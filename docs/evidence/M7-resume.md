@@ -23,6 +23,40 @@ physical restore implementation; it does not waive any full-history proof.
 
 ## Technical depth
 
+### Resume audit after restart
+
+The maintainer explicitly resumed M7 and requested the diagnostic cutoff
+question again. The goal is active. Git retains clean `m7` at
+`4b839b3718cf7275df38ec45d0607b1a1acba381` and the three isolated branch
+identities recorded below. The previous pause's terminal-handle statements are
+historical. At resume, the live agent inventory contained only the root; new
+bounded workers now own the same two isolated source assignments. Neither has
+permission to run a verification VM before the root grants its exclusive slot.
+
+The fifteen concrete temporary artifact paths named below are absent in this
+resumed environment: the original full-check log; both completion JSON files;
+both root runner scripts; manifest pause handoff; private-task safe handoff and
+fixture assessment; backup audit report; V1–V13 inventory report; and all five
+decision packets. The floor Mix cache is absent too. Their retained references
+and hashes describe the historical runs, but their bytes cannot be inspected or
+rehashed now. Git source, accepted contracts and the WIP commits remain available.
+Do not claim current availability of missing output, reconstruct a file under its
+historical digest, or relabel a new execution as the original run. Required
+closure evidence must be available at its retained reference; this gap remains
+open until an authentic copy is recovered or newly justified verification
+supplies its own identities and complete outputs.
+
+The diagnostic decision is presented from the committed source and this record.
+Option 1 permits one captured 1,000-ms setup cutoff per `:broken` / `:killed`
+disposition in the existing diagnostic fault test. Setup taking 100–1,000 ms
+would pass. The real device-write handshake, injected faults, loss counts,
+privacy, sealing and post-fault cleanup bounds remain required. Option 2 retains
+100 ms and the unresolved failure while investigating within that bound. The maintainer subsequently replied "approve 1000 ms"; the
+[recorded override](../developer/agent-context-map.md#disposition-m7-diagnostic-setup-cutoff-2026-10-05)
+authorizes only that setup change. The previous temporary packet is not available; this
+restatement does not claim its exact bytes were recovered.
+
+
 ### Saved integrated source and verification
 
 Integrated source is `8885e0dbacfc4a37cb873080d615869587132ea4`;
@@ -148,13 +182,13 @@ All report/source/evidence inputs above were reviewed and rehashed by root.
 
 ### Pending maintainer decisions
 
-Only diagnostic setup cutoff is currently presented. Packet
-`/private/tmp/loopex-m7-diagnostic-fault-setup-decision-20261005-v1.md`, SHA-256
-`f0a6fa52095e0c3a4c622f34fb55292fb97bc8dd093c7641ee68a0481c87638f`.
-Options: keep 100 ms and unresolved failure, or approve one captured 1000-ms
-pre-fault setup cutoff for each of two dispositions while preserving the real
-IO handshake, all injected faults, privacy and cleanup bounds. No answer yet;
-previous post-fault DOWN and CLI pipe approvals do not cover this change.
+The diagnostic setup cutoff is approved by the maintainer's "approve 1000 ms"
+reply and [recorded override](../developer/agent-context-map.md#disposition-m7-diagnostic-setup-cutoff-2026-10-05).
+The changed complete diagnostic test file passes all twenty cases on both
+supported toolchains. The previous external packet remains absent; approval
+is bound to the individually presented scope recorded above. The remaining
+queued contracts below are unaccepted and must be reconstructed from current
+committed source before being presented, since their external packets are absent.
 
 Queue subsequent questions individually, never implement before acceptance:
 

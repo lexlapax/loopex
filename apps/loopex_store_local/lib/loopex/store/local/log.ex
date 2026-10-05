@@ -9,7 +9,9 @@ defmodule Loopex.Store.Local.Log do
   ## Technical depth
 
   Frames use a fixed magic/version prefix, a bounded 32-bit payload length, a
-  SHA-256 checksum, and deterministic external-term bytes. An append syncs the
+  SHA-256 checksum, and deterministic uncompressed external-term bytes. Recovery
+  requires the same exact encoding as the writer and consumes the whole payload;
+  compressed bytes cannot bypass the frame ceiling through expansion. An append syncs the
   file before returning. Recovery accepts only a complete checksummed prefix,
   repairs a strict torn final frame, and surfaces a complete malformed or
   checksum-invalid frame as corruption. Semantic replay is performed separately
@@ -325,14 +327,25 @@ defmodule Loopex.Store.Local.Log do
   defp possible_header_prefix?(<<@magic, _partial_header::binary>>), do: true
   defp possible_header_prefix?(_bytes), do: false
 
-  defp decode_payload(payload) do
-    case :erlang.binary_to_term(payload, [:safe]) do
-      frame when is_map(frame) -> {:ok, frame}
-      _other -> {:error, :invalid_frame}
+  # Concept: recovery accepts only the current writer's physical frame format.
+  # Technical depth: the top-level MAP_EXT prefix excludes compressed ETF before
+  # decoding. Full consumption and exact deterministic reencoding also refuse
+  # trailing bytes and alternate map encodings even when both checksums match.
+  defp decode_payload(<<131, 116, _rest::binary>> = payload) do
+    case :erlang.binary_to_term(payload, [:safe, :used]) do
+      {frame, used} when is_map(frame) and used == byte_size(payload) ->
+        if :erlang.term_to_binary(frame, [:deterministic]) == payload,
+          do: {:ok, frame},
+          else: {:error, :invalid_frame}
+
+      _other ->
+        {:error, :invalid_frame}
     end
   rescue
     _error -> {:error, :invalid_frame}
   end
+
+  defp decode_payload(_payload), do: {:error, :invalid_frame}
 
   defp load_envelope_atom_modules do
     Enum.reduce_while(@envelope_atom_modules, :ok, fn module, :ok ->

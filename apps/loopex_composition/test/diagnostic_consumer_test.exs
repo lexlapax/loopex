@@ -425,10 +425,16 @@ defmodule LoopexComposition.DiagnosticConsumerTest do
 
   test "broken IO and writer death are unconfirmed and seal only diagnostic delivery" do
     for disposition <- [:broken, :killed] do
+      # Concept: fault injection starts only after the real writer reaches the device.
+      # Technical depth: the maintainer approved one captured 1,000-ms setup
+      # cutoff per disposition; startup and handshake spend the same allowance.
+      setup_cutoff = System.monotonic_time(:millisecond) + 1_000
       device = device()
       {:ok, consumer} = DiagnosticConsumer.start_link(device, 1_000)
       send(consumer, {:loopex_diagnostic, %{"kind" => "trace_call"}})
-      assert_receive {:device_write, worker, _}
+      setup_remaining = setup_cutoff - System.monotonic_time(:millisecond)
+      assert setup_remaining > 0
+      assert_receive {:device_write, worker, _}, setup_remaining
       send(consumer, {:loopex_diagnostic, %{"kind" => "ordinary"}})
 
       case disposition do

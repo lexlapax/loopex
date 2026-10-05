@@ -6850,3 +6850,20 @@ alone prove neither latestness nor exclusion. Current-format physical fault,
 lifetime, receipt and helper-ledger proofs remain required. T15 stays open until
 implementation and those proofs finish. No milestone closure, main merge,
 release, tag or publication follows from this acceptance.
+
+<a id="disposition-m7-diagnostic-setup-cutoff-2026-10-05"></a>
+### M7 diagnostic fault setup cutoff approved, 2026-10-05
+
+The maintainer replied "approve 1000 ms" to the individually presented diagnostic
+setup question. Permit one captured 1,000-ms pre-fault setup cutoff per `:broken`
+and `:killed` disposition in the existing composition test
+"broken IO and writer death are unconfirmed and seal only diagnostic delivery".
+Startup and the actual device-write handshake spend that same allowance. This
+replaces the implicit 100-ms setup observation; setup taking 100–1,000 ms is now
+accepted by this fixture. Preserve actual fault injection, loss accounting,
+privacy, delivery sealing and every post-fault cleanup bound. Production
+behaviour and deadlines are unchanged. This is an explicit maintainer override
+of what the setup observation proves, not a disposition of the other queued
+contracts or a verification result. The earlier external packet is absent after
+restart; the current question and scope are retained in the
+[restart record](../evidence/M7-resume.md).

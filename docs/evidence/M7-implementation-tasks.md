@@ -29,6 +29,75 @@ grouped by T00–T19. Empty added sections mean no added subtasks are recorded;
 they do not mean the original task is complete. This follows the maintainer's
 2026-10-01 update to the active implementation goal.
 
+## Verified decoder and diagnostic setup repair — 2026-10-05
+
+The maintainer approved "1000 ms" for the individually presented diagnostic
+setup change. The [recorded override](../developer/agent-context-map.md#disposition-m7-diagnostic-setup-cutoff-2026-10-05)
+binds one captured pre-fault cutoff per broken/killed disposition. Startup and
+actual IO handshake spend that same allowance. Faults, loss/privacy/sealing
+assertions and post-fault cleanup limits are unchanged. The complete diagnostic
+consumer file passes all twenty cases on both supported pairs, 1.238/1.542
+seconds including runner overhead.
+
+The actual Store reader accepted three checksummed invalid physical formats:
+compressed ETF expanding beyond its four-MiB frame ceiling, trailing bytes and
+reversed map entries. A new four-case regression reproduced three failures in
+0.467 seconds against the unchanged production decoder. Current payload decoding
+now requires the uncompressed MAP_EXT prefix before binary decoding, full safe
+consumption and exact deterministic reencoding. The writer format, checksum
+layout, torn-tail handling, private/public records and semantic reducer are
+unchanged. Complete Store suite passes 95 cases on each pair, 11.249/12.444
+seconds including runner overhead. This closes only a physical-decoder
+prerequisite; complete offline history auditing and restore remain open.
+
+Complete outputs are retained outside the repository in the durable directory
+`/Users/spuri/projects/lexlapax/loopex-evidence/M7/resume-20261005-v2`.
+Current green eight-step results `current-green-results.json` SHA-256
+`809df2521287381887da722110f5e02457d674ae1e1cf6ca079d8e6629e524c2`;
+floor green eight-step results `floor-green3-results.json` SHA-256
+`6012c1e81482ab427c6aa9f86e73afe012e79d82a5b33172323eca83611baacf`.
+Both pass owned-file formatting, dev/test warnings-as-errors compilation,
+status, compiled documentation and dependency direction. The result files
+bind identical source SHA-256 values for the three affected source/test files
+and each complete output's reference, digest, command and measured duration.
+They were focused checks of frozen working-tree bytes based on `4b839b37`,
+not a clean-candidate full integration run. Root independently rehashed all
+24 outputs across the seven result files.
+
+Current red `current-red-results.json` SHA-256
+`21e36e4e60765b596abc9ccfeb934e5ccc3b0889319c27ff2facb12815312136`;
+original failing test output SHA-256
+`226f5187de0636c9511ac1d6732a8ab2b18a20a03ab73f53846c833be178fba3`.
+Floor first failed before compilation because global Hex was OTP-incompatible;
+second failed before project compilation for absent rebar3. Those are retained
+as `floor-green-results.json` and `floor-green2-results.json`, SHA-256
+`863a6bd51d6189e09172b520c6f640e804e31e54bdd59f0b7ad43b830ffbed3b` and
+`4da5be2af580c8808fddccf2d3365919c57116d37ac9494876fb9944674fcb73`.
+Compatible Hex/rebar installation outputs are separately retained. No test
+failure was retried or relabeled PASS. Independent reviewer inspection was
+unavailable because its effective permission profile was writable; it stopped
+before source inspection and issued no review or approval. Root reviewed the
+complete source delta; required independent integration review remains open.
+
+Original T01–T19 counts remain 78 done / 95 todo / 6 retired. Added counts are
+286 done / 18 todo; including T00, 290 / 19. The diagnostic added row closes
+and one added Store physical-decoder prerequisite closes; no original outcome
+closes. Manifest source-only checkpoints and private-task trace remain
+unintegrated and unproved. No full fast or release check is claimed.
+
+## Resume audit — 2026-10-05
+
+The maintainer resumed M7. Main and both WIP source assignments are saved in
+Git; the live agent inventory started with only root. Replacement workers own
+the same separate manifest and private-task test paths and must request the
+exclusive VM slot before compilation or tests. The [restart record](M7-resume.md)
+now records that its fifteen concrete temporary artifact references and the
+floor Mix cache are absent. Historical hashes remain historical; output
+availability is not proved. Required closure outputs must be recovered or
+replaced by independently identified, justified runs before closure claims.
+The diagnostic setup question is presented again with its exact source scope;
+no approval or dependent source edit is inferred. Counts are unchanged.
+
 ## Safe restart checkpoint — 2026-10-05
 
 The maintainer explicitly requested a safe pause. The indexed
@@ -12467,6 +12536,8 @@ open.
 
 ### Added implementation subtasks
 
+- [x] Enforce the current Store writer's deterministic uncompressed whole-payload ETF format before offline restore auditing reuses its decoder. Reproduce checksummed compressed over-ceiling, trailing-byte and reversed-map acceptance, refuse all three without changing written bytes or repairing input, and prove complete Store conformance on both supported toolchains.
+
 - [ ] Produce the accepted complete physical manifest through the existing single owned restore IO worker: stream exact file hashes, preserve all paths/modes/empty directories and prior metadata, enforce all count/byte caps while accumulating, reject links/special/unsafe entries and prove actual faults and cleanup on both supported toolchains. Full history audit and restore orchestration remain separate.
 
 
@@ -12503,7 +12574,7 @@ open.
 ### Added implementation subtasks
 
 - [x] Repair the 6290ac47 wrapper-related integration failures in credential-plane, ephemeral trace, foreground, daemon and offline CLI witnesses; distinguish stale internal observations from actual option/dispatch regressions, preserve exact original adapter options, host-option allowlist, exclusion and credential/lifetime proofs, and verify both pairs with failed outputs retained.
-- [ ] Establish the cause and repair the 6290ac47 diagnostic broken-IO/writer-death test's missing dispatch within its original 100-ms receive allowance; preserve real blocked IO, exact counts, writer death and cleanup proofs without retries or implicit timeout changes.
+- [x] Repair the 6290ac47 diagnostic broken-IO/writer-death setup observation under the maintainer-approved single captured 1,000-ms setup cutoff per disposition; preserve real blocked IO, exact counts, writer death, privacy, sealing and post-fault cleanup proofs, and verify the complete twenty-case diagnostic file on both supported toolchains. The override explicitly replaces the original implicit 100-ms setup allowance.
 - [x] Establish the cause and repair the 6290ac47 real stalled-stdout pipe worker nonjoin; retain the original failure and exact timer/worker/kill/DOWN causal evidence, implement the maintainer-approved single D+retained-grace fixture observation cutoff while preserving production and parent deadlines, and prove complete actual pipe/PTY actor and OS closure on both supported toolchains. Full integration and later native compact joins remain separate.
 
 
