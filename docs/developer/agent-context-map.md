@@ -6665,3 +6665,25 @@ Acceptance changes only the Concept Status and empty Acceptance row within
 companion is unchanged. The earlier canonical-only candidate `ae950afeca980e76cf900901699bf281315c6e2a`
 remains unaccepted. This authorizes dependent implementation, not closure,
 merge, release, publication or the separately pending wire-create/bounds decisions.
+
+<a id="disposition-m7-command-bounds-codecs-2026-10-04"></a>
+### M7 shared command bounds approved, 2026-10-04
+
+The maintainer replied "Approved option 1" to the explicit shared command-bounds
+codec question. This authorizes `CommandBounds.decode_wire/2` and
+`encode_wire/2`, independent Node equivalents, schemas and exact vectors for
+the following closed grammar. Prompt bounds are optional and permit positive
+canonical decimal strings for `max_turns` and `token_budget`, a positive uint64
+decimal string for `deadline_ms`, and a positive JSON integer at most
+`9007199254740991` for `deadline_at_ms`. Follow-up bounds are optional and permit
+only `deadline_at_ms` with that same range. Compact bounds require exactly
+three canonical decimal strings: `max_attempts` from 1 through 4,
+`deadline_ms` from 1 through 60000, and `token_budget` from 1 through 32768.
+Unknown fields and null refuse. Preserve omitted, empty and partial authored
+prompt/follow-up bounds without supplying defaults or reading a clock.
+
+Earlier automatic approval review rejected the proposed codec writes before
+process creation because explicit authorization for the exact public and
+cross-application fields and limits was missing. This direct decision supplies
+that authorization. It does not authorize the separately pending wire-create
+grammar, generation activation, milestone closure, merge or publication.

@@ -325,6 +325,54 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: bounded actual OS-pipe fixture unit at worker commit
+  `065ba640ab4e4b76c8a3687478b1af662d0ed5c7`. Eight new physical-pipe
+  cases and all four existing PTY cases PASS on both supported pairs, measured
+  41.8 / 70.3 seconds; final warning-free metadata PASS in 8.8 / 12.0 seconds.
+  The corrected stall witness observes actual `/wait` admission before pausing
+  stdout, then proves kernel pressure, the waiting IO worker, model/transport/
+  runtime joins and provisional cleanup while stdout remains paused. OS exit
+  follows output resumption; no successful closing acknowledgement is claimed.
+  Initial failures remain retained; no time bound or required join was relaxed.
+  Root integrated only the three owned fixture paths from
+  `/private/tmp/loopex-m7-chat-pipe-owned-final.patch`, SHA-256
+  `c514eff4709e937797f0a76b55b4683111c6fe764c7d3b3cf0245af77197b581`.
+  All three match the tested bytes. All 47 references in
+  `/private/tmp/loopex-m7-chat-pipe-proof-inventory.tsv` match their recorded
+  sizes and digests; inventory SHA-256
+  `26956b83dceee5667e2152ea3c086d4a5fde05c156e80f547ebeb3bde33ed7ac`.
+  The committed root and worker differ outside these fixtures only in docs;
+  subsequent uncommitted chat-progress source is undergoing separate proof.
+  Actual paid/built/attended and complete T10 acceptance remain open.
+
+- Chat progress is in source/verification, not complete: the first output/
+  driver/workflow run PASS 60 tests in 34.296 seconds. The new workflow run
+  retained one failure because private fields correctly caused Core to refuse
+  the supposed valid reasoning delta. The fixture now emits a separate valid
+  summary and malformed private canary through the actual Model callback.
+  Review found framing-dependent suppression and old-domain retention defects;
+  changed source preserves full durable fallback for mid-line fragments,
+  skips retained empty fragments, and retires domains on every durable cursor.
+  The changed complete progress/workflow files PASS 19 tests in 10.201 seconds.
+  Complete affected-file and both-toolchain proof remain pending; no checkbox
+  closes for this draft. The earlier source audit at the original temporary
+  path was overwritten by its author; original `44aba864` bytes were not
+  recovered and are unavailable. Audit v2 is retained separately at
+  `/private/tmp/loopex-m7-chat-progress-audit-v2-5c94dced.md`, SHA-256
+  `5c94dcedad0df14a25229442fd5c7004f2f274b0eb36246f7a3de1deffc95c50`.
+  No test or completion proof depends on the lost audit bytes.
+
+- Maintainer decision: "Approved option 1" approves the exact shared
+  command-bounds Elixir/Node codecs, schemas and vectors. The
+  [durable disposition](../developer/agent-context-map.md#disposition-m7-command-bounds-codecs-2026-10-04)
+  records every field, range and authored omission rule, without defaults or
+  clock reads. Earlier automatic-review refusals remain retained; explicit
+  authorization now permits this bounded implementation. Isolated writer
+  worktree `/Users/spuri/.codex/worktrees/m7-command-bounds/loopex` starts at
+  `aa8952b1a974db7d9782d060dd6ffc39f674d412`. Root integrates; the pipe writer
+  retains the exclusive VM slot and the other writers proceed source-only.
+  No checkbox closes from approval. Wire-create is the next separate decision.
+
 - Alias-preparation ownership confirmed before source edits: isolated writer
   owns Core Model/session-coordinator/state/configuration/effect-intents and
   their configured/prepared/admission/conformance tests; composition Model
@@ -11305,7 +11353,7 @@ the still-open real-provider, live protocol, persistent-fault or closure lanes.
 ### Added implementation subtasks
 
 - [x] Preserve the writer's already-running control cutoff during unknown-admission shutdown and pass the captured host cutoff into final drain; prove deadline changes, delivery clearing, lost-writer handling and actor joins without changing public records or product bounds.
-- [ ] Prove actual OS-pipe fragmentation, question responses, wait backpressure, EOF and kernel stdout stalls through Chat.run with exact process cleanup; existing PTY and simulated byte-device proofs cover only their own lanes.
+- [x] Prove actual OS-pipe fragmentation, question responses, wait backpressure, EOF and kernel stdout stalls through Chat.run with exact process cleanup; existing PTY and simulated byte-device proofs cover only their own lanes.
 - [ ] Consume admitted transient provider progress through the existing attachment and bounded writer, including escaped rendering and reported drop counts, without inventing new pipe control fields.
 
 

@@ -17,6 +17,8 @@ defmodule LoopexCli.ChatPTYDriver do
     send_control(socket, {:pid, System.pid()})
     scenario = System.fetch_env!("LOOPEX_CHAT_PTY_SCENARIO")
     path = System.fetch_env!("LOOPEX_CHAT_PTY_CONFIG")
+    transport = System.get_env("LOOPEX_CHAT_PTY_TRANSPORT", "pty")
+    mode = if transport == "pipe", do: :pipe, else: :interactive
     argv = ["chat", "--config", path]
     {:ok, prepared} = LoopexCli.ChatConfiguration.load(argv, Path.dirname(path), nil)
     host = self()
@@ -42,6 +44,7 @@ defmodule LoopexCli.ChatPTYDriver do
               diagnostics_to: options[:diagnostics_to]
             )
 
+          if transport == "pipe", do: send(receiver, {:pipe_fixture, fixture})
           runtime_monitor = monitor_actors([fixture.runtime.supervisor])
           actors = [fixture.model, fixture.executor, fixture.store]
           actor_monitors = monitor_actors(actors)
@@ -127,8 +130,8 @@ defmodule LoopexCli.ChatPTYDriver do
           {:ok, manager} = LoopexCli.Interrupt.install_chat(driver, reference, grace)
           state = :sys.get_state(driver)
           true = state.startup == :ready and state.input_worker == nil
-          true = state.mode == :interactive
-          true = LoopexComposition.ProjectResources.operator_present?()
+          true = state.mode == mode
+          true = LoopexComposition.ProjectResources.operator_present?() == (mode == :interactive)
           true = MapSet.size(state.ready) == 2
           monitors = monitor_actors(Map.keys(state.workers))
           outer_monitors = monitor_actors([driver, state.writer])
@@ -145,7 +148,7 @@ defmodule LoopexCli.ChatPTYDriver do
       5000 -> raise "driver and output manager monitors were not captured"
     end
 
-    if scenario in ["controls", "interrupt"] do
+    if scenario in ["controls", "interrupt", "pipe-held", "pipe-eof", "pipe-stall"] do
       receive do
         :model_joined -> :ok
       after
@@ -153,11 +156,19 @@ defmodule LoopexCli.ChatPTYDriver do
       end
     end
 
-    if scenario == "interrupt" do
+    if scenario in ["interrupt", "pipe-eof"] do
       receive do
         :reader_joined -> :ok
       after
         5000 -> raise "blocked reader monitor was not joined"
+      end
+    end
+
+    if scenario == "pipe-stall" do
+      receive do
+        :writer_joined -> :ok
+      after
+        5000 -> raise "actual pipe IO worker monitor was not joined"
       end
     end
 
@@ -191,6 +202,30 @@ defmodule LoopexCli.ChatPTYDriver do
       %{text: "steered", calls: [], require_previous_worker_down: true},
       %{text: "followed", calls: [], require_previous_worker_down: true}
     ]
+
+  defp script("pipe-prompt", _),
+    do: [%{text: "pipe first", calls: []}, %{text: "pipe second", calls: []}]
+
+  # Concept: a real bounded reply produces enough rendered output for a stall witness.
+  # Technical depth: DEL remains 30,000 bytes in the Store's external-term bound
+  # and expands visibly to 120,003 transcript bytes. Kernel readiness, rather
+  # than this length or a presumed capacity, establishes actual pipe pressure.
+  defp script("pipe-stall", controller),
+    do: [%{text: String.duplicate(<<127>>, 30_000), calls: [], hold: controller}]
+
+  defp script("pipe-held", controller),
+    do: [
+      %{text: "released pipe work", calls: [], hold: controller},
+      %{
+        text: "must cancel future work",
+        calls: [],
+        hold: controller,
+        require_previous_worker_down: true
+      }
+    ]
+
+  defp script("pipe-eof", controller),
+    do: [%{text: "never returned", calls: [], hold: controller}]
 
   defp script("interrupt", controller),
     do: [%{text: "never returned", calls: [], hold: controller}]
@@ -234,16 +269,90 @@ defmodule LoopexCli.ChatPTYDriver do
 
   defp receive_control(socket, controller) do
     receive do
-      {:driver, driver, host} -> receive_commands(socket, controller, driver, host)
+      {:driver, driver, host} ->
+        fixture =
+          if System.get_env("LOOPEX_CHAT_PTY_TRANSPORT") == "pipe" do
+            receive do
+              {:pipe_fixture, fixture} -> fixture
+            after
+              5000 -> raise "actual pipe runtime fixture was not captured"
+            end
+          end
+
+        receive_commands(socket, controller, driver, host, fixture)
     end
   end
 
-  defp receive_commands(socket, controller, driver, host) do
+  defp receive_commands(socket, controller, driver, host, fixture) do
     case :gen_tcp.recv(socket, 0) do
       {:ok, bytes} ->
         case :erlang.binary_to_term(bytes, [:safe]) do
           :release ->
             send(controller, :release)
+
+          :inspect_pipe ->
+            # Concept: readiness precedes the first reader's asynchronous start.
+            # Technical depth: preserve the existing captured reader cutoff before
+            # observing an incomplete first line, without admitting any input.
+            if :sys.get_state(driver).sequence == 0,
+              do: await_reader(driver, System.monotonic_time(:millisecond) + 5000)
+
+            state = :sys.get_state(driver)
+            {:ok, status} = Loopex.session_status(fixture.runtime, state.session)
+            callback = Agent.get(fixture.model, & &1.previous_worker)
+            run = status.active_run_id
+
+            send_control(
+              socket,
+              {:pipe_state,
+               %{
+                 "sequence" => state.sequence,
+                 "barrier" => state.barrier,
+                 "input_worker_present" => is_pid(state.input_worker),
+                 "input_worker_alive" =>
+                   is_pid(state.input_worker) and Process.alive?(state.input_worker),
+                 "model_calls" => length(Loopex.AgentLoopTestModel.dispatched(fixture.model)),
+                 "callback_alive" => is_pid(callback) and Process.alive?(callback),
+                 "active_run_id" => if(run, do: LoopexProtocol.Wire.encode_identity(run))
+               }}
+            )
+
+          :inspect_writer ->
+            current = await_writer(driver, System.monotonic_time(:millisecond) + 5000)
+            monitor = Process.monitor(current.pid)
+
+            send_control(
+              socket,
+              {:writer_blocked,
+               %{
+                 "worker_waiting" => true,
+                 "worker_alive" => Process.alive?(current.pid),
+                 "kind" => Atom.to_string(current.item.kind),
+                 "bytes" => byte_size(current.item.bytes),
+                 "retained_bytes" => :sys.get_state(:sys.get_state(driver).writer).bytes,
+                 "result_pending" => current.result == nil
+               }}
+            )
+
+            receive do
+              {:DOWN, ^monitor, :process, pid, reason} when pid == current.pid ->
+                send_control(socket, {:writer_down, reason})
+                false = Process.alive?(pid)
+            after
+              5000 ->
+                send_control(
+                  socket,
+                  {:writer_join_timeout,
+                   %{
+                     "worker_alive" => Process.alive?(current.pid),
+                     "worker_status" => inspect(Process.info(current.pid, :status))
+                   }}
+                )
+
+                raise "actual pipe IO worker did not join"
+            end
+
+            send(host, :writer_joined)
 
           :inspect_reader ->
             reader = await_reader(driver, System.monotonic_time(:millisecond) + 5000)
@@ -260,10 +369,40 @@ defmodule LoopexCli.ChatPTYDriver do
             send(host, :reader_joined)
         end
 
-        receive_commands(socket, controller, driver, host)
+        receive_commands(socket, controller, driver, host, fixture)
 
       {:error, :closed} ->
         :ok
+    end
+  end
+
+  # Concept: the physical pipe witness must correspond to the actual IO worker.
+  # Technical depth: a queued record alone proves no blockage. Match its pending
+  # result and waiting live worker; the parent separately observes kernel pressure.
+  defp await_writer(driver, cutoff) do
+    state = :sys.get_state(driver)
+    writer = :sys.get_state(state.writer)
+
+    case writer.current do
+      %{pid: pid, result: nil} = current ->
+        if Process.info(pid, :status) == {:status, :waiting} do
+          current
+        else
+          await_writer_again(driver, cutoff)
+        end
+
+      _ ->
+        await_writer_again(driver, cutoff)
+    end
+  end
+
+  defp await_writer_again(driver, cutoff) do
+    if System.monotonic_time(:millisecond) >= cutoff,
+      do: raise("actual pipe IO worker did not block")
+
+    receive do
+    after
+      1 -> await_writer(driver, cutoff)
     end
   end
 
