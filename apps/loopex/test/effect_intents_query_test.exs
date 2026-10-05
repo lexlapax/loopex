@@ -210,6 +210,147 @@ defmodule Loopex.EffectIntentsQueryTest do
     refute_receive {:forbidden_store_call, _}, 0
   end
 
+  test "ordinary coverage requires current captured admission and request shapes", context do
+    %{runtime: runtime, session: session, reference: reference, records: records} = context
+    events = Fixture.events(context.fixture, session)
+    assert {:ok, _} = SessionState.recover(session, records, events)
+    assert :complete = scan_result(runtime, session)
+
+    for {current, retired} <- [
+          {"prompt_admitted_v3", "prompt_admitted_v2"},
+          {"model_request_committed_v2", "model_request_committed"}
+        ] do
+      assert Enum.any?(records, &(&1.payload.kind == current))
+
+      retired_rows =
+        change_payload(records, current, fn payload ->
+          payload |> Map.put(:kind, retired) |> Map.delete("configuration_version")
+        end)
+
+      install_history(reference, retired_rows)
+      assert {:error, :invalid_history} = scan_result(runtime, session)
+      assert {:error, _} = SessionState.recover(session, retired_rows, events)
+      assert_invalid_configuration_versions(reference, runtime, session, records, current)
+    end
+
+    {:ok, children} = Runtime.children(runtime)
+    assert :sys.get_state(children.control).sessions == %{}
+    refute_received {:forbidden_store_call, _}
+  end
+
+  test "resource request coverage requires its current captured shape", context do
+    %{runtime: runtime, session: session, reference: reference, records: original} = context
+    history = Enum.take(original, 2)
+    history = List.update_at(history, 0, &%{&1 | payload: Genesis.genesis([])})
+    {:ok, state} = SessionState.recover(session, history, [])
+    digest = String.duplicate("a", 64)
+
+    command = %{
+      type: :admit_resources,
+      command_id: "admit-current-resources",
+      manifest_digest: digest,
+      decision: %{
+        "manifest_digest" => digest,
+        "workspace_ref" => "workspace-ref",
+        "trust_scope" => "project_skills",
+        "decision_source" => "host_supplied",
+        "issued_at" => "2026-09-10T00:00:00Z",
+        "expires_at" => nil,
+        "revocation_state" => "active"
+      }
+    }
+
+    {:ok, admitted} =
+      SessionState.propose_resource_command(
+        state,
+        command,
+        {:accepted, %{"workspace_ref" => "workspace-ref", "manifest_digest" => digest}}
+      )
+
+    {state, history, events} = retain(state, admitted, history, [])
+
+    {:ok, prompt} =
+      SessionState.propose(
+        state,
+        %{type: :prompt, command_id: "resources-prompt", content: "inspect resources"},
+        %{max_turns: 8, deadline_ms: 60_000, token_budget: 10_000, context_token_budget: 8_192}
+      )
+
+    {state, history, events} = retain(state, prompt, history, events)
+    run_id = state.active_run_id
+    resources = state.run_resources[run_id]
+
+    header = %{
+      "version" => 1,
+      "manifest_digest" => digest,
+      "selection_digest" => SessionState.resource_selection_digest(resources),
+      "status" => "evaluated",
+      "blocks" => [%{"pack" => 64, "file" => 64, "status" => "staged"}]
+    }
+
+    catalog = "Available project skills: none selected."
+
+    selected = [
+      {catalog,
+       %{
+         "source_reference" => %{
+           "kind" => "resource_pack",
+           "manifest_digest" => digest,
+           "pack" => 64,
+           "file" => 64,
+           "file_digest" => LoopexProtocol.Canonical.digest_bytes(catalog)
+         },
+         "provenance_class" => "resource_pack",
+         "trust_class" => "untrusted_behavior_shaping_data"
+       }}
+    ]
+
+    staging = %{
+      run_id: run_id,
+      elements: SessionState.elements(state, run_id),
+      steer: nil,
+      deadline: 1
+    }
+
+    project = %{
+      "class" => "project_resource",
+      "receipt_revision" => 2,
+      "disposition" => "no_manifest",
+      "detail" => %{}
+    }
+
+    {:ok, candidate} =
+      SessionState.reference_model_candidate(state, staging, selected, project, header)
+
+    {:ok, requested} =
+      SessionState.propose_model_request(state, run_id, candidate.request,
+        context_receipt: candidate.receipt,
+        lineage_projection: candidate.projection
+      )
+
+    {_state, records, events} = retain(state, requested, history, events)
+    assert {:ok, _} = SessionState.recover(session, records, events)
+    current = "model_request_committed_resources_v2"
+    assert Enum.any?(records, &(&1.payload.kind == current))
+    install_history(reference, records)
+    assert :complete = scan_result(runtime, session)
+
+    retired =
+      change_payload(records, current, fn payload ->
+        payload
+        |> Map.put(:kind, "model_request_committed_resources_v1")
+        |> Map.drop(["configuration_version", "lineage_projection"])
+      end)
+
+    install_history(reference, retired)
+    assert {:error, :invalid_history} = scan_result(runtime, session)
+    assert {:error, _} = SessionState.recover(session, retired, events)
+    assert_invalid_configuration_versions(reference, runtime, session, records, current)
+    {:ok, children} = Runtime.children(runtime)
+    assert :sys.get_state(children.control).sessions == %{}
+    refute_received {:forbidden_store_call, _}
+  end
+
   test "compact admission, fences and episode-bound abort advance private coverage without effect rows",
        context do
     %{runtime: runtime, session: session, reference: reference, records: original} = context
@@ -1278,6 +1419,102 @@ defmodule Loopex.EffectIntentsQueryTest do
         &%{&1 | records: change_payload(records, "context_admission_refused_v2", transform)}
       )
 
+      assert {:error, :invalid_history} = scan_result(runtime, session)
+    end
+  end
+
+  test "refusal coverage requires its current captured shape", context do
+    %{runtime: runtime, session: session, reference: reference, records: original} = context
+
+    configuration =
+      Genesis.configuration()
+      |> Map.put("context_token_budget", 64)
+      |> Map.put("system_class_tokens", 64)
+      |> put_in(["budget_origins", "context_token_budget"], "explicit")
+
+    history = Enum.take(original, 2)
+    history = List.update_at(history, 0, &%{&1 | payload: Genesis.genesis([], configuration)})
+    {:ok, state} = SessionState.recover(session, history, [])
+
+    {:ok, prompt} =
+      SessionState.propose(
+        state,
+        %{type: :prompt, command_id: "oversized-context", content: String.duplicate("p", 4_096)},
+        %{max_turns: 8, deadline_ms: 60_000, token_budget: 10_000, context_token_budget: 64}
+      )
+
+    {state, history, events} = retain(state, prompt, history, [])
+    run_id = state.active_run_id
+
+    staging = %{
+      run_id: run_id,
+      elements: SessionState.elements(state, run_id),
+      steer: nil,
+      deadline: 1
+    }
+
+    project = %{
+      "class" => "project_resource",
+      "receipt_revision" => 2,
+      "disposition" => "no_manifest",
+      "detail" => %{}
+    }
+
+    {:ok, candidate} = SessionState.reference_model_candidate(state, staging, [], project, nil)
+
+    {:refused, refusal} =
+      SessionState.propose_model_request(state, run_id, candidate.request,
+        context_receipt: candidate.receipt,
+        lineage_projection: candidate.projection
+      )
+
+    assert refusal["failure"]["category"] == "context_budget_exceeded"
+    assert refusal["failure"]["observed"] > refusal["failure"]["limit"]
+    {:ok, refused} = SessionState.propose_context_refusal(state, run_id, refusal)
+    {_state, records, events} = retain(state, refused, history, events)
+    assert {:ok, _} = SessionState.recover(session, records, events)
+    current = "context_admission_refused_v2"
+    assert Enum.any?(records, &(&1.payload.kind == current))
+    install_history(reference, records)
+    assert :complete = scan_result(runtime, session)
+
+    retired =
+      change_payload(records, current, fn payload ->
+        payload
+        |> Map.drop(
+          ~w(failure configuration_version episode_id targets projection_state measurement_scope)
+        )
+        |> Map.merge(Map.take(payload["failure"], ~w(category dimension observed limit)))
+        |> Map.put(:kind, "context_admission_refused_v1")
+      end)
+
+    legacy = Enum.find(retired, &(&1.payload.kind == "context_admission_refused_v1"))
+
+    assert Enum.sort(Map.keys(legacy.payload)) ==
+             Enum.sort([
+               :kind
+               | ~w(run_id turn_id category dimension token_estimator descriptor_canonicalization_version project_disposition system_message_count session_message_count steer_message_count tool_definition_count provider_estimated_tokens context_token_budget record_byte_cost context_record_byte_ceiling ordered_descriptor_digest observed limit)
+             ])
+
+    install_history(reference, retired)
+    assert {:error, :invalid_history} = scan_result(runtime, session)
+    assert {:error, _} = SessionState.recover(session, retired, events)
+    assert_invalid_configuration_versions(reference, runtime, session, records, current)
+    {:ok, children} = Runtime.children(runtime)
+    assert :sys.get_state(children.control).sessions == %{}
+    refute_received {:forbidden_store_call, _}
+  end
+
+  defp assert_invalid_configuration_versions(reference, runtime, session, records, kind) do
+    for transform <- [
+          &Map.delete(&1, "configuration_version"),
+          &Map.put(&1, "configuration_version", nil),
+          &Map.put(&1, "configuration_version", 0),
+          &Map.put(&1, "configuration_version", -1),
+          &Map.put(&1, "configuration_version", "1"),
+          &Map.put(&1, "configuration_version", 18_446_744_073_709_551_616)
+        ] do
+      install_history(reference, change_payload(records, kind, transform))
       assert {:error, :invalid_history} = scan_result(runtime, session)
     end
   end

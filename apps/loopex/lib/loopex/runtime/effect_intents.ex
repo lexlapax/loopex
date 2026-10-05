@@ -41,7 +41,6 @@ defmodule Loopex.Runtime.EffectIntents do
   @neutral_shapes %{
     "owner_advanced" =>
       {~w(prior_owner_epoch owner_epoch owner_incarnation_id owner_transaction_id), []},
-    "prompt_admitted_v2" => {@prompt_keys, []},
     "prompt_admitted_v3" => {@prompt_keys ++ ~w(configuration_version), []},
     "session_configuration_admitted_v1" =>
       {@command_keys ++ ~w(changes prior_configuration_version configuration), []},
@@ -50,13 +49,10 @@ defmodule Loopex.Runtime.EffectIntents do
     "command_admission_refused_v1" =>
       {@command_keys ++ ~w(dimension candidate observed limit), []},
     "resource_command_v1" => {~w(command command_digest disposition resolved), []},
-    "model_request_committed" => {@request_keys, ~w(lineage_projection)},
-    "model_request_committed_resources_v1" => {@request_keys, []},
     "model_request_committed_v2" =>
       {@request_keys ++ ~w(configuration_version), ~w(lineage_projection)},
     "model_request_committed_resources_v2" =>
       {@request_keys ++ ~w(configuration_version), ~w(lineage_projection)},
-    "context_admission_refused_v1" => {@refusal_keys, []},
     "context_admission_refused_v2" =>
       {(@refusal_keys -- ~w(category dimension observed limit)) ++
          ~w(failure configuration_version episode_id targets projection_state measurement_scope),
@@ -420,6 +416,9 @@ defmodule Loopex.Runtime.EffectIntents do
       SessionState.normalize_compact_bounds(payload["bounds"]) == {:ok, payload["bounds"]}
   end
 
+  defp neutral_values?(%{payload: %{kind: "prompt_admitted_v3"} = payload}),
+    do: positive_version?(payload["configuration_version"])
+
   defp neutral_values?(%{payload: %{kind: "compact_abort_admitted_v1"} = payload}) do
     identifier?(payload["command_id"]) and digest?(payload["command_digest"]) and
       payload["command_type"] == "abort" and payload["admission"] == "accepted" and
@@ -427,8 +426,8 @@ defmodule Loopex.Runtime.EffectIntents do
   end
 
   defp neutral_values?(%{payload: %{kind: kind} = payload})
-       when kind in ~w(model_request_committed model_request_committed_v2 model_request_committed_resources_v1 model_request_committed_resources_v2) do
-    valid_request?(payload)
+       when kind in ~w(model_request_committed_v2 model_request_committed_resources_v2) do
+    positive_version?(payload["configuration_version"]) and valid_request?(payload)
   end
 
   # Concept: private coverage passes maintenance without projecting effects.
@@ -449,7 +448,8 @@ defmodule Loopex.Runtime.EffectIntents do
              Map.put(parent, "budget_origins", origins)
            ),
          true <- capture["configuration_version"] == payload["configuration_version"],
-         true <- closed?(bounds, ~w(max_turns token_budget deadline_ms max_attempts run_deadline)),
+         true <-
+           closed?(bounds, ~w(max_turns token_budget deadline_ms max_attempts run_deadline), []),
          {:ok, _} <-
            Bounds.declare(%{
              max_turns: bounds["max_turns"],
@@ -604,11 +604,13 @@ defmodule Loopex.Runtime.EffectIntents do
   end
 
   defp neutral_values?(%{payload: %{kind: "context_admission_refused_v2"} = payload}) do
-    case {Map.fetch(payload, "project_resource_count"), Map.fetch(payload, "resource_pack_count")} do
-      {:error, :error} -> true
-      {{:ok, project}, {:ok, resources}} -> version?(project) and version?(resources)
-      _ -> false
-    end
+    positive_version?(payload["configuration_version"]) and
+      case {Map.fetch(payload, "project_resource_count"),
+            Map.fetch(payload, "resource_pack_count")} do
+        {:error, :error} -> true
+        {{:ok, project}, {:ok, resources}} -> version?(project) and version?(resources)
+        _ -> false
+      end
   end
 
   defp neutral_values?(_record), do: true
