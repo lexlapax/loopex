@@ -39,24 +39,35 @@ The clean fully merged CLI worktree/local branch is removed. Handle56356 is
 terminal and collected, never poll/restart. Source is now in primary m7.
 Whole CLI and new combined full integration remain pending; no checkbox changes.
 
-Exclusive VM slot is GRANTED to restore_manifest_resume only. Start from its
-clean dbd4a29e Store source in /private/tmp/loopex-m7-store-semantic-audit;
-format owned IO/test, commit and re-pin a new immutable runner before verification.
-Its existing v2 preparatory runner is not a passing result. Run current/floor
-sequentially: isolated copied deps/per-environment builds, format/compile/metadata,
-focused41/2excluded, ordinary604/3excluded, changed owned IO long2/41excluded,
-zero skips. Preserve all original deadlines and actual joins, first failure and
-scripted-executor limitations. Worker must report its formatted source and live
-handle, then complete terminal outputs; root reviews before joining.
+Exclusive VM slot belongs to restore_manifest_resume. Its clean formatted source
+is fb4eb53964c58679f5e16061e1a5dd56a035077f in
+/private/tmp/loopex-m7-store-semantic-audit. Handle89711 remains active; the worker
+owns polling. The immutable v3 runner is retained in sibling
+M7/store-semantic-audit-20261005-v3, SHA-256
+5c13c0e8b6d570bafb27ebdf05ad796ed2f078f6461a2a0b9749f9845fb0270b.
+Current focused41/2excluded passed in18.921s and ordinary604/3excluded passed
+in331.738s, both with zero skips. Ordinary raw log SHA-256
+4da4523900f31f9a3fcff7c0f983145cce783b4144253d642205f5ec4dadae0c.
+The owned IO long selector is running; the floor pipeline follows sequentially.
+Retain isolated copied deps/per-environment builds, original deadlines and exact
+joins. Root reviewed the formatter patch; complete terminal output and both-pair
+proof remain pending. Actual Local Store uses scripted model/executor here and
+does not prove real OS-effect cleanup. Existing fault-test diagnostics remain in
+the raw output and do not close the separate diagnostic investigation.
 No root/resource/ledger/causal verification VM may start meanwhile.
 
 Resource runner v1 remains unexecuted. Source-only v2 is
 /Users/spuri/projects/lexlapax/loopex-evidence/M7/resource-retained-decoding-runner-20261005-v2/stage.sh,
 SHA-2560f902a0513fc236518d73ed308fd4f94d0cfda9f7aa3ca4ddb0a145aa11582e6.
 It addresses root review of writable primary dependency sharing, floor Mix-home,
-Node/toolchain and ambient overrides. Review exact v2 script before later grant.
-Causal91784948's startup deadlock/cleanup delta is reviewed; its exact-source
-runner is being prepared without a VM. Mechanism proof remains unexecuted and
+Node/toolchain and ambient overrides. Root has read the complete v2 script;
+execution remains ungranted until Store returns the exclusive slot.
+Causal91784948's startup deadlock/cleanup delta is reviewed. Its unexecuted v1
+runner needs isolated per-pair dependency copies and ambient override filtering;
+the worker is preparing v2 without a VM. A ledger runner is also being prepared
+for clean source0b82b006, with focused17/0excluded and ordinary294/2excluded
+under both pairs. No setup or verification is authorized for either runner yet.
+Mechanism proof remains unexecuted and
 cannot attribute the six retained actual Core shutdown diagnostics.
 
 Primary documentation checkpoint2e136d4c passed its one docs check in16.641s,
