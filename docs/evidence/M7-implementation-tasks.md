@@ -325,6 +325,30 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Resume handoff after acceptance: root is at
+  `238fc7d5aa0748fe728957b8e246222fe2de796e` before this ledger update.
+  Its clean documentation-only repository check PASS in 17.728 measured seconds;
+  complete output `/private/tmp/loopex-m7-output-cutoff-proof/accepted-docs-current.log`,
+  SHA-256 `0fce0753cef730d14b299d7051912e838d665a51725a99fcb1fe958553f99b90`.
+  All root verification handles are terminal. The pipe writer now owns the
+  exclusive VM slot after importing verified root implementation `72c1018a`;
+  root launches no VM/check until it releases that slot. Source-ready pipe draft
+  `d0c28019` is unproved and not integrated. Its immutable inventory
+  `/private/tmp/loopex-m7-chat-pipe-source-draft-v1.jsonl`, SHA-256
+  `097982b7918e9bc370a05da5a69a2d969a610021cb41f46f8e855dc521556d27`,
+  is discovery/source evidence, not PASS.
+  The alias-preparation writer owns source work in
+  `/Users/spuri/.codex/worktrees/m7-model-alias-preparation/loopex`, base `238fc7d5`.
+  It must report exact owned paths before editing and launches no VM/check until
+  granted the slot. Root reserves Chat host/driver/output and their tests for
+  progress integration; writers preserve unrelated paths and root integrates.
+  The only presented next maintainer question is explicit authorization for
+  the pinned shared command-bound Elixir/Node codecs, schemas and vectors.
+  Earlier automatic review refused those writes before process creation; no
+  bypass or dependent codec edit is authorized until the maintainer answers.
+  Original/added counts remain unchanged by this handoff; M7 stays In progress.
+
+
 - Maintainer decision: "Approved option 1" accepts the revised alias-capable
   ADR 0050 pair at `108dbf3468c925c69696f05fd73848380b6787ef`.
   [Durable disposition](../developer/agent-context-map.md#disposition-m7-model-preparation-alias-acceptance-2026-10-04)
@@ -10949,7 +10973,7 @@ or check was relaxed.
 
 - [x] Consume captured defaults in implicit create/lookup, refuse unconfigured and superseded creation before Store mutation, remove the Core v2 writer, capture and forward the template through all three reference constructors and actual daemon startup, and prove physical Store reopen/resume and exact no-activation replay on both toolchains. Migrate shared loop and creation/lifecycle fixtures to current captures while preserving request-byte, command-binding, retry, ownership and cleanup proofs. Remaining callers/readers and coordinated wire generations stay open.
 
-- [ ] Decide and implement the optional live host configuration-preparation boundary, retaining authority, duplicate disposition, bounded owned work, stale-result refusal and exact current replay; join both runtime-only transport hosts without exposing host routes or metadata. The maintainer selected the Model-port direction; ADR 0050 remains Proposed pending its revised pair acceptance, with dependent implementation paused.
+- [ ] Implement accepted ADR 0050 optional Model-port configuration preparation, retaining authored aliases bound to complete canonical candidates in current-v2 records, authority, duplicate disposition, bounded owned work, stale-result refusal and pure current replay; join both runtime-only transport hosts without exposing host routes or metadata. Exact revised pair candidate 108dbf3468c925c69696f05fd73848380b6787ef is accepted. Isolated source implementation is starting; verification awaits the exclusive VM slot.
 
 ## T05 — Update records, protocols and independent clients
 
