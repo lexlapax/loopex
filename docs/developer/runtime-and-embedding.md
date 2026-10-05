@@ -143,7 +143,7 @@ recover sessions but runs no turns, and supplying only some is invalid:
 | `:model` | `%{module: module, model: binary, options: keyword}` naming a `Loopex.Model` implementation. |
 | `:executor` | `%{module:, reference:, identity:, epoch:, fencing_token:, workspace_ref:, workspace_lease:}` naming a `Loopex.Executor` implementation and its placement. |
 | `:tools` | A list of tool definitions (`LoopexProtocol.ToolDefinition`), the only path by which a reserved `loopex.` identifier reaches the registry. |
-| `:active_tools` | Which declared tools a session offers, by `tool_id` or `{tool_id, tool_version}`; all of them when omitted. |
+| `:active_tools` | Runtime startup selection among declared tools, by `tool_id` or `{tool_id, tool_version}`; all declared tools when omitted. Each session offers the immutable tool selection in its captured defaults or explicit genesis. |
 | `:policy` | A `Loopex.Policy` module, or exactly `%{module: adapter, context: private_context}` selecting its optional `decide/2`. Required whenever a tool is active: its absence returns `{:error, :host_policy_required}`. |
 | `:policy_identity` | `%{"id" => binary, "revision" => binary}`, each 1 to 256 bytes. Required whenever `:policy` is named. |
 
@@ -174,11 +174,13 @@ Optional options:
 | `:project_manifest`, `:project_decision` | The root `AGENTS.md` resource and its trust decision; see [project resources](agent-loop-and-tools.md#technical-loop-project-resources). |
 | `:diagnostics_ceiling` | A narrower diagnostics admission ceiling than the default. |
 
-The error for a missing policy identity, an invalid policy identity, and every
-other malformed option is `{:error, :invalid_runtime_options}`; only a missing
-policy and an invalid context budget are reported by their own names. A host
-that explicitly supplies a malformed bound is refused at start rather than given
-the default. The inherited single-tool form (`:tool` with `:grant_decision`
+Missing or invalid policy identity and other malformed options return
+`{:error, :invalid_runtime_options}`. Missing policy, invalid context budget,
+invalid maintenance model and invalid maintenance instructions instead return
+`host_policy_required`, `invalid_context_token_budget`, `maintenance_model_invalid`
+and `maintenance_instructions_invalid`, respectively, inside the error tuple.
+A host that explicitly supplies a malformed bound is refused at start rather
+than given the default. The inherited single-tool form (`:tool` with `:grant_decision`
 `{:host_policy, :allow}`) is folded into the same tool set, so there is exactly
 one way a tool reaches a model.
 
@@ -236,13 +238,25 @@ end
 retries an empty queue and returns disconnection or another error instead of
 claiming that the run finished.
 
+`command_with_configuration/3` submits an authored configure command and a
+separate host-prepared candidate. The host resolves capability metadata and
+provider mapping before submission; the facade performs no catalog or credential
+effects. The serial session owner validates and atomically admits the candidate.
+A duplicate returns its original disposition even if the candidate has changed.
+
+`command_disposition/2` observes an earlier command's admission without submitting
+it again or dispatching work. It distinguishes committed admission or refusal,
+conclusively not committed, and pending `commit_unknown`. Missing facts or owner
+replacement cannot prove absence. Admission does not prove that the command's
+work has completed.
+
 | Group | Functions |
 | --- | --- |
 | Runtime | `start_link/1`, `stop/1`, `version/0` |
 | Sessions | `create_session/3`, `resume_session/3`, `session_status/2` |
 | Creation evidence | `lookup_create_result/4`, `creation_provenance/2` |
 | Session directory | `state_root/0` (reads `LOOPEX_HOME`), `runtime_placement_id/1`, `track_session/3`, `list_sessions/1`, `resume_known_session/4` |
-| Attachment | `attach/2`, `attach/3`, `command/2`, `next_event/1`, `snapshot/1`, `attachment_status/1`, `progress/2`, `diagnostic/2` |
+| Attachment | `attach/2`, `attach/3`, `command/2`, `command_with_configuration/3`, `command_disposition/2`, `next_event/1`, `snapshot/1`, `attachment_status/1`, `progress/2`, `diagnostic/2` |
 | Project skills | `resource_catalog/2`, `read_resource/3` |
 | Artifacts | `open_artifact_transfer/2`, `read_artifact_chunk/3`, `close_artifact_transfer/2` |
 | Diagnostics | `trace/1`, `trace/2`, `trace_status/1`, `trace_stop/1` |

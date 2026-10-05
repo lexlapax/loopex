@@ -325,12 +325,34 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Documentation corrections prepared: the current embedding guide now
+  distinguishes runtime tool declarations from captured immutable session
+  selection, lists shipped `command_with_configuration/3` and
+  `command_disposition/2`, explains admission versus completion and names
+  distinct maintenance-startup errors. The read-only audit checked actual
+  current facade and coordinator behavior; no proposed Model callback is
+  described as shipped. Documentation metadata is the next check. No original
+  outcome closes from these bounded corrections.
+
+- Prepared decision packet, not accepted or implemented: resumed/external
+  standalone compact admission has no public observation before its first
+  episode. The smallest proposal adds required native `compact_pending` to
+  existing same-owner/journal status and refuses definitive status while a
+  session mutation remains unresolved. The alternative adds public admission
+  events and snapshot projection for remote observers. Exact fields, read cut,
+  busy/barrier/abort rules and required proofs are retained in
+  `/private/tmp/loopex-m7-compact-busy-decision.md`, SHA-256
+  `bce0cacdb119977efdd4c80fa84a1e5e8aa6a48e96fba33023b7c971fbeeceaa`.
+  It queues behind ADR 0050 and other already queued decisions. No public or
+  persistence change follows from this read-only proposal.
+
 - Running independent source preparation: the T10 tracing writer owns only
   `apps/loopex_cli/test/chat_workflow_test.exs` in the temporary detached Git
   worktree `/private/tmp/loopex-m7-chat-file-trace-worktree`, based exactly on
   `7570d0c8`. Git worktree creation ran no setup or VM. The three-case live
   file/flag matrix uses existing Chat, diagnostic consumer and trace APIs;
-  all formatter, compile and suite VMs wait until full handle `13537` ends.
+  full handle `13537` passed; formatter, compile and suite VMs wait only
+  for root documentation metadata before the isolated focused verification.
   Root owns rejoin and post-rejoin verification. One added pending T10 row
   tracks this bounded proof. T01–T19 originals are 77 / 96 / 6; added work is
   266 done / 17 todo. No public boundary or original row closes from preparation.
@@ -362,21 +384,23 @@ did not resolve them. No paid provider calls were made during this check.
   APIs without a new contract; it remains independent of Model preparation and
   helper/wire decisions. No row closes from that inspection.
 
-- Running once: full current-pair fast check of exact clean new candidate
-  `698595b47f2d2523db552114f3e2fe37b8d60693` in the reused attached
-  `m7-trace-check` verification checkout. All artifact, chat and quiesce source
-  repairs above are committed in this candidate; the isolated T15 FAIL draft is
-  excluded. CI had no run for this exact SHA when inspected. Handle `13537`
-  is active; complete output streams to
-  `/private/tmp/loopex-m7-698595b4-fast-check.log` through retained runner
-  `/private/tmp/loopex-m7-698595b4-fast-check.py`, again using provider-only
-  serialization and ordinary per-app isolation. Collect its terminal result
-  before freezing or hashing the final output. Never launch it again for these
-  bytes; historical b6369cd6 FAIL remains immutable. While this full run lives,
-  keep independent suite and compile VMs stopped. Current task totals are
-  T01–T19 originals 76 / 97 / 6, added 266 / 16; no row closes from a running
-  full check. Model-port option B's exact revised ADR 0050 acceptance remains
-  pending; dependent callback/lifecycle/wrapper work has not started.
+- Passed once: full current-pair fast check of exact clean candidate
+  `698595b47f2d2523db552114f3e2fe37b8d60693` in the attached
+  `m7-trace-check` verification checkout, which remains clean at that SHA.
+  All eleven application suites pass: 3,889 cases with 45 existing exclusions,
+  in 1,557.8 measured seconds. Handle `13537` is terminal and collected.
+  Complete immutable output:
+  `/private/tmp/loopex-m7-698595b4-fast-check.log`, SHA-256
+  `7c8ae702d7c6400208ea34d2a336f86cf134a3fb46ee3adc3c7a95a75b0cebed`.
+  The retained runner is `/private/tmp/loopex-m7-698595b4-fast-check.py`;
+  provider-only serialization and ordinary per-app isolation are unchanged.
+  CI had no run for this exact SHA at launch. This check will not run again
+  for those bytes. Historical failed candidates remain FAIL. The pass proves
+  the integrated artifact, chat and quiesce repairs at the named candidate;
+  it does not prove subsequent documentation or tracing-test bytes, the floor
+  closure matrix, paid/release witnesses or completion of all M7 outcomes.
+  Current T01–T19 totals remain 77 / 96 / 6 originals and 266 / 17 added.
+  Revised ADR 0050 acceptance is still pending; dependent work has not started.
 
 - Final focused integration gates pass on both supported pairs: changed-file
   formatting, warning-free compilation, documentation ordering, current status,
