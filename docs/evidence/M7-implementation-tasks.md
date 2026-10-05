@@ -325,6 +325,35 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Live verification handoff: root owns the exclusive check slot. Full current
+  fast check runs once on exact clean candidate
+  `6290ac472cb18ecb78bb3cb75d1abc952458d55a` in the attached
+  `/Users/spuri/.codex/worktrees/m7-trace-check/loopex`. Retained runner
+  `/private/tmp/loopex-m7-6290ac47-fast-check.py`; streaming output
+  `/private/tmp/loopex-m7-6290ac47-fast-check.log`; terminal metadata will be
+  `loopex-m7-6290ac47-fast-check.json` in that directory. Execution handle
+  `26926` is live, not collected: resume/poll it, never launch a second check
+  for this candidate. Compilation/format/structure/docs/dependency/runner
+  fixtures passed; application suites are running. No complete PASS or output
+  digest exists yet. All workers remain VM-free; restore revision is read-only.
+
+  Both integrated writer worktrees, chat-pipe-proof and model-alias-preparation,
+  are archived with recoverable Git snapshots; full external evidence remains.
+  Inspection shape is the one presented pending question. Restore option B
+  selects direction only; its exact amendment is still under proposal/review.
+  T01–T19 original counts 78 done / 95 todo / 6 retired; added 275 / 17 / 0.
+  Including T00: originals 78 / 101 / 7, added 279 / 18 / 0.
+
+  T16 read-only private-task shutdown investigation retained at
+  `/private/tmp/loopex-m7-t16-private-task-shutdown-investigation-20261005-v2.md`,
+  SHA-256 `02ba53321ca075b14ecc1fe5a1f1476e0812d93feb7bf766987f31e97ddef7e0`;
+  source inventory SHA-256
+  `55c6a4fded2c4009544df83cfdc1b45a3d32d8526d9ffd960b8622f890139799`.
+  The nested DynamicSupervisor teardown race is a cause candidate, not proved.
+  Exact offender role and original preinstalled-monitor exit reason/order are
+  still needed. Actual-lifetime reproduction/repair waits for the check slot;
+  no new VM, reproduced generation-7 failure or production fix is claimed.
+
 - Alias-preparation scoped unit integrated and pushed as `dd9bddd1` from
   verified worker `b3bba74a1c952671be537ed1b0d3141dad3483cb`. All 25 owned
   paths match the final tested source inventory; the committed root progress
