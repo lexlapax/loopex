@@ -22,6 +22,7 @@ defmodule Loopex.AppServer.Mapping do
   would stop retrying the one identity that could still resolve it.
   """
 
+  alias LoopexProtocol.Session.Snapshot
   alias LoopexProtocol.Wire
 
   @content_bytes 1_048_576
@@ -579,32 +580,21 @@ defmodule Loopex.AppServer.Mapping do
   #
   # Technical depth: the cursor and the snapshot's event sequence are the same
   # number, reported twice because a client reads one to place later events and
-  # the other as part of the state it was handed. The open interaction is the
-  # view at that same cursor, so a client never receives a question belonging to
-  # a later moment than the snapshot it arrived with.
+  # the other as part of the state it was handed. The shared codec encodes all
+  # ten captured members and their canonical domains without a newer status read;
+  # the separate open interaction repeats that exact snapshot projection.
   defp snapshot_record(request, attachment) do
-    snapshot = Loopex.snapshot(attachment)
-    cursor = Map.get(snapshot, :event_sequence, 0)
+    {:ok, snapshot} = Snapshot.encode_wire(Loopex.snapshot(attachment))
 
     %{
       "type" => "snapshot",
       "request_id" => Map.get(request, "request_id"),
-      "session_id" => Wire.encode_identity(Map.fetch!(snapshot, :session_id)),
-      "event_cursor" => Wire.encode_u64(cursor),
-      "snapshot" => %{
-        "snapshot_revision" => Map.fetch!(snapshot, :snapshot_revision),
-        "session_id" => Wire.encode_identity(Map.fetch!(snapshot, :session_id)),
-        "event_sequence" => Wire.encode_u64(cursor),
-        "active_run_id" => optional_identity(Map.get(snapshot, :active_run_id)),
-        "active_run_phase" => optional_word(Map.get(snapshot, :active_run_phase))
-      },
-      "open_interaction" => Loopex.Attachment.open_interaction(attachment)
+      "session_id" => snapshot["session_id"],
+      "event_cursor" => snapshot["event_sequence"],
+      "snapshot" => snapshot,
+      "open_interaction" => snapshot["open_interaction"]
     }
   end
-
-  defp optional_word(nil), do: nil
-  defp optional_word(value) when is_atom(value), do: Atom.to_string(value)
-  defp optional_word(value) when is_binary(value), do: value
 
   defp attached(%{attachment: attachment}) when not is_nil(attachment), do: :ok
   defp attached(_context), do: {:error, %{"type" => "error", "code" => "not_attached"}}
