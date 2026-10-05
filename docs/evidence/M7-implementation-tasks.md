@@ -325,6 +325,43 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done by original-checklist audit: T08 items 5/6 now close continuation
+  accounting/reserves/headroom and all nine thinking cells plus the independent
+  thinking-off summarizer. Current Core/host/HTTP implementations and retained
+  paired headroom (207 cases, two existing exclusions), chat cells (25 cases)
+  and summarizer transport (14 cases) prove these implementation rows. Their
+  complete prescribed real-provider round/bound/cancel workflows and integrated
+  model-switch/failure evidence remain T08 items 10/11. No paid witness is claimed.
+
+- Done by original-checklist audit: T10 items 5/8/10 now close original-ID
+  uncertain-admission input ordering, independently draining diagnostics, and
+  trace isolation/redaction/stalled-stderr/ask-JSON separation. Current code and
+  retained paired actual-facade chat (175 cases), diagnostic/ephemeral ownership
+  (24 cases), real local-HTTP and OS-signal proofs establish these rows. Complete
+  compact/control integration, public-driver pressure/EOF matrix, flag/file
+  demonstrations and PTY evidence remain open. Twelve complete outputs were
+  rehashed against their existing ledger digests and made read-only without
+  changing bytes: `/private/tmp/loopex-m7-original-t08-t10-audit-inventory.tsv`,
+  SHA-256 `2b0cf2816be67d5b6fbd5d3a62f2d370c1f91205c15410079a77547be8a4ab17`.
+  T01–T19 originals become 75 done / 98 todo / 6 retired; T08 is 9 / 2 / 0,
+  T10 is 4 / 6 / 0. Added rows remain separate from these original closures.
+
+- Original T13 audit leaves 4 done / 6 todo: the four fixture implementations
+  have credential-free proofs, but the trusted campaign entrypoint, actual
+  review helper workflow, external target, executable step coverage, named
+  attendance and counted execution collection remain incomplete. Historical
+  policy/feature inventories reference source paths since changed; their
+  unchanged retained output hashes are not evidence of the exact current SHA.
+
+- Running independent preparation: the T10 ending writer owns only
+  `chat_driver_test.exs` in `m7-chat-ending-proof`, and the T15 current-restore
+  writer owns only the existing reference-client recovery test and fixture
+  in `m7-current-restore-proof`. Both start from `94f2b713`, preserve unrelated
+  edits and defer every suite VM/compile until full-check handle `6635` ends.
+  Root owns rejoin and post-rejoin verification. No product boundary or original
+  checkbox closes from draft preparation. Added T01–T19 is 263 done / 17 todo;
+  including T00 it is 267 / 18. Including T00 originals are 75 / 104 / 7.
+
 - Queued wire-create decision, not accepted: read-only inspection confirms
   current transport session_options is copied into genesis metadata, not used
   as settings overrides. The recommendation is a required closed empty wire
@@ -10655,8 +10692,8 @@ the still-open real-provider, live protocol, persistent-fault or closure lanes.
 - [x] Implement the exact adapter replies, canonical replies and monotonic settlement generations.
 - [x] Implement bounded in-capsule reference expansion, with no artifact substitution or external lookup.
 - [x] Preserve expanded native blocks, strings, ordering, IDs and parsed arguments.
-- [ ] Implement continuation accounting, reserves and compaction headroom targets.
-- [ ] Implement all nine accepted thinking cells and the separately configured summarizer.
+- [x] Implement continuation accounting, reserves and compaction headroom targets.
+- [x] Implement all nine accepted thinking cells and the separately configured summarizer.
 - [x] Build the native transport bridge: validate final requests after hooks, capture before conversion, and preserve admitted controls and ceilings.
 - [x] Bound raw streaming/parser buffers; implement fatal-error latching, flushing and wakeup.
 - [x] Test the bridge against a local HTTP server before integrating live-provider proofs.
@@ -10733,14 +10770,16 @@ the still-open real-provider, live protocol, persistent-fault or closure lanes.
 - [ ] Implement the exact pipe grammar and closed control records.
 - [ ] Enforce record limits, bounded input admission, the 256-KiB output queue and control-drain deadline.
 - [x] Implement the unknown-admission resolver using the original transaction identity and proposal.
-- [ ] Preserve input ordering while admission is uncertain; do not submit duplicate commands or fenced aborts.
+- [x] Preserve input ordering while admission is uncertain; do not submit duplicate commands or fenced aborts.
 - [ ] Make EOF, incomplete fragments, earlier failures and uncertain cleanup produce the specified outcomes.
 - [ ] Implement tracing through flags and files, including enable/disable and owner cleanup.
-- [ ] Add the independently draining diagnostic consumer with drop and unconfirmed-delivery accounting.
+- [x] Add the independently draining diagnostic consumer with drop and unconfirmed-delivery accounting.
 - [ ] Test PTYs, fragmented pipes, actual question IDs, barriers, slow readers, EOF and signals.
-- [ ] Test tracing isolation, redaction, stalled stderr and ask’s JSON output separation.
+- [x] Test tracing isolation, redaction, stalled stderr and ask’s JSON output separation.
 
 ### Added implementation subtasks
+
+- [ ] Prove the complete actual-facade chat EOF matrix for an active run and actual pending question, plus failed-then-successful runs retaining nonzero final exit and the latest successful outcome; preserve exact input/process/cleanup bounds. An isolated writer prepares only the existing driver test file; verification waits until the current full check ends.
 
 - [x] Resolve and implement the owner-only effective-settings report admission decision; preserve shared diagnostic queue/writer/cleanup bounds and prove redaction, exact values/origins, byte refusal and loss accounting.
 
@@ -10907,6 +10946,8 @@ retained under [Current work](#current-work). Backup/restore obligations remain
 open.
 
 ### Added implementation subtasks
+
+- [ ] Prove a bounded current-format physical Store/executor backup/restore slice with quiescent exact owner joins, complete unexcluded manifests, empty destination roots, separate workspace restoration and unknown-effect nonredispatch on both pairs. This does not close operator attendance or future helper/catalog/ledger coverage; isolated test preparation waits for the current full check before verification.
 
 - [x] Migrate current model adapters, fixtures, conformance callers and reply types to exact eleven-field v3 callbacks; remove the nine-field callback fallback and old two-argument canonical projection, preserving current ten-field replies, v3 settlement, raw-admission order, exact echoes, captured requirements and once-only accounting on both supported toolchains.
 
