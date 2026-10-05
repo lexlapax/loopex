@@ -29,6 +29,60 @@ grouped by T00–T19. Empty added sections mean no added subtasks are recorded;
 they do not mean the original task is complete. This follows the maintainer's
 2026-10-01 update to the active implementation goal.
 
+## Current verification checkpoint — 2026-10-05, policy decision identity
+
+The atomic replacement fix at `8addcf4db116b2c3686f2952e8c8fa24103cb388`
+passes the complete affected 463-case ordinary Core selection on both supported
+pairs in 32.973 / 33.842 seconds, with the same three long-bound exclusions.
+All fourteen formatting, dev/test compilation, test and metadata outputs were
+rehashed. Completion inventory:
+`/private/tmp/loopex-m7-repeated-defer-green-v2/completion.json`, SHA-256
+`1d118932578950a0f9b5685616ba625352e19c09ebcca15ca0f3549351a73b91`.
+The initial v1 verification runner omitted test-environment compilation and
+executed stale cached production. Its retained 462/463 result is invalid evidence
+for the fix, not a passing retry or an observed failure of the new production.
+Its output remains `/private/tmp/loopex-m7-repeated-defer-green-v1/current-core.log`,
+SHA-256 `0613db7da0c1b8524d3982048161c30599662593fbb80c88e04e6ccd38ff4029`.
+Both runner handles 38603 and 62464 are terminal and collected.
+
+Independent exact-commit review found a remaining P1 caller migration: raw call
+IDs may recur in independent runs or turns. The old coordinator used a
+session-wide raw-ID counter and allocation preimage, conflicting with the
+reducer's per-decision initial round zero. Review:
+`/private/tmp/loopex-m7-repeat-defer-8addcf4d-independent-review.md`, SHA-256
+`69df0aeff4b8f6e764803972278b7516828fe07564cc9de6c24cb8bb76d30063`;
+input inventory SHA-256
+`0c4e0b5a0b29d4debcdc21136a31a293670fbfda9135328b85d007bfb0f0a6e2`.
+The fresh-run regression failed before repair at unchanged `8addcf4d`: the
+coordinator stopped with `invalid_interaction_transition`, then the second
+question never arrived. It executed one case in 9.901 seconds, nineteen excluded.
+`/private/tmp/loopex-m7-reused-call-red-v1.log`, SHA-256
+`64f135b8fb0890b1bf5d78e43bef4afc57a721afef2ee7f56550bc831e040d6f`.
+The exact failed test SHA-256 is
+`fc7af37ca3dfbeda24883b7bd8d0dc796335ec7e183ff0cec92e9c224bec196f`.
+Handle 71263 is terminal. The source correction now scopes both the existing
+round counter and opaque allocation to the run/turn/call decision tuple, with
+round included in allocation. Existing persisted IDs remain read unchanged;
+no schema, public identity domain, authority, deadline or transaction changes.
+The regression now covers independent runs and turns. Verification is pending,
+so the added native T05 unit remains open.
+
+The standalone requested-model-question codec is integrated at `e66d8c15` from
+verified worker `b8651c2624e1eb3b302aaf8c2ea8693eac200d9a`. Root reviewed
+both encoders, complete tests and schema, rehashed all 77 retained artifacts,
+and compared all eleven source blobs to the exact worker commit. Both supported
+pairs pass eight complete codec/OpenInteraction cases in 0.419 / 0.505 seconds;
+pinned Node passes 141 literals and 156 boundaries. Retain the first wrong
+fixture-root failure and the unstaged-source prerequisite failure; both corrected
+inputs are documented. Inventory:
+`/private/tmp/loopex-m7-model-question-requested-proof-20261005-v1/retained-inventory.json`,
+SHA-256 `9c13900ce1312617ce9e93ec5ac20dd4393c81c7b54836e12174f79d4a3153af`.
+No serving imports or generation activation are included. Root post-rejoin proof
+is pending. Superseding coherent current policy-wire proposal is retained and
+reviewed, still unaccepted; do not implement its terminal grammar. The diagnostic
+setup cutoff remains the one unanswered question. Restore draft `de25c9db` is
+saved in its isolated checkout and still awaits its exclusive verification slot.
+
 ## Historical restart checkpoint — 2026-10-03, maintenance endings
 
 The maintainer resumed the implementation goal after restarting on 2026-10-03.

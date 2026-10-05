@@ -770,6 +770,63 @@ defmodule Loopex.InteractionLifecycleTest do
     assert Loopex.AgentLoopTestExecutor.jobs(fixture.executor) == []
   end
 
+  test "a reused raw tool call starts a fresh policy decision in a later run or turn" do
+    call = %{text: "working", calls: [%{id: "c1", name: "write", arguments: %{"path" => "c1"}}]}
+    done = %{text: "done", calls: []}
+
+    for scope <- [:run, :turn] do
+      script = if scope == :run, do: [call, done, call, done], else: [call, call, done]
+      fixture = Fixture.start(script: script, policy: DeferringPolicy)
+      on_exit(fn -> Fixture.stop(fixture) end)
+      {session_id, attachment} = loop_session(fixture)
+
+      assert {:accepted, "p1"} =
+               Loopex.command(attachment, %{type: :prompt, command_id: "p1", content: "first"})
+
+      first = await_nth_request(fixture, session_id, 1)
+
+      assert {:accepted, "deny-first"} =
+               Loopex.command(attachment, %{
+                 type: :interaction_answer,
+                 command_id: "deny-first",
+                 interaction_id: first["interaction_id"],
+                 choice_id: "deny"
+               })
+
+      if scope == :run do
+        await_event(fixture, session_id, "run.finished", 8_000)
+
+        assert {:accepted, "p2"} =
+                 Loopex.command(attachment, %{type: :prompt, command_id: "p2", content: "second"})
+      end
+
+      second = await_nth_request(fixture, session_id, 2)
+      assert second["tool_call_id"] == first["tool_call_id"]
+
+      if scope == :run do
+        assert second["run_id"] != first["run_id"]
+      else
+        assert second["run_id"] == first["run_id"]
+        assert second["turn"] == first["turn"] + 1
+      end
+
+      assert second["interaction_id"] != first["interaction_id"]
+      assert {:ok, status} = Loopex.session_status(fixture.runtime, session_id)
+      assert status.open_interaction["interaction_id"] == second["interaction_id"]
+      assert status.open_interaction["status"] == "pending"
+
+      requested =
+        Fixture.records(fixture, session_id)
+        |> Enum.filter(&(&1.payload.kind == "interaction_requested_v1"))
+
+      assert Enum.map(requested, & &1.payload["round"]) == [0, 0]
+      assert Loopex.AgentLoopTestExecutor.jobs(fixture.executor) == []
+
+      assert {:accepted, "abort-second"} =
+               Loopex.command(attachment, %{type: :abort, command_id: "abort-second"})
+    end
+  end
+
   defmodule BlockingResumePolicy do
     @moduledoc false
     @behaviour Loopex.Policy

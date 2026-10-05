@@ -9069,7 +9069,8 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # carries a timer: a run whose host never answers would otherwise stand until
   # its deadline with no fact saying why.
   defp begin_interaction(state, work, call, question) do
-    round = next_interaction_round(state, call.tool_call_id)
+    turn = Map.get(work, :turn_number, 1)
+    round = next_interaction_round(state, work.run_id, turn, call.tool_call_id)
 
     if round > 2 do
       commit_tool_terminal(state, work, call, :denied, "policy_denied")
@@ -9078,9 +9079,13 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
       interaction = %{
         interaction_id:
-          stable_id("interaction", state.session_id, "#{call.tool_call_id}-#{round}"),
+          stable_id(
+            "interaction",
+            state.session_id,
+            {work.run_id, turn, call.tool_call_id, round}
+          ),
         run_id: work.run_id,
-        turn: Map.get(work, :turn_number, 1),
+        turn: turn,
         tool_call_id: call.tool_call_id,
         request: question,
         round: round,
@@ -9323,11 +9328,12 @@ defmodule Loopex.Runtime.SessionCoordinator do
   #
   # Technical depth: read from the durable interactions rather than from a
   # counter beside them, so it survives restart and replay exactly as the
-  # decision it bounds does.
-  defp next_interaction_round(state, tool_call_id) do
+  # decision it bounds does. A raw call ID may recur in a different run or
+  # turn, so only this complete decision tuple spends the current allowance.
+  defp next_interaction_round(state, run_id, turn, tool_call_id) do
     state.durable.interactions
     |> Map.values()
-    |> Enum.filter(&(&1.tool_call_id == tool_call_id))
+    |> Enum.filter(&(&1.run_id == run_id and &1.turn == turn and &1.tool_call_id == tool_call_id))
     |> Enum.map(& &1.round)
     |> Enum.max(fn -> -1 end)
     |> Kernel.+(1)
