@@ -29,6 +29,32 @@ grouped by T00–T19. Empty added sections mean no added subtasks are recorded;
 they do not mean the original task is complete. This follows the maintainer's
 2026-10-01 update to the active implementation goal.
 
+## Current execution checkpoint — 2026-10-05, complete physical inventory
+
+The verified source and progress are committed/pushed through
+`3545e267` on m7. Root has no active verification VM. The isolated restore
+worker owns only restore/io.ex and restore_io_test.exs, starting exact repaired
+source `8885e0dbacfc4a37cb873080d615869587132ea4`, and holds the exclusive
+VM slot for the next bounded manifest unit. It must preserve the same worker,
+monitors and cutoffs; include the root, hidden files, empty directories and prior
+restore metadata without exclusions; hash in bounded chunks and refuse all
+accepted count/byte/link/path faults. Placement owner hard links are not an
+exception and cannot be silently deleted. Existing claims, guards and activation
+remain unimplemented. A separate read-only audit outline maps current Store,
+Local and artifact records; helper-ledger grammar remains a pending contract.
+
+A read-only review of the retained private-task causal WIP is also running. It
+may identify a fixture repair that completes exact linked-EXIT ordering and real
+resource custody without changing proof or bounds. No failed WIP is integrated,
+no runtime defect or quiet-shutdown pass is inferred, and the original shutdown
+failures remain retained.
+
+This adds one open T15 manifest prerequisite. Original T01–T19 totals stay
+78 done / 95 todo / 6 retired. Added totals are 284 done / 19 todo; including
+T00, 288 / 20. The diagnostic cutoff question remains unanswered; queued public
+decisions are presented one at a time. No full integration or milestone closure
+is claimed.
+
 ## Current verification checkpoint — 2026-10-05, restore prerequisite complete
 
 Exact repaired source `8885e0dbacfc4a37cb873080d615869587132ea4`
@@ -12383,6 +12409,9 @@ retained under [Current work](#current-work). Backup/restore obligations remain
 open.
 
 ### Added implementation subtasks
+
+- [ ] Produce the accepted complete physical manifest through the existing single owned restore IO worker: stream exact file hashes, preserve all paths/modes/empty directories and prior metadata, enforce all count/byte caps while accumulating, reject links/special/unsafe entries and prove actual faults and cleanup on both supported toolchains. Full history audit and restore orchestration remain separate.
+
 
 - [x] Implement and independently review the accepted ADR 0051 private restore codec and owned raw IO prerequisite; prove closed exact bytes, captured cleanup bounds and actual descriptor/guardian faults on both toolchains. Preserve required current-format audit, claims, guards, lineage and activation as subsequent work.
 
