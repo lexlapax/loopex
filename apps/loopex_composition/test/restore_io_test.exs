@@ -596,7 +596,10 @@ defmodule LoopexComposition.RestoreIOTest do
     fixture = store_fixture(context.root, 3)
     [first | _] = fixture.ids
     fixture = append_pending(fixture, first)
-    {:ok, orphan} = Store.advance_owner("absent-session", "owner", "orphan-tx", 0, 0, "orphan-owner")
+
+    {:ok, orphan} =
+      Store.advance_owner("absent-session", "owner", "orphan-tx", 0, 0, "orphan-owner")
+
     fixture = append_transaction(fixture, orphan)
     operation = store_operation(fixture)
     owned = launch(operation, :store_decode)
@@ -624,6 +627,7 @@ defmodule LoopexComposition.RestoreIOTest do
     fixture = store_fixture(context.root, 1)
     File.write!(fixture.path, <<>>)
     owned = launch(store_operation(%{fixture | bytes: <<>>}), :store_decode)
+
     assert {{:joined, {:ok, %{store: store, sessions: sessions}}, %{opens: 1, closes: 1}}, _} =
              drive(owned)
 
@@ -651,12 +655,37 @@ defmodule LoopexComposition.RestoreIOTest do
     directory_info = File.lstat!(Path.dirname(fixture.path))
     info = File.lstat!(fixture.path)
     assert info.size == size
+
     entries = [
-      %{"path" => ".", "kind" => "directory", "mode" => Bitwise.band(root_info.mode, 0o7777), "size" => 0, "sha256" => nil},
-      %{"path" => "store", "kind" => "directory", "mode" => Bitwise.band(directory_info.mode, 0o7777), "size" => 0, "sha256" => nil},
-      %{"path" => "store/history.log", "kind" => "regular", "mode" => Bitwise.band(info.mode, 0o7777), "size" => size, "sha256" => digest}
+      %{
+        "path" => ".",
+        "kind" => "directory",
+        "mode" => Bitwise.band(root_info.mode, 0o7777),
+        "size" => 0,
+        "sha256" => nil
+      },
+      %{
+        "path" => "store",
+        "kind" => "directory",
+        "mode" => Bitwise.band(directory_info.mode, 0o7777),
+        "size" => 0,
+        "sha256" => nil
+      },
+      %{
+        "path" => "store/history.log",
+        "kind" => "regular",
+        "mode" => Bitwise.band(info.mode, 0o7777),
+        "size" => size,
+        "sha256" => digest
+      }
     ]
-    {:ok, manifest} = Loopex.Executor.Local.RestoreCodec.encode(:manifest, ["loopex:current-state-manifest:v1", entries])
+
+    {:ok, manifest} =
+      Loopex.Executor.Local.RestoreCodec.encode(:manifest, [
+        "loopex:current-state-manifest:v1",
+        entries
+      ])
+
     declaration = %{"relative_path" => "store/history.log", "sha256" => digest}
     owned = launch({:audit_store, fixture.root, declaration, manifest}, :store_manifest)
     assert {{:joined, {:error, :io_error}, %{opens: 0, closes: 0}}, events} = drive(owned)
@@ -715,7 +744,10 @@ defmodule LoopexComposition.RestoreIOTest do
     for bytes <- [fixture.bytes <> binary_part(fixture.bytes, 0, 7), fixture.bytes <> "corrupt"] do
       File.write!(fixture.path, bytes)
       owned = launch(store_operation(%{fixture | bytes: bytes}), :store_decode)
-      assert {{:joined, {:error, :history_invalid}, %{opens: 1, closes: 1}}, events} = drive(owned)
+
+      assert {{:joined, {:error, :history_invalid}, %{opens: 1, closes: 1}}, events} =
+               drive(owned)
+
       refute :store_replay in issued_kinds(events)
       assert File.read!(fixture.path) == bytes
       joined(owned)
@@ -847,13 +879,17 @@ defmodule LoopexComposition.RestoreIOTest do
     assert_receive {:DOWN, monitor, :process, caller, :killed}, 1_000
     assert monitor == owned.caller_monitor
     assert caller == owned.caller
-    assert_receive {:restore_io, guardian, worker, reference,
-                    {:stopping, :caller_lost, _, _}}, 1_000
+
+    assert_receive {:restore_io, guardian, worker, reference, {:stopping, :caller_lost, _, _}},
+                   1_000
+
     assert {guardian, worker, reference} == {owned.guardian, owned.worker, owned.reference}
     send(owned.guardian, {:proceed, owned.reference, id})
     # The guardian publishes only to the lost caller; its probe retains the join.
     assert_receive {:restore_io, guardian, worker, reference,
-                    {:terminal, {:joined, {:error, :caller_lost}, %{opens: 1, closes: 1}}}}, 1_000
+                    {:terminal, {:joined, {:error, :caller_lost}, %{opens: 1, closes: 1}}}},
+                   1_000
+
     assert {guardian, worker, reference} == {owned.guardian, owned.worker, owned.reference}
     joined(owned, false)
   end
@@ -880,7 +916,9 @@ defmodule LoopexComposition.RestoreIOTest do
     System.put_env("LOOPEX_HOME", context.root)
 
     on_exit(fn ->
-      if previous, do: System.put_env("LOOPEX_HOME", previous), else: System.delete_env("LOOPEX_HOME")
+      if previous,
+        do: System.put_env("LOOPEX_HOME", previous),
+        else: System.delete_env("LOOPEX_HOME")
     end)
 
     root = physical_root(context.root)
@@ -888,6 +926,7 @@ defmodule LoopexComposition.RestoreIOTest do
     File.mkdir!(directory)
     path = Path.join(directory, "history.log")
     {:ok, store} = Loopex.Store.Local.start_link(path: path)
+
     on_exit(fn ->
       monitor = Process.monitor(store)
       Process.exit(store, :kill)
@@ -898,7 +937,9 @@ defmodule LoopexComposition.RestoreIOTest do
       Loopex.AgentLoopFixture.start(
         store: store,
         store_module: Loopex.Store.Local,
-        script: [%{text: "write", calls: [%{id: "call-1", name: "write", arguments: %{"path" => "a"}}]}],
+        script: [
+          %{text: "write", calls: [%{id: "call-1", name: "write", arguments: %{"path" => "a"}}]}
+        ],
         outcomes: %{"call-1" => "outcome_unknown"}
       )
 
@@ -931,12 +972,21 @@ defmodule LoopexComposition.RestoreIOTest do
     owned = launch(store_operation(%{root: root, path: path, bytes: bytes}), :store_decode)
     assert {{:joined, {:ok, result}, %{opens: 1, closes: 1}}, _} = drive(owned)
     assert result.store == replayed
-    assert {:ok, expected} = SessionState.recover(session, replayed.sessions[session].records, replayed.sessions[session].events)
+
+    assert {:ok, expected} =
+             SessionState.recover(
+               session,
+               replayed.sessions[session].records,
+               replayed.sessions[session].events
+             )
+
     assert result.sessions[session] == expected
+
     assert expected.conversation
            |> Map.values()
            |> List.flatten()
            |> Enum.any?(&(&1.kind == :tool_result and &1.outcome == :outcome_unknown))
+
     assert File.read!(path) == bytes
     joined(owned)
   end
@@ -945,15 +995,22 @@ defmodule LoopexComposition.RestoreIOTest do
     assert System.monotonic_time(:millisecond) < cutoff
 
     case Loopex.next_event(attachment) do
-      {:ok, %{:kind => "run.finished", "outcome" => "outcome_unknown"}} -> :ok
-      {:ok, _event} -> await_unknown(attachment, cutoff)
+      {:ok, %{:kind => "run.finished", "outcome" => "outcome_unknown"}} ->
+        :ok
+
+      {:ok, _event} ->
+        await_unknown(attachment, cutoff)
+
       {:error, :empty} ->
         assert System.monotonic_time(:millisecond) < cutoff
+
         receive do
         after
           1 -> await_unknown(attachment, cutoff)
         end
-      other -> flunk("unknown-effect fixture did not finish: #{inspect(other)}")
+
+      other ->
+        flunk("unknown-effect fixture did not finish: #{inspect(other)}")
     end
   end
 
@@ -966,7 +1023,13 @@ defmodule LoopexComposition.RestoreIOTest do
     initial = %{root: root, path: path, state: State.new(), frames: [], bytes: <<>>, ids: []}
 
     Enum.reduce(1..count, initial, fn number, fixture ->
-      {:ok, transaction} = Store.create_session("audit-runtime", "create-#{number}", ConfiguredGenesisFixture.genesis([]))
+      {:ok, transaction} =
+        Store.create_session(
+          "audit-runtime",
+          "create-#{number}",
+          ConfiguredGenesisFixture.genesis([])
+        )
+
       append_transaction(fixture, transaction)
     end)
   end
@@ -976,19 +1039,46 @@ defmodule LoopexComposition.RestoreIOTest do
     frames = fixture.frames ++ [frame]
     bytes = fixture.bytes <> encoded_frame(frame)
     File.write!(fixture.path, bytes)
-    %{fixture | state: state, frames: frames, bytes: bytes, ids: Enum.sort(Map.keys(state.sessions))}
+
+    %{
+      fixture
+      | state: state,
+        frames: frames,
+        bytes: bytes,
+        ids: Enum.sort(Map.keys(state.sessions))
+    }
   end
 
   defp append_pending(fixture, id) do
     head = fixture.state.sessions[id]
-    {:ok, owner} = Store.advance_owner(id, "owner", "owner-tx", 0, head.journal_version, "audit-owner")
+
+    {:ok, owner} =
+      Store.advance_owner(id, "owner", "owner-tx", 0, head.journal_version, "audit-owner")
+
     fixture = append_transaction(fixture, owner)
     head = fixture.state.sessions[id]
     {:ok, state} = SessionState.recover(id, head.records, head.events)
-    {:ok, prompt} = SessionState.propose(state, %{type: :prompt, command_id: "prompt", content: "continue"}, %{
-      max_turns: 8, token_budget: 10_000, deadline_ms: 60_000, context_token_budget: 8_192
-    })
-    {:ok, transaction} = Store.session_commit(id, "session", prompt.tx_id, head.owner_epoch, head.owner_incarnation_id, head.journal_version, prompt.records, prompt.events)
+
+    {:ok, prompt} =
+      SessionState.propose(state, %{type: :prompt, command_id: "prompt", content: "continue"}, %{
+        max_turns: 8,
+        token_budget: 10_000,
+        deadline_ms: 60_000,
+        context_token_budget: 8_192
+      })
+
+    {:ok, transaction} =
+      Store.session_commit(
+        id,
+        "session",
+        prompt.tx_id,
+        head.owner_epoch,
+        head.owner_incarnation_id,
+        head.journal_version,
+        prompt.records,
+        prompt.events
+      )
+
     append_transaction(fixture, transaction)
   end
 
@@ -998,7 +1088,12 @@ defmodule LoopexComposition.RestoreIOTest do
   end
 
   defp store_operation(fixture) do
-    assert {:joined, {:ok, manifest}, _} = RestoreIO.run({:manifest, fixture.root, byte_size(fixture.bytes)}, limits(1_000, 100))
+    assert {:joined, {:ok, manifest}, _} =
+             RestoreIO.run(
+               {:manifest, fixture.root, byte_size(fixture.bytes)},
+               limits(1_000, 100)
+             )
+
     declaration = %{"relative_path" => "store/history.log", "sha256" => hash(fixture.bytes)}
     {:audit_store, fixture.root, declaration, manifest}
   end

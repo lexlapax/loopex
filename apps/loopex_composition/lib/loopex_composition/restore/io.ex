@@ -425,7 +425,7 @@ defmodule LoopexComposition.Restore.IO do
 
       if not match?(%{"kind" => "regular"}, entry) or
            entry["sha256"] != declaration["sha256"] or entry["size"] > @max_read,
-        do: throw({:io_error, :inventory_mismatch})
+         do: throw({:io_error, :inventory_mismatch})
 
       ancestors = manifest_ancestors(root)
       directories = store_directories(root, Path.dirname(relative), index)
@@ -453,7 +453,7 @@ defmodule LoopexComposition.Restore.IO do
 
       if byte_size(bytes) != entry["size"] or
            primitive(:store_digest, fn -> RestoreCodec.digest_bytes(bytes) end) != entry["sha256"],
-        do: throw({:io_error, :inventory_mismatch})
+         do: throw({:io_error, :inventory_mismatch})
 
       result = audit_store_bytes(bytes)
       require_same_identity(before, manifest_stat(path))
@@ -541,9 +541,10 @@ defmodule LoopexComposition.Restore.IO do
     if not match?(%{"kind" => "directory"}, entry) or
          file_info(info, :type) != :directory or
          Bitwise.band(file_info(info, :mode), 0o7777) != entry["mode"],
-      do: throw({:io_error, :inventory_mismatch})
+       do: throw({:io_error, :inventory_mismatch})
 
     own = {path, manifest_identity(info)}
+
     if relative == ".",
       do: [own],
       else: [own | store_directories(root, Path.dirname(relative), index)]
@@ -553,7 +554,7 @@ defmodule LoopexComposition.Restore.IO do
     if file_info(info, :type) != :regular or file_info(info, :links) != 1 or
          file_info(info, :size) != entry["size"] or
          Bitwise.band(file_info(info, :mode), 0o7777) != entry["mode"],
-      do: throw({:io_error, :inventory_mismatch})
+       do: throw({:io_error, :inventory_mismatch})
   end
 
   defp require_same_identity(before, after_info) do
