@@ -325,7 +325,18 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
-- Integrated, proof running: daemon CLI worker `99fc81d28ab95c2e20761beb2450d12d48f72068`
+- Running T11 prerequisite: an isolated writer installs immutable retained
+  objects using ADR 0046's accepted physical durability rules and the existing
+  GenesisCodec as a concrete client. It owns only two new composition files;
+  no ledger mutation grammar, child manager, receipt or host/Core query is added.
+  Read-only inspection found the complete ledger mutation member inventories
+  and literal frame byte recipe still need pinning before their implementation.
+  Exact child terminal accounting has no current runtime read path, and
+  runtime-only clients require a universal host mutation guard before helper
+  exposure. Those material joins remain pending decisions, queued after the
+  current ADR 0050 choice rather than presented concurrently.
+
+- Done: daemon CLI worker `99fc81d28ab95c2e20761beb2450d12d48f72068`
   is joined as `59449777`; exactly four response-model literals change to the
   dated captured model. Complete four-file worker selections include Node
   22.14.0 and pass 31 cases on each pair in 483.7/485.3 seconds. Both formatters,
@@ -333,18 +344,45 @@ did not resolve them. No paid provider calls were made during this check.
   entries were rehashed: `/private/tmp/loopex-m7-cli-daemon-fixture-proof-inventory.tsv`,
   SHA-256 `66083bf3fc8840468bd4ae6ff371ceebc855f00ad5499bc9910f763d803e4b2c`.
   Baseline FAIL remains retained. Root's complete current-pair post-rejoin
-  selection is running under handle `68458`, with pinned Node and every original
-  recovery/shutdown bound, in `/private/tmp/loopex-m7-cli-daemon-postjoin-cli-current-v1.log`.
-  No checklist completion is claimed before collecting this result.
+  selection passes all 31 cases in 441.4 measured seconds, with pinned Node and
+  every original recovery/shutdown bound. Handle `68458` is terminal and
+  collected. Complete immutable output:
+  `/private/tmp/loopex-m7-cli-daemon-postjoin-cli-current-v1.log`, SHA-256
+  `0bb71913905b6add7cbbcbc5219ed9bafc934f9050ea6aff676f41b512471b90`.
+  Worker floor evidence covers the same four-file repairs; no integrated floor
+  rerun is claimed. Close one bounded added T05 row. T01–T19 originals remain
+  70 done / 103 todo / 6 retired; added work is 259 done / 13 todo. Including
+  T00, originals remain 70 / 109 / 7; added work is 263 / 14. Full integration,
+  current-only effect-reader retirement and quiesce cause remain open.
 
-- Running diagnostic-only T16 work: an isolated writer owns only
-  `runtime_quiesce_test.exs`, adding bounded whitelisted observations of existing
+- Integrated diagnostic-only T16 work: `697e3c58` joins worker
+  `9706d5afbfda21c109fc996b6ee813e75df9cc8e`, changing only
+  `runtime_quiesce_test.exs`. A bounded 64-event fixture record observes existing
   root/relay transitions and exact early Task completion. All captured clocks,
   numeric limits, actor concurrency, Store assertions and process joins remain.
-  The read-only phase review found several transitions collapse into
+  Earlier phase review found several transitions collapse into
   `runtime_unavailable`; missing startup notice alone does not identify the cause.
   Runtime tracing covers Control/coordinators, not the external fixture actors
   or Quiesce task subtree. No production deadline or proof obligation changes.
+
+  Worker receipt and all five retained entries were rehashed:
+  `/private/tmp/loopex-quiesce-phase-9706d5af-receipt.json`, SHA-256
+  `df4982c11dc584ff859df8ae80b78218c4248a6f103ea111d4c121ff0ddeb6a0`.
+  Complete ordinary-file runs pass 31 cases with four existing `long_bound`
+  exclusions per pair, at 13/15 measured total seconds. Those duration cases
+  remain required in their release lane. Post-rejoin complete ordinary-file
+  runs likewise pass 31 cases per pair with the same four exclusions in 8.3/7.9
+  measured seconds; handles `66607` and `98593` are terminal and collected.
+  Current validation overlapped the real daemon CLI check. Complete outputs:
+  `/private/tmp/loopex-m7-quiesce-diagnostic-postjoin-inventory.tsv`, SHA-256
+  `76389fee4db60e5ef8d135c3505a14c229898d3b02a7f5ad803a0325f0c32842`.
+  Integrated formatting, warning-free compilation, documentation/status,
+  dependency direction, whitespace and task reporting pass in 16.0 seconds;
+  output `/private/tmp/loopex-m7-quiesce-diagnostic-integration-metadata-v1.log`,
+  SHA-256 `ab144174df1ebd30207966932937e53bf4fec288305073e082214e0bba63378c`; handle `59899` is terminal and collected.
+  Neither worker nor integrated run reproduced the intermittent failure;
+  no failing transition or cause-specific repair is proved. Existing shutdown
+  diagnostics remain part of T16's open investigation. No checklist row closes.
 
 - Done: integrate four independently owned current fixture repairs on `m7`:
   composition `cad2c7f1` from `5aefdb8c63ce2d7f95e185ba74fcdfc919177bcd`,
@@ -470,15 +508,17 @@ did not resolve them. No paid provider calls were made during this check.
   pre-fence quiesce failure remains an open diagnosis; a passing focused retry
   would not prove its combined-load cause fixed.
 
-- Pending decision: [ADR 0050](../adr/0050-host-configuration-preparation.md#concept)
-  proposes the separate optional host configuration-preparation port for live
-  foreground/daemon configure. The existing prepared facade works for CLI but
-  transports have no host resolver or full live capture read. The alternative
-  extends Model with preparation and couples it to the model adapter. The pair
-  pins owned asynchronous work, a proposed 60,000-ms cutoff, retained cleanup,
-  authority/duplicate ordering and stale-result refusal. Dependent port/serving
-  work pauses for the maintainer; snapshot, independent digest and attempts
-  proposal work continue in separate worktrees. No acceptance is recorded.
+- Selected direction, revised acceptance pending: on 2026-10-04 the maintainer
+  answered "Lets do option b" to ADR 0050's boundary choice. Preparation will
+  extend the existing Model port rather than add the separate runtime port.
+  The proposed authority/duplicate ordering, owned asynchronous work,
+  60,000-ms cutoff, retained cleanup and stale-result refusal are retained.
+  [ADR 0050](../adr/0050-host-configuration-preparation.md#concept) remains
+  Proposed while its pair is revised and concrete Model option/dependency,
+  instruction-capture and authored-command identity joins are checked.
+  This direction choice does not accept the earlier choice-A pair's bytes.
+  Dependent port implementation awaits acceptance of the revised pair; other
+  in-scope work continues. Questions remain one at a time.
 
 - Done: integrate the current-only EffectIntents reader at `a36d1f20` from
   worker `e619f8ce9e57e73ca850ce7865e3666f6aa2c1b1`, and CLI captured fixtures
@@ -10265,7 +10305,7 @@ or check was relaxed.
 
 - [x] Consume captured defaults in implicit create/lookup, refuse unconfigured and superseded creation before Store mutation, remove the Core v2 writer, capture and forward the template through all three reference constructors and actual daemon startup, and prove physical Store reopen/resume and exact no-activation replay on both toolchains. Migrate shared loop and creation/lifecycle fixtures to current captures while preserving request-byte, command-binding, retry, ownership and cleanup proofs. Remaining callers/readers and coordinated wire generations stay open.
 
-- [ ] Decide and implement the optional live host configuration-preparation boundary, retaining authority, duplicate disposition, bounded owned work, stale-result refusal and exact current replay; join both runtime-only transport hosts without exposing host routes or metadata. ADR 0050 is Proposed; no dependent implementation is authorized yet.
+- [ ] Decide and implement the optional live host configuration-preparation boundary, retaining authority, duplicate disposition, bounded owned work, stale-result refusal and exact current replay; join both runtime-only transport hosts without exposing host routes or metadata. The maintainer selected the Model-port direction; ADR 0050 remains Proposed pending its revised pair acceptance, with dependent implementation paused.
 
 ## T05 — Update records, protocols and independent clients
 
@@ -10316,6 +10356,7 @@ or check was relaxed.
 - [x] Capture current startup settings in the ArtifactTransfer fixture host; preserve every transfer bound, actual ownership, cancellation, cleanup and read-window assertion, and prove all 29 affected cases on both pairs after integration.
 - [x] Match the external daemon SSE fixture to its exact captured dated model; retain progress-before-durable-answer ordering, positively assert completed outcome and prove actual socket/independent Node takeover on both supported pairs after integration.
 - [x] Capture actual provider capabilities and exact chat startup template in CLI fixtures; preserve explicit context/system/reply/cleanup budgets, physical reopen/resume, real HTTP accounting and two-runtime diagnostic isolation, and prove all 18 cases on both supported pairs after integration.
+- [x] Bind the four daemon CLI response fixtures to the exact captured dated model; preserve all process/socket, project context, replay, lease, controller, signal, once-only command and shutdown proofs. Prove all 31 cases including pinned independent Node on both worker toolchains and after integration on the current pair; retain original FAIL evidence and every existing bound.
 - [ ] Implement and verify the approved prompt/follow-up/compact wire bound codecs and independent Node vectors; preserve exact decimal/safe-integer domains, partial overrides and omission without defaults. Automatic approval review rejected both direct writes; obtain explicit maintainer approval before resuming this bounded implementation.
 - [ ] Migrate remaining implicit Core/edge/transport test hosts to captured current creation, replace their superseded record assertions, remove old configuration-less readers/writers, and prove current replay, command identity, uncertainty, authority and cleanup without a Core fallback. Run the full check once on the resulting clean committed candidate. The headless/loop and context-admission fixture phases are complete; superseded request/admission decoders and edge/transport joins remain.
 
@@ -10613,6 +10654,10 @@ the still-open real-provider, live protocol, persistent-fault or closure lanes.
 - [ ] Prove both role demonstrations with unchanged child workspaces and separate/combined usage.
 
 ### Added implementation subtasks
+
+- [ ] Install/read immutable validated retained-object bytes with actual content-addressed filesystem durability, exclusive host ownership, symlink/root guards and physical crash/fsync/uncertainty proof on both pairs; use the existing GenesisCodec as a concrete client without inventing ledger or catalog schemas.
+- [ ] Pin the complete private delegation ledger byte recipe and closed object/mutation field grammars under accepted ADR 0046 semantics before implementing append/recovery/transaction reduction; refuse incomplete or corrupt current frames without introducing a compatibility decoder.
+- [ ] Resolve exact retained child-accounting access and universal host mutation guards before exposing helpers through runtime-only clients; preserve host ownership, current serial session truth, retained maintenance charges and settled-child protection without copying private reducer accounting or adding an unapproved public read.
 
 - [x] Implement ADR 0046's bounded current-genesis private object codec shared by parent and child retention; prove exact plain ETF/base64/hash representation, owning schema validation, unsafe/compressed/trailing refusal, no input atom creation, encoded-size limits and actual current/floor cross-reading without re-encoding equality.
 
