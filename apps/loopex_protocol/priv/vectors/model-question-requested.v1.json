@@ -1,0 +1,3357 @@
+{
+  "format": "loopex.experimental.payload-vectors/1",
+  "contract": "model_question_requested",
+  "cases": [
+    {
+      "name": "requested-model-text",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "decoded": {
+        "interaction_id": {
+          "opaque_hex": "00ff0a"
+        },
+        "run_id": {
+          "opaque_hex": "ff"
+        },
+        "turn": "1",
+        "tool_call_id": {
+          "opaque_hex": "63616c6c"
+        },
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      }
+    },
+    {
+      "name": "requested-model-choice",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "One"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Two"
+          }
+        ],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "choice",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "decoded": {
+        "interaction_id": {
+          "opaque_hex": "00ff0a"
+        },
+        "run_id": {
+          "opaque_hex": "ff"
+        },
+        "turn": "1",
+        "tool_call_id": {
+          "opaque_hex": "63616c6c"
+        },
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [
+          {
+            "id": {
+              "opaque_hex": "63686f6963652d31"
+            },
+            "label": "One"
+          },
+          {
+            "id": {
+              "opaque_hex": "63686f6963652d32"
+            },
+            "label": "Two"
+          }
+        ],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "choice",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      }
+    },
+    {
+      "name": "requested-huge-turn",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "184467440737095516160000000000000000000001",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "decoded": {
+        "interaction_id": {
+          "opaque_hex": "00ff0a"
+        },
+        "run_id": {
+          "opaque_hex": "ff"
+        },
+        "turn": "184467440737095516160000000000000000000001",
+        "tool_call_id": {
+          "opaque_hex": "63616c6c"
+        },
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      }
+    },
+    {
+      "name": "zero-expiry",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "0",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "decoded": {
+        "interaction_id": {
+          "opaque_hex": "00ff0a"
+        },
+        "run_id": {
+          "opaque_hex": "ff"
+        },
+        "turn": "1",
+        "tool_call_id": {
+          "opaque_hex": "63616c6c"
+        },
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "0",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      }
+    },
+    {
+      "name": "uint64-expiry",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "18446744073709551615",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "decoded": {
+        "interaction_id": {
+          "opaque_hex": "00ff0a"
+        },
+        "run_id": {
+          "opaque_hex": "ff"
+        },
+        "turn": "1",
+        "tool_call_id": {
+          "opaque_hex": "63616c6c"
+        },
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "18446744073709551615",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      }
+    },
+    {
+      "name": "eight-original-choices",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "Choice 1"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Choice 2"
+          },
+          {
+            "id": "Y2hvaWNlLTM",
+            "label": "Choice 3"
+          },
+          {
+            "id": "Y2hvaWNlLTQ",
+            "label": "Choice 4"
+          },
+          {
+            "id": "Y2hvaWNlLTU",
+            "label": "Choice 5"
+          },
+          {
+            "id": "Y2hvaWNlLTY",
+            "label": "Choice 6"
+          },
+          {
+            "id": "Y2hvaWNlLTc",
+            "label": "Choice 7"
+          },
+          {
+            "id": "Y2hvaWNlLTg",
+            "label": "Choice 8"
+          }
+        ],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "choice",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "decoded": {
+        "interaction_id": {
+          "opaque_hex": "00ff0a"
+        },
+        "run_id": {
+          "opaque_hex": "ff"
+        },
+        "turn": "1",
+        "tool_call_id": {
+          "opaque_hex": "63616c6c"
+        },
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [
+          {
+            "id": {
+              "opaque_hex": "63686f6963652d31"
+            },
+            "label": "Choice 1"
+          },
+          {
+            "id": {
+              "opaque_hex": "63686f6963652d32"
+            },
+            "label": "Choice 2"
+          },
+          {
+            "id": {
+              "opaque_hex": "63686f6963652d33"
+            },
+            "label": "Choice 3"
+          },
+          {
+            "id": {
+              "opaque_hex": "63686f6963652d34"
+            },
+            "label": "Choice 4"
+          },
+          {
+            "id": {
+              "opaque_hex": "63686f6963652d35"
+            },
+            "label": "Choice 5"
+          },
+          {
+            "id": {
+              "opaque_hex": "63686f6963652d36"
+            },
+            "label": "Choice 6"
+          },
+          {
+            "id": {
+              "opaque_hex": "63686f6963652d37"
+            },
+            "label": "Choice 7"
+          },
+          {
+            "id": {
+              "opaque_hex": "63686f6963652d38"
+            },
+            "label": "Choice 8"
+          }
+        ],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "choice",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      }
+    },
+    {
+      "name": "utf8-byte-ceilings",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Two"
+          }
+        ],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "choice",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "decoded": {
+        "interaction_id": {
+          "opaque_hex": "00ff0a"
+        },
+        "run_id": {
+          "opaque_hex": "ff"
+        },
+        "turn": "1",
+        "tool_call_id": {
+          "opaque_hex": "63616c6c"
+        },
+        "status": "pending",
+        "prompt": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé",
+        "choices": [
+          {
+            "id": {
+              "opaque_hex": "63686f6963652d31"
+            },
+            "label": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé"
+          },
+          {
+            "id": {
+              "opaque_hex": "63686f6963652d32"
+            },
+            "label": "Two"
+          }
+        ],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "choice",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      }
+    },
+    {
+      "name": "missing-interaction_id",
+      "input": {
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "missing-run_id",
+      "input": {
+        "interaction_id": "AP8K",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "missing-turn",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "missing-tool_call_id",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "missing-status",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "missing-prompt",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "missing-choices",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "missing-expires_at",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "missing-producer",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "missing-interaction_kind",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "missing-answer",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "missing-command_digest",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "missing-command_id",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "missing-disposition",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "missing-settlement_sequence",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null
+      },
+      "error": true
+    },
+    {
+      "name": "nonnull-answer-number",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": 1,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "nonnull-answer-boolean",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": false,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "nonnull-answer-object",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": {},
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "nonnull-answer-array",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": [],
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "nonnull-answer-string",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": "private-canary",
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "nonnull-command_digest-number",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": 1,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "nonnull-command_digest-boolean",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": false,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "nonnull-command_digest-object",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": {},
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "nonnull-command_digest-array",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": [],
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "nonnull-command_digest-string",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": "private-canary",
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "nonnull-command_id-number",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": 1,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "nonnull-command_id-boolean",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": false,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "nonnull-command_id-object",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": {},
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "nonnull-command_id-array",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": [],
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "nonnull-command_id-string",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": "private-canary",
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "nonnull-disposition-number",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": 1,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "nonnull-disposition-boolean",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": false,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "nonnull-disposition-object",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": {},
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "nonnull-disposition-array",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": [],
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "nonnull-disposition-string",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": "private-canary",
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "nonnull-settlement_sequence-number",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": 1
+      },
+      "error": true
+    },
+    {
+      "name": "nonnull-settlement_sequence-boolean",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": false
+      },
+      "error": true
+    },
+    {
+      "name": "nonnull-settlement_sequence-object",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": {}
+      },
+      "error": true
+    },
+    {
+      "name": "nonnull-settlement_sequence-array",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": []
+      },
+      "error": true
+    },
+    {
+      "name": "nonnull-settlement_sequence-string",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": "private-canary"
+      },
+      "error": true
+    },
+    {
+      "name": "extra-kind",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null,
+        "kind": "private-canary"
+      },
+      "error": true
+    },
+    {
+      "name": "extra-event_id",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null,
+        "event_id": "private-canary"
+      },
+      "error": true
+    },
+    {
+      "name": "extra-event_sequence",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null,
+        "event_sequence": "private-canary"
+      },
+      "error": true
+    },
+    {
+      "name": "extra-answer_choice_id",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null,
+        "answer_choice_id": "private-canary"
+      },
+      "error": true
+    },
+    {
+      "name": "extra-answer_command_id",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null,
+        "answer_command_id": "private-canary"
+      },
+      "error": true
+    },
+    {
+      "name": "extra-policy_binding",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null,
+        "policy_binding": "private-canary"
+      },
+      "error": true
+    },
+    {
+      "name": "extra-grant",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null,
+        "grant": "private-canary"
+      },
+      "error": true
+    },
+    {
+      "name": "extra-private_capture",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null,
+        "private_capture": "private-canary"
+      },
+      "error": true
+    },
+    {
+      "name": "wrong-producer-policy_defer",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "One"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Two"
+          }
+        ],
+        "expires_at": "600000",
+        "producer": "policy_defer",
+        "interaction_kind": "choice",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "wrong-producer-unknown",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "One"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Two"
+          }
+        ],
+        "expires_at": "600000",
+        "producer": "unknown",
+        "interaction_kind": "choice",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "wrong-producer-None",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "One"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Two"
+          }
+        ],
+        "expires_at": "600000",
+        "producer": null,
+        "interaction_kind": "choice",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "wrong-status-answered",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "answered",
+        "prompt": "What should change?",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "One"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Two"
+          }
+        ],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "choice",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "wrong-status-expired",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "expired",
+        "prompt": "What should change?",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "One"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Two"
+          }
+        ],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "choice",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "wrong-status-None",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": null,
+        "prompt": "What should change?",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "One"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Two"
+          }
+        ],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "choice",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "wrong-interaction_kind-unknown",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "One"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Two"
+          }
+        ],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "unknown",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "wrong-interaction_kind-None",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "One"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Two"
+          }
+        ],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": null,
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "malformed-turn-zero",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "0",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "malformed-turn-negative",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "-1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "malformed-turn-sign",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "+1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "malformed-turn-leading-zero",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "01",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "malformed-turn-exponent",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1e2",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "malformed-turn-fraction",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1.0",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "malformed-turn-whitespace",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": " 1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "malformed-turn-empty",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "malformed-turn-null",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": null,
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "malformed-turn-number",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": 1,
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "malformed-turn-boolean",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": true,
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "malformed-turn-array",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": [],
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "malformed-turn-object",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": {},
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "malformed-expires_at-negative",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "-1",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "malformed-expires_at-sign",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "+1",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "malformed-expires_at-leading-zero",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "01",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "malformed-expires_at-exponent",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "1e2",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "malformed-expires_at-fraction",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "1.0",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "malformed-expires_at-whitespace",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": " 1",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "malformed-expires_at-empty",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "malformed-expires_at-null",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": null,
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "malformed-expires_at-number",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": 1,
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "malformed-expires_at-boolean",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": true,
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "malformed-expires_at-array",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": [],
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "malformed-expires_at-object",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": {},
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "expiry-overflow",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "18446744073709551616",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "malformed-interaction_id-empty",
+      "input": {
+        "interaction_id": "",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "malformed-interaction_id-padding",
+      "input": {
+        "interaction_id": "YQ=",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "malformed-interaction_id-noncanonical",
+      "input": {
+        "interaction_id": "YR",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "malformed-interaction_id-alphabet",
+      "input": {
+        "interaction_id": "!",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "malformed-interaction_id-newline",
+      "input": {
+        "interaction_id": "YQ\n",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "malformed-interaction_id-null",
+      "input": {
+        "interaction_id": null,
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "malformed-interaction_id-number",
+      "input": {
+        "interaction_id": 1,
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "malformed-interaction_id-array",
+      "input": {
+        "interaction_id": [],
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "malformed-interaction_id-object",
+      "input": {
+        "interaction_id": {},
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "malformed-run_id-empty",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "malformed-run_id-padding",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "YQ=",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "malformed-run_id-noncanonical",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "YR",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "malformed-run_id-alphabet",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "!",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "malformed-run_id-newline",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "YQ\n",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "malformed-run_id-null",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": null,
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "malformed-run_id-number",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": 1,
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "malformed-run_id-array",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": [],
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "malformed-run_id-object",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": {},
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "malformed-tool_call_id-empty",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "malformed-tool_call_id-padding",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "YQ=",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "malformed-tool_call_id-noncanonical",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "YR",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "malformed-tool_call_id-alphabet",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "!",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "malformed-tool_call_id-newline",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "YQ\n",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "malformed-tool_call_id-null",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": null,
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "malformed-tool_call_id-number",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": 1,
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "malformed-tool_call_id-array",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": [],
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "malformed-tool_call_id-object",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": {},
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "prompt-empty",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "prompt-null",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": null,
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "prompt-number",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": 1,
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "prompt-over-byte-ceiling",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "text-has-choice",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "One"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Two"
+          }
+        ],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "text",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "choice-has-no-choices",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "choice",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "nine-choices",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "Choice 1"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Choice 2"
+          },
+          {
+            "id": "Y2hvaWNlLTM",
+            "label": "Choice 3"
+          },
+          {
+            "id": "Y2hvaWNlLTQ",
+            "label": "Choice 4"
+          },
+          {
+            "id": "Y2hvaWNlLTU",
+            "label": "Choice 5"
+          },
+          {
+            "id": "Y2hvaWNlLTY",
+            "label": "Choice 6"
+          },
+          {
+            "id": "Y2hvaWNlLTc",
+            "label": "Choice 7"
+          },
+          {
+            "id": "Y2hvaWNlLTg",
+            "label": "Choice 8"
+          },
+          {
+            "id": "Y2hvaWNlLTk",
+            "label": "Choice 9"
+          }
+        ],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "choice",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "reordered-choice-ids",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Two"
+          },
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "One"
+          }
+        ],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "choice",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "choices-duplicate-id",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "One"
+          },
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "Two"
+          }
+        ],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "choice",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "choices-duplicate-label",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "One"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "One"
+          }
+        ],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "choice",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "choices-wrong-id",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "One"
+          },
+          {
+            "id": "YQ",
+            "label": "Two"
+          }
+        ],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "choice",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "choices-empty-label",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "One"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": ""
+          }
+        ],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "choice",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "choices-null-label",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "One"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": null
+          }
+        ],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "choice",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "choices-over-byte-label",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "One"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé"
+          }
+        ],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "choice",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "choices-private-member",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "One"
+          },
+          {
+            "id": "Y2hvaWNlLTI",
+            "label": "Two",
+            "policy_ref": "private-canary"
+          }
+        ],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "choice",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "choice-unknown-member",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": [
+          {
+            "id": "Y2hvaWNlLTE",
+            "label": "One",
+            "grant": {}
+          }
+        ],
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "choice",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "choices-null",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": null,
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "choice",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "choices-object",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": {},
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "choice",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "choices-string",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": "",
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "choice",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "choices-number",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "What should change?",
+        "choices": 1,
+        "expires_at": "600000",
+        "producer": "model_tool",
+        "interaction_kind": "choice",
+        "answer": null,
+        "command_digest": null,
+        "command_id": null,
+        "disposition": null,
+        "settlement_sequence": null
+      },
+      "error": true
+    },
+    {
+      "name": "payload-null",
+      "input": null,
+      "error": true
+    },
+    {
+      "name": "payload-array",
+      "input": [],
+      "error": true
+    },
+    {
+      "name": "payload-string",
+      "input": "",
+      "error": true
+    },
+    {
+      "name": "payload-number",
+      "input": 1,
+      "error": true
+    },
+    {
+      "name": "payload-boolean",
+      "input": true,
+      "error": true
+    }
+  ]
+}

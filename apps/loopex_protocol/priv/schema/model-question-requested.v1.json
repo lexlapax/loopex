@@ -1,0 +1,110 @@
+{
+  "format": "loopex.experimental.payload-contract/1",
+  "contract": "model_question_requested",
+  "authority": "docs/adr/0045-model-originated-questions-technical.md; approved M7 OpenInteraction disposition",
+  "integration": "M7 coordinated foreground /3 and daemon /4; not independently served",
+  "event_kind": "interaction.requested",
+  "envelope": "kind, event_id and event_sequence remain outside data",
+  "closed": true,
+  "required": [
+    "interaction_id",
+    "run_id",
+    "turn",
+    "tool_call_id",
+    "status",
+    "prompt",
+    "choices",
+    "expires_at",
+    "producer",
+    "interaction_kind",
+    "answer",
+    "command_digest",
+    "command_id",
+    "disposition",
+    "settlement_sequence"
+  ],
+  "fields": {
+    "interaction_id": {
+      "encoding": "canonical_unpadded_base64url",
+      "minimum_original_bytes": 1,
+      "maximum_original_bytes": 65536
+    },
+    "run_id": {
+      "encoding": "canonical_unpadded_base64url",
+      "minimum_original_bytes": 1,
+      "maximum_original_bytes": 65536
+    },
+    "turn": {
+      "encoding": "canonical_decimal_string",
+      "domain": "arbitrary_positive_integer"
+    },
+    "tool_call_id": {
+      "encoding": "canonical_unpadded_base64url",
+      "minimum_original_bytes": 1,
+      "maximum_original_bytes": 65536
+    },
+    "prompt": {
+      "encoding": "utf8",
+      "minimum_bytes": 1,
+      "maximum_bytes": 2048
+    },
+    "choices": {
+      "kind": "array",
+      "minimum_length": 0,
+      "maximum_length": 8,
+      "member": {
+        "closed": true,
+        "required": [
+          "id",
+          "label"
+        ],
+        "id": {
+          "encoding": "canonical_unpadded_base64url",
+          "minimum_original_bytes": 1,
+          "maximum_original_bytes": 64
+        },
+        "label": {
+          "encoding": "utf8",
+          "minimum_bytes": 1,
+          "maximum_bytes": 256
+        }
+      },
+      "unique_by": "id"
+    },
+    "expires_at": {
+      "encoding": "canonical_decimal_string",
+      "minimum": "0",
+      "maximum": "18446744073709551615"
+    }
+  },
+  "producer": "model_tool",
+  "status": "pending",
+  "interaction_kind": [
+    "text",
+    "choice"
+  ],
+  "required_null_fields": [
+    "answer",
+    "command_digest",
+    "command_id",
+    "disposition",
+    "settlement_sequence"
+  ],
+  "variants": {
+    "model_tool_text": {
+      "producer": "model_tool",
+      "choices_length": 0,
+      "status": "pending",
+      "interaction_kind": "text"
+    },
+    "model_tool_choice": {
+      "producer": "model_tool",
+      "minimum_choices": 1,
+      "maximum_choices": 8,
+      "id_by_original_position": "choice-1 through choice-8",
+      "unique_labels": true,
+      "status": "pending",
+      "interaction_kind": "choice"
+    }
+  }
+}
