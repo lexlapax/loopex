@@ -8555,13 +8555,19 @@ defmodule Loopex.Runtime.SessionState do
          {:ok, tool_call_id} <- record_binary(record, "tool_call_id"),
          true <- run_id == state.active_run_id,
          true <- not model_question_call?(state, run_id, tool_call_id),
-         true <- creatable_round?(state, tool_call_id),
          false <- Map.has_key?(state.interactions, interaction_id),
          {:ok, request} <- interaction_request(record),
          {:ok, round} <- interaction_round(record),
          true <- round <= 2,
          {:ok, expires_at} <- record_integer(record, "expires_at"),
-         {:ok, turn} <- record_integer(record, "turn") do
+         {:ok, turn} <- record_integer(record, "turn"),
+         true <- turn > 0,
+         true <- creatable_round?(state, run_id, turn, tool_call_id, round) do
+      # Concept: a repeated defer withdraws the answered question, not the tool decision.
+      # Technical depth: derive the old neutral terminal and new pending fact
+      # from this one creation row, only after its complete tuple is validated.
+      {state, closed_events} = cancel_open_interaction(state, run_id)
+
       interaction = %{
         interaction_id: interaction_id,
         run_id: run_id,
@@ -8580,7 +8586,7 @@ defmodule Loopex.Runtime.SessionState do
          state
          | interactions: Map.put(state.interactions, interaction_id, interaction),
            open_interaction: interaction_id
-       }, [interaction_requested_event(state.session_id, interaction)]}
+       }, closed_events ++ [interaction_requested_event(state.session_id, interaction)]}
     else
       _other -> {:error, :invalid_interaction_transition}
     end
@@ -8903,10 +8909,11 @@ defmodule Loopex.Runtime.SessionState do
     )
   end
 
-  # Concept: a run that ends takes its open question with it.
+  # Concept: the owning transition closes its open question.
   #
-  # Technical depth: every ending reaches here -- a deadline, a bound, a
-  # failure, an abort's terminal -- so no path leaves a question standing
+  # Technical depth: a validated policy replacement uses the same neutral
+  # cancellation as an ending. Every ending reaches here so no path leaves a
+  # question standing
   # against a run that is over. Leaving one would be worse than cosmetic: the
   # session would refuse every later question, because the serial owner may hold
   # only one open, and an operator would be shown a question nobody can answer.
@@ -8943,18 +8950,26 @@ defmodule Loopex.Runtime.SessionState do
   # Concept: a new question is admitted when none is open, or when the open one
   # has been answered and the host asked again about the same decision.
   #
-  # Technical depth: accepted ADR 0024 makes another defer resolve the answered
-  # round and create the next identity atomically, and one record per
-  # transaction is what makes that atomic here: this creation is the transition
-  # that ends the previous round. A question is never created while another one
-  # is still pending, because the serial owner has at most one question
-  # outstanding and two would leave an operator unable to tell which was live.
-  defp creatable_round?(%{open_interaction: nil}, _tool_call_id), do: true
+  # Technical depth: accepted ADR 0024 fixes initial round zero and exactly
+  # one increment for the same run, turn and tool decision. Creation derives
+  # cancellation before requested in one transaction, preserving the old answer.
+  # A pending or unrelated question cannot be replaced.
+  defp creatable_round?(%{open_interaction: nil}, _run_id, _turn, _tool_call_id, round),
+    do: round == 0
 
-  defp creatable_round?(state, tool_call_id) do
+  defp creatable_round?(state, run_id, turn, tool_call_id, round) do
     case Map.get(state.interactions, state.open_interaction) do
-      %{status: "answered", tool_call_id: ^tool_call_id} -> true
-      _other -> false
+      %{
+        status: "answered",
+        run_id: ^run_id,
+        turn: ^turn,
+        tool_call_id: ^tool_call_id,
+        round: previous
+      } = interaction ->
+        Map.get(interaction, :producer) != "model_tool" and round == previous + 1
+
+      _other ->
+        false
     end
   end
 

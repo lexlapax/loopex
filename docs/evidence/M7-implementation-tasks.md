@@ -325,6 +325,56 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- T16 diagnostic source checkpoint is unintegrated WIP
+  `0a341c48bae2703b3d90c34d028e5868417acb14` on
+  `codex/m7-private-task-witness-wip`. Current/floor first actual shutdown
+  witness runs each fail two of three cases; genuine supervisor-fault controls
+  pass. Both pairs associate exact late-monitor `noproc` reports with original
+  `normal` child exits, but no linked EXIT delivery is captured, so complete
+  race ordering remains unproved. Concurrent 32 achieves 320 original actor
+  joins per pair under the unchanged 1,000-ms cutoff. Serial mode stops at its
+  first case with `provider_cleanup_unproved`; registered resource kill sender
+  is not identified. Do not count this as a passing regression or product fix.
+  All first failures, source generations and checks remain retained; every
+  runner is terminal. Handoff
+  `/private/tmp/loopex-m7-private-task-causal-witness-v3-handoff.md`, SHA-256
+  `45b7b6bdfedb6aa9789b7da01a99bda13cfdcb8b10d03219e2bf4ce2b017a3dd`;
+  43-input inventory SHA-256
+  `f10f579995a8821bfaced503c3dc49f631b3dbacf57a794ab5bf4ba080a719a4`.
+  Root read the complete handoff and rehashed every inventory entry.
+  No production edit, report suppression, wider bound or unchanged-byte retry
+  is authorized by this incomplete diagnostic witness.
+
+
+- Native inspection follow-up: the repeated policy-defer path is reopened.
+  Independent source review found that its one private creation row replaces an
+  answered interaction but derives only the new requested event. The approved
+  inspection packet requires an ordered old terminal before replacement, and
+  strict historical snapshot reduction therefore rejects the current omission.
+  The prior 53-case and compact-chat results remain valid for their tested
+  cases, but do not complete this lifecycle obligation. Add actual successive
+  defer cursor/recovery assertions, retain the failing old-source witness and
+  repair the existing atomic creation reducer without a new persistent kind,
+  verdict or wire grammar. The old-source regression fails exactly because no
+  old cancellation exists, 1.324 seconds: production `ea535ad6` plus retained
+  regression source SHA-256
+  `0bb34a95b38491adb3b5106ab5e81a38e8f307a6b6661fc0445bb4ac07edfa45`.
+  Complete log `/private/tmp/loopex-m7-repeated-defer-red-v1.log`, SHA-256
+  `88f9b149967287b35dd5e064c58d6d96f1841ddf7a1c8696a2c008f47ab3539a`.
+  New source uses the existing cancellation helper only after validating the
+  new creation and original answered run/turn/call plus exact next round.
+  Both public rows derive from the same private creation record. The independent
+  authority review confirms this repairs already accepted semantics without
+  another decision: `/private/tmp/loopex-m7-repeat-defer-independent-review-20261005-v1.md`,
+  SHA-256 `c08d9b5ec47026074e75594d2072cdaa33e8af64d7e4834994b2c0eee03f6d13`;
+  seven-input inventory SHA-256
+  `3bec05f1b70d7bbca43951e4ecbcb2472a5a1e9d8d532b3e633c38e7669e2e84`.
+  Root read the complete review and rehashed every input before editing.
+  Corrected-source paired execution remains pending.
+  The diagnostic decision remains the sole question
+  currently asked; wire proposals are still queued.
+
+
 - Completed native Core/chat unit, 2026-10-05: tested root candidate
   `ea535ad6fab97cc5ac3f2538603708c65dbf4af8` passes all 41 cases in the
   complete changed ChatDriver file on current, 23.334 seconds, and all 181
@@ -11597,7 +11647,7 @@ or check was relaxed.
 
 ### Added implementation subtasks
 
-- [x] Commit the approved distinct policy answer-admitted transaction and public event, bounded immutable committed native inspection and complete revision-3 snapshot publication; prove exact-prefix pending/answered/terminal views, recovery correspondence, configuration and checkpoint privacy, native compact admission and mutation-uncertainty fencing on both supported toolchains. Complete /3-/4 payload manifests, transport projection and independent live clients remain separate.
+- [ ] Commit the approved distinct policy answer-admitted transaction and public event, bounded immutable committed native inspection and complete revision-3 snapshot publication; prove exact-prefix pending/answered/terminal views, recovery correspondence, configuration and checkpoint privacy, native compact admission and mutation-uncertainty fencing on both supported toolchains. Complete /3-/4 payload manifests, transport projection and independent live clients remain separate.
 
 - [x] Join the approved current eleven-member Inspection, pending/answered policy OpenInteraction and distinct answer-admitted event in shared Elixir and independent Node codecs; migrate Snapshot and retire superseded PendingInteraction. Prove exact nested schemas, quantities, opaque/UTF-8 boundaries, privacy refusals, canonical mutations and the complete 32-case selection on both pairs after root integration. Core transactions/publication, manifests and live generations remain open.
 

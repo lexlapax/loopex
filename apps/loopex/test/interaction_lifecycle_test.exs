@@ -712,6 +712,62 @@ defmodule Loopex.InteractionLifecycleTest do
     events = Fixture.events(fixture, session_id)
     assert Enum.count(events, &(&1.kind == "interaction.requested")) == 3
     assert Enum.all?(events, &(&1.kind != "tool.started"))
+
+    # Concept: a replacement closes the answered round before the next question.
+    # Technical depth: both facts derive from its one retained creation row;
+    # every historical cursor must replay without consulting current state.
+    for {old, replacement, command} <- [
+          {first, second, "answer-1"},
+          {second, third, "answer-2"}
+        ] do
+      admitted =
+        Enum.find(events, fn event ->
+          event.kind == "interaction.answer_admitted" and
+            event["interaction_id"] == old["interaction_id"]
+        end)
+
+      [terminal] =
+        Enum.filter(events, fn event ->
+          event.kind == "interaction.cancelled" and
+            event["interaction_id"] == old["interaction_id"]
+        end)
+
+      assert terminal["resolution"] == "cancelled"
+      assert terminal["choice_id"] == "allow"
+      assert terminal.event_sequence == admitted.event_sequence + 1
+      assert replacement.event_sequence == terminal.event_sequence + 1
+
+      for {cursor, expected} <- [
+            {admitted.event_sequence, {"answered", old["interaction_id"]}},
+            {terminal.event_sequence, nil},
+            {replacement.event_sequence, {"pending", replacement["interaction_id"]}}
+          ] do
+        {:ok, historical} =
+          Loopex.attach(fixture.runtime, session_id, after_event_sequence: cursor)
+
+        snapshot = Loopex.snapshot(historical)
+        assert snapshot.event_sequence == cursor
+
+        case expected do
+          nil ->
+            assert snapshot.open_interaction == nil
+
+          {status, identity} ->
+            assert snapshot.open_interaction["status"] == status
+            assert snapshot.open_interaction["interaction_id"] == identity
+
+            if status == "answered" do
+              assert snapshot.open_interaction["answer_command_id"] == command
+            end
+        end
+      end
+    end
+
+    records = Fixture.records(fixture, session_id)
+    assert {:ok, recovered} = Loopex.Runtime.SessionState.recover(session_id, records, events)
+    assert recovered.interactions[first["interaction_id"]].status == "cancelled"
+    assert recovered.interactions[second["interaction_id"]].status == "cancelled"
+    assert Loopex.AgentLoopTestExecutor.jobs(fixture.executor) == []
   end
 
   defmodule BlockingResumePolicy do
