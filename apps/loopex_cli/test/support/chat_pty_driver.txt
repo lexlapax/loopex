@@ -183,13 +183,20 @@ defmodule LoopexCli.ChatPTYDriver do
     if scenario == "pipe-stall" do
       receive do
         {:pipe_witness, collector, monitor} ->
+          cutoff =
+            receive do
+              {:pipe_reap_cutoff, captured} -> captured
+            after
+              0 -> raise "pipe reap cutoff was not retained"
+            end
+
           await_writer_and_witness(
             socket,
             collector,
             monitor,
             false,
             false,
-            System.monotonic_time(:millisecond) + 5000
+            cutoff
           )
       after
         0 -> raise "pipe causal witness identity was not retained"
@@ -346,13 +353,18 @@ defmodule LoopexCli.ChatPTYDriver do
             installed_at = System.monotonic_time(:nanosecond)
             monitor = Process.monitor(current.pid)
             true = self() in elem(Process.info(current.pid, :monitored_by), 1)
-            {:ok, manager} = Map.fetch(:sys.get_state(driver), :writer)
+            driver_state = :sys.get_state(driver)
+            {:ok, manager} = Map.fetch(driver_state, :writer)
+            grace = driver_state.cleanup_grace_ms
+            true = is_integer(grace) and grace > 0
+            cutoff = writer.delivery_deadline + grace
+            send(host, {:pipe_reap_cutoff, cutoff})
             {_, token} = writer.timer
 
             send(
               witness,
               {:snapshot, self(), monitor, manager, current.pid, token, writer.delivery_deadline,
-               installed_at}
+               grace, cutoff, installed_at}
             )
 
             send_control(
@@ -372,6 +384,8 @@ defmodule LoopexCli.ChatPTYDriver do
                  "manager" => pipe_identity(manager),
                  "timer_token" => pipe_identity(token),
                  "delivery_deadline_ms" => writer.delivery_deadline,
+                 "cleanup_grace_ms" => grace,
+                 "reap_cutoff_ms" => cutoff,
                  "observed_at_ns" => installed_at,
                  "remaining_ms" => writer.delivery_deadline - div(installed_at, 1_000_000)
                }}
@@ -381,7 +395,7 @@ defmodule LoopexCli.ChatPTYDriver do
               receive do
                 {:DOWN, ^monitor, :process, pid, reason} when pid == current.pid -> reason
               after
-                5000 ->
+                max(cutoff - System.monotonic_time(:millisecond), 0) ->
                   # Concept: a cutoff still admits an already-delivered exact join.
                   # Technical depth: inspect the mailbox immediately with no
                   # additional wait before diagnostics. A dead PID alone proves
@@ -440,7 +454,8 @@ defmodule LoopexCli.ChatPTYDriver do
   # Technical depth: a queued record alone proves no blockage. Match its pending
   # result and waiting live worker; the parent separately observes kernel pressure.
   # The same snapshot must already contain a deadline-bearing control. Its
-  # enqueue starts the product cutoff before the unchanged 5,000-ms join wait.
+  # enqueue starts the unchanged product cutoff. One captured reap cutoff adds
+  # the driver's retained cleanup grace and is shared by both exact join waits.
   defp await_writer(driver, cutoff) do
     state = :sys.get_state(driver)
     writer = :sys.get_state(state.writer)
@@ -564,7 +579,7 @@ defmodule LoopexCli.ChatPTYDriver do
         })
         |> pipe_witness_loop()
 
-      {:snapshot, receiver, original, manager, worker, token, deadline, at}
+      {:snapshot, receiver, original, manager, worker, token, deadline, grace, cutoff, at}
       when manager == state.manager and state.worker == nil ->
         monitor = Process.monitor(worker)
 
@@ -582,7 +597,9 @@ defmodule LoopexCli.ChatPTYDriver do
           "original_monitor" => pipe_identity(original),
           "collector_monitor" => pipe_identity(monitor),
           "token" => pipe_identity(token),
-          "deadline_ms" => deadline
+          "deadline_ms" => deadline,
+          "cleanup_grace_ms" => grace,
+          "reap_cutoff_ms" => cutoff
         })
         |> pipe_witness_loop()
 
@@ -692,7 +709,10 @@ defmodule LoopexCli.ChatPTYDriver do
 
       {:DOWN, ^monitor, :process, ^collector, :normal} ->
         false = Process.alive?(collector)
+        joined_at = System.monotonic_time(:nanosecond)
+        true = joined_at <= cutoff * 1_000_000
         send_control(socket, {:witness_down, :normal})
+        send_control(socket, {:witness_join_bound, joined_at, cutoff})
         await_writer_and_witness(socket, collector, monitor, worker_joined, true, cutoff)
     after
       remaining -> raise "actual pipe IO worker or causal collector monitor was not joined"

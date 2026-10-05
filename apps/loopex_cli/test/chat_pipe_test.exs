@@ -248,31 +248,49 @@ defmodule LoopexCli.ChatPipeTest do
     assert observed["worker"] == writer["worker"]
     assert observed["original_monitor"] == writer["original_monitor"]
     assert observed["deadline_ms"] == writer["delivery_deadline_ms"]
+    assert observed["cleanup_grace_ms"] == writer["cleanup_grace_ms"]
+    assert observed["reap_cutoff_ms"] == writer["reap_cutoff_ms"]
+    assert writer["cleanup_grace_ms"] == Loopex.Executor.default_cleanup_grace_ms()
+
+    assert writer["reap_cutoff_ms"] ==
+             writer["delivery_deadline_ms"] + writer["cleanup_grace_ms"]
+
+    reap_cutoff_ns = writer["reap_cutoff_ms"] * 1_000_000
+
+    assert {:witness_join_bound, witness_joined_at, reap_cutoff} =
+             Enum.find(messages, &match?({:witness_join_bound, _, _}, &1))
+
+    assert reap_cutoff == writer["reap_cutoff_ms"]
+    assert witness_joined_at <= reap_cutoff_ns
     [original_down] = Enum.filter(causal_records, &(&1["event"] == "original_down"))
     assert original_down["worker"] == writer["worker"]
     assert original_down["monitor"] == writer["original_monitor"]
     assert original_down["reason"] == "killed"
 
-    assert Enum.any?(
-             causal_records,
-             &(&1["event"] == "kill" and &1["target"] == writer["worker"])
-           )
+    [kill] =
+      Enum.filter(causal_records, &(&1["event"] == "kill" and &1["target"] == writer["worker"]))
 
-    assert Enum.any?(causal_records, &(&1["event"] == "output_drain_timeout"))
+    [timeout] = Enum.filter(causal_records, &(&1["event"] == "output_drain_timeout"))
     handled = Enum.filter(causal_records, &(&1["event"] == "deadline_handled"))
     assert handled != []
 
     assert Enum.any?(handled, fn event ->
-             Enum.any?(
-               causal_records,
-               &(&1["event"] == "timer_armed" and &1["token"] == event["token"])
-             )
+             event["at_ns"] <= timeout["at_ns"] and
+               Enum.any?(causal_records, fn arm ->
+                 arm["event"] == "timer_armed" and arm["token"] == event["token"] and
+                   arm["target"] == writer["manager"] and
+                   arm["at_ns"] <= event["at_ns"] and
+                   div(arm["at_ns"], 1_000_000) + arm["delay_ms"] <=
+                     writer["delivery_deadline_ms"] + 1
+               end)
            end)
 
-    assert Enum.any?(
-             causal_records,
-             &(&1["event"] == "actor_down" and &1["actor"] == writer["worker"])
-           )
+    assert timeout["at_ns"] <= kill["at_ns"]
+    assert kill["at_ns"] <= original_down["at_ns"]
+    assert original_down["at_ns"] <= reap_cutoff_ns
+    actor_downs = Enum.filter(causal_records, &(&1["event"] == "actor_down"))
+    assert Enum.any?(actor_downs, &(&1["actor"] == writer["worker"]))
+    assert Enum.all?(actor_downs, &(&1["at_ns"] <= reap_cutoff_ns))
 
     assert {:evidence, evidence, 1} = Enum.find(messages, &match?({:evidence, _, _}, &1))
     assert evidence.runtime_joined and evidence.transport_joined
