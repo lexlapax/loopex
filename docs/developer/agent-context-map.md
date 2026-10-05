@@ -6751,3 +6751,32 @@ foreground /3, daemon /4 and clients. It does not approve the packet's answered
 policy union, new answer event or private answer transaction, compact_pending,
 restore API/schema, generation activation or milestone closure. The policy
 cursor repair remains a separate decision before the complete generations join.
+
+
+<a id="disposition-m7-policy-answer-received-event-2026-10-05"></a>
+### M7 distinct permission-answer event approved, 2026-10-05
+
+The maintainer replied "1. approved" to the separately presented permission
+answer decision. Approve the distinct `interaction.answer_admitted` event,
+answered policy open-interaction branch and current private answer transaction
+in `/private/tmp/loopex-m7-inspection-policy-view-decision-20261004-8e6dc5c5-v1.md`,
+SHA-256 `399edfadaa7f7c8322554e0f94555fd421d34809fd90022a83295277332ac474`.
+The public state is answered while host policy resolution remains owed; an
+answer never grants permission. Pending objects keep ten members, answered
+policy objects have those ten plus answer_choice_id and answer_command_id.
+The distinct event carries the packet's nine closed fields. Commit the exact
+current `policy_interaction_answer_admitted_v1` record, answered state and
+outbox event in one owner transaction before admission publication or policy
+callback. Preserve canonical command/answer identities, offered-choice proof,
+duplicate/conflict semantics and unknown-commit fencing.
+
+Retire the superseded generic accepted-policy-answer variant and unused
+interaction_answer_admitted_v1 helper/reader under the pre-1.0 current-contract
+rule; do not rewrite retained journals. Historical attachments reduce only
+their own event prefix. A tail attachment and inspection agree on the open
+question at that public cursor, including answered-before-resolution and
+successor recovery without a matching policy binding. Update shared Elixir
+and independent Node codecs, snapshots, reducers, vectors and manifests
+together. This decision completes the inspection packet's two approvals; it
+does not accept compact_pending, restore contracts, helper accounting, live
+generation activation or milestone closure.

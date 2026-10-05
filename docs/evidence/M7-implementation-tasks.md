@@ -404,7 +404,9 @@ did not resolve them. No paid provider calls were made during this check.
   eight-entry source inventory SHA-256
   `03cbeb3e448926a6483359ce32e02e0e8c74da0f72e35cc68f3833d00a941d1d`.
   No speculative timer repair or timeout amendment was made.
-  The permission-answer event question is presented and unanswered. Restore
+  The permission-answer distinct event, shared answered view and private
+  transaction are approved by the
+  [maintainer disposition](../developer/agent-context-map.md#disposition-m7-policy-answer-received-event-2026-10-05). Restore
   pair drafting remains Proposed; no acceptance or implementation follows.
 
 - Terminal integration verification: the full current fast check ran once on
