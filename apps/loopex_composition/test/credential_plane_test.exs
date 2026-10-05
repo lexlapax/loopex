@@ -88,10 +88,10 @@ defmodule LoopexComposition.CredentialPlaneTest do
           {_owner, Loopex, [runtime_options], {:ok, ^runtime}} =
             Enum.find(edges, &(elem(&1, 1) == Loopex))
 
-          model_options =
-            runtime_options
-            |> Keyword.fetch!(:model)
-            |> Map.fetch!(:options)
+          model = Keyword.fetch!(runtime_options, :model)
+          assert model.module == LoopexComposition.Model
+          assert Keyword.fetch!(model.options, :adapter) == Loopex.LLM.ReqLLM
+          model_options = Keyword.fetch!(model.options, :adapter_options)
 
           token = Keyword.fetch!(model_options, :credential_token)
           registry = Keyword.fetch!(model_options, :credential_registry)

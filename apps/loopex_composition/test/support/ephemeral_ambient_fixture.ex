@@ -182,13 +182,18 @@ defmodule LoopexComposition.Ephemeral.AmbientFixture do
 
     runtime_start = fn options ->
       model = Keyword.fetch!(options, :model)
+      true = model.module == LoopexComposition.Model
+      true = Keyword.fetch!(model.options, :adapter) == Loopex.LLM.ReqLLM.InProcess
 
       options =
         options
         |> Keyword.put(:diagnostics_to, observer)
         |> Keyword.put(:model, %{
           model
-          | options: Keyword.put(model.options, :cleanup_owner_test_probe, probe)
+          | options:
+              Keyword.update!(model.options, :adapter_options, fn adapter_options ->
+                Keyword.put(adapter_options, :cleanup_owner_test_probe, probe)
+              end)
         })
 
       with {:ok, runtime} <-

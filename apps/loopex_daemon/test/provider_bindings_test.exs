@@ -94,7 +94,9 @@ defmodule LoopexDaemon.ProviderBindingsTest do
              )
 
     assert control.maintenance_instructions == instructions
-    config = Map.new(control.model.options)
+    assert control.model.module == LoopexComposition.Model
+    assert Keyword.fetch!(control.model.options, :adapter) == Loopex.LLM.ReqLLM
+    config = Map.new(Keyword.fetch!(control.model.options, :adapter_options))
     assert config.excluded_env_names == @names
     assert control.maintenance_model["model"] == "anthropic:claude-haiku-4-5-20251001"
     assert control.maintenance_model["reasoning"] == "none"

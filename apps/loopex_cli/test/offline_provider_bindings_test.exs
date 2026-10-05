@@ -65,7 +65,10 @@ defmodule LoopexCli.OfflineProviderBindingsTest do
         assert options[:sampling] == %{"max_tokens" => 2048}
         assert options[:active_tools] == []
         assert options[:maintenance_model]["reasoning"] == "none"
-        assert model.options[:excluded_env_names] == @names
+        assert model.module == LoopexComposition.Model
+        assert Keyword.fetch!(model.options, :adapter) == Loopex.LLM.ReqLLM
+        adapter_options = Keyword.fetch!(model.options, :adapter_options)
+        assert adapter_options[:excluded_env_names] == @names
 
         assert_receive {:launch_call,
                         {ProjectResources, :discover, [_, [excluded_env_names: @names]]}}
@@ -73,7 +76,7 @@ defmodule LoopexCli.OfflineProviderBindingsTest do
         assert_receive {:launch_call, {Placement, :process_incarnation, [_, "/bin/ps", @names]}}
         assert :ok = LoopexCli.release_placement()
         if iteration == 1, do: System.put_env("M7_OFFLINE_A", "replacement-must-stay-unused")
-        model.options
+        adapter_options
       end
 
     [first, second] = planes

@@ -178,8 +178,11 @@ defmodule Loopex.AppServer.HostTest do
           unless Enum.all?(names, &(System.get_env(&1) == nil)), do: raise("credential not consumed")
           model = Keyword.fetch!(options, :model)
           unless model.model == "openai:test", do: raise("model not forwarded")
-          unless model.options[:excluded_env_names] == names, do: raise("exclusions not forwarded")
-          unless map_size(model.options[:provider_routes]) == 2, do: raise("routes not forwarded")
+          unless model.module == LoopexComposition.Model, do: raise("model wrapper not forwarded")
+          unless Keyword.fetch!(model.options, :adapter) == Loopex.LLM.ReqLLM, do: raise("model adapter not forwarded")
+          adapter_options = Keyword.fetch!(model.options, :adapter_options)
+          unless adapter_options[:excluded_env_names] == names, do: raise("exclusions not forwarded")
+          unless map_size(adapter_options[:provider_routes]) == 2, do: raise("routes not forwarded")
           unless options[:maintenance_model]["reasoning"] == "none", do: raise("maintenance not forwarded")
           unless options[:active_tools] == [], do: raise("tool selection not forwarded")
         end
