@@ -325,9 +325,39 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Live source work, 2026-10-05: the native compact busy approval is pushed at
+  `14c2920d`. Root's three-path chat/facade draft is retained in Git at
+  `c703a8d0b5ef02697780af745ab6ee54fd8c7d50` on
+  `codex/m7-held-native-compact-chat`; it is not integrated or verified.
+  External patch `/private/tmp/loopex-m7-native-compact-chat-draft-20261005.patch`,
+  SHA-256 `9c5ee14ff4234b594d46fb4e1bf357c836133820420754cf961d32e8cfc1a777`.
+  Core's isolated writer is `m7-trace-check`; shared codec source checkpoint
+  `9a7a7335` is in `m7-protocol-manifests`, with both-pair verification running
+  serially. Core must join those codecs before execution and still needs the
+  exact event-size preflight boundary checked. Complete manifests, live
+  generation activation and transport joins are not claimed.
+
+  Pipe causal source checkpoint `847a368bc571069e39e22e7c4544d8d205f40aff`
+  is clean in `m7-pipe-deadline-witness`. The first current witness failed;
+  metadata shows correct worker kill 46.208 microseconds after the exact
+  fixture cutoff. The first floor witness with improved timer metadata passed;
+  it does not replace the current failure. Exact packet
+  `/private/tmp/loopex-m7-chat-pipe-cutoff-decision-20261005-v1.md`, SHA-256
+  `032ffa7aae3715357f14b7efb34e4830903caafe9d4dfa433ad41ab8d87f7940`,
+  is presented for a single shared deadline-plus-retained-grace observation
+  cutoff. That amendment is pending, not implemented. Ten-entry retained proof
+  inventory `/private/tmp/loopex-m7-pipe-witness-proof-inventory-v2.tsv`,
+  SHA-256 `d63069d3b1ccaeecabedacadc81264ff46e1a14e8f73448e9b6a5743c7333ba8`.
+  The pipe worker has released the VM slot and is independently reviewing the
+  Proposed restore pair at `8d1aa15a`. Root's clean verification checkout is
+  `m7-inspection-rejoin` at that SHA; no check has run there yet. No paid call,
+  full-check rerun or milestone closure occurred.
+
+
 - Clean pushed resume checkpoint: all root verification handles are terminal.
-  Source unit `790e73bc` and evidence child `5d531fe1` are pushed to m7. The
-  latter's one docs-only check passes in 17.866 seconds; complete output
+  Source unit `790e73bc`, evidence child `5d531fe1`, compact approval
+  `14c2920d` and Proposed restore pair `8d1aa15a` are pushed to m7. The
+  Evidence child `5d531fe1` passed its one docs-only check in 17.866 seconds; complete output
   `/private/tmp/loopex-m7-5d531fe1-docs.log`, SHA-256
   `e447ad1cc5f68c0525d63b0b2cae566ff8d4be13bf4c090462aaacfce5f3617b`.
   The completed command-bounds managed writer is now archived (confirmed by
@@ -339,7 +369,7 @@ did not resolve them. No paid provider calls were made during this check.
   Task.Supervisor lifetime investigations remain open; failed 6290ac47 is not
   relabeled by either focused repair.
 
-  Governed restore pair draft (external only; not installed or accepted):
+  Governed restore pair source draft (now installed as Proposed; not accepted):
   `/private/tmp/loopex-m7-restore-proposed-pair-20261005-v1/0051-current-format-physical-restore.md`,
   Concept SHA-256
   `b12f2fd057ca7c539c6d3dad9e53c71b6ad740ab5cdc942521db1e9d0efbfce1`;
@@ -347,8 +377,11 @@ did not resolve them. No paid provider calls were made during this check.
   `e7cb262e4750531059aced665e80c34d23f86375b962e63d4d287a61d9852efa`.
   Pair inventory SHA-256
   `5c6a91d8d7dd7736a55a311e7b3fead6013b82e0f16403eee0b125d852cea848`.
-  Root rehashed these three objects; full semantic pair review/install/indexing
-  is pending. The worker's reciprocal-link/schema self-check is source-only,
+  The exact pair is now installed and indexed as Proposed at `8d1aa15a`;
+  source-only review is complete, documentation gates and independent review
+  remain pending. It is not accepted and T15 remains open.
+  Root rehashed these three objects and reviewed both installed depths.
+  Documentation gates and independent semantic review are pending. The worker's reciprocal-link/schema self-check is source-only,
   with its initial checker failure retained; it is not product or independent
   acceptance evidence. No restore implementation is authorized by that draft.
 
@@ -407,7 +440,7 @@ did not resolve them. No paid provider calls were made during this check.
   The permission-answer distinct event, shared answered view and private
   transaction are approved by the
   [maintainer disposition](../developer/agent-context-map.md#disposition-m7-policy-answer-received-event-2026-10-05). Restore
-  pair drafting remains Proposed; no acceptance or implementation follows.
+  pair remains Proposed; no acceptance or implementation follows.
 
 - Terminal integration verification: the full current fast check ran once on
   exact clean candidate `6290ac472cb18ecb78bb3cb75d1abc952458d55a` and FAILED
@@ -11494,6 +11527,9 @@ or check was relaxed.
 - [ ] Later retain the required attended multi-prompt proof.
 
 ### Added implementation subtasks
+
+- [ ] Implement the approved required native compact_pending observation and definitive-status uncertainty fence; hold chat barriers through resumed/external pre-episode preparation, episode, abort and cleanup until committed completion, reject missing/non-Boolean busy values, and prove actual owner/recovery and exact joins on both supported toolchains. Add no wire or chat JSON members.
+
 
 - [x] Join the public chat entrypoint to exact creation, session tracking, prepared resume, guarded signals, effective report and existing input/output driver; share ask diagnostic joins and prove actual built startup/quit plus scripted continuity/restart/refusal/cleanup behavior on both pairs. Built multi-prompt/provider, attended, maintenance and helper proof remains open.
 
