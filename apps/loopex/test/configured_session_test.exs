@@ -2219,12 +2219,26 @@ defmodule Loopex.ConfiguredSessionTest do
       pending_interaction = pending.interactions[question["interaction_id"]]
 
       if pending_interaction.request.kind == :choice do
-        assert SessionState.propose_interaction_answer(
-                 pending,
-                 pending.open_interaction,
-                 "legacy-bypass",
-                 "choice-1"
-               ) == {:error, :invalid_interaction_transition}
+        records = Fixture.records(fixture, session)
+
+        retired =
+          Map.merge(List.last(records), %{
+            journal_version: pending.journal_version + 1,
+            payload: %{
+              :kind => "interaction_answer_admitted_v1",
+              "interaction_id" => pending.open_interaction,
+              "command_id" => "legacy-bypass",
+              "choice_id" => "choice-1",
+              "answer_digest" => Loopex.Interaction.digest(%{choice_id: "choice-1"})
+            }
+          })
+
+        assert SessionState.recover(
+                 session,
+                 records ++ [retired],
+                 Fixture.events(fixture, session)
+               ) ==
+                 {:error, :invalid_private_history}
       end
 
       assert pending_interaction.expires_at ==

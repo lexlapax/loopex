@@ -21,6 +21,7 @@ defmodule Loopex.Runtime.EffectIntents do
   """
 
   alias Loopex.Model
+  alias Loopex.Interaction
   alias Loopex.Bounds
   alias Loopex.Runtime.MaintenanceConfiguration
   alias Loopex.Runtime.ProviderAttempt
@@ -81,8 +82,8 @@ defmodule Loopex.Runtime.EffectIntents do
     "interaction_requested_v1" =>
       {~w(interaction_id run_id turn tool_call_id interaction_request interaction_request_digest policy_request_digest round created_at expires_at policy_identity),
        ~w(decision_ref)},
-    "interaction_answer_admitted_v1" =>
-      {~w(interaction_id command_id choice_id answer_digest), []},
+    "policy_interaction_answer_admitted_v1" =>
+      {@command_keys ++ ~w(interaction_id choice_id answer_digest), []},
     "interaction_resolved_v1" => {~w(interaction_id resolution), ~w(reason)},
     "model_question_requested_v1" =>
       {~w(producer interaction_id run_id turn tool_call_id argument_digest interaction_request interaction_request_digest created_at expires_at),
@@ -377,9 +378,6 @@ defmodule Loopex.Runtime.EffectIntents do
         {"accepted", "abort"} ->
           ~w(run_id)
 
-        {"accepted", "interaction_answer"} ->
-          ~w(interaction_id choice_id answer_digest)
-
         {"rejected_maintenance_active", type}
         when type in ~w(prompt steer follow_up configure compact interaction_answer) ->
           []
@@ -394,6 +392,30 @@ defmodule Loopex.Runtime.EffectIntents do
 
     is_list(extras) and closed?(payload, [:kind | @command_keys ++ extras]) and
       identifier?(payload["command_id"]) and digest?(payload["command_digest"])
+  end
+
+  # Concept: an admitted policy answer advances private coverage without
+  # granting a tool decision or projecting an executor effect.
+  # Technical depth: this local read binds the closed row to its normalized
+  # command and answer preimages. Full session replay additionally checks the
+  # pending interaction, offered choice and matching public event.
+  defp neutral_values?(%{payload: %{kind: "policy_interaction_answer_admitted_v1"} = payload}) do
+    command = %{
+      type: :interaction_answer,
+      command_id: payload["command_id"],
+      interaction_id: payload["interaction_id"],
+      choice_id: payload["choice_id"]
+    }
+
+    bytes = :erlang.term_to_binary(["loopex_command_v1", command], [:deterministic])
+    expected = :crypto.hash(:sha256, bytes) |> Base.encode16(case: :lower)
+
+    payload["command_type"] == "interaction_answer" and payload["admission"] == "accepted" and
+      is_binary(payload["command_id"]) and byte_size(payload["command_id"]) in 1..65_536 and
+      is_binary(payload["interaction_id"]) and byte_size(payload["interaction_id"]) in 1..65_536 and
+      identifier?(payload["choice_id"]) and byte_size(payload["choice_id"]) <= 64 and
+      payload["command_digest"] == expected and
+      payload["answer_digest"] == Interaction.digest(%{choice_id: payload["choice_id"]})
   end
 
   defp neutral_values?(%{payload: %{kind: "owner_advanced"} = payload} = record) do

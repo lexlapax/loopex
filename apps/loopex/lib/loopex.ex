@@ -486,6 +486,11 @@ defmodule Loopex do
   token_budget, relative deadline_ms and staged absolute deadline allowlist.
   The absolute deadline is nil before staging and never recomputed here.
   Turn/token quantities retain their arbitrary positive integer domains.
+  `compact_pending` is a required Boolean read from the same committed owner
+  cut. It stays true throughout a standalone compact command, including its
+  preparation and cleanup, until committed completion clears the slot. Status
+  refuses with `session_unavailable` while session mutation commitment is
+  unresolved; absence is never inferred from an uncertain transaction.
   """
   @spec session_status(Runtime.t(), binary()) :: {:ok, map()} | {:error, term()}
   def session_status(runtime, session_id), do: Runtime.session_status(runtime, session_id)

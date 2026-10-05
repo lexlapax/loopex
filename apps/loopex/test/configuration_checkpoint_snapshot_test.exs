@@ -35,6 +35,8 @@ defmodule Loopex.Runtime.ConfigurationCheckpointSnapshotTest do
       result = scan(events, anchor, width, configuration)
       assert result.configuration == if(anchor < 4, do: configuration, else: changed)
       assert result.checkpoint == Enum.at(expected_checkpoints, anchor)
+      assert result.snapshot.configuration == result.configuration
+      assert result.snapshot.checkpoint == result.checkpoint
       assert result.snapshot.event_sequence == anchor
       assert result.tail == length(events)
       refute Map.has_key?(result, :events)
@@ -43,6 +45,35 @@ defmodule Loopex.Runtime.ConfigurationCheckpointSnapshotTest do
 
     assert scan(events, nil, 1, configuration).configuration == changed
     assert scan(events, nil, 1, configuration).checkpoint == second
+  end
+
+  test "revision three requires a current seed and rejects inconsistent final views" do
+    assert {:error, :invalid_public_configuration} =
+             SessionState.start_snapshot_scan("session", 0, nil)
+
+    {:ok, scan} = SessionState.start_snapshot_scan("session", 0, configuration())
+    assert {:ok, %{snapshot: snapshot}} = SessionState.finish_snapshot_scan(scan)
+    assert snapshot.snapshot_revision == 3
+    assert {:ok, wire} = LoopexProtocol.Session.Snapshot.encode_wire(snapshot)
+    assert {:ok, ^snapshot} = LoopexProtocol.Session.Snapshot.decode_wire(wire)
+
+    for field <- [
+          :configuration,
+          :checkpoint,
+          :active_maintenance,
+          :open_interaction,
+          :last_compact
+        ] do
+      assert Map.has_key?(snapshot, field)
+    end
+
+    admitted = maintenance(checkpoint()) |> Map.put("configuration_version", 2)
+    {:ok, scan} = SessionState.start_snapshot_scan("session", nil, configuration())
+
+    assert {:ok, scan} =
+             SessionState.scan_snapshot_page(scan, stamp([change_maintenance(admitted)]))
+
+    assert {:error, :invalid_public_snapshot} = SessionState.finish_snapshot_scan(scan)
   end
 
   test "configuration refuses private seeds, malformed changes, version gaps and active owners" do
@@ -86,7 +117,7 @@ defmodule Loopex.Runtime.ConfigurationCheckpointSnapshotTest do
     first = %{first | "source_excerpted" => true}
     active = maintenance(first)
     admission = change_maintenance(active)
-    {:ok, initial} = SessionState.start_snapshot_scan("session", nil)
+    {:ok, initial} = SessionState.start_snapshot_scan("session", nil, configuration())
 
     assert {:error, :invalid_public_checkpoint} =
              SessionState.scan_snapshot_page(

@@ -798,6 +798,10 @@ defmodule Loopex.InteractionLifecycleTest do
     events = Fixture.events(fixture, session_id)
     assert Enum.count(events, &(&1.kind == "interaction.resolved")) == 1
     assert Enum.count(events, &(&1.kind == "interaction.requested")) == 1
+    assert Enum.count(events, &(&1.kind == "interaction.answer_admitted")) == 1
+    answer_event = Enum.find(events, &(&1.kind == "interaction.answer_admitted"))
+    assert answer_event["answer_command_id"] == "answer-1"
+    assert answer_event["answer_choice_id"] == "allow"
 
     started = Enum.find(events, &(&1.kind == "tool.started"))
     resolution = Enum.find(events, &(&1.kind == "interaction.resolved"))
@@ -908,8 +912,20 @@ defmodule Loopex.InteractionLifecycleTest do
     assert {:ok, status} = Loopex.session_status(successor, session_id)
     assert status.open_interaction["interaction_id"] == requested["interaction_id"]
     assert status.open_interaction["status"] == "answered"
+    assert status.open_interaction["producer"] == "policy_defer"
+    assert status.open_interaction["kind"] == "choice"
+    assert status.open_interaction["answer_command_id"] == "answer-1"
+    assert status.open_interaction["answer_choice_id"] == "allow"
+    assert map_size(status.open_interaction) == 12
 
     events = Fixture.events(fixture, session_id)
+    assert Enum.count(events, &(&1.kind == "interaction.answer_admitted")) == 1
+    answer_event = Enum.find(events, &(&1.kind == "interaction.answer_admitted"))
+
+    {:ok, historical} =
+      Loopex.attach(successor, session_id, after_event_sequence: answer_event.event_sequence)
+
+    assert Loopex.snapshot(historical).open_interaction == status.open_interaction
     assert Enum.all?(events, &(&1.kind != "tool.started"))
     assert Enum.all?(events, &(&1.kind != "interaction.resolved"))
   end

@@ -30,7 +30,6 @@ defmodule Loopex.Runtime.SessionCoordinator do
   alias Loopex.Interaction
   alias Loopex.Runtime.Control
   alias Loopex.Runtime.ExecutorStream
-  alias Loopex.Runtime.SessionConfiguration
   alias Loopex.Runtime.ProviderLifetime
   alias Loopex.Runtime.ResourceContext
   alias Loopex.Runtime.SessionState
@@ -681,19 +680,31 @@ defmodule Loopex.Runtime.SessionCoordinator do
   end
 
   def handle_call({:session_status, supplied_owner}, _from, state) do
-    if state.phase == :ready and supplied_owner == state.owner and not state.superseded do
+    with true <- state.phase == :ready and supplied_owner == state.owner and not state.superseded,
+         false <-
+           OwnerLane.fenced?(
+             state.lane,
+             %{session_id: state.session_id, mutation_domain: @mutation_domain}
+           ),
+         {:ok, views} <- SessionState.inspection_views(state.durable) do
       status = %{
         status: :active,
         owner_epoch: state.owner.owner_epoch,
         journal_version: state.durable.journal_version,
         event_sequence: state.durable.event_sequence,
         active_run_id: state.durable.active_run_id,
+        # Concept: standalone compact owns its slot before any episode exists.
+        # Technical depth: only committed completion clears this native Boolean.
+        # An unresolved mutation lane refuses the read before reaching this map.
+        compact_pending: not is_nil(state.durable.pending_compact),
         cleanup_grace_ms: state.durable.cleanup_grace_ms,
         # Concept: inspection reports the session's committed settings.
         # Technical depth: M7's configuration allowlist excludes instruction
-        # bytes, capabilities and provider mappings. Legacy unresolved state
-        # remains nil; runtime launch defaults never fill this observation.
-        configuration: SessionConfiguration.public_view(state.durable.configuration),
+        # bytes, capabilities and provider mappings. The current genesis always
+        # retains these settings; runtime launch defaults never fill this read.
+        configuration: views.configuration,
+        checkpoint: views.checkpoint,
+        active_maintenance: views.active_maintenance,
         active_bounds: active_bounds(state.durable),
         active_context_token_budget:
           SessionState.context_token_budget(state.durable, state.durable.active_run_id),
@@ -702,17 +713,16 @@ defmodule Loopex.Runtime.SessionCoordinator do
         # Concept: the question this session is waiting on, if it is waiting on
         # one, read at the same cursor as everything else here.
         #
-        # Technical depth: `nil` when none is open, and a terminal interaction
-        # is never presented as open. The host's private reference is not part
-        # of the view, and neither is anything a reader could mistake for
-        # authority: answering still takes a committed command naming the exact
-        # question.
-        open_interaction: SessionState.open_interaction(state.durable)
+        # Technical depth: a committed policy answer remains visible until
+        # policy resolution. Model responses clear the question. Each view joins
+        # the same admitted public tail and excludes the host's private reference;
+        # answer identities are observations and grant no tool authority.
+        open_interaction: views.open_interaction
       }
 
       {:reply, {:ok, status}, state}
     else
-      {:reply, {:error, :session_unavailable}, state}
+      _ -> {:reply, {:error, :session_unavailable}, state}
     end
   end
 

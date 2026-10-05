@@ -2133,6 +2133,13 @@ defmodule Loopex.ContextAdmissionTest do
 
     {session_id, attachment} = create_attached_session(fixture)
 
+    initial_configuration =
+      records(fixture, session_id)
+      |> hd()
+      |> Map.fetch!(:payload)
+      |> Map.fetch!("initial_configuration")
+      |> Loopex.Runtime.SessionConfiguration.public_view()
+
     :ok =
       M1RuntimeTestStore.hold_next_record_before_linearization(
         fixture.store,
@@ -2155,9 +2162,14 @@ defmodule Loopex.ContextAdmissionTest do
     admitted_anchor = List.last(admitted_events).event_sequence
 
     assert {:ok, admitted_snapshot} =
-             SessionState.snapshot(session_id, admitted_anchor, admitted_events)
+             SessionState.snapshot(
+               session_id,
+               admitted_anchor,
+               admitted_events,
+               initial_configuration
+             )
 
-    assert_revision_two_snapshot(
+    assert_current_snapshot(
       admitted_snapshot,
       session_id,
       admitted_anchor,
@@ -2175,9 +2187,14 @@ defmodule Loopex.ContextAdmissionTest do
     started_anchor = List.last(started_events).event_sequence
 
     assert {:ok, started_snapshot} =
-             SessionState.snapshot(session_id, started_anchor, started_events)
+             SessionState.snapshot(
+               session_id,
+               started_anchor,
+               started_events,
+               initial_configuration
+             )
 
-    assert_revision_two_snapshot(started_snapshot, session_id, started_anchor, "started")
+    assert_current_snapshot(started_snapshot, session_id, started_anchor, "started")
 
     assert Map.fetch!(started_snapshot, :active_run_id) ==
              Map.fetch!(admitted_snapshot, :active_run_id)
@@ -2189,7 +2206,12 @@ defmodule Loopex.ContextAdmissionTest do
     complete_anchor = List.last(complete_events).event_sequence
 
     assert {:ok, finished_snapshot} =
-             SessionState.snapshot(session_id, complete_anchor, complete_events)
+             SessionState.snapshot(
+               session_id,
+               complete_anchor,
+               complete_events,
+               initial_configuration
+             )
 
     assert Enum.sort(Map.keys(finished_snapshot)) ==
              Enum.sort([
@@ -2197,20 +2219,35 @@ defmodule Loopex.ContextAdmissionTest do
                :session_id,
                :event_sequence,
                :active_run_id,
-               :active_run_phase
+               :active_run_phase,
+               :configuration,
+               :checkpoint,
+               :active_maintenance,
+               :open_interaction,
+               :last_compact
              ])
 
-    assert dynamic_apply(Map, :get, [finished_snapshot, :snapshot_revision]) == 2
+    assert dynamic_apply(Map, :get, [finished_snapshot, :snapshot_revision]) == 3
     assert dynamic_apply(Map, :get, [finished_snapshot, :session_id]) == session_id
     assert dynamic_apply(Map, :get, [finished_snapshot, :event_sequence]) == complete_anchor
     assert dynamic_apply(Map, :get, [finished_snapshot, :active_run_id]) == nil
     assert dynamic_apply(Map, :get, [finished_snapshot, :active_run_phase]) == nil
 
     assert {:ok, historical_admitted} =
-             SessionState.snapshot(session_id, admitted_anchor, complete_events)
+             SessionState.snapshot(
+               session_id,
+               admitted_anchor,
+               complete_events,
+               initial_configuration
+             )
 
     assert {:ok, historical_started} =
-             SessionState.snapshot(session_id, started_anchor, complete_events)
+             SessionState.snapshot(
+               session_id,
+               started_anchor,
+               complete_events,
+               initial_configuration
+             )
 
     assert historical_admitted == admitted_snapshot
     assert historical_started == started_snapshot
@@ -2235,7 +2272,9 @@ defmodule Loopex.ContextAdmissionTest do
              SessionState.recover(session_id, unversioned_records, complete_events)
 
     complete_records = records(fixture, session_id)
-    assert {:ok, recovered} = SessionState.recover(session_id, complete_records, complete_events)
+
+    assert {:ok, recovered} =
+             SessionState.recover(session_id, complete_records, complete_events)
 
     for {current, superseded} <- [
           {"prompt_admitted_v3", "prompt_admitted_v2"},
@@ -2250,7 +2289,8 @@ defmodule Loopex.ContextAdmissionTest do
             else: record
         end)
 
-      assert {:error, _} = SessionState.recover(session_id, superseded_records, complete_events)
+      assert {:error, _} =
+               SessionState.recover(session_id, superseded_records, complete_events)
     end
 
     without_capture = %{recovered | configuration: nil, run_configurations: %{}}
@@ -3144,17 +3184,22 @@ defmodule Loopex.ContextAdmissionTest do
     }
   end
 
-  defp assert_revision_two_snapshot(snapshot, session_id, event_sequence, phase) do
+  defp assert_current_snapshot(snapshot, session_id, event_sequence, phase) do
     assert Enum.sort(Map.keys(snapshot)) ==
              Enum.sort([
                :snapshot_revision,
                :session_id,
                :event_sequence,
                :active_run_id,
-               :active_run_phase
+               :active_run_phase,
+               :configuration,
+               :checkpoint,
+               :active_maintenance,
+               :open_interaction,
+               :last_compact
              ])
 
-    assert Map.get(snapshot, :snapshot_revision) == 2
+    assert Map.get(snapshot, :snapshot_revision) == 3
     assert Map.get(snapshot, :session_id) == session_id
     assert Map.get(snapshot, :event_sequence) == event_sequence
     assert is_binary(Map.get(snapshot, :active_run_id))

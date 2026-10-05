@@ -378,9 +378,10 @@ defmodule Loopex.Runtime.SessionState do
          {:ok, projection} <- replay_projection(events, event_sequence, initial_configuration),
          true <- projection.active_run_id == state.active_run_id,
          true <- projection.active_maintenance == maintenance_public_view(state),
+         true <- projection.open_interaction == open_interaction(state),
          public_configuration = SessionConfiguration.public_view(state.configuration),
          true <- projection.configuration == public_configuration,
-         true <- checkpoint_projection_id(projection.checkpoint) == state.active_checkpoint do
+         true <- projection.checkpoint == checkpoint_public_view(state) do
       {:ok, %{state | event_sequence: event_sequence}}
     else
       false -> {:error, :private_public_projection_mismatch}
@@ -621,17 +622,18 @@ defmodule Loopex.Runtime.SessionState do
   the requested anchor. Event identities remain untouched; events after the
   anchor are excluded so an attachment can stream them contiguously.
   """
-  @spec snapshot(binary(), non_neg_integer(), [map()]) :: {:ok, map()} | {:error, term()}
-  def snapshot(session_id, anchor, events)
+  @spec snapshot(binary(), non_neg_integer(), [map()], map()) :: {:ok, map()} | {:error, term()}
+  def snapshot(session_id, anchor, events, initial_configuration)
       when is_binary(session_id) and is_integer(anchor) and anchor >= 0 and is_list(events) do
-    with {:ok, scan} <- start_snapshot_scan(session_id, anchor),
+    with {:ok, scan} <- start_snapshot_scan(session_id, anchor, initial_configuration),
          {:ok, scan} <- scan_snapshot_page(scan, events),
          {:ok, %{snapshot: snapshot}} <- finish_snapshot_scan(scan) do
       {:ok, snapshot}
     end
   end
 
-  def snapshot(_session_id, _anchor, _events), do: {:error, :invalid_snapshot_anchor}
+  def snapshot(_session_id, _anchor, _events, _initial_configuration),
+    do: {:error, :invalid_snapshot_anchor}
 
   @doc """
   ## Concept
@@ -644,26 +646,13 @@ defmodule Loopex.Runtime.SessionState do
   The requested anchor is either a non-negative durable cursor or `nil` for the
   Store tail observed by the scan. The accumulator retains only positions and
   run, interaction, configuration, checkpoint, maintenance and last-compact
-  projections, never event pages. The two-argument entry point has no initial
-  configuration; callers possessing immutable genesis use the explicit seed.
+  projections, never event pages. The immutable genesis configuration is required
+  and uses the closed current configuration allowlist. Never seed this reduction
+  from mutable current private state. Later settings come exclusively from
+  consecutive committed session.configured rows. The requested anchor keeps its
+  own bounded projection while scanning the tail.
   """
-  @spec start_snapshot_scan(binary(), non_neg_integer() | nil) :: {:ok, map()} | {:error, term()}
-  def start_snapshot_scan(session_id, requested_anchor),
-    do: start_snapshot_scan(session_id, requested_anchor, nil)
-
-  @doc """
-  ## Concept
-
-  Seed the cursor reduction with the immutable initial public configuration.
-
-  ## Technical depth
-
-  Accept only the closed configuration allowlist or an explicitly unconfigured
-  session. Never seed this reduction from mutable current private state. Later
-  settings come exclusively from consecutive committed session.configured rows.
-  The requested anchor keeps its own bounded projection while scanning the tail.
-  """
-  @spec start_snapshot_scan(binary(), non_neg_integer() | nil, map() | nil) ::
+  @spec start_snapshot_scan(binary(), non_neg_integer() | nil, map()) ::
           {:ok, map()} | {:error, term()}
   def start_snapshot_scan(session_id, requested_anchor, initial_configuration)
       when is_binary(session_id) and
@@ -731,44 +720,26 @@ defmodule Loopex.Runtime.SessionState do
              required(:snapshot) => map(),
              required(:tail) => non_neg_integer(),
              required(:open_interaction) => map() | nil,
-             required(:configuration) => map() | nil,
+             required(:configuration) => map(),
              required(:checkpoint) => map() | nil,
              required(:active_maintenance) => map() | nil,
              required(:last_compact) => map() | nil
            }}
           | {:error, term()}
-  def finish_snapshot_scan(%{
-        session_id: session_id,
-        requested_anchor: requested_anchor,
-        tail: tail,
-        active_run: active_run,
-        open_interaction: open_interaction,
-        configuration: configuration,
-        checkpoint: checkpoint,
-        active_maintenance: active_maintenance,
-        last_compact: last_compact,
-        anchor_projection: anchor_projection
-      }) do
+  def finish_snapshot_scan(
+        %{
+          session_id: session_id,
+          requested_anchor: requested_anchor,
+          tail: tail,
+          anchor_projection: anchor_projection
+        } = scan
+      ) do
     case {requested_anchor, anchor_projection} do
       {nil, _projection} ->
-        {:ok,
-         %{
-           tail: tail,
-           snapshot: public_snapshot(session_id, tail, active_run),
-           open_interaction: open_interaction,
-           configuration: configuration,
-           checkpoint: checkpoint,
-           active_maintenance: active_maintenance,
-           last_compact: last_compact
-         }}
+        finish_snapshot_projection(session_id, tail, tail, scan)
 
-      {anchor, {:set, projection}}
-      when anchor <= tail ->
-        {:ok,
-         Map.merge(Map.delete(projection, :active_run), %{
-           tail: tail,
-           snapshot: public_snapshot(session_id, anchor, projection.active_run)
-         })}
+      {anchor, {:set, projection}} when anchor <= tail ->
+        finish_snapshot_projection(session_id, anchor, tail, projection)
 
       {_anchor, _projection} ->
         {:error, :cursor_expired}
@@ -777,31 +748,32 @@ defmodule Loopex.Runtime.SessionState do
 
   def finish_snapshot_scan(_scan), do: {:error, :invalid_public_history}
 
-  # Concept: the snapshot says which run is active and how far along it is.
-  #
-  # Technical depth: ADR 0017's revision 2 carries the phase beside the identity,
-  # so an operator attaching after prompt admission but before the first staged
-  # request can tell an admitted, unstaged run from a started one. The two active
-  # members are nil together or non-nil together; no phase is ever inferred from
-  # the identity alone.
-  defp public_snapshot(session_id, event_sequence, nil) do
-    %{
-      snapshot_revision: 2,
-      session_id: session_id,
-      event_sequence: event_sequence,
-      active_run_id: nil,
-      active_run_phase: nil
-    }
-  end
+  # Concept: every snapshot view describes the same committed cursor.
+  # Technical depth: the bounded projection already holds that cursor's six
+  # views. The shared revision-3 codec validates the complete closed snapshot,
+  # including ownership and configuration relationships, before publication.
+  defp finish_snapshot_projection(session_id, anchor, tail, projection) do
+    views =
+      Map.take(
+        projection,
+        ~w(open_interaction configuration checkpoint active_maintenance last_compact)a
+      )
 
-  defp public_snapshot(session_id, event_sequence, {run_id, phase}) do
-    %{
-      snapshot_revision: 2,
-      session_id: session_id,
-      event_sequence: event_sequence,
-      active_run_id: run_id,
-      active_run_phase: phase
-    }
+    {run_id, phase} = projection.active_run || {nil, nil}
+
+    snapshot =
+      Map.merge(views, %{
+        snapshot_revision: 3,
+        session_id: session_id,
+        event_sequence: anchor,
+        active_run_id: run_id,
+        active_run_phase: phase
+      })
+
+    case LoopexProtocol.Session.Snapshot.encode_wire(snapshot) do
+      {:ok, _wire} -> {:ok, Map.merge(views, %{tail: tail, snapshot: snapshot})}
+      :error -> {:error, :invalid_public_snapshot}
+    end
   end
 
   @doc """
@@ -5349,22 +5321,6 @@ defmodule Loopex.Runtime.SessionState do
     )
   end
 
-  @doc false
-  @spec propose_interaction_answer(t(), binary(), binary(), binary()) ::
-          {:ok, proposal()} | {:error, term()}
-  def propose_interaction_answer(%__MODULE__{} = state, interaction_id, command_id, choice_id)
-      when is_binary(interaction_id) and is_binary(command_id) and is_binary(choice_id) do
-    record = %{
-      "interaction_id" => interaction_id,
-      "command_id" => command_id,
-      "choice_id" => choice_id,
-      "answer_digest" => Interaction.digest(%{choice_id: choice_id}),
-      kind: "interaction_answer_admitted_v1"
-    }
-
-    internal_proposal(state, stable_id("interaction-answer", interaction_id, command_id), record)
-  end
-
   # Concept: retain an allowed model question before publishing its identity.
   # Technical depth: request and generation are rederived from the pending
   # committed call; creation and expiry are captured once before Store admission.
@@ -5441,18 +5397,57 @@ defmodule Loopex.Runtime.SessionState do
 
   ## Technical depth
 
-  `nil` when none is open. A terminal interaction is never presented as open,
-  which is what keeps a fresh attach from showing a question that has already
-  been answered, expired or cancelled.
+  Pending questions carry their producer and kind. An admitted policy answer
+  remains open as `answered`, with its offered choice and command identity,
+  until the policy callback resolves it. Model answers and terminal policy
+  resolutions clear the open view. These observations grant no authority.
   """
   @spec open_interaction(t()) :: map() | nil
   def open_interaction(%__MODULE__{open_interaction: nil}), do: nil
 
   def open_interaction(%__MODULE__{open_interaction: interaction_id} = state) do
     case Map.get(state.interactions, interaction_id) do
-      nil -> nil
-      interaction -> Interaction.view(interaction)
+      nil ->
+        nil
+
+      interaction ->
+        view = interaction |> Interaction.view() |> Map.take(~w(interaction_id run_id turn
+          tool_call_id status prompt choices expires_at))
+
+        producer =
+          if Map.get(interaction, :producer) == "model_tool",
+            do: "model_tool",
+            else: "policy_defer"
+
+        view =
+          view
+          |> Map.put("producer", producer)
+          |> Map.put("kind", Atom.to_string(interaction.request.kind))
+
+        if interaction.status == "answered" and producer == "policy_defer" do
+          view
+          |> Map.put("answer_choice_id", interaction.choice_id)
+          |> Map.put("answer_command_id", interaction.command_id)
+        else
+          view
+        end
     end
+  end
+
+  # Concept: current inspection reads only facts the serial owner has admitted.
+  # Technical depth: bounded public views derive from current retained captures,
+  # not a scan of the full outbox on every status poll. Recovery independently
+  # reduces the public prefix and verifies these same complete views. Unknown
+  # proposals remain outside the admitted state; historical scans own their prefix.
+  @doc false
+  def inspection_views(state) do
+    {:ok,
+     %{
+       configuration: SessionConfiguration.public_view(state.configuration),
+       checkpoint: checkpoint_public_view(state),
+       active_maintenance: maintenance_public_view(state),
+       open_interaction: open_interaction(state)
+     }}
   end
 
   # Concept: explicit maintenance cannot queue unrelated session mutation.
@@ -5769,16 +5764,22 @@ defmodule Loopex.Runtime.SessionState do
           "interaction_id" => interaction.interaction_id,
           "choice_id" => command.choice_id,
           "answer_digest" => Interaction.digest(%{choice_id: command.choice_id}),
-          kind: "command_admitted"
+          kind: "policy_interaction_answer_admitted_v1"
         }
 
-        build_proposal(
-          state,
-          command.command_id,
-          record,
-          [],
-          {:accepted, command.command_id}
-        )
+        with {:ok, next} <- apply_command_record(state, record) do
+          events = Enum.drop(next.expected_events, length(state.expected_events))
+
+          admitted_proposal(
+            state,
+            command,
+            digest,
+            "interaction_answer",
+            record,
+            events,
+            {:accepted, command.command_id}
+          )
+        end
 
       {:error, reason} ->
         refusal(
@@ -6109,6 +6110,7 @@ defmodule Loopex.Runtime.SessionState do
               "model_question_abort_admitted_v2",
               "prompt_admitted_v3",
               "model_question_response_admitted_v2",
+              "policy_interaction_answer_admitted_v1",
               "session_configuration_admitted_v2",
               "compact_command_admitted_v1",
               "compact_abort_admitted_v1",
@@ -6168,7 +6170,6 @@ defmodule Loopex.Runtime.SessionState do
               "run_terminal_committed",
               "tool_result_committed_v2",
               "interaction_requested_v1",
-              "interaction_answer_admitted_v1",
               "interaction_resolved_v1",
               "model_question_requested_v1",
               "model_question_settled_v2"
@@ -6266,7 +6267,12 @@ defmodule Loopex.Runtime.SessionState do
   # Other commands and rejected prompts use the generic admission kind. It never
   # admits an accepted prompt without its retained settings.
   defp admissible_command_kind?("command_admitted", record),
-    do: not (record["command_type"] == "prompt" and record["admission"] == "accepted")
+    do:
+      not (record["command_type"] in ["prompt", "interaction_answer"] and
+             record["admission"] == "accepted")
+
+  defp admissible_command_kind?("policy_interaction_answer_admitted_v1", record),
+    do: record["command_type"] == "interaction_answer" and record["admission"] == "accepted"
 
   defp admissible_command_kind?("model_question_abort_admitted_v2", record),
     do:
@@ -6595,22 +6601,70 @@ defmodule Loopex.Runtime.SessionState do
     end
   end
 
-  defp command_effect(state, record, "interaction_answer", "accepted", command_id) do
-    with {:ok, interaction_id} <- record_binary(record, "interaction_id"),
+  defp command_effect(
+         state,
+         %{kind: "policy_interaction_answer_admitted_v1"} = record,
+         "interaction_answer",
+         "accepted",
+         command_id
+       ) do
+    with true <-
+           closed_history_map?(record, [
+             :kind,
+             "command_id",
+             "command_digest",
+             "command_type",
+             "admission",
+             "interaction_id",
+             "choice_id",
+             "answer_digest"
+           ]),
+         {:ok, interaction_id} <- record_binary(record, "interaction_id"),
          {:ok, choice_id} <- record_binary(record, "choice_id"),
+         {:ok, command} <-
+           normalize_command(%{
+             type: :interaction_answer,
+             command_id: command_id,
+             interaction_id: interaction_id,
+             choice_id: choice_id
+           }),
+         {:ok, digest} <- command_digest(command),
+         true <- record["command_digest"] == digest,
+         true <- record["answer_digest"] == Interaction.digest(%{choice_id: choice_id}),
          %{status: "pending"} = interaction <- Map.get(state.interactions, interaction_id),
          true <- state.open_interaction == interaction_id,
          true <- Map.get(interaction, :producer) != "model_tool",
          true <- Interaction.offered?(interaction.request, choice_id) do
-      answered = %{interaction | status: "answered", choice_id: choice_id}
+      answered =
+        interaction
+        |> Map.put(:status, "answered")
+        |> Map.put(:choice_id, choice_id)
+        |> Map.put(:command_id, command_id)
+
+      event = %{
+        :kind => "interaction.answer_admitted",
+        :event_id => stable_id("event-interaction-answer", state.session_id, command_id),
+        "interaction_id" => interaction_id,
+        "run_id" => interaction.run_id,
+        "turn" => interaction.turn,
+        "tool_call_id" => interaction.tool_call_id,
+        "producer" => "policy_defer",
+        "interaction_kind" => "choice",
+        "status" => "answered",
+        "answer_choice_id" => choice_id,
+        "answer_command_id" => command_id
+      }
 
       {:ok, {:accepted, command_id}, state.active_run_id, state.pending_work,
-       state.expected_events,
+       state.expected_events ++ [event],
        %{interactions: Map.put(state.interactions, interaction_id, answered)}}
     else
       _other -> {:error, :invalid_interaction_answer_record}
     end
   end
+
+  defp command_effect(_state, _record, "interaction_answer", "accepted", _command_id),
+    do: {:error, :invalid_interaction_answer_record}
 
   # Technical depth: an oversized command installs no run, steer, or follow-up,
   # emits no public event, and leaves every queue exactly as it was. Its retained
@@ -7558,18 +7612,7 @@ defmodule Loopex.Runtime.SessionState do
       }
 
       event =
-        Map.take(
-          record,
-          ~w(checkpoint_id episode_id covered_range prior_checkpoint_id strategy strategy_revision model reasoning configuration_version usage)
-        )
-        |> Map.put(
-          "owner",
-          if(kind == "compaction_checkpoint_committed_v1",
-            do: %{"kind" => "run", "id" => record["run_id"]},
-            else: %{"kind" => "compact", "id" => record["command_id"]}
-          )
-        )
-        |> Map.put("source_excerpted", candidate.summary["source_excerpted"])
+        checkpoint_public_payload(record)
         |> Map.put(:kind, "context.compacted")
         |> Map.put(
           :event_id,
@@ -8538,34 +8581,6 @@ defmodule Loopex.Runtime.SessionState do
          | interactions: Map.put(state.interactions, interaction_id, interaction),
            open_interaction: interaction_id
        }, [interaction_requested_event(state.session_id, interaction)]}
-    else
-      _other -> {:error, :invalid_interaction_transition}
-    end
-  end
-
-  # Concept: an answer is evidence that a choice was offered and taken; it is
-  # never a decision.
-  #
-  # Technical depth: the status becomes `answered`, which means policy
-  # resolution is owed and nothing more. The choice must be one the retained
-  # question offered, so an answer naming anything else is refused here rather
-  # than reaching the host as if it had been asked about it.
-  defp apply_internal_record(state, %{kind: "interaction_answer_admitted_v1"} = record) do
-    with {:ok, interaction_id} <- record_binary(record, "interaction_id"),
-         {:ok, choice_id} <- record_binary(record, "choice_id"),
-         {:ok, command_id} <- record_binary(record, "command_id"),
-         %{status: "pending"} = interaction <- Map.get(state.interactions, interaction_id),
-         true <- state.open_interaction == interaction_id,
-         true <- Map.get(interaction, :producer) != "model_tool",
-         true <- Interaction.offered?(interaction.request, choice_id) do
-      answered = %{
-        interaction
-        | status: "answered",
-          choice_id: choice_id,
-          command_id: command_id
-      }
-
-      {:ok, %{state | interactions: Map.put(state.interactions, interaction_id, answered)}, []}
     else
       _other -> {:error, :invalid_interaction_transition}
     end
@@ -10275,15 +10290,37 @@ defmodule Loopex.Runtime.SessionState do
     end
   end
 
-  defp initial_public_configuration([]), do: {:ok, nil}
-
-  defp valid_initial_public_configuration(nil), do: :ok
+  defp initial_public_configuration([]), do: {:error, :invalid_public_configuration}
 
   defp valid_initial_public_configuration(configuration) do
     case LoopexProtocol.Session.Configuration.encode_wire(configuration) do
       {:ok, _wire} -> :ok
       :error -> {:error, :invalid_public_configuration}
     end
+  end
+
+  # Concept: inspection and checkpoint publication carry one bounded capture.
+  # Technical depth: lookup only the active retained checkpoint. Its closed
+  # public allowlist excludes summary text and private lineage/digest fields;
+  # ownership and excerpting come from the same committed checkpoint record.
+  defp checkpoint_public_view(%{active_checkpoint: nil}), do: nil
+
+  defp checkpoint_public_view(state),
+    do: checkpoint_public_payload(Map.fetch!(state.checkpoints, state.active_checkpoint))
+
+  defp checkpoint_public_payload(record) do
+    Map.take(
+      record,
+      ~w(checkpoint_id episode_id covered_range prior_checkpoint_id strategy strategy_revision model reasoning configuration_version usage)
+    )
+    |> Map.put(
+      "owner",
+      if(record.kind == "compaction_checkpoint_committed_v1",
+        do: %{"kind" => "run", "id" => record["run_id"]},
+        else: %{"kind" => "compact", "id" => record["command_id"]}
+      )
+    )
+    |> Map.put("source_excerpted", record["summary"]["source_excerpted"])
   end
 
   defp checkpoint_projection_id(nil), do: nil
@@ -10297,7 +10334,8 @@ defmodule Loopex.Runtime.SessionState do
             snapshot: %{active_run_id: active_run_id, event_sequence: ^anchor},
             active_maintenance: active_maintenance,
             configuration: configuration,
-            checkpoint: checkpoint
+            checkpoint: checkpoint,
+            open_interaction: open_interaction
           }} <-
            finish_snapshot_scan(scan) do
       {:ok,
@@ -10306,6 +10344,7 @@ defmodule Loopex.Runtime.SessionState do
          active_maintenance: active_maintenance,
          configuration: configuration,
          checkpoint: checkpoint,
+         open_interaction: open_interaction,
          sequence: anchor
        }}
     else
@@ -10317,9 +10356,8 @@ defmodule Loopex.Runtime.SessionState do
   defp advance_snapshot_scan(scan, event) do
     expected = scan.tail + 1
 
-    open_interaction = advance_open_interaction(scan.open_interaction, event)
-
-    with {:ok, active_run} <- advance_public_projection(scan.active_run, event, expected),
+    with {:ok, open_interaction} <- advance_open_interaction(scan.open_interaction, event),
+         {:ok, active_run} <- advance_public_projection(scan.active_run, event, expected),
          {:ok, maintenance} <- advance_maintenance_projection(scan.active_maintenance, event),
          :ok <- valid_public_maintenance_owner(maintenance, active_run, open_interaction),
          {:ok, configuration} <-
@@ -10385,7 +10423,7 @@ defmodule Loopex.Runtime.SessionState do
     with {:ok, _} <- LoopexProtocol.Session.Configuration.encode_change(payload),
          true <- is_nil(run) and is_nil(maintenance) and is_nil(interaction),
          next = payload["configuration"],
-         prior_version = if(is_nil(current), do: 0, else: current["configuration_version"]),
+         prior_version = current["configuration_version"],
          true <- next["configuration_version"] == prior_version + 1 do
       {:ok, next}
     else
@@ -10504,38 +10542,75 @@ defmodule Loopex.Runtime.SessionState do
   # live coordinator state, because live state answers a different question: what
   # is open now, not what was open then. A resolution of any kind closes it, and
   # the kinds are distinct so a reader can tell an expiry from an abort.
-  defp advance_open_interaction(_open, %{kind: "interaction.requested"} = event) do
-    %{
-      "interaction_id" => Map.get(event, "interaction_id"),
-      "run_id" => Map.get(event, "run_id"),
-      "turn" => Map.get(event, "turn"),
-      "tool_call_id" => Map.get(event, "tool_call_id"),
-      "prompt" => Map.get(event, "prompt"),
-      "choices" => Map.get(event, "choices"),
-      "expires_at" => Map.get(event, "expires_at"),
-      "status" => "pending"
+  defp advance_open_interaction(nil, %{kind: "interaction.requested"} = event) do
+    projected = %{
+      "interaction_id" => event["interaction_id"],
+      "run_id" => event["run_id"],
+      "turn" => event["turn"],
+      "tool_call_id" => event["tool_call_id"],
+      "prompt" => event["prompt"],
+      "choices" => event["choices"],
+      "expires_at" => event["expires_at"],
+      "status" => "pending",
+      "producer" => if(event["producer"] == "model_tool", do: "model_tool", else: "policy_defer"),
+      "kind" =>
+        if(event["producer"] == "model_tool", do: event["interaction_kind"], else: "choice")
     }
-    |> then(fn projected ->
-      if event["producer"] == "model_tool" do
-        projected
-        |> Map.put("producer", "model_tool")
-        |> Map.put("kind", event["interaction_kind"])
-      else
-        projected
-      end
-    end)
+
+    case LoopexProtocol.Session.OpenInteraction.encode_wire(projected) do
+      {:ok, _} -> {:ok, projected}
+      :error -> {:error, :invalid_public_interaction}
+    end
   end
 
-  defp advance_open_interaction(%{"interaction_id" => open} = current, %{kind: kind} = event)
-       when is_binary(kind) do
-    closes? =
-      String.starts_with?(kind, "interaction.") and kind != "interaction.requested" and
-        Map.get(event, "interaction_id") == open
+  defp advance_open_interaction(
+         %{"status" => "pending", "producer" => "policy_defer", "kind" => "choice"} = open,
+         %{kind: "interaction.answer_admitted"} = event
+       ) do
+    payload = Map.drop(event, [:kind, :event_id, :event_sequence])
 
-    if closes?, do: nil, else: current
+    with {:ok, _} <- LoopexProtocol.Session.OpenInteraction.encode_answer_admitted(payload),
+         true <-
+           Enum.all?(~w(interaction_id run_id turn tool_call_id), &(payload[&1] == open[&1])),
+         true <- Enum.any?(open["choices"], &(&1["id"] == payload["answer_choice_id"])) do
+      {:ok,
+       open
+       |> Map.put("status", "answered")
+       |> Map.put("answer_choice_id", payload["answer_choice_id"])
+       |> Map.put("answer_command_id", payload["answer_command_id"])}
+    else
+      _ -> {:error, :invalid_public_interaction_answer}
+    end
   end
 
-  defp advance_open_interaction(open, _event), do: open
+  defp advance_open_interaction(_open, %{kind: kind})
+       when kind in ["interaction.requested", "interaction.answer_admitted"],
+       do: {:error, :invalid_public_interaction_transition}
+
+  defp advance_open_interaction(%{"interaction_id" => id}, %{kind: kind} = event)
+       when kind in [
+              "interaction.resolved",
+              "interaction.expired",
+              "interaction.cancelled",
+              "interaction.answered",
+              "interaction.declined"
+            ] do
+    if event["interaction_id"] == id,
+      do: {:ok, nil},
+      else: {:error, :invalid_public_interaction_transition}
+  end
+
+  defp advance_open_interaction(nil, %{kind: kind})
+       when kind in [
+              "interaction.resolved",
+              "interaction.expired",
+              "interaction.cancelled",
+              "interaction.answered",
+              "interaction.declined"
+            ],
+       do: {:error, :invalid_public_interaction_transition}
+
+  defp advance_open_interaction(open, _event), do: {:ok, open}
 
   # Concept: a run becomes publicly visible when its prompt is admitted, and
   # publicly started only when its first request is staged.

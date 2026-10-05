@@ -63,11 +63,11 @@ defmodule Loopex.Attachment do
 
   ## Technical depth
 
-  Accepted ADR 0023 makes this a sibling of the snapshot rather than a member of
-  it, because accepted ADR 0017 fixes the snapshot's members exactly. It is
-  projected from the same public events a client replays, so two attachments at
-  one cursor cannot disagree about whether a question was waiting there; live
-  coordinator state answers a different question, which is what is open now.
+  The current revision-3 snapshot contains the same closed open-interaction
+  view exposed by this accessor. Both are reduced from public events at this
+  attachment's cursor. An admitted policy answer remains visible until policy
+  resolution; it grants no authority. Two attachments at one cursor agree,
+  while live coordinator status describes its own current committed cursor.
   """
   @spec open_interaction(t()) :: map() | nil
   def open_interaction(%__MODULE__{open_interaction: open_interaction}), do: open_interaction

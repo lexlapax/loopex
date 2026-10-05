@@ -273,7 +273,14 @@ defmodule Loopex.EmbeddedApiTest do
       assert Enum.any?(reads, &match?(%{after_sequence: 1_024, returned: 515}, &1))
       assert Enum.any?(reads, &match?(%{after_sequence: 1_539, returned: 0}, &1))
 
-      {:ok, scan} = SessionState.start_snapshot_scan(paged_session, nil)
+      initial_configuration =
+        M1RuntimeTestStore.inspect_state(paged.store_pid).sessions[paged_session].records
+        |> hd()
+        |> Map.fetch!(:payload)
+        |> Map.fetch!("initial_configuration")
+        |> Loopex.Runtime.SessionConfiguration.public_view()
+
+      {:ok, scan} = SessionState.start_snapshot_scan(paged_session, nil, initial_configuration)
 
       scan =
         paged_events

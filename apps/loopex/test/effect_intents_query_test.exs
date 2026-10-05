@@ -157,6 +157,108 @@ defmodule Loopex.EffectIntentsQueryTest do
     ]
   end
 
+  defmodule AnswerPolicy do
+    @moduledoc false
+    @behaviour Loopex.Policy
+    @impl Loopex.Policy
+    def decide(request) do
+      if not is_nil(Map.get(request, :interaction_response)) do
+        {:deny, :policy_denied}
+      else
+        {:defer,
+         %{
+           kind: :choice,
+           prompt: "Decline the effect?",
+           choices: [%{id: "deny", label: "Decline"}],
+           expires_in_ms: 60_000
+         }}
+      end
+    end
+  end
+
+  test "current policy-answer rows advance neutral coverage and retired or corrupted rows refuse without activation",
+       context do
+    %{runtime: runtime, session: session, reference: reference} = context
+
+    fixture =
+      Fixture.start(
+        policy: AnswerPolicy,
+        script: [
+          %{text: "write", calls: [%{id: "c1", name: "write", arguments: %{"path" => "a"}}]},
+          %{text: "done", calls: []}
+        ]
+      )
+
+    on_exit(fn -> Fixture.stop(fixture) end)
+    {^session, attachment, {:accepted, "prompt-1"}} = Fixture.run(fixture, "write")
+
+    question =
+      await_policy_question(fixture, session, System.monotonic_time(:millisecond) + 5_000)
+
+    assert {:accepted, "answer"} =
+             Loopex.command(
+               attachment,
+               %{
+                 type: :interaction_answer,
+                 command_id: "answer",
+                 interaction_id: question["interaction_id"],
+                 choice_id: "deny"
+               }
+             )
+
+    await_finished(attachment, System.monotonic_time(:millisecond) + 5_000)
+    records = Fixture.records(fixture, session)
+    events = Fixture.events(fixture, session)
+    assert {:ok, _} = SessionState.recover(session, records, events)
+    current = "policy_interaction_answer_admitted_v1"
+    assert [answer] = Enum.filter(records, &(&1.payload.kind == current))
+    assert map_size(answer.payload) == 8
+    assert answer.payload["choice_id"] == "deny"
+    assert answer.payload["command_id"] == "answer"
+    install_history(reference, records)
+    pages = all_pages(runtime, session, nil, 1, [])
+    assert length(pages) == length(records)
+    assert List.last(pages).next_cursor == nil
+    answer_page = Enum.at(pages, answer.journal_version - 1)
+    assert answer_page.rows == []
+
+    for transform <- [
+          &Map.put(&1, :kind, "command_admitted"),
+          &Map.put(&1, :kind, "interaction_answer_admitted_v1"),
+          &Map.delete(&1, "command_digest"),
+          &Map.put(&1, "command_digest", String.duplicate("0", 64)),
+          &Map.put(&1, "answer_digest", String.duplicate("0", 64)),
+          &Map.put(&1, "command_type", "abort"),
+          &Map.put(&1, "admission", "rejected_interaction_resolved"),
+          &Map.put(&1, "command_id", "changed"),
+          &Map.put(&1, "choice_id", "changed"),
+          &Map.put(&1, "interaction_id", "changed"),
+          &Map.put(&1, "private", "canary")
+        ] do
+      corrupted = change_payload(records, current, transform)
+      install_history(reference, corrupted)
+      assert {:error, :invalid_history} = scan_result(runtime, session)
+      assert {:error, _} = SessionState.recover(session, corrupted, events)
+    end
+
+    {:ok, children} = Runtime.children(runtime)
+    assert :sys.get_state(children.control).sessions == %{}
+    assert Loopex.AgentLoopTestExecutor.jobs(fixture.executor) == []
+    refute_received {:forbidden_store_call, _}
+  end
+
+  defp await_policy_question(fixture, session, cutoff) do
+    case Enum.find(Fixture.events(fixture, session), &(&1.kind == "interaction.requested")) do
+      nil ->
+        assert System.monotonic_time(:millisecond) < cutoff
+        Process.sleep(20)
+        await_policy_question(fixture, session, cutoff)
+
+      question ->
+        question
+    end
+  end
+
   test "every record advances coverage and only nil next cursor completes it", context do
     %{
       runtime: runtime,

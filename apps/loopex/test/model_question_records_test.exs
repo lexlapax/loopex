@@ -89,6 +89,12 @@ defmodule Loopex.ModelQuestionRecordsTest do
                )
 
       assert pending_attachment.open_interaction == expected_open
+      pending_snapshot = Loopex.snapshot(pending_attachment)
+      assert pending_snapshot.snapshot_revision == 3
+      assert pending_snapshot.open_interaction == expected_open
+      assert pending_snapshot.event_sequence == requested.event_sequence
+      assert {:ok, pending_wire} = LoopexProtocol.Session.Snapshot.encode_wire(pending_snapshot)
+      assert {:ok, ^pending_snapshot} = LoopexProtocol.Session.Snapshot.decode_wire(pending_wire)
       assert expected_open["producer"] == "model_tool"
       assert expected_open["kind"] == vector["interaction_request"]["kind"]
 
@@ -215,6 +221,7 @@ defmodule Loopex.ModelQuestionRecordsTest do
                )
 
       assert historical_attachment.open_interaction == expected_open
+      assert Loopex.snapshot(historical_attachment) == pending_snapshot
 
       assert {:ok, settled_attachment} =
                Loopex.attach(fixture.runtime, session,
@@ -222,6 +229,7 @@ defmodule Loopex.ModelQuestionRecordsTest do
                )
 
       assert settled_attachment.open_interaction == nil
+      assert Loopex.snapshot(settled_attachment).open_interaction == nil
 
       response_row =
         Enum.find(records, &(&1.payload.kind == "model_question_response_admitted_v2"))

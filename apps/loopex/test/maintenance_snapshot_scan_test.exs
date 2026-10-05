@@ -43,6 +43,7 @@ defmodule Loopex.Runtime.MaintenanceSnapshotScanTest do
         assert result.tail == length(events)
         assert result.snapshot.event_sequence == anchor
         assert result.active_maintenance == Enum.at(expected, anchor)
+        assert result.snapshot.active_maintenance == result.active_maintenance
 
         assert Map.keys(scan) |> Enum.sort() ==
                  Enum.sort(
@@ -59,6 +60,85 @@ defmodule Loopex.Runtime.MaintenanceSnapshotScanTest do
       assert {:ok, tail} = events |> scan(nil, 1) |> SessionState.finish_snapshot_scan()
       assert tail.active_maintenance == nil
       assert tail.snapshot.event_sequence == length(events)
+    end
+  end
+
+  test "choice and text questions share their exact historical cursor with all snapshot views" do
+    for {producer, kind, choices} <- [
+          {"policy_defer", "choice", [%{"id" => <<255>>, "label" => "Proceed"}]},
+          {"model_tool", "choice", [%{"id" => "choice-1", "label" => "Proceed"}]},
+          {"model_tool", "text", []}
+        ] do
+      run_id = <<0, 255>>
+
+      requested =
+        row("interaction.requested", %{
+          "interaction_id" => <<1, 255>>,
+          "run_id" => run_id,
+          "turn" => Integer.pow(10, 100),
+          "tool_call_id" => <<2, 255>>,
+          "prompt" => "Choose",
+          "choices" => choices,
+          "expires_at" => 18_446_744_073_709_551_615
+        })
+
+      requested =
+        if producer == "model_tool",
+          do: requested |> Map.put("producer", producer) |> Map.put("interaction_kind", kind),
+          else: requested
+
+      endings =
+        if producer == "policy_defer" do
+          [
+            row("interaction.answer_admitted", %{
+              "interaction_id" => <<1, 255>>,
+              "run_id" => run_id,
+              "turn" => Integer.pow(10, 100),
+              "tool_call_id" => <<2, 255>>,
+              "producer" => "policy_defer",
+              "interaction_kind" => "choice",
+              "status" => "answered",
+              "answer_choice_id" => <<255>>,
+              "answer_command_id" => <<3, 255>>
+            }),
+            row("interaction.resolved", %{"interaction_id" => <<1, 255>>})
+          ]
+        else
+          [row("interaction.answered", %{"interaction_id" => <<1, 255>>})]
+        end
+
+      events =
+        stamp(
+          [row("user.message_appended", %{"run_id" => run_id}), requested] ++
+            endings ++ [row("run.finished", %{"run_id" => run_id})]
+        )
+
+      for width <- 1..length(events), anchor <- 0..length(events) do
+        {:ok, result} = events |> scan(anchor, width) |> SessionState.finish_snapshot_scan()
+        snapshot = result.snapshot
+        assert snapshot.configuration == result.configuration
+        assert snapshot.open_interaction == result.open_interaction
+        assert {:ok, wire} = LoopexProtocol.Session.Snapshot.encode_wire(snapshot)
+        assert {:ok, ^snapshot} = LoopexProtocol.Session.Snapshot.decode_wire(wire)
+
+        if anchor == 2 do
+          assert snapshot.open_interaction["producer"] == producer
+          assert snapshot.open_interaction["kind"] == kind
+          assert snapshot.open_interaction["turn"] == Integer.pow(10, 100)
+          assert snapshot.open_interaction["choices"] == choices
+          assert snapshot.active_run_id == run_id
+        else
+          if producer == "policy_defer" and anchor == 3 do
+            assert snapshot.open_interaction["status"] == "answered"
+            assert snapshot.open_interaction["answer_choice_id"] == <<255>>
+            assert snapshot.open_interaction["answer_command_id"] == <<3, 255>>
+            assert snapshot.open_interaction["turn"] == Integer.pow(10, 100)
+            assert map_size(snapshot.open_interaction) == 12
+          else
+            assert snapshot.open_interaction == nil
+          end
+        end
+      end
     end
   end
 
@@ -116,6 +196,7 @@ defmodule Loopex.Runtime.MaintenanceSnapshotScanTest do
     for width <- 1..length(events), anchor <- 0..length(events) do
       assert {:ok, result} = events |> scan(anchor, width) |> SessionState.finish_snapshot_scan()
       assert result.last_compact == Enum.at(expected, anchor)
+      assert result.snapshot.last_compact == result.last_compact
       assert result.snapshot.event_sequence == anchor
     end
 
@@ -129,7 +210,7 @@ defmodule Loopex.Runtime.MaintenanceSnapshotScanTest do
     run = view("run")
     complete = completion(compact)
     finish = row("context.compaction_finished", complete)
-    {:ok, initial} = SessionState.start_snapshot_scan("session", nil)
+    {:ok, initial} = SessionState.start_snapshot_scan("session", nil, configuration())
 
     for poisoned <- [
           Map.put(complete, "private", "PRIVATE_LAST_COMPACT_CANARY"),
@@ -166,7 +247,9 @@ defmodule Loopex.Runtime.MaintenanceSnapshotScanTest do
         change(admitted)
       ])
 
-    assert {:ok, result} = events |> scan(nil, 1) |> SessionState.finish_snapshot_scan()
+    assert {:ok, result} =
+             events |> scan(nil, 1, configuration(integer)) |> SessionState.finish_snapshot_scan()
+
     assert result.active_maintenance["configuration_version"] == integer
     assert result.active_maintenance["bounds"]["token_budget"] == integer
 
@@ -189,13 +272,13 @@ defmodule Loopex.Runtime.MaintenanceSnapshotScanTest do
           put_in(admitted, ["bounds", "token_budget"], "32768"),
           put_in(admitted, ["bounds", "token_budget"], 32_769)
         ] do
-      {:ok, scan} = SessionState.start_snapshot_scan("session", nil)
+      {:ok, scan} = SessionState.start_snapshot_scan("session", nil, configuration())
 
       assert {:error, :invalid_public_maintenance_view} =
                SessionState.scan_snapshot_page(scan, stamp([change(altered)]))
     end
 
-    {:ok, scan} = SessionState.start_snapshot_scan("session", nil)
+    {:ok, scan} = SessionState.start_snapshot_scan("session", nil, configuration())
     poisoned = Map.put(change(admitted), "instructions", "PRIVATE_SNAPSHOT_CANARY")
 
     assert {:error, :invalid_public_maintenance_view} =
@@ -214,7 +297,7 @@ defmodule Loopex.Runtime.MaintenanceSnapshotScanTest do
           [change(admitted), change(changed_episode)],
           [change(admitted), change(nil), change(nil)]
         ] do
-      {:ok, scan} = SessionState.start_snapshot_scan("session", nil)
+      {:ok, scan} = SessionState.start_snapshot_scan("session", nil, configuration())
 
       assert {:error, :invalid_public_maintenance_transition} =
                SessionState.scan_snapshot_page(scan, stamp(events))
@@ -246,20 +329,27 @@ defmodule Loopex.Runtime.MaintenanceSnapshotScanTest do
           [prompt, change(run), question],
           [prompt, question, change(run)]
         ] do
-      {:ok, scan} = SessionState.start_snapshot_scan("session", nil)
+      {:ok, scan} = SessionState.start_snapshot_scan("session", nil, configuration())
 
       assert {:error, :invalid_public_maintenance_transition} =
                SessionState.scan_snapshot_page(scan, stamp(events))
     end
   end
 
-  defp scan(events, anchor, width) do
-    {:ok, initial} = SessionState.start_snapshot_scan("session", anchor)
+  defp scan(events, anchor, width, configuration \\ configuration()) do
+    {:ok, initial} = SessionState.start_snapshot_scan("session", anchor, configuration)
 
     Enum.reduce(Enum.chunk_every(events, width), initial, fn page, scan ->
       assert {:ok, next} = SessionState.scan_snapshot_page(scan, page)
       next
     end)
+  end
+
+  defp configuration(version \\ 1) do
+    path = Path.join(:code.priv_dir(:loopex_protocol), "vectors/configuration-projection.v1.json")
+    vector = Enum.find(JSON.decode!(File.read!(path))["cases"], &(&1["name"] == "initial"))
+    {:ok, configuration} = LoopexProtocol.Session.Configuration.decode_wire(vector["input"])
+    %{configuration | "configuration_version" => version}
   end
 
   defp stamp(events) do
