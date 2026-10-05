@@ -156,14 +156,14 @@ defmodule LoopexCli.FoundationWorkflowTest do
     assert [{first, true}, {second, true}, {recovered, true}] =
              ProviderFixture.events(workflow.provider)
 
-    assert workflow.instruction in Enum.map(first["messages"], & &1["content"])
-    assert workflow.support in Enum.map(first["messages"], & &1["content"])
-    assert Jason.encode!(second) =~ "output truncated"
-    assert workflow.instruction in Enum.map(recovered["messages"], & &1["content"])
-    assert workflow.support in Enum.map(recovered["messages"], & &1["content"])
-    refute changed.instruction in Enum.map(recovered["messages"], & &1["content"])
-    refute changed.support in Enum.map(recovered["messages"], & &1["content"])
-    assert Jason.encode!(recovered) =~ "output truncated"
+    assert workflow.instruction in provider_texts(first)
+    assert workflow.support in provider_texts(first)
+    assert_artifact_excerpt(second, workflow)
+    assert workflow.instruction in provider_texts(recovered)
+    assert workflow.support in provider_texts(recovered)
+    refute changed.instruction in provider_texts(recovered)
+    refute changed.support in provider_texts(recovered)
+    assert_artifact_excerpt(recovered, workflow)
 
     assert {workflow.full, 0} ==
              run_cli_process(
@@ -237,16 +237,16 @@ defmodule LoopexCli.FoundationWorkflowTest do
     assert [{first, true}, {_second, true}, {recovered, true}] =
              ProviderFixture.events(workflow.provider)
 
-    recovered_contents = Enum.map(recovered["messages"], & &1["content"])
+    recovered_contents = provider_texts(recovered)
 
     first
-    |> Map.fetch!("messages")
+    |> provider_texts()
     |> Enum.take(3)
-    |> Enum.each(fn message -> refute message["content"] in recovered_contents end)
+    |> Enum.each(fn content -> refute content in recovered_contents end)
 
-    refute changed.instruction in Enum.map(recovered["messages"], & &1["content"])
-    refute changed.support in Enum.map(recovered["messages"], & &1["content"])
-    assert Jason.encode!(recovered) =~ "output truncated"
+    refute changed.instruction in provider_texts(recovered)
+    refute changed.support in provider_texts(recovered)
+    assert_artifact_excerpt(recovered, workflow)
   end
 
   defp owned_root(label) do
@@ -397,8 +397,8 @@ defmodule LoopexCli.FoundationWorkflowTest do
     assert Enum.any?(removed, fn frame ->
              Enum.any?(frame.records, fn record ->
                record.payload.kind in [
-                 "model_request_committed",
-                 "model_request_committed_resources_v1"
+                 "model_request_committed_v2",
+                 "model_request_committed_resources_v2"
                ]
              end)
            end),
@@ -438,11 +438,7 @@ defmodule LoopexCli.FoundationWorkflowTest do
 
   defp completed_artifact_locator(workflow) do
     assert [{_first, true}, {second, true}] = ProviderFixture.events(workflow.provider)
-
-    assert [_, locator] =
-             Regex.run(~r/output truncated[^\]]* ([0-9a-f]{64})\]/, Jason.encode!(second))
-
-    locator
+    assert_artifact_excerpt(second, workflow)
   end
 
   defp resume_cli_workflow(workflow, session_id) do
@@ -510,14 +506,50 @@ defmodule LoopexCli.FoundationWorkflowTest do
 
   defp assert_provider_workflow(workflow) do
     assert [{first, true}, {second, true}] = ProviderFixture.events(workflow.provider)
-    second_bytes = Jason.encode!(second)
-    staged = Enum.map(first["messages"], & &1["content"])
+    staged = provider_texts(first)
     assert workflow.instruction in staged
     assert workflow.support in staged
-    assert second_bytes =~ "output truncated"
+    assert_artifact_excerpt(second, workflow)
+  end
 
-    assert [_, locator] = Regex.run(~r/output truncated[^\]]* ([0-9a-f]{64})\]/, second_bytes)
-    locator
+  defp provider_texts(request) do
+    for message <- request["messages"],
+        %{"type" => "text", "text" => text} <- message["content"],
+        do: text
+  end
+
+  # Concept: the model sees a bounded artifact excerpt and the retained object
+  # remains retrievable in full through the public artifact surface.
+  # Technical depth: inspect the native tool-result block's closed JSON object;
+  # verify its actual source prefix, byte counts, object identity and omission.
+  defp assert_artifact_excerpt(request, workflow) do
+    [result] =
+      for message <- request["messages"],
+          %{"type" => "tool_result"} = block <- message["content"],
+          do: block
+
+    projection = JSON.decode!(result["content"])
+
+    assert Enum.sort(Map.keys(projection)) ==
+             ~w(excerpt excerpt_byte_count excerpt_offset excerpt_source object_digest object_size omitted source_byte_count use_locator)
+
+    digest = Base.encode16(:crypto.hash(:sha256, workflow.full), case: :lower)
+    assert projection["object_digest"] == digest
+    assert projection["object_size"] == byte_size(workflow.full)
+    assert projection["source_byte_count"] == CodingTools.limits().read_bytes
+    assert projection["excerpt_source"] == "receipt_content"
+    assert projection["excerpt_offset"] == 0
+    assert projection["omitted"] == true
+    assert projection["use_locator"] =~ ~r/^use:[0-9a-f]{64}$/
+    assert projection["excerpt_byte_count"] > 0
+    assert projection["excerpt_byte_count"] < projection["source_byte_count"]
+    assert projection["excerpt_byte_count"] == byte_size(projection["excerpt"])
+
+    assert projection["excerpt"] ==
+             binary_part(workflow.full, 0, projection["excerpt_byte_count"])
+
+    assert byte_size(result["content"]) <= 2_048
+    digest
   end
 
   defp build_isolated_provider_cli(workflow) do
@@ -778,7 +810,7 @@ defmodule LoopexCli.FoundationWorkflowTest do
         "id" => response_id,
         "type" => "message",
         "role" => "assistant",
-        "model" => "claude-haiku-4-5",
+        "model" => "claude-haiku-4-5-20251001",
         "content" => [],
         "stop_reason" => nil,
         "stop_sequence" => nil,

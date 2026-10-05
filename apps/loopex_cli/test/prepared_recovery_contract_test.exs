@@ -3484,7 +3484,9 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
         policy_identity: %{"id" => "loopex.test.policy", "revision" => "1"},
         grant_decision: {:host_policy, :allow},
         cleanup_grace_ms: @grace,
-        progress_to: Keyword.get(options, :progress_to)
+        progress_to: Keyword.get(options, :progress_to),
+        session_creation_defaults:
+          Loopex.AgentLoopFixture.creation_defaults(tools, cleanup_grace_ms: @grace)
       ]
 
     {:ok, runtime} = Loopex.start_link(runtime_options)
@@ -3533,7 +3535,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
 
         :admitted ->
           prompt_id = "prompt-#{unique}"
-          :ok = M1RuntimeTestStore.delay_after_record(store_pid, "prompt_admitted_v2", self())
+          :ok = M1RuntimeTestStore.delay_after_record(store_pid, "prompt_admitted_v3", self())
 
           prompt =
             Task.async(fn ->
@@ -3544,7 +3546,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
               })
             end)
 
-          assert_receive {:record_linearized, waiter, _store, "prompt_admitted_v2", _transition,
+          assert_receive {:record_linearized, waiter, _store, "prompt_admitted_v3", _transition,
                           {:committed, _tx_id, _receipt}},
                          5_000
 

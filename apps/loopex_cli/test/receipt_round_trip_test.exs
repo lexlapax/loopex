@@ -51,7 +51,11 @@ defmodule LoopexCli.ReceiptRoundTripTest do
         &(&1["tool_id"] in ~w(loopex.read loopex.write loopex.edit loopex.bash))
       )
 
-    genesis = Loopex.ConfiguredGenesisFixture.genesis(definitions)
+    genesis =
+      definitions
+      |> Loopex.AgentLoopFixture.creation_defaults(max_tokens: 1_024)
+      |> Map.put(:kind, "session_genesis_v3")
+      |> Map.put("options", %{})
 
     assert {:ok, session_id} =
              Loopex.create_session(stack.runtime, %{}, command_id: "create-1", genesis: genesis)

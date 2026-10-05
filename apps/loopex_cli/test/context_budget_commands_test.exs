@@ -8,6 +8,7 @@ defmodule LoopexCli.ContextBudgetCommandsTest do
 
   import ExUnit.CaptureIO
 
+  alias Loopex.AgentLoopFixture
   alias Loopex.AgentLoopTestExecutor
   alias Loopex.AgentLoopTestModel
   alias Loopex.M1RuntimeTestStore
@@ -345,7 +346,7 @@ defmodule LoopexCli.ContextBudgetCommandsTest do
     end
   end
 
-  test "a settled prepared owner with no active context accepts omission or an explicit future default" do
+  test "a settled prepared owner accepts a new process default while retaining its session configuration" do
     for {label, explicit} <- [{"omitted", nil}, {"explicit", 4_096}],
         command <- [:resume, :cancel] do
       fixture = settled_fixture("settled-#{command}-#{label}")
@@ -393,12 +394,12 @@ defmodule LoopexCli.ContextBudgetCommandsTest do
                Loopex.command(attachment, %{
                  type: :prompt,
                  command_id: prompt_id,
-                 content: "the selected process default governs this later prompt"
+                 content: "the captured session budget governs this later prompt"
                })
 
       assert_receive {:holding, model_worker}, 5_000
 
-      assert {:ok, %{active_context_token_budget: ^selected_default}} =
+      assert {:ok, %{active_context_token_budget: @context_budget}} =
                Loopex.session_status(replacement, fixture.session_id)
 
       [admission] =
@@ -407,10 +408,11 @@ defmodule LoopexCli.ContextBudgetCommandsTest do
         |> get_in([:sessions, fixture.session_id, :records])
         |> Enum.filter(fn record ->
           kind = Map.get(record.payload, :kind) || Map.get(record.payload, "kind")
-          kind == "prompt_admitted_v2" and record.payload["command_id"] == prompt_id
+          kind == "prompt_admitted_v3" and record.payload["command_id"] == prompt_id
         end)
 
-      assert admission.payload["context_token_budget"] == selected_default
+      assert admission.payload["context_token_budget"] == @context_budget
+      assert admission.payload["configuration_version"] == 1
       send(model_worker, :release)
       assert :ok = LoopexCli.release_placement()
       restore_signal_handlers()
@@ -472,7 +474,7 @@ defmodule LoopexCli.ContextBudgetCommandsTest do
   defp active_fixture(label) do
     fixture = start_fixture(label, [%{text: "context resume completed"}])
     command_id = "active-#{label}"
-    :ok = M1RuntimeTestStore.delay_after_record(fixture.store_pid, "prompt_admitted_v2", self())
+    :ok = M1RuntimeTestStore.delay_after_record(fixture.store_pid, "prompt_admitted_v3", self())
 
     prompt =
       Task.async(fn ->
@@ -483,7 +485,7 @@ defmodule LoopexCli.ContextBudgetCommandsTest do
         })
       end)
 
-    assert_receive {:record_linearized, waiter, _store, "prompt_admitted_v2", _transition,
+    assert_receive {:record_linearized, waiter, _store, "prompt_admitted_v3", _transition,
                     {:committed, _tx_id, _receipt}},
                    5_000
 
@@ -553,7 +555,13 @@ defmodule LoopexCli.ContextBudgetCommandsTest do
         policy_identity: %{"id" => "loopex.test.policy", "revision" => "1"},
         grant_decision: {:host_policy, :allow},
         cleanup_grace_ms: @cleanup_grace,
-        context_token_budget: @context_budget
+        context_token_budget: @context_budget,
+        session_creation_defaults:
+          AgentLoopFixture.creation_defaults([],
+            context_token_budget: @context_budget,
+            system_class_tokens: 200,
+            cleanup_grace_ms: @cleanup_grace
+          )
       ]
 
     {:ok, runtime} = Loopex.start_link(runtime_options)

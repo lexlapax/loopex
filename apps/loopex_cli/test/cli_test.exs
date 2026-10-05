@@ -84,6 +84,40 @@ defmodule LoopexCliTest do
     {state_root, workspace}
   end
 
+  # Concept: the host fixture captures the actual scripted adapter it installs.
+  # Technical depth: retain the composition's instruction bytes and tool set,
+  # while declaring the scripted adapter's canonical history renderer.
+  defp scripted_options(options, script) when is_pid(script) do
+    scripted_options(options, %{
+      module: Loopex.AgentLoopTestModel,
+      model: "scripted:v1",
+      options: [script: script, max_tokens: 256]
+    })
+  end
+
+  defp scripted_options(options, model) do
+    retained = Keyword.fetch!(options, :session_creation_defaults)
+
+    defaults =
+      AgentLoopFixture.creation_defaults(
+        Enum.reject(
+          retained["tool_selection"]["definitions"],
+          &(&1["tool_id"] == "artifact_read")
+        ),
+        context_token_budget: retained["initial_configuration"]["context_token_budget"],
+        system_class_tokens: retained["initial_configuration"]["system_class_tokens"],
+        cleanup_grace_ms: retained["runtime_configuration"]["cleanup_grace_ms"]
+      )
+      |> put_in(
+        ["initial_configuration", "instructions"],
+        retained["initial_configuration"]["instructions"]
+      )
+
+    options
+    |> Keyword.put(:model, model)
+    |> Keyword.put(:session_creation_defaults, defaults)
+  end
+
   defp fixture(options) do
     fixture = AgentLoopFixture.start(options)
     on_exit(fn -> AgentLoopFixture.stop(fixture) end)
@@ -484,11 +518,7 @@ defmodule LoopexCliTest do
           assert %{"packs" => [_pack]} = Keyword.fetch!(options, :resource_manifest)
 
           configured =
-            Keyword.put(options, :model, %{
-              module: Loopex.AgentLoopTestModel,
-              model: "scripted:v1",
-              options: [script: model, max_tokens: 256]
-            })
+            scripted_options(options, model)
 
           result = Loopex.start_link(configured)
           send(parent, {:skill_trust_runtime, result})
@@ -565,11 +595,7 @@ defmodule LoopexCliTest do
         Process.put(:"$loopex_composition_edge_observer", fn
           Loopex, :start_link, [options] ->
             configured =
-              Keyword.put(options, :model, %{
-                module: Loopex.AgentLoopTestModel,
-                model: "scripted:v1",
-                options: [script: model, max_tokens: 256]
-              })
+              scripted_options(options, model)
 
             result = Loopex.start_link(configured)
             send(parent, {:declined_skill_runtime, result})
@@ -1447,7 +1473,7 @@ defmodule LoopexCliTest do
           options: [script: model, max_tokens: 256]
         }
 
-        apply(Loopex, :start_link, [Keyword.put(options, :model, model_options)])
+        apply(Loopex, :start_link, [scripted_options(options, model_options)])
 
       module, function, arguments ->
         apply(module, function, arguments)
@@ -1618,7 +1644,7 @@ defmodule LoopexCliTest do
           options: [script: model, max_tokens: 256]
         }
 
-        apply(Loopex, :start_link, [Keyword.put(options, :model, scripted)])
+        apply(Loopex, :start_link, [scripted_options(options, scripted)])
 
       Loopex.Store.Local, :start_link, [options] ->
         result = apply(Loopex.Store.Local, :start_link, [options])
@@ -3632,7 +3658,7 @@ defmodule LoopexCliTest do
     receipt =
       fixture
       |> AgentLoopFixture.records(session_id)
-      |> Enum.find(&(&1.payload[:kind] == "model_request_committed"))
+      |> Enum.find(&(&1.payload[:kind] == "model_request_committed_v2"))
       |> get_in([Access.key(:payload), "context_receipt"])
 
     [system_descriptor | _rest] = receipt["blocks"]
@@ -3640,8 +3666,9 @@ defmodule LoopexCliTest do
     system_message_bytes = LoopexProtocol.Canonical.encode(hd(request.messages))
 
     assert system_descriptor["source_reference"] == %{
-             "kind" => "system",
-             "identity" => "loopex.system.v1"
+             "kind" => "host_instructions",
+             "version" => "host.v1",
+             "digest" => "a5d2d4fae514aebf0fa59ddf41df74b288bea67918272bfc2c7904dd4e9731ad"
            }
 
     assert system_descriptor["byte_cost"] == byte_size(system_message_bytes)

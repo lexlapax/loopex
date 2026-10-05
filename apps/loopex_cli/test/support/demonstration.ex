@@ -49,6 +49,18 @@ defmodule LoopexCli.Demonstration do
     {:ok, store} = Store.new(Store.Local, adapter)
     {:ok, executor} = open_executor(state_root, workspace, Keyword.get(options, :artifacts))
 
+    selected_tools =
+      Keyword.get(options, :active_tools, ~w(loopex.read loopex.write loopex.edit loopex.bash))
+
+    defaults =
+      CodingTools.definitions()
+      |> Enum.filter(&(&1["tool_id"] in selected_tools))
+      |> Loopex.AgentLoopFixture.creation_defaults(
+        context_token_budget: Keyword.get(options, :context_token_budget, 8_192),
+        system_class_tokens: 1_000,
+        max_tokens: 1_024
+      )
+
     {:ok, runtime} =
       Loopex.start_link(
         context_token_budget: Keyword.get(options, :context_token_budget, 8_192),
@@ -78,7 +90,8 @@ defmodule LoopexCli.Demonstration do
             :active_tools,
             ~w(loopex.read loopex.write loopex.edit loopex.bash)
           ),
-        progress_to: Keyword.get(options, :progress_to)
+        progress_to: Keyword.get(options, :progress_to),
+        session_creation_defaults: defaults
       )
 
     %{runtime: runtime, store: store, adapter: adapter, model: model_pid, workspace: workspace}
