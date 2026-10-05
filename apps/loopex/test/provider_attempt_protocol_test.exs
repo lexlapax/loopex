@@ -1618,8 +1618,17 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     await_callback = private_function_body!(ast, :await_provider_callback, 8)
     await_callback_exit = private_function_body!(ast, :await_provider_callback_exit, 9)
     register_resource = private_function_body!(ast, :register_provider_resource, 7)
-    result_after_guard = private_function_body!(ast, :provider_result_after_guard_exit, 5)
-    cleanup_window = private_function_body!(ast, :provider_cleanup_window, 1)
+
+    result_after_guard =
+      private_function_body!(ast, :provider_result_after_guard_exit, 5, :ordinary)
+
+    preparation_after_guard =
+      private_function_body!(ast, :provider_result_after_guard_exit, 5, :preparation)
+
+    cleanup_window = private_function_body!(ast, :local_provider_cleanup_window, 1)
+    cleanup_router = private_function_body!(ast, :provider_cleanup_window, 1)
+    ordinary_resource = private_function_body!(ast, :stop_callback_resource, 3, :ordinary)
+    preparation_resource = private_function_body!(ast, :stop_callback_resource, 3, :preparation)
 
     callback_retained =
       quote do
@@ -1681,7 +1690,74 @@ defmodule Loopex.ProviderAttemptProtocolTest do
            ),
            "the callback can retain a stale provider resource handle after registration"
 
-    guard_result = receive_clause_body!(await_guard, :loopex_provider_guard_result)
+    guard_result = receive_clause_body!(await_guard, {:loopex_provider_guard_result, :ordinary})
+
+    preparation_result =
+      receive_clause_body!(await_guard, {:loopex_provider_guard_result, :preparation})
+
+    assert ast_contains_expression?(
+             preparation_result,
+             quote do
+               provider_result_after_guard_exit(guard, guard_monitor, reference, result, cleanup)
+             end
+           ),
+           "preparation can replace its already captured cleanup window before joining the guard"
+
+    assert ast_contains_expression?(
+             preparation_after_guard,
+             quote do
+               await_provider_process_down(guard, guard_monitor, cleanup.observation_deadline)
+             end
+           ),
+           "preparation can return before the guard exits within its original observation deadline"
+
+    assert ast_contains_expression?(
+             preparation_after_guard,
+             quote do
+               force_unproved_provider_guard_stop(guard, guard_monitor, reference, cleanup)
+             end
+           ),
+           "preparation guard timeout can skip forced cleanup under the original window"
+
+    assert ast_contains_expression?(
+             preparation_after_guard,
+             quote do
+               {:configuration_preparation_result, :cleanup_unproved, cleanup}
+             end
+           ),
+           "preparation guard uncertainty can discard the original cleanup deadline"
+
+    assert ast_contains_expression?(
+             cleanup_router,
+             quote do
+               request_configuration_cleanup(caretaker, reference, cleanup_grace_ms)
+             end
+           ),
+           "preparation can recapture a later cleanup window instead of asking its caretaker"
+
+    assert ast_contains_expression?(
+             cleanup_router,
+             quote do
+               local_provider_cleanup_window(cleanup_grace_ms)
+             end
+           ),
+           "ordinary completion can lose the existing local cancellation formula"
+
+    assert ast_contains_expression?(
+             ordinary_resource,
+             quote do
+               stop_provider_resource(reference, grace)
+             end
+           ),
+           "ordinary completion can forward before its registered resource stops"
+
+    assert ast_contains_expression?(
+             preparation_resource,
+             quote do
+               stop_provider_resource_in_window(reference, cleanup)
+             end
+           ),
+           "preparation can forward before its resource stops under the original cleanup window"
 
     assert {:provider_result_after_guard_exit, _metadata,
             [
@@ -1764,9 +1840,10 @@ defmodule Loopex.ProviderAttemptProtocolTest do
               {:owner, _owner_metadata, nil},
               {:reference, _reference_metadata, nil},
               {:result, _reply_metadata, nil},
-              {:stop_provider_resource, _stop_metadata,
+              {:stop_callback_resource, _stop_metadata,
                [
                  {:reference, _cleanup_reference_metadata, nil},
+                 {:result, _cleanup_result_metadata, nil},
                  {:cleanup_grace_ms, _cleanup_grace_metadata, nil}
                ]}
             ]} = normal_down,
@@ -5108,12 +5185,18 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     end
   end
 
-  defp private_function_body!(ast, name, arity) do
+  defp private_function_body!(ast, name, arity, selector \\ :only) do
     {_ast, bodies} =
       Macro.prewalk(ast, [], fn
         {:defp, _metadata, [{^name, _head_metadata, arguments}, clauses]} = node, bodies
         when is_list(arguments) and length(arguments) == arity and is_list(clauses) ->
-          {node, [Keyword.fetch!(clauses, :do) | bodies]}
+          preparation = ast_contains_atom?(arguments, :configuration_preparation_result)
+
+          selected =
+            selector == :only or (selector == :preparation and preparation) or
+              (selector == :ordinary and not preparation)
+
+          if selected, do: {node, [Keyword.fetch!(clauses, :do) | bodies]}, else: {node, bodies}
 
         node, bodies ->
           {node, bodies}
@@ -5143,6 +5226,13 @@ defmodule Loopex.ProviderAttemptProtocolTest do
       [] -> flunk("receive clause #{inspect(expected)} was not found")
       _many -> flunk("receive clause #{inspect(expected)} was not unique")
     end
+  end
+
+  defp receive_pattern_matches?(pattern, {:loopex_provider_guard_result, selector}) do
+    preparation = ast_contains_atom?(pattern, :configuration_preparation_result)
+
+    ast_contains_atom?(pattern, :loopex_provider_guard_result) and
+      ((selector == :preparation and preparation) or (selector == :ordinary and not preparation))
   end
 
   defp receive_pattern_matches?(pattern, expected) when is_atom(expected),

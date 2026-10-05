@@ -77,6 +77,27 @@ defmodule LoopexComposition.ProviderBindings do
 
   def resolve_configuration(_, _, _), do: {:error, :invalid_session_configuration}
 
+  @doc false
+  def resolve_configuration_routes(declaration, providers, definitions)
+      when is_map(declaration) and not is_struct(declaration) and is_list(providers) do
+    with {:ok, capabilities, mapping} <-
+           resolve_selection_routes(
+             declaration["model"],
+             declaration["reasoning"],
+             declaration["max_tokens"],
+             providers
+           ) do
+      SessionConfiguration.resolve(
+        Map.put(declaration, "model", capabilities["model"]),
+        capabilities,
+        mapping,
+        definitions
+      )
+    end
+  end
+
+  def resolve_configuration_routes(_, _, _), do: {:error, :invalid_session_configuration}
+
   @doc """
   ## Concept
 

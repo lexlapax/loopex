@@ -226,7 +226,9 @@ defmodule LoopexComposition.Ephemeral.StartupTest do
            }
 
     assert is_pid(options[:executor].reference)
-    assert options[:model].options[:session_cell] == cell
+    assert options[:model].module == LoopexComposition.Model
+    assert options[:model].options[:adapter] == Loopex.LLM.ReqLLM.InProcess
+    assert options[:model].options[:adapter_options][:session_cell] == cell
     assert :atomics.get(cell, 1) == 0
     Process.exit(supervisor, :shutdown)
   end
@@ -266,7 +268,8 @@ defmodule LoopexComposition.Ephemeral.StartupTest do
     assert :sys.get_state(coordinator).maintenance_instructions == captured
     assert :sys.get_state(coordinator).maintenance_model == maintenance
     model_options = :sys.get_state(coordinator).model.options
-    assert model_options[:provider_bindings] == bindings
+    assert model_options[:adapter_options][:provider_bindings] == bindings
+    assert model_options[:host_options] == [provider_bindings: bindings]
     refute Keyword.has_key?(model_options, :credential_variable)
     assert {:ok, public} = Runtime.configuration(runtime)
     refute :erlang.term_to_binary(public) =~ block["body"]

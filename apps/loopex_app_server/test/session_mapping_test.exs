@@ -32,6 +32,38 @@ defmodule Loopex.AppServer.SessionMappingTest do
   alias Loopex.AppServer.Delivery
   alias LoopexProtocol.Wire
 
+  test "dormant configure capture preserves raw instruction bytes without serving an old generation" do
+    raw = %{
+      "version" => "wire.v1",
+      "base" => "exact wire bytes 猫\n",
+      "environment" => "",
+      "appendix" => "tail"
+    }
+
+    authored = %{"model" => "host-alias", "instructions" => raw, "max_tokens" => 512}
+    assert {:ok, captured} = Loopex.AppServer.Mapping.capture_configuration_changes(authored)
+    assert {:ok, instructions} = Loopex.Runtime.Instructions.capture(raw)
+    assert captured == %{authored | "instructions" => instructions}
+    assert Map.take(captured["instructions"], ~w(version base environment appendix)) == raw
+
+    assert {:ok, %{"model" => "host-alias"}} =
+             Loopex.AppServer.Mapping.capture_configuration_changes(%{"model" => "host-alias"})
+
+    for invalid <- [
+          Map.put(authored, "model_capabilities", %{}),
+          %{authored | "instructions" => Map.put(raw, "digest", String.duplicate("a", 64))},
+          %{authored | "instructions" => Map.put(raw, "file", "unread-path")},
+          %{authored | "instructions" => %{raw | "base" => <<255>>}},
+          %{}
+        ] do
+      assert {:error, :invalid_session_configuration} =
+               Loopex.AppServer.Mapping.capture_configuration_changes(invalid)
+    end
+
+    refute Loopex.AppServer.Mapping.implemented?("session.configure")
+    assert :unsupported = Loopex.AppServer.Mapping.call(%{"method" => "session.configure"}, %{})
+  end
+
   test "a session created over the wire is the session the facade would have created" do
     wire = fixture()
     facade = fixture()

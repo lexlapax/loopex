@@ -484,11 +484,11 @@ defmodule LoopexCli.ChatConfiguration do
            |> Map.merge(changes),
          {:ok, resolved} <-
            ProviderBindings.resolve_configuration(declaration, bindings, definitions),
-         changes <- canonical_model(changes, resolved),
+         effective <- canonical_model(changes, resolved),
          {:ok, candidate} <-
            SessionConfiguration.update(
              current,
-             changes,
+             effective,
              resolved["model_capabilities"],
              resolved["provider_mapping"],
              definitions

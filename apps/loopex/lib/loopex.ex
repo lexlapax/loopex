@@ -202,8 +202,8 @@ defmodule Loopex do
   @doc """
   ## Concept
 
-  Admits a prompt, steer, follow-up, abort or standalone compact through the
-  session reached by this attachment.
+  Admits a prompt, steer, follow-up, abort, standalone compact or settled
+  configuration change through the session reached by this attachment.
 
   ## Technical depth
 
@@ -212,6 +212,14 @@ defmodule Loopex do
   applied to the active run's next request and a follow-up is queued behind
   the active run; at most one of each is held unapplied. Durable command identity, active-run
   exclusion, and post-commit ownership fencing are enforced below the facade.
+  Configure carries `type`, `command_id` and authored `changes`. An optional
+  `Loopex.Model.prepare_configuration/5` callback resolves the complete candidate
+  under one owned 60,000-ms cutoff and the session's retained cleanup bounds.
+  An authored model alias remains part of command identity while the candidate
+  retains its canonical model. Missing preparation capability refuses. Retained
+  duplicate disposition and settledness are checked before host resolution; the
+  serial owner validates, preflights and commits the candidate after exact cleanup.
+  Preparation acquires no credential and dispatches no model or executor call.
   Compact carries explicit `max_attempts`, `deadline_ms` and `token_budget` bounds.
   Admission returns its acknowledgement. Repeating a completed compact returns
   the retained closed `disposition`, `checkpoint_id`, `failure`, `usage` and

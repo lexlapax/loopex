@@ -181,6 +181,37 @@ defmodule Loopex.Model do
   @doc """
   ## Concept
 
+  Optionally prepare a settled session's next complete configuration from its
+  authored changes and trusted host model resolution inputs.
+
+  ## Technical depth
+
+  Current settings and immutable definitions are committed session facts.
+  Authored changes retain their exact normalized identity, including a model
+  alias. Return only the complete bounded canonical candidate; the session owner
+  validates and commits it. Preparation acquires no credential and invokes no
+  model or executor operation. The context contains exactly the absolute local
+  `deadline_monotonic_ms` and retained `cleanup_grace_ms`. The owner enforces one
+  60,000-ms cutoff and joins invocation-owned work before admitting a result.
+  Per-invocation descendants must use the existing managed ProviderLifetime
+  starter and cleanup registration; shared host catalog services retain their
+  host-owned lifetime. Exceptions and malformed results become fixed refusals. Missing capability
+  refuses unprepared configure and never falls back to `complete/3`.
+  """
+  @callback prepare_configuration(
+              map(),
+              map(),
+              [map()],
+              %{deadline_monotonic_ms: integer(), cleanup_grace_ms: pos_integer()},
+              keyword()
+            ) ::
+              {:ok, map()} | {:error, term()}
+
+  @optional_callbacks prepare_configuration: 5
+
+  @doc """
+  ## Concept
+
   The delta kinds an adapter may emit.
 
   ## Technical depth

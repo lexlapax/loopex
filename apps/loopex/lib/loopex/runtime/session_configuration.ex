@@ -155,6 +155,47 @@ defmodule Loopex.Runtime.SessionConfiguration do
   @doc """
   ## Concept
 
+  Verify the exact canonical candidate captured for an authored configuration
+  change, including a host-resolved model alias.
+
+  ## Technical depth
+
+  ADR 0050 binds the original authored model name to the candidate's canonical
+  model. Only an explicitly authored model member may be substituted when
+  reconstructing the pure update. Omission cannot retarget the model, and every
+  other setting and origin must equal the existing update result. This validator
+  uses retained facts only; it performs no catalog lookup or host callback.
+  """
+  @spec validate_candidate(term(), term(), term(), term()) ::
+          :ok | {:error, :invalid_configuration_transition}
+  def validate_candidate(current, authored, candidate, definitions)
+      when is_map(current) and is_map(authored) and is_map(candidate) do
+    with :ok <- validate_update(authored),
+         true <- Map.has_key?(authored, "model") or candidate["model"] == current["model"],
+         effective <-
+           if(Map.has_key?(authored, "model"),
+             do: Map.put(authored, "model", candidate["model"]),
+             else: authored
+           ),
+         {:ok, ^candidate} <-
+           update(
+             current,
+             effective,
+             candidate["model_capabilities"],
+             candidate["provider_mapping"],
+             definitions
+           ) do
+      :ok
+    else
+      _ -> {:error, :invalid_configuration_transition}
+    end
+  end
+
+  def validate_candidate(_, _, _, _), do: {:error, :invalid_configuration_transition}
+
+  @doc """
+  ## Concept
+
   Project only the committed configuration settings an operator may inspect.
 
   ## Technical depth

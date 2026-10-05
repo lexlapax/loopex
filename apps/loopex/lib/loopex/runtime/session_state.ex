@@ -431,6 +431,25 @@ defmodule Loopex.Runtime.SessionState do
 
   def propose(_state, _command, _resolved), do: {:error, :invalid_command}
 
+  # Concept: host resolution follows the original authored command disposition.
+  # Technical depth: the pure ordinary proposal performs normalization, digest,
+  # duplicate lookup and settledness first. Only a fresh not-prepared configure
+  # command may reach the optional Model callback. Other proposals retain their
+  # existing refusal or replay, without invoking any host code.
+  @doc false
+  def prepare_configuration_command(state, command, owner_settled) do
+    case propose(state, command, %{configuration_owner_settled: owner_settled}) do
+      {:ok, %{reply: {:error, :configuration_not_prepared}}} ->
+        case normalize_command(command) do
+          {:ok, %{type: :configure} = normalized} -> {:new, normalized}
+          _ -> {:error, :invalid_command}
+        end
+
+      result ->
+        result
+    end
+  end
+
   # Concept: retained admission is evidence; an absent index entry is not absence.
   # Technical depth: this replay-derived view contains no Store or scheduling
   # effects. Refusal codes are the reducer's fixed atoms, never authored text.
@@ -5537,7 +5556,7 @@ defmodule Loopex.Runtime.SessionState do
       "changes" => configuration_record_changes(command.changes, admission),
       "prior_configuration_version" => configuration_version(state),
       "configuration" => if(admission == "accepted", do: candidate, else: nil),
-      kind: "session_configuration_admitted_v1"
+      kind: "session_configuration_admitted_v2"
     }
 
     with {:ok, next} <- apply_command_record(state, record) do
@@ -6090,7 +6109,7 @@ defmodule Loopex.Runtime.SessionState do
               "model_question_abort_admitted_v2",
               "prompt_admitted_v3",
               "model_question_response_admitted_v2",
-              "session_configuration_admitted_v1",
+              "session_configuration_admitted_v2",
               "compact_command_admitted_v1",
               "compact_abort_admitted_v1",
               "command_admission_refused_v1"
@@ -6263,7 +6282,7 @@ defmodule Loopex.Runtime.SessionState do
   defp admissible_command_kind?("model_question_response_admitted_v2", record),
     do: record["command_type"] == "interaction_answer" and record["admission"] == "accepted"
 
-  defp admissible_command_kind?("session_configuration_admitted_v1", record),
+  defp admissible_command_kind?("session_configuration_admitted_v2", record),
     do: record["command_type"] == "configure"
 
   defp admissible_command_kind?("compact_command_admitted_v1", record),
@@ -6467,7 +6486,7 @@ defmodule Loopex.Runtime.SessionState do
 
   defp command_effect(
          state,
-         %{kind: "session_configuration_admitted_v1"} = record,
+         %{kind: "session_configuration_admitted_v2"} = record,
          "configure",
          admission,
          command_id
@@ -6767,14 +6786,13 @@ defmodule Loopex.Runtime.SessionState do
          candidate
        )
        when is_map(current) and is_map(selection) and is_map(candidate) do
-    case SessionConfiguration.update(
+    case SessionConfiguration.validate_candidate(
            current,
            changes,
-           candidate["model_capabilities"],
-           candidate["provider_mapping"],
+           candidate,
            selection["definitions"]
          ) do
-      {:ok, ^candidate} ->
+      :ok ->
         SessionConfiguration.preflight_history(
           candidate,
           Enum.flat_map(state.run_order, &elements(state, &1)),

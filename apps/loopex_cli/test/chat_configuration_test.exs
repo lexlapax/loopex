@@ -263,10 +263,11 @@ defmodule LoopexCli.ChatConfigurationTest do
              })
 
     assert changes == %{
-             "model" => "anthropic:claude-haiku-4-5-20251001",
+             "model" => "anthropic:claude-haiku-4-5",
              "max_tokens" => 4096
            }
 
+    assert candidate["model"] == "anthropic:claude-haiku-4-5-20251001"
     assert candidate["configuration_version"] == 2
     assert candidate["context_token_budget"] == 200_000 - 4096
     assert candidate["budget_origins"]["context_token_budget"] == "model_window"

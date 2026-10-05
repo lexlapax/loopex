@@ -360,6 +360,7 @@ defmodule Loopex.EffectIntentsQueryTest do
     bounds = %{"max_attempts" => 4, "deadline_ms" => 60_000, "token_budget" => 32_768}
 
     commands = [
+      %{type: :configure, command_id: "configure-before-compact", changes: %{"max_tokens" => 32}},
       %{type: :compact, command_id: "compact", bounds: bounds},
       %{type: :compact, command_id: "compact-fenced", bounds: bounds},
       %{type: :configure, command_id: "configure-fenced", changes: %{"max_tokens" => 32}},
@@ -373,6 +374,7 @@ defmodule Loopex.EffectIntentsQueryTest do
       end)
 
     assert {:ok, replay} = SessionState.recover(session, records, [])
+    assert Enum.any?(records, &(&1.payload.kind == "session_configuration_admitted_v2"))
     assert replay.pending_compact == state.pending_compact
     install_history(reference, records)
     pages = all_pages(runtime, session, nil, 1, [])
@@ -383,6 +385,8 @@ defmodule Loopex.EffectIntentsQueryTest do
     refute_receive {:forbidden_store_call, _}, 0
 
     for {kind, transform} <- [
+          {"session_configuration_admitted_v2",
+           &Map.put(&1, :kind, "session_configuration_admitted_v1")},
           {"compact_command_admitted_v1", &put_in(&1, ["bounds", "max_attempts"], 5)},
           {"compact_command_admitted_v1", &put_in(&1, ["bounds", "token_budget"], "32768")},
           {"compact_command_admitted_v1", &Map.put(&1, "admitted_at", 1_000)},

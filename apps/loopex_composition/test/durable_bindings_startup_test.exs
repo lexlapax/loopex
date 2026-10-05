@@ -145,6 +145,65 @@ defmodule LoopexComposition.DurableBindingsStartupTest do
     end
   end
 
+  test "actual durable constructors prepare authored aliases using the borrowed route inventory",
+       %{options: options} do
+    {:ok, host} = CredentialHost.open(bindings())
+    host_pids = host_pids(host)
+    on_exit(fn -> Enum.each(host_pids, &stop/1) end)
+    System.delete_env("M7_START_A")
+    System.delete_env("M7_START_B")
+
+    for entry <- [:start, :with_runtime, :start_edges] do
+      {:ok, plane} = CredentialHost.plane(host)
+      settings = options ++ [credential_plane: plane]
+
+      case entry do
+        :start ->
+          assert {:ok, runtime} = LoopexComposition.start(settings)
+          assert_configuration(runtime)
+          assert :ok = Loopex.stop(runtime)
+          await_store_release(options[:state_root])
+
+        :with_runtime ->
+          assert :ok = LoopexComposition.with_runtime(settings, &assert_configuration/1)
+
+        :start_edges ->
+          assert {:ok, edges} = LoopexComposition.start_edges(settings)
+          assert_configuration(edges.runtime)
+          assert :ok = Loopex.stop(edges.runtime)
+          edges |> Map.drop([:runtime, :runtime_supervisor]) |> Map.values() |> Enum.each(&stop/1)
+      end
+
+      assert :ok = CredentialHost.release_plane(plane)
+      assert Enum.all?(host_pids, &Process.alive?/1)
+    end
+  end
+
+  defp assert_configuration(runtime) do
+    command_id = "create-configuration-#{System.unique_integer([:positive])}"
+    assert {:ok, session} = Loopex.create_session(runtime, %{}, command_id: command_id)
+    assert {:ok, attachment} = Loopex.attach(runtime, session, after_event_sequence: 0)
+    authored = %{"model" => "anthropic:claude-haiku-4-5", "max_tokens" => 8192}
+    command = %{type: :configure, command_id: "alias", changes: authored}
+    assert {:accepted, "alias"} = Loopex.command(attachment, command)
+    assert {:ok, status} = Loopex.session_status(runtime, session)
+    assert status.configuration["model"] == "anthropic:claude-haiku-4-5-20251001"
+    assert status.configuration["configuration_version"] == 2
+    assert {:accepted, "alias"} = Loopex.command(attachment, command)
+
+    assert {:error, :idempotency_conflict} =
+             Loopex.command(
+               attachment,
+               %{
+                 command
+                 | changes: %{authored | "model" => "anthropic:claude-haiku-4-5-20251001"}
+               }
+             )
+
+    refute :erlang.term_to_binary(status) =~ "start-canary"
+    :ok
+  end
+
   test "invalid complete planes and conflicting bindings refuse before owned effects", %{
     options: options
   } do
@@ -259,7 +318,9 @@ defmodule LoopexComposition.DurableBindingsStartupTest do
   defp assert_runtime(runtime) do
     {:ok, children} = Loopex.Runtime.children(runtime)
     state = :sys.get_state(children.control)
-    config = Map.new(state.model.options)
+    assert state.model.module == LoopexComposition.Model
+    assert state.model.options[:adapter] == Loopex.LLM.ReqLLM
+    config = Map.new(state.model.options[:adapter_options])
     assert config.excluded_env_names == @names
 
     for {model, expected} <- [

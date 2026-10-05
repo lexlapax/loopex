@@ -211,19 +211,23 @@ defmodule LoopexComposition do
                  tools: DurableOptions.definitions(options)
                ] ++
                  [
-                   model: %{
-                     module: ReqLLM,
-                     model: Keyword.get(options, :model, ReqLLM.default_model()),
-                     options:
-                       Keyword.get(options, :provider_launch, []) ++
-                         credential_plane.model_options ++
-                         [
-                           excluded_env_names:
-                             Map.get(credential_plane, :excluded_env_names, [
-                               ReqLLM.credential_variable()
-                             ])
-                         ]
-                   }
+                   model:
+                     LoopexComposition.Model.reference(
+                       %{
+                         module: ReqLLM,
+                         model: Keyword.get(options, :model, ReqLLM.default_model()),
+                         options:
+                           Keyword.get(options, :provider_launch, []) ++
+                             credential_plane.model_options ++
+                             [
+                               excluded_env_names:
+                                 Map.get(credential_plane, :excluded_env_names, [
+                                   ReqLLM.credential_variable()
+                                 ])
+                             ]
+                       },
+                       options
+                     )
                  ] ++
                  DurableOptions.runtime_options(options) ++
                  context_token_budget(options) ++

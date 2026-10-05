@@ -42,7 +42,7 @@ defmodule Loopex.Runtime.EffectIntents do
     "owner_advanced" =>
       {~w(prior_owner_epoch owner_epoch owner_incarnation_id owner_transaction_id), []},
     "prompt_admitted_v3" => {@prompt_keys ++ ~w(configuration_version), []},
-    "session_configuration_admitted_v1" =>
+    "session_configuration_admitted_v2" =>
       {@command_keys ++ ~w(changes prior_configuration_version configuration), []},
     "compact_command_admitted_v1" => {@command_keys ++ ~w(bounds episode_id), []},
     "compact_abort_admitted_v1" => {@command_keys ++ ~w(compact_command_id episode_id), []},

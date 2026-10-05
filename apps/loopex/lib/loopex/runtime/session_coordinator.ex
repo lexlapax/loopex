@@ -472,6 +472,8 @@ defmodule Loopex.Runtime.SessionCoordinator do
        interaction_timers: %{},
        pending_fault: nil,
        unknown_admission: nil,
+       configuration_preparation: nil,
+       configuration_cleanup_uncertain: false,
        # Concept: only a conclusive transaction refusal proves non-admission.
        # Technical depth: retain the latest such unknown-command observation in
        # one bounded slot. Older absent facts report pending, never absence.
@@ -532,8 +534,11 @@ defmodule Loopex.Runtime.SessionCoordinator do
         state
       )
 
-  def handle_call({:command_with_configuration, supplied_owner, command, candidate}, _from, state) do
+  def handle_call({:command_with_configuration, supplied_owner, command, candidate}, from, state) do
     cond do
+      state.configuration_cleanup_uncertain ->
+        {:reply, {:error, :runtime_unavailable}, state}
+
       not is_nil(state.drain) ->
         {:reply, {:error, :runtime_unavailable}, state}
 
@@ -549,7 +554,9 @@ defmodule Loopex.Runtime.SessionCoordinator do
       true ->
         case Control.current_owner(state.control, state.session_id, state.owner) do
           :ok ->
-            state |> fence_prepared_resume(command) |> commit_command(command, candidate)
+            state
+            |> fence_prepared_resume(command)
+            |> admit_configuration_or_command(command, candidate, from)
 
           {:error, :superseded_owner} ->
             {:reply, {:error, :superseded_owner}, superseded_owner(state)}
@@ -560,8 +567,11 @@ defmodule Loopex.Runtime.SessionCoordinator do
     end
   end
 
-  def handle_call({:command_detailed, supplied_owner, command}, _from, state) do
+  def handle_call({:command_detailed, supplied_owner, command}, from, state) do
     cond do
+      state.configuration_cleanup_uncertain ->
+        {:reply, {:error, :runtime_unavailable}, state}
+
       not is_nil(state.drain) ->
         {:reply, {:error, :runtime_unavailable}, state}
 
@@ -579,7 +589,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
           :ok ->
             state
             |> fence_prepared_resume(command)
-            |> commit_command(command)
+            |> admit_configuration_or_command(command, :unprepared, from, true)
             |> detailed_command_reply()
 
           {:error, :superseded_owner} ->
@@ -592,11 +602,26 @@ defmodule Loopex.Runtime.SessionCoordinator do
   end
 
   def handle_call(
+        {:admit_quiesce_abort, supplied_owner, _drain, _phase} = request,
+        from,
+        %{configuration_preparation: pending} = state
+      )
+      when is_map(pending) do
+    if supplied_owner == state.owner and not state.superseded and
+         state.phase == :ready and is_nil(state.drain) and is_nil(pending.after_cleanup),
+       do: cancel_configuration_preparation(state, {:quiesce, request, from}),
+       else: {:reply, {:error, :runtime_unavailable}, state}
+  end
+
+  def handle_call(
         {:admit_quiesce_abort, supplied_owner, drain_id, phase_owner},
         _from,
         state
       ) do
     cond do
+      state.configuration_cleanup_uncertain ->
+        {:reply, {:error, :runtime_unavailable}, state}
+
       not is_nil(state.drain) ->
         {:reply, {:error, :runtime_unavailable}, state}
 
@@ -971,6 +996,53 @@ defmodule Loopex.Runtime.SessionCoordinator do
       ) do
     pending = %{state.unknown_admission | worker: nil}
     {:noreply, schedule_admission_resolution(%{state | unknown_admission: pending})}
+  end
+
+  def handle_info(
+        {:configuration_preparation_started, pid, deadline},
+        %{configuration_preparation: %{task: %{pid: pid}, deadline: nil} = pending} = state
+      )
+      when is_integer(deadline) do
+    timer =
+      Process.send_after(
+        self(),
+        {:configuration_preparation_deadline, pid, deadline},
+        max(deadline - System.monotonic_time(:millisecond), 0)
+      )
+
+    {:noreply,
+     %{state | configuration_preparation: %{pending | deadline: deadline, timer: timer}}}
+  end
+
+  def handle_info({:configuration_preparation_started, _pid, _deadline}, state),
+    do: {:noreply, state}
+
+  def handle_info(
+        {:configuration_preparation_deadline, pid, deadline},
+        %{configuration_preparation: %{task: %{pid: pid}, deadline: deadline}} = state
+      ) do
+    if System.monotonic_time(:millisecond) >= deadline,
+      do: cancel_configuration_preparation(state, :deadline),
+      else: {:noreply, state}
+  end
+
+  def handle_info({:configuration_preparation_deadline, _pid, _deadline}, state),
+    do: {:noreply, state}
+
+  def handle_info(
+        {reference, result},
+        %{configuration_preparation: %{task: %{ref: reference}} = pending} = state
+      )
+      when is_reference(reference) do
+    {:noreply, %{state | configuration_preparation: %{pending | result: result}}}
+  end
+
+  def handle_info(
+        {:DOWN, reference, :process, pid, reason},
+        %{configuration_preparation: %{task: %{ref: reference, pid: pid}} = pending} = state
+      ) do
+    result = if reason == :normal, do: pending.result, else: :cleanup_unproved
+    finish_configuration_preparation(state, result)
   end
 
   def handle_info(message, state) do
@@ -2604,6 +2676,8 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
   defp answered_interaction(_state, _type, admit), do: admit.()
 
+  defp detailed_command_reply({:noreply, state}), do: {:noreply, state}
+
   defp detailed_command_reply({:reply, reply, state}),
     do: {:reply, {:result, reply}, state}
 
@@ -2740,11 +2814,526 @@ defmodule Loopex.Runtime.SessionCoordinator do
     end
   end
 
+  # Concept: configuration preparation is owned work, not an alternate writer.
+  # Technical depth: the original normalized command remains fixed while one
+  # invocation group resolves a candidate. Status stays serviceable; competing
+  # mutations refuse and abort retires the group before ordinary admission.
+  defp admit_configuration_or_command(state, command, candidate, from, detailed \\ false) do
+    cond do
+      state.configuration_cleanup_uncertain ->
+        {:reply, {:error, :runtime_unavailable}, state}
+
+      is_map(state.configuration_preparation) ->
+        case SessionState.propose(state.durable, command) do
+          {:replayed, reply} ->
+            {:reply, reply, state}
+
+          {:error, _reason} = error ->
+            {:reply, error, state}
+
+          {:ok, _proposal} ->
+            if command_field(command, :type) in [:abort, "abort"] and
+                 is_nil(state.configuration_preparation.after_cleanup),
+               do:
+                 cancel_configuration_preparation(
+                   state,
+                   {:command, command, candidate, from, detailed}
+                 ),
+               else: {:reply, {:error, :configuration_not_settled}, state}
+        end
+
+      candidate == :unprepared and command_field(command, :type) in [:configure, "configure"] and
+          is_nil(state.unknown_admission) ->
+        case SessionState.prepare_configuration_command(
+               state.durable,
+               command,
+               configuration_owner_settled?(state)
+             ) do
+          {:new, authored} ->
+            if is_nil(state.model),
+              do: commit_command(state, authored),
+              else: start_configuration_preparation(state, authored, from, detailed)
+
+          result ->
+            commit_command_proposal(state, result)
+        end
+
+      true ->
+        commit_command(state, command, candidate)
+    end
+  end
+
+  defp start_configuration_preparation(state, command, from, detailed) do
+    owner = self()
+    {caller, _} = from
+    current = state.durable.configuration
+    definitions = state.durable.tool_selection["definitions"]
+    grace = state.durable.cleanup_grace_ms
+    model = state.model
+
+    task =
+      Task.Supervisor.async_nolink(state.owner_workers, fn ->
+        configuration_preparation_group(
+          owner,
+          caller,
+          model,
+          current,
+          command.changes,
+          definitions,
+          grace,
+          state.owner_workers
+        )
+      end)
+
+    pending = %{
+      task: task,
+      command: command,
+      from: from,
+      owner: state.owner,
+      current: current,
+      definitions: definitions,
+      deadline: nil,
+      timer: nil,
+      result: nil,
+      after_cleanup: nil,
+      detailed: detailed
+    }
+
+    {:noreply, %{state | configuration_preparation: pending}}
+  end
+
+  defp cancel_configuration_preparation(state, after_cleanup) do
+    pending = state.configuration_preparation
+    send(pending.task.pid, {:cancel_configuration_preparation, self()})
+
+    {:noreply,
+     %{
+       state
+       | configuration_preparation: %{
+           pending
+           | after_cleanup: pending.after_cleanup || after_cleanup
+         }
+     }}
+  end
+
+  defp finish_configuration_preparation(state, result) do
+    pending = state.configuration_preparation
+    if pending.timer, do: Process.cancel_timer(pending.timer)
+    next = %{state | configuration_preparation: nil}
+    {caller, _} = pending.from
+
+    valid =
+      pending.owner == next.owner and not next.superseded and
+        next.phase == :ready and is_nil(next.drain) and
+        pending.current == next.durable.configuration and
+        pending.definitions == next.durable.tool_selection["definitions"] and
+        Process.alive?(caller)
+
+    outcome =
+      cond do
+        result == :cleanup_unproved ->
+          {:reply, {:error, :provider_call_failed},
+           %{next | configuration_cleanup_uncertain: true}}
+
+        not valid ->
+          {:reply, {:error, :superseded_owner}, next}
+
+        true ->
+          case Control.current_owner(next.control, next.session_id, pending.owner) do
+            :ok ->
+              result =
+                if is_integer(pending.deadline) and
+                     System.monotonic_time(:millisecond) < pending.deadline and
+                     is_nil(pending.after_cleanup) do
+                  result
+                else
+                  :expired
+                end
+
+              candidate =
+                case result do
+                  {:ok, candidate} when is_map(candidate) -> candidate
+                  {:error, :configuration_not_prepared} -> nil
+                  _ -> %{}
+                end
+
+              if is_nil(candidate),
+                do: commit_command(next, pending.command),
+                else:
+                  commit_configuration_command(
+                    next,
+                    pending.command,
+                    {:prepared_configuration, candidate}
+                  )
+
+            {:error, reason} ->
+              {:reply, {:error, reason}, next}
+          end
+      end
+
+    case outcome do
+      {:reply, reply, final} ->
+        if Process.alive?(caller),
+          do: GenServer.reply(pending.from, configuration_command_reply(reply, pending.detailed))
+
+        case pending.after_cleanup do
+          {:command, command, candidate, from, detailed} ->
+            request =
+              if detailed,
+                do: {:command_detailed, pending.owner, command},
+                else: {:command_with_configuration, pending.owner, command, candidate}
+
+            case handle_call(request, from, final) do
+              {:reply, answer, final} ->
+                GenServer.reply(from, answer)
+                continue_after_owner_loss(final)
+
+              other ->
+                other
+            end
+
+          {:quiesce, request, from} ->
+            case handle_call(request, from, final) do
+              {:reply, answer, final} ->
+                GenServer.reply(from, answer)
+                continue_after_owner_loss(final)
+
+              other ->
+                other
+            end
+
+          _ ->
+            continue_after_owner_loss(final)
+        end
+
+      other ->
+        other
+    end
+  end
+
+  defp configuration_command_reply(reply, true), do: {:result, reply}
+  defp configuration_command_reply(reply, false), do: reply
+
+  # Concept: callback-created work shares one invocation group and its cleanup.
+  # Technical depth: the existing guarded callback and managed child starter are
+  # reused for preparation, with no complete/3 fallback or provider permit.
+  # The group samples its monotonic cutoff once, monitors caller and owner, and
+  # joins every managed child before its result can reach serial admission.
+  defp configuration_preparation_group(
+         owner,
+         caller,
+         model,
+         current,
+         changes,
+         definitions,
+         grace,
+         owner_workers
+       ) do
+    Process.flag(:trap_exit, true)
+    owner_monitor = Process.monitor(owner)
+    caller_monitor = Process.monitor(caller)
+    deadline = System.monotonic_time(:millisecond) + 60_000
+    send(owner, {:configuration_preparation_started, self(), deadline})
+    context = %{deadline_monotonic_ms: deadline, cleanup_grace_ms: grace}
+    reference = make_ref()
+    key = {:loopex_configuration_preparation_children, reference}
+    Process.put(key, %{})
+    cleanup_key = {:loopex_configuration_preparation_cleanup, reference}
+    Process.put(cleanup_key, nil)
+    caretaker = self()
+
+    try do
+      {outcome, cleanup} =
+        try do
+          {:ok, guard} =
+            Task.Supervisor.start_child(
+              owner_workers,
+              fn ->
+                guard_provider_call(caretaker, reference, grace, owner_workers)
+              end,
+              shutdown: :brutal_kill
+            )
+
+          retain_configuration_child(key, guard)
+
+          worker =
+            Task.Supervisor.async_nolink(owner_workers, fn ->
+              call_provider(
+                guard,
+                reference,
+                {:configuration_preparation, model.module, caretaker, reference},
+                {current, changes, definitions, context},
+                model.options,
+                Model.discard_progress(),
+                grace,
+                %{}
+              )
+            end)
+
+          retain_configuration_child(key, worker.pid)
+          send(guard, {:loopex_provider_guard_bind, reference, caretaker, worker.pid})
+
+          await_configuration_preparation(
+            worker,
+            guard,
+            reference,
+            owner,
+            owner_monitor,
+            caller,
+            caller_monitor,
+            deadline,
+            grace,
+            owner_workers,
+            key
+          )
+        catch
+          _kind, _reason -> {:cleanup_unproved, capture_configuration_cleanup(reference, grace)}
+        end
+
+      if join_configuration_children(Process.get(key), cleanup.observation_deadline) == :ok,
+        do: outcome,
+        else: :cleanup_unproved
+    after
+      Process.delete(key)
+      Process.delete(cleanup_key)
+      Process.demonitor(owner_monitor, [:flush])
+      Process.demonitor(caller_monitor, [:flush])
+    end
+  end
+
+  # Concept: the existing owner group must also join preparation on owner death.
+  # Technical depth: every preparation member is a direct temporary child of
+  # its owner worker supervisor. The caretaker serially records a monitor before
+  # releasing a private starter reply; no callback can start an unrecorded member.
+  defp retain_configuration_child(key, pid) do
+    Process.put(key, Map.put(Process.get(key), pid, Process.monitor(pid)))
+    :ok
+  end
+
+  defp start_invocation_child(
+         {:configuration_preparation, _module, caretaker, reference},
+         _owner_workers,
+         child
+       ) do
+    request = make_ref()
+    monitor = Process.monitor(caretaker)
+    send(caretaker, {:configuration_preparation_child, reference, self(), request, child})
+
+    receive do
+      {:configuration_preparation_child, ^request, ^caretaker, result} ->
+        Process.demonitor(monitor, [:flush])
+        result
+
+      {:DOWN, ^monitor, :process, ^caretaker, _reason} ->
+        {:error, :unavailable}
+    end
+  end
+
+  defp start_invocation_child(_module, owner_workers, child),
+    do:
+      Task.Supervisor.start_child(owner_workers, child,
+        restart: :temporary,
+        shutdown: :brutal_kill
+      )
+
+  defp start_model_callback(
+         {:configuration_preparation, _module, _caretaker, _reference} = module,
+         owner_workers,
+         call
+       ) do
+    {:ok, callback} = start_invocation_child(module, owner_workers, call)
+    Process.link(callback)
+    {callback, Process.monitor(callback)}
+  end
+
+  defp start_model_callback(_module, _owner_workers, call),
+    do: :erlang.spawn_opt(call, [:link, :monitor])
+
+  defp await_configuration_preparation(
+         worker,
+         guard,
+         reference,
+         owner,
+         owner_monitor,
+         caller,
+         caller_monitor,
+         deadline,
+         grace,
+         owner_workers,
+         key
+       ) do
+    receive do
+      {:configuration_preparation_cleanup, ^reference, requester, request}
+      when is_pid(requester) and is_reference(request) ->
+        cleanup = capture_configuration_cleanup(reference, grace)
+        send(requester, {:configuration_preparation_cleanup, request, self(), cleanup})
+
+        await_configuration_preparation(
+          worker,
+          guard,
+          reference,
+          owner,
+          owner_monitor,
+          caller,
+          caller_monitor,
+          deadline,
+          grace,
+          owner_workers,
+          key
+        )
+
+      {:configuration_preparation_child, ^reference, requester, request, child}
+      when is_pid(requester) and is_reference(request) and is_function(child, 0) ->
+        if Process.alive?(requester) and System.monotonic_time(:millisecond) < deadline do
+          result =
+            Task.Supervisor.start_child(owner_workers, child,
+              restart: :temporary,
+              shutdown: :brutal_kill
+            )
+
+          case result do
+            {:ok, pid} -> retain_configuration_child(key, pid)
+            _ -> :ok
+          end
+
+          send(requester, {:configuration_preparation_child, request, self(), result})
+
+          await_configuration_preparation(
+            worker,
+            guard,
+            reference,
+            owner,
+            owner_monitor,
+            caller,
+            caller_monitor,
+            deadline,
+            grace,
+            owner_workers,
+            key
+          )
+        else
+          send(
+            requester,
+            {:configuration_preparation_child, request, self(), {:error, :unavailable}}
+          )
+
+          stop_configuration_callback(guard, reference, grace)
+        end
+
+      {task_reference, result} when task_reference == worker.ref ->
+        {result, cleanup} =
+          case result do
+            {:configuration_preparation_result, result, cleanup} -> {result, cleanup}
+            _ -> {:cleanup_unproved, capture_configuration_cleanup(reference, grace)}
+          end
+
+        receive do
+          {:DOWN, task_reference, :process, pid, :normal}
+          when task_reference == worker.ref and pid == worker.pid ->
+            outcome =
+              if System.monotonic_time(:millisecond) < deadline,
+                do: result,
+                else: {:error, :invalid_session_configuration}
+
+            {outcome, cleanup}
+        after
+          max(cleanup.observation_deadline - System.monotonic_time(:millisecond), 0) ->
+            {:cleanup_unproved, cleanup}
+        end
+
+      {:DOWN, task_reference, :process, pid, _reason}
+      when task_reference == worker.ref and pid == worker.pid ->
+        {:cleanup_unproved, capture_configuration_cleanup(reference, grace)}
+
+      {:cancel_configuration_preparation, ^owner} ->
+        stop_configuration_callback(guard, reference, grace)
+
+      {:DOWN, ^owner_monitor, :process, ^owner, _reason} ->
+        stop_configuration_callback(guard, reference, grace)
+
+      {:DOWN, ^caller_monitor, :process, ^caller, _reason} ->
+        stop_configuration_callback(guard, reference, grace)
+
+      {:EXIT, _pid, _reason} ->
+        stop_configuration_callback(guard, reference, grace)
+    after
+      max(deadline - System.monotonic_time(:millisecond), 0) ->
+        stop_configuration_callback(guard, reference, grace)
+    end
+  end
+
+  defp stop_configuration_callback(guard, reference, grace) do
+    cleanup = capture_configuration_cleanup(reference, grace)
+
+    outcome =
+      case stop_provider_guard_in_window(guard, reference, self(), cleanup) do
+        :ok -> {:error, :invalid_session_configuration}
+        _ -> :cleanup_unproved
+      end
+
+    {outcome, cleanup}
+  end
+
+  # Concept: every preparation exit spends the same captured cleanup window.
+  # Technical depth: callback return, guard failure, cancellation and cutoff ask
+  # the serial invocation caretaker for one window; later phases get its remainder.
+  defp capture_configuration_cleanup(reference, grace) do
+    key = {:loopex_configuration_preparation_cleanup, reference}
+
+    case Process.get(key) do
+      nil ->
+        cleanup = local_provider_cleanup_window(grace)
+        Process.put(key, cleanup)
+        cleanup
+
+      cleanup ->
+        cleanup
+    end
+  end
+
+  defp request_configuration_cleanup(caretaker, reference, grace) do
+    request = make_ref()
+    monitor = Process.monitor(caretaker)
+    send(caretaker, {:configuration_preparation_cleanup, reference, self(), request})
+
+    receive do
+      {:configuration_preparation_cleanup, ^request, ^caretaker, cleanup} ->
+        Process.demonitor(monitor, [:flush])
+        cleanup
+
+      {:DOWN, ^monitor, :process, ^caretaker, _reason} ->
+        local_provider_cleanup_window(grace)
+    end
+  end
+
+  defp preparation_cleanup_context({:configuration_preparation, _module, caretaker, reference}),
+    do: Process.put(:loopex_configuration_cleanup_context, {caretaker, reference})
+
+  defp preparation_cleanup_context(_module), do: :ok
+
+  defp join_configuration_children(children, deadline) do
+    Enum.each(children, fn {pid, _monitor} -> Process.exit(pid, :kill) end)
+
+    joined =
+      Enum.map(children, fn {pid, monitor} ->
+        receive do
+          {:DOWN, ^monitor, :process, ^pid, _reason} -> true
+        after
+          max(deadline - System.monotonic_time(:millisecond), 0) ->
+            Process.demonitor(monitor, [:flush])
+            false
+        end
+      end)
+
+    if Enum.all?(joined), do: :ok, else: :error
+  end
+
   defp configuration_owner_settled?(state) do
     Enum.all?(
       [state.in_flight, state.pending_cleanup, state.model_reserves, state.executor_reserves],
       &(map_size(&1) == 0)
-    ) and is_nil(state.pending_fault) and is_nil(state.query)
+    ) and is_nil(state.pending_fault) and is_nil(state.query) and
+      is_nil(state.configuration_preparation) and not state.configuration_cleanup_uncertain
   end
 
   # Concept: configuration must fit the history already retained, without
@@ -5612,6 +6201,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
          cleanup_grace_ms,
          identities
        ) do
+    preparation_cleanup_context(module)
     guard_monitor = Process.monitor(guard)
 
     send(
@@ -5675,6 +6265,10 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
         await_provider_guard(guard, guard_monitor, reference, retained, cleanup_grace_ms)
 
+      {:loopex_provider_guard_result, ^reference, ^guard,
+       {:configuration_preparation_result, _result, cleanup} = result} ->
+        provider_result_after_guard_exit(guard, guard_monitor, reference, result, cleanup)
+
       {:loopex_provider_guard_result, ^reference, ^guard, result} ->
         provider_result_after_guard_exit(
           guard,
@@ -5714,6 +6308,26 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
   defp provider_result_after_cleanup(_result, {:error, :provider_cleanup_unproved}),
     do: {:error, :provider_call_failed}
+
+  defp provider_result_after_guard_exit(
+         guard,
+         guard_monitor,
+         reference,
+         {:configuration_preparation_result, _result, cleanup} = result,
+         _window
+       ) do
+    case await_provider_process_down(guard, guard_monitor, cleanup.observation_deadline) do
+      {:ok, :normal} ->
+        result
+
+      {:ok, _reason} ->
+        {:configuration_preparation_result, :cleanup_unproved, cleanup}
+
+      :timeout ->
+        _ = force_unproved_provider_guard_stop(guard, guard_monitor, reference, cleanup)
+        {:configuration_preparation_result, :cleanup_unproved, cleanup}
+    end
+  end
 
   defp provider_result_after_guard_exit(guard, guard_monitor, reference, result, cleanup) do
     case await_provider_process_down(guard, guard_monitor, cleanup.cooperative_deadline) do
@@ -5767,32 +6381,30 @@ defmodule Loopex.Runtime.SessionCoordinator do
     receive do
       {:loopex_provider_guard_start, ^reference, ^owner, module, request, options, progress,
        identities} ->
+        preparation_cleanup_context(module)
         guard = self()
 
         {callback, callback_monitor} =
-          :erlang.spawn_opt(
-            fn ->
-              receive do
-                {:loopex_provider_callback_start, ^reference, ^guard} ->
-                  result =
-                    normalize_provider_call(
-                      owner,
-                      guard,
-                      reference,
-                      module,
-                      request,
-                      options,
-                      progress,
-                      cleanup_grace_ms,
-                      identities,
-                      owner_workers
-                    )
+          start_model_callback(module, owner_workers, fn ->
+            receive do
+              {:loopex_provider_callback_start, ^reference, ^guard} ->
+                result =
+                  normalize_provider_call(
+                    owner,
+                    guard,
+                    reference,
+                    module,
+                    request,
+                    options,
+                    progress,
+                    cleanup_grace_ms,
+                    identities,
+                    owner_workers
+                  )
 
-                  send(guard, {:loopex_provider_callback_result, reference, self(), result})
-              end
-            end,
-            [:link, :monitor]
-          )
+                send(guard, {:loopex_provider_callback_result, reference, self(), result})
+            end
+          end)
 
         Process.put({@provider_callback_key, reference}, callback)
         send(owner, {:loopex_provider_callback_retained, reference, guard, callback})
@@ -5843,10 +6455,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
     starter =
       Loopex.Runtime.ProviderLifetime.Starter.new(fn child ->
-        Task.Supervisor.start_child(owner_workers, child,
-          restart: :temporary,
-          shutdown: :brutal_kill
-        )
+        start_invocation_child(module, owner_workers, child)
       end)
 
     ProviderLifetime.scoped(
@@ -5863,9 +6472,9 @@ defmodule Loopex.Runtime.SessionCoordinator do
       end,
       starter,
       fn ->
-        Instrumentation.span([:model, :complete], identities, fn ->
+        invoke_model_span(module, identities, fn ->
           try do
-            module.complete(request, options, progress)
+            invoke_model_callback(module, request, options, progress)
           catch
             _kind, _reason -> {:error, :provider_call_failed}
           end
@@ -5873,6 +6482,44 @@ defmodule Loopex.Runtime.SessionCoordinator do
       end
     )
   end
+
+  defp invoke_model_span(
+         {:configuration_preparation, _module, _caretaker, _reference},
+         _identities,
+         call
+       ),
+       do: call.()
+
+  defp invoke_model_span(_module, identities, call),
+    do: Instrumentation.span([:model, :complete], identities, call)
+
+  defp invoke_model_callback(
+         {:configuration_preparation, module, caretaker, reference},
+         {current, changes, definitions, context},
+         options,
+         _progress
+       ) do
+    result =
+      try do
+        if Code.ensure_loaded?(module) and function_exported?(module, :prepare_configuration, 5) do
+          case module.prepare_configuration(current, changes, definitions, context, options) do
+            {:ok, candidate} -> {:ok, candidate}
+            {:error, :configuration_not_prepared} -> {:error, :configuration_not_prepared}
+            _ -> {:error, :invalid_session_configuration}
+          end
+        else
+          {:error, :configuration_not_prepared}
+        end
+      catch
+        _kind, _reason -> {:error, :invalid_session_configuration}
+      end
+
+    {:configuration_preparation_result, result,
+     request_configuration_cleanup(caretaker, reference, context.cleanup_grace_ms)}
+  end
+
+  defp invoke_model_callback(module, request, options, progress),
+    do: module.complete(request, options, progress)
 
   defp register_provider_resource(
          owner,
@@ -6142,7 +6789,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
           owner,
           reference,
           result,
-          stop_provider_resource(reference, cleanup_grace_ms)
+          stop_callback_resource(reference, result, cleanup_grace_ms)
         )
 
       {:DOWN, ^callback_monitor, :process, ^callback, _reason} ->
@@ -6227,6 +6874,22 @@ defmodule Loopex.Runtime.SessionCoordinator do
     send(owner, {:loopex_provider_guard_result, reference, self(), result})
   end
 
+  # Concept: preparation retains its original cleanup cutoff even on refusal.
+  # Technical depth: this private error envelope preserves uncertainty and the
+  # captured window for the invocation-group join; it cannot admit a candidate.
+  defp finish_provider_guard(
+         owner,
+         reference,
+         {:configuration_preparation_result, _result, cleanup},
+         {:error, :provider_cleanup_unproved}
+       ) do
+    send(
+      owner,
+      {:loopex_provider_guard_result, reference, self(),
+       {:configuration_preparation_result, :cleanup_unproved, cleanup}}
+    )
+  end
+
   defp finish_provider_guard(_owner, _reference, _result, {:error, :provider_cleanup_unproved}) do
     exit(:provider_cleanup_unproved)
   end
@@ -6247,6 +6910,16 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # unproved because the resource may have owned provider descendants not linked
   # to itself.
   defp provider_cleanup_window(cleanup_grace_ms) do
+    case Process.get(:loopex_configuration_cleanup_context) do
+      {caretaker, reference} ->
+        request_configuration_cleanup(caretaker, reference, cleanup_grace_ms)
+
+      nil ->
+        local_provider_cleanup_window(cleanup_grace_ms)
+    end
+  end
+
+  defp local_provider_cleanup_window(cleanup_grace_ms) do
     {:ok, %{executor_observe_ms: observation_ms}} =
       Executor.cancellation_bounds(cleanup_grace_ms)
 
@@ -6315,6 +6988,16 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
   defp combine_provider_cleanup(_callback, _resource),
     do: {:error, :provider_cleanup_unproved}
+
+  defp stop_callback_resource(
+         reference,
+         {:configuration_preparation_result, _result, cleanup},
+         _grace
+       ),
+       do: stop_provider_resource_in_window(reference, cleanup)
+
+  defp stop_callback_resource(reference, _result, grace),
+    do: stop_provider_resource(reference, grace)
 
   defp stop_provider_resource(reference, cleanup_grace_ms) do
     stop_provider_resource_in_window(reference, provider_cleanup_window(cleanup_grace_ms))
@@ -6406,8 +7089,16 @@ defmodule Loopex.Runtime.SessionCoordinator do
     stop_provider_guard(guard, reference, self(), cleanup_grace_ms)
   end
 
-  defp stop_provider_guard(guard, reference, requester, cleanup_grace_ms) do
-    cleanup = provider_cleanup_window(cleanup_grace_ms)
+  defp stop_provider_guard(guard, reference, requester, cleanup_grace_ms),
+    do:
+      stop_provider_guard_in_window(
+        guard,
+        reference,
+        requester,
+        provider_cleanup_window(cleanup_grace_ms)
+      )
+
+  defp stop_provider_guard_in_window(guard, reference, requester, cleanup) do
     guard_monitor = Process.monitor(guard)
     stop = make_ref()
     send(guard, {:loopex_provider_tree_stop, reference, stop, requester, cleanup})
@@ -6427,6 +7118,11 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
   defp await_provider_guard_stop(guard, guard_monitor, reference, stop, cleanup) do
     receive do
+      {:configuration_preparation_cleanup, ^reference, requester, request}
+      when is_pid(requester) and is_reference(request) ->
+        send(requester, {:configuration_preparation_cleanup, request, self(), cleanup})
+        await_provider_guard_stop(guard, guard_monitor, reference, stop, cleanup)
+
       {:loopex_provider_tree_stopped, ^stop, ^guard} ->
         case await_provider_process_down(guard, guard_monitor, cleanup.observation_deadline) do
           {:ok, :normal} ->
@@ -7271,7 +7967,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
         map_size(state.model_reserves) == 0 and
         map_size(state.streams) == 0 and
         is_nil(state.pending_fault) and
-        is_nil(state.prepared_transfer)
+        is_nil(state.prepared_transfer) and is_nil(state.configuration_preparation)
 
     if state.superseded and settled,
       do: {:stop, :normal, state},
@@ -9454,6 +10150,13 @@ defmodule Loopex.Runtime.SessionCoordinator do
   end
 
   defp superseded_owner(state) do
+    if is_map(state.configuration_preparation),
+      do:
+        send(
+          state.configuration_preparation.task.pid,
+          {:cancel_configuration_preparation, self()}
+        )
+
     if state.prepared && is_pid(state.prepared.guard) do
       {nonce, handoff} = state.prepared.guard_relationship
 

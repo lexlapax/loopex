@@ -3281,7 +3281,14 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
       },
       tools: tools,
       active_tools: active,
-      model: model,
+      model:
+        LoopexComposition.Model.reference(
+          model,
+          if(Map.has_key?(config, :provider_bindings),
+            do: [provider_bindings: config.provider_bindings],
+            else: []
+          )
+        ),
       bounds: %{max_turns: config.max_steps, deadline_ms: config.deadline_ms},
       sampling: %{"max_tokens" => config.max_tokens},
       context_token_budget: config.context_token_budget,

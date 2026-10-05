@@ -6,6 +6,43 @@ defmodule LoopexDaemon.RequestTest do
 
   @digest String.duplicate("a", 64)
 
+  test "dormant configure capture preserves raw instruction bytes without serving an old generation" do
+    raw = %{
+      "version" => "wire.v1",
+      "base" => "exact wire bytes 猫\n",
+      "environment" => "",
+      "appendix" => "tail"
+    }
+
+    authored = %{"model" => "host-alias", "instructions" => raw, "max_tokens" => 512}
+    assert {:ok, captured} = LoopexDaemon.Request.capture_configuration_changes(authored)
+    assert {:ok, instructions} = Loopex.Runtime.Instructions.capture(raw)
+    assert captured == %{authored | "instructions" => instructions}
+    assert Map.take(captured["instructions"], ~w(version base environment appendix)) == raw
+
+    assert {:ok, %{"model" => "host-alias"}} =
+             LoopexDaemon.Request.capture_configuration_changes(%{"model" => "host-alias"})
+
+    for invalid <- [
+          Map.put(authored, "model_capabilities", %{}),
+          %{authored | "instructions" => Map.put(raw, "digest", String.duplicate("a", 64))},
+          %{authored | "instructions" => Map.put(raw, "file", "unread-path")},
+          %{authored | "instructions" => %{raw | "base" => <<255>>}},
+          %{}
+        ] do
+      assert {:error, :invalid_session_configuration} =
+               LoopexDaemon.Request.capture_configuration_changes(invalid)
+    end
+
+    assert {:error, :unsupported_method} =
+             Request.parse(%{
+               "method" => "session.configure",
+               "request_id" => "request",
+               "command_id" => "configure",
+               "changes" => authored
+             })
+  end
+
   test "every generation-two method has one exact decoded request shape" do
     examples = examples()
     assert Enum.sort(Map.keys(examples)) == Enum.sort(V2.methods())

@@ -18,7 +18,7 @@ defmodule Loopex.Runtime.SessionConfigurationAdmissionTest do
 
     assert proposal.reply == {:accepted, "configure-1"}
     assert [record] = proposal.records
-    assert record.kind == "session_configuration_admitted_v1"
+    assert record.kind == "session_configuration_admitted_v2"
     assert record["prior_configuration_version"] == 1
     assert record["changes"] == changes
     assert record["configuration"] == candidate
@@ -299,6 +299,130 @@ defmodule Loopex.Runtime.SessionConfigurationAdmissionTest do
     end
 
     assert SessionConfiguration.public_view(nil) == nil
+  end
+
+  test "v2 binds authored alias to canonical candidate and keeps its independent digest preimage" do
+    {state, history} = state()
+    authored = %{"model" => "host-alias"}
+    command = %{type: :configure, command_id: "alias-vector", changes: authored}
+    candidate = prepare(state, %{"model" => state.configuration["model"]})
+
+    # Concept: alias identity is independent of the retained canonical spelling.
+    # Technical depth: this literal ETF and SHA-256 vector was encoded separately
+    # from the reducer. Substituting the canonical model changes the preimage.
+    bytes =
+      Base.decode64!(
+        "g2wAAAACbQAAABFsb29wZXhfY29tbWFuZF92MXQAAAADdwdjaGFuZ2VzdAAAAAFtAAAABW1vZGVsbQAAAApob3N0LWFsaWFzdwpjb21tYW5kX2lkbQAAAAxhbGlhcy12ZWN0b3J3BHR5cGV3CWNvbmZpZ3VyZWo="
+      )
+
+    assert :erlang.term_to_binary(["loopex_command_v1", command], [:deterministic]) == bytes
+
+    assert {:ok, proposal} =
+             SessionState.propose(state, command, %{configuration_candidate: candidate})
+
+    assert proposal.reply == {:accepted, command.command_id}
+    assert [record] = proposal.records
+    assert map_size(record) == 8
+    assert record.kind == "session_configuration_admitted_v2"
+    assert record["changes"] == authored
+    assert record["configuration"]["model"] == "scripted:v1"
+
+    assert record["command_digest"] ==
+             "9c0ee5fd98c16fd2d070f504eaeb252bfd614aa8c529aeed7e07cb3f676c692e"
+
+    {committed, rows, events} = commit(state, proposal)
+    assert {:ok, recovered} = SessionState.recover(state.session_id, history ++ rows, events)
+    assert recovered.configuration == candidate
+    assert {:replayed, {:accepted, "alias-vector"}} = SessionState.propose(recovered, command)
+
+    assert {:replayed, {:accepted, "alias-vector"}} =
+             SessionState.propose(committed, command, %{configuration_candidate: %{}})
+
+    assert {:error, :idempotency_conflict} =
+             SessionState.propose(
+               committed,
+               %{command | changes: %{"model" => candidate["model"]}}
+             )
+
+    [row] = rows
+    superseded = put_in(row, [:payload, :kind], "session_configuration_admitted_v1")
+    assert {:error, _} = SessionState.recover(state.session_id, history ++ [superseded], events)
+  end
+
+  test "alias binding cannot rewrite other authored settings or retarget an omitted model" do
+    {state, _} = state()
+    current = state.configuration
+    alias_changes = %{"model" => "host-alias", "max_tokens" => 512}
+    substituted = prepare(state, %{"model" => current["model"], "max_tokens" => 768})
+
+    assert {:error, :invalid_configuration_transition} =
+             SessionConfiguration.validate_candidate(current, alias_changes, substituted, [])
+
+    capabilities = Map.put(current["model_capabilities"], "model", "scripted:v2")
+
+    assert {:ok, retargeted} =
+             SessionConfiguration.update(
+               current,
+               %{"model" => "scripted:v2", "max_tokens" => 512},
+               capabilities,
+               current["provider_mapping"],
+               []
+             )
+
+    assert {:error, :invalid_configuration_transition} =
+             SessionConfiguration.validate_candidate(
+               current,
+               %{"max_tokens" => 512},
+               retargeted,
+               []
+             )
+
+    assert :ok = SessionConfiguration.validate_candidate(current, alias_changes, retargeted, [])
+
+    command = %{type: :configure, command_id: "retarget", changes: %{"max_tokens" => 512}}
+
+    assert {:ok, rejected} =
+             SessionState.propose(state, command, %{configuration_candidate: retargeted})
+
+    assert rejected.reply == {:error, :invalid_session_configuration}
+    assert rejected.next.configuration == current
+  end
+
+  test "fresh preparation gate checks retained disposition and settledness before host resolution" do
+    {state, history} = state()
+
+    command = %{
+      type: :configure,
+      command_id: "alias-refused",
+      changes: %{"model" => "host-alias"}
+    }
+
+    assert {:new, ^command} = SessionState.prepare_configuration_command(state, command, true)
+    assert {:ok, refused} = SessionState.propose(state, command)
+    {committed, rows, events} = commit(state, refused)
+    assert {:ok, recovered} = SessionState.recover(state.session_id, history ++ rows, events)
+
+    assert {:replayed, {:error, :configuration_not_prepared}} =
+             SessionState.prepare_configuration_command(recovered, command, true)
+
+    assert {:error, :idempotency_conflict} =
+             SessionState.prepare_configuration_command(
+               committed,
+               %{command | changes: %{"model" => "scripted:v1"}},
+               true
+             )
+
+    assert {:ok, busy} = SessionState.prepare_configuration_command(state, command, false)
+    assert busy.reply == {:error, :configuration_not_settled}
+
+    assert {:ok, active} =
+             SessionState.prepare_configuration_command(
+               %{state | active_run_id: "run"},
+               command,
+               true
+             )
+
+    assert active.reply == {:error, :configuration_not_settled}
   end
 
   defp state do

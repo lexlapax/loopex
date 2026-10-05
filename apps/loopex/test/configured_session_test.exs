@@ -1808,7 +1808,7 @@ defmodule Loopex.ConfiguredSessionTest do
              Loopex.command_with_configuration(attachment, command, nil)
 
     records = Fixture.records(fixture, session)
-    assert Enum.count(records, &(&1.payload.kind == "session_configuration_admitted_v1")) == 1
+    assert Enum.count(records, &(&1.payload.kind == "session_configuration_admitted_v2")) == 1
     {:ok, recovered} = SessionState.recover(session, records, Fixture.events(fixture, session))
     assert recovered.configuration == initial
     refute Enum.any?(Fixture.events(fixture, session), &(&1.kind == "session.configured"))
@@ -1955,7 +1955,7 @@ defmodule Loopex.ConfiguredSessionTest do
       )
 
     command = %{type: :configure, command_id: "configure", changes: changes}
-    kind = "session_configuration_admitted_v1"
+    kind = "session_configuration_admitted_v2"
     hold_record_commit(fixture, kind, :before)
     parent = self()
 
@@ -2028,7 +2028,7 @@ defmodule Loopex.ConfiguredSessionTest do
         )
 
       command = %{type: :configure, command_id: "configure", changes: changes}
-      kind = "session_configuration_admitted_v1"
+      kind = "session_configuration_admitted_v2"
       hold_record_commit(fixture, kind, phase)
       parent = self()
 

@@ -93,6 +93,34 @@ defmodule LoopexDaemon.Request do
           fields: map()
         }
 
+  # Concept: new-generation configure ingress captures explicit instruction bytes.
+  # Technical depth: this pure step accepts already-decoded authored settings;
+  # protocol activation and integer decoding remain the coordinated schema gate.
+  # Raw instructions have four fields; a supplied digest or metadata refuses.
+  @doc false
+  def capture_configuration_changes(changes) when is_map(changes) and not is_struct(changes) do
+    captured =
+      case Map.fetch(changes, "instructions") do
+        {:ok, raw} ->
+          case Loopex.Runtime.Instructions.capture(raw) do
+            {:ok, instructions} -> {:ok, Map.put(changes, "instructions", instructions)}
+            _ -> {:error, :invalid_session_configuration}
+          end
+
+        :error ->
+          {:ok, changes}
+      end
+
+    with {:ok, changes} <- captured,
+         :ok <- Loopex.Runtime.SessionConfiguration.validate_update(changes) do
+      {:ok, changes}
+    else
+      _ -> {:error, :invalid_session_configuration}
+    end
+  end
+
+  def capture_configuration_changes(_), do: {:error, :invalid_session_configuration}
+
   @doc false
   @spec parse(term()) :: {:ok, t()} | {:error, :invalid_request | :unsupported_method}
   def parse(request) when is_map(request) and not is_struct(request) do
