@@ -818,7 +818,11 @@ defmodule LoopexCli.ChatDriver do
        when is_integer(seq) and seq > state.cursor do
     state = %{state | waiting_event: nil, cursor: seq}
     state = project_event(state, event)
-    if state.transport == nil, do: grant_event(state), else: state
+
+    # Concept: input or output failure still requires observing cancellation truth.
+    # Technical depth: reader grants continue until the existing barrier/reap join;
+    # the captured shutdown cutoff remains the bound on unavailable truth.
+    grant_event(state)
   end
 
   defp consume_event(state), do: fail(%{state | waiting_event: nil}, :event_reader_failed)
