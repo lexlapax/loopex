@@ -48,8 +48,9 @@ defmodule Loopex.AppServer.FoundationMappingTest do
 
   ## Technical depth
 
-  Accepted ADR 0023 fixes the snapshot's exact members and the answer's exact
-  shape, and accepted ADR 0024 owns what an interaction is. These cases assert
+  ADRs 0023, 0043 and 0044 fix the current snapshot members, and the accepted
+  policy-answer disposition fixes distinct admission. ADR 0024 owns interaction
+  authority. These cases assert
   the wire projection member by member rather than comparing it to itself, and
   they assert the refusals that keep an answer from becoming an authority: an
   answer naming anything besides one choice is refused before a facade sees it,
@@ -62,6 +63,7 @@ defmodule Loopex.AppServer.FoundationMappingTest do
   alias Loopex.AgentLoopFixture, as: Fixture
   alias Loopex.AppServer.Connection
   alias LoopexProtocol.Session
+  alias LoopexProtocol.Session.Snapshot
   alias LoopexProtocol.Wire
 
   test "attaching returns the snapshot and the cursor, in their wire representations" do
@@ -86,39 +88,72 @@ defmodule Loopex.AppServer.FoundationMappingTest do
     assert is_integer(cursor)
 
     snapshot = record["snapshot"]
-    assert snapshot["snapshot_revision"] == 2
+    assert snapshot["snapshot_revision"] == 3
 
     assert Enum.sort(Map.keys(snapshot)) == [
+             "active_maintenance",
              "active_run_id",
              "active_run_phase",
+             "checkpoint",
+             "configuration",
              "event_sequence",
+             "last_compact",
+             "open_interaction",
              "session_id",
              "snapshot_revision"
            ]
+
+    assert snapshot["configuration"]["model"] == "scripted:v1"
+    assert snapshot["configuration"]["configuration_version"] == "1"
+    assert snapshot["configuration"]["max_tokens"] == "256"
+    assert is_nil(snapshot["checkpoint"])
+    assert is_nil(snapshot["active_maintenance"])
+    assert is_nil(snapshot["last_compact"])
+    assert is_nil(snapshot["open_interaction"])
+    assert record["open_interaction"] == snapshot["open_interaction"]
 
     # The two active members are both absent or both present; a phase is never
     # inferred from an identity.
     assert is_nil(snapshot["active_run_id"]) == is_nil(snapshot["active_run_phase"])
   end
 
-  test "the wire snapshot carries the same state the facade's own attachment does" do
+  test "the complete wire snapshot retains its cursor after the session advances" do
     fixture = fixture()
     {connection, session_id} = created(fixture)
 
-    {:ok, record, _connection} =
+    {:ok, record, connection} =
       Connection.dispatch(connection, %{
         "method" => "session.attach",
         "request_id" => "r2",
         "session_id" => Wire.encode_identity(session_id)
       })
 
-    {:ok, attachment} = Loopex.attach(fixture.runtime, session_id, after_event_sequence: 0)
+    assert {:ok, cursor} = Wire.u64(record["event_cursor"])
+
+    {:ok, admission, _connection} =
+      Connection.dispatch(connection, %{
+        "method" => "session.prompt",
+        "request_id" => "rp",
+        "command_id" => Wire.encode_identity("snapshot-prompt"),
+        "content_b64" => Base.url_encode64("advance the session", padding: false)
+      })
+
+    assert admission["status"] == "accepted"
+    assert settle(fixture, session_id) == :settled
+
+    {:ok, attachment} =
+      Loopex.attach(fixture.runtime, session_id, after_event_sequence: cursor)
+
     facade = Loopex.snapshot(attachment)
 
     assert record["snapshot"]["snapshot_revision"] == facade.snapshot_revision
     assert {:ok, ^session_id} = Wire.identity(record["snapshot"]["session_id"])
-
     assert {:ok, facade.event_sequence} == Wire.u64(record["snapshot"]["event_sequence"])
+    assert Snapshot.decode_wire(record["snapshot"]) == {:ok, facade}
+    assert record["open_interaction"] == record["snapshot"]["open_interaction"]
+
+    {:ok, current_attachment} = Loopex.attach(fixture.runtime, session_id)
+    assert Loopex.snapshot(current_attachment).event_sequence > facade.event_sequence
   end
 
   test "a cursor in any spelling but canonical decimal is refused" do
@@ -464,18 +499,14 @@ defmodule Loopex.AppServer.FoundationMappingTest do
     intent = Enum.find_index(kinds_after, &(&1 == "effect_intent_committed_v2"))
     receipt = Enum.find_index(kinds_after, &(&1 == "executor_receipt_committed_v2"))
 
-    # The answer is admitted as an ordinary command, between the question and
-    # its resolution, rather than as part of either.
-    answered =
-      kinds_after
-      |> Enum.with_index()
-      |> Enum.find_index(fn {kind, index} ->
-        kind == "command_admitted" and index > requested
-      end)
+    # The current policy answer has its own admission record, between the
+    # question and policy resolution; the answer itself grants no authority.
+    answer_admitted =
+      Enum.find_index(kinds_after, &(&1 == "policy_interaction_answer_admitted_v1"))
 
     for {label, position} <- [
           requested: requested,
-          answered: answered,
+          answer_admitted: answer_admitted,
           resolved: resolved,
           intent: intent,
           receipt: receipt
@@ -483,8 +514,8 @@ defmodule Loopex.AppServer.FoundationMappingTest do
       refute is_nil(position), "#{label} was never committed: #{inspect(kinds_after)}"
     end
 
-    assert requested < answered
-    assert answered < resolved
+    assert requested < answer_admitted
+    assert answer_admitted < resolved
     assert resolved < intent
     assert intent < receipt
     assert length(kinds_after) > length(kinds_before)

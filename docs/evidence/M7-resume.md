@@ -57,11 +57,22 @@ composition lane log SHA-256
 `2083d0b4781f56eb821ee3bce632794de6167c1d014018eede2a0d68de1832e8`.
 No Linux/native invalid-byte witness or full release closure is inferred.
 
-Root has granted the exclusive verification slot to the foreground worker for
-queued c35d94b5 both-pair proof; current cold dev compilation is active. Store and
-private-task workers have no VM permission. Query actual agent/runner state
-before any new launch. Main can receive this evidence checkpoint because the
-primary selected run has ended; foreground source is frozen in its own worktree.
+Foreground proof is terminal PASS at c119aa13 on both pairs, with exact 13
+FoundationMapping,3 external/4 excluded and102 ordinary/5 excluded cases and no
+skips. Root rehashed all 78 outputs and all 24 stage/source identities. The latest
+task-ledger entry records complete report/inventory/log digests. Source joins
+exactly to primary; worker history remains reachable through rejoin. Archive the
+clean landed foreground worktree/branch after integrating, preserving all needed
+external evidence.
+
+The Store worker alone owns the exclusive VM slot for exact 7dc5fe51, using
+`.../M7/store-byte-decoder-20261005-v3/run-stage.py`, SHA-256
+`eb53ff985b550fc96f09a427c01328b5fd5d79b8aafb623143984e8c1412634e`.
+Expected focused 10/full 100, both with 0 exclusions/skips. Current cold dev build
+is active; no other worker may launch VM proof. Preserve actual first failures
+and require exact source/clean status before joining. Query actual agent and
+runner state before any new launch. The prior prepared runner references below
+are historical versions, not execution evidence.
 
 Terminal full fast-check FAIL is retained in
 `/Users/spuri/projects/lexlapax/loopex-evidence/M7/integration-e327e46c-v1`.
@@ -76,20 +87,15 @@ admission assertion. Complete six additional application outputs were retained;
 inventory digests are in the latest task-ledger entry. Core's three actual
 shutdown_error/noproc reports remain an open causal investigation.
 
-The foreground worker alone owns the verification slot. Queued source
-checkpoints, all clean and pushed, are:
+The Store worker alone owns the verification slot. Source checkpoints are:
 
-1. Foreground repair `c35d94b57adde87b4cd839a42ef38c8330929670`,
-   branch `codex/m7-current-foreground-fixtures`, worktree
-   `/Users/spuri/.codex/worktrees/m7-inspection-rejoin/loopex`. Only Mapping and
-   FoundationMapping tests changed: full captured ten-field shared snapshot,
-   exact old-cursor parity after live advancement, and the current distinct
-   policy-answer admission order. No generation activation or ADR 0052 work.
-   Unformatted/uncompiled/unproved. Prepared external runner
-   `.../M7/foreground-c35d94b5-v2/run.py`, SHA-256
-   `0cfdefbddd80dcace416512a4f970ee2b628b0e60ec9aba1f2a1ab2bb087853a`.
-   Both supported pairs, pinned Node22.14.0, expected focused 13/0 exclusions and
-   full ordinary 102/5 exclusions. Preserve first failures and exact populations.
+1. Foreground repair c119aa131fd65263269855f9eb34161ab5f81e44 is proved and
+   joined. Its three owned paths are Mapping, FoundationMapping and the single
+   external restart identity oracle. The complete ten-member captured snapshot,
+   exact old-cursor parity after live advancement and actual answer-admission
+   ordering are proved on both pairs, along with real process/Store restart.
+   c35 first ordinary failure remains immutable. No generation activation or
+   ADR 0052 implementation is implied; full next-candidate integration remains.
 2. Pure internal Store byte decoder `7dc5fe51a4c646f9179ef715add641cf688bde82`,
    branch `codex/m7-offline-store-audit`, worktree
    `/Users/spuri/.codex/worktrees/m7-trace-check/loopex`. Only Log and existing
@@ -109,7 +115,8 @@ checkpoints, all clean and pushed, are:
    FAIL. Do not integrate as a passing regression or change production custody
    without actual causal evidence.
 
-Finish foreground verification first, then Store, one VM slot at a time. Root reviews exact diffs/output/source identities before joining
+Finish the active Store verification, then join only proved source, one VM slot
+at a time. Foreground proof is complete. Root reviews exact diffs/output/source identities before joining
 proved changes. Keep both project dev and test compilation before no-compile
 runs. New clean integration candidates get one full check; failed e327 is not a
 passing baseline. Worker source-only branches and prepared runner plans grant
@@ -151,6 +158,24 @@ Current reconstructive reports, all read-only and independently rehashed by root
  ingress; native authored changes/private v2 identity stay unchanged. Not accepted.
  Reports and sources are copied byte-exact to durable sibling storage; the old
  artifact-digests file retains temporary path labels as a historical record.
+
+
+Composition's ordinary helper now excludes actual long_bound cases, matching the
+accepted fast/release routing. The required release lane already proved both
+unchanged IO cases at e327; no deadline/assertion/case is deleted. The next full
+fast candidate must execute 588 ordinary composition cases with 3 exclusions.
+This routing change awaits next-candidate integrated metadata/full-fast proof;
+do not claim the older e327 suite tested that new helper.
+
+Run-accounting source reconstruction is available at
+`.../M7/run-accounting-reconstruction-20261005-v1/report.md`, SHA-256
+`5b0198f4bf5b80a53e5585a0052c6d96041a1331aea5a20ffcecfc11b8c74ded`;
+32-source inventory SHA-256
+`55dcc32d9c9acece4a2efb0b1e1ead789b0aa3f172503381fd1496e11161d6ba`.
+Worker verified all source bytes at 96c5d9b5; root review is pending. It identifies
+ordinary/run-owned maintenance settlement charge provenance and uncertainty,
+with standalone compact separate. No public read API, caps or helper refund is
+accepted or implemented by that report.
 
 `LegacyImport` reads the current offline SessionDirectory marker and supports
 the current promised prepare-index transfer. No old-schema decoder/fallback was

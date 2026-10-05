@@ -29,6 +29,64 @@ grouped by T00–T19. Empty added sections mean no added subtasks are recorded;
 they do not mean the original task is complete. This follows the maintainer's
 2026-10-01 update to the active implementation goal.
 
+## Verified foreground snapshot repair — 2026-10-05
+
+Exact three-file worker candidate c119aa131fd65263269855f9eb34161ab5f81e44
+passes both supported pairs: 13 FoundationMapping cases, 3 affected external cases
+with 4 exclusions, and all 102 ordinary AppServer cases with 5 exclusions. No skips
+or retries. All24 format/dev-test warnings-as-errors compilation/metadata/pinned
+Node version stages pass; measured stage totals 61.336/124.393 seconds. Complete
+ordinary durations 24.737/23.167 seconds. Third-party cold dependency warnings
+remain visible; project compilation passes, not every log line warning-free.
+
+The shared encoder now maps all ten captured revision-3 snapshot fields and
+repeats that exact encoded open interaction. Tests pin configuration/cursor and
+historical snapshot parity after actual live advancement. The distinct current
+policy answer-admission record is ordered between request and resolution. The
+external restart fixture compares its encoded snapshot ID to the independent
+encoding of the actual native requested-event identity; EOF, Store release,
+second process, resumed pending identity/status and all deadlines remain required.
+No event grammar, generation activation or ADR 0052 decision is implemented.
+
+Root reviewed the complete source diff, compared all three source blobs with
+Git, rehashed all 78 immutable retained artifacts and verified all 24 exact-source
+stage/log identities and six complete positive populations. Full terminal report
+in `.../M7/foreground-c119aa13-v1/terminal-report.json` has SHA-256
+`96fa66c2589e45f821cd90206afa6bc8f5d641ebd48cc7736848523544e413cb`;
+complete output inventory SHA-256
+`a4665be1888739ab22d5199852b31a29cf892a2e0f63142482665d4c2e9a0f2f`;
+complete source-rejoin patch SHA-256
+`96e93b00523d21436b8c5e72cc8dfeecf1768f8287250a94dfaea9c2d6cc0f1f`.
+Ordinary current log SHA-256
+`60b93a070cf47b0da255a31ba9caa5b34b47d4cb7e7a58d554ec842b4b2879c5`;
+floor log SHA-256
+`c54bd8f2f184b7533a01df327db88256ece5d2067c4c1d3b998d200f6302033b`.
+Paths abbreviated by ... start with
+`/Users/spuri/projects/lexlapax/loopex-evidence`.
+
+The first c35d94b5 complete suite failed 101/102 at the raw/encoded ID comparison,
+24.392 seconds; complete log SHA-256
+`670ecf6ef0ef2a57e9d47dca329377c5c7ad680464cd599241a87a6424ec758a`;
+terminal report SHA-256
+`c9361f2f1d27b1b50bd3b75d88abd04a05f4ed2a3c9e714ab4109eaf9c35ea7f`.
+Its bytes/first failure remain retained. Both c119 supported proofs concern the
+changed source; neither retries nor relabels c35 or full e327 failure. These
+three exact source paths join to primary; root owns subsequent integration.
+
+Composition's ordinary helper now excludes long_bound in accordance with the
+accepted fast/release stages. The existing required release group already
+includes composition and actual e327 selected proof executed both IO cases.
+No case, production limit or assertion is removed. Verify the next full fast
+candidate with 588 ordinary composition cases and3 exclusions; later mandatory
+release selection includes both long cases. The helper routing has no new
+standalone PASS claim; complete next-candidate integration remains open.
+
+The Store captured-byte proof is now active on isolated 7dc5fe51 with the
+exclusive VM slot. Foreground worker is stopped and its stage processes/groups
+were observed absent. Private-task causal WIP and all public contract decisions
+remain separate. Original T01–T19 stays 78 done / 95 todo / 6 retired; added 289 done
+/ 19 todo. Including T00: originals78/101/7; added293/20.
+
 ## Resumed integration failure and queued proof — 2026-10-05
 
 Exact clean e327e46c full current fast check ran once and failed, exit 1 in
@@ -12690,7 +12748,7 @@ open.
 
 ### Added implementation subtasks
 
-- [ ] Repair the e327e46c incomplete foreground revision-3 snapshot and superseded policy-answer admission fixture; prove all ten captured fields, exact historical cursor parity after live advancement, actual answer-admission order and the complete AppServer population on both supported pairs without changing generation activation or implementing unaccepted ADR0052.
+- [x] Repair the e327e46c incomplete foreground revision-3 snapshot and superseded policy-answer admission fixture; prove all ten captured fields, exact historical cursor parity after live advancement, actual answer-admission order and the complete AppServer population on both supported pairs without changing generation activation or implementing unaccepted ADR0052.
 
 - [x] Include composition's actual owned restore IO long-bound cases in the existing release long_bound group and prove the real selected composition lane. Preserve nonzero executed-case judgment, credential exclusion, all deadlines and prior required lanes; focused worker runs do not substitute for runner selection.
 

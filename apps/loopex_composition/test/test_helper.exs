@@ -42,4 +42,7 @@ defmodule LoopexComposition.PreparedSessionFixture do
   end
 end
 
-ExUnit.start(exclude: [:real_provider])
+# Concept: actual restore deadline proofs run in the release long-bound lane.
+# Technical depth: the ordinary suite excludes their tag; the required release
+# selection overrides it and retains the unchanged production cutoff assertions.
+ExUnit.start(exclude: [:real_provider, :long_bound])
