@@ -25,25 +25,44 @@ physical restore implementation; it does not waive any full-history proof.
 <a id="technical-depth"></a>
 ## Technical depth
 
-### Active focused CLI proof
+### Latest joined CLI proof and active Store owner
 
-Primary documentation checkpoint2e136d4cccbd8300d8b6e80dcc1cc6d959114da2 is
-pushed. Its one documentation check passed in16.641 seconds, retained at
-sibling M7/documentation-2e136d4c-v1, log SHA-256
+CLI proof00cf26bb31c45d6c98b29f9e132c7c6cb4d24115 is terminal PASS, all22
+stages in241.366 seconds. Each pair passes cold1 plus mixed13 with0 exclusions
+or skips; all56 raw/report/metadata outputs are sealed and independently rehashed.
+Retained directory: sibling M7/cli-guarded-provider-00cf26bb-v2.
+Terminal SHA-256e24339516558a4fedad86a8b2afad06f8b3ee9ea1a4c347268838b53e04151ab;
+reportd6a81e5e86ec722e36ab39e627cd60aecd67e0f1c2757ac236f0adfb34565240;
+inventorybbf80b2dd86fb49550b7fa262152480c7ca94f9c37c6c86d05d7fb843b4d589e.
+Root reviewed its complete one-file patch and joined ancestry at963f17bc.
+The clean fully merged CLI worktree/local branch is removed. Handle56356 is
+terminal and collected, never poll/restart. Source is now in primary m7.
+Whole CLI and new combined full integration remain pending; no checkbox changes.
+
+Exclusive VM slot is GRANTED to restore_manifest_resume only. Start from its
+clean dbd4a29e Store source in /private/tmp/loopex-m7-store-semantic-audit;
+format owned IO/test, commit and re-pin a new immutable runner before verification.
+Its existing v2 preparatory runner is not a passing result. Run current/floor
+sequentially: isolated copied deps/per-environment builds, format/compile/metadata,
+focused41/2excluded, ordinary604/3excluded, changed owned IO long2/41excluded,
+zero skips. Preserve all original deadlines and actual joins, first failure and
+scripted-executor limitations. Worker must report its formatted source and live
+handle, then complete terminal outputs; root reviews before joining.
+No root/resource/ledger/causal verification VM may start meanwhile.
+
+Resource runner v1 remains unexecuted. Source-only v2 is
+/Users/spuri/projects/lexlapax/loopex-evidence/M7/resource-retained-decoding-runner-20261005-v2/stage.sh,
+SHA-2560f902a0513fc236518d73ed308fd4f94d0cfda9f7aa3ca4ddb0a145aa11582e6.
+It addresses root review of writable primary dependency sharing, floor Mix-home,
+Node/toolchain and ambient overrides. Review exact v2 script before later grant.
+Causal91784948's startup deadlock/cleanup delta is reviewed; its exact-source
+runner is being prepared without a VM. Mechanism proof remains unexecuted and
+cannot attribute the six retained actual Core shutdown diagnostics.
+
+Primary documentation checkpoint2e136d4c passed its one docs check in16.641s,
+retained at sibling M7/documentation-2e136d4c-v1, log
 f7006279d40866f2ebf082675f30f681d2dd41a955c40a8ff44d70f4355002c9.
-
-Root holds the sole VM slot. CLI formatted candidate is now
-00cf26bb31c45d6c98b29f9e132c7c6cb4d24115, clean in the same isolated worktree;
-only the formatter's one blank line changed after15fdc361. Both-pair staged
-proof is ACTIVE on unified exec handle56356, runner
-/private/tmp/loopex-m7-cli-00cf-run-all.py and durable gated stage runner
-/Users/spuri/projects/lexlapax/loopex-evidence/M7/cli-guarded-provider-00cf26bb-v2/run-stage.py.
-Current dependency preparation and formatting passed; dev compilation started.
-Resume the same handle until its actual terminal result. Do not start another
-VM, modify this source, overwrite a stage output or retry an unchanged failure.
-Full output/identities/populations are retained stage by stage. No CLI proof or
-new checklist completion is claimed yet. Once terminal, root independently
-checks every result and grants the next worker explicitly. All workers wait.
+The following earlier active records are history; latest state above governs.
 
 ### Latest terminal run and next proof
 

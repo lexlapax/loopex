@@ -29,6 +29,52 @@ grouped by T00–T19. Empty added sections mean no added subtasks are recorded;
 they do not mean the original task is complete. This follows the maintainer's
 2026-10-01 update to the active implementation goal.
 
+## Focused guarded CLI startup proof joined — 2026-10-05
+
+Exact00cf26bb31c45d6c98b29f9e132c7c6cb4d24115 passed all22 staged proof steps
+under both supported pairs, total241.366 seconds. Each pair executes the genuine
+provider lifecycle fixture alone in a fresh test VM, then all13 mixed
+provider/Ask/resource cases with retained seed406612; zero exclusions/skips.
+Current cold5.020s and mixed17.746s; floor cold6.841s and mixed19.016s. Project
+dev/test compilation, formatting and metadata gates passed. Dependency warnings
+and dependency DAG cache rebuild diagnostics remain in complete raw logs.
+All real lifecycle, signal, host Logger, resource and cleanup assertions are
+unchanged. The only owned product-tree change is provider_runtime_isolation_test.exs
+setup, through the existing serial guarded starter, plus its formatter blank line.
+
+Root reviewed the entire one-file diff and independently rehashed all22 stage
+identities/populations/logs/judgments, then all56 sealed retained outputs. Source
+SHA-25661de229834f1706289db7b4e653ebdaf0a8ad23c2ba948c50b5062fd2f7077a7.
+Worker ancestry is joined by963f17bc8b1e3f141231d06e1dab90fffca3e8b7.
+The clean fully merged plain Git worktree and local branch are removed; tested
+history stays reachable in m7. Handle56356 is terminal and collected.
+
+Retained directory:
+/Users/spuri/projects/lexlapax/loopex-evidence/M7/cli-guarded-provider-00cf26bb-v2.
+all-stage-completion.json SHA-256
+`e24339516558a4fedad86a8b2afad06f8b3ee9ea1a4c347268838b53e04151ab`;
+verification-report.json SHA-256
+`d6a81e5e86ec722e36ab39e627cd60aecd67e0f1c2757ac236f0adfb34565240`;
+output-inventory.json SHA-256
+`bbf80b2dd86fb49550b7fa262152480c7ca94f9c37c6c86d05d7fb843b4d589e`.
+Current cold/mixed log hashes are
+`633fa7a2c621235e7a902e27d1d6d99a476362fe25afd2c01ad9bf587da4ab60` /
+`59be3f764c2e5fdff3e158f8ce764820c3c85d2bbcf2d8961b665c8be9cce074`;
+floor hashes are
+`cb7faedd7b00918fe80641fd84386ab6b1e97b154f421a41b16ea891e5687e61` /
+`67d0729f511e70d12894451265a729ebb0d7770f8ef8c7991b77acbc135ed296`.
+
+This is focused proof only. Whole ordinary CLI and the new combined full check
+remain pending, so the T16 repair row stays open and no completion checkbox
+changes. Original T01–T19 counts78 done/95 todo/6 retired; added290 done/22 todo.
+No release, paid provider, attendance or broad restore proof is inferred. Root
+returned its VM slot and explicitly granted Store audit worker only. That
+worker formats/pins before its two-pair focused/ordinary/owned-long proof;
+resource, ledger and causal workers stay stopped. Resource runner v1 was
+unexecuted and replaced by v2 to isolate writable dependency caches, pin floor
+Mix-home and Node, and strip ambient overrides; no product failure is implied.
+The exact ADR0052 question remains unanswered.
+
 ## Combined current-pair failure and isolated audit candidates — 2026-10-05
 
 Exact `48ca4ad12d8668aa664abd5d460e090bbe0f8343` full fast check ran once,
