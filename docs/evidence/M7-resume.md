@@ -27,6 +27,32 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Latest Store integration and next verification
 
+Latest completed proof: Ledger393d8935c26bd9a495198d79e5aa70300fcfbd12 is
+terminal PASS, joined by6abf3f39a89dddd8b11ebef13e1a8b4760904378. Both pairs
+pass17 focused/0excluded and294 ordinary/2excluded, zero skips; all32 logged
+stages pass, total542s. Root verified all44 sealed output files and exact
+pinned/final source inventories, all stage statuses and populations.
+Sibling evidence M7/ledger-byte-guard-execution-20261005-v1; result digest
+d9269fb21f2ad3e09123081734ec2c88d734fb40d6fe7bba1d9871e31ff694b3;
+inventory1d2cdbc1856ca54f8065ebc433b44e1714531504e8f5d9865b11a43dba5878e2.
+Handle86459 is terminal and collected, never poll/restart. The clean fully
+merged Ledger worktree/local branch may be removed after preserving evidence.
+Only the bounded T15 decoder-entry row closes; whole offline ledger/restore
+audit and Linux witness remain open. T01–T19 originals78/95/6, added292/21.
+
+EXCLUSIVE VM SLOT belongs to RESOURCE, handle96931. Source remains clean
+cc8ac30ff1ab6732233c3d3d53f93d0ab01000fb; formatter delta is empty.
+Corrected v4 runner: sibling M7/resource-retained-decoding-runner-20261005-v4/stage.sh,
+digest86aa58b503fd0f08d40646c5a13474af8fec736fe1d76e487b3aeabea34bb0a8.
+Root checked its exact pin-only delta and all8 source inventory records against
+Git/current bytes. Output M7/resource-retained-decoding-execution-20261005-v3.
+Dependency copies and current toolchain/Node probes passed; dev compile is
+running. Worker current_index_cleanup owns polling and returns the slot only
+after terminal collection. No root/causal/checkpoint VM may start meanwhile.
+Preserve both earlier Resource failures; neither is relabeled PASS.
+Earlier active statements below are historical snapshots; this latest state
+governs. Native checkpoint/configure remains source-only and unproved.
+
 Latest active verification is ROOT LEDGER ONLY, handle 86459. Initial source
 0b82b006 is formatted and committed as 393d8935c26bd9a495198d79e5aa70300fcfbd12
 in /private/tmp/loopex-m7-ledger-byte-guard. Runner v2 digest

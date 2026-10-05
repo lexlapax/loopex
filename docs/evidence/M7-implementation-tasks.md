@@ -29,6 +29,46 @@ grouped by T00–T19. Empty added sections mean no added subtasks are recorded;
 they do not mean the original task is complete. This follows the maintainer's
 2026-10-01 update to the active implementation goal.
 
+## Retained Local ledger byte guard joined — 2026-10-05
+
+The bounded T15 decoder-entry subtask is complete at tested source
+`393d8935c26bd9a495198d79e5aa70300fcfbd12`, joined through
+`6abf3f39a89dddd8b11ebef13e1a8b4760904378`. Both toolchains pass 17 focused
+record-conformance cases and 294 ordinary executor cases with 2 exclusions and
+zero skips. Current focused took 1.3 seconds and ordinary 174.3 seconds; floor
+focused took 1.2 seconds and ordinary 184.3 seconds. The complete pipeline took
+542 seconds. All 32 logged stages passed, including project dev/test compilation,
+formatting, metadata and actual suite-population judgments. Third-party warnings
+and cache rebuild diagnostics remain in full output.
+
+Root reviewed the source and formatter delta, checked both exact pinned/final
+source inventories against actual files and Git, verified all command statuses
+and four suite populations, and independently rehashed all 43 output-inventory
+entries plus the inventory itself. Retained directory:
+`/Users/spuri/projects/lexlapax/loopex-evidence/M7/ledger-byte-guard-execution-20261005-v1`.
+Result SHA-256:
+`d9269fb21f2ad3e09123081734ec2c88d734fb40d6fe7bba1d9871e31ff694b3`;
+output inventory SHA-256:
+`1d2cdbc1856ca54f8065ebc433b44e1714531504e8f5d9865b11a43dba5878e2`;
+pinned and final source inventory SHA-256:
+`47d2a50ca21101d06411db4c692302cedc4d503c2b9ae8768587c04430fb99ba`.
+Current ordinary log SHA-256:
+`46aaf37c61d7c7c778d372efc1bbad03d97599009fce84a8a1df78a1406968b1`;
+floor ordinary log SHA-256:
+`578e5b9c008b578d94575c80399d316373127dda576ed257b13c38196ecfd391`.
+Handle 86459 is terminal and collected; never restart or poll it.
+
+Current generation/marker/refusal/open readers reject compressed and wrong-root
+terms before actual decoding, enforce captured byte caps and full consumption,
+and preserve deterministic validation. Real BIF tracing includes a canonical
+positive control. Whole guardian-owned offline ledger capture, semantic relations,
+restore activation and the native Linux filename witness remain separate.
+No required long-bound case or release proof is replaced by this focused run.
+T01–T19 originals remain 78 done / 95 todo / 6 retired; added subtasks are now
+292 done / 21 todo. T15 added counts are 12 done / 5 todo, T08 remains 26 / 2.
+Resource v4 is active on handle 96931 at corrected source cc8ac30f and owns the
+exclusive VM slot. The full combined integration check remains pending.
+
 ## Owned Store semantic audit joined — 2026-10-05
 
 Subsequent source inspection selected a separate bounded T08 native proof:
@@ -12927,7 +12967,7 @@ open.
 
 - [x] Audit every declared current Store history through the existing owned IO worker, enforcing descriptor/path/hash identity, complete transaction replay and recovery of every session; prove actual retained unknown truth, faults and cleanup on both pairs without claiming scripted executors prove OS effects.
 - [ ] Decode retained current resource manifest/provenance bytes under derived physical ceilings before parsing, preserve exact normalization/content/Git identities and deterministic bytes, and prove actual current writers, hostile bytes and real decoder-entry controls on both pairs. Whole catalog capture/reference/backup orchestration remains separate.
-- [ ] Refuse compressed/wrong-root retained Local ledger records before actual term decoding, enforce captured byte caps and full consumption, and prove all current record readers plus positive real-BIF trace control on both pairs. Whole owned offline ledger capture/audit remains separate.
+- [x] Refuse compressed/wrong-root retained Local ledger records before actual term decoding, enforce captured byte caps and full consumption, and prove all current record readers plus positive real-BIF trace control on both pairs. Whole owned offline ledger capture/audit remains separate.
 
 - [x] Extract and prove bounded internal Store captured-byte decoding through the existing current decoder, preserving actual whole-log caps, complete/torn/corrupt evidence, cold fixed-schema loading and no IO/actors/repair; verify actual boundary/capacity and complete Store suite on both supported pairs before full backup audit integration.
 
