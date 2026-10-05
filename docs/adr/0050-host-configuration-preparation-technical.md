@@ -30,23 +30,13 @@ before normalizing the command; that operation adds only its deterministic diges
 reads no files or environment and runs no host callback. The captured instruction
 sections must remain exact. The existing five-field validator then applies.
 
-The callback returns only the complete candidate. Core rederives it with
-`SessionConfiguration.update/5` from the original normalized changes, returned
-capabilities/mapping and immutable definitions, requiring exact candidate equality
-before retained-history preflight. All non-model authored settings and explicit
-origins remain unchanged; derived ceilings follow the existing resolution rules.
-A different canonical model cannot replace the authored model after duplicate
-lookup. Such an alias refuses through existing invalid-configuration admission;
-clients use exact canonical model identifiers. The CLI's existing external alias
-resolution still happens before its Core command identity is constructed.
-
-The current eight-member `session_configuration_admitted_v1` record and normalized
-command digest remain unchanged. Accepted instruction changes keep their existing
-version/digest reference into the one retained candidate; replay reconstructs the
-same captured command, checks its original digest and rederives the candidate
-without Model or catalog access. Refusals retain their original normalized changes.
-No second changes map, alias receipt, compatibility decoder or rewritten event is
-introduced.
+The callback returns only the complete candidate. Core retains the original
+normalized authored changes and verifies the returned candidate using the pure
+[alias-binding rule](#technical-alias-identity) below, before retained-history
+preflight. All non-model authored settings and explicit origins remain unchanged;
+derived ceilings follow the existing resolution rules. Model aliases use the
+host's existing ProviderBindings resolution; no new alias registry or runtime
+catalog is added.
 
 The candidate cannot contain host bindings, routes, credentials, handles, modules
 or private catalog objects beyond the already approved bounded plain metadata.
@@ -105,6 +95,79 @@ Direction A would declare the same lifecycle on a separate behaviour and startup
 option. The selected B extends Model conformance and uses the composition wrapper;
 there is no new generic provider/configuration framework.
 
+<a id="technical-alias-identity"></a>
+### Alias binding and replay
+
+Concept: [Authored identity and retained resolution](0050-host-configuration-preparation.md#concept-alias-identity).
+
+The current private record becomes `session_configuration_admitted_v2`. Its
+closed eight-member shape is:
+
+```text
+kind: "session_configuration_admitted_v2"
+command_type: "configure"
+command_id
+command_digest
+admission
+changes
+prior_configuration_version
+configuration
+```
+
+`changes` retains normalized authored input, including the exact model alias.
+Compute `command_digest` from the existing deterministic preimage
+`["loopex_command_v1", normalized_authored_command]`; never substitute the
+canonical model into that preimage. Accepted instruction changes retain their
+existing version/digest descriptor into the single candidate. Reconstruct their
+full captured envelope from that candidate before verifying the authored digest.
+A refusal retains its authored changes and has `configuration: nil`, preserving
+the existing refusal grammar and semantics.
+
+For accepted admission and replay, let A be reconstructed authored changes, C
+the candidate and P the prior committed configuration:
+
+1. Validate A with the existing six-field mutable allowlist.
+2. If A explicitly contains `model`, derive effective changes by replacing only
+   that member with C's canonical `model`.
+3. If A omits `model`, require C's model to equal P's model. Omission cannot
+   refresh or retarget it.
+4. Require exact equality between C and
+   `SessionConfiguration.update(P, effective_changes, C.model_capabilities,
+   C.provider_mapping, immutable_definitions)`.
+5. Preserve settledness, prior-version equality, complete retained-history and
+   request preflight, source-bound metadata ceilings, origin rules and public
+   projection validation.
+
+The complete OwnerLane transaction binds authored changes to the full candidate.
+The retained model binding is A's `model` to C's `model`; no second changes map,
+alias receipt or callback return tuple is necessary. Alias resolution is a
+trusted host capture. Pure recovery verifies that retained binding and the
+complete candidate; it does not prove that today's catalog would resolve the
+alias identically. Model requests use only the canonical captured configuration.
+The candidate cannot rewrite any other authored setting.
+
+Normalize and digest authored input before preparation. An identical retained
+command returns its original accepted/refused disposition before invoking a
+callback or catalog. Changed authored payload returns `idempotency_conflict`.
+Alias and canonical spellings conflict under the same command ID even when they
+resolve identically. A fresh command ID may capture a different resolution after
+catalog drift. Unknown admission retains the original complete proposal,
+transaction ID and digest; never resolve again or rebuild its candidate.
+
+The existing prepared-candidate facade uses the same pure rule. Externally
+prepared alias commands gain support without another argument; canonical
+callers retain their semantics. Duplicate lookup ignores a replacement candidate.
+CLI preparation must preserve its authored changes while using canonical
+changes internally to construct C. Native, foreground and daemon ingress share
+this contract. Public configured events and snapshots remain canonical and
+unchanged.
+
+Replace all configure-v1 writer and readers together, including recovery and
+effect-index readers. Refuse `session_configuration_admitted_v1`; do not keep a
+compatibility reader, migrate roots or rewrite existing journals. This version
+change identifies the new persistent model-identity relationship. Current v2
+replay, owner restart and exact unknown-commit recovery remain required.
+
 <a id="technical-contract-impact"></a>
 ### Evidence and proof
 
@@ -133,8 +196,12 @@ joins; stale owner/version results; uncertain Store admission without repeated
 resolution or publication; captured current restart/replay without the callback;
 private canaries; and live foreground/daemon configure using admitted routes
 with unchanged lease fencing and no provider dispatch during preparation.
-Also prove identity-preserving preparation, alias refusal without rewritten
-command facts, raw-instruction pure capture and exact duplicate replay, wrapper
-option isolation and unchanged actual adapter completion. No test may accept a
-canonicalized candidate under a different authored command digest. Independent
-Node workflows remain part of the coordinated protocol join.
+Also prove authored-alias/canonical-candidate records and independent digest
+vectors; alias versus canonical duplicate conflicts; catalog drift with an
+identical duplicate versus a fresh ID; accepted/refused v2 replay without the
+callback; omitted-model retarget and non-model rewrite refusal; instruction
+reconstruction and pure raw capture; canonical and alias prepared callers;
+unknown-commit exact re-presentation without another resolver call; v1 refusal;
+wrapper option isolation and unchanged actual adapter completion. No test may
+substitute canonical changes into the authored command digest. Independent Node
+workflows remain part of the coordinated protocol join.
