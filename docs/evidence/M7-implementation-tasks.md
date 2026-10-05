@@ -325,6 +325,61 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Alias-preparation scoped unit integrated and pushed as `dd9bddd1` from
+  verified worker `b3bba74a1c952671be537ed1b0d3141dad3483cb`. All 25 owned
+  paths match the final tested source inventory; the committed root progress
+  fixture is preserved. Core/current-v2 alias admission/replay, composition
+  wrapper, CLI authored identity and dormant ingress helpers are implemented.
+  Live foreground /3, daemon /4 and independent clients remain open; current
+  foreground /1 and daemon /2 still refuse configure.
+
+  Both pairs PASS 486 ordinary tests plus one actual 60,000-ms cutoff case.
+  Core 324 cases measured 60.092 / 60.057 seconds; actual cutoff measured
+  61.384 / 61.339 seconds. Composition 85, ReqLLM 36, CLI configuration 15,
+  foreground mapping 15 and daemon 11 cases pass on each pair. Final owned
+  compilation, format, docs, status, dependency and matrix gates pass both.
+  Current non-Core outputs cover unchanged generation-6 paths; final Core
+  and all floor outputs use generation 7. A retained complete-file AST proof
+  identifies the coordinator's sole generation-6/7 change as formatting.
+
+  Immutable proof report
+  `/private/tmp/loopex-m7-model-alias-proof/final/proof-report.json`, SHA-256
+  `8cda1095d9225620e81273c95dcac1ebfb147f82b8ac1a98dc1e87ca2592653f`;
+  complete 1,057-path source inventory `source-full-tree.json` in that directory,
+  SHA-256 `c9ae6fa3d97105bcb2327deb94d09fc15d73558bbdd014644eefcbdcfd1fc2c8`;
+  retained-file manifest `retained-files-manifest.json`, SHA-256
+  `1bdeab7886d7d1c7b9c5b15d3cabeb1e768791d25be0a5c72cfa5c9effbd3b5e`.
+  Root rehashed all 348 retained entries and all 14 selected success outputs.
+  Five failed stages remain retained. Current Core lines 785/787 and floor
+  lines 774/776/790 still report Task.Supervisor shutdown_error/noproc; T16
+  remains open. The wrapper preserves current Edges route eligibility:
+  ephemeral startup with Ollama proves capture, not unprepared configure for
+  that route. No all-route, full-integration, paid, attended or closure claim.
+  Root owns the released VM slot and prepares one full current-pair check of
+  the clean combined chat/codec/preparation integration candidate.
+
+  The presented inspection-shape question is pending, independently of the
+  accepted restore direction. Exact restore proposal retained at
+  `/private/tmp/loopex-m7-current-restore-exact-amendment-research-20261004-v2.md`,
+  SHA-256 `0b833d12d8f4a0a7560ad660d0b0f6fa11a1db50358230c3f23b01e40c8b24f1`.
+  Integrator review `loopex-m7-current-restore-integrator-review-20261005-v1.md`
+  in `/private/tmp`, SHA-256
+  `86625c970e98aa0132f31022fe69eea7f0f3a6f53af510b61d5d37464463165d`,
+  requires repeatable current-format restore, exact persistent identities and
+  cleanup/uncertainty rules before preparing the governed pair. An attempted
+  independent audit was unavailable because its role required enforced
+  read-only permissions but its effective profile allowed repository writes;
+  it inspected no source. Integrator review is not independent closure review.
+
+  T11 exact accounting proposal
+  `/private/tmp/loopex-m7-retained-run-accounting-proposal-20261005-v1/proposal.md`,
+  SHA-256 `585dcfe29df34dbba772fa073fb1dff5d796db71dec1a30fc60fbf064f226d86`;
+  source inventory SHA-256
+  `9e503af70897a77ddd7c7a0aedbd2caac86936ace82c46b8206cef8f2dd62a6a`.
+  Its complete-prefix caps, conservative certainty and query lifetime are
+  proposed, not accepted. No helper accounting/authority implementation follows
+  from the packet; the host gateway and private ledger grammar remain separate.
+
 - Maintainer selected restore option B with "Approved option 1" in response
   to the empty-root recovery question. The
   [direction disposition](../developer/agent-context-map.md#disposition-m7-empty-root-restore-direction-2026-10-04)
@@ -11227,7 +11282,8 @@ or check was relaxed.
 
 - [x] Consume captured defaults in implicit create/lookup, refuse unconfigured and superseded creation before Store mutation, remove the Core v2 writer, capture and forward the template through all three reference constructors and actual daemon startup, and prove physical Store reopen/resume and exact no-activation replay on both toolchains. Migrate shared loop and creation/lifecycle fixtures to current captures while preserving request-byte, command-binding, retry, ownership and cleanup proofs. Remaining callers/readers and coordinated wire generations stay open.
 
-- [ ] Implement accepted ADR 0050 optional Model-port configuration preparation, retaining authored aliases bound to complete canonical candidates in current-v2 records, authority, duplicate disposition, bounded owned work, stale-result refusal and pure current replay; join both runtime-only transport hosts without exposing host routes or metadata. Exact revised pair candidate 108dbf3468c925c69696f05fd73848380b6787ef is accepted. Isolated source implementation is starting; verification awaits the exclusive VM slot.
+- [x] Implement and prove the bounded native ADR 0050 Model-port preparation unit, retaining authored aliases bound to complete canonical candidates in current-v2 records, authority, duplicate disposition, bounded owned work, stale-result refusal and pure current replay. Join composition/CLI and dormant ingress without exposing host routes or metadata; prove both supported pairs and each actual 60-second cutoff. Full live wire coverage remains the separate row below.
+- [ ] Finish accepted ADR 0050 through live foreground /3, daemon /4 and independent clients after coordinated generation activation; prove lease/owner authority, runtime alias resolution, exact duplicate/unknown persistence, public projection and cleanup without host-route disclosure. Native implementation and dormant ingress are proved; superseded generations do not advertise configure.
 
 ## T05 — Update records, protocols and independent clients
 
@@ -11763,6 +11819,7 @@ open.
 - [x] Reproduce and repair quiesce cancellation closure when a fence startup notice has not arrived; accept only Control's DOWN/absence-backed acknowledgement for an unannounced worker, refuse a foreign binding without falsely acknowledging absence, retain independent exact local DOWN for announced workers, prove expired/suspended-worker cases before and after the fix, and verify the complete quiesce file plus the unchanged real production fence cutoff on both supported pairs. Keep combined full integration and the original untraced failure schedule distinct.
 
 - [ ] Investigate and repair the full 520ff308 integration failure in the sixty-three blocked quiesce fences sharing one cutoff with a settled sibling; retain the failed exact-candidate output, establish the cause through bounded runtime observability and actual process lifetimes, preserve the shared cutoff, sibling progress, fence accounting and cleanup assertions, and verify both supported pairs.
+- [ ] Run the combined chat-progress, command-bounds and native alias-preparation integration candidate's full current-pair fast check once from a clean committed checkout; retain exact SHA, complete output, measured duration and digest. Keep required floor closure, live wire joins and observed T16 task-shutdown diagnostics separate.
 - [ ] Resolve the exact 0823aa50 full-check pre-fence runtime_unavailable under untraced combined load; retain failed output, establish its phase/cause and exact process lifetimes, preserve the original gate/fence/reap/cleanup/Store assertions, and verify a clean committed integration candidate without relabeling the failed run.
 
 - [x] Verify the combined caller-monitor cleanup and maintenance reply-reserve amendment from one clean committed integration candidate; retain exact SHA, full fast-check output and selected Node release workflow, preserve failed evidence and keep the separate concurrent owner-stop diagnostic open.
