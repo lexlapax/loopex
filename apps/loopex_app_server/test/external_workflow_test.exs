@@ -439,7 +439,7 @@ defmodule Loopex.AppServer.ExternalWorkflowTest do
     open_interaction = await_open_interaction(second, session_id)
 
     assert is_map(open_interaction), "the question did not survive the restart"
-    assert open_interaction["interaction_id"] == interaction["interaction_id"]
+    assert open_interaction["interaction_id"] == encode(interaction["interaction_id"])
     assert open_interaction["status"] == "pending"
 
     Port.close(second)
