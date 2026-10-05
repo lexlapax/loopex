@@ -1352,6 +1352,8 @@ defmodule Loopex.RuntimeQuiesceTest do
       session = create_session(fixture.runtime, "create-late-fence")
       {:ok, %{control: control}} = Runtime.children(fixture.runtime)
       observer = self()
+      mode = @fence_start_mode
+      bounds = fast_bounds(%{fence_budget_ms: 500, fence_reap_ms: 100})
       observations = :ets.new(:fence_start_observations, [:ordered_set, :public])
       :ets.insert(observations, {:count, 0})
 
@@ -1359,7 +1361,7 @@ defmodule Loopex.RuntimeQuiesceTest do
         spawn_link(fn ->
           Process.flag(:trap_exit, true)
           send(observer, {:fence_relay_ready, self()})
-          hold_fence_start(control, observer, observations, %{})
+          hold_fence_start(control, observer, observations, %{}, mode, bounds.fence_reap_ms)
         end)
 
       children = Supervisor.which_children(fixture.runtime.supervisor)
@@ -1404,14 +1406,14 @@ defmodule Loopex.RuntimeQuiesceTest do
               Quiesce.run(
                 root,
                 fixture.runtime.token,
-                fast_bounds(%{fence_budget_ms: 500, fence_reap_ms: 100})
+                bounds
               )
 
             observe_fence_start(observations, :task, :run_returned, fence_call_outcome(result))
             result
           end)
 
-        worker = await_held_fence_start(task, session, observations)
+        {worker, operation, work_deadline} = await_held_fence_start(task, session, observations)
         worker_monitor = Process.monitor(worker)
         before = M1RuntimeTestStore.inspect_state(fixture.store_pid).sessions[session]
 
@@ -1420,6 +1422,21 @@ defmodule Loopex.RuntimeQuiesceTest do
             assert true = :erlang.suspend_process(worker)
             :killed
           else
+            cutoff = work_deadline + bounds.fence_reap_ms
+
+            assert_receive {:DOWN, ^worker_monitor, :process, ^worker, :normal},
+                           max(cutoff - System.monotonic_time(:millisecond), 0)
+
+            assert System.monotonic_time(:millisecond) < cutoff
+
+            observe_fence_start(
+              observations,
+              :test,
+              :expired_worker_down,
+              {operation, worker, :normal}
+            )
+
+            send(relay, {:expired_worker_joined, operation, worker})
             :normal
           end
 
@@ -1427,7 +1444,29 @@ defmodule Loopex.RuntimeQuiesceTest do
         assert result.fences == %{session => {:unknown, :no_head}}
         assert result.unsettled == [session]
         assert result.settled == []
-        assert_receive {:DOWN, ^worker_monitor, :process, ^worker, ^reason}, 1_000
+
+        if @fence_start_mode == :held_until_cancel do
+          assert_receive {:DOWN, ^worker_monitor, :process, ^worker, ^reason}, 1_000
+        else
+          %{events: events, dropped: 0} = fence_start_observations(observations)
+
+          keys = [
+            :expired_worker_down,
+            :fence_cancel_forwarded,
+            :fence_cancelled_forwarded,
+            :run_returned
+          ]
+
+          proof = for {_, _, actor, event, id} <- events, event in keys, do: {actor, event, id}
+
+          assert proof == [
+                   {:test, :expired_worker_down, {operation, worker, :normal}},
+                   {:relay, :fence_cancel_forwarded, operation},
+                   {:relay, :fence_cancelled_forwarded, operation},
+                   {:task, :run_returned, :ok}
+                 ]
+        end
+
         elapsed_ms = System.monotonic_time(:millisecond) - started_at
         assert elapsed_ms >= 400
         assert elapsed_ms < 10_000
@@ -1518,7 +1557,7 @@ defmodule Loopex.RuntimeQuiesceTest do
   # forwards Control's actual DOWN-backed cleanup notice; no Store effect or
   # provider is substituted. The root projects the original child inventory with
   # this one transport delay, leaving session termination and Store truth real.
-  defp hold_fence_start(control, observer, observations, owners) do
+  defp hold_fence_start(control, observer, observations, owners, mode, reap_ms) do
     receive do
       {:"$gen_call", from, request} ->
         call = fence_call_kind(request)
@@ -1534,7 +1573,7 @@ defmodule Loopex.RuntimeQuiesceTest do
 
         GenServer.reply(from, result)
         observe_fence_start(observations, :relay, :call_replied, call)
-        hold_fence_start(control, observer, observations, owners)
+        hold_fence_start(control, observer, observations, owners, mode, reap_ms)
 
       {:start_quiesce_fence, token, drain, operation, owner, session, deadline, resolution} ->
         observe_fence_start(
@@ -1556,21 +1595,41 @@ defmodule Loopex.RuntimeQuiesceTest do
             resolution
           )
 
-        hold_fence_start(control, observer, observations, Map.put(owners, operation, owner))
+        fence = %{owner: owner, deadline: deadline, worker: nil}
+        owners = Map.put(owners, operation, fence)
+        hold_fence_start(control, observer, observations, owners, mode, reap_ms)
 
       {:loopex_quiesce_fence_started, operation, session, pid} ->
         observe_fence_start(observations, :relay, :fence_started, {operation, session, pid})
-        send(observer, {:held_fence_start, session, pid})
-        hold_fence_start(control, observer, observations, owners)
+        fence = %{owners[operation] | worker: pid}
+        send(observer, {:held_fence_start, session, pid, operation, fence.deadline})
+
+        hold_fence_start(
+          control,
+          observer,
+          observations,
+          Map.put(owners, operation, fence),
+          mode,
+          reap_ms
+        )
 
       {:cancel_quiesce_fence, token, drain, operation, owner} ->
         observe_fence_start(observations, :relay, :fence_cancel_requested, {operation, owner})
 
-        if owners[operation] == owner do
-          :ok = Control.cancel_quiesce_fence(control, token, drain, operation, self())
-        end
+        mode =
+          case owners[operation] do
+            %{owner: ^owner} = fence when mode == :expired_before_cancel ->
+              cancel_expired_fence(control, token, drain, operation, fence, observations, reap_ms)
 
-        hold_fence_start(control, observer, observations, owners)
+            %{owner: ^owner} ->
+              :ok = Control.cancel_quiesce_fence(control, token, drain, operation, self())
+              mode
+
+            _foreign ->
+              mode
+          end
+
+        hold_fence_start(control, observer, observations, owners, mode, reap_ms)
 
       message
       when is_tuple(message) and
@@ -1579,10 +1638,15 @@ defmodule Loopex.RuntimeQuiesceTest do
                :loopex_quiesce_fence_cancelled,
                :loopex_quiesce_fence_closed,
                :loopex_quiesce_fence_refused
-             ] ->
+             ] and
+             (mode != :expired_before_cancel or
+                elem(message, 0) not in [
+                  :loopex_quiesce_fence_failed,
+                  :loopex_quiesce_fence_closed
+                ]) ->
         observe_fence_start(observations, :relay, :fence_notice, message)
-        if owner = owners[elem(message, 1)], do: send(owner, message)
-        hold_fence_start(control, observer, observations, owners)
+        if fence = owners[elem(message, 1)], do: send(fence.owner, message)
+        hold_fence_start(control, observer, observations, owners, mode, reap_ms)
 
       {:EXIT, ^observer, _reason} ->
         exit(:shutdown)
@@ -1590,8 +1654,54 @@ defmodule Loopex.RuntimeQuiesceTest do
       :stop ->
         :ok
 
-      _other ->
-        hold_fence_start(control, observer, observations, owners)
+      other
+      when not is_tuple(other) or
+             elem(other, 0) not in [
+               :loopex_quiesce_fence_failed,
+               :loopex_quiesce_fence_closed,
+               :expired_worker_joined
+             ] ->
+        hold_fence_start(control, observer, observations, owners, mode, reap_ms)
+    end
+  end
+
+  # Concept: the expiry witness still requires Control's real cancellation acknowledgement.
+  # Technical depth: this single-session relay retains failed/closed notices until
+  # the observer's normal DOWN join and actual cancellation acknowledgement. Both
+  # selective receives spend the original work deadline plus its 100-ms reap bound.
+  defp cancel_expired_fence(control, token, drain, operation, fence, observations, reap_ms) do
+    cutoff = fence.deadline + reap_ms
+    worker = fence.worker
+
+    receive do
+      {:expired_worker_joined, ^operation, ^worker} when is_pid(worker) ->
+        if System.monotonic_time(:millisecond) < cutoff do
+          observe_fence_start(observations, :relay, :fence_cancel_forwarded, operation)
+          :ok = Control.cancel_quiesce_fence(control, token, drain, operation, self())
+
+          receive do
+            {:loopex_quiesce_fence_cancelled, ^operation} = acknowledgement ->
+              if System.monotonic_time(:millisecond) < cutoff do
+                observe_fence_start(observations, :relay, :fence_cancelled_forwarded, operation)
+                send(fence.owner, acknowledgement)
+                :expired_cancelled
+              else
+                observe_fence_start(observations, :relay, :expiry_ack_cutoff, operation)
+                :expired_before_cancel
+              end
+          after
+            max(cutoff - System.monotonic_time(:millisecond), 0) ->
+              observe_fence_start(observations, :relay, :expiry_ack_cutoff, operation)
+              :expired_before_cancel
+          end
+        else
+          observe_fence_start(observations, :relay, :expiry_join_cutoff, operation)
+          :expired_before_cancel
+        end
+    after
+      max(cutoff - System.monotonic_time(:millisecond), 0) ->
+        observe_fence_start(observations, :relay, :expiry_join_cutoff, operation)
+        :expired_before_cancel
     end
   end
 
@@ -1616,9 +1726,9 @@ defmodule Loopex.RuntimeQuiesceTest do
     task_ref = task.ref
 
     receive do
-      {:held_fence_start, ^session, worker} ->
+      {:held_fence_start, ^session, worker, operation, work_deadline} ->
         observe_fence_start(observations, :test, :held_start_received, {session, worker})
-        worker
+        {worker, operation, work_deadline}
 
       {^task_ref, result} ->
         observe_fence_start(observations, :test, :early_task_result, fence_call_outcome(result))
