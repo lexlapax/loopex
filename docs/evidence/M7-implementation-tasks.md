@@ -69,6 +69,44 @@ T01–T19 originals remain 78 done / 95 todo / 6 retired; added subtasks are now
 Resource v4 is active on handle 96931 at corrected source cc8ac30f and owns the
 exclusive VM slot. The full combined integration check remains pending.
 
+## Resource retained decoder proof joined — 2026-10-05
+
+The bounded added T15 resource-decoder subtask is complete at tested source
+`cc8ac30ff1ab6732233c3d3d53f93d0ab01000fb`, joined through
+`32cf240e40ab0ab3a807a2a6e17726d64c5cce1d`. Both supported pairs pass
+33 focused/0 excluded and596 ordinary Composition/3 excluded, zero skips.
+Current ExUnit durations32.3s/333.9s; floor32.3s/338.1s; complete pipeline918s.
+All31 logged command and tee statuses are zero; root independently verified
+all42 sealed output records, the inventory, all24 pinned/current/Git source
+records and all four actual suite populations. Formatter produced no changes.
+
+Immutable output directory:
+`/Users/spuri/projects/lexlapax/loopex-evidence/M7/resource-retained-decoding-execution-20261005-v3`.
+Result SHA-256`b7a2e13cebd18f0b71e5db49fd9cb43c959ae047cd951030a5af6dbae5ff7ccf`;
+output inventory`ac574688b712b2cdae6de7987b5cacd5e256428163c07854c924fb96f0a621d8`;
+final source inventory`131a009e1086c740ddd397313fbb3d6bc191fe67a3f1b1ca1c80b21726109156`.
+Raw current focused/ordinary digests are
+`312803dd6967d20b6845d0cf95bc50b22e0242cb330f47d479211a9833c2c619`/
+`518ec4bea51d1379b8bba5c3ee2cbdf46f26ee1978b1ec3d9a5cd67d8fe4fe83`;
+floor`73e60ddce8d0b08b1d481d17b44c0cca30ff8e3bd2c590da7eaca9b54536581f`/
+`31c31ed99393ae86852c80344b3e349b91e8618c468031d9828f67a7af185ff9`.
+Handle96931 is terminal exit0 and collected; no retry. Earlier runner and
+fixture failures remain retained. Floor ordinary output includes
+`erl_child_setup: failed with error 32 on line 282`; dependency warnings and
+Darwin invalid-UTF8 filename limitations remain explicit. This slice proves
+bounded pure decoding, current writers and decoder-entry controls, not whole
+catalog/reference capture, Linux filename acceptance or complete restore.
+
+The exclusive slot passed to causal worker, live handle52711. Formatter AST
+comparison passed and exact direct child`5fa9d9ce3d1f723aa31d877e096110c1d688e804`
+is pinned; current dev compilation is running. Causal4-case proof remains
+unproved and cannot attribute the six actual Runtime shutdown reports.
+T01–T19 originals78 done/95 todo/6 retired; added293 done/21 todo.
+The new captured-ledger extraction205afb7a remains source-only; its unexecuted
+runner sibling`M7/ledger-captured-decoding-runner-20261005-v1/stage.sh`
+SHA-256`abbd0b462164398e0a9d89abedf8861b95543414e4388c3671fbc8d294ebf99d`
+passed native Bash syntax and all five embedded Python AST checks without a VM.
+
 ## Owned Store semantic audit joined — 2026-10-05
 
 Subsequent source inspection selected a separate bounded T08 native proof:
@@ -12966,7 +13004,7 @@ open.
 ### Added implementation subtasks
 
 - [x] Audit every declared current Store history through the existing owned IO worker, enforcing descriptor/path/hash identity, complete transaction replay and recovery of every session; prove actual retained unknown truth, faults and cleanup on both pairs without claiming scripted executors prove OS effects.
-- [ ] Decode retained current resource manifest/provenance bytes under derived physical ceilings before parsing, preserve exact normalization/content/Git identities and deterministic bytes, and prove actual current writers, hostile bytes and real decoder-entry controls on both pairs. Whole catalog capture/reference/backup orchestration remains separate.
+- [x] Decode retained current resource manifest/provenance bytes under derived physical ceilings before parsing, preserve exact normalization/content/Git identities and deterministic bytes, and prove actual current writers, hostile bytes and real decoder-entry controls on both pairs. Whole catalog capture/reference/backup orchestration remains separate.
 - [x] Refuse compressed/wrong-root retained Local ledger records before actual term decoding, enforce captured byte caps and full consumption, and prove all current record readers plus positive real-BIF trace control on both pairs. Whole owned offline ledger capture/audit remains separate.
 - [ ] Extract the existing current Local ledger validator as a pure captured-byte decoder with fixed kind ceilings; prove actual writers, hostile captured bytes and complete Local conformance on both pairs. Physical capture and complete generation/basename/receipt/history audit remain separate.
 

@@ -27,6 +27,34 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Latest Store integration and next verification
 
+LATEST: Resource cc8ac30ff1ab6732233c3d3d53f93d0ab01000fb is terminal PASS,
+joined through32cf240e40ab0ab3a807a2a6e17726d64c5cce1d. Both pairs pass
+33focused/0excluded and596ordinary/3excluded, zero skips; all31 logged stages
+pass, total918s. Root independently verified42 sealed output records plus
+inventory, all24 source records and actual populations. Result digest
+b7a2e13cebd18f0b71e5db49fd9cb43c959ae047cd951030a5af6dbae5ff7ccf;
+inventory ac574688b712b2cdae6de7987b5cacd5e256428163c07854c924fb96f0a621d8
+in siblingM7/resource-retained-decoding-execution-20261005-v3. Handle96931 is
+terminal and collected, never poll/restart. Preserve first failures and actual
+floor erl_child_setup error32 diagnostic. Whole catalog/capture/restore and
+Linux witness remain open. T01–T19 originals78/95/6, added293/21.
+
+EXCLUSIVE VM SLOT now belongs to CAUSAL, live handle52711. Reviewed v2 runner
+siblingM7/private-task-causal-runner-91784948-v2/run.py is executing ONLY its
+four-case both-pair proof. Formatter/non-line AST comparison passed; source
+is re-pinned to direct child5fa9d9ce3d1f723aa31d877e096110c1d688e804. Current
+versions and format check passed; dev compilation is running. Worker
+private_task_causal_resume owns polling and returns the slot only after terminal
+collection and sealing. No root/Resource/native checkpoint/ledger VM may start.
+This controlled mechanism cannot attribute actual Runtime shutdown diagnostics.
+Native checkpoint4168dee7 remains source-only; worker prepares a gated runner.
+Captured ledger205afb7a remains source-only; its gated runner sibling
+M7/ledger-captured-decoding-runner-20261005-v1/stage.sh digest
+abbd0b462164398e0a9d89abedf8861b95543414e4388c3671fbc8d294ebf99d
+passed native Bash syntax and five embedded Python AST checks without execution.
+Root owns rejoin and one new clean combined fast check after queued proofs.
+All active-run statements below are historical snapshots; this latest state governs.
+
 Local ledger captured-byte extraction is source-only at
 205afb7a598210c97937fc27238061c163ff9b5f in
 /private/tmp/loopex-m7-ledger-captured-decoding,
