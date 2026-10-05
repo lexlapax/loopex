@@ -40,6 +40,7 @@ implementation authority:
 | [ADR 0047](../adr/0047-reference-host-run-defaults.md#concept) | Outcome 6's mandatory configured bounds and outcome 8's measured baseline |
 | [ADR 0048](../adr/0048-host-provider-routing-and-credential-bindings.md#concept) | Outcomes 3, 4 and 7 provider routing and credential bindings |
 | [ADR 0049](../adr/0049-explicit-host-configuration.md#concept) | Outcomes 6 and 7 explicit configuration, roles and command grammar |
+| [ADR 0051](../adr/0051-current-format-physical-restore.md#concept) | Proposed prerequisite for the fresh physical-root current-format restore outcome; [exact contracts and proof](../adr/0051-current-format-physical-restore-technical.md#technical-depth) require acceptance before dependent implementation |
 
 Accepted decisions that constrain the work:
 

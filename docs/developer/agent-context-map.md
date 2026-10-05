@@ -6802,3 +6802,12 @@ under the current-contract rule. Preserve the existing abort target, captured
 cleanup cutoff and exact joins. This adds no wire inspection member, durable
 compact-admission event, snapshot field or chat wait/closing JSON field. It does
 not accept restore/accounting contracts, activate generations or close M7.
+
+### Proposed current-format physical restore contract
+
+[ADR 0051](../adr/0051-current-format-physical-restore.md#concept) and its
+[technical companion](../adr/0051-current-format-physical-restore-technical.md#technical-depth)
+are Proposed. They specify the selected empty-root direction, including lost
+source trust, offline ownership, exact lineage and physical lifetime proofs.
+The direction disposition authorizes proposal preparation; the exact pair
+requires acceptance before dependent implementation. T15 remains open.

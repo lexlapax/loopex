@@ -60,6 +60,7 @@ a decision adds a new record rather than rewriting the old one.
 | 0048 | Host provider routing and credential bindings | Accepted | [Decision](0048-host-provider-routing-and-credential-bindings.md#concept) | [Technical depth](0048-host-provider-routing-and-credential-bindings-technical.md#technical-depth) |
 | 0049 | Explicit host configuration | Accepted | [Decision](0049-explicit-host-configuration.md#concept) | [Technical depth](0049-explicit-host-configuration-technical.md#technical-depth) |
 | 0050 | Model-port configuration preparation | Accepted | [Decision](0050-host-configuration-preparation.md#concept) | [Technical depth](0050-host-configuration-preparation-technical.md#technical-depth) |
+| 0051 | Current-format physical restore | Proposed | [Decision](0051-current-format-physical-restore.md#concept) | [Technical depth](0051-current-format-physical-restore-technical.md#technical-depth) |
 
 0001 and 0002 were the prerequisites that unblocked the first milestone
 candidate; the [plans register](../plans/README.md) records current status.

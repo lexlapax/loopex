@@ -102,6 +102,7 @@ pairing, link, review, code-documentation, and enforcement contracts.
 | 0048 — host provider routing and credential bindings | [Decision](adr/0048-host-provider-routing-and-credential-bindings.md#concept) | [Technical depth](adr/0048-host-provider-routing-and-credential-bindings-technical.md#technical-depth) |
 | 0049 — explicit host configuration | [Decision](adr/0049-explicit-host-configuration.md#concept) | [Technical depth](adr/0049-explicit-host-configuration-technical.md#technical-depth) |
 | 0050 — Model-port configuration preparation | [Decision](adr/0050-host-configuration-preparation.md#concept) | [Technical depth](adr/0050-host-configuration-preparation-technical.md#technical-depth) |
+| 0051 — current-format physical restore | [Decision](adr/0051-current-format-physical-restore.md#concept) | [Technical depth](adr/0051-current-format-physical-restore-technical.md#technical-depth) |
 
 An ADR pair is one decision. Its status and governance record live in the
 Concept file and bind both files when accepted.
