@@ -25,6 +25,26 @@ physical restore implementation; it does not waive any full-history proof.
 <a id="technical-depth"></a>
 ## Technical depth
 
+### Active focused CLI proof
+
+Primary documentation checkpoint2e136d4cccbd8300d8b6e80dcc1cc6d959114da2 is
+pushed. Its one documentation check passed in16.641 seconds, retained at
+sibling M7/documentation-2e136d4c-v1, log SHA-256
+f7006279d40866f2ebf082675f30f681d2dd41a955c40a8ff44d70f4355002c9.
+
+Root holds the sole VM slot. CLI formatted candidate is now
+00cf26bb31c45d6c98b29f9e132c7c6cb4d24115, clean in the same isolated worktree;
+only the formatter's one blank line changed after15fdc361. Both-pair staged
+proof is ACTIVE on unified exec handle56356, runner
+/private/tmp/loopex-m7-cli-00cf-run-all.py and durable gated stage runner
+/Users/spuri/projects/lexlapax/loopex-evidence/M7/cli-guarded-provider-00cf26bb-v2/run-stage.py.
+Current dependency preparation and formatting passed; dev compilation started.
+Resume the same handle until its actual terminal result. Do not start another
+VM, modify this source, overwrite a stage output or retry an unchanged failure.
+Full output/identities/populations are retained stage by stage. No CLI proof or
+new checklist completion is claimed yet. Once terminal, root independently
+checks every result and grants the next worker explicitly. All workers wait.
+
 ### Latest terminal run and next proof
 
 Full current check48ca4ad12d8668aa664abd5d460e090bbe0f8343 is terminal FAIL,
