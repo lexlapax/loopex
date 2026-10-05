@@ -27,6 +27,24 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Latest Store integration and next verification
 
+Local ledger captured-byte extraction is source-only at
+205afb7a598210c97937fc27238061c163ff9b5f in
+/private/tmp/loopex-m7-ledger-captured-decoding,
+codex/m7-ledger-captured-decoding. Root owns only ledger.ex and existing
+ledger_record_conformance_test.exs. Accepted ADR0051 treats pure-validator
+extraction as reversible. Existing current record schemas/caps/byte equality
+are reused; no Core facade or persistent schema changes. Two added cases are
+unexecuted (expected focused19/ordinary296, prior exclusions unchanged).
+No VM/formatter/compiler/test ran. Retained packet sibling
+M7/ledger-captured-decoding-source-20261005-v1, inventory
+a7c59b6a0d2f3c349f1cb0249f34c3b59e13a4bd76b79d64f740fe73347bafe4,
+patch eaed3927dc1df14a86001ced2c64371d4265936817b697a83a98f4691079c67a.
+One bounded T15 subtask is added/open; T01–T19 originals78/95/6,
+added292/22. Whole physical ledger audit/restore remains open. Resource
+current ordinary596/3excluded/0skips passed in333.9s ExUnit (334s command);
+floor is running on the same pinned source and exclusive handle96931.
+Causal is next, checkpoint/configure follows after runner review; no other VM.
+
 Latest completed proof: Ledger393d8935c26bd9a495198d79e5aa70300fcfbd12 is
 terminal PASS, joined by6abf3f39a89dddd8b11ebef13e1a8b4760904378. Both pairs
 pass17 focused/0excluded and294 ordinary/2excluded, zero skips; all32 logged
