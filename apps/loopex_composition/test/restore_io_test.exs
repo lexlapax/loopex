@@ -136,6 +136,56 @@ defmodule LoopexComposition.RestoreIOTest do
     assert File.read!(path) == "retained"
   end
 
+  test "guardian loss signals its linked descriptor owner and never reports a joined result", context do
+    path = Path.join(context.root, "record")
+    File.write!(path, "retained")
+    owned = launch({:read, path, 8}, :read)
+    assert_receive {:restore_io, _, _, _, {:issued, _, :read}}, 1_000
+    assert {:links, links} = Process.info(owned.worker, :links)
+    assert owned.guardian in links
+    Process.exit(owned.guardian, :kill)
+    assert {result, _events} = drive(owned, false)
+    assert result == {:unconfirmed, :guardian_lost}
+    guardian = owned.guardian
+    gm = owned.guardian_monitor
+    worker = owned.worker
+    wm = owned.worker_monitor
+    caller = owned.caller
+    cm = owned.caller_monitor
+    assert_receive {:DOWN, ^gm, :process, ^guardian, :killed}, 1_000
+    assert_receive {:DOWN, ^wm, :process, ^worker, :killed}, 1_000
+    assert_receive {:DOWN, ^cm, :process, ^caller, :normal}, 1_000
+    assert File.read!(path) == "retained"
+  end
+
+  test "guardian death during an actual blocking raw open remains unconfirmed after later worker DOWN", context do
+    path = Path.join(context.root, "record")
+    File.write!(path, "retained")
+    owned = launch({:read, path, 8}, :open)
+    assert_receive {:restore_io, guardian, worker, reference, {:issued, id, {:open, _token}}}, 1_000
+    assert {guardian, worker, reference} == {owned.guardian, owned.worker, owned.reference}
+    # The fault replaces the already-statted regular path with an actual FIFO.
+    # No IO result is substituted: the pinned raw open must really be blocked.
+    File.rm!(path)
+    assert {_, 0} = System.cmd("mkfifo", [path])
+    send(guardian, {:proceed, reference, id})
+    try do
+      await_raw_open(worker, System.monotonic_time(:millisecond) + 1_000)
+      Process.exit(guardian, :kill)
+      assert {result, _events} = drive(owned, false)
+      assert result == {:unconfirmed, :guardian_lost}
+    after
+      release_fifo(path)
+    end
+    gm = owned.guardian_monitor
+    wm = owned.worker_monitor
+    caller = owned.caller
+    cm = owned.caller_monitor
+    assert_receive {:DOWN, ^gm, :process, ^guardian, :killed}, 1_000
+    assert_receive {:DOWN, ^wm, :process, ^worker, :killed}, 1_000
+    assert_receive {:DOWN, ^cm, :process, ^caller, :normal}, 1_000
+  end
+
   @tag :long_bound
   test "a killed suspended raw-descriptor owner remains unconfirmed after its exact DOWN", context do
     path = Path.join(context.root, "record")
@@ -220,4 +270,39 @@ defmodule LoopexComposition.RestoreIOTest do
   defp index(values, value), do: Enum.find_index(values, &(&1 == value))
   defp hash(bytes), do: :crypto.hash(:sha256, bytes) |> Base.encode16(case: :lower)
   defp limits(work, grace), do: %{"work_ms" => work, "cleanup_grace_ms" => grace}
+  defp await_raw_open(worker, cutoff) do
+    parent = self()
+    reference = make_ref()
+    {inspector, monitor} = spawn_monitor(fn -> send(parent, {reference, observe_raw_open(worker, cutoff)}) end)
+    try do
+      receive do
+        {^reference, :observed} -> :ok
+        {^reference, {:unavailable, observation}} -> flunk("actual raw FIFO open was not observed in open_nif: #{inspect(observation)}")
+      after
+        max(0, cutoff - System.monotonic_time(:millisecond)) -> flunk("raw-open inspection did not return before its captured cutoff")
+      end
+    after
+      Process.exit(inspector, :kill)
+      assert_receive {:DOWN, ^monitor, :process, ^inspector, _}, 1_000
+    end
+  end
+  defp observe_raw_open(worker, cutoff) do
+    case Process.info(worker, :current_function) do
+      {:current_function, {:prim_file, :open_nif, 2}} -> :observed
+      observation ->
+        if System.monotonic_time(:millisecond) >= cutoff do
+          {:unavailable, observation}
+        else
+          receive do
+          after
+            1 -> observe_raw_open(worker, cutoff)
+          end
+        end
+    end
+  end
+  defp release_fifo(path) do
+    # Python is an existing development prerequisite. O_NONBLOCK guarantees
+    # that this exact joined release subprocess cannot hang if the reader died.
+    assert {_, 0} = System.cmd("python3", ["-c", "import os,sys; fd=os.open(sys.argv[1],os.O_RDWR|os.O_NONBLOCK); os.close(fd)", path])
+  end
 end

@@ -70,11 +70,16 @@ defmodule LoopexComposition.Restore.IO do
   end
 
   defp guardian_start(caller, reference, admitted, operation, limits, probe, pause) do
+    # Concept: the serial worker belongs to its guardian even if the guardian fails.
+    # Technical depth: the link signals guardian loss without waiting for a NIF
+    # to return to an Elixir receive. The monitor still supplies exact DOWN;
+    # neither signal proves an in-flight file resource or descriptor was joined.
+    Process.flag(:trap_exit, true)
     caller_monitor = Process.monitor(caller)
     receive do
       {:start, ^reference} ->
         owner = self()
-        {worker, worker_monitor} = spawn_monitor(fn -> worker_start(owner, reference, operation) end)
+        {worker, worker_monitor} = :erlang.spawn_opt(fn -> worker_start(owner, reference, operation) end, [:link, :monitor])
         state = %{caller: caller, caller_monitor: caller_monitor, reference: reference, worker: worker,
           worker_monitor: worker_monitor, probe: probe, pause: pause, pending: nil, paused: false,
           next: 1, open: MapSet.new(), opens: 0, closes: 0, acknowledgements: 0,
@@ -144,6 +149,7 @@ defmodule LoopexComposition.Restore.IO do
         guard(stop(state, if(match?({:ok, _}, result), do: :complete, else: :io_error), now()))
 
       {:finished, ^worker, ^reference} -> guard(%{state | finished: true})
+      {:EXIT, ^worker, _reason} -> guard(state)
       {:DOWN, ^caller_monitor, :process, _caller, _reason} -> guard(stop(state, :caller_lost, now()))
       {:DOWN, ^worker_monitor, :process, ^worker, reason} ->
         state = %{state | down: reason == :normal}
