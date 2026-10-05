@@ -325,6 +325,114 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Final focused integration gates pass on both supported pairs: changed-file
+  formatting, warning-free compilation, documentation ordering, current status,
+  dependency budget, whitespace and the checklist reporter. Handle `56002` is
+  terminal and collected; measured current/floor durations are 14.8/13.4 seconds.
+  Complete immutable outputs:
+  `/private/tmp/loopex-m7-shutdown-range-integration-current-metadata-v1.log`,
+  SHA-256 `1f2f27ce19fbc345f89fd8317b4dbc056784d4172b27c9dc0fec57a04fb96ae0`;
+  `/private/tmp/loopex-m7-shutdown-range-integration-floor-metadata-v1.log`,
+  SHA-256 `6f97b7e3abcaf588bcd4bba5d8ea3755ccf458284e3bc9904143069319e4759e`.
+  These gates and focused tests do not supersede the retained full-check FAIL.
+  ADR 0050 exact revised-pair acceptance remains the first pending question;
+  CommandBounds automatic-review refusal and wire-create grammar follow it.
+  The physical restore conflict and resumed pre-episode compact-busy observation
+  also require dispositions before their dependent implementation. No proposed
+  public contract or restored generation is implemented by implication.
+
+- Done: synchronize the expired, unannounced fence witness without changing
+  production behavior or any bound. The observer joins exact normal DOWN before
+  releasing original cancellation; the relay preserves an early join notification
+  and withholds actual failure/closed notices until actual Control cancellation
+  acknowledgement. Four bounded observations prove DOWN, cancellation forward,
+  acknowledgement forward and Task return in order. The suspended-live branch
+  still requires immediate cancellation and exact killed DOWN. Complete quiesce
+  files pass 31 cases with four existing long-bound exclusions on both pairs,
+  warning-free, in 8.1/7.9 measured seconds. Handle `4392` is terminal and collected.
+  Initial v1 retains FAIL despite 31 semantic passes because a compile-time mode
+  comparison warned; v2 retains the floor failure because the fixture discarded
+  a join message arriving before cancellation. Both causes changed source; no
+  same-revision retry or softened check is a pass. Seven exact source/fail/pass
+  records are retained in
+  `/private/tmp/loopex-m7-expired-fence-sync-proof-inventory.tsv`, SHA-256
+  `d466ab5ffb87796d898117b9052ca76fec35d3baa2669e83e5acde4b4dcaf921`.
+  Close one added T16 row. T01–T19 originals are 76 / 97 / 6; added work is
+  266 done / 16 todo. Including T00: originals 76 / 103 / 7, added 270 / 17.
+  This does not close full integration or older distinct quiesce failures.
+
+- Done: repair actual chat fragment shutdown. The initial expanded 31-case
+  driver file retained FAIL (29 passed; 22.4 seconds): both incomplete fragments
+  emitted the fixed input error and joined the model but stopped consuming
+  cancellation events once transport was marked failed. The reader now keeps
+  draining until the existing barrier/reap join under the same captured shutdown
+  cutoff. No input is resumed, prompt fabricated, authority changed or timeout
+  widened. Complete driver/workflow/status/interrupt/OS-signal/startup files pass
+  all 73 cases on both supported pairs in 31.6/30.9 measured seconds; handle
+  `26645` is terminal and collected. New cases cover active-run/question EOF,
+  idle/settled normal EOF, both malformed fragments and failure followed by
+  success; existing cases retain uncertain cleanup and second-interrupt proofs.
+  Original T10 item 6 and its bounded added row now close. T01–T19 originals
+  become 76 done / 97 todo / 6 retired; added work is 265 done / 17 todo while
+  quiesce synchronization remains pending. Exact source, failing-before and
+  complete passing outputs are retained in
+  `/private/tmp/loopex-m7-chat-fragment-shutdown-proof-inventory.tsv`, SHA-256
+  `75f2b87c8a0335074735ba4a7af832549f3d0926b28e6a9ec06411d19f0b9ac4`.
+  Earlier isolated three-case work is joined from `a8308bdc` as `a33ec9ae`;
+  its 14 complete output digests and committed owned source were rehashed.
+
+- T15 physical restore proof stops at a material contract conflict. The complete
+  copy manifests and exact actor joins pass after correcting directory-mode
+  preservation, but both restored Local executors refuse `generation_mismatch`.
+  Accepted ADR 0016 binds authority to path/device/inode and refuses copied
+  roots; accepted M7 requires complete empty-root restore. No guard, generation,
+  authority or persistent format has changed. Current complete-file v1 and v2
+  each retain FAIL (5/7 passed, one existing paid exclusion, 2.1 seconds); floor
+  suite was not run after this contract failure. All owned handles are terminal.
+  The two-file reproduction is saved only in isolated clean commit
+  `427c9cb5631e8c921748aa0e787d7205930ed703`, not integrated or pushed.
+  Immutable 23-entry inventory
+  `/private/tmp/loopex-m7-current-restore-proof-inventory.tsv`, SHA-256
+  `07bd9f9cda0dcf1b5d62e6495e954b2e03d5a88a0e6e95d965e1d9482bc7566c`.
+  Queued decision packet `/private/tmp/loopex-m7-current-restore-decision-packet.md`,
+  SHA-256 `4665662ca927b02d20fc979497ad6b412f583cf8afed95fe309ddd45666b8a6a`,
+  compares preserving physical identity with an explicit reviewed restore
+  transition. Present it after existing questions, one at a time. T15 remains open.
+
+- The current-pair full check of exact clean candidate
+  `b6369cd626e71ef9f56c1d274bacd692b1e7ee01` finished FAIL in 1,606.2
+  seconds. Handle `6635` is terminal and collected. Composition has seven
+  failures in ArtifactRangeExecutorTest, Store Local ten in ArtifactJobRangeTest,
+  and Core one expired-before-cancel fixture ordering failure. Other suites pass,
+  including all 582 CLI cases with six existing exclusions. The complete output
+  is immutable at `/private/tmp/loopex-m7-b6369cd6-fast-check.log`, SHA-256
+  `f8e859c7e56ece5de75d4bf02e4dbb6c4684fbb469e52c6b26f98fe5f0275ada`.
+  This failed candidate will not be rerun or relabeled. No full-floor, release,
+  paid witness or closure evidence is claimed.
+
+- Done: update the two remaining positive artifact-range source fixtures to
+  current `executor_receipt_committed_v2`. No production behavior, negative
+  control, assertion, work budget, deadline or cleanup bound changes. The full
+  ArtifactRangeExecutorTest and ArtifactJobRangeTest files pass 11 cases each
+  on both supported pairs. Current measured runs take 2.5/1.2 seconds; floor
+  2.3/1.1 seconds. Handle `64484` is terminal and collected. Four complete
+  immutable outputs and the two exact repaired source files are retained in
+  `/private/tmp/loopex-m7-current-range-fixture-proof-inventory.tsv`, SHA-256
+  `1ed37d0d757020cb2f32ff3b3de306511e394469ed1d7230481b045a0ddd8c9b`.
+  Close one bounded added T05 row; T01–T19 originals remain 75 / 98 / 6,
+  added work becomes 264 done / 17 todo. Current full integration remains open.
+
+- Historical cause analysis: the expired-before-cancel fixture lacked an ordering witness.
+  The real worker and Quiesce use the same captured work deadline, so leaving
+  the worker unsuspended does not prove normal expiry precedes cancellation.
+  The exact failure records cancellation 1.063 ms after that deadline and a
+  correctly joined killed worker. Hold only this fixture's cancellation delivery
+  until exact normal DOWN, bounded by its existing 100-ms reap cutoff; retain
+  immediate cancellation of the suspended-worker branch and all current joins,
+  Store assertions and deadlines. No production lifecycle change is selected.
+  Exact failure extract `/private/tmp/loopex-m7-b6369cd6-core-fail-extract.log`,
+  SHA-256 `061ea95d7f896530c9625a845786d9a8fe8c11e5ec360c29634636ffb375d563`.
+
 - Done by original-checklist audit: T08 items 5/6 now close continuation
   accounting/reserves/headroom and all nine thinking cells plus the independent
   thinking-off summarizer. Current Core/host/HTTP implementations and retained
@@ -357,7 +465,8 @@ did not resolve them. No paid provider calls were made during this check.
   `chat_driver_test.exs` in `m7-chat-ending-proof`, and the T15 current-restore
   writer owns only the existing reference-client recovery test and fixture
   in `m7-current-restore-proof`. Both start from `94f2b713`, preserve unrelated
-  edits and defer every suite VM/compile until full-check handle `6635` ends.
+  edits. Full-check handle `6635` and both writers are now terminal. Root has
+  verified the chat repair; the physical restore contract conflict is queued above.
   Root owns rejoin and post-rejoin verification. No product boundary or original
   checkbox closes from draft preparation. Added T01–T19 is 263 done / 17 todo;
   including T00 it is 267 / 18. Including T00 originals are 75 / 104 / 7.
@@ -410,18 +519,10 @@ did not resolve them. No paid provider calls were made during this check.
   maintainer acceptance. No host copy of private accounting, public API or
   persistent record is implemented from this review.
 
-- Running: the full current-pair fast check from exact clean candidate
-  `b6369cd626e71ef9f56c1d274bacd692b1e7ee01`, once, in the attached
-  `/Users/spuri/.codex/worktrees/m7-trace-check/loopex` verification checkout.
-  Handle `6635` is active; complete output streams to
-  `/private/tmp/loopex-m7-b6369cd6-fast-check.log` through retained runner
-  `/private/tmp/loopex-m7-b6369cd6-fast-check.py`. The provider app is serialized
-  with `LOOPEX_CHECK_ALONE=loopex_llm_reqllm`; ordinary per-app isolation remains.
-  This is a new candidate after source and fixture repairs. The historical
-  `75b7207d` FAIL is immutable and is not retried or relabeled. Collect the
-  active handle's terminal result before freezing/hash-recording its output.
-  No checklist item closes while this run is pending; a pass alone cannot prove
-  the historical quiesce failure's exact cause.
+- Historical run scheduling: the full current-pair fast check used the clean
+  attached `m7-trace-check` checkout with provider serialization through
+  `LOOPEX_CHECK_ALONE=loopex_llm_reqllm`. Its terminal FAIL and immutable output
+  are recorded above. Do not poll the collected handle or repeat this candidate.
 
 - Done: formatter worker `9ce237f1747161914ea0c9d57b9f894cd03fa8b9`
   is joined as `4ba44a3e`. Eleven syntax-only repairs have identical parsed AST
@@ -10489,6 +10590,9 @@ or check was relaxed.
 
 ### Added implementation subtasks
 
+- [x] Repair both remaining positive artifact-range source fixtures to the current receipt kind; preserve all actual IO, corruption, capacity, cancellation, deadline and descriptor cleanup assertions, and verify both complete affected files on both supported pairs. Keep the original full-check failure immutable.
+
+
 - [x] Remove Core's missing-projection read replay exception and nil-tool-selection policy reconstruction under mandatory current v3 genesis; prove the canonical retain-only substitution fails at intent admission after failing before the fix, preserve ordinary writes/current captured reads and run complete artifact-admission/current-genesis files on both supported pairs. Keep the direct executor API unchanged.
 
 - [x] Remove superseded effect/receipt/result/unknown readers and the old tool-event identity recipe; preserve current v2 records, enforce model-question abort identity, prove positive current replay before exact retired-kind refusals, and verify the complete nine-file selection on both supported pairs after integration. Artifact-policy fallback and coordinated wire generations remain separate work.
@@ -10771,7 +10875,7 @@ the still-open real-provider, live protocol, persistent-fault or closure lanes.
 - [ ] Enforce record limits, bounded input admission, the 256-KiB output queue and control-drain deadline.
 - [x] Implement the unknown-admission resolver using the original transaction identity and proposal.
 - [x] Preserve input ordering while admission is uncertain; do not submit duplicate commands or fenced aborts.
-- [ ] Make EOF, incomplete fragments, earlier failures and uncertain cleanup produce the specified outcomes.
+- [x] Make EOF, incomplete fragments, earlier failures and uncertain cleanup produce the specified outcomes.
 - [ ] Implement tracing through flags and files, including enable/disable and owner cleanup.
 - [x] Add the independently draining diagnostic consumer with drop and unconfirmed-delivery accounting.
 - [ ] Test PTYs, fragmented pipes, actual question IDs, barriers, slow readers, EOF and signals.
@@ -10779,7 +10883,7 @@ the still-open real-provider, live protocol, persistent-fault or closure lanes.
 
 ### Added implementation subtasks
 
-- [ ] Prove the complete actual-facade chat EOF matrix for an active run and actual pending question, plus failed-then-successful runs retaining nonzero final exit and the latest successful outcome; preserve exact input/process/cleanup bounds. An isolated writer prepares only the existing driver test file; verification waits until the current full check ends.
+- [x] Prove the complete actual-facade chat EOF matrix for an active run and actual pending question, plus incomplete EOF fragments, normal idle/settled EOF and failed-then-successful runs retaining nonzero final exit and the latest successful outcome; preserve exact input/process/cleanup bounds. The first three cases are integrated as a33ec9ae; the remaining four exposed and now prove the repaired actual reader drain through cancellation. Complete affected files pass on both pairs with unchanged bounds.
 
 - [x] Resolve and implement the owner-only effective-settings report admission decision; preserve shared diagnostic queue/writer/cleanup bounds and prove redaction, exact values/origins, byte refusal and loss accounting.
 
@@ -10975,6 +11079,9 @@ open.
 - [ ] Independently review integration changes and fix confirmed defects without weakening checks.
 
 ### Added implementation subtasks
+
+- [x] Synchronize the expired-before-cancel fixture's exact worker DOWN before forwarding cancellation within the existing captured reap cutoff; preserve the suspended live-worker branch, Store truth, cleanup acknowledgements and all deadlines, then verify the complete quiesce file on both pairs. Retain the exact full-check failure.
+
 
 - [x] Align the nineteen existing syntax differences across both supported formatters without changing parsed behavior, compare all non-location AST metadata and exact idempotent bytes, and prove integrated whole-tree floor formatting plus warning-free compilation, documentation, status and dependency gates. Retain the earlier untouched-path floor failures; full integration and cleanup investigations remain separate obligations.
 
