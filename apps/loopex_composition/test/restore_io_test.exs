@@ -339,7 +339,7 @@ defmodule LoopexComposition.RestoreIOTest do
     joined(ancestor)
   end
 
-  test "manifest refuses actual FIFOs regular hardlinks and undecodable filename bytes",
+  test "manifest refuses actual FIFOs and regular hardlinks",
        context do
     root = physical_root(context.root)
     path = Path.join(root, "node")
@@ -355,17 +355,6 @@ defmodule LoopexComposition.RestoreIOTest do
     joined(linked)
     File.rm!(Path.join(root, "owner.lock"))
     File.rm!(path)
-
-    assert {_, 0} =
-             System.cmd("python3", [
-               "-c",
-               "import os,sys; fd=os.open(os.fsencode(sys.argv[1])+b'/invalid-\\xff',os.O_WRONLY|os.O_CREAT,0o600); os.close(fd)",
-               root
-             ])
-
-    invalid = launch({:manifest, root, 0}, :list)
-    assert {{:joined, {:error, :io_error}, %{opens: 0, closes: 0}}, _} = drive(invalid)
-    joined(invalid)
   end
 
   test "manifest refuses same-size namespace substitution against the opened descriptor",
@@ -438,7 +427,7 @@ defmodule LoopexComposition.RestoreIOTest do
     send(owned.guardian, {:proceed, owned.reference, id})
     assert {{:joined, {:error, :io_error}, %{opens: 0, closes: 0}}, events} = drive(owned)
 
-    assert {:acknowledged, id, {:open, _}, :error} =
+    assert {:acknowledged, ^id, {:open, _}, :error} =
              Enum.find(events, &match?({:acknowledged, ^id, {:open, _}, :error}, &1))
 
     joined(owned)
@@ -558,6 +547,16 @@ defmodule LoopexComposition.RestoreIOTest do
 
     assert {:error, :invalid_io_request} =
              RestoreIO.run({:read, "relative", 1}, limits(1_000, 5), probe: self())
+
+    for path <- [
+          context.root <> "/invalid-" <> <<255>>,
+          context.root <> "/nul-" <> <<0>>,
+          "relative",
+          "/" <> String.duplicate("x", 8_192)
+        ] do
+      assert {:error, :invalid_io_request} =
+               RestoreIO.run({:manifest, path, 0}, limits(1_000, 5), probe: self())
+    end
 
     for cap <- [-1, 18_446_744_073_709_551_616, "0"] do
       assert {:error, :invalid_io_request} =
