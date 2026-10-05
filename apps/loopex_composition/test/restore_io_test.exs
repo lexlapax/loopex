@@ -10,6 +10,27 @@ defmodule LoopexComposition.RestoreIOTest do
     %{root: root}
   end
 
+  test "accepted long work and cleanup limits retain their captured cutoffs", context do
+    path = Path.join(context.root, "record")
+    File.write!(path, "retained")
+    long = 1_099_511_627_776
+
+    for {work, grace} <- [{long, 5}, {500, long}, {long, long}] do
+      owned = launch({:read, path, 8}, :stat, work, grace)
+      assert {{:joined, {:ok, "retained"}, evidence}, events} = drive(owned)
+      assert evidence.work_cutoff == owned.work_cutoff
+
+      assert {:stopping, :complete, stop, cleanup} =
+               Enum.find(events, &match?({:stopping, :complete, _, _}, &1))
+
+      assert cleanup == stop + max(10_000, grace + 2_000)
+      assert evidence.cleanup_cutoff == cleanup
+      assert evidence.opens == 1
+      assert evidence.closes == 1
+      joined(owned)
+    end
+  end
+
   test "real publish synchronizes closes renames and reads back before exact actor joins",
        context do
     path = Path.join(context.root, "record")

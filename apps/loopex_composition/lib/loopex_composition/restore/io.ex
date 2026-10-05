@@ -26,6 +26,7 @@ defmodule LoopexComposition.Restore.IO do
 
   alias Loopex.Executor.Local.RestoreCodec
 
+  @max_receive_timeout 4_294_967_295
   @chunk 65_536
   @max_read 268_435_456
 
@@ -59,20 +60,31 @@ defmodule LoopexComposition.Restore.IO do
   defp wait(guardian, monitor, reference, cutoff) do
     receive do
       {^reference, ^guardian, result} ->
-        receive do
-          {:DOWN, ^monitor, :process, ^guardian, :normal} -> result
-          {:DOWN, ^monitor, :process, ^guardian, _reason} -> {:unconfirmed, :guardian_lost}
-        after
-          remaining(cutoff) -> {:unconfirmed, :guardian_unjoined}
-        end
+        await_guardian_down(guardian, monitor, result, cutoff)
 
       {:DOWN, ^monitor, :process, ^guardian, _reason} ->
         {:unconfirmed, :guardian_lost}
     after
-      remaining(cutoff) ->
-        Process.exit(guardian, :kill)
-        Process.demonitor(monitor, [:flush])
-        {:unconfirmed, :guardian_unjoined}
+      wait_chunk(cutoff) ->
+        if remaining(cutoff) > 0 do
+          wait(guardian, monitor, reference, cutoff)
+        else
+          Process.exit(guardian, :kill)
+          Process.demonitor(monitor, [:flush])
+          {:unconfirmed, :guardian_unjoined}
+        end
+    end
+  end
+
+  defp await_guardian_down(guardian, monitor, result, cutoff) do
+    receive do
+      {:DOWN, ^monitor, :process, ^guardian, :normal} -> result
+      {:DOWN, ^monitor, :process, ^guardian, _reason} -> {:unconfirmed, :guardian_lost}
+    after
+      wait_chunk(cutoff) ->
+        if remaining(cutoff) > 0,
+          do: await_guardian_down(guardian, monitor, result, cutoff),
+          else: {:unconfirmed, :guardian_unjoined}
     end
   end
 
@@ -233,7 +245,7 @@ defmodule LoopexComposition.Restore.IO do
         state = if state.stop, do: state, else: stop(state, :worker_unjoined, now())
         guard(state)
     after
-      next_wait(state) -> guard(state)
+      min(next_wait(state), @max_receive_timeout) -> guard(state)
     end
   end
 
@@ -324,6 +336,11 @@ defmodule LoopexComposition.Restore.IO do
 
   defp now, do: System.monotonic_time(:millisecond)
   defp remaining(cutoff), do: max(0, cutoff - now())
+
+  # Concept: long accepted durations keep their original absolute deadline.
+  # Technical depth: each receive fits OTP's unsigned-32-bit timeout ceiling;
+  # a chunk expiry only rechecks the same cutoff, never starts a new allowance.
+  defp wait_chunk(cutoff), do: min(remaining(cutoff), @max_receive_timeout)
 
   defp worker_start(guardian, reference, operation) do
     monitor = Process.monitor(guardian)
