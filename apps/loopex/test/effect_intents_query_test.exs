@@ -879,6 +879,74 @@ defmodule Loopex.EffectIntentsQueryTest do
     assert {:error, :invalid_history} = Runtime.effect_intents(runtime, session, nil, 1)
   end
 
+  test "current effect histories replay and every retired effect kind refuses without activation",
+       context do
+    %{
+      runtime: runtime,
+      session: session,
+      records: records,
+      reference: reference,
+      fixture: fixture
+    } = context
+
+    events = Fixture.events(fixture, session)
+    intent = Enum.find(records, &(&1.payload.kind == "effect_intent_committed_v2"))
+    started = Enum.find(events, &(&1.kind == "tool.started"))
+    before_intent = Enum.take_while(records, &(&1.journal_version < intent.journal_version))
+    before_started = Enum.take_while(events, &(&1.event_sequence < started.event_sequence))
+    with_intent = before_intent ++ [intent]
+    with_started = before_started ++ [started]
+    assert {:ok, pending} = SessionState.recover(session, before_intent, before_started)
+    assert {:ok, dispatched} = SessionState.recover(session, with_intent, with_started)
+
+    assert {:ok, result} =
+             SessionState.propose_tool_result(
+               pending,
+               intent.payload["run_id"],
+               "call-1",
+               :failed,
+               "policy refused"
+             )
+
+    assert {:ok, unknown} =
+             SessionState.propose_outcome_unknown(
+               dispatched,
+               intent.payload["run_id"],
+               "reconciliation"
+             )
+
+    {_state, result_records, result_events} =
+      retain(pending, result, before_intent, before_started)
+
+    {_state, unknown_records, unknown_events} =
+      retain(dispatched, unknown, with_intent, with_started)
+
+    before = Loopex.M1RuntimeTestStore.inspect_state(fixture.store)
+    jobs = Loopex.AgentLoopTestExecutor.jobs(fixture.executor)
+
+    for {current, retired, history, public_events} <- [
+          {"effect_intent_committed_v2", "effect_intent_committed", records, events},
+          {"executor_receipt_committed_v2", "executor_receipt_committed", records, events},
+          {"tool_result_committed_v2", "tool_result_committed", result_records, result_events},
+          {"outcome_unknown_committed_v2", "outcome_unknown_committed", unknown_records,
+           unknown_events}
+        ] do
+      assert {:ok, _current} = SessionState.recover(session, history, public_events)
+      install_history(reference, history)
+      assert :complete = scan_result(runtime, session)
+      changed = change_payload(history, current, &%{&1 | kind: retired})
+      assert {:error, _retired_replay} = SessionState.recover(session, changed, public_events)
+      install_history(reference, changed)
+      assert {:error, :invalid_history} = scan_result(runtime, session)
+    end
+
+    assert before == Loopex.M1RuntimeTestStore.inspect_state(fixture.store)
+    assert jobs == Loopex.AgentLoopTestExecutor.jobs(fixture.executor)
+    {:ok, children} = Runtime.children(runtime)
+    assert DynamicSupervisor.which_children(children.sessions) == []
+    refute_received {:forbidden_store_call, _}
+  end
+
   test "unsupported, expanded and malformed retained facts cannot be skipped", context do
     %{runtime: runtime, session: session, records: records, reference: reference} = context
 

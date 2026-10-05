@@ -19,8 +19,8 @@ defmodule Loopex.Runtime.SessionState do
   The effect-intent, executor-receipt, tool-result and outcome-unknown families
   use `_v2`; question response, expiry and question-cancelling abort variants
   select the same recipe. Their payload members and public event members remain
-  unchanged. Historical kinds reproduce their original IDs exactly. No record
-  or retained event is rewritten, and unsupported variants refuse on replay.
+  unchanged. Superseded kinds refuse on replay; current records and retained
+  events are never rewritten.
 
   Automatic maintenance admission retains the run's staging identity, bounds,
   frozen summarizer configuration and fixed preparation cutoff. Admission alone
@@ -378,7 +378,8 @@ defmodule Loopex.Runtime.SessionState do
          {:ok, projection} <- replay_projection(events, event_sequence, initial_configuration),
          true <- projection.active_run_id == state.active_run_id,
          true <- projection.active_maintenance == maintenance_public_view(state),
-         true <- projection.configuration == SessionConfiguration.public_view(state.configuration),
+         public_configuration = SessionConfiguration.public_view(state.configuration),
+         true <- projection.configuration == public_configuration,
          true <- checkpoint_projection_id(projection.checkpoint) == state.active_checkpoint do
       {:ok, %{state | event_sequence: event_sequence}}
     else
@@ -1344,7 +1345,8 @@ defmodule Loopex.Runtime.SessionState do
   @doc false
   def propose_standalone_compact_failure(state, failure, clock, check \\ fn -> :ok end) do
     with {:ok, record} <- standalone_compact_failure_record(state, failure, clock, check),
-         {:ok, proposal} <- internal_proposal(state, record["episode_id"] <> ":completed", record),
+         identity = record["episode_id"] <> ":completed",
+         {:ok, proposal} <- internal_proposal(state, identity, record),
          :ok <- check.() do
       {:ok, proposal}
     end
@@ -1443,7 +1445,9 @@ defmodule Loopex.Runtime.SessionState do
   end
 
   defp zero_attempt_compact_cause(%{pending_compact: %{"abort_command_id" => abort}}, _, _, _, _)
-       when is_binary(abort), do: {:error, :invalid_compact_completion_transition}
+       when is_binary(abort) do
+    {:error, :invalid_compact_completion_transition}
+  end
 
   defp zero_attempt_compact_cause(
          state,
@@ -1474,7 +1478,9 @@ defmodule Loopex.Runtime.SessionState do
          clock,
          _check
        )
-       when is_integer(clock), do: :ok
+       when is_integer(clock) do
+    :ok
+  end
 
   defp zero_attempt_compact_cause(
          state,
@@ -1496,7 +1502,11 @@ defmodule Loopex.Runtime.SessionState do
         else: clock + state.pending_compact["bounds"]["deadline_ms"]
 
     if expected <= @uint64_max and cutoff == expected and observed >= expected and
-         observed <= @uint64_max, do: :ok, else: {:error, :invalid_compact_completion_transition}
+         observed <= @uint64_max do
+      :ok
+    else
+      {:error, :invalid_compact_completion_transition}
+    end
   end
 
   # Concept: standalone token bounds reserve the complete fixed reply before dispatch.
@@ -2948,7 +2958,12 @@ defmodule Loopex.Runtime.SessionState do
            "detail" => nil
          },
          header = Loopex.Runtime.ResourceContext.initial_header(staging.resources),
-         header = if(header, do: Map.put(header, "status", "retained_content_missing"), else: nil),
+         header =
+           (if header do
+              Map.put(header, "status", "retained_content_missing")
+            else
+              nil
+            end),
          {:ok, measurement} <-
            checkpoint_projection_measurement(state, staging, project, header, check) do
       {:ok, episode, measurement}
@@ -5077,7 +5092,7 @@ defmodule Loopex.Runtime.SessionState do
   end
 
   defp project_effect_history(session_id, %{kind: kind} = record)
-       when kind in ["effect_intent_committed", "effect_intent_committed_v2"] do
+       when kind == "effect_intent_committed_v2" do
     job_fields = Loopex.Executor.job_fields() ++ Loopex.Executor.JobRequest.derived_fields()
     grant_fields = Loopex.Executor.required_grant_bindings() ++ [:issued_by, :policy_context]
 
@@ -5095,7 +5110,7 @@ defmodule Loopex.Runtime.SessionState do
   end
 
   defp project_effect_history(session_id, %{kind: kind} = record)
-       when kind in ["executor_receipt_committed", "executor_receipt_committed_v2"] do
+       when kind == "executor_receipt_committed_v2" do
     required = Enum.map(@receipt_required_fields, &Atom.to_string/1)
     optional = Enum.map(@receipt_optional_fields, &Atom.to_string/1)
 
@@ -5115,10 +5130,11 @@ defmodule Loopex.Runtime.SessionState do
   end
 
   defp project_effect_history(_session_id, %{kind: kind} = record)
-       when kind in ["tool_result_committed", "tool_result_committed_v2"] do
+       when kind == "tool_result_committed_v2" do
     with true <-
            closed_history_map?(record, [:kind, "run_id", "tool_call_id", "outcome", "reason"]),
-         true <- history_identity?(record["run_id"]) and history_identity?(record["tool_call_id"]),
+         true <- history_identity?(record["run_id"]),
+         true <- history_identity?(record["tool_call_id"]),
          true <- is_nil(record["reason"]) or is_binary(record["reason"]),
          {:ok, _outcome} <- decode_receipt_outcome(record["outcome"]) do
       disposition =
@@ -5133,7 +5149,7 @@ defmodule Loopex.Runtime.SessionState do
   end
 
   defp project_effect_history(_session_id, %{kind: kind} = record)
-       when kind in ["outcome_unknown_committed", "outcome_unknown_committed_v2"] do
+       when kind == "outcome_unknown_committed_v2" do
     if closed_history_map?(record, [:kind, "run_id", "reconciliation_ref"]) and
          history_identity?(record["run_id"]) and history_identity?(record["reconciliation_ref"]) do
       {:ok, history_terminal(record["run_id"], nil, "outcome_unknown")}
@@ -6114,9 +6130,7 @@ defmodule Loopex.Runtime.SessionState do
               "model_attempt_opened_v1",
               "model_attempt_settled_v3",
               "model_termination_admitted_v1",
-              "effect_intent_committed",
               "effect_intent_committed_v2",
-              "executor_receipt_committed",
               "executor_receipt_committed_v2",
               "tool_result_preparation_state_v1",
               "maintenance_episode_admitted_v1",
@@ -6131,10 +6145,8 @@ defmodule Loopex.Runtime.SessionState do
               "maintenance_termination_admitted_v1",
               "tool_result_reference_prepared",
               "tool_result_preparation_failed_v1",
-              "outcome_unknown_committed",
               "outcome_unknown_committed_v2",
               "run_terminal_committed",
-              "tool_result_committed",
               "tool_result_committed_v2",
               "interaction_requested_v1",
               "interaction_answer_admitted_v1",
@@ -6647,9 +6659,11 @@ defmodule Loopex.Runtime.SessionState do
     # record names its outcome or it is refused like any other malformed abort.
     with {:ok, ^active_run_id} <- record_binary(record, "run_id"),
          true <-
+           match?(%{producer: "model_tool"}, open_interaction_record(state)) ==
+             (record.kind == "model_question_abort_admitted_v2"),
+         true <-
            record.kind != "model_question_abort_admitted_v2" or
-             (admissible_command_kind?(record.kind, record) and
-                match?(%{producer: "model_tool"}, open_interaction_record(state))) do
+             admissible_command_kind?(record.kind, record) do
       # Concept: an abort cancels the queues as well as the run.
       #
       # Technical depth: a durably admitted abort resolves any queued steer and
@@ -7498,7 +7512,8 @@ defmodule Loopex.Runtime.SessionState do
             ] do
     with {:ok, candidate} <-
            preflight_maintenance_checkpoint(state, record["committed_at"], fn -> :ok end),
-         true <- record == maintenance_checkpoint_record(state, candidate, record["committed_at"]),
+         expected = maintenance_checkpoint_record(state, candidate, record["committed_at"]),
+         true <- record == expected,
          false <- Map.has_key?(state.checkpoints, candidate.checkpoint_id),
          episode = state.maintenance_episodes[state.active_maintenance],
          {:ok, units} <- compaction_units(state, maintenance_scope(episode)),
@@ -8062,10 +8077,9 @@ defmodule Loopex.Runtime.SessionState do
            kind: kind
          } = record
        )
-       when kind in ["effect_intent_committed", "effect_intent_committed_v2"] do
+       when kind == "effect_intent_committed_v2" do
     with true <-
-           kind == "effect_intent_committed" or
-             closed_history_map?(record, [:kind, "run_id", "job", "grant"]),
+           closed_history_map?(record, [:kind, "run_id", "job", "grant"]),
          true <- is_nil(state.open_interaction),
          {:ok, job} <- decode_job(job),
          {:ok, grant} <- decode_grant(grant),
@@ -8085,10 +8099,7 @@ defmodule Loopex.Runtime.SessionState do
       next_work =
         Map.merge(work, %{stage: "effect_dispatched", job: job, grant: grant, tool_call: call})
 
-      revision = if kind == "effect_intent_committed_v2", do: 2, else: 1
-
-      {:ok, put_pending(state, run_id, next_work),
-       [tool_started_event(state.session_id, job, revision)]}
+      {:ok, put_pending(state, run_id, next_work), [tool_started_event(state.session_id, job)]}
     else
       _other -> {:error, :invalid_effect_intent_transition}
     end
@@ -8102,10 +8113,9 @@ defmodule Loopex.Runtime.SessionState do
            kind: kind
          } = record
        )
-       when kind in ["executor_receipt_committed", "executor_receipt_committed_v2"] do
+       when kind == "executor_receipt_committed_v2" do
     with true <-
-           kind == "executor_receipt_committed" or
-             closed_history_map?(record, [:kind, "run_id", "receipt"], ["reconciliation_query_id"]),
+           closed_history_map?(record, [:kind, "run_id", "receipt"], ["reconciliation_query_id"]),
          {:ok, receipt} <- decode_receipt(receipt),
          %{stage: "effect_dispatched", job: job, tool_call: call} = work <-
            Map.get(state.pending_work, run_id),
@@ -8159,8 +8169,7 @@ defmodule Loopex.Runtime.SessionState do
            state.session_id,
            job,
            to_string(receipt.outcome),
-           receipt.artifacts,
-           if(kind == "executor_receipt_committed_v2", do: 2, else: 1)
+           receipt.artifacts
          )
        ]}
     else
@@ -8262,7 +8271,7 @@ defmodule Loopex.Runtime.SessionState do
   end
 
   defp apply_internal_record(state, %{kind: kind} = record)
-       when kind in ["tool_result_committed", "tool_result_committed_v2"] do
+       when kind == "tool_result_committed_v2" do
     case open_interaction_record(state) do
       %{producer: "model_tool", tool_call_id: id} ->
         if id == record["tool_call_id"],
@@ -8423,10 +8432,9 @@ defmodule Loopex.Runtime.SessionState do
            kind: kind
          } = record
        )
-       when kind in ["outcome_unknown_committed", "outcome_unknown_committed_v2"] do
+       when kind == "outcome_unknown_committed_v2" do
     with true <-
-           kind == "outcome_unknown_committed" or
-             closed_history_map?(record, [:kind, "run_id", "reconciliation_ref"]),
+           closed_history_map?(record, [:kind, "run_id", "reconciliation_ref"]),
          %{stage: "effect_dispatched", job: job} = work <- Map.get(state.pending_work, run_id),
          true <- is_binary(reconciliation_ref) and byte_size(reconciliation_ref) > 0 do
       events = [
@@ -8434,8 +8442,7 @@ defmodule Loopex.Runtime.SessionState do
           state.session_id,
           job,
           "outcome_unknown",
-          [],
-          if(kind == "outcome_unknown_committed_v2", do: 2, else: 1)
+          []
         ),
         run_finished_event(
           state.session_id,
@@ -8648,10 +8655,9 @@ defmodule Loopex.Runtime.SessionState do
            kind: kind
          } = record
        )
-       when kind in ["tool_result_committed", "tool_result_committed_v2"] do
+       when kind == "tool_result_committed_v2" do
     with true <-
-           kind == "tool_result_committed" or
-             closed_history_map?(record, [:kind, "run_id", "tool_call_id", "outcome", "reason"]),
+           closed_history_map?(record, [:kind, "run_id", "tool_call_id", "outcome", "reason"]),
          %{stage: "effect_" <> _phase, pending_calls: [call | _rest]} = work <-
            Map.get(state.pending_work, run_id),
          true <- call.tool_call_id == tool_call_id,
@@ -8714,8 +8720,7 @@ defmodule Loopex.Runtime.SessionState do
               state.session_id,
               run_id,
               Map.get(work, :turn_id),
-              tool_call_id,
-              if(kind == "tool_result_committed_v2", do: 2, else: 1)
+              tool_call_id
             ),
           kind: "tool.finished"
         }
@@ -8783,16 +8788,7 @@ defmodule Loopex.Runtime.SessionState do
              "tool_call_id" => interaction.tool_call_id,
              "outcome" => outcome,
              "reason" => content,
-             kind:
-               if(
-                 record.kind in [
-                   "model_question_response_admitted_v2",
-                   "model_question_settled_v2",
-                   "model_question_abort_admitted_v2"
-                 ],
-                 do: "tool_result_committed_v2",
-                 else: "tool_result_committed"
-               )
+             kind: "tool_result_committed_v2"
            }) do
       resolved = %{
         interaction
@@ -10690,7 +10686,7 @@ defmodule Loopex.Runtime.SessionState do
   # it rendered as an empty name beside an opaque identifier, which tells an
   # operator nothing about what their agent is doing. The generation is public
   # information: it is already inside the staged request the model was shown.
-  defp tool_started_event(session_id, job, revision) do
+  defp tool_started_event(session_id, job) do
     %{
       "run_id" => job.run_id,
       "turn_id" => job.turn_id,
@@ -10704,8 +10700,7 @@ defmodule Loopex.Runtime.SessionState do
           session_id,
           job.run_id,
           job.turn_id,
-          job.tool_call_id,
-          revision
+          job.tool_call_id
         ),
       kind: "tool.started"
     }
@@ -10719,7 +10714,7 @@ defmodule Loopex.Runtime.SessionState do
   # and role beside the opaque locator so a reader knows what they are asking for
   # before they ask. A tool that spilled nothing carries an empty list rather
   # than an absent field, so a consumer never has to distinguish the two.
-  defp tool_finished_event(session_id, job, outcome, artifacts, revision) do
+  defp tool_finished_event(session_id, job, outcome, artifacts) do
     %{
       "run_id" => job.run_id,
       "turn_id" => job.turn_id,
@@ -10738,22 +10733,17 @@ defmodule Loopex.Runtime.SessionState do
           session_id,
           job.run_id,
           job.turn_id,
-          job.tool_call_id,
-          revision
+          job.tool_call_id
         ),
       kind: "tool.finished"
     }
   end
 
   # Concept: a provider may reuse its call ID in a later turn or run.
-  # Technical depth: new record variants bind the event to session/run/turn/call.
-  # Historical variants retain their original deterministic event IDs; replay
-  # selects the derivation from the retained kind, never a current default.
-  defp tool_event_id(namespace, session_id, run_id, turn_id, call_id, 2),
+  # Technical depth: the current record families bind every tool event to the
+  # session, run, turn and call; superseded kinds refuse before projection.
+  defp tool_event_id(namespace, session_id, run_id, turn_id, call_id),
     do: stable_id(namespace, session_id, {run_id, turn_id, call_id})
-
-  defp tool_event_id(namespace, session_id, _run_id, _turn_id, call_id, 1),
-    do: stable_id(namespace, session_id, call_id)
 
   # Concept: the public projection is the whole compact reference and none of the
   # private reason behind it.

@@ -64,7 +64,6 @@ defmodule Loopex.Runtime.ArtifactRead do
        ) do
     map_size(source) == 7 and
       kind in [
-        "executor_receipt_committed",
         "executor_receipt_committed_v2",
         "tool_result_reference_prepared"
       ] and

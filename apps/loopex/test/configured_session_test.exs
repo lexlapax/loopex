@@ -2838,6 +2838,17 @@ defmodule Loopex.ConfiguredSessionTest do
     abort_row = Enum.find(records, &(&1.payload.kind == "model_question_abort_admitted_v2"))
     assert abort_row
 
+    current_prefix = Enum.take_while(records, &(&1.journal_version <= abort_row.journal_version))
+
+    current_events =
+      Enum.take_while(
+        Fixture.events(fixture, session),
+        &(&1.event_sequence <= cancelled.event_sequence)
+      )
+
+    assert {:ok, _current_cancelled} =
+             SessionState.recover(session, current_prefix, current_events)
+
     historical_abort =
       records
       |> Enum.take_while(&(&1.journal_version <= abort_row.journal_version))
@@ -2854,7 +2865,10 @@ defmodule Loopex.ConfiguredSessionTest do
           event
       end)
 
-    assert {:ok, _historical_cancelled} =
+    assert {:error, _retired_kind_with_current_events} =
+             SessionState.recover(session, historical_abort, current_events)
+
+    assert {:error, _retired_abort} =
              SessionState.recover(session, historical_abort, historical_events)
 
     assert {:ok, recovered} =
@@ -3391,7 +3405,7 @@ defmodule Loopex.ConfiguredSessionTest do
 
     refute Enum.any?(
              Fixture.records(fixture, session),
-             &(&1.payload.kind in ["effect_intent_committed", "effect_intent_committed_v2"])
+             &(&1.payload.kind == "effect_intent_committed_v2")
            )
 
     [request, _] = AgentLoopTestModel.dispatched(fixture.model)
@@ -3473,7 +3487,7 @@ defmodule Loopex.ConfiguredSessionTest do
     intents =
       Enum.filter(
         Fixture.records(fixture, session),
-        &(&1.payload.kind in ["effect_intent_committed", "effect_intent_committed_v2"])
+        &(&1.payload.kind == "effect_intent_committed_v2")
       )
 
     assert length(intents) == 1

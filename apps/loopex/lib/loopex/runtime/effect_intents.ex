@@ -31,7 +31,7 @@ defmodule Loopex.Runtime.EffectIntents do
 
   @uint64_max 18_446_744_073_709_551_615
   @page_bytes 1_114_112
-  @effect_kinds ~w(effect_intent_committed effect_intent_committed_v2 executor_receipt_committed executor_receipt_committed_v2 tool_result_committed tool_result_committed_v2 outcome_unknown_committed outcome_unknown_committed_v2)
+  @effect_kinds ~w(effect_intent_committed_v2 executor_receipt_committed_v2 tool_result_committed_v2 outcome_unknown_committed_v2)
   @command_keys ~w(command_id command_digest command_type admission)
   @prompt_keys @command_keys ++
                  ~w(run_id content max_turns token_budget deadline_ms context_token_budget)

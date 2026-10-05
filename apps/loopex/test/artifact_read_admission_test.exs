@@ -133,6 +133,28 @@ defmodule Loopex.ArtifactReadAdmissionTest do
                SessionState.recover(session, changed, Fixture.events(fixture, session))
     end
 
+    assert {:ok, _current_range} = Loopex.Runtime.ArtifactRead.job_range(read)
+    retired_receipt = %{source.payload | kind: "executor_receipt_committed"}
+
+    retired_source = %{
+      expected["source"]
+      | "record_kind" => retired_receipt.kind,
+        "record_digest" => Canonical.digest(retired_receipt)
+    }
+
+    retired_arguments =
+      put_in(read.validated_arguments, ["resolved_artifact", "source"], retired_source)
+
+    assert {:ok, retired_job} =
+             Loopex.Executor.job(%{
+               Map.from_struct(read)
+               | validated_arguments: retired_arguments
+             })
+
+    assert :ok = Loopex.Executor.validate_job(retired_job)
+    assert retired_job.canonical_request_digest != read.canonical_request_digest
+    assert {:error, :invalid_tool_arguments} = Loopex.Runtime.ArtifactRead.job_range(retired_job)
+
     # A new self-consistent job digest cannot legitimize a substituted source.
     altered_arguments =
       put_in(

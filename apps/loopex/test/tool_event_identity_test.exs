@@ -255,7 +255,7 @@ defmodule Loopex.ToolEventIdentityTest do
     assert {:ok, _recovered} = recover(fixture, session)
   end
 
-  test "historical intent and receipt replay retain literal original event IDs" do
+  test "current intent and receipt replay reject retired kinds and old event IDs" do
     fixture =
       start(
         script: [
@@ -271,59 +271,44 @@ defmodule Loopex.ToolEventIdentityTest do
     terminal = Enum.find(records, &(&1.payload.kind == "executor_receipt_committed_v2"))
     finished = Enum.find(Fixture.events(fixture, session), &(&1.kind == "tool.finished"))
 
-    historical =
-      records
-      |> Enum.take_while(&(&1.journal_version <= terminal.journal_version))
-      |> Enum.map(fn row ->
-        case row.payload.kind do
-          "effect_intent_committed_v2" ->
-            put_in(row, [:payload, :kind], "effect_intent_committed")
+    prefix = Enum.take_while(records, &(&1.journal_version <= terminal.journal_version))
 
-          "executor_receipt_committed_v2" ->
-            put_in(row, [:payload, :kind], "executor_receipt_committed")
+    events =
+      Enum.take_while(
+        Fixture.events(fixture, session),
+        &(&1.event_sequence <= finished.event_sequence)
+      )
 
-          _other ->
-            row
-        end
-      end)
-
-    # Concept: legacy records must reproduce their retained public identity.
-    # Technical depth: literal IDs use the historical stdlib ETF/SHA recipe on
-    # session s_test_1 and raw call same, independently of the product reducer.
-    historical_events =
-      Fixture.events(fixture, session)
-      |> Enum.take_while(&(&1.event_sequence <= finished.event_sequence))
-      |> Enum.map(fn
-        %{kind: "tool.started"} = event ->
-          %{event | event_id: "event-to_97dadde6e247e890a41fdd5e11fb4a"}
-
-        %{kind: "tool.finished"} = event ->
-          %{event | event_id: "event-to_a86243fc3b5042265ee736650ac626"}
-
-        event ->
-          event
-      end)
-
-    assert {:ok, recovered} = SessionState.recover(session, historical, historical_events)
+    assert {:ok, recovered} = SessionState.recover(session, prefix, events)
 
     assert recovered.expected_events ==
              Enum.map(
-               historical_events,
+               events,
                &Map.drop(&1, [:event_sequence, :owner_epoch, :owner_incarnation_id])
              )
 
-    assert {:error, _mismatched_projection} =
-             SessionState.recover(
-               session,
-               historical,
-               Enum.take_while(
-                 Fixture.events(fixture, session),
-                 &(&1.event_sequence <= finished.event_sequence)
-               )
-             )
+    for {current, retired} <- [
+          {"effect_intent_committed_v2", "effect_intent_committed"},
+          {"executor_receipt_committed_v2", "executor_receipt_committed"}
+        ] do
+      changed =
+        Enum.map(prefix, fn row ->
+          if row.payload.kind == current, do: put_in(row, [:payload, :kind], retired), else: row
+        end)
+
+      assert {:error, _retired_kind} = SessionState.recover(session, changed, events)
+    end
+
+    for {kind, old_id} <- [
+          {"tool.started", "event-to_97dadde6e247e890a41fdd5e11fb4a"},
+          {"tool.finished", "event-to_a86243fc3b5042265ee736650ac626"}
+        ] do
+      changed = Enum.map(events, &if(&1.kind == kind, do: %{&1 | event_id: old_id}, else: &1))
+      assert {:error, _retired_identity} = SessionState.recover(session, prefix, changed)
+    end
   end
 
-  test "historical non-receipt terminals keep their IDs and new variants reject extra fields" do
+  test "current non-receipt terminals reject retired kinds identities and extra fields" do
     fixture =
       start(
         policy: DenyAll,
@@ -352,7 +337,10 @@ defmodule Loopex.ToolEventIdentityTest do
     old_events =
       List.update_at(events, -1, &%{&1 | event_id: "event-to_a86243fc3b5042265ee736650ac626"})
 
-    assert {:ok, _recovered} = SessionState.recover(session, historical, old_events)
+    assert {:ok, _current} = SessionState.recover(session, prefix, events)
+    assert {:error, _retired_kind} = SessionState.recover(session, historical, events)
+    assert {:error, _retired_identity} = SessionState.recover(session, prefix, old_events)
+    assert {:error, _retired_pair} = SessionState.recover(session, historical, old_events)
 
     assert {:error, _extra_field} =
              SessionState.recover(

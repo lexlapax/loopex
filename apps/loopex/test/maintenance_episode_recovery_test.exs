@@ -703,7 +703,7 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
 
     refute Enum.any?(
              rows,
-             &(&1.payload.kind in ["outcome_unknown_committed", "outcome_unknown_committed_v2"])
+             &(&1.payload.kind == "outcome_unknown_committed_v2")
            )
 
     assert AgentLoopTestModel.dispatched(successor.model) == []

@@ -53,17 +53,17 @@ defmodule Loopex.EffectHistoryProjectionTest do
     assert {:ok, _} = SessionState.effect_history_projection(session, intent.payload)
     assert before == Loopex.M1RuntimeTestStore.inspect_state(fixture.store)
 
-    assert SessionState.effect_history_projection(session, %{
-             intent.payload
-             | kind: "effect_intent_committed"
-           }) ==
-             SessionState.effect_history_projection(session, intent.payload)
+    assert {:error, :invalid_history} ==
+             SessionState.effect_history_projection(session, %{
+               intent.payload
+               | kind: "effect_intent_committed"
+             })
 
-    assert SessionState.effect_history_projection(session, %{
-             receipt.payload
-             | kind: "executor_receipt_committed"
-           }) ==
-             SessionState.effect_history_projection(session, receipt.payload)
+    assert {:error, :invalid_history} ==
+             SessionState.effect_history_projection(session, %{
+               receipt.payload
+               | kind: "executor_receipt_committed"
+             })
 
     for row <- [intent, receipt],
         do:
@@ -178,7 +178,7 @@ defmodule Loopex.EffectHistoryProjectionTest do
       "tool_call_id" => "call-1",
       "outcome" => "failed",
       "reason" => "receipt_committed outcome_unknown refused_before_effect",
-      kind: "tool_result_committed"
+      kind: "tool_result_committed_v2"
     }
 
     for {outcome, disposition} <- [
@@ -198,6 +198,12 @@ defmodule Loopex.EffectHistoryProjectionTest do
               }} ==
                SessionState.effect_history_projection(session, %{record | "outcome" => outcome})
     end
+
+    assert {:error, :invalid_history} ==
+             SessionState.effect_history_projection(session, %{
+               record
+               | kind: "tool_result_committed"
+             })
 
     assert_closed(session, record)
 
@@ -221,7 +227,7 @@ defmodule Loopex.EffectHistoryProjectionTest do
     record = %{
       "run_id" => intent["run_id"],
       "reconciliation_ref" => "reconciliation",
-      kind: "outcome_unknown_committed"
+      kind: "outcome_unknown_committed_v2"
     }
 
     assert {:ok,
@@ -232,11 +238,11 @@ defmodule Loopex.EffectHistoryProjectionTest do
               disposition: "outcome_unknown"
             }} == SessionState.effect_history_projection(session, record)
 
-    assert SessionState.effect_history_projection(session, %{
-             record
-             | kind: "outcome_unknown_committed_v2"
-           }) ==
-             SessionState.effect_history_projection(session, record)
+    assert {:error, :invalid_history} ==
+             SessionState.effect_history_projection(session, %{
+               record
+               | kind: "outcome_unknown_committed"
+             })
 
     assert_closed(session, record)
 
