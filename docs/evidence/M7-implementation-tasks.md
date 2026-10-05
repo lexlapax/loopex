@@ -29,6 +29,58 @@ grouped by T00–T19. Empty added sections mean no added subtasks are recorded;
 they do not mean the original task is complete. This follows the maintainer's
 2026-10-01 update to the active implementation goal.
 
+## Current rejoin checkpoint — 2026-10-05, interrupt intent
+
+At `55a577dba7910f6e44b8fcb78abe03781fc75d12`, both supported pairs
+pass the complete affected 464-case ordinary Core selection in 33.572 / 33.710
+seconds, with the same three long-bound exclusions. Both complete requested-model
+codec/OpenInteraction selections pass eight cases including independent Node in
+0.424 / 0.424 seconds. Formatting, dev/test warning-free compilation and metadata
+pass both pairs. Eighteen retained outputs, including the failure below, rehash:
+`/private/tmp/loopex-m7-policy-tuple-rejoin-v1/completion.json`, SHA-256
+`2f088898e7577c10e8e0452ef4340617fe0046b3abd7b70e6ba9775491f7d498`.
+Independent exact-commit tuple/counter/replay review reports no findings:
+`/private/tmp/loopex-m7-repeat-defer-55a577db-independent-review.md`, SHA-256
+`33c0a6bf26197a421f109b1d9689e61d7b1071e34a977df307b2eb53f1322132`;
+six-input inventory SHA-256
+`da3501c9f73d4de9a6e847b0d9ae9a056d3e45572824ac3c37a96907a7eda5f8`.
+The added native T05 unit is complete again, and one standalone requested-model
+codec subtask is complete. Original T05 outcomes and negotiated transport joins
+remain open.
+
+The same current candidate's complete ChatDriver selection FAILS 40/41 in
+28.174 seconds: external prepared compact interrupt never completes inside the
+existing 5,000-ms observation. Output:
+`/private/tmp/loopex-m7-policy-tuple-rejoin-v1/current-chat-driver.log`, SHA-256
+`21a1b7a79bbeb67d4714c894f6c2c84a6148c8f2bac9637cabc6f07e6e4540e9`.
+Its first floor selection passes 41 cases in 23.452 seconds; this does not
+resolve or relabel the same-source current failure. The added native compact/chat
+T06 unit is reopened. Handles 57957 and 18401 are terminal and collected.
+
+Source diagnosis found interrupt intent lost when begin_stop sees an in-flight
+status request. Its reply clears pending but polls the busy session indefinitely
+without sending the owed abort. A deterministic fixture now holds the exact
+second status reply, interrupts while pending, confirms stopping, and releases
+that reply. Corrected warning-free fixture fails against unchanged production:
+one of two cases fails, thirty-nine excluded, 7.515 seconds.
+`/private/tmp/loopex-m7-chat-status-interrupt-red-v2.log`, SHA-256
+`3bf37df37466c0f7c4b26e843a5449bba1eb6fbba60e59dc2fbf74ee6b45cb41`;
+exact test SHA-256
+`f816c71affbd760904de5482ba4178373545119cb66d9f2c12fca383b9f494c5`.
+The first deterministic fixture also reproduced the failure but emitted a
+constant-comparison warning; retain its v1 log, SHA-256
+`5352a6137180f01a38819948ea6f0af57f2b05ac5b575b9360018f73fdd34dea`.
+Both red handles 32597 and 45160 are terminal. The private stop_abort_sent latch
+now submits the owed abort once after uncertainty resolution and status reply;
+no deadline, status/public contract, runtime command or cleanup bound changes.
+The fixture requires exactly one actual compact abort record. Paired verification
+of the changed chat bytes is pending.
+
+T01–T19 originals remain 78 done / 95 todo / 6 retired. Added subtasks are
+281 done / 19 todo; including T00, added 285 / 20. The diagnostic setup-cutoff
+question remains unanswered. No full integration, release or closure pass is
+claimed. Restore's four-file draft remains unintegrated and unverified.
+
 ## Current verification checkpoint — 2026-10-05, policy decision identity
 
 The atomic replacement fix at `8addcf4db116b2c3686f2952e8c8fa24103cb388`
@@ -11701,7 +11753,9 @@ or check was relaxed.
 
 ### Added implementation subtasks
 
-- [ ] Commit the approved distinct policy answer-admitted transaction and public event, bounded immutable committed native inspection and complete revision-3 snapshot publication; prove exact-prefix pending/answered/terminal views, recovery correspondence, configuration and checkpoint privacy, native compact admission and mutation-uncertainty fencing on both supported toolchains. Complete /3-/4 payload manifests, transport projection and independent live clients remain separate.
+- [x] Commit the approved distinct policy answer-admitted transaction and public event, bounded immutable committed native inspection and complete revision-3 snapshot publication; prove exact-prefix pending/answered/terminal views, recovery correspondence, configuration and checkpoint privacy, native compact admission and mutation-uncertainty fencing on both supported toolchains. Complete /3-/4 payload manifests, transport projection and independent live clients remain separate.
+
+- [x] Implement the approved standalone fifteen-member model requested-question payload codec, literal schema/vectors and independent Node encoder/decoder; preserve all five null captures and current OpenInteraction domains, refuse policy and terminal branches, and prove complete codec files and descriptor/byte boundaries on both supported pairs after root integration. Serving imports, negotiated manifests and live generation activation remain open.
 
 - [x] Join the approved current eleven-member Inspection, pending/answered policy OpenInteraction and distinct answer-admitted event in shared Elixir and independent Node codecs; migrate Snapshot and retire superseded PendingInteraction. Prove exact nested schemas, quantities, opaque/UTF-8 boundaries, privacy refusals, canonical mutations and the complete 32-case selection on both pairs after root integration. Core transactions/publication, manifests and live generations remain open.
 
@@ -11766,7 +11820,7 @@ or check was relaxed.
 
 ### Added implementation subtasks
 
-- [x] Implement the approved required native compact_pending observation and definitive-status uncertainty fence; hold chat barriers through resumed/external pre-episode preparation, episode, abort and cleanup until committed completion, reject missing/non-Boolean busy values, and prove actual owner/recovery and exact joins on both supported toolchains. Add no wire or chat JSON members.
+- [ ] Implement the approved required native compact_pending observation and definitive-status uncertainty fence; hold chat barriers through resumed/external pre-episode preparation, episode, abort and cleanup until committed completion, reject missing/non-Boolean busy values, and prove actual owner/recovery and exact joins on both supported toolchains. Add no wire or chat JSON members.
 
 
 - [x] Join the public chat entrypoint to exact creation, session tracking, prepared resume, guarded signals, effective report and existing input/output driver; share ask diagnostic joins and prove actual built startup/quit plus scripted continuity/restart/refusal/cleanup behavior on both pairs. Built multi-prompt/provider, attended, maintenance and helper proof remains open.

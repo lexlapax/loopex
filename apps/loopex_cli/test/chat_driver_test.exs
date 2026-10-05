@@ -8,6 +8,17 @@ defmodule LoopexCli.ChatDriverTest do
   alias LoopexCli.ChatDriver
   alias Loopex.AgentLoopFixture, as: Fixture
 
+  defp hold_compact_status(:interrupt, 2, test) do
+    reference = make_ref()
+    send(test, {:compact_status_held, self(), reference})
+
+    receive do
+      {:release_compact_status, ^reference} -> :ok
+    end
+  end
+
+  defp hold_compact_status(_ending, _count, _test), do: :ok
+
   for ending <- [:unchanged, :interrupt] do
     @compact_ending ending
     test "a resumed external pre-episode compact holds wait until #{@compact_ending} completion" do
@@ -46,9 +57,19 @@ defmodule LoopexCli.ChatDriverTest do
       output = observing_output()
       test = self()
 
+      ending = @compact_ending
+
       facade = fn module, function, arguments ->
         result = apply(module, function, arguments)
-        if function == :session_status, do: send(test, {:compact_status_read, result})
+
+        if function == :session_status do
+          count = Process.get(:compact_status_reads, 0) + 1
+          Process.put(:compact_status_reads, count)
+          send(test, {:compact_status_read, result})
+
+          hold_compact_status(ending, count, test)
+        end
+
         result
       end
 
@@ -71,7 +92,11 @@ defmodule LoopexCli.ChatDriverTest do
             0
 
           :interrupt ->
+            assert_receive {:compact_status_held, command_worker, reference}, 5_000
+            assert :sys.get_state(driver).pending == :status
             ChatDriver.interrupt(driver)
+            assert :sys.get_state(driver).stopping
+            send(command_worker, {:release_compact_status, reference})
             1
         end
 
@@ -87,6 +112,17 @@ defmodule LoopexCli.ChatDriverTest do
 
       assert completion["command_id"] == "external-compact"
       assert completion["result"]["cleanup"] == "confirmed"
+
+      expected_aborts =
+        case @compact_ending do
+          :interrupt -> 1
+          :unchanged -> 0
+        end
+
+      assert Enum.count(
+               Fixture.records(fixture, session),
+               &(&1.payload.kind == "compact_abort_admitted_v1")
+             ) == expected_aborts
 
       case @compact_ending do
         :unchanged -> assert completion["result"]["disposition"] == "unchanged"

@@ -193,6 +193,7 @@ defmodule LoopexCli.ChatDriver do
       status: nil,
       exit_code: 0,
       stopping: false,
+      stop_abort_sent: false,
       reaping: false,
       give_up: false,
       closed: false,
@@ -1039,6 +1040,14 @@ defmodule LoopexCli.ChatDriver do
 
   defp check_barrier(%{unresolved: id} = state) when is_binary(id), do: observe(state)
 
+  # Concept: an interrupt retains its abort intent while a status read is pending.
+  # Technical depth: submit it once when the command worker becomes available,
+  # after uncertainty resolution and before waiting for terminal evidence.
+  defp check_barrier(
+         %{stopping: true, reaping: false, stop_abort_sent: false, pending: nil} = state
+       ),
+       do: abort_for_stop(state)
+
   defp check_barrier(%{status: %{event_sequence: tail}} = state) when state.cursor < tail,
     do: grant_event(state)
 
@@ -1133,11 +1142,13 @@ defmodule LoopexCli.ChatDriver do
 
   defp shorten_stop(state, _deadline), do: state
 
+  defp abort_for_stop(%{stop_abort_sent: true} = state), do: ask_status(state)
+
   defp abort_for_stop(state) do
     if MapSet.member?(state.ready, :command) do
       id = :crypto.strong_rand_bytes(24)
       state = admit(state, %{type: :abort, command_id: id})
-      %{state | pending: {:shutdown, id}}
+      %{state | pending: {:shutdown, id}, stop_abort_sent: true}
     else
       state |> unknown_cleanup() |> reap() |> maybe_finished()
     end
