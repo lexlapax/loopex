@@ -1,7 +1,32 @@
+# Concept: the shared session fixture loads under an explicit temporary home.
+# Technical depth: its guard runs during require, before case setup. Restore the
+# host environment immediately; the fixture starts no actors while loading.
+fixture_home =
+  Path.join(System.tmp_dir!(), "restore-store-load-#{System.unique_integer([:positive])}")
+
+File.mkdir_p!(fixture_home)
+prior_home = System.get_env("LOOPEX_HOME")
+System.put_env("LOOPEX_HOME", fixture_home)
+
+try do
+  Code.require_file("../../loopex/test/support/m1_runtime_helper.exs", __DIR__)
+  Code.require_file("../../loopex/test/support/agent_loop_helper.exs", __DIR__)
+after
+  if prior_home,
+    do: System.put_env("LOOPEX_HOME", prior_home),
+    else: System.delete_env("LOOPEX_HOME")
+
+  File.rm_rf!(fixture_home)
+end
+
 defmodule LoopexComposition.RestoreIOTest do
   use ExUnit.Case, async: false
 
   alias LoopexComposition.Restore.IO, as: RestoreIO
+  alias Loopex.ConfiguredGenesisFixture
+  alias Loopex.Runtime.SessionState
+  alias Loopex.Store
+  alias Loopex.Store.Local.{Log, State}
 
   setup do
     root = Path.join(System.tmp_dir!(), "loopex-restore-io-#{System.unique_integer([:positive])}")
@@ -564,6 +589,513 @@ defmodule LoopexComposition.RestoreIOTest do
     end
 
     refute_receive {:restore_io, _, _, _, _}
+  end
+
+  test "Store audit recovers every session and retains the complete private replay map",
+       context do
+    fixture = store_fixture(context.root, 3)
+    [first | _] = fixture.ids
+    fixture = append_pending(fixture, first)
+
+    {:ok, orphan} =
+      Store.advance_owner("absent-session", "owner", "orphan-tx", 0, 0, "orphan-owner")
+
+    fixture = append_transaction(fixture, orphan)
+    operation = store_operation(fixture)
+    owned = launch(operation, :store_decode)
+    assert {{:joined, {:ok, result}, evidence}, events} = drive(owned)
+    assert result.store == fixture.state
+    assert map_size(result.sessions) == 3
+    assert evidence.opens == 1
+    assert evidence.closes == 1
+    assert map_size(result.store.runtime_commands) > 0
+    assert map_size(result.store.creation_rows) > 0
+    assert map_size(result.store.orphan_resolutions) > 0
+    assert [_pending] = SessionState.pending_work(result.sessions[first])
+    assert Enum.count(issued_kinds(events), &(&1 == :session_recover)) == 3
+
+    for {id, session} <- fixture.state.sessions do
+      assert {:ok, expected} = SessionState.recover(id, session.records, session.events)
+      assert result.sessions[id] == expected
+    end
+
+    assert File.read!(fixture.path) == fixture.bytes
+    joined(owned)
+  end
+
+  test "an existing empty Store file audits as an empty complete history", context do
+    fixture = store_fixture(context.root, 1)
+    File.write!(fixture.path, <<>>)
+    owned = launch(store_operation(%{fixture | bytes: <<>>}), :store_decode)
+
+    assert {{:joined, {:ok, %{store: store, sessions: sessions}}, %{opens: 1, closes: 1}}, _} =
+             drive(owned)
+
+    assert sessions == %{}
+    assert store == State.new()
+    assert File.read!(fixture.path) == <<>>
+    joined(owned)
+  end
+
+  test "the physical whole-log ceiling refuses a real oversized file before open or decode",
+       context do
+    fixture = store_fixture(context.root, 1)
+    size = 268_435_457
+
+    assert {digest, 0} =
+             System.cmd("python3", [
+               "-c",
+               "import os,sys,hashlib; p=sys.argv[1]; n=int(sys.argv[2]); f=open(p,'wb'); f.truncate(n); f.close(); h=hashlib.sha256(); f=open(p,'rb'); [h.update(b) for b in iter(lambda:f.read(65536),b'')]; f.close(); print(h.hexdigest())",
+               fixture.path,
+               Integer.to_string(size)
+             ])
+
+    digest = String.trim_trailing(digest, "\n")
+    root_info = File.lstat!(fixture.root)
+    directory_info = File.lstat!(Path.dirname(fixture.path))
+    info = File.lstat!(fixture.path)
+    assert info.size == size
+
+    entries = [
+      %{
+        "path" => ".",
+        "kind" => "directory",
+        "mode" => Bitwise.band(root_info.mode, 0o7777),
+        "size" => 0,
+        "sha256" => nil
+      },
+      %{
+        "path" => "store",
+        "kind" => "directory",
+        "mode" => Bitwise.band(directory_info.mode, 0o7777),
+        "size" => 0,
+        "sha256" => nil
+      },
+      %{
+        "path" => "store/history.log",
+        "kind" => "regular",
+        "mode" => Bitwise.band(info.mode, 0o7777),
+        "size" => size,
+        "sha256" => digest
+      }
+    ]
+
+    {:ok, manifest} =
+      Loopex.Executor.Local.RestoreCodec.encode(:manifest, [
+        "loopex:current-state-manifest:v1",
+        entries
+      ])
+
+    declaration = %{"relative_path" => "store/history.log", "sha256" => digest}
+    owned = launch({:audit_store, fixture.root, declaration, manifest}, :store_manifest)
+    assert {{:joined, {:error, :io_error}, %{opens: 0, closes: 0}}, events} = drive(owned)
+    refute :store_decode in issued_kinds(events)
+    assert File.stat!(fixture.path).size == size
+    joined(owned)
+  end
+
+  test "Store-valid invalid second-session history refuses after the first session recovers",
+       context do
+    fixture = store_fixture(context.root, 1)
+    bad = Map.put(ConfiguredGenesisFixture.genesis([]), :kind, "session_genesis_v2")
+    [first] = fixture.ids
+
+    transaction =
+      Enum.find_value(1..100, fn number ->
+        {:ok, transaction} = Store.create_session("audit-runtime", "create-bad-#{number}", bad)
+        {:new, next, _frame, _outcome} = State.prepare(fixture.state, transaction)
+        [second] = Map.keys(next.sessions) -- [first]
+        if second > first, do: transaction
+      end)
+
+    assert transaction
+    fixture = append_transaction(fixture, transaction)
+    assert {:ok, replayed} = State.replay(fixture.frames)
+    assert replayed == fixture.state
+    assert map_size(replayed.sessions) == 2
+    [first, second] = Enum.sort(Map.keys(replayed.sessions))
+    assert {:ok, _} = SessionState.recover(first, replayed.sessions[first].records, [])
+    assert {:error, _} = SessionState.recover(second, replayed.sessions[second].records, [])
+    owned = launch(store_operation(fixture), :session_recover)
+    assert {{:joined, {:error, :history_invalid}, %{opens: 1, closes: 1}}, events} = drive(owned)
+    assert Enum.count(issued_kinds(events), &(&1 == :session_recover)) == 2
+    assert File.read!(fixture.path) == fixture.bytes
+    joined(owned)
+  end
+
+  test "complete frames with an invalid transaction order refuse before session recovery",
+       context do
+    fixture = store_fixture(context.root, 2)
+    bytes = Enum.map_join(Enum.reverse(fixture.frames), &encoded_frame/1)
+    File.write!(fixture.path, bytes)
+    fixture = %{fixture | bytes: bytes}
+    assert {:ok, _, :complete} = Log.decode_bytes(bytes)
+    assert {:error, _} = State.replay(Enum.reverse(fixture.frames))
+    owned = launch(store_operation(fixture), :store_replay)
+    assert {{:joined, {:error, :history_invalid}, %{opens: 1, closes: 1}}, events} = drive(owned)
+    refute :session_recover in issued_kinds(events)
+    assert File.read!(fixture.path) == bytes
+    joined(owned)
+  end
+
+  test "torn and corrupt actual Store files refuse without repairing any byte", context do
+    fixture = store_fixture(context.root, 1)
+
+    for bytes <- [fixture.bytes <> binary_part(fixture.bytes, 0, 7), fixture.bytes <> "corrupt"] do
+      File.write!(fixture.path, bytes)
+      owned = launch(store_operation(%{fixture | bytes: bytes}), :store_decode)
+
+      assert {{:joined, {:error, :history_invalid}, %{opens: 1, closes: 1}}, events} =
+               drive(owned)
+
+      refute :store_replay in issued_kinds(events)
+      assert File.read!(fixture.path) == bytes
+      joined(owned)
+    end
+  end
+
+  test "missing Store files do not become empty logs", context do
+    fixture = store_fixture(context.root, 1)
+    operation = store_operation(fixture)
+    File.rm!(fixture.path)
+    owned = launch(operation, :store_manifest)
+    assert {{:joined, {:error, :io_error}, %{opens: 0, closes: 0}}, events} = drive(owned)
+    refute :store_decode in issued_kinds(events)
+    refute File.exists?(fixture.path)
+    joined(owned)
+  end
+
+  test "declarations require manifest membership and the exact retained digest", context do
+    fixture = store_fixture(context.root, 1)
+    {:audit_store, root, declaration, manifest} = store_operation(fixture)
+
+    for changed <- [
+          %{declaration | "sha256" => String.duplicate("0", 64)},
+          %{declaration | "relative_path" => "store/absent.log"},
+          Map.put(declaration, "extra", "undeclared")
+        ] do
+      owned = launch({:audit_store, root, changed, manifest}, :store_declaration)
+      assert {{:joined, {:error, reason}, %{opens: 0, closes: 0}}, events} = drive(owned)
+      assert reason in [:io_error, :history_invalid]
+      refute :store_decode in issued_kinds(events)
+      joined(owned)
+    end
+  end
+
+  test "Store size mode and same-size content disagreement refuse against the captured manifest",
+       context do
+    fixture = store_fixture(context.root, 1)
+    operation = store_operation(fixture)
+    mode = Bitwise.band(File.stat!(fixture.path).mode, 0o7777)
+
+    for change <- [:size, :mode, :content] do
+      File.write!(fixture.path, fixture.bytes)
+      File.chmod!(fixture.path, mode)
+
+      case change do
+        :size -> File.write!(fixture.path, fixture.bytes <> <<0>>)
+        :mode -> File.chmod!(fixture.path, Bitwise.bxor(mode, 0o100))
+        :content -> File.write!(fixture.path, :binary.copy(<<0>>, byte_size(fixture.bytes)))
+      end
+
+      owned = launch(operation, :store_manifest)
+      assert {{:joined, {:error, :io_error}, evidence}, events} = drive(owned)
+      assert evidence.opens == evidence.closes
+      refute :store_decode in issued_kinds(events)
+      joined(owned)
+    end
+  end
+
+  test "Store hardlinks symlinks and symlink ancestors refuse before opening", context do
+    fixture = store_fixture(context.root, 1)
+    operation = store_operation(fixture)
+    other = Path.join(context.root, "other")
+    File.ln!(fixture.path, other)
+    owned = launch(operation, :store_manifest)
+    assert {{:joined, {:error, :io_error}, %{opens: 0, closes: 0}}, _} = drive(owned)
+    joined(owned)
+    File.rm!(other)
+    File.rename!(fixture.path, other)
+    File.ln_s!(other, fixture.path)
+    owned = launch(operation, :store_manifest)
+    assert {{:joined, {:error, :io_error}, %{opens: 0, closes: 0}}, _} = drive(owned)
+    joined(owned)
+    File.rm!(fixture.path)
+    File.rename!(other, fixture.path)
+    directory = Path.dirname(fixture.path)
+    moved = directory <> "-moved"
+    File.rename!(directory, moved)
+    File.ln_s!(moved, directory)
+    owned = launch(operation, :store_manifest)
+    assert {{:joined, {:error, :io_error}, %{opens: 0, closes: 0}}, _} = drive(owned)
+    joined(owned)
+  end
+
+  test "an opened Store replaced with identical bytes refuses and closes the old descriptor",
+       context do
+    fixture = store_fixture(context.root, 1)
+    owned = launch(store_operation(fixture), :descriptor_stat)
+    {id, _} = paused_operation(owned, :descriptor_stat)
+    replacement = fixture.path <> ".replacement"
+    File.write!(replacement, fixture.bytes)
+    File.chmod!(replacement, Bitwise.band(File.stat!(fixture.path).mode, 0o7777))
+    File.rename!(replacement, fixture.path)
+    send(owned.guardian, {:proceed, owned.reference, id})
+    assert {{:joined, {:error, :io_error}, %{opens: 1, closes: 1}}, events} = drive(owned)
+    refute :store_decode in issued_kinds(events)
+    joined(owned)
+  end
+
+  test "ancestor replacement after reading cannot publish recovered Store facts", context do
+    fixture = store_fixture(context.root, 1)
+    owned = launch(store_operation(fixture), :store_replay)
+    {id, _} = paused_operation(owned, :store_replay)
+    directory = Path.dirname(fixture.path)
+    moved = directory <> "-moved"
+    File.rename!(directory, moved)
+    File.mkdir!(directory)
+    File.rename!(Path.join(moved, "history.log"), fixture.path)
+    send(owned.guardian, {:proceed, owned.reference, id})
+    assert {{:joined, {:error, :io_error}, %{opens: 1, closes: 1}}, _} = drive(owned)
+    joined(owned)
+  end
+
+  test "Store semantic work stops at the original deadline with descriptors already closed",
+       context do
+    fixture = store_fixture(context.root, 1)
+    owned = launch(store_operation(fixture), :store_decode, 500)
+    paused_operation(owned, :store_decode)
+    assert {{:joined, {:error, :deadline}, %{opens: 1, closes: 1}}, events} = drive(owned, false)
+    refute :store_replay in issued_kinds(events)
+    joined(owned)
+  end
+
+  test "caller loss during Store descriptor validation closes and joins the owned worker",
+       context do
+    fixture = store_fixture(context.root, 1)
+    owned = launch(store_operation(fixture), :descriptor_stat)
+    {id, _} = paused_operation(owned, :descriptor_stat)
+    Process.exit(owned.caller, :kill)
+    assert_receive {:DOWN, monitor, :process, caller, :killed}, 1_000
+    assert monitor == owned.caller_monitor
+    assert caller == owned.caller
+
+    assert_receive {:restore_io, guardian, worker, reference, {:stopping, :caller_lost, _, _}},
+                   1_000
+
+    assert {guardian, worker, reference} == {owned.guardian, owned.worker, owned.reference}
+    send(owned.guardian, {:proceed, owned.reference, id})
+    # The guardian publishes only to the lost caller; its probe retains the join.
+    assert_receive {:restore_io, guardian, worker, reference,
+                    {:terminal, {:joined, {:error, :caller_lost}, %{opens: 1, closes: 1}}}},
+                   1_000
+
+    assert {guardian, worker, reference} == {owned.guardian, owned.worker, owned.reference}
+    joined(owned, false)
+  end
+
+  test "guardian loss during Store semantic recovery never publishes private facts", context do
+    fixture = store_fixture(context.root, 1)
+    owned = launch(store_operation(fixture), :session_recover)
+    paused_operation(owned, :session_recover)
+    Process.exit(owned.guardian, :kill)
+    assert_receive {tag, {:unconfirmed, :guardian_lost}}, 1_000
+    assert tag == owned.tag
+    assert_receive {:DOWN, guardian_monitor, :process, guardian, :killed}, 1_000
+    assert {guardian_monitor, guardian} == {owned.guardian_monitor, owned.guardian}
+    assert_receive {:DOWN, worker_monitor, :process, worker, :killed}, 1_000
+    assert {worker_monitor, worker} == {owned.worker_monitor, owned.worker}
+    assert_receive {:DOWN, caller_monitor, :process, caller, :normal}, 1_000
+    assert {caller_monitor, caller} == {owned.caller_monitor, owned.caller}
+    assert File.read!(fixture.path) == fixture.bytes
+  end
+
+  test "an actual Local Store retains unknown effect truth through offline semantic audit",
+       context do
+    previous = System.get_env("LOOPEX_HOME")
+    System.put_env("LOOPEX_HOME", context.root)
+
+    on_exit(fn ->
+      if previous,
+        do: System.put_env("LOOPEX_HOME", previous),
+        else: System.delete_env("LOOPEX_HOME")
+    end)
+
+    root = physical_root(context.root)
+    directory = Path.join(root, "store")
+    File.mkdir!(directory)
+    path = Path.join(directory, "history.log")
+    {:ok, store} = Loopex.Store.Local.start_link(path: path)
+
+    on_exit(fn ->
+      monitor = Process.monitor(store)
+      Process.exit(store, :kill)
+      assert_receive {:DOWN, ^monitor, :process, ^store, _}, 1_000
+    end)
+
+    fixture =
+      Loopex.AgentLoopFixture.start(
+        store: store,
+        store_module: Loopex.Store.Local,
+        script: [
+          %{text: "write", calls: [%{id: "call-1", name: "write", arguments: %{"path" => "a"}}]}
+        ],
+        outcomes: %{"call-1" => "outcome_unknown"}
+      )
+
+    actors = [fixture.runtime.supervisor, store, fixture.model, fixture.executor]
+    monitors = Enum.map(actors, &{&1, Process.monitor(&1)})
+
+    on_exit(fn ->
+      for actor <- actors do
+        monitor = Process.monitor(actor)
+        Process.exit(actor, :kill)
+        assert_receive {:DOWN, ^monitor, :process, ^actor, _}, 1_000
+      end
+    end)
+
+    {session, attachment, {:accepted, "prompt-1"}} = Loopex.AgentLoopFixture.run(fixture, "write")
+    cutoff = System.monotonic_time(:millisecond) + 5_000
+    await_unknown(attachment, cutoff)
+    :ok = Loopex.stop(fixture.runtime)
+    :ok = GenServer.stop(store, :normal, 1_000)
+    :ok = Agent.stop(fixture.model, :normal, 1_000)
+    :ok = Agent.stop(fixture.executor, :normal, 1_000)
+
+    for {actor, monitor} <- monitors do
+      assert_receive {:DOWN, ^monitor, :process, ^actor, :normal}, 1_000
+    end
+
+    bytes = File.read!(path)
+    {:ok, frames, :complete} = Log.decode_bytes(bytes)
+    {:ok, replayed} = State.replay(frames)
+    owned = launch(store_operation(%{root: root, path: path, bytes: bytes}), :store_decode)
+    assert {{:joined, {:ok, result}, %{opens: 1, closes: 1}}, _} = drive(owned)
+    assert result.store == replayed
+
+    assert {:ok, expected} =
+             SessionState.recover(
+               session,
+               replayed.sessions[session].records,
+               replayed.sessions[session].events
+             )
+
+    assert result.sessions[session] == expected
+
+    assert expected.conversation
+           |> Map.values()
+           |> List.flatten()
+           |> Enum.any?(&(&1.kind == :tool_result and &1.outcome == :outcome_unknown))
+
+    assert File.read!(path) == bytes
+    joined(owned)
+  end
+
+  defp await_unknown(attachment, cutoff) do
+    assert System.monotonic_time(:millisecond) < cutoff
+
+    case Loopex.next_event(attachment) do
+      {:ok, %{:kind => "run.finished", "outcome" => "outcome_unknown"}} ->
+        :ok
+
+      {:ok, _event} ->
+        await_unknown(attachment, cutoff)
+
+      {:error, :empty} ->
+        assert System.monotonic_time(:millisecond) < cutoff
+
+        receive do
+        after
+          1 -> await_unknown(attachment, cutoff)
+        end
+
+      other ->
+        flunk("unknown-effect fixture did not finish: #{inspect(other)}")
+    end
+  end
+
+  defp store_fixture(root, count) do
+    root = physical_root(root)
+    directory = Path.join(root, "store")
+    File.mkdir!(directory)
+    path = Path.join(directory, "history.log")
+    File.write!(path, <<>>)
+    initial = %{root: root, path: path, state: State.new(), frames: [], bytes: <<>>, ids: []}
+
+    Enum.reduce(1..count, initial, fn number, fixture ->
+      {:ok, transaction} =
+        Store.create_session(
+          "audit-runtime",
+          "create-#{number}",
+          ConfiguredGenesisFixture.genesis([])
+        )
+
+      append_transaction(fixture, transaction)
+    end)
+  end
+
+  defp append_transaction(fixture, transaction) do
+    {:new, state, frame, _outcome} = State.prepare(fixture.state, transaction)
+    frames = fixture.frames ++ [frame]
+    bytes = fixture.bytes <> encoded_frame(frame)
+    File.write!(fixture.path, bytes)
+
+    %{
+      fixture
+      | state: state,
+        frames: frames,
+        bytes: bytes,
+        ids: Enum.sort(Map.keys(state.sessions))
+    }
+  end
+
+  defp append_pending(fixture, id) do
+    head = fixture.state.sessions[id]
+
+    {:ok, owner} =
+      Store.advance_owner(id, "owner", "owner-tx", 0, head.journal_version, "audit-owner")
+
+    fixture = append_transaction(fixture, owner)
+    head = fixture.state.sessions[id]
+    {:ok, state} = SessionState.recover(id, head.records, head.events)
+
+    {:ok, prompt} =
+      SessionState.propose(state, %{type: :prompt, command_id: "prompt", content: "continue"}, %{
+        max_turns: 8,
+        token_budget: 10_000,
+        deadline_ms: 60_000,
+        context_token_budget: 8_192
+      })
+
+    {:ok, transaction} =
+      Store.session_commit(
+        id,
+        "session",
+        prompt.tx_id,
+        head.owner_epoch,
+        head.owner_incarnation_id,
+        head.journal_version,
+        prompt.records,
+        prompt.events
+      )
+
+    append_transaction(fixture, transaction)
+  end
+
+  defp encoded_frame(frame) do
+    {:ok, bytes} = Log.encode(frame)
+    bytes
+  end
+
+  defp store_operation(fixture) do
+    assert {:joined, {:ok, manifest}, _} =
+             RestoreIO.run(
+               {:manifest, fixture.root, byte_size(fixture.bytes)},
+               limits(1_000, 100)
+             )
+
+    declaration = %{"relative_path" => "store/history.log", "sha256" => hash(fixture.bytes)}
+    {:audit_store, fixture.root, declaration, manifest}
   end
 
   defp physical_root(root) do
