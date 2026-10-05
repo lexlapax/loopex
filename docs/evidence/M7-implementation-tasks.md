@@ -31,6 +31,18 @@ they do not mean the original task is complete. This follows the maintainer's
 
 ## Owned Store semantic audit joined — 2026-10-05
 
+Subsequent source inspection selected a separate bounded T08 native proof:
+configuration capability admission must use history surviving an accepted
+checkpoint, while owner preflight measures the exact summary and tail.
+ADR 0044 explicitly names compaction covering a terminal tool group as the
+remedy for unsupported canonical terminal-tool rendering. Maintenance must
+continue to refuse configuration before host resolution until fully settled.
+The added native checkpoint/quiescence row is open and source-only work has
+started in its isolated worktree. Hosted configure and protocol activation
+remain separate and gated. Current added T01–T19 counts are 291 done / 22 todo;
+T08 added counts are 26 done / 2 todo. The completed Store tally below records
+the preceding checkpoint.
+
 The bounded T15 Store-audit subtask is complete at tested source
 `fb4eb53964c58679f5e16061e1a5dd56a035077f`, joined through
 `47bcedd1daeb141a4a56ab165ac09192a77cee42`. Both supported toolchains pass
@@ -12661,6 +12673,7 @@ the still-open real-provider, live protocol, persistent-fault or closure lanes.
 - [x] Prove configuration restart, commit-unknown re-presentation and owner crashes before/after linearization through the live runtime.
 - [x] Join host configure resolution to the ordered chat driver through the public prepared facade; retain only confirmed candidates and prove busy/history refusal, exact unknown observation, canonical aliases and changed live model allowances on both toolchains.
 - [ ] Join host resolution and prepared daemon routing; extend configuration preflight to committed checkpoints and maintenance quiescence.
+- [ ] Validate native configuration against checkpoint-surviving history and exact summary/tail staging; prove actual committed checkpoints, covered/uncovered terminal-tool capability, unchanged refusals/replay/next-request capture, and maintenance refusal before host resolution through work, commitment, cleanup and recovery. Remote configure and coordinated protocol activation remain separate.
 - [x] Capture bounded limits and source bindings from the exact pinned packaged catalog without mutable lookup; preserve unknown limits and the literal accepted alias.
 - [x] Register all nine literal reasoning cells after deterministic native request/response, bound, disclosure and terminal-history conformance; share exact mappings with transport validation.
 - [x] Join registered reasoning subsets and exact mapping resolution to whole-profile preparation.

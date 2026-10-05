@@ -27,6 +27,40 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Latest Store integration and next verification
 
+Latest active verification is ROOT LEDGER ONLY, handle 86459. Initial source
+0b82b006 is formatted and committed as 393d8935c26bd9a495198d79e5aa70300fcfbd12
+in /private/tmp/loopex-m7-ledger-byte-guard. Runner v2 digest
+e6df58fc5b03bfa193aed16b1cb21c401195cbd5dbce4c6ab5415d49bc4ea114;
+output sibling M7/ledger-byte-guard-execution-20261005-v1. Current compilation,
+formatting and metadata passed; focused17/0excluded passed. Ordinary294/2excluded
+is running, then floor follows. Keep its source pinned; root resumes the same
+handle. No other verification VM may start until terminal return.
+
+Resource handle 54425 is terminal exit 1 and collected. Its focused33 population
+has32 passes/1 failure, zero exclusions/skips; no ordinary/floor stage ran.
+Production refused a positive fixture whose directory basename and skill name
+disagreed. Raw focused log SHA-256
+67e0c471a256aeea8910380fc94e64500f0d24f8264d4e33ab6b0c6f7b0acadd is retained
+in sibling M7/resource-retained-decoding-execution-20261005-v2.
+The corrected clean source is cc8ac30ff1ab6732233c3d3d53f93d0ab01000fb:
+add the matching review subdirectory and mark the module async:false because
+the actual decoder-entry fixtures change VM-global trace patterns. Production,
+assertions, population and bounds stay unchanged. Preserve first failures;
+prepare a newly pinned runner and fresh output for this changed source after
+root review. Resource has no VM grant while Ledger runs.
+
+The separate native checkpoint/configure slice is source-only in
+/private/tmp/loopex-m7-configure-checkpoint, codex/m7-configure-checkpoint,
+initial daa67f29. restore_manifest_resume owns session_state.ex, optional
+session_configuration.ex input documentation and the new
+configuration_checkpoint_admission_test.exs. Use existing checkpoint coverage,
+preserve exact owner staging and maintenance settledness, and prove actual
+checkpoint/replay/capability plus before-resolution maintenance refusals.
+ADR 0044 explicitly permits compaction covering the offending group as remedy.
+No new public/persistent/wire contract or VM is authorized. T08 adds one open
+bounded row; T01–T19 added counts now291 done/22 todo, originals unchanged.
+Earlier active-run statements below are historical; these latest facts govern.
+
 Store audit fb4eb53964c58679f5e16061e1a5dd56a035077f passed all 24 stages
 under both pairs and is joined through 47bcedd1daeb141a4a56ab165ac09192a77cee42.
 Per pair: focused 41/2 excluded, ordinary Composition 604/3 excluded, owned
