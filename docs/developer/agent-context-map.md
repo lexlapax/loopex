@@ -6687,3 +6687,21 @@ process creation because explicit authorization for the exact public and
 cross-application fields and limits was missing. This direct decision supplies
 that authorization. It does not authorize the separately pending wire-create
 grammar, generation activation, milestone closure, merge or publication.
+
+<a id="disposition-m7-wire-create-empty-options-2026-10-04"></a>
+### M7 wire creation uses central settings, 2026-10-04
+
+The maintainer replied "Approved option 1" to the foreground /3 and daemon /4
+wire-create question. Both generations require `session_options: {}` on every
+`session.create` request. Missing, null, non-object and nonempty values refuse
+before mutation. Creation uses the host's captured current configuration and
+immutable tool selection; clients change mutable settings through the separate
+configure command. Public embedding metadata and prepared-genesis APIs remain
+available. This narrows the wire contract without changing Core persistence.
+
+The approved packet is `/private/tmp/loopex-m7-session-create-options-decision-v2.md`,
+SHA-256 `255dfdef7a92e0a850dd866b48a733dc0be3f08568551ec72c19178aee3ce40c`.
+Retire superseded wire openness under the current-contract rule. Both complete
+manifests, validators, no-mutation refusals, exact duplicate identity and current
+restart proof must rejoin before serving the generations. Approval authorizes
+that implementation, not milestone closure, merge, release or publication.

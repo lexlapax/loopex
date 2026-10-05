@@ -325,6 +325,56 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Maintainer decision: "Approved option 1" requires `session_options: {}` on
+  every foreground /3 and daemon /4 wire create. The
+  [durable disposition](../developer/agent-context-map.md#disposition-m7-wire-create-empty-options-2026-10-04)
+  binds the exact packet and preserves host embedding/prepared creation. No
+  wire generation is activated from approval alone.
+
+- Done: shared command-bounds codec unit integrated as `0c017b54` from verified
+  worker `c6050463508a07d5eb00d273534fe9a0cf989e32`. Complete affected protocol
+  file including independent Node PASS 6 tests on current/floor in 0.421 / 0.640
+  seconds; standalone pinned Node PASS in 0.079 seconds. Proof retains 171
+  literal vectors, six enclosing omission cases and 39 independent boundary
+  checks. Both pairs pass owned warning-as-error compilation, formatting,
+  documentation/status and dependency checks; upstream dependency warnings
+  remain in complete logs. All retained digests verified against
+  `/private/tmp/loopex-m7-command-bounds-proof-20261004/evidence-final.sha256`,
+  SHA-256 `f19f11d6476c514a62378693f4c84945d9b52489bb5d22ca00e81a7b2e81bd80`.
+  Final completion inventory SHA-256
+  `459b600f5d587e77aa44f5238aa28b4a2a189081c06ab7010be732fdf25835d5`.
+  Initial sandbox/fixture/dependency-inventory failures remain retained. The
+  six integrated source paths match the tested bytes; full transport joins
+  and negotiated generations remain open.
+
+- Chat progress remains unproved: current v7 complete affected files have
+  182 tests, one failure, in 109.117 seconds. The workflow missed the final
+  dropped-progress diagnostic line; diagnostic closure deliberately discards
+  queued entries, so asynchronous submission alone does not prove delivery.
+  Complete failed output is
+  `/private/tmp/loopex-m7-chat-progress-proof/affected-current-v7.log`, SHA-256
+  `aae80289857cacf28581eb33884fcd713038e3166e57e97d0d8ebb7516d6097a`.
+  No unchanged-byte retry or PASS claim; delivery/loss proof is being repaired
+  within existing diagnostic and cleanup bounds.
+
+- Integrated progress verification retained current-toolchain PASS 182 tests
+  in 108.339 seconds, warning-free metadata PASS in 16.423 seconds and Core
+  progress routing PASS 3 tests in 1.040 seconds. Floor setup first stopped
+  before tests on an incompatible Hex archive; its failed output is retained.
+  With the existing floor Mix home, the unchanged complete affected files
+  executed 182 tests with one stalled-pipe failure in 115.585 seconds.
+  Investigation found the fixture's 5,000-ms IO join began before the settled
+  wait control acquired its own enqueue cutoff. Source repair requires the
+  same blocked-writer snapshot to contain an actual control and its captured
+  delivery deadline before starting the unchanged join wait; all kernel,
+  admission, barrier, actor, OS and collective bounds remain unchanged.
+  Review also requires a positive joined-delivery receipt before the held
+  Model callback is released in the suppression test. Both fixture changes
+  are source-only and unproved; no retry of unchanged failing bytes is planned.
+  Codec writer now holds the exclusive VM slot for its paired focused proof;
+  root and Model writer are source-only. Original pipe evidence remains a
+  historical proof of its exact revision; the new integration repair stays open.
+
 - Done: bounded actual OS-pipe fixture unit at worker commit
   `065ba640ab4e4b76c8a3687478b1af662d0ed5c7`. Eight new physical-pipe
   cases and all four existing PTY cases PASS on both supported pairs, measured
@@ -11097,7 +11147,7 @@ or check was relaxed.
 - [x] Match the external daemon SSE fixture to its exact captured dated model; retain progress-before-durable-answer ordering, positively assert completed outcome and prove actual socket/independent Node takeover on both supported pairs after integration.
 - [x] Capture actual provider capabilities and exact chat startup template in CLI fixtures; preserve explicit context/system/reply/cleanup budgets, physical reopen/resume, real HTTP accounting and two-runtime diagnostic isolation, and prove all 18 cases on both supported pairs after integration.
 - [x] Bind the four daemon CLI response fixtures to the exact captured dated model; preserve all process/socket, project context, replay, lease, controller, signal, once-only command and shutdown proofs. Prove all 31 cases including pinned independent Node on both worker toolchains and after integration on the current pair; retain original FAIL evidence and every existing bound.
-- [ ] Implement and verify the approved prompt/follow-up/compact wire bound codecs and independent Node vectors; preserve exact decimal/safe-integer domains, partial overrides and omission without defaults. Automatic approval review rejected both direct writes; obtain explicit maintainer approval before resuming this bounded implementation.
+- [x] Implement and verify the approved prompt/follow-up/compact wire bound codecs and independent Node vectors; preserve exact decimal/safe-integer domains, partial overrides and omission without defaults. Explicit maintainer approval supersedes the two retained automatic-review refusals; both supported pairs and independent Node pass the six integrated source paths. Complete negotiated transport joins remain open.
 - [ ] Migrate remaining implicit Core/edge/transport test hosts to captured current creation, replace their superseded record assertions, remove old configuration-less readers/writers, and prove current replay, command identity, uncertainty, authority and cleanup without a Core fallback. Run the full check once on the resulting clean committed candidate. The headless/loop and context-admission fixture phases are complete; superseded request/admission decoders and edge/transport joins remain.
 
 ## T06 — Build the first complete chat workflow
@@ -11353,6 +11403,7 @@ the still-open real-provider, live protocol, persistent-fault or closure lanes.
 ### Added implementation subtasks
 
 - [x] Preserve the writer's already-running control cutoff during unknown-admission shutdown and pass the captured host cutoff into final drain; prove deadline changes, delivery clearing, lost-writer handling and actor joins without changing public records or product bounds.
+- [ ] Establish the actual pending-control enqueue cutoff before the physical-pipe IO join; retain the failed integrated floor proof, preserve every existing pressure/lifetime assertion and all captured waits, then prove the repaired complete files on both pairs.
 - [x] Prove actual OS-pipe fragmentation, question responses, wait backpressure, EOF and kernel stdout stalls through Chat.run with exact process cleanup; existing PTY and simulated byte-device proofs cover only their own lanes.
 - [ ] Consume admitted transient provider progress through the existing attachment and bounded writer, including escaped rendering and reported drop counts, without inventing new pipe control fields.
 
