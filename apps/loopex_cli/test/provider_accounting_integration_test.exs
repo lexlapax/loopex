@@ -15,6 +15,8 @@ defmodule LoopexCli.ProviderAccountingIntegrationTest do
   alias Loopex.Runtime
   alias Loopex.Runtime.SessionState
 
+  @haiku "anthropic:claude-haiku-4-5-20251001"
+
   setup do
     previous = System.get_env(Adapter.credential_variable())
     System.put_env(Adapter.credential_variable(), "synthetic-accounting-integration-key")
@@ -35,6 +37,8 @@ defmodule LoopexCli.ProviderAccountingIntegrationTest do
       {store_pid, store} = M1RuntimeTestStore.start_store(label: "provider-accounting")
       executor = AgentLoopTestExecutor.start()
       definition = AgentLoopFixture.tool_definition()
+      model = if @boundary == :raw_refusal, do: "openai:gpt-4o", else: @haiku
+      defaults = creation_defaults(model, definition)
 
       # A managed runtime refuses the no-runtime trace capability, so the
       # provider runs under a capability bound to this runtime, as a host binds it.
@@ -45,6 +49,7 @@ defmodule LoopexCli.ProviderAccountingIntegrationTest do
       {:ok, runtime} =
         Loopex.start_link(
           context_token_budget: 8_192,
+          session_creation_defaults: defaults,
           runtime_id: "provider-accounting-integration",
           store: store,
           diagnostics_to: self(),
@@ -52,8 +57,7 @@ defmodule LoopexCli.ProviderAccountingIntegrationTest do
           sampling: %{"max_tokens" => 64},
           model: %{
             module: Adapter,
-            model:
-              if(@boundary == :raw_refusal, do: "openai:gpt-4o", else: Adapter.default_model()),
+            model: model,
             options: options
           },
           executor: %{
@@ -194,6 +198,44 @@ defmodule LoopexCli.ProviderAccountingIntegrationTest do
     end
   end
 
+  # Concept: this host retains the exact provider and instruction configuration.
+  # Technical depth: packaged catalog resolution reads no credential. The
+  # selected tool definition, explicit context/system/reply ceilings and cleanup
+  # grace match the runtime fixture; replay uses the captured current genesis.
+  defp creation_defaults(model, definition) do
+    {:ok, instructions} =
+      LoopexComposition.SessionInstructions.capture(
+        System.fetch_env!("LOOPEX_WORKSPACE"),
+        "coding"
+      )
+
+    [provider, _name] = String.split(model, ":", parts: 2)
+
+    {:ok, configuration} =
+      LoopexComposition.ProviderBindings.resolve_configuration(
+        %{
+          "model" => model,
+          "reasoning" => "default",
+          "configuration_version" => 1,
+          "instructions" => instructions,
+          "max_tokens" => 64,
+          "context_token_budget" => 8_192,
+          "system_class_tokens" => 1_000
+        },
+        %{provider => %{"credential" => %{"env" => Adapter.credential_variable()}}},
+        [definition]
+      )
+
+    assert configuration["model"] == model
+    assert configuration["max_tokens"] == 64
+    assert configuration["context_token_budget"] == 8_192
+    assert configuration["system_class_tokens"] == 1_000
+
+    Loopex.ConfiguredGenesisFixture.genesis([definition], configuration)
+    |> Map.drop([:kind, "options"])
+    |> put_in(["runtime_configuration", "cleanup_grace_ms"], 2_000)
+  end
+
   # Concept: the raw-byte witness reaches Core's reply admission over real HTTP.
   # Technical depth: Anthropic now refuses at its smaller native-content ceiling.
   # The ordinary OpenAI mapping still delivers the oversized complete reply, so
@@ -269,7 +311,7 @@ defmodule LoopexCli.ProviderAccountingIntegrationTest do
            "id" => "msg_accounting",
            "type" => "message",
            "role" => "assistant",
-           "model" => "claude-haiku-4-5",
+           "model" => "claude-haiku-4-5-20251001",
            "content" => [],
            "stop_reason" => nil,
            "stop_sequence" => nil,

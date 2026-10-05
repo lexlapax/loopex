@@ -353,6 +353,7 @@ defmodule LoopexCli.ChatConfigurationTest do
        fixture do
     assert {:ok, prepared} = load(fixture)
     profile = prepared.selection.profile
+    configuration = prepared.genesis["initial_configuration"]
     previous = System.get_env("M7_CHAT_CONFIG_SLOT")
     legacy = System.get_env("LOOPEX_PROVIDER_API_KEY")
 
@@ -362,9 +363,12 @@ defmodule LoopexCli.ChatConfigurationTest do
       workspace: profile["paths"]["workspace"],
       policy: LoopexCli.Policy.AllowAll,
       provider_bindings: profile["providers"],
-      model: prepared.selection.configuration["model"],
+      model: configuration["model"],
+      sampling: %{"max_tokens" => configuration["max_tokens"]},
+      context_token_budget: configuration["context_token_budget"],
+      session_creation_defaults: Map.drop(prepared.genesis, [:kind, "options"]),
       active_tools: prepared.active_tools,
-      cleanup_grace_ms: profile["session"]["cleanup_grace_ms"],
+      cleanup_grace_ms: prepared.genesis["runtime_configuration"]["cleanup_grace_ms"],
       recover_stale_writer: true
     ]
 

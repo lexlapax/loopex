@@ -14,6 +14,8 @@ defmodule LoopexCli.ProviderRuntimeIsolationTest do
   alias Loopex.M1RuntimeTestStore
   alias Loopex.Runtime
 
+  @haiku "anthropic:claude-haiku-4-5-20251001"
+
   @handler :loopex_provider_runtime_isolation_witness
 
   setup do
@@ -83,7 +85,7 @@ defmodule LoopexCli.ProviderRuntimeIsolationTest do
     assert_host_unchanged(baseline, host_processes, host, :started)
 
     failed_provider = Provider.new(:hold_before_error)
-    healthy_provider = Provider.new(:hold_before_return)
+    healthy_provider = Provider.new(:hold_before_return, response_body: healthy_response_body())
     failed = start_runtime(failed_provider, "failed-runtime")
     healthy = start_runtime(healthy_provider, "healthy-runtime")
     refute failed.runtime == healthy.runtime
@@ -209,6 +211,7 @@ defmodule LoopexCli.ProviderRuntimeIsolationTest do
     {store_pid, store} = M1RuntimeTestStore.start_store(label: id)
     executor = AgentLoopTestExecutor.start()
     definition = AgentLoopFixture.tool_definition()
+    defaults = creation_defaults(@haiku, definition)
 
     # A managed runtime refuses the no-runtime trace capability, so the
     # provider runs under a capability bound to this runtime, as a host binds it.
@@ -219,11 +222,12 @@ defmodule LoopexCli.ProviderRuntimeIsolationTest do
     {:ok, runtime} =
       Loopex.start_link(
         context_token_budget: 8_192,
+        session_creation_defaults: defaults,
         runtime_id: id,
         store: store,
         cleanup_grace_ms: 2_000,
         sampling: %{"max_tokens" => 64},
-        model: %{module: Adapter, model: Adapter.default_model(), options: options},
+        model: %{module: Adapter, model: @haiku, options: options},
         executor: %{
           module: AgentLoopTestExecutor,
           reference: executor,
@@ -247,6 +251,80 @@ defmodule LoopexCli.ProviderRuntimeIsolationTest do
     fixture = %{runtime: runtime, store_pid: store_pid, executor: executor, control: control}
     on_exit(fn -> stop_runtime(fixture) end)
     fixture
+  end
+
+  # Concept: this host retains the exact provider and instruction configuration.
+  # Technical depth: packaged catalog resolution reads no credential. The
+  # selected tool definition, explicit context/system/reply ceilings and cleanup
+  # grace match the runtime fixture; replay uses the captured current genesis.
+  defp creation_defaults(model, definition) do
+    {:ok, instructions} =
+      LoopexComposition.SessionInstructions.capture(
+        System.fetch_env!("LOOPEX_WORKSPACE"),
+        "coding"
+      )
+
+    [provider, _name] = String.split(model, ":", parts: 2)
+
+    {:ok, configuration} =
+      LoopexComposition.ProviderBindings.resolve_configuration(
+        %{
+          "model" => model,
+          "reasoning" => "default",
+          "configuration_version" => 1,
+          "instructions" => instructions,
+          "max_tokens" => 64,
+          "context_token_budget" => 8_192,
+          "system_class_tokens" => 1_000
+        },
+        %{provider => %{"credential" => %{"env" => Adapter.credential_variable()}}},
+        [definition]
+      )
+
+    assert configuration["model"] == model
+    assert configuration["max_tokens"] == 64
+    assert configuration["context_token_budget"] == 8_192
+    assert configuration["system_class_tokens"] == 1_000
+
+    Loopex.ConfiguredGenesisFixture.genesis([definition], configuration)
+    |> Map.drop([:kind, "options"])
+    |> put_in(["runtime_configuration", "cleanup_grace_ms"], 2_000)
+  end
+
+  defp healthy_response_body do
+    [
+      %{
+        "type" => "message_start",
+        "message" => %{
+          "id" => "msg_fixture",
+          "type" => "message",
+          "role" => "assistant",
+          "model" => "claude-haiku-4-5-20251001",
+          "stop_reason" => nil,
+          "stop_sequence" => nil,
+          "content" => [],
+          "usage" => %{"input_tokens" => 4, "output_tokens" => 0}
+        }
+      },
+      %{
+        "type" => "content_block_start",
+        "index" => 0,
+        "content_block" => %{"type" => "text", "text" => ""}
+      },
+      %{
+        "type" => "content_block_delta",
+        "index" => 0,
+        "delta" => %{"type" => "text_delta", "text" => "loopex"}
+      },
+      %{"type" => "content_block_stop", "index" => 0},
+      %{
+        "type" => "message_delta",
+        "delta" => %{"stop_reason" => "end_turn", "stop_sequence" => nil},
+        "usage" => %{"output_tokens" => 2}
+      },
+      %{"type" => "message_stop"}
+    ]
+    |> Enum.map_join(fn event -> "event: #{event["type"]}\ndata: #{Jason.encode!(event)}\n\n" end)
   end
 
   defp stop_runtime(fixture) do
