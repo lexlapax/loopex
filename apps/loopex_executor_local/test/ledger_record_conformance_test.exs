@@ -28,6 +28,67 @@ defmodule Loopex.Executor.Local.LedgerRecordConformanceTest do
     %{root: root, prepared: prepared, job: job()}
   end
 
+  test "captured records reuse actual current writers without retaining a path", context do
+    marker = Ledger.marker(context.job)
+    open = Ledger.open_entry(context.job, context.job.executor_identity)
+    refused_job = job(%{job_id: "captured-refusal", operation_id: "captured-refusal-operation"})
+    assert {:ok, refusal} = Ledger.refusal(refused_job, :workspace_lease_lost)
+    assert :ok = Ledger.with_claim(context.prepared, fn claimed ->
+      assert :ok = Ledger.admit(claimed, marker, open)
+      Ledger.refuse(claimed, refusal)
+    end)
+    paths = [Path.join(context.root, "generation"),
+      marker_path(context.root, context.job.job_id),
+      open_path(context.root, context.job.job_id),
+      marker_path(context.root, refused_job.job_id)]
+    captures = Enum.map(paths, fn path ->
+      bytes = File.read!(path)
+      record = :erlang.binary_to_term(bytes, [:safe])
+      {bytes, record}
+    end)
+    File.rm_rf!(context.root)
+    for {bytes, record} <- captures do
+      assert {:ok, ^record} = Ledger.decode_bytes(bytes, record.ledger_kind)
+      assert bytes == encode(record)
+    end
+    refute File.exists?(context.root)
+  end
+
+  test "captured kind and actual byte ceilings precede complete schema admission", context do
+    generation = File.read!(Path.join(context.root, "generation")) |> :erlang.binary_to_term([:safe])
+    marker = Ledger.marker(context.job)
+    open = Ledger.open_entry(context.job, context.job.executor_identity)
+    assert {:ok, refusal} = Ledger.refusal(context.job, :workspace_lease_lost)
+    for record <- [generation, marker, open, refusal] do
+      kind = record.ledger_kind
+      ceiling = if kind == "local_executor_generation_v1", do: 2_048, else: 65_536
+      canonical = encode(record)
+      assert {:ok, ^record} = Ledger.decode_bytes(canonical, kind)
+      compressed = :erlang.term_to_binary(record, [:deterministic, :compressed])
+      assert <<131, 80, _::binary>> = compressed
+      for bytes <- [compressed, canonical <> <<0>>, encode([record]),
+                    encode(Map.put(record, "extra", true)), encode(Map.delete(record, :ledger_kind))] do
+        assert {:error, {:ledger_unavailable, :malformed_record}} = Ledger.decode_bytes(bytes, kind)
+      end
+      oversized = canonical <> :binary.copy(<<0>>, ceiling + 1 - byte_size(canonical))
+      assert byte_size(oversized) == ceiling + 1
+      assert {:error, {:ledger_unavailable, :record_too_large}} = Ledger.decode_bytes(oversized, kind)
+      assert {:error, {:ledger_unavailable, :malformed_record}} = Ledger.decode_bytes(canonical, "retired")
+      assert {:error, {:ledger_unavailable, :malformed_record}} = Ledger.decode_bytes(canonical, nil)
+      assert {:error, {:ledger_unavailable, :malformed_record}} = Ledger.decode_bytes(nil, kind)
+      other_kind = if kind == "local_executor_generation_v1", do: "local_open_effect_v1", else: "local_executor_generation_v1"
+      assert {:error, {:ledger_unavailable, :malformed_record}} = Ledger.decode_bytes(canonical, other_kind)
+    end
+    identity = generation["executor_identity"]
+    room = 2_048 - byte_size(encode(generation))
+    exact = Map.put(generation, "executor_identity", identity <> String.duplicate("x", room))
+    assert byte_size(encode(exact)) == 2_048
+    assert {:ok, ^exact} = Ledger.decode_bytes(encode(exact), exact.ledger_kind)
+    beyond = Map.update!(exact, "executor_identity", &(&1 <> "x"))
+    assert byte_size(encode(beyond)) == 2_049
+    assert {:error, {:ledger_unavailable, :record_too_large}} = Ledger.decode_bytes(encode(beyond), beyond.ledger_kind)
+  end
+
   test "new generations use lowercase fixed-width spelling and reopen without rewriting",
        context do
     path = Path.join(context.root, "generation")

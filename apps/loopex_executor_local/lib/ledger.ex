@@ -921,14 +921,51 @@ defmodule Loopex.Executor.Local.Ledger do
   end
 
   defp decode_record(path, kinds, ceiling) do
-    with {:ok, bytes} <- File.read(path),
-         record when is_map(record) <- safe_decode(bytes, ceiling),
+    with {:ok, bytes} <- File.read(path) do
+      decode_captured_record(bytes, kinds, ceiling)
+    else
+      {:error, {:ledger_unavailable, _detail} = reason} -> {:error, reason}
+      {:error, reason} -> {:error, {:ledger_unavailable, reason}}
+      _other -> {:error, {:ledger_unavailable, :malformed_record}}
+    end
+  end
+
+  @doc """
+  ## Concept
+
+  Decodes one captured current ledger record for internal read-only inspection.
+
+  ## Technical depth
+
+  The fixed kind selects the existing physical ceiling: 2,048 bytes for a
+  generation and 65,536 for admission, refusal or open-authority records. The
+  same closed schema, uncompressed safe full-consumption decoder and exact
+  deterministic bytes are used by live readers. This performs no path IO,
+  claims, actor startup, creation or repair. File presence, basename, physical
+  placement and relations to jobs, receipts and other records remain separate
+  audit obligations; decoded data grants no authority.
+  """
+  @spec decode_bytes(binary(), binary()) :: {:ok, map()} | {:error, term()}
+  def decode_bytes(bytes, @generation_kind) when is_binary(bytes),
+    do: decode_captured_record(bytes, [@generation_kind], @generation_bytes)
+
+  def decode_bytes(bytes, kind)
+      when is_binary(bytes) and kind in [@marker_kind, @refusal_kind, @open_kind],
+    do: decode_captured_record(bytes, [kind], @record_bytes)
+
+  def decode_bytes(_bytes, _kind),
+    do: {:error, {:ledger_unavailable, :malformed_record}}
+
+  defp decode_captured_record(bytes, _kinds, ceiling) when byte_size(bytes) > ceiling,
+    do: {:error, {:ledger_unavailable, :record_too_large}}
+
+  defp decode_captured_record(bytes, kinds, ceiling) do
+    with record when is_map(record) <- safe_decode(bytes, ceiling),
          {:ok, canonical} <- validate_record(record, kinds, ceiling),
          true <- canonical == bytes do
       {:ok, record}
     else
       {:error, {:ledger_unavailable, _detail} = reason} -> {:error, reason}
-      {:error, reason} -> {:error, {:ledger_unavailable, reason}}
       _other -> {:error, {:ledger_unavailable, :malformed_record}}
     end
   end
