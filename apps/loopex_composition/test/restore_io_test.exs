@@ -624,7 +624,10 @@ defmodule LoopexComposition.RestoreIOTest do
     fixture = store_fixture(context.root, 1)
     File.write!(fixture.path, <<>>)
     owned = launch(store_operation(%{fixture | bytes: <<>>}), :store_decode)
-    assert {{:joined, {:ok, %{store: store, sessions: %{}}}, %{opens: 1, closes: 1}}, _} = drive(owned)
+    assert {{:joined, {:ok, %{store: store, sessions: sessions}}, %{opens: 1, closes: 1}}, _} =
+             drive(owned)
+
+    assert sessions == %{}
     assert store == State.new()
     assert File.read!(fixture.path) == <<>>
     joined(owned)
