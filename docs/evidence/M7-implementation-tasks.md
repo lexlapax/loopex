@@ -325,6 +325,23 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Alias-preparation ownership confirmed before source edits: isolated writer
+  owns Core Model/session-coordinator/state/configuration/effect-intents and
+  their configured/prepared/admission/conformance tests; composition Model
+  wrapper, ProviderBindings, runtime constructor and ephemeral owner plus their
+  tests; CLI ChatConfiguration and its tests. Additional owned transport paths
+  are foreground Mapping/session_mapping_test and daemon Request/
+  SocketConnection/request/socket_connection tests, only accepted configure
+  admission and pure raw Instructions.capture. No wire-create/CommandBounds,
+  shared schema, generation activation, vision, ADR or ledger edits are delegated.
+  Root reserves Chat host/driver/output and integration tests; pipe writer owns
+  only its three fixture paths. Do not advertise M7 configure through superseded
+  foreground-1/daemon-2 contracts. If coordinated T05 generation/schema work is
+  required for live transport proof, retain that obligation as open rather than
+  claiming complete ADR 0050 implementation from Core-only tests. The writer
+  proceeds source-only; the pipe writer retains the exclusive VM slot.
+
+
 - Resume handoff after acceptance: root is at
   `238fc7d5aa0748fe728957b8e246222fe2de796e` before this ledger update.
   Its clean documentation-only repository check PASS in 17.728 measured seconds;
