@@ -351,19 +351,40 @@ did not resolve them. No paid provider calls were made during this check.
   It queues behind ADR 0050 and other already queued decisions. No public or
   persistence change follows from this read-only proposal.
 
-- Running isolated focused verification: the T10 tracing writer owns only
-  `apps/loopex_cli/test/chat_workflow_test.exs` in the temporary detached Git
-  worktree `/private/tmp/loopex-m7-chat-file-trace-worktree`, based exactly on
-  `7570d0c8`. Git worktree creation ran no setup or VM. The three-case live
-  file/flag matrix uses existing Chat, diagnostic consumer and trace APIs;
-  full handle `13537` and root documentation handle `1433` passed and were
-  collected. The writer now runs the complete eleven-case Chat workflow and
-  complete diagnostic-consumer/ephemeral-trace companions, sequentially on both
-  supported pairs with applications in separate VMs. Root holds its own VMs
-  until those checks terminate.
-  Root owns rejoin and post-rejoin verification. One added pending T10 row
-  tracks this bounded proof. T01–T19 originals are 77 / 96 / 6; added work is
-  266 done / 17 todo. No public boundary or original row closes from preparation.
+- Done: integrate the actual Chat file/flag tracing matrix as `da90bef2`
+  from worker `00158a9a8487253c67fffc7c5bbe36a8380e2115`. Three cases prove
+  enabled-file tracing, --no-trace overriding that file and --trace overriding
+  disabled settings, exact selected values/origins, input readiness ordering,
+  actual diagnostic bytes or absence and exact diagnostic/tracer/runtime joins
+  before successful closing. No production or public contract changed.
+  Complete workflow (11) and diagnostic-consumer/ephemeral-trace companions (31)
+  pass on both supported pairs: current 7.96 / 10.85 and floor 7.71 / 10.68
+  measured seconds. All worker VMs are terminal and collected; both pairs'
+  formatting, warning-free compilation, documentation and dependency gates pass.
+  Initial sandbox TCP-lock refusal remains distinct environment evidence,
+  followed by approved compilation; no suite failed or required a source repair.
+
+  Nineteen immutable retained files were independently rehashed through
+  `/private/tmp/loopex-m7-chat-file-trace-proof/evidence/inventory.sha256`,
+  SHA-256 `57c86cc0d353786e752272de9045a921d2176655e4cc07ec26cea3c61acb2579`.
+  The complete 1,048-entry tested-source inventory has SHA-256
+  `00d462d7763d660ad0aa4c9fe5a604717b343cd581ead2549814423ff24255bb`.
+  Integrated modes all match and every production, fixture, test, dependency,
+  build and script byte matches the tested worker. Only this ledger and the
+  already verified embedding guide differ. Exact rejoin proof is retained at
+  `/private/tmp/loopex-m7-chat-file-trace-root-source-proof.txt`, SHA-256
+  `4ec51cfe7e5d3497def3215b3de7f382365ca3c1e27de7c8e7216c56af886190`.
+  Independent read-only review found no issues in tested source
+  `8e6c6ad84559d41034720f2c3bdadcdc7039b56716ba7e49e883f749e45118b9`;
+  retained review `/private/tmp/loopex-m7-chat-file-trace-independent-review.txt`
+  has SHA-256 `2e1a3efce3f144a7acb06f11e5923e540f93f20f04570200ea80ab348f90e93c`.
+
+  Original T10 item 7 and its added tracing-matrix row close. T01–T19 originals
+  become 78 done / 95 todo / 6 retired; added work becomes 267 / 16. Including
+  T00, originals are 78 / 101 / 7 and added work is 271 / 17. Root post-rejoin
+  metadata remains the next check; identical tested suites are not repeated.
+  No built-command, daemon tracing, paid-provider, floor closure or whole-M7
+  completion claim follows from this bounded proof.
 
 - Done by original-checklist audit: T04 item 7 uses accepted runtime-startup
   summarizer semantics. New automatic episodes use successor startup settings;
@@ -10961,14 +10982,14 @@ the still-open real-provider, live protocol, persistent-fault or closure lanes.
 - [x] Implement the unknown-admission resolver using the original transaction identity and proposal.
 - [x] Preserve input ordering while admission is uncertain; do not submit duplicate commands or fenced aborts.
 - [x] Make EOF, incomplete fragments, earlier failures and uncertain cleanup produce the specified outcomes.
-- [ ] Implement tracing through flags and files, including enable/disable and owner cleanup.
+- [x] Implement tracing through flags and files, including enable/disable and owner cleanup.
 - [x] Add the independently draining diagnostic consumer with drop and unconfirmed-delivery accounting.
 - [ ] Test PTYs, fragmented pipes, actual question IDs, barriers, slow readers, EOF and signals.
 - [x] Test tracing isolation, redaction, stalled stderr and ask’s JSON output separation.
 
 ### Added implementation subtasks
 
-- [ ] Prove actual Chat file-enabled tracing, --no-trace overriding enabled file settings, and --trace overriding disabled settings; observe real diagnostic trace delivery or its absence and exact tracer/consumer/writer/runtime joins before successful closing using existing host seams. Keep startup ordering and all bounds; no new public contract.
+- [x] Prove actual Chat file-enabled tracing, --no-trace overriding enabled file settings, and --trace overriding disabled settings; observe real diagnostic trace delivery or its absence and exact tracer/consumer/writer/runtime joins before successful closing using existing host seams. Keep startup ordering and all bounds; no new public contract.
 
 
 - [x] Prove the complete actual-facade chat EOF matrix for an active run and actual pending question, plus incomplete EOF fragments, normal idle/settled EOF and failed-then-successful runs retaining nonzero final exit and the latest successful outcome; preserve exact input/process/cleanup bounds. The first three cases are integrated as a33ec9ae; the remaining four exposed and now prove the repaired actual reader drain through cancellation. Complete affected files pass on both pairs with unchanged bounds.
