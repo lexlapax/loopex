@@ -325,6 +325,24 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Completed-writer cleanup: both temporary writer checkouts are removed after
+  exact source/evidence verification and root integration. Verified incremental
+  Git bundles retain their complete owned commit chains:
+  `/private/tmp/loopex-m7-gate-verified-worker.bundle`, SHA-256
+  `d6e2b0220c609c644668498fb37bc90d52f93d4ac6cc40315eeffbd06bf385cb`,
+  prerequisite root base `445a3a81`; and
+  `/private/tmp/loopex-m7-pty-verified-worker.bundle`, SHA-256
+  `8add7e68234576a157f24d02630719518525386f8dd5515e83539dae49b136f9`,
+  prerequisite root base `30835300`. Both bundle verifications pass against
+  this repository. The PTY checkout's two root-owned dirty files matched the
+  integrated bytes exactly and are also retained in final-root-dirty.patch;
+  only those already-integrated changes were restored before clean removal.
+  No unique source, failed output, current-format proof or needed ignored file
+  was discarded. All three retained inventories remain outside the removed
+  checkouts. Root, both writers and the independent reviewer have no live VM.
+  M7 remains In progress; goal active, exact alias-B ADR acceptance pending.
+  Current counts remain originals 78 / 95 / 6, added 269 / 16 for T01–T19.
+
 - Done: actual PTY controls and the production steer repair are integrated
   as `f98566dc`, matching final owned fixture commit
   `8d4ce28ab2b016412036076d3801c8d06cd92a3b` plus the exact tested root patch.
