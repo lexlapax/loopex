@@ -29,6 +29,45 @@ grouped by T00–T19. Empty added sections mean no added subtasks are recorded;
 they do not mean the original task is complete. This follows the maintainer's
 2026-10-01 update to the active implementation goal.
 
+## Current decision and audit pointers — 2026-10-05
+
+The diagnostic setup-cutoff question has been surfaced again with the same two
+options and exact retained packet; it remains unanswered. Root will not edit
+its assertion until disposition. Current packet SHA-256
+`f0a6fa52095e0c3a4c622f34fb55292fb97bc8dd093c7641ee68a0481c87638f`
+at `/private/tmp/loopex-m7-diagnostic-fault-setup-decision-20261005-v1.md`.
+The subsequent unaccepted decisions are queued, not concurrently presented:
+current policy wire events (`69e5141e8856abeb1b40f46ea641175f01d4a4b1c920bcf459a1aa9a5b3d8c56`),
+configure outer member (`7112840b7a315a4824e747497d9aa1aa4a93ea39013589725bf50b903d7f0dd5`),
+retained run accounting (`585dcfe29df34dbba772fa073fb1dff5d796db71dec1a30fc60fbf064f226d86`)
+and attempts event grammar (`b00591ffb23df421a83b7e76f4ed6a352273ff561ee4ed80660a54537463e0fe`).
+Their full packet paths remain in preceding retained entries. Current policy
+recommendation supersedes the earlier hybrid proposal; neither is accepted.
+Root independently checked the attempts proposal's eleven literal canonical
+JSON/hash frames; this checks examples only, not schema acceptance or replay.
+
+Whole-current-format audit outline:
+`/private/tmp/loopex-m7-backup-audit-20261005-v1/report.md`, SHA-256
+`2177609053eeb71f75d28db35125f8cdb3cae68ccfcd230c7aff82978ca4aaee`.
+All 44 retained authority/code/test files match exact
+`8885e0dbacfc4a37cb873080d615869587132ea4`; inventory SHA-256
+`21c59bbb4d07f85e0f90a8336136da57537dc74f1aa08a164b15417e761ddc13`.
+Root reviewed the complete format table, current pure reducers, unknown-effect
+relations and implementation/stopping boundaries. Raw Store frames currently
+safe-decode without compressed-payload/canonical reencode protection; resource
+and lock readers lack separate pre-read ceilings. Artifact use cap is 131,072
+bytes. Daemon index validation must preserve dependency direction. Future
+helper-ledger grammar is still missing. These facts are later audit work, not
+permission to activate a copied root or claim its histories validated.
+
+The manifest unit bounds retained candidate expansion and canonical output.
+OTP's native directory primitive materializes a listing; no streaming native
+allocator or hard transient heap bound is claimed. Worker must check/reserve
+candidate count/path/minimum exact ETF cost before traversal, then charge actual
+stat deltas before open/hash, and retain the same owned deadline/cleanup.
+Physical equality alone remains insufficient for complete restore acceptance.
+No additional checkbox closes or tally changes here.
+
 ## Current execution checkpoint — 2026-10-05, complete physical inventory
 
 The verified source and progress are committed/pushed through
