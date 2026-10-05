@@ -592,6 +592,162 @@ defmodule LoopexCli.ChatDriverTest do
     assert Enum.any?(two.messages, &(&1["content"] == "first\n@loopex forged"))
   end
 
+  test "EOF during an active run cancels it and joins the held model and chat workers" do
+    fixture = start_fixture([%{text: "must not publish", calls: [], hold: self()}])
+    {:ok, session} = Loopex.create_session(fixture.runtime, %{}, command_id: "create")
+    input = pipe_input("one\n")
+    output = observing_output()
+    {host, driver} = start_host(fixture.runtime, session, input, output)
+    assert_receive {:holding, model}, 5_000
+    assert_receive {:blocked_input, ^input, input_worker}, 5_000
+    {:ok, status} = Loopex.session_status(fixture.runtime, session)
+    assert is_binary(status.active_run_id)
+    assert status.open_interaction == nil
+    state = :sys.get_state(driver)
+    assert state.input_worker == input_worker
+    workers = monitor_processes([model | Map.keys(state.workers)])
+    send(input, :eof)
+
+    assert_receive {:provisional, ^host,
+                    %{
+                      exit_code: 1,
+                      cleanup: :confirmed,
+                      transport: nil,
+                      last_outcome: %{outcome: :cancelled}
+                    }},
+                   5_000
+
+    assert_processes_joined(workers)
+    barrier = await_record(&(&1["event"] == "wait"))
+    assert barrier["state"] == "settled"
+    assert barrier["run_id"] == LoopexProtocol.Wire.encode_identity(status.active_run_id)
+    assert barrier["outcome"]["outcome"] == "cancelled"
+    events = Fixture.events(fixture, session)
+    assert Enum.find(events, &(&1.kind == "run.finished"))["outcome"] == "cancelled"
+    refute Enum.any?(events, &(&1.kind == "assistant.message_appended"))
+    assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == 1
+    assert Loopex.AgentLoopTestExecutor.jobs(fixture.executor) == []
+    close_host_and_fixture(fixture, host, driver, 1)
+    closing = await_record(&(&1["event"] == "closing"))
+    assert closing["cleanup"] == "confirmed"
+    assert closing["exit_code"] == 1
+    assert closing["last_outcome"] == barrier["outcome"]
+    stop_devices([input, output])
+  end
+
+  test "EOF at an actual question cancels its exact interaction without another model turn" do
+    definition = LoopexProtocol.ToolDefinition.question_definition()
+
+    fixture =
+      start_fixture(
+        [
+          %{
+            text: "Which?",
+            calls: [%{id: "ask-eof", name: "ask", arguments: %{"question" => "Explain"}}]
+          },
+          %{text: "must not dispatch", calls: []}
+        ],
+        tools: [definition]
+      )
+
+    {:ok, session} = Loopex.create_session(fixture.runtime, %{}, command_id: "create")
+    input = pipe_input("one\n/wait\n")
+    output = observing_output()
+    {host, driver} = start_host(fixture.runtime, session, input, output)
+    question = await_record(&(&1["event"] == "question"))
+    barrier = await_record(&(&1["event"] == "wait"))
+    assert barrier["state"] == "question"
+    assert barrier["interaction_id"] == question["interaction_id"]
+    {:ok, status} = Loopex.session_status(fixture.runtime, session)
+
+    assert LoopexProtocol.Wire.encode_identity(status.open_interaction["interaction_id"]) ==
+             question["interaction_id"]
+
+    assert_receive {:blocked_input, ^input, input_worker}, 5_000
+    state = :sys.get_state(driver)
+    assert state.input_worker == input_worker
+    workers = monitor_processes(Map.keys(state.workers))
+    send(input, :eof)
+
+    assert_receive {:provisional, ^host,
+                    %{
+                      exit_code: 1,
+                      cleanup: :confirmed,
+                      transport: nil,
+                      last_outcome: %{outcome: :cancelled}
+                    }},
+                   5_000
+
+    assert_processes_joined(workers)
+    settled = await_record(&(&1["event"] == "wait" and &1["state"] == "settled"))
+    assert settled["run_id"] == barrier["run_id"]
+    assert settled["outcome"]["outcome"] == "cancelled"
+    events = Fixture.events(fixture, session)
+    cancelled = Enum.find(events, &(&1.kind == "interaction.cancelled"))
+
+    assert LoopexProtocol.Wire.encode_identity(cancelled["interaction_id"]) ==
+             question["interaction_id"]
+
+    assert Enum.find(events, &(&1.kind == "run.finished"))["outcome"] == "cancelled"
+
+    assert {:ok, %{active_run_id: nil, open_interaction: nil}} =
+             Loopex.session_status(fixture.runtime, session)
+
+    assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == 1
+    assert Loopex.AgentLoopTestExecutor.jobs(fixture.executor) == []
+    close_host_and_fixture(fixture, host, driver, 1)
+    closing = await_record(&(&1["event"] == "closing"))
+    assert closing["cleanup"] == "confirmed"
+    assert closing["exit_code"] == 1
+    assert closing["last_outcome"] == settled["outcome"]
+    stop_devices([input, output])
+  end
+
+  test "a successful later run retains an earlier failure in the closing exit code" do
+    fixture =
+      start_fixture([
+        %{error: :provider_unavailable, deltas: ["uncommitted failure text"]},
+        %{text: "recovered", calls: []}
+      ])
+
+    {:ok, session} = Loopex.create_session(fixture.runtime, %{}, command_id: "create")
+    {:ok, input} = StringIO.open("one\n/wait\ntwo\n/wait\n/quit\n", encoding: :latin1)
+    {:ok, output} = StringIO.open("", encoding: :latin1)
+    {host, driver} = start_host(fixture.runtime, session, input, output)
+
+    assert_receive {:provisional, ^host,
+                    %{
+                      exit_code: 1,
+                      cleanup: :confirmed,
+                      transport: nil,
+                      last_outcome: %{outcome: :completed}
+                    }},
+                   5_000
+
+    events = Fixture.events(fixture, session)
+    terminals = Enum.filter(events, &(&1.kind == "run.finished"))
+    assert Enum.map(terminals, & &1["outcome"]) == ["failed", "completed"]
+    assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == 2
+    assert Loopex.AgentLoopTestExecutor.jobs(fixture.executor) == []
+    close_host_and_fixture(fixture, host, driver, 1)
+    {"", transcript} = StringIO.contents(output)
+    controls = records(transcript)
+    [failed, successful, closing_wait] = Enum.filter(controls, &(&1["event"] == "wait"))
+    assert failed["outcome"]["outcome"] == "failed"
+    assert successful["outcome"]["outcome"] == "completed"
+    assert failed["run_id"] != successful["run_id"]
+    assert closing_wait["run_id"] == successful["run_id"]
+    assert closing_wait["outcome"] == successful["outcome"]
+    closing = List.last(controls)
+    assert closing["event"] == "closing"
+    assert closing["exit_code"] == 1
+    assert closing["cleanup"] == "confirmed"
+    assert closing["last_outcome"] == successful["outcome"]
+    assert transcript =~ "> recovered\n"
+    refute transcript =~ "> uncommitted failure text\n"
+    stop_devices([input, output], :gen_server)
+  end
+
   test "outer cleanup uncertainty prevents a successful closing record" do
     fixture = start_fixture([])
     {:ok, session} = Loopex.create_session(fixture.runtime, %{}, command_id: "create")
@@ -967,21 +1123,73 @@ defmodule LoopexCli.ChatDriverTest do
   end
 
   defp pipe_input(bytes) do
-    device = spawn(fn -> input_loop(bytes, nil) end)
+    test = self()
+    device = spawn(fn -> input_loop(bytes, nil, test) end)
     on_exit(fn -> Process.exit(device, :kill) end)
     device
   end
 
-  defp input_loop(<<byte, rest::binary>>, {worker, reply}) do
+  defp input_loop(<<byte, rest::binary>>, {worker, reply}, test) do
     send(worker, {:io_reply, reply, <<byte>>})
-    input_loop(rest, nil)
+    input_loop(rest, nil, test)
   end
 
-  defp input_loop(bytes, pending) do
+  defp input_loop(:eof, {worker, reply}, test) do
+    send(worker, {:io_reply, reply, :eof})
+    input_loop(:eof, nil, test)
+  end
+
+  defp input_loop("", {worker, _} = pending, test) do
+    send(test, {:blocked_input, self(), worker})
+    await_input("", pending, test)
+  end
+
+  defp input_loop(bytes, pending, test), do: await_input(bytes, pending, test)
+
+  defp await_input(bytes, pending, test) do
     receive do
-      {:io_request, worker, reply, {:get_chars, _, _, 1}} -> input_loop(bytes, {worker, reply})
-      {:bytes, next} -> input_loop(bytes <> next, pending)
+      {:io_request, worker, reply, {:get_chars, _, _, 1}} ->
+        input_loop(bytes, {worker, reply}, test)
+
+      {:bytes, next} ->
+        input_loop(bytes <> next, pending, test)
+
+      :eof ->
+        input_loop(:eof, pending, test)
     end
+  end
+
+  defp monitor_processes(pids), do: Enum.map(pids, &{&1, Process.monitor(&1)})
+
+  defp assert_processes_joined(monitors) do
+    for {pid, monitor} <- monitors do
+      assert_receive {:DOWN, ^monitor, :process, ^pid, _}, 5_000
+      refute Process.alive?(pid)
+    end
+  end
+
+  defp close_host_and_fixture(fixture, host, driver, exit_code) do
+    writer = :sys.get_state(driver).writer
+    closing = monitor_processes([host, driver, writer, fixture.runtime.supervisor])
+    assert Loopex.stop(fixture.runtime) == :ok
+    send(host, {:close, :confirmed})
+    assert_receive {:closed, ^host, ^exit_code}, 5_000
+    assert_processes_joined(closing)
+    actors = [fixture.model, fixture.executor, fixture.store]
+    monitors = monitor_processes(actors)
+    Enum.each(actors, &GenServer.stop(&1, :normal))
+    assert_processes_joined(monitors)
+  end
+
+  defp stop_devices(devices, kind \\ :process) do
+    monitors = monitor_processes(devices)
+
+    case kind do
+      :process -> Enum.each(devices, &Process.exit(&1, :kill))
+      :gen_server -> Enum.each(devices, &GenServer.stop(&1, :normal))
+    end
+
+    assert_processes_joined(monitors)
   end
 
   defp start_host(runtime, session, input, output, options \\ []) do
