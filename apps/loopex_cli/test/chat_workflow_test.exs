@@ -67,6 +67,18 @@ defmodule LoopexCli.ChatWorkflowTest do
     refute report =~ "provider_mapping"
   end
 
+  test "file-enabled trace reaches diagnostics and joins before successful closing", f do
+    assert_trace_workflow(f, true, [], true, "file#/trace/enabled")
+  end
+
+  test "no-trace overrides an enabled file through actual chat startup", f do
+    assert_trace_workflow(f, true, ["--no-trace"], false, "flag")
+  end
+
+  test "trace overrides a disabled file through actual chat startup", f do
+    assert_trace_workflow(f, false, ["--trace"], true, "flag")
+  end
+
   test "resume uses the real prepared signal holder and retained conversation", f do
     isolated_signal_manager()
     original = fixture(f, [%{text: "first", calls: []}])
@@ -205,6 +217,223 @@ defmodule LoopexCli.ChatWorkflowTest do
 
     assert Chat.run(["chat", "--config", f.path], opts) == 1
     assert List.last(controls(f.output))["cleanup"] == "confirmed"
+  end
+
+  defp assert_trace_workflow(f, file_enabled, flags, enabled, origin) do
+    trace = %{
+      "enabled" => file_enabled,
+      "level" => "returns",
+      "modules" => ["Loopex.Runtime.SessionCoordinator"],
+      "max_entry_bytes" => 1024,
+      "max_entries_per_second" => 1000,
+      "max_queue_entries" => 256
+    }
+
+    File.write!(f.path, :json.encode(Map.put(f.profile, "trace", trace)))
+    test = self()
+    tag = make_ref()
+    device = spawn(fn -> trace_device(f.diagnostic, test) end)
+    on_exit(fn -> Process.exit(device, :kill) end)
+
+    {host, host_monitor} =
+      spawn_monitor(fn ->
+        opts =
+          basic(f) ++
+            [
+              diagnostic_device: device,
+              acquire_placement: fn _, _ -> {:ok, "trace-placement"} end,
+              release_placement: fn "trace-placement", _ ->
+                refute Enum.any?(controls(f.output), &(&1["event"] == "closing"))
+                :ok
+              end,
+              placement_id: fn _ -> {:ok, "chat-workflow-runtime"} end,
+              with_runtime: fn options, callback ->
+                consumer = options[:diagnostics_to]
+                assert is_pid(consumer)
+
+                fixture =
+                  Fixture.start(
+                    script: [
+                      %{text: "first", calls: [], hold: test},
+                      %{text: "second", calls: [], require_previous_worker_down: true}
+                    ],
+                    tools: [],
+                    model: f.prepared.selection.configuration["model"],
+                    runtime_id: "chat-workflow-runtime",
+                    cleanup_grace_ms: options[:cleanup_grace_ms],
+                    diagnostics_to: consumer
+                  )
+
+                send(test, {tag, :fixture, fixture})
+
+                {:ok, %{tracer: tracer}} =
+                  Loopex.Runtime.Supervisor.children(fixture.runtime.supervisor)
+
+                runtime_monitors =
+                  monitor_actors([tracer, fixture.runtime.supervisor])
+
+                send(self(), {tag, :runtime, fixture, consumer})
+                result = callback.(fixture.runtime)
+                assert %{exit_code: 0, cleanup: :confirmed} = result
+                assert_receive {^tag, :diagnostic_monitors, diagnostic_monitors}, 0
+                join_actors(diagnostic_monitors)
+                refute Enum.any?(controls(f.output), &(&1["event"] == "closing"))
+                assert :ok = Loopex.stop(fixture.runtime)
+                join_actors(runtime_monitors)
+                actors = [fixture.model, fixture.executor, fixture.store]
+                actor_monitors = monitor_actors(actors)
+                Enum.each(actors, &GenServer.stop(&1, :normal))
+                join_actors(actor_monitors)
+                send(test, {tag, :joined})
+                result
+              end,
+              install_signal: fn driver, _, _, nil ->
+                assert_receive {^tag, :runtime, fixture, consumer}, 0
+                runtime = fixture.runtime
+                assert Loopex.AgentLoopTestModel.dispatched(fixture.model) == []
+                state = :sys.get_state(driver)
+                assert state.startup == :ready
+                assert MapSet.size(state.ready) == 2
+                assert state.input_worker == nil and state.reader_busy == false
+                assert state.cursor == 0 and state.sequence == 0
+                assert StringIO.contents(f.input) == {"one\n/wait\ntwo\n/wait\n/quit\n", ""}
+
+                assert state.configuration.selection.profile["trace"] ==
+                         Map.put(trace, "enabled", enabled)
+
+                assert state.configuration.selection.origins["/trace/enabled"] == origin
+
+                if enabled do
+                  assert {:ok,
+                          %{
+                            modules: [Loopex.Runtime.SessionCoordinator],
+                            level: :returns,
+                            sink: :diagnostics,
+                            limits: %{
+                              entry_bytes: 1024,
+                              entries_per_second: 1000,
+                              queued: 256
+                            }
+                          }} = Loopex.trace_status(runtime)
+                else
+                  assert {:error, :no_trace_session} = Loopex.trace_status(runtime)
+                end
+
+                assert_receive {:first_diagnostic_writer, ^device, writer}, 5_000
+
+                {:ok, diagnostic_actors} =
+                  LoopexComposition.DiagnosticConsumer.owned_processes(consumer)
+
+                assert writer in diagnostic_actors
+                send(self(), {tag, :diagnostic_monitors, monitor_actors(diagnostic_actors)})
+                send(test, {tag, :ready, driver, state.writer, diagnostic_actors})
+                send(device, :release)
+                {:ok, self()}
+              end,
+              finish_signal: fn _, _ -> {:ok, :ordinary} end
+            ]
+
+        send(test, {tag, :result, Chat.run(["chat", "--config", f.path] ++ flags, opts)})
+      end)
+
+    on_exit(fn -> if Process.alive?(host), do: Process.exit(host, :kill) end)
+    send(device, {:owner, host})
+    assert_receive {^tag, :fixture, fixture}, 5_000
+
+    on_exit(fn ->
+      Fixture.stop(fixture)
+
+      Enum.each([fixture.model, fixture.executor], fn actor ->
+        if Process.alive?(actor), do: GenServer.stop(actor, :normal)
+      end)
+    end)
+
+    assert_receive {^tag, :ready, driver, output_writer, diagnostic_actors}, 5_000
+    output_monitors = monitor_actors([driver, output_writer])
+    assert_receive {:holding, model}, 5_000
+    model_monitor = Process.monitor(model)
+    if enabled, do: await_trace_delivery(device, System.monotonic_time(:millisecond) + 5000)
+    send(model, :release)
+    assert_receive {:DOWN, ^model_monitor, :process, ^model, _}, 5_000
+    assert_receive {^tag, :joined}, 5_000
+    assert_receive {^tag, :result, 0}, 5_000
+    assert_receive {:DOWN, ^host_monitor, :process, ^host, :normal}, 5_000
+    join_actors(output_monitors)
+    Enum.each(diagnostic_actors, &refute(Process.alive?(&1)))
+    controls = controls(f.output)
+    assert List.last(controls)["cleanup"] == "confirmed"
+    assert List.last(controls)["exit_code"] == 0
+    assert List.last(controls)["last_outcome"]["outcome"] == "completed"
+    {"", report} = StringIO.contents(f.diagnostic)
+
+    if enabled do
+      assert report =~ "trace_call"
+      assert report =~ "Loopex.Runtime.SessionCoordinator"
+    else
+      refute report =~ "trace_call"
+      refute report =~ "trace_dropped"
+    end
+
+    refute report =~ "M7_WORKFLOW_SLOT"
+    {_, transcript} = StringIO.contents(f.output)
+    refute transcript =~ "trace_call"
+    device_monitor = Process.monitor(device)
+    Process.exit(device, :kill)
+    assert_receive {:DOWN, ^device_monitor, :process, ^device, :killed}, 5_000
+    io_monitors = monitor_actors([f.input, f.output, f.diagnostic])
+    Enum.each([f.input, f.output, f.diagnostic], &GenServer.stop(&1, :normal))
+    join_actors(io_monitors)
+  end
+
+  defp trace_device(output, test) do
+    receive do
+      {:owner, owner} ->
+        receive do
+          {:io_request, writer, reply, request} ->
+            send(owner, {:first_diagnostic_writer, self(), writer})
+            receive do: (:release -> :ok)
+            deliver_trace_bytes(output, test, writer, reply, request)
+            forward_trace_bytes(output, test)
+        end
+    end
+  end
+
+  defp forward_trace_bytes(output, test) do
+    receive do
+      {:io_request, writer, reply, request} ->
+        deliver_trace_bytes(output, test, writer, reply, request)
+        forward_trace_bytes(output, test)
+    end
+  end
+
+  defp deliver_trace_bytes(output, test, writer, reply, {:put_chars, _, bytes} = request) do
+    ref = make_ref()
+    send(output, {:io_request, self(), ref, request})
+
+    receive do
+      {:io_reply, ^ref, result} ->
+        send(writer, {:io_reply, reply, result})
+        send(test, {:diagnostic_delivered, self(), IO.iodata_to_binary(bytes)})
+    end
+  end
+
+  defp await_trace_delivery(device, deadline) do
+    receive do
+      {:diagnostic_delivered, ^device, bytes} ->
+        unless bytes =~ "trace_call", do: await_trace_delivery(device, deadline)
+    after
+      max(deadline - System.monotonic_time(:millisecond), 0) ->
+        flunk("actual trace bytes were not delivered")
+    end
+  end
+
+  defp monitor_actors(pids), do: Enum.map(pids, &{&1, Process.monitor(&1)})
+
+  defp join_actors(monitors) do
+    for {pid, reference} <- monitors do
+      assert_receive {:DOWN, ^reference, :process, ^pid, _}, 5_000
+      refute Process.alive?(pid)
+    end
   end
 
   defp fixture(f, script) do
