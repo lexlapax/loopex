@@ -325,6 +325,16 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Pending decision: [ADR 0050](../adr/0050-host-configuration-preparation.md#concept)
+  proposes the separate optional host configuration-preparation port for live
+  foreground/daemon configure. The existing prepared facade works for CLI but
+  transports have no host resolver or full live capture read. The alternative
+  extends Model with preparation and couples it to the model adapter. The pair
+  pins owned asynchronous work, a proposed 60,000-ms cutoff, retained cleanup,
+  authority/duplicate ordering and stale-result refusal. Dependent port/serving
+  work pauses for the maintainer; snapshot, independent digest and attempts
+  proposal work continue in separate worktrees. No acceptance is recorded.
+
 - Done: integrate the current-only EffectIntents reader at `a36d1f20` from
   worker `e619f8ce9e57e73ca850ce7865e3666f6aa2c1b1`, and CLI captured fixtures
   at `6e75c72a` from worker `a773ac4c0a912e1860a16833f7ecd0e9d54c8c10`.
@@ -10109,6 +10119,8 @@ or check was relaxed.
 - [x] Admit the approved centralized captured current-v3 creation defaults at Core startup, validate closed plain settings and exact model/tool bindings before children start, retain the template across Control restart and exclude it from informational configuration. Prove runtime isolation, malformed/credential-field refusal, exact oversized genesis and existing runtime/genesis cases on both supported toolchains. Implicit creation, v2 retirement and both transport hosts remain open.
 
 - [x] Consume captured defaults in implicit create/lookup, refuse unconfigured and superseded creation before Store mutation, remove the Core v2 writer, capture and forward the template through all three reference constructors and actual daemon startup, and prove physical Store reopen/resume and exact no-activation replay on both toolchains. Migrate shared loop and creation/lifecycle fixtures to current captures while preserving request-byte, command-binding, retry, ownership and cleanup proofs. Remaining callers/readers and coordinated wire generations stay open.
+
+- [ ] Decide and implement the optional live host configuration-preparation boundary, retaining authority, duplicate disposition, bounded owned work, stale-result refusal and exact current replay; join both runtime-only transport hosts without exposing host routes or metadata. ADR 0050 is Proposed; no dependent implementation is authorized yet.
 
 ## T05 — Update records, protocols and independent clients
 
