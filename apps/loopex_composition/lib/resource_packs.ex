@@ -692,7 +692,8 @@ defmodule LoopexComposition.ResourcePacks do
          true <- :erlang.term_to_binary(manifest, [:deterministic]) == bytes do
       {:ok, manifest}
     else
-      _invalid -> error(:retained_manifest_invalid, "retained manifest bytes or identity are invalid")
+      _invalid ->
+        error(:retained_manifest_invalid, "retained manifest bytes or identity are invalid")
     end
   end
 

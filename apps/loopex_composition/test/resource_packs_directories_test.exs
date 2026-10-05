@@ -514,6 +514,7 @@ defmodule LoopexComposition.ResourcePacksDirectoriesTest do
   } do
     directory = skill(Path.join(root, "retained-local"), "review", "body")
     File.write!(Path.join(directory, "opaque.bin"), <<0, 255, 128>>)
+
     assert {:ok, %{manifest: manifest}} =
              ResourcePacks.read_directories([directory], workspace: workspace)
 
@@ -527,8 +528,12 @@ defmodule LoopexComposition.ResourcePacksDirectoriesTest do
     assert pack["origin"] == nil
     assert pack["commit"] == nil
     assert pack["tree_digest"] == nil
+
     assert {:error, {:retained_provenance_invalid, _}} =
-             ResourcePacks.decode_retained_provenance(retained_bytes(pack), content_identity(pack))
+             ResourcePacks.decode_retained_provenance(
+               retained_bytes(pack),
+               content_identity(pack)
+             )
 
     assert File.read!(path) == bytes
     assert File.stat!(path).mode == mode
@@ -552,7 +557,10 @@ defmodule LoopexComposition.ResourcePacksDirectoriesTest do
       assert {:ok, ^pack} = ResourcePacks.decode_retained_provenance(pack_bytes, identity)
       assert byte_size(pack["commit"]) == width
       assert byte_size(pack["tree_digest"]) == width
-      assert Enum.find(pack["files"], &(&1["label"] == "opaque.bin"))["content"] == <<0, 255, 128>>
+
+      assert Enum.find(pack["files"], &(&1["label"] == "opaque.bin"))["content"] ==
+               <<0, 255, 128>>
+
       assert Enum.map([catalog_path, pack_path], &File.stat!(&1).mode) == modes
       assert File.read!(catalog_path) == catalog_bytes
       assert File.read!(pack_path) == pack_bytes
@@ -568,7 +576,18 @@ defmodule LoopexComposition.ResourcePacksDirectoriesTest do
     File.write!(Path.join(directory, "opaque.bin"), <<0, 255, 128>>)
     git!(source, ["init", "--quiet", "--object-format=sha1"])
     git!(source, ["add", "."])
-    git!(source, ["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "--quiet", "-m", "Retained pack"])
+
+    git!(source, [
+      "-c",
+      "user.name=Test",
+      "-c",
+      "user.email=test@example.invalid",
+      "commit",
+      "--quiet",
+      "-m",
+      "Retained pack"
+    ])
+
     commit = git!(source, ["rev-parse", "HEAD"])
     state_root = Path.join(root, "retained-import-state")
 
@@ -640,6 +659,7 @@ defmodule LoopexComposition.ResourcePacksDirectoriesTest do
     pack = hd(normalized["packs"])
     pack_bytes = retained_bytes(pack)
     assert byte_size(pack_bytes) <= 1_126_241
+
     assert {:ok, ^pack} =
              ResourcePacks.decode_retained_provenance(pack_bytes, content_identity(pack))
   end
@@ -710,6 +730,7 @@ defmodule LoopexComposition.ResourcePacksDirectoriesTest do
     pack_bytes = retained_bytes(pack)
     size_key = <<109, 0, 0, 0, 4, "size">>
     noncanonical = :binary.replace(bytes, size_key <> <<97, 3>>, size_key <> <<98, 3::32>>)
+
     noncanonical_pack =
       :binary.replace(pack_bytes, size_key <> <<97, 3>>, size_key <> <<98, 3::32>>)
 
@@ -733,7 +754,10 @@ defmodule LoopexComposition.ResourcePacksDirectoriesTest do
           retained_bytes(Map.put(manifest, "extra", self())),
           retained_bytes(Map.put(manifest, "extra", fn -> :unsafe end)),
           retained_bytes(Map.delete(manifest, "revision")),
-          retained_bytes(%{manifest | "packs" => [%{pack | "files" => Enum.reverse(pack["files"])}]})
+          retained_bytes(%{
+            manifest
+            | "packs" => [%{pack | "files" => Enum.reverse(pack["files"])}]
+          })
         ] do
       assert {:error, {:retained_manifest_invalid, _}} =
                ResourcePacks.decode_retained_manifest(candidate, digest)
@@ -751,25 +775,35 @@ defmodule LoopexComposition.ResourcePacksDirectoriesTest do
     end
 
     second_pack = %{pack | "name" => "second"}
+
     assert {:ok, two_digest, two_manifest} =
              Loopex.ResourcePack.digest(%{manifest | "packs" => [pack, second_pack]})
+
     unordered = %{two_manifest | "packs" => Enum.reverse(two_manifest["packs"])}
+
     assert {:error, {:retained_manifest_invalid, _}} =
              ResourcePacks.decode_retained_manifest(retained_bytes(unordered), two_digest)
 
     atom_name = "loopex_retained_pack_unknown_#{System.unique_integer([:positive])}"
     assert_raise ArgumentError, fn -> String.to_existing_atom(atom_name) end
-    unknown_atom = <<131, 116, 0, 0, 0, 1, 109, 0, 0, 0, 5, "extra", 118, byte_size(atom_name)::16, atom_name::binary>>
+
+    unknown_atom =
+      <<131, 116, 0, 0, 0, 1, 109, 0, 0, 0, 5, "extra", 118, byte_size(atom_name)::16,
+        atom_name::binary>>
+
     assert {:error, {:retained_manifest_invalid, _}} =
              ResourcePacks.decode_retained_manifest(unknown_atom, digest)
+
     assert {:error, {:retained_provenance_invalid, _}} =
              ResourcePacks.decode_retained_provenance(unknown_atom, identity)
+
     assert_raise ArgumentError, fn -> String.to_existing_atom(atom_name) end
   end
 
   test "retained identity size digest instruction and Git semantics cannot be forged" do
     {manifest, digest, pack, identity} = retained_fixture(64)
     [instruction, opaque] = pack["files"]
+
     altered_packs = [
       %{pack | "files" => [%{instruction | "size" => instruction["size"] + 1}, opaque]},
       %{pack | "files" => [%{instruction | "digest" => String.duplicate("0", 64)}, opaque]},
@@ -794,9 +828,16 @@ defmodule LoopexComposition.ResourcePacksDirectoriesTest do
     end
 
     assert {:error, {:retained_manifest_invalid, _}} =
-             ResourcePacks.decode_retained_manifest(retained_bytes(manifest), String.duplicate("0", 64))
+             ResourcePacks.decode_retained_manifest(
+               retained_bytes(manifest),
+               String.duplicate("0", 64)
+             )
+
     assert {:error, {:retained_provenance_invalid, _}} =
-             ResourcePacks.decode_retained_provenance(retained_bytes(pack), String.duplicate("0", 64))
+             ResourcePacks.decode_retained_provenance(
+               retained_bytes(pack),
+               String.duplicate("0", 64)
+             )
   end
 
   defp retained_fixture(width) do
@@ -865,6 +906,7 @@ defmodule LoopexComposition.ResourcePacksDirectoriesTest do
         receive do
           {:run, ^reference} ->
             send(parent, {reference, function.()})
+
             receive do
               {:stop, ^reference} -> :ok
             end
@@ -884,6 +926,7 @@ defmodule LoopexComposition.ResourcePacksDirectoriesTest do
       {result, calls}
     after
       :erlang.trace_pattern(boundary, false, [:local])
+
       if Process.alive?(worker) do
         Process.exit(worker, :kill)
         assert_receive {:DOWN, ^monitor, :process, ^worker, _reason}, 2_000
@@ -902,7 +945,8 @@ defmodule LoopexComposition.ResourcePacksDirectoriesTest do
     end
   end
 
-  defp collect_decoder_calls(_worker, _count), do: flunk("retained decoder trace exceeded its cap")
+  defp collect_decoder_calls(_worker, _count),
+    do: flunk("retained decoder trace exceeded its cap")
 
   defp skill(path, name, body) do
     File.mkdir_p!(path)
