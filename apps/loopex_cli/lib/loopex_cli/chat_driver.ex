@@ -535,7 +535,8 @@ defmodule LoopexCli.ChatDriver do
   # mapping cache must name the public configuration version before it can supply
   # a continuation warning; an external configure cannot silently reuse it.
   defp inspect_status(state) do
-    with {:ok, status} <- state.facade.(Loopex, :session_status, [state.runtime, state.session]),
+    with {:ok, %{compact_pending: busy} = status} when is_boolean(busy) <-
+           state.facade.(Loopex, :session_status, [state.runtime, state.session]),
          {:ok, trace} <- inspected_trace(state),
          {:ok, maintenance} <- inspected_maintenance(state.configuration, status.configuration),
          policy when is_map(policy) <- inspected_policy(state) do
@@ -801,7 +802,11 @@ defmodule LoopexCli.ChatDriver do
 
   defp command_reply(%{reaping: true} = state, _), do: state
 
-  defp command_reply(%{pending: :startup_status} = state, {:ok, status}) do
+  defp command_reply(
+         %{pending: :startup_status} = state,
+         {:ok, %{compact_pending: busy} = status}
+       )
+       when is_boolean(busy) do
     if state.cleanup_grace_ms != nil and state.cleanup_grace_ms != status.cleanup_grace_ms do
       state
       |> Map.put(:pending, nil)
@@ -878,7 +883,8 @@ defmodule LoopexCli.ChatDriver do
     state |> consume_event() |> local_refusal()
   end
 
-  defp command_reply(%{pending: :status} = state, {:ok, status}) do
+  defp command_reply(%{pending: :status} = state, {:ok, %{compact_pending: busy} = status})
+       when is_boolean(busy) do
     state = %{state | pending: nil, status: status}
     state = consume_event(state)
     check_barrier(state)
@@ -1037,13 +1043,30 @@ defmodule LoopexCli.ChatDriver do
     do: grant_event(state)
 
   defp check_barrier(
-         %{last_outcome: %{outcome: :outcome_unknown}, status: %{active_run_id: nil}} = state
+         %{
+           last_outcome: %{outcome: :outcome_unknown},
+           status: %{active_run_id: nil, compact_pending: false}
+         } = state
        ) do
     state = barrier_record(state, :uncertain, nil, state.last_run, state.last_outcome)
     state |> Map.put(:exit_code, max(state.exit_code, 1)) |> reap() |> maybe_finished()
   end
 
-  defp check_barrier(%{status: %{active_run_id: nil}, barrier: barrier} = state)
+  # Concept: standalone compact work owns the session before an episode exists.
+  # Technical depth: only definitive same-owner status can prove its slot clear;
+  # the public tail alone cannot reveal pre-episode admission. Drain that tail
+  # before checking the committed compact, run, follow-up and interaction facts.
+  defp check_barrier(
+         %{
+           status: %{
+             active_run_id: nil,
+             compact_pending: false,
+             pending_work_ids: [],
+             open_interaction: nil
+           },
+           barrier: barrier
+         } = state
+       )
        when barrier != nil do
     state = barrier_record(state, :settled, nil, state.last_run, state.last_outcome)
 

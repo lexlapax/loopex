@@ -1,11 +1,138 @@
 Code.require_file("../../loopex/test/support/m1_runtime_helper.exs", __DIR__)
 Code.require_file("../../loopex/test/support/agent_loop_helper.exs", __DIR__)
+Code.require_file("../../loopex/test/support/configured_genesis_helper.exs", __DIR__)
 
 defmodule LoopexCli.ChatDriverTest do
   use ExUnit.Case, async: false
   @moduletag capture_log: true
   alias LoopexCli.ChatDriver
   alias Loopex.AgentLoopFixture, as: Fixture
+
+  for ending <- [:unchanged, :interrupt] do
+    @compact_ending ending
+    test "a resumed external pre-episode compact holds wait until #{@compact_ending} completion" do
+      fixture = start_fixture([])
+
+      {:ok, session} =
+        Loopex.create_session(fixture.runtime, %{},
+          command_id: "create",
+          genesis: Loopex.ConfiguredGenesisFixture.genesis([])
+        )
+
+      owner = compact_owner(fixture, session)
+      hold_compact_advance(owner)
+      {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
+
+      assert {:accepted, "external-compact"} =
+               Loopex.command(attachment, %{
+                 type: :compact,
+                 command_id: "external-compact",
+                 bounds: %{"max_attempts" => 4, "deadline_ms" => 60_000, "token_budget" => 32_768}
+               })
+
+      assert_receive {:compact_advance_held, ^owner}, 5_000
+      monitor = Process.monitor(owner)
+      Process.exit(owner, :kill)
+      assert_receive {:DOWN, ^monitor, :process, ^owner, :killed}, 5_000
+
+      assert {:ok, {:prepared, activation}} =
+               Loopex.prepare_resume_session(fixture.runtime, session, "observe-external-compact")
+
+      assert {:ok, %{active_run_id: nil, compact_pending: true, active_maintenance: nil}} =
+               Loopex.session_status(fixture.runtime, session)
+
+      assert Fixture.events(fixture, session) == []
+      {:ok, input} = StringIO.open("/wait\n/quit\n", encoding: :latin1)
+      output = observing_output()
+      test = self()
+
+      facade = fn module, function, arguments ->
+        result = apply(module, function, arguments)
+        if function == :session_status, do: send(test, {:compact_status_read, result})
+        result
+      end
+
+      {host, driver} = start_host(fixture.runtime, session, input, output, facade: facade)
+      assert_receive {:compact_status_read, {:ok, %{compact_pending: true}}}, 5_000
+      assert_receive {:compact_status_read, {:ok, %{compact_pending: true}}}, 5_000
+      state = :sys.get_state(driver)
+      assert state.barrier == 1
+      assert state.input_worker == nil
+      assert state.cursor == 0
+      assert {"/quit\n", ""} = StringIO.contents(input)
+      refute_receive {:written, _}, 20
+
+      exit_code =
+        case @compact_ending do
+          :unchanged ->
+            assert :ok = Loopex.activate_resume(activation)
+            0
+
+          :interrupt ->
+            ChatDriver.interrupt(driver)
+            1
+        end
+
+      assert_receive {:provisional, ^host,
+                      %{exit_code: ^exit_code, cleanup: :confirmed, last_outcome: nil}},
+                     5_000
+
+      assert {:ok, %{compact_pending: false, active_run_id: nil}} =
+               Loopex.session_status(fixture.runtime, session)
+
+      completion =
+        Enum.find(Fixture.events(fixture, session), &(&1.kind == "context.compaction_finished"))
+
+      assert completion["command_id"] == "external-compact"
+      assert completion["result"]["cleanup"] == "confirmed"
+
+      case @compact_ending do
+        :unchanged -> assert completion["result"]["disposition"] == "unchanged"
+        :interrupt -> assert completion["result"]["failure"]["category"] == "cancelled"
+      end
+
+      barrier = await_record(&(&1["event"] == "wait"))
+      assert barrier["state"] == "settled"
+      assert barrier["run_id"] == nil and barrier["outcome"] == nil
+      assert :sys.get_state(driver).cursor >= completion.event_sequence
+      assert Loopex.AgentLoopTestModel.dispatched(fixture.model) == []
+      close_host_and_fixture(fixture, host, driver, exit_code)
+      stop_devices([input], :gen_server)
+      stop_devices([output])
+    end
+  end
+
+  for invalid <- [:missing, nil, "false", 0] do
+    @invalid_compact_pending invalid
+    test "startup refuses native compact busy value #{inspect(invalid)}" do
+      fixture = start_fixture([])
+      {:ok, session} = Loopex.create_session(fixture.runtime, %{}, command_id: "create")
+      {:ok, input} = StringIO.open("never read\n", encoding: :latin1)
+      {:ok, output} = StringIO.open("", encoding: :latin1)
+
+      facade = fn
+        Loopex, :session_status, arguments ->
+          {:ok, status} = apply(Loopex, :session_status, arguments)
+
+          {:ok,
+           if(@invalid_compact_pending == :missing,
+             do: Map.delete(status, :compact_pending),
+             else: Map.put(status, :compact_pending, @invalid_compact_pending)
+           )}
+
+        module, function, arguments ->
+          apply(module, function, arguments)
+      end
+
+      {:ok, driver} =
+        ChatDriver.start_link(fixture.runtime, session, input, output, facade: facade)
+
+      assert %{exit_code: 1, transport: :session_unavailable} = ChatDriver.run(driver)
+      assert ChatDriver.close(driver, :confirmed) == 1
+      assert {"never read\n", ""} = StringIO.contents(input)
+      stop_devices([input, output], :gen_server)
+    end
+  end
 
   test "a configured byte refusal reaches wait and closing without a transport failure" do
     prepared = prepared_configuration()
@@ -1524,6 +1651,27 @@ defmodule LoopexCli.ChatDriverTest do
   end
 
   defp monitor_processes(pids), do: Enum.map(pids, &{&1, Process.monitor(&1)})
+
+  defp compact_owner(fixture, session) do
+    {:ok, children} = Loopex.Runtime.children(fixture.runtime)
+    :sys.get_state(children.control).sessions[session].coordinator
+  end
+
+  defp hold_compact_advance(owner) do
+    observer = self()
+
+    hook = fn
+      :armed, {:in, :advance_work}, _ ->
+        send(observer, {:compact_advance_held, self()})
+        receive do: (:release_compact_advance -> :spent)
+
+      current, _, _ ->
+        current
+    end
+
+    assert :ok = :sys.install(owner, {hook, :armed})
+    on_exit(fn -> if Process.alive?(owner), do: Process.exit(owner, :kill) end)
+  end
 
   defp assert_processes_joined(monitors) do
     for {pid, monitor} <- monitors do
