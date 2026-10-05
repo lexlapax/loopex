@@ -291,7 +291,9 @@ defmodule Loopex.PrivateTaskShutdownTest do
       child_pids = runs |> Enum.flat_map(&Map.keys(&1.roles)) |> Enum.uniq()
 
       receive_patterns =
-        for pid <- child_pids, reason <- @safe_reasons, shape <- [:exit, :down] do
+        for pid <- child_pids,
+            reason <- @safe_reasons ++ [{:shutdown, :noproc}],
+            shape <- [:exit, :down] do
           message =
             case shape do
               :exit -> {:EXIT, pid, reason}
@@ -666,6 +668,39 @@ defmodule Loopex.PrivateTaskShutdownTest do
 
         collect(observer, [record | records], count + 1, fence, targets, actors, resources)
 
+      # Concept: process lifecycle metadata cannot discard the shutdown evidence.
+      # Technical depth: OTP spawn traces include an entry-point tuple; discard
+      # it and names immediately. Retain only pre-captured identities, never
+      # extend the actor set, and count every accepted shape toward the same cap.
+      {:trace_ts, pid, event, other, {_, _, _}, at}
+      when is_map_key(actors, pid) and is_pid(other) and event in [:spawn, :spawned] ->
+        records =
+          if is_map_key(actors, other) do
+            [
+              %{
+                "event" => "process_" <> Atom.to_string(event),
+                "pid" => identity(pid),
+                "other" => identity(other),
+                "at_ns" => trace_time(at)
+              }
+              | records
+            ]
+          else
+            records
+          end
+
+        collect(observer, records, count + 1, fence, targets, actors, resources)
+
+      {:trace_ts, pid, event, name, at}
+      when is_map_key(actors, pid) and is_atom(name) and event in [:register, :unregister] ->
+        record = %{
+          "event" => "process_" <> Atom.to_string(event),
+          "pid" => identity(pid),
+          "at_ns" => trace_time(at)
+        }
+
+        collect(observer, [record | records], count + 1, fence, targets, actors, resources)
+
       # Concept: process tracing can announce a link without retaining any payload.
       # Technical depth: count these fixed metadata shapes toward the same cap;
       # they do not prove delivery of a later EXIT and are not persisted.
@@ -850,6 +885,7 @@ defmodule Loopex.PrivateTaskShutdownTest do
     end
   end
 
+  defp safe_reason({:shutdown, :noproc}), do: "shutdown:noproc"
   defp safe_reason({:owner_workers_stopped, :killed}), do: "owner_workers_stopped:killed"
   defp safe_reason(reason) when reason in @safe_reasons, do: Atom.to_string(reason)
   defp safe_reason(_), do: "other"
