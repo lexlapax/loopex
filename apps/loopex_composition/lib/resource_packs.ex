@@ -28,6 +28,15 @@ defmodule LoopexComposition.ResourcePacks do
   @max_detail_bytes 1_024
   @max_deadline_ms 30_000
 
+  # Concept: offline audit admits every current retained writer without expanding input.
+  # Technical depth: raw ETF includes fixed keys, map/list/binary headers, size integers
+  # and booleans. A file is <=152+label+content bytes; each 64-file pack includes
+  # the required eight-byte SKILL.md label, giving <=77_664+content bytes per pack.
+  # A manifest is <=2_150+64*77_664+64*1_048_576; provenance is one complete pack.
+  # These are representation ceilings, distinct from core's content/metadata limits.
+  @max_retained_manifest_bytes 72_081_510
+  @max_retained_provenance_bytes 1_126_241
+
   # Concept: every import job commits one cleanup period, and the import
   # executor names its own root-claim wait, so a cancellation knows how long a
   # settling worker may still need.
@@ -669,6 +678,65 @@ defmodule LoopexComposition.ResourcePacks do
 
   def retain(_manifest, _state_root),
     do: error(:invalid_options, "manifest and state root are required")
+
+  @doc false
+  # Concept: validates one retained manifest's bytes without opening or repairing state.
+  # Technical depth: the current writer's normalized shape, order, digest and complete
+  # deterministic uncompressed ETF must agree. This audits neither the enclosing
+  # catalog inventory nor any other backup file, provenance record or live workspace.
+  @spec decode_retained_manifest(term(), term()) :: {:ok, map()} | refusal()
+  def decode_retained_manifest(bytes, expected_manifest_digest) do
+    with true <- retained_identity?(expected_manifest_digest),
+         {:ok, manifest} <- decode_retained_term(bytes, @max_retained_manifest_bytes),
+         {:ok, ^expected_manifest_digest, ^manifest} <- core_digest(manifest),
+         true <- :erlang.term_to_binary(manifest, [:deterministic]) == bytes do
+      {:ok, manifest}
+    else
+      _invalid ->
+        error(:retained_manifest_invalid, "retained manifest bytes or identity are invalid")
+    end
+  end
+
+  @doc false
+  # Concept: validates one imported pack's retained provenance without rediscovery.
+  # Technical depth: the record is the whole normalized pack, including bodies. Core
+  # checks matching native Git ID widths; the content identity binds sorted labels
+  # and digests. Local nil provenance, changed ordering and alternate ETF refuse.
+  @spec decode_retained_provenance(term(), term()) :: {:ok, map()} | refusal()
+  def decode_retained_provenance(bytes, expected_content_identity) do
+    with true <- retained_identity?(expected_content_identity),
+         {:ok, pack} <- decode_retained_term(bytes, @max_retained_provenance_bytes),
+         {:ok, ^pack} <- normalize_pack(pack),
+         true <- is_binary(pack["commit"]),
+         true <- content_identity(pack) == expected_content_identity,
+         true <- :erlang.term_to_binary(pack, [:deterministic]) == bytes do
+      {:ok, pack}
+    else
+      _invalid ->
+        error(:retained_provenance_invalid, "retained provenance bytes or identity are invalid")
+    end
+  end
+
+  # Concept: raw retained input cannot expand through compression or create atoms.
+  # Technical depth: the size guard and exact map tag run before binary_to_term.
+  # :used requires full consumption; the caller then validates and re-encodes the
+  # normalized current writer shape, rather than admitting safe arbitrary terms.
+  defp decode_retained_term(<<131, 116, _rest::binary>> = bytes, ceiling)
+       when byte_size(bytes) <= ceiling do
+    case :erlang.binary_to_term(bytes, [:safe, :used]) do
+      {term, used} when used == byte_size(bytes) -> {:ok, term}
+      _trailing -> :error
+    end
+  rescue
+    ArgumentError -> :error
+  end
+
+  defp decode_retained_term(_bytes, _ceiling), do: :error
+
+  defp retained_identity?(identity) when is_binary(identity) and byte_size(identity) == 64,
+    do: Regex.match?(~r/\A[0-9a-f]{64}\z/, identity)
+
+  defp retained_identity?(_identity), do: false
 
   @doc """
   ## Concept
