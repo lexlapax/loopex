@@ -325,24 +325,29 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
-- Live verification handoff: root owns the exclusive check slot. Full current
-  fast check runs once on exact clean candidate
-  `6290ac472cb18ecb78bb3cb75d1abc952458d55a` in the attached
-  `/Users/spuri/.codex/worktrees/m7-trace-check/loopex`. Retained runner
-  `/private/tmp/loopex-m7-6290ac47-fast-check.py`; streaming output
-  `/private/tmp/loopex-m7-6290ac47-fast-check.log`; terminal metadata will be
-  `loopex-m7-6290ac47-fast-check.json` in that directory. Execution handle
-  `26926` is live, not collected: resume/poll it, never launch a second check
-  for this candidate. Compilation/format/structure/docs/dependency/runner
-  fixtures passed; application suites are running. No complete PASS or output
-  digest exists yet. All workers remain VM-free; restore revision is read-only.
+- Terminal integration verification: the full current fast check ran once on
+  exact clean candidate `6290ac472cb18ecb78bb3cb75d1abc952458d55a` and FAILED
+  after 1,639.348 seconds, exit 1. Complete output
+  `/private/tmp/loopex-m7-6290ac47-fast-check.log`, SHA-256
+  `786d8bd5f90107113962c0696eaef4b3d2857ca2c2864e2d97744d0c0ded80c8`;
+  terminal metadata `/private/tmp/loopex-m7-6290ac47-fast-check.json`, SHA-256
+  `1e4116087ed048874aace7a3fff8bd3b91230ec46ed50f052128004afdc94d0d`.
+  Handle `26926` is terminal and collected. No repeat on unchanged bytes.
+  Compilation/format/structure/docs/dependency/runner gates passed. Seven tests
+  failed: Composition diagnostic writer dispatch, credential-plane wrapper
+  observation and ephemeral cleanup trace; foreground host exclusions; daemon
+  provider-binding observation; CLI offline exclusions and the real stalled-pipe
+  actor join. Full output remains evidence, not a pass. The T16 integration row
+  stays open. Source-only diagnosis proceeds; root owns the released VM slot.
 
   Both integrated writer worktrees, chat-pipe-proof and model-alias-preparation,
   are archived with recoverable Git snapshots; full external evidence remains.
-  Inspection shape is the one presented pending question. Restore option B
+  Expanded inspection shape is approved by the
+  [maintainer disposition](../developer/agent-context-map.md#disposition-m7-expanded-inspection-view-2026-10-05). Restore option B
   selects direction only; its exact amendment is still under proposal/review.
-  T01–T19 original counts 78 done / 95 todo / 6 retired; added 275 / 17 / 0.
-  Including T00: originals 78 / 101 / 7, added 279 / 18 / 0.
+  T01–T19 original counts 78 done / 95 todo / 6 retired; added 275 / 20 / 0.
+  Including T00: originals 78 / 101 / 7, added 279 / 21 / 0.
+  Three failure-repair subtasks were added under T16; no completion row closes.
 
   T16 read-only private-task shutdown investigation retained at
   `/private/tmp/loopex-m7-t16-private-task-shutdown-investigation-20261005-v2.md`,
@@ -384,11 +389,11 @@ did not resolve them. No paid provider calls were made during this check.
   remains open. The wrapper preserves current Edges route eligibility:
   ephemeral startup with Ollama proves capture, not unprepared configure for
   that route. No all-route, full-integration, paid, attended or closure claim.
-  Root owns the released VM slot and prepares one full current-pair check of
-  the clean combined chat/codec/preparation integration candidate.
+  The full integration check below supersedes the earlier focused-only
+  integration status; its failures remain unresolved.
 
-  The presented inspection-shape question is pending, independently of the
-  accepted restore direction. Exact restore proposal retained at
+  Expanded inspection is approved independently of the unanswered policy
+  union/event and accepted restore direction. Earlier restore proposal retained at
   `/private/tmp/loopex-m7-current-restore-exact-amendment-research-20261004-v2.md`,
   SHA-256 `0b833d12d8f4a0a7560ad660d0b0f6fa11a1db50358230c3f23b01e40c8b24f1`.
   Integrator review `loopex-m7-current-restore-integrator-review-20261005-v1.md`
@@ -399,6 +404,17 @@ did not resolve them. No paid provider calls were made during this check.
   independent audit was unavailable because its role required enforced
   read-only permissions but its effective profile allowed repository writes;
   it inspected no source. Integrator review is not independent closure review.
+
+  Revised restore proposal, not accepted:
+  `/private/tmp/loopex-m7-current-restore-exact-amendment-research-20261005-v3-final.md`,
+  SHA-256 `4f9f07b54d69ed68426b487fa3e5ce9d1b189994228a3ff8d01f440e9ada6df2`;
+  source inventory `loopex-m7-current-restore-exact-amendment-research-20261005-v3-final-sources.json`
+  in `/private/tmp`, SHA-256
+  `a3d9d80ec9e9f9efc0d478fef06c5ea46fa8aa6c191fc7b81a515fd4893519a4`.
+  Root rehashed all 32 inspected source files without mismatch. It proposes
+  append-only provenance, explicit raw-IO/resource joins and exact administrative
+  grammars; the new 64-transition cap, host attestations and signatures remain
+  decisions. No governed pair acceptance, execution proof or implementation.
 
   T11 exact accounting proposal
   `/private/tmp/loopex-m7-retained-run-accounting-proposal-20261005-v1/proposal.md`,
@@ -11834,6 +11850,11 @@ open.
 - [ ] Independently review integration changes and fix confirmed defects without weakening checks.
 
 ### Added implementation subtasks
+
+- [ ] Repair the 6290ac47 wrapper-related integration failures in credential-plane, ephemeral trace, foreground, daemon and offline CLI witnesses; distinguish stale internal observations from actual option/dispatch regressions, preserve exact original adapter options, host-option allowlist, exclusion and credential/lifetime proofs, and verify both pairs with failed outputs retained.
+- [ ] Establish the cause and repair the 6290ac47 diagnostic broken-IO/writer-death test's missing dispatch within its original 100-ms receive allowance; preserve real blocked IO, exact counts, writer death and cleanup proofs without retries or implicit timeout changes.
+- [ ] Establish the cause and repair the 6290ac47 real stalled-stdout pipe worker nonjoin; retain live/waiting worker evidence, capture exact worker/writer/deadline/kill/DOWN ordering and verify real actor/OS closure without relaxing production or fixture deadlines.
+
 
 - [x] Synchronize the expired-before-cancel fixture's exact worker DOWN before forwarding cancellation within the existing captured reap cutoff; preserve the suspended live-worker branch, Store truth, cleanup acknowledgements and all deadlines, then verify the complete quiesce file on both pairs. Retain the exact full-check failure.
 

@@ -6727,3 +6727,27 @@ explicit host preconditions. This direction does not accept a new
 administrative API, persistent record grammar, arbitrary snapshot rewind,
 lost-workspace recovery or another-host recovery. No ADR acceptance, data
 rewrite, milestone closure or publication follows from it.
+
+
+<a id="disposition-m7-expanded-inspection-view-2026-10-05"></a>
+### M7 expanded current inspection view approved, 2026-10-05
+
+The maintainer replied "Approved 1" to the expanded session inspection
+question. Approve the inspection inventory and active-bounds conversion in
+`/private/tmp/loopex-m7-inspection-policy-view-decision-20261004-8e6dc5c5-v1.md`,
+SHA-256 `399edfadaa7f7c8322554e0f94555fd421d34809fd90022a83295277332ac474`.
+The closed successful result has eleven required keys: status, event_sequence,
+active_run_id, cleanup_grace_ms, active_context_token_budget, pending_work_ids,
+open_interaction, configuration, active_bounds, checkpoint and active_maintenance.
+Configuration, checkpoint and maintenance reuse the existing bounded public
+projections. Active bounds retain exactly max_turns, token_budget, deadline_ms
+and deadline; arbitrary positive counters remain decimal strings, duration is
+positive uint64 and the retained absolute cutoff is null or nonnegative uint64.
+Read these committed facts together through the serial owner; the public event
+sequence identifies the outbox tail, not a version of every private fact.
+
+Approval authorizes coordinated implementation and vectors in the runtime,
+foreground /3, daemon /4 and clients. It does not approve the packet's answered
+policy union, new answer event or private answer transaction, compact_pending,
+restore API/schema, generation activation or milestone closure. The policy
+cursor repair remains a separate decision before the complete generations join.
