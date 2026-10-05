@@ -16,8 +16,8 @@ defmodule LoopexComposition.Restore.IO do
   kill, missing acknowledgement or guardian loss remains unconfirmed even if
   BEAM termination is observed. No shared file-server convenience IO is used.
 
-  This private prerequisite exposes bounded reads and durable record publication
-  to composition only. It does not acquire claims, audit history or activate a
+  This private prerequisite exposes bounded reads, complete physical manifests
+  and durable record publication to composition only. It does not acquire claims, audit history or activate a
   restored root. Host exclusion and validated paths are the caller's obligation.
   """
 
@@ -29,6 +29,10 @@ defmodule LoopexComposition.Restore.IO do
   @max_receive_timeout 4_294_967_295
   @chunk 65_536
   @max_read 268_435_456
+  @max_entries 65_536
+  @max_manifest 4_194_304
+  @max_uint64 18_446_744_073_709_551_615
+  @manifest_domain "loopex:current-state-manifest:v1"
 
   @doc false
   def run(operation, limits, options \\ []) do
@@ -368,6 +372,28 @@ defmodule LoopexComposition.Restore.IO do
 
   defp execute({:read, path, cap}), do: {:ok, read(path, cap)}
 
+  defp execute({:manifest, root, max_total}) do
+    ancestors = manifest_ancestors(root)
+    # Concept: listing does not give permission to retain an unbounded frontier.
+    # Technical depth: native listing materializes names, but every candidate is
+    # charged before traversal. Directory form is the smallest possible entry;
+    # observed mode and regular-file fields charge the remaining exact ETF cost.
+    empty_bytes = :erlang.external_size([@manifest_domain, []], [:deterministic]) + 5
+    state = %{entries: [], count: 0, encoded: empty_bytes, total: 0, cap: max_total}
+    state = reserve_manifest_entry(".", state)
+    state = manifest_entry(root, ".", state)
+    Enum.each(ancestors, fn {path, identity} ->
+      info = manifest_stat(path)
+      if directory_identity(info) != identity, do: throw({:io_error, :source_changed})
+    end)
+    entries = Enum.sort_by(state.entries, & &1["path"])
+    {:ok, bytes} = RestoreCodec.encode(:manifest, [@manifest_domain, entries])
+    if byte_size(bytes) != state.encoded, do: throw({:io_error, :manifest_measurement})
+    {:ok, observed} = RestoreCodec.manifest(bytes, max_total)
+    if Enum.reduce(observed, 0, &(&1["size"] + &2)) != state.total, do: throw({:io_error, :manifest_measurement})
+    {:ok, bytes}
+  end
+
   defp execute({:publish, path, temp, bytes, mode, expected}) do
     current =
       case primitive(:stat, fn -> :prim_file.read_link_info(path) end) do
@@ -403,6 +429,133 @@ defmodule LoopexComposition.Restore.IO do
     directory_sync(Path.dirname(path))
     if read(path, byte_size(bytes)) != bytes, do: throw({:io_error, :readback_mismatch})
     {:ok, RestoreCodec.digest_bytes(bytes)}
+  end
+
+  defp manifest_ancestors(path) do
+    info = manifest_stat(path)
+    if file_info(info, :type) != :directory, do: throw({:io_error, :not_directory})
+    parent = Path.dirname(path)
+    own = {path, directory_identity(info)}
+    if parent == path, do: [own], else: [own | manifest_ancestors(parent)]
+  end
+
+  defp manifest_stat(path),
+    do: require_value(primitive(:manifest_stat, fn -> :prim_file.read_link_info(path) end))
+
+  defp directory_identity(info),
+    do: {file_info(info, :type), file_info(info, :major_device), file_info(info, :inode)}
+
+  defp manifest_identity(info),
+    do: {directory_identity(info), file_info(info, :mode), file_info(info, :size),
+         file_info(info, :links), file_info(info, :mtime), file_info(info, :ctime)}
+
+  defp manifest_entry(root, relative, state) do
+    path = if relative == ".", do: root, else: Path.join(root, relative)
+    info = manifest_stat(path)
+    type = file_info(info, :type)
+    mode = Bitwise.band(file_info(info, :mode), 0o7777)
+
+    case type do
+      :directory ->
+        entry = manifest_directory(relative, mode)
+        state = retain_manifest_entry(entry, state)
+        {names, state} = manifest_candidates(path, relative, state)
+        state = Enum.reduce(names, state, fn name, current ->
+          manifest_entry(root, manifest_child(relative, name), current)
+        end)
+        comparison = %{state | entries: [], count: 0, encoded: 0}
+        {after_names, _} = manifest_candidates(path, relative, comparison)
+        if Enum.sort(names) != Enum.sort(after_names) or
+             manifest_identity(info) != manifest_identity(manifest_stat(path)),
+          do: throw({:io_error, :source_changed})
+        state
+
+      :regular ->
+        size = file_info(info, :size)
+        if file_info(info, :links) != 1 or not is_integer(size) or size < 0 or
+             size > @max_uint64 - state.total or size > state.cap - state.total,
+          do: throw({:io_error, :inventory_limit})
+        entry = %{"path" => relative, "kind" => "regular", "mode" => mode,
+                  "size" => size, "sha256" => String.duplicate("0", 64)}
+        state = retain_manifest_entry(entry, %{state | total: state.total + size})
+        descriptor = open(path, [:raw, :binary, :read])
+        opened = require_value(primitive(:descriptor_stat, fn -> :prim_file.read_handle_info(descriptor) end))
+        if manifest_identity(info) != manifest_identity(opened),
+          do: throw({:io_error, :source_changed})
+        digest = manifest_hash(descriptor, size, :crypto.hash_init(:sha256))
+        after_read = require_value(primitive(:descriptor_stat, fn -> :prim_file.read_handle_info(descriptor) end))
+        if manifest_identity(info) != manifest_identity(after_read) or
+             manifest_identity(info) != manifest_identity(manifest_stat(path)),
+          do: throw({:io_error, :source_changed})
+        close(descriptor)
+        [head | tail] = state.entries
+        %{state | entries: [Map.put(head, "sha256", digest) | tail]}
+
+      _ ->
+        throw({:io_error, :unsupported_entry})
+    end
+  end
+
+  defp manifest_candidates(path, relative, state) do
+    raw_names = require_value(primitive(:list, fn -> :prim_file.list_dir_all(path) end))
+    {names, state} = Enum.reduce(raw_names, {[], state}, fn raw, {names, current} ->
+      name = manifest_name(raw)
+      current = reserve_manifest_entry(manifest_child(relative, name), current)
+      {[name | names], current}
+    end)
+    {Enum.reverse(names), state}
+  end
+
+  # Concept: names retain the OS spelling; invalid UTF-8 is refused.
+  # Technical depth: list_dir_all returns decoded character lists or raw binary
+  # names when translation fails. Reversing the pinned native encoding preserves
+  # valid names' original bytes; it never repairs a raw invalid name.
+  defp manifest_name(raw) do
+    name = cond do
+      is_binary(raw) -> raw
+      is_list(raw) and :file.native_name_encoding() == :latin1 -> :erlang.list_to_binary(raw)
+      is_list(raw) -> :unicode.characters_to_binary(raw)
+      true -> :invalid
+    end
+    if not is_binary(name) or byte_size(name) == 0 or not String.valid?(name) or
+         String.contains?(name, [<<0>>, "/"]) or name in [".", ".."],
+      do: throw({:io_error, :unsupported_path})
+    name
+  end
+
+  defp manifest_child(".", name), do: name
+  defp manifest_child(parent, name), do: parent <> "/" <> name
+
+  defp manifest_directory(path, mode),
+    do: %{"path" => path, "kind" => "directory", "mode" => mode, "size" => 0, "sha256" => nil}
+
+  defp entry_bytes(entry), do: :erlang.external_size(entry, [:deterministic]) - 1
+
+  defp reserve_manifest_entry(path, state) do
+    if byte_size(path) > 8_192 or state.count == @max_entries,
+      do: throw({:io_error, :inventory_limit})
+    encoded = state.encoded + entry_bytes(manifest_directory(path, 0))
+    if encoded > @max_manifest, do: throw({:io_error, :inventory_limit})
+    %{state | count: state.count + 1, encoded: encoded}
+  end
+
+  defp retain_manifest_entry(entry, state) do
+    delta = entry_bytes(entry) - entry_bytes(manifest_directory(entry["path"], 0))
+    encoded = state.encoded + delta
+    if encoded > @max_manifest, do: throw({:io_error, :inventory_limit})
+    %{state | encoded: encoded, entries: [entry | state.entries]}
+  end
+
+  defp manifest_hash(descriptor, remaining, context) do
+    length = min(@chunk, remaining + 1)
+    case primitive(:hash_read, fn -> :prim_file.read(descriptor, length) end) do
+      :eof when remaining == 0 ->
+        :crypto.hash_final(context) |> Base.encode16(case: :lower)
+      {:ok, bytes} when byte_size(bytes) > 0 and byte_size(bytes) <= remaining ->
+        manifest_hash(descriptor, remaining - byte_size(bytes), :crypto.hash_update(context, bytes))
+      _ ->
+        throw({:io_error, :source_changed})
+    end
   end
 
   defp read(path, cap) do
@@ -554,6 +707,9 @@ defmodule LoopexComposition.Restore.IO do
   defp require_value(_result), do: throw({:io_error, :operation_failed})
   defp byte_size_or_zero(:absent), do: 0
   defp byte_size_or_zero(bytes), do: byte_size(bytes)
+
+  defp valid_operation?({:manifest, root, max_total}),
+    do: valid_path?(root) and is_integer(max_total) and max_total in 0..@max_uint64
 
   defp valid_operation?({:read, path, cap}),
     do: valid_path?(path) and is_integer(cap) and cap >= 0 and cap <= @max_read
