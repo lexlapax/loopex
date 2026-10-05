@@ -720,7 +720,7 @@ defmodule LoopexCli.LiveDaemonTest do
           "id" => response_id,
           "type" => "message",
           "role" => "assistant",
-          "model" => "claude-haiku-4-5",
+          "model" => "claude-haiku-4-5-20251001",
           "content" => [],
           "stop_reason" => nil,
           "stop_sequence" => nil,
