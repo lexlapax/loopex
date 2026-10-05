@@ -325,6 +325,22 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Running once: full current-pair fast check of exact clean new candidate
+  `698595b47f2d2523db552114f3e2fe37b8d60693` in the reused attached
+  `m7-trace-check` verification checkout. All artifact, chat and quiesce source
+  repairs above are committed in this candidate; the isolated T15 FAIL draft is
+  excluded. CI had no run for this exact SHA when inspected. Handle `13537`
+  is active; complete output streams to
+  `/private/tmp/loopex-m7-698595b4-fast-check.log` through retained runner
+  `/private/tmp/loopex-m7-698595b4-fast-check.py`, again using provider-only
+  serialization and ordinary per-app isolation. Collect its terminal result
+  before freezing or hashing the final output. Never launch it again for these
+  bytes; historical b6369cd6 FAIL remains immutable. While this full run lives,
+  keep independent suite and compile VMs stopped. Current task totals are
+  T01–T19 originals 76 / 97 / 6, added 266 / 16; no row closes from a running
+  full check. Model-port option B's exact revised ADR 0050 acceptance remains
+  pending; dependent callback/lifecycle/wrapper work has not started.
+
 - Final focused integration gates pass on both supported pairs: changed-file
   formatting, warning-free compilation, documentation ordering, current status,
   dependency budget, whitespace and the checklist reporter. Handle `56002` is
