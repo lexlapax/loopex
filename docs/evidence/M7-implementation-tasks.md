@@ -325,6 +325,83 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Integrated, proof running: daemon CLI worker `99fc81d28ab95c2e20761beb2450d12d48f72068`
+  is joined as `59449777`; exactly four response-model literals change to the
+  dated captured model. Complete four-file worker selections include Node
+  22.14.0 and pass 31 cases on each pair in 483.7/485.3 seconds. Both formatters,
+  warning-free compilation and whitespace pass in 7.4 seconds. Fifteen retained
+  entries were rehashed: `/private/tmp/loopex-m7-cli-daemon-fixture-proof-inventory.tsv`,
+  SHA-256 `66083bf3fc8840468bd4ae6ff371ceebc855f00ad5499bc9910f763d803e4b2c`.
+  Baseline FAIL remains retained. Root's complete current-pair post-rejoin
+  selection is running under handle `68458`, with pinned Node and every original
+  recovery/shutdown bound, in `/private/tmp/loopex-m7-cli-daemon-postjoin-cli-current-v1.log`.
+  No checklist completion is claimed before collecting this result.
+
+- Running diagnostic-only T16 work: an isolated writer owns only
+  `runtime_quiesce_test.exs`, adding bounded whitelisted observations of existing
+  root/relay transitions and exact early Task completion. All captured clocks,
+  numeric limits, actor concurrency, Store assertions and process joins remain.
+  The read-only phase review found several transitions collapse into
+  `runtime_unavailable`; missing startup notice alone does not identify the cause.
+  Runtime tracing covers Control/coordinators, not the external fixture actors
+  or Quiesce task subtree. No production deadline or proof obligation changes.
+
+- Done: integrate four independently owned current fixture repairs on `m7`:
+  composition `cad2c7f1` from `5aefdb8c63ce2d7f95e185ba74fcdfc919177bcd`,
+  StoreLocal `12aafd36` from `a0f4ae847799f73e328f510519fa1ecd2ad103de`,
+  daemon `c642b1d4` from `ad6f5a3f1c006ae867c3ec035787c3603153e0b3`,
+  and CLI provider `76a52c6e` from `a7cc81fe7ed5f9fe3c272d4cb6e1331cfb254f7c`.
+  Composition preserves the known-model context capture and current creation
+  refusal; immutable historical reads still avoid owner activation. Artifact
+  transfer retains captured current startup without changing transfer limits.
+  Provider captures use their actual capabilities and renderer mapping; SSE
+  fixtures use the exact dated captured model. Physical chat reopen, real HTTP
+  accounting, two-runtime diagnostic isolation, actual socket/Node takeover,
+  progress ordering, all numeric bounds and existing assertions remain proved.
+
+  Worker immutable inventories, rehashed by the integrator:
+  `/private/tmp/loopex-m7-composition-fixture-proof-inventory.tsv`, SHA-256
+  `7cfcc4ccb46e0292bc37281553ee561d6b9cc2cee8e24baf7861f7cf288947bd`;
+  `/private/tmp/loopex-m7-transfer-fixture-proof-inventory.tsv`, SHA-256
+  `f6b6af162323fba4e1605c21133ce20e521e6409b5668c1315e92cafaa02f568`;
+  `/private/tmp/loopex-m7-daemon-external-fixture-sha256-inventory.tsv`, SHA-256
+  `cd4f6c86dea2dcfc2525b64d1125acd953fd9df24a9bef61a73bbb325e9a169f`;
+  `/private/tmp/loopex-m7-cli-provider-fixture-proof-inventory.tsv`, SHA-256
+  `fb6ce8c5711d8602ee49570d0d8eab87d3c3fc3be3d44629aec571e1b6ac10dc`.
+  Earlier failed outputs remain FAIL, including the unrepaired full check.
+
+  Post-rejoin whole-file checks pass 3 composition, 29 StoreLocal, 2 daemon
+  and 18 CLI provider cases on each supported pair. Current/floor measured
+  seconds are 3.2/2.7, 2.2/2.1, 38.8/40.6 and 20.4/23.0 respectively.
+  Daemon checks explicitly include the independent Node client at 22.14.0.
+  Handles `10514`, `10360`, `56605` and `85758` are terminal and collected.
+  Complete outputs are retained in
+  `/private/tmp/loopex-m7-three-fixture-postjoin-inventory.tsv`, SHA-256
+  `8438c34bd24c22c429cf393a6513a4380c593c9e8ac028e344fdc1e68c70d370`,
+  and `/private/tmp/loopex-m7-cli-provider-postjoin-inventory.tsv`, SHA-256
+  `f9c701e66a8cc93369a3e132bd0c4a35edb5684e17488a76c08481e6d901c3f3`.
+  Integrated formatting, warning-free compilation, documentation/status,
+  dependency direction, whitespace and task reporting pass in 16.8 seconds.
+  Complete output: `/private/tmp/loopex-m7-four-fixture-integration-metadata-v1.log`,
+  SHA-256 `ad6363d8fb004d016971000771ceb3d52231d23070ce815291cb925043117b7d`; handle `37524` is terminal and collected.
+  Close four bounded added T05 rows; no original row closes. T01–T19 originals
+  remain 70 done / 103 todo / 6 retired; added work is 258 done / 13 todo.
+  Including T00, originals remain 70 / 109 / 7; added work is 262 / 14.
+  Full integration, remaining CLI daemon fixtures and quiesce diagnosis remain open.
+
+- Read-only T14 inventory: the accepted V1–V13 scenarios contain 74 numbered
+  steps and 258 distinct inventory rows, including 224 leaves. No complete
+  manifest-bound current case is claimed. Existing component tests are partial
+  evidence routes; 55 rows lack matching executables and eight are retired.
+  Required execution manifests, fixture/demo drivers, release selectors,
+  attempt admission and current-format backup/restore still need integration.
+  Exact retained inventory at `6e75c72a`:
+  `/private/tmp/loopex-m7-execution-manifest-inventory.tsv`, SHA-256
+  `e403e7cf6bf6f53aebd31f3093434aaa27d580122fceadb4c12102a9c8de5a06`;
+  gaps: `/private/tmp/loopex-m7-execution-manifest-gaps.md`, SHA-256
+  `ad1b5d99ebfb6a3b19219765d47b8410daf01f53f4d53e6061b7bb5c1c93b33f`.
+  This adds durable resume pointers, not scope, schema approval or task completion.
+
 - Done: integrate independent schema canonicalization proof at `5dc222e7`
   from `9c1869cd59e1f3292ed8485054830e9ea4d4673d`, then its reviewed accessor
   repair at `03dfb368` from `6227c3a3e1fb8424eab3bfdab9a91c692f31f755`.
@@ -380,16 +457,18 @@ did not resolve them. No paid provider calls were made during this check.
   Present this approval separately after the current ADR 0050 question is answered.
   The maintainer requests decisions one at a time. Other work continues.
 
-- Running integration check: clean committed candidate
-  `75b7207d9a3c0b1e42330f9e0c238cccc1ca53c5` is undergoing its single current-pair
-  full fast check in `m7-trace-check`; handle `43403`, complete streaming output
-  `/private/tmp/loopex-m7-75b7207d-fast-check.log`. Compilation and gates pass;
-  ReqLLM passes 385 with two excluded. Composition fails three stale fixtures:
-  a former 8,192-default assertion against captured known-model context, and two
-  hosts missing current creation captures. This run remains FAIL even if repairs
-  later pass; remaining application suites are still running. The composition
-  fixture worker owns only those two test files in its new separate worktree.
-  No same-byte full-check retry is authorized or planned.
+- Failed integration check: clean committed candidate
+  `75b7207d9a3c0b1e42330f9e0c238cccc1ca53c5` completed its single current-pair
+  full fast check in 1,599.2 measured seconds with 32 failures. Metadata and
+  compilation passed. Failures comprise three composition, eight StoreLocal,
+  one Core, one daemon and nineteen CLI cases. Complete immutable output:
+  `/private/tmp/loopex-m7-75b7207d-fast-check.log`, SHA-256
+  `5eb67af797dc3dd423e4c0b32b593a2c07d31f7e2576547e5c1ccab4e26522fb`.
+  Handle `43403` is terminal and collected. This exact run remains FAIL;
+  no same-byte full-check retry is authorized or planned. Fixture repairs are
+  integrated separately with both-pair focused proof. The recurring Core
+  pre-fence quiesce failure remains an open diagnosis; a passing focused retry
+  would not prove its combined-load cause fixed.
 
 - Pending decision: [ADR 0050](../adr/0050-host-configuration-preparation.md#concept)
   proposes the separate optional host configuration-preparation port for live
@@ -10233,6 +10312,10 @@ or check was relaxed.
 - [x] Remove superseded prompt/request/resource/refusal query shapes from EffectIntents, require current configuration-version domains, and prove positive current histories before exact retired-kind and invalid-version refusals on both toolchains and after integration. Superseded effect/job/receipt readers remain separate work.
 - [x] Migrate CLI captures and current journal assertions while preserving selected tools, retained resume budgets, exact model identity, structured excerpt/receipt/full-artifact retrieval and physical recovery proofs. Retain failed worker aggregates and corrected complete files; prove the complete focused selection on both toolchains after integration without widening bounds. Full integration remains separate work.
 - [x] Reproduce schema canonical preimages/digests independently in Node, bind all approved embedded payload schemas, reject non-plain/accessor data without executing getters, and prove exact literal/mutation/identity vectors on both supported pairs and after integration. Complete generation manifests, server negotiation and live clients remain separate joins.
+- [x] Migrate composition known-model context and immutable history fixtures to captured current creation; preserve actual initial refusal, exact context/reply origins, historical read cuts and physical reopening without owner activation. Prove complete affected files on both supported pairs after integration.
+- [x] Capture current startup settings in the ArtifactTransfer fixture host; preserve every transfer bound, actual ownership, cancellation, cleanup and read-window assertion, and prove all 29 affected cases on both pairs after integration.
+- [x] Match the external daemon SSE fixture to its exact captured dated model; retain progress-before-durable-answer ordering, positively assert completed outcome and prove actual socket/independent Node takeover on both supported pairs after integration.
+- [x] Capture actual provider capabilities and exact chat startup template in CLI fixtures; preserve explicit context/system/reply/cleanup budgets, physical reopen/resume, real HTTP accounting and two-runtime diagnostic isolation, and prove all 18 cases on both supported pairs after integration.
 - [ ] Implement and verify the approved prompt/follow-up/compact wire bound codecs and independent Node vectors; preserve exact decimal/safe-integer domains, partial overrides and omission without defaults. Automatic approval review rejected both direct writes; obtain explicit maintainer approval before resuming this bounded implementation.
 - [ ] Migrate remaining implicit Core/edge/transport test hosts to captured current creation, replace their superseded record assertions, remove old configuration-less readers/writers, and prove current replay, command identity, uncertainty, authority and cleanup without a Core fallback. Run the full check once on the resulting clean committed candidate. The headless/loop and context-admission fixture phases are complete; superseded request/admission decoders and edge/transport joins remain.
 
