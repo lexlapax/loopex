@@ -325,16 +325,68 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
-- Running T11 prerequisite: an isolated writer installs immutable retained
-  objects using ADR 0046's accepted physical durability rules and the existing
-  GenesisCodec as a concrete client. It owns only two new composition files;
-  no ledger mutation grammar, child manager, receipt or host/Core query is added.
-  Read-only inspection found the complete ledger mutation member inventories
-  and literal frame byte recipe still need pinning before their implementation.
-  Exact child terminal accounting has no current runtime read path, and
-  runtime-only clients require a universal host mutation guard before helper
-  exposure. Those material joins remain pending decisions, queued after the
-  current ADR 0050 choice rather than presented concurrently.
+- Done: formatter worker `9ce237f1747161914ea0c9d57b9f894cd03fa8b9`
+  is joined as `4ba44a3e`. Eleven syntax-only repairs have identical parsed AST
+  before/after on each supported toolchain, excluding only source locations;
+  both formatters produce the same idempotent bytes. Root reviewed the patch
+  and rehashed all 103 evidence entries:
+  `/private/tmp/loopex-m7-cross-format-proof-inventory.tsv`, SHA-256
+  `303c30c6bf6186b292c96ba7b45fc971270ece280fc92c7c2f1e3edda64794cd`.
+  Together with the eight SessionState repairs in `9fc4ee3a`, full-tree
+  formatting now passes on both pairs. Current metadata gates pass in 19.8
+  seconds before the retained-object join; full floor gates including that
+  join pass in 15.9 seconds. Complete immutable outputs:
+  `/private/tmp/loopex-m7-effect-format-postjoin-current-metadata-v1.log`, SHA-256
+  `12de41bd0cce2f10cfeb78dd4809a1db2935c11b38e82b7609b284ab52c50890`;
+  `/private/tmp/loopex-m7-effect-format-postjoin-floor-metadata-v1.log`, SHA-256
+  `3c3bd171adc4cfa0fcc2ddc113af46b8394d019f2b879269666d287cfc14fb14`.
+  The worker's earlier untouched-path floor FAIL remains retained. No assertion,
+  timeout, schema or formatter gate changes. Close one bounded added T16 row.
+  T01–T19 originals remain 70 done / 103 todo / 6 retired; added work is
+  262 done / 15 todo. Including T00: originals 70 / 109 / 7; added 266 / 16.
+  Full integration, quiesce cause and independent review remain open.
+  Final warning-free compilation, documentation/status gates, whitespace and
+  checkbox reporting pass in 9.5 seconds. Complete output:
+  `/private/tmp/loopex-m7-effect-retained-ledger-metadata-v1.log`, SHA-256
+  `028bc0b5c26ce9ab42ced61a4a879831a650e27eca16d95047cd1a0451b1eaa8`.
+
+- Done: retained-object worker `526c77715639747006db695dd757f7651986848d`
+  is joined as `dfc9b77e`. The two new composition files install and read
+  validated immutable bytes through actual temporary-file fsync, rename and
+  strict directory fsync under the host placement acquisition and existing
+  writer lock. Corruption, substitutions, ownership loss and post-rename
+  uncertainty refuse; normal caller loss joins the owner and releases exclusion.
+  An independent read-only review found no actionable defect within this unit.
+  All 30 worker evidence entries were rehashed: inventory
+  `/private/tmp/loopex-m7-retained-objects-proof-inventory.tsv`, SHA-256
+  `eba3faa74b23f175f2822cc2f6d70ea07e85de51155691e03a335110bbc03143`.
+  Root's complete retained-object/GenesisCodec selection passes all 27 cases on
+  current and floor in 2.8/3.7 measured seconds. Both handles are terminal and
+  collected. These physical/process proofs do not simulate power loss or prove
+  semantic object schemas, helper execution, ledger transactions or accounting.
+  Close only the existing bounded T11 physical-storage subtask. The complete
+  ledger grammar, exact child-accounting read and universal host mutation guard
+  remain pending joins before helper exposure.
+
+- Done: current-only effect-record worker
+  `dfd1e721908ab409f4f026810ac351383942c9b1` is joined as `9fc4ee3a`.
+  Remove the four superseded effect/receipt/result/unknown journal kinds,
+  private query/replay aliases and old tool-event identity recipe. Current v2
+  records remain unchanged; ordinary abort cannot settle a model-tool question.
+  Root reviewed all nine changed files and rehashed all 67 worker evidence
+  entries: `/private/tmp/loopex-m7-effect-retirement-proof-inventory.tsv`, SHA-256
+  `23b0acada41a12d0ce6dca4eb6fd07c329e3249935de1edea55ff971ca50545c`.
+  The complete nine-file post-rejoin selection passes 288 cases with three
+  existing exclusions on each supported pair in 43.1/41.2 measured seconds.
+  Both handles are terminal and collected; expected fault-injection diagnostics
+  do not close T16's separate cleanup investigation. Close one bounded added
+  T05 row. Configuration-less artifact-policy fallback and coordinated wire
+  generations remain separate work.
+
+- The four complete post-rejoin outputs above are immutable and independently
+  hashed in `/private/tmp/loopex-m7-effect-retained-postjoin-inventory.tsv`,
+  SHA-256 `84c88e09c13703da4617d96193fd3f07cff57e4767a19c6af386f0ff0ce0e285`.
+  No full fast check, release lane or milestone closure is claimed.
 
 - Done: daemon CLI worker `99fc81d28ab95c2e20761beb2450d12d48f72068`
   is joined as `59449777`; exactly four response-model literals change to the
@@ -10339,6 +10391,8 @@ or check was relaxed.
 
 ### Added implementation subtasks
 
+- [x] Remove superseded effect/receipt/result/unknown readers and the old tool-event identity recipe; preserve current v2 records, enforce model-question abort identity, prove positive current replay before exact retired-kind refusals, and verify the complete nine-file selection on both supported pairs after integration. Artifact-policy fallback and coordinated wire generations remain separate work.
+
 - [x] Pin the complete revision-3 snapshot and both producers' closed pending-question projection in shared Elixir and independent Node codecs with fully embedded nested schema definitions, literal identities, every-member/privacy refusals, exact quantities, full identity/text byte boundaries and cross-view owner/cursor/configuration relations. Prove the complete protocol suite including Node on both pairs. Current-only genesis, actual publication, both coordinated manifests/servers and live clients remain separate open joins.
 
 - [x] Reduce immutable genesis configuration, committed configuration changes and checkpoint provenance at the exact public cursor with bounded current/anchor state; validate closed projections, settled version advancement, actual maintenance capture, prior checkpoint and inherited omissions, and compare replay against private configuration/checkpoint identity. Preserve model-question producer/kind in pending and historical attachments through every existing choice/text/decline vector on both toolchains. Expanded public snapshot and coordinated wire/Node joins remain open.
@@ -10670,7 +10724,7 @@ the still-open real-provider, live protocol, persistent-fault or closure lanes.
 
 ### Added implementation subtasks
 
-- [ ] Install/read immutable validated retained-object bytes with actual content-addressed filesystem durability, exclusive host ownership, symlink/root guards and physical crash/fsync/uncertainty proof on both pairs; use the existing GenesisCodec as a concrete client without inventing ledger or catalog schemas.
+- [x] Install/read immutable validated retained-object bytes with actual content-addressed filesystem durability, exclusive host ownership, symlink/root guards and physical crash/fsync/uncertainty proof on both pairs; use the existing GenesisCodec as a concrete client without inventing ledger or catalog schemas.
 - [ ] Pin the complete private delegation ledger byte recipe and closed object/mutation field grammars under accepted ADR 0046 semantics before implementing append/recovery/transaction reduction; refuse incomplete or corrupt current frames without introducing a compatibility decoder.
 - [ ] Resolve exact retained child-accounting access and universal host mutation guards before exposing helpers through runtime-only clients; preserve host ownership, current serial session truth, retained maintenance charges and settled-child protection without copying private reducer accounting or adding an unapproved public read.
 
@@ -10817,6 +10871,8 @@ open.
 - [ ] Independently review integration changes and fix confirmed defects without weakening checks.
 
 ### Added implementation subtasks
+
+- [x] Align the nineteen existing syntax differences across both supported formatters without changing parsed behavior, compare all non-location AST metadata and exact idempotent bytes, and prove integrated whole-tree floor formatting plus warning-free compilation, documentation, status and dependency gates. Retain the earlier untouched-path floor failures; full integration and cleanup investigations remain separate obligations.
 
 - [x] Repair the c45af182 binding-read regressions by targeting the actual provider-attempt-open row rather than a shared one-record page size; prove exact session/position observation, elapsed-deadline refusal, timeout reader DOWN, Control-loss cleanup and unchanged positive/supersession/effect cases on both supported pairs without changing any production bound.
 - [x] Repair the c45af182 packaged-host failures with independent exact current host-instruction/environment and dated-alias response oracles; remove static undefined-host API calls from the separately compiled driver and prove every real escript/plain-OTP route, catalog control, application-startup and ambient dotenv negative on both pairs, retaining failed evidence and unchanged isolation/cleanup limits.
