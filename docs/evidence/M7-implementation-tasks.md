@@ -325,6 +325,41 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: remove the two superseded Core artifact-policy fallbacks. Current v3
+  genesis already requires the exact tool-selection capture; dispatch now reads
+  its artifact binding directly. Recovery requires projection context for every
+  current projection generation, including read 1.1.0. An added retain-only
+  substitution in the existing canonical replay-tamper case failed before the
+  fix: the intent was admitted and rejection occurred only at its receipt,
+  rather than the required invalid-effect-intent transition. The complete two
+  files pass all 30 cases after the fix on current/floor in 5.5/4.6 seconds;
+  the failing-before selection took 2.3 seconds. Every handle is terminal and
+  collected. Ordinary retain-only writes and positive captured reads remain;
+  no ExecutorLocal API, JobRequest schema or direct-read behavior changes.
+  Changed-file formatting, warning-free compilation, documentation/status,
+  dependency and whitespace gates pass on current/floor in 19.0/15.8 seconds.
+  Complete immutable outputs:
+  `/private/tmp/loopex-m7-core-projection-policy-current-metadata-v1.log`, SHA-256
+  `915036e628f3cd11945170cf1d2fe5e28b695cc37dd538c1d58f425ea0cc3df2`;
+  `/private/tmp/loopex-m7-core-projection-policy-floor-metadata-v1.log`, SHA-256
+  `8a59e14598ae7e34cd74032dd7782bde8f24686910b36585ca84ca57e9f5f932`.
+  Six immutable source/output records were hashed in
+  `/private/tmp/loopex-m7-core-projection-policy-proof-inventory.tsv`, SHA-256
+  `b7f8f300e29e1c311c06b3f7acbc1a44963033c8bf33c43de9a655f71510c587`.
+  Close one bounded added T05 row. T01–T19 originals remain 70 / 103 / 6;
+  added work becomes 263 done / 15 todo, including T05's 24 done / 3 todo.
+  Including T00: originals 70 / 109 / 7; added 267 / 16. The running full check
+  remains pinned to b6369cd6 and does not cover this later source change.
+
+- Read-only helper-accounting review confirms a material gap: current
+  SessionState.accounting/2 accumulates charged tokens but retains only the
+  latest charge source, not reported input/output and estimated totals or an
+  all-attempts certainty flag. Automatic run-owned maintenance uses that same
+  charge path. A runtime-owned retained read is the recommended proposal;
+  exact report, bounded passive replay and continuation ownership still require
+  maintainer acceptance. No host copy of private accounting, public API or
+  persistent record is implemented from this review.
+
 - Running: the full current-pair fast check from exact clean candidate
   `b6369cd626e71ef9f56c1d274bacd692b1e7ee01`, once, in the attached
   `/Users/spuri/.codex/worktrees/m7-trace-check/loopex` verification checkout.
@@ -10403,6 +10438,8 @@ or check was relaxed.
 - [ ] Run the required independent-client workflows.
 
 ### Added implementation subtasks
+
+- [x] Remove Core's missing-projection read replay exception and nil-tool-selection policy reconstruction under mandatory current v3 genesis; prove the canonical retain-only substitution fails at intent admission after failing before the fix, preserve ordinary writes/current captured reads and run complete artifact-admission/current-genesis files on both supported pairs. Keep the direct executor API unchanged.
 
 - [x] Remove superseded effect/receipt/result/unknown readers and the old tool-event identity recipe; preserve current v2 records, enforce model-question abort identity, prove positive current replay before exact retired-kind refusals, and verify the complete nine-file selection on both supported pairs after integration. Artifact-policy fallback and coordinated wire generations remain separate work.
 

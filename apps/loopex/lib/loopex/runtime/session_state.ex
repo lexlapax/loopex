@@ -7456,8 +7456,8 @@ defmodule Loopex.Runtime.SessionState do
 
   # Concept: recovered output policy belongs to the original session and turn.
   # Technical depth: recompute from retained definitions and lineage rather than
-  # accepting a self-consistent substituted job digest. Read 1.1 jobs committed
-  # before projection context existed keep their exact legacy policy and meaning.
+  # accepting a self-consistent substituted job digest. Every current projection
+  # generation requires the captured context, including reads.
   defp projection_job_matches?(work, %{generation: {id, version, _digest}} = call, job) do
     if is_map(job.artifact_policy) and Map.has_key?(job.artifact_policy, "projection") do
       with {:ok, binding} <-
@@ -7475,7 +7475,7 @@ defmodule Loopex.Runtime.SessionState do
         _invalid -> false
       end
     else
-      not (id in ~w(loopex.grep loopex.find loopex.ls) and version == "1.1.0")
+      not Loopex.Executor.JobRequest.projection_generation?(id, version)
     end
   end
 

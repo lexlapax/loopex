@@ -109,6 +109,7 @@ defmodule Loopex.ArtifactReadAdmissionTest do
     assert recovered.artifact_sources[context.reference.use_locator] == expected
 
     for replacement <- [
+          %{"retain" => true},
           put_in(read.artifact_policy, ["projection", "artifact_read"], nil),
           put_in(
             read.artifact_policy,

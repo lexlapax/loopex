@@ -8863,15 +8863,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
          definition["tool_id"],
          definition["tool_version"]
        ) do
-      binding =
-        case state.durable.tool_selection do
-          %{"artifact_read" => captured} ->
-            captured
-
-          nil ->
-            {:ok, captured} = Loopex.Runtime.ArtifactReadCapabilities.resolve(work.request.tools)
-            captured
-        end
+      binding = Map.fetch!(state.durable.tool_selection, "artifact_read")
 
       Loopex.Executor.JobRequest.artifact_policy(
         definition["tool_id"],
