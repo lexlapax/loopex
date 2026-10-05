@@ -191,7 +191,11 @@ defmodule LoopexComposition do
          :ok <- File.mkdir_p(root),
          {:ok, options} <- LoopexComposition.ResourcePacks.retain_launch_option(options, root),
          {:ok, credential_plane} <- Edges.credential_plane(options, &start_edge/2),
-         {:ok, adapter} <- start_edge(Store.Local, store_options(root, options, credential_plane)),
+         {:ok, adapter} <-
+           start_edge(
+             Store.Local,
+             store_options(root, options, credential_plane)
+           ),
          {:ok, store} <- Store.new(Store.Local, adapter),
          {:ok, spill} <- artifact_placement(root, options),
          {:ok, executor} <- open_executor(root, workspace, options, spill, credential_plane) do

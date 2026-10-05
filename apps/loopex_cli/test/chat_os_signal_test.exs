@@ -49,9 +49,10 @@ defmodule LoopexCli.ChatOSSignalTest do
       signal(state, signal, target)
       assert receive_control(state.socket) == :stopping
 
-      assert {:result, %{exit_code: 1, cleanup: :confirmed}, 1, {:ok, :interrupted}, transcript,
-              true, true} =
-               receive_control(state.socket)
+      assert(
+        {:result, %{exit_code: 1, cleanup: :confirmed}, 1, {:ok, :interrupted}, transcript, true,
+         true} = receive_control(state.socket)
+      )
 
       assert transcript =~ "\"cleanup\":\"confirmed\""
       assert {1, ""} == await_exit(state.port, "", System.monotonic_time(:millisecond) + 10_000)

@@ -2531,7 +2531,9 @@ defmodule Loopex.Runtime.SessionCoordinator do
   defp commit_command(state, command, candidate \\ :unprepared)
 
   defp commit_command(%{unknown_admission: pending} = state, _command, _candidate)
-       when is_map(pending), do: {:reply, {:error, :commit_unknown}, state}
+       when is_map(pending) do
+    {:reply, {:error, :commit_unknown}, state}
+  end
 
   defp commit_command(state, command, candidate) do
     type = command_field(command, :type)
@@ -3491,7 +3493,9 @@ defmodule Loopex.Runtime.SessionCoordinator do
     do: start_maintenance_preparation(state, work)
 
   defp advance_compact_episode(%{model: model} = state, %{"stage" => "model_attempt_open"}, work)
-       when is_map(model), do: start_model_work(state, work)
+       when is_map(model) do
+    start_model_work(state, work)
+  end
 
   defp advance_compact_episode(state, %{"stage" => "model_retry_permitted"}, _work) do
     case SessionState.propose_maintenance_attempt_open(state.durable) do
@@ -4705,7 +4709,9 @@ defmodule Loopex.Runtime.SessionCoordinator do
   end
 
   defp search_excerpts(_state, best, _selected, _project, _headers, low, high)
-       when low > high, do: {:ok, best}
+       when low > high do
+    {:ok, best}
+  end
 
   defp search_excerpts(state, best, selected, project, headers, low, high) do
     middle = div(low + high, 2)
@@ -7498,7 +7504,9 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # naming a run already being cleaned up is answered and starts no second
   # cleanup, which is what Outcome 8 requires of it.
   defp begin_admitted_cleanup({:reply, _reply, %{unknown_admission: pending}} = result)
-       when is_map(pending), do: result
+       when is_map(pending) do
+    result
+  end
 
   defp begin_admitted_cleanup({:reply, reply, state}) do
     case SessionState.aborting_run(state.durable) do

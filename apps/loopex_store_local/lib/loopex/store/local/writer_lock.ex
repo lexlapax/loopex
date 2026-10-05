@@ -115,7 +115,11 @@ defmodule Loopex.Store.Local.WriterLock do
          Enum.all?(names, fn name ->
            is_binary(name) and byte_size(name) in 1..128 and name != "LC_ALL" and
              Regex.match?(~r/\A[A-Za-z_][A-Za-z0-9_]*\z/, name)
-         end), do: :ok, else: {:error, :invalid_store_launch_exclusions}
+         end) do
+      :ok
+    else
+      {:error, :invalid_store_launch_exclusions}
+    end
   end
 
   def validate_exclusions(_), do: {:error, :invalid_store_launch_exclusions}

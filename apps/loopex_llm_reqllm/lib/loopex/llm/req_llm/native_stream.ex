@@ -257,7 +257,9 @@ defmodule Loopex.LLM.ReqLLM.NativeStream do
   defp step(_, _), do: :invalid
 
   defp open_block(%{"type" => "text", "text" => value} = block)
-       when map_size(block) == 2 and is_binary(value), do: {:ok, %{block: block}}
+       when map_size(block) == 2 and is_binary(value) do
+    {:ok, %{block: block}}
+  end
 
   defp open_block(%{"type" => "thinking", "thinking" => value, "signature" => signature} = block)
        when map_size(block) == 3 and is_binary(value) and is_binary(signature),

@@ -377,7 +377,9 @@ defmodule Loopex.LLM.ReqLLM.NativeTransport do
     do: {:reply, {:error, :invalid_provider_request}, fail(state)}
 
   def handle_call({:body, tag}, _, %{tag: tag, body: body, failed: false} = state)
-      when is_binary(body), do: {:reply, body, %{state | body: nil}}
+      when is_binary(body) do
+    {:reply, body, %{state | body: nil}}
+  end
 
   def handle_call({:body, _}, _, state), do: {:reply, :invalid_native_body, fail(state)}
 

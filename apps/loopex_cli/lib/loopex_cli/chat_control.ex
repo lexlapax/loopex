@@ -236,7 +236,13 @@ defmodule LoopexCli.ChatControl do
   end
 
   defp status_maintenance(maintenance) do
-    with true <- closed?(maintenance, [:configured_model, :active_model, :warning, :last_compact]),
+    with true <-
+           closed?(maintenance, [
+             :configured_model,
+             :active_model,
+             :warning,
+             :last_compact
+           ]),
          true <- nullable_text?(maintenance.configured_model, @record_bytes),
          true <- nullable_text?(maintenance.active_model, @record_bytes),
          true <- maintenance.warning in [nil, :maintenance_unconfigured],
@@ -330,7 +336,9 @@ defmodule LoopexCli.ChatControl do
          run_id: run,
          outcome: nil
        })
-       when is_binary(run) and is_binary(interaction), do: {:ok, nil}
+       when is_binary(run) and is_binary(interaction) do
+    {:ok, nil}
+  end
 
   defp wait_outcome(%{
          state: :uncertain,
@@ -339,7 +347,9 @@ defmodule LoopexCli.ChatControl do
          run_id: run,
          outcome: %{outcome: :outcome_unknown} = value
        })
-       when is_binary(run), do: Outcome.encode_wire(value)
+       when is_binary(run) do
+    Outcome.encode_wire(value)
+  end
 
   defp wait_outcome(%{
          state: :uncertain,
@@ -347,7 +357,9 @@ defmodule LoopexCli.ChatControl do
          command_id: command,
          outcome: :commit_unknown
        })
-       when is_binary(command), do: {:ok, "commit_unknown"}
+       when is_binary(command) do
+    {:ok, "commit_unknown"}
+  end
 
   defp wait_outcome(%{
          state: :uncertain,

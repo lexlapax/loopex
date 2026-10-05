@@ -196,7 +196,11 @@ defmodule Loopex.Model.Continuation do
          identity = Map.take(source, ~w(run_id turn_id operation_id attempt)),
          false <- MapSet.member?(sources, identity),
          index when is_integer(index) and index > previous <- entry["assistant_message_index"],
-         %{"role" => "assistant", "content" => text, "tool_calls" => calls} <- at(messages, index),
+         %{"role" => "assistant", "content" => text, "tool_calls" => calls} <-
+           at(
+             messages,
+             index
+           ),
          true <- is_list(calls) and calls != [] and length(calls) <= 128,
          true <- Enum.all?(calls, &is_map/1),
          capsule when is_map(capsule) <- entry["capsule"],

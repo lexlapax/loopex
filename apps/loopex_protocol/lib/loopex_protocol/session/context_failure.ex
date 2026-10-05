@@ -46,7 +46,11 @@ defmodule LoopexProtocol.Session.ContextFailure do
   def project(%{"version" => 2, "category" => "context_preparation_failed"} = value, _) do
     if closed?(value, ~w(version category retryable measurement_scope cause)) and
          value["retryable"] == false and value["measurement_scope"] in [nil, "ordinary"] and
-         value["cause"] in @causes, do: {:ok, value}, else: :error
+         value["cause"] in @causes do
+      {:ok, value}
+    else
+      :error
+    end
   end
 
   def project(_, _), do: :error

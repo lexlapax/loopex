@@ -67,7 +67,12 @@ defmodule LoopexCli.ChatConfiguration do
          active <- Map.fetch!(@profiles, selection.profile["session"]["tools"]),
          definitions <- selected_definitions(active),
          {:ok, instructions} <- capture_instructions(selection.profile),
-         {:ok, selection} <- ConfigSelection.resolve_session(selection, instructions, definitions),
+         {:ok, selection} <-
+           ConfigSelection.resolve_session(
+             selection,
+             instructions,
+             definitions
+           ),
          {:ok, _} <-
            DurableOptions.resolve(
              model: selection.configuration["model"],

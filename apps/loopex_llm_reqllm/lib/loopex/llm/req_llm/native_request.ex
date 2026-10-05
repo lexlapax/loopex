@@ -309,7 +309,10 @@ defmodule Loopex.LLM.ReqLLM.NativeRequest do
              _ ->
                false
            end),
-         pairs = Enum.map(request.headers, fn {name, value} -> {String.downcase(name), value} end),
+         pairs =
+           Enum.map(request.headers, fn {name, value} ->
+             {String.downcase(name), value}
+           end),
          headers = Map.new(pairs),
          true <- map_size(headers) == length(pairs),
          true <-
