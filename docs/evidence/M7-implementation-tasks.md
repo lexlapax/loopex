@@ -325,6 +325,26 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Resume handoff: verified chat unit is committed and pushed as
+  `cfed3bccca0f0e36069de994d4ac90957258d3b8`; root was clean and matched
+  `origin/m7` after push. All root VM runners are terminal. The alias-preparation
+  writer now owns the exclusive VM slot in its separate managed worktree;
+  root starts no VM/check until it releases that slot. The writer retains
+  its exact 24-path source generations and runs both-pair boundary proofs,
+  including the actual 60-second cutoff, before root integration.
+  Final ledger status PASS in 7.707 seconds, complete output
+  `/private/tmp/loopex-m7-chat-progress-proof/ledger-status-final-v9.log`, SHA-256
+  `70c9ebfb84f8006183610f2f16831cc9a893a9a083ede86a200ad03fe801eaf0`.
+  All ten committed implementation paths match the tested final inventory.
+
+  The next transport proposal is retained without implementation at
+  `/private/tmp/loopex-m7-inspection-policy-view-decision-20261004-8e6dc5c5-v1.md`,
+  SHA-256 `399edfadaa7f7c8322554e0f94555fd421d34809fd90022a83295277332ac474`.
+  It identifies the missing answered-policy public-cursor fact and proposes
+  exact inspection/open-interaction shapes. No manifest digest is pinned and
+  no new event/record/shape is authorized from this research. Present decisions
+  one at a time after the currently pending restore-outcome question.
+
 - Done: chat consumes actual session-labelled model/tool progress through its
   bootstrapped driver and existing bounded output writer. Answer/summary/tool
   text is escaped; provisional answer suppression requires exact content,
@@ -350,7 +370,7 @@ did not resolve them. No paid provider calls were made during this check.
   `ecc7040a2c76872d07880355586978344247b52994671c096afee45b8a5b0797`;
   floor output `affected-floor-v9.log` in that directory, SHA-256
   `8af36d629dd45c5e554be2d253cb0fab1b1d9af9d8cbad1bde7759e6c57a4480`.
-  All retained source copies and successful/failed outputs are indexed by
+  Source copies and test/fixture-metadata successful/failed outputs are indexed by
   `final-evidence-v9.tsv`, SHA-256
   `d21f20f84d96d18f624bbb03b05cfa555d4df2345b2646a80633e24431335383`;
   exact ten-path owned source inventory `final-owned-source-v9.json`, SHA-256
