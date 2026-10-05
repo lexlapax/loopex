@@ -325,6 +325,43 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: integrate the current-only EffectIntents reader at `a36d1f20` from
+  worker `e619f8ce9e57e73ca850ce7865e3666f6aa2c1b1`, and CLI captured fixtures
+  at `6e75c72a` from worker `a773ac4c0a912e1860a16833f7ecd0e9d54c8c10`.
+  The private reader refuses superseded prompt/request/resource/refusal shapes
+  and invalid configuration versions after positive current-history baselines.
+  CLI tests preserve captured tools, budgets, exact dated response identity,
+  structured artifact excerpts, full-object retrieval and physical recovery.
+  Production limits, fixture deadlines and required proof obligations are unchanged.
+
+  Worker evidence remains in the immutable inventories
+  `/private/tmp/loopex-m7-effect-reader-proof-inventory.tsv`, SHA-256
+  `c9823ec10dfa5de44b30c11106500bc2ce74efccc46320673f9eadad710f1e9f`, and
+  `/private/tmp/loopex-m7-cli-worker-proof-inventory.tsv`, SHA-256
+  `ba3f60e813eb0e01342a3a65d662d55d7fb1e6e27b8c42a06c29470b6c7cbd2c`.
+  Preliminary failures retain FAIL status; corrected complete files pass on
+  both supported pairs. The integrator rehashed all 28 retained entries.
+  Combined post-rejoin checks pass all 26 private-reader cases and all 133 CLI
+  cases on each pair, with two paid CLI cases excluded. Measured runner seconds
+  are 3.7 / 3.6 for Core and 111.7 / 120.5 for CLI, current / floor respectively.
+  Handles `65702` and `7158` are terminal and collected. Four complete outputs
+  are retained in `/private/tmp/loopex-m7-worker-rejoin-proof-inventory.tsv`,
+  SHA-256 `cbd54ec8db97a161b8791e4334fdc9e3050fd6ec2a5c2d1d5d71fed6500b8443`.
+
+  Integrated formatting, warning-free compilation, documentation, status,
+  dependency direction, whitespace and task reporting pass in 16.5 seconds.
+  Complete output is `/private/tmp/loopex-m7-worker-rejoin-metadata-v1.log`,
+  SHA-256 `5cfa10e02befacf2149f339ae90322149ff6374c2ae304a7f6c8cd627442894f`; handle `29869` is terminal and collected.
+
+  Close two bounded added T05 rows; no original row closes. T01–T19 originals
+  remain 70 done / 103 todo / 6 retired; added work is 253 done / 11 todo.
+  Including T00, originals remain 70 / 109 / 7 and added work is 257 / 12.
+  Full integration, superseded effect/receipt readers and coordinated wire
+  serving remain open. No paid-provider or full-check pass is claimed here.
+  The next independent writers prepare complete protocol manifests and current
+  cursor-bound snapshots in separate worktrees; a third agent prepares the
+  attempts-event decision proposal. Root owns rejoin and the next full check.
+
 - Done: integrate pure committed attempts-head selection at `4175d294` from
   isolated worker `c0ee3685ae8926c83dca2d05919da37e8ac20489`. The greatest
   sequence among exact lines naming the manifest-pinned campaign wins regardless
@@ -10115,6 +10152,8 @@ or check was relaxed.
 - [x] Remove Core compiled legacy instructions and the separate configuration-less request builder, migrate every remaining instruction caller to explicit captures, and prove captured-only request/reservation/tool selection plus the host-owned literal default across Core, composition, provider and CLI on both toolchains. Superseded journal readers/writers remain separate open work.
 - [x] Remove configuration-less prompt/request/refusal writers and readers; require captured run configuration before admission and preflight, preserve current refusal arithmetic, and prove current replay, superseded-kind refusal, missing-capture refusal, snapshots, maintenance and owner uncertainty on both supported toolchains. Edge/transport fixtures and full integration remain separate work.
 - [x] Migrate daemon socket/physical Store creation fixtures to current captured startup templates; preserve resume without startup defaults, wire/facade identity and lease/cleanup/uncertainty proofs, retain failed telemetry aggregates, correct the SSE fixture to exact dated model identity and prove both full policy-interaction/physical replay workflows on both toolchains. CLI fixtures, private query shapes and full integration remain separate work.
+- [x] Remove superseded prompt/request/resource/refusal query shapes from EffectIntents, require current configuration-version domains, and prove positive current histories before exact retired-kind and invalid-version refusals on both toolchains and after integration. Superseded effect/job/receipt readers remain separate work.
+- [x] Migrate CLI captures and current journal assertions while preserving selected tools, retained resume budgets, exact model identity, structured excerpt/receipt/full-artifact retrieval and physical recovery proofs. Retain failed worker aggregates and corrected complete files; prove the complete focused selection on both toolchains after integration without widening bounds. Full integration remains separate work.
 - [ ] Migrate remaining implicit Core/edge/transport test hosts to captured current creation, replace their superseded record assertions, remove old configuration-less readers/writers, and prove current replay, command identity, uncertainty, authority and cleanup without a Core fallback. Run the full check once on the resulting clean committed candidate. The headless/loop and context-admission fixture phases are complete; superseded request/admission decoders and edge/transport joins remain.
 
 ## T06 — Build the first complete chat workflow
