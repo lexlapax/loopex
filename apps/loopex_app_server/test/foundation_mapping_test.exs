@@ -464,18 +464,14 @@ defmodule Loopex.AppServer.FoundationMappingTest do
     intent = Enum.find_index(kinds_after, &(&1 == "effect_intent_committed_v2"))
     receipt = Enum.find_index(kinds_after, &(&1 == "executor_receipt_committed_v2"))
 
-    # The answer is admitted as an ordinary command, between the question and
-    # its resolution, rather than as part of either.
-    answered =
-      kinds_after
-      |> Enum.with_index()
-      |> Enum.find_index(fn {kind, index} ->
-        kind == "command_admitted" and index > requested
-      end)
+    # The current policy answer has its own admission record, between the
+    # question and policy resolution; the answer itself grants no authority.
+    answer_admitted =
+      Enum.find_index(kinds_after, &(&1 == "policy_interaction_answer_admitted_v1"))
 
     for {label, position} <- [
           requested: requested,
-          answered: answered,
+          answer_admitted: answer_admitted,
           resolved: resolved,
           intent: intent,
           receipt: receipt
@@ -483,8 +479,8 @@ defmodule Loopex.AppServer.FoundationMappingTest do
       refute is_nil(position), "#{label} was never committed: #{inspect(kinds_after)}"
     end
 
-    assert requested < answered
-    assert answered < resolved
+    assert requested < answer_admitted
+    assert answer_admitted < resolved
     assert resolved < intent
     assert intent < receipt
     assert length(kinds_after) > length(kinds_before)
