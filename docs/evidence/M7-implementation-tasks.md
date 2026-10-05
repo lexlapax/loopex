@@ -12573,6 +12573,8 @@ open.
 
 ### Added implementation subtasks
 
+- [ ] Include composition's actual owned restore IO long-bound cases in the existing release long_bound group and prove the real selected composition lane. Preserve nonzero executed-case judgment, credential exclusion, all deadlines and prior required lanes; focused worker runs do not substitute for runner selection.
+
 - [x] Repair the 6290ac47 wrapper-related integration failures in credential-plane, ephemeral trace, foreground, daemon and offline CLI witnesses; distinguish stale internal observations from actual option/dispatch regressions, preserve exact original adapter options, host-option allowlist, exclusion and credential/lifetime proofs, and verify both pairs with failed outputs retained.
 - [x] Repair the 6290ac47 diagnostic broken-IO/writer-death setup observation under the maintainer-approved single captured 1,000-ms setup cutoff per disposition; preserve real blocked IO, exact counts, writer death, privacy, sealing and post-fault cleanup proofs, and verify the complete twenty-case diagnostic file on both supported toolchains. The override explicitly replaces the original implicit 100-ms setup allowance.
 - [x] Establish the cause and repair the 6290ac47 real stalled-stdout pipe worker nonjoin; retain the original failure and exact timer/worker/kill/DOWN causal evidence, implement the maintainer-approved single D+retained-grace fixture observation cutoff while preserving production and parent deadlines, and prove complete actual pipe/PTY actor and OS closure on both supported toolchains. Full integration and later native compact joins remain separate.

@@ -316,7 +316,7 @@ fi
 
 # The long-duration bound proofs: cases whose claim is a real wait, tagged
 # long_bound and excluded from the fast check.
-long_bound_apps="loopex loopex_executor_local loopex_daemon"
+long_bound_apps="loopex loopex_executor_local loopex_daemon loopex_composition"
 if release_selected long_bound; then
   for app in $long_bound_apps; do
     lane "long-bound-$app" "$app" nonzero without_credential mix test --only long_bound
