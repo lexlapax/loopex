@@ -325,6 +325,77 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: actual PTY controls and the production steer repair are integrated
+  as `f98566dc`, matching final owned fixture commit
+  `8d4ce28ab2b016412036076d3801c8d06cd92a3b` plus the exact tested root patch.
+  Both supported pairs pass the complete six-file, 80-case selection: PTY four,
+  ChatDriver 34, workflow 11, actual OS signals two, interrupts 15 and controls
+  14. Measured current/floor runs are 43.17/42.43 seconds. The driver now reads
+  the public active run before submitting explicit steering identity; real
+  follow-up replacement between read and admission refuses run_mismatch without
+  retargeting. Idle steering is a local host refusal, never a Core durability
+  claim, and interactive input remains usable.
+
+  The corrected fixture preserves product bounds and uses escript's actual +B
+  startup; both exact OTP sources are retained. No production launcher change
+  was needed. Concrete evidence uses safe binary-key observations, validates
+  canonical request bytes/digests and binds question/answer/decline identities,
+  actual jobs/results, wait order, actor joins and the owned foreground OS group.
+  All failed source generations remain FAIL, including the 78/80 selection.
+  Correction of nonexistent job.arguments, actual interaction.declined naming
+  and closed outcome/run correlation changed only fixtures. Nested cleanup also
+  joins the runtime and all concrete adapters on evidence-projection failure.
+  No bound-proof suite ran concurrently; the recorded metadata/compile overlap
+  is retained and cannot be presented as exclusive metadata execution.
+
+  All 57 immutable evidence records rehash exactly:
+  `/private/tmp/loopex-m7-chat-pty-proof/evidence/final-evidence-inventory.sha256`,
+  SHA-256 `83836c625afbd219ade545d19bf2a27bac8f0d18b985b5233ee727e3eb23b528`.
+  Complete 1,051-entry source inventory:
+  `/private/tmp/loopex-m7-chat-pty-proof/evidence/final-source-inventory.tsv`,
+  SHA-256 `08f724cf800b32ecab62a1d0ca76573a969477a665f920fc3628f53be19500cc`.
+  Root proves all tested source kinds/executable modes and 1,048 contents match;
+  the revised Proposed ADR 0050 pair and ledger are the expected differences,
+  and only the independently proved gate's two files are additional. Proof:
+  `/private/tmp/loopex-m7-chat-pty-root-source-proof.txt`, SHA-256
+  `9b63c7e0ebca55ded683514b0e8d306e3d0d784f6a871b189059665c407d646c`.
+  Independent final review reports no findings and matches the exact three
+  fixture hashes: `/private/tmp/loopex-m7-chat-pty-independent-review.txt`,
+  SHA-256 `4e177962a0de7e11ad7599869d95cd94eecc8c6bcd77b08d2d8a3ecd27038232`.
+
+  Combined root formatting, warning-free compile, documentation, status,
+  dependency, whitespace and checklist gates pass on both pairs in 15.2/13.9
+  seconds. Handle `1778` is terminal and collected. Complete outputs:
+  `/private/tmp/loopex-m7-gate-pty-rejoin-current-metadata-v1.log`, SHA-256
+  `f13b94e9b8d2f40bf37c7d65ddd65548ff6731fb9094b5545a75ae8c7b359cf5`;
+  `/private/tmp/loopex-m7-gate-pty-rejoin-floor-metadata-v1.log`, SHA-256
+  `e2701772679096f38348cd0ce3b806bc2fcb62b04303b9b005dde869f44cc667`.
+  Original full-check evidence stays bound to `698595b4`; these focused proofs
+  and metadata do not claim a full check of later bytes. No same-byte selection
+  was repeated after rejoin. All worker and root VMs are terminal.
+  Close one added T10 subtask; the broader original fragmented-pipe/slow-reader
+  row stays open. T01–T19 originals: 78 done / 95 todo / 6 retired; added:
+  269 done / 16 todo. Including T00: originals 78 / 101 / 7; added 273 / 17.
+  Built-product, counted provider, attended and full-M7 closure proof remain
+  open. Exact alias-capable ADR 0050 acceptance is the first pending decision.
+
+- Proposed alias-capable B pair saved at exact candidate
+  `108dbf3468c925c69696f05fd73848380b6787ef`, pushed on `m7`. Concept digest
+  `adc7fdb5de88836b420989eb3de51d93b342e3ddeb748c103ca5a374d6f08eae`;
+  technical digest `410264b1508aa1493285c0ca1e4403a815610f789335a55f098fe4ee0ac7a32a`.
+  It retains authored normalized changes and their existing command digest,
+  binds canonical resolution in the complete candidate, defines identical
+  duplicates/catalog drift/unknown fencing and pure replay, and proposes the
+  closed eight-field configure-v2 record with v1 reader/writer retirement.
+  Neither a second changes map nor a resolution receipt is introduced.
+  The prepared facade and CLI preserve authored identity under the same rule.
+  Read-only independent pair review reports no findings and binds both hashes:
+  `/private/tmp/loopex-m7-host-preparation-alias-pair-review.txt`, SHA-256
+  `a3f70368a985fa1506ca0ce88ad0ebf4765b9a740aacc6d8fc8a2f8fbc5cf348`.
+  Exact revised-pair acceptance is now the first pending question. It remains
+  Proposed; no callback or configure-v2 implementation has started. Root
+  metadata checks wait for the PTY writer's exclusive slot to end.
+
 - Done: accepted V7.7's deterministic private cancellation gate is integrated
   as `53f7d1ea`, exact owned source from clean worker
   `328f6b0dca57e8ad59f2b5c36a8e8ba5559fa3ee`. The complete gate file passes
@@ -11100,7 +11171,7 @@ the still-open real-provider, live protocol, persistent-fault or closure lanes.
 
 ### Added implementation subtasks
 
-- [ ] Prove actual pseudo-terminal steer, follow-up, model-question identity/answer or decline and interrupt paths with real runtime/control observations and process/OS-group cleanup, using the existing Python stdlib tooling and product bounds; no paid-provider, attended or built-product claim.
+- [x] Prove actual pseudo-terminal steer, follow-up, model-question identity/answer or decline and interrupt paths with real runtime/control observations and process/OS-group cleanup, using the existing Python stdlib tooling and product bounds; no paid-provider, attended or built-product claim.
 
 - [x] Prove actual Chat file-enabled tracing, --no-trace overriding enabled file settings, and --trace overriding disabled settings; observe real diagnostic trace delivery or its absence and exact tracer/consumer/writer/runtime joins before successful closing using existing host seams. Keep startup ordering and all bounds; no new public contract.
 
