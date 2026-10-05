@@ -1,22 +1,17 @@
 <a id="technical-depth"></a>
 ## Technical depth
 
-Concept: [Current-format physical
-restore](0051-current-format-physical-restore.md#concept).
+Concept: [Current-format physical restore](0051-current-format-physical-restore.md#concept).
 
 <a id="technical-adr-0051-context"></a>
 ### Constraints and source evidence
 
-Concept: [Constraints and source
-evidence](0051-current-format-physical-restore.md#concept-adr-0051-context).
+Concept: [Constraints and source evidence](0051-current-format-physical-restore.md#concept-adr-0051-context).
 
-This successor narrowly amends [ADR
-0016](0016-configured-cancellation-observation.md#concept-adr-0016-decision)'s absence
-of an authorized physical-restore transition. Its [ordinary Local generation codec and
-binding](0016-configured-cancellation-observation-technical.md#technical-adr-0016-decision)
+This successor narrowly amends [ADR 0016](0016-configured-cancellation-observation.md#concept-adr-0016-decision)'s absence
+of an authorized physical-restore transition. Its [ordinary Local generation codec and binding](0016-configured-cancellation-observation-technical.md#technical-adr-0016-decision)
 remain current. [M7](../plans/M7-technical.md#technical-depth) requires complete
-current-format empty-root restore and separate workspace handling. [ADR
-0049](0049-explicit-host-configuration.md#concept) constrains retained physical
+current-format empty-root restore and separate workspace handling. [ADR 0049](0049-explicit-host-configuration.md#concept) constrains retained physical
 workspace identity.
 
 The current accepted constraints remain:
@@ -39,8 +34,7 @@ executor effect envelope, generic migration engine or backup CLI.
 <a id="technical-adr-0051-boundary"></a>
 ### Administrative signatures and input grammar
 
-Concept: [Administrative signatures and input
-grammar](0051-current-format-physical-restore.md#concept-adr-0051-boundary).
+Concept: [Administrative signatures and input grammar](0051-current-format-physical-restore.md#concept-adr-0051-boundary).
 
 Proposed host-only `LoopexComposition.Restore` signatures:
 
@@ -122,10 +116,11 @@ empty-lineage digest. Same tx/changed canonical plan conflicts; a fresh tx canno
 replace an unfinished original transition or consume the same old source generation
 while excluded.
 
-All source/backup/destination/workspace roots are distinct, pairwise nonnested, checked
-directory/no-symlink through every component. `lost` requires original path positively
-absent, not EACCES/unavailable/unknown; its original placement is a retained capture
-fact checked against copied bindings. `available` reobserves source physical placement
+All source/backup/destination/workspace roots are distinct and pairwise nonnested.
+Check existing roots and every existing ancestor as directories without symlinks.
+Only the lost source endpoint is exempt from the existing-directory requirement:
+`lost` requires its original path positively absent, not EACCES/unavailable/unknown.
+Its original placement is a retained capture fact checked against copied bindings. `available` reobserves source physical placement
 and complete cut. Workspace reference is checked by the existing codec and
 twice-observed physical identity; no replacement identity is minted. File aliases/hard
 links between participating trees must be refused or the caller must prove independent
@@ -151,8 +146,7 @@ a retained effect/job deadline.
 <a id="technical-adr-0051-placement"></a>
 ### Physical bindings and complete baseline
 
-Concept: [Physical bindings and complete
-baseline](0051-current-format-physical-restore.md#concept-adr-0051-placement).
+Concept: [Physical bindings and complete baseline](0051-current-format-physical-restore.md#concept-adr-0051-placement).
 
 A state-root binding has a distinct NEW domain; it must not reuse a Local ledger digest:
 
@@ -205,8 +199,7 @@ substitute truncated data.
 <a id="technical-adr-0051-lineage"></a>
 ### Current root and per-ledger lineage
 
-Concept: [Current root and per-ledger
-lineage](0051-current-format-physical-restore.md#concept-adr-0051-lineage).
+Concept: [Current root and per-ledger lineage](0051-current-format-physical-restore.md#concept-adr-0051-lineage).
 
 Paths use a fixed eight-digit decimal ordinal, not untrusted tx text. Root paths:
 
@@ -339,8 +332,7 @@ additions/deletions are allowed at commit.
 <a id="technical-adr-0051-lifetime"></a>
 ### Claims, IO ownership and cutoffs
 
-Concept: [Claims, IO ownership and
-cutoffs](0051-current-format-physical-restore.md#concept-adr-0051-lifetime).
+Concept: [Claims, IO ownership and cutoffs](0051-current-format-physical-restore.md#concept-adr-0051-lifetime).
 
 Do not acquire existing `Placement` inside state and exclude its new files from
 equality: `placement.ex:583` places placement.lock inside the root and `:404` its guard.
@@ -454,8 +446,7 @@ guardian/IO worker; prior_admin assertion does not override contradictory live m
 <a id="technical-adr-0051-transition"></a>
 ### Ordered transition and open guards
 
-Concept: [Ordered transition and open
-guards](0051-current-format-physical-restore.md#concept-adr-0051-transition).
+Concept: [Ordered transition and open guards](0051-current-format-physical-restore.md#concept-adr-0051-transition).
 
 Stable phase enum: `"claim"`, `"inventory"`, `"baseline_copy"`, `"destination_intent"`,
 `"source_retirement"`, `"destination_generations"`, `"destination_proofs"`,
@@ -501,8 +492,7 @@ completion.
 <a id="technical-adr-0051-outcomes"></a>
 ### Closed receipts, refusals and lookup
 
-Concept: [Closed receipts, refusals and
-lookup](0051-current-format-physical-restore.md#concept-adr-0051-outcomes).
+Concept: [Closed receipts, refusals and lookup](0051-current-format-physical-restore.md#concept-adr-0051-outcomes).
 
 Returned receipt≤2048, derived exactly from fully checked retained records; it carries
 no physical path, live authority or raw job/host evidence:
@@ -559,8 +549,7 @@ evaluation cannot wait unboundedly to obtain later precedence.
 
 lookup_code_enum exactly invalid_query, administrative_path_unavailable,
 restore_history_invalid, restore_conflict, physical_destination_changed,
-inventory_limit_exceeded, deadline, cleanup_unconfirmed. This replaces v2's inconsistent
-error spelling. Lookup uses bounded monitored raw read IO and the same work/cleanup
+inventory_limit_exceeded, deadline, cleanup_unconfirmed. Lookup uses bounded monitored raw read IO and the same work/cleanup
 rules, but no claim reclaim/sync/write/cleanup-of-state, no continuation or activation.
 Join failure returns error code cleanup_unconfirmed with cleanup=unconfirmed and
 preserves host exclusion of any retained previous admin claim.
@@ -598,8 +587,7 @@ administrative data loss. Caller keeps its retained original-tx uncertainty/evid
 <a id="technical-adr-0051-compatibility"></a>
 ### Alternatives and amendment mechanics
 
-Concept: [Alternatives and amendment
-mechanics](0051-current-format-physical-restore.md#concept-adr-0051-compatibility).
+Concept: [Alternatives and amendment mechanics](0051-current-format-physical-restore.md#concept-adr-0051-compatibility).
 
 This additive successor leaves the historical accepted ADR 0016 pair unchanged. Its
 narrow supersession applies only after explicit acceptance of this exact pair and before
@@ -634,8 +622,7 @@ ownership assumption is not.
 <a id="technical-adr-0051-proof"></a>
 ### Physical proof obligations and evidence
 
-Concept: [Physical proof obligations and
-evidence](0051-current-format-physical-restore.md#concept-adr-0051-proof).
+Concept: [Physical proof obligations and evidence](0051-current-format-physical-restore.md#concept-adr-0051-proof).
 
 Focused proof after acceptance must cover at least two successive complete current
 restores (A→B→C, available and lost source combinations), exact unchanged prior lineage

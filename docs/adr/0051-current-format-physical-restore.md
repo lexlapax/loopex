@@ -1,8 +1,7 @@
 <a id="concept"></a>
 ## Concept
 
-Technical depth: [Physical restore contracts and
-proof](0051-current-format-physical-restore-technical.md#technical-depth).
+Technical depth: [Physical restore contracts and proof](0051-current-format-physical-restore-technical.md#technical-depth).
 
 - **Status:** Proposed
 - **Date:** 2026-10-05
@@ -13,8 +12,7 @@ proof](0051-current-format-physical-restore-technical.md#technical-depth).
 <a id="concept-adr-0051-context"></a>
 ### Purpose and amendment
 
-Technical depth: [Constraints and source
-evidence](0051-current-format-physical-restore-technical.md#technical-adr-0051-context).
+Technical depth: [Constraints and source evidence](0051-current-format-physical-restore-technical.md#technical-adr-0051-context).
 
 Recover a complete latest quiescent state backup into an empty root while the original
 workspace remains available at its retained physical identity. The maintainer selected
@@ -39,8 +37,7 @@ engine or vision change is added.
 <a id="concept-adr-0051-boundary"></a>
 ### Host administrative boundary
 
-Technical depth: [Signatures and closed
-inputs](0051-current-format-physical-restore-technical.md#technical-adr-0051-boundary).
+Technical depth: [Signatures and closed inputs](0051-current-format-physical-restore-technical.md#technical-adr-0051-boundary).
 
 Propose host-only `LoopexComposition.Restore.restore(plan, invocation)` and
 `lookup(destination_state_root, tx_id, limits)`. Restore owns offline copying, audit,
@@ -62,8 +59,7 @@ evidence planes.
 <a id="concept-adr-0051-placement"></a>
 ### Eligibility, identity and complete-copy profile
 
-Technical depth: [Physical preimages and unexcluded
-manifests](0051-current-format-physical-restore-technical.md#technical-adr-0051-placement).
+Technical depth: [Physical preimages and unexcluded manifests](0051-current-format-physical-restore-technical.md#technical-adr-0051-placement).
 
 The host stops and positively joins old Runtime, Store, Local, guard, lease,
 worker-group, child-manager and placement authority, excludes competing copies and
@@ -106,8 +102,7 @@ Store/Local codec limits remain in force too; no partial inventory can pass.
 <a id="concept-adr-0051-lineage"></a>
 ### Repeatable provenance
 
-Technical depth: [Append-only root and ledger
-records](0051-current-format-physical-restore-technical.md#technical-adr-0051-lineage).
+Technical depth: [Append-only root and ledger records](0051-current-format-physical-restore-technical.md#technical-adr-0051-lineage).
 
 A restored current root can be backed up and restored again within the proposed bounds.
 Append one numbered private root transition and corresponding per-ledger records. Copy
@@ -135,8 +130,7 @@ reconstructs only that retained administrative image.
 <a id="concept-adr-0051-lifetime"></a>
 ### Administrative ownership and cleanup
 
-Technical depth: [Claims, direct IO and captured
-cutoffs](0051-current-format-physical-restore-technical.md#technical-adr-0051-lifetime).
+Technical depth: [Claims, direct IO and captured cutoffs](0051-current-format-physical-restore-technical.md#technical-adr-0051-lifetime).
 
 Accept private external path-bound administrative claims for available source and
 destination, with exclusive 0700/0600 publication, exact transaction/plan identity and
@@ -170,8 +164,7 @@ bypassing host.
 <a id="concept-adr-0051-transition"></a>
 ### Retirement, unknown resolution and activation
 
-Technical depth: [Ordered physical transition and
-guards](0051-current-format-physical-restore-technical.md#technical-adr-0051-transition).
+Technical depth: [Ordered physical transition and guards](0051-current-format-physical-restore-technical.md#technical-adr-0051-transition).
 
 Publish destination intent before source retirement. An available source's root intent
 fences composition, then per-ledger intent/retirement and final root retirement fence
@@ -199,8 +192,7 @@ successful.
 <a id="concept-adr-0051-outcomes"></a>
 ### Receipts and read-only lookup
 
-Technical depth: [Closed outcomes, precedence and historical
-checks](0051-current-format-physical-restore-technical.md#technical-adr-0051-outcomes).
+Technical depth: [Closed outcomes, precedence and historical checks](0051-current-format-physical-restore-technical.md#technical-adr-0051-outcomes).
 
 Accept the companion's exact bounded receipt/refusal/observation/lookup grammar,
 phase/reason vocabulary and refusal precedence. Receipts identify retained completion,
@@ -219,8 +211,7 @@ release even when deletion became visible.
 <a id="concept-adr-0051-compatibility"></a>
 ### Alternatives, current compatibility and rollback
 
-Technical depth: [Alternatives and amendment
-mechanics](0051-current-format-physical-restore-technical.md#technical-adr-0051-compatibility).
+Technical depth: [Alternatives and amendment mechanics](0051-current-format-physical-restore-technical.md#technical-adr-0051-compatibility).
 
 Recommend this explicit offline host-owned profile. It implements the selected
 empty-root direction with bounded current provenance and identifies the trust needed
@@ -247,8 +238,7 @@ are not answered here.
 <a id="concept-adr-0051-proof"></a>
 ### Required proof
 
-Technical depth: [Physical conformance and evidence
-limits](0051-current-format-physical-restore-technical.md#technical-adr-0051-proof).
+Technical depth: [Physical conformance and evidence limits](0051-current-format-physical-restore-technical.md#technical-adr-0051-proof).
 
 Prove actual successive A→B→C current restores with available/lost-source combinations,
 complete unexcluded modes/bytes manifests, unchanged earlier provenance, 64/65 refusal,
