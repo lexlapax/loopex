@@ -318,7 +318,7 @@ defmodule LoopexComposition.ArtifactRangeExecutorTest do
     calls = start_supervised!({Agent, fn -> [] end})
 
     source = %{
-      "record_kind" => "executor_receipt_committed",
+      "record_kind" => "executor_receipt_committed_v2",
       "journal_version" => 3,
       "record_digest" => String.duplicate("b", 64),
       "run_id" => "source-run",

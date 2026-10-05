@@ -5,7 +5,7 @@ defmodule Loopex.Store.Local.ArtifactJobRangeTest do
   alias Loopex.Store.Local.{Artifacts, Transfers}
 
   @source %{
-    "record_kind" => "executor_receipt_committed",
+    "record_kind" => "executor_receipt_committed_v2",
     "journal_version" => 3,
     "record_digest" => String.duplicate("b", 64),
     "run_id" => "source-run",
