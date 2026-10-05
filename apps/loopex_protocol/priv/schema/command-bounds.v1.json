@@ -1,0 +1,75 @@
+{
+  "contract": "command_bounds",
+  "revision": 1,
+  "additional_members": "refuse",
+  "null": "refuse",
+  "omission": "enclosing request preserves absence without calling object codec",
+  "native_keys": "binary strings",
+  "command_kinds": [
+    "prompt",
+    "follow_up",
+    "compact"
+  ],
+  "defaults": "none",
+  "clock": "none",
+  "prompt": {
+    "presence": "optional",
+    "required": [],
+    "fields": {
+      "max_turns": {
+        "encoding": "canonical_decimal_string",
+        "domain": "arbitrary_positive_integer"
+      },
+      "token_budget": {
+        "encoding": "canonical_decimal_string",
+        "domain": "arbitrary_positive_integer"
+      },
+      "deadline_ms": {
+        "encoding": "canonical_decimal_string",
+        "minimum": "1",
+        "maximum": "18446744073709551615"
+      },
+      "deadline_at_ms": {
+        "encoding": "JSON_integer",
+        "minimum": 1,
+        "maximum": 9007199254740991
+      }
+    }
+  },
+  "follow_up": {
+    "presence": "optional",
+    "required": [],
+    "fields": {
+      "deadline_at_ms": {
+        "encoding": "JSON_integer",
+        "minimum": 1,
+        "maximum": 9007199254740991
+      }
+    }
+  },
+  "compact": {
+    "presence": "required",
+    "required": [
+      "max_attempts",
+      "deadline_ms",
+      "token_budget"
+    ],
+    "fields": {
+      "max_attempts": {
+        "encoding": "canonical_decimal_string",
+        "minimum": "1",
+        "maximum": "4"
+      },
+      "deadline_ms": {
+        "encoding": "canonical_decimal_string",
+        "minimum": "1",
+        "maximum": "60000"
+      },
+      "token_budget": {
+        "encoding": "canonical_decimal_string",
+        "minimum": "1",
+        "maximum": "32768"
+      }
+    }
+  }
+}
