@@ -440,7 +440,12 @@ defmodule LoopexDaemon.SocketTransportTest do
     {:ok, store} = Loopex.Store.new(Loopex.Store.Local, adapter)
 
     {:ok, runtime} =
-      Loopex.start_link(runtime_id: "killed-placement", store: store, context_token_budget: 8_192)
+      Loopex.start_link(
+        runtime_id: "killed-placement",
+        store: store,
+        session_creation_defaults: creation_defaults(),
+        context_token_budget: 8_192
+      )
 
     {runtime, adapter}
   end

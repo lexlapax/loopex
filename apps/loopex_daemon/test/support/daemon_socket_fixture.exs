@@ -1,3 +1,5 @@
+Code.require_file("../../../loopex/test/support/configured_genesis_helper.exs", __DIR__)
+
 defmodule LoopexDaemon.Test.DaemonSocketFixture do
   @moduledoc false
 
@@ -6,6 +8,12 @@ defmodule LoopexDaemon.Test.DaemonSocketFixture do
 
   alias LoopexDaemon.{Listener, ListenerSocket, Owner}
   alias LoopexProtocol.{Frame, Session.V2}
+
+  @doc false
+  def creation_defaults do
+    Loopex.ConfiguredGenesisFixture.genesis([])
+    |> Map.drop([:kind, "options"])
+  end
 
   @doc false
   def temporary_directory(prefix) do
@@ -34,6 +42,7 @@ defmodule LoopexDaemon.Test.DaemonSocketFixture do
       Loopex.start_link(
         runtime_id: runtime_id || "daemon-test-#{System.unique_integer([:positive])}",
         store: store,
+        session_creation_defaults: creation_defaults(),
         context_token_budget: 8_192
       )
 
@@ -56,7 +65,12 @@ defmodule LoopexDaemon.Test.DaemonSocketFixture do
     {:ok, store} = Loopex.Store.new(Loopex.Store.Local, adapter)
 
     {:ok, previous} =
-      Loopex.start_link(runtime_id: runtime_id, store: store, context_token_budget: 8_192)
+      Loopex.start_link(
+        runtime_id: runtime_id,
+        store: store,
+        session_creation_defaults: creation_defaults(),
+        context_token_budget: 8_192
+      )
 
     sessions =
       for index <- 1..count do

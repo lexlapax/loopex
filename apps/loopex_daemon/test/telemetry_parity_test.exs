@@ -32,6 +32,27 @@ defmodule LoopexDaemon.TelemetryParityTest do
 
   @credential "telemetry-parity-placeholder"
 
+  # Concept: a failed workflow reports its runtime outcome at the model boundary.
+  # Technical depth: retain only the closed outcome/error-class span fields;
+  # request, response and credential data remain outside this fixture report.
+  setup do
+    handler = {__MODULE__, :model_outcome, make_ref()}
+    observer = self()
+
+    :ok =
+      :telemetry.attach(
+        handler,
+        [:loopex, :model, :complete, :stop],
+        fn _event, _measurements, metadata, _config ->
+          send(observer, {:parity_model_outcome, Map.take(metadata, [:outcome, :error_class])})
+        end,
+        nil
+      )
+
+    on_exit(fn -> :telemetry.detach(handler) end)
+    :ok
+  end
+
   # ADR 0030's closed inventory: five port callbacks and six coordinator cuts.
   @inventory [
     [:model, :complete],
@@ -204,6 +225,9 @@ defmodule LoopexDaemon.TelemetryParityTest do
           })
 
         Enum.reverse([event | acc])
+
+      %{"type" => "event", "event" => %{"kind" => "run.finished"} = event} ->
+        unexpected_terminal(event)
 
       %{"type" => "event", "event" => event} ->
         events_until_question(socket, epoch, [event | acc])
@@ -462,9 +486,25 @@ defmodule LoopexDaemon.TelemetryParityTest do
             "writer_epoch" => epoch
           })
 
+      %{"type" => "event", "event" => %{"kind" => "run.finished"} = event} ->
+        unexpected_terminal(event)
+
       _other ->
         answer_over_socket(socket, epoch)
     end
+  end
+
+  defp unexpected_terminal(event) do
+    outcome =
+      receive do
+        {:parity_model_outcome, metadata} -> metadata
+      after
+        0 -> :unavailable
+      end
+
+    flunk(
+      "run ended before its policy question: #{inspect(event)}; model span: #{inspect(outcome)}"
+    )
   end
 
   defp await_interaction(attachment, deadline) do
@@ -581,7 +621,7 @@ defmodule LoopexDaemon.TelemetryParityTest do
         "id" => response_id,
         "type" => "message",
         "role" => "assistant",
-        "model" => "claude-haiku-4-5",
+        "model" => "claude-haiku-4-5-20251001",
         "content" => [],
         "stop_reason" => nil,
         "stop_sequence" => nil,

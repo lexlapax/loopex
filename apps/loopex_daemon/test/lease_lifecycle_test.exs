@@ -260,6 +260,7 @@ defmodule LoopexDaemon.LeaseLifecycleTest do
       Loopex.start_link(
         runtime_id: "store-unavailable",
         store: store,
+        session_creation_defaults: creation_defaults(),
         context_token_budget: 8_192
       )
 

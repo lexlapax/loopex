@@ -325,6 +325,50 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: migrate daemon physical Store/socket fixture creation to the approved
+  captured startup template. Fresh helper and explicit test hosts create current
+  v3 sessions; resume-only hosts remain without new creation defaults, preserving
+  the proof that retained settings govern recovery. Foreground mapping still
+  compares wire and facade command identities and durable histories.
+
+  Both pairs pass all 46 foreground cases in 2.1 current / 3.4 floor measured
+  runner seconds. The nine-file daemon selection executed 196 cases: 194 passed
+  and two telemetry workflows failed on each pair, with two excluded cases.
+  Retain those aggregates as FAIL, measured 215.6 / 215.5 seconds. Their public
+  terminal was `model_call_failed`; the redacted model-completion span reported
+  error. A diagnostic fixture now fails at that terminal instead of swallowing
+  it until socket timeout, reporting only public fields and closed span outcome.
+  The fixture's SSE start named `claude-haiku-4-5`, while current startup/native
+  response admission binds `claude-haiku-4-5-20251001`. Matching the fixture's
+  literal identity to that retained selection fixes both complete workflows:
+  two passed on each pair in 15.6 / 20.8 seconds, including the actual deferred
+  policy answer, executor read, event parity, orderly daemon stop and physical
+  Store reopen. Interaction/socket/cleanup bounds and production admission are
+  unchanged. The corrected focused execution covers 242 cases per pair; neither
+  failed aggregate is relabelled PASS. No paid provider, Node, cross-UID,
+  excluded long-bound or full integration pass is claimed.
+
+  Eight outputs and sixteen immutable source copies are retained in
+  `/private/tmp/loopex-m7-current-transport-proof-inventory.tsv`, SHA-256
+  `75388a6f864265c65566a76b7191f88e020c512f69de27a07ad3b0208b437ac3`.
+  Handles `5286`, `28715`, `15943`, `70863`, `44218` and `60298` are terminal
+  and collected. Formatting, warning-free compilation, documentation, status,
+  dependency direction, whitespace and the task reporter pass in 17.6 measured
+  seconds. Complete output is
+  `/private/tmp/loopex-m7-current-transport-metadata-v1.log`, SHA-256
+  `2f369b4bc3e4f4948943e1b01e04774b6cf6363bc32a1ca375ab638c5540becb`; handle `32433`
+  is terminal and collected. Close one bounded added T05 transport-fixture row.
+  T01–T19 originals stay 70 done / 103 todo / 6 retired; added work is 250 done /
+  11 todo. Including T00, originals stay 70 / 109 / 7 and added work is 254 / 12.
+
+  The maintainer requested parallel subagents on 2026-10-04. Three independent
+  writers use separate managed worktrees based on `4d8bf706`: CLI current
+  fixtures and demonstration support; the private EffectIntents current
+  admission/request/refusal reader; and pure attempts-index committed-head
+  selection. Their path ownership is disjoint. The integrator retains daemon
+  work, ledger, rejoin and verification. No worker result is counted until
+  verified and integrated. No maintainer decision is pending.
+
 - Done: remove configuration-less prompt/request/refusal journal writers and
   readers from the serial reducer. Ordinary prompts write `prompt_admitted_v3`,
   ordinary and resource requests write their configuration-bound v2 kinds, and
@@ -10034,6 +10078,7 @@ or check was relaxed.
 - [x] Remove v2 genesis resolution/normalization and recovery admission, require current version-3 creation provenance in both Stores, and migrate pure genesis/resource/query fixtures while preserving exact byte ceilings, captured cleanup, no-default replay, command identity, immutable read cuts and physical Store conformance on both toolchains. Superseded genesis and provenance refuse; configuration-less request readers remain separate open work.
 - [x] Remove Core compiled legacy instructions and the separate configuration-less request builder, migrate every remaining instruction caller to explicit captures, and prove captured-only request/reservation/tool selection plus the host-owned literal default across Core, composition, provider and CLI on both toolchains. Superseded journal readers/writers remain separate open work.
 - [x] Remove configuration-less prompt/request/refusal writers and readers; require captured run configuration before admission and preflight, preserve current refusal arithmetic, and prove current replay, superseded-kind refusal, missing-capture refusal, snapshots, maintenance and owner uncertainty on both supported toolchains. Edge/transport fixtures and full integration remain separate work.
+- [x] Migrate daemon socket/physical Store creation fixtures to current captured startup templates; preserve resume without startup defaults, wire/facade identity and lease/cleanup/uncertainty proofs, retain failed telemetry aggregates, correct the SSE fixture to exact dated model identity and prove both full policy-interaction/physical replay workflows on both toolchains. CLI fixtures, private query shapes and full integration remain separate work.
 - [ ] Migrate remaining implicit Core/edge/transport test hosts to captured current creation, replace their superseded record assertions, remove old configuration-less readers/writers, and prove current replay, command identity, uncertainty, authority and cleanup without a Core fallback. Run the full check once on the resulting clean committed candidate. The headless/loop and context-admission fixture phases are complete; superseded request/admission decoders and edge/transport joins remain.
 
 ## T06 — Build the first complete chat workflow
