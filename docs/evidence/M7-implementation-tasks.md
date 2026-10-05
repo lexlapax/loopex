@@ -399,7 +399,9 @@ did not resolve them. No paid provider calls were made during this check.
   `0198bf0d25a94a9849e1f2b87029920a3ad767f81a041f823a46fdec39bdcecf`;
   Technical digest
   `e07dd2382f161bd2ccf1cea8b6b31f2a36f6c0e4db8a3bcb0d0e153a055af67c`.
-  Exact pair acceptance remains pending; no restore implementation is authorized.
+  The maintainer accepted this exact pair in the
+  [disposition](../developer/agent-context-map.md#disposition-m7-current-physical-restore-2026-10-05).
+  Restore implementation and physical/helper-ledger proofs remain open.
 
   Read-only generation activation inventory:
   `/private/tmp/loopex-m7-generation-activation-inventory-20261005-v1/inventory.md`,

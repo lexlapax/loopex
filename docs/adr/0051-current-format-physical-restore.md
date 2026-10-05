@@ -3,7 +3,7 @@
 
 Technical depth: [Physical restore contracts and proof](0051-current-format-physical-restore-technical.md#technical-depth).
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-05
 - **Decision owner:** Maintainer
 - **Supersedes:** 0016, only its absence of an authorized physical restore transition for a complete current-format latest quiescent backup. Ordinary Local generation binding, copied-root refusal, effect uncertainty and configured job cleanup remain unchanged.
@@ -261,4 +261,4 @@ evidence or approval.
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | — | — | — |
+| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-m7-current-physical-restore-2026-10-05) | candidate `74aa9288f1ee9671755434d68d292ad78008696e`; concept `sha256:0198bf0d25a94a9849e1f2b87029920a3ad767f81a041f823a46fdec39bdcecf`; technical `sha256:e07dd2382f161bd2ccf1cea8b6b31f2a36f6c0e4db8a3bcb0d0e153a055af67c` |

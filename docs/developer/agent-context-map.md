@@ -6824,11 +6824,29 @@ cleanup facts and the original current-pair FAIL. Verify changed bytes on both
 supported toolchains and the complete affected pipe/PTY selections. This
 approves no production timing change, restore contract or milestone closure.
 
-### Proposed current-format physical restore contract
+<a id="disposition-m7-current-physical-restore-2026-10-05"></a>
+### M7 current-format physical restore accepted, 2026-10-05
 
+The maintainer selected "1. Approve exact pair" for the independently reviewed
 [ADR 0051](../adr/0051-current-format-physical-restore.md#concept) and its
 [technical companion](../adr/0051-current-format-physical-restore-technical.md#technical-depth)
-are Proposed. They specify the selected empty-root direction, including lost
-source trust, offline ownership, exact lineage and physical lifetime proofs.
-The direction disposition authorizes proposal preparation; the exact pair
-requires acceptance before dependent implementation. T15 remains open.
+at candidate `74aa9288f1ee9671755434d68d292ad78008696e`. Acceptance binds the
+historical Proposed Concept SHA-256
+`0198bf0d25a94a9849e1f2b87029920a3ad767f81a041f823a46fdec39bdcecf` and
+Technical SHA-256
+`e07dd2382f161bd2ccf1cea8b6b31f2a36f6c0e4db8a3bcb0d0e153a055af67c`.
+Within the pair, this transition changes only Status and the empty Acceptance
+row. It partially supersedes ADR 0016's lack of an authorized physical restore
+transition, retaining ordinary generation binding, copied-root refusal,
+uncertainty and configured cleanup obligations.
+
+Implement the exact host-only API, closed private lineage, physical root/ledger
+binding and owned IO/cleanup contracts. The accepted profile requires the latest
+complete quiescent cut, unchanged external workspace identity, terminated old
+owners and host exclusion of concurrent roots. Available source retirement is
+one-way before destination activation; a lost source uses the retained trusted
+host attestation. Unknown effects remain fenced without redispatch. Checksums
+alone prove neither latestness nor exclusion. Current-format physical fault,
+lifetime, receipt and helper-ledger proofs remain required. T15 stays open until
+implementation and those proofs finish. No milestone closure, main merge,
+release, tag or publication follows from this acceptance.
