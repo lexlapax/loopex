@@ -1,0 +1,37 @@
+{
+  "contract": "active_bounds",
+  "revision": 1,
+  "required": [
+    "max_turns",
+    "token_budget",
+    "deadline_ms",
+    "deadline"
+  ],
+  "additional_members": "refuse",
+  "null": "refuse",
+  "native_keys": "binary strings",
+  "defaults": "none",
+  "clock": "none",
+  "max_turns": {
+    "encoding": "canonical_decimal_string",
+    "domain": "arbitrary_positive_integer",
+    "minimum": "1"
+  },
+  "token_budget": {
+    "encoding": "canonical_decimal_string",
+    "domain": "arbitrary_positive_integer",
+    "minimum": "1"
+  },
+  "deadline_ms": {
+    "encoding": "canonical_decimal_string",
+    "domain": "positive_uint64",
+    "minimum": "1",
+    "maximum": "18446744073709551615"
+  },
+  "deadline": {
+    "encoding": "null_or_canonical_decimal_string",
+    "domain": "nonnegative_uint64_or_null",
+    "minimum": "0",
+    "maximum": "18446744073709551615"
+  }
+}

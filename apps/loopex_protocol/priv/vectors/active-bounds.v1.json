@@ -1,0 +1,1242 @@
+{
+  "format": "loopex.experimental.payload-vectors/1",
+  "contract": "active_bounds",
+  "revision": 1,
+  "cases": [
+    {
+      "name": "committed_bounds_before_absolute_cutoff",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "10000",
+        "deadline_ms": "60000",
+        "deadline": null
+      },
+      "decoded": {
+        "max_turns": "8",
+        "token_budget": "10000",
+        "deadline_ms": "60000",
+        "deadline": null
+      }
+    },
+    {
+      "name": "canonical_zero_absolute_cutoff",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "10000",
+        "deadline_ms": "60000",
+        "deadline": "0"
+      },
+      "decoded": {
+        "max_turns": "8",
+        "token_budget": "10000",
+        "deadline_ms": "60000",
+        "deadline": "0"
+      }
+    },
+    {
+      "name": "positive_absolute_cutoff",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "10000",
+        "deadline_ms": "60000",
+        "deadline": "9007199254740993"
+      },
+      "decoded": {
+        "max_turns": "8",
+        "token_budget": "10000",
+        "deadline_ms": "60000",
+        "deadline": "9007199254740993"
+      }
+    },
+    {
+      "name": "exact_uint64_maxima",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "10000",
+        "deadline_ms": "18446744073709551615",
+        "deadline": "18446744073709551615"
+      },
+      "decoded": {
+        "max_turns": "8",
+        "token_budget": "10000",
+        "deadline_ms": "18446744073709551615",
+        "deadline": "18446744073709551615"
+      }
+    },
+    {
+      "name": "minimum_positive_members",
+      "input": {
+        "max_turns": "1",
+        "token_budget": "1",
+        "deadline_ms": "1",
+        "deadline": "1"
+      },
+      "decoded": {
+        "max_turns": "1",
+        "token_budget": "1",
+        "deadline_ms": "1",
+        "deadline": "1"
+      }
+    },
+    {
+      "name": "max_turns_above_uint64",
+      "input": {
+        "max_turns": "18446744073709551616",
+        "token_budget": "10000",
+        "deadline_ms": "60000",
+        "deadline": null
+      },
+      "decoded": {
+        "max_turns": "18446744073709551616",
+        "token_budget": "10000",
+        "deadline_ms": "60000",
+        "deadline": null
+      }
+    },
+    {
+      "name": "max_turns_enormous_decimal",
+      "input": {
+        "max_turns": "99999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999",
+        "token_budget": "10000",
+        "deadline_ms": "60000",
+        "deadline": null
+      },
+      "decoded": {
+        "max_turns": "99999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999",
+        "token_budget": "10000",
+        "deadline_ms": "60000",
+        "deadline": null
+      }
+    },
+    {
+      "name": "token_budget_above_uint64",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "18446744073709551616",
+        "deadline_ms": "60000",
+        "deadline": null
+      },
+      "decoded": {
+        "max_turns": "8",
+        "token_budget": "18446744073709551616",
+        "deadline_ms": "60000",
+        "deadline": null
+      }
+    },
+    {
+      "name": "token_budget_enormous_decimal",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "99999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999",
+        "deadline_ms": "60000",
+        "deadline": null
+      },
+      "decoded": {
+        "max_turns": "8",
+        "token_budget": "99999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999",
+        "deadline_ms": "60000",
+        "deadline": null
+      }
+    },
+    {
+      "name": "member_order_is_not_semantic",
+      "input": {
+        "deadline": null,
+        "deadline_ms": "60000",
+        "token_budget": "10000",
+        "max_turns": "8"
+      },
+      "decoded": {
+        "deadline": null,
+        "deadline_ms": "60000",
+        "token_budget": "10000",
+        "max_turns": "8"
+      }
+    },
+    {
+      "name": "max_turns_empty",
+      "input": {
+        "max_turns": "",
+        "token_budget": "10000",
+        "deadline_ms": "60000",
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "max_turns_negative",
+      "input": {
+        "max_turns": "-1",
+        "token_budget": "10000",
+        "deadline_ms": "60000",
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "max_turns_positive_sign",
+      "input": {
+        "max_turns": "+1",
+        "token_budget": "10000",
+        "deadline_ms": "60000",
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "max_turns_leading_zero",
+      "input": {
+        "max_turns": "01",
+        "token_budget": "10000",
+        "deadline_ms": "60000",
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "max_turns_zero_padding",
+      "input": {
+        "max_turns": "00",
+        "token_budget": "10000",
+        "deadline_ms": "60000",
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "max_turns_decimal_point",
+      "input": {
+        "max_turns": "1.0",
+        "token_budget": "10000",
+        "deadline_ms": "60000",
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "max_turns_exponent",
+      "input": {
+        "max_turns": "1e3",
+        "token_budget": "10000",
+        "deadline_ms": "60000",
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "max_turns_leading_space",
+      "input": {
+        "max_turns": " 1",
+        "token_budget": "10000",
+        "deadline_ms": "60000",
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "max_turns_trailing_space",
+      "input": {
+        "max_turns": "1 ",
+        "token_budget": "10000",
+        "deadline_ms": "60000",
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "max_turns_trailing_lf",
+      "input": {
+        "max_turns": "1\n",
+        "token_budget": "10000",
+        "deadline_ms": "60000",
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "max_turns_trailing_cr",
+      "input": {
+        "max_turns": "1\r",
+        "token_budget": "10000",
+        "deadline_ms": "60000",
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "max_turns_trailing_nul",
+      "input": {
+        "max_turns": "1\u0000",
+        "token_budget": "10000",
+        "deadline_ms": "60000",
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "max_turns_arabic_digits",
+      "input": {
+        "max_turns": "١",
+        "token_budget": "10000",
+        "deadline_ms": "60000",
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "max_turns_fullwidth_digits",
+      "input": {
+        "max_turns": "１",
+        "token_budget": "10000",
+        "deadline_ms": "60000",
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "max_turns_number",
+      "input": {
+        "max_turns": 1,
+        "token_budget": "10000",
+        "deadline_ms": "60000",
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "max_turns_numeric_zero",
+      "input": {
+        "max_turns": 0,
+        "token_budget": "10000",
+        "deadline_ms": "60000",
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "max_turns_numeric_negative",
+      "input": {
+        "max_turns": -1,
+        "token_budget": "10000",
+        "deadline_ms": "60000",
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "max_turns_unsafe_number",
+      "input": {
+        "max_turns": 9007199254740992,
+        "token_budget": "10000",
+        "deadline_ms": "60000",
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "max_turns_fraction",
+      "input": {
+        "max_turns": 1.5,
+        "token_budget": "10000",
+        "deadline_ms": "60000",
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "max_turns_boolean",
+      "input": {
+        "max_turns": true,
+        "token_budget": "10000",
+        "deadline_ms": "60000",
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "max_turns_array",
+      "input": {
+        "max_turns": [],
+        "token_budget": "10000",
+        "deadline_ms": "60000",
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "max_turns_object",
+      "input": {
+        "max_turns": {},
+        "token_budget": "10000",
+        "deadline_ms": "60000",
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "max_turns_null",
+      "input": {
+        "max_turns": null,
+        "token_budget": "10000",
+        "deadline_ms": "60000",
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "max_turns_zero_decimal",
+      "input": {
+        "max_turns": "0",
+        "token_budget": "10000",
+        "deadline_ms": "60000",
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "token_budget_empty",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "",
+        "deadline_ms": "60000",
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "token_budget_negative",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "-1",
+        "deadline_ms": "60000",
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "token_budget_positive_sign",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "+1",
+        "deadline_ms": "60000",
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "token_budget_leading_zero",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "01",
+        "deadline_ms": "60000",
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "token_budget_zero_padding",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "00",
+        "deadline_ms": "60000",
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "token_budget_decimal_point",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "1.0",
+        "deadline_ms": "60000",
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "token_budget_exponent",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "1e3",
+        "deadline_ms": "60000",
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "token_budget_leading_space",
+      "input": {
+        "max_turns": "8",
+        "token_budget": " 1",
+        "deadline_ms": "60000",
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "token_budget_trailing_space",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "1 ",
+        "deadline_ms": "60000",
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "token_budget_trailing_lf",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "1\n",
+        "deadline_ms": "60000",
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "token_budget_trailing_cr",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "1\r",
+        "deadline_ms": "60000",
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "token_budget_trailing_nul",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "1\u0000",
+        "deadline_ms": "60000",
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "token_budget_arabic_digits",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "١",
+        "deadline_ms": "60000",
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "token_budget_fullwidth_digits",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "１",
+        "deadline_ms": "60000",
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "token_budget_number",
+      "input": {
+        "max_turns": "8",
+        "token_budget": 1,
+        "deadline_ms": "60000",
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "token_budget_numeric_zero",
+      "input": {
+        "max_turns": "8",
+        "token_budget": 0,
+        "deadline_ms": "60000",
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "token_budget_numeric_negative",
+      "input": {
+        "max_turns": "8",
+        "token_budget": -1,
+        "deadline_ms": "60000",
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "token_budget_unsafe_number",
+      "input": {
+        "max_turns": "8",
+        "token_budget": 9007199254740992,
+        "deadline_ms": "60000",
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "token_budget_fraction",
+      "input": {
+        "max_turns": "8",
+        "token_budget": 1.5,
+        "deadline_ms": "60000",
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "token_budget_boolean",
+      "input": {
+        "max_turns": "8",
+        "token_budget": true,
+        "deadline_ms": "60000",
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "token_budget_array",
+      "input": {
+        "max_turns": "8",
+        "token_budget": [],
+        "deadline_ms": "60000",
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "token_budget_object",
+      "input": {
+        "max_turns": "8",
+        "token_budget": {},
+        "deadline_ms": "60000",
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "token_budget_null",
+      "input": {
+        "max_turns": "8",
+        "token_budget": null,
+        "deadline_ms": "60000",
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "token_budget_zero_decimal",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "0",
+        "deadline_ms": "60000",
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "deadline_ms_empty",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "10000",
+        "deadline_ms": "",
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "deadline_ms_negative",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "10000",
+        "deadline_ms": "-1",
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "deadline_ms_positive_sign",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "10000",
+        "deadline_ms": "+1",
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "deadline_ms_leading_zero",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "10000",
+        "deadline_ms": "01",
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "deadline_ms_zero_padding",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "10000",
+        "deadline_ms": "00",
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "deadline_ms_decimal_point",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "10000",
+        "deadline_ms": "1.0",
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "deadline_ms_exponent",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "10000",
+        "deadline_ms": "1e3",
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "deadline_ms_leading_space",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "10000",
+        "deadline_ms": " 1",
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "deadline_ms_trailing_space",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "10000",
+        "deadline_ms": "1 ",
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "deadline_ms_trailing_lf",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "10000",
+        "deadline_ms": "1\n",
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "deadline_ms_trailing_cr",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "10000",
+        "deadline_ms": "1\r",
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "deadline_ms_trailing_nul",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "10000",
+        "deadline_ms": "1\u0000",
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "deadline_ms_arabic_digits",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "10000",
+        "deadline_ms": "١",
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "deadline_ms_fullwidth_digits",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "10000",
+        "deadline_ms": "１",
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "deadline_ms_number",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "10000",
+        "deadline_ms": 1,
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "deadline_ms_numeric_zero",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "10000",
+        "deadline_ms": 0,
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "deadline_ms_numeric_negative",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "10000",
+        "deadline_ms": -1,
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "deadline_ms_unsafe_number",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "10000",
+        "deadline_ms": 9007199254740992,
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "deadline_ms_fraction",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "10000",
+        "deadline_ms": 1.5,
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "deadline_ms_boolean",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "10000",
+        "deadline_ms": true,
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "deadline_ms_array",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "10000",
+        "deadline_ms": [],
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "deadline_ms_object",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "10000",
+        "deadline_ms": {},
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "deadline_ms_null",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "10000",
+        "deadline_ms": null,
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "deadline_ms_zero_decimal",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "10000",
+        "deadline_ms": "0",
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "deadline_empty",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "10000",
+        "deadline_ms": "60000",
+        "deadline": ""
+      },
+      "error": true
+    },
+    {
+      "name": "deadline_negative",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "10000",
+        "deadline_ms": "60000",
+        "deadline": "-1"
+      },
+      "error": true
+    },
+    {
+      "name": "deadline_positive_sign",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "10000",
+        "deadline_ms": "60000",
+        "deadline": "+1"
+      },
+      "error": true
+    },
+    {
+      "name": "deadline_leading_zero",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "10000",
+        "deadline_ms": "60000",
+        "deadline": "01"
+      },
+      "error": true
+    },
+    {
+      "name": "deadline_zero_padding",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "10000",
+        "deadline_ms": "60000",
+        "deadline": "00"
+      },
+      "error": true
+    },
+    {
+      "name": "deadline_decimal_point",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "10000",
+        "deadline_ms": "60000",
+        "deadline": "1.0"
+      },
+      "error": true
+    },
+    {
+      "name": "deadline_exponent",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "10000",
+        "deadline_ms": "60000",
+        "deadline": "1e3"
+      },
+      "error": true
+    },
+    {
+      "name": "deadline_leading_space",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "10000",
+        "deadline_ms": "60000",
+        "deadline": " 1"
+      },
+      "error": true
+    },
+    {
+      "name": "deadline_trailing_space",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "10000",
+        "deadline_ms": "60000",
+        "deadline": "1 "
+      },
+      "error": true
+    },
+    {
+      "name": "deadline_trailing_lf",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "10000",
+        "deadline_ms": "60000",
+        "deadline": "1\n"
+      },
+      "error": true
+    },
+    {
+      "name": "deadline_trailing_cr",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "10000",
+        "deadline_ms": "60000",
+        "deadline": "1\r"
+      },
+      "error": true
+    },
+    {
+      "name": "deadline_trailing_nul",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "10000",
+        "deadline_ms": "60000",
+        "deadline": "1\u0000"
+      },
+      "error": true
+    },
+    {
+      "name": "deadline_arabic_digits",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "10000",
+        "deadline_ms": "60000",
+        "deadline": "١"
+      },
+      "error": true
+    },
+    {
+      "name": "deadline_fullwidth_digits",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "10000",
+        "deadline_ms": "60000",
+        "deadline": "１"
+      },
+      "error": true
+    },
+    {
+      "name": "deadline_number",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "10000",
+        "deadline_ms": "60000",
+        "deadline": 1
+      },
+      "error": true
+    },
+    {
+      "name": "deadline_numeric_zero",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "10000",
+        "deadline_ms": "60000",
+        "deadline": 0
+      },
+      "error": true
+    },
+    {
+      "name": "deadline_numeric_negative",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "10000",
+        "deadline_ms": "60000",
+        "deadline": -1
+      },
+      "error": true
+    },
+    {
+      "name": "deadline_unsafe_number",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "10000",
+        "deadline_ms": "60000",
+        "deadline": 9007199254740992
+      },
+      "error": true
+    },
+    {
+      "name": "deadline_fraction",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "10000",
+        "deadline_ms": "60000",
+        "deadline": 1.5
+      },
+      "error": true
+    },
+    {
+      "name": "deadline_boolean",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "10000",
+        "deadline_ms": "60000",
+        "deadline": true
+      },
+      "error": true
+    },
+    {
+      "name": "deadline_array",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "10000",
+        "deadline_ms": "60000",
+        "deadline": []
+      },
+      "error": true
+    },
+    {
+      "name": "deadline_object",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "10000",
+        "deadline_ms": "60000",
+        "deadline": {}
+      },
+      "error": true
+    },
+    {
+      "name": "deadline_ms_uint64_overflow",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "10000",
+        "deadline_ms": "18446744073709551616",
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "deadline_ms_enormous_overflow",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "10000",
+        "deadline_ms": "99999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999",
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "deadline_uint64_overflow",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "10000",
+        "deadline_ms": "60000",
+        "deadline": "18446744073709551616"
+      },
+      "error": true
+    },
+    {
+      "name": "deadline_enormous_overflow",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "10000",
+        "deadline_ms": "60000",
+        "deadline": "99999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999"
+      },
+      "error": true
+    },
+    {
+      "name": "missing_max_turns",
+      "input": {
+        "token_budget": "10000",
+        "deadline_ms": "60000",
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "missing_token_budget",
+      "input": {
+        "max_turns": "8",
+        "deadline_ms": "60000",
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "missing_deadline_ms",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "10000",
+        "deadline": null
+      },
+      "error": true
+    },
+    {
+      "name": "missing_deadline",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "10000",
+        "deadline_ms": "60000"
+      },
+      "error": true
+    },
+    {
+      "name": "unknown_deadline_at_ms",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "10000",
+        "deadline_ms": "60000",
+        "deadline": null,
+        "deadline_at_ms": "1"
+      },
+      "error": true
+    },
+    {
+      "name": "unknown_owner_epoch",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "10000",
+        "deadline_ms": "60000",
+        "deadline": null,
+        "owner_epoch": "1"
+      },
+      "error": true
+    },
+    {
+      "name": "unknown_configuration",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "10000",
+        "deadline_ms": "60000",
+        "deadline": null,
+        "configuration": "1"
+      },
+      "error": true
+    },
+    {
+      "name": "unknown_unknown",
+      "input": {
+        "max_turns": "8",
+        "token_budget": "10000",
+        "deadline_ms": "60000",
+        "deadline": null,
+        "unknown": "1"
+      },
+      "error": true
+    },
+    {
+      "name": "null_object",
+      "input": null,
+      "error": true
+    },
+    {
+      "name": "array_object",
+      "input": [],
+      "error": true
+    },
+    {
+      "name": "empty_object",
+      "input": {},
+      "error": true
+    },
+    {
+      "name": "number_object",
+      "input": 1,
+      "error": true
+    },
+    {
+      "name": "string_object",
+      "input": "bounds",
+      "error": true
+    }
+  ]
+}
