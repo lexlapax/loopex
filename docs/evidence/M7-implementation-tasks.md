@@ -514,8 +514,11 @@ did not resolve them. No paid provider calls were made during this check.
   The proposed authority/duplicate ordering, owned asynchronous work,
   60,000-ms cutoff, retained cleanup and stale-result refusal are retained.
   [ADR 0050](../adr/0050-host-configuration-preparation.md#concept) remains
-  Proposed while its pair is revised and concrete Model option/dependency,
-  instruction-capture and authored-command identity joins are checked.
+  Proposed with the concrete revised Model callback, composition-owned wrapper,
+  pure raw-instruction capture and identity-preserving candidate validation.
+  It proposes exact canonical model IDs for runtime-only clients and explicit
+  admitted provider routes for the reference wrapper; CLI aliases remain
+  externally resolved. No new configure record or second changes map is added.
   This direction choice does not accept the earlier choice-A pair's bytes.
   Dependent port implementation awaits acceptance of the revised pair; other
   in-scope work continues. Questions remain one at a time.

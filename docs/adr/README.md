@@ -59,7 +59,7 @@ a decision adds a new record rather than rewriting the old one.
 | 0047 | Reference host run defaults | Accepted | [Decision](0047-reference-host-run-defaults.md#concept) | [Technical depth](0047-reference-host-run-defaults-technical.md#technical-depth) |
 | 0048 | Host provider routing and credential bindings | Accepted | [Decision](0048-host-provider-routing-and-credential-bindings.md#concept) | [Technical depth](0048-host-provider-routing-and-credential-bindings-technical.md#technical-depth) |
 | 0049 | Explicit host configuration | Accepted | [Decision](0049-explicit-host-configuration.md#concept) | [Technical depth](0049-explicit-host-configuration-technical.md#technical-depth) |
-| 0050 | Host configuration preparation | Proposed | [Decision](0050-host-configuration-preparation.md#concept) | [Technical depth](0050-host-configuration-preparation-technical.md#technical-depth) |
+| 0050 | Model-port configuration preparation | Proposed | [Decision](0050-host-configuration-preparation.md#concept) | [Technical depth](0050-host-configuration-preparation-technical.md#technical-depth) |
 
 0001 and 0002 were the prerequisites that unblocked the first milestone
 candidate; the [plans register](../plans/README.md) records current status.
