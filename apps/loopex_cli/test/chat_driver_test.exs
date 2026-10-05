@@ -60,6 +60,8 @@ defmodule LoopexCli.ChatDriverTest do
       assert state.input_worker == nil
       assert state.cursor == 0
       assert {"/quit\n", ""} = StringIO.contents(input)
+      admission = await_record(&(&1["event"] == "input"))
+      assert admission["input_sequence"] == "1" and admission["disposition"] == "admitted"
       refute_receive {:written, _}, 20
 
       exit_code =
@@ -1290,22 +1292,35 @@ defmodule LoopexCli.ChatDriverTest do
   test "broken output returns a fixed transport failure after worker joins" do
     fixture = start_fixture([])
     {:ok, session} = Loopex.create_session(fixture.runtime, %{}, command_id: "create")
-    {:ok, input} = StringIO.open("/wait\n/quit\n", encoding: :latin1)
+    # Concept: this case ends through actual output failure.
+    # Technical depth: keep stdin open so provisional quit cannot race the
+    # independent writer's error and exact DOWN notification.
+    input = pipe_input("/wait\n")
+    test = self()
 
     output =
       spawn(fn ->
         receive do
           {:io_request, writer, reply, _} ->
+            send(test, {:broken_output_fault, self(), writer})
             send(writer, {:io_reply, reply, {:error, :private_failure}})
         end
       end)
 
+    output_monitor = Process.monitor(output)
     on_exit(fn -> if Process.alive?(output), do: Process.exit(output, :kill) end)
     {:ok, driver} = ChatDriver.start_link(fixture.runtime, session, input, output)
+    writer = :sys.get_state(driver).writer
+    closing = monitor_processes([driver, writer])
     assert %{exit_code: 1, transport: :output_failed} = ChatDriver.run(driver)
+    assert_receive {:broken_output_fault, ^output, device_writer}, 5_000
+    assert is_pid(device_writer)
+    assert_receive {:DOWN, ^output_monitor, :process, ^output, :normal}, 5_000
     assert :sys.get_state(driver).workers == %{}
     assert Loopex.stop(fixture.runtime) == :ok
     assert ChatDriver.close(driver, :confirmed) == 1
+    assert_processes_joined(closing)
+    stop_devices([input])
   end
 
   test "attachment-holder death preserves pending admission uncertainty and reaps remaining actors" do

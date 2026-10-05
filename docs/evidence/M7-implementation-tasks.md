@@ -325,6 +325,57 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Joined native inspection and chat candidate, 2026-10-05: Core source is
+  committed at `9a5f810d` and chat compact barriers at `ce650854`.
+  Core worker `9c7f39b7f68364643013e26b5ed33a731aeba1ca` passed
+  463 ordinary cases on each toolchain, with three long-bound cases excluded;
+  its separate actual cleanup-expiry case passed on both pairs in
+  23.245 / 23.218 seconds. This is the existing 22,001-ms backstop proof,
+  not the two existing 60,000-ms maintenance-expiry cases. Root reviewed
+  the production diff and rehashed 272 retained artifacts and 46 exact source
+  entries. Final worker inventory
+  `/private/tmp/loopex-m7-policy-inspection-proof/final/artifact-inventory.json`,
+  SHA-256 `046239db4425e7bc41dcf3242ed398895f48ec3e07ae057e7b52c012d5799ad4`;
+  result SHA-256
+  `afad9fca6758a70f06c977c33c834af00fe13fe310f7c5495a664d5bcdeac350`.
+  Worker initial compile and fixture failures remain retained. No complete
+  wire generation, full integration or release proof follows from this unit.
+
+  Root's joined candidate passed warning-free compilation and all 53 focused
+  Core cases on the current pair. Its full fourteen-file chat selection failed
+  three of 181 cases in 105.707 seconds. Complete output
+  `/private/tmp/loopex-m7-ce650854-rejoin-authorized/current-chat.log`, SHA-256
+  `8c70801000b646e09d6419537847bc066cd84666797ed9a0e660b511e132b502`.
+  Two new compact cases incorrectly expected no admission record for `/wait`;
+  corrected source explicitly consumes and checks that record before refusing
+  premature barrier output. The broken-output case raced automatic `/quit`
+  against the independent writer error. Corrected source keeps actual stdin
+  open so output failure drives shutdown and retains the original transport,
+  worker and closing assertions, plus exact device/manager joins. These source
+  corrections await paired execution. The initial sandbox-only TCP-lock failure
+  is separately retained; it occurred before compilation, and the authorized
+  runner used a new output directory. No failed run is reclassified as PASS.
+
+  One diagnostic setup-cutoff decision is pending; no dependent edit is made.
+  Packet `/private/tmp/loopex-m7-diagnostic-fault-setup-decision-20261005-v1.md`,
+  SHA-256 `f0a6fa52095e0c3a4c622f34fb55292fb97bc8dd093c7641ee68a0481c87638f`.
+  Root read the complete packet and rehashed its nine retained inputs.
+  The approved pipe cutoff and earlier post-fault DOWN grace do not authorize
+  this separate pre-fault setup change. The Task.Supervisor causal fixture is
+  isolated in the CLI worker checkout; only that worker currently owns the VM
+  verification slot. Restore and dormant model-requested codec source can
+  proceed independently without a VM.
+
+  Two wire grammar packets are queued, not accepted or implemented. Root read
+  each packet and rehashed all seventeen retained source entries in each:
+  `/private/tmp/loopex-m7-policy-wire-decision-20261005-v1/decision.md`, SHA-256
+  `d8f73f691db2d487445719a40334f9065511cb23e29ccf461a0b2794fec1b7e1`,
+  and `/private/tmp/loopex-m7-configure-wire-decision-20261005-v1/decision.md`,
+  SHA-256 `7112840b7a315a4824e747497d9aa1aa4a93ea39013589725bf50b903d7f0dd5`.
+  Ask one decision at a time after the current diagnostic answer. No partial
+  manifest, compatibility branch or generation activation is authorized here.
+
+
 - Live source work, 2026-10-05: standalone OpenInteraction, answer-admitted,
   Inspection and Snapshot codecs are joined and pushed at
   `04a363dee84ea74710162d3da07f52cba3e671d2`. Both toolchains pass the complete
@@ -350,10 +401,11 @@ did not resolve them. No paid provider calls were made during this check.
   Native compact busy approval is pushed at `14c2920d`. Root's three-path
   chat/facade draft remains retained in Git at
   `c703a8d0b5ef02697780af745ab6ee54fd8c7d50` on
-  `codex/m7-held-native-compact-chat`; it is not integrated or verified.
+  `codex/m7-held-native-compact-chat`; it is superseded by the joined candidate
+  above and remains historical source evidence.
   External patch `/private/tmp/loopex-m7-native-compact-chat-draft-20261005.patch`,
   SHA-256 `9c5ee14ff4234b594d46fb4e1bf357c836133820420754cf961d32e8cfc1a777`.
-  Core's isolated writer is `m7-trace-check`, joining the approved answer
+  Core's isolated writer `m7-trace-check` completed the approved answer
   transaction, bounded committed inspection and native compact flag. Event-size
   arithmetic must account for the actual Store transaction-ID limit before
   claiming a reachable refusal gap. No additional refusal grammar is approved.
@@ -378,7 +430,8 @@ did not resolve them. No paid provider calls were made during this check.
   and parent 15,000-ms bounds remain unchanged. Original current causal FAIL
   remains immutable. This closes the added T16 pipe repair only; native compact
   and further Core joins require their own affected verification. All pipe/root
-  runners are terminal. Core now holds the exclusive VM slot. No paid call,
+  runners are terminal. Subsequent native Core/chat verification is recorded
+  above. No paid call,
   full-check rerun or milestone closure occurred.
 
   Proposed restore pair is indexed at
@@ -467,7 +520,8 @@ did not resolve them. No paid provider calls were made during this check.
   The permission-answer distinct event, shared answered view and private
   transaction are approved by the
   [maintainer disposition](../developer/agent-context-map.md#disposition-m7-policy-answer-received-event-2026-10-05). Restore
-  pair remains Proposed; no acceptance or implementation follows.
+  pair was subsequently accepted as recorded above; implementation remains
+  separately tracked.
 
 - Terminal integration verification: the full current fast check ran once on
   exact clean candidate `6290ac472cb18ecb78bb3cb75d1abc952458d55a` and FAILED
