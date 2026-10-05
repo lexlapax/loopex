@@ -325,6 +325,19 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Running: the full current-pair fast check from exact clean candidate
+  `b6369cd626e71ef9f56c1d274bacd692b1e7ee01`, once, in the attached
+  `/Users/spuri/.codex/worktrees/m7-trace-check/loopex` verification checkout.
+  Handle `6635` is active; complete output streams to
+  `/private/tmp/loopex-m7-b6369cd6-fast-check.log` through retained runner
+  `/private/tmp/loopex-m7-b6369cd6-fast-check.py`. The provider app is serialized
+  with `LOOPEX_CHECK_ALONE=loopex_llm_reqllm`; ordinary per-app isolation remains.
+  This is a new candidate after source and fixture repairs. The historical
+  `75b7207d` FAIL is immutable and is not retried or relabeled. Collect the
+  active handle's terminal result before freezing/hash-recording its output.
+  No checklist item closes while this run is pending; a pass alone cannot prove
+  the historical quiesce failure's exact cause.
+
 - Done: formatter worker `9ce237f1747161914ea0c9d57b9f894cd03fa8b9`
   is joined as `4ba44a3e`. Eleven syntax-only repairs have identical parsed AST
   before/after on each supported toolchain, excluding only source locations;
