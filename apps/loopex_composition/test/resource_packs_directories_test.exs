@@ -559,7 +559,10 @@ defmodule LoopexComposition.ResourcePacksDirectoriesTest do
     end
   end
 
-  test "retained provenance decoder consumes the actual pinned Git import writer", %{root: root} do
+  test "retained provenance decoder consumes the actual pinned Git import writer", %{
+    root: root,
+    workspace: workspace
+  } do
     source = Path.join(root, "retained-import-source")
     directory = skill(Path.join(source, "imported"), "imported", "body")
     File.write!(Path.join(directory, "opaque.bin"), <<0, 255, 128>>)
@@ -570,7 +573,7 @@ defmodule LoopexComposition.ResourcePacksDirectoriesTest do
     state_root = Path.join(root, "retained-import-state")
 
     assert {:ok, pack} =
-             ResourcePacks.add(Path.join(root, "retained-import-workspace"), source,
+             ResourcePacks.add(workspace, source,
                workspace_ref: "workspace:retained-import",
                state_root: state_root,
                rev: commit,
@@ -679,6 +682,26 @@ defmodule LoopexComposition.ResourcePacksDirectoriesTest do
                  ResourcePacks.decode_retained_provenance(retained_bytes(pack), identity)
                ]
              end)
+  end
+
+  test "retained decoder trace witness refuses an existing pattern without clearing it" do
+    boundary = {:erlang, :binary_to_term, 2}
+    assert :erlang.trace_info(boundary, :traced) == {:traced, false}
+
+    try do
+      assert :erlang.trace_pattern(boundary, true, [:local]) == 1
+      traced = :erlang.trace_info(boundary, :traced)
+      match_spec = :erlang.trace_info(boundary, :match_spec)
+
+      assert_raise ExUnit.AssertionError, fn ->
+        decoder_calls(fn -> flunk("existing trace pattern must refuse before worker startup") end)
+      end
+
+      assert :erlang.trace_info(boundary, :traced) == traced
+      assert :erlang.trace_info(boundary, :match_spec) == match_spec
+    after
+      :erlang.trace_pattern(boundary, false, [:local])
+    end
   end
 
   test "retained decoders refuse trailing noncanonical unsafe and non-normalized data" do
@@ -831,6 +854,11 @@ defmodule LoopexComposition.ResourcePacksDirectoriesTest do
     parent = self()
     reference = make_ref()
     boundary = {:erlang, :binary_to_term, 2}
+
+    # Concept: this witness never replaces another observer's BIF trace pattern.
+    # Technical depth: the process-scoped probe refuses existing tracing before
+    # allocating its worker or entering the cleanup that clears its own pattern.
+    assert :erlang.trace_info(boundary, :traced) == {:traced, false}
 
     {worker, monitor} =
       spawn_monitor(fn ->
