@@ -136,7 +136,23 @@ defmodule LoopexCli.ChatPTYDriver do
           monitors = monitor_actors(Map.keys(state.workers))
           outer_monitors = monitor_actors([driver, state.writer])
           send(host, {:driver, driver, monitors, outer_monitors, state.session})
-          send(receiver, {:driver, driver, host})
+
+          witness =
+            if scenario == "pipe-stall" do
+              {collector, monitor} =
+                spawn_monitor(fn -> pipe_witness(socket, host, driver, state.writer) end)
+
+              receive do
+                {:pipe_witness_ready, ^collector} -> :ok
+              after
+                5000 -> raise "pipe causal witness was not armed"
+              end
+
+              send(host, {:pipe_witness, collector, monitor})
+              collector
+            end
+
+          send(receiver, {:driver, driver, host, witness})
           send_control(socket, {:ready, state.mode, state.sequence, System.pid()})
           {:ok, manager}
         end
@@ -166,9 +182,17 @@ defmodule LoopexCli.ChatPTYDriver do
 
     if scenario == "pipe-stall" do
       receive do
-        :writer_joined -> :ok
+        {:pipe_witness, collector, monitor} ->
+          await_writer_and_witness(
+            socket,
+            collector,
+            monitor,
+            false,
+            false,
+            System.monotonic_time(:millisecond) + 5000
+          )
       after
-        5000 -> raise "actual pipe IO worker monitor was not joined"
+        0 -> raise "pipe causal witness identity was not retained"
       end
     end
 
@@ -269,7 +293,7 @@ defmodule LoopexCli.ChatPTYDriver do
 
   defp receive_control(socket, controller) do
     receive do
-      {:driver, driver, host} ->
+      {:driver, driver, host, witness} ->
         fixture =
           if System.get_env("LOOPEX_CHAT_PTY_TRANSPORT") == "pipe" do
             receive do
@@ -279,11 +303,11 @@ defmodule LoopexCli.ChatPTYDriver do
             end
           end
 
-        receive_commands(socket, controller, driver, host, fixture)
+        receive_commands(socket, controller, driver, host, fixture, witness)
     end
   end
 
-  defp receive_commands(socket, controller, driver, host, fixture) do
+  defp receive_commands(socket, controller, driver, host, fixture, witness) do
     case :gen_tcp.recv(socket, 0) do
       {:ok, bytes} ->
         case :erlang.binary_to_term(bytes, [:safe]) do
@@ -319,7 +343,17 @@ defmodule LoopexCli.ChatPTYDriver do
 
           :inspect_writer ->
             {current, writer} = await_writer(driver, System.monotonic_time(:millisecond) + 5000)
+            installed_at = System.monotonic_time(:nanosecond)
             monitor = Process.monitor(current.pid)
+            true = self() in elem(Process.info(current.pid, :monitored_by), 1)
+            {:ok, manager} = Map.fetch(:sys.get_state(driver), :writer)
+            {_, token} = writer.timer
+
+            send(
+              witness,
+              {:snapshot, self(), monitor, manager, current.pid, token, writer.delivery_deadline,
+               installed_at}
+            )
 
             send_control(
               socket,
@@ -332,7 +366,14 @@ defmodule LoopexCli.ChatPTYDriver do
                  "retained_bytes" => writer.bytes,
                  "result_pending" => current.result == nil,
                  "pending_control" => true,
-                 "delivery_cutoff_present" => is_integer(writer.delivery_deadline)
+                 "delivery_cutoff_present" => is_integer(writer.delivery_deadline),
+                 "worker" => pipe_identity(current.pid),
+                 "original_monitor" => pipe_identity(monitor),
+                 "manager" => pipe_identity(manager),
+                 "timer_token" => pipe_identity(token),
+                 "delivery_deadline_ms" => writer.delivery_deadline,
+                 "observed_at_ns" => installed_at,
+                 "remaining_ms" => writer.delivery_deadline - div(installed_at, 1_000_000)
                }}
             )
 
@@ -349,6 +390,11 @@ defmodule LoopexCli.ChatPTYDriver do
                     {:DOWN, ^monitor, :process, pid, reason} when pid == current.pid -> reason
                   after
                     0 ->
+                      send(
+                        witness,
+                        {:cutoff, current.pid, monitor, System.monotonic_time(:nanosecond)}
+                      )
+
                       send_control(
                         socket,
                         {:writer_join_timeout,
@@ -362,9 +408,10 @@ defmodule LoopexCli.ChatPTYDriver do
                   end
               end
 
+            joined_at = System.monotonic_time(:nanosecond)
             send_control(socket, {:writer_down, reason})
             false = Process.alive?(current.pid)
-
+            send(witness, {:original_down, current.pid, monitor, reason, joined_at})
             send(host, :writer_joined)
 
           :inspect_reader ->
@@ -382,7 +429,7 @@ defmodule LoopexCli.ChatPTYDriver do
             send(host, :reader_joined)
         end
 
-        receive_commands(socket, controller, driver, host, fixture)
+        receive_commands(socket, controller, driver, host, fixture, witness)
 
       {:error, :closed} ->
         :ok
@@ -438,6 +485,217 @@ defmodule LoopexCli.ChatPTYDriver do
       after
         1 -> await_reader(driver, cutoff)
       end
+    end
+  end
+
+  # Concept: the real pipe failure retains a causal witness without transcript bytes.
+  # Technical depth: call tracing uses arities and closed metadata match actions.
+  # Only the acquired output manager is traced, in this isolated fixture VM.
+  # The collector caps its record list and owns exact manager, driver and worker
+  # monitors. It never receives raw function arguments or process mailboxes.
+  defp pipe_witness(socket, host, driver, manager) do
+    patterns = [
+      {{LoopexCli.ChatOutput, :handle_info, 2},
+       [{[{:output_deadline, :"$1"}, :_], [], [{:message, :"$1"}]}], [:local]},
+      {{LoopexCli.ChatOutput, :fail, 2},
+       [{[:_, :output_drain_timeout], [], [{:message, :output_drain_timeout}]}], [:local]},
+      {{:erlang, :exit, 2}, [{[:"$1", :kill], [], [{:message, :"$1"}]}], []},
+      {{:erlang, :send_after, 3},
+       [{[:"$1", :"$2", {:output_deadline, :"$3"}], [], [{:message, {{:"$1", :"$2", :"$3"}}}]}],
+       []},
+      {{:erlang, :send_after, 4},
+       [
+         {[:"$1", :"$2", {:output_deadline, :"$3"}, :_], [],
+          [{:message, {{:"$1", :"$2", :"$3"}}}]}
+       ], []}
+    ]
+
+    for {mfa, match, flags} <- patterns,
+        do: true = :erlang.trace_pattern(mfa, match, flags) > 0
+
+    true =
+      :erlang.trace(manager, true, [:call, :arity, :monotonic_timestamp, {:tracer, self()}]) == 1
+
+    monitors = Map.new([manager, driver], &{Process.monitor(&1), &1})
+    send(host, {:pipe_witness_ready, self()})
+
+    state = %{
+      socket: socket,
+      host: host,
+      driver: driver,
+      manager: manager,
+      monitors: monitors,
+      worker: nil,
+      original_monitor: nil,
+      records: [],
+      patterns: patterns,
+      fence: nil,
+      original_down: false
+    }
+
+    pipe_witness_loop(state)
+  end
+
+  defp pipe_witness_loop(state) do
+    receive do
+      {:trace_ts, manager, :call, {LoopexCli.ChatOutput, :handle_info, 2}, token, at}
+      when manager == state.manager ->
+        state
+        |> pipe_record("deadline_handled", at, %{"token" => pipe_identity(token)})
+        |> pipe_witness_loop()
+
+      {:trace_ts, manager, :call, {LoopexCli.ChatOutput, :fail, 2}, :output_drain_timeout, at}
+      when manager == state.manager ->
+        state |> pipe_record("output_drain_timeout", at, %{}) |> pipe_witness_loop()
+
+      {:trace_ts, manager, :call, {:erlang, :exit, 2}, target, at}
+      when manager == state.manager ->
+        state
+        |> pipe_record("kill", at, %{"target" => pipe_identity(target)})
+        |> pipe_witness_loop()
+
+      {:trace_ts, manager, :call, {:erlang, :send_after, arity}, {delay, target, token}, at}
+      when manager == state.manager and arity in [3, 4] ->
+        state
+        |> pipe_record("timer_armed", at, %{
+          "delay_ms" => delay,
+          "target" => pipe_identity(target),
+          "token" => pipe_identity(token)
+        })
+        |> pipe_witness_loop()
+
+      {:snapshot, receiver, original, manager, worker, token, deadline, at}
+      when manager == state.manager and state.worker == nil ->
+        monitor = Process.monitor(worker)
+
+        state = %{
+          state
+          | worker: worker,
+            original_monitor: original,
+            monitors: Map.put(state.monitors, monitor, worker)
+        }
+
+        state
+        |> pipe_record("snapshot", at, %{
+          "receiver" => pipe_identity(receiver),
+          "worker" => pipe_identity(worker),
+          "original_monitor" => pipe_identity(original),
+          "collector_monitor" => pipe_identity(monitor),
+          "token" => pipe_identity(token),
+          "deadline_ms" => deadline
+        })
+        |> pipe_witness_loop()
+
+      {:original_down, worker, original, reason, at}
+      when worker == state.worker and original == state.original_monitor ->
+        fence = :erlang.trace_delivered(:all)
+        state = %{state | original_down: true, fence: fence}
+
+        state
+        |> pipe_record("original_down", at, %{
+          "worker" => pipe_identity(worker),
+          "monitor" => pipe_identity(original),
+          "reason" => Atom.to_string(reason)
+        })
+        |> pipe_witness_loop()
+
+      {:cutoff, worker, original, at}
+      when worker == state.worker and original == state.original_monitor ->
+        send_control(
+          state.socket,
+          {:writer_causal,
+           %{
+             "records" => Enum.reverse(state.records),
+             "cutoff_at_ns" => at,
+             "status_observed_at_ns" => System.monotonic_time(:nanosecond),
+             "manager_status" => pipe_status(state.manager),
+             "driver_status" => pipe_status(state.driver),
+             "worker_status" => pipe_status(worker)
+           }}
+        )
+
+        raise "pipe causal witness retained the original worker nonjoin"
+
+      {:DOWN, monitor, :process, pid, reason} ->
+        ^pid = Map.fetch!(state.monitors, monitor)
+        state = %{state | monitors: Map.delete(state.monitors, monitor)}
+
+        state
+        |> pipe_record("actor_down", System.monotonic_time(:nanosecond), %{
+          "actor" => pipe_identity(pid),
+          "monitor" => pipe_identity(monitor),
+          "reason" => Atom.to_string(reason)
+        })
+        |> pipe_witness_loop()
+
+      {:trace_delivered, :all, fence} when fence == state.fence ->
+        state = %{state | fence: :delivered}
+        pipe_witness_loop(state)
+
+      _unexpected ->
+        raise "pipe causal witness received unexpected metadata"
+    after
+      0 ->
+        if state.original_down and state.fence == :delivered and state.monitors == %{} do
+          for {mfa, _, flags} <- state.patterns, do: :erlang.trace_pattern(mfa, false, flags)
+
+          send_control(
+            state.socket,
+            {:writer_causal, %{"records" => Enum.reverse(state.records)}}
+          )
+
+          :ok
+        else
+          receive do
+            message -> send(self(), message)
+          end
+
+          pipe_witness_loop(state)
+        end
+    end
+  end
+
+  defp pipe_record(state, event, at, fields) when length(state.records) < 64 do
+    record = Map.merge(fields, %{"event" => event, "at_ns" => at})
+    %{state | records: [record | state.records]}
+  end
+
+  defp pipe_record(_, _, _, _), do: raise("pipe causal metadata limit exceeded")
+  defp pipe_identity(value) when is_pid(value), do: List.to_string(:erlang.pid_to_list(value))
+
+  defp pipe_identity(value) when is_reference(value),
+    do: List.to_string(:erlang.ref_to_list(value))
+
+  defp pipe_status(pid) do
+    case Process.info(pid, [:status, :current_function, :message_queue_len]) do
+      nil ->
+        %{"alive" => false}
+
+      info ->
+        %{
+          "alive" => true,
+          "status" => Atom.to_string(info[:status]),
+          "current_function" => inspect(info[:current_function]),
+          "queued_messages" => info[:message_queue_len]
+        }
+    end
+  end
+
+  defp await_writer_and_witness(_, _, _, true, true, _), do: :ok
+
+  defp await_writer_and_witness(socket, collector, monitor, worker_joined, witness_joined, cutoff) do
+    remaining = max(cutoff - System.monotonic_time(:millisecond), 0)
+
+    receive do
+      :writer_joined ->
+        await_writer_and_witness(socket, collector, monitor, true, witness_joined, cutoff)
+
+      {:DOWN, ^monitor, :process, ^collector, :normal} ->
+        false = Process.alive?(collector)
+        send_control(socket, {:witness_down, :normal})
+        await_writer_and_witness(socket, collector, monitor, worker_joined, true, cutoff)
+    after
+      remaining -> raise "actual pipe IO worker or causal collector monitor was not joined"
     end
   end
 
