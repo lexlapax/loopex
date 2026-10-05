@@ -48,7 +48,7 @@ defmodule LoopexCli.ProgressConsumer do
             next_closure_order: non_neg_integer()
           }
 
-  defstruct domains: %{}, next_closure_order: 0
+  defstruct domains: %{}, next_closure_order: 0, minimum_base: 0, retention_limit: nil
 
   @doc """
   ## Concept
@@ -61,6 +61,47 @@ defmodule LoopexCli.ProgressConsumer do
   """
   @spec new() :: t()
   def new, do: %__MODULE__{}
+
+  # Concept: long chat retains only its current provisional display evidence.
+  # Technical depth: reuse the transcript's 256-KiB ceiling for retained answer
+  # fragments. Exhaustion invalidates that domain and preserves durable fallback.
+  # Advancing the durable cursor retires prior domains and refuses stale items.
+  @doc false
+  def new(:chat), do: %__MODULE__{retention_limit: 262_144}
+
+  @doc false
+  def advance(%__MODULE__{} = state, cursor) when is_integer(cursor) and cursor >= 0 do
+    {retired, kept} =
+      Enum.split_with(state.domains, fn {_id, domain} ->
+        elem(domain.identity, tuple_size(domain.identity) - 1) < cursor
+      end)
+
+    {%{state | domains: Map.new(kept), minimum_base: max(cursor, state.minimum_base)},
+     Enum.map(retired, &elem(&1, 0))}
+  end
+
+  # Concept: complete transient content is only a candidate for suppression.
+  # Technical depth: the chat writer must separately prove every nonempty answer
+  # fragment delivered and its IO worker joined. No closure proves output IO.
+  @doc false
+  def chat_assistant(%__MODULE__{} = state, event_sequence, content) do
+    candidate = next_complete_model(state, event_sequence - 1)
+    {next, disposition} = durable_assistant(state, event_sequence, content)
+
+    case {disposition, candidate} do
+      {:suppress, {domain, %{text: [_last | earlier]} = evidence}} ->
+        # Concept: suppression preserves the answer's displayed line framing.
+        # Technical depth: each queued fragment is visibly quoted and terminated.
+        # Earlier fragments must already end at LF boundaries for concatenated
+        # rendering to equal the complete durable answer. Otherwise fall back.
+        if Enum.all?(earlier, &String.ends_with?(&1, "\n")),
+          do: {next, {domain, length(evidence.text)}},
+          else: {next, nil}
+
+      _ ->
+        {next, nil}
+    end
+  end
 
   @doc """
   ## Concept
@@ -144,17 +185,26 @@ defmodule LoopexCli.ProgressConsumer do
          :ok <- valid_visible_payload(kind, item) do
       domain = Map.get(state.domains, domain_id, new_domain(kind, identity))
 
-      if domain.kind == kind and domain.identity == identity and domain.status == :open and
-           domain.next_sequence == sequence do
-        next_domain = %{
-          domain
-          | next_sequence: sequence + 1,
-            text: retain_text(kind, item, domain.text)
-        }
+      cond do
+        elem(identity, tuple_size(identity) - 1) < state.minimum_base ->
+          {state, []}
 
-        {put_domain(state, domain_id, next_domain), actions(kind, item)}
-      else
-        {invalidate(state, domain_id, domain, kind, identity), []}
+        domain.kind == kind and domain.identity == identity and domain.status == :open and
+            domain.next_sequence == sequence ->
+          next_domain = %{
+            domain
+            | next_sequence: sequence + 1,
+              text: retain_text(kind, item, domain.text)
+          }
+
+          next = put_domain(state, domain_id, next_domain)
+
+          if within_retention?(next),
+            do: {next, actions(kind, item)},
+            else: {put_domain(next, domain_id, %{next_domain | status: :invalid, text: []}), []}
+
+        true ->
+          {invalidate(state, domain_id, domain, kind, identity), []}
       end
     else
       _invalid -> {invalidate_known_domain(state, item), []}
@@ -169,20 +219,25 @@ defmodule LoopexCli.ProgressConsumer do
          true <- disposition in @dispositions do
       domain = Map.get(state.domains, domain_id, new_domain(kind, identity))
 
-      if domain.kind == kind and domain.identity == identity and domain.status == :open and
-           domain.next_sequence == count do
-        closed = %{
-          domain
-          | status: disposition,
-            closure_order: state.next_closure_order
-        }
+      cond do
+        elem(identity, tuple_size(identity) - 1) < state.minimum_base ->
+          {state, []}
 
-        {%{
-           put_domain(state, domain_id, closed)
-           | next_closure_order: state.next_closure_order + 1
-         }, []}
-      else
-        {invalidate(state, domain_id, domain, kind, identity), []}
+        domain.kind == kind and domain.identity == identity and domain.status == :open and
+            domain.next_sequence == count ->
+          closed = %{
+            domain
+            | status: disposition,
+              closure_order: state.next_closure_order
+          }
+
+          {%{
+             put_domain(state, domain_id, closed)
+             | next_closure_order: state.next_closure_order + 1
+           }, []}
+
+        true ->
+          {invalidate(state, domain_id, domain, kind, identity), []}
       end
     else
       _invalid -> {invalidate_known_domain(state, item), []}
@@ -240,6 +295,7 @@ defmodule LoopexCli.ProgressConsumer do
   defp optional_terminal_text?(nil), do: true
   defp optional_terminal_text?(value), do: ProgressPayload.terminal_safe?(value)
 
+  defp retain_text(:model, %{kind: :text_delta, text: ""}, retained), do: retained
   defp retain_text(:model, %{kind: :text_delta, text: text}, retained), do: [text | retained]
   defp retain_text(_kind, _item, retained), do: retained
 
@@ -296,6 +352,14 @@ defmodule LoopexCli.ProgressConsumer do
 
   defp put_domain(state, domain_id, domain),
     do: %{state | domains: Map.put(state.domains, domain_id, domain)}
+
+  defp within_retention?(%{retention_limit: nil}), do: true
+
+  defp within_retention?(state) do
+    Enum.reduce(state.domains, 0, fn {_id, domain}, bytes ->
+      Enum.reduce(domain.text, bytes, &(byte_size(&1) + &2))
+    end) <= state.retention_limit
+  end
 
   defp next_complete_model(%__MODULE__{domains: domains}, base_event_sequence) do
     domains

@@ -52,6 +52,27 @@ defmodule LoopexCli.ChatOutput do
           :ok | :dropped | {:error, atom()}
   def write(writer, kind, bytes), do: GenServer.call(writer, {:write, kind, bytes})
 
+  # Concept: provisional answer and summary text share transcript pressure.
+  # Technical depth: the owner supplies the existing stdout/stderr device for
+  # each entry. One queue, byte charge and IO worker govern both destinations.
+  # A private domain tag records actual joined writes, never queue admission.
+  @doc false
+  def progress(writer, bytes, device, domain \\ nil),
+    do: GenServer.call(writer, {:progress, bytes, device, domain})
+
+  # Concept: a durable answer replaces any undelivered provisional fragments.
+  # Technical depth: return the exact delivery counts before retiring this
+  # domain. Active IO stays charged and delivery-unconfirmed until worker DOWN;
+  # queued fragments are discarded before the required answer is admitted.
+  @doc false
+  def settle_progress(writer, domain), do: GenServer.call(writer, {:settle_progress, domain})
+
+  # Concept: capture a stable drop count before diagnostic shutdown.
+  # Technical depth: seal only progress and discard queued provisional entries.
+  # Required output and the active IO worker retain their existing lifecycle.
+  @doc false
+  def seal_progress(writer), do: GenServer.call(writer, :seal_progress)
+
   @doc """
   ## Concept
 
@@ -95,6 +116,8 @@ defmodule LoopexCli.ChatOutput do
        bytes: 0,
        current: nil,
        dropped: 0,
+       progress_sealed: false,
+       progress_delivery: %{},
        failure: nil,
        finishing: nil,
        finish_deadline: nil,
@@ -110,6 +133,21 @@ defmodule LoopexCli.ChatOutput do
   def handle_call(:status, _from, state),
     do: {:reply, Map.take(state, [:bytes, :dropped, :failure]), state}
 
+  def handle_call({:settle_progress, domain}, _from, state) when is_binary(domain) do
+    state = discard_progress(state, &(&1.domain == domain))
+    counts = Map.get(state.progress_delivery, domain, %{admitted: 0, delivered: 0, dropped: 0})
+    {:reply, counts, %{state | progress_delivery: Map.delete(state.progress_delivery, domain)}}
+  end
+
+  def handle_call(:seal_progress, _from, state) do
+    state = discard_progress(state, fn _ -> true end)
+    {:reply, state.dropped, %{state | progress_sealed: true, progress_delivery: %{}}}
+  end
+
+  def handle_call({:progress, bytes, device, domain}, from, state)
+      when is_binary(bytes) and (is_binary(domain) or is_nil(domain)),
+      do: enqueue(:progress, bytes, device || state.device, domain, from, state)
+
   def handle_call({:write, _, _}, _from, %{failure: failure} = state) when failure != nil,
     do: {:reply, {:error, failure}, state}
 
@@ -118,6 +156,32 @@ defmodule LoopexCli.ChatOutput do
 
   def handle_call({:write, kind, bytes}, _from, state)
       when kind in [:control, :text, :progress] and is_binary(bytes) do
+    enqueue(kind, bytes, state.device, nil, nil, state)
+  end
+
+  def handle_call({:write, _, _}, _from, state),
+    do: {:reply, {:error, :invalid_output}, fail(state, :invalid_output)}
+
+  def handle_call({:finish, deadline}, from, state) when is_integer(deadline) do
+    state = %{state | finishing: from, finish_deadline: min(deadline, now() + @drain_ms)}
+    continue(arm(state))
+  end
+
+  def handle_call({:finish, _}, _from, state),
+    do: {:reply, {:error, :invalid_output_deadline}, state}
+
+  defp enqueue(_kind, _bytes, _device, _domain, _from, %{failure: failure} = state)
+       when failure != nil,
+       do: {:reply, {:error, failure}, state}
+
+  defp enqueue(_kind, _bytes, _device, _domain, _from, %{finishing: from} = state)
+       when from != nil,
+       do: {:reply, {:error, :output_closed}, state}
+
+  defp enqueue(:progress, _bytes, _device, _domain, _from, %{progress_sealed: true} = state),
+    do: {:reply, :dropped, state}
+
+  defp enqueue(kind, bytes, device, domain, _from, state) do
     cond do
       kind == :control and byte_size(bytes) > @control_bytes ->
         {:reply, {:error, :control_record_too_large}, fail(state, :control_record_too_large)}
@@ -126,6 +190,7 @@ defmodule LoopexCli.ChatOutput do
         {:reply, :ok, state}
 
       kind == :progress and state.bytes + byte_size(bytes) > @queue_bytes ->
+        state = account_progress(state, domain, :dropped)
         {:reply, :dropped, %{state | dropped: state.dropped + 1}}
 
       true ->
@@ -133,7 +198,10 @@ defmodule LoopexCli.ChatOutput do
 
         if state.bytes + byte_size(bytes) <= @queue_bytes do
           deadline = if kind == :control, do: now() + @drain_ms
-          item = %{kind: kind, bytes: bytes, deadline: deadline}
+          item = %{kind: kind, bytes: bytes, deadline: deadline, device: device, domain: domain}
+
+          state =
+            if kind == :progress, do: account_progress(state, domain, :admitted), else: state
 
           state = %{
             state
@@ -147,17 +215,6 @@ defmodule LoopexCli.ChatOutput do
         end
     end
   end
-
-  def handle_call({:write, _, _}, _from, state),
-    do: {:reply, {:error, :invalid_output}, fail(state, :invalid_output)}
-
-  def handle_call({:finish, deadline}, from, state) when is_integer(deadline) do
-    state = %{state | finishing: from, finish_deadline: min(deadline, now() + @drain_ms)}
-    continue(arm(state))
-  end
-
-  def handle_call({:finish, _}, _from, state),
-    do: {:reply, {:error, :invalid_output_deadline}, state}
 
   @impl true
   def format_status(status) do
@@ -184,7 +241,7 @@ defmodule LoopexCli.ChatOutput do
 
     state =
       if reason == :normal and current.result == :ok,
-        do: state,
+        do: delivered_progress(state, current.item),
         else: fail(state, :output_failed)
 
     continue(state |> dispatch() |> arm())
@@ -214,8 +271,15 @@ defmodule LoopexCli.ChatOutput do
   defp make_room(state, incoming) when state.bytes + incoming <= @queue_bytes, do: state
 
   defp make_room(state, _incoming) do
-    {progress, retained} = Enum.split_with(:queue.to_list(state.queue), &(&1.kind == :progress))
+    discard_progress(state, fn _ -> true end)
+  end
+
+  defp discard_progress(state, selected) do
+    {progress, retained} =
+      Enum.split_with(:queue.to_list(state.queue), &(&1.kind == :progress and selected.(&1)))
+
     removed = Enum.reduce(progress, 0, &(byte_size(&1.bytes) + &2))
+    state = Enum.reduce(progress, state, &account_progress(&2, &1.domain, :dropped))
 
     %{
       state
@@ -232,7 +296,7 @@ defmodule LoopexCli.ChatOutput do
 
       {{:value, item}, rest} ->
         manager = self()
-        device = state.device
+        device = item.device
 
         {pid, ref} =
           :erlang.spawn_opt(
@@ -261,11 +325,28 @@ defmodule LoopexCli.ChatOutput do
     send(state.owner, {:loopex_chat_output_failed, self(), reason})
     cancel_timer(state.timer)
     if state.current, do: Process.exit(state.current.pid, :kill)
+    state = discard_progress(state, fn _ -> true end)
     retained = if state.current, do: byte_size(state.current.item.bytes), else: 0
     %{state | failure: reason, queue: :queue.new(), bytes: retained, timer: nil}
   end
 
   defp fail(state, _reason), do: state
+
+  defp delivered_progress(state, %{kind: :progress, domain: domain}) when is_binary(domain) do
+    if Map.has_key?(state.progress_delivery, domain),
+      do: account_progress(state, domain, :delivered),
+      else: state
+  end
+
+  defp delivered_progress(state, _item), do: state
+
+  defp account_progress(state, nil, _field), do: state
+
+  defp account_progress(state, domain, field) do
+    counts = Map.get(state.progress_delivery, domain, %{admitted: 0, delivered: 0, dropped: 0})
+    counts = Map.update!(counts, field, &(&1 + 1))
+    %{state | progress_delivery: Map.put(state.progress_delivery, domain, counts)}
+  end
 
   defp continue(%{finishing: from, current: nil} = state) when from != nil do
     if :queue.is_empty(state.queue) do

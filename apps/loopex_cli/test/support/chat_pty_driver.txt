@@ -318,7 +318,7 @@ defmodule LoopexCli.ChatPTYDriver do
             )
 
           :inspect_writer ->
-            current = await_writer(driver, System.monotonic_time(:millisecond) + 5000)
+            {current, writer} = await_writer(driver, System.monotonic_time(:millisecond) + 5000)
             monitor = Process.monitor(current.pid)
 
             send_control(
@@ -329,28 +329,41 @@ defmodule LoopexCli.ChatPTYDriver do
                  "worker_alive" => Process.alive?(current.pid),
                  "kind" => Atom.to_string(current.item.kind),
                  "bytes" => byte_size(current.item.bytes),
-                 "retained_bytes" => :sys.get_state(:sys.get_state(driver).writer).bytes,
-                 "result_pending" => current.result == nil
+                 "retained_bytes" => writer.bytes,
+                 "result_pending" => current.result == nil,
+                 "pending_control" => true,
+                 "delivery_cutoff_present" => is_integer(writer.delivery_deadline)
                }}
             )
 
-            receive do
-              {:DOWN, ^monitor, :process, pid, reason} when pid == current.pid ->
-                send_control(socket, {:writer_down, reason})
-                false = Process.alive?(pid)
-            after
-              5000 ->
-                send_control(
-                  socket,
-                  {:writer_join_timeout,
-                   %{
-                     "worker_alive" => Process.alive?(current.pid),
-                     "worker_status" => inspect(Process.info(current.pid, :status))
-                   }}
-                )
+            reason =
+              receive do
+                {:DOWN, ^monitor, :process, pid, reason} when pid == current.pid -> reason
+              after
+                5000 ->
+                  # Concept: a cutoff still admits an already-delivered exact join.
+                  # Technical depth: inspect the mailbox immediately with no
+                  # additional wait before diagnostics. A dead PID alone proves
+                  # nothing; absence of this monitor's DOWN remains a failure.
+                  receive do
+                    {:DOWN, ^monitor, :process, pid, reason} when pid == current.pid -> reason
+                  after
+                    0 ->
+                      send_control(
+                        socket,
+                        {:writer_join_timeout,
+                         %{
+                           "worker_alive" => Process.alive?(current.pid),
+                           "worker_status" => inspect(Process.info(current.pid, :status))
+                         }}
+                      )
 
-                raise "actual pipe IO worker did not join"
-            end
+                      raise "actual pipe IO worker did not join"
+                  end
+              end
+
+            send_control(socket, {:writer_down, reason})
+            false = Process.alive?(current.pid)
 
             send(host, :writer_joined)
 
@@ -379,14 +392,21 @@ defmodule LoopexCli.ChatPTYDriver do
   # Concept: the physical pipe witness must correspond to the actual IO worker.
   # Technical depth: a queued record alone proves no blockage. Match its pending
   # result and waiting live worker; the parent separately observes kernel pressure.
+  # The same snapshot must already contain a deadline-bearing control. Its
+  # enqueue starts the product cutoff before the unchanged 5,000-ms join wait.
   defp await_writer(driver, cutoff) do
     state = :sys.get_state(driver)
     writer = :sys.get_state(state.writer)
 
     case writer.current do
       %{pid: pid, result: nil} = current ->
-        if Process.info(pid, :status) == {:status, :waiting} do
-          current
+        pending_control =
+          current.item.kind == :control or
+            Enum.any?(:queue.to_list(writer.queue), &(&1.kind == :control))
+
+        if Process.info(pid, :status) == {:status, :waiting} and pending_control and
+             is_integer(writer.delivery_deadline) do
+          {current, writer}
         else
           await_writer_again(driver, cutoff)
         end

@@ -93,10 +93,22 @@ defmodule LoopexCli.Chat do
                DiagnosticLifetime.start(deps.diagnostic_device, grace(invocation)) do
           remember(tag, :diagnostics, {consumer, Process.monitor(consumer), grace(invocation)})
 
+          {:ok, driver} =
+            ChatDriver.bootstrap(deps.input, deps.output,
+              mode: deps.mode,
+              cleanup_grace_ms: grace(invocation),
+              progress_device: deps.diagnostic_device
+            )
+
+          Process.unlink(driver)
+          remember(tag, :driver, {driver, Process.monitor(driver)})
+
           result =
             deps.with_runtime.(
-              composition_options(invocation, resources, placement, consumer, deps),
-              fn runtime -> callback(runtime, invocation, consumer, placement, deps, tag) end
+              composition_options(invocation, resources, placement, consumer, driver, deps),
+              fn runtime ->
+                callback(runtime, invocation, consumer, driver, placement, deps, tag)
+              end
             )
 
           remember(
@@ -167,7 +179,7 @@ defmodule LoopexCli.Chat do
     end
   end
 
-  defp composition_options(invocation, resources, placement, consumer, deps) do
+  defp composition_options(invocation, resources, placement, consumer, driver, deps) do
     profile = invocation.selection.profile
     configuration = Map.get(invocation.selection, :configuration, %{})
 
@@ -181,6 +193,7 @@ defmodule LoopexCli.Chat do
       provider_launch: deps.provider_launch.(),
       resource_manifest: resources.manifest,
       diagnostics_to: consumer,
+      progress_to: {:session, driver},
       active_tools: Map.get(invocation, :active_tools, []),
       cleanup_grace_ms: grace(invocation),
       recover_stale_writer: true,
@@ -189,7 +202,7 @@ defmodule LoopexCli.Chat do
     ]
   end
 
-  defp callback(runtime, invocation, consumer, placement, deps, tag) do
+  defp callback(runtime, invocation, consumer, driver, placement, deps, tag) do
     try do
       with {:ok, prepared, session, activation} <-
              session(runtime, invocation, placement, deps, tag) do
@@ -201,17 +214,13 @@ defmodule LoopexCli.Chat do
         )
 
         with :ok <- trace(runtime, prepared),
-             {:ok, driver} <-
-               ChatDriver.start_link(runtime, session, deps.input, deps.output,
-                 mode: deps.mode,
+             :ok <-
+               ChatDriver.bind(driver, runtime, session,
                  configuration: prepared,
                  status_policy: status_policy(prepared),
                  cleanup_grace_ms: grace(prepared),
                  bounds: bounds(prepared)
                ) do
-          Process.unlink(driver)
-          remember(tag, :driver, {driver, Process.monitor(driver)})
-
           case guarded(fn -> drive(driver, prepared, activation, deps, tag) end) do
             {:error, :chat_startup_failed} ->
               ChatDriver.interrupt(driver)
@@ -228,6 +237,7 @@ defmodule LoopexCli.Chat do
       # Technical depth: retain the exact close certificate/joins before
       # composition can replace a provisional callback result with cleanup loss.
       settle_activation(tag)
+      report_progress(driver, consumer)
       remember(tag, :diagnostics_closed, close_diagnostics(consumer, tag))
     end
   end
@@ -369,6 +379,21 @@ defmodule LoopexCli.Chat do
   end
 
   defp finish(result, context, deps) do
+    if not (is_map(result) and Map.has_key?(result, :exit_code)) do
+      case context do
+        %{driver: {driver, _}} ->
+          guarded(fn -> ChatDriver.refuse_startup(driver, startup_code(result)) end)
+
+        _ ->
+          :ok
+      end
+    end
+
+    case context do
+      %{driver: {driver, _}, diagnostics: {consumer, _, _}} -> report_progress(driver, consumer)
+      _ -> :ok
+    end
+
     diagnostics =
       case context do
         %{diagnostics_closed: closed} ->
@@ -420,12 +445,7 @@ defmodule LoopexCli.Chat do
   end
 
   defp startup_failure(output, result, cleanup) do
-    code =
-      case result do
-        {:error, reason} when is_atom(reason) -> reason
-        {:error, {reason, pointer}} when is_atom(reason) and is_binary(pointer) -> reason
-        _ -> :chat_startup_failed
-      end
+    code = startup_code(result)
 
     guarded(fn ->
       with {:ok, writer} <- ChatOutput.start_link(output),
@@ -439,6 +459,26 @@ defmodule LoopexCli.Chat do
     end)
 
     1
+  end
+
+  defp startup_code(result) do
+    case result do
+      {:error, reason} when is_atom(reason) -> reason
+      {:error, {reason, pointer}} when is_atom(reason) and is_binary(pointer) -> reason
+      _ -> :chat_startup_failed
+    end
+  end
+
+  defp report_progress(driver, consumer) do
+    guarded(fn ->
+      case ChatDriver.seal_progress(driver) do
+        {count, true} when is_integer(count) ->
+          send(consumer, {:loopex_diagnostic, %{kind: "chat_progress_dropped", dropped: count}})
+
+        _ ->
+          :ok
+      end
+    end)
   end
 
   defp command_id, do: :crypto.strong_rand_bytes(16) |> Base.url_encode64(padding: false)

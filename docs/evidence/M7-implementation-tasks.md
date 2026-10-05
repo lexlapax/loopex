@@ -325,6 +325,59 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: chat consumes actual session-labelled model/tool progress through its
+  bootstrapped driver and existing bounded output writer. Answer/summary/tool
+  text is escaped; provisional answer suppression requires exact content,
+  complete framing and actual joined IO receipts. Gaps, loss and mid-line
+  fragments preserve the full durable answer. Cursor advancement retires old
+  domains; empty deltas and retained text are bounded. Startup refusal joins
+  the unbound driver/writer without reading input or acquiring facade authority.
+  Progress seals once with a stable count submitted to the existing lossy
+  diagnostic consumer; the workflow proves exact receipt and retained count,
+  while existing tests prove nonzero drops and delivery-unconfirmed cleanup.
+
+  Complete eleven affected CLI files PASS 182 tests on both supported pairs,
+  measured 108.630 / 105.183 seconds. Actual pipe/PTY, signal/interrupt, control,
+  startup, workflow and existing ask/progress cases are included. Core progress
+  routing PASS three tests per pair, measured 1.071 / 0.944 seconds. Owned
+  compilation, formatting, docs/status and dependency checks PASS on both pairs
+  in 16.168 / 14.712 seconds; unchanged production bytes reuse those metadata
+  results. The final fixture-only syntax/format proof PASS in 0.327 / 0.303
+  seconds. No full fast/release, paid, built-provider or attended claim.
+
+  Final current output
+  `/private/tmp/loopex-m7-chat-progress-proof/affected-current-v9.log`, SHA-256
+  `ecc7040a2c76872d07880355586978344247b52994671c096afee45b8a5b0797`;
+  floor output `affected-floor-v9.log` in that directory, SHA-256
+  `8af36d629dd45c5e554be2d253cb0fab1b1d9af9d8cbad1bde7759e6c57a4480`.
+  All retained source copies and successful/failed outputs are indexed by
+  `final-evidence-v9.tsv`, SHA-256
+  `d21f20f84d96d18f624bbb03b05cfa555d4df2345b2646a80633e24431335383`;
+  exact ten-path owned source inventory `final-owned-source-v9.json`, SHA-256
+  `bb7d965a59a0b8c65bdb732782165d4e31598383a837d5534379f3fe49b949aa`.
+
+  The failed v8 floor run remains FAIL, 182 tests/one failure in 115.710
+  seconds, SHA-256 `61b03ad04c7260700bb1422cf7ed17f2b1a62e0489b4ec65a2fc71562c99a2a0`.
+  Its monitor timeout observed a dead worker without retaining its exact DOWN.
+  The fixture now requires a deadline-bearing control in the same stalled
+  writer snapshot and, at the unchanged 5,000-ms wait boundary, immediately
+  checks for the exact monitor/PID DOWN with zero additional wait before any
+  diagnostics. Absence still fails; a dead PID never substitutes for a join.
+  This proves bounded waiting plus an exact final mailbox observation, not
+  an independently timestamped DOWN-before-cutoff guarantee. All pressure,
+  lifetime, outer join and OS assertions remain. Earlier v5/v7 failures and
+  the incorrect guaranteed-stderr assertion are retained; no unchanged-byte
+  failure was retried as proof and no wait or cleanup allowance was increased.
+
+- Running: ADR 0050 alias-preparation source is ready in its isolated worktree.
+  Independent 24-path review found and the writer repaired duplicate/refusal
+  abort handling before cancellation; no unresolved material source finding
+  remains, but execution proof is pending. Root will transfer the exclusive
+  VM slot after saving the chat unit. New transport manifest preparation paused
+  before source edits on unpinned inspection/open-policy-question shapes;
+  its concrete decision packet is being prepared. The presented human question
+  remains the restore outcome, asked separately; no new wire shape is assumed.
+
 - Maintainer decision: "Approved option 1" requires `session_options: {}` on
   every foreground /3 and daemon /4 wire create. The
   [durable disposition](../developer/agent-context-map.md#disposition-m7-wire-create-empty-options-2026-10-04)
@@ -11148,6 +11201,7 @@ or check was relaxed.
 - [x] Capture actual provider capabilities and exact chat startup template in CLI fixtures; preserve explicit context/system/reply/cleanup budgets, physical reopen/resume, real HTTP accounting and two-runtime diagnostic isolation, and prove all 18 cases on both supported pairs after integration.
 - [x] Bind the four daemon CLI response fixtures to the exact captured dated model; preserve all process/socket, project context, replay, lease, controller, signal, once-only command and shutdown proofs. Prove all 31 cases including pinned independent Node on both worker toolchains and after integration on the current pair; retain original FAIL evidence and every existing bound.
 - [x] Implement and verify the approved prompt/follow-up/compact wire bound codecs and independent Node vectors; preserve exact decimal/safe-integer domains, partial overrides and omission without defaults. Explicit maintainer approval supersedes the two retained automatic-review refusals; both supported pairs and independent Node pass the six integrated source paths. Complete negotiated transport joins remain open.
+- [ ] Resolve and pin the complete current inspection member inventory and answered policy-defer visibility at the correct public/private truth plane before hashing or serving the full /3-/4 manifests; preserve configuration, active bounds, maintenance privacy and snapshot cursor semantics.
 - [ ] Migrate remaining implicit Core/edge/transport test hosts to captured current creation, replace their superseded record assertions, remove old configuration-less readers/writers, and prove current replay, command identity, uncertainty, authority and cleanup without a Core fallback. Run the full check once on the resulting clean committed candidate. The headless/loop and context-admission fixture phases are complete; superseded request/admission decoders and edge/transport joins remain.
 
 ## T06 — Build the first complete chat workflow
@@ -11403,9 +11457,9 @@ the still-open real-provider, live protocol, persistent-fault or closure lanes.
 ### Added implementation subtasks
 
 - [x] Preserve the writer's already-running control cutoff during unknown-admission shutdown and pass the captured host cutoff into final drain; prove deadline changes, delivery clearing, lost-writer handling and actor joins without changing public records or product bounds.
-- [ ] Establish the actual pending-control enqueue cutoff before the physical-pipe IO join; retain the failed integrated floor proof, preserve every existing pressure/lifetime assertion and all captured waits, then prove the repaired complete files on both pairs.
+- [x] Establish the actual pending-control enqueue cutoff before the physical-pipe IO join; retain the failed integrated floor proofs, preserve every existing pressure/lifetime assertion and captured wait, require the exact monitor/PID DOWN including a zero-wait final mailbox observation, and prove the repaired complete affected files on both pairs.
 - [x] Prove actual OS-pipe fragmentation, question responses, wait backpressure, EOF and kernel stdout stalls through Chat.run with exact process cleanup; existing PTY and simulated byte-device proofs cover only their own lanes.
-- [ ] Consume admitted transient provider progress through the existing attachment and bounded writer, including escaped rendering and reported drop counts, without inventing new pipe control fields.
+- [x] Consume admitted transient provider progress through the existing attachment and bounded writer, including escaped rendering, joined delivery before suppression, durable fallback, bounded/retired domains and stable drop-count submission to the lossy diagnostic consumer, without inventing new pipe control fields. Prove actual model callback delivery, exact consumer receipt, startup refusal, privacy and cleanup through complete affected files on both pairs.
 
 
 - [x] Prove actual pseudo-terminal steer, follow-up, model-question identity/answer or decline and interrupt paths with real runtime/control observations and process/OS-group cleanup, using the existing Python stdlib tooling and product bounds; no paid-provider, attended or built-product claim.

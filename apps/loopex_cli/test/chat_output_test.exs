@@ -104,6 +104,72 @@ defmodule LoopexCli.ChatOutputTest do
     refute_receive {:loopex_chat_output_failed, ^writer, _}, 0
   end
 
+  test "stdout and stderr progress share one charged queue and joined delivery proof" do
+    stdout = device()
+    stderr = device()
+    {:ok, writer} = ChatOutput.start_link(stdout)
+    assert :ok = ChatOutput.progress(writer, "answer", stdout, "model-a")
+    assert_receive {:device_write, _, "answer"}
+    first = :sys.get_state(writer).current.pid
+    first_monitor = Process.monitor(first)
+    assert_monitor_established(first)
+    assert :ok = ChatOutput.progress(writer, "summary", stderr)
+    assert ChatOutput.status(writer).bytes == 13
+    refute_receive {:device_write, _, "summary"}, 0
+
+    assert ChatOutput.settle_progress(writer, "model-a") ==
+             %{admitted: 1, delivered: 0, dropped: 0}
+
+    send(stdout, {:release, :ok})
+    assert_receive {:DOWN, ^first_monitor, :process, ^first, :normal}
+    assert_receive {:device_write, _, "summary"}
+    assert :ok = ChatOutput.progress(writer, "delivered", stdout, "model-b")
+    send(stderr, {:release, :ok})
+    assert_receive {:device_write, _, "delivered"}
+    second = :sys.get_state(writer).current.pid
+    second_monitor = Process.monitor(second)
+    assert_monitor_established(second)
+    send(stdout, {:release, :ok})
+    assert_receive {:DOWN, ^second_monitor, :process, ^second, :normal}
+    # A same-owner call following the worker's DOWN waits until the writer has
+    # processed its own monitor, rather than treating the IO reply as a join.
+    assert :ok = ChatOutput.write(writer, :control, "barrier")
+    assert_receive {:device_write, _, "barrier"}
+
+    assert ChatOutput.settle_progress(writer, "model-b") ==
+             %{admitted: 1, delivered: 1, dropped: 0}
+
+    send(stdout, {:release, :ok})
+    assert :ok = ChatOutput.finish(writer)
+  end
+
+  test "retiring a domain and sealing progress preserve charged active IO and stable drops" do
+    output = device()
+    {:ok, writer} = ChatOutput.start_link(output)
+    assert :ok = ChatOutput.write(writer, :text, "active")
+    assert_receive {:device_write, _, "active"}
+    assert :ok = ChatOutput.progress(writer, "old", output, "old-domain")
+    assert :ok = ChatOutput.progress(writer, "other", output, "other-domain")
+
+    assert ChatOutput.settle_progress(writer, "old-domain") ==
+             %{admitted: 1, delivered: 0, dropped: 1}
+
+    assert ChatOutput.status(writer) == %{bytes: 11, dropped: 1, failure: nil}
+    assert ChatOutput.seal_progress(writer) == 2
+    assert ChatOutput.status(writer) == %{bytes: 6, dropped: 2, failure: nil}
+    assert :dropped = ChatOutput.progress(writer, "late", output, "late-domain")
+    assert :dropped = ChatOutput.write(writer, :progress, "also late")
+    assert ChatOutput.seal_progress(writer) == 2
+    assert :sys.get_state(writer).progress_delivery == %{}
+    assert :ok = ChatOutput.write(writer, :control, "closing")
+    send(output, {:release, :ok})
+    assert_receive {:device_write, _, "closing"}
+    refute_receive {:device_write, _, "old"}, 0
+    refute_receive {:device_write, _, "other"}, 0
+    send(output, {:release, :ok})
+    assert :ok = ChatOutput.finish(writer)
+  end
+
   test "oversized control records refuse before IO rather than being truncated" do
     device = device()
     {:ok, writer} = ChatOutput.start_link(device)

@@ -232,6 +232,7 @@ defmodule LoopexCli.ChatPipeTest do
     assert :ok = :gen_tcp.send(state.socket, :erlang.term_to_binary(:inspect_writer))
     assert {:writer_blocked, writer} = control(state.socket)
     assert writer["worker_waiting"] and writer["worker_alive"] and writer["result_pending"]
+    assert writer["pending_control"] and writer["delivery_cutoff_present"]
     assert writer["kind"] in ["text", "control"]
     assert writer["bytes"] > 0 and writer["bytes"] <= 262_144
     assert writer["retained_bytes"] <= 262_144

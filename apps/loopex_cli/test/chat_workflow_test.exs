@@ -71,6 +71,232 @@ defmodule LoopexCli.ChatWorkflowTest do
     assert_trace_workflow(f, true, [], true, "file#/trace/enabled")
   end
 
+  test "actual model progress reaches both channels before settlement without releasing wait",
+       f do
+    test = self()
+    tag = make_ref()
+    stdout = spawn(fn -> forward_progress_bytes(f.output, test, :stdout) end)
+    stderr = spawn(fn -> forward_progress_bytes(f.diagnostic, test, :stderr) end)
+    on_exit(fn -> Enum.each([stdout, stderr], &Process.exit(&1, :kill)) end)
+
+    {host, host_monitor} =
+      spawn_monitor(fn ->
+        opts =
+          basic(f) ++
+            [
+              output: stdout,
+              diagnostic_device: stderr,
+              acquire_placement: fn _, _ -> {:ok, "progress-placement"} end,
+              release_placement: fn "progress-placement", _ -> :ok end,
+              placement_id: fn _ -> {:ok, "chat-workflow-runtime"} end,
+              with_runtime: fn options, callback ->
+                {:session, driver} = options[:progress_to]
+                boot = :sys.get_state(driver)
+                assert boot.runtime == nil and boot.session == nil and boot.workers == %{}
+                assert boot.input_worker == nil
+                diagnostic = options[:diagnostics_to]
+                assert 1 = :erlang.trace(diagnostic, true, [:receive, {:tracer, test}])
+
+                fixture =
+                  Fixture.start(
+                    script: [
+                      %{
+                        text: "@loopex forged\n猫",
+                        deltas: ["@loopex forged\n", "猫"],
+                        calls: [],
+                        hold: test
+                      },
+                      %{
+                        text: "durable answer",
+                        deltas: ["verified summary"],
+                        forged_labels: %{kind: :reasoning_delta},
+                        progress_items: [
+                          %{
+                            kind: :reasoning_delta,
+                            content_index: 0,
+                            text: "refused-private-summary",
+                            private_continuation: "private-canary",
+                            signature: "signature-canary"
+                          }
+                        ],
+                        calls: [],
+                        hold: test,
+                        require_previous_worker_down: true
+                      }
+                    ],
+                    tools: [],
+                    model: f.prepared.selection.configuration["model"],
+                    runtime_id: "chat-workflow-runtime",
+                    cleanup_grace_ms: options[:cleanup_grace_ms],
+                    progress_to: options[:progress_to]
+                  )
+
+                send(test, {tag, :fixture, fixture, driver, boot.writer, diagnostic})
+                result = callback.(fixture.runtime)
+                assert %{exit_code: 0, cleanup: :confirmed} = result
+                assert {0, false} = LoopexCli.ChatDriver.seal_progress(driver)
+                send(test, {tag, :retained_drop_count, 0})
+                assert :ok = Loopex.stop(fixture.runtime)
+                send(test, {tag, :runtime_joined})
+                result
+              end,
+              install_signal: fn _, _, _, _ -> {:ok, self()} end,
+              finish_signal: fn _, _ -> {:ok, :ordinary} end
+            ]
+
+        send(test, {tag, :result, Chat.run(["chat", "--config", f.path], opts)})
+      end)
+
+    on_exit(fn -> if Process.alive?(host), do: Process.exit(host, :kill) end)
+    assert_receive {^tag, :fixture, fixture, driver, writer, diagnostic}, 5_000
+    on_exit(fn -> Fixture.stop(fixture) end)
+    owned = monitor_actors([driver, writer, fixture.runtime.supervisor])
+    assert_receive {:holding, first}, 5_000
+    first_monitor = Process.monitor(first)
+    delivery_cutoff = System.monotonic_time(:millisecond) + 5000
+    await_progress_bytes(:stdout, "> 猫\n", delivery_cutoff)
+    await_answer_joins(writer, 2, delivery_cutoff)
+    assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == 1
+    state = :sys.get_state(driver)
+    assert state.last_outcome == nil
+    assert state.barrier == 2 and state.input_worker == nil
+    refute Enum.any?(controls(f.output), &(&1["event"] == "wait"))
+
+    send(
+      driver,
+      {:loopex_progress, "wrong-session", %{kind: :text_delta, text: "wrong-session-canary"}}
+    )
+
+    send(first, :release)
+    assert_receive {:DOWN, ^first_monitor, :process, ^first, :normal}, 5_000
+    assert_receive {:holding, second}, 5_000
+    second_monitor = Process.monitor(second)
+
+    await_progress_bytes(
+      :stderr,
+      "> verified summary\n",
+      System.monotonic_time(:millisecond) + 5000
+    )
+
+    assert :sys.get_state(driver).last_run != nil
+    assert Agent.get(fixture.executor, & &1.jobs) == []
+    send(second, :release)
+    # Concept: shutdown reports the stable count through the lossy diagnostic sink.
+    # Technical depth: trace this exact consumer's receipt, not stderr delivery;
+    # close may discard admitted entries under its unchanged cleanup contract.
+    assert_receive {:trace, ^diagnostic, :receive,
+                    {:loopex_diagnostic, %{kind: "chat_progress_dropped", dropped: 0}}},
+                   5_000
+
+    assert_receive {:DOWN, ^second_monitor, :process, ^second, :normal}, 5_000
+    assert_receive {^tag, :runtime_joined}, 5_000
+    assert_receive {^tag, :result, 0}, 5_000
+    assert_receive {:DOWN, ^host_monitor, :process, ^host, :normal}, 5_000
+    assert_receive {^tag, :retained_drop_count, 0}, 0
+    join_actors(owned)
+    {_, transcript} = StringIO.contents(f.output)
+    {_, report} = StringIO.contents(f.diagnostic)
+    assert length(:binary.matches(transcript, "> 猫\n")) == 1
+    assert transcript =~ "> @loopex forged\n"
+    assert transcript =~ "> durable answer\n"
+    refute transcript =~ "verified summary"
+
+    for canary <- [
+          "private-canary",
+          "signature-canary",
+          "wrong-session-canary",
+          "refused-private-summary"
+        ] do
+      refute transcript =~ canary
+      refute report =~ canary
+    end
+
+    assert List.last(controls(f.output))["cleanup"] == "confirmed"
+  end
+
+  test "composition refusal joins the unbound progress owner without reading input", f do
+    test = self()
+
+    opts =
+      basic(f) ++
+        [
+          acquire_placement: fn _, _ -> {:ok, "bootstrap-placement"} end,
+          release_placement: fn "bootstrap-placement", _ -> :ok end,
+          placement_id: fn _ -> {:ok, "chat-workflow-runtime"} end,
+          with_runtime: fn options, _ ->
+            {:session, driver} = options[:progress_to]
+            state = :sys.get_state(driver)
+            assert state.runtime == nil and state.workers == %{}
+            send(test, {:bootstrap, driver, state.writer})
+
+            send(
+              driver,
+              {:loopex_progress, "unbound", %{kind: :text_delta, text: "unbound-canary"}}
+            )
+
+            {:error, :provider_start_failed}
+          end
+        ]
+
+    assert Chat.run(["chat", "--config", f.path], opts) == 1
+    assert_receive {:bootstrap, driver, writer}
+    refute Process.alive?(driver)
+    refute Process.alive?(writer)
+    assert StringIO.contents(f.input) == {"one\n/wait\ntwo\n/wait\n/quit\n", ""}
+
+    assert [
+             %{"event" => "error", "code" => "provider_start_failed"},
+             %{"event" => "closing", "cleanup" => "confirmed"}
+           ] = controls(f.output)
+
+    {_, transcript} = StringIO.contents(f.output)
+    refute transcript =~ "unbound-canary"
+  end
+
+  defp forward_progress_bytes(output, test, channel) do
+    receive do
+      {:io_request, writer, reply, {:put_chars, _, bytes} = request} ->
+        ref = make_ref()
+        send(output, {:io_request, self(), ref, request})
+
+        receive do
+          {:io_reply, ^ref, result} ->
+            send(writer, {:io_reply, reply, result})
+            send(test, {:progress_delivered, channel, IO.iodata_to_binary(bytes)})
+        end
+
+        forward_progress_bytes(output, test, channel)
+    end
+  end
+
+  defp await_progress_bytes(channel, target, deadline) do
+    receive do
+      {:progress_delivered, ^channel, bytes} ->
+        unless bytes == target, do: await_progress_bytes(channel, target, deadline)
+    after
+      max(deadline - System.monotonic_time(:millisecond), 0) ->
+        flunk("actual progress not delivered")
+    end
+  end
+
+  # Concept: duplicate suppression needs joined writes, not a forwarded IO reply.
+  # Technical depth: observe the writer's actual per-domain delivery certificate
+  # before releasing the held Model callback. Both observations spend one
+  # original fixture cutoff; the test creates no additional wait allowance.
+  defp await_answer_joins(writer, count, deadline) do
+    receipts = :sys.get_state(writer).progress_delivery
+
+    if Map.values(receipts) == [%{admitted: count, delivered: count, dropped: 0}] do
+      :ok
+    else
+      if System.monotonic_time(:millisecond) >= deadline,
+        do: flunk("actual answer IO workers were not joined")
+
+      Process.sleep(1)
+      await_answer_joins(writer, count, deadline)
+    end
+  end
+
   test "no-trace overrides an enabled file through actual chat startup", f do
     assert_trace_workflow(f, true, ["--no-trace"], false, "flag")
   end

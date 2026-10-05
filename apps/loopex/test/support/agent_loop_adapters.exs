@@ -61,6 +61,11 @@ defmodule Loopex.AgentLoopTestModel do
       progress.(Map.merge(%{kind: :text_delta, content_index: 0, text: text}, forged))
     end)
 
+    # Concept: malformed scripted items cross the real Model progress boundary.
+    # Technical depth: these opt-in items use the callback acquired by the actual
+    # supervised attempt. Refused items reserve no sequence or closure count.
+    Enum.each(Map.get(turn, :progress_items, []), progress)
+
     # Concept: a turn that can be held open, so a test can steer a live run.
     #
     # Technical depth: the adapter blocks inside the supervised task exactly as a
