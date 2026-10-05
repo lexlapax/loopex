@@ -29,6 +29,54 @@ grouped by T00–T19. Empty added sections mean no added subtasks are recorded;
 they do not mean the original task is complete. This follows the maintainer's
 2026-10-01 update to the active implementation goal.
 
+## Current verification checkpoint — 2026-10-05, closing observation
+
+Changed chat source `538c0e5e20fda82780d0ba2c23c4824877d0a5ad`
+passes all fourteen complete current chat files, 181 cases in 100.691 seconds.
+The first floor run FAILS 180/181 in 98.055 seconds; its controlled interrupt
+regression passes, but the existing unknown-admission output-cutoff test reads
+nil finish_deadline after observing closing IO. Complete fourteen-output
+inventory, failures included, rehashed:
+`/private/tmp/loopex-m7-chat-stop-rejoin-v1/completion.json`, SHA-256
+`1fecde49df77b57ae87a3f1d4a5898aef9590f861556fe63f104209f8427c699`.
+Current output SHA-256
+`00ea69e665ae34c3c947f64564dd36065a3a0692a4a4572832b304ada66ee0f6`;
+floor output SHA-256
+`91dfa1a0b7f7fb698dc30f2b12fed3b1905a0224de223a3e9513d5903ab59872`.
+Handle 30772 is terminal and collected. No unchanged failing suite is retried.
+
+Independent exact latch/regression review reports no findings:
+`/private/tmp/loopex-m7-chat-stop-538c0e5e-independent-review.md`, SHA-256
+`206f9fdd03a66e4ab0a7eed59a93e93af612701589f8a613f4a1f3059059a19d`;
+eight inputs rehashed, inventory SHA-256
+`114269609f0d9b087f1b13c135201969c2cb1dc5e2165e150d483e54d0381636`.
+The added T06 unit stays open until corrected chat proof completes.
+
+The closing fixture's instant state observation is unordered: the writer
+acknowledges queue admission and its IO worker may notify blocked_closing before
+the driver submits its following finish call. Source-backed proof-preservation
+assessment:
+`/private/tmp/loopex-m7-chat-finish-observation-538c0e5e-review.md`, SHA-256
+`bd02ac74e82a42c7b461616129136a78c25af3da7b56a333633d7b247d052228`;
+four exact candidate/failure inputs rehashed, inventory SHA-256
+`ae5717f00a78f60052cde7804c8e6e73fbd3ae4979e03fe372e6af727bc96486`.
+The two existing blocked-closing fixtures now trace only the captured writer,
+require receipt of the exact driver's finish request with the original cutoff
+within that same remaining cutoff, then read its serially admitted integer
+deadline. Tracing is disabled in finally; actual blocked IO, release, outcome
+and every actor join remain. No production or bound change. Source/format and
+paired tests of this fixture repair are pending the exclusive slot.
+
+The exclusive VM slot belongs to restore worker model_preparation_option_b,
+verifying only its four isolated new codec/IO paths. Draft a3107d0e links and
+monitors the actual raw IO worker, retains guardian-loss uncertainty, and adds
+actual opened-descriptor and blocking-FIFO faults. No facade, claims, activation
+or root/Local guards are integrated. Required checks may stop at unavailable raw
+IO proof; no convenience file-server substitute or destructor inference is
+allowed. Root currently performs source-only work. Original and added tallies
+are unchanged from the preceding checkpoint; the diagnostic setup cutoff
+remains the unanswered maintainer question.
+
 ## Current rejoin checkpoint — 2026-10-05, interrupt intent
 
 At `55a577dba7910f6e44b8fcb78abe03781fc75d12`, both supported pairs

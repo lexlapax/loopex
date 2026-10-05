@@ -804,9 +804,7 @@ defmodule LoopexCli.ChatDriverTest do
     send(output, {:release_output, :ok})
     closing = monitor_processes([host, driver, state.writer, fixture.runtime.supervisor])
     assert Loopex.stop(fixture.runtime) == :ok
-    send(host, {:close, :confirmed})
-    assert_receive {:blocked_closing, ^output}, 5_000
-    assert :sys.get_state(state.writer).finish_deadline <= captured
+    assert_closing_deadline(host, driver, output, state.writer, captured)
     send(output, :release_closing)
     assert_receive {:closed, ^host, 1}, 5_000
     assert_processes_joined(closing)
@@ -1395,9 +1393,7 @@ defmodule LoopexCli.ChatDriverTest do
     assert state.deadline <= output_deadline
     send(output, {:release_output, :ok})
     closing = monitor_processes([host, driver, state.writer])
-    send(host, {:close, :confirmed})
-    assert_receive {:blocked_closing, ^output}, 5_000
-    assert :sys.get_state(state.writer).finish_deadline <= state.deadline
+    assert_closing_deadline(host, driver, output, state.writer, state.deadline)
     send(output, :release_closing)
     assert_receive {:closed, ^host, 1}
     assert_processes_joined(closing)
@@ -1772,6 +1768,34 @@ defmodule LoopexCli.ChatDriverTest do
     on_exit(fn -> if Process.alive?(host), do: Process.exit(host, :kill) end)
     assert_receive {:host_driver, ^host, driver}
     {host, driver}
+  end
+
+  # Concept: both blocked-closing fixtures observe finish admission before its state.
+  # Technical depth: closing IO starts independently of the owner's following
+  # finish call. Spend only the already-captured cutoff to observe that exact
+  # driver/writer call; the subsequent serial query sees its retained deadline.
+  defp assert_closing_deadline(host, driver, output, writer, captured) do
+    assert 1 = :erlang.trace(writer, true, [:receive, {:tracer, self()}])
+
+    try do
+      send(host, {:close, :confirmed})
+      assert_receive {:blocked_closing, ^output}, 5_000
+
+      remaining = captured - System.monotonic_time(:millisecond)
+      assert remaining >= 0
+
+      assert_receive {:trace, ^writer, :receive, {:"$gen_call", {^driver, _}, {:finish, ^captured}}},
+                     remaining
+
+      finish_deadline = :sys.get_state(writer).finish_deadline
+      assert is_integer(finish_deadline) and finish_deadline <= captured
+    after
+      try do
+        :erlang.trace(writer, false, [:receive])
+      rescue
+        ArgumentError -> :ok
+      end
+    end
   end
 
   defp blocked_control_output(block_closing \\ true) do
