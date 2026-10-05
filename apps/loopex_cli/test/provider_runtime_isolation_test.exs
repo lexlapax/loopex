@@ -36,6 +36,7 @@ defmodule LoopexCli.ProviderRuntimeIsolationTest do
     assert :ok = LoopexComposition.Ephemeral.Bootstrap.start()
     starter = Process.whereis(LoopexComposition.ReqLLMStarter)
     assert is_pid(starter)
+
     deadline =
       System.monotonic_time() + System.convert_time_unit(5_000, :millisecond, :native)
 
