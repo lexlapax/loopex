@@ -325,65 +325,81 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
-- Live source work, 2026-10-05: the native compact busy approval is pushed at
-  `14c2920d`. Root's three-path chat/facade draft is retained in Git at
+- Live source work, 2026-10-05: standalone OpenInteraction, answer-admitted,
+  Inspection and Snapshot codecs are joined and pushed at
+  `04a363dee84ea74710162d3da07f52cba3e671d2`. Both toolchains pass the complete
+  six-file 32-case selection with independent Node, whole-source formatting,
+  status and compiled documentation checks. Current/floor focused durations
+  are 2.903 / 2.934 seconds. Eight complete output references and digests are
+  retained in `/private/tmp/loopex-m7-04a363de-rejoin/completion.json`, SHA-256
+  `20b7094ead72c85ad35470390b40d391a8200f823312dda4e1b2d2525cc7049e`.
+  Root rehashed all eight outputs. This closes one standalone added T05
+  subtask; Core publication, complete manifests, transports, live clients and
+  generation activation remain open. No full integration rerun occurred.
+
+  Worker source is `a22384d3836e56149976610e77cf6b34d6dd59e1`, following
+  `9a7a7335dde670b0e00efa95cd2f61b1402f9af0`. Completion inventory
+  `/private/tmp/loopex-m7-open-inspection-proof-20261005-v1/completion.json`,
+  SHA-256 `e272dcfbb913b6f5ddc111b29a821c3c2617e16f27f16a158d733ecaf1ccf5bc`.
+  Root reviewed the source and rehashed all 86 retained entries and 25 exact
+  final source entries. Direct Node proves 237 codec vectors plus 38 boundaries
+  and 164 snapshot/open vectors plus 21 boundaries; the canonical proof has
+  21 cases, 11 payloads and 1,371 leaf mutations. Complete worker compile,
+  format, docs, dependency and status gates pass both pairs.
+
+  Native compact busy approval is pushed at `14c2920d`. Root's three-path
+  chat/facade draft remains retained in Git at
   `c703a8d0b5ef02697780af745ab6ee54fd8c7d50` on
   `codex/m7-held-native-compact-chat`; it is not integrated or verified.
   External patch `/private/tmp/loopex-m7-native-compact-chat-draft-20261005.patch`,
   SHA-256 `9c5ee14ff4234b594d46fb4e1bf357c836133820420754cf961d32e8cfc1a777`.
-  Core's isolated writer is `m7-trace-check`; shared codec source checkpoint
-  `9a7a7335` is in `m7-protocol-manifests`, with both-pair verification running
-  serially. Core must join those codecs before execution and still needs the
-  exact event-size preflight boundary checked. Complete manifests, live
-  generation activation and transport joins are not claimed.
+  Core's isolated writer is `m7-trace-check`, joining the approved answer
+  transaction, bounded committed inspection and native compact flag. Event-size
+  arithmetic must account for the actual Store transaction-ID limit before
+  claiming a reachable refusal gap. No additional refusal grammar is approved.
 
   Pipe causal source checkpoint `847a368bc571069e39e22e7c4544d8d205f40aff`
-  is clean in `m7-pipe-deadline-witness`. The first current witness failed;
+  is retained in `m7-pipe-deadline-witness`. The first current witness failed;
   metadata shows correct worker kill 46.208 microseconds after the exact
   fixture cutoff. The first floor witness with improved timer metadata passed;
-  it does not replace the current failure. Exact packet
-  `/private/tmp/loopex-m7-chat-pipe-cutoff-decision-20261005-v1.md`, SHA-256
-  `032ffa7aae3715357f14b7efb34e4830903caafe9d4dfa433ad41ab8d87f7940`,
-  is presented for a single shared deadline-plus-retained-grace observation
-  cutoff. That amendment is pending, not implemented. Ten-entry retained proof
-  inventory `/private/tmp/loopex-m7-pipe-witness-proof-inventory-v2.tsv`,
-  SHA-256 `d63069d3b1ccaeecabedacadc81264ff46e1a14e8f73448e9b6a5743c7333ba8`.
-  The pipe worker has released the VM slot and is independently reviewing the
-  Proposed restore pair at `8d1aa15a`. Root's clean verification checkout is
-  `m7-inspection-rejoin` at that SHA; no check has run there yet. No paid call,
-  full-check rerun or milestone closure occurred.
+  it does not replace the current failure. The maintainer approved the exact
+  deadline-plus-retained-grace packet; the
+  [disposition](../developer/agent-context-map.md#disposition-m7-pipe-shutdown-observation-2026-10-05)
+  authorizes the two fixture-bound changes. Changed source and paired proof
+  remain in progress. Ten-entry original proof inventory
+  `/private/tmp/loopex-m7-pipe-witness-proof-inventory-v2.tsv`, SHA-256
+  `d63069d3b1ccaeecabedacadc81264ff46e1a14e8f73448e9b6a5743c7333ba8`.
+  The pipe writer holds the exclusive VM slot; all root verification handles
+  are terminal. No paid call or milestone closure occurred.
 
+  Proposed restore pair is indexed at
+  `74aa9288f1ee9671755434d68d292ad78008696e`. Its one docs-only check passed
+  in 16.817 seconds, output `/private/tmp/loopex-m7-74aa9288-docs.log`, SHA-256
+  `de065c2a98c90c79ee199494125a7a02b03dd5e00f5c13e439ee3eb24effeeaf`.
+  The prior `8d1aa15a` docs check failed in 22.067 seconds on multiline exact
+  relationship-link syntax; retain `/private/tmp/loopex-m7-8d1aa15a-docs.log`,
+  SHA-256 `48c6fad8fd7961949706b5315ebc0afb5827c8754bf84a82222301e04c5a1f6f`.
+  New bytes fix that syntax and two independently identified wording defects.
+  Independent exact-candidate review finds no blocker within the stated trusted
+  host profile. Report
+  `/private/tmp/loopex-m7-adr0051-independent-review-74aa9288.md`, SHA-256
+  `18b736055475b45156a505dfb09e40d7f8d6bc0487b7513f02f38707e58751a8`;
+  nine-input inventory SHA-256
+  `269d933b26de32c3c251d720a5e3c3ffe806cae9733261dcce1e60f55aa1ccb6`.
+  Root rehashed every exact input. Proposed Concept digest
+  `0198bf0d25a94a9849e1f2b87029920a3ad767f81a041f823a46fdec39bdcecf`;
+  Technical digest
+  `e07dd2382f161bd2ccf1cea8b6b31f2a36f6c0e4db8a3bcb0d0e153a055af67c`.
+  Exact pair acceptance remains pending; no restore implementation is authorized.
 
-- Clean pushed resume checkpoint: all root verification handles are terminal.
-  Source unit `790e73bc`, evidence child `5d531fe1`, compact approval
-  `14c2920d` and Proposed restore pair `8d1aa15a` are pushed to m7. The
-  Evidence child `5d531fe1` passed its one docs-only check in 17.866 seconds; complete output
-  `/private/tmp/loopex-m7-5d531fe1-docs.log`, SHA-256
-  `e447ad1cc5f68c0525d63b0b2cae566ff8d4be13bf4c090462aaacfce5f3617b`.
-  The completed command-bounds managed writer is now archived (confirmed by
-  artifact inventory); do not reuse its former filesystem path. All retained
-  source/log manifests remain external and intact. Workers have no active
-  verification handles. The approved full inspection and distinct policy-answer transaction are
-  being implemented in separate Core and protocol writers. The native compact
-  busy observation is also approved; its dependent barrier work may proceed. Diagnostic dispatch, actual pipe nonjoin and
-  Task.Supervisor lifetime investigations remain open; failed 6290ac47 is not
-  relabeled by either focused repair.
+  Read-only generation activation inventory:
+  `/private/tmp/loopex-m7-generation-activation-inventory-20261005-v1/inventory.md`,
+  SHA-256 `dc5ce3daf8a84e65f77e6336f9704bd254e91bf0fbe9ebe647eb6bbb22c68752`.
+  It identifies remaining routing, lease/capacity, complete payload digests,
+  independent clients and current requested/terminal policy-event joins. It is
+  not execution evidence. Diagnostic dispatch and Task.Supervisor lifetime
+  investigations remain open; the failed full check at `6290ac47` remains FAIL.
 
-  Governed restore pair source draft (now installed as Proposed; not accepted):
-  `/private/tmp/loopex-m7-restore-proposed-pair-20261005-v1/0051-current-format-physical-restore.md`,
-  Concept SHA-256
-  `b12f2fd057ca7c539c6d3dad9e53c71b6ad740ab5cdc942521db1e9d0efbfce1`;
-  its technical companion SHA-256
-  `e7cb262e4750531059aced665e80c34d23f86375b962e63d4d287a61d9852efa`.
-  Pair inventory SHA-256
-  `5c6a91d8d7dd7736a55a311e7b3fead6013b82e0f16403eee0b125d852cea848`.
-  The exact pair is now installed and indexed as Proposed at `8d1aa15a`;
-  source-only review is complete, documentation gates and independent review
-  remain pending. It is not accepted and T15 remains open.
-  Root rehashed these three objects and reviewed both installed depths.
-  Documentation gates and independent semantic review are pending. The worker's reciprocal-link/schema self-check is source-only,
-  with its initial checker failure retained; it is not product or independent
-  acceptance evidence. No restore implementation is authorized by that draft.
 
 - Approved inspection work: the standalone four-member ActiveBounds codec,
   closed schema, 121 literal vectors and independent Node validator are
@@ -11466,6 +11482,8 @@ or check was relaxed.
 - [ ] Run the required independent-client workflows.
 
 ### Added implementation subtasks
+
+- [x] Join the approved current eleven-member Inspection, pending/answered policy OpenInteraction and distinct answer-admitted event in shared Elixir and independent Node codecs; migrate Snapshot and retire superseded PendingInteraction. Prove exact nested schemas, quantities, opaque/UTF-8 boundaries, privacy refusals, canonical mutations and the complete 32-case selection on both pairs after root integration. Core transactions/publication, manifests and live generations remain open.
 
 - [x] Implement the approved standalone four-member ActiveBounds codec/schema with arbitrary positive counters, uint64 duration and null/nonnegative uint64 retained cutoff; prove 121 literal vectors and strict independent Node native/object boundaries, both supported toolchains and exact source inventories. Enclosing inspection, policy-answer union and generation activation remain separate obligations.
 

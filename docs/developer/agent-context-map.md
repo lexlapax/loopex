@@ -6803,6 +6803,27 @@ cleanup cutoff and exact joins. This adds no wire inspection member, durable
 compact-admission event, snapshot field or chat wait/closing JSON field. It does
 not accept restore/accounting contracts, activate generations or close M7.
 
+<a id="disposition-m7-pipe-shutdown-observation-2026-10-05"></a>
+### M7 stalled-pipe shutdown observation approved, 2026-10-05
+
+The maintainer replied "1. approved" to the separately presented recommended
+shutdown-observation option. Approve the exact packet
+`/private/tmp/loopex-m7-chat-pipe-cutoff-decision-20261005-v1.md`, SHA-256
+`032ffa7aae3715357f14b7efb34e4830903caafe9d4dfa433ad41ab8d87f7940`.
+Keep the production control-delivery deadline at 5,000 ms. Capture once the
+actual pending-output deadline D and retained cleanup grace G, and require
+the fixture's original worker monitor and main/collector joins by the same
+absolute D+G cutoff. No stage receives a fresh allowance. Default G is
+5,000 ms; the parent 15,000-ms cutoff and every other bound remain unchanged.
+
+This changes the two fixture waits from delivery-expiry observations to bounded
+shutdown observations because the retained causal trace shows the correct
+worker kill just after the competing fixture timer expired. Preserve actual
+pipe pressure, exact actor/monitor and OS joins, timer-token/kill ordering,
+cleanup facts and the original current-pair FAIL. Verify changed bytes on both
+supported toolchains and the complete affected pipe/PTY selections. This
+approves no production timing change, restore contract or milestone closure.
+
 ### Proposed current-format physical restore contract
 
 [ADR 0051](../adr/0051-current-format-physical-restore.md#concept) and its
