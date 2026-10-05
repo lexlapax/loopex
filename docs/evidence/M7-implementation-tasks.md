@@ -325,6 +325,42 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: integrate pure committed attempts-head selection at `4175d294` from
+  isolated worker `c0ee3685ae8926c83dca2d05919da37e8ac20489`. The greatest
+  sequence among exact lines naming the manifest-pinned campaign wins regardless
+  of order. Malformed relevant lines and conflicting equal-sequence digests
+  refuse, including lower retained sequences. Foreign campaign heads remain
+  subject to the separate succession admission. Missing evidence remains
+  unavailable. Verification reuses the existing frame-chain anchor proof;
+  stale, forked, foreign, incomplete and corrupted presented chains refuse.
+  This pure helper opens no files and grants no ownership or dispatch authority.
+
+  Worker current/floor lanes pass all 21 focused frame/head cases in 60.0 / 40.0
+  measured runner seconds including fresh compilation. Its formatting,
+  warning-free compilation and documentation checks pass in 2.5 seconds.
+  Six immutable output/source entries are retained in
+  `/private/tmp/loopex-m7-attempt-head-proof-inventory.tsv`, SHA-256
+  `a663e5908e2fd3800807434847d6463a1a0062d7ffd43536e956fa463845c3a8`.
+  The integrator reviewed the complete helper/test source and rehashed all six
+  entries before rejoin. Post-rejoin current/floor checks pass the same 21 cases
+  in 1.2 / 1.0 seconds; current handle `10605` is terminal and collected, floor
+  completed immediately. Both outputs are retained in
+  `/private/tmp/loopex-m7-attempt-head-postjoin-proof-inventory.tsv`, SHA-256
+  `d5b485494d51319023dd490e0dcd4186413dce7aa4747c9dd4f2ac6f73128509`.
+  Integrated formatting, warning-free compilation, documentation, status,
+  dependency direction, whitespace and task reporting pass in 16.0 seconds.
+  Complete output is `/private/tmp/loopex-m7-attempt-head-integration-metadata-v1.log`,
+  SHA-256 `7037344a8ccac7093a2c7598d1903f511293419fc65cab3bf64e357adf527985`; handle `82981` is terminal and collected.
+
+  Close one bounded added T14 row; no original T14 row closes. Full event-union
+  schema/replay, actual locking/fsync/handoff, causal review and runner/validator
+  dispatch joins remain open. No paid call or full integration pass is claimed.
+  T01–T19 originals stay 70 done / 103 todo / 6 retired; added work is 251 done /
+  11 todo. Including T00, originals stay 70 / 109 / 7 and added work is 255 / 12.
+  CLI current fixtures and the EffectIntents reader remain in their isolated
+  writer trees. A read-only agent maps the next protocol /3 and /4 rejoin.
+  No maintainer decision is pending.
+
 - Done: migrate daemon physical Store/socket fixture creation to the approved
   captured startup template. Fresh helper and explicit test hosts create current
   v3 sessions; resume-only hosts remain without new creation defaults, preserving
@@ -10468,6 +10504,8 @@ candidate integration and focused floor proofs are retained there; items 9 and
 - [x] Implement the accepted private attempts-index canonical envelope and complete-chain framing; reuse sorted JSON and duplicate-aware decoding, pin an independent exact-byte/hash vector, refuse malformed/noncanonical/oversized/forked records and preserve unresolved truncated tails on both supported toolchains. Event admission, writer ownership, fsync and runner dispatch integration remain open.
 
 - [x] Verify a complete attempts chain contains the exact previously committed campaign/sequence/digest head; refuse stale copies, missing history, authenticated forks and malformed anchors without resolving incomplete tails or granting dispatch authority. Prove on both supported toolchains. Greatest-head selection and runner admission remain open.
+
+- [x] Select and authenticate the greatest retained committed attempts head for the manifest-pinned campaign, refuse malformed/conflicting relevant lines and missing/stale/forked/incomplete evidence, and prove exact private head parsing plus existing frame anchoring on both supported toolchains and after integration. Full event admission, ownership, filesystem fsync and runner dispatch remain open.
 
 ## T15 — Prove migration and rollback
 
