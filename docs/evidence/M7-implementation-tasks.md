@@ -352,7 +352,14 @@ did not resolve them. No paid provider calls were made during this check.
   against the independent writer error. Corrected source keeps actual stdin
   open so output failure drives shutdown and retains the original transport,
   worker and closing assertions, plus exact device/manager joins. These source
-  corrections await paired execution. The initial sandbox-only TCP-lock failure
+  corrections passed 180 of 181 cases in the next current fourteen-file run
+  at `7a32b10bd2828911ddfb35ddc373339ae0debfb4`, 101.818 seconds.
+  `/private/tmp/loopex-m7-7a32b10b-rejoin/current-chat.log`, SHA-256
+  `c99a5776747a68dc483bac20cb8441abc3b67a9a24e046075569e5a5e0d182f8`.
+  The remaining new normal-resume assertion expected `:ok`; the actual facade
+  returns `{:ok, session_id}`. Corrected bytes match that exact return.
+  Current complete ChatDriver and floor complete chat checks remain pending.
+  The initial sandbox-only TCP-lock failure
   is separately retained; it occurred before compilation, and the authorized
   runner used a new output directory. No failed run is reclassified as PASS.
 

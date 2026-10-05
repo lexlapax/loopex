@@ -67,7 +67,7 @@ defmodule LoopexCli.ChatDriverTest do
       exit_code =
         case @compact_ending do
           :unchanged ->
-            assert :ok = Loopex.activate_resume(activation)
+            assert {:ok, ^session} = Loopex.activate_resume(activation)
             0
 
           :interrupt ->
