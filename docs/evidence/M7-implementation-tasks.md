@@ -519,6 +519,18 @@ did not resolve them. No paid provider calls were made during this check.
   It proposes exact canonical model IDs for runtime-only clients and explicit
   admitted provider routes for the reference wrapper; CLI aliases remain
   externally resolved. No new configure record or second changes map is added.
+  The first revised-proposal metadata run passed its initial gates, then failed
+  final status validation because the integration owner manually changed the
+  strictly generated register capsule. The generated rows are restored; the
+  live decision remains recorded here and in Proposed ADR 0050. Complete
+  immutable FAIL output: `/private/tmp/loopex-m7-model-preparation-proposal-metadata-v1.log`,
+  SHA-256 `0162bd82d4484dc64164b9bfe4e93c483a5feb01a1a44e3866d2da843ea24129`.
+  Handle `79285` is terminal and collected; the proposal was committed as
+  `a33a1ae5` with that status error, which this repair retains rather than hiding.
+  Corrected current formatting/compile/docs/status/dependency/whitespace and
+  task reporting pass in 16.3 measured seconds on the repaired capsule.
+  Complete immutable output: `/private/tmp/loopex-m7-model-preparation-proposal-metadata-v2.log`,
+  SHA-256 `78ba07d229bd370e6718440f47f3a2d5fcebaf7ff888803f42f9e611242a8a58`; handle `54943` is terminal and collected.
   This direction choice does not accept the earlier choice-A pair's bytes.
   Dependent port implementation awaits acceptance of the revised pair; other
   in-scope work continues. Questions remain one at a time.
