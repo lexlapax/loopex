@@ -54,8 +54,7 @@ defmodule Loopex.Executor.Local.LedgerRecordConformanceTest do
        fn -> Ledger.read_marker(context.prepared, context.job) end},
       {marker_path(context.root, context.job.job_id), refusal,
        fn -> Ledger.read_marker(context.prepared, context.job) end},
-      {open_path(context.root, context.job.job_id), open,
-       fn -> snapshot(context.prepared) end}
+      {open_path(context.root, context.job.job_id), open, fn -> snapshot(context.prepared) end}
     ]
 
     for {path, record, read} <- cases do
@@ -117,7 +116,11 @@ defmodule Loopex.Executor.Local.LedgerRecordConformanceTest do
           assert 1 == :erlang.trace(reader, true, [:call, :arity])
           send(reader, :read)
           assert_receive {:generation_read, ^reader, result}, remaining.()
-          if expected_calls == 1, do: assert(match?({:ok, _}, result)), else: assert_unavailable(result)
+
+          if expected_calls == 1,
+            do: assert(match?({:ok, _}, result)),
+            else: assert_unavailable(result)
+
           barrier = :erlang.trace_delivered(reader)
           assert_receive {:trace_delivered, ^reader, ^barrier}, remaining.()
 
