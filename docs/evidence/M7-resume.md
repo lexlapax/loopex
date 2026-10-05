@@ -25,7 +25,44 @@ physical restore implementation; it does not waive any full-history proof.
 <a id="technical-depth"></a>
 ## Technical depth
 
-### Latest joined CLI proof and active Store owner
+### Latest Store integration and next verification
+
+Store audit fb4eb53964c58679f5e16061e1a5dd56a035077f passed all 24 stages
+under both pairs and is joined through 47bcedd1daeb141a4a56ab165ac09192a77cee42.
+Per pair: focused 41/2 excluded, ordinary Composition 604/3 excluded, owned
+long bounds 2/41 excluded, zero skips. Root verified all 1,097 source blobs,
+all stage identities/logs/populations and the 63 sealed output files.
+Sibling evidence: M7/store-semantic-audit-20261005-v3.
+Completion digest bde265d351e1dff9187da01c580ea27bc3d6097faf7669237e7ce979e72763fc;
+inventory 82c3e24f52d2ac468cca01a986b34673f144f64a16d5f9315c5e476cb37ab3ba.
+Handle 89711 is terminal and collected; never restart/poll it. The clean fully
+merged plain Store worktree/branch may be removed after its evidence is saved.
+Only the bounded added T15 Store-audit row closes. Whole backup/restore,
+real executor effects and existing diagnostic obligations remain open.
+T01–T19 originals 78 done/95 todo/6 retired; added 291 done/21 todo.
+
+No worker currently holds the exclusive VM slot. Resource runner v2 handle
+67651 is terminal exit 1 and collected. It failed before any formatter or VM
+because Bash 3.2 rejects the empty ambient-filter array under nounset.
+Source remains clean 16b904adae7b26a034870798472634f91e920079; no tests ran.
+Complete first output is preserved in sibling
+M7/resource-retained-decoding-execution-20261005-v1. current_index_cleanup is
+preparing immutable Resource runner v3 and Ledger runner v2, with a nonempty
+command array and native Bash no-VM checks. Review their exact bytes and then
+grant Resource alone a new output directory. Preserve failed v2 evidence.
+
+Causal runner v2 is prepared, source-only and reviewed at sibling
+M7/private-task-causal-runner-91784948-v2/run.py, digest
+40d0cbe649b2885322d0dde3ce9fef1695c21bc178aa3d82e4fb3adbf7ed8cf5.
+It copies dependencies and Mix homes per pair, filters ambient overrides and
+requires four passing cases plus all 68 nonempty traces and exact cleanup.
+It remains unexecuted. Its controlled mechanism cannot attribute the actual
+Core shutdown reports. Ledger source 0b82b006 is also unchanged and unproved.
+ADR 0052 exact-pair acceptance is still unanswered. Root owns integration and
+one combined full check after proved slices rejoin. Earlier records below are
+historical snapshots; this latest section governs.
+
+### Earlier joined CLI proof and active Store owner
 
 CLI proof00cf26bb31c45d6c98b29f9e132c7c6cb4d24115 is terminal PASS, all22
 stages in241.366 seconds. Each pair passes cold1 plus mixed13 with0 exclusions

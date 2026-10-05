@@ -29,6 +29,48 @@ grouped by T00–T19. Empty added sections mean no added subtasks are recorded;
 they do not mean the original task is complete. This follows the maintainer's
 2026-10-01 update to the active implementation goal.
 
+## Owned Store semantic audit joined — 2026-10-05
+
+The bounded T15 Store-audit subtask is complete at tested source
+`fb4eb53964c58679f5e16061e1a5dd56a035077f`, joined through
+`47bcedd1daeb141a4a56ab165ac09192a77cee42`. Both supported toolchains pass
+41 focused IO cases with 2 exclusions, 604 ordinary Composition cases with
+3 exclusions, and 2 owned long-bound cases with 41 exclusions. Zero skips.
+Current ordinary took 331.738 seconds; floor ordinary took 329.359 seconds.
+All 24 stages passed, including isolated dependency copies, separate dev/test
+project compilation, formatting and metadata checks. Raw dependency warnings
+and fault-test shutdown reports remain retained.
+
+Root reviewed the complete source and formatter changes, verified all 1,097
+source blobs against Git and the worktree, rehashed all 24 stage identities,
+logs and suite judgments, and verified all 62 output-inventory entries plus
+the separately hashed inventory. The 63 sealed files are retained under
+`/Users/spuri/projects/lexlapax/loopex-evidence/M7/store-semantic-audit-20261005-v3`.
+Completion SHA-256:
+`bde265d351e1dff9187da01c580ea27bc3d6097faf7669237e7ce979e72763fc`;
+report SHA-256:
+`6d6408fdf0d1f09831723b7b6dbd84aaccaa5ec790127b3eb8cc16266532de01`;
+output inventory SHA-256:
+`82c3e24f52d2ac468cca01a986b34673f144f64a16d5f9315c5e476cb37ab3ba`.
+Handle 89711 is terminal and collected; never poll or restart it.
+
+This proves declared Store bytes, complete transaction replay and every-session
+recovery under existing IO ownership and bounds. It preserves actual Local
+Store unknown history using scripted model/executor fixtures. Whole physical
+restore, real OS-effect cleanup, artifact/receipt/catalog/host relations and the
+native Linux filename witness remain open. The caller must first enforce the
+original invocation's total-file-byte bound on the captured manifest.
+
+Original T01–T19 counts remain 78 done / 95 todo / 6 retired. Added subtasks
+are now 291 done / 21 todo; T15 added counts are 11 done / 6 todo. The next
+combined integration check remains pending. Resource runner v2 failed before
+formatter/VM entry because macOS Bash 3.2 refuses an empty array expansion
+under nounset. Handle 67651 is terminal and collected, source 16b904ad is
+unchanged, and the first output is retained under sibling
+`M7/resource-retained-decoding-execution-20261005-v1`. Revised Resource v3
+and Ledger v2 runners require a new explicit slot grant; no test result is
+claimed from that pre-VM failure.
+
 ## Focused guarded CLI startup proof joined — 2026-10-05
 
 Exact00cf26bb31c45d6c98b29f9e132c7c6cb4d24115 passed all22 staged proof steps
@@ -12870,7 +12912,7 @@ open.
 
 ### Added implementation subtasks
 
-- [ ] Audit every declared current Store history through the existing owned IO worker, enforcing descriptor/path/hash identity, complete transaction replay and recovery of every session; prove actual retained unknown truth, faults and cleanup on both pairs without claiming scripted executors prove OS effects.
+- [x] Audit every declared current Store history through the existing owned IO worker, enforcing descriptor/path/hash identity, complete transaction replay and recovery of every session; prove actual retained unknown truth, faults and cleanup on both pairs without claiming scripted executors prove OS effects.
 - [ ] Decode retained current resource manifest/provenance bytes under derived physical ceilings before parsing, preserve exact normalization/content/Git identities and deterministic bytes, and prove actual current writers, hostile bytes and real decoder-entry controls on both pairs. Whole catalog capture/reference/backup orchestration remains separate.
 - [ ] Refuse compressed/wrong-root retained Local ledger records before actual term decoding, enforce captured byte caps and full consumption, and prove all current record readers plus positive real-BIF trace control on both pairs. Whole owned offline ledger capture/audit remains separate.
 
