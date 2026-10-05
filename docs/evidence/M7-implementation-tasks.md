@@ -29,6 +29,43 @@ grouped by T00–T19. Empty added sections mean no added subtasks are recorded;
 they do not mean the original task is complete. This follows the maintainer's
 2026-10-01 update to the active implementation goal.
 
+## Supported physical manifest implementation — 2026-10-05
+
+The two owned manifest paths from `8885e0db` through worker
+`0cd79e6de02d0fe9e1486dd6e9d11a7111a516a9` are joined exactly into m7;
+root reviewed the complete source/test diff and independently rehashed all
+1095 committed source blobs against the exact Git tree plus all 52 retained
+outputs. Complete supported IO file passes 25 ordinary and two actual long-bound
+cases on each pair: ordinary 17.050/16.750 seconds, long 20.970/20.932 seconds.
+Both format, dev/test warnings-as-errors project compilation, documentation,
+dependency and status checks pass. Native lists are materialized; only retained
+candidate expansion and exact output have entry/encoded caps. No streaming
+native allocator or transient heap ceiling is claimed.
+
+Completion retained at
+`/Users/spuri/projects/lexlapax/loopex-evidence/M7/manifest-resume-20261005-v2/completion.json`,
+SHA-256 `dd98955ff03c5b6a7854e2bf0058553940afc2824754906a78d20477f847fd2d`;
+complete 52-output inventory SHA-256
+`ab1c2ec7df9ececad465e584cee9388714eed04f7e261e0d9e8630ee74ac3a26`;
+1095-source inventory SHA-256
+`2c91fe7f5e4c9ffe0152b1e6b0ad8d8a5c74486de3ab67c019c7ac9a0f95422f`.
+Root read the complete report, SHA-256
+`12ab769ace3f6afeabf284d43ea99c981f3d3a25218119d5d2e67bc191797acf`.
+First current ordinary run failed 24/25 at `ebaf7c99`, 17.383 seconds,
+SHA-256 `98f5664020a527aa49342460b387a958307729ccb602f2970f72c54c2222d897`,
+retained in durable v1. macOS returned EILSEQ before an actual invalid-byte name
+could be created. That Linux/native-name witness remains unavailable and is
+not replaced by the separately tested invalid UTF-8/NUL request refusal. A new
+unused-ID assertion warning was fixed by pinning the exact ID. Supported v2
+results do not relabel the failed v1 or prove the missing Linux branch.
+
+The broad added manifest subtask stays open for that physical witness and
+post-rejoin verification. Full audit, claims, source retirement, lineage and
+activation remain open. The release runner now includes composition in its
+existing long_bound group at `67d287cd`; the new added selection-proof row is
+open until the actual selected lane executes. No full fast/release check ran
+for this join. T01–T19 counts remain original78/95/6 and added286/19.
+
 ## Verified decoder and diagnostic setup repair — 2026-10-05
 
 The maintainer approved "1000 ms" for the individually presented diagnostic

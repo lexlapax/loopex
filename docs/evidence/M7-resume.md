@@ -23,6 +23,25 @@ physical restore implementation; it does not waive any full-history proof.
 
 ## Technical depth
 
+### Current resumed work
+
+The diagnostic decision is approved and the paired repairs are committed/pushed.
+Manifest worker source is joined as described below; all its handles are
+terminal and its verification slot has returned to root. The private-task
+trace remains unverified source-only `57c110d73cdbe2cf90fa16b32c304f2b52c5c419`
+on the existing isolated branch, pushed without integration. No trace VM ran.
+
+New complete outputs are in the durable external directory
+`/Users/spuri/projects/lexlapax/loopex-evidence/M7`, with exact digests in the
+[task ledger](M7-implementation-tasks.md). Earlier temporary output remains
+absent. The next proof is the combined integration candidate, including actual
+release selection. Reconstruct queued public decisions from current sources;
+a new read-only policy vocabulary report is available at
+`/Users/spuri/projects/lexlapax/loopex-evidence/M7/policy-wire-reconstruction-20261005-v1/report.md`,
+SHA-256 `2cdeafa61a5607be195826ff090daf9fe19c2336091103e2aacf2fa3269659ad`.
+Root read it; it proposes no implementation or approval. Its native integer
+turn must be encoded as a canonical decimal string on wire, never a JSON number.
+
 ### Resume audit after restart
 
 The maintainer explicitly resumed M7 and requested the diagnostic cutoff
@@ -59,8 +78,15 @@ restatement does not claim its exact bytes were recovered.
 
 ### Saved integrated source and verification
 
-Integrated source is `8885e0dbacfc4a37cb873080d615869587132ea4`;
-subsequent `m7` commits record evidence and work ownership only. The commit
+The original paused integrated source was
+`8885e0dbacfc4a37cb873080d615869587132ea4`. After explicit resume,
+`83fe9300` adds the verified Store decoder and approved diagnostic setup repair;
+`67d287cd` includes composition in the release long-bound group. The commit
+containing the latest manifest ledger entry joins exact worker source
+`0cd79e6de02d0fe9e1486dd6e9d11a7111a516a9`; find its integrated identity in
+Git history. Supported IO tests pass both pairs, but native invalid-byte Linux
+names and selected release-lane proof remain open. The earlier source-only
+pause descriptions below are historical, not the current worker state. The commit
 containing this file is the pause checkpoint, discoverable from Git history;
 this file cannot name its own commit. The main checkout must be clean and
 `m7` equal `origin/m7` before restart is declared ready.
