@@ -325,6 +325,24 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Running independent accepted-proof work: the T10 PTY writer owns only new
+  `apps/loopex_cli/test/chat_pty_test.exs` and bounded support fixtures in the
+  temporary detached checkout `/private/tmp/loopex-m7-chat-pty-worktree`, exact
+  base `30835300b6f0ddc317646da3394c999e4d7ef8ca`. The accepted outcome 6 requires
+  actual pseudo-terminal paths for steer, follow-up, questions and interrupt.
+  Existing Python standard-library PTY tooling and real runtime fixtures avoid
+  new dependencies or contracts. Root owns rejoin and holds its VMs while the
+  writer verifies. Stop on any production defect/material decision; no paid
+  provider, human attendance or built-product claim comes from this fixture.
+  One added pending T10 row tracks the proof. T01–T19 originals remain
+  78 / 95 / 6; added work is now 267 done / 17 todo.
+
+  A concurrent read-only review examines the already accepted V7.7
+  pre-transport Model cancellation gate's ownership, unchanged forwarding and
+  truthful dispatch/accounting. It changes no code and cannot authorize paid
+  attempts before the attempts index. ADR 0050 remains the first unanswered
+  decision; this independent work does not implement its proposed callback.
+
 - Done: the current embedding guide now
   distinguishes runtime tool declarations from captured immutable session
   selection, lists shipped `command_with_configuration/3` and
@@ -10997,6 +11015,8 @@ the still-open real-provider, live protocol, persistent-fault or closure lanes.
 - [x] Test tracing isolation, redaction, stalled stderr and ask’s JSON output separation.
 
 ### Added implementation subtasks
+
+- [ ] Prove actual pseudo-terminal steer, follow-up, model-question identity/answer or decline and interrupt paths with real runtime/control observations and process/OS-group cleanup, using the existing Python stdlib tooling and product bounds; no paid-provider, attended or built-product claim.
 
 - [x] Prove actual Chat file-enabled tracing, --no-trace overriding enabled file settings, and --trace overriding disabled settings; observe real diagnostic trace delivery or its absence and exact tracer/consumer/writer/runtime joins before successful closing using existing host seams. Keep startup ordering and all bounds; no new public contract.
 
