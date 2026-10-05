@@ -325,6 +325,43 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Maintainer selected restore option B with "Approved option 1" in response
+  to the empty-root recovery question. The
+  [direction disposition](../developer/agent-context-map.md#disposition-m7-empty-root-restore-direction-2026-10-04)
+  retains that outcome and requires an exact reviewed ADR 0016 amendment before
+  dependent implementation. The separate administrative API and persistent
+  transition remain proposed, not accepted. Read-only concrete amendment work
+  proceeds while the alias-preparation writer retains the exclusive VM slot.
+
+  Current Core preparation selection PASS 324 tests/five exclusions in 60.267
+  seconds; its actual 60-second cutoff case PASS one test/17 exclusions in
+  61.412 seconds. Complete outputs under
+  `/private/tmp/loopex-m7-model-alias-proof/generation4/current-loopex-complete-selection.log`
+  and `current-actual-preparation-cutoff.log` in that directory, SHA-256 respectively
+  `5a666757b0b07317e0e3e404b1517f5f17327b786b1ab1b32d5f96054eea6fb9`
+  and `38dce0221dc9acd078b70f70e86599124ba40923fc25c8b69fd798562dd7e746`.
+  Composition generation 4 stopped before tests because the shared fixture
+  lacked temporary-home setup. Generation 5 then passed 83 tests and failed
+  two in 60.981 seconds, retained output
+  `/private/tmp/loopex-m7-model-alias-proof/generation5/current-loopex_composition-complete-selection.log`,
+  SHA-256
+  `7a06d6206f21529be2db580d6b7ef404403e7f5b3a14431837ff047cdbdbc2d3`.
+  The new wrapper leaked host workspace options inward; restrict its retained
+  host routing options to provider_bindings/credential_plane and migrate the
+  existing startup assertion to the current wrapper. Original private adapter
+  options stay exact. Both failures remain failed evidence; both-pair proof,
+  integration and transport activation remain open. No checklist row closes.
+
+  T11 read-only accounting/host-guard packet retained at
+  `/private/tmp/loopex-m7-t11-accounting-host-guard-decision-research-20261004-v1.md`,
+  SHA-256 `314be59b992d844f694d903805d447c4fa811a03d2975bfcbb84c14726f8ea38`;
+  source inventory SHA-256
+  `f438e4dceef9da8ece39be95de68d9a7933c69278f52ec6aa34b1c44e2e4c09e`.
+  Public observations omit complete maintenance/failed-attempt charges, and
+  the private latest charge-source field cannot establish historical reporting
+  certainty. A retained accounting read and universal reference-host mutation
+  guard require separate decisions. This research grants no new read/authority.
+
 - Verification handoff update: alias-preparation writer saved local draft
   `e49ae7a7f14bf161f2264f194de29c9f56f14be8` with 25 owned paths, not
   integrated or pushed. Its corrected current Core run has 323 passes, one
@@ -350,8 +387,9 @@ did not resolve them. No paid provider calls were made during this check.
   remain intact. Host exclusion/freshness attestations cannot be inferred from
   copied bytes. No arbitrary snapshot rewind, lost-workspace recovery, new
   administrative API or persistent transition is approved from this research.
-  The restore direction question remains pending. Helper accounting/mutation
-  guard research proceeds independently without source edits or new authority.
+  The restore direction question was pending at that handoff; the selection
+  above supersedes it. Helper accounting/mutation guard research is retained
+  above without source edits or new authority.
 
 - Resume handoff: verified chat unit is committed and pushed as
   `cfed3bccca0f0e36069de994d4ac90957258d3b8`; root was clean and matched

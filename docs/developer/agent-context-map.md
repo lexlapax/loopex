@@ -6705,3 +6705,25 @@ Retire superseded wire openness under the current-contract rule. Both complete
 manifests, validators, no-mutation refusals, exact duplicate identity and current
 restart proof must rejoin before serving the generations. Approval authorizes
 that implementation, not milestone closure, merge, release or publication.
+
+<a id="disposition-m7-empty-root-restore-direction-2026-10-04"></a>
+### M7 empty-root restore direction selected, 2026-10-04
+
+The maintainer replied "Approved option 1" to the next restore question, whose
+first option was B. Preserve recovery of a complete current-format backup into
+an empty state root, with a fresh destination physical ledger generation,
+positive termination of old owners and retained receipt/provenance
+reconciliation. Unknown effects remain fenced and are never redispatched to
+discover their outcome. This selects the direction instead of narrowing M7
+restore to the original state directory.
+
+The question expressly requires an exact reviewed ADR 0016 amendment before
+implementation. Prepare that proposal for a latest quiescent complete cut and
+an unchanged external workspace identity. The read-only scope analysis is
+`/private/tmp/loopex-m7-current-restore-option-b-research-v1.md`, SHA-256
+`65f9ffdee66f6998d7691aa5bb2c33803bfee440cf951617c64f1cb37798ec67`.
+Checksums do not establish freshness or exclusion of a second root; those remain
+explicit host preconditions. This direction does not accept a new
+administrative API, persistent record grammar, arbitrary snapshot rewind,
+lost-workspace recovery or another-host recovery. No ADR acceptance, data
+rewrite, milestone closure or publication follows from it.
