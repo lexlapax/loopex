@@ -1,3 +1,5 @@
+Code.require_file("../../loopex/test/support/configured_genesis_helper.exs", __DIR__)
+
 defmodule Loopex.Store.Local.ArtifactTransferTest do
   @moduledoc """
   ## Concept
@@ -912,7 +914,13 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
     {:ok, store} = Loopex.Store.new(Loopex.Store.Local, store_pid)
 
     options =
-      [context_token_budget: 8_192, runtime_id: "artifact-transfer", store: store]
+      [
+        context_token_budget: 8_192,
+        runtime_id: "artifact-transfer",
+        store: store,
+        session_creation_defaults:
+          Loopex.ConfiguredGenesisFixture.genesis([]) |> Map.drop([:kind, "options"])
+      ]
       |> then(fn options ->
         case artifact_handle do
           nil ->
