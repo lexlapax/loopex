@@ -3,6 +3,7 @@ Code.require_file("../../loopex/test/support/agent_loop_adapters.exs", __DIR__)
 defmodule LoopexComposition.EffectIntentsHistoryTest do
   use ExUnit.Case, async: false
 
+  alias Loopex.ConfiguredGenesisFixture
   alias Loopex.AgentLoopTestModel
   alias Loopex.AgentLoopTestExecutor
   alias Loopex.AgentLoopTestPolicy
@@ -62,6 +63,13 @@ defmodule LoopexComposition.EffectIntentsHistoryTest do
       {:ok, original} = Store.load_records(source, session, 0, 1_000)
       assert {:ok, first} = Runtime.effect_intents(fixture.runtime, session, nil, 3)
       assert first.through_version == List.last(original).journal_version
+      [genesis | _] = original
+      assert genesis.payload.kind == "session_genesis_v3"
+
+      assert genesis.payload["initial_configuration"] ==
+               fixture.creation_defaults["initial_configuration"]
+
+      assert genesis.payload["tool_selection"] == fixture.creation_defaults["tool_selection"]
 
       assert {:accepted, "prompt-2"} =
                Loopex.command(attachment, %{
@@ -154,6 +162,24 @@ defmodule LoopexComposition.EffectIntentsHistoryTest do
       }
     }
 
+    # Concept: the first host captures the settings consumed by the scripted model.
+    # Technical depth: the adapter reads canonical history and supports terminal
+    # tool history with no native continuation; its exact tool generation and
+    # 256-token reply reserve are retained before first creation.
+    configuration =
+      ConfiguredGenesisFixture.configuration()
+      |> Map.put("max_tokens", 256)
+      |> Map.put("system_class_tokens", 1_000)
+      |> put_in(["budget_origins", "context_token_budget"], "explicit")
+      |> put_in(["model_capabilities", "reasoning_levels"], ["default"])
+      |> put_in(["provider_mapping", "mapping_revision"], "loopex.test.scripted.mapping.v1")
+      |> put_in(["provider_mapping", "renderer_revision"], "loopex.test.scripted.renderer.v1")
+      |> put_in(["provider_mapping", "canonical_terminal_tool_history"], true)
+
+    creation_defaults =
+      ConfiguredGenesisFixture.genesis([definition], configuration)
+      |> Map.drop([:kind, "options"])
+
     model =
       AgentLoopTestModel.start([
         %{text: "write", calls: [%{id: "call-1", name: "write", arguments: %{"path" => "a"}}]},
@@ -167,6 +193,7 @@ defmodule LoopexComposition.EffectIntentsHistoryTest do
       Loopex.start_link(
         runtime_id: "agent-loop-runtime",
         context_token_budget: 8_192,
+        session_creation_defaults: creation_defaults,
         store: port,
         model: %{
           module: AgentLoopTestModel,
@@ -191,7 +218,7 @@ defmodule LoopexComposition.EffectIntentsHistoryTest do
         grant_decision: {:host_policy, :allow}
       )
 
-    %{runtime: runtime, executor: executor}
+    %{runtime: runtime, executor: executor, creation_defaults: creation_defaults}
   end
 
   defp pages(runtime, session, cursor, limit, reversed) do
