@@ -358,19 +358,28 @@ did not resolve them. No paid provider calls were made during this check.
   arithmetic must account for the actual Store transaction-ID limit before
   claiming a reachable refusal gap. No additional refusal grammar is approved.
 
-  Pipe causal source checkpoint `847a368bc571069e39e22e7c4544d8d205f40aff`
-  is retained in `m7-pipe-deadline-witness`. The first current witness failed;
-  metadata shows correct worker kill 46.208 microseconds after the exact
-  fixture cutoff. The first floor witness with improved timer metadata passed;
-  it does not replace the current failure. The maintainer approved the exact
-  deadline-plus-retained-grace packet; the
-  [disposition](../developer/agent-context-map.md#disposition-m7-pipe-shutdown-observation-2026-10-05)
-  authorizes the two fixture-bound changes. Changed source and paired proof
-  remain in progress. Ten-entry original proof inventory
-  `/private/tmp/loopex-m7-pipe-witness-proof-inventory-v2.tsv`, SHA-256
-  `d63069d3b1ccaeecabedacadc81264ff46e1a14e8f73448e9b6a5743c7333ba8`.
-  The pipe writer holds the exclusive VM slot; all root verification handles
-  are terminal. No paid call or milestone closure occurred.
+  Approved pipe source is joined at `03aa0e06`, from worker
+  `256835ac25cbfdd68d66806e7de427a5add3a5f3` and causal parent `847a368b`.
+  Both complete pipe/PTY selections pass all twelve cases on changed bytes:
+  current 42.249 seconds, floor 39.957 seconds. Complete logs
+  `/private/tmp/loopex-m7-pipe-approved-current-v1.log`, SHA-256
+  `d8db5e17f81e37888b1dd36081e734d26c434422d571b592da6ca3b93c335695`,
+  and `/private/tmp/loopex-m7-pipe-approved-floor-v1.log`, SHA-256
+  `adcee1704ede828ec055ade791f20df7e0762cb7e1b0c9f2784ea8de5e23559f`.
+  Both-pair formatting, warning-free compile, driver-format idempotence and six
+  source gates pass. Root reviewed the complete patch and rehashed all 22
+  source/output inventory entries, including both exact joined source blobs.
+  Inventory `/private/tmp/loopex-m7-pipe-approved-proof-inventory-v1.tsv`,
+  SHA-256 `7b64ae2f58526b03407e1073a0ce4b4e13a517cc81a4de1e6a1645e2b316cf39`;
+  handoff SHA-256
+  `910c442314a63cb731260b787418bb74695128895858e03364d2a389b2e23d6e`.
+  The [approved amendment](../developer/agent-context-map.md#disposition-m7-pipe-shutdown-observation-2026-10-05)
+  captures one D+G fixture observation cutoff; production 5,000-ms delivery
+  and parent 15,000-ms bounds remain unchanged. Original current causal FAIL
+  remains immutable. This closes the added T16 pipe repair only; native compact
+  and further Core joins require their own affected verification. All pipe/root
+  runners are terminal. Core now holds the exclusive VM slot. No paid call,
+  full-check rerun or milestone closure occurred.
 
   Proposed restore pair is indexed at
   `74aa9288f1ee9671755434d68d292ad78008696e`. Its one docs-only check passed
@@ -11997,7 +12006,7 @@ open.
 
 - [x] Repair the 6290ac47 wrapper-related integration failures in credential-plane, ephemeral trace, foreground, daemon and offline CLI witnesses; distinguish stale internal observations from actual option/dispatch regressions, preserve exact original adapter options, host-option allowlist, exclusion and credential/lifetime proofs, and verify both pairs with failed outputs retained.
 - [ ] Establish the cause and repair the 6290ac47 diagnostic broken-IO/writer-death test's missing dispatch within its original 100-ms receive allowance; preserve real blocked IO, exact counts, writer death and cleanup proofs without retries or implicit timeout changes.
-- [ ] Establish the cause and repair the 6290ac47 real stalled-stdout pipe worker nonjoin; retain live/waiting worker evidence, capture exact worker/writer/deadline/kill/DOWN ordering and verify real actor/OS closure without relaxing production or fixture deadlines.
+- [x] Establish the cause and repair the 6290ac47 real stalled-stdout pipe worker nonjoin; retain the original failure and exact timer/worker/kill/DOWN causal evidence, implement the maintainer-approved single D+retained-grace fixture observation cutoff while preserving production and parent deadlines, and prove complete actual pipe/PTY actor and OS closure on both supported toolchains. Full integration and later native compact joins remain separate.
 
 
 - [x] Synchronize the expired-before-cancel fixture's exact worker DOWN before forwarding cancellation within the existing captured reap cutoff; preserve the suspended live-worker branch, Store truth, cleanup acknowledgements and all deadlines, then verify the complete quiesce file on both pairs. Retain the exact full-check failure.
