@@ -325,6 +325,19 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Queued wire-create decision, not accepted: read-only inspection confirms
+  current transport session_options is copied into genesis metadata, not used
+  as settings overrides. The recommendation is a required closed empty wire
+  object using centralized host creation capture and later configure. This
+  narrows the existing open wire metadata boundary and needs explicit approval;
+  authored initial overrides would instead need their own host-resolution
+  contract. No validator or manifest is changed from the recommendation.
+  The complete field/domain inventory and alternatives are retained at
+  `/private/tmp/loopex-m7-session-create-options-decision-v2.md`, SHA-256
+  `255dfdef7a92e0a850dd866b48a733dc0be3f08568551ec72c19178aee3ce40c`.
+  Present this after the pending ADR 0050 acceptance and blocked CommandBounds
+  decision, one question at a time. No checklist row closes from inspection.
+
 - Done: remove the two superseded Core artifact-policy fallbacks. Current v3
   genesis already requires the exact tool-selection capture; dispatch now reads
   its artifact binding directly. Recovery requires projection context for every
