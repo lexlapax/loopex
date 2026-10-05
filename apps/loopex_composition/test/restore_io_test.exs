@@ -268,8 +268,16 @@ defmodule LoopexComposition.RestoreIOTest do
     File.write!(Path.join(root, "stream"), content)
     File.chmod!(Path.join(root, "stream"), 0o4750)
 
-    paths = [".", ".hidden", ".loopex-restore", ".loopex-restore/0001",
-             ".loopex-restore/0001/intent", "empty", "stream"]
+    paths = [
+      ".",
+      ".hidden",
+      ".loopex-restore",
+      ".loopex-restore/0001",
+      ".loopex-restore/0001/intent",
+      "empty",
+      "stream"
+    ]
+
     expected = expected_manifest(root, paths)
     owned = launch({:manifest, root, byte_size(content) + 21}, :list)
     assert {{:joined, {:ok, bytes}, evidence}, events} = drive(owned)
@@ -284,12 +292,14 @@ defmodule LoopexComposition.RestoreIOTest do
   test "manifest accepts zero total for an empty root and refuses a smaller regular-byte cap",
        context do
     root = physical_root(context.root)
+
     for cap <- [0, 18_446_744_073_709_551_615] do
       empty = launch({:manifest, root, cap}, :list)
       assert {{:joined, {:ok, bytes}, %{opens: 0, closes: 0}}, _} = drive(empty)
       assert bytes == expected_manifest(root, ["."])
       joined(empty)
     end
+
     File.write!(Path.join(root, "data"), "12345")
     bounded = launch({:manifest, root, 5}, :list)
     assert {{:joined, {:ok, bytes}, %{opens: 1, closes: 1}}, _} = drive(bounded)
@@ -345,8 +355,14 @@ defmodule LoopexComposition.RestoreIOTest do
     joined(linked)
     File.rm!(Path.join(root, "owner.lock"))
     File.rm!(path)
-    assert {_, 0} = System.cmd("python3", ["-c",
-      "import os,sys; fd=os.open(os.fsencode(sys.argv[1])+b'/invalid-\\xff',os.O_WRONLY|os.O_CREAT,0o600); os.close(fd)", root])
+
+    assert {_, 0} =
+             System.cmd("python3", [
+               "-c",
+               "import os,sys; fd=os.open(os.fsencode(sys.argv[1])+b'/invalid-\\xff',os.O_WRONLY|os.O_CREAT,0o600); os.close(fd)",
+               root
+             ])
+
     invalid = launch({:manifest, root, 0}, :list)
     assert {{:joined, {:error, :io_error}, %{opens: 0, closes: 0}}, _} = drive(invalid)
     joined(invalid)
@@ -369,19 +385,28 @@ defmodule LoopexComposition.RestoreIOTest do
   test "manifest refuses physical size mode and type changes during hashing", context do
     root = physical_root(context.root)
     path = Path.join(root, "data")
+
     for change <- [:shorter, :longer, :mode, :symlink] do
       File.write!(path, "original")
       File.chmod!(path, 0o600)
       owned = launch({:manifest, root, 8}, :hash_read)
       {id, _} = paused_operation(owned, :hash_read)
+
       case change do
-        :shorter -> File.write!(path, "short")
-        :longer -> File.write!(path, "original plus")
-        :mode -> File.chmod!(path, 0o640)
+        :shorter ->
+          File.write!(path, "short")
+
+        :longer ->
+          File.write!(path, "original plus")
+
+        :mode ->
+          File.chmod!(path, 0o640)
+
         :symlink ->
           File.rename!(path, Path.join(root, "previous"))
           File.ln_s!(Path.join(root, "previous"), path)
       end
+
       send(owned.guardian, {:proceed, owned.reference, id})
       assert {{:joined, {:error, :io_error}, %{opens: 1, closes: 1}}, _} = drive(owned)
       joined(owned)
@@ -412,8 +437,10 @@ defmodule LoopexComposition.RestoreIOTest do
     File.rm!(path)
     send(owned.guardian, {:proceed, owned.reference, id})
     assert {{:joined, {:error, :io_error}, %{opens: 0, closes: 0}}, events} = drive(owned)
+
     assert {:acknowledged, id, {:open, _}, :error} =
              Enum.find(events, &match?({:acknowledged, ^id, {:open, _}, :error}, &1))
+
     joined(owned)
   end
 
@@ -426,9 +453,11 @@ defmodule LoopexComposition.RestoreIOTest do
     Process.exit(owned.caller, :kill)
     assert_receive {:DOWN, monitor, :process, caller, :killed}, 1_000
     assert {monitor, caller} == {owned.caller_monitor, owned.caller}
+
     assert_receive {:restore_io, _, _, _,
                     {:terminal, {:joined, {:error, :caller_lost}, %{opens: 1, closes: 1}}}},
                    1_000
+
     joined(owned, false)
   end
 
@@ -464,8 +493,10 @@ defmodule LoopexComposition.RestoreIOTest do
     assert_receive {:DOWN, monitor, :process, worker, :killed}, 1_000
     assert {monitor, worker} == {owned.worker_monitor, owned.worker}
     assert {{:unconfirmed, :descriptor_unclosed}, events} = drive(owned, false)
+
     assert {:stopping, :worker_unjoined, stop, cleanup} =
              Enum.find(events, &match?({:stopping, _, _, _}, &1))
+
     assert cleanup == stop + 10_000
     assert System.monotonic_time(:millisecond) >= cleanup
     guardian = owned.guardian
@@ -496,12 +527,21 @@ defmodule LoopexComposition.RestoreIOTest do
     # Independently measure the actual deterministic ETF directory lower bound.
     # If even this smaller representation exceeds 4 MiB, regular fields cannot fit.
     mode = Bitwise.band(File.stat!(root).mode, 0o7777)
-    entries = [%{"path" => ".", "kind" => "directory", "mode" => mode,
-                 "size" => 0, "sha256" => nil} |
-               Enum.map(names, fn name -> %{"path" => name, "kind" => "directory",
-                                           "mode" => 0, "size" => 0, "sha256" => nil} end)]
-    assert byte_size(:erlang.term_to_binary(["loopex:current-state-manifest:v1", entries],
-                                          [:deterministic])) > 4_194_304
+
+    entries = [
+      %{"path" => ".", "kind" => "directory", "mode" => mode, "size" => 0, "sha256" => nil}
+      | Enum.map(names, fn name ->
+          %{"path" => name, "kind" => "directory", "mode" => 0, "size" => 0, "sha256" => nil}
+        end)
+    ]
+
+    assert byte_size(
+             :erlang.term_to_binary(
+               ["loopex:current-state-manifest:v1", entries],
+               [:deterministic]
+             )
+           ) > 4_194_304
+
     owned = launch({:manifest, root, 0}, :list)
     assert {{:joined, {:error, :io_error}, %{opens: 0, closes: 0}}, events} = drive(owned)
     assert Enum.count(issued_kinds(events), &(&1 == :list)) == 1
@@ -523,24 +563,38 @@ defmodule LoopexComposition.RestoreIOTest do
       assert {:error, :invalid_io_request} =
                RestoreIO.run({:manifest, context.root, cap}, limits(1_000, 5), probe: self())
     end
+
     refute_receive {:restore_io, _, _, _, _}
   end
 
   defp physical_root(root) do
-    assert {physical, 0} = System.cmd("python3", ["-c", "import os,sys; print(os.path.realpath(sys.argv[1]))", root])
+    assert {physical, 0} =
+             System.cmd("python3", [
+               "-c",
+               "import os,sys; print(os.path.realpath(sys.argv[1]))",
+               root
+             ])
+
     String.trim_trailing(physical, "\n")
   end
 
   defp expected_manifest(root, paths) do
-    entries = paths |> Enum.sort() |> Enum.map(fn relative ->
-      path = if relative == ".", do: root, else: Path.join(root, relative)
-      info = File.lstat!(path)
-      %{"path" => relative,
-        "kind" => if(info.type == :directory, do: "directory", else: "regular"),
-        "mode" => Bitwise.band(info.mode, 0o7777),
-        "size" => if(info.type == :directory, do: 0, else: info.size),
-        "sha256" => if(info.type == :directory, do: nil, else: hash(File.read!(path)))}
-    end)
+    entries =
+      paths
+      |> Enum.sort()
+      |> Enum.map(fn relative ->
+        path = if relative == ".", do: root, else: Path.join(root, relative)
+        info = File.lstat!(path)
+
+        %{
+          "path" => relative,
+          "kind" => if(info.type == :directory, do: "directory", else: "regular"),
+          "mode" => Bitwise.band(info.mode, 0o7777),
+          "size" => if(info.type == :directory, do: 0, else: info.size),
+          "sha256" => if(info.type == :directory, do: nil, else: hash(File.read!(path)))
+        }
+      end)
+
     :erlang.term_to_binary(["loopex:current-state-manifest:v1", entries], [:deterministic])
   end
 
@@ -551,21 +605,29 @@ defmodule LoopexComposition.RestoreIOTest do
     guardian = owned.guardian
     worker = owned.worker
     reference = owned.reference
+
     receive do
       {:restore_io, ^guardian, ^worker, ^reference, {:issued, id, kind}} ->
         name = if is_tuple(kind), do: elem(kind, 0), else: kind
         if name == expected, do: {id, kind}, else: paused_operation(owned, expected, cutoff)
+
       {:restore_io, ^guardian, ^worker, ^reference, _} ->
         paused_operation(owned, expected, cutoff)
     after
-      max(0, cutoff - System.monotonic_time(:millisecond)) -> flunk("expected owned operation was not issued")
+      max(0, cutoff - System.monotonic_time(:millisecond)) ->
+        flunk("expected owned operation was not issued")
     end
   end
 
   defp create_listing(root, count, width) do
-    assert {_, 0} = System.cmd("python3", ["-c",
-      "import os,sys; root=sys.argv[1]; count=int(sys.argv[2]); width=int(sys.argv[3]); [os.close(os.open(os.path.join(root, str(i).zfill(width)), os.O_CREAT|os.O_EXCL|os.O_WRONLY,0o600)) for i in range(count)]",
-      root, Integer.to_string(count), Integer.to_string(width)])
+    assert {_, 0} =
+             System.cmd("python3", [
+               "-c",
+               "import os,sys; root=sys.argv[1]; count=int(sys.argv[2]); width=int(sys.argv[3]); [os.close(os.open(os.path.join(root, str(i).zfill(width)), os.O_CREAT|os.O_EXCL|os.O_WRONLY,0o600)) for i in range(count)]",
+               root,
+               Integer.to_string(count),
+               Integer.to_string(width)
+             ])
   end
 
   defp launch(operation, pause, work_ms \\ 1_000, grace \\ 100) do
