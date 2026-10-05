@@ -3,6 +3,7 @@
 Part of the [evidence index](README.md). This is a resume record, not an
 acceptance, milestone closure or verification waiver.
 
+<a id="concept"></a>
 ## Concept
 
 M7 implementation resumed after the maintainer restart on 2026-10-05. Continue
@@ -21,15 +22,28 @@ No main merge, milestone closure, tag, release, publication or paid evidence
 campaign is authorized by this checkpoint. Accepted ADR 0051 permits its exact
 physical restore implementation; it does not waive any full-history proof.
 
+<a id="technical-depth"></a>
 ## Technical depth
 
 ### Current resumed work
 
-Primary `m7` is clean and pushed at
-`e327e46c51298d49deee045e3cb03fc9e375dc94`. The active goal remains authorized;
-this checkpoint does not pause it. The approved diagnostic setup cutoff and
-complete physical manifest source are integrated. The full current fast check
-of e327 failed; never retry or relabel that candidate PASS.
+Primary `m7` includes the proved foreground repair and Store byte decoder.
+Both worker histories are joined and their clean worktrees archived. Landed
+local and remote worker branches are removed. The active goal remains
+authorized; this checkpoint does not pause it.
+
+The full current fast check of exact
+`4a23ce9489a2c37ba249b7fec4156d6830027def` failed in 14.128 seconds. Compilation
+and formatting passed; the structure gate found a task-ledger link to this
+file's missing explicit technical anchor. No suite started. The new explicit
+anchors repair that link without changing product source or check behavior.
+Complete output is retained at
+`/Users/spuri/projects/lexlapax/loopex-evidence/M7/integration-4a23ce94-v1/current-fast-check.log`,
+SHA-256 `d6ccd17adcee85092d767485d17dac278c8898aa19534e81fcf8a87d769bf3fe`;
+completion SHA-256
+`7c5faee504013535908df0ab0ed25a598d889b7d376f614b329bc15e393f637c`.
+Final HEAD and clean tree matched the tested candidate. Run the next new clean
+candidate once; never retry or relabel 4a23 or e327 PASS.
 
 The selected `bash scripts/check-release.sh --only long_bound` is terminal PASS
 on exact e327, exit 0 in 1090.005 seconds. Root collected handle 9847; do not poll

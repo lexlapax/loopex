@@ -29,6 +29,28 @@ grouped by T00–T19. Empty added sections mean no added subtasks are recorded;
 they do not mean the original task is complete. This follows the maintainer's
 2026-10-01 update to the active implementation goal.
 
+## Combined candidate documentation failure — 2026-10-05
+
+The full current fast check of exact
+`4a23ce9489a2c37ba249b7fec4156d6830027def` failed once, exit 1 in 14.128 seconds.
+Compilation and formatting passed. The repository structure gate refused a
+task-ledger link to the missing explicit technical anchor in M7-resume.md. No
+application suite started, so this result supplies no combined test proof.
+The explicit Concept and Technical depth anchors now fix the broken link.
+Neither check behavior nor product source changes. A new committed candidate
+gets one full check; the failed candidate will not be retried.
+
+Complete immutable output is retained at
+`/Users/spuri/projects/lexlapax/loopex-evidence/M7/integration-4a23ce94-v1/current-fast-check.log`,
+SHA-256 `d6ccd17adcee85092d767485d17dac278c8898aa19534e81fcf8a87d769bf3fe`;
+completion SHA-256
+`7c5faee504013535908df0ab0ed25a598d889b7d376f614b329bc15e393f637c`.
+Exact final HEAD and clean tree match. The application-log inventory is empty,
+as expected before the suite stage. Landed Store worker worktree is archived;
+local/remote branch is removed, with source and evidence retained in m7.
+No checklist completion changes: T01–T19 originals 78 done, 95 remaining,
+6 retired; added 290 done, 18 remaining.
+
 ## Verified captured Store byte decoder — 2026-10-05
 
 Exact worker7dc5fe51a4c646f9179ef715add641cf688bde82 is joined with its ancestry.
