@@ -325,6 +325,70 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: accepted V7.7's deterministic private cancellation gate is integrated
+  as `53f7d1ea`, exact owned source from clean worker
+  `328f6b0dca57e8ad59f2b5c36a8e8ba5559fa3ee`. The complete gate file passes
+  ten cases on each supported pair in 11.2/11.9 seconds. Four complete Core
+  control files pass 106 executed cases with one existing long-bound exclusion
+  on each pair in 77.5/77.4 seconds. Warning-free final metadata gates pass
+  in 7.1/6.3 seconds. All six authorized runner handles are terminal; the slot
+  is released to PTY verification. Retain the initial 9/10 fixture FAIL and
+  environment-unavailable output; source changed, no failure became a retry pass.
+  Actual process suspension replaced OTP system suspension to prove the same
+  1,000-ms captured stop cutoff and exact DOWN, without changing the module.
+
+  All 29 retained records rehashed successfully:
+  `/private/tmp/loopex-m7-cancellation-gate-proof-inventory.tsv`, SHA-256
+  `583597ae7c2ca4c5eb839019a501171c1524dc91b11d9d7bf84848e37af7564e`.
+  Final source inventory:
+  `/private/tmp/loopex-m7-cancellation-gate-source-final-v3.jsonl`, SHA-256
+  `766ef20bc423cc287956f24c25550eeecc7af33311a4c7ad125c70a64934c2bb`.
+  Root proves all 1,050 source modes and 1,047 contents, including the gate and
+  all Core controls, match; independent steer source/test and this ledger are
+  the three explicit rejoin differences. Source proof:
+  `/private/tmp/loopex-m7-cancellation-gate-root-source-proof.txt`, SHA-256
+  `488fad92c630c115b61942470f3be9a0848b391687bc9981a4831e14b29fd8f1`.
+  Read-only independent review reports no findings and matches both gate hashes:
+  `/private/tmp/loopex-m7-cancellation-gate-independent-review.txt`, SHA-256
+  `a5670ce6ad2cbf35f9162f976963b0d2248dbb917e1efe1b51d0cbd2e9126cda`.
+  Close one added T08 subtask. T01–T19 originals remain 78 done / 95 todo /
+  6 retired; added work is 268 done / 17 todo. Gate forwarding uses the real
+  protected adapter against local HTTP; counted paid V7.7 and script integration
+  remain separate, unproved obligations. Root post-rejoin metadata waits for
+  the PTY slot; this evidence does not cover root's steering repair.
+
+- Maintainer decision: revise Model preparation option B to support runtime
+  aliases. First specify retained authored-to-canonical identity, duplicate
+  command and replay semantics. Canonical-only exact candidate `ae950afe`
+  remains Proposed and unaccepted; no dependent callback/persistence work is
+  authorized by implication. Revise ADR 0050's pair, retain the new exact
+  candidate, then request its acceptance before implementing that contract.
+
+- Resume checkpoint: both independent writers saved isolated, owned-only drafts.
+  The PTY draft `18f5bee656125153410e9f14d9497da99f3fa92d` retains a complete
+  four-case FAIL in 28.59 seconds. It exposed the production `/steer` command's
+  missing required run identity, a terminal Ctrl-C entering BEAM BREAK whose
+  product/stand-in cause remains unresolved, and unsafe-term fixture evidence
+  decoding after successful answer/decline completion. No PTY row is proved.
+  Exact failure/source inventory:
+  `/private/tmp/loopex-m7-chat-pty-proof/evidence/draft-output-inventory.sha256`,
+  SHA-256 `992fbf16181e7cded1094a966fdf788d504945a775dd7316017297c044d3fe78`.
+  All prior PTY VMs are terminal and owned OS processes are gone. Root owns the
+  steer repair and regression; the PTY writer owns only fixture corrections.
+
+  The cancellation gate draft `6a4dc90c8cb20d37a59c53b75210dc8c0fc096de`
+  retains bounded admission and owner stop, with one caller-captured cleanup
+  cutoff and exact joins. Its checkpoint patch is
+  `/private/tmp/loopex-m7-cancellation-gate-draft-checkpoint.patch`, SHA-256
+  `2dbb430c6bb4687dc4b2008cef1130e1f4e392f0fbd7add5972e05f4d7d28392`.
+  The gate writer now holds the exclusive VM slot for both-pair verification;
+  root and the PTY writer hold all VMs until its explicit release. Gate current
+  conformance passed ten cases after correcting a suspended-stop fixture;
+  complete controls and floor proof remain running, so no row closes yet.
+  Revised ADR 0050 exact acceptance remains the first pending decision. The
+  maintainer's option-B direction remains recorded; no proposed callback ships
+  by implication. T01–T19 originals remain 78 / 95 / 6; added 267 / 18.
+
 - Running source preparation for accepted V7.7: the second isolated writer
   owns only the new private Model cancellation gate and its conformance tests
   in `/private/tmp/loopex-m7-cancellation-gate-worktree`, exact base `445a3a81`.
@@ -10957,7 +11021,7 @@ the still-open real-provider, live protocol, persistent-fault or closure lanes.
 
 ### Added implementation subtasks
 
-- [ ] Implement the accepted trusted pre-transport Model cancellation gate with unchanged same-process forwarding, second distinct staged-request selection, exact host release and loss/deadline refusal; prove real Core committed-tool/abort/callback-cleanup order, truthful conservative accounting and unchanged later prompts on both supported pairs. Script/counted paid-provider integration remains separate.
+- [x] Implement the accepted trusted pre-transport Model cancellation gate with unchanged same-process forwarding, second distinct staged-request selection, exact host release and loss/deadline refusal; prove real Core committed-tool/abort/callback-cleanup order, truthful conservative accounting and unchanged later prompts on both supported pairs. Script/counted paid-provider integration remains separate.
 
 - [x] Prepare closed whole-candidate mutable updates with bounded inputs, monotonic versions and retained explicit/derived budget origins.
 - [x] Prepare atomic configuration admission/replay with exact command identity, single-copy instructions, retained earlier run captures and public event allowlists.
