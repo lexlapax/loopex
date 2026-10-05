@@ -325,6 +325,43 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Running independent source preparation: the T10 tracing writer owns only
+  `apps/loopex_cli/test/chat_workflow_test.exs` in the temporary detached Git
+  worktree `/private/tmp/loopex-m7-chat-file-trace-worktree`, based exactly on
+  `7570d0c8`. Git worktree creation ran no setup or VM. The three-case live
+  file/flag matrix uses existing Chat, diagnostic consumer and trace APIs;
+  all formatter, compile and suite VMs wait until full handle `13537` ends.
+  Root owns rejoin and post-rejoin verification. One added pending T10 row
+  tracks this bounded proof. T01–T19 originals are 77 / 96 / 6; added work is
+  266 done / 17 todo. No public boundary or original row closes from preparation.
+
+- Done by original-checklist audit: T04 item 7 uses accepted runtime-startup
+  summarizer semantics. New automatic episodes use successor startup settings;
+  already admitted episodes return their retained capture before consulting
+  replacements. Real Model-port dispatch, checkpoint and continuation cases
+  cover both changed and absent successor settings. Prepared public configure
+  changes ordinary settings, not runtime summarizer selection. ADRs 0043/0044
+  explicitly keep these boundaries distinct. Complete configured-session and
+  maintenance-recovery test files exactly match their retained v4 source copies,
+  and their complete nine-file selection passes 288 cases with three existing
+  exclusions on both pairs (39.733/39.192 seconds). Complete immutable outputs:
+  `/private/tmp/loopex-m7-effect-retirement-current-focused-v4.log`, SHA-256
+  `d93d55848fdee3ae17464e2c95f1e8cc528089ebe0eb8c7b9b242989d96c8d1c`;
+  `/private/tmp/loopex-m7-effect-retirement-floor-focused-v4.log`, SHA-256
+  `c461f30d40e4d70b7b96e4340eb086fffe3956876904186381c507c2f689ba60`.
+  Both outputs were rehashed without a rerun. T01–T19 originals become
+  77 done / 96 todo / 6 retired; added subtasks remain 266 / 16. This does not
+  prove daemon configure, coordinated wire serving or the running full check.
+
+- Read-only audits preserve two remaining original rows. T03 policy denial and
+  immutable read-only selection are proved even with hostile staged text, but
+  the actual helper adapter and universal mutation guard are missing. T10
+  tracing is selected and torn down in code, but its live Chat proofs omit
+  enabled-file tracing, --no-trace precedence and exact actual tracer cleanup.
+  The three-case file/flag matrix can use existing host seams and public trace
+  APIs without a new contract; it remains independent of Model preparation and
+  helper/wire decisions. No row closes from that inspection.
+
 - Running once: full current-pair fast check of exact clean new candidate
   `698595b47f2d2523db552114f3e2fe37b8d60693` in the reused attached
   `m7-trace-check` verification checkout. All artifact, chat and quiesce source
@@ -10542,7 +10579,7 @@ or check was relaxed.
 - [x] Implement file/flag precedence, validation and effective-value display.
 - [x] Require explicit conversation bounds in the file, including when flags override them.
 - [ ] Retain committed session settings, tool selections, roles and delegation declarations.
-- [ ] Allow maintenance settings to change new episodes while preserving already admitted episodes.
+- [x] Allow maintenance settings to change new episodes while preserving already admitted episodes.
 - [ ] Implement named provider and credential bindings through the existing custody boundaries.
 - [ ] Abandon prepared owners on every post-preparation refusal; retain uncertain cleanup honestly.
 - [ ] Test malformed files, duplicate keys, overrides, resume conflicts, missing bindings, changed catalogs and cleanup failures.
@@ -10898,6 +10935,9 @@ the still-open real-provider, live protocol, persistent-fault or closure lanes.
 - [x] Test tracing isolation, redaction, stalled stderr and ask’s JSON output separation.
 
 ### Added implementation subtasks
+
+- [ ] Prove actual Chat file-enabled tracing, --no-trace overriding enabled file settings, and --trace overriding disabled settings; observe real diagnostic trace delivery or its absence and exact tracer/consumer/writer/runtime joins before successful closing using existing host seams. Keep startup ordering and all bounds; no new public contract.
+
 
 - [x] Prove the complete actual-facade chat EOF matrix for an active run and actual pending question, plus incomplete EOF fragments, normal idle/settled EOF and failed-then-successful runs retaining nonzero final exit and the latest successful outcome; preserve exact input/process/cleanup bounds. The first three cases are integrated as a33ec9ae; the remaining four exposed and now prove the repaired actual reader drain through cancellation. Complete affected files pass on both pairs with unchanged bounds.
 
