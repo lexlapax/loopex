@@ -29,6 +29,99 @@ grouped by T00–T19. Empty added sections mean no added subtasks are recorded;
 they do not mean the original task is complete. This follows the maintainer's
 2026-10-01 update to the active implementation goal.
 
+## Current verification checkpoint — 2026-10-05, restore prerequisite complete
+
+Exact repaired source `8885e0dbacfc4a37cb873080d615869587132ea4`
+passes complete Local codec/conformance 29, ordinary IO 12 and actual long IO 1
+on both supported toolchains. Current measured durations are 1.626 / 0.983 /
+10.744 seconds; floor 1.567 / 0.987 / 10.743. Thus all 42 cases run on each
+pair, including the unchanged actual 10,000-ms cleanup proof. Both formatting,
+dev/test warning-free compilation, documentation, dependency and status gates
+pass. Eighteen complete outputs rehash:
+`/private/tmp/loopex-m7-restore-timeout-rejoin-v1/completion.json`, SHA-256
+`bb8887d25c1db92f8043af2924002219d0dd78471fd07fc39b413b529361942a`.
+Runner 37268 is terminal and collected. The bounded T15 codec/IO prerequisite
+is complete; no original T15 backup/restore outcome closes.
+
+Independent first-unit review identified the invalid oversized receive timeout:
+`/private/tmp/loopex-m7-restore-1d7d370d-independent-review.md`, SHA-256
+`87cf26735a0f3c63a97c6e5d8690594fcb4d0d1dcc7828eb87a5cc0855af81c2`;
+39 exact inputs rehashed, inventory SHA-256
+`a009bbe9e67fd06d7f63aaaf4593ae3d5df5e06169a538f41bc2491e22936aae`.
+Root reproduced timeout_value against saved parent b17a2b94 using an actual
+read and joined the installed actors, in 0.520 seconds. Output:
+`/private/tmp/loopex-m7-restore-timeout-red-v1/current-red.log`, SHA-256
+`b011bc1c053c21361c40836ca114f6b5142e94d0095ce6512eee0fb330d3215a`.
+All three reproduction/compile outputs rehash; inventory SHA-256
+`759ce3422b74785de9dcd2eb49fc31d666d1cbfef23f315b92b2f4ac37253a8f`.
+Runner 75258 is terminal and collected. This is a recorded reproduced defect,
+not a passing restore result.
+
+The repair clamps each receive to OTP's per-wait ceiling and loops against the
+same original cutoff, actor monitor and retained result. Guardian first-stop
+capture remains unchanged. The new actual-file regression exercises huge work,
+huge grace and both, preserving exact cutoffs and original actor joins. Chunk
+expiry after fifty days is source-reviewed, not claimed as dynamically run.
+Independent exact repair review reports no findings:
+`/private/tmp/loopex-m7-restore-timeout-8885e0db-independent-review.md`, SHA-256
+`4df23618a8e84830e91ff3d9a33e623631e30a722507f238ada22e2bf5d48b7f`;
+nine inputs rehashed, inventory SHA-256
+`6898d6808f0c346b5f59fcd4fbef628532efaff3e1e9a95cfe8ca26fb836df5b`.
+No accepted duration, schema, ownership or cleanup bound changes.
+
+Completed: paired ChatDriver repair, V1–V13 source inventory and restore codec/IO
+prerequisite. Running: read-only whole-current-format restore audit design.
+Remaining: full physical manifest producer, complete current history audit,
+claims, guards, lineage, copying and activation, alongside other open M7 tasks.
+Original T01–T19 totals stay 78 done / 95 todo / 6 retired. Added totals are
+284 done / 18 todo; including T00, 288 / 19. The unanswered diagnostic cutoff
+question and queued public decisions remain. No full integration, closure,
+release or provider campaign PASS is claimed.
+
+## Current verification checkpoint — 2026-10-05, paired chat and restore review
+
+Saved chat fixture `4f9a0778fde90bd6b285ba72c52a4d561e2b6570`
+passes the complete 41-case ChatDriver file on both supported toolchains in
+22.982 / 23.605 seconds. Both formatting, dev/test warning-free compilation,
+documentation, dependency and status checks pass. All fourteen outputs rehash:
+`/private/tmp/loopex-m7-chat-finish-rejoin-v1/completion.json`, SHA-256
+`1ebe13894a411ed705d5ab5f2a3ab8c0688b33ba78e84f587cb8feff3a41a09d`.
+Runner 61092 is terminal and collected. This completes the reopened added T06
+native busy/barrier unit. Original T06/T10 integration outcomes stay open; all
+previous same-source failures remain retained.
+
+The VM-free V1–V13 inventory retains all 74 numbered steps, 155 descriptive
+subcases and 80 supporting test pointers. Root checked all accepted plan spans
+and rehashed all 403 artifacts. Report:
+`/private/tmp/loopex-m7-v1-v13-executable-inventory-20261005-v1/report.md`, SHA-256
+`d188cd0db4dc4cb70e5088d6c1d7b7318a23a4e3040cd1fe34945791677da8d3`;
+complete inventory SHA-256
+`2338f7375ccd991364998c6cf1055a68bb5ad76c3ee0b94469fef83ab99d8055`.
+It closes one added T14 inventory row. Execution manifest pins, attempt admission,
+paid cases, child manager and full restore remain unfinished; supporting tests
+supply no provider proof or new accepted manifest.
+
+Restore worker `1d7d370d74859605615fd5a8af36ec8fbbfdca70` supplies four
+new private codec/owned IO files, integrated at
+`b17a2b94fce7d19b9284e4be9c13636578ca489b`. Root compared all five selected
+source blobs and rehashed all 81 retained artifacts. Both worker pairs pass
+29 Local codec/conformance cases, 11 ordinary IO cases and the separate actual
+10,000-ms IO case, plus owned format, dev/test compilation and metadata.
+Report `/private/tmp/loopex-m7-restore-unit-proof/final/report.md`, SHA-256
+`e03b93e541fdc28424238510168b09eb0c68260f348763538604edbaebd71bd1`;
+output inventory SHA-256
+`89919e410e2510a9bbe08d9c8794c66ef6dca327583729e113d7e66335e3aa1d`.
+Initial environment and compiler failures remain retained. Independent source
+review found accepted u64 durations can exceed receive-after's single-wait
+ceiling despite valid signed native-time arithmetic. Root is reproducing and
+repairing this internal timer implementation; the new bounded T15 prerequisite
+row stays open. No full restore API, claim, audit, guards or activation is claimed.
+
+Original T01–T19 counts remain 78 done / 95 todo / 6 retired. Added counts are
+283 done / 19 todo; including T00, 287 / 20. The diagnostic setup cutoff is the
+unanswered question. Other proposed public decisions remain queued, one at a
+time. Full integration and closure evidence remain unavailable.
+
 ## Current verification checkpoint — 2026-10-05, closing observation
 
 Changed chat source `538c0e5e20fda82780d0ba2c23c4824877d0a5ad`
@@ -11868,7 +11961,7 @@ or check was relaxed.
 
 ### Added implementation subtasks
 
-- [ ] Implement the approved required native compact_pending observation and definitive-status uncertainty fence; hold chat barriers through resumed/external pre-episode preparation, episode, abort and cleanup until committed completion, reject missing/non-Boolean busy values, and prove actual owner/recovery and exact joins on both supported toolchains. Add no wire or chat JSON members.
+- [x] Implement the approved required native compact_pending observation and definitive-status uncertainty fence; hold chat barriers through resumed/external pre-episode preparation, episode, abort and cleanup until committed completion, reject missing/non-Boolean busy values, and prove actual owner/recovery and exact joins on both supported toolchains. Add no wire or chat JSON members.
 
 
 - [x] Join the public chat entrypoint to exact creation, session tracking, prepared resume, guarded signals, effective report and existing input/output driver; share ask diagnostic joins and prove actual built startup/quit plus scripted continuity/restart/refusal/cleanup behavior on both pairs. Built multi-prompt/provider, attended, maintenance and helper proof remains open.
@@ -12260,6 +12353,9 @@ candidate integration and focused floor proofs are retained there; items 9 and
 
 ### Added implementation subtasks
 
+- [x] Inventory all 74 numbered V1–V13 steps and 155 descriptive subcases against exact accepted plan spans and current supporting tests; retain source identities, existing evidence and every missing executable owner/oracle pin. This is read-only planning evidence, not an accepted execution manifest or provider execution.
+
+
 - [x] Implement the accepted private attempts-index canonical envelope and complete-chain framing; reuse sorted JSON and duplicate-aware decoding, pin an independent exact-byte/hash vector, refuse malformed/noncanonical/oversized/forked records and preserve unresolved truncated tails on both supported toolchains. Event admission, writer ownership, fsync and runner dispatch integration remain open.
 
 - [x] Verify a complete attempts chain contains the exact previously committed campaign/sequence/digest head; refuse stale copies, missing history, authenticated forks and malformed anchors without resolving incomplete tails or granting dispatch authority. Prove on both supported toolchains. Greatest-head selection and runner admission remain open.
@@ -12287,6 +12383,9 @@ retained under [Current work](#current-work). Backup/restore obligations remain
 open.
 
 ### Added implementation subtasks
+
+- [x] Implement and independently review the accepted ADR 0051 private restore codec and owned raw IO prerequisite; prove closed exact bytes, captured cleanup bounds and actual descriptor/guardian faults on both toolchains. Preserve required current-format audit, claims, guards, lineage and activation as subsequent work.
+
 
 - [ ] Prove a bounded current-format physical Store/executor backup/restore slice with quiescent exact owner joins, complete unexcluded manifests, empty destination roots, separate workspace restoration and unknown-effect nonredispatch on both pairs. This does not close operator attendance or future helper/catalog/ledger coverage; isolated test preparation waits for the current full check before verification.
 
