@@ -3,7 +3,7 @@ defmodule LoopexProtocol.Session.Snapshot do
   ## Concept
 
   One closed revision-3 snapshot describes a session at one committed cursor.
-  Configuration, checkpoint, maintenance, pending question and last compact
+  Configuration, checkpoint, maintenance, open question and last compact
   completion belong to that same point in history.
 
   ## Technical depth
@@ -24,7 +24,7 @@ defmodule LoopexProtocol.Session.Snapshot do
     CompactResult,
     Configuration,
     MaintenanceView,
-    PendingInteraction
+    OpenInteraction
   }
 
   @fields [
@@ -155,8 +155,8 @@ defmodule LoopexProtocol.Session.Snapshot do
   defp checkpoint(value, :encode), do: Checkpoint.encode_wire(value)
   defp checkpoint(value, :decode), do: Checkpoint.decode_wire(value)
   defp interaction(nil, _mode), do: {:ok, nil}
-  defp interaction(value, :encode), do: PendingInteraction.encode_wire(value)
-  defp interaction(value, :decode), do: PendingInteraction.decode_wire(value)
+  defp interaction(value, :encode), do: OpenInteraction.encode_wire(value)
+  defp interaction(value, :decode), do: OpenInteraction.decode_wire(value)
 
   defp maintenance(value, mode) do
     result =

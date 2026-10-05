@@ -1,6 +1,6 @@
 {
   "format": "loopex.experimental.payload-vectors/1",
-  "contract": "pending_interaction",
+  "contract": "open_interaction",
   "cases": [
     {
       "name": "model-choice",
@@ -2028,6 +2028,1143 @@
         "kind": "choice"
       },
       "error": "invalid_payload"
+    },
+    {
+      "name": "policy-answered",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "answered",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "_w",
+            "label": "Proceed"
+          },
+          {
+            "id": "YQ",
+            "label": "Proceed"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "policy_defer",
+        "kind": "choice",
+        "answer_choice_id": "_w",
+        "answer_command_id": "Y29tbWFuZA"
+      },
+      "decoded": {
+        "interaction_id": {
+          "opaque_hex": "00ff0a"
+        },
+        "run_id": {
+          "opaque_hex": "ff"
+        },
+        "turn": "1",
+        "tool_call_id": {
+          "opaque_hex": "63616c6c"
+        },
+        "status": "answered",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": {
+              "opaque_hex": "ff"
+            },
+            "label": "Proceed"
+          },
+          {
+            "id": {
+              "opaque_hex": "61"
+            },
+            "label": "Proceed"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "policy_defer",
+        "kind": "choice",
+        "answer_choice_id": {
+          "opaque_hex": "ff"
+        },
+        "answer_command_id": {
+          "opaque_hex": "636f6d6d616e64"
+        }
+      }
+    },
+    {
+      "name": "policy-answered-huge-turn",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "184467440737095516160000000000000000000001",
+        "tool_call_id": "Y2FsbA",
+        "status": "answered",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "_w",
+            "label": "Proceed"
+          },
+          {
+            "id": "YQ",
+            "label": "Proceed"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "policy_defer",
+        "kind": "choice",
+        "answer_choice_id": "_w",
+        "answer_command_id": "Y29tbWFuZA"
+      },
+      "decoded": {
+        "interaction_id": {
+          "opaque_hex": "00ff0a"
+        },
+        "run_id": {
+          "opaque_hex": "ff"
+        },
+        "turn": "184467440737095516160000000000000000000001",
+        "tool_call_id": {
+          "opaque_hex": "63616c6c"
+        },
+        "status": "answered",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": {
+              "opaque_hex": "ff"
+            },
+            "label": "Proceed"
+          },
+          {
+            "id": {
+              "opaque_hex": "61"
+            },
+            "label": "Proceed"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "policy_defer",
+        "kind": "choice",
+        "answer_choice_id": {
+          "opaque_hex": "ff"
+        },
+        "answer_command_id": {
+          "opaque_hex": "636f6d6d616e64"
+        }
+      }
+    },
+    {
+      "name": "answered-missing-interaction_id",
+      "input": {
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "answered",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "_w",
+            "label": "Proceed"
+          },
+          {
+            "id": "YQ",
+            "label": "Proceed"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "policy_defer",
+        "kind": "choice",
+        "answer_choice_id": "_w",
+        "answer_command_id": "Y29tbWFuZA"
+      },
+      "error": true
+    },
+    {
+      "name": "answered-missing-run_id",
+      "input": {
+        "interaction_id": "AP8K",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "answered",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "_w",
+            "label": "Proceed"
+          },
+          {
+            "id": "YQ",
+            "label": "Proceed"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "policy_defer",
+        "kind": "choice",
+        "answer_choice_id": "_w",
+        "answer_command_id": "Y29tbWFuZA"
+      },
+      "error": true
+    },
+    {
+      "name": "answered-missing-turn",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "tool_call_id": "Y2FsbA",
+        "status": "answered",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "_w",
+            "label": "Proceed"
+          },
+          {
+            "id": "YQ",
+            "label": "Proceed"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "policy_defer",
+        "kind": "choice",
+        "answer_choice_id": "_w",
+        "answer_command_id": "Y29tbWFuZA"
+      },
+      "error": true
+    },
+    {
+      "name": "answered-missing-tool_call_id",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "status": "answered",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "_w",
+            "label": "Proceed"
+          },
+          {
+            "id": "YQ",
+            "label": "Proceed"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "policy_defer",
+        "kind": "choice",
+        "answer_choice_id": "_w",
+        "answer_command_id": "Y29tbWFuZA"
+      },
+      "error": true
+    },
+    {
+      "name": "answered-missing-status",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "_w",
+            "label": "Proceed"
+          },
+          {
+            "id": "YQ",
+            "label": "Proceed"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "policy_defer",
+        "kind": "choice",
+        "answer_choice_id": "_w",
+        "answer_command_id": "Y29tbWFuZA"
+      },
+      "error": true
+    },
+    {
+      "name": "answered-missing-prompt",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "answered",
+        "choices": [
+          {
+            "id": "_w",
+            "label": "Proceed"
+          },
+          {
+            "id": "YQ",
+            "label": "Proceed"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "policy_defer",
+        "kind": "choice",
+        "answer_choice_id": "_w",
+        "answer_command_id": "Y29tbWFuZA"
+      },
+      "error": true
+    },
+    {
+      "name": "answered-missing-choices",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "answered",
+        "prompt": "Choose λ",
+        "expires_at": "18446744073709551615",
+        "producer": "policy_defer",
+        "kind": "choice",
+        "answer_choice_id": "_w",
+        "answer_command_id": "Y29tbWFuZA"
+      },
+      "error": true
+    },
+    {
+      "name": "answered-missing-expires_at",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "answered",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "_w",
+            "label": "Proceed"
+          },
+          {
+            "id": "YQ",
+            "label": "Proceed"
+          }
+        ],
+        "producer": "policy_defer",
+        "kind": "choice",
+        "answer_choice_id": "_w",
+        "answer_command_id": "Y29tbWFuZA"
+      },
+      "error": true
+    },
+    {
+      "name": "answered-missing-producer",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "answered",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "_w",
+            "label": "Proceed"
+          },
+          {
+            "id": "YQ",
+            "label": "Proceed"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "kind": "choice",
+        "answer_choice_id": "_w",
+        "answer_command_id": "Y29tbWFuZA"
+      },
+      "error": true
+    },
+    {
+      "name": "answered-missing-kind",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "answered",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "_w",
+            "label": "Proceed"
+          },
+          {
+            "id": "YQ",
+            "label": "Proceed"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "policy_defer",
+        "answer_choice_id": "_w",
+        "answer_command_id": "Y29tbWFuZA"
+      },
+      "error": true
+    },
+    {
+      "name": "answered-missing-answer_choice_id",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "answered",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "_w",
+            "label": "Proceed"
+          },
+          {
+            "id": "YQ",
+            "label": "Proceed"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "policy_defer",
+        "kind": "choice",
+        "answer_command_id": "Y29tbWFuZA"
+      },
+      "error": true
+    },
+    {
+      "name": "answered-missing-answer_command_id",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "answered",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "_w",
+            "label": "Proceed"
+          },
+          {
+            "id": "YQ",
+            "label": "Proceed"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "policy_defer",
+        "kind": "choice",
+        "answer_choice_id": "_w"
+      },
+      "error": true
+    },
+    {
+      "name": "answered-answer_choice_id-null",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "answered",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "_w",
+            "label": "Proceed"
+          },
+          {
+            "id": "YQ",
+            "label": "Proceed"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "policy_defer",
+        "kind": "choice",
+        "answer_choice_id": null,
+        "answer_command_id": "Y29tbWFuZA"
+      },
+      "error": true
+    },
+    {
+      "name": "answered-answer_choice_id-empty",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "answered",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "_w",
+            "label": "Proceed"
+          },
+          {
+            "id": "YQ",
+            "label": "Proceed"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "policy_defer",
+        "kind": "choice",
+        "answer_choice_id": "",
+        "answer_command_id": "Y29tbWFuZA"
+      },
+      "error": true
+    },
+    {
+      "name": "answered-answer_choice_id-padded",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "answered",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "_w",
+            "label": "Proceed"
+          },
+          {
+            "id": "YQ",
+            "label": "Proceed"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "policy_defer",
+        "kind": "choice",
+        "answer_choice_id": "YQ==",
+        "answer_command_id": "Y29tbWFuZA"
+      },
+      "error": true
+    },
+    {
+      "name": "answered-answer_choice_id-noncanonical",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "answered",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "_w",
+            "label": "Proceed"
+          },
+          {
+            "id": "YQ",
+            "label": "Proceed"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "policy_defer",
+        "kind": "choice",
+        "answer_choice_id": "YR",
+        "answer_command_id": "Y29tbWFuZA"
+      },
+      "error": true
+    },
+    {
+      "name": "answered-answer_choice_id-array",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "answered",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "_w",
+            "label": "Proceed"
+          },
+          {
+            "id": "YQ",
+            "label": "Proceed"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "policy_defer",
+        "kind": "choice",
+        "answer_choice_id": [],
+        "answer_command_id": "Y29tbWFuZA"
+      },
+      "error": true
+    },
+    {
+      "name": "answered-answer_choice_id-object",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "answered",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "_w",
+            "label": "Proceed"
+          },
+          {
+            "id": "YQ",
+            "label": "Proceed"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "policy_defer",
+        "kind": "choice",
+        "answer_choice_id": {},
+        "answer_command_id": "Y29tbWFuZA"
+      },
+      "error": true
+    },
+    {
+      "name": "answered-answer_choice_id-number",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "answered",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "_w",
+            "label": "Proceed"
+          },
+          {
+            "id": "YQ",
+            "label": "Proceed"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "policy_defer",
+        "kind": "choice",
+        "answer_choice_id": 1,
+        "answer_command_id": "Y29tbWFuZA"
+      },
+      "error": true
+    },
+    {
+      "name": "answered-answer_command_id-null",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "answered",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "_w",
+            "label": "Proceed"
+          },
+          {
+            "id": "YQ",
+            "label": "Proceed"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "policy_defer",
+        "kind": "choice",
+        "answer_choice_id": "_w",
+        "answer_command_id": null
+      },
+      "error": true
+    },
+    {
+      "name": "answered-answer_command_id-empty",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "answered",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "_w",
+            "label": "Proceed"
+          },
+          {
+            "id": "YQ",
+            "label": "Proceed"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "policy_defer",
+        "kind": "choice",
+        "answer_choice_id": "_w",
+        "answer_command_id": ""
+      },
+      "error": true
+    },
+    {
+      "name": "answered-answer_command_id-padded",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "answered",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "_w",
+            "label": "Proceed"
+          },
+          {
+            "id": "YQ",
+            "label": "Proceed"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "policy_defer",
+        "kind": "choice",
+        "answer_choice_id": "_w",
+        "answer_command_id": "YQ=="
+      },
+      "error": true
+    },
+    {
+      "name": "answered-answer_command_id-noncanonical",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "answered",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "_w",
+            "label": "Proceed"
+          },
+          {
+            "id": "YQ",
+            "label": "Proceed"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "policy_defer",
+        "kind": "choice",
+        "answer_choice_id": "_w",
+        "answer_command_id": "YR"
+      },
+      "error": true
+    },
+    {
+      "name": "answered-answer_command_id-array",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "answered",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "_w",
+            "label": "Proceed"
+          },
+          {
+            "id": "YQ",
+            "label": "Proceed"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "policy_defer",
+        "kind": "choice",
+        "answer_choice_id": "_w",
+        "answer_command_id": []
+      },
+      "error": true
+    },
+    {
+      "name": "answered-answer_command_id-object",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "answered",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "_w",
+            "label": "Proceed"
+          },
+          {
+            "id": "YQ",
+            "label": "Proceed"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "policy_defer",
+        "kind": "choice",
+        "answer_choice_id": "_w",
+        "answer_command_id": {}
+      },
+      "error": true
+    },
+    {
+      "name": "answered-answer_command_id-number",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "answered",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "_w",
+            "label": "Proceed"
+          },
+          {
+            "id": "YQ",
+            "label": "Proceed"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "policy_defer",
+        "kind": "choice",
+        "answer_choice_id": "_w",
+        "answer_command_id": 1
+      },
+      "error": true
+    },
+    {
+      "name": "answered-unoffered-choice",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "answered",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "_w",
+            "label": "Proceed"
+          },
+          {
+            "id": "YQ",
+            "label": "Proceed"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "policy_defer",
+        "kind": "choice",
+        "answer_choice_id": "dW5vZmZlcmVk",
+        "answer_command_id": "Y29tbWFuZA"
+      },
+      "error": true
+    },
+    {
+      "name": "answered-invalid-model_tool-choice",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "answered",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "_w",
+            "label": "Proceed"
+          },
+          {
+            "id": "YQ",
+            "label": "Proceed"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "model_tool",
+        "kind": "choice",
+        "answer_choice_id": "_w",
+        "answer_command_id": "Y29tbWFuZA"
+      },
+      "error": true
+    },
+    {
+      "name": "answered-invalid-model_tool-text",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "answered",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "_w",
+            "label": "Proceed"
+          },
+          {
+            "id": "YQ",
+            "label": "Proceed"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "model_tool",
+        "kind": "text",
+        "answer_choice_id": "_w",
+        "answer_command_id": "Y29tbWFuZA"
+      },
+      "error": true
+    },
+    {
+      "name": "answered-invalid-policy_defer-text",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "answered",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "_w",
+            "label": "Proceed"
+          },
+          {
+            "id": "YQ",
+            "label": "Proceed"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "policy_defer",
+        "kind": "text",
+        "answer_choice_id": "_w",
+        "answer_command_id": "Y29tbWFuZA"
+      },
+      "error": true
+    },
+    {
+      "name": "open-terminal-declined",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "declined",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "_w",
+            "label": "Proceed"
+          },
+          {
+            "id": "YQ",
+            "label": "Proceed"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "policy_defer",
+        "kind": "choice",
+        "answer_choice_id": "_w",
+        "answer_command_id": "Y29tbWFuZA"
+      },
+      "error": true
+    },
+    {
+      "name": "open-terminal-expired",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "expired",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "_w",
+            "label": "Proceed"
+          },
+          {
+            "id": "YQ",
+            "label": "Proceed"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "policy_defer",
+        "kind": "choice",
+        "answer_choice_id": "_w",
+        "answer_command_id": "Y29tbWFuZA"
+      },
+      "error": true
+    },
+    {
+      "name": "open-terminal-cancelled",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "cancelled",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "_w",
+            "label": "Proceed"
+          },
+          {
+            "id": "YQ",
+            "label": "Proceed"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "policy_defer",
+        "kind": "choice",
+        "answer_choice_id": "_w",
+        "answer_command_id": "Y29tbWFuZA"
+      },
+      "error": true
+    },
+    {
+      "name": "answered-private-answer",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "answered",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "_w",
+            "label": "Proceed"
+          },
+          {
+            "id": "YQ",
+            "label": "Proceed"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "policy_defer",
+        "kind": "choice",
+        "answer_choice_id": "_w",
+        "answer_command_id": "Y29tbWFuZA",
+        "answer": {
+          "text": "private"
+        }
+      },
+      "error": true
+    },
+    {
+      "name": "answered-private-policy_request_digest",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "answered",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "_w",
+            "label": "Proceed"
+          },
+          {
+            "id": "YQ",
+            "label": "Proceed"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "policy_defer",
+        "kind": "choice",
+        "answer_choice_id": "_w",
+        "answer_command_id": "Y29tbWFuZA",
+        "policy_request_digest": "private"
+      },
+      "error": true
+    },
+    {
+      "name": "answered-private-decision_ref",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "answered",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "_w",
+            "label": "Proceed"
+          },
+          {
+            "id": "YQ",
+            "label": "Proceed"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "policy_defer",
+        "kind": "choice",
+        "answer_choice_id": "_w",
+        "answer_command_id": "Y29tbWFuZA",
+        "decision_ref": "private"
+      },
+      "error": true
+    },
+    {
+      "name": "answered-private-owner_epoch",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "answered",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "_w",
+            "label": "Proceed"
+          },
+          {
+            "id": "YQ",
+            "label": "Proceed"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "policy_defer",
+        "kind": "choice",
+        "answer_choice_id": "_w",
+        "answer_command_id": "Y29tbWFuZA",
+        "owner_epoch": "1"
+      },
+      "error": true
+    },
+    {
+      "name": "pending-with-answer-members",
+      "input": {
+        "interaction_id": "AP8K",
+        "run_id": "_w",
+        "turn": "1",
+        "tool_call_id": "Y2FsbA",
+        "status": "pending",
+        "prompt": "Choose λ",
+        "choices": [
+          {
+            "id": "_w",
+            "label": "Proceed"
+          },
+          {
+            "id": "YQ",
+            "label": "Proceed"
+          }
+        ],
+        "expires_at": "18446744073709551615",
+        "producer": "policy_defer",
+        "kind": "choice",
+        "answer_choice_id": "_w",
+        "answer_command_id": "Y29tbWFuZA"
+      },
+      "error": true
     }
   ]
 }

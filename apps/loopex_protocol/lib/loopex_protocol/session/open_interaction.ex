@@ -1,9 +1,9 @@
-defmodule LoopexProtocol.Session.PendingInteraction do
+defmodule LoopexProtocol.Session.OpenInteraction do
   @moduledoc """
   ## Concept
 
-  A pending question retains its producer, kind and original call identity.
-  Reading it grants no authority and carries no response or host policy handle.
+  An open question retains its producer, kind and original call identity.
+  Policy answers remain open while resolution is owed. Reading grants no authority.
 
   ## Technical depth
 
@@ -13,22 +13,27 @@ defmodule LoopexProtocol.Session.PendingInteraction do
   choices have one to eight distinct opaque identifiers up to 64 bytes and
   nonempty UTF-8 labels up to 256 bytes. Model choices retain their original
   choice-N order and distinct labels. Text questions retain an empty list.
-  This codec describes the public cursor, not private answered policy state.
+  Pending views have ten members. Answered policy choice views add only the
+  offered answer_choice_id and admitted answer_command_id. Model answers close
+  atomically and have no open answered branch. No private policy handle enters
+  this public cursor projection.
   """
 
   alias LoopexProtocol.Wire
   @keys ~w(interaction_id run_id turn tool_call_id status prompt choices expires_at producer kind)
+  @answered_keys @keys ++ ~w(answer_choice_id answer_command_id)
+  @event_keys ~w(interaction_id run_id turn tool_call_id producer interaction_kind status answer_choice_id answer_command_id)
   @u64 18_446_744_073_709_551_615
 
   @doc """
   ## Concept
 
-  Encode the closed pending question at an attachment cursor.
+  Encode the closed pending or answered policy question at its public cursor.
 
   ## Technical depth
 
   Preserve exact identity bytes and turn/expiry quantities. Extra members,
-  terminal responses and private policy facts refuse.
+  model terminal responses and private policy facts refuse.
   """
   @spec encode_wire(term()) :: {:ok, map()} | :error
   def encode_wire(value), do: project(value, :encode)
@@ -36,7 +41,7 @@ defmodule LoopexProtocol.Session.PendingInteraction do
   @doc """
   ## Concept
 
-  Decode a pending question without inventing its producer or kind.
+  Decode an open question without inventing its producer, kind or answer.
 
   ## Technical depth
 
@@ -46,9 +51,80 @@ defmodule LoopexProtocol.Session.PendingInteraction do
   @spec decode_wire(term()) :: {:ok, map()} | :error
   def decode_wire(value), do: project(value, :decode)
 
+  @doc """
+  ## Concept
+
+  Encode a committed policy answer admission without granting an effect.
+
+  ## Technical depth
+
+  Require exactly the nine approved event-data members. Raw identities retain
+  their own byte ceilings and turn remains an arbitrary positive integer.
+  The serial reducer separately verifies the offered choice and question tuple.
+  No event envelope, prompt, expiry, policy reference or resolution is added.
+  """
+  @spec encode_answer_admitted(term()) :: {:ok, map()} | :error
+  def encode_answer_admitted(value), do: answer_admitted(value, :encode)
+
+  @doc """
+  ## Concept
+
+  Decode the closed public policy answer admission data.
+
+  ## Technical depth
+
+  Producer, interaction kind and status are fixed literal strings. Noncanonical
+  identities, quantities, missing members and private payloads refuse.
+  """
+  @spec decode_answer_admitted(term()) :: {:ok, map()} | :error
+  def decode_answer_admitted(value), do: answer_admitted(value, :decode)
+
+  defp answer_admitted(value, mode) do
+    with true <- closed?(value, @event_keys),
+         "policy_defer" <- value["producer"],
+         "choice" <- value["interaction_kind"],
+         "answered" <- value["status"],
+         {:ok, turn} <- quantity(value["turn"], mode, 1, nil) do
+      Enum.reduce_while(
+        ~w(interaction_id run_id tool_call_id answer_choice_id answer_command_id),
+        {:ok, Map.put(value, "turn", turn)},
+        fn key, {:ok, result} ->
+          maximum = if key == "answer_choice_id", do: 64, else: 65_536
+
+          case identity(value[key], mode, maximum) do
+            {:ok, scalar} -> {:cont, {:ok, Map.put(result, key, scalar)}}
+            :error -> {:halt, :error}
+          end
+        end
+      )
+    else
+      _ -> :error
+    end
+  end
+
+  defp open_shape?(%{"status" => "pending"} = value), do: closed?(value, @keys)
+
+  defp open_shape?(
+         %{"status" => "answered", "producer" => "policy_defer", "kind" => "choice"} = value
+       ),
+       do: closed?(value, @answered_keys)
+
+  defp open_shape?(_), do: false
+
+  defp answer(%{"status" => "pending"}, _choices, _mode), do: {:ok, %{}}
+
+  defp answer(value, choices, mode) do
+    with {:ok, choice} <- identity(value["answer_choice_id"], mode, 64),
+         true <- Enum.any?(choices, &(&1["id"] == choice)),
+         {:ok, command} <- identity(value["answer_command_id"], mode, 65_536) do
+      {:ok, %{"answer_choice_id" => choice, "answer_command_id" => command}}
+    else
+      _ -> :error
+    end
+  end
+
   defp project(value, mode) do
-    with true <- closed?(value, @keys),
-         "pending" <- value["status"],
+    with true <- open_shape?(value),
          true <- value["producer"] in ~w(model_tool policy_defer),
          true <- value["kind"] in ~w(choice text),
          true <- text?(value["prompt"], 2_048),
@@ -58,16 +134,19 @@ defmodule LoopexProtocol.Session.PendingInteraction do
          {:ok, turn} <- quantity(value["turn"], mode, 1, nil),
          {:ok, expiry} <- quantity(value["expires_at"], mode, 0, @u64),
          {:ok, choices} <- choices(value["choices"], mode),
-         true <- valid_choices?(value["producer"], value["kind"], choices, mode) do
+         true <- valid_choices?(value["producer"], value["kind"], choices, mode),
+         {:ok, answer} <- answer(value, choices, mode) do
       {:ok,
-       Map.merge(value, %{
+       value
+       |> Map.merge(%{
          "interaction_id" => interaction,
          "run_id" => run,
          "tool_call_id" => call,
          "turn" => turn,
          "expires_at" => expiry,
          "choices" => choices
-       })}
+       })
+       |> Map.merge(answer)}
     else
       _ -> :error
     end

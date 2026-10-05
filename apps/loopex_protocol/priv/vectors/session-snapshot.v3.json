@@ -2076,6 +2076,218 @@
         "last_compact": null
       },
       "error": "invalid_payload"
+    },
+    {
+      "name": "policy-answer-resolution-owed",
+      "input": {
+        "snapshot_revision": 3,
+        "session_id": "c2Vzc2lvbg",
+        "event_sequence": "9",
+        "active_run_id": "_w",
+        "active_run_phase": "started",
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "checkpoint": null,
+        "active_maintenance": null,
+        "open_interaction": {
+          "interaction_id": "AP8K",
+          "run_id": "_w",
+          "turn": "1",
+          "tool_call_id": "Y2FsbA",
+          "status": "answered",
+          "prompt": "Choose λ",
+          "choices": [
+            {
+              "id": "_w",
+              "label": "Proceed"
+            },
+            {
+              "id": "YQ",
+              "label": "Proceed"
+            }
+          ],
+          "expires_at": "18446744073709551615",
+          "producer": "policy_defer",
+          "kind": "choice",
+          "answer_choice_id": "_w",
+          "answer_command_id": "Y29tbWFuZA"
+        },
+        "last_compact": null
+      },
+      "decoded": {
+        "snapshot_revision": 3,
+        "session_id": {
+          "opaque_hex": "73657373696f6e"
+        },
+        "event_sequence": "9",
+        "active_run_id": {
+          "opaque_hex": "ff"
+        },
+        "active_run_phase": "started",
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "checkpoint": null,
+        "active_maintenance": null,
+        "open_interaction": {
+          "interaction_id": {
+            "opaque_hex": "00ff0a"
+          },
+          "run_id": {
+            "opaque_hex": "ff"
+          },
+          "turn": "1",
+          "tool_call_id": {
+            "opaque_hex": "63616c6c"
+          },
+          "status": "answered",
+          "prompt": "Choose λ",
+          "choices": [
+            {
+              "id": {
+                "opaque_hex": "ff"
+              },
+              "label": "Proceed"
+            },
+            {
+              "id": {
+                "opaque_hex": "61"
+              },
+              "label": "Proceed"
+            }
+          ],
+          "expires_at": "18446744073709551615",
+          "producer": "policy_defer",
+          "kind": "choice",
+          "answer_choice_id": {
+            "opaque_hex": "ff"
+          },
+          "answer_command_id": {
+            "opaque_hex": "636f6d6d616e64"
+          }
+        },
+        "last_compact": null
+      }
+    },
+    {
+      "name": "answered-question-wrong-run",
+      "input": {
+        "snapshot_revision": 3,
+        "session_id": "c2Vzc2lvbg",
+        "event_sequence": "9",
+        "active_run_id": "b3RoZXI",
+        "active_run_phase": "started",
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "checkpoint": null,
+        "active_maintenance": null,
+        "open_interaction": {
+          "interaction_id": "AP8K",
+          "run_id": "_w",
+          "turn": "1",
+          "tool_call_id": "Y2FsbA",
+          "status": "answered",
+          "prompt": "Choose λ",
+          "choices": [
+            {
+              "id": "_w",
+              "label": "Proceed"
+            },
+            {
+              "id": "YQ",
+              "label": "Proceed"
+            }
+          ],
+          "expires_at": "18446744073709551615",
+          "producer": "policy_defer",
+          "kind": "choice",
+          "answer_choice_id": "_w",
+          "answer_command_id": "Y29tbWFuZA"
+        },
+        "last_compact": null
+      },
+      "error": true
+    },
+    {
+      "name": "answered-question-private-command",
+      "input": {
+        "snapshot_revision": 3,
+        "session_id": "c2Vzc2lvbg",
+        "event_sequence": "9",
+        "active_run_id": "_w",
+        "active_run_phase": "started",
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "checkpoint": null,
+        "active_maintenance": null,
+        "open_interaction": {
+          "interaction_id": "AP8K",
+          "run_id": "_w",
+          "turn": "1",
+          "tool_call_id": "Y2FsbA",
+          "status": "answered",
+          "prompt": "Choose λ",
+          "choices": [
+            {
+              "id": "_w",
+              "label": "Proceed"
+            },
+            {
+              "id": "YQ",
+              "label": "Proceed"
+            }
+          ],
+          "expires_at": "18446744073709551615",
+          "producer": "policy_defer",
+          "kind": "choice",
+          "answer_choice_id": "_w",
+          "answer_command_id": "Y29tbWFuZA",
+          "answer": {
+            "text": "private"
+          }
+        },
+        "last_compact": null
+      },
+      "error": true
     }
   ]
 }

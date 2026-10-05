@@ -1,0 +1,3296 @@
+{
+  "format": "loopex.experimental.payload-vectors/1",
+  "contract": "inspection",
+  "cases": [
+    {
+      "name": "idle-current-configuration",
+      "input": {
+        "status": "active",
+        "event_sequence": "0",
+        "active_run_id": null,
+        "cleanup_grace_ms": "1000",
+        "active_context_token_budget": null,
+        "pending_work_ids": [],
+        "open_interaction": null,
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "active_bounds": null,
+        "checkpoint": null,
+        "active_maintenance": null
+      },
+      "decoded": {
+        "status": "active",
+        "event_sequence": "0",
+        "active_run_id": null,
+        "cleanup_grace_ms": "1000",
+        "active_context_token_budget": null,
+        "pending_work_ids": [],
+        "open_interaction": null,
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "active_bounds": null,
+        "checkpoint": null,
+        "active_maintenance": null
+      }
+    },
+    {
+      "name": "active-policy-answer-exact-bounds",
+      "input": {
+        "status": "active",
+        "event_sequence": "9",
+        "active_run_id": "_w",
+        "cleanup_grace_ms": "1000",
+        "active_context_token_budget": "8192",
+        "pending_work_ids": [
+          "_w"
+        ],
+        "open_interaction": {
+          "interaction_id": "AP8K",
+          "run_id": "_w",
+          "turn": "1",
+          "tool_call_id": "Y2FsbA",
+          "status": "answered",
+          "prompt": "Choose λ",
+          "choices": [
+            {
+              "id": "_w",
+              "label": "Proceed"
+            },
+            {
+              "id": "YQ",
+              "label": "Proceed"
+            }
+          ],
+          "expires_at": "18446744073709551615",
+          "producer": "policy_defer",
+          "kind": "choice",
+          "answer_choice_id": "_w",
+          "answer_command_id": "Y29tbWFuZA"
+        },
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "active_bounds": {
+          "max_turns": "184467440737095516160000000001",
+          "token_budget": "184467440737095516160000000002",
+          "deadline_ms": "18446744073709551615",
+          "deadline": "18446744073709551615"
+        },
+        "checkpoint": null,
+        "active_maintenance": null
+      },
+      "decoded": {
+        "status": "active",
+        "event_sequence": "9",
+        "active_run_id": {
+          "opaque_hex": "ff"
+        },
+        "cleanup_grace_ms": "1000",
+        "active_context_token_budget": "8192",
+        "pending_work_ids": [
+          {
+            "opaque_hex": "ff"
+          }
+        ],
+        "open_interaction": {
+          "interaction_id": {
+            "opaque_hex": "00ff0a"
+          },
+          "run_id": {
+            "opaque_hex": "ff"
+          },
+          "turn": "1",
+          "tool_call_id": {
+            "opaque_hex": "63616c6c"
+          },
+          "status": "answered",
+          "prompt": "Choose λ",
+          "choices": [
+            {
+              "id": {
+                "opaque_hex": "ff"
+              },
+              "label": "Proceed"
+            },
+            {
+              "id": {
+                "opaque_hex": "61"
+              },
+              "label": "Proceed"
+            }
+          ],
+          "expires_at": "18446744073709551615",
+          "producer": "policy_defer",
+          "kind": "choice",
+          "answer_choice_id": {
+            "opaque_hex": "ff"
+          },
+          "answer_command_id": {
+            "opaque_hex": "636f6d6d616e64"
+          }
+        },
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "active_bounds": {
+          "max_turns": "184467440737095516160000000001",
+          "token_budget": "184467440737095516160000000002",
+          "deadline_ms": "18446744073709551615",
+          "deadline": "18446744073709551615"
+        },
+        "checkpoint": null,
+        "active_maintenance": null
+      }
+    },
+    {
+      "name": "active-before-deadline",
+      "input": {
+        "status": "active",
+        "event_sequence": "9",
+        "active_run_id": "_w",
+        "cleanup_grace_ms": "1000",
+        "active_context_token_budget": "8192",
+        "pending_work_ids": [
+          "_w"
+        ],
+        "open_interaction": {
+          "interaction_id": "AP8K",
+          "run_id": "_w",
+          "turn": "1",
+          "tool_call_id": "Y2FsbA",
+          "status": "pending",
+          "prompt": "Choose λ",
+          "choices": [
+            {
+              "id": "_w",
+              "label": "Proceed"
+            },
+            {
+              "id": "YQ",
+              "label": "Proceed"
+            }
+          ],
+          "expires_at": "18446744073709551615",
+          "producer": "policy_defer",
+          "kind": "choice"
+        },
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "active_bounds": {
+          "max_turns": "184467440737095516160000000001",
+          "token_budget": "184467440737095516160000000002",
+          "deadline_ms": "18446744073709551615",
+          "deadline": null
+        },
+        "checkpoint": null,
+        "active_maintenance": null
+      },
+      "decoded": {
+        "status": "active",
+        "event_sequence": "9",
+        "active_run_id": {
+          "opaque_hex": "ff"
+        },
+        "cleanup_grace_ms": "1000",
+        "active_context_token_budget": "8192",
+        "pending_work_ids": [
+          {
+            "opaque_hex": "ff"
+          }
+        ],
+        "open_interaction": {
+          "interaction_id": {
+            "opaque_hex": "00ff0a"
+          },
+          "run_id": {
+            "opaque_hex": "ff"
+          },
+          "turn": "1",
+          "tool_call_id": {
+            "opaque_hex": "63616c6c"
+          },
+          "status": "pending",
+          "prompt": "Choose λ",
+          "choices": [
+            {
+              "id": {
+                "opaque_hex": "ff"
+              },
+              "label": "Proceed"
+            },
+            {
+              "id": {
+                "opaque_hex": "61"
+              },
+              "label": "Proceed"
+            }
+          ],
+          "expires_at": "18446744073709551615",
+          "producer": "policy_defer",
+          "kind": "choice"
+        },
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "active_bounds": {
+          "max_turns": "184467440737095516160000000001",
+          "token_budget": "184467440737095516160000000002",
+          "deadline_ms": "18446744073709551615",
+          "deadline": null
+        },
+        "checkpoint": null,
+        "active_maintenance": null
+      }
+    },
+    {
+      "name": "active-zero-deadline",
+      "input": {
+        "status": "active",
+        "event_sequence": "9",
+        "active_run_id": "_w",
+        "cleanup_grace_ms": "1000",
+        "active_context_token_budget": "8192",
+        "pending_work_ids": [
+          "_w"
+        ],
+        "open_interaction": {
+          "interaction_id": "AP8K",
+          "run_id": "_w",
+          "turn": "1",
+          "tool_call_id": "Y2FsbA",
+          "status": "answered",
+          "prompt": "Choose λ",
+          "choices": [
+            {
+              "id": "_w",
+              "label": "Proceed"
+            },
+            {
+              "id": "YQ",
+              "label": "Proceed"
+            }
+          ],
+          "expires_at": "18446744073709551615",
+          "producer": "policy_defer",
+          "kind": "choice",
+          "answer_choice_id": "_w",
+          "answer_command_id": "Y29tbWFuZA"
+        },
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "active_bounds": {
+          "max_turns": "184467440737095516160000000001",
+          "token_budget": "184467440737095516160000000002",
+          "deadline_ms": "18446744073709551615",
+          "deadline": "0"
+        },
+        "checkpoint": null,
+        "active_maintenance": null
+      },
+      "decoded": {
+        "status": "active",
+        "event_sequence": "9",
+        "active_run_id": {
+          "opaque_hex": "ff"
+        },
+        "cleanup_grace_ms": "1000",
+        "active_context_token_budget": "8192",
+        "pending_work_ids": [
+          {
+            "opaque_hex": "ff"
+          }
+        ],
+        "open_interaction": {
+          "interaction_id": {
+            "opaque_hex": "00ff0a"
+          },
+          "run_id": {
+            "opaque_hex": "ff"
+          },
+          "turn": "1",
+          "tool_call_id": {
+            "opaque_hex": "63616c6c"
+          },
+          "status": "answered",
+          "prompt": "Choose λ",
+          "choices": [
+            {
+              "id": {
+                "opaque_hex": "ff"
+              },
+              "label": "Proceed"
+            },
+            {
+              "id": {
+                "opaque_hex": "61"
+              },
+              "label": "Proceed"
+            }
+          ],
+          "expires_at": "18446744073709551615",
+          "producer": "policy_defer",
+          "kind": "choice",
+          "answer_choice_id": {
+            "opaque_hex": "ff"
+          },
+          "answer_command_id": {
+            "opaque_hex": "636f6d6d616e64"
+          }
+        },
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "active_bounds": {
+          "max_turns": "184467440737095516160000000001",
+          "token_budget": "184467440737095516160000000002",
+          "deadline_ms": "18446744073709551615",
+          "deadline": "0"
+        },
+        "checkpoint": null,
+        "active_maintenance": null
+      }
+    },
+    {
+      "name": "pending-work-order-preserved",
+      "input": {
+        "status": "active",
+        "event_sequence": "9",
+        "active_run_id": "_w",
+        "cleanup_grace_ms": "1000",
+        "active_context_token_budget": "8192",
+        "pending_work_ids": [
+          "Yg",
+          "YQ",
+          "Yg"
+        ],
+        "open_interaction": {
+          "interaction_id": "AP8K",
+          "run_id": "_w",
+          "turn": "1",
+          "tool_call_id": "Y2FsbA",
+          "status": "answered",
+          "prompt": "Choose λ",
+          "choices": [
+            {
+              "id": "_w",
+              "label": "Proceed"
+            },
+            {
+              "id": "YQ",
+              "label": "Proceed"
+            }
+          ],
+          "expires_at": "18446744073709551615",
+          "producer": "policy_defer",
+          "kind": "choice",
+          "answer_choice_id": "_w",
+          "answer_command_id": "Y29tbWFuZA"
+        },
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "active_bounds": {
+          "max_turns": "184467440737095516160000000001",
+          "token_budget": "184467440737095516160000000002",
+          "deadline_ms": "18446744073709551615",
+          "deadline": "18446744073709551615"
+        },
+        "checkpoint": null,
+        "active_maintenance": null
+      },
+      "decoded": {
+        "status": "active",
+        "event_sequence": "9",
+        "active_run_id": {
+          "opaque_hex": "ff"
+        },
+        "cleanup_grace_ms": "1000",
+        "active_context_token_budget": "8192",
+        "pending_work_ids": [
+          {
+            "opaque_hex": "62"
+          },
+          {
+            "opaque_hex": "61"
+          },
+          {
+            "opaque_hex": "62"
+          }
+        ],
+        "open_interaction": {
+          "interaction_id": {
+            "opaque_hex": "00ff0a"
+          },
+          "run_id": {
+            "opaque_hex": "ff"
+          },
+          "turn": "1",
+          "tool_call_id": {
+            "opaque_hex": "63616c6c"
+          },
+          "status": "answered",
+          "prompt": "Choose λ",
+          "choices": [
+            {
+              "id": {
+                "opaque_hex": "ff"
+              },
+              "label": "Proceed"
+            },
+            {
+              "id": {
+                "opaque_hex": "61"
+              },
+              "label": "Proceed"
+            }
+          ],
+          "expires_at": "18446744073709551615",
+          "producer": "policy_defer",
+          "kind": "choice",
+          "answer_choice_id": {
+            "opaque_hex": "ff"
+          },
+          "answer_command_id": {
+            "opaque_hex": "636f6d6d616e64"
+          }
+        },
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "active_bounds": {
+          "max_turns": "184467440737095516160000000001",
+          "token_budget": "184467440737095516160000000002",
+          "deadline_ms": "18446744073709551615",
+          "deadline": "18446744073709551615"
+        },
+        "checkpoint": null,
+        "active_maintenance": null
+      }
+    },
+    {
+      "name": "cleanup-uint64-wire-zero",
+      "input": {
+        "status": "active",
+        "event_sequence": "0",
+        "active_run_id": null,
+        "cleanup_grace_ms": "0",
+        "active_context_token_budget": null,
+        "pending_work_ids": [],
+        "open_interaction": null,
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "active_bounds": null,
+        "checkpoint": null,
+        "active_maintenance": null
+      },
+      "decoded": {
+        "status": "active",
+        "event_sequence": "0",
+        "active_run_id": null,
+        "cleanup_grace_ms": "0",
+        "active_context_token_budget": null,
+        "pending_work_ids": [],
+        "open_interaction": null,
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "active_bounds": null,
+        "checkpoint": null,
+        "active_maintenance": null
+      }
+    },
+    {
+      "name": "captured-run-captured-null-deadline",
+      "input": {
+        "status": "active",
+        "event_sequence": "4",
+        "active_run_id": "_w",
+        "cleanup_grace_ms": "1000",
+        "active_context_token_budget": "8192",
+        "pending_work_ids": [
+          "_w"
+        ],
+        "open_interaction": null,
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "active_bounds": {
+          "max_turns": "184467440737095516160000000001",
+          "token_budget": "184467440737095516160000000002",
+          "deadline_ms": "18446744073709551615",
+          "deadline": "18446744073709551615"
+        },
+        "checkpoint": null,
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "run",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      },
+      "decoded": {
+        "status": "active",
+        "event_sequence": "4",
+        "active_run_id": {
+          "opaque_hex": "ff"
+        },
+        "cleanup_grace_ms": "1000",
+        "active_context_token_budget": "8192",
+        "pending_work_ids": [
+          {
+            "opaque_hex": "ff"
+          }
+        ],
+        "open_interaction": null,
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "active_bounds": {
+          "max_turns": "184467440737095516160000000001",
+          "token_budget": "184467440737095516160000000002",
+          "deadline_ms": "18446744073709551615",
+          "deadline": "18446744073709551615"
+        },
+        "checkpoint": null,
+        "active_maintenance": {
+          "episode_id": {
+            "opaque_hex": "00ff0a"
+          },
+          "owner": {
+            "kind": "run",
+            "id": {
+              "opaque_hex": "ff"
+            }
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "max_turns": "8",
+            "token_budget": "10000",
+            "deadline_ms": "60000",
+            "run_deadline": null
+          }
+        }
+      }
+    },
+    {
+      "name": "captured-compact-captured-ceilings",
+      "input": {
+        "status": "active",
+        "event_sequence": "4",
+        "active_run_id": null,
+        "cleanup_grace_ms": "1000",
+        "active_context_token_budget": null,
+        "pending_work_ids": [],
+        "open_interaction": null,
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "active_bounds": null,
+        "checkpoint": null,
+        "active_maintenance": {
+          "episode_id": "AP8K",
+          "owner": {
+            "kind": "compact",
+            "id": "_w"
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "deadline_ms": "60000",
+            "token_budget": "32768"
+          }
+        }
+      },
+      "decoded": {
+        "status": "active",
+        "event_sequence": "4",
+        "active_run_id": null,
+        "cleanup_grace_ms": "1000",
+        "active_context_token_budget": null,
+        "pending_work_ids": [],
+        "open_interaction": null,
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "active_bounds": null,
+        "checkpoint": null,
+        "active_maintenance": {
+          "episode_id": {
+            "opaque_hex": "00ff0a"
+          },
+          "owner": {
+            "kind": "compact",
+            "id": {
+              "opaque_hex": "ff"
+            }
+          },
+          "model": "vendor/model-λ",
+          "reasoning": "none",
+          "configuration_version": "1",
+          "bounds": {
+            "max_attempts": "4",
+            "deadline_ms": "60000",
+            "token_budget": "32768"
+          }
+        }
+      }
+    },
+    {
+      "name": "inspection-missing-status",
+      "input": {
+        "event_sequence": "0",
+        "active_run_id": null,
+        "cleanup_grace_ms": "1000",
+        "active_context_token_budget": null,
+        "pending_work_ids": [],
+        "open_interaction": null,
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "active_bounds": null,
+        "checkpoint": null,
+        "active_maintenance": null
+      },
+      "error": true
+    },
+    {
+      "name": "inspection-missing-event_sequence",
+      "input": {
+        "status": "active",
+        "active_run_id": null,
+        "cleanup_grace_ms": "1000",
+        "active_context_token_budget": null,
+        "pending_work_ids": [],
+        "open_interaction": null,
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "active_bounds": null,
+        "checkpoint": null,
+        "active_maintenance": null
+      },
+      "error": true
+    },
+    {
+      "name": "inspection-missing-active_run_id",
+      "input": {
+        "status": "active",
+        "event_sequence": "0",
+        "cleanup_grace_ms": "1000",
+        "active_context_token_budget": null,
+        "pending_work_ids": [],
+        "open_interaction": null,
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "active_bounds": null,
+        "checkpoint": null,
+        "active_maintenance": null
+      },
+      "error": true
+    },
+    {
+      "name": "inspection-missing-cleanup_grace_ms",
+      "input": {
+        "status": "active",
+        "event_sequence": "0",
+        "active_run_id": null,
+        "active_context_token_budget": null,
+        "pending_work_ids": [],
+        "open_interaction": null,
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "active_bounds": null,
+        "checkpoint": null,
+        "active_maintenance": null
+      },
+      "error": true
+    },
+    {
+      "name": "inspection-missing-active_context_token_budget",
+      "input": {
+        "status": "active",
+        "event_sequence": "0",
+        "active_run_id": null,
+        "cleanup_grace_ms": "1000",
+        "pending_work_ids": [],
+        "open_interaction": null,
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "active_bounds": null,
+        "checkpoint": null,
+        "active_maintenance": null
+      },
+      "error": true
+    },
+    {
+      "name": "inspection-missing-pending_work_ids",
+      "input": {
+        "status": "active",
+        "event_sequence": "0",
+        "active_run_id": null,
+        "cleanup_grace_ms": "1000",
+        "active_context_token_budget": null,
+        "open_interaction": null,
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "active_bounds": null,
+        "checkpoint": null,
+        "active_maintenance": null
+      },
+      "error": true
+    },
+    {
+      "name": "inspection-missing-open_interaction",
+      "input": {
+        "status": "active",
+        "event_sequence": "0",
+        "active_run_id": null,
+        "cleanup_grace_ms": "1000",
+        "active_context_token_budget": null,
+        "pending_work_ids": [],
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "active_bounds": null,
+        "checkpoint": null,
+        "active_maintenance": null
+      },
+      "error": true
+    },
+    {
+      "name": "inspection-missing-configuration",
+      "input": {
+        "status": "active",
+        "event_sequence": "0",
+        "active_run_id": null,
+        "cleanup_grace_ms": "1000",
+        "active_context_token_budget": null,
+        "pending_work_ids": [],
+        "open_interaction": null,
+        "active_bounds": null,
+        "checkpoint": null,
+        "active_maintenance": null
+      },
+      "error": true
+    },
+    {
+      "name": "inspection-missing-active_bounds",
+      "input": {
+        "status": "active",
+        "event_sequence": "0",
+        "active_run_id": null,
+        "cleanup_grace_ms": "1000",
+        "active_context_token_budget": null,
+        "pending_work_ids": [],
+        "open_interaction": null,
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "checkpoint": null,
+        "active_maintenance": null
+      },
+      "error": true
+    },
+    {
+      "name": "inspection-missing-checkpoint",
+      "input": {
+        "status": "active",
+        "event_sequence": "0",
+        "active_run_id": null,
+        "cleanup_grace_ms": "1000",
+        "active_context_token_budget": null,
+        "pending_work_ids": [],
+        "open_interaction": null,
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "active_bounds": null,
+        "active_maintenance": null
+      },
+      "error": true
+    },
+    {
+      "name": "inspection-missing-active_maintenance",
+      "input": {
+        "status": "active",
+        "event_sequence": "0",
+        "active_run_id": null,
+        "cleanup_grace_ms": "1000",
+        "active_context_token_budget": null,
+        "pending_work_ids": [],
+        "open_interaction": null,
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "active_bounds": null,
+        "checkpoint": null
+      },
+      "error": true
+    },
+    {
+      "name": "inspection-invalid-status",
+      "input": {
+        "status": "dormant",
+        "event_sequence": "0",
+        "active_run_id": null,
+        "cleanup_grace_ms": "1000",
+        "active_context_token_budget": null,
+        "pending_work_ids": [],
+        "open_interaction": null,
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "active_bounds": null,
+        "checkpoint": null,
+        "active_maintenance": null
+      },
+      "error": true
+    },
+    {
+      "name": "inspection-invalid-owner_epoch",
+      "input": {
+        "status": "active",
+        "event_sequence": "0",
+        "active_run_id": null,
+        "cleanup_grace_ms": "1000",
+        "active_context_token_budget": null,
+        "pending_work_ids": [],
+        "open_interaction": null,
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "active_bounds": null,
+        "checkpoint": null,
+        "active_maintenance": null,
+        "owner_epoch": "1"
+      },
+      "error": true
+    },
+    {
+      "name": "inspection-invalid-journal_version",
+      "input": {
+        "status": "active",
+        "event_sequence": "0",
+        "active_run_id": null,
+        "cleanup_grace_ms": "1000",
+        "active_context_token_budget": null,
+        "pending_work_ids": [],
+        "open_interaction": null,
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "active_bounds": null,
+        "checkpoint": null,
+        "active_maintenance": null,
+        "journal_version": "9"
+      },
+      "error": true
+    },
+    {
+      "name": "inspection-invalid-private_recovery",
+      "input": {
+        "status": "active",
+        "event_sequence": "0",
+        "active_run_id": null,
+        "cleanup_grace_ms": "1000",
+        "active_context_token_budget": null,
+        "pending_work_ids": [],
+        "open_interaction": null,
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "active_bounds": null,
+        "checkpoint": null,
+        "active_maintenance": null,
+        "private_recovery": {}
+      },
+      "error": true
+    },
+    {
+      "name": "inspection-invalid-configuration",
+      "input": {
+        "status": "active",
+        "event_sequence": "0",
+        "active_run_id": null,
+        "cleanup_grace_ms": "1000",
+        "active_context_token_budget": null,
+        "pending_work_ids": [],
+        "open_interaction": null,
+        "configuration": null,
+        "active_bounds": null,
+        "checkpoint": null,
+        "active_maintenance": null
+      },
+      "error": true
+    },
+    {
+      "name": "inspection-invalid-pending_work_ids",
+      "input": {
+        "status": "active",
+        "event_sequence": "0",
+        "active_run_id": null,
+        "cleanup_grace_ms": "1000",
+        "active_context_token_budget": null,
+        "pending_work_ids": null,
+        "open_interaction": null,
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "active_bounds": null,
+        "checkpoint": null,
+        "active_maintenance": null
+      },
+      "error": true
+    },
+    {
+      "name": "inspection-invalid-active_bounds",
+      "input": {
+        "status": "active",
+        "event_sequence": "0",
+        "active_run_id": null,
+        "cleanup_grace_ms": "1000",
+        "active_context_token_budget": null,
+        "pending_work_ids": [],
+        "open_interaction": null,
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "active_bounds": {},
+        "checkpoint": null,
+        "active_maintenance": null
+      },
+      "error": true
+    },
+    {
+      "name": "inspection-invalid-checkpoint",
+      "input": {
+        "status": "active",
+        "event_sequence": "0",
+        "active_run_id": null,
+        "cleanup_grace_ms": "1000",
+        "active_context_token_budget": null,
+        "pending_work_ids": [],
+        "open_interaction": null,
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "active_bounds": null,
+        "checkpoint": {},
+        "active_maintenance": null
+      },
+      "error": true
+    },
+    {
+      "name": "inspection-invalid-active_maintenance",
+      "input": {
+        "status": "active",
+        "event_sequence": "0",
+        "active_run_id": null,
+        "cleanup_grace_ms": "1000",
+        "active_context_token_budget": null,
+        "pending_work_ids": [],
+        "open_interaction": null,
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "active_bounds": null,
+        "checkpoint": null,
+        "active_maintenance": {}
+      },
+      "error": true
+    },
+    {
+      "name": "inspection-invalid-open_interaction",
+      "input": {
+        "status": "active",
+        "event_sequence": "0",
+        "active_run_id": null,
+        "cleanup_grace_ms": "1000",
+        "active_context_token_budget": null,
+        "pending_work_ids": [],
+        "open_interaction": {},
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "active_bounds": null,
+        "checkpoint": null,
+        "active_maintenance": null
+      },
+      "error": true
+    },
+    {
+      "name": "run-without-bounds",
+      "input": {
+        "status": "active",
+        "event_sequence": "9",
+        "active_run_id": "_w",
+        "cleanup_grace_ms": "1000",
+        "active_context_token_budget": "8192",
+        "pending_work_ids": [
+          "_w"
+        ],
+        "open_interaction": {
+          "interaction_id": "AP8K",
+          "run_id": "_w",
+          "turn": "1",
+          "tool_call_id": "Y2FsbA",
+          "status": "answered",
+          "prompt": "Choose λ",
+          "choices": [
+            {
+              "id": "_w",
+              "label": "Proceed"
+            },
+            {
+              "id": "YQ",
+              "label": "Proceed"
+            }
+          ],
+          "expires_at": "18446744073709551615",
+          "producer": "policy_defer",
+          "kind": "choice",
+          "answer_choice_id": "_w",
+          "answer_command_id": "Y29tbWFuZA"
+        },
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "active_bounds": null,
+        "checkpoint": null,
+        "active_maintenance": null
+      },
+      "error": true
+    },
+    {
+      "name": "bounds-without-run",
+      "input": {
+        "status": "active",
+        "event_sequence": "9",
+        "active_run_id": null,
+        "cleanup_grace_ms": "1000",
+        "active_context_token_budget": "8192",
+        "pending_work_ids": [
+          "_w"
+        ],
+        "open_interaction": {
+          "interaction_id": "AP8K",
+          "run_id": "_w",
+          "turn": "1",
+          "tool_call_id": "Y2FsbA",
+          "status": "answered",
+          "prompt": "Choose λ",
+          "choices": [
+            {
+              "id": "_w",
+              "label": "Proceed"
+            },
+            {
+              "id": "YQ",
+              "label": "Proceed"
+            }
+          ],
+          "expires_at": "18446744073709551615",
+          "producer": "policy_defer",
+          "kind": "choice",
+          "answer_choice_id": "_w",
+          "answer_command_id": "Y29tbWFuZA"
+        },
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "active_bounds": {
+          "max_turns": "184467440737095516160000000001",
+          "token_budget": "184467440737095516160000000002",
+          "deadline_ms": "18446744073709551615",
+          "deadline": "18446744073709551615"
+        },
+        "checkpoint": null,
+        "active_maintenance": null
+      },
+      "error": true
+    },
+    {
+      "name": "event_sequence-overflow",
+      "input": {
+        "status": "active",
+        "event_sequence": "18446744073709551616",
+        "active_run_id": "_w",
+        "cleanup_grace_ms": "1000",
+        "active_context_token_budget": "8192",
+        "pending_work_ids": [
+          "_w"
+        ],
+        "open_interaction": {
+          "interaction_id": "AP8K",
+          "run_id": "_w",
+          "turn": "1",
+          "tool_call_id": "Y2FsbA",
+          "status": "answered",
+          "prompt": "Choose λ",
+          "choices": [
+            {
+              "id": "_w",
+              "label": "Proceed"
+            },
+            {
+              "id": "YQ",
+              "label": "Proceed"
+            }
+          ],
+          "expires_at": "18446744073709551615",
+          "producer": "policy_defer",
+          "kind": "choice",
+          "answer_choice_id": "_w",
+          "answer_command_id": "Y29tbWFuZA"
+        },
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "active_bounds": {
+          "max_turns": "184467440737095516160000000001",
+          "token_budget": "184467440737095516160000000002",
+          "deadline_ms": "18446744073709551615",
+          "deadline": "18446744073709551615"
+        },
+        "checkpoint": null,
+        "active_maintenance": null
+      },
+      "error": true
+    },
+    {
+      "name": "event_sequence-leading_zero",
+      "input": {
+        "status": "active",
+        "event_sequence": "01",
+        "active_run_id": "_w",
+        "cleanup_grace_ms": "1000",
+        "active_context_token_budget": "8192",
+        "pending_work_ids": [
+          "_w"
+        ],
+        "open_interaction": {
+          "interaction_id": "AP8K",
+          "run_id": "_w",
+          "turn": "1",
+          "tool_call_id": "Y2FsbA",
+          "status": "answered",
+          "prompt": "Choose λ",
+          "choices": [
+            {
+              "id": "_w",
+              "label": "Proceed"
+            },
+            {
+              "id": "YQ",
+              "label": "Proceed"
+            }
+          ],
+          "expires_at": "18446744073709551615",
+          "producer": "policy_defer",
+          "kind": "choice",
+          "answer_choice_id": "_w",
+          "answer_command_id": "Y29tbWFuZA"
+        },
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "active_bounds": {
+          "max_turns": "184467440737095516160000000001",
+          "token_budget": "184467440737095516160000000002",
+          "deadline_ms": "18446744073709551615",
+          "deadline": "18446744073709551615"
+        },
+        "checkpoint": null,
+        "active_maintenance": null
+      },
+      "error": true
+    },
+    {
+      "name": "event_sequence-negative",
+      "input": {
+        "status": "active",
+        "event_sequence": "-1",
+        "active_run_id": "_w",
+        "cleanup_grace_ms": "1000",
+        "active_context_token_budget": "8192",
+        "pending_work_ids": [
+          "_w"
+        ],
+        "open_interaction": {
+          "interaction_id": "AP8K",
+          "run_id": "_w",
+          "turn": "1",
+          "tool_call_id": "Y2FsbA",
+          "status": "answered",
+          "prompt": "Choose λ",
+          "choices": [
+            {
+              "id": "_w",
+              "label": "Proceed"
+            },
+            {
+              "id": "YQ",
+              "label": "Proceed"
+            }
+          ],
+          "expires_at": "18446744073709551615",
+          "producer": "policy_defer",
+          "kind": "choice",
+          "answer_choice_id": "_w",
+          "answer_command_id": "Y29tbWFuZA"
+        },
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "active_bounds": {
+          "max_turns": "184467440737095516160000000001",
+          "token_budget": "184467440737095516160000000002",
+          "deadline_ms": "18446744073709551615",
+          "deadline": "18446744073709551615"
+        },
+        "checkpoint": null,
+        "active_maintenance": null
+      },
+      "error": true
+    },
+    {
+      "name": "event_sequence-number",
+      "input": {
+        "status": "active",
+        "event_sequence": 1,
+        "active_run_id": "_w",
+        "cleanup_grace_ms": "1000",
+        "active_context_token_budget": "8192",
+        "pending_work_ids": [
+          "_w"
+        ],
+        "open_interaction": {
+          "interaction_id": "AP8K",
+          "run_id": "_w",
+          "turn": "1",
+          "tool_call_id": "Y2FsbA",
+          "status": "answered",
+          "prompt": "Choose λ",
+          "choices": [
+            {
+              "id": "_w",
+              "label": "Proceed"
+            },
+            {
+              "id": "YQ",
+              "label": "Proceed"
+            }
+          ],
+          "expires_at": "18446744073709551615",
+          "producer": "policy_defer",
+          "kind": "choice",
+          "answer_choice_id": "_w",
+          "answer_command_id": "Y29tbWFuZA"
+        },
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "active_bounds": {
+          "max_turns": "184467440737095516160000000001",
+          "token_budget": "184467440737095516160000000002",
+          "deadline_ms": "18446744073709551615",
+          "deadline": "18446744073709551615"
+        },
+        "checkpoint": null,
+        "active_maintenance": null
+      },
+      "error": true
+    },
+    {
+      "name": "event_sequence-exponent",
+      "input": {
+        "status": "active",
+        "event_sequence": "1e0",
+        "active_run_id": "_w",
+        "cleanup_grace_ms": "1000",
+        "active_context_token_budget": "8192",
+        "pending_work_ids": [
+          "_w"
+        ],
+        "open_interaction": {
+          "interaction_id": "AP8K",
+          "run_id": "_w",
+          "turn": "1",
+          "tool_call_id": "Y2FsbA",
+          "status": "answered",
+          "prompt": "Choose λ",
+          "choices": [
+            {
+              "id": "_w",
+              "label": "Proceed"
+            },
+            {
+              "id": "YQ",
+              "label": "Proceed"
+            }
+          ],
+          "expires_at": "18446744073709551615",
+          "producer": "policy_defer",
+          "kind": "choice",
+          "answer_choice_id": "_w",
+          "answer_command_id": "Y29tbWFuZA"
+        },
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "active_bounds": {
+          "max_turns": "184467440737095516160000000001",
+          "token_budget": "184467440737095516160000000002",
+          "deadline_ms": "18446744073709551615",
+          "deadline": "18446744073709551615"
+        },
+        "checkpoint": null,
+        "active_maintenance": null
+      },
+      "error": true
+    },
+    {
+      "name": "event_sequence-newline",
+      "input": {
+        "status": "active",
+        "event_sequence": "1\n",
+        "active_run_id": "_w",
+        "cleanup_grace_ms": "1000",
+        "active_context_token_budget": "8192",
+        "pending_work_ids": [
+          "_w"
+        ],
+        "open_interaction": {
+          "interaction_id": "AP8K",
+          "run_id": "_w",
+          "turn": "1",
+          "tool_call_id": "Y2FsbA",
+          "status": "answered",
+          "prompt": "Choose λ",
+          "choices": [
+            {
+              "id": "_w",
+              "label": "Proceed"
+            },
+            {
+              "id": "YQ",
+              "label": "Proceed"
+            }
+          ],
+          "expires_at": "18446744073709551615",
+          "producer": "policy_defer",
+          "kind": "choice",
+          "answer_choice_id": "_w",
+          "answer_command_id": "Y29tbWFuZA"
+        },
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "active_bounds": {
+          "max_turns": "184467440737095516160000000001",
+          "token_budget": "184467440737095516160000000002",
+          "deadline_ms": "18446744073709551615",
+          "deadline": "18446744073709551615"
+        },
+        "checkpoint": null,
+        "active_maintenance": null
+      },
+      "error": true
+    },
+    {
+      "name": "cleanup_grace_ms-overflow",
+      "input": {
+        "status": "active",
+        "event_sequence": "9",
+        "active_run_id": "_w",
+        "cleanup_grace_ms": "18446744073709551616",
+        "active_context_token_budget": "8192",
+        "pending_work_ids": [
+          "_w"
+        ],
+        "open_interaction": {
+          "interaction_id": "AP8K",
+          "run_id": "_w",
+          "turn": "1",
+          "tool_call_id": "Y2FsbA",
+          "status": "answered",
+          "prompt": "Choose λ",
+          "choices": [
+            {
+              "id": "_w",
+              "label": "Proceed"
+            },
+            {
+              "id": "YQ",
+              "label": "Proceed"
+            }
+          ],
+          "expires_at": "18446744073709551615",
+          "producer": "policy_defer",
+          "kind": "choice",
+          "answer_choice_id": "_w",
+          "answer_command_id": "Y29tbWFuZA"
+        },
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "active_bounds": {
+          "max_turns": "184467440737095516160000000001",
+          "token_budget": "184467440737095516160000000002",
+          "deadline_ms": "18446744073709551615",
+          "deadline": "18446744073709551615"
+        },
+        "checkpoint": null,
+        "active_maintenance": null
+      },
+      "error": true
+    },
+    {
+      "name": "cleanup_grace_ms-leading_zero",
+      "input": {
+        "status": "active",
+        "event_sequence": "9",
+        "active_run_id": "_w",
+        "cleanup_grace_ms": "01",
+        "active_context_token_budget": "8192",
+        "pending_work_ids": [
+          "_w"
+        ],
+        "open_interaction": {
+          "interaction_id": "AP8K",
+          "run_id": "_w",
+          "turn": "1",
+          "tool_call_id": "Y2FsbA",
+          "status": "answered",
+          "prompt": "Choose λ",
+          "choices": [
+            {
+              "id": "_w",
+              "label": "Proceed"
+            },
+            {
+              "id": "YQ",
+              "label": "Proceed"
+            }
+          ],
+          "expires_at": "18446744073709551615",
+          "producer": "policy_defer",
+          "kind": "choice",
+          "answer_choice_id": "_w",
+          "answer_command_id": "Y29tbWFuZA"
+        },
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "active_bounds": {
+          "max_turns": "184467440737095516160000000001",
+          "token_budget": "184467440737095516160000000002",
+          "deadline_ms": "18446744073709551615",
+          "deadline": "18446744073709551615"
+        },
+        "checkpoint": null,
+        "active_maintenance": null
+      },
+      "error": true
+    },
+    {
+      "name": "cleanup_grace_ms-negative",
+      "input": {
+        "status": "active",
+        "event_sequence": "9",
+        "active_run_id": "_w",
+        "cleanup_grace_ms": "-1",
+        "active_context_token_budget": "8192",
+        "pending_work_ids": [
+          "_w"
+        ],
+        "open_interaction": {
+          "interaction_id": "AP8K",
+          "run_id": "_w",
+          "turn": "1",
+          "tool_call_id": "Y2FsbA",
+          "status": "answered",
+          "prompt": "Choose λ",
+          "choices": [
+            {
+              "id": "_w",
+              "label": "Proceed"
+            },
+            {
+              "id": "YQ",
+              "label": "Proceed"
+            }
+          ],
+          "expires_at": "18446744073709551615",
+          "producer": "policy_defer",
+          "kind": "choice",
+          "answer_choice_id": "_w",
+          "answer_command_id": "Y29tbWFuZA"
+        },
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "active_bounds": {
+          "max_turns": "184467440737095516160000000001",
+          "token_budget": "184467440737095516160000000002",
+          "deadline_ms": "18446744073709551615",
+          "deadline": "18446744073709551615"
+        },
+        "checkpoint": null,
+        "active_maintenance": null
+      },
+      "error": true
+    },
+    {
+      "name": "cleanup_grace_ms-number",
+      "input": {
+        "status": "active",
+        "event_sequence": "9",
+        "active_run_id": "_w",
+        "cleanup_grace_ms": 1,
+        "active_context_token_budget": "8192",
+        "pending_work_ids": [
+          "_w"
+        ],
+        "open_interaction": {
+          "interaction_id": "AP8K",
+          "run_id": "_w",
+          "turn": "1",
+          "tool_call_id": "Y2FsbA",
+          "status": "answered",
+          "prompt": "Choose λ",
+          "choices": [
+            {
+              "id": "_w",
+              "label": "Proceed"
+            },
+            {
+              "id": "YQ",
+              "label": "Proceed"
+            }
+          ],
+          "expires_at": "18446744073709551615",
+          "producer": "policy_defer",
+          "kind": "choice",
+          "answer_choice_id": "_w",
+          "answer_command_id": "Y29tbWFuZA"
+        },
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "active_bounds": {
+          "max_turns": "184467440737095516160000000001",
+          "token_budget": "184467440737095516160000000002",
+          "deadline_ms": "18446744073709551615",
+          "deadline": "18446744073709551615"
+        },
+        "checkpoint": null,
+        "active_maintenance": null
+      },
+      "error": true
+    },
+    {
+      "name": "cleanup_grace_ms-exponent",
+      "input": {
+        "status": "active",
+        "event_sequence": "9",
+        "active_run_id": "_w",
+        "cleanup_grace_ms": "1e0",
+        "active_context_token_budget": "8192",
+        "pending_work_ids": [
+          "_w"
+        ],
+        "open_interaction": {
+          "interaction_id": "AP8K",
+          "run_id": "_w",
+          "turn": "1",
+          "tool_call_id": "Y2FsbA",
+          "status": "answered",
+          "prompt": "Choose λ",
+          "choices": [
+            {
+              "id": "_w",
+              "label": "Proceed"
+            },
+            {
+              "id": "YQ",
+              "label": "Proceed"
+            }
+          ],
+          "expires_at": "18446744073709551615",
+          "producer": "policy_defer",
+          "kind": "choice",
+          "answer_choice_id": "_w",
+          "answer_command_id": "Y29tbWFuZA"
+        },
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "active_bounds": {
+          "max_turns": "184467440737095516160000000001",
+          "token_budget": "184467440737095516160000000002",
+          "deadline_ms": "18446744073709551615",
+          "deadline": "18446744073709551615"
+        },
+        "checkpoint": null,
+        "active_maintenance": null
+      },
+      "error": true
+    },
+    {
+      "name": "cleanup_grace_ms-newline",
+      "input": {
+        "status": "active",
+        "event_sequence": "9",
+        "active_run_id": "_w",
+        "cleanup_grace_ms": "1\n",
+        "active_context_token_budget": "8192",
+        "pending_work_ids": [
+          "_w"
+        ],
+        "open_interaction": {
+          "interaction_id": "AP8K",
+          "run_id": "_w",
+          "turn": "1",
+          "tool_call_id": "Y2FsbA",
+          "status": "answered",
+          "prompt": "Choose λ",
+          "choices": [
+            {
+              "id": "_w",
+              "label": "Proceed"
+            },
+            {
+              "id": "YQ",
+              "label": "Proceed"
+            }
+          ],
+          "expires_at": "18446744073709551615",
+          "producer": "policy_defer",
+          "kind": "choice",
+          "answer_choice_id": "_w",
+          "answer_command_id": "Y29tbWFuZA"
+        },
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "active_bounds": {
+          "max_turns": "184467440737095516160000000001",
+          "token_budget": "184467440737095516160000000002",
+          "deadline_ms": "18446744073709551615",
+          "deadline": "18446744073709551615"
+        },
+        "checkpoint": null,
+        "active_maintenance": null
+      },
+      "error": true
+    },
+    {
+      "name": "active_context_token_budget-overflow",
+      "input": {
+        "status": "active",
+        "event_sequence": "9",
+        "active_run_id": "_w",
+        "cleanup_grace_ms": "1000",
+        "active_context_token_budget": "18446744073709551616",
+        "pending_work_ids": [
+          "_w"
+        ],
+        "open_interaction": {
+          "interaction_id": "AP8K",
+          "run_id": "_w",
+          "turn": "1",
+          "tool_call_id": "Y2FsbA",
+          "status": "answered",
+          "prompt": "Choose λ",
+          "choices": [
+            {
+              "id": "_w",
+              "label": "Proceed"
+            },
+            {
+              "id": "YQ",
+              "label": "Proceed"
+            }
+          ],
+          "expires_at": "18446744073709551615",
+          "producer": "policy_defer",
+          "kind": "choice",
+          "answer_choice_id": "_w",
+          "answer_command_id": "Y29tbWFuZA"
+        },
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "active_bounds": {
+          "max_turns": "184467440737095516160000000001",
+          "token_budget": "184467440737095516160000000002",
+          "deadline_ms": "18446744073709551615",
+          "deadline": "18446744073709551615"
+        },
+        "checkpoint": null,
+        "active_maintenance": null
+      },
+      "error": true
+    },
+    {
+      "name": "active_context_token_budget-leading_zero",
+      "input": {
+        "status": "active",
+        "event_sequence": "9",
+        "active_run_id": "_w",
+        "cleanup_grace_ms": "1000",
+        "active_context_token_budget": "01",
+        "pending_work_ids": [
+          "_w"
+        ],
+        "open_interaction": {
+          "interaction_id": "AP8K",
+          "run_id": "_w",
+          "turn": "1",
+          "tool_call_id": "Y2FsbA",
+          "status": "answered",
+          "prompt": "Choose λ",
+          "choices": [
+            {
+              "id": "_w",
+              "label": "Proceed"
+            },
+            {
+              "id": "YQ",
+              "label": "Proceed"
+            }
+          ],
+          "expires_at": "18446744073709551615",
+          "producer": "policy_defer",
+          "kind": "choice",
+          "answer_choice_id": "_w",
+          "answer_command_id": "Y29tbWFuZA"
+        },
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "active_bounds": {
+          "max_turns": "184467440737095516160000000001",
+          "token_budget": "184467440737095516160000000002",
+          "deadline_ms": "18446744073709551615",
+          "deadline": "18446744073709551615"
+        },
+        "checkpoint": null,
+        "active_maintenance": null
+      },
+      "error": true
+    },
+    {
+      "name": "active_context_token_budget-negative",
+      "input": {
+        "status": "active",
+        "event_sequence": "9",
+        "active_run_id": "_w",
+        "cleanup_grace_ms": "1000",
+        "active_context_token_budget": "-1",
+        "pending_work_ids": [
+          "_w"
+        ],
+        "open_interaction": {
+          "interaction_id": "AP8K",
+          "run_id": "_w",
+          "turn": "1",
+          "tool_call_id": "Y2FsbA",
+          "status": "answered",
+          "prompt": "Choose λ",
+          "choices": [
+            {
+              "id": "_w",
+              "label": "Proceed"
+            },
+            {
+              "id": "YQ",
+              "label": "Proceed"
+            }
+          ],
+          "expires_at": "18446744073709551615",
+          "producer": "policy_defer",
+          "kind": "choice",
+          "answer_choice_id": "_w",
+          "answer_command_id": "Y29tbWFuZA"
+        },
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "active_bounds": {
+          "max_turns": "184467440737095516160000000001",
+          "token_budget": "184467440737095516160000000002",
+          "deadline_ms": "18446744073709551615",
+          "deadline": "18446744073709551615"
+        },
+        "checkpoint": null,
+        "active_maintenance": null
+      },
+      "error": true
+    },
+    {
+      "name": "active_context_token_budget-number",
+      "input": {
+        "status": "active",
+        "event_sequence": "9",
+        "active_run_id": "_w",
+        "cleanup_grace_ms": "1000",
+        "active_context_token_budget": 1,
+        "pending_work_ids": [
+          "_w"
+        ],
+        "open_interaction": {
+          "interaction_id": "AP8K",
+          "run_id": "_w",
+          "turn": "1",
+          "tool_call_id": "Y2FsbA",
+          "status": "answered",
+          "prompt": "Choose λ",
+          "choices": [
+            {
+              "id": "_w",
+              "label": "Proceed"
+            },
+            {
+              "id": "YQ",
+              "label": "Proceed"
+            }
+          ],
+          "expires_at": "18446744073709551615",
+          "producer": "policy_defer",
+          "kind": "choice",
+          "answer_choice_id": "_w",
+          "answer_command_id": "Y29tbWFuZA"
+        },
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "active_bounds": {
+          "max_turns": "184467440737095516160000000001",
+          "token_budget": "184467440737095516160000000002",
+          "deadline_ms": "18446744073709551615",
+          "deadline": "18446744073709551615"
+        },
+        "checkpoint": null,
+        "active_maintenance": null
+      },
+      "error": true
+    },
+    {
+      "name": "active_context_token_budget-exponent",
+      "input": {
+        "status": "active",
+        "event_sequence": "9",
+        "active_run_id": "_w",
+        "cleanup_grace_ms": "1000",
+        "active_context_token_budget": "1e0",
+        "pending_work_ids": [
+          "_w"
+        ],
+        "open_interaction": {
+          "interaction_id": "AP8K",
+          "run_id": "_w",
+          "turn": "1",
+          "tool_call_id": "Y2FsbA",
+          "status": "answered",
+          "prompt": "Choose λ",
+          "choices": [
+            {
+              "id": "_w",
+              "label": "Proceed"
+            },
+            {
+              "id": "YQ",
+              "label": "Proceed"
+            }
+          ],
+          "expires_at": "18446744073709551615",
+          "producer": "policy_defer",
+          "kind": "choice",
+          "answer_choice_id": "_w",
+          "answer_command_id": "Y29tbWFuZA"
+        },
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "active_bounds": {
+          "max_turns": "184467440737095516160000000001",
+          "token_budget": "184467440737095516160000000002",
+          "deadline_ms": "18446744073709551615",
+          "deadline": "18446744073709551615"
+        },
+        "checkpoint": null,
+        "active_maintenance": null
+      },
+      "error": true
+    },
+    {
+      "name": "active_context_token_budget-newline",
+      "input": {
+        "status": "active",
+        "event_sequence": "9",
+        "active_run_id": "_w",
+        "cleanup_grace_ms": "1000",
+        "active_context_token_budget": "1\n",
+        "pending_work_ids": [
+          "_w"
+        ],
+        "open_interaction": {
+          "interaction_id": "AP8K",
+          "run_id": "_w",
+          "turn": "1",
+          "tool_call_id": "Y2FsbA",
+          "status": "answered",
+          "prompt": "Choose λ",
+          "choices": [
+            {
+              "id": "_w",
+              "label": "Proceed"
+            },
+            {
+              "id": "YQ",
+              "label": "Proceed"
+            }
+          ],
+          "expires_at": "18446744073709551615",
+          "producer": "policy_defer",
+          "kind": "choice",
+          "answer_choice_id": "_w",
+          "answer_command_id": "Y29tbWFuZA"
+        },
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "active_bounds": {
+          "max_turns": "184467440737095516160000000001",
+          "token_budget": "184467440737095516160000000002",
+          "deadline_ms": "18446744073709551615",
+          "deadline": "18446744073709551615"
+        },
+        "checkpoint": null,
+        "active_maintenance": null
+      },
+      "error": true
+    },
+    {
+      "name": "context-zero",
+      "input": {
+        "status": "active",
+        "event_sequence": "9",
+        "active_run_id": "_w",
+        "cleanup_grace_ms": "1000",
+        "active_context_token_budget": "0",
+        "pending_work_ids": [
+          "_w"
+        ],
+        "open_interaction": {
+          "interaction_id": "AP8K",
+          "run_id": "_w",
+          "turn": "1",
+          "tool_call_id": "Y2FsbA",
+          "status": "answered",
+          "prompt": "Choose λ",
+          "choices": [
+            {
+              "id": "_w",
+              "label": "Proceed"
+            },
+            {
+              "id": "YQ",
+              "label": "Proceed"
+            }
+          ],
+          "expires_at": "18446744073709551615",
+          "producer": "policy_defer",
+          "kind": "choice",
+          "answer_choice_id": "_w",
+          "answer_command_id": "Y29tbWFuZA"
+        },
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "active_bounds": {
+          "max_turns": "184467440737095516160000000001",
+          "token_budget": "184467440737095516160000000002",
+          "deadline_ms": "18446744073709551615",
+          "deadline": "18446744073709551615"
+        },
+        "checkpoint": null,
+        "active_maintenance": null
+      },
+      "error": true
+    },
+    {
+      "name": "active_run_id-empty",
+      "input": {
+        "status": "active",
+        "event_sequence": "9",
+        "active_run_id": "",
+        "cleanup_grace_ms": "1000",
+        "active_context_token_budget": "8192",
+        "pending_work_ids": [
+          "_w"
+        ],
+        "open_interaction": {
+          "interaction_id": "AP8K",
+          "run_id": "_w",
+          "turn": "1",
+          "tool_call_id": "Y2FsbA",
+          "status": "answered",
+          "prompt": "Choose λ",
+          "choices": [
+            {
+              "id": "_w",
+              "label": "Proceed"
+            },
+            {
+              "id": "YQ",
+              "label": "Proceed"
+            }
+          ],
+          "expires_at": "18446744073709551615",
+          "producer": "policy_defer",
+          "kind": "choice",
+          "answer_choice_id": "_w",
+          "answer_command_id": "Y29tbWFuZA"
+        },
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "active_bounds": {
+          "max_turns": "184467440737095516160000000001",
+          "token_budget": "184467440737095516160000000002",
+          "deadline_ms": "18446744073709551615",
+          "deadline": "18446744073709551615"
+        },
+        "checkpoint": null,
+        "active_maintenance": null
+      },
+      "error": true
+    },
+    {
+      "name": "active_run_id-padded",
+      "input": {
+        "status": "active",
+        "event_sequence": "9",
+        "active_run_id": "YQ==",
+        "cleanup_grace_ms": "1000",
+        "active_context_token_budget": "8192",
+        "pending_work_ids": [
+          "_w"
+        ],
+        "open_interaction": {
+          "interaction_id": "AP8K",
+          "run_id": "_w",
+          "turn": "1",
+          "tool_call_id": "Y2FsbA",
+          "status": "answered",
+          "prompt": "Choose λ",
+          "choices": [
+            {
+              "id": "_w",
+              "label": "Proceed"
+            },
+            {
+              "id": "YQ",
+              "label": "Proceed"
+            }
+          ],
+          "expires_at": "18446744073709551615",
+          "producer": "policy_defer",
+          "kind": "choice",
+          "answer_choice_id": "_w",
+          "answer_command_id": "Y29tbWFuZA"
+        },
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "active_bounds": {
+          "max_turns": "184467440737095516160000000001",
+          "token_budget": "184467440737095516160000000002",
+          "deadline_ms": "18446744073709551615",
+          "deadline": "18446744073709551615"
+        },
+        "checkpoint": null,
+        "active_maintenance": null
+      },
+      "error": true
+    },
+    {
+      "name": "active_run_id-noncanonical",
+      "input": {
+        "status": "active",
+        "event_sequence": "9",
+        "active_run_id": "YR",
+        "cleanup_grace_ms": "1000",
+        "active_context_token_budget": "8192",
+        "pending_work_ids": [
+          "_w"
+        ],
+        "open_interaction": {
+          "interaction_id": "AP8K",
+          "run_id": "_w",
+          "turn": "1",
+          "tool_call_id": "Y2FsbA",
+          "status": "answered",
+          "prompt": "Choose λ",
+          "choices": [
+            {
+              "id": "_w",
+              "label": "Proceed"
+            },
+            {
+              "id": "YQ",
+              "label": "Proceed"
+            }
+          ],
+          "expires_at": "18446744073709551615",
+          "producer": "policy_defer",
+          "kind": "choice",
+          "answer_choice_id": "_w",
+          "answer_command_id": "Y29tbWFuZA"
+        },
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "active_bounds": {
+          "max_turns": "184467440737095516160000000001",
+          "token_budget": "184467440737095516160000000002",
+          "deadline_ms": "18446744073709551615",
+          "deadline": "18446744073709551615"
+        },
+        "checkpoint": null,
+        "active_maintenance": null
+      },
+      "error": true
+    },
+    {
+      "name": "active_run_id-number",
+      "input": {
+        "status": "active",
+        "event_sequence": "9",
+        "active_run_id": 1,
+        "cleanup_grace_ms": "1000",
+        "active_context_token_budget": "8192",
+        "pending_work_ids": [
+          "_w"
+        ],
+        "open_interaction": {
+          "interaction_id": "AP8K",
+          "run_id": "_w",
+          "turn": "1",
+          "tool_call_id": "Y2FsbA",
+          "status": "answered",
+          "prompt": "Choose λ",
+          "choices": [
+            {
+              "id": "_w",
+              "label": "Proceed"
+            },
+            {
+              "id": "YQ",
+              "label": "Proceed"
+            }
+          ],
+          "expires_at": "18446744073709551615",
+          "producer": "policy_defer",
+          "kind": "choice",
+          "answer_choice_id": "_w",
+          "answer_command_id": "Y29tbWFuZA"
+        },
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "active_bounds": {
+          "max_turns": "184467440737095516160000000001",
+          "token_budget": "184467440737095516160000000002",
+          "deadline_ms": "18446744073709551615",
+          "deadline": "18446744073709551615"
+        },
+        "checkpoint": null,
+        "active_maintenance": null
+      },
+      "error": true
+    },
+    {
+      "name": "bad-pending-work-54",
+      "input": {
+        "status": "active",
+        "event_sequence": "9",
+        "active_run_id": "_w",
+        "cleanup_grace_ms": "1000",
+        "active_context_token_budget": "8192",
+        "pending_work_ids": [
+          ""
+        ],
+        "open_interaction": {
+          "interaction_id": "AP8K",
+          "run_id": "_w",
+          "turn": "1",
+          "tool_call_id": "Y2FsbA",
+          "status": "answered",
+          "prompt": "Choose λ",
+          "choices": [
+            {
+              "id": "_w",
+              "label": "Proceed"
+            },
+            {
+              "id": "YQ",
+              "label": "Proceed"
+            }
+          ],
+          "expires_at": "18446744073709551615",
+          "producer": "policy_defer",
+          "kind": "choice",
+          "answer_choice_id": "_w",
+          "answer_command_id": "Y29tbWFuZA"
+        },
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "active_bounds": {
+          "max_turns": "184467440737095516160000000001",
+          "token_budget": "184467440737095516160000000002",
+          "deadline_ms": "18446744073709551615",
+          "deadline": "18446744073709551615"
+        },
+        "checkpoint": null,
+        "active_maintenance": null
+      },
+      "error": true
+    },
+    {
+      "name": "bad-pending-work-55",
+      "input": {
+        "status": "active",
+        "event_sequence": "9",
+        "active_run_id": "_w",
+        "cleanup_grace_ms": "1000",
+        "active_context_token_budget": "8192",
+        "pending_work_ids": [
+          "YQ=="
+        ],
+        "open_interaction": {
+          "interaction_id": "AP8K",
+          "run_id": "_w",
+          "turn": "1",
+          "tool_call_id": "Y2FsbA",
+          "status": "answered",
+          "prompt": "Choose λ",
+          "choices": [
+            {
+              "id": "_w",
+              "label": "Proceed"
+            },
+            {
+              "id": "YQ",
+              "label": "Proceed"
+            }
+          ],
+          "expires_at": "18446744073709551615",
+          "producer": "policy_defer",
+          "kind": "choice",
+          "answer_choice_id": "_w",
+          "answer_command_id": "Y29tbWFuZA"
+        },
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "active_bounds": {
+          "max_turns": "184467440737095516160000000001",
+          "token_budget": "184467440737095516160000000002",
+          "deadline_ms": "18446744073709551615",
+          "deadline": "18446744073709551615"
+        },
+        "checkpoint": null,
+        "active_maintenance": null
+      },
+      "error": true
+    },
+    {
+      "name": "bad-pending-work-56",
+      "input": {
+        "status": "active",
+        "event_sequence": "9",
+        "active_run_id": "_w",
+        "cleanup_grace_ms": "1000",
+        "active_context_token_budget": "8192",
+        "pending_work_ids": [
+          null
+        ],
+        "open_interaction": {
+          "interaction_id": "AP8K",
+          "run_id": "_w",
+          "turn": "1",
+          "tool_call_id": "Y2FsbA",
+          "status": "answered",
+          "prompt": "Choose λ",
+          "choices": [
+            {
+              "id": "_w",
+              "label": "Proceed"
+            },
+            {
+              "id": "YQ",
+              "label": "Proceed"
+            }
+          ],
+          "expires_at": "18446744073709551615",
+          "producer": "policy_defer",
+          "kind": "choice",
+          "answer_choice_id": "_w",
+          "answer_command_id": "Y29tbWFuZA"
+        },
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "active_bounds": {
+          "max_turns": "184467440737095516160000000001",
+          "token_budget": "184467440737095516160000000002",
+          "deadline_ms": "18446744073709551615",
+          "deadline": "18446744073709551615"
+        },
+        "checkpoint": null,
+        "active_maintenance": null
+      },
+      "error": true
+    },
+    {
+      "name": "bad-pending-work-57",
+      "input": {
+        "status": "active",
+        "event_sequence": "9",
+        "active_run_id": "_w",
+        "cleanup_grace_ms": "1000",
+        "active_context_token_budget": "8192",
+        "pending_work_ids": [
+          1
+        ],
+        "open_interaction": {
+          "interaction_id": "AP8K",
+          "run_id": "_w",
+          "turn": "1",
+          "tool_call_id": "Y2FsbA",
+          "status": "answered",
+          "prompt": "Choose λ",
+          "choices": [
+            {
+              "id": "_w",
+              "label": "Proceed"
+            },
+            {
+              "id": "YQ",
+              "label": "Proceed"
+            }
+          ],
+          "expires_at": "18446744073709551615",
+          "producer": "policy_defer",
+          "kind": "choice",
+          "answer_choice_id": "_w",
+          "answer_command_id": "Y29tbWFuZA"
+        },
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "active_bounds": {
+          "max_turns": "184467440737095516160000000001",
+          "token_budget": "184467440737095516160000000002",
+          "deadline_ms": "18446744073709551615",
+          "deadline": "18446744073709551615"
+        },
+        "checkpoint": null,
+        "active_maintenance": null
+      },
+      "error": true
+    },
+    {
+      "name": "private-configuration-instructions",
+      "input": {
+        "status": "active",
+        "event_sequence": "9",
+        "active_run_id": "_w",
+        "cleanup_grace_ms": "1000",
+        "active_context_token_budget": "8192",
+        "pending_work_ids": [
+          "_w"
+        ],
+        "open_interaction": {
+          "interaction_id": "AP8K",
+          "run_id": "_w",
+          "turn": "1",
+          "tool_call_id": "Y2FsbA",
+          "status": "answered",
+          "prompt": "Choose λ",
+          "choices": [
+            {
+              "id": "_w",
+              "label": "Proceed"
+            },
+            {
+              "id": "YQ",
+              "label": "Proceed"
+            }
+          ],
+          "expires_at": "18446744073709551615",
+          "producer": "policy_defer",
+          "kind": "choice",
+          "answer_choice_id": "_w",
+          "answer_command_id": "Y29tbWFuZA"
+        },
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": "private"
+        },
+        "active_bounds": {
+          "max_turns": "184467440737095516160000000001",
+          "token_budget": "184467440737095516160000000002",
+          "deadline_ms": "18446744073709551615",
+          "deadline": "18446744073709551615"
+        },
+        "checkpoint": null,
+        "active_maintenance": null
+      },
+      "error": true
+    },
+    {
+      "name": "private-configuration-provider_mapping",
+      "input": {
+        "status": "active",
+        "event_sequence": "9",
+        "active_run_id": "_w",
+        "cleanup_grace_ms": "1000",
+        "active_context_token_budget": "8192",
+        "pending_work_ids": [
+          "_w"
+        ],
+        "open_interaction": {
+          "interaction_id": "AP8K",
+          "run_id": "_w",
+          "turn": "1",
+          "tool_call_id": "Y2FsbA",
+          "status": "answered",
+          "prompt": "Choose λ",
+          "choices": [
+            {
+              "id": "_w",
+              "label": "Proceed"
+            },
+            {
+              "id": "YQ",
+              "label": "Proceed"
+            }
+          ],
+          "expires_at": "18446744073709551615",
+          "producer": "policy_defer",
+          "kind": "choice",
+          "answer_choice_id": "_w",
+          "answer_command_id": "Y29tbWFuZA"
+        },
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          "provider_mapping": {}
+        },
+        "active_bounds": {
+          "max_turns": "184467440737095516160000000001",
+          "token_budget": "184467440737095516160000000002",
+          "deadline_ms": "18446744073709551615",
+          "deadline": "18446744073709551615"
+        },
+        "checkpoint": null,
+        "active_maintenance": null
+      },
+      "error": true
+    },
+    {
+      "name": "private-configuration-host_binding",
+      "input": {
+        "status": "active",
+        "event_sequence": "9",
+        "active_run_id": "_w",
+        "cleanup_grace_ms": "1000",
+        "active_context_token_budget": "8192",
+        "pending_work_ids": [
+          "_w"
+        ],
+        "open_interaction": {
+          "interaction_id": "AP8K",
+          "run_id": "_w",
+          "turn": "1",
+          "tool_call_id": "Y2FsbA",
+          "status": "answered",
+          "prompt": "Choose λ",
+          "choices": [
+            {
+              "id": "_w",
+              "label": "Proceed"
+            },
+            {
+              "id": "YQ",
+              "label": "Proceed"
+            }
+          ],
+          "expires_at": "18446744073709551615",
+          "producer": "policy_defer",
+          "kind": "choice",
+          "answer_choice_id": "_w",
+          "answer_command_id": "Y29tbWFuZA"
+        },
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          "host_binding": {}
+        },
+        "active_bounds": {
+          "max_turns": "184467440737095516160000000001",
+          "token_budget": "184467440737095516160000000002",
+          "deadline_ms": "18446744073709551615",
+          "deadline": "18446744073709551615"
+        },
+        "checkpoint": null,
+        "active_maintenance": null
+      },
+      "error": true
+    },
+    {
+      "name": "private-bounds-deadline_at_ms",
+      "input": {
+        "status": "active",
+        "event_sequence": "9",
+        "active_run_id": "_w",
+        "cleanup_grace_ms": "1000",
+        "active_context_token_budget": "8192",
+        "pending_work_ids": [
+          "_w"
+        ],
+        "open_interaction": {
+          "interaction_id": "AP8K",
+          "run_id": "_w",
+          "turn": "1",
+          "tool_call_id": "Y2FsbA",
+          "status": "answered",
+          "prompt": "Choose λ",
+          "choices": [
+            {
+              "id": "_w",
+              "label": "Proceed"
+            },
+            {
+              "id": "YQ",
+              "label": "Proceed"
+            }
+          ],
+          "expires_at": "18446744073709551615",
+          "producer": "policy_defer",
+          "kind": "choice",
+          "answer_choice_id": "_w",
+          "answer_command_id": "Y29tbWFuZA"
+        },
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "active_bounds": {
+          "max_turns": "184467440737095516160000000001",
+          "token_budget": "184467440737095516160000000002",
+          "deadline_ms": "18446744073709551615",
+          "deadline": "18446744073709551615",
+          "deadline_at_ms": 1
+        },
+        "checkpoint": null,
+        "active_maintenance": null
+      },
+      "error": true
+    },
+    {
+      "name": "private-bounds-owner_epoch",
+      "input": {
+        "status": "active",
+        "event_sequence": "9",
+        "active_run_id": "_w",
+        "cleanup_grace_ms": "1000",
+        "active_context_token_budget": "8192",
+        "pending_work_ids": [
+          "_w"
+        ],
+        "open_interaction": {
+          "interaction_id": "AP8K",
+          "run_id": "_w",
+          "turn": "1",
+          "tool_call_id": "Y2FsbA",
+          "status": "answered",
+          "prompt": "Choose λ",
+          "choices": [
+            {
+              "id": "_w",
+              "label": "Proceed"
+            },
+            {
+              "id": "YQ",
+              "label": "Proceed"
+            }
+          ],
+          "expires_at": "18446744073709551615",
+          "producer": "policy_defer",
+          "kind": "choice",
+          "answer_choice_id": "_w",
+          "answer_command_id": "Y29tbWFuZA"
+        },
+        "configuration": {
+          "configuration_version": "1",
+          "model": "provider:exact-model",
+          "reasoning": "default",
+          "max_tokens": "4096",
+          "context_token_budget": "8192",
+          "system_class_tokens": "1000",
+          "instructions": {
+            "version": "host.v3",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        "active_bounds": {
+          "max_turns": "184467440737095516160000000001",
+          "token_budget": "184467440737095516160000000002",
+          "deadline_ms": "18446744073709551615",
+          "deadline": "18446744073709551615",
+          "owner_epoch": "1"
+        },
+        "checkpoint": null,
+        "active_maintenance": null
+      },
+      "error": true
+    }
+  ]
+}

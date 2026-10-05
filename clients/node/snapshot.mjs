@@ -9,7 +9,7 @@ import { decodeConfiguration } from "./configuration.mjs";
 import { decodeCheckpoint } from "./checkpoint.mjs";
 import { decodeMaintenanceView } from "./maintenance-view.mjs";
 import { decodeCompactCompletion } from "./compact-result.mjs";
-import { decodePendingInteraction } from "./pending-interaction.mjs";
+import { decodeOpenInteraction } from "./open-interaction.mjs";
 
 const keys = ["snapshot_revision", "session_id", "event_sequence", "active_run_id", "active_run_phase",
   "configuration", "checkpoint", "active_maintenance", "open_interaction", "last_compact"];
@@ -22,7 +22,7 @@ export function decodeSnapshot(value) {
   const cursor = quantity(value.event_sequence);
   const configuration = decodeConfiguration(value.configuration);
   const checkpoint = value.checkpoint === null ? null : decodeCheckpoint(value.checkpoint);
-  const question = value.open_interaction === null ? null : decodePendingInteraction(value.open_interaction);
+  const question = value.open_interaction === null ? null : decodeOpenInteraction(value.open_interaction);
   const maintenance = decodeMaintenanceView({ active_maintenance: value.active_maintenance });
   const compact = value.last_compact === null ? null : decodeCompactCompletion(value.last_compact);
   if (session === null || cursor === null || configuration === null ||

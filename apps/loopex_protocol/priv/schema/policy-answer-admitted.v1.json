@@ -1,0 +1,51 @@
+{
+  "format": "loopex.experimental.payload-contract/1",
+  "contract": "policy_answer_admitted",
+  "event_kind": "interaction.answer_admitted",
+  "closed": true,
+  "required": [
+    "interaction_id",
+    "run_id",
+    "turn",
+    "tool_call_id",
+    "producer",
+    "interaction_kind",
+    "status",
+    "answer_choice_id",
+    "answer_command_id"
+  ],
+  "interaction_id": {
+    "encoding": "canonical_unpadded_base64url",
+    "minimum_original_bytes": 1,
+    "maximum_original_bytes": 65536
+  },
+  "run_id": {
+    "encoding": "canonical_unpadded_base64url",
+    "minimum_original_bytes": 1,
+    "maximum_original_bytes": 65536
+  },
+  "turn": {
+    "encoding": "canonical_decimal_string",
+    "domain": "arbitrary_positive_integer"
+  },
+  "tool_call_id": {
+    "encoding": "canonical_unpadded_base64url",
+    "minimum_original_bytes": 1,
+    "maximum_original_bytes": 65536
+  },
+  "producer": "policy_defer",
+  "interaction_kind": "choice",
+  "status": "answered",
+  "answer_choice_id": {
+    "encoding": "canonical_unpadded_base64url",
+    "minimum_original_bytes": 1,
+    "maximum_original_bytes": 64
+  },
+  "answer_command_id": {
+    "encoding": "canonical_unpadded_base64url",
+    "minimum_original_bytes": 1,
+    "maximum_original_bytes": 65536
+  },
+  "authority_granted": false,
+  "contextual_binding": "serial reducer verifies original question tuple and offered choice before admission"
+}

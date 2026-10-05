@@ -74,7 +74,7 @@ defmodule LoopexProtocol.CanonicalSchemaProofTest do
             %{
               "canonical_cases" => 21,
               "approved_payloads" => 11,
-              "embedded_leaf_mutations" => 1307,
+              "embedded_leaf_mutations" => 1371,
               "rejected_json" => 13,
               "identity_checks" => 6,
               "accessor_checks" => 4,

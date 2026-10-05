@@ -1,21 +1,9 @@
 {
   "format": "loopex.experimental.payload-contract/1",
-  "contract": "pending_interaction",
-  "authority": "docs/adr/0045-model-originated-questions-technical.md",
+  "contract": "open_interaction",
+  "authority": "approved M7 inspection/policy-answer disposition; ADRs 0023/0024/0045",
   "integration": "M7 coordinated foreground /3 and daemon /4; not independently served",
   "closed": true,
-  "required": [
-    "interaction_id",
-    "run_id",
-    "turn",
-    "tool_call_id",
-    "status",
-    "prompt",
-    "choices",
-    "expires_at",
-    "producer",
-    "kind"
-  ],
   "interaction_id": {
     "encoding": "canonical_unpadded_base64url",
     "minimum_original_bytes": 1,
@@ -40,7 +28,10 @@
     "minimum": "0",
     "maximum": "18446744073709551615"
   },
-  "status": "pending",
+  "status": [
+    "pending",
+    "answered"
+  ],
   "producer": [
     "model_tool",
     "policy_defer"
@@ -81,7 +72,8 @@
     "model_tool_text": {
       "producer": "model_tool",
       "kind": "text",
-      "choices_length": 0
+      "choices_length": 0,
+      "status": "pending"
     },
     "model_tool_choice": {
       "producer": "model_tool",
@@ -89,14 +81,68 @@
       "minimum_choices": 1,
       "maximum_choices": 8,
       "id_by_original_position": "choice-1 through choice-8",
-      "unique_labels": true
+      "unique_labels": true,
+      "status": "pending"
     },
     "policy_defer_choice": {
       "producer": "policy_defer",
       "kind": "choice",
       "minimum_choices": 1,
-      "maximum_choices": 8
+      "maximum_choices": 8,
+      "status": "pending"
+    },
+    "answered_policy_defer_choice": {
+      "status": "answered",
+      "producer": "policy_defer",
+      "kind": "choice",
+      "minimum_choices": 1,
+      "maximum_choices": 8,
+      "answer_members": [
+        "answer_choice_id",
+        "answer_command_id"
+      ]
     }
   },
-  "authority_granted": false
+  "authority_granted": false,
+  "required_by_status": {
+    "pending": [
+      "interaction_id",
+      "run_id",
+      "turn",
+      "tool_call_id",
+      "status",
+      "prompt",
+      "choices",
+      "expires_at",
+      "producer",
+      "kind"
+    ],
+    "answered": [
+      "interaction_id",
+      "run_id",
+      "turn",
+      "tool_call_id",
+      "status",
+      "prompt",
+      "choices",
+      "expires_at",
+      "producer",
+      "kind",
+      "answer_choice_id",
+      "answer_command_id"
+    ]
+  },
+  "answer_choice_id": {
+    "encoding": "canonical_unpadded_base64url",
+    "minimum_original_bytes": 1,
+    "maximum_original_bytes": 64,
+    "required_when": "answered",
+    "membership": "one of the retained offered choice ids"
+  },
+  "answer_command_id": {
+    "encoding": "canonical_unpadded_base64url",
+    "minimum_original_bytes": 1,
+    "maximum_original_bytes": 65536,
+    "required_when": "answered"
+  }
 }

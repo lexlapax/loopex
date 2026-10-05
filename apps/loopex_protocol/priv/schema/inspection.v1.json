@@ -1,28 +1,28 @@
 {
   "format": "loopex.experimental.payload-contract/1",
-  "contract": "session_snapshot",
-  "authority": "docs/plans/M7-technical.md",
-  "integration": "M7 coordinated foreground /3 and daemon /4; not independently served",
+  "contract": "inspection",
+  "integration": "standalone preparation; coordinated M7 foreground /3 and daemon /4 not independently served",
   "closed": true,
   "required": [
-    "snapshot_revision",
-    "session_id",
+    "status",
     "event_sequence",
     "active_run_id",
-    "active_run_phase",
-    "configuration",
-    "checkpoint",
-    "active_maintenance",
+    "cleanup_grace_ms",
+    "active_context_token_budget",
+    "pending_work_ids",
     "open_interaction",
-    "last_compact"
+    "configuration",
+    "active_bounds",
+    "checkpoint",
+    "active_maintenance"
   ],
-  "snapshot_revision": 3,
-  "session_id": {
-    "encoding": "canonical_unpadded_base64url",
-    "minimum_original_bytes": 1,
-    "maximum_original_bytes": 256
-  },
+  "status": "active",
   "event_sequence": {
+    "encoding": "canonical_decimal_string",
+    "minimum": "0",
+    "maximum": "18446744073709551615"
+  },
+  "cleanup_grace_ms": {
     "encoding": "canonical_decimal_string",
     "minimum": "0",
     "maximum": "18446744073709551615"
@@ -35,11 +35,173 @@
       "maximum_original_bytes": 65536
     }
   },
-  "active_run_phase": [
-    null,
-    "admitted_unstaged",
-    "started"
-  ],
+  "active_context_token_budget": {
+    "nullable": true,
+    "encoding": "canonical_decimal_string",
+    "minimum": "1",
+    "maximum": "18446744073709551615"
+  },
+  "pending_work_ids": {
+    "kind": "array",
+    "maximum_length": 1024,
+    "member": {
+      "encoding": "canonical_unpadded_base64url",
+      "minimum_original_bytes": 1,
+      "maximum_original_bytes": 65536
+    },
+    "order": "preserved"
+  },
+  "open_interaction": {
+    "nullable": true,
+    "definition": {
+      "format": "loopex.experimental.payload-contract/1",
+      "contract": "open_interaction",
+      "authority": "approved M7 inspection/policy-answer disposition; ADRs 0023/0024/0045",
+      "integration": "M7 coordinated foreground /3 and daemon /4; not independently served",
+      "closed": true,
+      "interaction_id": {
+        "encoding": "canonical_unpadded_base64url",
+        "minimum_original_bytes": 1,
+        "maximum_original_bytes": 65536
+      },
+      "run_id": {
+        "encoding": "canonical_unpadded_base64url",
+        "minimum_original_bytes": 1,
+        "maximum_original_bytes": 65536
+      },
+      "tool_call_id": {
+        "encoding": "canonical_unpadded_base64url",
+        "minimum_original_bytes": 1,
+        "maximum_original_bytes": 65536
+      },
+      "turn": {
+        "encoding": "canonical_decimal_string",
+        "domain": "arbitrary_positive_integer"
+      },
+      "expires_at": {
+        "encoding": "canonical_decimal_string",
+        "minimum": "0",
+        "maximum": "18446744073709551615"
+      },
+      "status": [
+        "pending",
+        "answered"
+      ],
+      "producer": [
+        "model_tool",
+        "policy_defer"
+      ],
+      "kind": [
+        "choice",
+        "text"
+      ],
+      "prompt": {
+        "encoding": "utf8",
+        "minimum_bytes": 1,
+        "maximum_bytes": 2048
+      },
+      "choices": {
+        "kind": "array",
+        "minimum_length": 0,
+        "maximum_length": 8,
+        "member": {
+          "closed": true,
+          "required": [
+            "id",
+            "label"
+          ],
+          "id": {
+            "encoding": "canonical_unpadded_base64url",
+            "minimum_original_bytes": 1,
+            "maximum_original_bytes": 64
+          },
+          "label": {
+            "encoding": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 256
+          }
+        },
+        "unique_by": "id"
+      },
+      "variants": {
+        "model_tool_text": {
+          "producer": "model_tool",
+          "kind": "text",
+          "choices_length": 0,
+          "status": "pending"
+        },
+        "model_tool_choice": {
+          "producer": "model_tool",
+          "kind": "choice",
+          "minimum_choices": 1,
+          "maximum_choices": 8,
+          "id_by_original_position": "choice-1 through choice-8",
+          "unique_labels": true,
+          "status": "pending"
+        },
+        "policy_defer_choice": {
+          "producer": "policy_defer",
+          "kind": "choice",
+          "minimum_choices": 1,
+          "maximum_choices": 8,
+          "status": "pending"
+        },
+        "answered_policy_defer_choice": {
+          "status": "answered",
+          "producer": "policy_defer",
+          "kind": "choice",
+          "minimum_choices": 1,
+          "maximum_choices": 8,
+          "answer_members": [
+            "answer_choice_id",
+            "answer_command_id"
+          ]
+        }
+      },
+      "authority_granted": false,
+      "required_by_status": {
+        "pending": [
+          "interaction_id",
+          "run_id",
+          "turn",
+          "tool_call_id",
+          "status",
+          "prompt",
+          "choices",
+          "expires_at",
+          "producer",
+          "kind"
+        ],
+        "answered": [
+          "interaction_id",
+          "run_id",
+          "turn",
+          "tool_call_id",
+          "status",
+          "prompt",
+          "choices",
+          "expires_at",
+          "producer",
+          "kind",
+          "answer_choice_id",
+          "answer_command_id"
+        ]
+      },
+      "answer_choice_id": {
+        "encoding": "canonical_unpadded_base64url",
+        "minimum_original_bytes": 1,
+        "maximum_original_bytes": 64,
+        "required_when": "answered",
+        "membership": "one of the retained offered choice ids"
+      },
+      "answer_command_id": {
+        "encoding": "canonical_unpadded_base64url",
+        "minimum_original_bytes": 1,
+        "maximum_original_bytes": 65536,
+        "required_when": "answered"
+      }
+    }
+  },
   "configuration": {
     "nullable": false,
     "definition": {
@@ -108,6 +270,47 @@
         }
       }
     }
+  },
+  "active_bounds": {
+    "nullable": true,
+    "definition": {
+      "contract": "active_bounds",
+      "revision": 1,
+      "required": [
+        "max_turns",
+        "token_budget",
+        "deadline_ms",
+        "deadline"
+      ],
+      "additional_members": "refuse",
+      "null": "refuse",
+      "native_keys": "binary strings",
+      "defaults": "none",
+      "clock": "none",
+      "max_turns": {
+        "encoding": "canonical_decimal_string",
+        "domain": "arbitrary_positive_integer",
+        "minimum": "1"
+      },
+      "token_budget": {
+        "encoding": "canonical_decimal_string",
+        "domain": "arbitrary_positive_integer",
+        "minimum": "1"
+      },
+      "deadline_ms": {
+        "encoding": "canonical_decimal_string",
+        "domain": "positive_uint64",
+        "minimum": "1",
+        "maximum": "18446744073709551615"
+      },
+      "deadline": {
+        "encoding": "null_or_canonical_decimal_string",
+        "domain": "nonnegative_uint64_or_null",
+        "minimum": "0",
+        "maximum": "18446744073709551615"
+      }
+    },
+    "relation": "null iff active_run_id is null"
   },
   "checkpoint": {
     "nullable": true,
@@ -487,403 +690,57 @@
       "encoding": "canonical_positive_decimal",
       "maximum": null
     },
-    "bounds": {
-      "select_by": "owner.kind",
-      "variants": {
-        "run": {
-          "required": [
-            "max_attempts",
-            "max_turns",
-            "token_budget",
-            "deadline_ms",
-            "run_deadline"
-          ],
-          "additional_members": "refuse",
-          "max_attempts": "4",
-          "max_turns": {
-            "encoding": "canonical_positive_decimal",
-            "maximum": null
-          },
-          "token_budget": {
-            "encoding": "canonical_positive_decimal",
-            "maximum": null
-          },
-          "deadline_ms": {
-            "encoding": "canonical_positive_decimal",
-            "maximum": "18446744073709551615"
-          },
-          "run_deadline": {
-            "nullable": true,
-            "encoding": "canonical_nonnegative_decimal",
-            "maximum": "18446744073709551615"
-          }
-        },
-        "compact": {
-          "required": [
-            "max_attempts",
-            "deadline_ms",
-            "token_budget"
-          ],
-          "additional_members": "refuse",
-          "max_attempts": {
-            "encoding": "canonical_positive_decimal",
-            "maximum": "4"
-          },
-          "deadline_ms": {
-            "encoding": "canonical_positive_decimal",
-            "maximum": "60000"
-          },
-          "token_budget": {
-            "encoding": "canonical_positive_decimal",
-            "maximum": "32768"
-          }
-        }
-      }
-    }
-  },
-  "open_interaction": {
-    "nullable": true,
-    "definition": {
-      "format": "loopex.experimental.payload-contract/1",
-      "contract": "open_interaction",
-      "authority": "approved M7 inspection/policy-answer disposition; ADRs 0023/0024/0045",
-      "integration": "M7 coordinated foreground /3 and daemon /4; not independently served",
-      "closed": true,
-      "interaction_id": {
-        "encoding": "canonical_unpadded_base64url",
-        "minimum_original_bytes": 1,
-        "maximum_original_bytes": 65536
-      },
-      "run_id": {
-        "encoding": "canonical_unpadded_base64url",
-        "minimum_original_bytes": 1,
-        "maximum_original_bytes": 65536
-      },
-      "tool_call_id": {
-        "encoding": "canonical_unpadded_base64url",
-        "minimum_original_bytes": 1,
-        "maximum_original_bytes": 65536
-      },
-      "turn": {
-        "encoding": "canonical_decimal_string",
-        "domain": "arbitrary_positive_integer"
-      },
-      "expires_at": {
-        "encoding": "canonical_decimal_string",
-        "minimum": "0",
-        "maximum": "18446744073709551615"
-      },
-      "status": [
-        "pending",
-        "answered"
-      ],
-      "producer": [
-        "model_tool",
-        "policy_defer"
-      ],
-      "kind": [
-        "choice",
-        "text"
-      ],
-      "prompt": {
-        "encoding": "utf8",
-        "minimum_bytes": 1,
-        "maximum_bytes": 2048
-      },
-      "choices": {
-        "kind": "array",
-        "minimum_length": 0,
-        "maximum_length": 8,
-        "member": {
-          "closed": true,
-          "required": [
-            "id",
-            "label"
-          ],
-          "id": {
-            "encoding": "canonical_unpadded_base64url",
-            "minimum_original_bytes": 1,
-            "maximum_original_bytes": 64
-          },
-          "label": {
-            "encoding": "utf8",
-            "minimum_bytes": 1,
-            "maximum_bytes": 256
-          }
-        },
-        "unique_by": "id"
-      },
-      "variants": {
-        "model_tool_text": {
-          "producer": "model_tool",
-          "kind": "text",
-          "choices_length": 0,
-          "status": "pending"
-        },
-        "model_tool_choice": {
-          "producer": "model_tool",
-          "kind": "choice",
-          "minimum_choices": 1,
-          "maximum_choices": 8,
-          "id_by_original_position": "choice-1 through choice-8",
-          "unique_labels": true,
-          "status": "pending"
-        },
-        "policy_defer_choice": {
-          "producer": "policy_defer",
-          "kind": "choice",
-          "minimum_choices": 1,
-          "maximum_choices": 8,
-          "status": "pending"
-        },
-        "answered_policy_defer_choice": {
-          "status": "answered",
-          "producer": "policy_defer",
-          "kind": "choice",
-          "minimum_choices": 1,
-          "maximum_choices": 8,
-          "answer_members": [
-            "answer_choice_id",
-            "answer_command_id"
-          ]
-        }
-      },
-      "authority_granted": false,
-      "required_by_status": {
-        "pending": [
-          "interaction_id",
-          "run_id",
-          "turn",
-          "tool_call_id",
-          "status",
-          "prompt",
-          "choices",
-          "expires_at",
-          "producer",
-          "kind"
-        ],
-        "answered": [
-          "interaction_id",
-          "run_id",
-          "turn",
-          "tool_call_id",
-          "status",
-          "prompt",
-          "choices",
-          "expires_at",
-          "producer",
-          "kind",
-          "answer_choice_id",
-          "answer_command_id"
-        ]
-      },
-      "answer_choice_id": {
-        "encoding": "canonical_unpadded_base64url",
-        "minimum_original_bytes": 1,
-        "maximum_original_bytes": 64,
-        "required_when": "answered",
-        "membership": "one of the retained offered choice ids"
-      },
-      "answer_command_id": {
-        "encoding": "canonical_unpadded_base64url",
-        "minimum_original_bytes": 1,
-        "maximum_original_bytes": 65536,
-        "required_when": "answered"
-      }
-    }
-  },
-  "last_compact": {
-    "nullable": true,
-    "definition": {
-      "contract": "standalone_compact_completion",
-      "revision": 1,
+    "run_bounds": {
       "required": [
-        "episode_id",
-        "command_id",
-        "result"
+        "max_attempts",
+        "max_turns",
+        "token_budget",
+        "deadline_ms",
+        "run_deadline"
       ],
       "additional_members": "refuse",
-      "episode_id": {
-        "encoding": "canonical_unpadded_base64url",
-        "decoded_bytes_min": 1,
-        "decoded_bytes_max": 65536,
-        "wire_bytes_max": 87382,
-        "nullable": false
+      "max_attempts": "4",
+      "max_turns": {
+        "encoding": "canonical_positive_decimal",
+        "maximum": null
       },
-      "command_id": {
-        "encoding": "canonical_unpadded_base64url",
-        "decoded_bytes_min": 1,
-        "decoded_bytes_max": 65536,
-        "wire_bytes_max": 87382,
-        "nullable": false
+      "token_budget": {
+        "encoding": "canonical_positive_decimal",
+        "maximum": null
       },
-      "result": {
-        "contract": "standalone_compact_result",
-        "revision": 1,
-        "required": [
-          "disposition",
-          "checkpoint_id",
-          "failure",
-          "usage",
-          "cleanup"
-        ],
-        "additional_members": "refuse",
-        "disposition": {
-          "checkpointed": {
-            "checkpoint_id": "required",
-            "failure": null,
-            "cleanup": "confirmed"
-          },
-          "unchanged": {
-            "checkpoint_id": null,
-            "failure": null,
-            "cleanup": "confirmed"
-          },
-          "failed": {
-            "checkpoint_id": "nullable",
-            "failure": "required",
-            "cleanup": [
-              "confirmed",
-              "unknown"
-            ]
-          }
-        },
-        "checkpoint_id": {
-          "encoding": "unpadded_base64url_of_original_opaque_bytes",
-          "original_min_bytes": 1,
-          "original_max_bytes": 65536
-        },
-        "usage": {
-          "required": [
-            "attempts",
-            "reported_tokens",
-            "estimated_tokens",
-            "total_tokens"
-          ],
-          "additional_members": "refuse",
-          "encoding": "canonical_decimal_string",
-          "domain": "arbitrary_nonnegative_integer",
-          "relation": "total_tokens = reported_tokens + estimated_tokens"
-        },
-        "failure": {
-          "additional_members": "refuse",
-          "retryable": false,
-          "simple": {
-            "categories": [
-              "model_call_failed",
-              "cancelled"
-            ],
-            "required": [
-              "category",
-              "retryable"
-            ]
-          },
-          "bound_reached": {
-            "required": [
-              "category",
-              "retryable",
-              "bound",
-              "observed",
-              "declared_limit",
-              "accounting_source"
-            ],
-            "bounds": [
-              "max_attempts",
-              "deadline_ms",
-              "token_budget"
-            ],
-            "accounting_source": [
-              null,
-              "reported",
-              "estimated"
-            ],
-            "max_attempts_accounting_source": null,
-            "observed": "nonnegative_integer",
-            "declared_limit": "positive_integer",
-            "deadline_ms": "u64",
-            "attempts_and_tokens": "arbitrary_integer",
-            "relation": "no observed versus declared_limit requirement; reservation may refuse below limit"
-          },
-          "numeric_v2": {
-            "required": [
-              "version",
-              "category",
-              "retryable",
-              "measurement_scope",
-              "dimension",
-              "observed",
-              "limit",
-              "hard_limit"
-            ],
-            "version": 2,
-            "categories": [
-              "context_budget_exceeded",
-              "thinking_exchange_headroom"
-            ],
-            "measurement_scope": [
-              "ordinary",
-              "maintenance"
-            ],
-            "dimensions": [
-              "system_class_tokens",
-              "context_tokens",
-              "context_record_bytes",
-              "context_record_depth",
-              "context_record_cardinality"
-            ],
-            "observed": "nonnegative_u64",
-            "limit_and_hard_limit": "positive_u64",
-            "context_record_bytes_hard_limit": "65536",
-            "context_budget_exceeded": "limit = hard_limit; system_class_tokens observed >= limit, otherwise observed > limit",
-            "thinking_exchange_headroom": "context_tokens or context_record_bytes; limit <= hard_limit and observed > limit"
-          },
-          "preparation_v2": {
-            "required": [
-              "version",
-              "category",
-              "retryable",
-              "measurement_scope",
-              "cause"
-            ],
-            "version": 2,
-            "category": "context_preparation_failed",
-            "measurement_scope": [
-              null,
-              "ordinary"
-            ],
-            "causes": [
-              "maintenance_model_unconfigured",
-              "maintenance_instructions_unconfigured",
-              "maintenance_reasoning_unsupported",
-              "compaction_excerpt_budget_too_small",
-              "compaction_no_progress",
-              "compaction_preparation_deadline",
-              "maintenance_deadline_unrepresentable",
-              "maintenance_summary_incomplete",
-              "maintenance_summary_invalid",
-              "maintenance_reply_reserve_unavailable",
-              "canonical_history_rendering_unsupported",
-              "artifact_read_unavailable",
-              "artifact_metadata_unrepresentable",
-              "artifact_preparation_count_exhausted",
-              "artifact_preparation_bytes_exhausted",
-              "artifact_preparation_deadline",
-              "artifact_preparation_failed",
-              "context_projection_invalid"
-            ]
-          }
-        },
-        "presentation": "enclosing_transport_owns_framing_and_ceiling"
+      "deadline_ms": {
+        "encoding": "canonical_positive_decimal",
+        "maximum": "18446744073709551615"
+      },
+      "run_deadline": {
+        "nullable": true,
+        "encoding": "canonical_nonnegative_decimal",
+        "maximum": "18446744073709551615"
+      }
+    },
+    "compact_bounds": {
+      "required": [
+        "max_attempts",
+        "deadline_ms",
+        "token_budget"
+      ],
+      "additional_members": "refuse",
+      "max_attempts": {
+        "encoding": "canonical_positive_decimal",
+        "maximum": "4"
+      },
+      "deadline_ms": {
+        "encoding": "canonical_positive_decimal",
+        "maximum": "60000"
+      },
+      "token_budget": {
+        "encoding": "canonical_positive_decimal",
+        "maximum": "32768"
       }
     }
   },
-  "relations": [
-    "active_run_id and active_run_phase are null together",
-    "a pending question requires its active run and no maintenance",
-    "run-owned maintenance matches active_run_id; compact-owned maintenance requires no active run",
-    "maintenance configuration_version equals current configuration_version",
-    "checkpoint configuration_version is no newer than current configuration_version",
-    "cursor zero has no run, checkpoint, maintenance, question or compact completion"
-  ],
-  "legacy_configuration_or_revision_fallback": false
+  "defaults": "none",
+  "clock": "none",
+  "private_members": "refuse",
+  "event_sequence_meaning": "last committed public outbox position; not identity of every private journal fact"
 }

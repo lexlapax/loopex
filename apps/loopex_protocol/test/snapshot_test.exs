@@ -1,19 +1,19 @@
 defmodule LoopexProtocol.SnapshotTest do
   use ExUnit.Case, async: true
 
-  alias LoopexProtocol.Session.{PendingInteraction, Snapshot}
+  alias LoopexProtocol.Session.{OpenInteraction, Snapshot}
 
-  test "literal pending questions preserve both producers and exact model kinds" do
-    fixture = read("vectors/pending-interaction.v1.json")
-    assert length(fixture["cases"]) == 74
+  test "literal open questions preserve both producers and exact model kinds" do
+    fixture = read("vectors/open-interaction.v1.json")
+    assert length(fixture["cases"]) == 114
 
     for vector <- fixture["cases"],
-        do: verify(vector, &PendingInteraction.decode_wire/1, &PendingInteraction.encode_wire/1)
+        do: verify(vector, &OpenInteraction.decode_wire/1, &OpenInteraction.encode_wire/1)
   end
 
   test "literal snapshots close every cursor view and reject inconsistent owners" do
     fixture = read("vectors/session-snapshot.v3.json")
-    assert length(fixture["cases"]) == 47
+    assert length(fixture["cases"]) == 50
 
     for vector <- fixture["cases"],
         do: verify(vector, &Snapshot.decode_wire/1, &Snapshot.encode_wire/1)
@@ -25,17 +25,17 @@ defmodule LoopexProtocol.SnapshotTest do
 
     for key <- ~w(interaction_id run_id tool_call_id) do
       value = Map.put(native, key, full)
-      assert {:ok, wire} = PendingInteraction.encode_wire(value)
-      assert PendingInteraction.decode_wire(wire) == {:ok, value}
-      assert PendingInteraction.encode_wire(Map.put(value, key, full <> "x")) == :error
+      assert {:ok, wire} = OpenInteraction.encode_wire(value)
+      assert OpenInteraction.decode_wire(wire) == {:ok, value}
+      assert OpenInteraction.encode_wire(Map.put(value, key, full <> "x")) == :error
     end
 
     short = :binary.copy(<<255>>, 64)
     value = %{native | "choices" => [%{"id" => short, "label" => "Proceed"}]}
-    assert {:ok, wire} = PendingInteraction.encode_wire(value)
-    assert PendingInteraction.decode_wire(wire) == {:ok, value}
+    assert {:ok, wire} = OpenInteraction.encode_wire(value)
+    assert OpenInteraction.decode_wire(wire) == {:ok, value}
 
-    assert PendingInteraction.encode_wire(
+    assert OpenInteraction.encode_wire(
              put_in(value, ["choices", Access.at(0), "id"], short <> "x")
            ) == :error
   end
@@ -43,18 +43,18 @@ defmodule LoopexProtocol.SnapshotTest do
   test "pending prompt and labels use exact UTF-8 byte limits" do
     native = pending()
     prompt = String.duplicate("é", 1_024)
-    assert {:ok, _} = PendingInteraction.encode_wire(%{native | "prompt" => prompt})
-    assert PendingInteraction.encode_wire(%{native | "prompt" => prompt <> "x"}) == :error
-    assert PendingInteraction.encode_wire(%{native | "prompt" => <<255>>}) == :error
+    assert {:ok, _} = OpenInteraction.encode_wire(%{native | "prompt" => prompt})
+    assert OpenInteraction.encode_wire(%{native | "prompt" => prompt <> "x"}) == :error
+    assert OpenInteraction.encode_wire(%{native | "prompt" => <<255>>}) == :error
     label = String.duplicate("é", 128)
     value = %{native | "choices" => [%{"id" => "choice", "label" => label}]}
-    assert {:ok, _} = PendingInteraction.encode_wire(value)
+    assert {:ok, _} = OpenInteraction.encode_wire(value)
 
-    assert PendingInteraction.encode_wire(
+    assert OpenInteraction.encode_wire(
              put_in(value, ["choices", Access.at(0), "label"], label <> "x")
            ) == :error
 
-    assert PendingInteraction.encode_wire(%URI{}) == :error
+    assert OpenInteraction.encode_wire(%URI{}) == :error
   end
 
   test "snapshot identity ceilings, atom keys and current configuration are exact" do
@@ -79,14 +79,14 @@ defmodule LoopexProtocol.SnapshotTest do
 
   test "complete nested schemas and literal vectors have pinned byte identities" do
     for {relative, digest} <- [
-          {"schema/pending-interaction.v1.json",
-           "cac5052fb10927b599a3c08b1216eb64cb2a7403abbc1112c41223985bdeb72f"},
+          {"schema/open-interaction.v1.json",
+           "3b764fe133c8cabf59418d02d890edcb82a5eac764c28e13a41638742e910721"},
           {"schema/session-snapshot.v3.json",
-           "d7fb48ff5fabb5836fd3e1a10cfd0019616f9f3b59523b8ae73f551b08380aa6"},
-          {"vectors/pending-interaction.v1.json",
-           "5e415d01b0abebb726413a951db41c8f62ddc2c0dd946e10d62e0192fcb182a0"},
+           "bce5ad3ea0e2b8027f7c29d2d480c864fe7b2032959290cc2ed8b234ed20aeeb"},
+          {"vectors/open-interaction.v1.json",
+           "2fc849930dc7ccac592c9f076c1a2008bfb86a983531f499490b28d5c5c4288d"},
           {"vectors/session-snapshot.v3.json",
-           "593049e9406e68ee030dda98a8bf5093183d0036e8db864a801c4e480f9eef8c"}
+           "6147367feaf72a5c14a15755b88ba91726d8cd3d48a17b244eb9082e33717268"}
         ] do
       assert :crypto.hash(:sha256, File.read!(path(relative))) |> Base.encode16(case: :lower) ==
                digest
@@ -104,7 +104,7 @@ defmodule LoopexProtocol.SnapshotTest do
     assert schema["last_compact"]["definition"] ==
              read("schema/standalone-compact-completion.v1.json")
 
-    assert schema["open_interaction"]["definition"] == read("schema/pending-interaction.v1.json")
+    assert schema["open_interaction"]["definition"] == read("schema/open-interaction.v1.json")
     assert schema["active_maintenance"]["owner"] == read("schema/checkpoint-owner.v1.json")
 
     assert Map.keys(schema["active_maintenance"]["bounds"]["variants"]) |> Enum.sort() ==
@@ -118,7 +118,7 @@ defmodule LoopexProtocol.SnapshotTest do
 
     arguments = [
       Path.join(root, "clients/node/snapshot-vectors.mjs"),
-      path("vectors/pending-interaction.v1.json"),
+      path("vectors/open-interaction.v1.json"),
       path("vectors/session-snapshot.v3.json")
     ]
 
@@ -126,8 +126,8 @@ defmodule LoopexProtocol.SnapshotTest do
     assert status == 0, output
 
     assert JSON.decode!(String.trim(output)) == %{
-             "pending_vectors" => 74,
-             "snapshot_vectors" => 47,
+             "open_vectors" => 114,
+             "snapshot_vectors" => 50,
              "boundary_checks" => 21
            }
   end
@@ -142,7 +142,7 @@ defmodule LoopexProtocol.SnapshotTest do
     end
   end
 
-  @identities ~w(session_id active_run_id interaction_id run_id tool_call_id checkpoint_id episode_id prior_checkpoint_id command_id id call_id)
+  @identities ~w(session_id active_run_id interaction_id run_id tool_call_id checkpoint_id episode_id prior_checkpoint_id command_id id call_id answer_choice_id answer_command_id)
   defp retained(value, key \\ nil)
 
   defp retained(value, _key) when is_map(value),
@@ -161,7 +161,7 @@ defmodule LoopexProtocol.SnapshotTest do
 
   defp pending do
     {:ok, value} =
-      PendingInteraction.decode_wire(vector("pending-interaction.v1.json", "policy-choice"))
+      OpenInteraction.decode_wire(vector("open-interaction.v1.json", "policy-choice"))
 
     value
   end
