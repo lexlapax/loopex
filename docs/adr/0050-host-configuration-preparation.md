@@ -3,7 +3,7 @@
 
 Technical depth: [Host configuration preparation](0050-host-configuration-preparation-technical.md#technical-depth).
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-04
 - **Decision owner:** Maintainer
 - **Amends:** [ADR 0044](0044-run-model-and-reasoning-configuration.md#concept)'s host preparation boundary and authored-to-canonical configure binding; authority and single-transaction admission remain.
@@ -106,4 +106,4 @@ semantics. This proposal does not authorize milestone closure or publication.
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | — | — | — |
+| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-m7-model-preparation-alias-acceptance-2026-10-04) | candidate `108dbf3468c925c69696f05fd73848380b6787ef`; concept `sha256:adc7fdb5de88836b420989eb3de51d93b342e3ddeb748c103ca5a374d6f08eae`; technical `sha256:410264b1508aa1493285c0ca1e4403a815610f789335a55f098fe4ee0ac7a32a` |

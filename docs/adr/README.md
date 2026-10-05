@@ -53,13 +53,13 @@ a decision adds a new record rather than rewriting the old one.
 | 0041 | Session lineage projection and context budget | Accepted | [Decision](0041-session-lineage-projection-and-context-budget.md#concept) | [Technical depth](0041-session-lineage-projection-and-context-budget-technical.md#technical-depth) |
 | 0042 | Host-composed instructions | Accepted | [Decision](0042-host-composed-instructions.md#concept) | [Technical depth](0042-host-composed-instructions-technical.md#technical-depth) |
 | 0043 | Context compaction checkpoint | Accepted | [Decision](0043-context-compaction-checkpoint.md#concept) | [Technical depth](0043-context-compaction-checkpoint-technical.md#technical-depth) |
-| 0044 | Run model and reasoning configuration | Accepted | [Decision](0044-run-model-and-reasoning-configuration.md#concept) | [Technical depth](0044-run-model-and-reasoning-configuration-technical.md#technical-depth) |
+| 0044 | Run model and reasoning configuration | Accepted (host configuration preparation and authored-to-canonical alias binding amended by 0050) | [Decision](0044-run-model-and-reasoning-configuration.md#concept) | [Technical depth](0044-run-model-and-reasoning-configuration-technical.md#technical-depth) |
 | 0045 | Model-originated questions | Accepted | [Decision](0045-model-originated-questions.md#concept) | [Technical depth](0045-model-originated-questions-technical.md#technical-depth) |
 | 0046 | Child-session tool | Accepted | [Decision](0046-child-session-tool.md#concept) | [Technical depth](0046-child-session-tool-technical.md#technical-depth) |
 | 0047 | Reference host run defaults | Accepted | [Decision](0047-reference-host-run-defaults.md#concept) | [Technical depth](0047-reference-host-run-defaults-technical.md#technical-depth) |
 | 0048 | Host provider routing and credential bindings | Accepted | [Decision](0048-host-provider-routing-and-credential-bindings.md#concept) | [Technical depth](0048-host-provider-routing-and-credential-bindings-technical.md#technical-depth) |
 | 0049 | Explicit host configuration | Accepted | [Decision](0049-explicit-host-configuration.md#concept) | [Technical depth](0049-explicit-host-configuration-technical.md#technical-depth) |
-| 0050 | Model-port configuration preparation | Proposed | [Decision](0050-host-configuration-preparation.md#concept) | [Technical depth](0050-host-configuration-preparation-technical.md#technical-depth) |
+| 0050 | Model-port configuration preparation | Accepted | [Decision](0050-host-configuration-preparation.md#concept) | [Technical depth](0050-host-configuration-preparation-technical.md#technical-depth) |
 
 0001 and 0002 were the prerequisites that unblocked the first milestone
 candidate; the [plans register](../plans/README.md) records current status.

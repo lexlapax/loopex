@@ -325,6 +325,18 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Maintainer decision: "Approved option 1" accepts the revised alias-capable
+  ADR 0050 pair at `108dbf3468c925c69696f05fd73848380b6787ef`.
+  [Durable disposition](../developer/agent-context-map.md#disposition-m7-model-preparation-alias-acceptance-2026-10-04)
+  binds both exact Proposed digests. The administrative transition changes only
+  Concept Status/Acceptance within the pair and its index/0044 annotation.
+  Model preparation and authored-alias/canonical-candidate v2 replay may now be
+  implemented. No implementation checkbox closes from decision acceptance.
+  Command-bound codec, wire-create, restore and compact-busy decisions remain
+  separate and will be presented individually. T01–T19 originals 78 / 95 / 6;
+  added 270 / 18. M7 remains In progress and goal active.
+
+
 - Done: T10 output cutoffs are implemented at
   `72c1018a2c1ff34704ef22e8dc2cf4580cd934a0`. The writer privately reports its
   earliest pending delivery deadline and clears delivered controls. The driver

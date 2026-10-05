@@ -6642,3 +6642,26 @@ The selected alternative is retained at
 `0caba84dcca0b4952f30d7ec4dc425d39349b52c5f6760656f84f2501b18464b`. This authorizes the Core startup/default contract and
 coordinated transport implementation; it does not close M7 or authorize merge,
 release or publication.
+
+<a id="disposition-m7-model-preparation-alias-acceptance-2026-10-04"></a>
+### M7 model preparation with runtime aliases accepted, 2026-10-04
+
+The maintainer replied "Approved option 1" to the exact revised alias-capable
+ADR 0050 pair at candidate `108dbf3468c925c69696f05fd73848380b6787ef`.
+This accepts optional `Model.prepare_configuration/5`, central composition
+resolution, one owned 60,000-ms preparation cutoff, and retained authored model
+identity bound to its complete canonical candidate. Identical duplicates and
+current replay use retained facts without resolving aliases again; fresh command
+IDs may capture changed mappings. The new current private configure record is
+`session_configuration_admitted_v2`; v1 writers/readers are replaced together,
+superseded v1 histories refuse and no existing-user-data rewrite is authorized.
+Both optional preparation and the previously accepted prepared facade follow
+that binding; public configurations remain canonical.
+
+Bound Proposed bytes: Concept `sha256:adc7fdb5de88836b420989eb3de51d93b342e3ddeb748c103ca5a374d6f08eae`;
+Technical depth `sha256:410264b1508aa1493285c0ca1e4403a815610f789335a55f098fe4ee0ac7a32a`.
+Acceptance changes only the Concept Status and empty Acceptance row within
+[ADR 0050](../adr/0050-host-configuration-preparation.md#concept); its technical
+companion is unchanged. The earlier canonical-only candidate `ae950afeca980e76cf900901699bf281315c6e2a`
+remains unaccepted. This authorizes dependent implementation, not closure,
+merge, release, publication or the separately pending wire-create/bounds decisions.
