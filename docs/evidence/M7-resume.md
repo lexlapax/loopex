@@ -41,15 +41,27 @@ Only the bounded added T15 Store-audit row closes. Whole backup/restore,
 real executor effects and existing diagnostic obligations remain open.
 T01–T19 originals 78 done/95 todo/6 retired; added 291 done/21 todo.
 
-No worker currently holds the exclusive VM slot. Resource runner v2 handle
+Resource now holds the exclusive VM slot with live handle 54425. Its corrected
+immutable v3 runner is sibling M7/resource-retained-decoding-runner-20261005-v3/stage.sh,
+digest 14adbdee5e3cae3a8083a5e4fbece0b54abb4d136f1d4719a694e83f8e10b356.
+Root reviewed its exact command-array correction and all four native Bash 3.2
+no-VM controls. The formatted committed source is now
+ca2975ffa877eec3fedec6cd85ed4b95ebb07589. Both dependency copies and current
+toolchain/Node probes passed; dev compilation is running. Fresh output directory:
+sibling M7/resource-retained-decoding-execution-20261005-v2. Worker owns polling;
+keep source pinned and start no other verification VM until its terminal return.
+
+The earlier Resource runner v2 handle
 67651 is terminal exit 1 and collected. It failed before any formatter or VM
 because Bash 3.2 rejects the empty ambient-filter array under nounset.
-Source remains clean 16b904adae7b26a034870798472634f91e920079; no tests ran.
+Its source remained clean 16b904adae7b26a034870798472634f91e920079; no tests ran.
 Complete first output is preserved in sibling
-M7/resource-retained-decoding-execution-20261005-v1. current_index_cleanup is
-preparing immutable Resource runner v3 and Ledger runner v2, with a nonempty
-command array and native Bash no-VM checks. Review their exact bytes and then
-grant Resource alone a new output directory. Preserve failed v2 evidence.
+M7/resource-retained-decoding-execution-20261005-v1. Preserve failed v2 evidence.
+Ledger runner v2 is prepared and reviewed at sibling
+M7/ledger-byte-guard-runner-20261005-v2/stage.sh, digest
+e6df58fc5b03bfa193aed16b1cb21c401195cbd5dbce4c6ab5415d49bc4ea114.
+It also uses the corrected nonempty command array and passes all four native
+Bash no-VM controls. Ledger remains ungranted and unexecuted.
 
 Causal runner v2 is prepared, source-only and reviewed at sibling
 M7/private-task-causal-runner-91784948-v2/run.py, digest
@@ -58,7 +70,11 @@ It copies dependencies and Mix homes per pair, filters ambient overrides and
 requires four passing cases plus all 68 nonempty traces and exact cleanup.
 It remains unexecuted. Its controlled mechanism cannot attribute the actual
 Core shutdown reports. Ledger source 0b82b006 is also unchanged and unproved.
-ADR 0052 exact-pair acceptance is still unanswered. Root owns integration and
+The clean fully merged Store worktree/local branch is removed; all needed
+evidence and tested ancestry remain saved. restore_manifest_resume is doing a
+read-only source investigation of the remaining T08 prepared daemon routing;
+it has no VM or write authority. ADR 0052 exact-pair acceptance is still
+unanswered. Root owns integration and
 one combined full check after proved slices rejoin. Earlier records below are
 historical snapshots; this latest section governs.
 
