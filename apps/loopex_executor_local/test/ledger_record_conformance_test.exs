@@ -40,6 +40,108 @@ defmodule Loopex.Executor.Local.LedgerRecordConformanceTest do
     assert File.read!(path) == bytes
   end
 
+  test "all retained kinds refuse compression, trailing bytes and non-map roots", context do
+    generation_path = Path.join(context.root, "generation")
+    generation = generation_path |> File.read!() |> :erlang.binary_to_term([:safe])
+    marker = Ledger.marker(context.job)
+    open = Ledger.open_entry(context.job, context.job.executor_identity)
+    assert {:ok, refusal} = Ledger.refusal(context.job, :workspace_lease_lost)
+
+    cases = [
+      {generation_path, generation,
+       fn -> Ledger.prepare(context.root, "ledger-record-test", 5_000) end},
+      {marker_path(context.root, context.job.job_id), marker,
+       fn -> Ledger.read_marker(context.prepared, context.job) end},
+      {marker_path(context.root, context.job.job_id), refusal,
+       fn -> Ledger.read_marker(context.prepared, context.job) end},
+      {open_path(context.root, context.job.job_id), open,
+       fn -> snapshot(context.prepared) end}
+    ]
+
+    for {path, record, read} <- cases do
+      canonical = encode(record)
+      compressed = :erlang.term_to_binary(record, [:deterministic, :compressed])
+      assert <<131, 80, _rest::binary>> = compressed
+      assert byte_size(compressed) < byte_size(canonical)
+
+      for bytes <- [compressed, canonical <> <<0>>, encode([record])] do
+        File.write!(path, bytes)
+        assert_unavailable(read.())
+        assert File.read!(path) == bytes
+      end
+
+      File.write!(path, canonical)
+      assert {:ok, _record_or_snapshot} = read.()
+      assert File.read!(path) == canonical
+    end
+  end
+
+  test "compressed and non-map generation bytes never enter the actual term decoder", context do
+    path = Path.join(context.root, "generation")
+    canonical = File.read!(path)
+    record = :erlang.binary_to_term(canonical, [:safe])
+    boundary = {:erlang, :binary_to_term, 2}
+    assert {:traced, false} = :erlang.trace_info(boundary, :traced)
+    deadline = System.monotonic_time(:millisecond) + 5_000
+    remaining = fn -> max(deadline - System.monotonic_time(:millisecond), 0) end
+    parent = self()
+
+    try do
+      assert 1 == :erlang.trace_pattern(boundary, true, [:local])
+
+      for {bytes, expected_calls} <- [
+            {canonical, 1},
+            {:erlang.term_to_binary(record, [:deterministic, :compressed]), 0},
+            {encode([record]), 0}
+          ] do
+        File.write!(path, bytes)
+
+        {reader, monitor} =
+          spawn_monitor(fn ->
+            receive do
+              :read ->
+                result = Ledger.prepare(context.root, "ledger-record-test", 5_000)
+                send(parent, {:generation_read, self(), result})
+
+                receive do
+                  :finish -> :ok
+                after
+                  remaining.() -> exit(:observer_deadline)
+                end
+            after
+              remaining.() -> exit(:observer_deadline)
+            end
+          end)
+
+        try do
+          assert 1 == :erlang.trace(reader, true, [:call, :arity])
+          send(reader, :read)
+          assert_receive {:generation_read, ^reader, result}, remaining.()
+          if expected_calls == 1, do: assert(match?({:ok, _}, result)), else: assert_unavailable(result)
+          barrier = :erlang.trace_delivered(reader)
+          assert_receive {:trace_delivered, ^reader, ^barrier}, remaining.()
+
+          if expected_calls == 1 do
+            assert_receive {:trace, ^reader, :call, ^boundary}, 0
+          end
+
+          refute_receive {:trace, ^reader, :call, ^boundary}, 0
+          assert File.read!(path) == bytes
+          send(reader, :finish)
+          assert_receive {:DOWN, ^monitor, :process, ^reader, :normal}, remaining.()
+        after
+          if Process.alive?(reader) do
+            Process.exit(reader, :kill)
+            assert_receive {:DOWN, ^monitor, :process, ^reader, _reason}, remaining.()
+          end
+        end
+      end
+    after
+      :erlang.trace_pattern(boundary, false, [:local])
+      File.write!(path, canonical)
+    end
+  end
+
   test "generation readers admit independently specified lowercase epoch vectors", context do
     path = Path.join(context.root, "generation")
     original = path |> File.read!() |> :erlang.binary_to_term([:safe])
