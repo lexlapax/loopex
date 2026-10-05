@@ -29,6 +29,24 @@ grouped by T00–T19. Empty added sections mean no added subtasks are recorded;
 they do not mean the original task is complete. This follows the maintainer's
 2026-10-01 update to the active implementation goal.
 
+## Safe restart checkpoint — 2026-10-05
+
+The maintainer explicitly requested a safe pause. The indexed
+[restart record](M7-resume.md) retains exact integrated proof, every pending
+question, isolated WIP branches, terminal handle state, toolchains, caches and
+next resume actions. Both workers are stopped and their checkouts clean; all
+handles are terminal/collected and no worker owns the verification slot.
+Manifest draft is source-only WIP `ef8be7f159269d33a5204f83b6e4430515eb9937`
+on `codex/m7-restore-manifest-wip`; its complete1095-source/pause artifacts
+were rehashed. It changes only IO source and has no new tests/format/compile
+proof. Private-task source remains `0a341c48bae2703b3d90c34d028e5868417acb14`
+on `codex/m7-private-task-witness-wip`; trace expansion did not start.
+No draft is integrated or counted complete. Root will push all saved branches
+and verify remote identity before reporting restart-ready. No further goal work
+is authorized until explicit resume. T01–T19 original78/95/6 and added284/19
+are unchanged. Raw outputs remain immutable outside the repo, bound by exact
+references and hashes in Git. This is an execution pause, not milestone closure.
+
 ## Current decision and audit pointers — 2026-10-05
 
 The diagnostic setup-cutoff question has been surfaced again with the same two
