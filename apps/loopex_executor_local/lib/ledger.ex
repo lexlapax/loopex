@@ -922,7 +922,7 @@ defmodule Loopex.Executor.Local.Ledger do
 
   defp decode_record(path, kinds, ceiling) do
     with {:ok, bytes} <- File.read(path),
-         record when is_map(record) <- safe_decode(bytes),
+         record when is_map(record) <- safe_decode(bytes, ceiling),
          {:ok, canonical} <- validate_record(record, kinds, ceiling),
          true <- canonical == bytes do
       {:ok, record}
@@ -1023,13 +1023,25 @@ defmodule Loopex.Executor.Local.Ledger do
     end
   end
 
-  defp safe_decode(bytes) do
-    :erlang.binary_to_term(bytes, [:safe])
+  # Concept: only the current uncompressed map encoding enters the decoder.
+  #
+  # Technical depth: compressed terms can allocate far beyond their small file
+  # size. Check actual captured bytes and MAP_EXT before binary_to_term, then
+  # require safe full consumption. Kind validation and deterministic byte
+  # equality below remain the authority for the decoded record.
+  defp safe_decode(<<131, 116, _rest::binary>> = bytes, ceiling)
+       when byte_size(bytes) <= ceiling do
+    case :erlang.binary_to_term(bytes, [:safe, :used]) do
+      {record, used} when used == byte_size(bytes) -> record
+      _other -> :invalid
+    end
   rescue
     _error -> :invalid
   catch
     _kind, _reason -> :invalid
   end
+
+  defp safe_decode(_bytes, _ceiling), do: :invalid
 
   # Concept: publication is first-writer-wins, and durable before it returns.
   #
