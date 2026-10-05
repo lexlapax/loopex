@@ -27,7 +27,21 @@ defmodule LoopexCli.ProviderRuntimeIsolationTest do
       if previous, do: System.put_env(variable, previous), else: System.delete_env(variable)
     end)
 
-    {:ok, _started} = Application.ensure_all_started(:req_llm)
+    # Concept: this host fixture uses the same guarded dependency startup as
+    # the other embedded callers sharing its VM.
+    # Technical depth: direct ReqLLM startup can load dotenv before composition
+    # records its supervisor provenance. That pollutes later admission depending
+    # on test order. Preserve the genuine lifecycle and diagnostic witnesses by
+    # preparing the dependency through the existing serial starter first.
+    assert :ok = LoopexComposition.Ephemeral.Bootstrap.start()
+    starter = Process.whereis(LoopexComposition.ReqLLMStarter)
+    assert is_pid(starter)
+
+    deadline =
+      System.monotonic_time() + System.convert_time_unit(5_000, :millisecond, :native)
+
+    assert :ok = LoopexComposition.ReqLLMStarter.request(starter, nil, deadline)
+    assert Application.get_env(:req_llm, :load_dotenv) == false
     :ok
   end
 
