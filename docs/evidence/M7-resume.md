@@ -65,14 +65,19 @@ exactly to primary; worker history remains reachable through rejoin. Archive the
 clean landed foreground worktree/branch after integrating, preserving all needed
 external evidence.
 
-The Store worker alone owns the exclusive VM slot for exact 7dc5fe51, using
-`.../M7/store-byte-decoder-20261005-v3/run-stage.py`, SHA-256
-`eb53ff985b550fc96f09a427c01328b5fd5d79b8aafb623143984e8c1412634e`.
-Expected focused 10/full 100, both with 0 exclusions/skips. Current cold dev build
-is active; no other worker may launch VM proof. Preserve actual first failures
-and require exact source/clean status before joining. Query actual agent and
-runner state before any new launch. The prior prepared runner references below
-are historical versions, not execution evidence.
+Store proof is terminal PASS on both pairs at exact7dc5fe51, joined with its
+ancestry. Focused10 and full100 cases run with0 exclusions/skips on each pair;
+all20 stages passed. Root rehashed all63 outputs and all1097 Git source blobs.
+The task ledger records exact available completion/report/inventory digests.
+Both workers are stopped and their verification handles terminal; no worker owns
+the VM slot. Root's next full current fast check runs once on the new clean
+combined candidate. Once started, hold its exact HEAD/source frozen until its
+terminal result and resume the same running handle rather than retrying.
+
+Foreground's clean managed worktree is archived and landed local/remote branch
+removed; tested c119 source remains in m7 ancestry. Store's clean landed worktree
+and branch should be archived/removed too after rejoin. All needed proof outputs
+are already in durable sibling storage; ignore cache removal as disposable.
 
 Terminal full fast-check FAIL is retained in
 `/Users/spuri/projects/lexlapax/loopex-evidence/M7/integration-e327e46c-v1`.
@@ -87,7 +92,7 @@ admission assertion. Complete six additional application outputs were retained;
 inventory digests are in the latest task-ledger entry. Core's three actual
 shutdown_error/noproc reports remain an open causal investigation.
 
-The Store worker alone owns the verification slot. Source checkpoints are:
+Source checkpoints are:
 
 1. Foreground repair c119aa131fd65263269855f9eb34161ab5f81e44 is proved and
    joined. Its three owned paths are Mapping, FoundationMapping and the single
@@ -96,15 +101,12 @@ The Store worker alone owns the verification slot. Source checkpoints are:
    ordering are proved on both pairs, along with real process/Store restart.
    c35 first ordinary failure remains immutable. No generation activation or
    ADR 0052 implementation is implied; full next-candidate integration remains.
-2. Pure internal Store byte decoder `7dc5fe51a4c646f9179ef715add641cf688bde82`,
-   branch `codex/m7-offline-store-audit`, worktree
-   `/Users/spuri/.codex/worktrees/m7-trace-check/loopex`. Only Log and existing
-   log_encoding tests changed. Decode captured bytes using the same current
-   frame decoder/schema loading and256 MiB predecode cap; no actors/IO/repair.
-   Unformatted/uncompiled/unproved. Prepared external runner
-   `.../M7/store-byte-decoder-20261005-v1/run-stage.py`, SHA-256
-   `8d8da5dfa7157e4a6c08d4c0b4d2a9cb8312aed23ce0fa2bdc34cbbdea7311cb`.
-   Both pairs: focused encoding/capacity 10 then whole ordinary Store suite.
+2. Internal Store byte decoder7dc5fe51 is proved and joined. Only Log and
+   existing encoding tests changed. Same current frame decoder and trusted
+   schema loading, actual256MiB predecode cap and complete/torn/corrupt evidence;
+   no actors/path IO/repair. Both pairs pass focused10/full100 with0 exclusions
+   or skips. Full semantic Store/SessionState backup audit still needs actual
+   implementation and current physical/private-format proofs.
 3. Private-task causal witness `6a39e0bbc3237222207eeeed3daccdde0444a419`,
    branch `codex/m7-private-task-witness-wip`, worktree
    `/Users/spuri/.codex/worktrees/m7-pipe-deadline-witness/loopex`. Sole shutdown
@@ -115,8 +117,8 @@ The Store worker alone owns the verification slot. Source checkpoints are:
    FAIL. Do not integrate as a passing regression or change production custody
    without actual causal evidence.
 
-Finish the active Store verification, then join only proved source, one VM slot
-at a time. Foreground proof is complete. Root reviews exact diffs/output/source identities before joining
+Run the new combined candidate full fast check once, with one exclusive VM slot.
+Foreground and decoder unit proof are complete. Root reviews exact diffs/output/source identities before joining
 proved changes. Keep both project dev and test compilation before no-compile
 runs. New clean integration candidates get one full check; failed e327 is not a
 passing baseline. Worker source-only branches and prepared runner plans grant
@@ -172,7 +174,8 @@ Run-accounting source reconstruction is available at
 `5b0198f4bf5b80a53e5585a0052c6d96041a1331aea5a20ffcecfc11b8c74ded`;
 32-source inventory SHA-256
 `55dcc32d9c9acece4a2efb0b1e1ead789b0aa3f172503381fd1496e11161d6ba`.
-Worker verified all source bytes at 96c5d9b5; root review is pending. It identifies
+Worker verified all source bytes at 96c5d9b5; root independently rehashed all32
+snapshots/report, but substantive report review is pending. It identifies
 ordinary/run-owned maintenance settlement charge provenance and uncertainty,
 with standalone compact separate. No public read API, caps or helper refund is
 accepted or implemented by that report.

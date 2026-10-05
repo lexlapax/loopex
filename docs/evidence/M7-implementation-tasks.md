@@ -29,6 +29,47 @@ grouped by T00–T19. Empty added sections mean no added subtasks are recorded;
 they do not mean the original task is complete. This follows the maintainer's
 2026-10-01 update to the active implementation goal.
 
+## Verified captured Store byte decoder — 2026-10-05
+
+Exact worker7dc5fe51a4c646f9179ef715add641cf688bde82 is joined with its ancestry.
+Both pairs pass all20 planned stages, including actual encoding/capacity10 cases
+and complete ordinary Store100 cases per pair, zero exclusions/skips. Focused
+current/floor1.956/1.959 seconds; ordinary12.358/12.055 seconds. Dev/test project
+warnings-as-errors compilation, owned formatting, documentation, dependencies,
+status, exact toolchain and pinned Node version checks pass. Cold dependency
+warnings and rebar cache diagnostics stay retained, with no verification retry.
+
+Internal Log.decode_bytes shares unchanged live-reader frame decoding and fixed
+trusted schema loading, enforcing actual256MiB before decoding. Tests preserve
+complete/torn/corrupt evidence, original checksum offsets, missing/empty physical
+reads without creation/repair, compressed/trailing/noncanonical refusals, actual
+ceiling/+1 bytes and a real cold child. No Store/session actor, path IO or repair
+is introduced by this pure entry point. Full semantic backup/session auditing,
+workspace/current private formats, claims, lineage and activation remain open.
+
+Root reviewed the complete source/test diff and report, rehashed all63 immutable
+outputs and all20 terminal command/log identities, then independently compared
+all1097 source paths/modes/kinds/object IDs/lengths/digests with Git. Complete
+available evidence is in
+`/Users/spuri/projects/lexlapax/loopex-evidence/M7/store-byte-decoder-20261005-v3`:
+completion SHA-256
+`3b545bddefff8727e867291099e82225c03d69668c4ae42b86c2ce40db628f04`;
+report SHA-256
+`78cff5e67eb28c2e75a8a7ac1d61f027b277586eb46f923513cf5f51e2c2e570`;
+complete outputs inventory SHA-256
+`706a40036d2561df02afa6199ec4d851065048ae70a081f80211b0cc476e8372`;
+complete owned-source patch SHA-256
+`56e1c759bc87c405425ca05111320dde4684eb4f89e08b4cbd1f359196c0efff`.
+No independent review, integrated full check or complete restore is claimed.
+
+All worker handles are terminal and their slot returned. The next full current
+fast check must run once on the new clean combined candidate, preserving the
+failed e327 result and observed private-task diagnostics. Landed foreground is
+archived; its local/remote branch is deleted and c119 remains in m7 ancestry.
+Store worker can be archived after this join; all needed outputs are external.
+Original T01–T19 stays78 done/95 todo/6 retired; added290 done/18 todo.
+Including T00: originals78/101/7; added294/19.
+
 ## Verified foreground snapshot repair — 2026-10-05
 
 Exact three-file worker candidate c119aa131fd65263269855f9eb34161ab5f81e44
@@ -12709,7 +12750,7 @@ open.
 
 ### Added implementation subtasks
 
-- [ ] Extract and prove bounded internal Store captured-byte decoding through the existing current decoder, preserving actual whole-log caps, complete/torn/corrupt evidence, cold fixed-schema loading and no IO/actors/repair; verify actual boundary/capacity and complete Store suite on both supported pairs before full backup audit integration.
+- [x] Extract and prove bounded internal Store captured-byte decoding through the existing current decoder, preserving actual whole-log caps, complete/torn/corrupt evidence, cold fixed-schema loading and no IO/actors/repair; verify actual boundary/capacity and complete Store suite on both supported pairs before full backup audit integration.
 
 - [x] Enforce the current Store writer's deterministic uncompressed whole-payload ETF format before offline restore auditing reuses its decoder. Reproduce checksummed compressed over-ceiling, trailing-byte and reversed-map acceptance, refuse all three without changing written bytes or repairing input, and prove complete Store conformance on both supported toolchains.
 
