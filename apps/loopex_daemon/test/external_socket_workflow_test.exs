@@ -175,6 +175,9 @@ defmodule LoopexDaemon.ExternalSocketWorkflowTest do
     records = records_until_finished(client, [])
     kinds = Enum.map(records, &record_kind/1)
 
+    terminal = List.last(records)["event"]["data"]
+    assert terminal["outcome"] == "completed", inspect(Map.take(terminal, ~w(outcome reason)))
+
     assert {:progress, "text_delta"} in kinds
 
     assert Enum.find_index(kinds, &(&1 == {:progress, "text_delta"})) <
@@ -355,7 +358,7 @@ defmodule LoopexDaemon.ExternalSocketWorkflowTest do
           "id" => response_id,
           "type" => "message",
           "role" => "assistant",
-          "model" => "claude-haiku-4-5",
+          "model" => "claude-haiku-4-5-20251001",
           "content" => [],
           "stop_reason" => nil,
           "stop_sequence" => nil,
