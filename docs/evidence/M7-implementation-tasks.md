@@ -325,6 +325,33 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Clean pushed resume checkpoint: all root verification handles are terminal.
+  Source unit `790e73bc` and evidence child `5d531fe1` are pushed to m7. The
+  latter's one docs-only check passes in 17.866 seconds; complete output
+  `/private/tmp/loopex-m7-5d531fe1-docs.log`, SHA-256
+  `e447ad1cc5f68c0525d63b0b2cae566ff8d4be13bf4c090462aaacfce5f3617b`.
+  The completed command-bounds managed writer is now archived (confirmed by
+  artifact inventory); do not reuse its former filesystem path. All retained
+  source/log manifests remain external and intact. Workers have no active
+  verification handles. The next runtime work is the approved full inspection
+  integration, with policy-answer event/persistence dependent work held for the
+  separately presented decision. Diagnostic dispatch, actual pipe nonjoin and
+  Task.Supervisor lifetime investigations remain open; failed 6290ac47 is not
+  relabeled by either focused repair.
+
+  Governed restore pair draft (external only; not installed or accepted):
+  `/private/tmp/loopex-m7-restore-proposed-pair-20261005-v1/0051-current-format-physical-restore.md`,
+  Concept SHA-256
+  `b12f2fd057ca7c539c6d3dad9e53c71b6ad740ab5cdc942521db1e9d0efbfce1`;
+  its technical companion SHA-256
+  `e7cb262e4750531059aced665e80c34d23f86375b962e63d4d287a61d9852efa`.
+  Pair inventory SHA-256
+  `5c6a91d8d7dd7736a55a311e7b3fead6013b82e0f16403eee0b125d852cea848`.
+  Root rehashed these three objects; full semantic pair review/install/indexing
+  is pending. The worker's reciprocal-link/schema self-check is source-only,
+  with its initial checker failure retained; it is not product or independent
+  acceptance evidence. No restore implementation is authorized by that draft.
+
 - Approved inspection work: the standalone four-member ActiveBounds codec,
   closed schema, 121 literal vectors and independent Node validator are
   integrated as `790e73bc` from verified worker
