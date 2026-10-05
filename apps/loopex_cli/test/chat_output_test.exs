@@ -36,6 +36,33 @@ defmodule LoopexCli.ChatOutputTest do
     end)
   end
 
+  test "owner notifications track the earliest undelivered control and clear after delivery" do
+    device = device()
+    {:ok, writer} = ChatOutput.start_link(device)
+    assert :ok = ChatOutput.write(writer, :text, "blocked")
+    assert_receive {:device_write, _, "blocked"}
+    refute_receive {:loopex_chat_output_deadline, ^writer, _}, 0
+    assert :ok = ChatOutput.write(writer, :control, "first")
+    first = :sys.get_state(writer).delivery_deadline
+    assert_receive {:loopex_chat_output_deadline, ^writer, ^first}
+    assert :ok = ChatOutput.write(writer, :control, "second")
+    second = List.last(:queue.to_list(:sys.get_state(writer).queue)).deadline
+    assert second >= first
+    refute_receive {:loopex_chat_output_deadline, ^writer, _}, 0
+    send(device, {:release, :ok})
+    assert_receive {:device_write, _, "first"}
+    send(device, {:release, :ok})
+    assert_receive {:device_write, _, "second"}
+
+    if second > first,
+      do: assert_receive({:loopex_chat_output_deadline, ^writer, ^second})
+
+    send(device, {:release, :ok})
+    assert_receive {:loopex_chat_output_deadline, ^writer, nil}
+    assert :sys.get_state(writer).delivery_deadline == nil
+    assert :ok = ChatOutput.finish(writer)
+  end
+
   test "progress drops before required output and active bytes remain charged" do
     device = device()
     {:ok, writer} = ChatOutput.start_link(device)

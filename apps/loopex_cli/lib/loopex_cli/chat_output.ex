@@ -98,7 +98,8 @@ defmodule LoopexCli.ChatOutput do
        failure: nil,
        finishing: nil,
        finish_deadline: nil,
-       timer: nil
+       timer: nil,
+       delivery_deadline: nil
      }}
   end
 
@@ -279,6 +280,10 @@ defmodule LoopexCli.ChatOutput do
 
   defp arm(%{failure: failure} = state) when failure != nil, do: state
 
+  # Concept: the host can shorten shutdown without waiting on blocked IO.
+  # Technical depth: notify only this writer's owner when the earliest pending
+  # delivery cutoff changes. Clearing delivered controls cannot renew a cutoff
+  # the host already captured. A sealed writer keeps its last cutoff.
   defp arm(state) do
     cancel_timer(state.timer)
     current_deadline = if state.current, do: state.current.item.deadline
@@ -288,22 +293,23 @@ defmodule LoopexCli.ChatOutput do
       current_deadline | Enum.map(:queue.to_list(state.queue), & &1.deadline)
     ]
 
-    case Enum.reject(deadlines, &is_nil/1) do
-      [] ->
-        %{state | timer: nil}
+    deadline =
+      case Enum.reject(deadlines, &is_nil/1) do
+        [] -> nil
+        pending -> Enum.min(pending)
+      end
 
-      deadlines ->
+    if deadline != state.delivery_deadline,
+      do: send(state.owner, {:loopex_chat_output_deadline, self(), deadline})
+
+    timer =
+      if deadline != nil do
         token = make_ref()
+        timer = Process.send_after(self(), {:output_deadline, token}, max(deadline - now(), 0))
+        {timer, token}
+      end
 
-        timer =
-          Process.send_after(
-            self(),
-            {:output_deadline, token},
-            max(Enum.min(deadlines) - now(), 0)
-          )
-
-        %{state | timer: {timer, token}}
-    end
+    %{state | timer: timer, delivery_deadline: deadline}
   end
 
   defp cancel_timer(nil), do: :ok

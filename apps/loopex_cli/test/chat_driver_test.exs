@@ -61,7 +61,7 @@ defmodule LoopexCli.ChatDriverTest do
       )
 
     {:ok, input} = StringIO.open("/status\nnever read\n", encoding: :latin1)
-    {:ok, output} = StringIO.open("", encoding: :latin1)
+    output = blocked_control_output(false)
     test = self()
 
     facade = fn
@@ -86,14 +86,20 @@ defmodule LoopexCli.ChatDriverTest do
     ChatDriver.interrupt(driver)
     assert_receive {:provisional, ^host, %{exit_code: 1, cleanup: :unknown}}, 5_000
     assert_receive {:DOWN, ^monitor, :process, ^worker, :killed}
-    assert :sys.get_state(driver).deadline == captured
+    assert_receive {:blocked_control_output, ^output}, 5_000
+    stopped = :sys.get_state(driver)
+    control_deadline = :sys.get_state(stopped.writer).delivery_deadline
+    assert is_integer(control_deadline)
+    assert stopped.deadline == min(captured, control_deadline)
+    send(output, {:release_output, :ok})
     assert {"never read\n", ""} = StringIO.contents(input)
     assert Loopex.stop(fixture.runtime) == :ok
     send(host, {:close, :confirmed})
     assert_receive {:closed, ^host, 1}
-    {_, transcript} = StringIO.contents(output)
+    transcript = written_transcript()
     refute Enum.any?(records(transcript), &(&1["event"] == "status"))
     assert List.last(records(transcript))["cleanup"] == "unknown"
+    stop_devices([output])
   end
 
   test "status follows confirmed configure and warns from the retained continuation mapping" do
@@ -592,6 +598,60 @@ defmodule LoopexCli.ChatDriverTest do
     assert Enum.any?(two.messages, &(&1["content"] == "first\n@loopex forged"))
   end
 
+  test "unknown admission retains the existing control-output deadline through cleanup" do
+    fixture = start_fixture([%{text: "must not publish", calls: [], hold: self()}])
+    {:ok, session} = Loopex.create_session(fixture.runtime, %{}, command_id: "create")
+    input = pipe_input("one\n")
+    test = self()
+
+    output = blocked_control_output()
+
+    facade = fn module, function, args ->
+      case {function, args} do
+        {:command, [attachment, %{type: :prompt} = command]} ->
+          assert {:accepted, _} = Loopex.command(attachment, command)
+          {:error, :commit_unknown}
+
+        {:command_disposition, [_, id]} ->
+          send(test, {:blocked_disposition, self(), id})
+          receive do: (:release -> apply(module, function, args))
+
+        _ ->
+          apply(module, function, args)
+      end
+    end
+
+    {host, driver} = start_host(fixture.runtime, session, input, output, facade: facade)
+    assert_receive {:holding, model}, 5_000
+    assert_receive {:blocked_control_output, ^output}, 5_000
+    assert_receive {:blocked_disposition, observer, command_id}, 5_000
+    state = :sys.get_state(driver)
+    output_deadline = :sys.get_state(state.writer).current.item.deadline
+    assert is_integer(output_deadline)
+    assert state.stopping and state.unresolved == command_id
+    assert state.deadline <= output_deadline
+    captured = state.deadline
+    joined = monitor_processes([model | Map.keys(state.workers)])
+    send(observer, :release)
+    assert_receive {:provisional, ^host, %{exit_code: 1, cleanup: :confirmed}}, 5_000
+    assert :sys.get_state(driver).deadline == captured
+    assert_processes_joined(joined)
+    send(output, {:release_output, :ok})
+    closing = monitor_processes([host, driver, state.writer, fixture.runtime.supervisor])
+    assert Loopex.stop(fixture.runtime) == :ok
+    send(host, {:close, :confirmed})
+    assert_receive {:blocked_closing, ^output}, 5_000
+    assert :sys.get_state(state.writer).finish_deadline <= captured
+    send(output, :release_closing)
+    assert_receive {:closed, ^host, 1}, 5_000
+    assert_processes_joined(closing)
+    actors = [fixture.model, fixture.executor, fixture.store]
+    actor_monitors = monitor_processes(actors)
+    Enum.each(actors, &GenServer.stop(&1, :normal))
+    assert_processes_joined(actor_monitors)
+    stop_devices([input, output])
+  end
+
   test "EOF during an active run cancels it and joins the held model and chat workers" do
     fixture = start_fixture([%{text: "must not publish", calls: [], hold: self()}])
     {:ok, session} = Loopex.create_session(fixture.runtime, %{}, command_id: "create")
@@ -1051,7 +1111,7 @@ defmodule LoopexCli.ChatDriverTest do
     fixture = start_fixture([%{text: "done", calls: []}])
     {:ok, session} = Loopex.create_session(fixture.runtime, %{}, command_id: "create")
     {:ok, input} = StringIO.open("one\n/wait\ntwo\n", encoding: :latin1)
-    {:ok, output} = StringIO.open("", encoding: :latin1)
+    output = blocked_control_output(false)
     test = self()
 
     facade = fn module, function, args ->
@@ -1080,18 +1140,24 @@ defmodule LoopexCli.ChatDriverTest do
     assert_receive {:provisional, ^host, %{exit_code: 1, cleanup: :unknown}}, 5_000
     assert_receive {:DOWN, ^worker_monitor, :process, ^worker, :killed}
     refute_receive :unexpected_abort, 0
-    assert :sys.get_state(driver).deadline == initial.deadline
+    assert_receive {:blocked_control_output, ^output}, 5_000
+    stopped = :sys.get_state(driver)
+    control_deadline = :sys.get_state(stopped.writer).delivery_deadline
+    assert is_integer(control_deadline)
+    assert stopped.deadline == min(initial.deadline, control_deadline)
+    send(output, {:release_output, :ok})
     assert {"/wait\ntwo\n", ""} = StringIO.contents(input)
     assert Loopex.stop(fixture.runtime) == :ok
     send(host, {:close, :confirmed})
     assert_receive {:closed, ^host, 1}
-    {_, transcript} = StringIO.contents(output)
+    transcript = written_transcript()
     assert [ack] = Enum.filter(records(transcript), &(&1["event"] == "input"))
     assert ack["disposition"] == "unknown"
     assert [barrier] = Enum.filter(records(transcript), &(&1["event"] == "wait"))
     assert barrier["outcome"] == "commit_unknown"
     assert barrier["command_id"] == LoopexProtocol.Wire.encode_identity(id)
     assert List.last(records(transcript))["cleanup"] == "unknown"
+    stop_devices([output])
   end
 
   test "broken output returns a fixed transport failure after worker joins" do
@@ -1119,7 +1185,7 @@ defmodule LoopexCli.ChatDriverTest do
     fixture = start_fixture([%{text: "done", calls: []}])
     {:ok, session} = Loopex.create_session(fixture.runtime, %{}, command_id: "create")
     {:ok, input} = StringIO.open("one\n/wait\n", encoding: :latin1)
-    {:ok, output} = StringIO.open("", encoding: :latin1)
+    output = blocked_control_output()
     test = self()
 
     facade = fn module, function, args ->
@@ -1135,20 +1201,33 @@ defmodule LoopexCli.ChatDriverTest do
 
     {host, driver} = start_host(fixture.runtime, session, input, output, facade: facade)
     assert_receive {:pending_admission, worker, id}
+    joins = monitor_processes(Map.keys(:sys.get_state(driver).workers))
     Process.exit(worker, :kill)
 
     assert_receive {:provisional, ^host,
                     %{exit_code: 1, transport: :chat_worker_failed, cleanup: :unknown}},
                    5_000
 
-    assert :sys.get_state(driver).workers == %{}
+    assert_processes_joined(joins)
+    assert_receive {:blocked_control_output, ^output}, 5_000
+    state = :sys.get_state(driver)
+    output_deadline = :sys.get_state(state.writer).delivery_deadline
+    assert is_integer(output_deadline)
+    assert state.finished
+    assert state.deadline <= output_deadline
+    send(output, {:release_output, :ok})
+    closing = monitor_processes([host, driver, state.writer])
     send(host, {:close, :confirmed})
+    assert_receive {:blocked_closing, ^output}, 5_000
+    assert :sys.get_state(state.writer).finish_deadline <= state.deadline
+    send(output, :release_closing)
     assert_receive {:closed, ^host, 1}
-    {_, transcript} = StringIO.contents(output)
-    barrier = Enum.find(records(transcript), &(&1["event"] == "wait"))
+    assert_processes_joined(closing)
+    barrier = await_record(&(&1["event"] == "wait"))
     assert barrier["outcome"] == "commit_unknown"
     assert barrier["command_id"] == LoopexProtocol.Wire.encode_identity(id)
     assert Loopex.AgentLoopTestModel.dispatched(fixture.model) == []
+    stop_devices([output])
   end
 
   test "a malformed complete command is refused before the next valid prompt" do
@@ -1496,6 +1575,29 @@ defmodule LoopexCli.ChatDriverTest do
     {host, driver}
   end
 
+  defp blocked_control_output(block_closing \\ true) do
+    test = self()
+
+    device =
+      spawn(fn ->
+        receive do
+          {:io_request, peer, reply, {:put_chars, _, bytes}} ->
+            send(test, {:blocked_control_output, self()})
+
+            receive do
+              {:release_output, result} ->
+                send(test, {:written, IO.iodata_to_binary(bytes)})
+                send(peer, {:io_reply, reply, result})
+            end
+
+            if block_closing, do: closing_output_loop(test), else: output_loop(test)
+        end
+      end)
+
+    on_exit(fn -> if Process.alive?(device), do: Process.exit(device, :kill) end)
+    device
+  end
+
   defp observing_output do
     test = self()
     device = spawn(fn -> output_loop(test) end)
@@ -1509,6 +1611,35 @@ defmodule LoopexCli.ChatDriverTest do
         send(test, {:written, IO.iodata_to_binary(bytes)})
         send(writer, {:io_reply, reply, :ok})
         output_loop(test)
+    end
+  end
+
+  defp closing_output_loop(test) do
+    receive do
+      {:io_request, writer, reply, {:put_chars, _, bytes}} ->
+        if String.starts_with?(bytes, "@loopex ") and
+             JSON.decode!(binary_part(bytes, 8, byte_size(bytes) - 8))["event"] == "closing" do
+          send(test, {:blocked_closing, self()})
+          receive do: (:release_closing -> :ok)
+        end
+
+        send(test, {:written, bytes})
+        send(writer, {:io_reply, reply, :ok})
+        closing_output_loop(test)
+    end
+  end
+
+  defp written_transcript(acc \\ []) do
+    receive do
+      {:written, bytes} ->
+        acc = [bytes | acc]
+
+        if String.starts_with?(bytes, "@loopex ") and
+             JSON.decode!(binary_part(bytes, 8, byte_size(bytes) - 8))["event"] == "closing",
+           do: acc |> Enum.reverse() |> IO.iodata_to_binary(),
+           else: written_transcript(acc)
+    after
+      5_000 -> flunk("closing transcript not delivered")
     end
   end
 

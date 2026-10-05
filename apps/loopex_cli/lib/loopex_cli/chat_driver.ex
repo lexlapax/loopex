@@ -153,6 +153,7 @@ defmodule LoopexCli.ChatDriver do
       configuration: Keyword.get(options, :configuration),
       status_policy: Keyword.get(options, :status_policy),
       writer: writer,
+      output_deadline: nil,
       facade: facade,
       workers: %{},
       command: nil,
@@ -243,7 +244,7 @@ defmodule LoopexCli.ChatDriver do
     result =
       emit(state, :closing, %{exit_code: code, cleanup: cleanup, last_outcome: state.last_outcome})
 
-    delivered = finish_output(state.writer)
+    delivered = finish_output(state)
     code = if result == :ok and delivered == :ok, do: code, else: max(code, 1)
 
     if map_size(state.workers) == 0,
@@ -343,6 +344,11 @@ defmodule LoopexCli.ChatDriver do
     do: {:noreply, fail(state, :output_failed)}
 
   def handle_info({:EXIT, _, _}, state), do: {:noreply, state}
+
+  def handle_info({:loopex_chat_output_deadline, writer, deadline}, %{writer: writer} = state)
+      when is_integer(deadline) or is_nil(deadline) do
+    {:noreply, shorten_stop(%{state | output_deadline: deadline}, deadline)}
+  end
 
   def handle_info({:loopex_chat_output_failed, writer, code}, %{writer: writer} = state),
     do: {:noreply, fail(state, code)}
@@ -961,8 +967,10 @@ defmodule LoopexCli.ChatDriver do
     grace = state.cleanup_grace_ms || Loopex.Executor.default_cleanup_grace_ms()
 
     {:ok, bounds} = Loopex.Executor.cancellation_bounds(grace)
-    deadline = System.monotonic_time(:millisecond) + bounds.cli_backstop_ms
-    cutoff_timer = Process.send_after(self(), :cutoff, bounds.cli_backstop_ms)
+    now = System.monotonic_time(:millisecond)
+    deadline = now + bounds.cli_backstop_ms
+    deadline = if state.output_deadline, do: min(deadline, state.output_deadline), else: deadline
+    cutoff_timer = Process.send_after(self(), :cutoff, max(deadline - now, 0))
 
     state = %{
       state
@@ -975,6 +983,25 @@ defmodule LoopexCli.ChatDriver do
     if state.input_worker, do: Process.exit(state.input_worker, :kill)
     if state.pending == nil and state.unresolved == nil, do: abort_for_stop(state), else: state
   end
+
+  # Concept: a late writer notification may shorten an active shutdown.
+  # Technical depth: queue admission and this owner's mailbox are independent.
+  # Preserve the minimum once stopping starts, even when output later drains
+  # or provisional unknown cleanup already returned. Closing shares that cutoff;
+  # only an unfinished shutdown needs its timer rearmed.
+  defp shorten_stop(%{stopping: true, deadline: captured} = state, deadline)
+       when is_integer(captured) and is_integer(deadline) and deadline < captured do
+    if state.finished do
+      %{state | deadline: deadline}
+    else
+      if state.cutoff_timer, do: Process.cancel_timer(state.cutoff_timer)
+      remaining = max(deadline - System.monotonic_time(:millisecond), 0)
+      timer = Process.send_after(self(), :cutoff, remaining)
+      %{state | deadline: deadline, cutoff_timer: timer}
+    end
+  end
+
+  defp shorten_stop(state, _deadline), do: state
 
   defp abort_for_stop(state) do
     if MapSet.member?(state.ready, :command) do
@@ -1095,8 +1122,10 @@ defmodule LoopexCli.ChatDriver do
     :exit, _ -> {:error, :output_failed}
   end
 
-  defp finish_output(writer) do
-    ChatOutput.finish(writer)
+  defp finish_output(state) do
+    if state.deadline,
+      do: ChatOutput.finish(state.writer, state.deadline),
+      else: ChatOutput.finish(state.writer)
   catch
     :exit, _ -> {:error, :output_failed}
   end
