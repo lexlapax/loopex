@@ -325,6 +325,68 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: T10 output cutoffs are implemented at
+  `72c1018a2c1ff34704ef22e8dc2cf4580cd934a0`. The writer privately reports its
+  earliest pending delivery deadline and clears delivered controls. The driver
+  keeps the minimum while stopping, including a notification arriving after
+  provisional unknown cleanup, and passes that captured cutoff to final drain.
+  No public record, persistence, authority or product bound changes.
+  First unknown-admission and late worker-loss witnesses fail before their
+  respective fixes, with retained complete outputs. The first broader run also
+  exposed a premature worker-map assertion after unknown cleanup; exact acquired
+  process monitors and final driver/writer joins now prove actual termination.
+  Two second-interrupt checks now assert exactly the minimum of their first
+  captured cutoff and a positively blocked control's actual cutoff. This keeps
+  the original no-extension proof and additionally proves required shortening;
+  independent review confirms no check or timeout was weakened.
+  Final seven-file selection: 93 PASS on current, 52.087 measured seconds;
+  93 PASS on floor, 50.373 seconds. Warning-free compile, owned formatting,
+  docs, status, dependency direction and diff gates PASS on both pairs in
+  15.103 / 13.321 measured seconds. All run handles are terminal and collected.
+  Complete logs under `/private/tmp/loopex-m7-output-cutoff-proof/`:
+  `affected-current-v5.log`, SHA-256
+  `c4671097e8f08a693ebdef1e14ef99e988b56f8052da05e51a50b571404f5181`;
+  `affected-floor-v5.log`, SHA-256
+  `7302228c0989c16d72e7f9a08957113b7ac9fa3960704d523a881ded901ac910`;
+  `metadata-current-v5.log`, SHA-256
+  `9776367af1da7d3f84497629bf5fccca11e3d6107f9c7e0275b0f528d1871481`;
+  `metadata-floor-v5.log`, SHA-256
+  `9ca52496672a5f43887786438f3014e033468f8faa069c80b1388a7af18a2954`.
+  Retained 1,053-record working-tree source inventory `final-v5-source.jsonl`,
+  SHA-256 `867d026d7a9ec9e2227dcfdf1a3d68005830b838920339321f6cc22cc4931ecb`;
+  four-file owned patch `final-v5-owned.patch`, SHA-256
+  `df997bf70537cd5cd00d7ebc53959b9c95b09f622071cf4040c1d029c3e5750b`;
+  exact committed four-file source proof `root-source-proof-v2.txt`, SHA-256
+  `c09107520ef3e5d0364b00f9d994349c036965ea3867b00b8a7e955502743c45`;
+  independent `final-review-v5.txt`, SHA-256
+  `8e1339ce051dd46ea6b30983fa25d61510ef2d184472e98485ffc4b3e278e89b`.
+  The source proof distinguishes the tested working tree from the code commit:
+  pending ledger rows were uncommitted; the four owned source/test blobs match
+  exactly. No full fast check, release, attendance or milestone closure claim.
+  All 46 retained files, including failed/environment-unavailable runs,
+  baselines and superseded review, are rehashed in `final-evidence-v2.sha256`,
+  SHA-256 `b9876ffc5a98a1b8863057a4f4c860de5ea6924e4a0be88fb661477e43899ad7`.
+  Close one added T10 subtask. T01–T19 originals remain 78 / 95 / 6;
+  added subtasks are 270 / 18. T10 is original 6 / 4, added 19 / 2.
+
+- Running separate source work: the actual OS-pipe proof writer owns only its
+  fixture paths in `/Users/spuri/.codex/worktrees/m7-chat-pipe-proof/loopex`,
+  base `282c33f2`. Root owns integration and the output repair above. The writer
+  has not launched a VM; root releases its exclusive slot only after this unit's
+  verification/bookkeeping. Pending original fragmented-pipe/kernel-stall proof
+  remains open. Progress integration is a separate pending added row.
+  Source-backed progress audit: `/private/tmp/loopex-m7-chat-progress-audit.md`,
+  SHA-256 `44aba8643a5ccfae0766061ff3d50fa7d88e7795213b1b4d89d9b8302dda2fe3`.
+  Runtime's existing session-labelled sink must reach the driver without a
+  blocked-host forwarding mailbox; both progress channels share the bounded
+  writer. Queue admission does not prove delivery or justify suppressing the
+  durable answer. Drop accounting must stabilize before diagnostics close.
+  No progress implementation or new public/persistent decision is claimed.
+  Exact alias-capable ADR 0050 candidate `108dbf3468c925c69696f05fd73848380b6787ef`
+  remains Proposed and awaits maintainer acceptance; dependent implementation
+  remains unstarted.
+
+
 - Completed-writer cleanup: both temporary writer checkouts are removed after
   exact source/evidence verification and root integration. Verified incremental
   Git bundles retain their complete owned commit chains:
@@ -11188,6 +11250,11 @@ the still-open real-provider, live protocol, persistent-fault or closure lanes.
 - [x] Test tracing isolation, redaction, stalled stderr and ask’s JSON output separation.
 
 ### Added implementation subtasks
+
+- [x] Preserve the writer's already-running control cutoff during unknown-admission shutdown and pass the captured host cutoff into final drain; prove deadline changes, delivery clearing, lost-writer handling and actor joins without changing public records or product bounds.
+- [ ] Prove actual OS-pipe fragmentation, question responses, wait backpressure, EOF and kernel stdout stalls through Chat.run with exact process cleanup; existing PTY and simulated byte-device proofs cover only their own lanes.
+- [ ] Consume admitted transient provider progress through the existing attachment and bounded writer, including escaped rendering and reported drop counts, without inventing new pipe control fields.
+
 
 - [x] Prove actual pseudo-terminal steer, follow-up, model-question identity/answer or decline and interrupt paths with real runtime/control observations and process/OS-group cleanup, using the existing Python stdlib tooling and product bounds; no paid-provider, attended or built-product claim.
 
