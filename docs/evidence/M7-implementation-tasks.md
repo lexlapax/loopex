@@ -325,6 +325,39 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: remove configuration-less prompt/request/refusal journal writers and
+  readers from the serial reducer. Ordinary prompts write `prompt_admitted_v3`,
+  ordinary and resource requests write their configuration-bound v2 kinds, and
+  refusals retain their current closed failure object. No missing run capture
+  substitutes a system ceiling, instruction source, history admission or
+  terminal failure. Initial pure state remains available for genesis replay;
+  new prompt/configure admission and model/history preflight require a capture.
+  Superseded prompt, request, resource-request and refusal kinds fail closed.
+  Current refusal arithmetic and complete descriptor-count proofs remain.
+
+  Both supported pairs pass 404 focused cases with two long-bound cases
+  excluded: 47.9 current / 46.5 floor measured runner seconds. The twelve-file
+  selection covers ordinary effects, exact record ceilings and optional-intake
+  order, configured admission/update, snapshots, automatic/standalone
+  maintenance, owner loss, uncertain commits and pure current resource replay.
+  Current histories replay before their retagged superseded-kind mutants refuse.
+  No paid lane, excluded long-bound proof or full integration pass is claimed.
+  Two complete outputs and three immutable source copies are retained in
+  `/private/tmp/loopex-m7-current-journal-proof-inventory.tsv`, SHA-256
+  `058c455cf766fc480ce72cb2552f342042e7219d7fbe19334a0dc630fb13a2c4`.
+  Handles `44400` and `26394` are terminal and collected.
+  Formatting, warning-free compilation, documentation, status, dependency
+  direction, whitespace and the task reporter pass in 19.0 measured seconds.
+  Complete output is `/private/tmp/loopex-m7-current-journal-metadata-v1.log`,
+  SHA-256 `799ac9277dbb1a039ae3793878a6611afe1533a354d23a3c812f662f948da2f3`; handle `86111` is terminal and collected.
+
+  Close the existing added T03 fallback-removal row and one bounded added T05
+  journal-removal row. T01–T19 originals stay 70 done / 103 todo / 6 retired;
+  added work is 249 done / 11 todo. Including T00, originals stay 70 / 109 / 7
+  and added work is 253 / 12. Edge/transport fixtures, remaining superseded
+  contracts, protocol /3 and /4 and the next full exact-candidate check remain
+  open. No maintainer decision is pending.
+
 - Done: remove Core's compiled instruction compatibility text and public
   `Instructions.legacy/0`, the configuration-less request builder and its
   duplicate source/message/sampling helpers. The coordinator uses the current
@@ -9903,7 +9936,7 @@ or check was relaxed.
 
 - [x] Prove through live v3 owners and replay that exact host/role instruction sections cannot override a denying policy or enable unselected write/task calls; retain a successful admitted read as a positive control. Actual helper-adapter authority and nesting proof remain open.
 
-- [ ] Retire the v2-only session instruction fallback after current-format genesis migration, while retaining the reference host's authored default capture.
+- [x] Retire the v2-only session instruction fallback after current-format genesis migration, while retaining the reference host's authored default capture.
 
 ## T04 — Implement configuration, genesis and provider routing
 
@@ -10000,6 +10033,7 @@ or check was relaxed.
 - [x] Migrate context-admission fixtures to valid captured current configuration, revision-4 receipts and refusal-v2; preserve first-failure order, exact fixed-point bytes, no optional work on required refusal, owner-loss/prepared abandonment, inherited budgets and replay-tampering baselines on both toolchains. Initial system overflow refuses at current creation before Control or Store rather than creating an invalid legacy session.
 - [x] Remove v2 genesis resolution/normalization and recovery admission, require current version-3 creation provenance in both Stores, and migrate pure genesis/resource/query fixtures while preserving exact byte ceilings, captured cleanup, no-default replay, command identity, immutable read cuts and physical Store conformance on both toolchains. Superseded genesis and provenance refuse; configuration-less request readers remain separate open work.
 - [x] Remove Core compiled legacy instructions and the separate configuration-less request builder, migrate every remaining instruction caller to explicit captures, and prove captured-only request/reservation/tool selection plus the host-owned literal default across Core, composition, provider and CLI on both toolchains. Superseded journal readers/writers remain separate open work.
+- [x] Remove configuration-less prompt/request/refusal writers and readers; require captured run configuration before admission and preflight, preserve current refusal arithmetic, and prove current replay, superseded-kind refusal, missing-capture refusal, snapshots, maintenance and owner uncertainty on both supported toolchains. Edge/transport fixtures and full integration remain separate work.
 - [ ] Migrate remaining implicit Core/edge/transport test hosts to captured current creation, replace their superseded record assertions, remove old configuration-less readers/writers, and prove current replay, command identity, uncertainty, authority and cleanup without a Core fallback. Run the full check once on the resulting clean committed candidate. The headless/loop and context-admission fixture phases are complete; superseded request/admission decoders and edge/transport joins remain.
 
 ## T06 — Build the first complete chat workflow

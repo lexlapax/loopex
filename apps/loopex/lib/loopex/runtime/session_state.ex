@@ -3625,7 +3625,7 @@ defmodule Loopex.Runtime.SessionState do
   ## Technical depth
 
   The immutable projection references captured committed settings rather than
-  current runtime defaults. Nil identifies legacy or unknown runs explicitly.
+  current runtime defaults. Nil identifies an unknown run.
   """
   @spec run_configuration(t(), binary() | nil) :: map() | nil
   def run_configuration(%__MODULE__{} = state, run_id),
@@ -3907,14 +3907,18 @@ defmodule Loopex.Runtime.SessionState do
 
   def preflight_model_request(%__MODULE__{} = state, run_id, request, options)
       when is_binary(run_id) and is_map(request) and is_list(options) do
-    work = Map.get(state.pending_work, run_id, %{turn_number: 1})
-    turn_number = next_turn_number(work)
-    record = model_request_record(state, run_id, request, options, turn_number)
+    with configuration when is_map(configuration) <- run_configuration(state, run_id) do
+      work = Map.get(state.pending_work, run_id, %{turn_number: 1})
+      turn_number = next_turn_number(work)
+      record = model_request_record(state, run_id, request, options, turn_number)
 
-    case admit_context_candidate(record, state) do
-      {:ok, fixed} -> {:ok, fixed}
-      {:refused, refusal} -> context_refusal_result(state, record, refusal, work, turn_number)
-      {:error, reason} -> {:error, reason}
+      case admit_context_candidate(record, state) do
+        {:ok, fixed} -> {:ok, fixed}
+        {:refused, refusal} -> context_refusal_result(state, record, refusal, work, turn_number)
+        {:error, reason} -> {:error, reason}
+      end
+    else
+      _ -> {:error, :invalid_session_configuration}
     end
   end
 
@@ -3979,8 +3983,8 @@ defmodule Loopex.Runtime.SessionState do
   defp model_request_record(state, run_id, request, options, turn_number) do
     kind =
       if is_nil(Map.get(state.run_resources, run_id)),
-        do: "model_request_committed",
-        else: "model_request_committed_resources_v1"
+        do: "model_request_committed_v2",
+        else: "model_request_committed_resources_v2"
 
     record = %{
       "run_id" => run_id,
@@ -3990,32 +3994,16 @@ defmodule Loopex.Runtime.SessionState do
       "request" => encode_plain(request),
       "applied_steer" => Keyword.get(options, :applied_steer),
       "context_receipt" => Keyword.get(options, :context_receipt),
+      "configuration_version" => run_configuration(state, run_id)["configuration_version"],
       kind: kind
     }
 
     # Concept: excerpt provenance is private staging data, not provider context.
     # Technical depth: ADR 0042 fixes the receipt at 17 or 18 outer keys. The
     # revisioned staging member is included in complete-record admission instead.
-    record =
-      case Keyword.get(options, :lineage_projection) do
-        nil -> record
-        projection -> Map.put(record, "lineage_projection", projection)
-      end
-
-    case run_configuration(state, run_id) do
-      nil ->
-        record
-
-      configuration ->
-        record
-        |> Map.put(
-          :kind,
-          if(kind == "model_request_committed",
-            do: "model_request_committed_v2",
-            else: "model_request_committed_resources_v2"
-          )
-        )
-        |> Map.put("configuration_version", configuration["configuration_version"])
+    case Keyword.get(options, :lineage_projection) do
+      nil -> record
+      projection -> Map.put(record, "lineage_projection", projection)
     end
   end
 
@@ -4038,7 +4026,8 @@ defmodule Loopex.Runtime.SessionState do
          %{"context_receipt" => receipt} = record,
          configuration,
          reserve
-       ) do
+       )
+       when is_map(configuration) do
     observations = %{
       system_class_tokens: get_in(receipt, ["totals", "by_provenance", "system", "token_cost"]),
       provider_estimated_tokens: Map.get(receipt, "provider_estimated_tokens"),
@@ -4046,17 +4035,9 @@ defmodule Loopex.Runtime.SessionState do
       context_record_byte_ceiling: Store.max_item_bytes(),
       context_record_depth_limit: Store.max_item_depth(),
       context_record_cardinality_limit: Store.max_item_cardinality(),
-      reserve_thinking_exchange: reserve
+      reserve_thinking_exchange: reserve,
+      system_class_token_ceiling: configuration["system_class_tokens"]
     }
-
-    observations =
-      case configuration do
-        nil ->
-          observations
-
-        configuration ->
-          Map.put(observations, :system_class_token_ceiling, configuration["system_class_tokens"])
-      end
 
     # Concept: only a structurally inadmissible candidate skips the fixed point,
     # and it skips it to be named, not to be waved through.
@@ -4078,6 +4059,9 @@ defmodule Loopex.Runtime.SessionState do
       end
     end
   end
+
+  defp preflight_context_candidate(_record, _configuration, _reserve),
+    do: {:error, :invalid_session_configuration}
 
   # Concept: only a new ordinary exchange reserves continuation capacity.
   # Technical depth: an open exchange's immutable prefix uses its hard ceilings.
@@ -4114,11 +4098,10 @@ defmodule Loopex.Runtime.SessionState do
   # history length.
   defp context_refusal_result(state, record, refusal, work, turn_number) do
     receipt = Map.fetch!(record, "context_receipt")
-    configured? = not is_nil(record["configuration_version"])
     frozen? = not is_nil(frozen_context(state, work.run_id))
 
     with {:ok, counts} <- context_descriptor_counts(record),
-         true <- counts.project + counts.resources == 0 or (configured? and frozen?) do
+         true <- counts.project + counts.resources == 0 or frozen? do
       compact =
         compact_refusal(receipt, refusal, work, turn_number, counts)
 
@@ -4163,14 +4146,10 @@ defmodule Loopex.Runtime.SessionState do
 
   # Concept: A refusal describes every class in the measured candidate.
   #
-  # Technical depth: ADR 0017 gives the compact refusal exactly the system,
-  # session, steer, and tool counts, and makes their sum the descriptor count of
-  # the sequence whose bytes produced `provider_estimated_tokens` and
-  # `ordered_descriptor_digest`. There is no count for a project descriptor, so a
-  # v1 candidate carrying optional descriptors cannot use that record. Configured
-  # v2 candidates retain their frozen optional prefix and add the approved pair
-  # of project/resource counts. The live constructor owns the descriptor
-  # preimage and proves the complete partition before retaining compact counts.
+  # Technical depth: required counts partition system, session, steer and tools.
+  # A frozen optional prefix adds the approved project/resource counts. The live
+  # constructor owns the descriptor preimage and proves the complete partition
+  # before retaining the current refusal and its ordered digest.
   defp compact_refusal(receipt, refusal, work, turn_number, counts) do
     %{
       "run_id" => Map.fetch!(work, :run_id),
@@ -4191,11 +4170,9 @@ defmodule Loopex.Runtime.SessionState do
       "ordered_descriptor_digest" => Map.fetch!(receipt, "ordered_descriptor_digest"),
       "observed" => Map.fetch!(refusal, "observed"),
       "limit" => Map.fetch!(refusal, "limit"),
-      kind: "context_admission_refused_v1"
+      kind: "context_admission_refused_v2"
     }
   end
-
-  defp configured_refusal(compact, nil, _measurement), do: compact
 
   defp configured_refusal(compact, version, measurement) do
     failure =
@@ -5505,6 +5482,10 @@ defmodule Loopex.Runtime.SessionState do
   # Duplicate lookup has already happened; replay rederives the candidate from
   # captured facts, never from a catalog or a new runtime default. Owner history
   # preflight must precede supplying a prepared candidate at this pure boundary.
+  defp propose_new(%{configuration: nil}, %{type: type}, _digest)
+       when type in [:configure, :prompt],
+       do: {:error, :invalid_session_configuration}
+
   defp propose_new(state, %{type: :configure} = command, digest) do
     candidate = command.resolved_bounds[:configuration_candidate]
 
@@ -5512,9 +5493,6 @@ defmodule Loopex.Runtime.SessionState do
       cond do
         not configuration_settled?(state) ->
           "rejected_configuration_not_settled"
-
-        is_nil(state.configuration) ->
-          "rejected_legacy_configuration_unresolved"
 
         command.resolved_bounds[:configuration_owner_settled] == false ->
           "rejected_configuration_owner_busy"
@@ -5576,19 +5554,9 @@ defmodule Loopex.Runtime.SessionState do
       "token_budget" => command.resolved_bounds.token_budget,
       "deadline_ms" => command.resolved_bounds.deadline_ms,
       "context_token_budget" => Map.fetch!(command.resolved_bounds, :context_token_budget),
-      kind: "prompt_admitted_v2"
+      "configuration_version" => configuration_version(state),
+      kind: "prompt_admitted_v3"
     }
-
-    record =
-      case state.configuration do
-        nil ->
-          record
-
-        configuration ->
-          record
-          |> Map.put(:kind, "prompt_admitted_v3")
-          |> Map.put("configuration_version", configuration["configuration_version"])
-      end
 
     events = prompt_events(state.session_id, command.command_id, run_id, command.content)
 
@@ -6104,7 +6072,6 @@ defmodule Loopex.Runtime.SessionState do
        when kind in [
               "command_admitted",
               "model_question_abort_admitted_v2",
-              "prompt_admitted_v2",
               "prompt_admitted_v3",
               "model_question_response_admitted_v2",
               "session_configuration_admitted_v1",
@@ -6140,12 +6107,9 @@ defmodule Loopex.Runtime.SessionState do
          }
        )
        when kind in [
-              "context_admission_refused_v1",
               "context_admission_refused_v2",
               "deadline_staging_failed_v1",
-              "model_request_committed",
               "model_request_committed_v2",
-              "model_request_committed_resources_v1",
               "model_request_committed_resources_v2",
               "model_attempt_opened_v1",
               "model_attempt_settled_v3",
@@ -6267,11 +6231,9 @@ defmodule Loopex.Runtime.SessionState do
 
   # Concept: an accepted prompt must carry the ceiling its run committed.
   #
-  # Technical depth: ADR 0017 gives the accepted prompt its own record kind, so
-  # a history written before the context budget existed fails closed instead of
-  # replaying as though the value were merely absent and then being handed
-  # whatever the current process now defaults to. Every other admission keeps
-  # the legacy kind, so only the accepted-prompt spelling is refused there.
+  # Technical depth: accepted prompts use their current configuration-bound kind.
+  # Other commands and rejected prompts use the generic admission kind. It never
+  # admits an accepted prompt without its retained settings.
   defp admissible_command_kind?("command_admitted", record),
     do: not (record["command_type"] == "prompt" and record["admission"] == "accepted")
 
@@ -6297,9 +6259,6 @@ defmodule Loopex.Runtime.SessionState do
 
   defp admissible_command_kind?("compact_abort_admitted_v1", record),
     do: record["command_type"] == "abort" and record["admission"] == "accepted"
-
-  defp admissible_command_kind?("prompt_admitted_v2", record),
-    do: record["command_type"] == "prompt" and record["admission"] == "accepted"
 
   defp admissible_command_kind?("prompt_admitted_v3", record),
     do:
@@ -6817,13 +6776,6 @@ defmodule Loopex.Runtime.SessionState do
 
   defp configuration_refusal(state, "rejected_configuration_not_settled") do
     if configuration_settled?(state), do: :error, else: {:ok, :configuration_not_settled}
-  end
-
-  defp configuration_refusal(
-         %{configuration: nil} = state,
-         "rejected_legacy_configuration_unresolved"
-       ) do
-    if configuration_settled?(state), do: {:ok, :legacy_configuration_unresolved}, else: :error
   end
 
   defp configuration_refusal(
@@ -7923,10 +7875,9 @@ defmodule Loopex.Runtime.SessionState do
            "staged_request_digest" => staged_request_digest,
            "request" => request,
            "applied_steer" => applied_steer,
-           kind: kind
+           kind: "model_request_committed_v2"
          } = record
-       )
-       when kind in ["model_request_committed", "model_request_committed_v2"] do
+       ) do
     with true <- is_nil(state.active_maintenance),
          true <- preparation_ready?(state, run_id),
          true <- is_nil(Map.get(state.run_resources, run_id)),
@@ -7981,22 +7932,14 @@ defmodule Loopex.Runtime.SessionState do
            "staged_request_digest" => staged_request_digest,
            "request" => request,
            "applied_steer" => applied_steer,
-           kind: kind
+           kind: "model_request_committed_resources_v2"
          } = record
-       )
-       when kind in [
-              "model_request_committed_resources_v1",
-              "model_request_committed_resources_v2"
-            ] do
+       ) do
     with true <- is_nil(state.active_maintenance),
          true <- preparation_ready?(state, run_id),
          true <- not is_nil(Map.get(state.run_resources, run_id)),
          true <-
-           map_size(record) ==
-             if(kind == "model_request_committed_resources_v1",
-               do: 8,
-               else: if(Map.has_key?(record, "lineage_projection"), do: 10, else: 9)
-             ),
+           map_size(record) == if(Map.has_key?(record, "lineage_projection"), do: 10, else: 9),
          {:ok, request} <- decode_request(request),
          %{stage: stage} = work when stage in ["model_pending", "turn_settled"] <-
            Map.get(state.pending_work, run_id),
@@ -8340,8 +8283,7 @@ defmodule Loopex.Runtime.SessionState do
   # rows is legitimate and carries the marker into the next fetch. Reaching the
   # durable head with the marker still pending, or observing any intervening,
   # duplicated, or mismatched row, is invalid incomplete history.
-  defp apply_internal_record(state, %{kind: kind} = refusal)
-       when kind in ["context_admission_refused_v1", "context_admission_refused_v2"] do
+  defp apply_internal_record(state, %{kind: "context_admission_refused_v2"} = refusal) do
     with :ok <- validate_context_refusal(state, refusal) do
       {:ok,
        %{
@@ -9778,9 +9720,6 @@ defmodule Loopex.Runtime.SessionState do
         {:error, :invalid_context_token_budget_record}
     end
   end
-
-  defp admitted_run_configuration(%{configuration: nil}, %{kind: "prompt_admitted_v2"}, _budget),
-    do: {:ok, nil}
 
   defp admitted_run_configuration(
          %{configuration: configuration},
@@ -11560,9 +11499,7 @@ defmodule Loopex.Runtime.SessionState do
   defp validate_request_configuration(state, record, request, run_id) do
     case run_configuration(state, run_id) do
       nil ->
-        if record.kind in ["model_request_committed", "model_request_committed_resources_v1"],
-          do: :ok,
-          else: {:error, :invalid_request_configuration}
+        {:error, :invalid_request_configuration}
 
       configuration ->
         with true <-
@@ -12051,7 +11988,7 @@ defmodule Loopex.Runtime.SessionState do
 
     with {:ok, entries} <- request_session_entries(state, run_id) do
       {:ok,
-       [context_source(instruction_source(state, receipt, run_id), "system")] ++
+       [context_source(instruction_source(state, run_id), "system")] ++
          expected_project_sources(Map.get(receipt, "project_resource")) ++
          Enum.map(entries, fn {reference, _message} -> context_source(reference, "session") end) ++
          steer}
@@ -12091,7 +12028,7 @@ defmodule Loopex.Runtime.SessionState do
     else
       with {:ok, entries} <- request_session_entries(state, run_id) do
         {:ok,
-         [context_source(instruction_source(state, receipt, run_id), "system")] ++
+         [context_source(instruction_source(state, run_id), "system")] ++
            expected_project_sources(receipt["project_resource"]) ++
            resource_sources ++
            Enum.map(entries, fn {reference, _message} -> context_source(reference, "session") end) ++
@@ -12100,15 +12037,8 @@ defmodule Loopex.Runtime.SessionState do
     end
   end
 
-  defp instruction_source(state, receipt, run_id) do
-    case {receipt["provider_revision"], run_configuration(state, run_id)} do
-      {4, configuration} when is_map(configuration) ->
-        SessionConfiguration.instruction_source(configuration)
-
-      _legacy ->
-        %{"kind" => "system", "identity" => "loopex.system.v1"}
-    end
-  end
+  defp instruction_source(state, run_id),
+    do: SessionConfiguration.instruction_source(run_configuration(state, run_id))
 
   defp expected_project_sources(%{
          "disposition" => "staged",
@@ -12317,15 +12247,15 @@ defmodule Loopex.Runtime.SessionState do
   ## Technical depth
 
   Uses complete lineage through the run and excludes the active run from the
-  terminal-history capability requirement. Legacy runs retain their historical
-  admission path. Configured runs use only captured mapping facts and perform
-  no catalog lookup, compaction or dispatch.
+  terminal-history capability requirement. Runs use only captured mapping facts
+  and perform no catalog lookup, compaction or dispatch. A missing capture is
+  invalid configuration.
   """
   @spec preflight_run_history(t(), binary()) :: :ok | {:error, atom()}
   def preflight_run_history(%__MODULE__{} = state, run_id) do
     case run_configuration(state, run_id) do
       nil ->
-        :ok
+        {:error, :invalid_session_configuration}
 
       configuration ->
         with :ok <-
@@ -12531,27 +12461,13 @@ defmodule Loopex.Runtime.SessionState do
     }
   end
 
-  # Concept: the four fields an operator can act on, plus the one fact that
-  # makes the ending final.
-  #
-  # Technical depth: ADR 0017 fixes this projection at exactly five members and
-  # makes it exclusive to a failed context terminal. It copies the refusal's own
-  # committed observations rather than deriving new ones, so the private
-  # terminal, the public event, and the retained receipt cannot disagree.
   defp deadline_failure,
     do: %{"category" => "deadline_preflight_failed", "retryable" => false}
 
+  # Concept: terminal failures retain the same observations as their refusal.
+  # Technical depth: the current closed failure object is copied unchanged into
+  # private terminal and public event, including its measurement scope.
   defp context_failure(%{"failure" => failure, kind: "context_admission_refused_v2"}), do: failure
-
-  defp context_failure(refusal) do
-    %{
-      "category" => Map.fetch!(refusal, "category"),
-      "retryable" => false,
-      "dimension" => Map.fetch!(refusal, "dimension"),
-      "observed" => Map.fetch!(refusal, "observed"),
-      "limit" => Map.fetch!(refusal, "limit")
-    }
-  end
 
   # Concept: a summary refusal is proved by the preceding canonical settlement.
   # Technical depth: its usage already settled once. The v2 refusal and episode
@@ -12812,8 +12728,7 @@ defmodule Loopex.Runtime.SessionState do
     end
   end
 
-  defp validate_context_refusal(state, refusal),
-    do: validate_context_refusal_base(state, refusal, 1_000, Bounds.estimator())
+  defp validate_context_refusal(_state, _refusal), do: {:error, :invalid_context_refusal}
 
   defp validate_ordinary_v2_relations(state, refusal, configuration, failure) do
     common =
@@ -12864,7 +12779,7 @@ defmodule Loopex.Runtime.SessionState do
 
   # Concept: Frozen optional inputs stay visible in a compact measured refusal.
   # Technical depth: The pair is present together only when at least one optional
-  # descriptor exists. Required-only and unavailable legacy v2 shapes stay exact.
+  # descriptor exists. Required-only and unavailable current shapes stay exact.
   # The Store protects committed observations; replay validates their bounds and
   # relations without inventing a missing descriptor preimage.
   defp valid_v2_descriptor_counts?(refusal) do

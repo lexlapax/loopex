@@ -666,7 +666,7 @@ of metadata; a run selects at most four skills with eight supporting files each.
 These ceilings do not raise the context or Store budgets.
 
 Resource commands are retained as `resource_command_v1`; admitted sessions
-stage through `model_request_committed_resources_v1`. The reducer reconstructs
+stage through configuration-bound `model_request_committed_resources_v2`. The reducer reconstructs
 exact staged request bytes without any snapshot. When a fresh process recovers
 a session, the command prepares it under a temporary composition without
 activating work, reads its admitted manifest digest, abandons the preparation,

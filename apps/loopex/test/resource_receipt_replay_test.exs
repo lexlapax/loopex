@@ -54,8 +54,10 @@ defmodule Loopex.ResourceReceiptReplayTest do
       )
 
     {_state, records, events} = append_proposal(fixture, proposal)
+    assert {:ok, _} = SessionState.recover(fixture.session_id, records, events)
 
     mutations = [
+      fn payload -> Map.put(payload, :kind, "model_request_committed_resources_v1") end,
       fn payload -> put_in(payload, ["context_receipt", "provider_revision"], 2) end,
       fn payload -> put_in(payload, ["context_receipt", "provider_revision"], 3) end,
       fn payload ->

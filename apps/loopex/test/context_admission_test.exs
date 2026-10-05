@@ -2049,6 +2049,10 @@ defmodule Loopex.ContextAdmissionTest do
     terminal = Enum.at(base_records, terminal_index)
 
     malformed = [
+      {:superseded_refusal,
+       List.update_at(base_records, refusal_index, fn record ->
+         put_in(record, [:payload, :kind], "context_admission_refused_v1")
+       end), base_events},
       {:missing_tail, List.delete_at(base_records, terminal_index), base_events},
       {:duplicate_first, List.insert_at(base_records, terminal_index, refusal), base_events},
       {:reordered_pair,
@@ -2229,6 +2233,42 @@ defmodule Loopex.ContextAdmissionTest do
 
     assert {:error, _reason} =
              SessionState.recover(session_id, unversioned_records, complete_events)
+
+    complete_records = records(fixture, session_id)
+    assert {:ok, recovered} = SessionState.recover(session_id, complete_records, complete_events)
+
+    for {current, superseded} <- [
+          {"prompt_admitted_v3", "prompt_admitted_v2"},
+          {"model_request_committed_v2", "model_request_committed"}
+        ] do
+      assert Enum.any?(complete_records, &kind?(&1, current))
+
+      superseded_records =
+        Enum.map(complete_records, fn record ->
+          if kind?(record, current),
+            do: put_in(record, [:payload, :kind], superseded),
+            else: record
+        end)
+
+      assert {:error, _} = SessionState.recover(session_id, superseded_records, complete_events)
+    end
+
+    without_capture = %{recovered | configuration: nil, run_configurations: %{}}
+
+    assert {:error, :invalid_session_configuration} =
+             SessionState.propose(without_capture, %{
+               type: :prompt,
+               command_id: "missing-capture",
+               content: "must refuse before admission"
+             })
+
+    run_id = List.first(recovered.run_order)
+
+    assert {:error, :invalid_session_configuration} =
+             SessionState.preflight_run_history(without_capture, run_id)
+
+    assert {:error, :invalid_session_configuration} =
+             SessionState.preflight_model_request(without_capture, run_id, %{})
   end
 
   test "page-size-one replay survives a crash after the refusal row and applies its terminal once" do
