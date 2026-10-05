@@ -325,6 +325,72 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Done: integrate independent schema canonicalization proof at `5dc222e7`
+  from `9c1869cd59e1f3292ed8485054830e9ea4d4673d`, then its reviewed accessor
+  repair at `03dfb368` from `6227c3a3e1fb8424eab3bfdab9a91c692f31f755`.
+  The independent Node implementation reproduces 21 literal canonical preimages
+  and digests, binds all eleven approved payload schemas and detects 1,307
+  embedded-leaf mutations. Getter/setter properties refuse before evaluation;
+  frozen ordinary data retains identical bytes. This prepares digest verification
+  without changing any served generation or claiming a complete manifest.
+
+  Worker proof inventories are `/private/tmp/loopex-m7-schema-proof-inventory.tsv`,
+  SHA-256 `601fd74d3670e8003e2b6639aa21211020915519bf0cf11ec515935be8fd985f`,
+  and `/private/tmp/loopex-m7-schema-accessor-inventory-v1.tsv`, SHA-256
+  `9cf63b00c79209de6fe77a628ded58c42ec000f52cdc42a051d375d48734a34c`.
+  The explicit before-repair accessor witness remains FAIL. The integrator
+  reviewed both implementations and rehashed all retained entries. Integrated
+  current/floor selections include Node and pass four cases each in 2.8 seconds
+  per pair. The earlier ordinary selection passes three with Node excluded;
+  it is not counted as an independent-client proof. Handle `71309` is terminal
+  and collected. All three complete outputs are retained in
+  `/private/tmp/loopex-m7-schema-proof-postjoin-inventory.tsv`, SHA-256
+  `2ef8a635b7a62c8d4471b521b3811a08f6172ff4aa99005b83fc135f82f99507`.
+
+  Integrated formatting, warning-free compilation, documentation, status,
+  dependency direction, whitespace and task reporting pass in 16.0 seconds.
+  Complete output: `/private/tmp/loopex-m7-schema-proof-integration-metadata-v1.log`,
+  SHA-256 `56cc4c99a99cb8478608bbad9bfbb3c2c38b99072417165444e42cf5a3ee88b4`; handle `72404` is terminal and collected.
+
+  Close one added T05 row. T01–T19 originals remain 70 done / 103 todo / 6 retired.
+  Added subtasks are 254 done / 13 todo after recording the preparation-port
+  decision and blocked bounds codec separately. Including T00, originals stay
+  70 / 109 / 7 and added subtasks are 258 / 14. Complete creation-input grammar,
+  manifests, serving and live independent workflows remain open.
+
+- Prepared, unintegrated: snapshot worker `9c3f160d1519038e4200378aa9384b867dff26a7`
+  joins all ten approved members at the exact bounded cursor, requires captured
+  configuration and removes unseeded snapshot fallback. Both pairs pass 144
+  focused cases with two excluded; 18.8 / 17.9 measured seconds. Its 28-entry
+  immutable inventory is `/private/tmp/loopex-m7-snapshot-projection-proof-inventory.tsv`,
+  SHA-256 `f410123f140ed2804e89fa6d0883226237bad2c0938fb18f896ff0eb7db40b6d`;
+  all entries were rehashed. Both formatters, warning-free compilation and docs
+  pass after eight neutral syntax repairs; failed earlier outputs remain FAIL.
+  Keep this commit in the managed `m7-snapshot-projection` worktree until both
+  transports switch together. Do not expose revision 3 under `/1` or `/2`, and
+  do not count its bounded worker completion as integrated publication proof.
+
+- Blocked write: automatic approval review twice rejected the shared pure
+  prompt/follow-up/compact bounds codec write before creating files, including
+  a retry with the recorded M7/ADR acceptance. It classified the codecs as new
+  public/cross-application behavior requiring exact human approval. Dependent
+  writes stopped; no workaround was attempted. Retained rejection and exact
+  proposed limits: `/private/tmp/loopex-m7-command-bounds-auto-review-rejections.txt`,
+  SHA-256 `9f0fa0cf317917af58ece0636424a660a9c7c4094b5a76ddf3816501d29f7f81`.
+  Present this approval separately after the current ADR 0050 question is answered.
+  The maintainer requests decisions one at a time. Other work continues.
+
+- Running integration check: clean committed candidate
+  `75b7207d9a3c0b1e42330f9e0c238cccc1ca53c5` is undergoing its single current-pair
+  full fast check in `m7-trace-check`; handle `43403`, complete streaming output
+  `/private/tmp/loopex-m7-75b7207d-fast-check.log`. Compilation and gates pass;
+  ReqLLM passes 385 with two excluded. Composition fails three stale fixtures:
+  a former 8,192-default assertion against captured known-model context, and two
+  hosts missing current creation captures. This run remains FAIL even if repairs
+  later pass; remaining application suites are still running. The composition
+  fixture worker owns only those two test files in its new separate worktree.
+  No same-byte full-check retry is authorized or planned.
+
 - Pending decision: [ADR 0050](../adr/0050-host-configuration-preparation.md#concept)
   proposes the separate optional host configuration-preparation port for live
   foreground/daemon configure. The existing prepared facade works for CLI but
@@ -10166,6 +10232,8 @@ or check was relaxed.
 - [x] Migrate daemon socket/physical Store creation fixtures to current captured startup templates; preserve resume without startup defaults, wire/facade identity and lease/cleanup/uncertainty proofs, retain failed telemetry aggregates, correct the SSE fixture to exact dated model identity and prove both full policy-interaction/physical replay workflows on both toolchains. CLI fixtures, private query shapes and full integration remain separate work.
 - [x] Remove superseded prompt/request/resource/refusal query shapes from EffectIntents, require current configuration-version domains, and prove positive current histories before exact retired-kind and invalid-version refusals on both toolchains and after integration. Superseded effect/job/receipt readers remain separate work.
 - [x] Migrate CLI captures and current journal assertions while preserving selected tools, retained resume budgets, exact model identity, structured excerpt/receipt/full-artifact retrieval and physical recovery proofs. Retain failed worker aggregates and corrected complete files; prove the complete focused selection on both toolchains after integration without widening bounds. Full integration remains separate work.
+- [x] Reproduce schema canonical preimages/digests independently in Node, bind all approved embedded payload schemas, reject non-plain/accessor data without executing getters, and prove exact literal/mutation/identity vectors on both supported pairs and after integration. Complete generation manifests, server negotiation and live clients remain separate joins.
+- [ ] Implement and verify the approved prompt/follow-up/compact wire bound codecs and independent Node vectors; preserve exact decimal/safe-integer domains, partial overrides and omission without defaults. Automatic approval review rejected both direct writes; obtain explicit maintainer approval before resuming this bounded implementation.
 - [ ] Migrate remaining implicit Core/edge/transport test hosts to captured current creation, replace their superseded record assertions, remove old configuration-less readers/writers, and prove current replay, command identity, uncertainty, authority and cleanup without a Core fallback. Run the full check once on the resulting clean committed candidate. The headless/loop and context-admission fixture phases are complete; superseded request/admission decoders and edge/transport joins remain.
 
 ## T06 — Build the first complete chat workflow
