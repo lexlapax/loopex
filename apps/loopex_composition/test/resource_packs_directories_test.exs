@@ -1,5 +1,5 @@
 defmodule LoopexComposition.ResourcePacksDirectoriesTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
   alias LoopexComposition.ResourcePacks
 
   defmodule ObservedFiles do
@@ -512,7 +512,7 @@ defmodule LoopexComposition.ResourcePacksDirectoriesTest do
     root: root,
     workspace: workspace
   } do
-    directory = skill(Path.join(root, "retained-local"), "review", "body")
+    directory = skill(Path.join([root, "retained-local", "review"]), "review", "body")
     File.write!(Path.join(directory, "opaque.bin"), <<0, 255, 128>>)
 
     assert {:ok, %{manifest: manifest}} =
