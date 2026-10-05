@@ -25,6 +25,47 @@ physical restore implementation; it does not waive any full-history proof.
 <a id="technical-depth"></a>
 ## Technical depth
 
+### Latest terminal run and next proof
+
+Full current check48ca4ad12d8668aa664abd5d460e090bbe0f8343 is terminal FAIL,
+exit1 in2320.544 seconds; handle55093 is collected, never restart/poll it.
+Ten suites pass, CLI626/635 with6 exclusions. All eleven raw logs are complete
+and independently rehashed with their inventory. Full log SHA-256
+4c4131e4e026119c32350811c56483ec506f5ca17118b0181ad3a8e41deaa7f4;
+completion2ec75ef9edfd230a22e20f579159d9f2018279f3b59b7b9cb1378670679f7fa2;
+inventory77eb1ff2730b006bc71d1ce8cd4a28f394ccdf82e1805bedcd4b2dcd7f1337d1.
+Retained directory is sibling M7/integration-48ca4ad1-v1. Core's six actual
+shutdown reports stay open despite its passing1313 cases.
+
+Root owns the exclusive slot next for the isolated CLI correction15fdc361
+in /private/tmp/loopex-m7-cli-guarded-provider-start, branch
+codex/m7-cli-guarded-provider-start. Format its sole test file, commit/re-pin,
+then prove one cold real provider lifecycle and all13 mixed provider/Ask/resource
+cases with seed406612 under both pairs. Prepared immutable source/runner packet:
+/Users/spuri/projects/lexlapax/loopex-evidence/M7/cli-guarded-provider-15fdc361-v1.
+No proof ran yet. Direct fixture ReqLLM startup exposed default dotenv enabled;
+the correction uses existing serial starter configuration/provenance without
+weakening a production guard or changing any required assertion.
+
+Waiting clean source-only workers: Storedbd4a29e in
+/private/tmp/loopex-m7-store-semantic-audit, v2 packet store-semantic-audit-20261005-v2;
+resource16b904ad in /private/tmp/loopex-m7-resource-retained-decoding,
+runner resource-retained-decoding-runner-20261005-v1;
+causal91784948 in /private/tmp/loopex-m7-private-task-causal-proofs,
+packet private-task-causal-proofs-91784948-v1. Root ledgerguard0b82b006 is
+/private/tmp/loopex-m7-ledger-byte-guard, packet ledger-byte-guard-0b82b006-v1.
+All branch names follow their worktree suffix with codex/m7-; consult git
+worktree list for exact branch identity. No candidate is formatted, compiled,
+tested or integrated. Root grants exactly one VM worker explicitly after CLI.
+Store/root resource corrections are reviewed; causal deadlock/cleanup revision
+still awaits complete source review and focused execution. Current-format
+LegacyImport remains an accepted current workflow, not superseded code.
+
+T01–T19 originals78 done/95 todo/6 retired; added290 done/22 todo after recording
+three T15 audit prerequisites and one T16 CLI repair. No completion checkbox
+changes. ADR0052 exact pair question remains unanswered; later queued decisions
+stay separate. The goal is active.
+
 ### Current resumed work
 
 Primary `m7` includes the proved foreground repair and Store byte decoder.

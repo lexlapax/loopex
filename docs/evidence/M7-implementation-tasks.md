@@ -29,6 +29,58 @@ grouped by T00–T19. Empty added sections mean no added subtasks are recorded;
 they do not mean the original task is complete. This follows the maintainer's
 2026-10-01 update to the active implementation goal.
 
+## Combined current-pair failure and isolated audit candidates — 2026-10-05
+
+Exact `48ca4ad12d8668aa664abd5d460e090bbe0f8343` full fast check ran once,
+exit 1 in 2320.544 seconds. Ten suites passed: Composition588/3 excluded,
+Core1313/10, provider385/2, executor292/2, AppServer102/5, daemon462/9,
+protocol141/14, reference client21/2, Store100/0 and telemetry8/0. CLI passed
+626/635 with6 exclusions. All nine failures are in the seven Ask integration
+cases and two resource admission startup cases. Explicit results include
+`req_llm_dotenv_enabled`; the provider-runtime fixture directly starts ReqLLM
+before composition records guarded configuration/provenance. Seed406612 is
+retained. A source-only one-file correction15fdc3613938f6cdd1a391500a783ae1a6e123c1
+uses the existing serial starter, retaining all real lifecycle, signal,
+diagnostic and cleanup assertions. Its focused cold-start and mixed-file proof
+on both pairs is pending; ordinary CLI proof awaits the next combined candidate.
+
+Complete output is immutable under
+`/Users/spuri/projects/lexlapax/loopex-evidence/M7/integration-48ca4ad1-v1`.
+current-fast-check.log SHA-256
+`4c4131e4e026119c32350811c56483ec506f5ca17118b0181ad3a8e41deaa7f4`;
+completion.json SHA-256
+`2ec75ef9edfd230a22e20f579159d9f2018279f3b59b7b9cb1378670679f7fa2`;
+application-log-inventory.json SHA-256
+`77eb1ff2730b006bc71d1ce8cd4a28f394ccdf82e1805bedcd4b2dcd7f1337d1`.
+Root independently rehashed all eleven complete raw application logs, checked
+actual populations and final exact clean HEAD, with no capture errors. Core's
+six actual shutdown_error reports remain causally unproved; its final raw log
+SHA-256 is `48c08b27cf424525582ccdb23a2d49ec3556ec1f40655586da5c905fe8f6e4da`.
+The original and new full failures remain FAIL, with no unchanged-source retry.
+
+Source-only isolated candidates are Store semantic IO auditdbd4a29e0f8f60320bdc45fe95dfd8c7834c21e3,
+resource retained byte decoders16b904adae7b26a034870798472634f91e920079,
+private startup causal fixture91784948aeca9e1f837a4882e9757893e5b3a835,
+and ledger predecode guard0b82b00688234fcb6ea848a6bb202e9e6158be9a.
+All are committed in separate worktrees. No VM, formatting, compilation or test
+ran for them; none is integrated or PASS. Root reviewed the Store/resource
+minor corrections and rehashed Store's1097 source blobs plus six artifacts.
+Root found and requested correction of the causal witness's pre-spawn deadlock
+and missing failure-path joins; revised source remains unproved. The Store
+unknown fixture has actual Local Store but scripted model/executor, so it
+proves no real OS-effect cleanup. Derived resource ceilings are conservative
+current-grammar upper bounds, not an exact-last-byte claim. Current LegacyImport
+producer/marker workflow remains required; the before1.0 override does not
+retire a current facility merely because its name contains Legacy.
+
+Root retains the exclusive verification slot for the CLI correction's focused
+both-pair proof, then explicitly grants one worker at a time. Full handle55093
+is terminal and collected; do not poll/restart it. ADR0052's exact-pair acceptance
+question remains unanswered and dependent protocol work paused. Original
+T01–T19 counts remain78 done/95 todo/6 retired. Four newly recorded open subtasks
+make added counts290 done/22 todo. Required full closure/provider/attended and
+whole physical restore proofs remain open.
+
 ## Combined candidate documentation failure — 2026-10-05
 
 The full current fast check of exact
@@ -12772,6 +12824,10 @@ open.
 
 ### Added implementation subtasks
 
+- [ ] Audit every declared current Store history through the existing owned IO worker, enforcing descriptor/path/hash identity, complete transaction replay and recovery of every session; prove actual retained unknown truth, faults and cleanup on both pairs without claiming scripted executors prove OS effects.
+- [ ] Decode retained current resource manifest/provenance bytes under derived physical ceilings before parsing, preserve exact normalization/content/Git identities and deterministic bytes, and prove actual current writers, hostile bytes and real decoder-entry controls on both pairs. Whole catalog capture/reference/backup orchestration remains separate.
+- [ ] Refuse compressed/wrong-root retained Local ledger records before actual term decoding, enforce captured byte caps and full consumption, and prove all current record readers plus positive real-BIF trace control on both pairs. Whole owned offline ledger capture/audit remains separate.
+
 - [x] Extract and prove bounded internal Store captured-byte decoding through the existing current decoder, preserving actual whole-log caps, complete/torn/corrupt evidence, cold fixed-schema loading and no IO/actors/repair; verify actual boundary/capacity and complete Store suite on both supported pairs before full backup audit integration.
 
 - [x] Enforce the current Store writer's deterministic uncompressed whole-payload ETF format before offline restore auditing reuses its decoder. Reproduce checksummed compressed over-ceiling, trailing-byte and reversed-map acceptance, refuse all three without changing written bytes or repairing input, and prove complete Store conformance on both supported toolchains.
@@ -12833,6 +12889,7 @@ open.
 - [x] Reproduce and repair quiesce cancellation closure when a fence startup notice has not arrived; accept only Control's DOWN/absence-backed acknowledgement for an unannounced worker, refuse a foreign binding without falsely acknowledging absence, retain independent exact local DOWN for announced workers, prove expired/suspended-worker cases before and after the fix, and verify the complete quiesce file plus the unchanged real production fence cutoff on both supported pairs. Keep combined full integration and the original untraced failure schedule distinct.
 
 - [ ] Investigate and repair the full 520ff308 integration failure in the sixty-three blocked quiesce fences sharing one cutoff with a settled sibling; retain the failed exact-candidate output, establish the cause through bounded runtime observability and actual process lifetimes, preserve the shared cutoff, sibling progress, fence accounting and cleanup assertions, and verify both supported pairs.
+- [ ] Repair the nine seed406612 CLI failures from the48ca full check by preparing the genuine provider-runtime lifecycle fixture through existing guarded startup; retain the first failure, preserve all startup/signal/resource/diagnostic/cleanup assertions, prove cold-first and mixed real fixtures on both pairs, then verify ordinary CLI in the next combined integration candidate.
 - [ ] Run the combined chat-progress, command-bounds and native alias-preparation integration candidate's full current-pair fast check once from a clean committed checkout; retain exact SHA, complete output, measured duration and digest. Keep required floor closure, live wire joins and observed T16 task-shutdown diagnostics separate.
 - [ ] Resolve the exact 0823aa50 full-check pre-fence runtime_unavailable under untraced combined load; retain failed output, establish its phase/cause and exact process lifetimes, preserve the original gate/fence/reap/cleanup/Store assertions, and verify a clean committed integration candidate without relabeling the failed run.
 
