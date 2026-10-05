@@ -254,6 +254,260 @@ defmodule LoopexComposition.RestoreIOTest do
     assert File.read!(path) == "retained"
   end
 
+  test "manifest includes root hidden empty and prior metadata with exact modes and hashes",
+       context do
+    root = physical_root(context.root)
+    File.chmod!(root, 0o750)
+    File.mkdir!(Path.join(root, "empty"))
+    File.chmod!(Path.join(root, "empty"), 0o1750)
+    File.mkdir_p!(Path.join(root, ".loopex-restore/0001"))
+    File.write!(Path.join(root, ".loopex-restore/0001/intent"), "prior immutable bytes")
+    File.write!(Path.join(root, ".hidden"), "")
+    File.chmod!(Path.join(root, ".hidden"), 0o640)
+    content = :binary.copy(<<1, 2, 3, 4>>, 40_000)
+    File.write!(Path.join(root, "stream"), content)
+    File.chmod!(Path.join(root, "stream"), 0o4750)
+
+    paths = [".", ".hidden", ".loopex-restore", ".loopex-restore/0001",
+             ".loopex-restore/0001/intent", "empty", "stream"]
+    expected = expected_manifest(root, paths)
+    owned = launch({:manifest, root, byte_size(content) + 21}, :list)
+    assert {{:joined, {:ok, bytes}, evidence}, events} = drive(owned)
+    assert bytes == expected
+    assert evidence.opens == 3
+    assert evidence.closes == 3
+    assert Enum.count(issued_kinds(events), &(&1 == :hash_read)) >= 6
+    assert File.read!(Path.join(root, "stream")) == content
+    joined(owned)
+  end
+
+  test "manifest accepts zero total for an empty root and refuses a smaller regular-byte cap",
+       context do
+    root = physical_root(context.root)
+    for cap <- [0, 18_446_744_073_709_551_615] do
+      empty = launch({:manifest, root, cap}, :list)
+      assert {{:joined, {:ok, bytes}, %{opens: 0, closes: 0}}, _} = drive(empty)
+      assert bytes == expected_manifest(root, ["."])
+      joined(empty)
+    end
+    File.write!(Path.join(root, "data"), "12345")
+    bounded = launch({:manifest, root, 5}, :list)
+    assert {{:joined, {:ok, bytes}, %{opens: 1, closes: 1}}, _} = drive(bounded)
+    assert bytes == expected_manifest(root, [".", "data"])
+    joined(bounded)
+    excess = launch({:manifest, root, 4}, :list)
+    assert {{:joined, {:error, :io_error}, %{opens: 0, closes: 0}}, _} = drive(excess)
+    joined(excess)
+  end
+
+  test "manifest preserves distinct UTF-8 filename bytes and sums every regular file",
+       context do
+    root = physical_root(context.root)
+    names = ["λ", "😀", "z", ".hidden"]
+    for name <- names, do: File.write!(Path.join(root, name), "12")
+    owned = launch({:manifest, root, 8}, :list)
+    assert {{:joined, {:ok, bytes}, %{opens: 4, closes: 4}}, _} = drive(owned)
+    assert bytes == expected_manifest(root, ["." | names])
+    joined(owned)
+    excess = launch({:manifest, root, 7}, :list)
+    assert {{:joined, {:error, :io_error}, %{opens: 3, closes: 3}}, _} = drive(excess)
+    joined(excess)
+  end
+
+  test "manifest rejects symlink entries and symlink ancestors without opening data",
+       context do
+    root = physical_root(context.root)
+    File.ln_s!(root, Path.join(root, "alias"))
+    entry = launch({:manifest, root, 0}, :list)
+    assert {{:joined, {:error, :io_error}, %{opens: 0, closes: 0}}, _} = drive(entry)
+    joined(entry)
+    File.rm!(Path.join(root, "alias"))
+    File.mkdir!(Path.join(root, "directory"))
+    File.ln_s!(Path.join(root, "directory"), Path.join(root, "alias"))
+    ancestor = launch({:manifest, Path.join(root, "alias"), 0}, :manifest_stat)
+    assert {{:joined, {:error, :io_error}, %{opens: 0, closes: 0}}, _} = drive(ancestor)
+    joined(ancestor)
+  end
+
+  test "manifest refuses actual FIFOs regular hardlinks and undecodable filename bytes",
+       context do
+    root = physical_root(context.root)
+    path = Path.join(root, "node")
+    assert {_, 0} = System.cmd("mkfifo", [path])
+    special = launch({:manifest, root, 0}, :list)
+    assert {{:joined, {:error, :io_error}, %{opens: 0, closes: 0}}, _} = drive(special)
+    joined(special)
+    File.rm!(path)
+    File.write!(path, "retained")
+    File.ln!(path, Path.join(root, "owner.lock"))
+    linked = launch({:manifest, root, 16}, :list)
+    assert {{:joined, {:error, :io_error}, %{opens: 0, closes: 0}}, _} = drive(linked)
+    joined(linked)
+    File.rm!(Path.join(root, "owner.lock"))
+    File.rm!(path)
+    assert {_, 0} = System.cmd("python3", ["-c",
+      "import os,sys; fd=os.open(os.fsencode(sys.argv[1])+b'/invalid-\\xff',os.O_WRONLY|os.O_CREAT,0o600); os.close(fd)", root])
+    invalid = launch({:manifest, root, 0}, :list)
+    assert {{:joined, {:error, :io_error}, %{opens: 0, closes: 0}}, _} = drive(invalid)
+    joined(invalid)
+  end
+
+  test "manifest refuses same-size namespace substitution against the opened descriptor",
+       context do
+    root = physical_root(context.root)
+    path = Path.join(root, "data")
+    File.write!(path, "original")
+    owned = launch({:manifest, root, 8}, :descriptor_stat)
+    {id, _} = paused_operation(owned, :descriptor_stat)
+    File.rename!(path, Path.join(root, "previous"))
+    File.write!(path, "replaced")
+    send(owned.guardian, {:proceed, owned.reference, id})
+    assert {{:joined, {:error, :io_error}, %{opens: 1, closes: 1}}, _} = drive(owned)
+    joined(owned)
+  end
+
+  test "manifest refuses physical size mode and type changes during hashing", context do
+    root = physical_root(context.root)
+    path = Path.join(root, "data")
+    for change <- [:shorter, :longer, :mode, :symlink] do
+      File.write!(path, "original")
+      File.chmod!(path, 0o600)
+      owned = launch({:manifest, root, 8}, :hash_read)
+      {id, _} = paused_operation(owned, :hash_read)
+      case change do
+        :shorter -> File.write!(path, "short")
+        :longer -> File.write!(path, "original plus")
+        :mode -> File.chmod!(path, 0o640)
+        :symlink ->
+          File.rename!(path, Path.join(root, "previous"))
+          File.ln_s!(Path.join(root, "previous"), path)
+      end
+      send(owned.guardian, {:proceed, owned.reference, id})
+      assert {{:joined, {:error, :io_error}, %{opens: 1, closes: 1}}, _} = drive(owned)
+      joined(owned)
+      File.rm!(path)
+      if change == :symlink, do: File.rm!(Path.join(root, "previous"))
+    end
+  end
+
+  test "manifest detects a changed directory even after its original child was hashed",
+       context do
+    root = physical_root(context.root)
+    File.write!(Path.join(root, "data"), "retained")
+    owned = launch({:manifest, root, 8}, :close)
+    {id, _} = paused_operation(owned, :close)
+    File.write!(Path.join(root, ".new"), "")
+    send(owned.guardian, {:proceed, owned.reference, id})
+    assert {{:joined, {:error, :io_error}, %{opens: 1, closes: 1}}, _} = drive(owned)
+    joined(owned)
+  end
+
+  test "manifest raw open failure joins without inventing a descriptor acknowledgement",
+       context do
+    root = physical_root(context.root)
+    path = Path.join(root, "data")
+    File.write!(path, "retained")
+    owned = launch({:manifest, root, 8}, :open)
+    {id, _} = paused_operation(owned, :open)
+    File.rm!(path)
+    send(owned.guardian, {:proceed, owned.reference, id})
+    assert {{:joined, {:error, :io_error}, %{opens: 0, closes: 0}}, events} = drive(owned)
+    assert {:acknowledged, id, {:open, _}, :error} =
+             Enum.find(events, &match?({:acknowledged, ^id, {:open, _}, :error}, &1))
+    joined(owned)
+  end
+
+  test "manifest caller loss closes its exact opened file without a successful manifest",
+       context do
+    root = physical_root(context.root)
+    File.write!(Path.join(root, "data"), "retained")
+    owned = launch({:manifest, root, 8}, :hash_read)
+    paused_operation(owned, :hash_read)
+    Process.exit(owned.caller, :kill)
+    assert_receive {:DOWN, monitor, :process, caller, :killed}, 1_000
+    assert {monitor, caller} == {owned.caller_monitor, owned.caller}
+    assert_receive {:restore_io, _, _, _,
+                    {:terminal, {:joined, {:error, :caller_lost}, %{opens: 1, closes: 1}}}},
+                   1_000
+    joined(owned, false)
+  end
+
+  test "manifest guardian loss preserves uncertainty and joins the exact linked descriptor owner",
+       context do
+    root = physical_root(context.root)
+    File.write!(Path.join(root, "data"), "retained")
+    owned = launch({:manifest, root, 8}, :hash_read)
+    paused_operation(owned, :hash_read)
+    Process.exit(owned.guardian, :kill)
+    assert {{:unconfirmed, :guardian_lost}, _} = drive(owned, false)
+    guardian = owned.guardian
+    gm = owned.guardian_monitor
+    worker = owned.worker
+    wm = owned.worker_monitor
+    caller = owned.caller
+    cm = owned.caller_monitor
+    assert_receive {:DOWN, ^gm, :process, ^guardian, :killed}, 1_000
+    assert_receive {:DOWN, ^wm, :process, ^worker, :killed}, 1_000
+    assert_receive {:DOWN, ^cm, :process, ^caller, :normal}, 1_000
+    assert File.read!(Path.join(root, "data")) == "retained"
+  end
+
+  @tag :long_bound
+  test "manifest worker DOWN cannot substitute for its unacknowledged descriptor close",
+       context do
+    root = physical_root(context.root)
+    File.write!(Path.join(root, "data"), "retained")
+    owned = launch({:manifest, root, 8}, :hash_read, 1_000, 5)
+    paused_operation(owned, :hash_read)
+    :erlang.suspend_process(owned.worker)
+    Process.exit(owned.worker, :kill)
+    assert_receive {:DOWN, monitor, :process, worker, :killed}, 1_000
+    assert {monitor, worker} == {owned.worker_monitor, owned.worker}
+    assert {{:unconfirmed, :descriptor_unclosed}, events} = drive(owned, false)
+    assert {:stopping, :worker_unjoined, stop, cleanup} =
+             Enum.find(events, &match?({:stopping, _, _, _}, &1))
+    assert cleanup == stop + 10_000
+    assert System.monotonic_time(:millisecond) >= cleanup
+    guardian = owned.guardian
+    gm = owned.guardian_monitor
+    caller = owned.caller
+    cm = owned.caller_monitor
+    assert_receive {:DOWN, ^gm, :process, ^guardian, :normal}, 1_000
+    assert_receive {:DOWN, ^cm, :process, ^caller, :normal}, 1_000
+  end
+
+  test "manifest native entry-count refusal precedes child traversal on an actual excessive list",
+       context do
+    root = physical_root(context.root)
+    create_listing(root, 65_536, 5)
+    assert length(File.ls!(root)) == 65_536
+    owned = launch({:manifest, root, 0}, :list)
+    assert {{:joined, {:error, :io_error}, %{opens: 0, closes: 0}}, events} = drive(owned)
+    assert Enum.count(issued_kinds(events), &(&1 == :list)) == 1
+    joined(owned)
+  end
+
+  test "manifest exact encoded-byte ceiling refuses an actual sub-count listing before hashing",
+       context do
+    root = physical_root(context.root)
+    create_listing(root, 20_000, 200)
+    names = File.ls!(root)
+    assert length(names) == 20_000
+    # Independently measure the actual deterministic ETF directory lower bound.
+    # If even this smaller representation exceeds 4 MiB, regular fields cannot fit.
+    mode = Bitwise.band(File.stat!(root).mode, 0o7777)
+    entries = [%{"path" => ".", "kind" => "directory", "mode" => mode,
+                 "size" => 0, "sha256" => nil} |
+               Enum.map(names, fn name -> %{"path" => name, "kind" => "directory",
+                                           "mode" => 0, "size" => 0, "sha256" => nil} end)]
+    assert byte_size(:erlang.term_to_binary(["loopex:current-state-manifest:v1", entries],
+                                          [:deterministic])) > 4_194_304
+    owned = launch({:manifest, root, 0}, :list)
+    assert {{:joined, {:error, :io_error}, %{opens: 0, closes: 0}}, events} = drive(owned)
+    assert Enum.count(issued_kinds(events), &(&1 == :list)) == 1
+    joined(owned)
+  end
+
   test "invalid work or operation requests launch no IO actors", context do
     assert {:error, :invalid_io_request} =
              RestoreIO.run(
@@ -265,7 +519,53 @@ defmodule LoopexComposition.RestoreIOTest do
     assert {:error, :invalid_io_request} =
              RestoreIO.run({:read, "relative", 1}, limits(1_000, 5), probe: self())
 
+    for cap <- [-1, 18_446_744_073_709_551_616, "0"] do
+      assert {:error, :invalid_io_request} =
+               RestoreIO.run({:manifest, context.root, cap}, limits(1_000, 5), probe: self())
+    end
     refute_receive {:restore_io, _, _, _, _}
+  end
+
+  defp physical_root(root) do
+    assert {physical, 0} = System.cmd("python3", ["-c", "import os,sys; print(os.path.realpath(sys.argv[1]))", root])
+    String.trim_trailing(physical, "\n")
+  end
+
+  defp expected_manifest(root, paths) do
+    entries = paths |> Enum.sort() |> Enum.map(fn relative ->
+      path = if relative == ".", do: root, else: Path.join(root, relative)
+      info = File.lstat!(path)
+      %{"path" => relative,
+        "kind" => if(info.type == :directory, do: "directory", else: "regular"),
+        "mode" => Bitwise.band(info.mode, 0o7777),
+        "size" => if(info.type == :directory, do: 0, else: info.size),
+        "sha256" => if(info.type == :directory, do: nil, else: hash(File.read!(path)))}
+    end)
+    :erlang.term_to_binary(["loopex:current-state-manifest:v1", entries], [:deterministic])
+  end
+
+  defp paused_operation(owned, expected),
+    do: paused_operation(owned, expected, System.monotonic_time(:millisecond) + 1_000)
+
+  defp paused_operation(owned, expected, cutoff) do
+    guardian = owned.guardian
+    worker = owned.worker
+    reference = owned.reference
+    receive do
+      {:restore_io, ^guardian, ^worker, ^reference, {:issued, id, kind}} ->
+        name = if is_tuple(kind), do: elem(kind, 0), else: kind
+        if name == expected, do: {id, kind}, else: paused_operation(owned, expected, cutoff)
+      {:restore_io, ^guardian, ^worker, ^reference, _} ->
+        paused_operation(owned, expected, cutoff)
+    after
+      max(0, cutoff - System.monotonic_time(:millisecond)) -> flunk("expected owned operation was not issued")
+    end
+  end
+
+  defp create_listing(root, count, width) do
+    assert {_, 0} = System.cmd("python3", ["-c",
+      "import os,sys; root=sys.argv[1]; count=int(sys.argv[2]); width=int(sys.argv[3]); [os.close(os.open(os.path.join(root, str(i).zfill(width)), os.O_CREAT|os.O_EXCL|os.O_WRONLY,0o600)) for i in range(count)]",
+      root, Integer.to_string(count), Integer.to_string(width)])
   end
 
   defp launch(operation, pause, work_ms \\ 1_000, grace \\ 100) do

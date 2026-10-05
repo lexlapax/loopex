@@ -17,8 +17,9 @@ defmodule LoopexComposition.Restore.IO do
   BEAM termination is observed. No shared file-server convenience IO is used.
 
   This private prerequisite exposes bounded reads, complete physical manifests
-  and durable record publication to composition only. It does not acquire claims, audit history or activate a
-  restored root. Host exclusion and validated paths are the caller's obligation.
+  and durable record publication to composition only. It does not acquire claims,
+  audit history or activate a restored root. Host exclusion and validated paths
+  are the caller's obligation.
   """
 
   require Record
@@ -498,6 +499,13 @@ defmodule LoopexComposition.Restore.IO do
 
   defp manifest_candidates(path, relative, state) do
     raw_names = require_value(primitive(:list, fn -> :prim_file.list_dir_all(path) end))
+    # Concept: an excessive listing refuses before any child traversal.
+    # Technical depth: count the materialized native list before retaining names;
+    # the independent encoded ceiling can bind sooner on otherwise valid counts.
+    _ = Enum.reduce(raw_names, state.count, fn _name, count ->
+      if count == @max_entries, do: throw({:io_error, :inventory_limit})
+      count + 1
+    end)
     {names, state} = Enum.reduce(raw_names, {[], state}, fn raw, {names, current} ->
       name = manifest_name(raw)
       current = reserve_manifest_entry(manifest_child(relative, name), current)
