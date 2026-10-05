@@ -325,6 +325,24 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Running source preparation for accepted V7.7: the second isolated writer
+  owns only the new private Model cancellation gate and its conformance tests
+  in `/private/tmp/loopex-m7-cancellation-gate-worktree`, exact base `445a3a81`.
+  The accepted plan already permits this fixed trusted harness override.
+  Same-process forwarding preserves the existing ProviderLifetime registrar,
+  original request/options/progress and downstream result. The target is the
+  second distinct staged digest, not an adapter retry. Parent abort retains
+  Core's conservative dispatched-or-unknown/estimated accounting even when the
+  harness independently observes no transport entry; no relabeling is allowed.
+  Script/campaign integration and all paid attempts remain pending the index.
+
+  The PTY writer owns the first exclusive VM slot. The gate writer prepares
+  source only and holds every formatter/compile/test VM until explicit root
+  release after PTY checks terminate. Root owns both rejoins and keeps its own
+  VMs stopped. One added pending T08 row tracks this deterministic gate proof;
+  T01–T19 originals remain 78 / 95 / 6 and added work is 267 done / 18 todo.
+  No proposed Model preparation/public contract is implemented by this work.
+
 - Running independent accepted-proof work: the T10 PTY writer owns only new
   `apps/loopex_cli/test/chat_pty_test.exs` and bounded support fixtures in the
   temporary detached checkout `/private/tmp/loopex-m7-chat-pty-worktree`, exact
@@ -10938,6 +10956,8 @@ the still-open real-provider, live protocol, persistent-fault or closure lanes.
 - [ ] Complete the seven thinking-round subcases, nine bound subcases and cancellation witness, including their prescribed subsequent prompts.
 
 ### Added implementation subtasks
+
+- [ ] Implement the accepted trusted pre-transport Model cancellation gate with unchanged same-process forwarding, second distinct staged-request selection, exact host release and loss/deadline refusal; prove real Core committed-tool/abort/callback-cleanup order, truthful conservative accounting and unchanged later prompts on both supported pairs. Script/counted paid-provider integration remains separate.
 
 - [x] Prepare closed whole-candidate mutable updates with bounded inputs, monotonic versions and retained explicit/derived budget origins.
 - [x] Prepare atomic configuration admission/replay with exact command identity, single-copy instructions, retained earlier run captures and public event allowlists.
