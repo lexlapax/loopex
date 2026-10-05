@@ -8,7 +8,14 @@ defmodule Loopex.PrivateTaskShutdownTest do
   alias Loopex.Runtime.{OwnerGroup, ProviderLifetime}
 
   @filter :loopex_private_task_shutdown_witness
-  @safe_reasons [:normal, :shutdown, :killed, :noproc, :private_task_fixture_fault]
+  @safe_reasons [
+    :normal,
+    :shutdown,
+    :killed,
+    :noproc,
+    :private_task_fixture_fault,
+    :provider_cleanup_unproved
+  ]
 
   defmodule HeldModel do
     @moduledoc false
@@ -30,7 +37,7 @@ defmodule Loopex.PrivateTaskShutdownTest do
         end)
 
       {:managed, guard, _grace} = ProviderLifetime.register(child, stop_reference)
-      send(observer, {:holding, callback, child, guard})
+      send(observer, {:holding, callback, child, guard, stop_reference})
       callback_loop(observer, hold_cutoff)
     end
 
@@ -52,7 +59,7 @@ defmodule Loopex.PrivateTaskShutdownTest do
           child_loop(callback, callback_monitor, stop_reference, observer)
 
         {:loopex_provider_resource_stop, ^stop_reference, stop, requester, _, _} ->
-          send(observer, {:managed_child_stopping, self(), :resource_stop})
+          send(observer, {:managed_child_stopping, self(), :resource_stop, stop, requester})
           send(requester, {:loopex_provider_resource_stopped, stop, self()})
           :ok
 
@@ -206,7 +213,7 @@ defmodule Loopex.PrivateTaskShutdownTest do
 
   defp hold(run) do
     {_session, _attachment, {:accepted, _}} = Fixture.run(run.fixture, "held shutdown")
-    assert_receive {:holding, callback, child, guard}, 5_000
+    assert_receive {:holding, callback, child, guard, stop_reference}, 5_000
     assert_receive {:managed_child_ready, ^callback, ^child}, 5_000
     assert {:ok, children} = Loopex.Runtime.children(run.fixture.runtime)
     [{_, group, _, _}] = Supervisor.which_children(children.owner_groups)
@@ -235,7 +242,10 @@ defmodule Loopex.PrivateTaskShutdownTest do
         run.owner => "owner"
       })
 
-    roles = Map.put(roles, children.owner_groups, "owner_groups")
+    roles =
+      roles
+      |> Map.put(children.owner_groups, "owner_groups")
+      |> Map.put(children.sessions, "sessions")
 
     monitors =
       Map.new(roles, fn {pid, role} ->
@@ -253,6 +263,9 @@ defmodule Loopex.PrivateTaskShutdownTest do
 
     Map.merge(run, %{
       workers: workers,
+      resource: child,
+      guard: guard,
+      stop_reference: stop_reference,
       group: group,
       owner_groups: children.owner_groups,
       roles: roles,
@@ -262,7 +275,13 @@ defmodule Loopex.PrivateTaskShutdownTest do
 
   defp observe_shutdown(runs, mode, label, require_quiet \\ true) do
     observer = self()
-    {collector, collector_monitor} = spawn_monitor(fn -> collect(observer, [], 0, nil, %{}) end)
+    actors = Enum.reduce(runs, %{}, &Map.merge(&2, &1.roles))
+    actors = Map.put(actors, observer, "test_observer")
+    resources = Map.new(runs, &{&1.resource, {&1.stop_reference, &1.guard}})
+
+    {collector, collector_monitor} =
+      spawn_monitor(fn -> collect(observer, [], 0, nil, %{}, actors, resources) end)
+
     session = :trace.session_create(:loopex_private_task_shutdown, collector, [])
     cutoff = System.monotonic_time(:millisecond) + 1_000
     cleanup_key = {__MODULE__, :collector_joined, collector}
@@ -282,12 +301,25 @@ defmodule Loopex.PrivateTaskShutdownTest do
           {[:_, :_, message], [], []}
         end
 
-      :trace.recv(session, receive_patterns, [])
+      resource_patterns =
+        Enum.flat_map(runs, fn run ->
+          [
+            {[
+               :_,
+               :_,
+               {:loopex_provider_resource_stop, run.stop_reference, :"$1", run.guard, :_, :_}
+             ], [{:is_reference, :"$1"}], []},
+            {[:_, :_, {:loopex_provider_resource_stopped, :"$1", run.resource}],
+             [{:is_reference, :"$1"}], []}
+          ]
+        end)
+
+      :trace.recv(session, receive_patterns ++ resource_patterns, [])
 
       assert :trace.function(
                session,
                {DynamicSupervisor, :monitor_child, 1},
-               [{[:"$1"], [], [{:message, :"$1"}, {:return_trace}]}],
+               for(pid <- child_pids, do: {[pid], [], [{:message, {:const, pid}}, {:return_trace}]}),
                [:local]
              ) > 0
 
@@ -301,10 +333,32 @@ defmodule Loopex.PrivateTaskShutdownTest do
                []
              ) > 0
 
-      for run <- runs do
-        assert :trace.process(session, run.workers, true, [
+      assert :trace.function(
+               session,
+               {:erlang, :unlink, 1},
+               for(pid <- child_pids, do: {[pid], [], [{:message, {:const, pid}}, {:return_trace}]}),
+               []
+             ) > 0
+
+      assert :trace.function(
+               session,
+               {:erlang, :exit, 2},
+               for(
+                 pid <- child_pids,
+                 reason <- [:kill, :shutdown],
+                 do: {[pid, reason], [], [{:message, {:const, {pid, reason}}}]}
+               ),
+               []
+             ) > 0
+
+      # Concept: record the exact actors that can stop these retained resources.
+      # Technical depth: arity-only calls have fixed-target match specifications;
+      # no request arguments or arbitrary messages enter the evidence records.
+      for pid <- Map.keys(actors) do
+        assert :trace.process(session, pid, true, [
                  :call,
                  :arity,
+                 :procs,
                  :receive,
                  :monotonic_timestamp
                ]) == 1
@@ -319,20 +373,6 @@ defmodule Loopex.PrivateTaskShutdownTest do
       end
 
       monitors = Enum.reduce(runs, %{}, &Map.merge(&2, &1.monitors))
-
-      monitors =
-        if mode == :explicit_stop do
-          for run <- runs do
-            assert_receive {:explicit_stop_returned, owner} when owner == run.owner,
-                           max(cutoff - System.monotonic_time(:millisecond), 0)
-
-            send(run.owner, :stop)
-          end
-
-          monitors
-        else
-          monitors
-        end
 
       {monitors, first_evidence} =
         if mode == :supervisor_fault do
@@ -374,6 +414,17 @@ defmodule Loopex.PrivateTaskShutdownTest do
       evidence = evidence ++ causal_classifications(evidence)
       retain(label, evidence)
 
+      if mode == :explicit_stop do
+        for run <- runs do
+          assert Enum.any?(
+                   evidence,
+                   &(&1["event"] == "explicit_stop_returned" and &1["pid"] == identity(run.owner))
+                 ),
+                 "explicit runtime stop did not return successfully: " <>
+                   inspect(evidence, limit: :infinity)
+        end
+      end
+
       if require_quiet,
         do:
           refute(
@@ -401,8 +452,26 @@ defmodule Loopex.PrivateTaskShutdownTest do
   defp join_originals(monitors, _collector, _cutoff, evidence) when map_size(monitors) == 0,
     do: Enum.reverse(evidence)
 
+  # Concept: failed explicit stop retains its causal trace before failing the test.
+  # Technical depth: successful stop receipts release their exact owner within
+  # the original join cutoff; the unchanged success assertion follows retention.
   defp join_originals(monitors, collector, cutoff, evidence) do
     receive do
+      {:explicit_stop_returned, owner} ->
+        assert Enum.any?(monitors, fn {_reference, {pid, role}} ->
+                 pid == owner and role == "owner"
+               end)
+
+        send(owner, :stop)
+
+        record = %{
+          "event" => "explicit_stop_returned",
+          "pid" => identity(owner),
+          "observed_at_ns" => System.monotonic_time(:nanosecond)
+        }
+
+        join_originals(monitors, collector, cutoff, [record | evidence])
+
       {:DOWN, reference, :process, pid, reason} when is_map_key(monitors, reference) ->
         {^pid, role} = Map.fetch!(monitors, reference)
 
@@ -422,12 +491,13 @@ defmodule Loopex.PrivateTaskShutdownTest do
     end
   end
 
-  defp collect(_observer, _records, count, _fence, _targets) when count >= 8_192,
+  defp collect(_observer, _records, count, _fence, _targets, _actors, _resources) when count >= 8_192,
     do: exit(:private_task_trace_limit)
 
-  defp collect(observer, records, count, fence, targets) do
+  defp collect(observer, records, count, fence, targets, actors, resources) do
     receive do
-      {:trace_ts, pid, :call, {DynamicSupervisor, :monitor_child, 1}, child, at} ->
+      {:trace_ts, pid, :call, {DynamicSupervisor, :monitor_child, 1}, child, at}
+      when is_map_key(actors, pid) and is_map_key(actors, child) ->
         record = %{
           "event" => "monitor_child",
           "supervisor" => identity(pid),
@@ -435,9 +505,18 @@ defmodule Loopex.PrivateTaskShutdownTest do
           "at_ns" => trace_time(at)
         }
 
-        collect(observer, [record | records], count + 1, fence, Map.put(targets, pid, child))
+        collect(
+          observer,
+          [record | records],
+          count + 1,
+          fence,
+          Map.put(targets, pid, child),
+          actors,
+          resources
+        )
 
-      {:trace_ts, pid, :call, {:erlang, :monitor, 2}, child, at} ->
+      {:trace_ts, pid, :call, {:erlang, :monitor, 2}, child, at}
+      when is_map_key(actors, pid) and is_map_key(actors, child) ->
         record = %{
           "event" => "late_monitor_call",
           "supervisor" => identity(pid),
@@ -445,10 +524,18 @@ defmodule Loopex.PrivateTaskShutdownTest do
           "at_ns" => trace_time(at)
         }
 
-        collect(observer, [record | records], count + 1, fence, Map.put(targets, pid, child))
+        collect(
+          observer,
+          [record | records],
+          count + 1,
+          fence,
+          Map.put(targets, pid, child),
+          actors,
+          resources
+        )
 
       {:trace_ts, pid, :return_from, {:erlang, :monitor, 2}, reference, at}
-      when is_reference(reference) ->
+      when is_reference(reference) and is_map_key(actors, pid) ->
         record = %{
           "event" => "late_monitor_installed",
           "supervisor" => identity(pid),
@@ -457,9 +544,10 @@ defmodule Loopex.PrivateTaskShutdownTest do
           "at_ns" => trace_time(at)
         }
 
-        collect(observer, [record | records], count + 1, fence, targets)
+        collect(observer, [record | records], count + 1, fence, targets, actors, resources)
 
-      {:trace_ts, pid, :return_from, {DynamicSupervisor, :monitor_child, 1}, result, at} ->
+      {:trace_ts, pid, :return_from, {DynamicSupervisor, :monitor_child, 1}, result, at}
+      when is_map_key(actors, pid) ->
         record = %{
           "event" => "monitor_child_return",
           "supervisor" => identity(pid),
@@ -468,9 +556,10 @@ defmodule Loopex.PrivateTaskShutdownTest do
           "at_ns" => trace_time(at)
         }
 
-        collect(observer, [record | records], count + 1, fence, targets)
+        collect(observer, [record | records], count + 1, fence, targets, actors, resources)
 
-      {:trace_ts, pid, :receive, {:EXIT, child, reason}, at} ->
+      {:trace_ts, pid, :receive, {:EXIT, child, reason}, at}
+      when is_map_key(actors, pid) and is_map_key(actors, child) ->
         record = %{
           "event" => "supervisor_exit_received",
           "supervisor" => identity(pid),
@@ -479,9 +568,10 @@ defmodule Loopex.PrivateTaskShutdownTest do
           "at_ns" => trace_time(at)
         }
 
-        collect(observer, [record | records], count + 1, fence, targets)
+        collect(observer, [record | records], count + 1, fence, targets, actors, resources)
 
-      {:trace_ts, pid, :receive, {:DOWN, monitor, :process, child, reason}, at} ->
+      {:trace_ts, pid, :receive, {:DOWN, monitor, :process, child, reason}, at}
+      when is_map_key(actors, pid) and is_map_key(actors, child) ->
         record = %{
           "event" => "supervisor_down_received",
           "supervisor" => identity(pid),
@@ -491,13 +581,107 @@ defmodule Loopex.PrivateTaskShutdownTest do
           "at_ns" => trace_time(at)
         }
 
-        collect(observer, [record | records], count + 1, fence, targets)
+        collect(observer, [record | records], count + 1, fence, targets, actors, resources)
+
+      {:trace_ts, pid, :call, {:erlang, :unlink, 1}, child, at}
+      when is_map_key(actors, pid) and is_map_key(actors, child) ->
+        record = %{
+          "event" => "unlink_call",
+          "actor" => identity(pid),
+          "pid" => identity(child),
+          "at_ns" => trace_time(at)
+        }
+
+        collect(
+          observer,
+          [record | records],
+          count + 1,
+          fence,
+          Map.put(targets, {:unlink, pid}, child),
+          actors,
+          resources
+        )
+
+      {:trace_ts, pid, :return_from, {:erlang, :unlink, 1}, true, at}
+      when is_map_key(actors, pid) ->
+        record = %{
+          "event" => "unlink_return",
+          "actor" => identity(pid),
+          "pid" => identity(Map.fetch!(targets, {:unlink, pid})),
+          "at_ns" => trace_time(at)
+        }
+
+        collect(observer, [record | records], count + 1, fence, targets, actors, resources)
+
+      {:trace_ts, pid, :call, {:erlang, :exit, 2}, {child, reason}, at}
+      when is_map_key(actors, pid) and is_map_key(actors, child) and reason in [:kill, :shutdown] ->
+        record = %{
+          "event" => "exit_signal_sent",
+          "sender" => identity(pid),
+          "pid" => identity(child),
+          "reason" => Atom.to_string(reason),
+          "at_ns" => trace_time(at)
+        }
+
+        collect(observer, [record | records], count + 1, fence, targets, actors, resources)
+
+      {:trace_ts, pid, :exit, reason, at} when is_map_key(actors, pid) ->
+        record = %{
+          "event" => "actor_exit",
+          "pid" => identity(pid),
+          "role" => Map.fetch!(actors, pid),
+          "reason" => safe_reason(reason),
+          "at_ns" => trace_time(at)
+        }
+
+        collect(observer, [record | records], count + 1, fence, targets, actors, resources)
+
+      {:trace_ts, resource, :receive,
+       {:loopex_provider_resource_stop, reference, nonce, requester, _, _}, at}
+      when is_map_key(resources, resource) and is_reference(nonce) ->
+        {^reference, ^requester} = Map.fetch!(resources, resource)
+
+        record = %{
+          "event" => "resource_stop_received",
+          "pid" => identity(resource),
+          "requester" => identity(requester),
+          "stop_reference" => identity(reference),
+          "stop_nonce" => identity(nonce),
+          "at_ns" => trace_time(at)
+        }
+
+        collect(observer, [record | records], count + 1, fence, targets, actors, resources)
+
+      {:trace_ts, requester, :receive, {:loopex_provider_resource_stopped, nonce, resource}, at}
+      when is_map_key(resources, resource) and is_reference(nonce) ->
+        {_reference, ^requester} = Map.fetch!(resources, resource)
+
+        record = %{
+          "event" => "resource_stop_ack_received",
+          "pid" => identity(resource),
+          "requester" => identity(requester),
+          "stop_nonce" => identity(nonce),
+          "at_ns" => trace_time(at)
+        }
+
+        collect(observer, [record | records], count + 1, fence, targets, actors, resources)
+
+      # Concept: process tracing can announce a link without retaining any payload.
+      # Technical depth: count these fixed metadata shapes toward the same cap;
+      # they do not prove delivery of a later EXIT and are not persisted.
+      {:trace_ts, pid, event, other, _at}
+      when is_map_key(actors, pid) and is_pid(other) and
+             event in [:link, :unlink, :getting_linked, :getting_unlinked] ->
+        collect(observer, records, count + 1, fence, targets, actors, resources)
 
       {:finish, ^observer, session} when fence == nil ->
-        collect(observer, records, count, :trace.delivered(session, :all), targets)
+        collect(observer, records, count, :trace.delivered(session, :all), targets, actors, resources)
 
       {:trace_delivered, :all, reference} when reference == fence ->
         send(observer, {:causal_trace, self(), Enum.reverse(records)})
+
+      _unexpected ->
+        exit(:private_task_trace_shape)
     end
   end
 
@@ -514,6 +698,19 @@ defmodule Loopex.PrivateTaskShutdownTest do
     actors = Enum.reduce(runs, %{}, &Map.merge(&2, &1.roles))
 
     receive do
+      {:managed_child_stopping, child, :resource_stop, nonce, requester}
+      when is_map_key(actors, child) and is_map_key(actors, requester) and is_reference(nonce) ->
+        drain_reports(runs, [
+          %{
+            "event" => "managed_child_stopping",
+            "pid" => identity(child),
+            "route" => "resource_stop",
+            "requester" => identity(requester),
+            "stop_nonce" => identity(nonce)
+          }
+          | records
+        ])
+
       {:managed_child_stopping, child, route}
       when is_map_key(actors, child) and
              route in [:resource_stop, :callback_down] ->
@@ -546,7 +743,8 @@ defmodule Loopex.PrivateTaskShutdownTest do
 
   # Concept: a late noproc observation cannot replace the child's original exit.
   # Technical depth: classify only exact original child, supervisor and new
-  # monitor identities; incomplete ordering evidence remains explicitly unknown.
+  # monitor identities. An absent received EXIT proves no raw signal history;
+  # the observed unlink/exit branch says only what this fixed trace retained.
   defp causal_classifications(records) do
     for report <- records,
         report["event"] == "supervisor_report" and
@@ -585,6 +783,27 @@ defmodule Loopex.PrivateTaskShutdownTest do
               &1["pid"] == pid and &1["supervisor"] == supervisor)
         )
 
+      unlink_called =
+        Enum.find(
+          records,
+          &(&1["event"] == "unlink_call" and
+              &1["pid"] == pid and &1["actor"] == supervisor)
+        )
+
+      unlinked =
+        Enum.find(
+          records,
+          &(&1["event"] == "unlink_return" and
+              &1["pid"] == pid and &1["actor"] == supervisor)
+        )
+
+      exited =
+        Enum.find(
+          records,
+          &(&1["event"] == "actor_exit" and &1["pid"] == pid and
+              original != nil and &1["reason"] == original["reason"])
+        )
+
       classification =
         cond do
           original != nil and original["reason"] == "noproc" ->
@@ -595,6 +814,15 @@ defmodule Loopex.PrivateTaskShutdownTest do
             linked_exit["reason"] == original["reason"] and
               linked_exit["at_ns"] > returned["at_ns"] ->
             "late_monitor_before_linked_exit"
+
+          original != nil and exited != nil and install != nil and down != nil and
+            returned != nil and unlink_called != nil and unlinked != nil and
+            linked_exit == nil and exited["at_ns"] <= install["at_ns"] and
+            install["at_ns"] <= unlink_called["at_ns"] and
+            unlink_called["at_ns"] <= unlinked["at_ns"] and
+            unlinked["at_ns"] <= returned["at_ns"] and
+              returned["at_ns"] <= down["at_ns"] ->
+            "late_monitor_noproc_without_retained_link_exit"
 
           true ->
             "evidence_incomplete"
