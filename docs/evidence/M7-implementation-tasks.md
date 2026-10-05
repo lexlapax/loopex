@@ -325,6 +325,61 @@ did not resolve them. No paid provider calls were made during this check.
 <a id="current-work"></a>
 ## Current work
 
+- Approved inspection work: the standalone four-member ActiveBounds codec,
+  closed schema, 121 literal vectors and independent Node validator are
+  integrated as `790e73bc` from verified worker
+  `9a26b35b4c0957ea8c3ebda228afa1f6275cee25`. Root reviewed both codecs and
+  schema, verified all six committed/retained source blobs and all 43 retained
+  manifest entries. Both pairs pass five complete focused tests with Node;
+  direct pinned Node passes 121 vectors plus 89 boundary checks. Worker
+  project compile, whole format, docs, dependency and status gates pass both.
+  Completion `/private/tmp/loopex-m7-active-bounds-proof-20261005-v1/completion.json`,
+  SHA-256 `1b2e14956d36433f9177cbb8aaf1d1758964489f8b83f5a2bc71ed3bf751307e`;
+  source inventory SHA-256
+  `b80e05e312df4679a871d5e1a2066f3a82b155829cf81f7763f24aeeee1ae4e2`;
+  complete evidence-manifest SHA-256
+  `af9c57a5bb363776570f20409fff5d7a1b6d5501319410801998be874c1abb23`.
+  The pre-test sandbox TCP-lock failure remains retained as unavailable.
+  Root post-rejoin checks pass both pairs on the unchanged joined source:
+  five codec/Node cases, whole-source format, compiled module docs and dependency
+  gates. Complete eight outputs under `/private/tmp/loopex-m7-790e73bc-rejoin`,
+  completion inventory SHA-256 `f35a8134d3b5f03550bd7e52175b4aa80bd993fb72dae37d32bc768cad3cc45c`. This is focused
+  source verification; no replacement full integration PASS is claimed.
+  This closes one added T05 subtask only: the eleven-member serial inspection,
+  permission-answer union/event, full manifests and live generations remain open.
+
+  Wrapper fixture repairs are integrated as `08fe8be1`. Five fixtures now
+  strictly inspect/mutate original adapter_options inside the current wrapper;
+  production completion is unchanged. All 25 affected tests pass on both pairs,
+  including actual provider-only TLS/canary/trace and cleanup witnesses for all
+  three provider profiles. Composition 3 cases measured 11.735 / 11.662 seconds,
+  foreground 14 cases 7.881 / 7.472, daemon 6 cases 4.173 / 4.111 and offline
+  CLI 2 cases 3.034 / 2.708. Owned format, project warning-free compile, docs
+  and dependency gates pass both. Completion
+  `/private/tmp/loopex-m7-wrapper-repair-proof-v1/completion.json`, SHA-256
+  `57c2e7c425d683a387ce6525d0778a8a0848d9a03f57883f0109c9e743ac695f`;
+  exact commit/source binding `commit-binding.json` in that directory, SHA-256
+  `f5800d55eeaf13f06eb71f7ef817013ad3718e7a9d715422882f8b3aac5c5257`.
+  All 17 outputs were root-rehashed. The initial incorrect docs task-name
+  invocation remains retained; the actual docs_check used a separate output,
+  without a test retry. This closes the added T16 wrapper repair, not the full
+  integration row or separate diagnostic/pipe/task-supervisor investigations.
+
+  The approval/evidence checkpoint `64729e3454d8bb04ca84edb8bd30994b569f4448`
+  passed one full docs-only check in 23.973 seconds. Retained output
+  `/private/tmp/loopex-m7-64729e34-docs-check.log`, SHA-256
+  `75c24d02ad778233bc3608fb07dad88afdea7d882409bb75a83eaf28feec9a10`.
+  T01–T19 originals remain 78 done / 95 todo / 6 retired; added 277 / 19 / 0.
+  Chat pipe diagnosis retains the actual live/waiting worker and calls for
+  exact timer-token/deadline/kill/DOWN causal evidence within existing bounds.
+  `/private/tmp/loopex-m7-chat-pipe-integration-failure-diagnosis-20261005-v1.md`,
+  SHA-256 `0c8666c2741cdd1dda0a7aa57911b08643abbbfdd82af86f8c0fc7b1ffb74411`;
+  eight-entry source inventory SHA-256
+  `03cbeb3e448926a6483359ce32e02e0e8c74da0f72e35cc68f3833d00a941d1d`.
+  No speculative timer repair or timeout amendment was made.
+  The permission-answer event question is presented and unanswered. Restore
+  pair drafting remains Proposed; no acceptance or implementation follows.
+
 - Terminal integration verification: the full current fast check ran once on
   exact clean candidate `6290ac472cb18ecb78bb3cb75d1abc952458d55a` and FAILED
   after 1,639.348 seconds, exit 1. Complete output
@@ -345,9 +400,9 @@ did not resolve them. No paid provider calls were made during this check.
   Expanded inspection shape is approved by the
   [maintainer disposition](../developer/agent-context-map.md#disposition-m7-expanded-inspection-view-2026-10-05). Restore option B
   selects direction only; its exact amendment is still under proposal/review.
-  T01–T19 original counts 78 done / 95 todo / 6 retired; added 275 / 20 / 0.
-  Including T00: originals 78 / 101 / 7, added 279 / 21 / 0.
-  Three failure-repair subtasks were added under T16; no completion row closes.
+  At failure recording: T01–T19 originals 78 / 95 / 6, added 275 / 20 / 0.
+  Three failure-repair subtasks were added under T16. The wrapper repair now
+  closes above; diagnostic dispatch and real pipe joins remain open.
 
   T16 read-only private-task shutdown investigation retained at
   `/private/tmp/loopex-m7-t16-private-task-shutdown-investigation-20261005-v2.md`,
@@ -404,6 +459,14 @@ did not resolve them. No paid provider calls were made during this check.
   independent audit was unavailable because its role required enforced
   read-only permissions but its effective profile allowed repository writes;
   it inspected no source. Integrator review is not independent closure review.
+
+  Root integrator review v2 of that revised restore packet is retained at
+  `/private/tmp/loopex-m7-current-restore-integrator-review-20261005-v2.md`,
+  SHA-256 `92e5a617a48596d9e4ffd04575d3159d7b475c2102f60554a8fd2d790bf85325`.
+  Before publishing the Proposed pair, clarify normal-completion cutoff capture
+  and pre-metadata standalone Local host exclusion. No independent acceptance
+  review or execution proof is claimed. A worker drafts only external Proposed
+  files; no product or repository writes are delegated for that draft.
 
   Revised restore proposal, not accepted:
   `/private/tmp/loopex-m7-current-restore-exact-amendment-research-20261005-v3-final.md`,
@@ -11347,6 +11410,9 @@ or check was relaxed.
 
 ### Added implementation subtasks
 
+- [x] Implement the approved standalone four-member ActiveBounds codec/schema with arbitrary positive counters, uint64 duration and null/nonnegative uint64 retained cutoff; prove 121 literal vectors and strict independent Node native/object boundaries, both supported toolchains and exact source inventories. Enclosing inspection, policy-answer union and generation activation remain separate obligations.
+
+
 - [x] Repair both remaining positive artifact-range source fixtures to the current receipt kind; preserve all actual IO, corruption, capacity, cancellation, deadline and descriptor cleanup assertions, and verify both complete affected files on both supported pairs. Keep the original full-check failure immutable.
 
 
@@ -11851,7 +11917,7 @@ open.
 
 ### Added implementation subtasks
 
-- [ ] Repair the 6290ac47 wrapper-related integration failures in credential-plane, ephemeral trace, foreground, daemon and offline CLI witnesses; distinguish stale internal observations from actual option/dispatch regressions, preserve exact original adapter options, host-option allowlist, exclusion and credential/lifetime proofs, and verify both pairs with failed outputs retained.
+- [x] Repair the 6290ac47 wrapper-related integration failures in credential-plane, ephemeral trace, foreground, daemon and offline CLI witnesses; distinguish stale internal observations from actual option/dispatch regressions, preserve exact original adapter options, host-option allowlist, exclusion and credential/lifetime proofs, and verify both pairs with failed outputs retained.
 - [ ] Establish the cause and repair the 6290ac47 diagnostic broken-IO/writer-death test's missing dispatch within its original 100-ms receive allowance; preserve real blocked IO, exact counts, writer death and cleanup proofs without retries or implicit timeout changes.
 - [ ] Establish the cause and repair the 6290ac47 real stalled-stdout pipe worker nonjoin; retain live/waiting worker evidence, capture exact worker/writer/deadline/kill/DOWN ordering and verify real actor/OS closure without relaxing production or fixture deadlines.
 
