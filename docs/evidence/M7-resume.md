@@ -27,6 +27,33 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+After the maintainer's 2026-10-06 reboot, work continues directly in the primary
+`m7` checkout. Exact reviewed source from isolated `37ac673f` is integrated and
+pushed as `cf98ea6cb8f14e6ad6364c88a9ad7090c74c617b`: immutable provider attempt
+positions, cleanup before owner succession, literal `/abort`, and `/compact`
+with physical bounds delivery, committed results and cursor-bound status. All
+eight recovered paths match the retained source hashes. Temporary checkouts were
+removed by reboot; their committed branch references remain. No application
+data restore is underway, and no temporary checkout is needed for this unit.
+
+Current Core81 passed at `57044cc9`. The same run's CLI170 assertions passed,
+but its check failed on generated-test compiler warnings. Those three tests now
+use the same assertions through a parameterized helper. Current warning-free
+compilation and formatting passed at `37ac673f`; its CLI170 run was interrupted
+before a final result and floor stages were unrun. Never repoll original34233
+or signal its pre-reboot PIDs. Retained interruption
+`M7/chat-compact-reboot-interruption-20261006-v1.json`, SHA-256
+`5db87ae4efa50da58748c45f0426d7f70b36dcbb6f7aedf5fb4d8cc3c55eab16`,
+preserves the incomplete run and complete936-key consumed registry, SHA-256
+`c02887e7b1b2ab81105842573ce200e27f718ee766069d17b66444c7570435b0`.
+Continue current CLI170 and unrun floor Core81/CLI170 from the clean integrated
+candidate, retaining unchanged current Core success, then run its full current
+fast check once. Original T06.3/.5/.6 and four T10 rows remain open until those
+proofs; hosted/attended, release and milestone closure remain separate.
+Original T01–T19:80 done/93 todo/6 retired; added302 done/39 todo.
+
+The named results below remain evidence of their specific revisions.
+
 Original T06.2 and T06.4 are complete. The new built-command test is copied
 literally from tested source `a5c9ea85c59983f913e3ef3a08f4047506983710`,
 file SHA-256 `ea3339c833cb9e6cb5b2199172aedc7a40b94e30924313ba0ff1838a7e6eaf73`.

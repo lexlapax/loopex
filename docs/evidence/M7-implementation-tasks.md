@@ -1,5 +1,15 @@
 # M7 Implementation Tasks
 
+The reviewed conversation/compaction and provider-cleanup unit is recovered,
+integrated and pushed at `cf98ea6c` after the maintainer reboot. Current Core81
+passed; the warning-corrected CLI170 run was interrupted and floor was unrun.
+Continue paired affected-boundary verification and the integrated full fast
+check before closing T06.3/.5/.6 or the four remaining T10 original rows.
+No restore work replaces those capability tasks. The
+[restart checkpoint](M7-resume.md#technical-depth) retains exact source and
+interruption identities. Original T01–T19:80 done/93 todo/6 retired;
+added302 done/39 todo. Older entries below describe their named revisions.
+
 Original T06.2 and T06.4 are complete. The literally integrated built-command
 witness passed all ten selected ordinary cases on both supported toolchains:
 two prompts, fresh-process resume after changed file defaults, exact retained
