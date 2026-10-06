@@ -39,29 +39,37 @@ its independent source review and root admission. Native v1/v2 were never run.
 
 Current isolated source ownership:
 
-- `current_index_cleanup`: Core authored-bounds source at
-  `/private/tmp/loopex-m7-authored-run-bounds`, frozen milestone
-  `9f2b4e2d4c60660924c17f03275fcbc06f2018d3`, parent
-  `d87e5923167532c74c2cfb953b31e6c0361503e9`. It is making a sole child for the
-  independent P2 finding: model:nil and prepared-resume paths must arm accepted
-  absolute deadlines before staging. Owned Coordinator and deadline test only
-  for this correction. No formatter/compiler/runtime proof exists yet.
-- `authored_bounds_review`: sealed the source-only 9f2 audit with that blocker
-  at `/private/tmp/loopex-m7-authored-run-bounds-source-audit-9f2b4e2d-20261006-v1`.
-  Report SHA `fb6cc99c98d6943026100bc8c4fab633e62c8030f6dc24f0c4209ab6ed7bda31`;
-  SHA256SUMS `74c2b55fffa3b55d225828b414f635a69463d037a2e8e5ef7b754a1f84148a5e`.
-  Re-review the actual correction before formatting/verification.
-- `cli_current_fixtures`: prepares disabled generation native v3 for clean
-  `9d74407937897b9298d8228cff6d317c29bf9b48` at
-  `/private/tmp/loopex-m7-generation-native`. V2 duplicates both already-passed
-  exact source/pair/format-check keys from original18466. V3 must consume those
-  original checks and omit fresh formatting, never rename duplicate stages.
-  Both formatting proofs remain required and counted on identical bytes.
-  Expected native population remains141 per pair across seven files; prospective
-  new matrix is22 stages, including dev/test warning-free compilation.
-- `restore_prefix_source_audit`: independently reviews disabled generation
-  native v2 and retains the duplicate-key blocker before v3 review. No execution
-  grant follows from a source report.
+- `current_index_cleanup`: accepted0053 configure decoder/vector prerequisite,
+  separate writer `/private/tmp/loopex-m7-configure-current-grammar`, branch
+  `codex/m7-configure-current-grammar` fromd995ed35. Owned shared pure configure
+  request codec/tests/schema/vectors/Node consumer plus Mapping, Request and new
+  focused ingress tests. No old-generation route registration or complete wire
+  activation; whole manifest rejoin remains separate.
+- `cli_current_fixtures`: Core abort/deadline recovery correction, separate
+  writer `/private/tmp/loopex-m7-authored-abort-cutoff`, branch
+  `codex/m7-authored-abort-cutoff` fromf6b791ab. Own Coordinator and
+  authored_run_deadline_test only. Preserve committed abort precedence and make
+  model:nil/prepared successors progress the existing abort cleanup rather than
+  selecting a new deadline ending or remaining stuck. Source-only native proofs
+  and a clean sole child are required before independent review.
+- `authored_bounds_review`: sealed Core9f2 P2 missing-model timer finding;
+  subsequent f6b791ab correction fixes that but introduces a durable-abort timer
+  recovery blocker. Correction audit report
+  `380cd1ea823899f54d2519527796e138fec62fc9f7a687b711c6a7ff6dbc25c2`,
+  SHA256SUMS `2b70210f919c738bbe232a07531262a9afd5691ede7899100564a1ea0f24d187`
+  at `/private/tmp/loopex-m7-authored-run-bounds-correction-source-audit-f6b791ab-20261006-v1`.
+  Both are source findings, never runtime failures or passes. Re-review the next
+  actual child before formatting/compilation/testing.
+- `restore_prefix_source_audit`: independent source admission of disabled
+  generation nativev3 for clean9d744079 at
+  `/private/tmp/loopex-m7-generation-native-focused-runtime-runner-20261006-v3`.
+  V3 consumes both original18466 formatting proofs and selects22 fresh stages,
+ 141 cases per pair. Report01c8eeab, inventoryabe6676d,109 artifacts,59 actual/Git
+  rows,29 refs; root enable script
+  `/private/tmp/m7-enable-generation-native-runtime-v3.py` is authored but
+  unexecuted, seed724. V2 duplicate-key blocker remains retained in report
+  `2511eee207fa1b05f2ebb6d535b53d8cb2c14ea29352e17f535e9821d64ceb9c`.
+  Neither v1 nor v2 nor v3 has made a native attempt. No source report grants execution.
 
 One integrator owns rejoin. Core9f2 and protocol c364 both change SessionState;
 compose the approved policy provenance/cursor changes with authored command v4
