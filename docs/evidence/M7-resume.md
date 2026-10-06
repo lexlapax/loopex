@@ -27,6 +27,47 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Latest Store integration and next verification
 
+CURRENT EXECUTION: `private_task_causal_resume` alone owns live handle
+`51106`. Root reviewed and pushed corrected source
+`7ca8b9161739842ecf4da4b3a37567b5f67b8464` and granted reviewed runner
+`a0862eca0c9bf4944a9cf04e1f796865089c0fb132a4eb83c92c8710aa2ae461` with fresh
+sibling `M7/runtime-preparation-startup-execution-20261005-v3`. Root verified
+five source and eight runner artifacts, 13 actual/Git/mode records, exact source
+preview and validator delta, unchanged helpers and clean source/new output.
+Runner AST changes are limited to INITIAL and validate_witness. The new exact
+send/reference/queue observation distinguishes send from actual insertion;
+64 observations/63 yields share the original cutoff, with four traced actors,
+eleven original joins and all old cases/assertions unchanged.
+
+Authorized formatter AST equality passed; tested clean direct child is
+`590b997c305697e94a2b9ae8585bbaf4e1bf4202`. Current dev compilation is underway;
+no current or floor test result yet. Worker owns every poll, first-failure seal,
+process-group join and slot return. No other verification VM or same-source
+retry is authorized. Both old failures below remain immutable.
+
+LEDGER QUEUED: clean source `7340024dd056af931478bd6afcf1472733612202` is
+pushed on `codex/m7-ledger-capture-audit`, still unintegrated. Root read the full
+two-file production/test delta and complete runner delta from reviewed Resource
+v4. It verified 37 source-packet artifacts, eight runner artifacts, 32 actual/
+Git/mode records and byte-identical stage/AST/toolchain helpers. Expected IO
+64/2 excluded, adjacent Ledger19/0, ordinary Composition635/3 and owned long2/64
+per pair are source-derived expectations, not results. Runner digest
+`57995802ba94e2121f185bc0a43abb915c60adf657aee341997286fb6b0acd06`.
+There is no Ledger VM grant. Independent read-only exact-source review found
+no blocking issue; root read it and verified its seven exact inputs. Immutable
+review sibling `M7/ledger-capture-audit-independent-review-20261005-v1`, report
+`c3a8548b105527bab98803ab5f2e24880ddbfe29e9efda8340ac8fdfd915fec5`.
+Complete ledger/receipt/history/restore remains open.
+
+NEXT INTEGRATION: disabled draft retained byte-identically under sibling
+`M7/integration-next-current-runner-draft-20261005-v1`. Root read its review;
+the full 425-line runner/helper review and final source/validator/population
+pins remain pending. No execution is enabled. If startup and Ledger both join,
+expected Core1324/10 and Composition635/3 supersede the draft's initial
+Composition623/3; Local296/2 and CLI635/6 remain prospective. A read-only Docker
+platform/image inventory found the daemon unavailable; no app, container or
+image pull was started. The actual Linux filename witness remains unavailable.
+
 LATEST STARTUP RESULT: the second execution stopped at source
 `559017602d06d74e3bf73104ec5b5c068e09aac2`. Handle `25505` is terminal exit 1,
 collected and sealed; the exclusive VM slot is returned. The map-only Logger
