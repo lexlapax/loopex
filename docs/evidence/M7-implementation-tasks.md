@@ -29,6 +29,30 @@ grouped by T00–T19. Empty added sections mean no added subtasks are recorded;
 they do not mean the original task is complete. This follows the maintainer's
 2026-10-01 update to the active implementation goal.
 
+## Current source review and receipt extraction, 2026-10-05
+
+Artifact source/evidence is pushed at `87be37e7`; its clean merged worktree and
+local/remote topic branches are removed. No verification VM runs.
+Root reviewed the complete four-path Ledger enumeration candidate `0c4b805d`,
+verified 44 listed packet artifacts,32 actual/Git/mode sources and 85 unchanged
+old case bodies. Its exact-size proof awaits a source-only correction from
+`external_size` to actual encoded byte size plus the proved 69-byte nonce
+footprint. Installed documentation promises only an upper bound; this is a
+proof gap, not a reproduced differing-size failure. Live nonce serialization,
+current bounds and all old assertions remain. Independent correction review
+and both-pair execution are pending; the enumeration row stays open.
+
+Root read and verified the private receipt inventory: four sealed files,
+22 Git/mode inputs,21 fixed actual sources and three prior references. A
+separately recorded moving resume document does not alter production pins.
+Private receipt source extraction now owns only Local executor and its
+local_authority_contract_test in an isolated `87be37e7` worktree. No VM or test
+result is claimed. One added T15 receipt decoder row tracks this work.
+The next full check stays disabled until reviewed source slices are rejoined;
+this sequences checks without waiving or repeating a recorded full attempt.
+T01–T19 originals: 78 done/95 todo/6 retired; added: 299 done/21 todo.
+Including T00 originals: 78/101/7, added: 303/22. T15 added: 17 done/6 todo.
+
 ## Current artifact-use decoder joined, 2026-10-05
 
 The bounded T15 artifact decoder row is complete at tested clean source
@@ -13280,6 +13304,7 @@ open.
 
 ### Added implementation subtasks
 
+- [ ] Extract one private captured-byte Local receipt decoder shared with live reads; preserve the native current 28-field ETF schema, 65,536-byte cap, exact raw job binding, closed predicates and all claim/finality/job/recovery authority. Replace the injected decoder seam with actual bounded BIF proof and actual writer/hostile controls on both supported pairs; physical receipt capture and complete history audit remain separate.
 - [ ] Enumerate the complete current Local generation/marker/open namespace under one original restore IO guardian; require exact physical name membership, current marker-plane grammar, open cardinality/whole-byte bounds and source/job/digest relations. Preserve actual writer crash cuts and claim observations; complete receipts/Store/job/history/restore certification remains separate.
 - [x] Extract the current Local artifact-use captured-byte decoder with the existing 131,072-byte ceiling, exact canonical bytes and filename digest; reuse the existing ArtifactStore facade through a private captured-bytes handle for closed reference-bound admission. Prove actual writers, deleted-source decoding, opaque identities, hostile bytes and existing semantic negatives on both pairs; physical capture, object bytes and complete history relations remain separate.
 - [x] Capture one canonical current Local generation, admission, refusal or open ledger file through the guardian-owned restore IO worker; bind exact descriptor, pathname, raw job identity, original source placement and role ceiling before decode; prove actual current writers, hostile physical captures and unchanged cleanup on both pairs. Complete ledger enumeration, receipt/Store/artifact relations and restore activation remain separate.

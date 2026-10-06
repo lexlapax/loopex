@@ -96,6 +96,17 @@ One original guardian/cutoff, exact current writers/crash cuts and private
 structural bounds. No synthetic authority, claim reclamation, public contract,
 receipt/Store/history certification, VM, formatter, test or network work.
 This develops the existing incomplete backup/restore outcome; no row closes.
+Candidate `0c4b805d9269c773830ee8536a60b8560a36b528` is committed cleanly.
+Root read the complete four-path delta, report, runner proposal and nonce proof;
+independently verified 44 listed sealed artifacts plus their inventory,
+32 actual/Git/mode sources and 85 unchanged original case bodies. Independent
+review found no other blocker. The exact-size proof is held: installed OTP
+`external_size` documentation promises an upper bound, while the packet proves
+only the omitted nonce's 69 bytes. Root authorized a source-only replacement
+with `byte_size(term_to_binary(five_member_observation, [:deterministic])) + 69`.
+Live encoding retains its actual claim nonce. Worker must retain `0c` and seal a
+new correction, followed by independent review before a disabled runner grant.
+No VM, formatter or test has run for enumeration.
 
 LATEST ARTIFACT PROOF: handle24595 is terminal exit zero, collected and sealed;
 exclusive VM slot returned. Both pairs pass focused29/0 and Store105/0, no
@@ -122,9 +133,25 @@ packet `4b61611414a808ce3fd6cc4c9024083fafdff179dd2c4e95cd7ff77de2021b65`.
 Exact reviewed initiald18, frozen e8 finding and disabledv1/v2/v3/finalv4 remain
 retained. Final v4 runner841b83f0/config8bdad8c5 have no further grant. Canonical
 artifact stage registry has35 consumed keys; do not reset it or repeat stages.
-No verification VM currently runs. Root owns m7 push/clean merged worktree and
-local/remote topic cleanup next. Ledger enumeration remains isolated source-only.
-Private agent owns read-only receipt-decoder inventory, no source or VM grant.
+No verification VM currently runs. Source/evidence push87be37e7 completed;
+the clean merged artifact worktree and local/remote topic branches are removed.
+Ledger enumeration remains isolated source-only.
+
+RECEIPT SOURCE: root read the full sealed inventory report and concrete boundary;
+verified four sealed files, 22 Git/mode inputs, 21 fixed actual inputs and three
+prior references. Moving resume documentation has separate retained hashes.
+Report `f5e73d591faaa0adcea70643b7a411480ffcc4c6b6c7d86066bb7bd1fb570b9c`;
+input inventory `8759ef5d71295426a18c749e9b80c6fc25fdf39f361e456d8e8877baaec6ea4d`.
+Private agent now owns source-only extraction in isolated
+`/private/tmp/loopex-m7-receipt-captured-decoding`, branch
+`codex/m7-receipt-captured-decoding`, base `87be37e7`. Exactly Local executor.ex
+and local_authority_contract_test.exs are authorized. Preserve native 28-field
+ETF, 65536 cap, live raw-job equality, claim/finality, 17 job comparisons and
+separate solicited Core recovery. Replace injected decoder proof with actual
+bounded arity-only BIF trace and positive control; preserve other assertions
+and deadlines. Actual-writer bytes and hostile captured-byte controls remain
+pending. No VM, formatter, test, push or primary source edit is granted.
+Stop after committed source/pins/report or a material decision.
 
 PRIOR FULL-CHECK REGISTRY: root read and verified five packet artifacts,116
 inputs,78 Git source/toolchain identities,17 supplemental actual logs and75
@@ -150,7 +177,11 @@ unchanged. Runner changes only explicit malformed-summary refusal. Runner digest
 helper `51d8030cd1e7cc7bc6a24c0b837585e92a76c114a7c0ab7cae1de8df51ac7843`.
 Final source, populations and exact canonical attempt-registry pins remain pending.
 Registry seeding is now complete as recorded above.
-No execution is enabled. Startup and Ledger are now joined;
+No execution is enabled. Batch the source-reviewed Ledger enumeration slice
+before the next full integration candidate to avoid immediately repeating the
+full suite for another source change. This is sequencing only: every required
+check remains, no recorded source is rerun, and final populations/pins wait for
+verified rejoin. Startup and the single-file Ledger capture are now joined;
 expected Core1324/10 and Composition635/3 supersede the draft's initial
 Composition623/3; Local296/2 and CLI635/6 remain prospective. Store is now105/0 after paired artifact proof and exact source rejoin. A read-only Docker
 platform/image inventory found the daemon unavailable; no app, container or
