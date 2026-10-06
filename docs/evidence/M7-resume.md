@@ -27,61 +27,54 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
-Built-chat corrected source `e06acd5eaa2f892389179086966ab6493a41f04b`
-is running under root original60433, output
-`M7/built-chat-focused-20261006-v2`. The sole product VM is busy; do not start
-another product command until that original is terminal and collected.
-Runner `/private/tmp/m7-built-chat-focused-run-v2.py`, SHA
-`b2e8854915194d2e1fa3d36db2337653d454931d65758c924c882d07f9ebf2f3`,
-uses the complete842-key seed and the existing retained process engine.
-Independent review found no source blocker in raw17bbc6; root formatting proved
-whole-file non-line AST equality and made clean047de720. Original22058 then
-FAILED after123.368 seconds: current compilation passed and9/10 focused cases
-passed, but the built test inspected root/state while its LOOPEX_HOME override
-selected root/home. Removed fixture files supply no observed alternate-root
-claim. Source review confirms the accepted env-over-file precedence. Root's sole
-child e06acd5e aligns that one temporary environment value with root/state and
-preserves every assertion. No same-source retry or floor PASS is claimed.
-Collection `M7/built-chat-focused-20261006-v1/original-collection.json`, SHA
-`05c6cbbba5fbeeae27ee88c62d81dbca0f22973c219bcdb469bd2b4a17bc4856`,
-verifies37 artifacts,9 original process joins and the complete842-key registry,
-SHA `dbcad40ad3c2a786e5816b5d68afe27db82412e2cc841b89ee586c2332090c48`.
-Original22058 is fully collected and must not be repolled. No row closes.
+Original T06.2 and T06.4 are complete. The new built-command test is copied
+literally from tested source `a5c9ea85c59983f913e3ef3a08f4047506983710`,
+file SHA-256 `ea3339c833cb9e6cb5b2199172aedc7a40b94e30924313ba0ff1838a7e6eaf73`.
+All unowned implementation bytes equal the tested source; intervening primary
+commits changed only this checkpoint and the task ledger. Current and floor
+focused runs each executed all ten selected cases, with zero failures, skipped
+or excluded cases. Ordinary controlled HTTP/build binding is the scope; hosted,
+attended and production companion/archive proofs remain open.
 
-The already reviewed T15 claim-release source is saved in clean isolated
-`d6347049`, sole child ofb83725bd, with all four actual files matching the sealed
-22-row packet. Independent source report SHA
-`14ca0c9a9bbedae910eaecb70e2235b575b82fd97e8489dcada6e824f0351164`.
-It is unformatted, untested and unjoined; no new restore workstream is assigned.
-All source agents are stopped. T06.2/T06.4 may close only after both-pair focused
-proof and literal integration; hosted/attended T06.7 and required T16 proofs
-remain separately open. Original78/95/6 and added302/39 are unchanged.
+Current original95113 completed native success, exit0 and ten passed, after
+126.246 seconds overall. Its wrapper retained FAIL_OR_UNAVAILABLE because it
+compared an absent `selected` member; the parsed population was already exact.
+The original remains immutable. Repository suite-summary judgment confirmed ten;
+selected is independently ten executed plus zero excluded/skipped. Floor-only
+original92829 then passed all four previously unexecuted stages after127.14
+seconds overall. Neither original may be repolled; no current test was rerun.
+Current collection `M7/built-chat-focused-20261006-v4/original-collection.json`,
+SHA `bdee627528e4c9fcaac7501c09099989c085d3b5e8e548d4784cd7a33663cdb9`,
+verifies37 artifacts and9 original process joins. Floor collection
+`M7/built-chat-floor-20261006-v1/original-collection.json`, SHA
+`1385c9a20571c2f4564288bf30c1547505fa973f7182309b89b8aa84acae6171`,
+verifies21 artifacts and4 original process joins. The floor output also retains
+`current-original-rejudgment.json` and the complete870-key registry, SHA
+`eed3c95dee98a284cee7f0d558d252139e3b72ed3e0718f55f12860123e2240e`.
+Earlier originals22058/60433/74670 remain fully collected failures. Their exact
+fixture root, transcript and rendered-instruction corrections changed no product
+code or bounds. The rejected v4 runner preflight admitted no product stage;
+its erroneous expected engine digest and exact correction are retained separately.
 
-The maintainer asked to prioritize completing original tasks over further
-restore decomposition. Next is the complete configured built-chat workflow for
-T06: two prompts, clean quit, restart by retained session identity after changing
-file defaults, and a third prompt using retained history and instructions.
-The ordinary built-process proof and required hosted/attended acceptance remain
-distinct. Do not add another restore workstream beyond the assigned claim-release
-correction. `authored_bounds_review` now owns the new
-`apps/loopex_cli/test/chat_built_workflow_test.exs` in the isolated
-`/private/tmp/loopex-m7-built-chat-workflow`, branch
-`codex/m7-built-chat-workflow`, based on `3c242017`. It uses existing
-ProviderIsolationFixture and compile-time ProviderLaunch binding with the
-original LoopexCli.main; no public endpoint field or driver injection.
-The concise source-only design is
-`/private/tmp/loopex-m7-built-chat-witness-design-20261006-v1.md`.
-Observe every provider child at its own settled barrier because fixture marker
-files are overwritten by the next call. Use one absolute process cutoff.
-Root alone commits, formats and runs the resulting test.
+Next original capability work is the independently reviewed literal `/abort`
+case in clean isolated `f31f9f5f31046fdf96f5b2564e00cc17b39538cb`, worktree
+`/private/tmp/loopex-m7-chat-abort`, based on primary cfd3a0a1. One107-line
+addition owns only `apps/loopex_cli/test/chat_driver_test.exs`; all old test/helper
+and product bytes are literal. Raw file SHA
+`c2dc185d8885f789eeabc20cca9362fe9859452657668feeb5496cf43288584f`.
+Independent report `/private/tmp/m7-chat-abort-review.md`, SHA
+`c30c7326342d9475f0c6f7e01de8e054bc95da545abd6f8f341ce3280c8576af`,
+finds no source blocker. Root must format, compile and run the complete42-case
+file on both pairs, integrate it, then run one full current fast check on the
+clean integration candidate. T06.3/.5/.6 remain open until their mapped proof;
+T06.7 and required T16 real-path/release/load obligations stay separately open.
+No original task was replaced or added. Original80/93/6; added302/39.
 
-The already assigned claim-release writer has stopped with four owned dirty
-paths at baseb837. Its sealed source report is
-`/private/tmp/loopex-m7-retained-claim-release-source-20261006-v1/report.md`,
-SHA `d306650468d2e99599c25979fc31fe475b04ff628b63736cd224fba88fe2d0dc`;
-index SHA `cf784fad406c3227d4d9ec4ff33b1e049e1b7c9ec051139081e859d7c244d8b3`.
-Nineteen prospective cases remain unrun. `neutral_revision_source_audit` reviews
-that existing correction only; no new restore workstream or proof claim.
+The existing T15 claim-release correction remains saved in clean isolated
+d6347049, unformatted/untested/unjoined. No new restore workstream is assigned.
+T05's bounded next-unit map identifies approved configure routing and the still
+Proposed0054/0055 full-generation barriers; it grants no acceptance or activation.
+All source agents are stopped. The product VM is free after collected92829.
 
 Latest finalization formatter original79544 is terminal and fully collected,
 FAIL after44.903 seconds. All three whole-file non-line AST comparisons passed;

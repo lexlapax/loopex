@@ -1,23 +1,22 @@
 # M7 Implementation Tasks
 
-Built-chat original22058 is fully collected FAIL123.368s, current9/10 with
-warning-free project compilation and floor unrun. The new case reached two
-successful prompts/quit before inspecting the wrong temporary state root.
-Independent source review identifies the fixture's LOOPEX_HOME-over-file
-precedence mismatch. Root committed the exact one-literal correction as isolated
-e06acd5e; original60433 now verifies it on both toolchains. All assertions and
-prior failures remain. Collection identities and live handle are in the
-[restart checkpoint](M7-resume.md#technical-depth). Reviewed T15 claim-release
-source is saved at isolatedd6347049, untested/unjoined. No row closes yet.
-Original T01–T19 remains78 done/95 todo/6 retired; added302 done/39 todo.
+Original T06.2 and T06.4 are complete. The literally integrated built-command
+witness passed all ten selected ordinary cases on both supported toolchains:
+two prompts, fresh-process resume after changed file defaults, exact retained
+instruction bytes/history/tools/settings, and malformed startup with no new
+session or dispatch. No case was skipped or excluded. Current native success
+was preserved despite a runner comparison of an absent selected-count member;
+the repository judge confirmed ten and the floor-only continuation ran each
+previously unexecuted stage once. Earlier fixture failures remain retained.
+Proof references and source identities are in the
+[restart checkpoint](M7-resume.md#technical-depth).
+Original T01–T19: 80 done / 93 todo / 6 retired; added: 302 done / 39 todo.
 
-The maintainer directed work back to completing original task outcomes.
-Next is T06's configured built-command conversation: two prompts, clean quit,
-restart after changed file defaults, and retained history/instructions. A bounded
-source-only design uses existing provider/build edges. Required hosted and
-attended acceptance stays distinct; component/source proofs do not close it.
-Keep the already assigned T15 claim-release correction bounded and do not add
-further restore workstreams in place of original capability completion.
+Next, verify the independently reviewed direct `/abort` case saved at isolated
+f31f9f5f, integrate it, and run the full current fast check for the remaining
+ordinary T06 rows. Hosted/attended T06.7 and required T16 proofs remain open.
+The existing T15 correction is saved at isolated d6347049, untested/unjoined;
+no further restore workstream replaces original capability completion.
 
 Finalization formatter original79544 failed after44.903 seconds and is fully
 collected. Three whole-file non-line AST proofs passed; one multiline call failed
@@ -13243,9 +13242,9 @@ or check was relaxed.
 ### Original checklist
 
 - [x] Add loopex chat through the existing session/runtime facade.
-- [ ] Join explicit configuration, continuity and instructions.
+- [x] Join explicit configuration, continuity and instructions.
 - [ ] Support prompts, status, wait, abort, bounded output and truthful shutdown.
-- [ ] Prove two prompts and restart through the built command.
+- [x] Prove two prompts and restart through the built command.
 - [ ] Preserve existing ask, durable-run and embedded workflows.
 - [ ] Test startup refusal, admission failure, output and cleanup.
 - [ ] Later retain the required attended multi-prompt proof.
