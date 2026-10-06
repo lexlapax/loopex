@@ -27,6 +27,34 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current proof, execution and source ownership
 
+ROOT VM OCCUPIED by original34176, frozen cleanup-notification runtime at
+`f9ac9c82818c5de8e70a1f32a068e8dd0f1768f3`. Enabled packet
+`M7/cleanup-notification-focused-runtime-runner-20261006-v1`, config SHA-256
+`9a15518813b9135227bc0aac361a1d0550059d291ccb4d2cfbea055daaeda529`;
+root admission review `49074eca04d88a42a3ce07866acb3a85cbe0f8f61f0fa43657598af4a6b2b755`.
+Output `M7/m7-cleanup-notification-focused-runtime-v1`. Exact eight test lanes
+run43 cases per pair/22 stages, including original preparation long case,
+zero skips. Root verified33 disabled artifacts,29 references and145 Git inputs.
+No terminal runtime result exists yet. Collect this original before freeing
+the slot, changing source or admitting another run; do not replay its keys.
+
+Original53663 is fully collected PASS_FORMAT_PREPARATION_ONLY147.462s,
+12 stages,74 retained artifacts,145 actual/Git inputs and12 original joins.
+Both owned whole-file ASTs and both format checks pass; its sole-parentf9 child
+formats only the new test. Collection
+`M7/cleanup-notification-format-original-collection-20261006-v1.json`
+SHA-256 `073b9ea8ba3a56245c00c2b703fb399348069edb22c74b569a9a5f4b3c3ff08d`.
+Latest registry613 keys, SHA-256
+`3dbf65068166083d99b0214d328d56b3a4324240adecf0adfa06c6d28ece1540`.
+Never repoll53663. Formatting establishes no cleanup or full-check PASS.
+
+Generation1a8cc8d9 passed independent source review only, report SHA-256
+`b808e23890ddfc6a2d61d2035b245a2919da71fcd1be29ca7e12c8264f4a7547`.
+The protocol assembly's disabled formatter is prepared; a worker independently
+reviews its21 product paths while other workers investigate exact retained
+candidate-prefix continuation and helper-ledger accounting gaps. They run no
+VMs and grant no execution. Original and added task counts remain unchanged.
+
 ROOT VM OCCUPIED by original53663, cleanup-notification formatting at exact
 `1bd9d59f9675885358e2757e0834845b6a49dbcd`. Enabled packet
 `M7/cleanup-notification-format-runner-20261006-v1`, config SHA-256
