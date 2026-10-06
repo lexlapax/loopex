@@ -27,6 +27,31 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current proof, execution and source ownership
 
+ACTIVE EXCLUSIVE DIAGNOSTIC RUN, 2026-10-06: root original exec77347
+owns the only verification VM. No other agent may compile/test/format while
+it is active. Frozen source is clean32ef. Root reviewed30 packet artifacts,
+20 external pins,35 actual/Git sources and full source/parent NUL trees;
+eleven lifecycle functions plus source admission and shared helpers match
+the earlier modern formatter. Enabled packet
+`M7/private-task-diagnostic-runner-20261006-v3` config is
+`03b4b018401d343b471d644bf82cb024600df043ffe0a8fab6190a07675a4074`, root inventory
+`e0a19463dfc70ba1c2bbfca4e1fb3073639d21c5458541483f1f1085e0be78f4`.
+Source-review report
+`M7/private-task-diagnostic-source-review-32ef-20261006-v1/report.md` is
+`da20a76b7d5947872efaea954d65c017e2d08cf735408d485211e9de17e170a5`.
+Fresh output `M7/m7-private-task-diagnostic-v1` and separate registry
+`M7/private-task-diagnostic-stage-attempt-registry.json` preserve320 historical
+keys. Current then floor: tool/Node, warning-free dev/test compilation,
+matrix and focused3 diagnostic cases only. First failure stops successors.
+No formatter repeat, ordinary/full suite or broad T16 claim. All actual
+sink files produced before a failed test are retained; unproduced or
+incomplete observations remain unavailable. Original test exits never change.
+One enable-author metadata failure happened before any durable mutation/VM:
+32ef already has four valid collected formatter keys. The corrected seed
+check rejects only the twelve proposed runtime keys and preserves all320
+historical keys; original author and correction are retained in the packet.
+Root alone collects77347; do not poll it from a worker. Task counts unchanged.
+
 LATEST COLLECTION, 2026-10-06: root original 97342 is fully collected,
 exit 0 after 36.797 seconds. Eight formatter stages passed on current and
 floor toolchains; no formatting diff or child exists. Clean source remains
