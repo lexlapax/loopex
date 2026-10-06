@@ -27,6 +27,37 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Latest Store integration and next verification
 
+CURRENT EXECUTION: the reviewed startup correction is committed and pushed at
+`559017602d06d74e3bf73104ec5b5c068e09aac2`. Root read its complete map-only
+source delta and runner pin-only delta, verified five source and seven runner
+artifacts, 13 actual/Git/mode records, unchanged helpers and the new output
+absence. The worker `private_task_causal_resume` has the sole VM grant for
+runner digest `e548b76d3a4c19f6aff2f03a66379faba72f82788e8dee2b0757845779a50e10`
+and fresh sibling `M7/runtime-preparation-startup-execution-20261005-v2`.
+Handle is pending launch. No other VM or same-source retry is authorized.
+Earlier first-failure results below remain immutable.
+
+NEXT SOURCE: `current_index_cleanup` owns only restore IO source/test in
+`/private/tmp/loopex-m7-ledger-capture-audit`, branch
+`codex/m7-ledger-capture-audit`, base `d79d171f`. It may implement one private
+physical Local ledger file capture under the accepted restore contract, using
+current four-role byte decoders and existing guardian ownership. It has no VM
+grant. Root read its complete proposal, verified 16 exact source/Git records
+and 18 artifact records/modes. Proposal sibling
+`M7/ledger-capture-slice-inventory-20261005-v1/report.md` digest
+`8f21c2c78ff4b05fcda7fb9992089e7d33302c19504d584a612b530b5272adf3`.
+Complete enumeration, receipt/history/artifact relations and activation stay
+open; no public or persistent schema changes are authorized. The original
+physical-manifest row remains open for its unavailable Linux native-name proof;
+later integrated IO verification covers its supported-platform cases.
+
+The ledger capture assignment adds one explicit T15 subtask. Current T01–T19
+originals remain 78 done / 95 todo / 6 retired; added 296 done / 21 todo.
+Including T00: originals 78 / 101 / 7, added 300 / 22. No completed row was
+reopened. A read-only combined current full-fast runner packet is also assigned
+to `cli_current_fixtures`; candidate pin and execution wait for root review and
+startup verification. No paid/provider lane is authorized.
+
 LATEST: Resource physical capture is proved and joined through
 c137b2ce7a7656ea1d165494f69a3cac5c1b7126, tested clean source
 3ecf76623ab2a47fe7edc612135b6529c66634c8. Handle54345 is terminal exit0,

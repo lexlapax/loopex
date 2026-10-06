@@ -13144,6 +13144,7 @@ open.
 
 ### Added implementation subtasks
 
+- [ ] Capture one canonical current Local generation, admission, refusal or open ledger file through the guardian-owned restore IO worker; bind exact descriptor, pathname, raw job identity, original source placement and role ceiling before decode; prove actual current writers, hostile physical captures and unchanged cleanup on both pairs. Complete ledger enumeration, receipt/Store/artifact relations and restore activation remain separate.
 - [x] Audit every declared current Store history through the existing owned IO worker, enforcing descriptor/path/hash identity, complete transaction replay and recovery of every session; prove actual retained unknown truth, faults and cleanup on both pairs without claiming scripted executors prove OS effects.
 - [x] Capture one exact retained Resource manifest or provenance record through the existing guardian-owned restore IO worker, binding canonical pathname/identity to the physical manifest, enforcing its raw ceiling before open/read, revalidating descriptors and ancestors, and proving current writers, hostile captures and unchanged cleanup on both pairs. Complete catalog/reference orchestration remains separate.
 - [x] Decode retained current resource manifest/provenance bytes under derived physical ceilings before parsing, preserve exact normalization/content/Git identities and deterministic bytes, and prove actual current writers, hostile bytes and real decoder-entry controls on both pairs. Whole catalog capture/reference/backup orchestration remains separate.
