@@ -107,6 +107,7 @@ pairing, link, review, code-documentation, and enforcement contracts.
 | 0053 — current configure request | [Decision](adr/0053-current-configure-request.md#concept) | [Technical depth](adr/0053-current-configure-request-technical.md#technical-depth) |
 | 0054 — compaction activity progress | [Decision](adr/0054-compaction-activity-progress.md#concept) | [Technical depth](adr/0054-compaction-activity-progress-technical.md#technical-depth) |
 | 0055 — remote session creation options | [Decision](adr/0055-remote-session-creation-options.md#concept) | [Technical depth](adr/0055-remote-session-creation-options-technical.md#technical-depth) |
+| 0056 — host helper ledger byte recipe | [Decision](adr/0056-host-helper-ledger-recipe.md#concept) | [Technical depth](adr/0056-host-helper-ledger-recipe-technical.md#technical-depth) |
 
 An ADR pair is one decision. Its status and governance record live in the
 Concept file and bind both files when accepted.

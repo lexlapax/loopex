@@ -27,6 +27,22 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current proof, execution and source ownership
 
+ROOT VM FREE after original72925 fully collected PASS_DOCUMENTATION_CHECK_ONLY,
+68.034 seconds, one current/docs-check stage at clean corrected Proposed0056
+`f3fc594becea5fe659ecb7a4af383286aa407824`. All four repository docs steps passed;
+29 artifacts, complete1,121 Git/live records and one original process join verified.
+Collection `M7/helper-ledger-recipe-docs-original-collection-20261006-v1.json`
+`4b0b66eb97680c34807716c782af47f0a595f79c53f4057d3619933b9e91f71d`;
+latest complete724-key registry
+`318bd4516c40a72f982d23be005ddade04b7387f6f8faca367b44f1078bc4d08`.
+Never repoll72925. Root copies the two literal reviewed f3 Proposed0056 files,
+appending only their index rows and preserving accepted0053. Its proposal review
+49c17036 and docs-runner review498f673b remain distinct; no acceptance follows.
+Maintainer's next one-at-a-time question is0054 at3c33a2ca;0055/0056 remain queued.
+Independent source reviews run for Core9f2b4e2d and disabled generation nativev2
+at9d744079 (v1 authoring constants/label error is retained, never enablev1).
+Checklist unchanged; previous occupancy and0053-pending records are historical.
+
 Maintainer accepted ADR0053 option1, exact `changes` pair at838cf0e3, on
 2026-10-06. Acceptance is recorded in its Concept/status index and context-map
 disposition; Technical bytes remain literal. Dependent transport implementation

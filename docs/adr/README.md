@@ -65,6 +65,7 @@ a decision adds a new record rather than rewriting the old one.
 | 0053 | Current configure request | Accepted | [Decision](0053-current-configure-request.md#concept) | [Technical depth](0053-current-configure-request-technical.md#technical-depth) |
 | 0054 | Compaction activity progress | Proposed | [Decision](0054-compaction-activity-progress.md#concept) | [Technical depth](0054-compaction-activity-progress-technical.md#technical-depth) |
 | 0055 | Remote session creation options | Proposed | [Decision](0055-remote-session-creation-options.md#concept) | [Technical depth](0055-remote-session-creation-options-technical.md#technical-depth) |
+| 0056 | Host helper ledger byte recipe | Proposed | [Decision](0056-host-helper-ledger-recipe.md#concept) | [Technical depth](0056-host-helper-ledger-recipe-technical.md#technical-depth) |
 
 0001 and 0002 were the prerequisites that unblocked the first milestone
 candidate; the [plans register](../plans/README.md) records current status.
