@@ -602,7 +602,7 @@ defmodule LoopexComposition.RestoreWorkflowTest do
       expected = if unquote(ancestor) == :nondirectory, do: :enotdir, else: :enoent
       assert File.lstat(fixture.source) == {:error, expected}
       owned = launch(fixture.plan)
-      assert_preintent_refusal(owned, fixture, "inventory_unavailable")
+      assert_preintent_refusal(owned, fixture, "inventory_unavailable", [], expected)
     end
   end
 
@@ -872,7 +872,17 @@ defmodule LoopexComposition.RestoreWorkflowTest do
     %{fixture | plan: plan}
   end
 
-  defp assert_preintent_refusal(owned, fixture, code, events \\ []) do
+  # Concept: pre-intent refusal leaves no acquired claim behind.
+  # Technical depth: a lost source never acquires its source claim. Its absent
+  # pathname reports ENOTDIR beneath the deliberately nondirectory ancestor;
+  # the destination claim must still report ENOENT.
+  defp assert_preintent_refusal(
+         owned,
+         fixture,
+         code,
+         events \\ [],
+         source_claim_error \\ :enoent
+       ) do
     {result, _events} = finish(owned, events)
 
     assert {:joined, {:ok, %{restore_result: {:not_committed, ^code}, release_claims: []}},
@@ -883,7 +893,9 @@ defmodule LoopexComposition.RestoreWorkflowTest do
     assert File.ls!(fixture.destination) == []
     assert File.lstat(Path.join(fixture.destination, ".loopex-restore")) == {:error, :enoent}
     assert manifest(fixture.backup) == fixture.baseline
-    assert Enum.all?(claims(fixture.plan), &(File.lstat(&1) == {:error, :enoent}))
+    [source_claim, destination_claim] = claims(fixture.plan)
+    assert File.lstat(source_claim) == {:error, source_claim_error}
+    assert File.lstat(destination_claim) == {:error, :enoent}
     exact_joins(owned)
   end
 

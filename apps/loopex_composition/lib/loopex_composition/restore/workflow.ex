@@ -548,7 +548,8 @@ defmodule LoopexComposition.Restore.Workflow do
     end)
   end
 
-  defp prefixes(relative), do: relative |> Path.split() |> Enum.scan(&Path.join/2)
+  defp prefixes(relative),
+    do: relative |> Path.split() |> Enum.scan(fn component, parent -> Path.join(parent, component) end)
 
   defp publish!(root, relative, bytes, io) do
     path = Path.join(root, relative)
