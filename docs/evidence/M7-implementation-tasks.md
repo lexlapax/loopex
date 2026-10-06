@@ -1,5 +1,10 @@
 # M7 Implementation Tasks
 
+Boundary formatter86465 PASS56.325s at unchanged5b46, all46ASTs/bothsamefinal
+formatters verified; no native proof yet. Restore native original18936 is running
+at4b7c9249 with22stages/147cases perpair and795seedkeys after independent review.
+Counts unchanged until complete native results and root rejoin.
+
 Corrected boundary original86465 formatter is running at5b46 after independent
 82-row review and full210-row author rehash. Sealed147/pair restore native packet
 is under separate review;420/pair boundary packet awaits actual formatter receipt.
