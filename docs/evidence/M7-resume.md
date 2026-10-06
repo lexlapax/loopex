@@ -28,22 +28,23 @@ physical restore implementation; it does not waive any full-history proof.
 ### Current work and restart order
 
 Continue the existing ACTIVE unlimited goal on `m7`. Do not create another goal.
-Primary previous pushed checkpoint is `3a97256f`; this commit supersedes its
+Primary previous pushed checkpoint is `d6b80a48`; this commit supersedes its
 resume record. Historical detail remains at
 `bdc88a05:docs/evidence/M7-resume.md` and in the task ledger.
 
-Root verification VM is BUSY with original prefix formatter75543 atf2d9bae9.
-Enabled `M7/generation-prefix-format-runner-20261006-v1`, config
-`fc704d45cb366054fcee9be0fcc58c4f0aaffb278a432357af124a3e2dee6fcc`,
-root reviewa0c496c8. Independent formatter report7ec72c32/index856fec5c has56
-rehashed artifacts; root read full author/semantic/formatter reports and all
-120 author artifacts,29 external rows and59 actual/Git facts before admission.
-Latest776 union reconciled. All5 ASTs and both same-final-source formatters
-are required, maximum one sole confined child. Output
-`M7/m7-generation-prefix-format-v1`; root collector
-`/private/tmp/m7-collect-generation-prefix-format-v1.py`, arguments original
-handle, actual outer exit, seed count776. Collect this original handle once;
-never repoll terminal handles or grant another product VM before collection.
+Root verification VM is FREE. Prefix formatter original75543 is fully collected
+PASS_FORMAT_PREPARATION_ONLY60.687s at clean
+`4b7c9249248ffebbadf30d40aed1a2d004bbf40c`, solef2 child. All5 whole-file
+non-line ASTs and both same-final-source current/floor format checks verified;
+73 artifacts,59 actual/Git source entries and11 original joins verified.
+Collection `M7/generation-prefix-format-original-collection-20261006-v1.json`,
+SHA `0b2e71c1c4129e1fa9ca0abe1c07c9a534bdb60e9fc247ea4e1435e78085af35`;
+report `fbe2c4e25dd50e2848b074aa365d359cc7984c576a26e8ca04f4c02cb89306a3`,
+inventory `e1f3d823e370b267a473c18f89c120d8b3b116428c6aea034065ffe4e313939d`.
+Never repoll75543. Its native proof must consume both exact final-format keys.
+`private_task_causal_resume` authors disabled147-case-per-pair native packet at
+`/private/tmp/loopex-m7-generation-prefix-native-runner-4b7c9249-20261006-v1`.
+All execution gates remain unset until independent/root admission. No task closes.
 
 Boundary original93428 is fully collected FAIL53.392s at final formatter child
 `c35ca42dabfec014a04f1e34ba3f253bb766107f`, sole9acf child. All46 whole-file
@@ -64,7 +65,7 @@ claim follows. Primary evidence updates remain disjoint from70-path source unit.
 `private_task_causal_resume` sealed prospective native population420/pair at
 frozen9acf, and verified declarations/generator domains unchanged at5b46.
 Packet `/private/tmp/loopex-m7-current-boundary-native-population-9acf03a3-20261006-v1`,
-report77b42195/index800275c3; root must read/rehash before native admission.
+report77b42195/index800275c3; root read full report and rehashed119 artifacts.
 Core318, Protocol ordinary28/7excluded plusNode7/28excluded over same6files,
 foreground36, daemon31. No native execution or final formatted-source admission.
 
@@ -252,9 +253,9 @@ proposal review49c17036 and docs proof below; no acceptance follows.
 ### Latest complete evidence and attempt union
 
 Evidence base is `/Users/spuri/projects/lexlapax/loopex-evidence/M7`.
-Latest fully collected registry has776 keys:
-`current-boundary-format-v1-stage-attempt-registry.json`, SHA
-`8d85a34d58cae2c5bf8935217dd3348c540f14cf3ce1e749df61542d4d70a4b1`.
+Latest fully collected registry has787 keys:
+`generation-prefix-format-v1-stage-attempt-registry.json`, SHA
+`509b3b6ddb4dfa3f0c62e1dbc51e83568f3bb76264abcc9b781041c1d0f6bfbf`.
 Reconcile every retained registry into the same unique exact(source,pair,stage)
 union before any fresh grant. A source child is not permission to reroll a case.
 
