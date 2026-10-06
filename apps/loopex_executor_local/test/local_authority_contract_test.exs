@@ -1292,8 +1292,8 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
     <<131, output_key::binary>> = :erlang.term_to_binary(:output, [:deterministic])
 
     unknown_atom_bytes =
-      <<131, 116, pair_count + 1::unsigned-32, published_pairs::binary, output_key::binary,
-        119, byte_size(atom_name), atom_name::binary>>
+      <<131, 116, pair_count + 1::unsigned-32, published_pairs::binary, output_key::binary, 119,
+        byte_size(atom_name), atom_name::binary>>
 
     assert byte_size(unknown_atom_bytes) <= 65_536
 
@@ -1338,6 +1338,7 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
 
           :artifact ->
             File.write!(Path.join(fixture.workspace, "captured.txt"), :binary.copy("x", 1_024))
+
             {"loopex.read", "read_only", %{"path" => "captured.txt"},
              %{"max_output_bytes" => 128}}
         end
@@ -1417,25 +1418,26 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
     bytes = File.read!(Path.join(fixture.ledger, sha256(request.job_id) <> ".receipt"))
     assert {:ok, ^receipt} = Local.decode_receipt_bytes(bytes)
 
-    malformed = [
-      %{receipt | child_environment_names: ["PATH" | :invalid]},
-      %{receipt | child_environment_names: [["PATH" | :invalid]]},
-      %{receipt | artifacts: [%{} | :invalid]},
-      %{receipt | artifacts: [[%{} | :invalid]]},
-      %{receipt | artifacts: [%{digest: ["x" | :invalid]}]},
-      %{receipt | output: self()},
-      %{receipt | operation_id: make_ref()},
-      %{receipt | output: fn -> :invalid end},
-      %{receipt | job_id: ""},
-      %{receipt | protocol_version: 2},
-      %{receipt | canonical_request_digest: "INVALID"},
-      %{receipt | cleanup_confirmation: :unconfirmed, outcome: :completed},
-      %{receipt | receipt_retention_bound_ms: receipt.receipt_retention_bound_ms + 1},
-      %{receipt | effective_deadline_ms: receipt.run_deadline_ms + 1},
-      %{receipt | tool_version: "superseded"},
-      %{receipt | provider_credential_present: true},
-      Map.put(receipt, :unknown, true)
-    ] ++ Enum.map(Map.keys(receipt), &Map.delete(receipt, &1))
+    malformed =
+      [
+        %{receipt | child_environment_names: ["PATH" | :invalid]},
+        %{receipt | child_environment_names: [["PATH" | :invalid]]},
+        %{receipt | artifacts: [%{} | :invalid]},
+        %{receipt | artifacts: [[%{} | :invalid]]},
+        %{receipt | artifacts: [%{digest: ["x" | :invalid]}]},
+        %{receipt | output: self()},
+        %{receipt | operation_id: make_ref()},
+        %{receipt | output: fn -> :invalid end},
+        %{receipt | job_id: ""},
+        %{receipt | protocol_version: 2},
+        %{receipt | canonical_request_digest: "INVALID"},
+        %{receipt | cleanup_confirmation: :unconfirmed, outcome: :completed},
+        %{receipt | receipt_retention_bound_ms: receipt.receipt_retention_bound_ms + 1},
+        %{receipt | effective_deadline_ms: receipt.run_deadline_ms + 1},
+        %{receipt | tool_version: "superseded"},
+        %{receipt | provider_credential_present: true},
+        Map.put(receipt, :unknown, true)
+      ] ++ Enum.map(Map.keys(receipt), &Map.delete(receipt, &1))
 
     for value <- malformed do
       assert Local.decode_receipt_bytes(:erlang.term_to_binary(value, [:deterministic])) ==
