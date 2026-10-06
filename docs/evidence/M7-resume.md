@@ -56,9 +56,11 @@ T01–T19 originals78done/95todo/6retired; added299done/36todo.
 Root's transport source checkpoint is nowca84db9c, adding closed model-ending
 calls, unverified/unrejoined pending the allocated codecb53de021. That codec
 has271 unexecuted terminal vectors and preserves requested141; it still needs
-independent root review and both-pair focused proof. ADR0054 stays Proposed;
-ADR0055aa87 needs revision for exact concurrent-create admission and positive
-Store absence semantics. Configure0053 remains the only question asked so far.
+independent root review and both-pair focused proof. ADR0054 stays Proposed. Root reviewed the exact revised ADR0055 pairf1f0fb3a,
+including explicit concurrent-create refusals, bounded pre-session ownership and
+a startup-captured read-only Store absence probe. Its literal pair and index
+rows are retained here as Proposed, with no dependent implementation or human
+question yet. Configure0053 remains the only question asked so far.
 All three agents have separate source/proposal worktrees; root owns the VM.
 
 Earlier execution entries below are retained history.
