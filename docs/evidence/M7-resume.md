@@ -27,6 +27,25 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current proof, execution and source ownership
 
+ROOT VM OCCUPIED by original58629, launched once for the frozened550 handoff
+and adjacent runtime selections. Enabled packet
+`M7/retained-claim-handoff-focused-runtime-runner-20261006-v1`, config SHA-256
+`1e4b0ea6d0e53dd0f28d4da7fbd0cabb49dcf632c99a955f58e3666708dd33bc`;
+root source review `c3b575c33eabddcc99c143e02d25c56f2632b1eb121bcf390db620a6daa35226`.
+The four explicit lanes per pair are34 handoff,17 pending,10 construction and16
+publication, with test compilation under warnings as errors;14 stages total.
+Output `M7/m7-retained-claim-handoff-focused-runtime-v1`. No terminal result
+exists at this checkpoint. Join and collect the original handle before freeing
+the slot or inspecting its terminal report; never launch a second attempt.
+
+Parallel source work now uses separate worktrees: current-index owns model
+terminal codecs/vectors in `/private/tmp/loopex-m7-model-terminal-codec`;
+cli owns same-worker source retirement continuation in
+`/private/tmp/loopex-m7-retained-source-retirement`; private-task prepares the
+remote creation ADR0055. Root independently read Proposed ADR0054 and copied
+its exact pair/index rows here; no dependent progress implementation or
+acceptance follows. Configure0053 remains the single pending human question.
+
 ROOT VM FREE after original87718, fully collected
 PASS_FORMAT_PREPARATION_ONLY52.902s/11stages. The three retained claim-handoff
 files have exact whole-file non-line AST equality and one confined sole-parent

@@ -63,6 +63,7 @@ a decision adds a new record rather than rewriting the old one.
 | 0051 | Current-format physical restore | Accepted | [Decision](0051-current-format-physical-restore.md#concept) | [Technical depth](0051-current-format-physical-restore-technical.md#technical-depth) |
 | 0052 | Policy interaction public events | Accepted | [Decision](0052-policy-interaction-public-events.md#concept) | [Technical depth](0052-policy-interaction-public-events-technical.md#technical-depth) |
 | 0053 | Current configure request | Proposed | [Decision](0053-current-configure-request.md#concept) | [Technical depth](0053-current-configure-request-technical.md#technical-depth) |
+| 0054 | Compaction activity progress | Proposed | [Decision](0054-compaction-activity-progress.md#concept) | [Technical depth](0054-compaction-activity-progress-technical.md#technical-depth) |
 
 0001 and 0002 were the prerequisites that unblocked the first milestone
 candidate; the [plans register](../plans/README.md) records current status.
