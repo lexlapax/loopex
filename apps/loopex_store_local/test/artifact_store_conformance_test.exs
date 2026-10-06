@@ -589,6 +589,7 @@ defmodule Loopex.Store.Local.ArtifactStoreConformanceTest do
 
     for {reference, use, bytes} <- captures do
       assert {:ok, ^use} = Artifacts.decode_use_bytes(bytes, reference.use_digest)
+
       assert {:ok, ^use} =
                describe_artifact(Artifacts, captured_use_handle(bytes, reference), reference)
     end
@@ -611,17 +612,22 @@ defmodule Loopex.Store.Local.ArtifactStoreConformanceTest do
     over_metadata = metadata_for_exact_use_size(seed, 131_073)
     over = Canonical.encode(["artifact-use-v2", expected_use(seed, over_metadata)])
     assert byte_size(over) == 131_073
+
     assert {:error, :artifact_use_too_large} =
              put_artifact(Artifacts, handle, object_bytes, over_metadata)
+
     assert File.read!(path) == bytes
     assert File.stat!(path).mode == mode
     File.rm_rf!(root)
 
     assert {{:ok, ^use}, 1} = observed_use_decode(bytes, reference.use_digest)
+
     assert {{:error, :artifact_integrity_failed}, 0} =
              observed_use_decode(over, Canonical.digest_bytes(over))
+
     assert {:ok, ^use} =
              describe_artifact(Artifacts, captured_use_handle(bytes, reference), reference)
+
     refute File.exists?(root)
   end
 
@@ -633,11 +639,18 @@ defmodule Loopex.Store.Local.ArtifactStoreConformanceTest do
     [tag, {:loopex_map, pairs}] = :erlang.binary_to_term(bytes, [:safe])
     File.rm_rf!(root)
 
-    compressed = :erlang.term_to_binary([tag, {:loopex_map, pairs}], [:compressed, :deterministic])
+    compressed =
+      :erlang.term_to_binary([tag, {:loopex_map, pairs}], [:compressed, :deterministic])
+
     assert <<131, 80, _::binary>> = compressed
 
-    early = [compressed, Canonical.encode(use), Canonical.encode([tag]),
-             Canonical.encode([tag, use, use]), :binary.copy(<<0>>, 131_073)]
+    early = [
+      compressed,
+      Canonical.encode(use),
+      Canonical.encode([tag]),
+      Canonical.encode([tag, use, use]),
+      :binary.copy(<<0>>, 131_073)
+    ]
 
     for hostile <- early do
       assert {{:error, :artifact_integrity_failed}, 0} =
@@ -648,9 +661,10 @@ defmodule Loopex.Store.Local.ArtifactStoreConformanceTest do
       assert {{:error, :artifact_integrity_failed}, 0} = observed_use_decode(bytes, digest)
     end
 
-    nonplain = Enum.map(pairs, fn {key, value} ->
-      {key, if(key == :object_locator, do: self(), else: value)}
-    end)
+    nonplain =
+      Enum.map(pairs, fn {key, value} ->
+        {key, if(key == :object_locator, do: self(), else: value)}
+      end)
 
     improper_shapes = [
       [hd(pairs) | 0],
@@ -674,12 +688,15 @@ defmodule Loopex.Store.Local.ArtifactStoreConformanceTest do
       :erlang.term_to_binary([tag, {:loopex_map, nonplain}], [:deterministic])
     ]
 
-    decoded = decoded ++ Enum.map(improper_shapes, fn shape ->
-      :erlang.term_to_binary([tag, {:loopex_map, shape}], [:deterministic])
-    end)
+    decoded =
+      decoded ++
+        Enum.map(improper_shapes, fn shape ->
+          :erlang.term_to_binary([tag, {:loopex_map, shape}], [:deterministic])
+        end)
 
     for hostile <- decoded do
       assert <<131, 108, 2::unsigned-big-32, _::binary>> = hostile
+
       assert {{:error, :artifact_integrity_failed}, 1} =
                observed_use_decode(hostile, Canonical.digest_bytes(hostile))
     end
@@ -687,10 +704,15 @@ defmodule Loopex.Store.Local.ArtifactStoreConformanceTest do
     unknown = "loopex_artifact_use_unknown_#{System.unique_integer([:positive])}"
     assert_raise ArgumentError, fn -> String.to_existing_atom(unknown) end
     <<131, tag_bytes::binary>> = :erlang.term_to_binary(tag, [:deterministic])
-    hostile = <<131, 108, 2::unsigned-big-32>> <> tag_bytes <>
-                <<119, byte_size(unknown)>> <> unknown <> <<106>>
+
+    hostile =
+      <<131, 108, 2::unsigned-big-32>> <>
+        tag_bytes <>
+        <<119, byte_size(unknown)>> <> unknown <> <<106>>
+
     assert {{:error, :artifact_integrity_failed}, 1} =
              observed_use_decode(hostile, Canonical.digest_bytes(hostile))
+
     assert_raise ArgumentError, fn -> String.to_existing_atom(unknown) end
     assert {{:ok, ^use}, 1} = observed_use_decode(bytes, reference.use_digest)
   end
@@ -706,18 +728,33 @@ defmodule Loopex.Store.Local.ArtifactStoreConformanceTest do
     digest = Canonical.digest_bytes(replacement)
     refute digest == reference.use_digest
     File.write!(path, replacement)
-    assert {:error, :artifact_integrity_failed} = Artifacts.describe(handle, reference.use_locator)
+
+    assert {:error, :artifact_integrity_failed} =
+             Artifacts.describe(handle, reference.use_locator)
+
     assert File.read!(path) == replacement
+
     assert {:error, :artifact_integrity_failed} =
              Artifacts.decode_use_bytes(bytes, String.duplicate("0", 64))
+
     assert {:error, :artifact_integrity_failed} =
-             Artifacts.describe(captured_use_handle(replacement, reference), reference.use_locator)
+             Artifacts.describe(
+               captured_use_handle(replacement, reference),
+               reference.use_locator
+             )
+
     assert {:error, :unknown_artifact_use} =
-             Artifacts.describe({:captured_artifact_use, bytes, reference.use_digest}, "use:" <> digest)
+             Artifacts.describe(
+               {:captured_artifact_use, bytes, reference.use_digest},
+               "use:" <> digest
+             )
+
     assert {:error, :unknown_artifact_use} = Artifacts.describe(%{}, reference.use_locator)
     File.rm_rf!(root)
+
     assert {:ok, ^use} =
              describe_artifact(Artifacts, captured_use_handle(bytes, reference), reference)
+
     refute File.exists?(root)
   end
 
@@ -728,23 +765,25 @@ defmodule Loopex.Store.Local.ArtifactStoreConformanceTest do
     bytes = File.read!(local_use_path(handle, use))
     File.rm_rf!(root)
 
-    changed_uses = [
-      Map.put(use, :extra, true),
-      Map.delete(use, :metadata),
-      %{use | canonicalization_version: "loopex.canonical.future"},
-      %{use | object_digest: String.duplicate("a", 64)},
-      %{use | object_size: use.object_size + 1},
-      %{use | object_locator: "different-object"},
-      %{use | media_type: "text/plain"},
-      %{use | role: "input"},
-      %{use | media_type: :invalid_media_type},
-      %{use | metadata: Map.put(use.metadata, "extra", true)},
-      %{use | metadata: Map.delete(use.metadata, "attempt")},
-      %{use | metadata: %{use.metadata | "attempt" => 0}},
-      %{use | metadata: %{use.metadata | "run_id" => :existing_atom}}
-    ] ++ Enum.map(~w(session_id run_id operation_id tool_call_id), fn field ->
-      %{use | metadata: Map.put(use.metadata, field, "")}
-    end)
+    changed_uses =
+      [
+        Map.put(use, :extra, true),
+        Map.delete(use, :metadata),
+        %{use | canonicalization_version: "loopex.canonical.future"},
+        %{use | object_digest: String.duplicate("a", 64)},
+        %{use | object_size: use.object_size + 1},
+        %{use | object_locator: "different-object"},
+        %{use | media_type: "text/plain"},
+        %{use | role: "input"},
+        %{use | media_type: :invalid_media_type},
+        %{use | metadata: Map.put(use.metadata, "extra", true)},
+        %{use | metadata: Map.delete(use.metadata, "attempt")},
+        %{use | metadata: %{use.metadata | "attempt" => 0}},
+        %{use | metadata: %{use.metadata | "run_id" => :existing_atom}}
+      ] ++
+        Enum.map(~w(session_id run_id operation_id tool_call_id), fn field ->
+          %{use | metadata: Map.put(use.metadata, field, "")}
+        end)
 
     for changed <- changed_uses do
       captured = Canonical.encode(["artifact-use-v2", changed])
@@ -752,7 +791,10 @@ defmodule Loopex.Store.Local.ArtifactStoreConformanceTest do
       selected = %{reference | use_digest: digest, use_locator: "use:" <> digest}
       assert ArtifactStore.valid_reference?(selected)
       assert {:ok, ^changed} = Artifacts.decode_use_bytes(captured, digest)
-      assert {:ok, ^changed} = Artifacts.describe(captured_use_handle(captured, selected), selected.use_locator)
+
+      assert {:ok, ^changed} =
+               Artifacts.describe(captured_use_handle(captured, selected), selected.use_locator)
+
       assert {:error, :artifact_use_mismatch} =
                describe_artifact(Artifacts, captured_use_handle(captured, selected), selected)
     end
@@ -764,6 +806,7 @@ defmodule Loopex.Store.Local.ArtifactStoreConformanceTest do
           %{reference | media_type: "text/plain"}
         ] do
       assert ArtifactStore.valid_reference?(changed)
+
       assert {:error, :artifact_use_mismatch} =
                describe_artifact(Artifacts, captured_use_handle(bytes, reference), changed)
     end
@@ -778,13 +821,20 @@ defmodule Loopex.Store.Local.ArtifactStoreConformanceTest do
                describe_artifact(Artifacts, captured_use_handle(bytes, reference), changed)
     end
 
-    substituted = %{reference | use_digest: String.duplicate("0", 64),
-                                 use_locator: "use:" <> String.duplicate("0", 64)}
+    substituted = %{
+      reference
+      | use_digest: String.duplicate("0", 64),
+        use_locator: "use:" <> String.duplicate("0", 64)
+    }
+
     assert ArtifactStore.valid_reference?(substituted)
+
     assert {:error, :unknown_artifact_use} =
              describe_artifact(Artifacts, captured_use_handle(bytes, reference), substituted)
+
     assert {:ok, ^use} =
              describe_artifact(Artifacts, captured_use_handle(bytes, reference), reference)
+
     refute File.exists?(root)
   end
 
@@ -800,17 +850,20 @@ defmodule Loopex.Store.Local.ArtifactStoreConformanceTest do
     cutoff = System.monotonic_time(:millisecond) + 1_000
     pattern = {:erlang, :binary_to_term, 2}
 
-    {worker, monitor} = spawn_monitor(fn ->
-      receive do
-        {^tag, :decode} ->
-          send(parent, {tag, Artifacts.decode_use_bytes(bytes, digest)})
-          receive do
-            {^tag, :stop} -> :ok
-          end
+    {worker, monitor} =
+      spawn_monitor(fn ->
+        receive do
+          {^tag, :decode} ->
+            send(parent, {tag, Artifacts.decode_use_bytes(bytes, digest)})
 
-        {^tag, :stop} -> :ok
-      end
-    end)
+            receive do
+              {^tag, :stop} -> :ok
+            end
+
+          {^tag, :stop} ->
+            :ok
+        end
+      end)
 
     try do
       assert :erlang.trace_pattern(pattern, true, []) == 1
@@ -826,8 +879,11 @@ defmodule Loopex.Store.Local.ArtifactStoreConformanceTest do
       send(worker, {tag, :stop})
 
       receive do
-        {:DOWN, ^monitor, :process, ^worker, :normal} -> :ok
-        {:DOWN, ^monitor, :process, ^worker, reason} -> flunk("decode observer worker failed: #{inspect(reason)}")
+        {:DOWN, ^monitor, :process, ^worker, :normal} ->
+          :ok
+
+        {:DOWN, ^monitor, :process, ^worker, reason} ->
+          flunk("decode observer worker failed: #{inspect(reason)}")
       after
         max(0, cutoff - System.monotonic_time(:millisecond)) ->
           Process.exit(worker, :kill)
@@ -840,7 +896,9 @@ defmodule Loopex.Store.Local.ArtifactStoreConformanceTest do
     receive do
       {:trace, ^worker, :call, {:erlang, :binary_to_term, 2}} ->
         collect_use_decode(worker, tag, cutoff, count + 1)
-      {^tag, result} -> {result, count}
+
+      {^tag, result} ->
+        {result, count}
     after
       max(0, cutoff - System.monotonic_time(:millisecond)) ->
         flunk("captured use decoder did not report before its cutoff")
@@ -851,7 +909,9 @@ defmodule Loopex.Store.Local.ArtifactStoreConformanceTest do
     receive do
       {:trace, ^worker, :call, {:erlang, :binary_to_term, 2}} ->
         finish_use_decode_trace(worker, delivery, cutoff, count + 1)
-      {:trace_delivered, ^worker, ^delivery} -> count
+
+      {:trace_delivered, ^worker, ^delivery} ->
+        count
     after
       max(0, cutoff - System.monotonic_time(:millisecond)) ->
         flunk("captured use decode trace did not drain before its cutoff")
