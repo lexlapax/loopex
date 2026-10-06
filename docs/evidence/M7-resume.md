@@ -27,6 +27,51 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current proof, execution and source ownership
 
+CURRENT RUNTIME GRANT, 2026-10-06: root reviewed the complete disabled
+39-case runner delta and all final packet/source/external inventories, then
+enabled `M7/lineage-boundary-success-runner-20261006-v4` for frozen clean
+`93739dc270a201e6c936272d99a7ea24cf00c71e`. Config is
+`f718046217393267d9d54177716a2016ceaf35c6748aa2865e4a8bd8c893d3d0`, root
+inventory `13622bc60d88bf924bf21c98d533cdcae3079fc6a3a3d462f109a7166f85fcde`.
+Root source review `root-source-review.md` is
+`ed1d5ad7f3523ff08fb4de82226bf50dd08b398d118b349e8a85037ca9152857`.
+The fresh `M7/lineage-boundary-success-stage-attempt-registry.json` seeds all
+289 unique keys from fourteen unchanged canonical predecessor registries;
+seed digest is `f57647f990019e84e425773482fa78e8a4890d266e437212e1ad212897dbd6e7`.
+Fresh output is `M7/m7-lineage-boundary-success-v1`. Grant covers one
+66-stage current-then-floor campaign, 12 lanes per pair, first failure stops
+successors. Workflow is 39/0, ordinary Composition 716/4; all other lanes
+retain their populations and bounds, zero skips. No formatter, historical
+negative/consumer repeat, provider, full-fast/release, Linux, export or rejoin.
+Root alone launches and collects the original handle. No runtime result yet.
+Disabled v3's earlier metadata-selector authoring failures remain separately
+retained; they started no VM and changed no product source.
+
+Public lookup inspection found five source defects at frozen f470; report
+`/private/tmp/loopex-m7-public-lookup-source-inspection-f470f3e6-20261006-v1/report.md`
+is `0dcf12073add613d875e6e646117ee5e5cc666f52e43ca3874ed9edb32e434a0`, inventory
+`83c0b90e047f519b28301dc28bdc61e358d563f4ac89130810a6dccdfcf404c1`.
+They concern ledger capture identity, cumulative physical validation under
+pending transitions, foreign claims, temporary-record phase mapping and
+actual empty directory-prefix cuts. Baseline.tmp without intent already
+takes the conservative pending branch; no missing-baseline relaxation is
+needed after intent. Private-task owns source fixes and added genuine-writer
+controls in `/private/tmp/loopex-m7-restore-public-lookup-fixes`, branch
+`codex/m7-restore-public-lookup-fixes`, based on f470. Same four paths only;
+preserve all existing cases and cutoffs. Commit before rejoin; no VM,
+formatter/compiler/tests/runner/push is granted. No contract decision needed.
+
+T16 disabled formatter proposal is sealed at
+`/private/tmp/loopex-m7-private-task-format-runner-f04b8f63-20261006-v2`,
+run `f53fa3ff32d392636d23e02f0a66dfc60e2e38657ef310f1e0d3a851657a0734`,
+config `e39dec930f99ad508dbd78b31a2159478546381d5e836a9438914539a1e9a2ab`,
+inventory `b3df6cf64f763fd358c42678468bfacf5705850a569336b69416a311e5addb56`.
+It pins 35 current Core/authority inputs and three ordinary witness cases;
+all grants/output/registry remain unset. The template's unavailable restore
+references and first metadata-authoring failure are retained honestly.
+Root review and execution remain pending behind the runtime slot.
+Task totals remain unchanged; no source-only proof row was closed.
+
 BOUNDARY FORMATTER COLLECTED, 2026-10-06: root original handle 30821 is
 fully collected, exit 0 after 47.197 seconds. Eleven stages passed; the one
 complete-file AST comparison and current/floor formatting checks passed.
