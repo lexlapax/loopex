@@ -405,6 +405,93 @@ defmodule Loopex.Executor.Local.RestoreGuard do
     end
   end
 
+  # Concept: pending intake validates retained identity without reclaiming it.
+  # Technical depth: reuse the complete captured lookup reducer, then bind the
+  # supplied canonical plan and host's prior-admin evidence to the actual claim.
+  # Returned intent bytes are the original candidates, never replacement epochs.
+  @doc false
+  def pending_captured(root, plan, invocation, index, files, placements, claim) do
+    tx_id = plan["tx_id"]
+
+    with {:ok, _} <- RestoreCodec.encode(:plan, plan),
+         {:ok, _} <- RestoreCodec.encode(:invocation, invocation),
+         {:ok, digest} <- RestoreCodec.plan_digest(plan),
+         {:pending, observation} <-
+           lookup_captured(root, tx_id, index, files, placements, claim) do
+      try do
+        role = if root == plan["destination_state_root"], do: "destination", else: "source"
+
+        lookup_ensure!(
+          root == plan["destination_state_root"] or
+            (plan["source_status"] == "available" and root == plan["source_state_root"]),
+          "restore_conflict"
+        )
+
+        lookup_ensure!(
+          not is_nil(claim) and claim["tx_id"] == tx_id and claim["plan_digest"] == digest and
+            claim["state_root"] == root and claim["role"] == role,
+          "restore_conflict"
+        )
+
+        if role == "source",
+          do: lookup_ensure!(placements[root] == plan["source_state_placement"],
+            "physical_destination_changed")
+
+        {intent, baseline} =
+          if is_nil(observation["ordinal"]) do
+            {nil, nil}
+          else
+            directory = Path.join([@root_admin, "lineage", ordinal(observation["ordinal"])])
+            bytes = files[Path.join(directory, "intent")] || files[Path.join(directory, "intent.tmp")]
+            {:ok, decoded} = RestoreCodec.decode(:intent, bytes)
+            lookup_ensure!(decoded["plan"] == plan and decoded["plan_digest"] == digest,
+              "restore_conflict")
+            baseline = files[Path.join(directory, "baseline")]
+
+            if role == "destination" do
+              {:ok, entries} = RestoreCodec.manifest(baseline, invocation["max_total_file_bytes"])
+
+              Enum.each(decoded["generations"], fn candidate ->
+                path = Path.join(candidate["relative_root"], "generation")
+                original = candidate["source_generation_bytes"]
+                installed = candidate["destination_generation_bytes"]
+                allowed =
+                  case observation["phase"] do
+                    phase when phase in ["destination_intent", "source_retirement"] -> [original]
+                    "destination_generations" -> [original, installed]
+                    _ -> [installed]
+                  end
+
+                lookup_ensure!(files[path] in allowed, "restore_history_invalid")
+                entry = Enum.find(entries, &(&1["path"] == path))
+                lookup_ensure!(not is_nil(entry) and index[path]["mode"] == entry["mode"],
+                  "restore_history_invalid")
+              end)
+            end
+
+            {bytes, baseline}
+          end
+
+        # This is a host assertion about every previous admin actor/resource.
+        # Captured filesystem bytes and this invocation's joins cannot prove it.
+        if invocation["prior_admin_authority"] in ["joined", "host_rebooted"] and
+             not is_nil(invocation["prior_admin_evidence_sha256"]) do
+          {:pending, %{observation: observation, intent: intent, baseline: baseline, claim: claim}}
+        else
+          {:error, :authority_unconfirmed}
+        end
+      rescue
+        _error in [MatchError, KeyError, ArgumentError] ->
+          lookup_failure(tx_id, "restore_history_invalid")
+      catch
+        {:lookup_refusal, code} -> lookup_failure(tx_id, code)
+      end
+    else
+      {:error, _} = failure -> failure
+      _ -> lookup_failure(tx_id, "restore_conflict")
+    end
+  end
+
   defp lookup_absent_or_claim(tx_id, nil),
     do: {:absent, %{"tx_id" => tx_id, "observation" => "not_present"}}
 

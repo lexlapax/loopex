@@ -20,6 +20,70 @@ defmodule LoopexComposition.Restore.Workflow do
   alias LoopexComposition.Restore.Audit
   alias LoopexComposition.WorkspaceIdentity
 
+  # Concept: intake preserves an unfinished original transaction without acting on it.
+  # Technical depth: both claims and their canonical candidates are captured by
+  # this callback's original IO owner. Joined/rebooted host evidence is mandatory;
+  # no reclaim, sync, copy, publication or candidate allocation follows intake.
+  @doc false
+  def pending_intake(plan, invocation, io) do
+    phase(io, "claim")
+    ensure!(plan["prior_restore_count"] < 64, "inventory_limit_exceeded")
+    destination = plan["destination_state_root"]
+    retained = pending!(destination, plan, invocation, io)
+    value!(io.({:restore_observation_facts, retained.observation}))
+    workspace!(plan, value!(io.({:placement, plan["workspace"]["root"]})))
+
+    source =
+      if plan["source_status"] == "available" do
+        pending!(plan["source_state_root"], plan, invocation, io)
+      else
+        value!(io.({:lost_source_absent, plan["source_state_root"]}))
+        nil
+      end
+
+    if source && source.intent,
+      do: ensure!(source.intent == retained.intent, "restore_conflict")
+
+    if is_nil(retained.intent) do
+      # A partial staging copy is not an admitted baseline. This unit accepts
+      # only the complete unchanged pre-intent cut; later prefix handling owns
+      # staged administrative temporaries and publication continuation.
+      max_total = invocation["max_total_file_bytes"]
+      baseline = value!(io.({:manifest, plan["backup_state_root"], max_total}))
+      ensure!(hash(baseline) == plan["manifest_sha256"], "inventory_mismatch")
+      ensure!(value!(io.({:manifest, destination, max_total})) == baseline, "inventory_mismatch")
+
+      if source,
+        do: ensure!(value!(io.({:manifest, plan["source_state_root"], max_total})) == baseline,
+          "inventory_mismatch")
+
+      retained = %{retained | baseline: baseline}
+      {:ok, retained}
+    else
+      if source && is_nil(source.intent),
+        do: ensure!(value!(io.({:manifest, plan["source_state_root"],
+          invocation["max_total_file_bytes"]})) == retained.baseline, "inventory_mismatch")
+
+      {:ok, retained}
+    end
+  catch
+    {:restore_refusal, code} -> {:error, code}
+    {:io_error, _} -> {:error, "inventory_unavailable"}
+    {:stopped, _} -> {:error, "inventory_unavailable"}
+  end
+
+  defp pending!(root, plan, invocation, io) do
+    case io.({:restore_pending_capture, root, plan, invocation}) do
+      {:ok, {:pending, retained}} -> retained
+      {:ok, {:error, :authority_unconfirmed}} ->
+        throw({:restore_refusal, "authority_unconfirmed"})
+      {:ok, {:error, %{"code" => "restore_history_invalid"}}} ->
+        throw({:restore_refusal, "invalid_current_history"})
+      {:ok, {:error, %{"code" => code}}} -> throw({:restore_refusal, code})
+      _ -> throw({:restore_refusal, "inventory_unavailable"})
+    end
+  end
+
   @doc false
   def execute(plan, invocation, io) do
     Process.put(:restore_workflow_claims, [])
@@ -134,7 +198,9 @@ defmodule LoopexComposition.Restore.Workflow do
     publish!(destination, Path.join(root_admin, "baseline"), baseline, io)
     Process.put(:restore_workflow_intent, true)
     value!(io.({:intent_may_persist, "destination_intent"}))
+    value!(io.({:restore_intent_facts, plan["prior_restore_count"] + 1, "may_exist"}))
     publish!(destination, Path.join(root_admin, "intent"), compiled.intent, io)
+    value!(io.({:restore_intent_facts, plan["prior_restore_count"] + 1, "validated"}))
 
     phase(io, "source_retirement")
 
