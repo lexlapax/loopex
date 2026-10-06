@@ -27,6 +27,39 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current proof, execution and source ownership
 
+ROOT VM OCCUPIED by original38095 at corrected protocol source
+`717d7074ed79b7be8c977197928a605b1b4df94f`. Enabled nativev3 config
+`9a6f098011ccfd949d5a94e6f570a9ff80f79d19b1c99378de76dfbf2c011bf8`, rootreview
+`e9b9b1ea692789d5496ff2d75dcfbbcadc536771f094293949ab568df548c1bc`;
+output `M7/m7-protocol-cleanup-native-focused-runtime-v3`. Sixteen prospective
+stages include both13-path format checks and78native tests per pair; complete681
+seed. Independent report `3b92f2181d6a4b86d6821cbd50f50c571a4bd93fca9f116ba60dff3d70a55879`,
+inventory `62458375c797d047c244709739e867b7a2c97ce1478207cedd4ab526a15f15bd`
+read and rehashed by root. Collect38095 before another VM grant.
+
+Original35594 fully collected FAIL73.569s/four stages,36 artifacts,53source
+rows and all four original joins. Current compile passes; retirement18/22pass,
+four stale guard assertions fail, both actual payload controls pass. Collection
+`M7/retained-source-retirement-focused-runtime-original-collection-20261006-v4.json`
+`b47251250f223e82c261ac58b618524c229c04c7b561640ec731ec0fb9f97c50`;
+registry681 `c8cd49e8b325c1817cd6961a2221369d17c4e4334fd3ad9a8959b92f436eb64a`.
+Never repoll35594. New sole3e child `a4b14867951a31fbab7f820fc4380493b216456e`
+changes only the ledger assertion to its existing ledger_unavailable wrapper.
+Agent prepares disabledv5 with both format checks and unchanged99case populations.
+
+Independent generation oracle audit `4dca872367efe7edd45c2f9bc82aac8e12bf3a4907a43da5a4c94f9999679498`
+keeps de01 frozen and identifies that same ledger wrapper in two generator
+assertions. Root new clean generation candidate
+`9f17c0264e89ff0020c0bd9c92ec9fbf80bedf5c` in
+`/private/tmp/loopex-m7-generation-native` fixes those exact two assertions and
+joins literal a4 retirement-test bytes;1109 other Git records remain literalde01.
+Source composition record
+`/private/tmp/loopex-m7-generation-native-source-9f17c026-20261006-v1.json`
+`71d7c49b6aa8ea63580e26efba01c91ed9c114df8a0a3a5e0c046d77a95c300a`.
+Generation42-case proof and formatter remain unexecuted. Core bounds writer
+continues separately. No task closes; earlier execution records are historical.
+
+
 ROOT VM OCCUPIED by original35594, retirement native v4 at exact clean
 `3e77431d004b2220ebdb79720fc8beeafd355755`. Enabled
 `M7/retained-source-retirement-focused-runtime-runner-20261006-v4`, config
