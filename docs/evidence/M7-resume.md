@@ -27,6 +27,59 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current proof, execution and source ownership
 
+LATEST SOURCE REJOIN, 2026-10-06: verification VM remains FREE. Root owns clean
+`fd523a570a216865de480aaf6c93820dfe0eaf8f` in
+`/private/tmp/loopex-m7-restore-intake-candidate`, branch
+`codex/m7-restore-intake-candidate`. Chain3da→95693b72→2dc13cb3→fd523a57 combines
+lookup repairs and pending-intake unit1. One IO formatting conflict retained the
+exact reviewed pending lookup/classification block. CLI independently reviews
+the rejoin; current-index prepares only a disabled five-file formatter packet.
+No formatter, compiler or runtime test has run on this candidate. All earlier
+source checkouts stay clean/frozen; no private branch was pushed.
+
+Original eleven lookup failures are mapped in
+`/private/tmp/loopex-m7-lookup-failure-diagnosis-3da1dcdb-20261006-v1/report.md`,
+SHA `02a883346413fe7b43a5d21bd4d970444765bf2e387ca372d081619701557ad2`.
+Five arise from applying today's physical root to copied complete ordinals;
+four from ignoring the exact terminal-release worker at a directory-sync pause;
+one from admitting a missing dependent proof beneath root commitment. The
+remaining foreign-claim refusal passed, but rewriting its owner risks captured
+identity; the exact failed stat component was not retained and stays unattributed.
+Root's956 repair preserves historical proof validation, requires dependent
+ledger proofs, admits only an owned release worker and swaps a real hostile
+claim directory while leaving the original owner untouched. Independent review
+found an introduced late-monitor race in rename-only fixtures; direct child2dc
+captures release monitors only behind an actual directory-sync pause.
+Independent2dc review found no remaining bounded source blocker:
+`/private/tmp/loopex-m7-lookup-correction-review-2dc13cb3-20261006-v1/report.md`,
+SHA `1685b6021ea08d99e2ac21b2102100bd06d9a9dffef467a16243eb25a6c5d015`.
+All38 cases, original assertions and deadlines remain. Original22595 stays FAIL.
+
+Pending-intake source unit1 is clean01e64b56eca114e7a629c1e71ed8322e7c8e100e
+in its separate writer. Four owned paths retain closed terminal observations
+and validate the original plan/claims/candidates under captured IO; no reclaim,
+allocation, publication or public facade is added. Source packet
+`/private/tmp/loopex-m7-restore-pending-intake-source-01e64b56-20261006-v2/report.md`
+is `a04c3c2c0bfec90af2f7d73a6b62d839fb39c0c3d75627dceed506180ef14dd4`.
+Root bounded source review is
+`/private/tmp/loopex-m7-pending-intake-root-review-01e64b56-v1/report.md`, SHA
+`beea8822cbd9f17f837138513c8e018b007ec17d5008f975f77bfd2739e4e4c6`.
+Seventeen new ordinary cases are prospective only. Root verified16 artifacts
+and22 actual Git inputs; no VM ran. Claim-loss observations preserve actual
+admitted claim state, and the old exact evidence.restore projection remains.
+
+Diagnostic4f2 independent review disposed prior R1 but found R2 native queue
+ordering and R3 premature owner termination after an intermediate membership
+list. Report
+`/private/tmp/loopex-m7-private-task-cleanup-order-r1-review-4f2dd8ef-20261006-v1/report.md`
+is `c388ca2ad8bf8a49b0bac1afd52776a1cc955095b58970a1a552ec89d8003e73`.
+Private-task owns a source-only direct child51cd31bb642d1538b12044c7a26761485edbf0be
+that awaits native absence within the same selected deadline and repairs the
+new witness. Its packet/review are pending. A live native control does not
+claim deterministic intermediate-branch coverage when none occurred. No VM,
+new deadline, old-test change or broader approval is granted. Task totals remain
+unchanged; no source-only work closes T15/T16.
+
 LATEST COLLECTION, 2026-10-06: root22595 is fully collected, exit1 after
 320.204s and12 current-toolchain stages. The verification VM is FREE. Project
 development/test compilation and structural gates passed. Focused IO passed
