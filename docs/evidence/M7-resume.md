@@ -27,6 +27,45 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current proof, execution and source ownership
 
+CURRENT BOUNDARY FORMATTER GRANT, 2026-10-06: root integrated the two
+source-only boundary fixtures as clean `5c3e9b77c5d95f5dd98deeda64c4528de3fb4286`,
+sole parent edee, in `/private/tmp/loopex-m7-restore-boundary-integration`.
+Workflow population is 39/0; all prior 37 cases and IO bytes remain.
+Root and the default independent source inspector found no concrete blocker;
+runtime feasibility and refusal relevance remain unproved. The attempted
+release-reviewer role could not inspect under the available write sandbox;
+it issued no findings or approval. Intermediate default inspection supplies
+source findings only, not the milestone's eventual independent review.
+
+Root reviewed and enabled the separate one-file formatter packet
+`M7/lineage-boundary-format-runner-20261006-v2`, config
+`2632fab236fd61f5c45548c9162de4eb394f0d3f6cffa2877a704582bd37f2e9`,
+root inventory `af7cc83c00cea5aa617823d2059347a6cd55d28e3b0192b6779669a08dfefd97`.
+Combined source report is
+`M7/lineage-boundary-combined-source-review-5c3e-20261006-v1/report.md`,
+`fc2441fc66311ac4e9cd6570ed8cb163d6756ea2796e289ec987b1bbf63748b8`;
+its inventory is `c7936d0a75d7ffb915d5bbe57015a2075da0a7d6696c8124e177cd94d54274dc`.
+The eleven-stage grant permits one current complete-file AST comparison,
+at most one formatting child, then current/floor checks of the same bytes.
+Fresh output is `M7/m7-lineage-boundary-format-v1`; fresh registry is
+`M7/lineage-boundary-format-stage-attempt-registry.json`. Root alone owns
+execution and original-handle collection. No compiler or tests are granted.
+The disabled 37-case runtime proposal was never executed; adapt a new
+39-case proposal after collecting this formatter, rather than running both.
+
+T16 source-only current-Core witness is retained separately at clean
+`f04b8f634e49686d8b4f837c701451c495bbce24` in
+`/private/tmp/loopex-m7-private-task-current-witness`, child of b3d8, itself
+a sole child of primary 0301. The three-case b3d8 fixture exactly preserved
+the earlier 6a39 witness. The f04 child adds Logger producer identity and
+requires its matching original actor DOWN, after retaining evidence and
+before unchanged quiet assertions. Caps, the original cutoff and all joins
+remain. Latest delta inspection is pending; no VM or tests ran. Earlier
+failed witness evidence remains failed. Primary source has not rejoined it.
+The maintainer's repeated "approve 1000 ms" reconfirms only the diagnostic
+setup disposition already retained in the context map; it changes no
+production deadline or other queued decision. Task totals are unchanged.
+
 CURRENT COLLECTED FORMATTER, 2026-10-06: original root handle 46796 is
 fully collected, exit 0 after 46.438 seconds. All eleven stages passed, including
 five complete-file NON_LINE_AST_EQUAL rows and current/floor formatting. Clean
