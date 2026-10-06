@@ -74,7 +74,20 @@ The existing T15 claim-release correction remains saved in clean isolated
 d6347049, unformatted/untested/unjoined. No new restore workstream is assigned.
 T05's bounded next-unit map identifies approved configure routing and the still
 Proposed0054/0055 full-generation barriers; it grants no acceptance or activation.
-All source agents are stopped. The product VM is free after collected92829.
+All source agents are stopped. The sole product VM now belongs to root
+original68691, running `/private/tmp/m7-chat-abort-focused-run.py` against
+f31f9f5f in the isolated chat-abort worktree. Output
+`M7/chat-abort-focused-20261006-v1`; complete870-key seed as recorded above.
+Collect that exact original once before changing its source or starting another
+product VM. No T06.3 closure is claimed yet.
+
+The built-chat integration and original-row updates are committed on primary
+`c697773cae2ccfa24c0a969a3ade4c2a30915234`. Composite proof
+`M7/built-chat-floor-20261006-v1/both-pair-proof.json`, SHA
+`4111f6bf66a75e8585dd095870f499def64cfa55d90724e979d24470936aa3b7`,
+binds both original collections, current rejudgment, literal test bytes and the
+independent original-row assessment. Push original34782 is fully collected, exit0; origin/m7 confirmed c697773c.
+Do not repoll that terminal handle.
 
 Latest finalization formatter original79544 is terminal and fully collected,
 FAIL after44.903 seconds. All three whole-file non-line AST comparisons passed;
