@@ -27,6 +27,27 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current proof, execution and source ownership
 
+LATEST SOURCE REVIEW AND NEXT PROOFS, 2026-10-06: root read the full independent
+eee5 source review, which found no additional blocker with the known prefix
+repair rejoined. Retained exact report
+`M7/successive-lineage-independent-review-eee5df42-20261006-v1/report.md`,
+SHA-256 `e48ae6378bfaa12f1bc8d399b73035bf743d0f190c7b692201c0dae9414047a6`,
+inventory `d5010c2d53cde622b531d05e85c119fa0cdcb1bbc6f80ebc1431db0c9f9f274f`.
+No runtime success follows from review. Current-index owns only a disabled
+five-path formatter proposal for clean combined c63d, with all 37 workflow
+cases and the complete IO test retained. No VM execution is active.
+
+Added two open T15 proof rows making accepted boundary obligations explicit:
+64 actual successive restores and a fully rebound historical omission. These
+add no contract or scope. CLI owns only restore_workflow_test.exs in isolated
+`/private/tmp/loopex-m7-restore-lineage-boundary-fixtures`, branch
+`codex/m7-restore-lineage-boundary-fixtures`, based on c63d. It must preserve
+all 37 cases and the 10,000-ms work, 1,000-ms grace, 16-MiB total and existing
+test timeout. Source-only work is authorized; no formatter, compiler, VM,
+test, runner, export or rejoin. Root owns verification and integration.
+T01–T19 counts are now originals 78/95/6, added 298/32; T00-inclusive counts
+are originals 78/101/7, added 302/33. T15 added is 16 done/16 todo.
+
 LATEST INTEGRATION SOURCE, 2026-10-06: clean
 `c63d6aa398f0401c684177af52f1d5842d587774` in
 `/private/tmp/loopex-m7-restore-successive-integration`, branch
