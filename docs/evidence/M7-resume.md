@@ -28,11 +28,30 @@ physical restore implementation; it does not waive any full-history proof.
 ### Current work and restart order
 
 Continue the existing ACTIVE unlimited goal on `m7`. Do not create another goal.
-Primary previous pushed checkpoint is `d6b80a48`; this commit supersedes its
+Primary previous pushed checkpoint is `27cc927d`; this commit supersedes its
 resume record. Historical detail remains at
 `bdc88a05:docs/evidence/M7-resume.md` and in the task ledger.
 
-Root verification VM is FREE. Prefix formatter original75543 is fully collected
+Root verification VM is BUSY with original boundary formatter86465 at5b46.
+Enabled `M7/current-boundary-reformat-runner-20261006-v1`, config
+`756073fa0672716904cdcdcae73c80321e4f2d060e8f213e0e24e86710878a47`,
+root reviewc75dddbec. Independent main2630a9c5, Corecarry1d7a2be6 and indexdda1724a
+have82 rehashed artifacts; root read full reports,210 author artifacts and133
+actual/Git facts, all21 external rows, and reconciled787unique attempted keys.
+All46 freshAST comparisons and bothfinalformatchecks required. Output
+`M7/m7-current-boundary-reformat-v1`; collector
+`/private/tmp/m7-collect-current-boundary-reformat-v1.py` takes original handle
+and actualexit. Collect86465 once before any next product VM; no retries/repolls.
+The disabled restore native147/pair packet is sealed at
+`/private/tmp/loopex-m7-generation-prefix-native-runner-4b7c9249-20261006-v1`,
+reporte0f657b4/indexda4fbf17 (120rows), root read full report/delta and rehashed
+120 artifacts/36 external inputs. `authored_bounds_review` independently reviews
+it; root finalizer is prepared but unexecuted. Both4b7 finalformatterkeys must
+be consumed. `private_task_causal_resume` prepares disabled420/pair boundary
+native packet at5b46, unsealed pending this exact formatter receipt; a new
+formatter child requires explicit rebind. Root alone executes/collects/rejoins.
+
+Historical prefix proof: Prefix formatter original75543 is fully collected
 PASS_FORMAT_PREPARATION_ONLY60.687s at clean
 `4b7c9249248ffebbadf30d40aed1a2d004bbf40c`, solef2 child. All5 whole-file
 non-line ASTs and both same-final-source current/floor format checks verified;

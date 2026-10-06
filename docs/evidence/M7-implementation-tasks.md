@@ -1,5 +1,10 @@
 # M7 Implementation Tasks
 
+Corrected boundary original86465 formatter is running at5b46 after independent
+82-row review and full210-row author rehash. Sealed147/pair restore native packet
+is under separate review;420/pair boundary packet awaits actual formatter receipt.
+Root owns the sole product VM and complete original collection. Counts unchanged.
+
 Prefix formatter original75543 fullycollectedPASS60.687s at4b7c9249, all5ASTs,
 bothsame-final-source supported formatters,73 artifacts/59facts/11joins. Native
 147/pair packet is being authored; formatting closes no original or added item.
