@@ -27,6 +27,29 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current proof, execution and source ownership
 
+ROOT VM OCCUPIED by original53663, cleanup-notification formatting at exact
+`1bd9d59f9675885358e2757e0834845b6a49dbcd`. Enabled packet
+`M7/cleanup-notification-format-runner-20261006-v1`, config SHA-256
+`0ac9021449ab3a661248dd4375fbdb57f22b2a23aaedec008adc80b8d7089f1d`;
+output `M7/m7-cleanup-notification-format-v1`. Root verified36 packet artifacts,
+16 references and145 actual/Git inputs. Root review SHA-256
+`290d5ae708105013a35b1ed621e8bb848f2571a1dc09dd0102f392da72feab68`;
+independent review `dddb9d0a2b18690ccb05c6f478516d199e4199191628a881a2b2c83853795652`.
+No terminal result yet; collect this original handle and all joins before
+freeing the slot. Nine mandatory stages plus up to three confined-child Git
+stages; no compilation/tests or new full-check proof follows from formatting.
+
+Corrective retirement assertion source is frozen atf2b422bc, direct childed40,
+with an intentional AST change preserving the original call and assertions.
+Disabled v2 retirement formatter/runtime packets retain all97 focused cases
+per pair and require actual new formatting proof. Generation1a8cc8d9 is under
+independent source review. Protocol source units have been assembled separately
+at `038401b76cbcff0f2546697354287d9210b64c3d` in
+`/private/tmp/loopex-m7-model-policy-proof-integration`. Twenty paths equal the
+frozen unit bytes; SessionState has identical policy patch hunks on the newer
+primary compaction body. No generation activation, formatting or tests have
+run. A third parallel worker prepares its disabled formatter.
+
 ROOT VM FREE after original67819 was fully collected, exit1 after51.979s.
 Current formatting and whole-file non-line AST equality passed for all three
 retirement paths; floor formatting failed one multiline tuple assertion at
