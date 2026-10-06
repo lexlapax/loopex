@@ -118,11 +118,19 @@ defmodule LoopexComposition.Restore.Workflow do
     phase(io, "claim_release")
     {:ok, %{restore_result: {:committed, compiled.receipt}, release_claims: claims}}
   catch
-    {:restore_refusal, code} ->
-      claims = Process.get(:restore_workflow_claims, [])
-      release = if Process.get(:restore_workflow_changed), do: [], else: claims
-      result = if Process.get(:restore_workflow_intent), do: {:commit_unknown, code}, else: {:not_committed, code}
-      {:ok, %{restore_result: result, release_claims: release}}
+    {:restore_refusal, code} -> refusal(code)
+    {:io_error, _reason} -> refusal("inventory_unavailable")
+  end
+
+  # Concept: a pre-intent IO refusal still releases positively acquired claims.
+  # Technical depth: only the original worker's completed acquisition records
+  # enter this list. The guardian retains partial acquisitions separately and
+  # runs release through its existing terminal owner and captured cutoffs.
+  defp refusal(code) do
+    claims = Process.get(:restore_workflow_claims, [])
+    release = if Process.get(:restore_workflow_changed), do: [], else: claims
+    result = if Process.get(:restore_workflow_intent), do: {:commit_unknown, code}, else: {:not_committed, code}
+    {:ok, %{restore_result: result, release_claims: release}}
   end
 
   defp claims!(plan, io) do

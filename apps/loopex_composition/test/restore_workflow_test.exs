@@ -186,6 +186,111 @@ defmodule LoopexComposition.RestoreWorkflowTest do
     assert original_deadline > System.monotonic_time(:millisecond)
   end
 
+  test "second foreign claim failure releases the fully acquired first claim only", context do
+    fixture = actual_cut(context.root)
+    [first, second] = ordered_claims(fixture.plan)
+    source_before = manifest(fixture.source)
+    destination_before = manifest(fixture.destination)
+    File.mkdir!(second)
+    foreign_owner = Path.join(second, "owner")
+    File.write!(foreign_owner, "foreign claim", [:exclusive])
+    foreign_before = File.lstat!(foreign_owner)
+    owned = launch(fixture.plan)
+    {result, events} = finish(owned)
+    assert {:joined, {:ok, %{restore_result: {:not_committed, "inventory_unavailable"}, release_claims: []}}, evidence} = result
+    assert evidence.claim_count == 0 and evidence.restore.intent == false
+    assert evidence.opens == evidence.closes
+    assert File.lstat(first) == {:error, :enoent}
+    assert File.lstat!(foreign_owner) == foreign_before
+    assert File.read!(foreign_owner) == "foreign claim"
+    assert File.ls!(second) == ["owner"]
+    assert manifest(fixture.source) == source_before
+    assert manifest(fixture.destination) == destination_before
+    assert Enum.any?(events, fn
+      {:acknowledged, _, {:restore_claim_acquired, %{directory: ^first}}, :completed} -> true
+      _ -> false
+    end)
+    assert Enum.any?(events, fn
+      {:acknowledged, _, {:restore_claim_create, %{directory: ^second}}, :foreign} -> true
+      _ -> false
+    end)
+    assert Enum.any?(events, &match?({:acknowledged, _, {:restore_claim_released, ^first}, :completed}, &1))
+    assert Enum.count(events, &match?({:terminal_release_installed, _}, &1)) == 1
+    exact_joins(owned)
+  end
+
+  test "partial second owner publication remains fenced after joined first claim release", context do
+    fixture = actual_cut(context.root)
+    [first, second] = ordered_claims(fixture.plan)
+    source_before = manifest(fixture.source)
+    destination_before = manifest(fixture.destination)
+    owned = launch(fixture.plan)
+    {id, events} = pause_after_claim_create(owned, second, false, [])
+    assert File.dir?(second)
+    assert File.lstat(Path.join(second, "owner")) == {:error, :enoent}
+    collision = Path.join(second, "owner.tmp")
+    File.write!(collision, "partial publication fence", [:exclusive])
+    partial_before = File.lstat!(collision)
+    send(owned.guardian, {:proceed, owned.reference, id})
+    {result, events} = finish(owned, events)
+    assert {:joined, {:ok, %{restore_result: {:not_committed, "inventory_unavailable"}, release_claims: []}}, evidence} = result
+    assert evidence.claim_count == 1 and evidence.restore.intent == false
+    assert evidence.opens == evidence.closes
+    assert File.lstat(first) == {:error, :enoent}
+    assert File.lstat(Path.join(second, "owner")) == {:error, :enoent}
+    assert File.lstat!(collision) == partial_before
+    assert File.read!(collision) == "partial publication fence"
+    assert File.ls!(second) == ["owner.tmp"]
+    assert manifest(fixture.source) == source_before
+    assert manifest(fixture.destination) == destination_before
+    assert Enum.any?(events, fn
+      {:acknowledged, _, {:restore_claim_acquired, %{directory: ^first}}, :completed} -> true
+      _ -> false
+    end)
+    assert Enum.any?(events, &match?({:acknowledged, _, {:open, _}, :error}, &1))
+    refute Enum.any?(events, fn
+      {:acknowledged, _, {:restore_claim_acquired, %{directory: ^second}}, :completed} -> true
+      {:issued, _, {:restore_claim_released, ^second}} -> true
+      _ -> false
+    end)
+    assert Enum.any?(events, &match?({:acknowledged, _, {:restore_claim_released, ^first}, :completed}, &1))
+    assert Enum.count(events, &match?({:terminal_release_installed, _}, &1)) == 1
+    exact_joins(owned)
+  end
+
+  # Concept: the partial-publication control changes only the newly owned claim.
+  # Technical depth: the exact guardian acknowledges second mkdir, then its next
+  # real open is held before creating the exclusive owner.tmp collision. Every
+  # receive spends the same original work/cleanup cutoff; no actor is replaced.
+  defp pause_after_claim_create(owned, directory, created, events) do
+    guardian = owned.guardian
+    reference = owned.reference
+    tag = owned.tag
+    receive do
+      {:restore_io, ^guardian, _worker, ^reference, {:acknowledged, _, {:restore_claim_create, %{directory: ^directory}}, :created} = event} ->
+        pause_after_claim_create(owned, directory, true, [event | events])
+      {:restore_io, ^guardian, _worker, ^reference, {:issued, id, {:open, _}} = event} ->
+        if created do
+          {id, [event | events]}
+        else
+          send(guardian, {:proceed, reference, id})
+          pause_after_claim_create(owned, directory, false, [event | events])
+        end
+      {:restore_io, ^guardian, _worker, ^reference, event} ->
+        pause_after_claim_create(owned, directory, created, [event | events])
+      {^tag, result} -> flunk("restore ended before second claim publication control: #{inspect(result)}")
+    after
+      max(0, owned.work_cutoff + max(10_000, @grace + 2_000) - System.monotonic_time(:millisecond)) -> flunk("original restore work/cleanup cutoff reached")
+    end
+  end
+
+  defp ordered_claims(plan) do
+    Enum.sort([plan["source_state_root"], plan["destination_state_root"]]) |> Enum.map(fn root ->
+      {:ok, digest} = RestoreCodec.claim_digest(root)
+      Path.join(Path.dirname(root), ".loopex-restore-claim-" <> digest)
+    end)
+  end
+
   defp actual_cut(root) do
     source = Path.join(root, "source")
     backup = Path.join(root, "backup")

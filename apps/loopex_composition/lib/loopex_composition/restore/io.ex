@@ -257,7 +257,7 @@ defmodule LoopexComposition.Restore.IO do
 
       {:not_issued, ^worker, ^reference, id} ->
         if state.pending && elem(state.pending, 0) == id,
-          do: guard(%{state | pending: nil, paused: false}),
+          do: guard(not_issued(%{state | pending: nil, paused: false}, elem(state.pending, 1))),
           else: guard(stop(state, :history_invalid, now()))
 
       {:payload, ^worker, ^reference, result} ->
@@ -289,7 +289,26 @@ defmodule LoopexComposition.Restore.IO do
   defp acknowledge(state, {:close, token}, :closed),
     do: %{state | open: MapSet.delete(state.open, token), closes: state.closes + 1}
 
+  defp acknowledge(state, {:restore_claim_create, claim}, observation) do
+    status = case observation do
+      :created -> :partial
+      :foreign -> :foreign
+      _ -> :uncertain
+    end
+    retain_claim(state, claim, status)
+  end
+
+  defp acknowledge(state, {:restore_claim_acquired, claim}, :completed),
+    do: retain_claim(state, claim, :acquired)
+
+  defp acknowledge(state, {:restore_claim_released, directory}, :completed),
+    do: %{state | restore: %{state.restore | claims: Enum.reject(state.restore.claims, &(&1.directory == directory))}}
+
   defp acknowledge(state, _kind, _observation), do: state
+
+  defp not_issued(state, {:restore_claim_create, claim}),
+    do: %{state | restore: %{state.restore | claims: Enum.reject(state.restore.claims, &(&1.directory == claim.directory))}}
+  defp not_issued(state, _kind), do: state
 
   defp clean?(state),
     do:
@@ -369,7 +388,7 @@ defmodule LoopexComposition.Restore.IO do
   defp cleanup_operation?(state, kind),
     do: close_operation?(kind) or (state.terminal_release and
       (kind_name(kind) in [:open, :stat, :read, :file_sync, :directory_sync,
-                          :claim_delete, :claim_directory_delete, :descriptor_stat, :manifest_stat, :list]))
+                          :claim_delete, :claim_directory_delete, :restore_claim_released, :descriptor_stat, :manifest_stat, :list]))
 
   defp release_needed?(%{terminal_release: false, payload: {:ok, %{release_claims: [_ | _]}}}), do: true
   defp release_needed?(_), do: false
@@ -398,12 +417,22 @@ defmodule LoopexComposition.Restore.IO do
     do: %{state | restore: %{state.restore | phase: phase}}
   defp observe_restore_issue(state, {:intent_may_persist, phase}),
     do: %{state | restore: %{state.restore | phase: phase, intent: true}}
-  defp observe_restore_issue(state, {:restore_claim, claim}),
-    do: %{state | restore: %{state.restore | claims: [claim | state.restore.claims]}}
+  defp observe_restore_issue(state, {:restore_claim_create, claim}),
+    do: retain_claim(state, claim, :uncertain)
   defp observe_restore_issue(state, _), do: state
+
+  # Concept: completed release removes only its proved claim, never a sibling.
+  # Technical depth: mkdir issue is uncertain until acknowledged; EEXIST is
+  # foreign, successful mkdir remains partial until owner publication and sync
+  # complete. These private states never authorize deletion of a partial claim.
+  defp retain_claim(state, claim, status) do
+    claims = Enum.reject(state.restore.claims, &(&1.directory == claim.directory))
+    %{state | restore: %{state.restore | claims: [Map.put(claim, :status, status) | claims]}}
+  end
+
   defp restore_evidence(%{restore: nil}), do: %{}
   defp restore_evidence(state), do: %{restore: Map.drop(state.restore, [:claims]),
-    claim_count: if(state.terminal_release and match?({:ok, %{release_claims: []}}, state.payload), do: 0, else: length(state.restore.claims))}
+    claim_count: Enum.count(state.restore.claims, &(&1.status != :foreign))}
 
   defp close_operation?({:close, _token}), do: true
   defp close_operation?(_kind), do: false
@@ -505,13 +534,16 @@ defmodule LoopexComposition.Restore.IO do
   end
   defp execute({:acquire_restore_claim, claim}) do
     manifest_ancestors(Path.dirname(claim.directory))
-    primitive({:restore_claim, claim}, fn -> :ok end)
-    execute({:make_directory, claim.directory, 0o700})
+    require_ok(primitive({:restore_claim_create, claim}, fn -> :prim_file.make_dir(claim.directory) end))
+    require_ok(primitive(:mode, fn -> :prim_file.write_file_info(claim.directory, file_info(mode: 0o700)) end))
+    directory_sync(Path.dirname(claim.directory))
     owner = Path.join(claim.directory, "owner")
     execute({:publish, owner, owner <> ".tmp", claim.owner, 0o600, :absent})
     directory_sync(Path.dirname(claim.directory))
-    {:ok, Map.merge(claim, %{directory_identity: directory_identity(manifest_stat(claim.directory)),
-      owner_identity: manifest_stat(owner)})}
+    acquired = Map.merge(claim, %{directory_identity: directory_identity(manifest_stat(claim.directory)),
+      owner_identity: manifest_stat(owner)})
+    primitive({:restore_claim_acquired, acquired}, fn -> :ok end)
+    {:ok, acquired}
   end
   defp execute({:release_restore_claims, claims}) do
     Enum.each(claims, fn claim ->
@@ -537,6 +569,7 @@ defmodule LoopexComposition.Restore.IO do
       directory_sync(claim.directory)
       require_ok(primitive(:claim_directory_delete, fn -> :prim_file.del_dir(claim.directory) end))
       directory_sync(Path.dirname(claim.directory))
+      primitive({:restore_claim_released, claim.directory}, fn -> :ok end)
     end)
     {:ok, :released}
   end
@@ -1541,6 +1574,8 @@ defmodule LoopexComposition.Restore.IO do
 
           observation =
             case {kind, result} do
+              {{:restore_claim_create, _}, :ok} -> :created
+              {{:restore_claim_create, _}, {:error, :eexist}} -> :foreign
               {{:open, _}, {:ok, _}} -> :opened
               {{:close, _}, :ok} -> :closed
               {_, {:error, _}} -> :error
