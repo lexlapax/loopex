@@ -1202,6 +1202,8 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
              Local.execute(envelope_local, envelope_job, grant(envelope_job), [], nil)
 
     envelope_path = receipt_path!(envelope_fixture.ledger, envelope_job.job_id)
+    published_bytes = File.read!(envelope_path)
+    assert published_bytes == :erlang.term_to_binary(envelope_receipt, [:deterministic])
 
     empty_envelope =
       envelope_receipt
@@ -1244,27 +1246,6 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
     assert byte_size(compressed_bytes) < 65_536
     assert match?(<<131, 80, _::binary>>, compressed_bytes)
 
-    owner = self()
-
-    assert Local.receipt_decode_probe(compressed_bytes, envelope_job.job_id, fn bytes ->
-             send(owner, {:receipt_decoder_called, bytes})
-             :erlang.binary_to_term(bytes, [:safe])
-           end) == {:error, :invalid_retained_receipt}
-
-    refute_receive {:receipt_decoder_called, _bytes}
-
-    assert {:ok, ^envelope_receipt} =
-             Local.receipt_decode_probe(
-               :erlang.term_to_binary(envelope_receipt, [:deterministic]),
-               envelope_job.job_id,
-               fn bytes ->
-                 send(owner, {:receipt_decoder_called, bytes})
-                 :erlang.binary_to_term(bytes, [:safe])
-               end
-             )
-
-    assert_receive {:receipt_decoder_called, _canonical_bytes}
-
     File.write!(envelope_path, compressed_bytes)
 
     assert Local.receipt(envelope_local, envelope_job.job_id) ==
@@ -1286,6 +1267,200 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
 
     assert Local.receipt(envelope_local, envelope_job.job_id) ==
              {:error, :invalid_retained_receipt}
+
+    join_deadline = System.monotonic_time(:millisecond) + 5_000
+    join_remaining = fn -> max(join_deadline - System.monotonic_time(:millisecond), 0) end
+
+    for pid <- [envelope_local, envelope_fixture.lease] do
+      monitor = Process.monitor(pid)
+      assert :ok = GenServer.stop(pid, :normal, join_remaining.())
+      assert_receive {:DOWN, ^monitor, :process, ^pid, :normal}, join_remaining.()
+    end
+
+    File.rm_rf!(envelope_fixture.ledger)
+    refute File.exists?(envelope_fixture.ledger)
+
+    # This hostile alternate map appends an existing key and a manually encoded
+    # SMALL_ATOM_UTF8_EXT value. The name stays binary throughout construction.
+    # Late field/canonical refusal cannot prove that :safe prevented interning.
+    atom_name =
+      "loopex_receipt_uninterned_" <> Integer.to_string(System.unique_integer([:positive]))
+
+    assert byte_size(atom_name) <= 255
+    assert_raise ArgumentError, fn -> :erlang.binary_to_existing_atom(atom_name, :utf8) end
+    <<131, 116, pair_count::unsigned-32, published_pairs::binary>> = published_bytes
+    <<131, output_key::binary>> = :erlang.term_to_binary(:output, [:deterministic])
+
+    unknown_atom_bytes =
+      <<131, 116, pair_count + 1::unsigned-32, published_pairs::binary, output_key::binary, 119,
+        byte_size(atom_name), atom_name::binary>>
+
+    assert byte_size(unknown_atom_bytes) <= 65_536
+
+    # The exact cap vector edits real-writer output; it is a decoder control,
+    # not a claim that the executor published that rewritten receipt itself.
+    assert_receipt_decode_calls([
+      {published_bytes, {:ok, envelope_receipt}, 1},
+      {exact_bytes, {:ok, %{envelope_receipt | output: exact_output}}, 1},
+      {compressed_bytes, {:error, :invalid_retained_receipt}, 0},
+      {oversized_bytes, {:error, :invalid_retained_receipt}, 0},
+      {unknown_atom_bytes, {:error, :invalid_retained_receipt}, 1},
+      {:erlang.term_to_binary([envelope_receipt], [:deterministic]),
+       {:error, :invalid_retained_receipt}, 0}
+    ])
+
+    assert_raise ArgumentError, fn -> :erlang.binary_to_existing_atom(atom_name, :utf8) end
+  end
+
+  test "captured receipts decode after original authorities join and the root is removed" do
+    for kind <- [:demo, :bash, :artifact] do
+      fixture = prepared_fixture("captured-receipt-#{kind}")
+      {:ok, artifacts} = ArtifactStore.start(:truthful)
+      on_exit(fn -> stop(artifacts) end)
+
+      {:ok, local} =
+        start_local(fixture, artifacts: %{module: ArtifactStore, handle: artifacts})
+
+      on_exit(fn -> stop(local) end)
+      opaque = <<255, 0, 128>> <> "captured-#{kind}"
+      large = 18_446_744_073_709_551_616
+
+      {tool, effect, arguments, budgets} =
+        case kind do
+          :demo ->
+            {"loopex.demo.write", "workspace_write",
+             %{"relative_path" => "captured.txt", "content" => "ok"},
+             %{"max_output_bytes" => 65_536}}
+
+          :bash ->
+            {"loopex.bash", "process", %{"argv" => ["/usr/bin/printf", "captured"]},
+             %{"max_output_bytes" => 65_536}}
+
+          :artifact ->
+            File.write!(Path.join(fixture.workspace, "captured.txt"), :binary.copy("x", 1_024))
+
+            {"loopex.read", "read_only", %{"path" => "captured.txt"},
+             %{"max_output_bytes" => 128}}
+        end
+
+      request =
+        job(fixture, opaque, arguments, System.system_time(:millisecond) + 60_000, %{
+          tool_id: tool,
+          effect_class: effect,
+          required_capabilities: [effect],
+          resource_budgets: budgets,
+          operation_id: opaque <> "-operation",
+          session_id: opaque <> "-session",
+          run_id: opaque <> "-run",
+          turn_id: opaque <> "-turn",
+          tool_call_id: opaque <> "-call",
+          attempt: large,
+          origin_session_epoch: large
+        })
+
+      assert {:ok, receipt} = Local.execute(local, request, grant(request), [], nil)
+      assert receipt.job_id == opaque
+      assert receipt.attempt == large
+      assert receipt.session_epoch_at_dispatch == large
+      assert receipt.cleanup_confirmation == :confirmed
+
+      if kind == :artifact do
+        assert [reference] = receipt.artifacts
+
+        for field <- Map.keys(reference),
+            malformed <- [["x" | :invalid], {["x" | :invalid]}, %{"nested" => ["x" | :invalid]}] do
+          altered = %{receipt | artifacts: [Map.put(reference, field, malformed)]}
+
+          assert Local.decode_receipt_bytes(:erlang.term_to_binary(altered, [:deterministic])) ==
+                   {:error, :invalid_retained_receipt}
+        end
+      end
+
+      basename = sha256(opaque) <> ".receipt"
+      path = Path.join(fixture.ledger, basename)
+      bytes = File.read!(path)
+      assert bytes == :erlang.term_to_binary(receipt, [:deterministic])
+      assert {:ok, ^receipt} = Local.receipt(local, opaque)
+      assert Local.receipt(local, opaque <> "-other") == :absent
+      other_path = Path.join(fixture.ledger, sha256(opaque <> "-other") <> ".receipt")
+      File.write!(other_path, bytes)
+      assert Local.receipt(local, opaque <> "-other") == {:error, :invalid_retained_receipt}
+      File.rm!(other_path)
+
+      deadline = System.monotonic_time(:millisecond) + 5_000
+      remaining = fn -> max(deadline - System.monotonic_time(:millisecond), 0) end
+
+      for pid <- [local, fixture.lease, artifacts] do
+        monitor = Process.monitor(pid)
+        assert :ok = GenServer.stop(pid, :normal, remaining.())
+        assert_receive {:DOWN, ^monitor, :process, ^pid, :normal}, remaining.()
+      end
+
+      File.rm_rf!(fixture.ledger)
+      refute File.exists?(fixture.ledger)
+      assert_receipt_decode_calls([{bytes, {:ok, receipt}, 1}])
+      assert sha256(receipt.job_id) <> ".receipt" == basename
+    end
+  end
+
+  test "captured receipt hostile shapes refuse through the shared current grammar" do
+    fixture = prepared_fixture("captured-receipt-hostile")
+    {:ok, local} = start_local(fixture)
+    on_exit(fn -> stop(local) end)
+
+    request =
+      job(fixture, "captured-receipt-hostile", %{
+        "path" => "captured.txt",
+        "content" => "ok"
+      })
+
+    assert {:ok, receipt} = Local.execute(local, request, grant(request), [], nil)
+    bytes = File.read!(Path.join(fixture.ledger, sha256(request.job_id) <> ".receipt"))
+    assert {:ok, ^receipt} = Local.decode_receipt_bytes(bytes)
+
+    malformed =
+      [
+        %{receipt | child_environment_names: ["PATH" | :invalid]},
+        %{receipt | child_environment_names: [["PATH" | :invalid]]},
+        %{receipt | artifacts: [%{} | :invalid]},
+        %{receipt | artifacts: [[%{} | :invalid]]},
+        %{receipt | artifacts: [%{digest: ["x" | :invalid]}]},
+        %{receipt | output: self()},
+        %{receipt | operation_id: make_ref()},
+        %{receipt | output: fn -> :invalid end},
+        %{receipt | job_id: ""},
+        %{receipt | protocol_version: 2},
+        %{receipt | canonical_request_digest: "INVALID"},
+        %{receipt | cleanup_confirmation: :unconfirmed, outcome: :completed},
+        %{receipt | receipt_retention_bound_ms: receipt.receipt_retention_bound_ms + 1},
+        %{receipt | effective_deadline_ms: receipt.run_deadline_ms + 1},
+        %{receipt | tool_version: "superseded"},
+        %{receipt | provider_credential_present: true},
+        Map.put(receipt, :unknown, true)
+      ] ++ Enum.map(Map.keys(receipt), &Map.delete(receipt, &1))
+
+    for value <- malformed do
+      assert Local.decode_receipt_bytes(:erlang.term_to_binary(value, [:deterministic])) ==
+               {:error, :invalid_retained_receipt}
+    end
+
+    for value <- [nil, [], %{}, <<>>, binary_part(bytes, 0, byte_size(bytes) - 1), bytes <> <<0>>] do
+      assert Local.decode_receipt_bytes(value) == {:error, :invalid_retained_receipt}
+    end
+
+    assert Local.decode_receipt_bytes(:erlang.term_to_binary(receipt, [:compressed])) ==
+             {:error, :invalid_retained_receipt}
+
+    # Repeating a stored pair changes the declared entry count. ETF decoding
+    # may collapse it, but exact deterministic bytes refuse that alternate form.
+    <<131, 116, count::unsigned-32, pairs::binary>> = bytes
+    <<131, key::binary>> = :erlang.term_to_binary(:tool_version, [:deterministic])
+    <<131, value::binary>> = :erlang.term_to_binary(receipt.tool_version, [:deterministic])
+    duplicate = <<131, 116, count + 1::unsigned-32, pairs::binary, key::binary, value::binary>>
+    assert Local.decode_receipt_bytes(duplicate) == {:error, :invalid_retained_receipt}
+
+    assert {:ok, ^receipt} = Local.receipt(local, request.job_id)
+    assert Local.stats(local).dispatches[request.job_id] == 1
   end
 
   test "complete root snapshots enforce both entry capacity and the byte ceiling" do
@@ -2028,6 +2203,65 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
         collect_call_trace([{:return, module, function, arity, result} | acc])
     after
       0 -> Enum.reverse(acc)
+    end
+  end
+
+  # Concept: observe the actual allocation boundary without retaining arguments.
+  # Technical depth: a single cutoff covers fixed reader monitors and trace
+  # delivery. The positive writer control prevents an unarmed trace proving
+  # absence; refusal controls must call the BIF zero times and exit normally.
+  defp assert_receipt_decode_calls(vectors) do
+    boundary = {:erlang, :binary_to_term, 2}
+    assert {:traced, false} = :erlang.trace_info(boundary, :traced)
+    deadline = System.monotonic_time(:millisecond) + 1_000
+    remaining = fn -> max(deadline - System.monotonic_time(:millisecond), 0) end
+    parent = self()
+
+    try do
+      assert 1 == :erlang.trace_pattern(boundary, true, [:local])
+
+      for {bytes, expected, calls} <- vectors do
+        nonce = make_ref()
+        joined_key = {__MODULE__, :receipt_observer_joined, nonce}
+        Process.put(joined_key, false)
+
+        {reader, monitor} =
+          spawn_monitor(fn ->
+            receive do
+              {:decode_receipt, ^nonce} ->
+                result = Local.decode_receipt_bytes(bytes)
+                send(parent, {:receipt_decoded, self(), nonce, result})
+
+                receive do
+                  {:finish_receipt, ^nonce} -> :ok
+                after
+                  remaining.() -> exit(:receipt_observer_deadline)
+                end
+            after
+              remaining.() -> exit(:receipt_observer_deadline)
+            end
+          end)
+
+        try do
+          assert 1 == :erlang.trace(reader, true, [:call, :arity])
+          send(reader, {:decode_receipt, nonce})
+          assert_receive {:receipt_decoded, ^reader, ^nonce, ^expected}, remaining.()
+          delivered = :erlang.trace_delivered(reader)
+          assert_receive {:trace_delivered, ^reader, ^delivered}, remaining.()
+          if calls == 1, do: assert_receive({:trace, ^reader, :call, ^boundary}, 0)
+          refute_receive {:trace, ^reader, :call, ^boundary}, 0
+          send(reader, {:finish_receipt, nonce})
+          assert_receive {:DOWN, ^monitor, :process, ^reader, :normal}, remaining.()
+          Process.put(joined_key, true)
+        after
+          if Process.delete(joined_key) != true do
+            if Process.alive?(reader), do: Process.exit(reader, :kill)
+            assert_receive {:DOWN, ^monitor, :process, ^reader, _reason}, remaining.()
+          end
+        end
+      end
+    after
+      :erlang.trace_pattern(boundary, false, [:local])
     end
   end
 
