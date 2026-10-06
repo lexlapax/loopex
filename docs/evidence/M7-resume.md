@@ -27,6 +27,21 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current proof, execution and source ownership
 
+ROOT VM FREE after original95286 fully collected as FAIL_OR_UNAVAILABLE,
+112.905 seconds and seven stages at clean c36433ec. All50 artifacts,59 actual
+Git/source records and seven original process joins verified. Current formatting,
+warning-free compilation, Core25 and Protocol14 pass, including three Node cases;
+foreground18/22 pass. Four projection cases cannot find the original run timer
+while a model question is pending. Daemon/floor did not run. Collection
+`M7/protocol-cleanup-native-runtime-original-collection-20261006-v4.json`
+`15b03659fa7ed37b6073c6ac49a6790bd0f27de6efc4bf74a53df37f02b6f9f9`;
+latest complete registry712
+`ec93acba96402ef36a0f3add7a613331fead8fcaf0680696c816817feda4016e`.
+Never repoll95286 or retry c364. Core bounds writer is investigating its accepted
+run-wide timer obligation; no fixture timer or softened assertion is authorized.
+Generation formatter and Proposed0056 docs packets remain disabled under parallel
+source preparation/review. No checklist item closes; previous run entries are history.
+
 ROOT VM OCCUPIED by original95286, protocolnativev4 at clean
 `c36433ec6ed152c9dd329ddbf401a756abda1a5f`. Enabled packet
 `M7/protocol-cleanup-native-focused-runtime-runner-20261006-v4`, config
