@@ -1441,6 +1441,53 @@ defmodule LoopexComposition.Restore.IO do
     {:ok, RestoreCodec.digest_bytes(bytes)}
   end
 
+  # Concept: original-tx publication reuses only the exact named retained payload.
+  # Technical depth: callers supply already compiled current bytes under proved
+  # host exclusion/claim custody. This private, unwired operation grants neither;
+  # its role selects existing caps, and its only temporary is the final's sibling.
+  defp execute({:restore_publish, role, path, bytes, mode, expected}) do
+    cap = retained_publication_cap(role)
+    temp = path <> ".tmp"
+    ancestors = retained_publication_ancestors(Path.dirname(path))
+    current = retained_publication_file(path, cap, mode)
+    temporary = retained_publication_file(temp, cap, mode)
+
+    if current != :absent and current.bytes != bytes and current.bytes != expected,
+      do: throw({:io_error, :changed_destination})
+
+    if current == :absent and expected != :absent,
+      do: throw({:io_error, :changed_destination})
+
+    if temporary != :absent and temporary.bytes != bytes,
+      do: throw({:io_error, :changed_destination})
+
+    retained_publication_ancestors!(ancestors)
+
+    cond do
+      current != :absent and current.bytes == bytes ->
+        if temporary == :absent,
+          do: retained_publication_sync(path, current),
+          else: retained_publication_delete(path, current, temp, temporary, ancestors)
+
+      true ->
+        temporary =
+          if temporary == :absent,
+            do: retained_publication_create(temp, bytes, mode, cap),
+            else: temporary
+
+        retained_publication_namespace!(ancestors, [{path, current}, {temp, temporary}])
+        retained_publication_sync(temp, temporary)
+        retained_publication_namespace!(ancestors, [{path, current}, {temp, temporary}])
+        require_ok(primitive(:rename, fn -> :prim_file.rename(temp, path) end))
+    end
+
+    retained_publication_directory_sync(Path.dirname(path), ancestors)
+    final = retained_publication_file(path, cap, mode)
+    if final == :absent or final.bytes != bytes, do: throw({:io_error, :readback_mismatch})
+    retained_publication_ancestors!(ancestors)
+    {:ok, RestoreCodec.digest_bytes(bytes)}
+  end
+
   # Concept: resolution and lookup use the same owned administrative capture.
   # Technical depth: classification adds only a pure plan/transaction reduction;
   # it neither starts another guardian nor renews this worker's cutoffs.
@@ -2352,6 +2399,146 @@ defmodule LoopexComposition.Restore.IO do
     end
   end
 
+  defp retained_publication_cap(:baseline), do: @max_manifest
+  defp retained_publication_cap(:record), do: @max_ledger_record
+  defp retained_publication_cap(:generation), do: @max_ledger_generation
+
+  # Concept: existing files are admitted without repairing modes or following links.
+  # Technical depth: the role cap is checked before raw open, followed by coupled
+  # descriptor/path identities around bounded bytes, explicit close and recheck.
+  defp retained_publication_file(path, cap, mode) do
+    case primitive(:retained_publication_stat, fn -> :prim_file.read_link_info(path) end) do
+      {:error, :enoent} ->
+        :absent
+
+      {:ok, info} ->
+        if file_info(info, :type) != :regular or file_info(info, :links) != 1 or
+             file_info(info, :size) > cap or Bitwise.band(file_info(info, :mode), 0o7777) != mode,
+           do: throw({:io_error, :invalid_retained_file})
+
+        descriptor = open(path, [:raw, :binary, :read])
+        retained_publication_descriptor!(descriptor, path, info)
+        bytes = read_chunks(descriptor, cap, [])
+        retained_publication_descriptor!(descriptor, path, info)
+        close(descriptor)
+        require_same_identity(info, manifest_stat(path))
+        %{bytes: bytes, info: info}
+
+      _ ->
+        throw({:io_error, :stat_failed})
+    end
+  end
+
+  defp retained_publication_descriptor!(descriptor, path, info) do
+    opened = require_value(primitive(:descriptor_stat, fn -> :prim_file.read_handle_info(descriptor) end))
+    require_same_identity(info, opened)
+    require_same_identity(info, manifest_stat(path))
+  end
+
+  defp retained_publication_create(temp, bytes, mode, cap) do
+    descriptor = open(temp, [:raw, :binary, :write, :exclusive])
+    created = manifest_stat(temp)
+    if file_info(created, :type) != :regular or file_info(created, :links) != 1 or
+         file_info(created, :size) != 0,
+       do: throw({:io_error, :invalid_retained_file})
+    retained_publication_descriptor!(descriptor, temp, created)
+    require_ok(primitive(:mode, fn -> :prim_file.write_file_info(temp, file_info(mode: mode)) end))
+    configured = manifest_stat(temp)
+    require_audit_file(configured, %{"size" => 0, "mode" => mode})
+    if directory_identity(configured) != directory_identity(created),
+      do: throw({:io_error, :source_changed})
+    retained_publication_descriptor!(descriptor, temp, configured)
+    write(descriptor, bytes)
+    info = manifest_stat(temp)
+    require_audit_file(info, %{"size" => byte_size(bytes), "mode" => mode})
+    retained_publication_descriptor!(descriptor, temp, info)
+    require_ok(primitive(:file_sync, fn -> :prim_file.sync(descriptor) end))
+    retained_publication_descriptor!(descriptor, temp, info)
+    close(descriptor)
+    captured = retained_publication_file(temp, cap, mode)
+    if captured == :absent or captured.bytes != bytes, do: throw({:io_error, :readback_mismatch})
+    require_same_identity(info, captured.info)
+    captured
+  end
+
+  defp retained_publication_sync(path, captured) do
+    descriptor = open(path, [:raw, :binary, :read])
+    retained_publication_descriptor!(descriptor, path, captured.info)
+    if read_chunks(descriptor, byte_size(captured.bytes), []) != captured.bytes,
+      do: throw({:io_error, :changed_destination})
+    require_ok(primitive(:file_sync, fn -> :prim_file.sync(descriptor) end))
+    retained_publication_descriptor!(descriptor, path, captured.info)
+    close(descriptor)
+    require_same_identity(captured.info, manifest_stat(path))
+  end
+
+  # Concept: equal final bytes allow removal only of the exact equal owned sibling.
+  # Technical depth: each raw check/read/sync/close/delete has its own original
+  # permit/ack. Host exclusion holds through the final validation and mutation;
+  # this operation supplies no hostile-host atomic compare-and-swap guarantee.
+  defp retained_publication_delete(path, current, temp, temporary, ancestors) do
+    files = [{path, current}, {temp, temporary}]
+    retained_publication_namespace!(ancestors, files)
+    retained_publication_sync(path, current)
+    retained_publication_sync(temp, temporary)
+    retained_publication_namespace!(ancestors, files)
+    require_ok(primitive(:delete, fn -> :prim_file.delete(temp) end))
+
+    case primitive(:retained_publication_stat, fn -> :prim_file.read_link_info(temp) end) do
+      {:error, :enoent} -> :ok
+      _ -> throw({:io_error, :changed_destination})
+    end
+
+    require_same_identity(current.info, manifest_stat(path))
+  end
+
+  # Concept: mutations stay bound to captured names and unchanged ancestors.
+  # Technical depth: the first real metadata call supplies the private pause seam
+  # before final byte revalidation. Every synchronous call is separately owned.
+  defp retained_publication_namespace!(ancestors, files) do
+    Enum.each(ancestors, fn {path, identity} ->
+      info = require_value(primitive(:retained_publication_recheck, fn -> :prim_file.read_link_info(path) end))
+      if retained_publication_directory_identity(info) != identity, do: throw({:io_error, :source_changed})
+    end)
+
+    Enum.each(files, fn {path, captured} ->
+      case {captured, primitive(:retained_publication_recheck, fn -> :prim_file.read_link_info(path) end)} do
+        {:absent, {:error, :enoent}} -> :ok
+        {%{info: info}, {:ok, observed}} -> require_same_identity(info, observed)
+        _ -> throw({:io_error, :source_changed})
+      end
+    end)
+  end
+
+  defp retained_publication_ancestors(parent) do
+    Enum.map(manifest_ancestors(parent), fn {path, identity} ->
+      info = manifest_stat(path)
+      if directory_identity(info) != identity, do: throw({:io_error, :source_changed})
+      {path, retained_publication_directory_identity(info)}
+    end)
+  end
+
+  defp retained_publication_directory_identity(info),
+    do: {directory_identity(info), Bitwise.band(file_info(info, :mode), 0o7777)}
+
+  defp retained_publication_ancestors!(ancestors) do
+    Enum.each(ancestors, fn {path, identity} ->
+      if retained_publication_directory_identity(manifest_stat(path)) != identity,
+        do: throw({:io_error, :source_changed})
+    end)
+  end
+
+  defp retained_publication_directory_sync(parent, ancestors) do
+    retained_publication_ancestors!(ancestors)
+    descriptor = open(parent, [:raw, :read, :directory])
+    info = require_value(primitive(:descriptor_stat, fn -> :prim_file.read_handle_info(descriptor) end))
+    {^parent, identity} = Enum.find(ancestors, fn {path, _} -> path == parent end)
+    if retained_publication_directory_identity(info) != identity, do: throw({:io_error, :source_changed})
+    require_ok(primitive(:directory_sync, fn -> :prim_file.sync(descriptor) end))
+    close(descriptor)
+    retained_publication_ancestors!(ancestors)
+  end
+
   defp read(path, cap) do
     info = require_value(primitive(:stat, fn -> :prim_file.read_link_info(path) end))
 
@@ -2581,6 +2768,16 @@ defmodule LoopexComposition.Restore.IO do
 
   defp valid_operation?({:read, path, cap}),
     do: valid_path?(path) and is_integer(cap) and cap >= 0 and cap <= @max_read
+
+  defp valid_operation?({:restore_publish, role, path, bytes, mode, expected}),
+    do:
+      role in [:baseline, :record, :generation] and valid_path?(path) and
+        valid_path?(path <> ".tmp") and is_binary(bytes) and
+        byte_size(bytes) <= retained_publication_cap(role) and
+        is_integer(mode) and mode in 0..4095 and
+        (role == :generation or mode == 0o600) and
+        (expected == :absent or
+           (is_binary(expected) and byte_size(expected) <= retained_publication_cap(role)))
 
   defp valid_operation?({:publish, path, temp, bytes, mode, expected}),
     do:
