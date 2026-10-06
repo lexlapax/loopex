@@ -27,6 +27,20 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current proof, execution and source ownership
 
+ROOT VM OCCUPIED by original18466, generation formatter v1 at clean initial
+`9f17c0264e89ff0020c0bd9c92ec9fbf80bedf5c`. Enabled packet
+`M7/generation-native-format-runner-20261006-v1`, config
+`726f2a434162d49a0112039cbd9da2910219cc3efa0d2aede5d887b392fceb5e`, rootreview
+`5d2d9c3533c86255786b7342e9236c3d0418ab4affc3cca40f69a9457d926e48`.
+Output `M7/m7-generation-native-format-v1`; latest712-key seed. Root read the
+independent report ff3c97f5 and verified all135 SHA256SUMS rows (index d6bdcddd),
+103 author artifacts,59 actual/Git rows and19 final external pins. Five whole-file
+AST proofs, both toolchains and at most one sole confined formatting child are
+admitted. No compiler or native tests; prospective141 cases remain unproved.
+Collect original18466 before any next VM grant. Core bounds source work continues;
+Proposed0056's disabled one-stage docs runner is sealed and under source-only
+independent audit. Checklist unchanged; previous occupancy records are history.
+
 ROOT VM FREE after original95286 fully collected as FAIL_OR_UNAVAILABLE,
 112.905 seconds and seven stages at clean c36433ec. All50 artifacts,59 actual
 Git/source records and seven original process joins verified. Current formatting,
