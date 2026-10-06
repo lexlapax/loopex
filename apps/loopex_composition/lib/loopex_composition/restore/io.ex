@@ -643,289 +643,6 @@ defmodule LoopexComposition.Restore.IO do
   defp execute({:restore_classification, root, plan}),
     do: lookup_operation(root, plan["tx_id"], plan)
 
-  # Concept: resolution and lookup use the same owned administrative capture.
-  # Technical depth: classification adds only a pure plan/transaction reduction;
-  # it neither starts another guardian nor renews this worker's cutoffs.
-  defp lookup_operation(root, tx_id, plan) do
-    try do
-      ancestors = manifest_ancestors(root)
-      {:ok, placement} = execute({:placement, root})
-
-      state = %{
-        index: %{"." => manifest_directory(".", 0)},
-        files: %{},
-        placements: %{root => placement},
-        identities: %{},
-        directories: %{},
-        absent: [],
-        count: 1
-      }
-
-      admin = Path.join(root, ".loopex-restore")
-      state = lookup_optional_tree(root, admin, state)
-
-      intents =
-        state.files
-        |> Enum.filter(fn {path, _} ->
-          case Path.split(path) do
-            [".loopex-restore", "lineage", _ordinal, name] -> name in ["intent", "intent.tmp"]
-            _ -> false
-          end
-        end)
-
-      ledgers =
-        Enum.flat_map(intents, fn {_path, bytes} ->
-          case primitive(:lookup_intent_decode, fn -> RestoreCodec.decode(:intent, bytes) end) do
-            {:ok, intent} -> Enum.map(intent["generations"], & &1["relative_root"])
-            _ -> throw({:lookup_error, "restore_history_invalid"})
-          end
-        end)
-        |> Enum.uniq()
-
-      state =
-        Enum.reduce(ledgers, state, fn relative, current ->
-          path = Path.join(root, relative)
-          manifest_ancestors(path)
-          original = manifest_stat(path)
-
-          observed = %{
-            "expanded_root" => path,
-            "major_device" => file_info(original, :major_device),
-            "inode" => file_info(original, :inode)
-          }
-
-          info =
-            require_value(
-              primitive(:lookup_ledger_placement_stat, fn -> :prim_file.read_link_info(path) end)
-            )
-
-          if file_info(original, :type) != :directory or
-               manifest_identity(info) != manifest_identity(original),
-             do: throw({:lookup_error, "physical_destination_changed"})
-
-          current = %{
-            current
-            | placements: Map.put(current.placements, path, observed),
-              identities: Map.put(current.identities, path, original),
-              index:
-                Map.put(
-                  current.index,
-                  relative,
-                  manifest_directory(relative, Bitwise.band(file_info(info, :mode), 0o7777))
-                )
-          }
-
-          current = lookup_optional_tree(root, Path.join(path, "restore-lineage"), current)
-          lookup_capture(root, Path.join(path, "generation"), 2048, current, false)
-        end)
-
-      {:ok, claim_digest} = RestoreCodec.claim_digest(root)
-      claim_path = Path.join(Path.dirname(root), ".loopex-restore-claim-" <> claim_digest)
-      {claim, state} = lookup_claim(root, claim_path, state)
-      lookup_recheck(root, ancestors, state)
-      result = if is_nil(plan) do
-        primitive(:restore_lookup_decode, fn ->
-          Loopex.Executor.Local.RestoreGuard.lookup_captured(root, tx_id, state.index,
-            state.files, state.placements, claim)
-        end)
-      else
-        primitive(:restore_classification_decode, fn ->
-          Loopex.Executor.Local.RestoreGuard.classify_captured(root, plan, state.index,
-            state.files, state.placements, claim)
-        end)
-      end
-      {:ok, result}
-    catch
-      {:lookup_error, code} -> {:ok, lookup_refusal(tx_id, code)}
-      {:io_error, :inventory_limit} -> {:ok, lookup_refusal(tx_id, "inventory_limit_exceeded")}
-      {:io_error, _} -> {:ok, lookup_refusal(tx_id, "administrative_path_unavailable")}
-    end
-  end
-
-  defp lookup_refusal(tx_id, code),
-    do:
-      {:error,
-       %{
-         "kind" => "loopex_current_restore_lookup_refusal_v1",
-         "tx_id" => tx_id,
-         "code" => code,
-         "cleanup" => "joined"
-       }}
-
-  # Concept: lookup captures only administrative history and selected generations.
-  # Technical depth: caps precede open, all descriptors close before reduction,
-  # and the original worker rechecks file, directory and ancestor identities.
-  defp lookup_optional_tree(root, path, state) do
-    case primitive(:lookup_stat, fn -> :prim_file.read_link_info(path) end) do
-      {:error, :enoent} -> %{state | absent: [path | state.absent]}
-      {:ok, info} -> lookup_tree(root, path, info, state)
-      _ -> throw({:lookup_error, "administrative_path_unavailable"})
-    end
-  end
-
-  defp lookup_tree(root, path, info, state) do
-    relative = Path.relative_to(path, root)
-
-    if byte_size(relative) > 8192 or state.count >= @max_entries,
-      do: throw({:lookup_error, "inventory_limit_exceeded"})
-
-    mode = Bitwise.band(file_info(info, :mode), 0o7777)
-
-    case file_info(info, :type) do
-      :directory when mode == 0o700 ->
-        names = require_value(primitive(:lookup_list, fn -> :prim_file.list_dir_all(path) end))
-        if length(names) > 64, do: throw({:lookup_error, "inventory_limit_exceeded"})
-        names = Enum.map(names, &manifest_name/1) |> Enum.sort()
-
-        state = %{
-          state
-          | count: state.count + 1,
-            index: Map.put(state.index, relative, manifest_directory(relative, mode)),
-            identities: Map.put(state.identities, path, info),
-            directories: Map.put(state.directories, path, names)
-        }
-
-        Enum.reduce(names, state, fn name, current ->
-          child = Path.join(path, name)
-          lookup_tree(root, child, manifest_stat(child), current)
-        end)
-
-      :regular ->
-        cap =
-          if Path.basename(path) in ["baseline", "baseline.tmp"],
-            do: @max_manifest,
-            else: @max_ledger_record
-
-        lookup_capture(root, path, cap, state, true)
-
-      _ ->
-        throw({:lookup_error, "restore_history_invalid"})
-    end
-  end
-
-  defp lookup_capture(root, path, cap, state, administrative) do
-    before = manifest_stat(path)
-    if state.count >= @max_entries, do: throw({:lookup_error, "inventory_limit_exceeded"})
-
-    if file_info(before, :type) != :regular or file_info(before, :links) != 1 or
-         (administrative and Bitwise.band(file_info(before, :mode), 0o7777) != 0o600),
-       do: throw({:lookup_error, "restore_history_invalid"})
-
-    if file_info(before, :size) > cap,
-      do: throw({:lookup_error, "inventory_limit_exceeded"})
-
-    ancestors = manifest_ancestors(Path.dirname(path))
-    descriptor = open(path, [:raw, :binary, :read])
-
-    opened =
-      require_value(
-        primitive(:lookup_descriptor_stat, fn -> :prim_file.read_handle_info(descriptor) end)
-      )
-
-    if manifest_identity(opened) != manifest_identity(before),
-      do: throw({:lookup_error, "restore_history_invalid"})
-
-    bytes = read_chunks(descriptor, cap, [])
-    close(descriptor)
-
-    if byte_size(bytes) != file_info(before, :size) or
-         manifest_identity(manifest_stat(path)) != manifest_identity(before),
-       do: throw({:lookup_error, "restore_history_invalid"})
-
-    Enum.each(ancestors, fn {ancestor, identity} ->
-      if directory_identity(manifest_stat(ancestor)) != identity,
-        do: throw({:lookup_error, "physical_destination_changed"})
-    end)
-
-    relative = Path.relative_to(path, root)
-
-    entry = %{
-      "path" => relative,
-      "kind" => "regular",
-      "mode" => Bitwise.band(file_info(before, :mode), 0o7777),
-      "size" => byte_size(bytes),
-      "sha256" => RestoreCodec.digest_bytes(bytes)
-    }
-
-    %{
-      state
-      | count: state.count + 1,
-        index: Map.put(state.index, relative, entry),
-        files: Map.put(state.files, relative, bytes),
-        identities: Map.put(state.identities, path, before)
-    }
-  end
-
-  defp lookup_claim(root, path, state) do
-    case primitive(:lookup_claim_stat, fn -> :prim_file.read_link_info(path) end) do
-      {:error, :enoent} ->
-        {nil, %{state | absent: [path | state.absent]}}
-
-      {:ok, info} ->
-        if file_info(info, :type) != :directory or
-             Bitwise.band(file_info(info, :mode), 0o7777) != 0o700,
-           do: throw({:lookup_error, "restore_conflict"})
-
-        names =
-          require_value(primitive(:lookup_claim_names, fn -> :prim_file.list_dir_all(path) end))
-          |> Enum.map(&manifest_name/1)
-          |> Enum.sort()
-
-        if file_info(info, :type) != :directory or
-             Bitwise.band(file_info(info, :mode), 0o7777) != 0o700 or names != ["owner"],
-           do: throw({:lookup_error, "restore_conflict"})
-
-        state = %{
-          state
-          | identities: Map.put(state.identities, path, info),
-            directories: Map.put(state.directories, path, names)
-        }
-
-        state = lookup_capture(root, Path.join(path, "owner"), 2048, state, true)
-        bytes = Map.fetch!(state.files, Path.relative_to(Path.join(path, "owner"), root))
-
-        case primitive(:lookup_claim_decode, fn -> RestoreCodec.decode(:claim, bytes) end) do
-          {:ok, claim} ->
-            if claim["state_root"] == root,
-              do: {claim, state},
-              else: throw({:lookup_error, "restore_conflict"})
-
-          _ ->
-            throw({:lookup_error, "restore_conflict"})
-        end
-
-      _ ->
-        throw({:lookup_error, "restore_conflict"})
-    end
-  end
-
-  defp lookup_recheck(_root, ancestors, state) do
-    Enum.each(ancestors, fn {path, identity} ->
-      if directory_identity(manifest_stat(path)) != identity,
-        do: throw({:lookup_error, "physical_destination_changed"})
-    end)
-
-    Enum.each(state.identities, fn {path, info} ->
-      if manifest_identity(manifest_stat(path)) != manifest_identity(info),
-        do: throw({:lookup_error, "physical_destination_changed"})
-    end)
-
-    Enum.each(state.directories, fn {path, expected} ->
-      actual =
-        require_value(primitive(:lookup_recheck_names, fn -> :prim_file.list_dir_all(path) end))
-        |> Enum.map(&manifest_name/1)
-        |> Enum.sort()
-
-      if actual != expected, do: throw({:lookup_error, "restore_history_invalid"})
-    end)
-
-    Enum.each(state.absent, fn path ->
-      if primitive(:lookup_recheck_absent, fn -> :prim_file.read_link_info(path) end) !=
-           {:error, :enoent},
-         do: throw({:lookup_error, "restore_history_invalid"})
-    end)
-  end
-
   defp execute({:restore_first, plan, invocation}),
     do: LoopexComposition.Restore.Workflow.execute(plan, invocation, &execute/1)
 
@@ -1506,6 +1223,289 @@ defmodule LoopexComposition.Restore.IO do
     directory_sync(Path.dirname(path))
     if read(path, byte_size(bytes)) != bytes, do: throw({:io_error, :readback_mismatch})
     {:ok, RestoreCodec.digest_bytes(bytes)}
+  end
+
+  # Concept: resolution and lookup use the same owned administrative capture.
+  # Technical depth: classification adds only a pure plan/transaction reduction;
+  # it neither starts another guardian nor renews this worker's cutoffs.
+  defp lookup_operation(root, tx_id, plan) do
+    try do
+      ancestors = manifest_ancestors(root)
+      {:ok, placement} = execute({:placement, root})
+
+      state = %{
+        index: %{"." => manifest_directory(".", 0)},
+        files: %{},
+        placements: %{root => placement},
+        identities: %{},
+        directories: %{},
+        absent: [],
+        count: 1
+      }
+
+      admin = Path.join(root, ".loopex-restore")
+      state = lookup_optional_tree(root, admin, state)
+
+      intents =
+        state.files
+        |> Enum.filter(fn {path, _} ->
+          case Path.split(path) do
+            [".loopex-restore", "lineage", _ordinal, name] -> name in ["intent", "intent.tmp"]
+            _ -> false
+          end
+        end)
+
+      ledgers =
+        Enum.flat_map(intents, fn {_path, bytes} ->
+          case primitive(:lookup_intent_decode, fn -> RestoreCodec.decode(:intent, bytes) end) do
+            {:ok, intent} -> Enum.map(intent["generations"], & &1["relative_root"])
+            _ -> throw({:lookup_error, "restore_history_invalid"})
+          end
+        end)
+        |> Enum.uniq()
+
+      state =
+        Enum.reduce(ledgers, state, fn relative, current ->
+          path = Path.join(root, relative)
+          manifest_ancestors(path)
+          original = manifest_stat(path)
+
+          observed = %{
+            "expanded_root" => path,
+            "major_device" => file_info(original, :major_device),
+            "inode" => file_info(original, :inode)
+          }
+
+          info =
+            require_value(
+              primitive(:lookup_ledger_placement_stat, fn -> :prim_file.read_link_info(path) end)
+            )
+
+          if file_info(original, :type) != :directory or
+               manifest_identity(info) != manifest_identity(original),
+             do: throw({:lookup_error, "physical_destination_changed"})
+
+          current = %{
+            current
+            | placements: Map.put(current.placements, path, observed),
+              identities: Map.put(current.identities, path, original),
+              index:
+                Map.put(
+                  current.index,
+                  relative,
+                  manifest_directory(relative, Bitwise.band(file_info(info, :mode), 0o7777))
+                )
+          }
+
+          current = lookup_optional_tree(root, Path.join(path, "restore-lineage"), current)
+          lookup_capture(root, Path.join(path, "generation"), 2048, current, false)
+        end)
+
+      {:ok, claim_digest} = RestoreCodec.claim_digest(root)
+      claim_path = Path.join(Path.dirname(root), ".loopex-restore-claim-" <> claim_digest)
+      {claim, state} = lookup_claim(root, claim_path, state)
+      lookup_recheck(root, ancestors, state)
+      result = if is_nil(plan) do
+        primitive(:restore_lookup_decode, fn ->
+          Loopex.Executor.Local.RestoreGuard.lookup_captured(root, tx_id, state.index,
+            state.files, state.placements, claim)
+        end)
+      else
+        primitive(:restore_classification_decode, fn ->
+          Loopex.Executor.Local.RestoreGuard.classify_captured(root, plan, state.index,
+            state.files, state.placements, claim)
+        end)
+      end
+      {:ok, result}
+    catch
+      {:lookup_error, code} -> {:ok, lookup_refusal(tx_id, code)}
+      {:io_error, :inventory_limit} -> {:ok, lookup_refusal(tx_id, "inventory_limit_exceeded")}
+      {:io_error, _} -> {:ok, lookup_refusal(tx_id, "administrative_path_unavailable")}
+    end
+  end
+
+  defp lookup_refusal(tx_id, code),
+    do:
+      {:error,
+       %{
+         "kind" => "loopex_current_restore_lookup_refusal_v1",
+         "tx_id" => tx_id,
+         "code" => code,
+         "cleanup" => "joined"
+       }}
+
+  # Concept: lookup captures only administrative history and selected generations.
+  # Technical depth: caps precede open, all descriptors close before reduction,
+  # and the original worker rechecks file, directory and ancestor identities.
+  defp lookup_optional_tree(root, path, state) do
+    case primitive(:lookup_stat, fn -> :prim_file.read_link_info(path) end) do
+      {:error, :enoent} -> %{state | absent: [path | state.absent]}
+      {:ok, info} -> lookup_tree(root, path, info, state)
+      _ -> throw({:lookup_error, "administrative_path_unavailable"})
+    end
+  end
+
+  defp lookup_tree(root, path, info, state) do
+    relative = Path.relative_to(path, root)
+
+    if byte_size(relative) > 8192 or state.count >= @max_entries,
+      do: throw({:lookup_error, "inventory_limit_exceeded"})
+
+    mode = Bitwise.band(file_info(info, :mode), 0o7777)
+
+    case file_info(info, :type) do
+      :directory when mode == 0o700 ->
+        names = require_value(primitive(:lookup_list, fn -> :prim_file.list_dir_all(path) end))
+        if length(names) > 64, do: throw({:lookup_error, "inventory_limit_exceeded"})
+        names = Enum.map(names, &manifest_name/1) |> Enum.sort()
+
+        state = %{
+          state
+          | count: state.count + 1,
+            index: Map.put(state.index, relative, manifest_directory(relative, mode)),
+            identities: Map.put(state.identities, path, info),
+            directories: Map.put(state.directories, path, names)
+        }
+
+        Enum.reduce(names, state, fn name, current ->
+          child = Path.join(path, name)
+          lookup_tree(root, child, manifest_stat(child), current)
+        end)
+
+      :regular ->
+        cap =
+          if Path.basename(path) in ["baseline", "baseline.tmp"],
+            do: @max_manifest,
+            else: @max_ledger_record
+
+        lookup_capture(root, path, cap, state, true)
+
+      _ ->
+        throw({:lookup_error, "restore_history_invalid"})
+    end
+  end
+
+  defp lookup_capture(root, path, cap, state, administrative) do
+    before = manifest_stat(path)
+    if state.count >= @max_entries, do: throw({:lookup_error, "inventory_limit_exceeded"})
+
+    if file_info(before, :type) != :regular or file_info(before, :links) != 1 or
+         (administrative and Bitwise.band(file_info(before, :mode), 0o7777) != 0o600),
+       do: throw({:lookup_error, "restore_history_invalid"})
+
+    if file_info(before, :size) > cap,
+      do: throw({:lookup_error, "inventory_limit_exceeded"})
+
+    ancestors = manifest_ancestors(Path.dirname(path))
+    descriptor = open(path, [:raw, :binary, :read])
+
+    opened =
+      require_value(
+        primitive(:lookup_descriptor_stat, fn -> :prim_file.read_handle_info(descriptor) end)
+      )
+
+    if manifest_identity(opened) != manifest_identity(before),
+      do: throw({:lookup_error, "restore_history_invalid"})
+
+    bytes = read_chunks(descriptor, cap, [])
+    close(descriptor)
+
+    if byte_size(bytes) != file_info(before, :size) or
+         manifest_identity(manifest_stat(path)) != manifest_identity(before),
+       do: throw({:lookup_error, "restore_history_invalid"})
+
+    Enum.each(ancestors, fn {ancestor, identity} ->
+      if directory_identity(manifest_stat(ancestor)) != identity,
+        do: throw({:lookup_error, "physical_destination_changed"})
+    end)
+
+    relative = Path.relative_to(path, root)
+
+    entry = %{
+      "path" => relative,
+      "kind" => "regular",
+      "mode" => Bitwise.band(file_info(before, :mode), 0o7777),
+      "size" => byte_size(bytes),
+      "sha256" => RestoreCodec.digest_bytes(bytes)
+    }
+
+    %{
+      state
+      | count: state.count + 1,
+        index: Map.put(state.index, relative, entry),
+        files: Map.put(state.files, relative, bytes),
+        identities: Map.put(state.identities, path, before)
+    }
+  end
+
+  defp lookup_claim(root, path, state) do
+    case primitive(:lookup_claim_stat, fn -> :prim_file.read_link_info(path) end) do
+      {:error, :enoent} ->
+        {nil, %{state | absent: [path | state.absent]}}
+
+      {:ok, info} ->
+        if file_info(info, :type) != :directory or
+             Bitwise.band(file_info(info, :mode), 0o7777) != 0o700,
+           do: throw({:lookup_error, "restore_conflict"})
+
+        names =
+          require_value(primitive(:lookup_claim_names, fn -> :prim_file.list_dir_all(path) end))
+          |> Enum.map(&manifest_name/1)
+          |> Enum.sort()
+
+        if file_info(info, :type) != :directory or
+             Bitwise.band(file_info(info, :mode), 0o7777) != 0o700 or names != ["owner"],
+           do: throw({:lookup_error, "restore_conflict"})
+
+        state = %{
+          state
+          | identities: Map.put(state.identities, path, info),
+            directories: Map.put(state.directories, path, names)
+        }
+
+        state = lookup_capture(root, Path.join(path, "owner"), 2048, state, true)
+        bytes = Map.fetch!(state.files, Path.relative_to(Path.join(path, "owner"), root))
+
+        case primitive(:lookup_claim_decode, fn -> RestoreCodec.decode(:claim, bytes) end) do
+          {:ok, claim} ->
+            if claim["state_root"] == root,
+              do: {claim, state},
+              else: throw({:lookup_error, "restore_conflict"})
+
+          _ ->
+            throw({:lookup_error, "restore_conflict"})
+        end
+
+      _ ->
+        throw({:lookup_error, "restore_conflict"})
+    end
+  end
+
+  defp lookup_recheck(_root, ancestors, state) do
+    Enum.each(ancestors, fn {path, identity} ->
+      if directory_identity(manifest_stat(path)) != identity,
+        do: throw({:lookup_error, "physical_destination_changed"})
+    end)
+
+    Enum.each(state.identities, fn {path, info} ->
+      if manifest_identity(manifest_stat(path)) != manifest_identity(info),
+        do: throw({:lookup_error, "physical_destination_changed"})
+    end)
+
+    Enum.each(state.directories, fn {path, expected} ->
+      actual =
+        require_value(primitive(:lookup_recheck_names, fn -> :prim_file.list_dir_all(path) end))
+        |> Enum.map(&manifest_name/1)
+        |> Enum.sort()
+
+      if actual != expected, do: throw({:lookup_error, "restore_history_invalid"})
+    end)
+
+    Enum.each(state.absent, fn path ->
+      if primitive(:lookup_recheck_absent, fn -> :prim_file.read_link_info(path) end) !=
+           {:error, :enoent},
+         do: throw({:lookup_error, "restore_history_invalid"})
+    end)
   end
 
   defp resource_role(:manifest), do: {"manifests", @max_resource_manifest}
