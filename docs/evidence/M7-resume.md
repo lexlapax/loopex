@@ -67,9 +67,31 @@ current/floor verification: focused32/0, adjacent35/0, ordinaryLocal298/2,
 zero skips. Only two owned AST-equal formatter changes and exact direct-child
 re-pin are permitted. Stop and retain first failure; no retry, source repair,
 second VM, full fast, paid/attended lane or integration. Exact new output is
-`M7/receipt-captured-decoding-execution-20261005-v1`. At this checkpoint no
-receipt handle exists yet; dispatch follows the saved grant. The bounded
-receipt row remains open. Four source/review packets remain retained unchanged.
+`M7/receipt-captured-decoding-execution-20261005-v1`. Receipt execution now owns
+the sole VM under original outer handle8112, polled only by
+private_task_causal_resume. Current toolchain/Node and owned non-line AST checks
+passed; worker reports an allowed formatter-only direct child `fdd6c0fa`.
+Current32 focused and35 adjacent passed in22.605/1.775 seconds. Ordinary
+returned296/298 passed with two failures,2 excluded,zero skips in174.004 seconds;
+command exit2/evidence1. Pipeline364.417 seconds. Original8112 is terminal exit1,
+fully collected; slot returned. Tested formatter-only direct child is
+`fdd6c0fadfc363e7fecfe2bb5b9be8fda9c57163`. Root read its full formatter patch,
+verified91 terminal artifacts, four collection artifacts plus inventory,
+22 original raw stages/started identities,32 actual/Git/kind/mode sources and
+22 unique consumed receipt attempts. Read-only OS probes confirm all22 original
+PIDs/groups absent. No floor, retry, forced cleanup or integration occurred.
+Terminal sibling `M7/receipt-captured-decoding-execution-20261005-v1`: report
+`2292f213320d5a2bd1182ed3353608bd2a520160ed946f33deceb2bc6f930aae`, inventory
+`cd1c32e72ef0faecd7c140380a7a7933a902da9369bace8a382f8e54d605902d`, ordinary raw
+`de05763f2c10f1532fef1dc6b332e6dfd8e1fc592b43de2a9c8b32797eb6c761`.
+Collection sibling `M7/receipt-captured-decoding-collection-20261005-v1`: report
+`ce13509a5953c7f3f591a95def59aa104f3bc3ba73a896bb63373b0df48eb3f8`, inventory
+`90d393a501f0a752830b3227d93ddaadfea49a202fd99ba8e284886296c0270e`.
+The22-key registry digest is
+`9a70086a798f91b0d7d2a48f366388b9325f5960fcbbafb7a0352f643e83c188`; never reset.
+No verification VM runs. The bounded receipt row remains open. Four original
+source/review packets remain unchanged. Receipt agent now independently reviews
+the new artifact source read-only; it has no further execution grant.
 
 NEXT ARTIFACT INVENTORY: root read the complete selected-use capture report and
 schema; verified four listed artifacts plus inventory,11 actual/Git/kind/mode
@@ -79,11 +101,69 @@ historical0644 source-mode inventory and records new0444 copy modes, retention
 map `25727f58d32fec834d2d1ab8996bf78bf4f5f9fa29002054db8acc085bd77228`.
 Report `9f52de85f2dea47c20ef4140844e631f8998736ab56ca30f29e01c21c4d4d683`
 recommends reusing owned capture and the existing reference-bound facade for one
-selected use. No implementation or VM grant exists. Object hashing/complete
+selected use. Root assigned current_index_cleanup a new source-only isolated
+`/private/tmp/loopex-m7-artifact-use-physical-capture` worktree, branch
+`codex/m7-artifact-use-physical-capture`. Root's initial `6baa7364` pin lacked
+the proved Artifact decoder prerequisite. The worker stopped before edits;
+root corrected the base through two-parent dependency rejoin
+`5f7f9b08fff0d8359b294006295161819c002277` with saved m7 `f67e546e`. Root verified
+both Store paths equal tested10006 bytes and all four Ledger paths unchanged.
+The worker owns only restore IO and its tests; the failed Ledger source remains
+frozen separately. Clean source-only child
+`b5ce08de7916d15a5af05732802be729a0b47666` adds the selected-use capture and14
+new cases, with82 old case bodies unchanged. Root read its full two-path patch,
+report and independent review; verified108 source artifacts plus inventory,
+87 actual/Git/kind/mode inputs, seven external refs and the independent review's
+three artifacts,13 actual/Git/kind/mode inputs and eight refs. No source blocker.
+Durable source sibling `M7/artifact-use-physical-capture-source-20261005-v1`:
+patch `5ec49c23cb4e84586b1b2863504e3427f96ab9d9ada7b493de7c670998e05b57`, inventory
+`3d1006df1257234a1d73c736a8092cfe3ae027ef95cef0fed7ce79f6df6d43ad`.
+Independent report is retained unchanged in
+`M7/artifact-use-physical-capture-b5-independent-review-20261005-v1`, digest
+`e16004a3f5bc61bcb591343d5e045255a884727060b85fb34ae858af8faab519`.
+Proposed IO94/2, Artifact29/0, Composition665/3, owned IO long2/94 populations
+are source expectations, not runtime results.
+No formatter, compiler, test or VM is granted for this source work. One new
+added T15 row tracks selected-use capture. Object hashing/complete
 namespace/history remain separate; the writer64MiB cap does not narrow the
 current uint64 reader/reference domain, and legitimate orphan objects remain.
 The repeated maintainer1,000ms diagnostic approval confirms the existing
 setup-only disposition and changes no other bound or ADR acceptance.
+
+CURRENT FIXTURE REPAIR: root read the complete source-only diagnosis and verified
+six artifacts plus inventory,17 actual/Git/kind/mode sources and seven external
+inputs. It establishes the long workspace capture exceeds the strict default
+1,000 system ceiling in the seven failed cases; unchanged preflight180 already
+proves the explicit-instructions remedy at the same long path and ceiling.
+Durable sibling `M7/ephemeral-admission-diagnosis-6baa7364-20261005-v1` retains
+report `eb6bbcbd73c3d4bd348ab16599e7d16fd5e6890e360c88826bad97b892e681bf`,
+historical inventory `d701103e3753639814da67f80e2fe7f01d6223d7895bb46a63bad53e08490a14`
+and exact copy mode map. Root grants CLI agent a new isolated source-only
+`/private/tmp/loopex-m7-physical-fixture-bounds`, branch
+`codex/m7-physical-fixture-bounds`, base5f7. Only Model integration test and
+ReadOnly tools test are owned. Seven failed startup options get short explicit
+instructions; selected tools, default ceiling, shared setup, passing cases,
+all assertions and deadlines remain. Only the two real physical cases get fresh
+short OS-temp workspaces, preserving real FIFO/socket/symlink and exactly
+8MiB cumulative raw bytes/first-over proof. No global TMPDIR/chdir, fake, limit
+change or runner workaround. No formatter, compiler, test or VM grant exists.
+Clean source-only fixture child `d754e78bd892fbf02e0062f69c690fb87b42a203` is
+accepted after root read the complete two-path delta/report and verified11
+artifacts plus inventory, four base/candidate Git/kind/mode records, two current
+actual files and14 external inputs. Both the seven affected Model startup
+options and only the two tagged ReadOnly workspaces meet the authorized scope.
+No source blocker; formatting/runtime remains pending. Durable sibling
+`M7/physical-fixture-bounds-source-d754e78b-20261005-v1` preserves source report
+`6455bed8cd2bf79be6c06be28e053503e25c28eecf218154d9de454f48a8660d` and full patch
+`2b530c466948dd941acca69348ea85574fe3d4d18492a2f81ed1e4153968d4e1`.
+One new added T16 row tracks this genuine fixture portability correction.
+Root now prepares one new isolated integration candidate containing reviewed
+Ledger6baa, receiptfdd6, artifactb5 and fixtured754 source. No primary source
+rejoin or VM grant exists for that combined candidate yet. Root owns integration;
+do not execute old failed candidates again or reset either22-key registry.
+
+T01–T19 originals remain78 done/95 todo/6 retired; added299 done/23 todo.
+Including T00 originals78/101/7, added303/24. T15 added17/7; T16 added53/6.
 
 The following paragraphs retain earlier checkpoints; the current execution,
 receipt grant and inventory above supersede their live-state descriptions.

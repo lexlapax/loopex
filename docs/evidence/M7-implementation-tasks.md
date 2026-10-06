@@ -43,12 +43,32 @@ Receipt `f6e731bd` passed final independent/root source review, including its
 unknown-atom/no-creation witness under the unchanged1,000ms observer cutoff.
 Root verified the disabled modern runner and retained a separate v3 grant after
 the Ledger slot returned. One current/floor sequence expects32 focused,35 adjacent
-and298 ordinary Local with2 excluded,zero skips; no receipt handle exists at
-this saved checkpoint. Both isolated branches preserve original source/evidence.
+and298 ordinary Local with2 excluded,zero skips. Receipt now owns sole VM under
+original handle8112; current toolchain/Node and formatter AST checks passed,
+allowed formatter child `fdd6c0fa`. Suite/terminal evidence remains pending.
+Both isolated branches preserve original source/evidence.
 
 Root verified the next artifact physical inventory; selected-use capture can
-reuse the existing owner and reference-bound facade. Its implementation is
-not yet assigned. Object/complete namespace/history obligations remain separate.
+reuse the existing owner and reference-bound facade. Source-only implementation
+owns restore IO/test in a new isolated worktree; no VM is granted. Root corrected
+the too-early `6baa7364` base through dependency rejoin `5f7f9b08`, preserving
+all four Ledger paths and the two Artifact paths' exact tested10006 bytes.
+One new added T15 row tracks it. Object/complete namespace/history remain separate.
+Receipt ordinary returned296/298 passed with two real-path fixture failures,
+2 excluded,zero skips; original8112 exit1 is collected, evidence sealed and slot
+returned. Root verified91 terminal artifacts,32 actual/Git/kind/mode sources,
+22 original PIDs/groups absent and exact formatter child `fdd6c0fa`.
+Its32 focused/35 adjacent pass; no floor ran. Artifact capture source-only
+`b5ce08de` passed root and independent source review, with no runtime proof.
+Fixture-only `d754e78b` passed root source review. Both complete source packets
+and original failure evidence are retained. Root prepares one new isolated
+combined candidate; no old candidate retry, primary source rejoin or VM is granted.
+A source-only T16
+repair now owns only the failed Model integration startup options and the two
+ReadOnly physical cases' workspace setup. Existing1,000 ceiling, actual Unix
+socket/FIFO and exact8MiB/first-over assertions remain required.
+T01–T19 originals78 done/95 todo/6 retired; added299 done/23 todo.
+Including T00 originals78/101/7, added303/24. T15 added17/7; T16 added53/6.
 These are current facts; the following paragraphs retain historical checkpoints.
 
 Artifact source/evidence is pushed at `87be37e7`; its clean merged worktree and
@@ -13324,6 +13344,7 @@ open.
 
 ### Added implementation subtasks
 
+- [ ] Capture one selected current artifact-use sidecar through the existing guardian-owned restore IO worker and real captured Local/Core describe facade; require exact reference-derived pathname, physical manifest membership, current raw ceiling, hash/mode/link/ancestor identity and close-before-semantics under original cutoffs. Prove actual writers and physical/semantic refusals on both pairs; object bytes, complete namespace/orphans and history/restore relations remain separate.
 - [ ] Extract one private captured-byte Local receipt decoder shared with live reads; preserve the native current 28-field ETF schema, 65,536-byte cap, exact raw job binding, closed predicates and all claim/finality/job/recovery authority. Replace the injected decoder seam with actual bounded BIF proof and actual writer/hostile controls on both supported pairs; physical receipt capture and complete history audit remain separate.
 - [ ] Enumerate the complete current Local generation/marker/open namespace under one original restore IO guardian; require exact physical name membership, current marker-plane grammar, open cardinality/whole-byte bounds and source/job/digest relations. Preserve actual writer crash cuts and claim observations; complete receipts/Store/job/history/restore certification remains separate.
 - [x] Extract the current Local artifact-use captured-byte decoder with the existing 131,072-byte ceiling, exact canonical bytes and filename digest; reuse the existing ArtifactStore facade through a private captured-bytes handle for closed reference-bound admission. Prove actual writers, deleted-source decoding, opaque identities, hostile bytes and existing semantic negatives on both pairs; physical capture, object bytes and complete history relations remain separate.
@@ -13373,6 +13394,7 @@ open.
 
 ### Added implementation subtasks
 
+- [ ] Repair the inherited long-temporary-path fixture failures exposed by Ledger6baa and receiptfdd6 ordinary checks: supply bounded explicit instructions only to seven failed model startup cases while preserving the 1,000-token ceiling and give only the actual Unix socket/exact8MiB cases fresh short temporary workspaces. Preserve real HTTP/effects/questions/cleanup, actual special files, all exact path-byte/first-over assertions and original deadlines; prove focused, adjacent and complete affected application populations on both supported pairs with both original failed runs retained.
 - [x] Repair the e327e46c incomplete foreground revision-3 snapshot and superseded policy-answer admission fixture; prove all ten captured fields, exact historical cursor parity after live advancement, actual answer-admission order and the complete AppServer population on both supported pairs without changing generation activation or implementing unaccepted ADR0052.
 
 - [x] Include composition's actual owned restore IO long-bound cases in the existing release long_bound group and prove the real selected composition lane. Preserve nonzero executed-case judgment, credential exclusion, all deadlines and prior required lanes; focused worker runs do not substitute for runner selection.
