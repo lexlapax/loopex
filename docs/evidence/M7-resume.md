@@ -27,6 +27,57 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current proof, execution and source ownership
 
+LATEST, 2026-10-06: the maintainer reconfirmed the existing diagnostic
+setup-only1,000ms cutoff. Production and post-fault deadlines are unchanged.
+T01–T19 totals remain originals78 done/95 todo/6 retired and added298 done/32
+todo. No source review or formatting outcome completes a checklist row.
+
+Original76214 is fully collected FAIL after46.768s/11 stages. Current five-file
+formatting and AST equality passed; floor rejected one IO helper layout. The
+clean formatting child is7e7520d153fd17b1210ea2a656f95dae627e7757. Collection
+`M7/pending-intake-format-original-collection-20261006-v1.json` is
+`5844b3a98206693814bf9667ee362ec68e6bf869728b23a757fc055347fef8f5`.
+The one-helper source correction3d79a9a25517111244cd0193ef35ba5587afe531 lives
+in `/private/tmp/loopex-m7-restore-floor-layout`. Independent source review
+`/private/tmp/loopex-m7-restore-floor-layout-review-3d79a9a2-20261006-v1/report.md`
+is `be3bc91997914627c8e42cd78bcbb35a356583289a577e07b1a5d2583c239c17`.
+Only ordinary do/end layout changes; all tests remain parent bytes.
+
+Root original81917 is fully collected PASS_FORMAT_PREPARATION_ONLY after
+38.910s/8 stages. The sole verification VM is FREE. Output is
+`M7/m7-floor-layout-format-v1`; enabled runner
+`M7/floor-layout-format-runner-20261006-v1` config is
+`77d5f7e43f14f8f8a7e855caa47023cb551c650b0edcc29a6895037d31fc03a6`.
+An initial invocation omitted the required CLI arguments and refused before any
+stage/output creation. The corrected invocation passed current AST and current
+and floor formatting; clean source remains3d79 with no child. Root verified59
+artifacts,49 actual Git source records and8 original EOF/wait/PID-group joins.
+Collection `M7/floor-layout-format-original-collection-20261006-v1.json` is
+`abddb6e7d956c2177d26c1fb1aacaa2efb78c246f92860ecc468c0243431a9dd`, report
+`0c3d2dc6371b5d55b64cbab3248381d500b1a64466b681f091fd2aa0185e09d6`, inventory
+`8e2f5b5daf1493e800c912237a5cde52eadaabdd853187f4e021d58e6c46fdc2` and registry
+`36a64cd5e537fa6f7abc35961a8c5ab255e1ee38ef3a98ce574b6f15c2d8299d` has397
+unique keys. Never repoll81917 or repeat its exact source/pair/stage keys.
+Current-index prepares only a disabled runtime packet on3d79; prior same-byte
+formatting is reused. No compiler/test/runtime outcome is yet proved.
+
+Original90833 is fully collected FAIL after36.921s/3 stages, with41 immutable
+artifacts,134 actual source records and all3 original EOF/wait/PID-group joins.
+Current formatting failed on new retirement-test syntax at line334. OwnerGroup
+and Coordinator contain captured partial formatter changes; their dirty bytes
+are retained, not reset or claimed committed. Collection
+`M7/private-task-cleanup-format-original-collection-20261006-v1.json` is
+`c06b835c31e75990954148fa39dd06cee3a1ac543f9dd2116623cee1520284cf`;
+terminal report is `e59d52df4674e577321425d65bc128ee2e43a082e45e4393162680e86abf278a`,
+inventory `c7cd02bae17d8c7830ef9fbd5633766d82179627dc5a6e01fba12bd8cadbdfcd`,
+and registry `4848fe009d886f9c4d43ad6ba525443472bee6c45c8dbe7305d7254669e629d8`
+has389 unique keys. No AST, commit, compiler, floor or tests ran. Private-task
+preserved residue in separate commit2b4e5163, then a syntax-only test correction
+dbf2060c and prepares a disabled formatter proposal. All105 older test/support
+files and the OPEN
+intermediate membership-branch proof remain required. No worker VM grant exists.
+Never repoll76214/90833 or repeat their source/pair/stage keys.
+
 LATEST SOURCE REJOIN, 2026-10-06: verification VM remains FREE. Root owns clean
 `fd523a570a216865de480aaf6c93820dfe0eaf8f` in
 `/private/tmp/loopex-m7-restore-intake-candidate`, branch
