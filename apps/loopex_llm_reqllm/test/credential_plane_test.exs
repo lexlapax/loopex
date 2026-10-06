@@ -87,10 +87,14 @@ defmodule Loopex.LLM.ReqLLM.CredentialPlaneTest do
 
   test "actual version two companion refuses version one bootstrap before readiness or credential" do
     fixture = Fixture.new()
-    # A random name: `unique_integer` restarts in every VM, so a socket a
-    # killed run left behind would fail this bind with `:eaddrinuse`.
+    # Concept: the real local socket must fit the operating system's path bound.
+    # Technical depth: an exclusive random directory stays short even with a long TMPDIR.
     suffix = Base.url_encode64(:crypto.strong_rand_bytes(9), padding: false)
-    path = Path.join(System.tmp_dir!(), "v1-#{suffix}.sock")
+    root = Path.join("/tmp", "lpv-#{suffix}")
+    File.mkdir!(root)
+    File.chmod!(root, 0o700)
+    on_exit(fn -> File.rm_rf!(root) end)
+    path = Path.join(root, "s")
 
     {:ok, listener} =
       :gen_tcp.listen(0, [:binary, active: false, packet: :raw, ifaddr: {:local, path}])
@@ -100,10 +104,7 @@ defmodule Loopex.LLM.ReqLLM.CredentialPlaneTest do
     digest = fixture.options[:build_manifest_sha256]
     deadline = System.system_time(:millisecond) + 10_000
 
-    on_exit(fn ->
-      :gen_tcp.close(listener)
-      File.rm(path)
-    end)
+    on_exit(fn -> :gen_tcp.close(listener) end)
 
     {owner, reference, monitor} = start_version_probe(fixture, path, nonce, digest, deadline)
 

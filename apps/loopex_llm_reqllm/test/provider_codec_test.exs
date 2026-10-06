@@ -685,9 +685,13 @@ defmodule Loopex.LLM.ReqLLM.ProviderCodecTest do
   end
 
   defp socket_pair do
-    root = Path.join(System.tmp_dir!(), "lpc-#{System.unique_integer([:positive])}")
+    # Concept: the real local socket must fit the operating system's path bound.
+    # Technical depth: an exclusive random directory stays short even with a long TMPDIR.
+    suffix = Base.url_encode64(:crypto.strong_rand_bytes(9), padding: false)
+    root = Path.join("/tmp", "lpc-#{suffix}")
     File.mkdir!(root)
     File.chmod!(root, 0o700)
+    on_exit(fn -> File.rm_rf!(root) end)
     path = Path.join(root, "s")
     options = [:binary, active: false, packet: :raw, send_timeout: 1_000]
     {:ok, listener} = :gen_tcp.listen(0, [{:ifaddr, {:local, path}} | options])
@@ -699,7 +703,6 @@ defmodule Loopex.LLM.ReqLLM.ProviderCodecTest do
     on_exit(fn ->
       :gen_tcp.close(sender)
       :gen_tcp.close(receiver)
-      File.rm_rf!(root)
     end)
 
     {sender, receiver}
