@@ -29,6 +29,63 @@ grouped by T00–T19. Empty added sections mean no added subtasks are recorded;
 they do not mean the original task is complete. This follows the maintainer's
 2026-10-01 update to the active implementation goal.
 
+## Local ledger physical capture joined, 2026-10-05
+
+The bounded T15 ledger capture row is complete at tested clean source
+`fef3c28bece368c8ab44c9cf0f72d27c0f47a867`, joined through
+`f66ede0a0107ee9ad3089548310b90faf39780ca`. Only the two owned restore IO paths
+changed; their integrated bytes equal tested source. Both pairs pass focused
+IO 64/2 excluded, adjacent Ledger 19/0, ordinary Composition 635/3 and selected
+owned IO long 2/64, zero failures or skips. Current durations are
+25.690/1.724/334.364/21.931 seconds; floor 24.705/1.641/336.311/21.909.
+Pipeline took 1,040.074 seconds. Handle 21956 is terminal exit zero, collected,
+and its exclusive VM slot is returned. Root independently verified all 120
+terminal artifacts, all 32 raw stages and original started process groups
+absent, 32 actual/Git/mode source records, eight actual suite populations and
+the formatter-only direct child. No check was retried.
+
+Immutable sibling `M7/ledger-capture-audit-execution-20261005-v1` retains the
+complete raw outputs, exact source inventories, formatter AST proof and
+collection report. Terminal SHA-256
+`9a9ac7a491dfcbf71e5807f03eadc802ade32d425b6fb33ed003affbb8b611ad`;
+collection `4ce2d6545727cdde39d74a882f566aff700c9bdfcab31789b5bc797e4a63255e`.
+Floor ordinary output retains `erl_child_setup` error 32. Both ordinary logs
+retain the unavailable Darwin invalid-name witness; actual Linux proof stays
+open. Complete ledger enumeration, receipts, jobs, Store/artifact/history
+relations and restore activation remain separate.
+
+T01–T19 original totals remain 78 done/95 todo/6 retired; added totals are
+298 done/20 todo. Including T00 originals remain 78/101/7, added 302/21.
+T15 added is 16/5. The maintainer reaffirms the accepted 1,000-ms diagnostic
+fixture cutoff; this changes no production deadline or retained failure.
+
+Next artifact source `e8f01716923b62873872cee548a0de3dafa5c7e8` remains unproved.
+Root read its complete delta and independent review, which found improper
+projected/nested/tuple-contained lists can raise before integrity refusal.
+A separate source-only structural repair is authorized in the isolated Store
+worktree. No artifact VM, formatter or test has run. The v1 runner was refused
+before execution because its expected population and lifetime evidence were
+wrong; a disabled modern successor is being prepared. This is a source review
+finding, not an executed test failure. Final independent review sibling
+`M7/artifact-use-decoder-independent-review-e8-20261005-v2` retains six reviewed
+artifacts and eighteen exact inputs; report digest
+`777e13a74ecd160800b5a74afb5be7bfffba3bc485174f3c0bf7f99c862570c3`.
+The earlier v1 snapshot is preserved; v2 is the complete final packet.
+
+Root verified the prior full-check inventory's five artifacts, 116 inputs,
+78 exact commit/toolchain identities, 17 supplemental logs and 75 absent raw
+references. Immutable sibling `M7/full-fast-attempt-inventory-20261005-v1`
+retains the complete inventory, digest
+`451b3612ecba27148ae5610abe50e04ff37bb550a032ee0c3191132aa10748fd`.
+The stable sibling `M7/current-full-fast-attempt-registry` now contains 78
+immutable blocking markers; seeding inventory digest
+`36efa35f7937ca558a154b584da1074e6489d97e13dd5f95cafd2c40e80cd6e9`.
+Only three original executions are available, all failures. Historical PASS
+claims and missing raw evidence are not promoted. External/unrecorded attempts
+remain unknown. The next full check is disabled until final joined-source,
+population, witness, registry and exclusive-grant pins are reviewed.
+ADR 0052 exact-pair acceptance remains pending.
+
 ## Runtime startup witness joined, 2026-10-05
 
 The bounded T16 startup witness is complete at tested clean source
@@ -13180,7 +13237,7 @@ open.
 ### Added implementation subtasks
 
 - [ ] Extract the current Local artifact-use captured-byte decoder with the existing 131,072-byte ceiling, exact canonical bytes and filename digest; reuse the existing ArtifactStore facade through a private captured-bytes handle for closed reference-bound admission. Prove actual writers, deleted-source decoding, opaque identities, hostile bytes and existing semantic negatives on both pairs; physical capture, object bytes and complete history relations remain separate.
-- [ ] Capture one canonical current Local generation, admission, refusal or open ledger file through the guardian-owned restore IO worker; bind exact descriptor, pathname, raw job identity, original source placement and role ceiling before decode; prove actual current writers, hostile physical captures and unchanged cleanup on both pairs. Complete ledger enumeration, receipt/Store/artifact relations and restore activation remain separate.
+- [x] Capture one canonical current Local generation, admission, refusal or open ledger file through the guardian-owned restore IO worker; bind exact descriptor, pathname, raw job identity, original source placement and role ceiling before decode; prove actual current writers, hostile physical captures and unchanged cleanup on both pairs. Complete ledger enumeration, receipt/Store/artifact relations and restore activation remain separate.
 - [x] Audit every declared current Store history through the existing owned IO worker, enforcing descriptor/path/hash identity, complete transaction replay and recovery of every session; prove actual retained unknown truth, faults and cleanup on both pairs without claiming scripted executors prove OS effects.
 - [x] Capture one exact retained Resource manifest or provenance record through the existing guardian-owned restore IO worker, binding canonical pathname/identity to the physical manifest, enforcing its raw ceiling before open/read, revalidating descriptors and ancestors, and proving current writers, hostile captures and unchanged cleanup on both pairs. Complete catalog/reference orchestration remains separate.
 - [x] Decode retained current resource manifest/provenance bytes under derived physical ceilings before parsing, preserve exact normalization/content/Git identities and deterministic bytes, and prove actual current writers, hostile bytes and real decoder-entry controls on both pairs. Whole catalog capture/reference/backup orchestration remains separate.

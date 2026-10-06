@@ -62,26 +62,54 @@ collection Markdown `e1b4fb73b55b4aa7940008deea851509c2567212b984514bd1331a703b0
 Both old failures remain immutable. Historical reports and registered-resource
 semantic cleanup are not attributed or proved by this controlled witness.
 
-CURRENT LEDGER EXECUTION: clean source `7340024dd056af931478bd6afcf1472733612202` is
-pushed on `codex/m7-ledger-capture-audit`, still unintegrated. Root read the full
-two-file production/test delta and complete runner delta from reviewed Resource
-v4. It verified 37 source-packet artifacts, eight runner artifacts, 32 actual/
-Git/mode records and byte-identical stage/AST/toolchain helpers. Expected IO
-64/2 excluded, adjacent Ledger19/0, ordinary Composition635/3 and owned long2/64
-per pair are source-derived expectations, not results. Runner digest
-`57995802ba94e2121f185bc0a43abb915c60adf657aee341997286fb6b0acd06`.
-Ledger now owns the exclusive grant and live handle21956; formatter AST equality
-passed for both paths, and tested clean direct child is
-`fef3c28bece368c8ab44c9cf0f72d27c0f47a867`. Current verification is underway.
-Current focused 64/2 excluded passes in 25.690 seconds and adjacent Ledger 19/0
-in 1.724 seconds, zero failures/skips. Whole ordinary Composition is running;
-floor and owned long checks remain pending. Root read the complete 734-to-fef
-formatter delta, which only changes formatting. Worker owns polling, first-failure
-sealing and slot return. Independent read-only exact-source review found
-no blocking issue; root read it and verified its seven exact inputs. Immutable
-review sibling `M7/ledger-capture-audit-independent-review-20261005-v1`, report
-`c3a8548b105527bab98803ab5f2e24880ddbfe29e9efda8340ac8fdfd915fec5`.
-Complete ledger/receipt/history/restore remains open.
+LATEST LEDGER PROOF: handle21956 is terminal exit zero, collected and sealed;
+exclusive VM slot returned. Tested formatter-only child
+`fef3c28bece368c8ab44c9cf0f72d27c0f47a867` is pushed and joined through
+`f66ede0a0107ee9ad3089548310b90faf39780ca`. Root checked exact integrated bytes,
+120 terminal artifacts, 32 original waited/absent OS groups, 32 actual/Git/mode
+records, eight raw populations and the complete formatter delta. Both pairs
+pass IO64/2 excluded, Ledger19/0, Composition635/3 and owned IO long2/64,
+zero failures/skips. Current durations25.690/1.724/334.364/21.931 seconds;
+floor24.705/1.641/336.311/21.909; pipeline1,040.074. No rerun or repair.
+Sibling `M7/ledger-capture-audit-execution-20261005-v1`: terminal
+`9a9ac7a491dfcbf71e5807f03eadc802ade32d425b6fb33ed003affbb8b611ad`;
+collection `4ce2d6545727cdde39d74a882f566aff700c9bdfcab31789b5bc797e4a63255e`.
+Floor ordinary raw retains erl_child_setup error32; both ordinary logs retain
+the unavailable Darwin invalid filename/Linux-required witness. These remain
+visible. Only the bounded T15 capture row closes. Complete ledger/receipt/job/
+Store/artifact/history/restore relations stay open. No live verification handle
+remains and no next VM grant has been issued.
+
+ARTIFACT SOURCE REVIEW: exact e8f01716923b62873872cee548a0de3dafa5c7e8 in
+`/private/tmp/loopex-m7-artifact-use-decoder`, branch
+`codex/m7-artifact-use-decoder`, is unproved. Only Store artifacts.ex and
+artifact_store_conformance_test.exs are owned. Root read the full two-file delta
+and final independent report and verified six artifacts/eighteen actual/Git/
+installed-source inputs. Improper projected pairs, nested lists and tuple/map-
+hidden improper lists can raise FunctionClauseError before integrity refusal.
+Explicit structural refusal and real decoder hostile controls are authorized
+as a separate source-only child; no Core/port/Canonical changes, VM, formatter,
+test or network work yet. Final sibling
+`M7/artifact-use-decoder-independent-review-e8-20261005-v2`, report
+`777e13a74ecd160800b5a74afb5be7bfffba3bc485174f3c0bf7f99c862570c3`;
+input `50c6c73eff3d59d0a78576a8d3c4688bb9876039079b441e952a5d67c66d3572`.
+Earlier v1 snapshot is preserved; v2 is final. Root rejected disabled v1 runner
+before execution: ordinary expectation290 disagrees with source105; missing
+owned formatter/AST repin; original command exit/PID/group cleanup insufficient.
+The worker is sealing a disabled modern v2 runner and repairing source. Future
+both-pair focus29/0 and Store105/0 are source-derived, not test results.
+
+PRIOR FULL-CHECK REGISTRY: root read and verified five packet artifacts,116
+inputs,78 Git source/toolchain identities,17 supplemental actual logs and75
+absent raw references. Retained sibling
+`M7/full-fast-attempt-inventory-20261005-v1`, inventory
+`451b3612ecba27148ae5610abe50e04ff37bb550a032ee0c3191132aa10748fd`.
+Stable `M7/current-full-fast-attempt-registry` has78 immutable source blocking
+markers, preserving reported versus verified outcomes; seeding inventory
+`36efa35f7937ca558a154b584da1074e6489d97e13dd5f95cafd2c40e80cd6e9`.
+Three available original executions are FAIL;44 historical PASS claims remain
+unavailable as original proof. External/unrecorded CI/local attempts remain
+unknown. Do not reset this registry or rerun a recorded source.
 
 NEXT INTEGRATION: disabled draft retained byte-identically under sibling
 `M7/integration-next-current-runner-draft-20261005-v1` remains unchanged. Root
@@ -93,10 +121,12 @@ byte-identical to startup v4; helper AST outside population/validate_witness is
 unchanged. Runner changes only explicit malformed-summary refusal. Runner digest
 `c0ba6836b099ce85e66425f10acafb72cb95d3e5668ef4f7ca1c5c97e15a0402`;
 helper `51d8030cd1e7cc7bc6a24c0b837585e92a76c114a7c0ab7cae1de8df51ac7843`.
-Final source, populations and canonical attempt-registry pins remain pending.
-No execution is enabled. If startup and Ledger both join,
+Final source, populations and exact canonical attempt-registry pins remain pending.
+Registry seeding is now complete as recorded above.
+No execution is enabled. Startup and Ledger are now joined;
 expected Core1324/10 and Composition635/3 supersede the draft's initial
-Composition623/3; Local296/2 and CLI635/6 remain prospective. A read-only Docker
+Composition623/3; Local296/2 and CLI635/6 remain prospective. Store becomes105/0 only if the
+artifact decoder joins after paired proof; current primary Store remains100/0. A read-only Docker
 platform/image inventory found the daemon unavailable; no app, container or
 image pull was started. The actual Linux filename witness remains unavailable.
 
