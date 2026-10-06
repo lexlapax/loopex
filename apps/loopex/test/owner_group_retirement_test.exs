@@ -333,11 +333,11 @@ defmodule Loopex.Runtime.OwnerGroupRetirementTest do
         assert resume_reply?(rows, group, tag, target)
         await_action(group, workers, expected, rows ++ [row], cutoff)
 
-      {:trace, ^group, _kind, _term} ->
-        flunk("unexpected Group receive trace shape in the fixed actor witness")
+      {:trace, ^group, _kind, _term} = row ->
+        unexpected_trace("unexpected Group receive trace shape in the fixed actor witness", row)
 
-      {:trace, ^group, :send, _term, _target} ->
-        flunk("unexpected Group send trace shape in the fixed actor witness")
+      {:trace, ^group, :send, _term, _target} = row ->
+        unexpected_trace("unexpected Group send trace shape in the fixed actor witness", row)
     after
       left(cutoff) -> flunk("native membership/stop observation missed the original cutoff")
     end
@@ -451,14 +451,32 @@ defmodule Loopex.Runtime.OwnerGroupRetirementTest do
           cutoff
         )
 
-      {:trace, ^group, _kind, _term} ->
-        flunk("unexpected native progress receive trace shape")
+      {:trace, ^group, _kind, _term} = row ->
+        unexpected_trace("unexpected native progress receive trace shape", row)
 
-      {:trace, ^group, :send, _term, _target} ->
-        flunk("unexpected native progress send trace shape")
+      {:trace, ^group, :send, _term, _target} = row ->
+        unexpected_trace("unexpected native progress send trace shape", row)
     after
       left(cutoff) -> flunk("positive membership fence did not precede native bulk stop")
     end
+  end
+
+  # Concept: the actual observed row is diagnostic evidence; the clause still fails.
+  # Technical depth: an omitted tail remains unavailable. Bounded rendering changes
+  # neither accepting clauses nor the original deadline and trace-row cap.
+  defp unexpected_trace(label, row) do
+    rendered =
+      inspect(row,
+        structs: false,
+        limit: 12,
+        printable_limit: 128,
+        charlists: :as_lists,
+        pretty: false
+      )
+
+    flunk(label <> "; bounded actual row: " <>
+      String.slice(rendered, 0, 1_024) <>
+      "; any omitted tail is UNAVAILABLE, no complete-shape claim")
   end
 
   defp membership_queries(rows, group, workers) do
