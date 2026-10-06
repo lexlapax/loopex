@@ -27,6 +27,31 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current proof, execution and source ownership
 
+LATEST EXECUTION, 2026-10-06: root original22595 owns the sole verification
+VM on frozen clean3da. Current then floor,37 stages and14 lanes per pair,
+74 total stages. IO106/3→lookup38/0→resolution9/0→workflow39/0 precede original
+model/adjacent/receipt/ledger/read-only/artifact/ordinary/long lanes. Ordinary
+Composition763/4 is derived716+38lookup+9resolution. The actual64 case retains
+its original60000ms timeout. First command or evidence failure seals the run
+and prevents successors; no formatter/control/consumer repeat or source mutation.
+
+Enabled `M7/combined-success-runner-20261006-v1` config is
+`a226e766034a9859ea41345f45fd5a56569ce097c44b8f4e1dcdd147a46589b8`, root inventory
+`dd12994271aebda65e4c48dd4bfc9f646c7bd1da530ef0e4deaf603f1b0b8854`.
+Root source review `M7/combined-success-source-review-3da-20261006-v1/report.md`
+is `9f3c234cc82f22e7dba27731f7bed9e24da3835ee4ff435c3676ff1cdf87b82f`.
+Root admitted39 packet artifacts,230 external pins,134 actual Git source rows
+and full1105-entry candidate/parent trees. Eleven lifecycle functions, source(),
+shared helpers/collector/admission/toolchain and historical causal admission
+remain exact template bytes. One terminal limits literal is corrected in the
+enabled copy to name lookup/resolution and Composition763; disabled v1 stays
+immutable and the exact metadata-only patch is retained. Both-pair stage counts
+are unambiguously37 each in the stage inventory and this checkpoint.
+Fresh output `M7/m7-combined-success-v1`; separate registry preserves363 prior
+unique keys. Root alone collects22595. All workers have no VM grant. This is
+restore prerequisite verification, no complete public restore or T15/T16 closure.
+Original71975 compile failure remains FAIL. Earlier FREE entries are historical.
+
 LATEST REVIEW FINDING, 2026-10-06: diagnostic5fc MUST NOT be verified.
 Independent source review found ordinary DOWN handling prunes the last provider
 record before proving its original Task.Supervisor membership absent, so a
