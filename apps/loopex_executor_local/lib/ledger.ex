@@ -951,7 +951,7 @@ defmodule Loopex.Executor.Local.Ledger do
 
   def decode_bytes(bytes, kind)
       when is_binary(bytes) and kind in [@marker_kind, @refusal_kind, @open_kind],
-    do: decode_captured_record(bytes, [kind], @record_bytes)
+      do: decode_captured_record(bytes, [kind], @record_bytes)
 
   def decode_bytes(_bytes, _kind),
     do: {:error, {:ledger_unavailable, :malformed_record}}
