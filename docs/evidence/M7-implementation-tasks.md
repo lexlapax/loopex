@@ -50,10 +50,15 @@ Its only corrective change renames the captured `open` binding and its two uses
 to `open_records`, preserving IO calls and limits. Both formatter checks and
 runtime verification of these new bytes remain pending.
 
-Current-index agent prepared a new disabled runner whose two formatter checks
-precede compilation and suites. Root and independent runner review and execution
-grant remain pending. Expected IO 106/2, Composition 677/3 and long 2/106 include
-twelve new object cases; these are expectations, not results. No VM runs.
+Root and independent source/runner reviews found no blocker. Root verified
+197 disabled artifacts, 124 actual Git/mode inputs, 29 external references,
+eleven unchanged lifecycle functions and the independent review's 207 inputs.
+A separate enabled packet retains exact code with a new config/grant and fresh
+one-shot registry. Current-index agent owns the sole verification VM under
+original handle 14406, polling and collecting it alone. Both formatter checks
+precede compilation and suites; first failure stops the attempt. Expected IO
+106/2, Composition 677/3 and long 2/106 include twelve new object cases; these
+are expectations, not results. No old-source retry or primary rejoin is granted.
 CLI agent implements the first integrated available-source restore workflow in
 isolated `codex/m7-current-restore-workflow`, using existing open bounded T15
 work. The required full audit, source retirement, destination generation/root

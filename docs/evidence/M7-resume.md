@@ -85,14 +85,39 @@ formatter child through `83994da3bd2e4d64e708405048a924a8bae17e07`, then committ
 `open_records` at the captured binding and its two uses. IO calls, data, order
 and limits remain unchanged. Neither formatter nor a suite has run on this
 new candidate. Its full delta from `3030f46a` is still the eight owned paths.
-Private agent reviews this source read-only. Current-index agent prepared a
-separate disabled runner; both formatter checks precede compilation, gates and
-suites. Sibling `M7/object-restore-integration-runner-20261005-v1`: run
+Independent source review found no blocker; root verified its seven artifacts,
+forty Git/kind/mode inputs and three original floor-evidence references. Report
+`fee4a0aee99de043bc782e058113e850ba8df130f8eefdf2999eeb09fc68b285` is retained in
+`M7/object-format-fb23-independent-review-20261005-v1`. Current-index agent
+prepared a separate disabled runner; both formatter checks precede compilation,
+gates and suites. Sibling `M7/object-restore-integration-runner-20261005-v1`: run
 `1deaff39e380179b21595c987f12bcf2dcc5ea5185334957d1b9c10e19804474`, disabled config
 `512ee8618ff653365ec2947ce1feed33284001e75d9acd6573944bf930fd171d`, final inventory
-`a0c3917b7a4989c181f88b24fbb36901419dd50663a685f928bb641fc1dbc73e`. Root review,
-independent runner review and an execution grant remain pending. New output
-`M7/m7-object-restore-join-v1` and new object registry are absent. Proposed IO
+`a0c3917b7a4989c181f88b24fbb36901419dd50663a685f928bb641fc1dbc73e`. Root verified 197 sealed artifacts, 124 actual/Git/kind/mode sources,
+29 external inputs, eleven byte-identical shared functions and exact old-case
+preservation. Independent runner review found no blocker; report
+`03e0f3327ab17f53b736fdd41a407cd95d9484584ac0dd37b7503a1345fe0807`, inventory
+`e9280b72d3b6a0eea9ffb1d7ab39acf50b17a27751810d7dd2542edf294b1c05`, retained in
+`M7/object-restore-integration-runner-independent-review-20261005-v1`. Root
+verified its four artifacts and 207 recorded inputs before finalization.
+
+CURRENT EXCLUSIVE EXECUTION: root finalized separate enabled sibling
+`M7/object-restore-integration-runner-20261005-v2` and verified 218 artifacts
+plus root inventory. Active code and helper bytes match the disabled packet;
+its historical inventories apply only to the complete `disabled-review-packet`
+copy. Enabled config
+`c52a1fdc64f1117dead19452996906f55de58c1a3b6adbd516865804d9ef853c`, root inventory
+`aecb08236178c9b867a0fe611fee25a994c26d231e592ec881dc52024662e378`. Fresh canonical
+`M7/object-restore-stage-attempt-registry.json` was seeded at
+`1a5f5f5aa0ba2c8e25a6d0994e96d5911cd7194ee78b447a194f0321f46bdbf0`; never reset.
+Root grants current_index_cleanup one exclusive current/floor campaign under
+original outer handle 14406, which only that agent polls and collects. Output
+is `M7/m7-object-restore-join-v1`. Preserve the old 43-key registry and failure;
+stop at first failure, retain original status/raw EOF/source/modes and exact
+joins, then collect the original handle before returning the slot. Only the
+reviewed eight-path AST-equal clean single-parent formatter child/re-pin is
+permitted. No source repair, retry, second VM, full-fast, provider, release,
+attended, Linux, primary source rejoin or broader restore claim is granted. Proposed IO
 106/2, Composition 677/3 and long 2/106 populations include twelve new object
 cases; other lane populations stay unchanged. No retry of old source is allowed.
 
