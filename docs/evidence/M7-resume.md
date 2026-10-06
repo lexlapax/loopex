@@ -53,8 +53,7 @@ consumed keys and digest
 The root audit is retained in
 `M7/current-restore-join-root-audit-20261005-v1`, retention map
 `8bbf591df1b10d80246cec4a32d2ecaf0a44a21e99308be409f6c548ceb3c264`.
-Original handle 8713 must never be polled or retried. Its execution grant ended;
-no verification VM runs.
+Original handle 8713 must never be polled or retried. Its execution grant ended and its slot returned before the separate grant below.
 
 CURRENT OBJECT SOURCE: clean
 `8c9c4f924bdd7131a2fc2cce09b2c6bb85d083e5` in
@@ -83,8 +82,8 @@ formatter child through `83994da3bd2e4d64e708405048a924a8bae17e07`, then committ
 `/private/tmp/loopex-m7-object-format-integration`, branch
 `codex/m7-object-format-integration`. The correction only renames `open` to
 `open_records` at the captured binding and its two uses. IO calls, data, order
-and limits remain unchanged. Neither formatter nor a suite has run on this
-new candidate. Its full delta from `3030f46a` is still the eight owned paths.
+and limits remain unchanged. The following attempt records its allowed formatter child and first failure; no
+suite has run on those bytes. Its full delta from `3030f46a` is still the eight owned paths.
 Independent source review found no blocker; root verified its seven artifacts,
 forty Git/kind/mode inputs and three original floor-evidence references. Report
 `fee4a0aee99de043bc782e058113e850ba8df130f8eefdf2999eeb09fc68b285` is retained in
@@ -101,7 +100,7 @@ preservation. Independent runner review found no blocker; report
 `M7/object-restore-integration-runner-independent-review-20261005-v1`. Root
 verified its four artifacts and 207 recorded inputs before finalization.
 
-CURRENT EXCLUSIVE EXECUTION: root finalized separate enabled sibling
+COLLECTED OBJECT EXECUTION: root finalized separate enabled sibling
 `M7/object-restore-integration-runner-20261005-v2` and verified 218 artifacts
 plus root inventory. Active code and helper bytes match the disabled packet;
 its historical inventories apply only to the complete `disabled-review-packet`
@@ -110,8 +109,8 @@ copy. Enabled config
 `aecb08236178c9b867a0fe611fee25a994c26d231e592ec881dc52024662e378`. Fresh canonical
 `M7/object-restore-stage-attempt-registry.json` was seeded at
 `1a5f5f5aa0ba2c8e25a6d0994e96d5911cd7194ee78b447a194f0321f46bdbf0`; never reset.
-Root grants current_index_cleanup one exclusive current/floor campaign under
-original outer handle 14406, which only that agent polls and collects. Output
+Root granted current_index_cleanup one exclusive current/floor campaign under
+original outer handle 14406; that attempt is now terminal and fully collected. Output
 is `M7/m7-object-restore-join-v1`. Preserve the old 43-key registry and failure;
 stop at first failure, retain original status/raw EOF/source/modes and exact
 joins, then collect the original handle before returning the slot. Only the
@@ -120,6 +119,44 @@ permitted. No source repair, retry, second VM, full-fast, provider, release,
 attended, Linux, primary source rejoin or broader restore claim is granted. Proposed IO
 106/2, Composition 677/3 and long 2/106 populations include twelve new object
 cases; other lane populations stay unchanged. No retry of old source is allowed.
+
+LATEST OBJECT FAILURE: original 14406 is collected, exit 1, with its VM slot
+returned. The clean permitted formatter child is
+`6d9dfed9405ccb279d9abdddaa4d9b1e5c52f318`, exact single parent `fb23ac0d`.
+Root read the complete two-path formatter patch; all eight whole-file non-line
+AST checks passed. Immediately following current format-check failed in
+0.399 seconds at `restore_io_test.exs:1810`, requiring a different multiline
+argument layout from the mutating formatter's output. Pipeline duration was
+85.127 seconds. No floor formatter, compilation, gate or suite ran.
+
+Sibling `M7/m7-object-restore-join-v1`: terminal report
+`750d1033d84e18fa627dda220672036a3acce3a9b918018fb97819694f1a026d`, inventory
+`38693a9a73d1674e87ed886594c741f6a756df081949b2012c6885c9f09c4247`, raw failure
+`0b5a1e847ef0423bde357b4347c41de51b50b7632b777ab2eb534ae6471bd77c`, formatter
+patch `2df8a6c3369fd2b29d87c9fabfb1dd4ef0850e260bc6a2ba83891438ee4d9341`. Root
+independently verified 55 sealed artifacts, eight original raw/started/terminal
+stages and eight unique consumed keys, 124 final actual/Git/mode sources,
+full tree projection and all eight PIDs/groups absent. Root audit sibling
+`M7/object-restore-join-root-audit-20261005-v1`, retention map
+`00336645834c6c742a6bc74e9a15f94f492d053f9bebea4e887409449cf5074c`.
+The canonical object registry now has eight keys and digest
+`8e428a322645e23bcd0748a13ab5cd03fb70127e5a9c85c750bc3a55b8267aaa`; never reset.
+The old 43-key registry remains unchanged. Never poll or retry original 14406.
+No verification VM runs and its grant has ended.
+
+NEXT SOURCE CANDIDATE: root created isolated
+`/private/tmp/loopex-m7-object-call-fixture`, branch
+`codex/m7-object-call-fixture`, from frozen `6d9dfed9`, then committed and pushed
+`2826b30bfc583ff943cdbe63c99041950d1c907f`. Its only change binds the unchanged
+invalid artifact request tuple to `invalid_operation` before the existing
+RestoreIO.run call. All arguments, probe, assertions and 1,000/100-ms fixture
+limits remain exact; no test or production bound changes. This avoids the
+formatter's unstable multiline call shape. No formatter/compiler/test has run
+on the new source. Private agent reviews the tiny source change read-only;
+current-index agent prepares a new disabled runner using the same early
+formatter sequencing and unchanged eleven populations. Fresh proposed object
+call registry and output `M7/m7-object-call-join-v1` remain absent. New source
+review, runner review and grant are required; no old-source retry is authorized.
 
 CURRENT RESTORE WORKFLOW: CLI agent owns source-only implementation in isolated
 `/private/tmp/loopex-m7-current-restore-workflow`, branch

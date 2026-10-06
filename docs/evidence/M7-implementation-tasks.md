@@ -53,12 +53,21 @@ runtime verification of these new bytes remain pending.
 Root and independent source/runner reviews found no blocker. Root verified
 197 disabled artifacts, 124 actual Git/mode inputs, 29 external references,
 eleven unchanged lifecycle functions and the independent review's 207 inputs.
-A separate enabled packet retains exact code with a new config/grant and fresh
-one-shot registry. Current-index agent owns the sole verification VM under
-original handle 14406, polling and collecting it alone. Both formatter checks
-precede compilation and suites; first failure stops the attempt. Expected IO
-106/2, Composition 677/3 and long 2/106 include twelve new object cases; these
-are expectations, not results. No old-source retry or primary rejoin is granted.
+The separate enabled attempt under original handle 14406 is now terminal exit
+1 and fully collected; its slot returned. The permitted formatter child is
+`6d9dfed9`. All eight AST checks pass, then current format-check fails on one
+call layout produced by the preceding mutating formatter. Pipeline 85.127
+seconds; no floor format, compilation, gate or test ran. Root verified 55
+sealed artifacts, eight original stages/unique keys, 124 final actual Git/mode
+sources, full tree and all eight PIDs/groups absent. The old 43-key registry
+and new consumed eight-key registry are unchanged and may never be reset.
+Root committed and pushed new source `2826b30b` in isolated
+`codex/m7-object-call-fixture`: bind the identical invalid-request tuple before
+the existing call, preserving every argument, assertion, probe and cutoff.
+Private agent reviews source; current-index agent prepares a fresh disabled
+runner. No VM runs and no new execution is granted. Expected IO 106/2,
+Composition 677/3 and long 2/106 stay unchanged; no checkbox closes. No old-source
+retry or primary rejoin is authorized.
 CLI agent implements the first integrated available-source restore workflow in
 isolated `codex/m7-current-restore-workflow`, using existing open bounded T15
 work. The required full audit, source retirement, destination generation/root
