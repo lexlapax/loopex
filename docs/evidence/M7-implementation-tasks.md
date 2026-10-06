@@ -13427,6 +13427,18 @@ candidate integration and floor proof, source hashes and output digests are
 retained under [Current work](#current-work). Backup/restore obligations remain
 open.
 
+2026-10-06 prerequisite run at `fdfe148889b76fae8738573d3442d2daf5e2c569`
+stopped after current IO passed 106 cases and all nine workflow cases failed
+the required resource-history assertion. No long or floor lane ran. Independent
+source diagnosis found that the real fixture supplied the runtime catalog but
+omitted explicit session resource admission; the current producer and restore
+auditor agree on the record schema. Repair the fixture through actual accepted
+admission, retaining its history assertion and physical dependency controls.
+This is part of the open backup/restore proof, not a completed subtask.
+Original handle 28778 is fully collected; failure pins and current ownership are
+in the [restart record](M7-resume.md#technical-depth).
+
+
 ### Added implementation subtasks
 
 - [ ] Recheck the captured source ancestor type/device/inode identities after the second native absence observation, including the final pre-root-commit phase. Prove actual persistent parent removal at the held final read refuses completion while preserving original cutoffs, post-intent fencing, retained destination claim and all prior case bodies on both supported pairs.

@@ -49,8 +49,20 @@ records 58 artifacts, 132 source/Git records, twelve raw EOF/wait/status joins
 and unchanged historical registries. Root rehashed the collection, report,
 inventory and first-failure raw identity pins. Active registry ends at
 `ae7c1b7cbc59366327ef72c354dda7bde22b20d3af4a64bdfbd53e0ba09aae36`.
-The execution grant ended. Current-index agent now owns read-only diagnosis of
-the missing resource history, with no VM or edit permission.
+The execution grant ended. Two independent source inspections agree that
+there is no producer/audit schema drift. The fixture retained a runtime resource
+catalog but never sent the required session `admit_resources` command, leaving
+the run resource binding nil. Keep the required resource-history assertion;
+add actual accepted admission bound to the retained manifest and workspace.
+CLI committed the fixture-only repair at
+`ed1e437161430319b98cca6ea8951f8b658c6441`, sole child of db584, in new isolated
+`/private/tmp/loopex-m7-restore-resource-admission`, branch
+`codex/m7-restore-resource-admission`, now clean at ed1e4371. Root read the full diff. It preserves all 27
+cases and cutoffs, strengthens exact manifest binding and fixes generated
+unreachable-clause warnings without suppressing them. No VM is granted.
+Current-index prepares only a disabled formatter adaptation; private-task will
+review the committed fixture diff. Frozen fdfe/db584 and failed output remain
+unchanged. No private source branch export is authorized.
 
 Full disabled v1 runner review found no execution blocker but required a
 provenance-label correction. Root read its full report and rehashed fourteen
