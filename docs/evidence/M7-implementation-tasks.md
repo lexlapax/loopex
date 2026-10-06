@@ -63,14 +63,23 @@ Its32 focused/35 adjacent pass; no floor ran. Artifact capture source-only
 Fixture-only `d754e78b` passed root source review. Both complete source packets
 and original failure evidence are retained. Root prepared clean isolated
 combined candidate `015341ef`, exactly eight paths equal reviewed source bytes.
-A new disabled runner is being prepared. No old candidate retry, primary source
-rejoin or VM is granted.
+Root reviewed the sealed disabled runner, verifying173 artifacts,124 actual/Git
+source inputs,17 external references and eleven unchanged lifecycle functions.
+Independent review found no source blocker. Root finalized separate enabled v2
+and granted one exclusive sequential current/floor verification, original
+handle8713, new output `M7/m7-restore-join-v1`; exact config
+`db3c100932dc368a87983e9c794a974070060a304e9265e4eeea040224a607e9`.
+No old candidate retry or primary source rejoin is granted. A separate
+source-only object audit owns IO/test in isolated
+`codex/m7-artifact-object-physical-capture` at015341ef. It reuses streaming
+hashing and preserves current locator/digest reader relations; no new cap or
+complete-history claim is introduced.
 A source-only T16
 repair now owns only the failed Model integration startup options and the two
 ReadOnly physical cases' workspace setup. Existing1,000 ceiling, actual Unix
 socket/FIFO and exact8MiB/first-over assertions remain required.
-T01–T19 originals78 done/95 todo/6 retired; added299 done/23 todo.
-Including T00 originals78/101/7, added303/24. T15 added17/7; T16 added53/6.
+T01–T19 originals78 done/95 todo/6 retired; added299 done/24 todo.
+Including T00 originals78/101/7, added303/25. T15 added17/8; T16 added53/6.
 These are current facts; the following paragraphs retain historical checkpoints.
 
 Artifact source/evidence is pushed at `87be37e7`; its clean merged worktree and
@@ -13346,6 +13355,7 @@ open.
 
 ### Added implementation subtasks
 
+- [ ] Audit one selected current Local artifact object through the existing owned streaming hash, binding the locator-derived physical path to the reference digest/size, complete captured manifest and descriptor/ancestor identities under original total/work/cleanup bounds. Preserve current direct-fetch locator semantics, writer-only limits and all orphan/staging bytes; prove actual writer and physical refusal cases on both pairs. Complete object enumeration, history relations and restore activation remain separate.
 - [ ] Capture one selected current artifact-use sidecar through the existing guardian-owned restore IO worker and real captured Local/Core describe facade; require exact reference-derived pathname, physical manifest membership, current raw ceiling, hash/mode/link/ancestor identity and close-before-semantics under original cutoffs. Prove actual writers and physical/semantic refusals on both pairs; object bytes, complete namespace/orphans and history/restore relations remain separate.
 - [ ] Extract one private captured-byte Local receipt decoder shared with live reads; preserve the native current 28-field ETF schema, 65,536-byte cap, exact raw job binding, closed predicates and all claim/finality/job/recovery authority. Replace the injected decoder seam with actual bounded BIF proof and actual writer/hostile controls on both supported pairs; physical receipt capture and complete history audit remain separate.
 - [ ] Enumerate the complete current Local generation/marker/open namespace under one original restore IO guardian; require exact physical name membership, current marker-plane grammar, open cardinality/whole-byte bounds and source/job/digest relations. Preserve actual writer crash cuts and claim observations; complete receipts/Store/job/history/restore certification remains separate.

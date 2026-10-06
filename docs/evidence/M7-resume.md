@@ -27,6 +27,54 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current proof, execution and source ownership
 
+CURRENT COMBINED RUNNER REVIEW: clean pushed015341ef remains frozen in
+`/private/tmp/loopex-m7-current-restore-integration`. Disabled sibling
+`M7/current-restore-integration-runner-20261005-v1` pins exactly eight reviewed
+paths, ordered two-parent initial graph and single-parent formatter-child rule.
+Root reviewed the full changed run/AST/config/schema and verified173 listed
+artifacts plus inventory,124 actual/Git/kind/mode source inputs,17 external
+references and eleven byte-identical shared functions. Run
+`125f68c2421d65674794829a40e1954f0b62b84a9062aa395f91eb514a268dfd`, disabled config
+`80748e4120cd565a39250293e13f1f1bc08577af86a8054ce7e95de5e6394f78`, final inventory
+`9638e94ec6e882841f62fa33e79c0456d4d3df530968a649d6e0739740fc79b9`.
+Independent review found no source blocker, report
+`3e834a2e83d445046ac03a40d6238c7684238b90fa9ae17d53d46c70f1837ac0`. Root verified
+its three artifacts plus inventory and finalized separate enabled v2, retaining
+181 artifacts plus finalization inventory. Config
+`db3c100932dc368a87983e9c794a974070060a304e9265e4eeea040224a607e9`, finalization
+`f78acd3c0cd0e21ac184793e53db42219bdafb8d83223e8f3d21510d8a930f2f`. Root audited
+the two consumed22-key registries unchanged and12 prior terminal records with
+no combined015 attempt, then seeded new canonical
+`M7/current-restore-stage-attempt-registry.json` at
+`1a5f5f5aa0ba2c8e25a6d0994e96d5911cd7194ee78b447a194f0321f46bdbf0`; never reset.
+Root grants current_index_cleanup one exclusive sequential current/floor run.
+Original outer handle8713 is live, polled only by that agent; output
+`M7/m7-restore-join-v1`. No second VM, repair/retry, source rejoin or broader
+full-fast/provider/release lane is granted. Stop and retain first failure and
+return slot only after original handle collection and exact group joins.
+Expected per pair: IO94/2, Model28/0, Composition
+adjacent21/0, Receipt32/0, Ledger23/0, ReadOnly22/0, Local adjacent21/0,
+Artifact29/0, Composition665/3, Local302/2 and owned IO long2/94; zero skips.
+These are source expectations, not results.
+
+CURRENT OBJECT SOURCE WORK: root read the complete selected-object inventory
+and schema, verified four artifacts plus inventory, nine actual/Git/mode
+sources and four external inputs. Immutable sibling
+`M7/artifact-object-audit-inventory-015341ef-20261005-v1` retains exact five files
+and records original0644/retained0444 modes; retention map
+`7b0106ea1077b3c606596ee760bc9433623404e48c65aa47708ff34df3bbf59c`. Report
+`b36d662f3ca433c859446c5a600e0877ca11e59d7a892712dec7ff7d1e0866ab` distinguishes
+Local direct fetch from stat: direct fetch selects by lowerhex locator and
+verifies requested digest/size without equating locator to digest. Reuse the
+existing owned streaming hash and original total/global/work/cleanup limits;
+preserve writer-only64MiB cap, orphan/staging bytes and current reader domain.
+Root created isolated `/private/tmp/loopex-m7-artifact-object-physical-capture`,
+branch `codex/m7-artifact-object-physical-capture`, base015341ef. CLI agent owns
+only restore IO/test for source-only implementation and retained packet; no
+VM/toolchain/formatter/compiler/tests/runner/network/push or complete-history
+claim. One new T15 row is open. The following older run grants are historical;
+both original failed handles remain collected and may never be retried.
+
 CURRENT EXECUTION: Ledger enumeration handle2090 is terminal exit1 and fully
 collected. The original current Composition command exited2 with644/651 passed,
 seven failures,3 excluded and zero skips in354.531 seconds; pipeline677.138.
