@@ -27,6 +27,47 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current proof, execution and source ownership
 
+LATEST SOURCE, 2026-10-06: sole verification VM remains FREE. Root combined
+reviewed7694,886,79464 and corrected3fc79 in isolated
+`/private/tmp/loopex-m7-restore-combined`, branch `codex/m7-restore-combined`.
+Clean head is `4ae9e86df2effcb6f0f0459cb65bf8d310f786cd`; chain is
+7694→32af0561→5a2d52ea→730c4920→4ae9e86d. One IO formatting conflict retained
+the exact reviewed plan-sensitive result branch. The last commit moves the
+complete unchanged lookup helper block after all execute/1 clauses; inverse
+movement recovers the whole parent file. Block SHA is
+`340614a228d0572ee53d2293674224c41d54f9070ba53652f515026fb378e401`, mechanical
+record `/private/tmp/m7-restore-combined-clause-move-v1.json`. Independent rejoin
+review and disabled five-file formatter preparation are active. Source remains
+frozen; no formatter, compiler or test has run on4ae9. Workflow39, lookup38,
+IO109 and new resolution9 cases remain planned populations with unchanged
+actual64/default60000ms proof. No broad task completion or primary source rejoin.
+
+Independent3fc correction review found no blocker in either prior finding's
+disposal, preserving exact native races, assertions and original cutoffs.
+Packet `/private/tmp/loopex-m7-original-tx-correction-inspection-3fc79fde-20261006-v1/report.md`
+is `7f28bed051eb61ddc814d6d180ebb367462954d400bd470ab42daa2b3d178ef5`, inventory
+`a07a758452bd6d89c1e5bd7c0ee7d02173289319b0b174b7bfa78252864de078`.
+Remaining public restore continuation map is
+`/private/tmp/loopex-m7-public-restore-continuation-analysis-3fc79fde-v1/report.md`,
+SHA `0306202b8aabdd3c2ee9d2418b30c5e2c0ed258aebb3478c2864d4b3c5286770`, inventory
+`1f408834838250e33bc3e0bee35d706b0e697f518017fa7544c9166db88db579`.
+It maps bounded terminal facts/pending intake, retained-candidate continuation,
+physical prefix/cleanup resolution and complete public facade migration. No new
+decision identified; sole intent/claim evidence loss stays fenced under ADR0051.
+Prepared separate writer `/private/tmp/loopex-m7-restore-pending-intake`,
+branch `codex/m7-restore-pending-intake`, at4ae9, currently unchanged and unassigned.
+
+Diagnostic source checkpoint2b436a40aba618127516309d20d25acf823f573a is preserved
+in its separate writer, but MUST NOT be verified or joined: new private group
+calls use infinity and may block beyond retained observation/work cutoffs.
+Packet `/private/tmp/loopex-m7-private-task-cleanup-order-source-2b436a40-20261006-v1/report.md`
+is `5e21a9742954e882f245bc600933251286a182095fd5ad86b1390bf9a6f50d08`, inventory
+`040d31b7ebd9153f30b26662f8b8713d56e564bf0067a95dda3e9b8144d2ec41`.
+All105 Core test/support files remain unchanged. Worker owns a new bounded-call
+child in the same three paths. Every new wait must spend an already-owned
+absolute work/cleanup remainder; no known local window means cleanup unproved,
+not an invented allowance. This is source repair, no deadline or quiet-check waiver.
+
 LATEST COLLECTION, 2026-10-06: root71975 is fully collected, exit1 after
 82.223s and three current stages. Verification VM is FREE. Compilation failed
 on IO's separated execute/1 clauses at641/923; no tests, floor or successor
