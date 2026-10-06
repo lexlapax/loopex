@@ -123,7 +123,14 @@ No compilation, gate or test ran on the resulting source. Separate local
 test-only control `22fb279b`, direct child of `fdfe1488`, changes only the six-line
 expiry-block ordering and preserves all test bytes, monitors and bounds.
 It remains unexecuted and must not be merged or pushed as product source.
-The separately owned causal runner/collector proposal is disabled.
+Original causal handle 68739 is collected, outer exit 1, in 214.170 seconds.
+All nine compilation/metadata predecessors pass. The selected real test fails
+at the intended unchanged assertion after late guardian consumption C+2 ms
+wrongly joins; one failure/executed case, 108 exclusions, zero skips, both real
+timelines and all original actor/OS joins retained. Original classifier remains
+UNAVAILABLE due the assertion's anonymous-function stack frame. A separate
+read-only consumer correction is pending review; original failed artifacts
+stay immutable and no source retry is authorized. No checkbox closes.
 One added cleanup row stays open; no checkbox closes.
 Lost-source,
 repeated restore, fault/cleanup and helper-ledger proofs remain required.
@@ -131,7 +138,9 @@ CLI owns the first-ordinal lost-source implementation in separate
 `codex/m7-restore-lost-source-first`, based on frozen `fdfe1488`, under the
 existing open T15 restore obligation. It reuses accepted codecs and guards;
 only the four entry/IO/workflow/workflow-test paths are writable there.
-No formatter, compiler, tests or source-branch push is granted to this writer.
+Clean local source `365a0d28` adds seventeen proposed expanded workflow cases,
+preserving the original nine and the complete IO test; source packet review is
+pending. No formatter, compiler, tests or source-branch push is granted to this writer.
 Root retained the source gap inventory and ordinary-guard authority review.
 The guard preserves existing synchronous ownership and the original claim
 deadline; administrative restore and public lookup retain explicit owned IO.

@@ -494,7 +494,43 @@ timeline files and separate judgment. Return the slot only after full original
 collection and OS group joins. No retry, repair, formatter, floor/ordinary/other
 test, source switch, provider/network campaign, source-branch export, full-fast,
 release or primary source rejoin is granted. Other agents are source-only or
-stopped. This grant adds no test result; corrected proof remains pending.
+stopped. Original outer handle 68739 is terminal exit 1 and fully collected;
+the exclusive VM slot is returned and this execution grant has ended. Never
+poll or retry the original handle. Corrected proof remains pending.
+
+COLLECTED CAUSAL FAILURE: output `M7/m7-final-observation-causal-v1` retains
+terminal report `307ba75563690b88024654d725425d3ef59a96564fb2177891cd7b0c6131c8d5`,
+inventory `db096cbb8862d0c1dc7dadc740644a78391191fc9f96cf5dd4da91b18b120488`, raw test
+`68f26103d4677e3cbf5247d805624e3dcda8a663057ac6e39d0c260c8d93523c`.
+All nine predecessor stages pass; dev/test compile took 45.288/44.764 seconds.
+The selected test takes 12.906 seconds, original command exit 2/evidence 1,
+one failed/executed case, 108 exclusions and zero skips. Pipeline 214.170 seconds,
+outer exit 1. The unchanged expected-unconfirmed assertion at line 3490 fails
+on actual wrong joined. Both genuine timelines and original actor joins are
+complete: timely consumption C-10000 ms joins; late worker DOWN is observed
+before C, but guardian consumption is C+2 ms, O-998 ms, and wrongly joins.
+All observations and original joins precede O. Original classifier remains
+UNAVAILABLE solely because it requires line-3490 `(test)` while actual Elixir
+emits the exact named witness's anonymous fn/3 there and loop `(test)` at 3312.
+Preserve this original judgment and every failed status; do not rewrite them.
+The ten-key causal registry is consumed at
+`a3a6f3e549e7d163c808ab10c4cb65b23733493ccd79cfa2fd94a2b232e78ca7`; never reset.
+Original collection record `M7/final-observation-causal-original-collection-v1.json`,
+digest `692a7d4e27456c2bcf1adff07607361ff43e17f58de4721a18d93075ec37e18e`.
+Root verified 57 sealed artifacts, all ten original stage/started/EOF/wait/status
+records and absent PIDs/groups, 132 actual/Git source identities, 2,640 exact
+source snapshot rows, complete NUL tree, registry and both bounded timelines.
+Root audit `M7/final-observation-causal-collected-root-audit-20261005-v1`, result
+`cc045db60bc8c26f288a9203a22ad17eae713eee23c6c0f71a6fabf56dc1f768`, inventory
+`8c6a53ce995a29e4f192f6c9b6dca0e247343b8adeb0a19d1057f1d4cb52b119`.
+Its initial registry-field assumption and corrected actual closed schema are
+retained as read-only verifier limitations, not product/VM failures.
+Private-task agent independently audits the collected original facts.
+Current-index agent owns only a separately disabled read-only classifier
+correction requiring the exact anonymous witness frame and source-derived loop
+frame, preserving every other raw/source/timeline/join requirement. No changed
+consumer evaluation, original artifact alteration, new VM, source repair or
+retry is granted. Review it before admitting any new separate evidence judgment.
 
 PARALLEL LOST-SOURCE UNIT: CLI agent owns only Restore entry, IO, Workflow and
 workflow-test source in clean-base isolated
@@ -510,6 +546,12 @@ changes the owned workflow launch helper. Public entry/lookup, repeated lineage,
 original-tx continuation and helper grammar remain unfinished. This writer has
 no VM, formatter, compiler, test, registry or source-branch push grant; root owns
 review and rejoin after the frozen prerequisite proof.
+CLI reports clean local source checkpoint
+`365a0d28d01fbc44638b23d88610a659c82f0086`, direct child of `fdfe1488`, four owned
+paths only. Source-derived workflow population is 26 expanded cases: seventeen
+added and nine original bodies preserved, with complete IO test unchanged.
+Source packet freeze, root/independent review and both-pair execution remain
+pending. No source-only population is a runtime pass or checklist completion.
 
 PRE-INTENT CORRECTION: clean frozen
 `c71e8dc88f0a49a1fe613fbbc5940824ad296fc1` on
