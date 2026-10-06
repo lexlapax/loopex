@@ -1,5 +1,17 @@
 # M7 Implementation Tasks
 
+Corrected private retained finalization has independent SOURCE_NO_BLOCKER review
+and root raw source commitb83725bd in its isolated worktree. It is not joined,
+formatted, compiled or natively proved. Disabled formatter preparation continues.
+The partial-release continuation map is under independent contract/source review;
+ownerless remnants remain separately fenced. Neutral v3 establishes no sound
+replacement control, including the serial same-batch job-loss alternative.
+Four newer packets/81 hashes are retained under
+`M7/reviewed-finalization-and-proof-disposition-retention-20261006-v1.json`, SHA
+`79fd48d2abf54cfc0385dfae1bea250a32b50999cdccffe36215c51d2fc7dfe2`.
+No new product attempt or task closure: original78/95/6; added302/38 for T01–T19.
+The earlier blocked v1/v2 proof records below remain historical evidence.
+
 Independent source reviews found two blockers; neither unit is applied or
 verified. Retained finalization cannot issue the destination committed-proof
 step through the existing closed IO guard. Its isolated writer is correcting

@@ -28,6 +28,36 @@ physical restore implementation; it does not waive any full-history proof.
 ### Current work and restart order
 
 Continue the existing ACTIVE unlimited goal on `m7`. Do not create another goal.
+Latest source progress: root committed reviewed raw retained finalization as
+`b83725bdad032476665f003fc27f97e66cad9ff1`, sole child of402ebf8a, in the clean
+isolated writer worktree. All three committed paths match frozen v2 bytes; root
+read the full operative delta, all625 fixture lines and the corrective inverse,
+and rehashed23 author rows. Independent v2 report SOURCE_NO_BLOCKER, SHA
+`5bc6463128d3f0223157f2a48817617d067aef868e0a0de50f77c6cb54951ce8`,
+index `d22043e1195f4c32460bfe839377fa7ee0dd72c520339c6d54aebe948e6975ce`.
+No syntax, formatter, compiler or native PASS follows. The isolated commit is
+not joined into primary `m7`.
+
+Four newer packets are durably retained with81 indexed hashes verified:
+`M7/reviewed-finalization-and-proof-disposition-retention-20261006-v1.json`, SHA
+`79fd48d2abf54cfc0385dfae1bea250a32b50999cdccffe36215c51d2fc7dfe2`.
+It pins v2 source/review, neutral v3 disposition and partial-release next map.
+Neutral v3 report994aaff3 establishes no sound replacement control; same-batch
+job loss cannot coexist with a pending question under serial dispatch. Both
+old proposals stay blocked, original79496 failed and native obligations open.
+No proof-choice question, deletion/filter or expected-code union is authorized.
+
+`authored_bounds_review` owns a disabled three-path formatter preparation at
+`/private/tmp/loopex-m7-retained-finalization-format-runner-b83725bd-20261006-v1`;
+root alone reviews/grants/executes. `neutral_revision_source_audit` reviews the
+partial-release source map1a88327e/index274f34dd independently. Intact matching
+claims mixed with wholly absent directories require complete canonical current
+proofs, separate native absence/sync obligations and exact joins; that proposal
+does not recreate absent claims. Ownerless remnants remain stranded under0051's
+separate recovery-decision requirement. No dependent implementation begins from
+the map alone. Root reconciled all70 registries to the same825-key union with no
+conflicts or new attempts. VM remains FREE and counts unchanged.
+
 Primary pushed checkpoint before this source-review record is
 `3b9e097a21ffd255fd9f15ae7b7edf4feec5298f`. No new product execution occurred.
 Six blocked/unapplied author and review packets are durably copied outside the
