@@ -342,7 +342,11 @@ defmodule Loopex.Runtime.OwnerGroup do
         if Enum.all?(remaining, fn {_ref, provider} ->
              is_nil(provider.guard) and is_nil(provider.worker) and is_nil(provider.resource) and
                is_nil(provider.caretaker)
-           end), do: 0, else: wait_slice(deadline)
+           end) do
+          0
+        else
+          wait_slice(deadline)
+        end
 
       receive do
         {:DOWN, monitor, :process, pid, _reason} ->
