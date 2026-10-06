@@ -28,11 +28,34 @@ physical restore implementation; it does not waive any full-history proof.
 ### Current work and restart order
 
 Continue the existing ACTIVE unlimited goal on `m7`. Do not create another goal.
-Primary previous pushed checkpoint is `c4b096ac`; this commit supersedes its
+Primary previous pushed checkpoint is `ff33985d`; this commit supersedes its
 resume record. Historical detail remains at
 `bdc88a05:docs/evidence/M7-resume.md` and in the task ledger.
 
-Root verification VM is FREE. Original81659 is fully collected FAIL142.996s
+Root verification VM is BUSY with original formatter handle93428 at clean9acf.
+Enabled `M7/current-boundary-format-runner-20261006-v1`, config
+`47be6c390aec584a3faa538759097afa683c8067940473fa07a7e555aa7b8c5f`,
+root review `cdf1f4300cb54fbb6db376ac056e186cf470281c96dbe61be51634dac6e22cd0`.
+Independent combined review report53c2992c/index80ba0156 has92 rehashed rows;
+root read full report and133 live/Git source rows,221 author artifacts and all
+36 external inputs before finalization. Latest768 union reconciled. All46 ASTs
+and both same-final-source formatters are required, with at most one confined
+sole child. Output `M7/m7-current-boundary-format-v1`; root collector prepared
+at `/private/tmp/m7-collect-current-boundary-format-v1.py`. Collect this original
+handle once, then run collector with its actual exit; do not repoll terminal
+handles or grant a second product VM before collection. Native proof remains
+unrun. Primary evidence documents are disjoint from the70-path unit.
+
+Prefixf2 semantic review is complete with no source blocker. Root read full
+reportb1589791 and rehashed81 artifacts. Disabled prefix formatter packet is
+sealed at `/private/tmp/loopex-m7-generation-prefix-format-runner-f2d9bae9-20261006-v1`,
+reportfac24719/index460d2aae; root read report/main delta, rehashed120 artifacts
+and29 external rows. `authored_bounds_review` independently reviews that packet;
+`private_task_causal_resume` derives actual boundary native populations and
+commands at9acf, source-only. Neither author may execute. Prefix formatter
+root enabler is prepared but unexecuted; it must reconcile the union after93428.
+
+Historical terminal records follow. Original81659 is fully collected FAIL142.996s
 at exact `f3086bdd1aa894017e582cd8d896244becf1a613`: current identity/dev/test
 compilation pass, install23/23, prefix15/21 with6 failures, zero exclusions/skips.
 Remaining adjacent files and floor did not run. No generation task closes.

@@ -1,5 +1,11 @@
 # M7 Implementation Tasks
 
+Current boundary formatter original93428 is running at9acf03a3 under root's
+exclusive VM grant. Complete70-path source/46 formatter paths independently
+reviewed, all221 author and92 review artifacts rehashed; latest768 union retained.
+Prefixf2 source review and disabled formatting packet are ready for independent
+runner review. No checklist row closes from source/format readiness.
+
 Execution checklist supplied by the maintainer. The accepted
 [plan](../plans/M7.md#concept) and its
 [technical companion](../plans/M7-technical.md#technical-depth) govern scope
