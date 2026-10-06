@@ -27,6 +27,40 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Latest Store integration and next verification
 
+LATEST: Causal v3 handle38955 is terminal exit1 and collected. Current dev/test
+compile and matrix pass; focused2/4 pass, zero exclusions/skips, floor never
+ran. Root independently rehashed all41 terminal-listed artifacts. Serial and
+concurrent quiet assertions fail on actual provider_cleanup_unproved reports
+(one and29 respectively); five structured traces are retained,63 required
+artifacts missing. Controlled startup and genuine fault pass, including exact
+startup joined/cutoff/empty-unjoined cleanup. Stage-only duration98.493s is
+not total pipeline time. Actual Runtime attribution and quiet proof remain open.
+SiblingM7/private-task-causal-runner-5fa9d9ce-v3/execution-001:
+terminal cb7ca29c1cb9f83c4ba506892d5134aa3cc6ffb7e088adbf687324e898de0bbf,
+raw focused a9740fccf3c44f4b3be4adca14cf5234acad93587ea44b55a0da4f5d2834ac39,
+collection39e460580eef39b33665f7477e145a2137f45fa1a53215ff9f808dfe40873595.
+Do not retry38955 or edit/drop quiet assertions to relabel the failure.
+Causal worker now performs read-only cause investigation from retained JSON and
+existing provider cleanup/OwnerGroup code, with no source writes or VM grant.
+The entire1473-line four-case causal file is absent from primarym7; eventual
+integration adds FOUR executed Core cases, not one. No causal source is joined.
+
+EXCLUSIVE VM SLOT now belongs to NATIVE CHECKPOINT, live handle99172.
+Reviewed gated runner4168dee7-v1 has re-pinned formatted direct child
+10d16fd5e9bf8fab07dce0b5681cb8b5019a97d2 after all three AST-equivalence
+checks. Current whole-tree format and byte-only population check passed
+(new10, adjacent63/1excluded); dev compilation is running. Worker
+restore_manifest_resume owns polling/terminal collection. Preserve exact
+source and start no other VM. Both-pair proof and full ordinary Core remain
+pending. All active statements below are historical snapshots.
+
+Read-only independent review of isolated captured-ledger source205afb7a found
+no concrete correctness/minimalism/contract/test-proof issue. It confirms live
+and captured readers share unchanged schema/format validation and fixed caps;
+physical/job/receipt/authority obligations remain distinct. No reviewer writes,
+VM or tests occurred. Ledger runtime proof remains queued/unexecuted.
+Counts T01–T19 originals78/95/6, added293/21; ADR0052 acceptance unanswered.
+
 LATEST VERIFICATION: Causal v2 handle52711 is terminal exit1 and collected.
 Current compile/matrix passed but focused exited2 with0/4 passed, zero
 exclusions/skips, because all four retain calls rejected runner-selected
