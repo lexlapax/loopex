@@ -27,6 +27,59 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current proof, execution and source ownership
 
+CURRENT EXECUTION, 2026-10-06: root original exec2055 owns the only
+verification VM. Clean corrected058 is frozen; lookup is absent from this
+campaign. Enabled `M7/guard-time-success-runner-20261006-v2` config is
+`5000e6e9ec4f8d8fad7f57cde955508920d59f2d88aacf8964b876d937693b54`, root inventory
+`788184ce986343bb0ea672e08be29d6272251feeefe3eb3fd745e84032dae632`.
+Source-review report
+`M7/guard-time-success-source-review-058bf-20261006-v1/report.md` is
+`ba9b8abe0fad26b042ea8045b0ef174c2b556eea1af5f9100d45521bda830194`.
+Root verified40 packet artifacts,93 external pins,132 actual/Git source rows,
+complete1103-entry trees and exact eleven modern lifecycle/source/env/helper
+functions. Fresh output `M7/m7-guard-time-success-v1`; separate registry
+`M7/guard-time-success-stage-attempt-registry.json` preserves326 historical
+keys. Same66 stages12 lanes, current then floor, first failure stops. Consume
+collected eight-stage97342 formatting without repeat. Original IO106/3,
+workflow39/0, Composition716/4, Local302/2, long3/106 populations and all
+other focused lanes remain unchanged. No source mutation, lookup, full-fast,
+release, provider, export or primary rejoin. Root alone collects2055.
+
+DIAGNOSTIC FAILURE COLLECTED: original77347 is fully collected, exit1 after
+114.117 seconds and six current stages. Dev/test compilation and matrix
+passed; focused diagnostic1/3 passed and two failed, command2/evidence1,
+seed709680. Floor never ran. Unexpected provider_cleanup_unproved
+shutdown_error reports failed the unchanged quiet assertions. Logger producer
+correspondence did not fail. Root verified48 artifacts,35 actual/Git source
+rows, six original raw EOF/wait/status/PID-group joins and320 preserved plus
+six new keys. All original actors absent and clean32ef frozen. Actual three
+sink files are retained;63 unproduced files are unavailable, not inferred.
+Output `M7/m7-private-task-diagnostic-v1` report is
+`65343545e7b08c1cb52b4cb2345da09e8334bf77c7f13d2a933c5fa2f3d35ad5`, inventory
+`2bd2249e93808c2571aa4beb1b1e25406bab2adf1a96143121ec415ea8807cd1`.
+Original collection `M7/private-task-diagnostic-original-collection-20261006-v1.json`
+is `9969f53a268fa07d9783589f3acabfc13d25b17f4b9e3668bffe0641d4306480`;
+audit `M7/private-task-diagnostic-collection-20261006-v1.py` is
+`afa81d8734f22df6de5eff7b1d6df3d9f650f20bb5ca7f4559f5b0e802087fd8`.
+Final registry digest is
+`55f13ec421400b4f08be15d0b5bd19c7d73d2b8fc2d5b68be71cf01e4aa65a7c`.
+Never poll77347 or rerun32ef. Private-task owns bounded read-only causal
+analysis of actual retained witnesses plus frozen production source.
+
+Root integrated reviewed f470,4d0,060a onto058 in separate
+`/private/tmp/loopex-m7-restore-lookup-integration`, branch
+`codex/m7-restore-lookup-integration`, head7d3f503a. No conflicts or VM run;
+39 workflow and38 lookup cases proposed. Current-index audits only exact
+rejoin preservation; CLI prepares a disabled four-file formatter. Incoming
+independent report
+`/private/tmp/loopex-m7-lookup-incoming-inspection-060a6bb6-20261006-v1/report.md`
+is `d033e67c0d2185b20941959487461d4e770f224537561d2c111dc85ea0168fa4`, inventory
+`1d06302a8c03a2c87a7618c826efff4cde5868d788cbc8482b9f39eb883a2208`.
+No concrete blocker; four actual cuts address the prior test-design gap,
+with all34 parent cases/helpers/assertions/bounds preserved. Actual runtime
+remains unproved. Primary task counts unchanged; neither T15 nor T16 is done.
+Older active-handle/grant entries below are historical and superseded.
+
 ACTIVE EXCLUSIVE DIAGNOSTIC RUN, 2026-10-06: root original exec77347
 owns the only verification VM. No other agent may compile/test/format while
 it is active. Frozen source is clean32ef. Root reviewed30 packet artifacts,
