@@ -765,16 +765,17 @@ defmodule LoopexComposition.Restore.IO do
            ),
          {:ok, markers} <-
            audit_ledger_plane(root, relative, "markers", marker_names, index, declaration),
-         {:ok, open} <- audit_ledger_plane(root, relative, "open", open_names, index, declaration),
+         {:ok, open_records} <-
+           audit_ledger_plane(root, relative, "open", open_names, index, declaration),
          {:ok, snapshot} <-
            primitive(:ledger_snapshot, fn ->
              Ledger.validate_captured_open_index(
                declaration["source_generation_sha256"],
                generation["root_binding"],
-               open
+               open_records
              )
            end),
-         true <- ledger_index_pairs?(markers, open) do
+         true <- ledger_index_pairs?(markers, open_records) do
       Enum.each(namespaces, fn {directory, names} ->
         if audit_ledger_names(root, directory, index) != names,
           do: throw({:io_error, :source_changed})
