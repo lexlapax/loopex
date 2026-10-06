@@ -54,15 +54,23 @@ defmodule LoopexComposition.Restore.Workflow do
       ensure!(value!(io.({:manifest, destination, max_total})) == baseline, "inventory_mismatch")
 
       if source,
-        do: ensure!(value!(io.({:manifest, plan["source_state_root"], max_total})) == baseline,
-          "inventory_mismatch")
+        do:
+          ensure!(
+            value!(io.({:manifest, plan["source_state_root"], max_total})) == baseline,
+            "inventory_mismatch"
+          )
 
       retained = %{retained | baseline: baseline}
       {:ok, retained}
     else
       if source && is_nil(source.intent),
-        do: ensure!(value!(io.({:manifest, plan["source_state_root"],
-          invocation["max_total_file_bytes"]})) == retained.baseline, "inventory_mismatch")
+        do:
+          ensure!(
+            value!(
+              io.({:manifest, plan["source_state_root"], invocation["max_total_file_bytes"]})
+            ) == retained.baseline,
+            "inventory_mismatch"
+          )
 
       {:ok, retained}
     end
@@ -74,13 +82,20 @@ defmodule LoopexComposition.Restore.Workflow do
 
   defp pending!(root, plan, invocation, io) do
     case io.({:restore_pending_capture, root, plan, invocation}) do
-      {:ok, {:pending, retained}} -> retained
+      {:ok, {:pending, retained}} ->
+        retained
+
       {:ok, {:error, :authority_unconfirmed}} ->
         throw({:restore_refusal, "authority_unconfirmed"})
+
       {:ok, {:error, %{"code" => "restore_history_invalid"}}} ->
         throw({:restore_refusal, "invalid_current_history"})
-      {:ok, {:error, %{"code" => code}}} -> throw({:restore_refusal, code})
-      _ -> throw({:restore_refusal, "inventory_unavailable"})
+
+      {:ok, {:error, %{"code" => code}}} ->
+        throw({:restore_refusal, code})
+
+      _ ->
+        throw({:restore_refusal, "inventory_unavailable"})
     end
   end
 

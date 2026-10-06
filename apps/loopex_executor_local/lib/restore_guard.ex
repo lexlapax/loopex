@@ -434,18 +434,28 @@ defmodule Loopex.Executor.Local.RestoreGuard do
         )
 
         if role == "source",
-          do: lookup_ensure!(placements[root] == plan["source_state_placement"],
-            "physical_destination_changed")
+          do:
+            lookup_ensure!(
+              placements[root] == plan["source_state_placement"],
+              "physical_destination_changed"
+            )
 
         {intent, baseline} =
           if is_nil(observation["ordinal"]) do
             {nil, nil}
           else
             directory = Path.join([@root_admin, "lineage", ordinal(observation["ordinal"])])
-            bytes = files[Path.join(directory, "intent")] || files[Path.join(directory, "intent.tmp")]
+
+            bytes =
+              files[Path.join(directory, "intent")] || files[Path.join(directory, "intent.tmp")]
+
             {:ok, decoded} = RestoreCodec.decode(:intent, bytes)
-            lookup_ensure!(decoded["plan"] == plan and decoded["plan_digest"] == digest,
-              "restore_conflict")
+
+            lookup_ensure!(
+              decoded["plan"] == plan and decoded["plan_digest"] == digest,
+              "restore_conflict"
+            )
+
             baseline = files[Path.join(directory, "baseline")]
 
             if role == "destination" do
@@ -455,6 +465,7 @@ defmodule Loopex.Executor.Local.RestoreGuard do
                 path = Path.join(candidate["relative_root"], "generation")
                 original = candidate["source_generation_bytes"]
                 installed = candidate["destination_generation_bytes"]
+
                 allowed =
                   case observation["phase"] do
                     phase when phase in ["destination_intent", "source_retirement"] -> [original]
@@ -464,8 +475,11 @@ defmodule Loopex.Executor.Local.RestoreGuard do
 
                 lookup_ensure!(files[path] in allowed, "restore_history_invalid")
                 entry = Enum.find(entries, &(&1["path"] == path))
-                lookup_ensure!(not is_nil(entry) and index[path]["mode"] == entry["mode"],
-                  "restore_history_invalid")
+
+                lookup_ensure!(
+                  not is_nil(entry) and index[path]["mode"] == entry["mode"],
+                  "restore_history_invalid"
+                )
               end)
             end
 
@@ -476,7 +490,8 @@ defmodule Loopex.Executor.Local.RestoreGuard do
         # Captured filesystem bytes and this invocation's joins cannot prove it.
         if invocation["prior_admin_authority"] in ["joined", "host_rebooted"] and
              not is_nil(invocation["prior_admin_evidence_sha256"]) do
-          {:pending, %{observation: observation, intent: intent, baseline: baseline, claim: claim}}
+          {:pending,
+           %{observation: observation, intent: intent, baseline: baseline, claim: claim}}
         else
           {:error, :authority_unconfirmed}
         end

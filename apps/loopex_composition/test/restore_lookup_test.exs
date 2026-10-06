@@ -1200,7 +1200,8 @@ defmodule LoopexComposition.RestoreLookupTest do
   defp finish_paused(owned, pause) do
     receive do
       {:restore_io, guardian, worker, reference, {:terminal_release_installed, _}}
-      when guardian == owned.guardian and reference == owned.reference and pause == :directory_sync ->
+      when guardian == owned.guardian and reference == owned.reference and
+             pause == :directory_sync ->
         # The release worker pauses at directory_sync before it can finish.
         # A rename-only fixture has no such release barrier and adds no late monitor.
         assert worker != owned.worker
@@ -1237,6 +1238,7 @@ defmodule LoopexComposition.RestoreLookupTest do
     exact_down(owned, owned.caller, owned.caller_monitor, :normal)
     exact_down(owned, owned.guardian, owned.guardian_monitor, :normal)
     exact_down(owned, owned.worker, owned.worker_monitor, :normal)
+
     if release = Process.get({:lookup_release_worker, owned.reference}) do
       {worker, monitor} = release
       exact_down(owned, worker, monitor, :normal)
@@ -1283,6 +1285,18 @@ defmodule LoopexComposition.RestoreLookupTest do
   end
 
   defp claim_owner_identity(owner),
-    do: owner |> File.lstat!(time: :posix)
-      |> Map.take([:type, :major_device, :minor_device, :inode, :mode, :size, :links, :mtime, :ctime])
+    do:
+      owner
+      |> File.lstat!(time: :posix)
+      |> Map.take([
+        :type,
+        :major_device,
+        :minor_device,
+        :inode,
+        :mode,
+        :size,
+        :links,
+        :mtime,
+        :ctime
+      ])
 end

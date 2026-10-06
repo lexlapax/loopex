@@ -10,14 +10,22 @@ defmodule LoopexComposition.RestorePendingIntakeTest do
 
   setup do
     {:ok, temp} = WorkspaceIdentity.resolve_path(System.tmp_dir!())
-    root = Path.join(temp, "restore-intake-" <> Base.encode16(:crypto.strong_rand_bytes(12), case: :lower))
+
+    root =
+      Path.join(
+        temp,
+        "restore-intake-" <> Base.encode16(:crypto.strong_rand_bytes(12), case: :lower)
+      )
+
     File.mkdir!(root)
     on_exit(fn -> File.rm_rf!(root) end)
     %{root: root}
   end
 
   for status <- ~w(available lost), authority <- ~w(joined host_rebooted) do
-    test "actual #{status} pending candidates admit #{authority} intake without mutation", %{root: root} do
+    test "actual #{status} pending candidates admit #{authority} intake without mutation", %{
+      root: root
+    } do
       cut = prepare(root, unquote(status))
       {terminal, prior} = strand(cut, "source_retirement")
       assert {:joined, _, old_evidence} = terminal
@@ -32,8 +40,10 @@ defmodule LoopexComposition.RestorePendingIntakeTest do
       assert retained.intent == original and retained.observation["phase"] == "source_retirement"
       assert {:ok, intent} = RestoreCodec.decode(:intent, retained.intent)
       assert intent["plan"] == cut.plan
+
       assert File.read!(Path.join(cut.destination, "receipts/generation")) ==
                hd(intent["generations"])["source_generation_bytes"]
+
       assert evidence.restore_observation["ordinal"] == 1
       assert evidence.restore_observation["intent"] == "validated"
       assert manifest(root) == before
@@ -73,9 +83,12 @@ defmodule LoopexComposition.RestorePendingIntakeTest do
     assert {:pending, _} = Restore.lookup(cut.destination, cut.plan["tx_id"], @limits)
   end
 
-  test "a live original owner does not become joined authority from its filesystem claim", %{root: root} do
+  test "a live original owner does not become joined authority from its filesystem claim", %{
+    root: root
+  } do
     cut = prepare(root, "available")
     owned = launch({:restore_first, cut.plan, invocation()}, :restore_phase)
+
     try do
       {_id, _events} = hold(owned, "source_retirement", [])
       assert Process.alive?(owned.guardian) and Process.alive?(owned.worker)
@@ -127,6 +140,7 @@ defmodule LoopexComposition.RestorePendingIntakeTest do
       cut = prepare(root, "available")
       {_terminal, prior} = strand(cut, "source_retirement")
       path = Path.join(cut.destination, "receipts/generation")
+
       if unquote(fault) == :generation do
         other = Path.join(root, "other-ledger")
         assert {:ok, _} = Ledger.prepare(other, "intake-local", 1_000)
@@ -134,6 +148,7 @@ defmodule LoopexComposition.RestorePendingIntakeTest do
       else
         File.chmod!(path, 0o640)
       end
+
       before = manifest(root)
       {result, events} = intake(cut, invocation("joined", prior))
       assert {:joined, {:error, "invalid_current_history"}, evidence} = result
@@ -153,9 +168,12 @@ defmodule LoopexComposition.RestorePendingIntakeTest do
     assert_read_only(events, evidence)
   end
 
-  test "guardian loss retains last actual intent ordinal phase and uncertain cleanup", %{root: root} do
+  test "guardian loss retains last actual intent ordinal phase and uncertain cleanup", %{
+    root: root
+  } do
     cut = prepare(root, "available")
     owned = launch({:restore_first, cut.plan, invocation()}, :restore_phase)
+
     try do
       {_id, _events} = hold(owned, "source_retirement", [])
       Process.exit(owned.guardian, :kill)
@@ -174,9 +192,11 @@ defmodule LoopexComposition.RestorePendingIntakeTest do
     end
   end
 
-  test "pre-claim guardian loss cannot report absent intent joined cleanup or a retained claim", %{root: root} do
+  test "pre-claim guardian loss cannot report absent intent joined cleanup or a retained claim",
+       %{root: root} do
     cut = prepare(root, "available")
     owned = launch({:restore_first, cut.plan, invocation()}, :restore_phase)
+
     try do
       {_id, _events} = hold(owned, "claim", [])
       Process.exit(owned.guardian, :kill)
@@ -198,6 +218,7 @@ defmodule LoopexComposition.RestorePendingIntakeTest do
   # monitors. A new intake is read-only and cannot reacquire any claim.
   defp strand(cut, phase) do
     owned = launch({:restore_first, cut.plan, invocation()}, :restore_phase)
+
     try do
       {_id, _events} = hold(owned, phase, [])
       Process.exit(owned.caller, :kill)
@@ -207,8 +228,18 @@ defmodule LoopexComposition.RestorePendingIntakeTest do
       assert evidence.restore_observation["claim"] == "retained"
       join(owned, [:killed, :normal, :normal])
       owner = File.read!(Path.join(claim_path(cut.destination), "owner"))
-      evidence_digest = hash(:erlang.term_to_binary({owner, evidence.opens, evidence.closes,
-        Enum.map(actors(owned), fn {_actor, monitor} -> Process.get({:intake_down, monitor}) end)}, [:deterministic]))
+
+      evidence_digest =
+        hash(
+          :erlang.term_to_binary(
+            {owner, evidence.opens, evidence.closes,
+             Enum.map(actors(owned), fn {_actor, monitor} ->
+               Process.get({:intake_down, monitor})
+             end)},
+            [:deterministic]
+          )
+        )
+
       {terminal, evidence_digest}
     after
       cleanup(owned)
@@ -217,6 +248,7 @@ defmodule LoopexComposition.RestorePendingIntakeTest do
 
   defp intake(cut, invoke) do
     owned = launch({:restore_pending_intake, cut.plan, invoke}, :restore_pending_decode)
+
     try do
       {result, events} = collect(owned, [])
       join(owned, [:normal, :normal, :normal])
@@ -228,17 +260,43 @@ defmodule LoopexComposition.RestorePendingIntakeTest do
 
   defp assert_read_only(events, evidence) do
     assert evidence.opens == evidence.closes and evidence.claim_count == 0
+
     Enum.each(events, fn
-      {:issued, _, {:open, _}} -> :ok
-      {:issued, _, {:close, _}} -> :ok
-      {:issued, _, {:restore_phase, "claim"}} -> :ok
-      {:issued, _, {:restore_observation_facts, _}} -> :ok
-      {:issued, _, kind} -> assert kind in [:manifest_stat, :lookup_stat, :lookup_list,
-        :lookup_intent_decode, :lookup_ledger_placement_stat, :lookup_descriptor_stat,
-        :lookup_claim_stat, :lookup_claim_names, :lookup_claim_decode,
-        :lookup_recheck_names, :lookup_recheck_absent, :read, :restore_pending_decode,
-        :descriptor_stat, :list, :hash_read, :source_absence]
-      _ -> :ok
+      {:issued, _, {:open, _}} ->
+        :ok
+
+      {:issued, _, {:close, _}} ->
+        :ok
+
+      {:issued, _, {:restore_phase, "claim"}} ->
+        :ok
+
+      {:issued, _, {:restore_observation_facts, _}} ->
+        :ok
+
+      {:issued, _, kind} ->
+        assert kind in [
+                 :manifest_stat,
+                 :lookup_stat,
+                 :lookup_list,
+                 :lookup_intent_decode,
+                 :lookup_ledger_placement_stat,
+                 :lookup_descriptor_stat,
+                 :lookup_claim_stat,
+                 :lookup_claim_names,
+                 :lookup_claim_decode,
+                 :lookup_recheck_names,
+                 :lookup_recheck_absent,
+                 :read,
+                 :restore_pending_decode,
+                 :descriptor_stat,
+                 :list,
+                 :hash_read,
+                 :source_absence
+               ]
+
+      _ ->
+        :ok
     end)
   end
 
@@ -255,54 +313,105 @@ defmodule LoopexComposition.RestorePendingIntakeTest do
     generation = File.read!(Path.join(source, "receipts/generation"))
     assert {:ok, workspace_ref} = WorkspaceIdentity.reference(workspace)
     {:ok, entries} = RestoreCodec.manifest(baseline, @total)
-    {:ok, lineage} = RestoreCodec.lineage_digest(Enum.filter(entries, fn entry ->
-      Enum.any?(Path.split(entry["path"]), &(&1 in [".loopex-restore", "restore-lineage"]))
-    end))
-    plan = %{"version" => 1, "tx_id" => hash("pending-original-tx"), "source_state_root" => source,
-      "source_state_placement" => placement(source), "source_status" => status,
-      "backup_state_root" => backup, "destination_state_root" => destination,
-      "manifest_sha256" => hash(baseline), "cut_id" => hash("pending-cut"),
-      "prior_restore_count" => 0, "prior_lineage_sha256" => lineage,
-      "runtime_ids" => [], "stores" => [], "ledgers" => [%{"relative_root" => "receipts",
-        "executor_identity" => "intake-local", "source_generation_sha256" => hash(generation),
-        "source_placement" => placement(Path.join(source, "receipts"))}],
+
+    {:ok, lineage} =
+      RestoreCodec.lineage_digest(
+        Enum.filter(entries, fn entry ->
+          Enum.any?(Path.split(entry["path"]), &(&1 in [".loopex-restore", "restore-lineage"]))
+        end)
+      )
+
+    plan = %{
+      "version" => 1,
+      "tx_id" => hash("pending-original-tx"),
+      "source_state_root" => source,
+      "source_state_placement" => placement(source),
+      "source_status" => status,
+      "backup_state_root" => backup,
+      "destination_state_root" => destination,
+      "manifest_sha256" => hash(baseline),
+      "cut_id" => hash("pending-cut"),
+      "prior_restore_count" => 0,
+      "prior_lineage_sha256" => lineage,
+      "runtime_ids" => [],
+      "stores" => [],
+      "ledgers" => [
+        %{
+          "relative_root" => "receipts",
+          "executor_identity" => "intake-local",
+          "source_generation_sha256" => hash(generation),
+          "source_placement" => placement(Path.join(source, "receipts"))
+        }
+      ],
       "workspace" => %{"root" => workspace, "workspace_ref" => workspace_ref},
-      "host_attestation" => %{"latest_cut" => true, "no_post_cut_activity" => true,
-        "all_other_copies_excluded" => true, "old_authority_termination" => "joined",
-        "host_ledgers_validated" => true, "evidence_sha256" => hash("quiescent-native-writer")}}
+      "host_attestation" => %{
+        "latest_cut" => true,
+        "no_post_cut_activity" => true,
+        "all_other_copies_excluded" => true,
+        "old_authority_termination" => "joined",
+        "host_ledgers_validated" => true,
+        "evidence_sha256" => hash("quiescent-native-writer")
+      }
+    }
+
     if status == "lost", do: File.rm_rf!(source)
     %{plan: plan, source: source, destination: destination, baseline: baseline}
   end
 
-  defp invocation(authority \\ "none", evidence \\ nil), do: Map.merge(@limits,
-    %{"max_total_file_bytes" => @total, "prior_admin_authority" => authority,
-      "prior_admin_evidence_sha256" => evidence})
+  defp invocation(authority \\ "none", evidence \\ nil),
+    do:
+      Map.merge(
+        @limits,
+        %{
+          "max_total_file_bytes" => @total,
+          "prior_admin_authority" => authority,
+          "prior_admin_evidence_sha256" => evidence
+        }
+      )
+
   defp placement(root) do
     stat = File.lstat!(root)
     %{"expanded_root" => root, "major_device" => stat.major_device, "inode" => stat.inode}
   end
+
   defp manifest(root) do
     assert {:joined, {:ok, bytes}, _} = RestoreIO.run({:manifest, root, @total}, @limits)
     bytes
   end
+
   defp hash(bytes), do: RestoreCodec.digest_bytes(bytes)
+
   defp claim_path(root) do
     {:ok, digest} = RestoreCodec.claim_digest(root)
     Path.join(Path.dirname(root), ".loopex-restore-claim-" <> digest)
   end
+
   defp intent_path(cut), do: Path.join(cut.destination, ".loopex-restore/lineage/00000001/intent")
   defp left(cutoff), do: max(0, cutoff - System.monotonic_time(:millisecond))
 
   defp launch(operation, pause) do
     parent = self()
-    {caller, monitor} = spawn_monitor(fn ->
-      send(parent, {:result, self(), RestoreIO.run(operation, @limits, probe: parent, pause_at: pause)})
-    end)
+
+    {caller, monitor} =
+      spawn_monitor(fn ->
+        send(
+          parent,
+          {:result, self(), RestoreIO.run(operation, @limits, probe: parent, pause_at: pause)}
+        )
+      end)
+
     receive do
       {:restore_io, guardian, worker, reference, {:installed, _, cutoff}} ->
-        %{caller: caller, caller_monitor: monitor, guardian: guardian, worker: worker,
-          reference: reference, guardian_monitor: Process.monitor(guardian),
-          worker_monitor: Process.monitor(worker), cutoff: cutoff + 10_000}
+        %{
+          caller: caller,
+          caller_monitor: monitor,
+          guardian: guardian,
+          worker: worker,
+          reference: reference,
+          guardian_monitor: Process.monitor(guardian),
+          worker_monitor: Process.monitor(worker),
+          cutoff: cutoff + 10_000
+        }
     after
       10_000 -> flunk("original intake actors unavailable")
     end
@@ -318,6 +427,7 @@ defmodule LoopexComposition.RestorePendingIntakeTest do
           send(guardian, {:proceed, reference, id})
           hold(owned, wanted, [event | events])
         end
+
       {:restore_io, guardian, worker, reference, event}
       when guardian == owned.guardian and worker == owned.worker and reference == owned.reference ->
         hold(owned, wanted, [event | events])
@@ -332,10 +442,13 @@ defmodule LoopexComposition.RestorePendingIntakeTest do
       when guardian == owned.guardian and worker == owned.worker and reference == owned.reference ->
         send(guardian, {:proceed, reference, id})
         collect(owned, [event | events])
+
       {:restore_io, guardian, worker, reference, event}
       when guardian == owned.guardian and worker == owned.worker and reference == owned.reference ->
         collect(owned, [event | events])
-      {:result, caller, result} when caller == owned.caller -> {result, events}
+
+      {:result, caller, result} when caller == owned.caller ->
+        {result, events}
     after
       left(owned.cutoff) -> flunk("original intake result unavailable")
     end
@@ -344,18 +457,27 @@ defmodule LoopexComposition.RestorePendingIntakeTest do
   defp receive_terminal(owned) do
     receive do
       {:restore_io, guardian, worker, reference, {:terminal, result}}
-      when guardian == owned.guardian and worker == owned.worker and reference == owned.reference -> result
+      when guardian == owned.guardian and worker == owned.worker and reference == owned.reference ->
+        result
+
       {:restore_io, guardian, worker, reference, _event}
-      when guardian == owned.guardian and worker == owned.worker and reference == owned.reference -> receive_terminal(owned)
+      when guardian == owned.guardian and worker == owned.worker and reference == owned.reference ->
+        receive_terminal(owned)
     after
       left(owned.cutoff) -> flunk("original stopped-owner terminal unavailable")
     end
   end
 
-  defp actors(owned), do: [{owned.caller, owned.caller_monitor},
-    {owned.guardian, owned.guardian_monitor}, {owned.worker, owned.worker_monitor}]
+  defp actors(owned),
+    do: [
+      {owned.caller, owned.caller_monitor},
+      {owned.guardian, owned.guardian_monitor},
+      {owned.worker, owned.worker_monitor}
+    ]
+
   defp join(owned, reasons) do
-    Enum.zip(actors(owned), reasons) |> Enum.each(fn {{actor, monitor}, reason} ->
+    Enum.zip(actors(owned), reasons)
+    |> Enum.each(fn {{actor, monitor}, reason} ->
       receive do
         {:DOWN, ^monitor, :process, ^actor, actual} ->
           Process.put({:intake_down, monitor}, actual)
@@ -365,12 +487,15 @@ defmodule LoopexComposition.RestorePendingIntakeTest do
       end
     end)
   end
+
   defp cleanup(owned) do
     Enum.each(actors(owned), fn {actor, monitor} ->
       if is_nil(Process.get({:intake_down, monitor})) do
         Process.exit(actor, :kill)
+
         receive do
-          {:DOWN, ^monitor, :process, ^actor, reason} -> Process.put({:intake_down, monitor}, reason)
+          {:DOWN, ^monitor, :process, ^actor, reason} ->
+            Process.put({:intake_down, monitor}, reason)
         after
           left(owned.cutoff) -> flunk("failure cleanup did not join original actor")
         end

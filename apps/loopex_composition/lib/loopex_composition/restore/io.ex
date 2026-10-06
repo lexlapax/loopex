@@ -76,8 +76,14 @@ defmodule LoopexComposition.Restore.IO do
         end)
 
       send(guardian, {:start, reference})
-      wait(guardian, monitor, reference, admitted + limits.work_ms + limits.cleanup_window_ms,
-        initial_restore_observation(operation))
+
+      wait(
+        guardian,
+        monitor,
+        reference,
+        admitted + limits.work_ms + limits.cleanup_window_ms,
+        initial_restore_observation(operation)
+      )
     else
       _ -> {:error, :invalid_io_request}
     end
@@ -114,7 +120,9 @@ defmodule LoopexComposition.Restore.IO do
 
   defp await_guardian_down(guardian, monitor, result, cutoff, observation) do
     receive do
-      {:DOWN, ^monitor, :process, ^guardian, :normal} -> result
+      {:DOWN, ^monitor, :process, ^guardian, :normal} ->
+        result
+
       {:DOWN, ^monitor, :process, ^guardian, _reason} ->
         unconfirmed_restore(:guardian_lost, observation)
     after
@@ -511,8 +519,11 @@ defmodule LoopexComposition.Restore.IO do
   defp finish(state, result) do
     result =
       case result do
-        {:unconfirmed, reason} -> unconfirmed_restore(reason, restore_observation(state, "unconfirmed"))
-        _ -> result
+        {:unconfirmed, reason} ->
+          unconfirmed_restore(reason, restore_observation(state, "unconfirmed"))
+
+        _ ->
+          result
       end
 
     notify(state, {:terminal, result})
@@ -597,11 +608,23 @@ defmodule LoopexComposition.Restore.IO do
     do: %{state | restore: %{state.restore | phase: phase, intent: true}}
 
   defp observe_restore_issue(state, {:restore_intent_facts, ordinal, intent}),
-    do: %{state | restore: %{state.restore | ordinal: ordinal, intent: true, intent_status: intent}}
+    do: %{
+      state
+      | restore: %{state.restore | ordinal: ordinal, intent: true, intent_status: intent}
+    }
 
   defp observe_restore_issue(state, {:restore_observation_facts, observation}),
-    do: %{state | restore: %{state.restore | ordinal: observation["ordinal"],
-      phase: observation["phase"], intent: true, intent_status: observation["intent"], prior_claim: true}}
+    do: %{
+      state
+      | restore: %{
+          state.restore
+          | ordinal: observation["ordinal"],
+            phase: observation["phase"],
+            intent: true,
+            intent_status: observation["intent"],
+            prior_claim: true
+        }
+    }
 
   defp observe_restore_issue(state, {:restore_claim_create, claim}),
     do: retain_claim(state, claim, :uncertain)
@@ -632,26 +655,41 @@ defmodule LoopexComposition.Restore.IO do
   # contain no paths, claim owners, handles or arbitrary OS failure terms.
   defp initial_restore_state(operation) do
     case initial_restore_observation(operation) do
-      nil -> nil
+      nil ->
+        nil
+
       observation ->
-        %{tx_id: observation["tx_id"], ordinal: nil, phase: "claim", claims: [],
+        %{
+          tx_id: observation["tx_id"],
+          ordinal: nil,
+          phase: "claim",
+          claims: [],
           intake: match?({:restore_pending_intake, _, _}, operation),
-          intent: match?({:restore_pending_intake, _, _}, operation), intent_status: observation["intent"],
-          prior_claim: observation["claim"] == "retained"}
+          intent: match?({:restore_pending_intake, _, _}, operation),
+          intent_status: observation["intent"],
+          prior_claim: observation["claim"] == "retained"
+        }
     end
   end
 
   defp initial_restore_observation({kind, plan, _invocation})
        when kind in [:restore_first, :restore_pending_intake] do
-    %{ "kind" => "loopex_current_restore_observation_v1", "tx_id" => plan["tx_id"],
-      "ordinal" => nil, "phase" => "claim", "intent" => "may_exist",
-      "cleanup" => "unconfirmed", "claim" => "none",
-      "reason" => "none"}
+    %{
+      "kind" => "loopex_current_restore_observation_v1",
+      "tx_id" => plan["tx_id"],
+      "ordinal" => nil,
+      "phase" => "claim",
+      "intent" => "may_exist",
+      "cleanup" => "unconfirmed",
+      "claim" => "none",
+      "reason" => "none"
+    }
   end
 
   defp initial_restore_observation(_), do: nil
 
   defp retain_restore_progress(%{restore: nil} = state), do: state
+
   defp retain_restore_progress(state) do
     identity = {state.restore, state.stop}
 
@@ -660,6 +698,7 @@ defmodule LoopexComposition.Restore.IO do
     else
       observation = restore_observation(state, "unconfirmed")
       previous = if state.restore_progress, do: elem(state.restore_progress, 1), else: nil
+
       if observation != previous,
         do: send(state.caller, {:restore_progress, state.reference, self(), observation})
 
@@ -668,49 +707,87 @@ defmodule LoopexComposition.Restore.IO do
   end
 
   defp restore_observation(%{restore: nil}, _cleanup), do: nil
+
   defp restore_observation(state, cleanup) do
     restore = state.restore
     retained = restore.prior_claim or Enum.any?(restore.claims, &(&1.status != :foreign))
     intent = if restore.intent, do: restore.intent_status, else: "absent"
     intent = if cleanup == "unconfirmed" and intent == "absent", do: "may_exist", else: intent
 
-    observation = %{"kind" => "loopex_current_restore_observation_v1", "tx_id" => restore.tx_id,
-      "ordinal" => restore.ordinal, "phase" => restore.phase, "intent" => intent,
-      "cleanup" => cleanup, "claim" => if(retained, do: "retained", else: "none"),
-      "reason" => restore_terminal_reason(state)}
+    observation = %{
+      "kind" => "loopex_current_restore_observation_v1",
+      "tx_id" => restore.tx_id,
+      "ordinal" => restore.ordinal,
+      "phase" => restore.phase,
+      "intent" => intent,
+      "cleanup" => cleanup,
+      "claim" => if(retained, do: "retained", else: "none"),
+      "reason" => restore_terminal_reason(state)
+    }
 
     {:ok, _} = RestoreCodec.encode(:observation, observation)
     observation
   end
 
   defp unconfirmed_restore(reason, nil), do: {:unconfirmed, reason}
+
   defp unconfirmed_restore(reason, observation) do
-    observation = observation |> Map.put("cleanup", "unconfirmed")
+    observation =
+      observation
+      |> Map.put("cleanup", "unconfirmed")
       |> Map.put("reason", restore_reason(reason))
-    observation = if observation["intent"] == "absent",
-      do: Map.put(observation, "intent", "may_exist"), else: observation
+
+    observation =
+      if observation["intent"] == "absent",
+        do: Map.put(observation, "intent", "may_exist"),
+        else: observation
+
     {:ok, _} = RestoreCodec.encode(:observation, observation)
     {:unconfirmed, reason, %{restore_observation: observation}}
   end
 
   defp restore_reason(reason) when reason in [nil, :complete], do: "none"
-  defp restore_reason(reason) when reason in [:deadline, :caller_lost, :descriptor_unclosed,
-       :history_invalid, :claim_release_unconfirmed], do: Atom.to_string(reason)
-  defp restore_reason(reason) when reason in [:guardian_lost, :guardian_unjoined, :worker_unjoined],
-    do: "worker_unjoined"
+
+  defp restore_reason(reason)
+       when reason in [
+              :deadline,
+              :caller_lost,
+              :descriptor_unclosed,
+              :history_invalid,
+              :claim_release_unconfirmed
+            ],
+       do: Atom.to_string(reason)
+
+  defp restore_reason(reason)
+       when reason in [:guardian_lost, :guardian_unjoined, :worker_unjoined],
+       do: "worker_unjoined"
+
   defp restore_reason(_), do: "io_error"
 
   defp restore_terminal_reason(%{stop: stop, payload: {:error, code}})
        when stop == :io_error and is_binary(code), do: restore_refusal_reason(code)
-  defp restore_terminal_reason(%{stop: :complete,
-       payload: {:ok, %{restore_result: {_tag, code}}}}) when is_binary(code),
+
+  defp restore_terminal_reason(%{
+         stop: :complete,
+         payload: {:ok, %{restore_result: {_tag, code}}}
+       })
+       when is_binary(code),
        do: restore_refusal_reason(code)
+
   defp restore_terminal_reason(state), do: restore_reason(state.stop)
 
   defp restore_refusal_reason("authority_unconfirmed"), do: "authority_unconfirmed"
   defp restore_refusal_reason("inventory_mismatch"), do: "readback_mismatch"
-  defp restore_refusal_reason(code) when code in ["invalid_current_history", "restore_conflict",
-       "restore_history_invalid", "physical_destination_changed"], do: "history_invalid"
+
+  defp restore_refusal_reason(code)
+       when code in [
+              "invalid_current_history",
+              "restore_conflict",
+              "restore_history_invalid",
+              "physical_destination_changed"
+            ],
+       do: "history_invalid"
+
   defp restore_refusal_reason(_), do: "io_error"
 
   defp close_operation?({:close, _token}), do: true
@@ -792,6 +869,7 @@ defmodule LoopexComposition.Restore.IO do
     primitive({:restore_observation_facts, observation}, fn -> :ok end)
     {:ok, :retained}
   end
+
   defp execute({:placement, root}) do
     manifest_ancestors(root)
     info = manifest_stat(root)
@@ -1441,29 +1519,53 @@ defmodule LoopexComposition.Restore.IO do
       claim_path = Path.join(Path.dirname(root), ".loopex-restore-claim-" <> claim_digest)
       {claim, state} = lookup_claim(root, claim_path, state)
       lookup_recheck(root, ancestors, state)
+
       if not is_nil(plan) and not is_nil(claim) do
         {guardian, reference, _monitor} = Process.get(:restore_io_owner)
         send(guardian, {:retained_restore_claim, self(), reference})
       end
-      result = if is_nil(plan) do
-        primitive(:restore_lookup_decode, fn ->
-          Loopex.Executor.Local.RestoreGuard.lookup_captured(root, tx_id, state.index,
-            state.files, state.placements, claim)
-        end)
-      else
-        case plan do
-          {:pending, original, invocation} ->
-            primitive(:restore_pending_decode, fn ->
-              Loopex.Executor.Local.RestoreGuard.pending_captured(root, original, invocation,
-                state.index, state.files, state.placements, claim)
-            end)
-          _ ->
-        primitive(:restore_classification_decode, fn ->
-          Loopex.Executor.Local.RestoreGuard.classify_captured(root, plan, state.index,
-            state.files, state.placements, claim)
-        end)
+
+      result =
+        if is_nil(plan) do
+          primitive(:restore_lookup_decode, fn ->
+            Loopex.Executor.Local.RestoreGuard.lookup_captured(
+              root,
+              tx_id,
+              state.index,
+              state.files,
+              state.placements,
+              claim
+            )
+          end)
+        else
+          case plan do
+            {:pending, original, invocation} ->
+              primitive(:restore_pending_decode, fn ->
+                Loopex.Executor.Local.RestoreGuard.pending_captured(
+                  root,
+                  original,
+                  invocation,
+                  state.index,
+                  state.files,
+                  state.placements,
+                  claim
+                )
+              end)
+
+            _ ->
+              primitive(:restore_classification_decode, fn ->
+                Loopex.Executor.Local.RestoreGuard.classify_captured(
+                  root,
+                  plan,
+                  state.index,
+                  state.files,
+                  state.placements,
+                  claim
+                )
+              end)
+          end
         end
-      end
+
       if match?({:pending, _, _}, plan), do: lookup_recheck(root, ancestors, state)
       {:ok, result}
     catch
@@ -2428,8 +2530,9 @@ defmodule LoopexComposition.Restore.IO do
         invocation["prior_admin_authority"] == "none"
 
   defp valid_operation?({:restore_pending_intake, plan, invocation}),
-    do: match?({:ok, _}, RestoreCodec.encode(:plan, plan)) and
-      match?({:ok, _}, RestoreCodec.encode(:invocation, invocation))
+    do:
+      match?({:ok, _}, RestoreCodec.encode(:plan, plan)) and
+        match?({:ok, _}, RestoreCodec.encode(:invocation, invocation))
 
   defp valid_operation?({:audit_restore_lineage, root, plan, manifest}),
     do:
