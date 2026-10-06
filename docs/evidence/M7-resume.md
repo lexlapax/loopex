@@ -27,6 +27,32 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current proof, execution and source ownership
 
+ROOT VM RUNNING, 2026-10-06: original outer handle74970 owns the sole
+verification VM. Collect that original handle to terminal EOF/wait before any
+other VM grant; no worker grant exists. Source remains frozen clean
+e2b835d745ff9c2c3d02c2d4841503a18e9aac09. The enabled Core-only runner is
+`M7/private-task-core-runtime-runner-20261006-v1`, output
+`M7/m7-private-task-core-runtime-v1`, config
+`be206af145eac432beb36537a2b022e2c7a6e59d51601bd9718664f3e5963f65`, root inventory
+`43d521f88670deb3a1ad34dfc0bcdab584fbe3a12e33c3eed39bef946bdb6be8` (91 artifacts).
+Fresh registry `M7/private-task-core-runtime-stage-attempt-registry.json` starts
+with421 historical keys, digest
+`eb03b7844c786106ed07a579a1a997dc0ae53d92b2047225bfb309fb41831fca`.
+Independent reviewer finished with no bounded proposal blocker; report
+`/private/tmp/loopex-m7-private-task-core-runner-review-e2b835d7-v5-20261006-v1/report.md`
+is `be3bd73314a0d51433fae629b5f9d911dad5dfe77e6a7a41736e0376349fad39`, inventory
+`791df905bf4bbc8a5a669c3fc2baec82e2167f6f1815669b32305f2ef404823c` (7 sealed artifacts).
+Root retained both under `M7/private-task-core-runtime-source-review-e2-20261006-v1`;
+its root report is `4e166d98cdc99430baf92f76721242d11a823cd646259c0293ea8bc9884477fa`,
+inventory `91a12ccd7f6091c39a2d33f0e3177d8f347b56995cbcca013043df7b83d3ebe4`.
+Author47351 fully collected exit0. Root-only Core enable/execution passed
+automatic approval review. Restore admission remains explicitly disabled and
+its separate question remains unanswered. No runtime PASS yet. After original
+collection, use the prepared collector
+`/private/tmp/m7-collect-private-task-core-runtime-v1.py` with actual outer
+handle/exit, preserving first failure and actual witness status; audit the
+original report fields before executing it. Do not repeat same-source keys.
+
 ROOT REVIEW IN PROGRESS, 2026-10-06: the maintainer's latest "approve1000ms"
 reconfirms the recorded diagnostic setup cutoff only; see
 [its disposition](../developer/agent-context-map.md#disposition-m7-diagnostic-setup-cutoff-2026-10-05).
