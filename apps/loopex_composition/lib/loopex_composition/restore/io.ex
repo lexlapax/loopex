@@ -145,6 +145,8 @@ defmodule LoopexComposition.Restore.IO do
           payload: nil,
           finished: false,
           down: false,
+          worker_exit_seen: false,
+          final_observation: :off,
           forced: false,
           work_cutoff: admitted + limits.work_ms,
           grace: limits.cleanup_grace_ms,
@@ -166,7 +168,13 @@ defmodule LoopexComposition.Restore.IO do
   defp guard(state) do
     state = check_cutoffs(state)
 
+    # Concept: join admission ends at the original cleanup observation cutoff.
+    # Technical depth: a queued normal DOWN consumed late cannot let clean state
+    # bypass expiry or admit terminal release under the caller's later bound.
     cond do
+      state.cleanup_cutoff && now() >= state.cleanup_cutoff ->
+        finish(state, {:unconfirmed, uncertainty(state)})
+
       clean?(state) and release_needed?(state) and now() >= state.cooperative_cutoff ->
         finish(state, {:unconfirmed, :claim_release_unconfirmed})
 
@@ -187,15 +195,13 @@ defmodule LoopexComposition.Restore.IO do
            }, restore_evidence(state))}
         )
 
-      state.cleanup_cutoff && now() >= state.cleanup_cutoff ->
-        finish(state, {:unconfirmed, uncertainty(state)})
-
       true ->
         receive_event(state)
     end
   end
 
   defp receive_event(state) do
+    state = pause_final_observation(state)
     worker = state.worker
     reference = state.reference
     caller_monitor = state.caller_monitor
@@ -221,6 +227,17 @@ defmodule LoopexComposition.Restore.IO do
           true ->
             permit(state, id, kind)
             guard(state)
+        end
+
+      {:proceed_final_observation, ^reference, id} when state.paused ->
+        state = check_cutoffs(state)
+
+        if state.pending && elem(state.pending, 0) == id && is_nil(state.stop) &&
+             state.final_observation == :off do
+          permit(state, id, elem(state.pending, 1))
+          guard(%{state | paused: false, final_observation: :armed})
+        else
+          guard(state)
         end
 
       {:proceed, ^reference, id} when state.paused ->
@@ -268,18 +285,60 @@ defmodule LoopexComposition.Restore.IO do
       {:finished, ^worker, ^reference} ->
         guard(%{state | finished: true})
 
-      {:EXIT, ^worker, _reason} ->
+      {:EXIT, ^worker, reason} ->
+        state = if state.final_observation == :armed,
+          do: %{state | worker_exit_seen: reason == :normal}, else: state
         guard(state)
 
       {:DOWN, ^caller_monitor, :process, _caller, _reason} ->
         guard(stop(state, :caller_lost, now()))
 
       {:DOWN, ^worker_monitor, :process, ^worker, reason} ->
+        if state.final_observation == :continued,
+          do: notify(state, {:worker_down_observed, worker_monitor, reason == :normal, now()})
         state = %{state | down: reason == :normal}
         state = if state.stop, do: state, else: stop(state, :worker_unjoined, now())
         guard(state)
     after
       min(next_wait(state), @max_receive_timeout) -> guard(state)
+    end
+  end
+
+  # Concept: a private scheduling control holds only final join observation.
+  # Technical depth: arm through the exact already-paused primitive after fixture
+  # monitors exist. Finished/closed acknowledgements and the genuine normal EXIT
+  # are consumed first; DOWN remains for this already-entered receive to scan.
+  # Continuation never rechecks cutoffs before that scan, renews an allowance or
+  # changes a result. Only the following ordinary guard admits or refuses join.
+  defp pause_final_observation(%{final_observation: :armed, finished: true,
+         down: false, worker_exit_seen: true, pending: nil, forced: false} = state) do
+    if MapSet.size(state.open) == 0 and not is_nil(state.payload) and
+         not is_nil(state.cleanup_cutoff) and now() < state.cleanup_cutoff do
+      reference = state.reference
+      paused_at = now()
+      notify(state, {:final_observation_paused, state.worker_monitor, paused_at,
+        %{finished: true, down: false, pending: false, open_count: 0,
+          worker_exit_seen: true, opens: state.opens, closes: state.closes,
+          stop: state.stop, stop_at: state.cooperative_cutoff - state.grace,
+          work_cutoff: state.work_cutoff, cleanup_cutoff: state.cleanup_cutoff}})
+
+      continuation = await_final_observation(reference, state.cleanup_cutoff)
+
+      notify(state, {:final_observation_continued, continuation, now()})
+      %{state | final_observation: :continued}
+    else
+      state
+    end
+  end
+  defp pause_final_observation(state), do: state
+
+  defp await_final_observation(reference, cutoff) do
+    receive do
+      {:continue_final_observation, ^reference} -> :continued
+    after
+      wait_chunk(cutoff) ->
+        if remaining(cutoff) > 0,
+          do: await_final_observation(reference, cutoff), else: :expired
     end
   end
 
@@ -312,7 +371,7 @@ defmodule LoopexComposition.Restore.IO do
 
   defp clean?(state),
     do:
-      state.stop && state.finished && state.down && not state.forced && is_nil(state.pending) &&
+      not is_nil(state.stop) && state.finished && state.down && not state.forced && is_nil(state.pending) &&
         MapSet.size(state.open) == 0 && not is_nil(state.payload)
 
   defp stop(%{stop: reason} = state, _new, _at) when not is_nil(reason), do: state
@@ -400,7 +459,7 @@ defmodule LoopexComposition.Restore.IO do
     {worker, monitor} = :erlang.spawn_opt(fn -> worker_start(guardian, reference, {:release_restore_claims, claims}) end, [:link, :monitor])
     state = %{state | worker: worker, worker_monitor: monitor, terminal_release: true,
       terminal_payload: state.payload, payload: nil, finished: false, down: false,
-      pending: nil, paused: false, next: 1}
+      worker_exit_seen: false, pending: nil, paused: false, next: 1}
     notify(state, {:terminal_release_installed, state.cleanup_cutoff})
     send(worker, {:start, reference})
     guard(state)
