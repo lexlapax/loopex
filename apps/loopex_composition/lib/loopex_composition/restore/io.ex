@@ -21,8 +21,8 @@ defmodule LoopexComposition.Restore.IO do
   canonical retained Resource or Local ledger record audit, and complete Local
   generation/marker/open-plane enumeration and selected reference-bound artifact
   use capture and one locator-selected streaming object audit to composition only.
-  A private available-source first-transition worker now sequences these
-  captures, exact streaming copy, accepted publication and separate terminal
+  A private first-transition worker sequences available-source retirement or
+  lost-source host-exclusion evidence, exact copy/publication and terminal
   claim release without replacing the original guardian or deadlines. Public
   restore/lookup and the remaining accepted variants are unfinished. Validated
   maps and recovered facts remain private; standalone audit operations grant no
