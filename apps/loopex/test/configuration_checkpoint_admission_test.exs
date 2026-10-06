@@ -626,11 +626,16 @@ defmodule Loopex.ConfigurationCheckpointAdmissionTest do
   end
 
   defp recover(f) do
+    # Concept: replay reads one committed private/public history pair.
+    # Technical depth: cancellation may commit while this fixture polls. One
+    # Store snapshot keeps both vectors at the same cut; strict recovery remains.
+    snapshot = TestStore.inspect_state(f.store).sessions |> Map.fetch!(f.session)
+
     assert {:ok, state} =
              SessionState.recover(
                f.session,
-               Fixture.records(f, f.session),
-               Fixture.events(f, f.session)
+               snapshot.records,
+               snapshot.events
              )
 
     state
