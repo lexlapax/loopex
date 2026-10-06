@@ -157,6 +157,7 @@ defmodule Loopex.Executor.Local.Ledger do
          true <- is_binary(identity) and identity != "",
          true <- is_integer(cleanup_grace_ms) and cleanup_grace_ms in 1..@max_uint64,
          expanded = Path.expand(root),
+         :ok <- Loopex.Executor.Local.RestoreGuard.ledger(expanded),
          :ok <- mkdir_synced(expanded),
          {:ok, binding} <- root_binding(expanded),
          :ok <- mkdir_synced(open_directory(expanded)),
@@ -189,10 +190,12 @@ defmodule Loopex.Executor.Local.Ledger do
   """
   @spec revalidate(prepared()) :: :ok | {:error, term()}
   def revalidate(%{root: root, root_binding: binding}) do
-    case root_binding(root) do
-      {:ok, ^binding} -> :ok
-      {:ok, _other} -> {:error, {:ledger_unavailable, :root_binding_changed}}
-      {:error, reason} -> {:error, reason}
+    with :ok <- Loopex.Executor.Local.RestoreGuard.ledger(root) do
+      case root_binding(root) do
+        {:ok, ^binding} -> :ok
+        {:ok, _other} -> {:error, {:ledger_unavailable, :root_binding_changed}}
+        {:error, reason} -> {:error, reason}
+      end
     end
   end
 
@@ -274,6 +277,16 @@ defmodule Loopex.Executor.Local.Ledger do
   defp do_with_claim_until(%{root: root} = prepared, work, deadline, work_policy) do
     path = claim_directory(root)
 
+    # Concept: a retained source-role restore record cannot regain a claim.
+    # Technical depth: read the synchronous capped guard before mkdir and repeat
+    # after admission; the existing original deadline still gates the body.
+    case Loopex.Executor.Local.RestoreGuard.ledger(root) do
+      :ok -> take_claim_until(prepared, work, deadline, work_policy, path)
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp take_claim_until(prepared, work, deadline, work_policy, path) do
     case File.mkdir(path) do
       :ok ->
         outcome =

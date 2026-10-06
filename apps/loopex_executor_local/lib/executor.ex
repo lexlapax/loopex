@@ -2004,7 +2004,11 @@ defmodule Loopex.Executor.Local do
     end
   end
 
-  defp retained_receipt_matches_job?(receipt, job) do
+  # Concept: offline restore uses the exact live receipt/job binding predicate.
+  # Technical depth: this adapter-private read performs no IO or dispatch and
+  # retains all seventeen bindings and the selected tool output limit.
+  @doc false
+  def retained_receipt_matches_job?(receipt, job) do
     comparisons = [
       {:protocol_version, :protocol_version},
       {:job_id, :job_id},
