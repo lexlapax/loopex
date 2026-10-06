@@ -171,7 +171,21 @@ defmodule Loopex.Runtime.OwnerGroup do
     do: {:stop, {:owner_workers_stopped, reason}, state}
 
   def handle_info({:DOWN, monitor, :process, pid, _reason}, state) do
-    {:noreply, %{state | providers: retire_provider(state.providers, monitor, pid)}}
+    providers = retire_provider(state.providers, monitor, pid)
+    completed = Enum.filter(providers, fn {_reference, provider} -> provider_complete?(provider) end)
+
+    # Concept: actor DOWN cannot discard the last native child identity.
+    # Technical depth: ordinary retirement spends only the already selected
+    # observation cutoff. A missing/failed fence retains identities through the
+    # existing unproved group termination, never a live provider-history map.
+    if Enum.any?(completed, fn {_reference, provider} -> is_nil(provider.cleanup) end) do
+      {:stop, :provider_cleanup_unproved, %{state | providers: providers}}
+    else
+      providers = retire_supervised_members(providers, state.workers)
+      if Enum.any?(providers, fn {_reference, provider} -> provider_complete?(provider) end),
+        do: {:stop, :provider_cleanup_unproved, %{state | providers: providers}},
+        else: {:noreply, %{state | providers: providers}}
+    end
   end
 
   def handle_info(_message, state), do: {:noreply, state}
@@ -224,15 +238,21 @@ defmodule Loopex.Runtime.OwnerGroup do
   defp begin_provider_cleanup(providers) do
     started = System.monotonic_time(:millisecond)
     Map.new(providers, fn {reference, provider} ->
-      {:ok, %{executor_observe_ms: observation}} = Loopex.Executor.cancellation_bounds(provider.grace)
-      sampled = %{cooperative_deadline: started + provider.grace,
-                  observation_deadline: started + observation}
-      cleanup = earlier_cleanup(provider.cleanup, sampled)
-      notify_cleanup(provider, reference, cleanup)
-      if is_pid(provider.guard) do
-        send(provider.guard, {:loopex_provider_tree_stop, reference, make_ref(), self(), cleanup})
+      if is_nil(provider.cleanup) and provider_complete?(provider) do
+        # No selected window exists for this failed startup-only record. Keep
+        # its native identities for unproved fallback without selecting one.
+        {reference, provider}
+      else
+        {:ok, %{executor_observe_ms: observation}} = Loopex.Executor.cancellation_bounds(provider.grace)
+        sampled = %{cooperative_deadline: started + provider.grace,
+                    observation_deadline: started + observation}
+        cleanup = earlier_cleanup(provider.cleanup, sampled)
+        notify_cleanup(provider, reference, cleanup)
+        if is_pid(provider.guard) do
+          send(provider.guard, {:loopex_provider_tree_stop, reference, make_ref(), self(), cleanup})
+        end
+        {reference, %{provider | cleanup: cleanup}}
       end
-      {reference, %{provider | cleanup: cleanup}}
     end)
   end
 
@@ -242,7 +262,7 @@ defmodule Loopex.Runtime.OwnerGroup do
     providers = retire_supervised_members(providers, workers)
     now = System.monotonic_time(:millisecond)
     {expired, remaining} = Enum.split_with(providers, fn {_ref, provider} ->
-      now >= provider.cleanup.observation_deadline
+      is_nil(provider.cleanup) or now >= provider.cleanup.observation_deadline
     end)
 
     for {reference, provider} <- expired do
@@ -266,7 +286,7 @@ defmodule Loopex.Runtime.OwnerGroup do
       end), do: 0, else: wait_slice(deadline)
       receive do
         {:DOWN, monitor, :process, pid, _reason} ->
-          await_provider_cleanup(retire_provider(remaining, monitor, pid, false), workers)
+          await_provider_cleanup(retire_provider(remaining, monitor, pid), workers)
 
         {:"$gen_call", from, {:provider_cleanup, reference, sampled}} ->
           {reply, remaining} = select_cleanup(remaining, reference, sampled, elem(from, 0))
@@ -294,14 +314,14 @@ defmodule Loopex.Runtime.OwnerGroup do
   # avoiding a fresh late-monitor race when bulk termination begins.
   defp retire_supervised_members(providers, workers) do
     completed = Enum.filter(providers, fn {_reference, provider} ->
-      is_nil(provider.guard) and is_nil(provider.worker) and is_nil(provider.resource) and
-        is_nil(provider.caretaker)
+      provider_complete?(provider) and not is_nil(provider.cleanup)
     end)
     if completed == [] do
       providers
     else
-      deadline = providers |> Map.values() |> Enum.map(& &1.cleanup.observation_deadline)
-                           |> Enum.min()
+      deadline = completed |> Enum.map(fn {_reference, provider} ->
+        provider.cleanup.observation_deadline
+      end) |> Enum.min()
       remaining = wait_slice(deadline)
       if remaining == 0 do
         providers
@@ -328,7 +348,11 @@ defmodule Loopex.Runtime.OwnerGroup do
   defp wait_slice(deadline),
     do: min(max(deadline - System.monotonic_time(:millisecond), 0), @timer_slice_ms)
 
-  defp retire_provider(providers, monitor, pid, prune \\ true) do
+  defp provider_complete?(provider),
+    do: is_nil(provider.guard) and is_nil(provider.worker) and is_nil(provider.resource) and
+      is_nil(provider.caretaker)
+
+  defp retire_provider(providers, monitor, pid) do
     Enum.reduce(providers, %{}, fn {reference, provider}, retained ->
       provider = cond do
         provider.guard == pid and provider.guard_monitor == monitor ->
@@ -341,10 +365,7 @@ defmodule Loopex.Runtime.OwnerGroup do
           %{provider | caretaker: nil, caretaker_monitor: nil}
         true -> provider
       end
-      if prune and is_nil(provider.guard) and is_nil(provider.worker) and is_nil(provider.resource) and
-        is_nil(provider.caretaker),
-        do: retained,
-        else: Map.put(retained, reference, provider)
+      Map.put(retained, reference, provider)
     end)
   end
 
