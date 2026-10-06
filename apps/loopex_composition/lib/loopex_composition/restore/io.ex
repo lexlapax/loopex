@@ -322,11 +322,7 @@ defmodule LoopexComposition.Restore.IO do
           stop: state.stop, stop_at: state.cooperative_cutoff - state.grace,
           work_cutoff: state.work_cutoff, cleanup_cutoff: state.cleanup_cutoff}})
 
-      continuation = receive do
-        {:continue_final_observation, ^reference} -> :continued
-      after
-        min(remaining(state.cleanup_cutoff), @max_receive_timeout) -> :expired
-      end
+      continuation = await_final_observation(reference, state.cleanup_cutoff)
 
       notify(state, {:final_observation_continued, continuation, now()})
       %{state | final_observation: :continued}
@@ -335,6 +331,16 @@ defmodule LoopexComposition.Restore.IO do
     end
   end
   defp pause_final_observation(state), do: state
+
+  defp await_final_observation(reference, cutoff) do
+    receive do
+      {:continue_final_observation, ^reference} -> :continued
+    after
+      wait_chunk(cutoff) ->
+        if remaining(cutoff) > 0,
+          do: await_final_observation(reference, cutoff), else: :expired
+    end
+  end
 
   defp acknowledge(state, {:open, token}, :opened),
     do: %{state | open: MapSet.put(state.open, token), opens: state.opens + 1}
