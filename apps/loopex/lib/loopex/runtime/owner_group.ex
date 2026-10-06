@@ -257,8 +257,11 @@ defmodule Loopex.Runtime.OwnerGroup do
     end
   end
 
+  # Concept: cleanup notices reach only invocation-local window consumers.
+  # Technical depth: the ordinary coordinator obtains the window by its bounded
+  # call reply; only a distinct caretaker receives and caches a window notice.
   defp notify_cleanup(provider, reference, cleanup) do
-    for pid <- Enum.uniq([provider.guard, provider.worker, provider.retainer]), is_pid(pid) do
+    for pid <- Enum.uniq([provider.guard, provider.worker, provider.caretaker]), is_pid(pid) do
       send(pid, {:loopex_provider_cleanup_window, self(), reference, cleanup})
     end
   end
