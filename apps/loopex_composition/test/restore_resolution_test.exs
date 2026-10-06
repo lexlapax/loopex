@@ -10,13 +10,21 @@ defmodule LoopexComposition.RestoreResolutionTest do
 
   setup do
     {:ok, temp} = WorkspaceIdentity.resolve_path(System.tmp_dir!())
-    root = Path.join(temp, "restore-resolution-" <> Base.encode16(:crypto.strong_rand_bytes(12), case: :lower))
+
+    root =
+      Path.join(
+        temp,
+        "restore-resolution-" <> Base.encode16(:crypto.strong_rand_bytes(12), case: :lower)
+      )
+
     File.mkdir!(root)
     on_exit(fn -> File.rm_rf!(root) end)
     %{root: root}
   end
 
-  test "exact committed duplicate joins without allocation or opening old source and backup", %{root: root} do
+  test "exact committed duplicate joins without allocation or opening old source and backup", %{
+    root: root
+  } do
     fixture = first(root)
     File.rm_rf!(fixture.source)
     File.rm_rf!(fixture.plan["backup_state_root"])
@@ -28,7 +36,9 @@ defmodule LoopexComposition.RestoreResolutionTest do
     assert File.lstat(fixture.plan["backup_state_root"]) == {:error, :enoent}
   end
 
-  test "original plan at retained B returns its historical receipt after actual A to B to C", %{root: root} do
+  test "original plan at retained B returns its historical receipt after actual A to B to C", %{
+    root: root
+  } do
     first = first(root)
     next = restore_cut(root, first.destination, first.workspace, 1)
     File.rm_rf!(first.source)
@@ -50,7 +60,9 @@ defmodule LoopexComposition.RestoreResolutionTest do
     assert manifest(root) == before
   end
 
-  test "invocation total allowance does not change exact committed receipt identity", %{root: root} do
+  test "invocation total allowance does not change exact committed receipt identity", %{
+    root: root
+  } do
     fixture = first(root)
     before = manifest(root)
     invoke = %{invocation() | "max_total_file_bytes" => @total + 1}
@@ -69,7 +81,8 @@ defmodule LoopexComposition.RestoreResolutionTest do
   end
 
   for status <- ~w(available lost) do
-    test "preinstalled foreign destination claim excludes fresh #{status} restore before native acquisition", %{root: root} do
+    test "preinstalled foreign destination claim excludes fresh #{status} restore before native acquisition",
+         %{root: root} do
       {source, workspace} = source(root)
       cut = root |> prepare_cut(source, workspace, 0) |> with_source_status(unquote(status))
       foreign = %{cut | plan: %{cut.plan | "tx_id" => hash("foreign-preflight")}}
@@ -87,8 +100,10 @@ defmodule LoopexComposition.RestoreResolutionTest do
     {source, workspace} = source(root)
     cut = prepare_cut(root, source, workspace, 0)
     owned = launch_restore(cut)
+
     try do
       {id, _} = hold_phase(owned, "source_retirement", [])
+
       try do
         replacement = %{cut | plan: %{cut.plan | "tx_id" => hash("fresh-tx")}}
         before = manifest(root)
@@ -117,32 +132,73 @@ defmodule LoopexComposition.RestoreResolutionTest do
   # original actors under the captured cutoff. A late monitor is not a join proof.
   defp assert_resolution(fixture, expected, invoke \\ invocation()) do
     parent = self()
-    {caller, monitor} = spawn_monitor(fn ->
-      send(parent, {:restore_result, self(), Restore.first(fixture.plan, invoke,
-        probe: parent, pause_at: :restore_classification_decode)})
-    end)
-    owned = receive do
-      {:restore_io, guardian, worker, reference, {:installed, _, cutoff}} ->
-        %{caller: caller, caller_monitor: monitor, guardian: guardian, worker: worker, reference: reference,
-          guardian_monitor: Process.monitor(guardian), worker_monitor: Process.monitor(worker), cutoff: cutoff + 10_000}
-    after
-      10_000 -> flunk("resolution did not install original actors")
-    end
+
+    {caller, monitor} =
+      spawn_monitor(fn ->
+        send(
+          parent,
+          {:restore_result, self(),
+           Restore.first(fixture.plan, invoke,
+             probe: parent,
+             pause_at: :restore_classification_decode
+           )}
+        )
+      end)
+
+    owned =
+      receive do
+        {:restore_io, guardian, worker, reference, {:installed, _, cutoff}} ->
+          %{
+            caller: caller,
+            caller_monitor: monitor,
+            guardian: guardian,
+            worker: worker,
+            reference: reference,
+            guardian_monitor: Process.monitor(guardian),
+            worker_monitor: Process.monitor(worker),
+            cutoff: cutoff + 10_000
+          }
+      after
+        10_000 -> flunk("resolution did not install original actors")
+      end
+
     try do
       {result, events} = collect_resolution(owned, [])
       assert {:joined, {:ok, %{restore_result: ^expected, release_claims: []}}, evidence} = result
       assert evidence.opens == evidence.closes and evidence.claim_count == 0
       assert Enum.count(events, &match?({:issued, _, :restore_classification_decode}, &1)) == 1
+
       assert Enum.all?(events, fn
-        {:issued, _, {:open, _}} -> true
-        {:issued, _, {:close, _}} -> true
-        {:issued, _, {:restore_phase, "claim"}} -> true
-        {:issued, _, kind} -> kind in [:manifest_stat, :lookup_stat, :lookup_list,
-          :lookup_intent_decode, :lookup_ledger_placement_stat, :lookup_descriptor_stat,
-          :lookup_claim_stat, :lookup_claim_names, :lookup_claim_decode,
-          :lookup_recheck_names, :lookup_recheck_absent, :read, :restore_classification_decode]
-        _ -> true
-      end)
+               {:issued, _, {:open, _}} ->
+                 true
+
+               {:issued, _, {:close, _}} ->
+                 true
+
+               {:issued, _, {:restore_phase, "claim"}} ->
+                 true
+
+               {:issued, _, kind} ->
+                 kind in [
+                   :manifest_stat,
+                   :lookup_stat,
+                   :lookup_list,
+                   :lookup_intent_decode,
+                   :lookup_ledger_placement_stat,
+                   :lookup_descriptor_stat,
+                   :lookup_claim_stat,
+                   :lookup_claim_names,
+                   :lookup_claim_decode,
+                   :lookup_recheck_names,
+                   :lookup_recheck_absent,
+                   :read,
+                   :restore_classification_decode
+                 ]
+
+               _ ->
+                 true
+             end)
+
       join(owned)
     after
       cleanup_owned(owned)
@@ -151,20 +207,25 @@ defmodule LoopexComposition.RestoreResolutionTest do
 
   defp collect_resolution(owned, events) do
     receive do
-      {:restore_io, guardian, worker, reference, {:issued, id, :restore_classification_decode} = event}
+      {:restore_io, guardian, worker, reference,
+       {:issued, id, :restore_classification_decode} = event}
       when guardian == owned.guardian and worker == owned.worker and reference == owned.reference ->
         send(guardian, {:proceed, reference, id})
         collect_resolution(owned, [event | events])
+
       {:restore_io, guardian, worker, reference, event}
       when guardian == owned.guardian and worker == owned.worker and reference == owned.reference ->
         collect_resolution(owned, [event | events])
-      {:restore_result, caller, result} when caller == owned.caller -> {result, events}
+
+      {:restore_result, caller, result} when caller == owned.caller ->
+        {result, events}
     after
       left(owned.cutoff) -> flunk("resolution unavailable at original cutoff")
     end
   end
 
   defp with_source_status(cut, "available"), do: cut
+
   defp with_source_status(cut, "lost") do
     File.rm_rf!(cut.source)
     %{cut | plan: %{cut.plan | "source_status" => "lost"}}
@@ -185,7 +246,8 @@ defmodule LoopexComposition.RestoreResolutionTest do
     restore_cut(root, source, workspace, 0)
   end
 
-  defp restore_cut(root, source, workspace, prior), do: root |> prepare_cut(source, workspace, prior) |> execute_cut()
+  defp restore_cut(root, source, workspace, prior),
+    do: root |> prepare_cut(source, workspace, prior) |> execute_cut()
 
   defp prepare_cut(root, source, workspace, prior) do
     backup = Path.join(root, "backup-#{prior}")
@@ -194,51 +256,104 @@ defmodule LoopexComposition.RestoreResolutionTest do
     assert {:ok, _} = File.cp_r(source, backup)
     baseline = manifest(backup)
     {:ok, entries} = RestoreCodec.manifest(baseline, @total)
-    {:ok, lineage} = RestoreCodec.lineage_digest(Enum.filter(entries, fn entry ->
-      Enum.any?(Path.split(entry["path"]), &(&1 in [".loopex-restore", "restore-lineage"]))
-    end))
+
+    {:ok, lineage} =
+      RestoreCodec.lineage_digest(
+        Enum.filter(entries, fn entry ->
+          Enum.any?(Path.split(entry["path"]), &(&1 in [".loopex-restore", "restore-lineage"]))
+        end)
+      )
+
     generation_bytes = File.read!(Path.join(source, "receipts/generation"))
     {:ok, generation} = Ledger.decode_bytes(generation_bytes, "local_executor_generation_v1")
     {:ok, workspace_ref} = WorkspaceIdentity.reference(workspace)
-    plan = %{"version" => 1, "tx_id" => hash("lookup-restore-#{prior}"), "source_state_root" => source,
-      "source_state_placement" => placement(source), "source_status" => "available", "backup_state_root" => backup,
-      "destination_state_root" => destination, "manifest_sha256" => hash(baseline), "cut_id" => hash("cut-#{prior}"),
-      "prior_restore_count" => prior, "prior_lineage_sha256" => lineage, "runtime_ids" => [], "stores" => [],
-      "ledgers" => [%{"relative_root" => "receipts", "executor_identity" => generation["executor_identity"],
-        "source_generation_sha256" => hash(generation_bytes), "source_placement" => placement(Path.join(source, "receipts"))}],
+
+    plan = %{
+      "version" => 1,
+      "tx_id" => hash("lookup-restore-#{prior}"),
+      "source_state_root" => source,
+      "source_state_placement" => placement(source),
+      "source_status" => "available",
+      "backup_state_root" => backup,
+      "destination_state_root" => destination,
+      "manifest_sha256" => hash(baseline),
+      "cut_id" => hash("cut-#{prior}"),
+      "prior_restore_count" => prior,
+      "prior_lineage_sha256" => lineage,
+      "runtime_ids" => [],
+      "stores" => [],
+      "ledgers" => [
+        %{
+          "relative_root" => "receipts",
+          "executor_identity" => generation["executor_identity"],
+          "source_generation_sha256" => hash(generation_bytes),
+          "source_placement" => placement(Path.join(source, "receipts"))
+        }
+      ],
       "workspace" => %{"root" => workspace, "workspace_ref" => workspace_ref},
-      "host_attestation" => %{"latest_cut" => true, "no_post_cut_activity" => true, "all_other_copies_excluded" => true,
-        "old_authority_termination" => "joined", "host_ledgers_validated" => true, "evidence_sha256" => hash("fixture-local-joined")}}
+      "host_attestation" => %{
+        "latest_cut" => true,
+        "no_post_cut_activity" => true,
+        "all_other_copies_excluded" => true,
+        "old_authority_termination" => "joined",
+        "host_ledgers_validated" => true,
+        "evidence_sha256" => hash("fixture-local-joined")
+      }
+    }
+
     %{plan: plan, destination: destination, source: source, workspace: workspace}
   end
 
   defp execute_cut(cut) do
-    assert {:joined, {:ok, %{restore_result: {:committed, receipt}, release_claims: []}}, evidence} =
-      Restore.first(cut.plan, invocation())
+    assert {:joined, {:ok, %{restore_result: {:committed, receipt}, release_claims: []}},
+            evidence} =
+             Restore.first(cut.plan, invocation())
+
     assert evidence.opens == evidence.closes and evidence.claim_count == 0
     Map.put(cut, :receipt, receipt)
   end
 
-  defp invocation, do: Map.merge(@limits, %{"max_total_file_bytes" => @total, "prior_admin_authority" => "none", "prior_admin_evidence_sha256" => nil})
+  defp invocation,
+    do:
+      Map.merge(@limits, %{
+        "max_total_file_bytes" => @total,
+        "prior_admin_authority" => "none",
+        "prior_admin_evidence_sha256" => nil
+      })
+
   defp manifest(root) do
     assert {:joined, {:ok, bytes}, _} = RestoreIO.run({:manifest, root, @total}, @limits)
     bytes
   end
+
   defp placement(root) do
     stat = File.lstat!(root)
     %{"expanded_root" => root, "major_device" => stat.major_device, "inode" => stat.inode}
   end
+
   defp hash(bytes), do: RestoreCodec.digest_bytes(bytes)
+
   defp claim_path(root) do
     {:ok, digest} = RestoreCodec.claim_digest(root)
     Path.join(Path.dirname(root), ".loopex-restore-claim-" <> digest)
   end
+
   defp claim_bytes(fixture) do
     {:ok, digest} = RestoreCodec.plan_digest(fixture.plan)
-    {:ok, bytes} = RestoreCodec.encode(:claim, %{"kind" => "loopex_current_restore_claim_v1", "tx_id" => fixture.plan["tx_id"],
-      "plan_digest" => digest, "claim_nonce" => hash("retained-fixture-claim"), "state_root" => fixture.destination, "role" => "destination"})
+
+    {:ok, bytes} =
+      RestoreCodec.encode(:claim, %{
+        "kind" => "loopex_current_restore_claim_v1",
+        "tx_id" => fixture.plan["tx_id"],
+        "plan_digest" => digest,
+        "claim_nonce" => hash("retained-fixture-claim"),
+        "state_root" => fixture.destination,
+        "role" => "destination"
+      })
+
     bytes
   end
+
   defp install_claim(fixture) do
     path = claim_path(fixture.destination)
     File.mkdir!(path)
@@ -247,19 +362,38 @@ defmodule LoopexComposition.RestoreResolutionTest do
     File.chmod!(Path.join(path, "owner"), 0o600)
     path
   end
+
   defp left(cutoff), do: max(0, cutoff - System.monotonic_time(:millisecond))
 
   defp launch_restore(cut) do
     parent = self()
-    {caller, monitor} = spawn_monitor(fn -> send(parent, {:restore_result, self(), Restore.first(cut.plan, invocation(), probe: parent, pause_at: :restore_phase)}) end)
+
+    {caller, monitor} =
+      spawn_monitor(fn ->
+        send(
+          parent,
+          {:restore_result, self(),
+           Restore.first(cut.plan, invocation(), probe: parent, pause_at: :restore_phase)}
+        )
+      end)
+
     receive do
       {:restore_io, guardian, worker, reference, {:installed, _, cutoff}} ->
-        %{caller: caller, caller_monitor: monitor, guardian: guardian, worker: worker, reference: reference,
-          guardian_monitor: Process.monitor(guardian), worker_monitor: Process.monitor(worker), cutoff: cutoff + 10_000}
+        %{
+          caller: caller,
+          caller_monitor: monitor,
+          guardian: guardian,
+          worker: worker,
+          reference: reference,
+          guardian_monitor: Process.monitor(guardian),
+          worker_monitor: Process.monitor(worker),
+          cutoff: cutoff + 10_000
+        }
     after
       10_000 -> flunk("restore did not install")
     end
   end
+
   defp hold_phase(owned, wanted, events) do
     receive do
       {:restore_io, guardian, worker, reference, {:issued, id, {:restore_phase, phase}} = event}
@@ -270,17 +404,23 @@ defmodule LoopexComposition.RestoreResolutionTest do
           send(guardian, {:proceed, reference, id})
           hold_phase(owned, wanted, [event | events])
         end
-      {:restore_io, _, _, _, event} -> hold_phase(owned, wanted, [event | events])
+
+      {:restore_io, _, _, _, event} ->
+        hold_phase(owned, wanted, [event | events])
     after
       left(owned.cutoff) -> flunk("original restore cutoff reached before phase")
     end
   end
+
   defp finish_restore(owned) do
     receive do
       {:restore_io, guardian, _, reference, {:issued, id, {:restore_phase, _}}} ->
         send(guardian, {:proceed, reference, id})
         finish_restore(owned)
-      {:restore_io, _, _, _, _} -> finish_restore(owned)
+
+      {:restore_io, _, _, _, _} ->
+        finish_restore(owned)
+
       {:restore_result, caller, result} when caller == owned.caller ->
         assert {:joined, {:ok, %{restore_result: {:committed, _}}}, _} = result
         join(owned)
@@ -288,6 +428,7 @@ defmodule LoopexComposition.RestoreResolutionTest do
       left(owned.cutoff) -> flunk("restore result unavailable at original bound")
     end
   end
+
   defp join(owned) do
     exact_down(owned, owned.caller, owned.caller_monitor, :normal)
     exact_down(owned, owned.guardian, owned.guardian_monitor, :normal)
@@ -305,15 +446,25 @@ defmodule LoopexComposition.RestoreResolutionTest do
   end
 
   defp cleanup_owned(owned) do
-    Enum.each([{owned.caller, owned.caller_monitor}, {owned.guardian, owned.guardian_monitor}, {owned.worker, owned.worker_monitor}], fn {actor, monitor} ->
-      if is_nil(Process.get({:lookup_original_down, monitor})) do
-        Process.exit(actor, :kill)
-        receive do
-          {:DOWN, ^monitor, :process, ^actor, reason} -> Process.put({:lookup_original_down, monitor}, reason)
-        after
-          left(owned.cutoff) -> flunk("failure cleanup did not join original actor within original bound")
+    Enum.each(
+      [
+        {owned.caller, owned.caller_monitor},
+        {owned.guardian, owned.guardian_monitor},
+        {owned.worker, owned.worker_monitor}
+      ],
+      fn {actor, monitor} ->
+        if is_nil(Process.get({:lookup_original_down, monitor})) do
+          Process.exit(actor, :kill)
+
+          receive do
+            {:DOWN, ^monitor, :process, ^actor, reason} ->
+              Process.put({:lookup_original_down, monitor}, reason)
+          after
+            left(owned.cutoff) ->
+              flunk("failure cleanup did not join original actor within original bound")
+          end
         end
       end
-    end)
+    )
   end
 end

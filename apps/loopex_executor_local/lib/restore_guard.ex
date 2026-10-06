@@ -355,26 +355,33 @@ defmodule Loopex.Executor.Local.RestoreGuard do
     case result do
       {:committed, %{"receipt" => receipt}} when is_nil(claim) ->
         path = Path.join([@root_admin, "lineage", ordinal(receipt["ordinal"]), "intent"])
+
         with {:ok, bytes} <- Map.fetch(files, path),
              {:ok, intent} <- RestoreCodec.decode(:intent, bytes),
              {:ok, digest} <- RestoreCodec.plan_digest(plan),
-             true <- root == plan["destination_state_root"] and intent["plan"] == plan and
-               intent["plan_digest"] == digest do
+             true <-
+               root == plan["destination_state_root"] and intent["plan"] == plan and
+                 intent["plan_digest"] == digest do
           {:committed, receipt}
         else
           _ -> lookup_failure(tx_id, "restore_conflict")
         end
 
       {:absent, _} when is_nil(claim) ->
-        intents = files |> Enum.filter(fn {path, _bytes} ->
-          case Path.split(path) do
-            [@root_admin, "lineage", _ordinal, name] -> name in ["intent", "intent.tmp"]
-            _ -> false
-          end
-        end) |> Enum.sort_by(&elem(&1, 0))
+        intents =
+          files
+          |> Enum.filter(fn {path, _bytes} ->
+            case Path.split(path) do
+              [@root_admin, "lineage", _ordinal, name] -> name in ["intent", "intent.tmp"]
+              _ -> false
+            end
+          end)
+          |> Enum.sort_by(&elem(&1, 0))
 
         case List.last(intents) do
-          nil -> :fresh
+          nil ->
+            :fresh
+
           {_path, bytes} ->
             with {:ok, latest} <- RestoreCodec.decode(:intent, bytes),
                  {:committed, %{"view" => "current"}} <-
@@ -385,8 +392,11 @@ defmodule Loopex.Executor.Local.RestoreGuard do
             end
         end
 
-      {:error, _} = failure -> failure
-      _ -> lookup_failure(tx_id, "restore_conflict")
+      {:error, _} = failure ->
+        failure
+
+      _ ->
+        lookup_failure(tx_id, "restore_conflict")
     end
   end
 
@@ -1183,6 +1193,7 @@ defmodule Loopex.Executor.Local.RestoreGuard do
       ])
 
     ensure!(hash(activation) == committed["activation_manifest_sha256"])
+
     {_final, final_entries} =
       reconstruct(activation_entries, [], [
         {Path.join([@root_admin, "lineage", ordinal_name]), [{"committed", committed_bytes}]}

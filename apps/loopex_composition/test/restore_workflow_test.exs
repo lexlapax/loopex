@@ -295,15 +295,25 @@ defmodule LoopexComposition.RestoreWorkflowTest do
         {^tag, result} ->
           flunk("restore ended before native second claim race: #{inspect(result)}")
       after
-        max(0, owned.work_cutoff + max(10_000, @grace + 2_000) -
-          System.monotonic_time(:millisecond)) ->
+        max(
+          0,
+          owned.work_cutoff + max(10_000, @grace + 2_000) -
+              System.monotonic_time(:millisecond)
+        ) ->
           flunk("original restore work/cleanup cutoff reached")
       end
     end
 
     {id, events} = hold_second.(hold_second, [])
-    assert Enum.any?(events, &match?(
-      {:acknowledged, _, {:restore_claim_acquired, %{directory: ^first}}, :completed}, &1))
+
+    assert Enum.any?(
+             events,
+             &match?(
+               {:acknowledged, _, {:restore_claim_acquired, %{directory: ^first}}, :completed},
+               &1
+             )
+           )
+
     assert File.lstat(second) == {:error, :enoent}
     File.mkdir!(second)
     foreign_owner = Path.join(second, "owner")
@@ -848,8 +858,11 @@ defmodule LoopexComposition.RestoreWorkflowTest do
         {^tag, result} ->
           flunk("restore ended before native destination claim race: #{inspect(result)}")
       after
-        max(0, owned.work_cutoff + max(10_000, @grace + 2_000) -
-          System.monotonic_time(:millisecond)) ->
+        max(
+          0,
+          owned.work_cutoff + max(10_000, @grace + 2_000) -
+              System.monotonic_time(:millisecond)
+        ) ->
           flunk("original restore work/cleanup cutoff reached")
       end
     end

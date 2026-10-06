@@ -1305,17 +1305,32 @@ defmodule LoopexComposition.Restore.IO do
       claim_path = Path.join(Path.dirname(root), ".loopex-restore-claim-" <> claim_digest)
       {claim, state} = lookup_claim(root, claim_path, state)
       lookup_recheck(root, ancestors, state)
-      result = if is_nil(plan) do
-        primitive(:restore_lookup_decode, fn ->
-          Loopex.Executor.Local.RestoreGuard.lookup_captured(root, tx_id, state.index,
-            state.files, state.placements, claim)
-        end)
-      else
-        primitive(:restore_classification_decode, fn ->
-          Loopex.Executor.Local.RestoreGuard.classify_captured(root, plan, state.index,
-            state.files, state.placements, claim)
-        end)
-      end
+
+      result =
+        if is_nil(plan) do
+          primitive(:restore_lookup_decode, fn ->
+            Loopex.Executor.Local.RestoreGuard.lookup_captured(
+              root,
+              tx_id,
+              state.index,
+              state.files,
+              state.placements,
+              claim
+            )
+          end)
+        else
+          primitive(:restore_classification_decode, fn ->
+            Loopex.Executor.Local.RestoreGuard.classify_captured(
+              root,
+              plan,
+              state.index,
+              state.files,
+              state.placements,
+              claim
+            )
+          end)
+        end
+
       {:ok, result}
     catch
       {:lookup_error, code} -> {:ok, lookup_refusal(tx_id, code)}

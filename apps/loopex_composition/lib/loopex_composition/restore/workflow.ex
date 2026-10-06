@@ -32,8 +32,10 @@ defmodule LoopexComposition.Restore.Workflow do
     # this admission gate; every claim and physical IO operation follows the gate.
     ensure!(plan["prior_restore_count"] < 64, "inventory_limit_exceeded")
     classify!(plan["destination_state_root"], plan, io)
+
     if plan["source_status"] == "available",
       do: classify!(plan["source_state_root"], plan, io)
+
     claims = claims!(plan, io)
     Process.put(:restore_workflow_claims, claims)
     phase(io, "inventory")
@@ -196,9 +198,15 @@ defmodule LoopexComposition.Restore.Workflow do
   catch
     {:restore_duplicate, receipt} ->
       {:ok, %{restore_result: {:committed, receipt}, release_claims: []}}
-    {:restore_refusal, code} -> refusal(code)
-    {:io_error, _reason} -> refusal("inventory_unavailable")
-    {:stopped, _reason} -> refusal("inventory_unavailable")
+
+    {:restore_refusal, code} ->
+      refusal(code)
+
+    {:io_error, _reason} ->
+      refusal("inventory_unavailable")
+
+    {:stopped, _reason} ->
+      refusal("inventory_unavailable")
   end
 
   # Concept: classify retained completion before fresh claims or allocation.
@@ -207,12 +215,20 @@ defmodule LoopexComposition.Restore.Workflow do
   # pending continuation remains a separate unfinished implementation unit.
   defp classify!(root, plan, io) do
     case value!(io.({:restore_classification, root, plan})) do
-      :fresh -> :ok
-      {:committed, receipt} -> throw({:restore_duplicate, receipt})
+      :fresh ->
+        :ok
+
+      {:committed, receipt} ->
+        throw({:restore_duplicate, receipt})
+
       {:error, %{"code" => "restore_history_invalid"}} ->
         throw({:restore_refusal, "invalid_current_history"})
-      {:error, %{"code" => code}} -> throw({:restore_refusal, code})
-      _ -> throw({:restore_refusal, "invalid_current_history"})
+
+      {:error, %{"code" => code}} ->
+        throw({:restore_refusal, code})
+
+      _ ->
+        throw({:restore_refusal, "invalid_current_history"})
     end
   end
 
