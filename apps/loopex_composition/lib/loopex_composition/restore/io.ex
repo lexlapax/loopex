@@ -18,7 +18,8 @@ defmodule LoopexComposition.Restore.IO do
 
   This private prerequisite exposes bounded reads, complete physical manifests,
   durable record publication, complete declared-Store semantic auditing and one
-  canonical retained Resource or Local ledger record audit to composition only. Validated maps
+  canonical retained Resource or Local ledger record audit, and complete Local
+  generation/marker/open-plane enumeration to composition only. Validated maps
   and recovered session facts remain private; the
   operation grants no effect authority and does not validate other backup
   formats or activate a restored root. Host exclusion remains the caller's
@@ -547,6 +548,22 @@ defmodule LoopexComposition.Restore.IO do
     end
   end
 
+  defp execute({:audit_ledger_index, root, declaration, manifest}) do
+    # Concept: enumerate the complete generation/marker/open metadata plane.
+    # Technical depth: all IO and reductions remain in this one owned worker.
+    # Receipts, recovered jobs and restore history are separate obligations.
+    with {:ok, _} <-
+           primitive(:ledger_declaration, fn ->
+             RestoreCodec.encode(:ledger_descriptor, declaration)
+           end),
+         {:ok, entries} <-
+           primitive(:ledger_manifest, fn -> RestoreCodec.manifest(manifest, @max_uint64) end) do
+      audit_ledger_index(root, declaration, Map.new(entries, &{&1["path"], &1}))
+    else
+      _ -> {:error, :history_invalid}
+    end
+  end
+
   defp execute({:publish, path, temp, bytes, mode, expected}) do
     current =
       case primitive(:stat, fn -> :prim_file.read_link_info(path) end) do
@@ -617,6 +634,131 @@ defmodule LoopexComposition.Restore.IO do
     do:
       record["job_id"] == job_id and
         (role != :open or record["executor_identity"] == declaration["executor_identity"])
+
+  defp audit_ledger_index(root, declaration, index) do
+    relative = declaration["relative_root"]
+    ancestors = manifest_ancestors(root)
+    claim = Path.join(relative, "claim")
+    claim_directories = if Map.has_key?(index, claim), do: [claim], else: []
+    selected_directories = [relative, Path.join(relative, "markers"), Path.join(relative, "open")] ++ claim_directories
+    directories = Enum.flat_map(selected_directories, &audit_directories(root, &1, index))
+    namespaces = Map.new(selected_directories,
+      fn directory -> {directory, audit_ledger_names(root, directory, index)} end)
+    if claim_directories != [] and namespaces[claim] != [],
+      do: throw({:io_error, :inventory_mismatch})
+    marker_names = namespaces[Path.join(relative, "markers")]
+    open_names = namespaces[Path.join(relative, "open")]
+    if not Enum.all?(marker_names ++ open_names, &Regex.match?(~r/\A[0-9a-f]{64}\z/, &1)),
+      do: throw({:io_error, :unsupported_path})
+
+    require_ok(primitive(:ledger_capacity, fn -> Ledger.open_index_capacity(length(open_names)) end))
+    members =
+      [{Path.join(relative, "generation"), @max_ledger_generation} |
+       Enum.map(marker_names, &{Path.join([relative, "markers", &1]), @max_ledger_record}) ++
+       Enum.map(open_names, &{Path.join([relative, "open", &1]), @max_ledger_record})]
+    observed =
+      Map.new(members, fn {path, ceiling} ->
+        entry = index[path]
+        if not match?(%{"kind" => "regular"}, entry) or entry["size"] > ceiling,
+          do: throw({:io_error, :inventory_mismatch})
+        info = manifest_stat(Path.join(root, path))
+        require_audit_file(info, entry)
+        {path, manifest_identity(info)}
+      end)
+
+    with {:ok, generation} <-
+           audit_captured_record(root, Path.join(relative, "generation"), index,
+             @max_ledger_generation, :ledger_digest, :ledger_decode, fn bytes ->
+               with {:ok, record} <- Ledger.decode_bytes(bytes, "local_executor_generation_v1"),
+                    true <- ledger_relations?(record, bytes, declaration, :generation, nil) do
+                 {:ok, record}
+               else
+                 _ -> {:error, :history_invalid}
+               end
+             end),
+         {:ok, markers} <- audit_ledger_plane(root, relative, "markers", marker_names, index, declaration),
+         {:ok, open} <- audit_ledger_plane(root, relative, "open", open_names, index, declaration),
+         {:ok, snapshot} <-
+           primitive(:ledger_snapshot, fn ->
+             Ledger.validate_captured_open_index(declaration["source_generation_sha256"],
+               generation["root_binding"], open)
+           end),
+         true <- ledger_index_pairs?(markers, open) do
+      Enum.each(namespaces, fn {directory, names} ->
+        if audit_ledger_names(root, directory, index) != names,
+          do: throw({:io_error, :source_changed})
+      end)
+      Enum.each(observed, fn {path, identity} ->
+        if manifest_identity(manifest_stat(Path.join(root, path))) != identity,
+          do: throw({:io_error, :source_changed})
+      end)
+      Enum.each(directories, fn {path, identity} ->
+        if manifest_identity(manifest_stat(path)) != identity,
+          do: throw({:io_error, :source_changed})
+      end)
+      Enum.each(ancestors, fn {path, identity} ->
+        if directory_identity(manifest_stat(path)) != identity,
+          do: throw({:io_error, :source_changed})
+      end)
+      # Presence is evidence only. No owner is inferred, joined or reclaimed.
+      {:ok, %{generation: generation, markers: markers, open: snapshot,
+              claim_present: Map.has_key?(index, Path.join(relative, "claim"))}}
+    else
+      _ -> {:error, :history_invalid}
+    end
+  end
+
+  defp audit_ledger_names(root, relative, index) do
+    raw = require_value(primitive(:ledger_names, fn ->
+      :prim_file.list_dir_all(Path.join(root, relative))
+    end))
+    if length(raw) > @max_entries, do: throw({:io_error, :inventory_limit})
+    names = Enum.sort(Enum.map(raw, &manifest_name/1))
+    expected =
+      index |> Map.keys() |> Enum.filter(&(Path.dirname(&1) == relative))
+      |> Enum.map(&Path.basename/1) |> Enum.sort()
+    if names != expected, do: throw({:io_error, :inventory_mismatch})
+    names
+  end
+
+  defp audit_ledger_plane(root, relative, plane, names, index, declaration) do
+    Enum.reduce_while(names, {:ok, []}, fn name, {:ok, records} ->
+      result =
+        audit_captured_record(root, Path.join([relative, plane, name]), index,
+          @max_ledger_record, :ledger_digest, :ledger_decode, fn bytes ->
+            decoded =
+              if plane == "markers", do: Ledger.decode_marker_bytes(bytes),
+                else: Ledger.decode_bytes(bytes, "local_open_effect_v1")
+            with {:ok, record} <- decoded,
+                 true <- RestoreCodec.digest_bytes(record["job_id"]) == name,
+                 true <- plane != "open" or record["executor_identity"] == declaration["executor_identity"] do
+              {:ok, record}
+            else
+              _ -> {:error, :history_invalid}
+            end
+          end)
+      case result do
+        {:ok, record} -> {:cont, {:ok, [{name, record} | records]}}
+        _ -> {:halt, {:error, :history_invalid}}
+      end
+    end)
+    |> case do
+      {:ok, records} -> {:ok, Enum.reverse(records)}
+      error -> error
+    end
+  end
+
+  defp ledger_index_pairs?(markers, open) do
+    markers = Map.new(markers)
+    Enum.all?(open, fn {name, record} ->
+      case markers[name] do
+        %{ledger_kind: "local_effect_admission_v1"} = marker ->
+          Enum.all?(~w(job_id canonical_request_digest cleanup_grace_ms),
+            &(marker[&1] == record[&1]))
+        _ -> true
+      end
+    end)
+  end
 
   # Concept: Resource and ledger audits share one owned physical capture.
   # Technical depth: exact inventory membership and role size precede open;
@@ -1094,6 +1236,10 @@ defmodule LoopexComposition.Restore.IO do
            (role in [:admission, :refusal, :open] and is_binary(job_id) and
               byte_size(job_id) in 1..8192)) and
         is_binary(manifest) and byte_size(manifest) <= @max_manifest
+
+  defp valid_operation?({:audit_ledger_index, root, declaration, manifest}),
+    do: valid_path?(root) and is_map(declaration) and
+      is_binary(manifest) and byte_size(manifest) <= @max_manifest
 
   defp valid_operation?({:manifest, root, max_total}),
     do: valid_path?(root) and is_integer(max_total) and max_total in 0..@max_uint64

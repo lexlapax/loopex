@@ -873,16 +873,68 @@ defmodule Loopex.Executor.Local.Ledger do
       prepared.root_binding,
       prepared.root_claim_nonce,
       length(entries),
-      Enum.map(entries, fn {name, record} -> [name, digest(encode(record)), record] end)
+      snapshot_members(entries)
     ]
 
-    if byte_size(:erlang.term_to_binary(observation, [:deterministic])) <= @snapshot_bytes,
-      do: {:ok, Enum.map(entries, fn {_name, record} -> record end)},
-      else: {:error, {:ledger_unavailable, :snapshot_too_large}}
+    bound_snapshot_size(byte_size(:erlang.term_to_binary(observation, [:deterministic])), entries)
   end
 
-  defp within_capacity(names) when length(names) <= @max_open_entries, do: :ok
-  defp within_capacity(_names), do: {:error, {:ledger_unavailable, :capacity}}
+  defp snapshot_members(entries),
+    do: Enum.map(entries, fn {name, record} -> [name, digest(encode(record)), record] end)
+
+  defp bound_snapshot_size(size, entries) when size <= @snapshot_bytes,
+    do: {:ok, Enum.map(entries, fn {_name, record} -> record end)}
+
+  defp bound_snapshot_size(_size, _entries),
+    do: {:error, {:ledger_unavailable, :snapshot_too_large}}
+
+  defp within_capacity(names), do: open_index_capacity(length(names))
+
+  @doc false
+  # Concept: capacity refuses rather than evicting unresolved entries.
+  # Technical depth: live and captured readers use the same fixed count domain.
+  def open_index_capacity(count) when is_integer(count) and count in 0..@max_open_entries,
+    do: :ok
+
+  def open_index_capacity(_count), do: {:error, {:ledger_unavailable, :capacity}}
+
+  @doc false
+  # Concept: checks a captured open index without creating or claiming authority.
+  # Technical depth: reuse live record, basename, count and whole-size domains.
+  # The live nonce is always a 64-byte binary: its ETF member costs 69 bytes
+  # (BINARY_EXT, four-byte length, payload). Omitting that member from the proper
+  # list leaves the header and tail widths unchanged. Adding 69 measures exactly
+  # the live size without inventing a nonce or observing claim ownership.
+  def validate_captured_open_index(generation, binding, entries) when is_list(entries) do
+    with true <- hex_digest?(generation) and hex_digest?(binding),
+         :ok <- within_capacity(entries),
+         true <- Enum.all?(entries, &captured_open_entry?/1),
+         true <- entries == Enum.sort_by(entries, &elem(&1, 0)),
+         true <- length(Enum.uniq_by(entries, &elem(&1, 0))) == length(entries) do
+      observation = [
+        "loopex:local-root-snapshot:v1", generation, binding, length(entries),
+        snapshot_members(entries)
+      ]
+
+      bound_snapshot_size(:erlang.external_size(observation, [:deterministic]) + 69, entries)
+    else
+      {:error, _} = error -> error
+      _ -> {:error, {:ledger_unavailable, :malformed_open_entry}}
+    end
+  end
+
+  def validate_captured_open_index(_generation, _binding, _entries),
+    do: {:error, {:ledger_unavailable, :malformed_open_entry}}
+
+  defp captured_open_entry?({name, record}) do
+    with {:ok, _} <- validate_record(record, [@open_kind], @record_bytes) do
+      name == digest(record["job_id"])
+    else
+      _ -> false
+    end
+  end
+
+  defp captured_open_entry?(_entry), do: false
 
   defp list_entries(directory) do
     case File.ls(directory) do
@@ -954,6 +1006,16 @@ defmodule Loopex.Executor.Local.Ledger do
       do: decode_captured_record(bytes, [kind], @record_bytes)
 
   def decode_bytes(_bytes, _kind),
+    do: {:error, {:ledger_unavailable, :malformed_record}}
+
+  @doc false
+  # Concept: one marker namespace admits admission or pre-effect refusal.
+  # Technical depth: use the live reader's fixed allowed-kind set in one decode;
+  # no alternate decoder, fallback or older record format is admitted.
+  def decode_marker_bytes(bytes) when is_binary(bytes),
+    do: decode_captured_record(bytes, [@marker_kind, @refusal_kind], @record_bytes)
+
+  def decode_marker_bytes(_bytes),
     do: {:error, {:ledger_unavailable, :malformed_record}}
 
   defp decode_captured_record(bytes, _kinds, ceiling) when byte_size(bytes) > ceiling,
