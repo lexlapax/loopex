@@ -125,7 +125,7 @@ defmodule Loopex.Executor.Local.RestoreGuard do
         end)
         |> Map.put(root, plan["source_state_placement"])
 
-      context = %{root: root, index: index, files: files, placements: placements}
+      context = captured_context(root, index, files, placements)
       reserved = Enum.filter(entries, &reserved_entry?/1)
       {:ok, digest} = RestoreCodec.lineage_digest(reserved)
       ensure!(digest == plan["prior_lineage_sha256"])
@@ -181,10 +181,9 @@ defmodule Loopex.Executor.Local.RestoreGuard do
   # the one owned lookup worker; captured reads have no live-IO fallback.
   @doc false
   def lookup_captured(root, tx_id, index, files, placements, claim) do
-    context = %{root: root, index: index, files: files, placements: placements}
-    captured = {root, context}
-
     try do
+      context = captured_context(root, index, files, placements)
+      captured = {root, context}
       admin = history_path(captured, @root_admin)
 
       if Map.has_key?(index, @root_admin) do
@@ -1061,6 +1060,42 @@ defmodule Loopex.Executor.Local.RestoreGuard do
 
   defp history_path(path, parts), do: Path.join([path | List.wrap(parts)])
 
+  # Concept: one captured audit reuses facts about its immutable input bytes.
+  # Technical depth: indexes contain observed digests and immediate child names,
+  # never trusted manifest digests or validation results. Every read still checks
+  # its current entry, role, cap, size and digest; historical reads additionally
+  # compare the same observed digest with that transition's expected entry. The
+  # two pure entry points own these values locally, without a live-IO fallback.
+  defp captured_context(root, index, files, placements) do
+    children =
+      Enum.reduce(Map.keys(index), %{}, fn relative, children ->
+        parent = Path.dirname(relative)
+
+        if relative == parent do
+          children
+        else
+          Map.update(children, parent, [Path.basename(relative)], &[Path.basename(relative) | &1])
+        end
+      end)
+
+    digests =
+      Map.new(files, fn {relative, bytes} ->
+        {relative, if(is_binary(bytes), do: hash(bytes), else: nil)}
+      end)
+
+    %{
+      root: root,
+      index: index,
+      files: files,
+      placements: placements,
+      children: children,
+      digests: digests
+    }
+  end
+
+  defp captured_digest!({path, context}),
+    do: Map.fetch!(context.digests, Path.relative_to(path, context.root))
+
   defp generation_mode!({path, context}) do
     entry = captured_entry!(path, context)
     ensure!(entry["kind"] == "regular")
@@ -1414,7 +1449,8 @@ defmodule Loopex.Executor.Local.RestoreGuard do
           if(Path.basename(history_root(path)) == "baseline", do: 4_194_304, else: @record_cap)
         )
 
-      ensure!(byte_size(bytes) == entry["size"] and hash(bytes) == entry["sha256"])
+      digest = if is_tuple(path), do: captured_digest!(path), else: hash(bytes)
+      ensure!(byte_size(bytes) == entry["size"] and digest == entry["sha256"])
     else
       directory!(path)
     end
@@ -1470,11 +1506,7 @@ defmodule Loopex.Executor.Local.RestoreGuard do
     directory!(captured)
     relative = Path.relative_to(path, context.root)
 
-    names =
-      context.index
-      |> Map.keys()
-      |> Enum.filter(&(Path.dirname(&1) == relative and &1 != relative))
-      |> Enum.map(&Path.basename/1)
+    names = Map.get(context.children, relative, [])
 
     ensure!(length(names) <= 64 and Enum.all?(names, &String.valid?/1))
     Enum.sort(names)
@@ -1512,7 +1544,11 @@ defmodule Loopex.Executor.Local.RestoreGuard do
     bytes = Map.fetch!(context.files, Path.relative_to(path, context.root))
     ensure!(entry["kind"] == "regular" and entry["size"] <= cap)
     ensure!(role == :baseline or entry["mode"] == 0o600)
-    ensure!(byte_size(bytes) == entry["size"] and hash(bytes) == entry["sha256"])
+
+    ensure!(
+      byte_size(bytes) == entry["size"] and captured_digest!({path, context}) == entry["sha256"]
+    )
+
     bytes
   end
 

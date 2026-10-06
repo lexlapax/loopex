@@ -155,6 +155,147 @@ defmodule LoopexComposition.RestoreRetainedConstructionTest do
     assert {:error, "inventory_limit_exceeded"} = construct(fixture, total)
   end
 
+  test "captured history audits reject changed or missing bytes independently on every call" do
+    {plan, entries, files, tx_id} = captured_history()
+    assert {:ok, checked} = RestoreGuard.validate_captured_lineage(plan, entries, files)
+    assert checked.previous == 2
+    assert {:committed, %{"view" => "current"}} = captured_lookup(plan, entries, files, tx_id)
+    path = ".loopex-restore/lineage/00000001/committed"
+    <<first, rest::binary>> = files[path]
+    changed = Map.put(files, path, <<Bitwise.bxor(first, 1), rest::binary>>)
+
+    for invalid <- [changed, Map.delete(files, path)] do
+      assert {:error, :history_invalid} =
+               RestoreGuard.validate_captured_lineage(plan, entries, invalid)
+
+      assert captured_lookup(plan, entries, invalid, tx_id) ==
+               {:error,
+                %{
+                  "kind" => "loopex_current_restore_lookup_refusal_v1",
+                  "tx_id" => tx_id,
+                  "code" => "restore_history_invalid",
+                  "cleanup" => "joined"
+                }}
+    end
+
+    assert {:ok, ^checked} = RestoreGuard.validate_captured_lineage(plan, entries, files)
+    assert {:committed, %{"view" => "current"}} = captured_lookup(plan, entries, files, tx_id)
+  end
+
+  test "captured reads still enforce each current entry kind mode size and digest" do
+    {plan, entries, files, _tx_id} = captured_history()
+    path = ".loopex-restore/lineage/00000001/intent"
+
+    for change <- [
+          %{"kind" => "directory", "size" => 0, "sha256" => nil},
+          %{"mode" => 0o644},
+          %{"size" => byte_size(files[path]) + 1},
+          %{"sha256" => hash("different-observed-bytes")}
+        ] do
+      changed =
+        Enum.map(entries, fn entry ->
+          if entry["path"] == path, do: Map.merge(entry, change), else: entry
+        end)
+
+      {:ok, digest} = RestoreCodec.lineage_digest(Enum.filter(changed, &reserved?(&1["path"])))
+      rebound = %{plan | "prior_lineage_sha256" => digest}
+
+      assert {:error, :history_invalid} =
+               RestoreGuard.validate_captured_lineage(rebound, changed, files)
+    end
+  end
+
+  test "matching current manifest digests cannot replace retained historical commitments" do
+    {plan, entries, files, tx_id} = captured_history()
+    path = ".loopex-restore/lineage/00000001/source-retirement"
+    {:ok, original} = RestoreCodec.decode(:source_retirement, files[path])
+
+    bytes =
+      encode!(:source_retirement, %{
+        original
+        | "host_evidence_sha256" => hash("private-capture-must-not-be-returned")
+      })
+
+    changed_files = Map.put(files, path, bytes)
+
+    changed_entries =
+      Enum.map(entries, fn entry ->
+        if entry["path"] == path,
+          do: %{entry | "size" => byte_size(bytes), "sha256" => hash(bytes)},
+          else: entry
+      end)
+
+    {:ok, digest} =
+      RestoreCodec.lineage_digest(Enum.filter(changed_entries, &reserved?(&1["path"])))
+
+    rebound = %{plan | "prior_lineage_sha256" => digest}
+
+    assert {:error, :history_invalid} =
+             RestoreGuard.validate_captured_lineage(rebound, changed_entries, changed_files)
+
+    assert {:error, %{"code" => "restore_history_invalid"} = refusal} =
+             captured_lookup(rebound, changed_entries, changed_files, tx_id)
+
+    assert Map.keys(refusal) |> Enum.sort() == ["cleanup", "code", "kind", "tx_id"]
+  end
+
+  # Concept: two retained transitions exercise historical and current entry checks.
+  # Technical depth: reuse the existing canonical construction fixtures, retaining
+  # every earlier record byte. This is pure reducer evidence and grants no physical
+  # restore, IO cleanup or authority claim.
+  defp captured_history do
+    first = fixture("available")
+    assert {:ok, first_compiled} = construct(first)
+    second = next_fixture(first, first_compiled, 3)
+    assert {:ok, second_compiled} = construct(second)
+    [candidate] = second.intent["generations"]
+
+    plan =
+      plan(
+        "available",
+        second.intent["destination_state_placement"],
+        candidate["destination_ledger_placement"],
+        second_compiled.final,
+        2
+      )
+
+    [ledger] = second_compiled.ledgers
+
+    files =
+      Map.merge(second.prior_files, %{
+        ".loopex-restore/lineage/00000002/baseline" => second.baseline,
+        ".loopex-restore/lineage/00000002/intent" => second_compiled.intent,
+        ".loopex-restore/lineage/00000002/source-retirement" => second_compiled.retirement,
+        ".loopex-restore/lineage/00000002/committed" => second_compiled.committed,
+        "receipts/restore-lineage/00000002/intent" => ledger.intent,
+        "receipts/restore-lineage/00000002/source-retired" => ledger.retired,
+        "receipts/restore-lineage/00000002/committed" => ledger.committed,
+        "receipts/generation" => ledger.candidate
+      })
+
+    {:ok, entries} = RestoreCodec.manifest(second_compiled.final, @total)
+    {plan, entries, files, second.intent["tx_id"]}
+  end
+
+  defp captured_lookup(plan, entries, files, tx_id) do
+    root = plan["source_state_root"]
+
+    placements =
+      Map.new(plan["ledgers"], fn ledger ->
+        {Path.join(root, ledger["relative_root"]), ledger["source_placement"]}
+      end)
+      |> Map.put(root, plan["source_state_placement"])
+
+    RestoreGuard.lookup_captured(
+      root,
+      tx_id,
+      Map.new(entries, &{&1["path"], &1}),
+      files,
+      placements,
+      nil
+    )
+  end
+
   # Concept: these are pure current-codec vectors, not physical restore evidence.
   # Technical depth: fixed retained generation bytes and captures permit semantic
   # reconstruction without filesystem/actors, allocation or an acknowledged receipt.
