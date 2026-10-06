@@ -27,6 +27,37 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current proof, execution and source ownership
 
+ROOT VM FREE after original38095 fully collected FAIL102.791s/six stages,
+46 artifacts,59 actual/Git sources and all six original process joins. Current
+format/compile pass, Core25pass and Protocol13/14pass including all three Node
+vector cases; one native-terminal fixture fails at strict `not(nil)` before its
+assertions. Collection `M7/protocol-cleanup-native-runtime-original-collection-20261006-v3.json`
+`f94349ee5c00ab36b5e6df12d89f6432b2fd5a32b2f49602415722d4a8ad4750`;
+latest687 registry `fa925628fb628d034f1f889aac0e5ace6f8338fa5cedcea843abf96f893e3a9d`.
+Never repoll38095. New clean sole717 test child
+`c36433ec6ed152c9dd329ddbf401a756abda1a5f` defaults absent vector error to false,
+preserving all case/assertion/vector/schema/production bytes. Agent prepares
+fresh disablednativev4. No foreground/daemon/floor proof ran at717.
+
+Disabled retirementnativev5 is sealed for a4b14867:61artifacts53sources23refs,
+18prospective stages99cases eachpair, both format checks. Formatter47584 stays
+origin3e only; currenta4 has exact assertion-correction source admission. Report
+`3074503175f3676c32f84ded032f2ab3fb153b78c7de0c52658316515e847c90`, inventory
+`b31be5d6fc7c1057084c6218b8108adf2b619b4ed48daa760cd61c7ca8f55870`.
+Independent admission audit is running; do not execute until root admission.
+Root enable script `/private/tmp/m7-enable-retained-source-retirement-runtime-v5.py`
+is authored but unexecuted, prospective seed687; reconcile fullunion at enable.
+
+Corrected Proposed0056 independent review report
+`49c17036fb7106290b64ec16a70612142bff675b05789cf63a3ab4802adf42eb`, inventory
+`ca3c2e7d8dca3fdf0af0a1864affd73810b581648a46ea5191303ddc5f93204a`
+finds no source blocker. Complete pair remains unaccepted/unasked at f3fc594b;
+documentation proof and separate accounting decisions remain open. Core bounds
+writer continues at d87; likely rejoin overlap with approved policy native
+SessionState changes is explicitly retained for root integration. Task counts
+unchanged from4e87723d. Earlier occupied-handle paragraphs are historical.
+
+
 ROOT VM OCCUPIED by original38095 at corrected protocol source
 `717d7074ed79b7be8c977197928a605b1b4df94f`. Enabled nativev3 config
 `9a6f098011ccfd949d5a94e6f570a9ff80f79d19b1c99378de76dfbf2c011bf8`, rootreview
