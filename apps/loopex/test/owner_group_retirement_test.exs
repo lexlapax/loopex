@@ -390,6 +390,7 @@ defmodule Loopex.Runtime.OwnerGroupRetirementTest do
       {:trace, ^group, :call, {:erts_internal, :is_process_alive, [target, reference]}} = row
       when is_reference(reference) and target in [coordinator, workers] ->
         rows = retain_liveness_row(rows, group, coordinator, workers, row)
+
         await_empty_then_stop(
           group,
           workers,
@@ -403,6 +404,7 @@ defmodule Loopex.Runtime.OwnerGroupRetirementTest do
 
       {:trace, ^group, :return_from, {:erts_internal, :is_process_alive, 2}, :ok} = row ->
         rows = retain_liveness_row(rows, group, coordinator, workers, row)
+
         await_empty_then_stop(
           group,
           workers,
@@ -417,6 +419,7 @@ defmodule Loopex.Runtime.OwnerGroupRetirementTest do
       {:trace, ^group, :receive, {reference, result}} = row
       when is_reference(reference) and is_boolean(result) ->
         rows = retain_liveness_row(rows, group, coordinator, workers, row)
+
         await_empty_then_stop(
           group,
           workers,
@@ -484,8 +487,11 @@ defmodule Loopex.Runtime.OwnerGroupRetirementTest do
                end) ==
                  Enum.count(rows, fn
                    {:trace, ^group, :receive, {reference, result}}
-                   when is_reference(reference) and is_boolean(result) -> true
-                   _row -> false
+                   when is_reference(reference) and is_boolean(result) ->
+                     true
+
+                   _row ->
+                     false
                  end)
 
         rows ++ [row]
@@ -584,7 +590,8 @@ defmodule Loopex.Runtime.OwnerGroupRetirementTest do
 
     state =
       Enum.reduce(rows, %{references: MapSet.new(), pending: nil}, fn
-        {:trace, ^group, :call, {:erts_internal, :is_process_alive, [target, reference]}}, state ->
+        {:trace, ^group, :call, {:erts_internal, :is_process_alive, [target, reference]}},
+        state ->
           %{
             references: MapSet.put(state.references, reference),
             pending: %{target: target, reference: reference, returned: false}
@@ -619,7 +626,8 @@ defmodule Loopex.Runtime.OwnerGroupRetirementTest do
       end
 
     unless valid,
-      do: unexpected_trace("native liveness call/return/reference correspondence unavailable", row)
+      do:
+        unexpected_trace("native liveness call/return/reference correspondence unavailable", row)
 
     rows ++ [row]
   end
@@ -735,7 +743,6 @@ defmodule Loopex.Runtime.OwnerGroupRetirementTest do
           left(cutoff) -> flunk("original fixture actor join remains unproved")
         end
       end
-
     after
       if state.liveness_pattern do
         :erlang.trace_pattern(@liveness_mfa, false, [])
