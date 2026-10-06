@@ -133,7 +133,11 @@ for one sequential current/floor execution: IO80/2, Ledger23/0, Composition651/3
 Local300/2, owned IO long2/80, zero skips. Permit only owned AST-equal formatting
 and exact direct-child re-pin. Stop/retain first failure; no rerun, source repair,
 assertion or bound change, second VM, full fast or paid/attended lane.
-Execution handle and measured outcomes remain pending. Receipt work is source-only.
+Execution is active under original persistent handle2090, owned by
+current_index_cleanup. Preflight confirms exact run/config, clean bbf source,
+unconsumed initial registry and fresh output; initial private cache copy is
+underway. No stage or test result is claimed yet. Do not start another VM,
+rerun or poll that agent-owned handle independently. Receipt work is source-only.
 
 LATEST ARTIFACT PROOF: handle24595 is terminal exit zero, collected and sealed;
 exclusive VM slot returned. Both pairs pass focused29/0 and Store105/0, no
