@@ -3134,6 +3134,228 @@ defmodule LoopexComposition.RestoreIOTest do
              ])
   end
 
+  @tag :long_bound
+  test "late final guardian observation refuses join despite the real worker's timely normal termination", context do
+    sink = final_observation_sink()
+    path = Path.join(context.root, "observation-record")
+    File.write!(path, "retained")
+
+    for mode <- [:timely, :late] do
+      owned = launch({:read, path, 8}, :stat)
+      guardian = owned.guardian
+      worker = owned.worker
+      reference = owned.reference
+      tag = owned.tag
+      assert_receive {:restore_io, ^guardian, ^worker, ^reference, {:issued, id, :stat}}, 1_000
+      send(guardian, {:proceed_final_observation, reference, id})
+      {guardian_worker_monitor, paused_at, facts, events} = final_observation_ready(owned, [])
+      cutoff = facts.cleanup_cutoff
+      caller_cutoff = owned.work_cutoff + 10_000
+      assert facts == %{finished: true, down: false, pending: false, open_count: 0,
+        worker_exit_seen: true, opens: 1, closes: 1, stop: :complete,
+        stop_at: facts.stop_at, work_cutoff: owned.work_cutoff, cleanup_cutoff: cutoff}
+      assert [{:stopping, :complete, stop_at, ^cutoff}] =
+        for {:stopping, :complete, _, _} = event <- events, do: event
+      assert stop_at == facts.stop_at
+      assert cutoff == facts.stop_at + 10_000
+      assert facts.stop_at <= owned.work_cutoff
+      assert paused_at < cutoff and cutoff < caller_cutoff
+      assert [{:acknowledged, _, {:open, token}, :opened}] =
+        for {:acknowledged, _, {:open, _}, :opened} = event <- events, do: event
+      assert [{:acknowledged, _, {:close, ^token}, :closed}] =
+        for {:acknowledged, _, {:close, _}, :closed} = event <- events, do: event
+
+      suspension_key = {:restore_observation_suspended, guardian}
+      try do
+        suspended_at = if mode == :late do
+          assert :erlang.suspend_process(guardian)
+          Process.put(suspension_key, true)
+          at = System.monotonic_time(:millisecond)
+          assert at < cutoff
+          at
+        end
+        worker_monitor = owned.worker_monitor
+        receive do
+          {:DOWN, ^worker_monitor, :process, ^worker, :normal} -> :ok
+        after
+          max(0, cutoff - System.monotonic_time(:millisecond)) -> flunk("actual worker normal DOWN was not observed before original cleanup cutoff")
+        end
+        worker_down_at = System.monotonic_time(:millisecond)
+        assert paused_at <= worker_down_at and worker_down_at < cutoff
+        refute Process.alive?(worker)
+        refute_received {:restore_io, ^guardian, ^worker, ^reference, {:terminal, _}}
+        refute_received {^tag, _}
+
+        if mode == :late do
+          receive do
+          after
+            max(0, cutoff - System.monotonic_time(:millisecond)) -> :ok
+          end
+          crossed_at = System.monotonic_time(:millisecond)
+          assert crossed_at >= cutoff and crossed_at < caller_cutoff
+        end
+        continued_at = System.monotonic_time(:millisecond)
+        send(guardian, {:continue_final_observation, reference})
+        resumed_at = if mode == :late do
+          assert Process.delete(suspension_key)
+          assert :erlang.resume_process(guardian)
+          System.monotonic_time(:millisecond)
+        end
+        {result, events, result_received_at} = final_observation_result(owned, caller_cutoff, events)
+        assert [{:worker_down_observed, ^guardian_worker_monitor, true, observed_at}] =
+          for {:worker_down_observed, _, _, _} = event <- events, do: event
+        assert [{:final_observation_continued, continuation, barrier_continued_at}] =
+          for {:final_observation_continued, _, _} = event <- events, do: event
+        assert continuation in [:continued, :expired]
+        assert continued_at <= barrier_continued_at and barrier_continued_at <= observed_at
+        assert worker_down_at <= observed_at
+        assert observed_at < caller_cutoff
+        if mode == :timely do
+          assert observed_at < cutoff
+        else
+          assert suspended_at < cutoff
+          assert continued_at >= cutoff
+          assert resumed_at >= cutoff and resumed_at < caller_cutoff
+          assert observed_at >= cutoff
+        end
+        guardian_joined_at = final_observation_join(guardian, owned.guardian_monitor, caller_cutoff)
+        caller_joined_at = final_observation_join(owned.caller, owned.caller_monitor, caller_cutoff)
+        assert File.read!(path) == "retained"
+        {result_tag, result_reason} = case result do
+          {:joined, {:ok, "retained"}, _} -> {"joined", nil}
+          {:unconfirmed, :worker_unjoined} -> {"unconfirmed", "worker_unjoined"}
+          _ -> {"unexpected", nil}
+        end
+        final_observation_retain(sink, mode, %{
+          "kind" => "restore_io_observation_witness_v1", "mode" => Atom.to_string(mode),
+          "caller" => inspect(owned.caller), "guardian" => inspect(guardian), "worker" => inspect(worker),
+          "caller_monitor" => inspect(owned.caller_monitor),
+          "guardian_monitor" => inspect(owned.guardian_monitor),
+          "fixture_worker_monitor" => inspect(worker_monitor),
+          "guardian_worker_monitor" => inspect(guardian_worker_monitor),
+          "work_ms" => 1_000, "cleanup_grace_ms" => 100, "cleanup_window_ms" => 10_000,
+          "admitted_at" => owned.work_cutoff - 1_000, "stop_at" => facts.stop_at,
+          "work_cutoff" => owned.work_cutoff, "cleanup_cutoff" => cutoff, "caller_cutoff" => caller_cutoff,
+          "barrier_paused_at" => paused_at, "guardian_suspended_at" => suspended_at,
+          "fixture_worker_down_observed_at" => worker_down_at, "fixture_worker_down_normal" => true,
+          "continuation_sent_at" => continued_at, "guardian_resumed_at" => resumed_at,
+          "barrier_continued_at" => barrier_continued_at, "barrier_continuation" => Atom.to_string(continuation),
+          "worker_down_consumed_by_guardian_at" => observed_at,
+          "result_received_at" => result_received_at,
+          "guardian_join_observed_at" => guardian_joined_at, "caller_join_observed_at" => caller_joined_at,
+          "opens" => 1, "closes" => 1, "finished" => true, "pending" => false,
+          "worker_exit_seen_before_barrier" => true, "open_count_at_barrier" => 0,
+          "complete_original_actor_joins" => true,
+          "result" => result_tag, "reason" => result_reason})
+        if mode == :timely do
+          assert {:joined, {:ok, "retained"}, %{opens: 1, closes: 1, stop: :complete,
+            work_cutoff: work_cutoff, cleanup_cutoff: ^cutoff}} = result
+          assert work_cutoff == owned.work_cutoff
+        else
+          assert result == {:unconfirmed, :worker_unjoined}
+        end
+      after
+        if Process.delete(suspension_key) == true and Process.alive?(guardian),
+          do: :erlang.resume_process(guardian)
+      end
+    end
+  end
+
+  # Concept: the fixture holds observation, never the actual raw IO resource.
+  # Technical depth: first-stat pause installs original monitors; the exact held
+  # continuation arms a single finished/closed/normal-EXIT barrier. Its wait and
+  # all subsequent observations spend captured W/C/O, without a relative retry.
+  defp final_observation_ready(owned, events) do
+    guardian = owned.guardian
+    worker = owned.worker
+    reference = owned.reference
+    tag = owned.tag
+    receive do
+      {:restore_io, ^guardian, ^worker, ^reference, {:final_observation_paused, monitor, at, facts} = event} ->
+        {monitor, at, facts, Enum.reverse([event | events])}
+      {:restore_io, ^guardian, ^worker, ^reference, {:issued, id, :stat} = event} ->
+        send(guardian, {:proceed, reference, id})
+        final_observation_ready(owned, [event | events])
+      {:restore_io, ^guardian, ^worker, ^reference, event} ->
+        final_observation_ready(owned, [event | events])
+      {^tag, result} -> flunk("real IO finished without establishing the fixed final observation barrier: #{inspect(result)}")
+    after
+      max(0, owned.work_cutoff - System.monotonic_time(:millisecond)) -> flunk("fixed final observation barrier was not established by original work cutoff")
+    end
+  end
+
+  defp final_observation_result(owned, cutoff, events) do
+    guardian = owned.guardian
+    worker = owned.worker
+    reference = owned.reference
+    tag = owned.tag
+    receive do
+      {:restore_io, ^guardian, ^worker, ^reference, event} ->
+        final_observation_result(owned, cutoff, events ++ [event])
+      {^tag, result} ->
+        at = System.monotonic_time(:millisecond)
+        assert at < cutoff
+        {result, events, at}
+    after
+      max(0, cutoff - System.monotonic_time(:millisecond)) -> flunk("late observation result exceeded original caller cutoff")
+    end
+  end
+
+  defp final_observation_join(actor, monitor, cutoff) do
+    receive do
+      {:DOWN, ^monitor, :process, ^actor, :normal} ->
+        at = System.monotonic_time(:millisecond)
+        assert at < cutoff
+        at
+    after
+      max(0, cutoff - System.monotonic_time(:millisecond)) -> flunk("original observation actor did not join inside original caller cutoff")
+    end
+  end
+
+  # Concept: a runner may retain only this fixture's bounded scheduling proof.
+  # Technical depth: require an empty mode-0700 physical child of this stage's
+  # mode-0700 System.tmp_dir, before any evidence write. Recheck both identities;
+  # publish exactly two exclusive mode-0600 JSON files, each at most 4,096 bytes.
+  # Nil sink adds no filesystem operation. No payload, path or crash reason is
+  # retained, and monitor strings describe the actual original local actors.
+  defp final_observation_sink() do
+    case System.get_env("LOOPEX_RESTORE_OBSERVATION_EVIDENCE_DIR") do
+      nil -> nil
+      directory ->
+        assert {:ok, temp} = LoopexComposition.WorkspaceIdentity.resolve_path(System.tmp_dir!())
+        assert {:ok, physical} = LoopexComposition.WorkspaceIdentity.resolve_path(directory)
+        assert physical == Path.expand(directory)
+        assert Path.dirname(physical) == temp
+        temp_stat = File.lstat!(temp)
+        directory_stat = File.lstat!(physical)
+        assert temp_stat.type == :directory and Bitwise.band(temp_stat.mode, 0o7777) == 0o700
+        assert directory_stat.type == :directory and Bitwise.band(directory_stat.mode, 0o7777) == 0o700
+        assert File.ls!(physical) == []
+        %{directory: physical, temp: temp, temp_identity: {temp_stat.major_device, temp_stat.inode},
+          directory_identity: {directory_stat.major_device, directory_stat.inode}}
+    end
+  end
+
+  defp final_observation_retain(nil, _mode, _record), do: :ok
+  defp final_observation_retain(sink, mode, record) do
+    temp_stat = File.lstat!(sink.temp)
+    directory_stat = File.lstat!(sink.directory)
+    assert temp_stat.type == :directory and Bitwise.band(temp_stat.mode, 0o7777) == 0o700
+    assert directory_stat.type == :directory and Bitwise.band(directory_stat.mode, 0o7777) == 0o700
+    assert {temp_stat.major_device, temp_stat.inode} == sink.temp_identity
+    assert {directory_stat.major_device, directory_stat.inode} == sink.directory_identity
+    expected = if mode == :timely, do: [], else: ["timely.json"]
+    assert File.ls!(sink.directory) == expected
+    bytes = JSON.encode!(record)
+    assert byte_size(bytes) <= 4_096
+    path = Path.join(sink.directory, Atom.to_string(mode) <> ".json")
+    assert File.lstat(path) == {:error, :enoent}
+    File.write!(path, bytes, [:binary, :exclusive])
+    File.chmod!(path, 0o600)
+    assert {:ok, %File.Stat{type: :regular, links: 1, size: size} = info} = File.lstat(path)
+    assert size == byte_size(bytes) and Bitwise.band(info.mode, 0o7777) == 0o600
+  end
+
   defp launch(operation, pause, work_ms \\ 1_000, grace \\ 100) do
     parent = self()
     tag = make_ref()
