@@ -31,8 +31,18 @@ LATEST REVIEW FINDING, 2026-10-06: diagnostic5fc MUST NOT be verified.
 Independent source review found ordinary DOWN handling prunes the last provider
 record before proving its original Task.Supervisor membership absent, so a
 subsequent coordinator DOWN can bypass the intended membership fence. This is
-a source proof gap, not an executed5fc failure. CLI is sealing the exact report;
-private-task will make a fresh bounded correction only after that report is read.
+a source proof gap, not an executed5fc failure. Root read the sealed report
+`/private/tmp/loopex-m7-private-task-cleanup-order-review-5fc08b3b-20261006-v1/report.md`,
+SHA `7f4c73c7d1f80f7f7aeb7049c51769dba37eee55bd14e9043c73777de030844d`, inventory
+`5f8b8871fa8afbcbc2ffbd97818a422e0ba4ed93c9e7325ca50db7eb81387611`.
+Private-task owns the fresh bounded membership correction and one new focused
+Core test file for genuine supervisor EXIT-reduction ordering; existing105
+files stay immutable, and no VM or added allowance is granted. CLI now prepares
+only disabled fourteen-lane/seventy-four-stage paired runtime at3da in
+`/private/tmp/loopex-m7-combined-success-runner-v1`; original86356 formatter and
+historical causal red are consumed without repeat. Source review/grant/output/
+registry gates must remain unset until root review. Current-index continues
+source-only pending intake in its separate4ae writer. No approval is inferred.
 No new allowance, actor, public contract or test weakening is authorized.
 The disabled5fc formatter is sealed at
 `/private/tmp/loopex-m7-private-task-cleanup-order-format-runner-5fc08b3b-v2`;
