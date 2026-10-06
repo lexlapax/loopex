@@ -27,6 +27,38 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Latest Store integration and next verification
 
+LATEST: Native checkpoint v2 handle80977 is TERMINAL exit1 and collected;
+exclusive VM slot is FREE. Source remains cleand00fdaec2d87b433ae57037fbe3125d2e53fe344,
+formatter unchanged, first17stages pass. Current focused2/10passed with
+8failures,0excluded/0skipped; no adjacent/ordinary/floor stages ran.
+Root rehashed54terminal artifacts plus terminal/seal/completion identities,
+checked all18stage exits, exact unchanged source and absent process groups.
+Stage-only duration130.533990291s is not total pipeline time.
+SiblingM7/configure-checkpoint-runner-d00fdaec-v2/execution-001:
+terminal7a4809440fb7d1405d9db8a7ce87b8d2ac31c56ac9bd80405a2ac37ad35744eb,
+FIRST_FAILURE314058acc92fac721b496094a88a5665c6759d8e795e1b7f90f49b4b61fa388f,
+focused rawa687968ca65cb0448ba5134b49f585023972ccca0e18d3bbdf40642ba0d8195b,
+source inventoryc950d584006cc9340689f64ab5cb7158be41a57f78661a7b0d4d608c401f9aee,
+seal inventoryc2532badaa9123c0b9b70c2169f800084f23620e03072cdaacad4b900998b7bd.
+Keep the first failure; never poll/restart80977. No native source is merged.
+
+Failures are three compact busy reason assertions, two omittedtool_calls:[]
+history assertions, two automatic cases missingheld callback notices within
+the original5,000ms, and an uncovered second-checkpoint
+compact_checkpoint_failed/context_projection_invalid crash. The corrected
+genesis reaches behavior; do not label all failures fixture-only. Worker
+restore_manifest_resume is now READ-ONLY investigating exact causes and
+accepted contracts; no assertion/source/runner/bound edits or VM grant.
+
+Resource physical-capture source writer current_index_cleanup continues only
+its isolated two owned paths, no VM. Causal worker private_task_causal_resume
+is read-only investigating an actual-runtime reproduction route for the six
+earlier48ca reports; its separate resource-loss explanation grants no quiet
+assertion change. Root owns rejoin and next distinct corrected proof. Ledger
+worktree/branch were cleanly removed after merge; all needed ancestry/evidence
+and checklist were committed/pushed at8de014bf. Counts remain78/95/6 and294/21.
+All active statements below are historical snapshots superseded here.
+
 LATEST: Captured Local ledger decoder proof is complete and joined through
 58bcad07f9b2721cbdfd2c127daf53b19c375a92, tested source
 1e604aed7f651beaae6e2331e455282f0a5c9cda. Both pairs pass19focused/0excluded,
