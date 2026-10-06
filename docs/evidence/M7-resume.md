@@ -27,6 +27,38 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current proof, execution and source ownership
 
+LATEST COLLECTION, 2026-10-06: root71975 is fully collected, exit1 after
+82.223s and three current stages. Verification VM is FREE. Compilation failed
+on IO's separated execute/1 clauses at641/923; no tests, floor or successor
+ran. This is a source grouping defect, not a test result. Source010 remains
+clean/frozen; never poll71975 or repeat its source/pair/stage keys. Root verified
+32 retained artifacts,133 actual Git source rows, three original raw EOF/wait/
+status/PID-group joins, and349 preserved plus3 new registry keys.
+Output `M7/m7-lookup-focused-success-v1` report is
+`ba8d1df9b8a4a53d4a8d24fd8ff219b83970f2a48ac634190c4cc4f61e509084`, inventory
+`6364637b4e2c1366058d3764afe88ca565c9d3486fe1a40d6412679663095581`.
+Original collection `M7/lookup-focused-success-original-collection-20261006-v1.json`
+is `904a33e719536be811a8054da6dd229d69adf96dae78b1afd5b09b268747479e`, audit
+`M7/lookup-focused-success-collection-audit-20261006-v1.py` is
+`dbeaf4c86a408296af7c716eb6746bf1c508b5e0fe44b08a388b0feb6323e7cd`.
+Registry is `87573a4055f08e115cf33b9cc7d325ad985fbc051c1013a77cee3d8fdc9aeca2`.
+Root owns clause regrouping on a fresh integration child, preserving bodies
+and all test assertions/bounds.
+
+Original-tx correction is frozen clean3fc79fdecc7c65c7952daec3a031fb74dc24e459,
+soleparent79464, with accepted restore history vocabulary and two native
+collision fixture setups moved to exact held mkdir operations. Original
+assertions remain literal; two separate early-exclusion controls bring new
+resolution population to9. Packet
+`/private/tmp/loopex-m7-original-tx-correction-source-3fc79fde-v1/report.md` is
+`77a20c54a66606ed8de47a5b1b6926bcce2f8b2ef11063fc22ef673afca38bc3`, inventory
+`27e9cccd79bafcba3c8b4ea30b1bfe3d6736eb75cdd0ea4391cff6f2e611ec07`.
+Static audit verified35 artifacts,19 actual Git inputs and four external refs;
+audit `...-3fc79fde-audit-v1.json` is
+`17eb63707cedc35b93514f18de48b5a7abd3b269baaebad9e4a3ced52a6ffd3e`.
+Independent correction review is active; no formatter/runtime proof or primary
+rejoin. Task totals unchanged. Earlier active71975 entry below is historical.
+
 LATEST EXECUTION, 2026-10-06: root original exec71975 owns the sole verification
 VM for frozen formatted010. Earlier FREE and active-handle entries below are
 historical. Reviewed intermediate scope is current then floor IO106/3 and
