@@ -40,8 +40,15 @@ send/reference/queue observation distinguishes send from actual insertion;
 eleven original joins and all old cases/assertions unchanged.
 
 Authorized formatter AST equality passed; tested clean direct child is
-`590b997c305697e94a2b9ae8585bbaf4e1bf4202`. Current dev compilation is underway;
-no current or floor test result yet. Worker owns every poll, first-failure seal,
+`590b997c305697e94a2b9ae8585bbaf4e1bf4202`. Current focused tests pass 18 executed,
+one excluded and zero skipped in 6.902 seconds. The retained witness validator
+passes: four traced actors, exact matching stop reference, queue insertion on
+observation one before child spawn, eleven unique original joins, no unjoined
+actors and cutoff met. Current dev/test compilation passed in 48.204/47.311
+seconds. Current ordinary Core passes 1,314 executed, ten excluded and zero
+skipped in 226.110 seconds; its witness validator also passes. Floor compilation
+is running and floor tests remain pending. These are worker-reported stage
+results; the paired proof is not complete. Worker owns every poll, first-failure seal,
 process-group join and slot return. No other verification VM or same-source
 retry is authorized. Both old failures below remain immutable.
 
@@ -60,15 +67,19 @@ review sibling `M7/ledger-capture-audit-independent-review-20261005-v1`, report
 Complete ledger/receipt/history/restore remains open.
 
 NEXT INTEGRATION: disabled draft retained byte-identically under sibling
-`M7/integration-next-current-runner-draft-20261005-v1`. Root read its review;
-the full 425-line runner/helper review and final source/validator/population
-pins remain pending. No execution is enabled. If startup and Ledger both join,
+`M7/integration-next-current-runner-draft-20261005-v1`. Root read its review,
+complete 425-line runner, helper and configuration. Twelve of thirteen input
+records still match bytes and modes; the startup fixture record predates the
+reviewed 7ca/590b repair. The worker is preparing a new disabled v2 packet with
+the exact v4 witness validator and strict summary parsing. Final source,
+validator, population and attempt-registry pins remain pending. No execution
+is enabled. If startup and Ledger both join,
 expected Core1324/10 and Composition635/3 supersede the draft's initial
 Composition623/3; Local296/2 and CLI635/6 remain prospective. A read-only Docker
 platform/image inventory found the daemon unavailable; no app, container or
 image pull was started. The actual Linux filename witness remains unavailable.
 
-LATEST STARTUP RESULT: the second execution stopped at source
+SECOND STARTUP FAILURE, retained unchanged: the second execution stopped at source
 `559017602d06d74e3bf73104ec5b5c068e09aac2`. Handle `25505` is terminal exit 1,
 collected and sealed; the exclusive VM slot is returned. The map-only Logger
 repair passed setup. The new case then failed awaiting the actual stop-enqueued
@@ -90,14 +101,16 @@ source records. Failed cleanup stays unproved: nine original joins, one
 unjoined collector and cutoff false. The empty partial trace and missing full
 trace/chain are retained; group exit does not promote them to proof.
 
-Next diagnosis is read-only. Installed current and floor source show actual
+The diagnosis preceding the active corrected execution was read-only. Installed
+current and floor source show actual
 OwnerGroup Supervisor.stop(..., :infinity) routes through GenServer.stop and
 proc_lib.stop to sys.terminate, then gen.call's local/infinity send operator.
 The fixture's send/3-and-ok-return trace assumes the different finite-timeout
-primitive path. No helper is spawned by this direct-PID route. A proposed
-narrow dedicated send trace must retain exact queue insertion before startup,
+primitive path. No helper is spawned by this direct-PID route. The corrected
+narrow dedicated send trace retained exact queue insertion before startup,
 four fixed actors, eleven original joins, the 1,000 ms cutoff and unchanged
-post-child two-message queue proof. No repair, retry or VM grant exists yet.
+post-child two-message queue proof. The reviewed correction is the active 7ca/590b
+execution above; this failed execution was not retried.
 Earlier first-failure results below remain immutable.
 
 NEXT SOURCE: `current_index_cleanup` owns only restore IO source/test in
