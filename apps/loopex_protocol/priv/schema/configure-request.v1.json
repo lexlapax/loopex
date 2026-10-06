@@ -1,0 +1,116 @@
+{
+  "format": "loopex.experimental.payload-schema/1",
+  "contract": "configure_request",
+  "closed": true,
+  "method": "session.configure",
+  "envelopes": {
+    "foreground": {
+      "required": [
+        "request_id",
+        "method",
+        "command_id",
+        "changes"
+      ],
+      "optional": []
+    },
+    "daemon": {
+      "required": [
+        "request_id",
+        "method",
+        "command_id",
+        "changes",
+        "writer_epoch"
+      ],
+      "optional": []
+    }
+  },
+  "request_id": {
+    "encoding": "ascii",
+    "bytes_min": 1,
+    "bytes_max": 64,
+    "alphabet": "A-Z a-z 0-9 . _ ~ -"
+  },
+  "command_id": {
+    "encoding": "canonical_unpadded_base64url",
+    "original_bytes_min": 1,
+    "original_bytes_max": 65536
+  },
+  "writer_epoch": {
+    "encoding": "canonical_unpadded_base64url",
+    "original_bytes_min": 1,
+    "original_bytes_max": 64
+  },
+  "changes": {
+    "closed": true,
+    "members_min": 1,
+    "members": [
+      "model",
+      "reasoning",
+      "instructions",
+      "max_tokens",
+      "context_token_budget",
+      "system_class_tokens"
+    ],
+    "model": {
+      "encoding": "utf8",
+      "bytes_min": 1,
+      "authored_bytes_preserved": true,
+      "model_name_ceiling": null
+    },
+    "reasoning": [
+      "default",
+      "none",
+      "low",
+      "medium",
+      "high"
+    ],
+    "quantities": {
+      "members": [
+        "max_tokens",
+        "context_token_budget",
+        "system_class_tokens"
+      ],
+      "encoding": "canonical_positive_decimal_string",
+      "minimum": "1",
+      "maximum": "18446744073709551615"
+    },
+    "instructions": {
+      "closed": true,
+      "required": [
+        "version",
+        "base",
+        "environment",
+        "appendix"
+      ],
+      "version": {
+        "encoding": "ascii",
+        "bytes_min": 1,
+        "bytes_max": 64,
+        "pattern": "[A-Za-z0-9][A-Za-z0-9._-]{0,63}"
+      },
+      "base": {
+        "encoding": "utf8",
+        "bytes_min": 1,
+        "bytes_max": 32768
+      },
+      "environment": {
+        "encoding": "utf8",
+        "bytes_min": 0,
+        "bytes_max": 4096
+      },
+      "appendix": {
+        "encoding": "utf8",
+        "bytes_min": 0,
+        "bytes_max": 16384
+      }
+    }
+  },
+  "admission": [
+    "existing duplicate-aware Frame before map conversion",
+    "existing transport total limits",
+    "adapter Instructions.capture",
+    "adapter SessionConfiguration.validate_update",
+    "central complete candidate validation"
+  ],
+  "generation_activation": false
+}

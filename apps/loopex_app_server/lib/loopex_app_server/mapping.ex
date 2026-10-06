@@ -46,6 +46,21 @@ defmodule Loopex.AppServer.Mapping do
     "session.activate_skill"
   ]
 
+  # Concept: current configure decoding prepares authored input without serving a route.
+  # Technical depth: the shared pure grammar supplies exact integers and opaque
+  # identities. Existing capture and whole-update validation remain the native
+  # boundary; authority, central preparation and generation activation follow.
+  @doc false
+  def prepare_configuration_request(request) do
+    with {:ok, decoded} <-
+           LoopexProtocol.Session.ConfigureRequest.decode_wire(request, :foreground),
+         {:ok, changes} <- capture_configuration_changes(decoded.changes) do
+      {:ok, Map.put(decoded, :changes, changes)}
+    else
+      _ -> {:error, :invalid_request}
+    end
+  end
+
   # Concept: new-generation configure ingress captures explicit instruction bytes.
   # Technical depth: this pure step accepts already-decoded authored settings;
   # protocol activation and integer decoding remain the coordinated schema gate.
