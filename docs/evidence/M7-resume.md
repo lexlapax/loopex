@@ -27,6 +27,48 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current proof, execution and source ownership
 
+BOUNDARY FORMATTER COLLECTED, 2026-10-06: root original handle 30821 is
+fully collected, exit 0 after 47.197 seconds. Eleven stages passed; the one
+complete-file AST comparison and current/floor formatting checks passed.
+Clean child `93739dc270a201e6c936272d99a7ea24cf00c71e` has sole parent
+5c3e; only workflow formatting changed. Root verified all 69 artifacts,
+46 actual/Git kind/mode/blob source rows and eleven original raw EOF/wait/
+status/PID-group joins. All original PIDs/groups are absent; VM slot is free.
+No compiler or test ran. Output `M7/m7-lineage-boundary-format-v1` report is
+`172dcdb8793baf72e329e7fda386e326219dd668bdd80636475550686d7550e3`, inventory
+`5e3622af48d37f9302aea7c94dc790fd703dea64bb783ef44599695de016d309`.
+Original collection `M7/lineage-boundary-format-original-collection-20261006-v1.json`
+is `37b947103d9c245c9a5ee9db6382343e82983f8e67e477297f33fae9cd9294f9`;
+audit `M7/lineage-boundary-format-collection-20261006-v1.py` is
+`2d495b5feb48c4f7d74c050f94f71986372192de9c2793d6c5e2234422dc0995`.
+Final eleven-key registry is
+`ea2703e9db7f1a632f04d7c65196b74b99b6acca0d9b10175263c767c936b169`.
+Never poll 30821, reset its registry or repeat its stages. CLI owns only the
+new disabled 39-case paired runtime proposal at frozen 9373, with Composition
+716/4 and all other lanes unchanged. No execution grant is active.
+
+Lookup source is now clean `f470f3e6649bbbe9bac2bf36a58377a022b6ef31`, sole
+parent edee, in the assigned public-lookup worktree. Four authorized paths
+only, 939 insertions/one deletion, no Codec change. Original 109 IO and 37
+workflow cases remain; new lookup has 19 proposed ordinary cases, unexecuted.
+Sealed source report `/private/tmp/m7-public-lookup-source-checkpoint-f470f3e6-v1.md`
+is `136788874f1ee55213e3fe7947591d235d35ea37131d38efa3d012cb7d94f99b`;
+source inventory `/private/tmp/m7-public-lookup-source-checkpoint-f470f3e6-v1.json`
+is `36f5aa530053337e43c6c8c86509ca7b21c44f4c601b3d39dba05142bbbd56c2`.
+Current-index owns independent read-only inspection; no formatting or runtime
+proof follows from this source checkpoint. Root has not rejoined primary.
+
+The T16 producer delta passed intermediate source inspection, report
+`/private/tmp/loopex-m7-private-task-logger-producer-inspection-f04b8f63-20261006-v1/report.md`,
+`32b1e50d54120679ceaa723f89fe5f84ae90acdfa731106d004b25759d42d30b`,
+inventory `7fa0698a8f379694848e288696931da92e8641f1f6da3a104a037a172c6b3333`.
+Installed OTP27/29 local primary filters execute in the caller. Matching the
+retained producer to its original actor DOWN supports the existing local
+report drain without extra waiting. This proves no arbitrary handler drain,
+VM execution, causal classification or quiet runtime outcome. Private-task
+owns only a disabled one-file witness formatter proposal in a fresh temporary
+packet; all source is read-only and no VM is granted. Task totals unchanged.
+
 CURRENT BOUNDARY FORMATTER GRANT, 2026-10-06: root integrated the two
 source-only boundary fixtures as clean `5c3e9b77c5d95f5dd98deeda64c4528de3fb4286`,
 sole parent edee, in `/private/tmp/loopex-m7-restore-boundary-integration`.
