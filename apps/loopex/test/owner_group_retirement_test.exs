@@ -354,9 +354,13 @@ defmodule Loopex.Runtime.OwnerGroupRetirementTest do
     end)
   end
 
-  defp original_downs(rows, group), do: MapSet.new(for
-    {:trace, ^group, :receive, {:DOWN, monitor, :process, pid, :normal}} <- rows,
-    do: {monitor, pid})
+  defp original_downs(rows, group) do
+    downs =
+      for {:trace, ^group, :receive, {:DOWN, monitor, :process, pid, :normal}} <- rows,
+        do: {monitor, pid}
+
+    MapSet.new(downs)
+  end
 
   defp normal_exit_reply_before_bulk?(rows, group, workers) do
     queries = membership_queries(rows, group, workers)
