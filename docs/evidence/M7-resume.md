@@ -74,12 +74,43 @@ The existing T15 claim-release correction remains saved in clean isolated
 d6347049, unformatted/untested/unjoined. No new restore workstream is assigned.
 T05's bounded next-unit map identifies approved configure routing and the still
 Proposed0054/0055 full-generation barriers; it grants no acceptance or activation.
-All source agents are stopped. The sole product VM now belongs to root
-original68691, running `/private/tmp/m7-chat-abort-focused-run.py` against
-f31f9f5f in the isolated chat-abort worktree. Output
-`M7/chat-abort-focused-20261006-v1`; complete870-key seed as recorded above.
-Collect that exact original once before changing its source or starting another
-product VM. No T06.3 closure is claimed yet.
+ChatDriver original68691 is terminal and fully collected FAIL after80.438
+seconds. Current41/42 passed; the new literal abort case passed, while the old
+steer/follow-up replacement case failed before observing its first model callback.
+The retained log reports owner-group termination with redacted reason and
+session_unavailable controls; it does not establish the underlying cause.
+Current compilation and whole-file non-line AST proof passed; floor unrun.
+No unchanged-source retry, timeout change, retirement, primary driver join or
+T06.3 closure is authorized by those observations.
+
+Failed source `aac824a9eba414a38495770d1db66d0bb38be0bd` is the clean formatter
+child of f31f9f5f in the isolated chat-abort worktree. Formatted file SHA
+`5f10088a8dc86bf90da8e14513658c8b350da1fd82ce78be5c7f2dc54122ad60`.
+Collection `M7/chat-abort-focused-20261006-v1/original-collection.json`, SHA
+`e4d66da28e1101b112a45b71a75b1bd4c0d5d9749eb2179d62eb88875d57db41`,
+verifies37 artifacts and9 original process joins. Complete879-key registry SHA
+`f3aae1fb772fea179bb326396337305cdb27a58db02c2ee04a59af51a5fc9e05`.
+Never repoll68691. The VM is free; both source-only agents have stopped.
+Retained diagnosis reports identify a concrete source-supported candidate,
+not the observed redacted cause: a follow-up admitted between staging and
+advance_work changes the journal head; dispatch incorrectly presents that head
+as the attempt-open position. Control then refuses that binding. Discard stops
+the waiting worker before selecting its cleanup window, permitting guard/worker
+DOWN to terminate OwnerGroup as cleanup unproved.
+Root should distinguish this chain through existing runtime-scoped returns trace
+for SessionCoordinator, Control and OwnerGroup, with Fixture.start's diagnostics_to
+recipient. Preserve trace dropped/emitted counts, normal cleanup and every old
+assertion/cutoff. Do not hide the potential product race by delaying the fixture's
+follow-up input. If confirmed, fix immutable attempt-position selection and
+cleanup selection before worker release/termination under the existing contract;
+stop only if that requires a new contract/persistent-schema decision.
+Reports are retained beside the failed original under their original names:
+`m7-chat-steer-owner-source-diagnosis.md`, SHA
+`05dc6ab7b887e47449cd6e4630cdb2b7315a9a12d778a20beeb6d1606e096105`,
+and `m7-chat-steer-fixture-source-diagnosis.md`, SHA
+`6d2648b985d6dfc991c3953901852e4e91796710afc9680104abc14720335d08`.
+The fixture's actual default deadline is600,000ms; no expiry is proved.
+No further restore work replaces this original capability correction.
 
 The built-chat integration and original-row updates are committed on primary
 `c697773cae2ccfa24c0a969a3ade4c2a30915234`. Composite proof

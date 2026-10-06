@@ -12,9 +12,14 @@ Proof references and source identities are in the
 [restart checkpoint](M7-resume.md#technical-depth).
 Original T01–T19: 80 done / 93 todo / 6 retired; added: 302 done / 39 todo.
 
-Next, verify the independently reviewed direct `/abort` case saved at isolated
-f31f9f5f, integrate it, and run the full current fast check for the remaining
-ordinary T06 rows. Hosted/attended T06.7 and required T16 proofs remain open.
+The complete direct `/abort` file ran at formatted aac824a9: current41/42
+passed, including the new abort case. An existing steer/follow-up case failed
+with owner-group termination before its first model marker; floor was unrun.
+The original is fully collected. Source diagnosis identifies a possible mutable
+attempt-position and cleanup-window race, requiring observation and a causal
+fix. Preserve the preloaded early follow-up, all old assertions and cutoffs.
+Then integrate the corrected complete file and run the full current fast check
+for the remaining ordinary T06 rows. Hosted/attended T06.7 and required T16 proofs remain open.
 The existing T15 correction is saved at isolated d6347049, untested/unjoined;
 no further restore workstream replaces original capability completion.
 
