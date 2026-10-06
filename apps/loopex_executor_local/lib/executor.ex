@@ -8217,35 +8217,43 @@ defmodule Loopex.Executor.Local do
     end
   end
 
-  # A canonical receipt is an uncompressed map external term. Refusing the ETF
-  # compression tag before decoding prevents a small file from expanding into a
-  # large term merely to be rejected by the later canonical-byte comparison.
-  defp decode_receipt(bytes, job_id),
-    do: decode_receipt(bytes, job_id, &:erlang.binary_to_term(&1, [:safe]))
-
-  # The injected decoder makes the allocation boundary directly observable to
-  # the locked contract case without changing the production path.
-  @doc false
-  @spec receipt_decode_probe(binary(), binary(), (binary() -> term())) ::
-          {:ok, map()} | {:error, :invalid_retained_receipt}
-  def receipt_decode_probe(bytes, job_id, decoder)
-      when is_binary(bytes) and is_binary(job_id) and is_function(decoder, 1),
-      do: decode_receipt(bytes, job_id, decoder)
-
-  defp decode_receipt(<<131, 80, _compressed::binary>>, _job_id, _decoder),
-    do: {:error, :invalid_retained_receipt}
-
-  defp decode_receipt(bytes, job_id, decoder) when byte_size(bytes) <= @max_receipt_bytes do
-    with receipt <- decoder.(bytes),
-         true <- :erlang.term_to_binary(receipt, [:deterministic]) == bytes,
-         true <- exact_receipt_fields?(receipt),
-         true <- receipt_fields_readable?(receipt, job_id) do
+  defp decode_receipt(bytes, job_id) do
+    with {:ok, receipt} <- decode_receipt_bytes(bytes),
+         true <- receipt.job_id == job_id do
       {:ok, receipt}
     else
       _invalid -> {:error, :invalid_retained_receipt}
     end
+  end
+
+  # Concept: captured current receipt bytes are evidence without live authority.
+  # Technical depth: share the live closed grammar without IO, claims or actors.
+  # The caller separately proves filename, physical placement and job relations.
+  # Refuse the raw ceiling and every non-map ETF root before the actual decoder;
+  # safe full consumption and exact deterministic bytes admit no alternate form.
+  @doc false
+  @spec decode_receipt_bytes(term()) :: {:ok, map()} | {:error, :invalid_retained_receipt}
+  def decode_receipt_bytes(<<131, 116, _map::binary>> = bytes)
+      when byte_size(bytes) <= @max_receipt_bytes do
+    with {:ok, receipt} <- safe_receipt_term(bytes),
+         true <- exact_receipt_fields?(receipt),
+         true <- receipt_fields_readable?(receipt, receipt.job_id),
+         true <- :erlang.term_to_binary(receipt, [:deterministic]) == bytes do
+      {:ok, receipt}
+    else
+      _invalid -> {:error, :invalid_retained_receipt}
+    end
+  end
+
+  def decode_receipt_bytes(_bytes), do: {:error, :invalid_retained_receipt}
+
+  defp safe_receipt_term(bytes) do
+    case :erlang.binary_to_term(bytes, [:safe, :used]) do
+      {receipt, consumed} when consumed == byte_size(bytes) -> {:ok, receipt}
+      _trailing -> {:error, :invalid_retained_receipt}
+    end
   rescue
-    _error -> {:error, :invalid_retained_receipt}
+    ArgumentError -> {:error, :invalid_retained_receipt}
   end
 
   defp exact_receipt_fields?(receipt) when is_map(receipt) and not is_struct(receipt),
@@ -8304,7 +8312,7 @@ defmodule Loopex.Executor.Local do
   defp digest_readable?(_digest), do: false
 
   defp environment_names_readable?(names) when is_list(names) do
-    names == Enum.uniq(names) and
+    proper_receipt_list?(names) and names == Enum.uniq(names) and
       Enum.all?(names, fn name ->
         is_binary(name) and byte_size(name) in 1..@max_job_id_bytes and
           Regex.match?(@receipt_environment_name, name) and name != @credential_name
@@ -8375,10 +8383,19 @@ defmodule Loopex.Executor.Local do
       receipt.effective_deadline_ms <= receipt.run_deadline_ms
   end
 
-  defp artifacts_readable?(artifacts) when is_list(artifacts) and length(artifacts) <= 1,
-    do: Enum.all?(artifacts, &Loopex.ArtifactStore.valid_reference?/1)
+  defp artifacts_readable?(artifacts) when is_list(artifacts),
+    do:
+      proper_receipt_list?(artifacts) and length(artifacts) <= 1 and
+        Enum.all?(artifacts, &Loopex.ArtifactStore.valid_reference?/1)
 
   defp artifacts_readable?(_artifacts), do: false
+
+  # Concept: malformed tails refuse before collection traversal.
+  # Technical depth: safe ETF decoding admits improper lists; Enum and length do
+  # not. Only the two current receipt list fields use this structural check.
+  defp proper_receipt_list?([]), do: true
+  defp proper_receipt_list?([_head | tail]), do: proper_receipt_list?(tail)
+  defp proper_receipt_list?(_tail), do: false
 
   # Concept: a retained receipt whose cleanup facts are missing, unreadable, or
   # contradictory is not a receipt this executor will hand back.

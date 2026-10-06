@@ -1246,6 +1246,1177 @@ defmodule LoopexComposition.RestoreIOTest do
     end
   end
 
+  test "artifact use capture preserves actual writer bytes after original root deletion",
+       context do
+    for bytes <- [<<>>, "retained text", <<0, 255, 128>>] do
+      metadata = artifact_metadata()
+      fixture = artifact_fixture(context.root, bytes, [metadata, %{metadata | "attempt" => 2}])
+      [first, second] = fixture.references
+      assert first.digest == second.digest
+      refute first.use_digest == second.use_digest
+      File.write!(Path.join(fixture.root, "orphan-object"), "unreferenced")
+      File.write!(Path.join(fixture.root, "staging.tmp"), "unfinished")
+      File.mkdir!(Path.join(fixture.root, "empty-directory"))
+
+      for {reference, use} <- Enum.zip(fixture.references, fixture.uses) do
+        selected = %{
+          fixture
+          | reference: reference,
+            use: use,
+            path: artifact_use_path(fixture.root, reference)
+        }
+
+        owned = launch(artifact_operation(selected), :artifact_describe)
+        assert {{:joined, {:ok, ^use}, %{opens: 1, closes: 1}}, events} = drive(owned)
+        kinds = issued_kinds(events)
+        assert index(kinds, :close) < index(kinds, :artifact_describe)
+
+        assert use.metadata ==
+                 Map.drop(
+                   if(reference == first, do: metadata, else: %{metadata | "attempt" => 2}),
+                   ["role", "media_type"]
+                 )
+
+        assert File.read!(selected.path) ==
+                 LoopexProtocol.Canonical.encode(["artifact-use-v2", use])
+
+        joined(owned)
+      end
+
+      assert File.read!(Path.join(fixture.root, "orphan-object")) == "unreferenced"
+      assert File.read!(Path.join(fixture.root, "staging.tmp")) == "unfinished"
+      assert File.dir?(Path.join(fixture.root, "empty-directory"))
+      refute File.exists?(fixture.original)
+    end
+  end
+
+  test "selected artifact use does not certify objects or narrow the uint64 use size grammar",
+       context do
+    fixture = artifact_fixture(context.root)
+
+    object =
+      Path.join([
+        fixture.root,
+        "artifacts",
+        binary_part(fixture.reference.digest, 0, 2),
+        fixture.reference.digest
+      ])
+
+    File.rm!(object)
+
+    for size <- [67_108_865, 18_446_744_073_709_551_615] do
+      # These writer-derived semantic controls change the retained use, not an
+      # actual oversized Local publication. Object proof remains a separate step.
+      use = %{fixture.use | object_size: size}
+      reference = %{fixture.reference | size: size}
+      selected = artifact_use_control(fixture, use, reference)
+      owned = launch(artifact_operation(selected), :artifact_describe)
+      assert {{:joined, {:ok, ^use}, %{opens: 1, closes: 1}}, _} = drive(owned)
+      joined(owned)
+    end
+
+    refute File.exists?(object)
+  end
+
+  test "artifact reference closure precedes path selection and opens no file", context do
+    fixture = artifact_fixture(context.root)
+    {:audit_artifact_use, root, reference, manifest} = artifact_operation(fixture)
+
+    for changed <- [
+          Map.put(reference, :extra, true),
+          Map.delete(reference, :digest),
+          %{reference | use_digest: String.duplicate("A", 64)},
+          %{reference | use_digest: "../unsafe"},
+          %{reference | use_locator: "use:" <> String.duplicate("0", 64)},
+          %{reference | use_canonicalization_version: "loopex.canonical.future"},
+          %{reference | role: "input"},
+          %{reference | size: -1},
+          %{reference | size: 18_446_744_073_709_551_616}
+        ] do
+      owned = launch({:audit_artifact_use, root, changed, manifest}, :artifact_reference)
+
+      assert {{:joined, {:error, :history_invalid}, %{opens: 0, closes: 0}}, events} =
+               drive(owned)
+
+      refute :artifact_manifest in issued_kinds(events)
+      refute :artifact_describe in issued_kinds(events)
+      joined(owned)
+    end
+
+    assert {:error, :invalid_io_request} =
+             RestoreIO.run({:audit_artifact_use, root, nil, manifest}, limits(1_000, 100),
+               probe: self()
+             )
+
+    refute_receive {:restore_io, _, _, _, _}
+  end
+
+  test "artifact selection requires canonical file membership and all parent modes", context do
+    fixture = artifact_fixture(context.root)
+    {:audit_artifact_use, root, reference, manifest} = artifact_operation(fixture)
+    [domain, entries] = :erlang.binary_to_term(manifest, [:safe])
+    relative = Path.relative_to(fixture.path, root)
+    parent = Path.dirname(relative)
+
+    for changed <- [
+          Enum.reject(entries, &(&1["path"] == relative)),
+          Enum.reject(entries, &(&1["path"] == parent)),
+          Enum.map(entries, fn entry ->
+            if entry["path"] == relative,
+              do: %{entry | "kind" => "directory", "size" => 0, "sha256" => nil},
+              else: entry
+          end),
+          Enum.map(entries, fn entry ->
+            if entry["path"] == parent,
+              do: %{entry | "mode" => Bitwise.bxor(entry["mode"], 0o100)},
+              else: entry
+          end)
+        ] do
+      altered = :erlang.term_to_binary([domain, changed], [:deterministic])
+      owned = launch({:audit_artifact_use, root, reference, altered}, :artifact_manifest)
+      assert {{:joined, {:error, reason}, %{opens: 0, closes: 0}}, events} = drive(owned)
+      assert reason in [:io_error, :history_invalid]
+      refute :artifact_describe in issued_kinds(events)
+      joined(owned)
+    end
+
+    File.rename!(fixture.path, fixture.path <> ".etf")
+    owned = launch(artifact_operation(fixture), :artifact_manifest)
+    assert {{:joined, {:error, :io_error}, %{opens: 0, closes: 0}}, _} = drive(owned)
+    joined(owned)
+  end
+
+  test "artifact selected digest must authenticate the actual canonical filename bytes",
+       context do
+    fixture = artifact_fixture(context.root)
+    wrong = String.duplicate("0", 64)
+    reference = %{fixture.reference | use_digest: wrong, use_locator: "use:" <> wrong}
+    path = artifact_use_path(fixture.root, reference)
+    File.mkdir_p!(Path.dirname(path))
+    File.cp!(fixture.path, path)
+    selected = %{fixture | reference: reference, path: path}
+    owned = launch(artifact_operation(selected), :artifact_describe)
+    assert {{:joined, {:error, :history_invalid}, %{opens: 1, closes: 1}}, _} = drive(owned)
+    assert File.read!(path) == fixture.bytes
+    joined(owned)
+  end
+
+  test "artifact use actual writer cap succeeds and first over-cap refuses before open",
+       context do
+    seed = artifact_fixture(context.root)
+    assert Loopex.ArtifactStore.max_use_bytes() == 131_072
+    metadata = artifact_metadata()
+    width = 131_072 - byte_size(seed.bytes) + byte_size(metadata["session_id"])
+    metadata = %{metadata | "session_id" => :binary.copy("s", width)}
+    fixture = artifact_fixture(context.root, "captured object", [metadata])
+    assert byte_size(fixture.bytes) == 131_072
+    owned = launch(artifact_operation(fixture), :artifact_describe)
+    assert {{:joined, {:ok, use}, %{opens: 1, closes: 1}}, _} = drive(owned)
+    assert use == fixture.use
+    joined(owned)
+
+    # The negative file and checked physical manifest agree on all 131073 bytes;
+    # admission must refuse its role ceiling before any raw descriptor is opened.
+    File.write!(fixture.path, fixture.bytes <> <<0>>)
+    owned = launch(artifact_operation(fixture), :artifact_manifest)
+    assert {{:joined, {:error, :io_error}, %{opens: 0, closes: 0}}, events} = drive(owned)
+    refute :read in issued_kinds(events)
+    refute :artifact_describe in issued_kinds(events)
+    assert File.stat!(fixture.path).size == 131_073
+    joined(owned)
+  end
+
+  test "artifact use capture checks physical size mode contents and manifest hash", context do
+    fixture = artifact_fixture(context.root)
+    mode = Bitwise.band(File.stat!(fixture.path).mode, 0o7777)
+
+    for change <- [:size, :mode, :content, :digest] do
+      File.write!(fixture.path, fixture.bytes)
+      File.chmod!(fixture.path, mode)
+      operation = artifact_operation(fixture)
+
+      altered =
+        case change do
+          :size ->
+            File.write!(fixture.path, fixture.bytes <> <<0>>)
+            operation
+
+          :mode ->
+            File.chmod!(fixture.path, Bitwise.bxor(mode, 0o100))
+            operation
+
+          :content ->
+            File.write!(fixture.path, :binary.copy(<<0>>, byte_size(fixture.bytes)))
+            operation
+
+          :digest ->
+            {:audit_artifact_use, root, reference, manifest} = operation
+            [domain, entries] = :erlang.binary_to_term(manifest, [:safe])
+            relative = Path.relative_to(fixture.path, root)
+
+            changed =
+              Enum.map(entries, fn entry ->
+                if entry["path"] == relative,
+                  do: %{entry | "sha256" => String.duplicate("0", 64)},
+                  else: entry
+              end)
+
+            {:audit_artifact_use, root, reference,
+             :erlang.term_to_binary([domain, changed], [:deterministic])}
+        end
+
+      owned = launch(altered, :artifact_manifest)
+      assert {{:joined, {:error, :io_error}, evidence}, events} = drive(owned)
+      assert evidence.opens == evidence.closes
+      refute :artifact_describe in issued_kinds(events)
+      joined(owned)
+    end
+  end
+
+  test "artifact hardlink symlink FIFO and symlink parent substitutions refuse before open",
+       context do
+    fixture = artifact_fixture(context.root)
+    operation = artifact_operation(fixture)
+    path = fixture.path
+    other = Path.join(fixture.root, "other")
+    File.ln!(path, other)
+    owned = launch(operation, :artifact_manifest)
+    assert {{:joined, {:error, :io_error}, %{opens: 0, closes: 0}}, _} = drive(owned)
+    joined(owned)
+    File.rm!(other)
+    File.rename!(path, other)
+    File.ln_s!(other, path)
+    owned = launch(operation, :artifact_manifest)
+    assert {{:joined, {:error, :io_error}, %{opens: 0, closes: 0}}, _} = drive(owned)
+    joined(owned)
+    File.rm!(path)
+    assert {_, 0} = System.cmd("mkfifo", [path])
+    owned = launch(operation, :artifact_manifest)
+    assert {{:joined, {:error, :io_error}, %{opens: 0, closes: 0}}, _} = drive(owned)
+    joined(owned)
+    File.rm!(path)
+    File.rename!(other, path)
+    directory = Path.dirname(path)
+    File.rename!(directory, directory <> "-moved")
+    File.ln_s!(directory <> "-moved", directory)
+    owned = launch(operation, :artifact_manifest)
+    assert {{:joined, {:error, :io_error}, %{opens: 0, closes: 0}}, _} = drive(owned)
+    joined(owned)
+  end
+
+  test "artifact opened descriptor and post-describe identities prevent replacement", context do
+    for change <- [:descriptor, :file, :parent, :external_ancestor] do
+      fixture = artifact_fixture(context.root)
+      pause = if change == :descriptor, do: :descriptor_stat, else: :artifact_describe
+      owned = launch(artifact_operation(fixture), pause)
+      {id, _} = paused_operation(owned, pause)
+
+      case change do
+        :parent ->
+          directory = Path.dirname(fixture.path)
+          File.rename!(directory, directory <> "-moved")
+          File.mkdir!(directory)
+
+          File.rename!(
+            Path.join(directory <> "-moved", Path.basename(fixture.path)),
+            fixture.path
+          )
+
+        :external_ancestor ->
+          parent = Path.dirname(fixture.root)
+          moved = parent <> "-moved-#{System.unique_integer([:positive])}"
+          File.rename!(parent, moved)
+          File.mkdir!(parent)
+          File.rename!(Path.join(moved, Path.basename(fixture.root)), fixture.root)
+          on_exit(fn -> File.rm_rf!(moved) end)
+
+        _ ->
+          replacement = fixture.path <> ".replacement"
+          File.write!(replacement, fixture.bytes)
+          File.chmod!(replacement, Bitwise.band(File.stat!(fixture.path).mode, 0o7777))
+          File.rename!(replacement, fixture.path)
+      end
+
+      send(owned.guardian, {:proceed, owned.reference, id})
+      assert {{:joined, {:error, :io_error}, %{opens: 1, closes: 1}}, events} = drive(owned)
+      if change == :descriptor, do: refute(:artifact_describe in issued_kinds(events))
+      joined(owned)
+    end
+  end
+
+  test "artifact physical equality cannot admit hostile or alternate current transport",
+       context do
+    fixture = artifact_fixture(context.root)
+    ordered = :erlang.binary_to_term(fixture.bytes, [:safe])
+    compressed = :erlang.term_to_binary(ordered, [:deterministic, :compressed])
+    assert <<131, 80, _::binary>> = compressed
+
+    for bytes <- [
+          compressed,
+          fixture.bytes <> <<0>>,
+          <<131>>,
+          :erlang.term_to_binary(fixture.use, [:deterministic])
+        ] do
+      File.write!(fixture.path, bytes)
+      owned = launch(artifact_operation(fixture), :artifact_describe)
+
+      assert {{:joined, {:error, :history_invalid}, %{opens: 1, closes: 1}}, events} =
+               drive(owned)
+
+      assert index(issued_kinds(events), :close) < index(issued_kinds(events), :artifact_describe)
+      assert File.read!(fixture.path) == bytes
+      joined(owned)
+    end
+  end
+
+  test "artifact captured transport alone cannot substitute for real Core use closure", context do
+    fixture = artifact_fixture(context.root)
+    use = fixture.use
+
+    changed_uses =
+      [
+        Map.put(use, :extra, true),
+        Map.delete(use, :metadata),
+        %{use | canonicalization_version: "loopex.canonical.future"},
+        %{use | object_digest: String.duplicate("a", 64)},
+        %{use | object_size: use.object_size + 1},
+        %{use | object_locator: "different-object"},
+        %{use | media_type: "text/plain"},
+        %{use | role: "input"},
+        %{use | media_type: :invalid_media_type},
+        %{use | metadata: Map.put(use.metadata, "extra", true)},
+        %{use | metadata: Map.delete(use.metadata, "attempt")},
+        %{use | metadata: %{use.metadata | "attempt" => 0}},
+        %{use | metadata: %{use.metadata | "run_id" => :existing_atom}}
+      ] ++
+        Enum.map(~w(session_id run_id operation_id tool_call_id), fn field ->
+          %{use | metadata: Map.put(use.metadata, field, "")}
+        end)
+
+    for changed <- changed_uses do
+      selected = artifact_use_control(fixture, changed, fixture.reference)
+
+      assert {:ok, ^changed} =
+               Loopex.Store.Local.Artifacts.decode_use_bytes(
+                 selected.bytes,
+                 selected.reference.use_digest
+               )
+
+      owned = launch(artifact_operation(selected), :artifact_describe)
+      assert {{:joined, {:error, :history_invalid}, %{opens: 1, closes: 1}}, _} = drive(owned)
+      joined(owned)
+    end
+  end
+
+  test "artifact compact object facts must agree with the selected unchanged use", context do
+    fixture = artifact_fixture(context.root)
+
+    for reference <- [
+          %{fixture.reference | digest: String.duplicate("a", 64)},
+          %{fixture.reference | size: fixture.reference.size + 1},
+          %{fixture.reference | locator: "different-object"},
+          %{fixture.reference | media_type: "text/plain"}
+        ] do
+      assert Loopex.ArtifactStore.valid_reference?(reference)
+      owned = launch(artifact_operation(%{fixture | reference: reference}), :artifact_describe)
+      assert {{:joined, {:error, :history_invalid}, %{opens: 1, closes: 1}}, _} = drive(owned)
+      joined(owned)
+    end
+  end
+
+  test "artifact semantic permit retains the original work cutoff after explicit close",
+       context do
+    fixture = artifact_fixture(context.root)
+    owned = launch(artifact_operation(fixture), :artifact_describe, 500)
+    paused_operation(owned, :artifact_describe)
+    assert {{:joined, {:error, :deadline}, %{opens: 1, closes: 1}}, _} = drive(owned, false)
+    joined(owned)
+  end
+
+  test "real artifact describe synchronous telemetry remains within the original semantic lifetime",
+       context do
+    fixture = artifact_fixture(context.root)
+    parent = self()
+    handler = "restore-artifact-describe-#{System.unique_integer([:positive])}"
+
+    assert :ok =
+             :telemetry.attach(
+               handler,
+               [:loopex, :artifact, :describe, :start],
+               &__MODULE__.pause_artifact_describe/4,
+               parent
+             )
+
+    on_exit(fn -> :telemetry.detach(handler) end)
+    owned = launch(artifact_operation(fixture), :artifact_describe, 500)
+    {id, _} = paused_operation(owned, :artifact_describe)
+    send(owned.guardian, {:proceed, owned.reference, id})
+    assert_receive {:artifact_describe_entered, worker, metadata}, 1_000
+    assert worker == owned.worker
+    assert metadata == %{use_locator: fixture.reference.use_locator}
+    guardian = owned.guardian
+    reference = owned.reference
+
+    assert_receive {:restore_io, ^guardian, ^worker, ^reference,
+                    {:stopping, :deadline, stop, cleanup}},
+                   1_000
+
+    assert stop >= owned.work_cutoff
+    assert cleanup == stop + 10_000
+    send(worker, :continue_artifact_describe)
+    assert {{:joined, {:error, :deadline}, %{opens: 1, closes: 1}}, _} = drive(owned, false)
+    joined(owned)
+    assert :ok = :telemetry.detach(handler)
+  end
+
+  test "artifact object streaming binds actual Local writer bytes after source deletion",
+       context do
+    for bytes <- [
+          <<>>,
+          "retained text",
+          :binary.copy(<<0, 255>>, 32_768),
+          :binary.copy("x", 65_537)
+        ] do
+      metadata = artifact_metadata()
+      fixture = artifact_fixture(context.root, bytes, [metadata, %{metadata | "attempt" => 2}])
+      File.write!(Path.join(fixture.root, "orphan-object"), "unreferenced")
+      File.write!(Path.join(fixture.root, "staging.tmp"), "unfinished")
+      File.mkdir!(Path.join(fixture.root, "empty-directory"))
+      operation = artifact_object_operation(fixture)
+      {:audit_artifact_object, _, _, baseline, _} = operation
+      object = Map.take(fixture.reference, [:digest, :size, :locator])
+      owned = launch(operation, :artifact_object_digest)
+      assert {{:joined, {:ok, ^object}, %{opens: 1, closes: 1}}, events} = drive(owned)
+      kinds = issued_kinds(events)
+      assert Enum.count(kinds, &(&1 == :hash_read)) == div(byte_size(bytes) + 65_535, 65_536) + 1
+      refute :read in kinds
+      refute :artifact_describe in kinds
+      assert index(kinds, :close) < index(kinds, :artifact_object_digest)
+      assert File.read!(artifact_object_path(fixture.root, fixture.reference)) == bytes
+      assert File.read!(Path.join(fixture.root, "orphan-object")) == "unreferenced"
+      assert File.read!(Path.join(fixture.root, "staging.tmp")) == "unfinished"
+      assert File.dir?(Path.join(fixture.root, "empty-directory"))
+
+      assert {:joined, {:ok, ^baseline}, _} =
+               RestoreIO.run({:manifest, fixture.root, 1_048_576}, limits(1_000, 100))
+
+      refute File.exists?(fixture.original)
+      joined(owned)
+    end
+  end
+
+  test "artifact object above the Local writer cap remains an actual streaming reader control",
+       context do
+    fixture = artifact_fixture(context.root, "seed")
+    size = 67_108_865
+    locator = hash("large-reader:" <> fixture.reference.digest)
+    reference = %{fixture.reference | locator: locator, size: size}
+    path = artifact_object_path(fixture.root, reference)
+    File.mkdir_p!(Path.dirname(path))
+    {:ok, descriptor} = :file.open(path, [:raw, :binary, :write])
+
+    # This actual physical reader-domain control derives a use from the writer
+    # seed. Local put did not publish an object exceeding its unchanged cap.
+    context =
+      try do
+        chunk = :binary.copy("r", 65_536)
+
+        context =
+          Enum.reduce(1..1_024, :crypto.hash_init(:sha256), fn _, context ->
+            assert :ok = :file.write(descriptor, chunk)
+            :crypto.hash_update(context, chunk)
+          end)
+
+        assert :ok = :file.write(descriptor, "r")
+        :crypto.hash_update(context, "r")
+      after
+        assert :ok = :file.close(descriptor)
+      end
+
+    digest = :crypto.hash_final(context) |> Base.encode16(case: :lower)
+    reference = %{reference | digest: digest}
+    use = %{fixture.use | object_locator: locator, object_digest: digest, object_size: size}
+    selected = artifact_use_control(fixture, use, reference)
+    assert File.stat!(path).size == size
+    assert size == Loopex.Store.Local.Artifacts.max_bytes() + 1
+    operation = artifact_object_operation(selected, size + 1_048_576)
+    object = Map.take(selected.reference, [:digest, :size, :locator])
+    owned = launch(operation, :artifact_object_digest)
+    assert {{:joined, {:ok, ^object}, %{opens: 1, closes: 1}}, events} = drive(owned)
+    kinds = issued_kinds(events)
+    assert Enum.count(kinds, &(&1 == :hash_read)) == 1_026
+    refute :read in kinds
+    joined(owned)
+  end
+
+  test "artifact object locator-selected audit preserves current direct-fetch alias semantics",
+       context do
+    bytes = "actual writer bytes at an alternate admitted reader locator"
+    fixture = artifact_fixture(context.root, bytes)
+    locator = hash("reader-locator:" <> fixture.reference.digest)
+    refute locator == fixture.reference.digest
+    reference = %{fixture.reference | locator: locator}
+    path = artifact_object_path(fixture.root, reference)
+    File.mkdir_p!(Path.dirname(path))
+    File.rename!(artifact_object_path(fixture.root, fixture.reference), path)
+
+    # Concept: this is a reader-admission vector derived from real writer bytes.
+    # Technical depth: Local put still issued digest==locator; only the selected
+    # baseline path and current use/reference are deliberately retargeted here.
+    selected = artifact_use_control(fixture, %{fixture.use | object_locator: locator}, reference)
+    assert {:ok, handle} = Loopex.Store.Local.Artifacts.open(Path.join(fixture.root, "artifacts"))
+    store = %{module: Loopex.Store.Local.Artifacts, handle: handle}
+    assert {:ok, ^bytes} = Loopex.ArtifactStore.fetch(store, selected.reference)
+    assert {:error, :artifact_integrity_failed} = Loopex.ArtifactStore.stat(store, locator)
+    assert {:ok, use} = Loopex.ArtifactStore.describe(store, selected.reference)
+    assert use == selected.use
+    object = Map.take(selected.reference, [:digest, :size, :locator])
+    owned = launch(artifact_object_operation(selected), :artifact_object_digest)
+    assert {{:joined, {:ok, ^object}, %{opens: 1, closes: 1}}, _} = drive(owned)
+    assert File.read!(path) == bytes
+    joined(owned)
+  end
+
+  test "artifact object reference and Local locator admission precede manifest and path access",
+       context do
+    fixture = artifact_fixture(context.root)
+    {:audit_artifact_object, root, reference, manifest, cap} = artifact_object_operation(fixture)
+
+    for changed <- [
+          Map.put(reference, :extra, true),
+          Map.delete(reference, :digest),
+          %{reference | digest: String.duplicate("A", 64)},
+          %{reference | size: -1},
+          %{reference | size: 18_446_744_073_709_551_616},
+          %{reference | locator: "../unsafe"},
+          %{reference | locator: "x"},
+          %{reference | locator: String.duplicate("z", 64)},
+          %{reference | locator: "line\nbreak"}
+        ] do
+      owned = launch({:audit_artifact_object, root, changed, manifest, cap}, :artifact_reference)
+
+      assert {{:joined, {:error, :history_invalid}, %{opens: 0, closes: 0}}, events} =
+               drive(owned)
+
+      refute :artifact_manifest in issued_kinds(events)
+      refute :hash_read in issued_kinds(events)
+      joined(owned)
+    end
+
+    for invalid <- [-1, 18_446_744_073_709_551_616, "1048576"] do
+      invalid_operation = {:audit_artifact_object, root, reference, manifest, invalid}
+
+      assert {:error, :invalid_io_request} =
+               RestoreIO.run(invalid_operation, limits(1_000, 100), probe: self())
+
+      refute_receive {:restore_io, _, _, _, _}
+    end
+  end
+
+  test "artifact object manifest membership and original total cap refuse before open", context do
+    fixture = artifact_fixture(context.root)
+    operation = artifact_object_operation(fixture)
+    {:audit_artifact_object, root, reference, manifest, cap} = operation
+    [domain, entries] = :erlang.binary_to_term(manifest, [:safe])
+    relative = Path.relative_to(artifact_object_path(root, reference), root)
+    parent = Path.dirname(relative)
+    total = Enum.reduce(entries, 0, &(&1["size"] + &2))
+    assert total > 0
+
+    for changed <- [
+          Enum.reject(entries, &(&1["path"] == relative)),
+          Enum.reject(entries, &(&1["path"] == parent)),
+          Enum.map(entries, fn entry ->
+            if entry["path"] == relative,
+              do: %{entry | "sha256" => String.duplicate("0", 64)},
+              else: entry
+          end),
+          Enum.map(entries, fn entry ->
+            if entry["path"] == parent,
+              do: %{entry | "mode" => Bitwise.bxor(entry["mode"], 0o100)},
+              else: entry
+          end)
+        ] do
+      altered = :erlang.term_to_binary([domain, changed], [:deterministic])
+      owned = launch({:audit_artifact_object, root, reference, altered, cap}, :artifact_manifest)
+      assert {{:joined, {:error, reason}, %{opens: 0, closes: 0}}, events} = drive(owned)
+      assert reason in [:io_error, :history_invalid]
+      refute :hash_read in issued_kinds(events)
+      joined(owned)
+    end
+
+    owned =
+      launch({:audit_artifact_object, root, reference, manifest, total - 1}, :artifact_manifest)
+
+    assert {{:joined, {:error, :history_invalid}, %{opens: 0, closes: 0}}, events} = drive(owned)
+    refute :hash_read in issued_kinds(events)
+    joined(owned)
+
+    # Current reader sizes stay uint64; these fail physical inventory equality,
+    # not an inferred writer cap. They do not claim an oversized Local put.
+    for size <- [67_108_865, 18_446_744_073_709_551_615] do
+      changed = %{reference | size: size}
+      assert Loopex.ArtifactStore.valid_reference?(changed)
+      owned = launch({:audit_artifact_object, root, changed, manifest, cap}, :artifact_manifest)
+      assert {{:joined, {:error, :io_error}, %{opens: 0, closes: 0}}, events} = drive(owned)
+      refute :hash_read in issued_kinds(events)
+      joined(owned)
+    end
+  end
+
+  test "artifact object streaming rejects same-size forged manifest content and physical disagreement",
+       context do
+    bytes = "payload"
+    fixture = artifact_fixture(context.root, bytes)
+    path = artifact_object_path(fixture.root, fixture.reference)
+    mode = Bitwise.band(File.stat!(path).mode, 0o7777)
+
+    for change <- [:content, :size, :mode] do
+      File.write!(path, bytes)
+      File.chmod!(path, mode)
+      operation = artifact_object_operation(fixture)
+
+      case change do
+        :content -> File.write!(path, "damage!")
+        :size -> File.write!(path, bytes <> "x")
+        :mode -> File.chmod!(path, Bitwise.bxor(mode, 0o100))
+      end
+
+      owned = launch(operation, :artifact_manifest)
+      assert {{:joined, {:error, :io_error}, evidence}, events} = drive(owned)
+      assert evidence.opens == evidence.closes
+
+      if change == :content do
+        assert evidence.opens == 1
+        assert :artifact_object_digest in issued_kinds(events)
+      else
+        assert evidence.opens == 0
+      end
+
+      joined(owned)
+    end
+  end
+
+  test "artifact object exact EOF rejects growth and early EOF after descriptor admission",
+       context do
+    bytes = "payload"
+
+    for change <- [:grow, :shrink] do
+      fixture = artifact_fixture(context.root, bytes)
+      owned = launch(artifact_object_operation(fixture), :hash_read)
+      {id, :hash_read} = paused_operation(owned, :hash_read)
+      path = artifact_object_path(fixture.root, fixture.reference)
+      File.write!(path, if(change == :grow, do: bytes <> "x", else: "payloa"))
+      send(owned.guardian, {:proceed, owned.reference, id})
+      assert {{:joined, {:error, :io_error}, %{opens: 1, closes: 1}}, events} = drive(owned)
+      refute :artifact_object_digest in issued_kinds(events)
+      joined(owned)
+    end
+  end
+
+  test "artifact object native links FIFO and symlink parent refuse before open", context do
+    fixture = artifact_fixture(context.root)
+    operation = artifact_object_operation(fixture)
+    path = artifact_object_path(fixture.root, fixture.reference)
+    other = Path.join(fixture.root, "other-object")
+    File.ln!(path, other)
+    owned = launch(operation, :artifact_manifest)
+    assert {{:joined, {:error, :io_error}, %{opens: 0, closes: 0}}, _} = drive(owned)
+    joined(owned)
+    File.rm!(other)
+    File.rename!(path, other)
+    File.ln_s!(other, path)
+    owned = launch(operation, :artifact_manifest)
+    assert {{:joined, {:error, :io_error}, %{opens: 0, closes: 0}}, _} = drive(owned)
+    joined(owned)
+    File.rm!(path)
+    assert {_, 0} = System.cmd("mkfifo", [path])
+    owned = launch(operation, :artifact_manifest)
+    assert {{:joined, {:error, :io_error}, %{opens: 0, closes: 0}}, _} = drive(owned)
+    joined(owned)
+    File.rm!(path)
+    File.rename!(other, path)
+    directory = Path.dirname(path)
+    File.rename!(directory, directory <> "-moved")
+    File.ln_s!(directory <> "-moved", directory)
+    owned = launch(operation, :artifact_manifest)
+    assert {{:joined, {:error, :io_error}, %{opens: 0, closes: 0}}, _} = drive(owned)
+    joined(owned)
+  end
+
+  test "artifact object descriptor and post-close identities reject file parent and ancestor replacement",
+       context do
+    for change <- [:descriptor, :file, :parent, :external_ancestor] do
+      fixture = artifact_fixture(context.root)
+      path = artifact_object_path(fixture.root, fixture.reference)
+      bytes = File.read!(path)
+      pause = if change == :descriptor, do: :descriptor_stat, else: :artifact_object_digest
+      owned = launch(artifact_object_operation(fixture), pause)
+      {id, _} = paused_operation(owned, pause)
+
+      case change do
+        :parent ->
+          directory = Path.dirname(path)
+          File.rename!(directory, directory <> "-moved")
+          File.mkdir!(directory)
+          File.rename!(Path.join(directory <> "-moved", Path.basename(path)), path)
+
+        :external_ancestor ->
+          parent = Path.dirname(fixture.root)
+          moved = parent <> "-moved-#{System.unique_integer([:positive])}"
+          File.rename!(parent, moved)
+          File.mkdir!(parent)
+          File.rename!(Path.join(moved, Path.basename(fixture.root)), fixture.root)
+          on_exit(fn -> File.rm_rf!(moved) end)
+
+        _ ->
+          replacement = path <> ".replacement"
+          File.write!(replacement, bytes)
+          File.chmod!(replacement, Bitwise.band(File.stat!(path).mode, 0o7777))
+          File.rename!(replacement, path)
+      end
+
+      send(owned.guardian, {:proceed, owned.reference, id})
+      assert {{:joined, {:error, :io_error}, %{opens: 1, closes: 1}}, _} = drive(owned)
+      joined(owned)
+    end
+  end
+
+  test "artifact object post-close comparison retains the original work cutoff", context do
+    fixture = artifact_fixture(context.root)
+    owned = launch(artifact_object_operation(fixture), :artifact_object_digest, 500)
+    paused_operation(owned, :artifact_object_digest)
+    assert {{:joined, {:error, :deadline}, %{opens: 1, closes: 1}}, _} = drive(owned, false)
+    joined(owned)
+  end
+
+  test "artifact object caller loss closes and joins its exact descriptor owner", context do
+    fixture = artifact_fixture(context.root)
+    owned = launch(artifact_object_operation(fixture), :hash_read)
+    paused_operation(owned, :hash_read)
+    Process.exit(owned.caller, :kill)
+    caller = owned.caller
+    monitor = owned.caller_monitor
+    guardian = owned.guardian
+    worker = owned.worker
+    reference = owned.reference
+    assert_receive {:DOWN, ^monitor, :process, ^caller, :killed}, 1_000
+
+    assert_receive {:restore_io, ^guardian, ^worker, ^reference,
+                    {:terminal, {:joined, {:error, :caller_lost}, %{opens: 1, closes: 1}}}},
+                   1_000
+
+    joined(owned, false)
+  end
+
+  test "artifact object guardian loss cannot certify descriptor close or object facts", context do
+    fixture = artifact_fixture(context.root)
+    owned = launch(artifact_object_operation(fixture), :hash_read)
+    paused_operation(owned, :hash_read)
+    Process.exit(owned.guardian, :kill)
+    assert {{:unconfirmed, :guardian_lost}, _} = drive(owned, false)
+    guardian = owned.guardian
+    gm = owned.guardian_monitor
+    worker = owned.worker
+    wm = owned.worker_monitor
+    caller = owned.caller
+    cm = owned.caller_monitor
+    assert_receive {:DOWN, ^gm, :process, ^guardian, :killed}, 1_000
+    assert_receive {:DOWN, ^wm, :process, ^worker, :killed}, 1_000
+    assert_receive {:DOWN, ^cm, :process, ^caller, :normal}, 1_000
+  end
+
+  test "ledger index captures every actual marker and open record under one guardian", context do
+    fixture = ledger_fixture(context.root)
+    owned = launch(ledger_index_operation(fixture), :ledger_snapshot)
+    assert {{:joined, {:ok, result}, %{opens: 4, closes: 4}}, events} = drive(owned)
+    assert result.generation == fixture.records.generation
+
+    assert result.markers ==
+             Enum.sort([
+               {hash(fixture.jobs.admission), fixture.records.admission},
+               {hash(fixture.jobs.refusal), fixture.records.refusal}
+             ])
+
+    assert result.open == [fixture.records.open]
+    refute result.claim_present
+    assert Enum.count(issued_kinds(events), &(&1 == :ledger_decode)) == 4
+    assert Enum.count(issued_kinds(events), &(&1 == :ledger_snapshot)) == 1
+
+    assert index(issued_kinds(events), :ledger_decode) <
+             index(issued_kinds(events), :ledger_snapshot)
+
+    joined(owned)
+  end
+
+  test "ledger index preserves actual close restore and open-before-marker writer cuts",
+       context do
+    fixture = ledger_fixture(context.root)
+
+    assert :ok =
+             Ledger.with_claim(fixture.prepared, fn claimed ->
+               Ledger.close_open(claimed, fixture.jobs.open)
+             end)
+
+    assert {:joined, {:ok, %{open: []}}, _} =
+             RestoreIO.run(ledger_index_operation(fixture), limits(1_000, 100))
+
+    assert :ok =
+             Ledger.with_claim(fixture.prepared, fn claimed ->
+               Ledger.restore_open(claimed, fixture.records.open)
+             end)
+
+    request = %{fixture.request | job_id: "partial-publication"}
+    marker = Ledger.marker(request)
+    open = Ledger.open_entry(request, fixture.declaration["executor_identity"])
+    blocked = Path.join([fixture.prepared.root, "markers", hash(request.job_id)])
+    File.mkdir!(blocked)
+
+    assert {:error, _} =
+             Ledger.with_claim(fixture.prepared, fn claimed ->
+               Ledger.admit(claimed, marker, open)
+             end)
+
+    File.rmdir!(blocked)
+
+    assert {:joined, {:ok, result}, _} =
+             RestoreIO.run(ledger_index_operation(fixture), limits(1_000, 100))
+
+    assert Enum.sort(result.open) == Enum.sort([fixture.records.open, open])
+    refute List.keymember?(result.markers, hash(request.job_id), 0)
+
+    assert File.read!(fixture.paths.admission) ==
+             :erlang.term_to_binary(fixture.records.admission, [:deterministic])
+  end
+
+  test "ledger index retains a refusal alongside an unresolved open warning", context do
+    fixture = ledger_fixture(context.root)
+    record = %{fixture.records.open | "job_id" => fixture.jobs.refusal}
+
+    assert :ok =
+             Ledger.with_claim(fixture.prepared, fn claimed ->
+               Ledger.restore_open(claimed, record)
+             end)
+
+    assert {:joined, {:ok, result}, _} =
+             RestoreIO.run(ledger_index_operation(fixture), limits(1_000, 100))
+
+    assert record in result.open
+    assert {hash(fixture.jobs.refusal), fixture.records.refusal} in result.markers
+  end
+
+  test "ledger index records a current held claim without reclaiming or granting it", context do
+    fixture = ledger_fixture(context.root)
+
+    assert :ok =
+             Ledger.with_claim(fixture.prepared, fn _claimed ->
+               operation = ledger_index_operation(fixture)
+
+               assert {:joined, {:ok, %{claim_present: true}}, _} =
+                        RestoreIO.run(operation, limits(1_000, 100))
+
+               assert File.dir?(Path.join(fixture.prepared.root, "claim"))
+               :ok
+             end)
+
+    refute File.exists?(Path.join(fixture.prepared.root, "claim"))
+  end
+
+  test "ledger index copies retain original source binding and reject relocated descriptors",
+       context do
+    fixture = ledger_fixture(context.root)
+    backup = fixture.root <> "-index-backup"
+    File.cp_r!(fixture.root, backup)
+    on_exit(fn -> File.rm_rf!(backup) end)
+    copied = %{fixture | root: backup}
+
+    assert {:joined, {:ok, %{generation: generation}}, _} =
+             RestoreIO.run(ledger_index_operation(copied), limits(1_000, 100))
+
+    assert generation == fixture.records.generation
+    info = File.stat!(Path.join(backup, "ledger"))
+
+    moved = %{
+      "expanded_root" => Path.join(backup, "ledger"),
+      "major_device" => info.major_device,
+      "inode" => info.inode
+    }
+
+    changed = %{copied | declaration: %{copied.declaration | "source_placement" => moved}}
+
+    assert {:joined, {:error, :history_invalid}, _} =
+             RestoreIO.run(ledger_index_operation(changed), limits(1_000, 100))
+  end
+
+  test "ledger index refuses omitted inventory members and actual extra names", context do
+    for change <- [:omitted, :extra] do
+      fixture = ledger_fixture(context.root)
+      {:audit_ledger_index, root, declaration, manifest} = ledger_index_operation(fixture)
+      assert {:ok, entries} = RestoreCodec.manifest(manifest, 1_048_576)
+
+      manifest =
+        if change == :omitted do
+          path = "ledger/open/" <> hash(fixture.jobs.open)
+          changed = Enum.reject(entries, &(&1["path"] == path))
+
+          assert {:ok, bytes} =
+                   RestoreCodec.encode(
+                     :manifest,
+                     ["loopex:current-state-manifest:v1", changed]
+                   )
+
+          bytes
+        else
+          File.write!(Path.join([fixture.prepared.root, "open", hash("unlisted")]), "extra")
+          manifest
+        end
+
+      owned = launch({:audit_ledger_index, root, declaration, manifest}, :ledger_names)
+      assert {{:joined, {:error, :io_error}, %{opens: 0, closes: 0}}, events} = drive(owned)
+      refute :ledger_decode in issued_kinds(events)
+      joined(owned)
+    end
+  end
+
+  test "ledger index requires generation and both physical directories without initialization",
+       context do
+    for role <- [:generation, :markers, :open] do
+      fixture = ledger_fixture(context.root)
+      path = Path.join(fixture.prepared.root, Atom.to_string(role))
+      File.rm_rf!(path)
+      owned = launch(ledger_index_operation(fixture), :ledger_names)
+      assert {{:joined, {:error, :io_error}, %{opens: 0, closes: 0}}, _} = drive(owned)
+      refute File.exists?(path)
+      joined(owned)
+    end
+  end
+
+  test "ledger index rejects nested staging and noncanonical committed names before opening",
+       context do
+    for {plane, name, directory?} <- [
+          {"markers", hash("nested"), true},
+          {"markers", hash("staged") <> ".tmp-1", false},
+          {"open", String.duplicate("A", 64), false},
+          {"open", "unknown", false}
+        ] do
+      fixture = ledger_fixture(context.root)
+      path = Path.join([fixture.prepared.root, plane, name])
+      if directory?, do: File.mkdir!(path), else: File.write!(path, "record")
+      owned = launch(ledger_index_operation(fixture), :ledger_names)
+      assert {{:joined, {:error, :io_error}, %{opens: 0, closes: 0}}, _} = drive(owned)
+      joined(owned)
+    end
+  end
+
+  test "ledger index preflights every role byte ceiling before opening any member", context do
+    for {role, cap} <- [{:generation, 2_048}, {:admission, 65_536}, {:open, 65_536}] do
+      fixture = ledger_fixture(context.root)
+      File.write!(fixture.paths[role], :binary.copy(<<0>>, cap + 1))
+      owned = launch(ledger_index_operation(fixture), :ledger_capacity)
+      assert {{:joined, {:error, :io_error}, %{opens: 0, closes: 0}}, events} = drive(owned)
+      refute :ledger_decode in issued_kinds(events)
+      joined(owned)
+    end
+  end
+
+  test "ledger index refuses 1025 actual open writer entries before record opening", context do
+    fixture = ledger_fixture(context.root)
+
+    assert :ok =
+             Ledger.with_claim(fixture.prepared, fn claimed ->
+               for number <- 1..1_024 do
+                 record = %{fixture.records.open | "job_id" => "open-#{number}"}
+                 assert :ok = Ledger.restore_open(claimed, record)
+               end
+
+               :ok
+             end)
+
+    owned = launch(ledger_index_operation(fixture), :ledger_capacity)
+    assert {{:joined, {:error, :io_error}, %{opens: 0, closes: 0}}, events} = drive(owned)
+    assert :ledger_capacity in issued_kinds(events)
+    refute :ledger_decode in issued_kinds(events)
+    joined(owned)
+  end
+
+  test "ledger marker retention does not borrow the open index cardinality limit", context do
+    fixture = ledger_fixture(context.root)
+
+    assert :ok =
+             Ledger.with_claim(fixture.prepared, fn claimed ->
+               for number <- 1..1_023 do
+                 request = %{fixture.request | job_id: "refusal-#{number}"}
+                 assert {:ok, refusal} = Ledger.refusal(request, :workspace_lease_lost)
+                 assert :ok = Ledger.refuse(claimed, refusal)
+               end
+
+               :ok
+             end)
+
+    owned = launch(ledger_index_operation(fixture, 5_000), :ledger_snapshot, 5_000)
+    assert {{:joined, {:ok, result}, %{opens: 1_027, closes: 1_027}}, _} = drive(owned)
+    assert length(result.markers) == 1_025
+    assert result.open == [fixture.records.open]
+    joined(owned)
+  end
+
+  test "ledger index uses the live whole-snapshot exact byte ceiling", context do
+    fixture = ledger_fixture(context.root)
+
+    assert :ok =
+             Ledger.with_claim(fixture.prepared, fn claimed ->
+               Ledger.close_open(claimed, fixture.jobs.open)
+             end)
+
+    entries =
+      Ledger.with_claim(fixture.prepared, fn claimed ->
+        entries = ledger_ceiling_entries(claimed, fixture.records.open)
+        assert byte_size(ledger_snapshot_bytes(claimed, entries)) == 4_194_304
+        for {_name, record} <- entries, do: assert(:ok == Ledger.restore_open(claimed, record))
+        entries
+      end)
+
+    owned = launch(ledger_index_operation(fixture, 5_000), :ledger_snapshot, 5_000)
+    expected = Enum.map(entries, &elem(&1, 1))
+    assert {{:joined, {:ok, %{open: ^expected}}, %{opens: 515, closes: 515}}, _} = drive(owned)
+    joined(owned)
+    [{_name, first} | rest] = entries
+    # Remove then publish the next writer-admitted record. Every selected file
+    # remains canonical and below its role cap; only the whole observation grows.
+    assert byte_size(first["job_id"]) < 8_192
+    larger = %{first | "job_id" => first["job_id"] <> "x"}
+
+    assert :ok =
+             Ledger.with_claim(fixture.prepared, fn claimed ->
+               assert :ok = Ledger.close_open(claimed, first["job_id"])
+               Ledger.restore_open(claimed, larger)
+             end)
+
+    Ledger.with_claim(fixture.prepared, fn claimed ->
+      larger_entries = Enum.sort([{hash(larger["job_id"]), larger} | rest])
+      assert byte_size(ledger_snapshot_bytes(claimed, larger_entries)) == 4_194_305
+    end)
+
+    owned = launch(ledger_index_operation(fixture, 5_000), :ledger_snapshot, 5_000)
+    assert {{:joined, {:error, :history_invalid}, %{opens: 515, closes: 515}}, _} = drive(owned)
+    joined(owned)
+  end
+
+  test "ledger index refuses linked or replaced later records without decoding their bytes",
+       context do
+    for change <- [:symlink, :hardlink, :changed_after_generation] do
+      fixture = ledger_fixture(context.root)
+      operation = ledger_index_operation(fixture)
+      owned = launch(operation, :ledger_decode)
+      {id, :ledger_decode} = paused_operation(owned, :ledger_decode)
+      path = fixture.paths.open
+
+      case change do
+        :symlink ->
+          external = Path.join(fixture.root, "external-open")
+          File.rename!(path, external)
+          File.ln_s!(external, path)
+
+        :hardlink ->
+          File.ln!(path, Path.join(fixture.root, "linked-open"))
+
+        :changed_after_generation ->
+          changed = %{fixture.records.open | "origin_executor_epoch" => 8}
+          File.write!(path, :erlang.term_to_binary(changed, [:deterministic]))
+      end
+
+      send(owned.guardian, {:proceed, owned.reference, id})
+      assert {{:joined, {:error, :io_error}, _}, events} = drive(owned)
+      # Generation was decoded; the changed later open record must not be.
+      assert Enum.count(issued_kinds(events), &(&1 == :ledger_decode)) <= 3
+      joined(owned)
+    end
+  end
+
+  test "ledger index rejects marker basenames open identity and admission-pair disagreements",
+       context do
+    for change <- [:basename, :executor, :request, :cleanup, :wrong_plane] do
+      fixture = ledger_fixture(context.root)
+      path = if change == :basename, do: fixture.paths.admission, else: fixture.paths.open
+
+      case change do
+        :basename ->
+          File.rename!(path, Path.join(Path.dirname(path), hash("other-job")))
+
+        _ ->
+          record =
+            case change do
+              :executor ->
+                %{fixture.records.open | "executor_identity" => "other"}
+
+              :request ->
+                %{fixture.records.open | "canonical_request_digest" => String.duplicate("b", 64)}
+
+              :cleanup ->
+                %{fixture.records.open | "cleanup_grace_ms" => 101}
+
+              :wrong_plane ->
+                fixture.records.admission
+            end
+
+          File.write!(path, :erlang.term_to_binary(record, [:deterministic]))
+      end
+
+      owned = launch(ledger_index_operation(fixture), :ledger_snapshot)
+      assert {{:joined, {:error, :history_invalid}, _}, _} = drive(owned)
+      joined(owned)
+    end
+  end
+
+  test "ledger index rechecks namespaces earlier records and ancestors after the final decode",
+       context do
+    for change <- [:addition, :earlier_record, :ancestor] do
+      fixture = ledger_fixture(context.root)
+      owned = launch(ledger_index_operation(fixture), :ledger_snapshot)
+      {id, :ledger_snapshot} = paused_operation(owned, :ledger_snapshot)
+
+      case change do
+        :addition ->
+          File.write!(Path.join([fixture.prepared.root, "markers", hash("late")]), "late")
+
+        :earlier_record ->
+          replacement = fixture.paths.generation <> ".replacement"
+          File.write!(replacement, File.read!(fixture.paths.generation))
+
+          File.chmod!(
+            replacement,
+            Bitwise.band(File.stat!(fixture.paths.generation).mode, 0o7777)
+          )
+
+          File.rename!(replacement, fixture.paths.generation)
+
+        :ancestor ->
+          directory = Path.join(fixture.prepared.root, "markers")
+          moved = directory <> "-moved"
+          File.rename!(directory, moved)
+          File.mkdir!(directory)
+
+          for name <- File.ls!(moved),
+              do: File.rename!(Path.join(moved, name), Path.join(directory, name))
+
+          File.rmdir!(moved)
+      end
+
+      send(owned.guardian, {:proceed, owned.reference, id})
+      assert {{:joined, {:error, :io_error}, %{opens: 4, closes: 4}}, _} = drive(owned)
+      joined(owned)
+    end
+  end
+
+  test "ledger index captures the original cutoff across all members and snapshot reduction",
+       context do
+    fixture = ledger_fixture(context.root)
+    owned = launch(ledger_index_operation(fixture), :ledger_snapshot, 500)
+    paused_operation(owned, :ledger_snapshot)
+    assert {{:joined, {:error, :deadline}, %{opens: 4, closes: 4}}, _} = drive(owned, false)
+    joined(owned)
+  end
+
   test "Ledger audit preserves all actual current writer records and raw job identities",
        context do
     fixture = ledger_fixture(context.root)
@@ -1829,9 +3000,69 @@ defmodule LoopexComposition.RestoreIOTest do
       root: state,
       declaration: declaration,
       paths: paths,
+      prepared: prepared,
+      request: job,
       jobs: %{generation: nil, admission: job.job_id, refusal: refused.job_id, open: job.job_id},
       records: %{generation: generation, admission: marker, refusal: refusal, open: open}
     }
+  end
+
+  defp ledger_ceiling_entries(claimed, base) do
+    build = fn width ->
+      for number <- 1..512 do
+        id = String.pad_leading(Integer.to_string(number), 4, "0") <> String.duplicate("j", width)
+        record = %{base | "job_id" => id}
+        {hash(id), record}
+      end
+      |> Enum.sort()
+    end
+
+    width = ledger_fitting_width(claimed, build, 0, 8_188)
+    entries = build.(width)
+    remaining = 4_194_304 - byte_size(ledger_snapshot_bytes(claimed, entries))
+    # Distribute the final bytes within actual identifier domains. Leave one
+    # byte in the first entry for the exact first-over control.
+    {entries, 0} =
+      Enum.map_reduce(entries, remaining, fn {_name, record}, left ->
+        added = min(left, 8_191 - byte_size(record["job_id"]))
+        record = %{record | "job_id" => record["job_id"] <> String.duplicate("j", added)}
+        {{hash(record["job_id"]), record}, left - added}
+      end)
+
+    Enum.sort(entries)
+  end
+
+  defp ledger_fitting_width(_claimed, _build, low, high) when low == high, do: low
+
+  defp ledger_fitting_width(claimed, build, low, high) do
+    middle = div(low + high + 1, 2)
+
+    if byte_size(ledger_snapshot_bytes(claimed, build.(middle))) <= 4_194_304,
+      do: ledger_fitting_width(claimed, build, middle, high),
+      else: ledger_fitting_width(claimed, build, low, middle - 1)
+  end
+
+  defp ledger_snapshot_bytes(claimed, entries) do
+    :erlang.term_to_binary(
+      [
+        "loopex:local-root-snapshot:v1",
+        claimed.generation_digest,
+        claimed.root_binding,
+        claimed.root_claim_nonce,
+        length(entries),
+        Enum.map(entries, fn {name, record} ->
+          [name, hash(:erlang.term_to_binary(record, [:deterministic])), record]
+        end)
+      ],
+      [:deterministic]
+    )
+  end
+
+  defp ledger_index_operation(fixture, work_ms \\ 1_000) do
+    assert {:joined, {:ok, manifest}, _} =
+             RestoreIO.run({:manifest, fixture.root, 16_777_216}, limits(work_ms, 100))
+
+    {:audit_ledger_index, fixture.root, fixture.declaration, manifest}
   end
 
   defp ledger_operation(fixture, role) do
@@ -1839,6 +3070,105 @@ defmodule LoopexComposition.RestoreIOTest do
              RestoreIO.run({:manifest, fixture.root, 1_048_576}, limits(1_000, 100))
 
     {:audit_ledger, fixture.root, fixture.declaration, role, fixture.jobs[role], manifest}
+  end
+
+  # Concept: the test observes the real synchronous Core facade, without a fake
+  # adapter or retained payload. Technical depth: its finite wait covers a single
+  # original 500-ms invocation cutoff and receives an explicit release after stop.
+  @doc false
+  def pause_artifact_describe(_event, _measurements, metadata, parent) do
+    send(parent, {:artifact_describe_entered, self(), metadata})
+
+    receive do
+      :continue_artifact_describe -> :ok
+    after
+      1_000 -> raise "artifact describe observation was not released"
+    end
+  end
+
+  defp artifact_metadata do
+    %{
+      "session_id" => <<255, 0, 128>>,
+      "run_id" => "run" <> <<0, 254>>,
+      "operation_id" => <<128, 255, 0>>,
+      "tool_call_id" => <<0, 255>>,
+      "attempt" => Integer.pow(2, 128),
+      "media_type" => "application/octet-stream",
+      "role" => "tool_output"
+    }
+  end
+
+  defp artifact_fixture(root, bytes \\ "captured object", metadata \\ [artifact_metadata()]) do
+    root = physical_root(root)
+    unique = System.unique_integer([:positive])
+    original = Path.join(root, "artifact-writer-#{unique}")
+    backup = Path.join(root, "artifact-backup-#{unique}")
+    assert {:ok, handle} = Loopex.Store.Local.Artifacts.open(Path.join(original, "artifacts"))
+    store = %{module: Loopex.Store.Local.Artifacts, handle: handle}
+
+    records =
+      Enum.map(metadata, fn labels ->
+        assert {:ok, reference} = Loopex.ArtifactStore.put(store, bytes, labels)
+        assert {:ok, use} = Loopex.ArtifactStore.describe(store, reference)
+        {reference, use}
+      end)
+
+    File.cp_r!(original, backup)
+    File.rm_rf!(original)
+    refute File.exists?(original)
+    [{reference, use} | _] = records
+    path = artifact_use_path(backup, reference)
+    captured = File.read!(path)
+    assert captured == LoopexProtocol.Canonical.encode(["artifact-use-v2", use])
+
+    %{
+      root: backup,
+      original: original,
+      path: path,
+      bytes: captured,
+      reference: reference,
+      use: use,
+      references: Enum.map(records, &elem(&1, 0)),
+      uses: Enum.map(records, &elem(&1, 1))
+    }
+  end
+
+  defp artifact_use_path(root, reference),
+    do:
+      Path.join([
+        root,
+        "artifacts",
+        "uses",
+        binary_part(reference.use_digest, 0, 2),
+        reference.use_digest
+      ])
+
+  defp artifact_use_control(fixture, use, reference) do
+    bytes = LoopexProtocol.Canonical.encode(["artifact-use-v2", use])
+    digest = hash(bytes)
+    reference = %{reference | use_digest: digest, use_locator: "use:" <> digest}
+    assert Loopex.ArtifactStore.valid_reference?(reference)
+    path = artifact_use_path(fixture.root, reference)
+    File.mkdir_p!(Path.dirname(path))
+    File.write!(path, bytes)
+    %{fixture | reference: reference, use: use, path: path, bytes: bytes}
+  end
+
+  defp artifact_operation(fixture) do
+    assert {:joined, {:ok, manifest}, _} =
+             RestoreIO.run({:manifest, fixture.root, 1_048_576}, limits(1_000, 100))
+
+    {:audit_artifact_use, fixture.root, fixture.reference, manifest}
+  end
+
+  defp artifact_object_path(root, reference),
+    do: Path.join([root, "artifacts", binary_part(reference.locator, 0, 2), reference.locator])
+
+  defp artifact_object_operation(fixture, max_total \\ 1_048_576) do
+    assert {:joined, {:ok, manifest}, _} =
+             RestoreIO.run({:manifest, fixture.root, max_total}, limits(1_000, 100))
+
+    {:audit_artifact_object, fixture.root, fixture.reference, manifest, max_total}
   end
 
   defp resource_fixture(root, width \\ 40) do
