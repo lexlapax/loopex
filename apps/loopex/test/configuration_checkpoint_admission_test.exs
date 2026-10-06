@@ -324,6 +324,9 @@ defmodule Loopex.ConfigurationCheckpointAdmissionTest do
         min(5_000, Keyword.get(options, :context_token_budget, 8_192))
       )
       |> put_in(["budget_origins", "context_token_budget"], "explicit")
+      |> put_in(["model_capabilities", "reasoning_levels"], ["default"])
+      |> put_in(["provider_mapping", "mapping_revision"], "loopex.test.scripted.mapping.v1")
+      |> put_in(["provider_mapping", "renderer_revision"], "loopex.test.scripted.renderer.v1")
       |> put_in(["provider_mapping", "canonical_terminal_tool_history"], true)
 
     observer = self()
