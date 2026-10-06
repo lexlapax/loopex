@@ -27,6 +27,53 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current proof, execution and source ownership
 
+LATEST COLLECTION, 2026-10-06: root original 97342 is fully collected,
+exit 0 after 36.797 seconds. Eight formatter stages passed on current and
+floor toolchains; no formatting diff or child exists. Clean source remains
+`058bf9e74b2c40be49d1246f4610bc254fc9c293`. Root verified all 60 artifacts,
+46 source rows, eight original raw EOF/wait/status/PID-group joins and 312
+preserved plus eight new registry keys. All original actors are absent; the
+verification VM is free. Never poll 97342 or repeat its stages. Output
+`M7/m7-guard-time-format-v1` report is
+`d088f2d06dbebd4be38879b197ff2e72a155e61760c8b5e038610558e5c4d47d`, inventory
+`f4da77dac12b1ed4a843df433247f91e560cb27d5435fec61c11f53a836d23b8`.
+Original collection `M7/guard-time-format-original-collection-20261006-v1.json`
+is `d7c1a201059cb5a989c9f1638dc2cd5fbb4a128b07266e1733bb09c59f67af01`;
+audit `M7/guard-time-format-collection-20261006-v1.py` is
+`45737a4a88a2242d1e7788d2385da016e9fdab15acf9a599241a4039f47e8a1c`.
+Final registry digest is
+`cadb37a7d414911f3439464dbd0aac9e3b446c4a68e5b198dfff86b6a194aa61`.
+No compiler/tests ran. The prior formatter grant below is historical.
+
+Independent lookup-fix source review at clean 4d0 found no concrete blocker;
+all five original findings are addressed and original 19 cases preserved.
+Report `/private/tmp/loopex-m7-public-lookup-fixes-inspection-4d0ce51f-20261006-v1/report.md`
+is `54af339ecbe258eafb57c25a9d03273ef33dfb047644e78d905d6a1670c60281`, inventory
+`6d06a27a2c94e7de43ccf137f7495d7160325d3dec3620b94caa995d6e482ea2`.
+The incoming higher-transition coverage gap now has a separate source unit,
+`060a6bb6ffe1e597ab20b7d7c061a2c6726e93a2`, sole child of 4d0, in
+`/private/tmp/loopex-m7-restore-lookup-incoming-fixtures`. It adds four actual
+A-to-B-to-C phase fixtures, preserving all 34 existing cases and helpers.
+Proposed population is 38 ordinary cases. Source packet
+`/private/tmp/loopex-m7-restore-lookup-incoming-fixtures-source-v2/report.md`
+is `5686d0597516c41452a8b578eb3ff860a0b56bd990268377e96ed8798c91eba8`, inventory
+`94f9de2e0e6456dcf2a2112bd96bffab62fb753e6564a358002897c363f72dad`.
+Current-index owns its bounded independent read-only inspection. No VM,
+formatter, compiler, tests or primary rejoin occurred.
+
+Private-task disabled focused three-case runtime proposal is sealed at
+`/private/tmp/loopex-m7-private-task-diagnostic-runner-32ef61aa-20261006-v2`.
+Report `76081466ea4d3849a1a9ee662f594a65ed673574d5191b13a5c3ec468201e12c`,
+inventory `b115c169ac647571b9150bc706435e7822b3f967636bd20ce93b7bd0ef16f8d2`.
+Root is reviewing it; no execution grant or output exists. It consumes
+collected formatter 5073, preserves original command exits, copies actual
+66-file sink bytes even after test failure and reports missing/incomplete
+observations as unavailable. No standalone actor/cutoff/fence rows are invented.
+CLI now owns only disabled paired 39-case runtime preparation at corrected
+058bf, reusing collected eight-stage formatting evidence. It does not rejoin
+lookup source. All task totals remain unchanged. These are source and
+formatter results, not broad T15/T16 verification or closure.
+
 T16 FORMATTER COLLECTED, 2026-10-06: root original 5073 is fully collected,
 exit 0 after 37.104 seconds, eleven stages, complete-file AST equality and
 both toolchain formatting checks. Clean child
