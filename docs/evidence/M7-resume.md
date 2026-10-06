@@ -27,6 +27,39 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current proof, execution and source ownership
 
+LATEST COLLECTION, 2026-10-06: root original74970 is fully collected
+FAIL_OR_UNAVAILABLE after264.321s/15 current stages. The sole verification VM
+is FREE. Source e2b835d745ff9c2c3d02c2d4841503a18e9aac09 remains clean/unchanged.
+Output `M7/m7-private-task-core-runtime-v1` passed current toolchain/Node,
+three-production residue AST, dev/test compilation and all5 metadata gates.
+Existing private-task3/provider-lifetime2/owner-groups2/preparation18ordinary
+(1 excluded) passed. Actual private witness has all66 files retained and
+AVAILABLE_SCOPED_RECORDS; actual startup trace/chain/cleanup validated and the
+optional partial artifact is absent. Both private temporary sinks were removed.
+New retirement suite passed1/3: selected_window and live_window fail at
+await_empty_then_stop line458, "unexpected native progress send trace shape".
+The offending term was not printed or retained, so its identity/cause is
+UNAVAILABLE; do not infer it from a generic flunk. No floor stage ran, no repeat.
+Root verified148 immutable artifacts,134 actual/committed source records and
+all15 original EOF/wait/PID-group joins. Collection
+`M7/private-task-core-runtime-original-collection-20261006-v1.json` is
+`46d8cbe2e3bb72515d9f93cac6438cf3e5189c77eee7555c3b63de2d6e62adb1`, report
+`8c14ff1e9f8c476f7823dee1eb2ce3924b9998272f89e18e6a77fd6bc11d2c7b`, inventory
+`c0f89036d5777269babe47d5b7cd7908c27abe8cd7b1ac26a521cae23cf2868d`, registry
+`8381a097c163fad6eb9f4024e33115d133d492039f7d72db487be4619cfc0d81`
+has436 unique keys. Original retirement command exit2 remains exit2; evidence
+exit1 and outer exit1 remain unchanged. Collector12324 fully collected exit0;
+retained collector digest is
+`8fabe131e900528a3314bdc51581aa5b53bfeb5ff436662f65876cdf584bb8b5`.
+Never repoll74970 or repeat its source/pair/stage keys. No task count changes.
+Private-task prepares only a bounded fixture proposal to retain actual offending
+send and recognized membership/joins under the existing cutoff/cap/assertions;
+no source edit or VM grant. Earlier sink proposal
+`/private/tmp/m7-owner-group-intermediate-witness-proposal-20261006-v1.md` is
+`3b24f24cc8e7fc8d3e8494dc0f735efa5cb651916d5ca67a6671ac32cb584369`.
+Intermediate branch and floor proofs remain open. Restore admission stays
+disabled pending its separate unanswered question.
+
 ROOT VM RUNNING, 2026-10-06: original outer handle74970 owns the sole
 verification VM. Collect that original handle to terminal EOF/wait before any
 other VM grant; no worker grant exists. Source remains frozen clean
