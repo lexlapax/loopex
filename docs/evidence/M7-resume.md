@@ -27,23 +27,53 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current proof, execution and source ownership
 
-CURRENT ACTIVE FORMATTER, 2026-10-06: root owns the sole verification VM
-for one five-file current/floor formatter campaign at clean combined c63d.
-Original outer handle 46796 was launched once; root alone collects it.
+CURRENT COLLECTED FORMATTER, 2026-10-06: original root handle 46796 is
+fully collected, exit 0 after 46.438 seconds. All eleven stages passed, including
+five complete-file NON_LINE_AST_EQUAL rows and current/floor formatting. Clean
+formatter child `edee20723046382afe07b2199d4e948ab99f9caa` has sole parent
+c63d; four of five owned files changed only in formatting. Root verified all
+73 retained artifacts, 46 actual/Git kind/mode/blob source records, eleven raw
+EOF/wait/status/original PID-group joins and eleven unique consumed keys.
+All original PIDs and groups are absent. The verification VM slot is free.
+No compiler or tests ran; no runtime PASS follows from formatting.
+
 Enabled `M7/successive-format-runner-20261006-v2`: config
 `224a758b7224b9eddff93c8d05746887f2dc33e11056288ed082cae08cec92c8`,
 root inventory
 `716a98f6ef3a5cdd3c0dbbe0a18fde788362f27a3426a80175e57540521a0c0c`.
-Root verified 26 disabled artifacts, 22 external references, 46 actual/Git
-kind/mode/blob inputs and complete candidate/parent NUL trees. Exact combined
-source review `M7/successive-combined-source-review-c63d-20261006-v1/report.md`
-is `c41cfe7f5d40b6bc0e7c3224f4a9744f737d3dc9cee085d49e9275fbb5f39292`.
-The formatter may create at most one five-path AST-equivalent child and check
-same bytes on both pairs. No compiler, tests, other VM, runtime/control repeat,
-source export or primary rejoin is granted. New output is
-`M7/m7-successive-format-v1`; never reset its fresh registry
-`M7/successive-format-stage-attempt-registry.json`. CLI may continue only its
-isolated test-source fixture work. No new PASS is inferred before collection.
+Exact combined source review
+`M7/successive-combined-source-review-c63d-20261006-v1/report.md` is
+`c41cfe7f5d40b6bc0e7c3224f4a9744f737d3dc9cee085d49e9275fbb5f39292`.
+Output `M7/m7-successive-format-v1`: terminal report
+`dcb052ccaa3cce5b7b84becbf87c7e9b1f12832b15f19216cc89b543dafe28fd`,
+inventory `3edb26ffa3ac4d36e9e10f0b835041d0d75b4ccb63d006425597a9542673eb9a`.
+Collection `M7/successive-format-original-collection-20261006-v1.json` is
+`a55a0847949ea263b2555e4b5227b14a3dfb1b8c8edc7697d3d6f3cdfaceedec`,
+audit reader `M7/successive-format-collection-20261006-v1.py` is
+`2a9db8684f84192a2d31e28f7ef731d9bd715b37cb2d9dbbb315de6feeca1457`.
+Final eleven-key registry
+`M7/successive-format-stage-attempt-registry.json` is
+`b2ded3700c40879f28a5fe738c0a425d7f3103e52878bc025fcf9e22e4d729e7`;
+never reset or repeat completed stages or poll handle 46796 again.
+
+Current-index owns only disabled current-then-floor runtime preparation at
+frozen edee in `/private/tmp/loopex-m7-restore-successive-integration`.
+Expected workflow is 37/0 and ordinary Composition 714/4; IO is 106/3,
+selected long IO 3/106, Local 302/2 and all other lanes remain unchanged,
+with zero skips. Historical negative causal evidence stays at its actual fdfe
+source; no current cleanup timeline is claimed. No VM execution is granted.
+
+Private-task worker owns accepted public lookup source only in
+`/private/tmp/loopex-m7-restore-public-lookup`, branch
+`codex/m7-restore-public-lookup`, based on edee. Its four owned paths are
+composition Restore entry, Restore IO, Local RestoreGuard and new
+restore_lookup_test.exs. The accepted unit has one original owned read worker,
+current/historical/pending/absent/error results and unchanged bounds, without
+claims, writes, reclaim, continuation or activation. It must not call the
+synchronous live Guard reader from lookup's worker. CLI continues only its
+isolated boundary-test source work. Each writer commits before rejoin; no VM,
+formatter/compiler/test, runner, export or rejoin is granted to either writer.
+Root integrates and verifies; original-transaction continuation remains open.
 
 LATEST SOURCE REVIEW AND NEXT PROOFS, 2026-10-06: root read the full independent
 eee5 source review, which found no additional blocker with the known prefix
