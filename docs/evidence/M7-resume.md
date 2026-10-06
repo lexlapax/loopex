@@ -27,6 +27,21 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current proof, execution and source ownership
 
+ROOT VM OCCUPIED by original95286, protocolnativev4 at clean
+`c36433ec6ed152c9dd329ddbf401a756abda1a5f`. Enabled packet
+`M7/protocol-cleanup-native-focused-runtime-runner-20261006-v4`, config
+`d6406cb1dde0b628031162a1ee921fad321ef262b2475c268ac7b31c493c3314`, rootreview
+`0e087bea78cf301fb3163d36bdf7ef2144655e236afeaf506be02d23ba44ee67`.
+Output `M7/m7-protocol-cleanup-native-focused-runtime-v4`; complete705-key seed
+from retirementv5. Root read independent review and verified its actual204-entry
+SHA256SUMS index,52 packet artifacts,59 actual/Git sources and component proofs.
+Sixteen prospective stages78 cases per pair; no runtime result yet. Collect
+original95286 before any other VM grant; no same-source retry or source child.
+Primary retirement integration `7621cb08` is pushed. Checklist remains original
+78/95/6 and added300/39. Core authored-bounds writer continues in isolation;
+generation five-path formatter packet is sealed and independently audited in
+parallel, all its execution gates closed. Earlier occupancy records are history.
+
 ROOT VM FREE after original93010 fully collected
 PASS_FOCUSED_RETAINED_SOURCE_RETIREMENT_ONLY187.704s/18stages at clean
 `a4b14867951a31fbab7f820fc4380493b216456e`. All99cases eachpair pass with
