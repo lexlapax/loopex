@@ -649,7 +649,9 @@ defmodule Loopex.Executor.Local.RestoreGuard do
     {:ok, descriptor} = :file.open(String.to_charlist(path), [:raw, :binary, :read])
 
     try do
-      {:ok, record} = :file.read_file_info(descriptor)
+      # Concept: descriptor and path identities use the same timestamp representation.
+      # Technical depth: File.lstat defaults to universal time; raw reads default to local.
+      {:ok, record} = :file.read_file_info(descriptor, time: :universal)
       ensure!(file_identity(File.Stat.from_record(record)) == file_identity(before))
 
       bytes =

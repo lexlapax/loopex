@@ -978,7 +978,7 @@ defmodule LoopexComposition.RestoreWorkflowTest do
     second = next_cut(first, context.root)
     plan = %{second.plan | "prior_restore_count" => 64}
     assert {:ok, _} = RestoreCodec.encode(:plan, plan)
-    owned = launch(plan, {:restore_phase, "claim"})
+    owned = launch(plan, :restore_phase)
     guardian = owned.guardian
     worker = owned.worker
     reference = owned.reference
@@ -1214,7 +1214,7 @@ defmodule LoopexComposition.RestoreWorkflowTest do
     for {root, baseline} <- backups, do: assert(manifest(root) == baseline)
     next = next_cut(last, context.root, ["l"])
     assert next.plan["prior_restore_count"] == 64
-    owned = launch(next.plan, {:restore_phase, "claim"})
+    owned = launch(next.plan, :restore_phase)
     guardian = owned.guardian
     worker = owned.worker
     reference = owned.reference
