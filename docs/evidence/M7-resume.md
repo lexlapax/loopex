@@ -43,12 +43,14 @@ Fresh output is `M7/m7-lineage-boundary-success-v1`. Grant covers one
 successors. Workflow is 39/0, ordinary Composition 716/4; all other lanes
 retain their populations and bounds, zero skips. No formatter, historical
 negative/consumer repeat, provider, full-fast/release, Linux, export or rejoin.
-Root alone launches and collects the original handle. No runtime result yet.
+Root original handle 89580 is ACTIVE and exclusively owns the VM slot;
+root alone polls and collects it. Current dev compilation and all five gates
+passed; test compilation is underway. No workflow/runtime PASS is claimed.
 Disabled v3's earlier metadata-selector authoring failures remain separately
 retained; they started no VM and changed no product source.
 
 Public lookup inspection found five source defects at frozen f470; report
-`/private/tmp/loopex-m7-public-lookup-source-inspection-f470f3e6-20261006-v1/report.md`
+`M7/public-lookup-source-inspection-f470f3e6-20261006-v1/report.md`
 is `0dcf12073add613d875e6e646117ee5e5cc666f52e43ca3874ed9edb32e434a0`, inventory
 `83c0b90e047f519b28301dc28bdc61e358d563f4ac89130810a6dccdfcf404c1`.
 They concern ledger capture identity, cumulative physical validation under
@@ -70,6 +72,12 @@ It pins 35 current Core/authority inputs and three ordinary witness cases;
 all grants/output/registry remain unset. The template's unavailable restore
 references and first metadata-authoring failure are retained honestly.
 Root review and execution remain pending behind the runtime slot.
+Current-index owns independent read-only inspection of this disabled packet;
+no execution grant is implied. Its source inspection of the logger delta
+is now retained byte-exact at
+`M7/private-task-logger-producer-inspection-f04b8f63-20261006-v1`, same
+report/inventory digests as recorded below. All predecessor reports remain
+unchanged. Primary source and the frozen verification source remain clean.
 Task totals remain unchanged; no source-only proof row was closed.
 
 BOUNDARY FORMATTER COLLECTED, 2026-10-06: root original handle 30821 is
