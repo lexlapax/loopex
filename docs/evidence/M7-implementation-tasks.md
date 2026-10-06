@@ -54,6 +54,14 @@ The Core correction adds three causal controls while preserving all old assertio
 added300/39 remain unchanged. Exact collection hashes and live ownership are in
 the restart checkpoint. Earlier paragraphs remain historical.
 
+Root now retains clean combined boundary candidate9acf03a3:70unit paths,
+46Elixir, all configure/compact/run/answer dormant prerequisites plus the narrow
+Core corrections. Independent Core review clears the fixture module correction;
+prospectiveCore318 includes three additional causal controls. Whole candidate
+formatting/native proof is pending. Prefix fixture correctionf2d9bae9 adds four
+physical controls,25prospective cases, under independent source review. No tally
+changes or runtime PASS follows; restart checkpoint carries exact identities.
+
 Subsequent verification retained original4121 as FAILED at `9d744079`: current
 identity/dev/test compilation pass, generation install20/21 with one compound
 closure/payload assertion failure; prefix, adjacent and floor stages did not

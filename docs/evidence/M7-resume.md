@@ -28,7 +28,7 @@ physical restore implementation; it does not waive any full-history proof.
 ### Current work and restart order
 
 Continue the existing ACTIVE unlimited goal on `m7`. Do not create another goal.
-Primary previous pushed checkpoint is `16e81da7`; this commit supersedes its
+Primary previous pushed checkpoint is `c4b096ac`; this commit supersedes its
 resume record. Historical detail remains at
 `bdc88a05:docs/evidence/M7-resume.md` and in the task ledger.
 
@@ -89,41 +89,76 @@ inventory `090366fd050eea14585b47807e028264e8a593f4572ce3d7d95132dd373d855b`.
 Never repoll31620,4121 or47417. Native verification must consume both exact final
 formatting results rather than repeating their keys.
 
+Current conditional combined boundary source is clean
+`9acf03a38dc970d7cc6152f49b4c293d9b57b507` in
+`/private/tmp/loopex-m7-current-boundary-rejoin`, branch
+`codex/m7-current-boundary-rejoin`. It contains70 unit paths versus
+`8be2ce96197d0e894f525854329d89f71ca7298f`:46 Elixir and24 other paths.
+No primary owned baseline collides. Root composed both reviewed ingress leaves
+as16 literal new files plus four literal helper insertions; removing both helper
+blocks reconstructs both complete f4 parent adapters. E24 composition then
+received the four literal b7 Core files at82102865, followed by one fixture module
+qualification correction at9acf. No parser/format/compiler/test has run for9acf.
+
+Core leaf b7b7d06e7ad8a30b7d803a5e2e9a14143bd7bb6b remains source-blocked:
+its new fixture called absent Loopex.ToolDefinition. Root's one-token correction
+uses existing LoopexProtocol.ToolDefinition. Independent b7 review is immutable:
+`/private/tmp/loopex-m7-core-native-correction-independent-review-b7b7d06e-20261006-v1`,
+report `a4deb8c1eff3d2f8d269a8348cb9842bd5d8ebb73f2aa0f3ed70df7f47c1d9b7`,
+index `8005fc20f949b9e77d4d234c22394854a79fb1c02e33356d61bff23c5e46da2c`.
+Root read full report and rehashed120 artifacts. Independent Core-only9acf addendum
+clears that source blocker and carries the transaction/preflight/unknown review:
+`/private/tmp/loopex-m7-core-native-correction-independent-review-9acf03a3-20261006-v1`,
+report `9d682351802883f891f4b72dfc1a5530bcf45745805c992d4f567f63a55828df`,
+index `12bebdbdf8d71b28ef2704899a1cacc384a943ff0b17cbff8d67e98b290dd81d`.
+Root read full report and rehashed55 artifacts. Prospective318Core, including
+three new causal cases; all old assertions/bounds remain under exact inverses.
+This is source readiness, not runtime PASS or coordinated generation activation.
+
 Source ownership, all separate worktrees and source-only agents:
 
-- `authored_bounds_review` implements the narrow2817 corrections in
-  `/private/tmp/loopex-m7-core-native-failure-correction`, branch
-  `codex/m7-core-native-failure-correction`, exactd6 base. Four paths: Coordinator,
-  State, authored-deadline fixture and context-admission fixture. The configured
-  session test stays literal. Actual UTC expiry may prefix the existing expiry
-  row before deadline terminal in the same proposal; monotonic-only expiry keeps
-  truthful cancellation. Three additional causal cases make prospective318Core.
-  No new schema, deadline extension, assertion weakening or extra dispatch.
-  Original source audit is sealed at
-  `/private/tmp/loopex-m7-core-configure-native-failure-audit-d6afe045-20261006-v1`,
-  report `65dc5dd82d8d1210fc96a94a02736bd8cf34da2358ab71fb0a0cd1027c15a07a`,
-  index `0d2eb075822e5bbb5bb55cecc7c1d5ee31245fafd28274608267a0c6d5b6b929`.
-  Root read full report and rehashed120 artifacts. No correction proof yet.
-- `private_task_causal_resume` diagnoses the6 restore prefix failures at frozen
-  f308 in `/private/tmp/loopex-m7-generation-prefix-failure-audit-f3086bdd-20261006-v1`.
-  No source mutation or retry; distinguish payload observation and refusal precedence.
-  Its answer independent source review found no blocker at exactb9679df7:
-  `/private/tmp/loopex-m7-answer-ingress-independent-review-b9679df7-20261006-v1`,
-  report `5d31881facbdd639d52a87661a50ad3a2f8e9cbf124a62bb3205f7ad12e998e3`,
-  active inventory-v2 `21db09342c916d3afcd5317b80893512c571c5a095d1fa45ae63545de2fbf18f`.
-  Root read full report/addendum and rehashed8 indexed files. All304 vectors,
-  11 prospective cases, whole helper inverses/old tests remain source evidence only.
-- `restore_prefix_source_audit` re-reviews root's narrow run-vector correction
-  at clean65a552c3, sole2e child in `/private/tmp/loopex-m7-run-vector-correction`.
-  Four shared lone-surrogate values become U+FFFD; only the vector and two hash
-  pins change. Node direct malformed-string control remains literal. New vector
-  SHA `a59eeb61590d2fad71a3e864cb511c649e0d126148df1edc36726a1afb18756c`.
-  Its initial blocking review remains immutable at
-  `/private/tmp/loopex-m7-run-ingress-independent-review-2e30dd74-20261006-v1`,
-  report `ba720997de864e8547f2ceb8e2ba2269b88360708fcc39e35c0f2c9e7f59f23d`,
-  index `54fa4d2753e1bf878913636587d75cf79f936f4dd7a94ecef55cbcc3ccb06c89`.
-  Root read full report and rehashed71 artifacts. Dormant run leaf has576 vectors,
-  12 prospective cases and no runtime/route activation.
+- `authored_bounds_review` authors only the disabled whole70/46 boundary formatter
+  packet at `/private/tmp/loopex-m7-current-boundary-format-runner-9acf03a3-20261006-v1`.
+  Root owns frozen9acf. Reuse literal Core/configure formatter engine, all46
+  whole-file ASTs and both supported same-final-source formatting results,
+  maximum one sole confined child. All execution/review/grant/output/registry gates
+  remain unset until root independent admission. Its b7 author packet remains
+  explicitly source-blocked at
+  `/private/tmp/loopex-m7-core-native-failure-correction-source-b7b7d06e-20261006-v1`,
+  report `a5569cdbe2871221b2949530d82da3d46439e4b75f40a7270c8e7240eebcea7c`,
+  index `e1212b8f8fde179da89dc43bef0fcce33fb82c37f490ec3f1f0923d44f1ee057`.
+- `private_task_causal_resume` implements/seals only the prefix fixture correction
+  in `/private/tmp/loopex-m7-generation-prefix-fixture-correction`, branch
+  `codex/m7-generation-prefix-fixture-correction`, solef308 childf2d9bae9.
+  One test path; mirror passing install's narrow physical projection, preserve
+  both generation exclusions and all old image/claims/no-handoff/joins/bounds.
+  Two stale private-code singletons change to actual first-stage codes; public
+  post-intent unknown contract stays unchanged. Four physical controls add25
+  prospective prefix cases. No runtime proof. Its sealed source diagnosis is
+  `/private/tmp/loopex-m7-generation-prefix-failure-audit-f3086bdd-20261006-v1`,
+  report `8e224a59913d0f1ec0c7cc95fad825b17239123e674d9120e7fde4143594e26f`,
+  inventory `3d4bb51d59a69ce726c55cb91fea7bf0db7c24caffaedc3784b2a5f0f84006f5`.
+  Root read full report and rehashed7 indexed artifacts.
+- `restore_prefix_source_audit` independently reviews that exactf2 prefix child in
+  `/private/tmp/loopex-m7-generation-prefix-correction-independent-review-f2d9bae9-20261006-v1`.
+  No source mutation; bind actual two-ledger/role projection exemptions, foreign
+  file/directory/hardlink controls, all prior assertions and unchanged cutoffs.
+
+Reviewed answer leaf b967 source has no blocker; root read full report/addendum
+and rehashed8 active index entries at
+`/private/tmp/loopex-m7-answer-ingress-independent-review-b9679df7-20261006-v1`,
+report `5d31881facbdd639d52a87661a50ad3a2f8e9cbf124a62bb3205f7ad12e998e3`,
+active inventory-v2 `21db09342c916d3afcd5317b80893512c571c5a095d1fa45ae63545de2fbf18f`.
+Root read full corrected-run review/rehashed73 entries at
+`/private/tmp/loopex-m7-run-ingress-correction-independent-review-65a552c3-20261006-v1`,
+report `f4812dcea7ce5155a42414630467ff6cfe336456bd8fec12b3ebf00e81a6d5ab`,
+index `7e8f74f1e778af2146faf2e734785fe76bb4c31b40a69b6cf32bf78553552be0`.
+Run leaf `65a552c3bb294c426397d277ff9bb53d7dc73a18` is sole2e child; its four
+shared request-ID negatives use valid U+FFFD, two hash pins update, Node's direct
+lone-surrogate check remains literal.576 vectors/12 prospective cases remain.
+The original blocked2e review is retained, never executed. All leaf routes and
+manifests stay dormant; runtime policy/producer/controller and whole generation
+proofs remain separate.
 
 Frozen dormant answer leaf is `b9679df77eb93ad452fd567ab34f99dcf27cdc3f`,
 solef4 child in `/private/tmp/loopex-m7-interaction-answer-ingress`. Author packet
