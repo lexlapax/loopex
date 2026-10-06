@@ -678,6 +678,12 @@ defmodule LoopexComposition.Restore.IO do
     end)
 
     require_source_absent(root)
+
+    Enum.each(ancestors, fn {path, identity} ->
+      if directory_identity(manifest_stat(path)) != identity,
+        do: throw({:io_error, :source_changed})
+    end)
+
     {:ok, ancestors}
   end
 

@@ -628,6 +628,71 @@ defmodule LoopexComposition.RestoreWorkflowTest do
     exact_joins(owned)
   end
 
+  test "lost final second absence cannot admit root completion below a missing captured parent",
+       context do
+    parent = Path.join(context.root, "source-parent")
+    File.mkdir!(parent)
+    fixture = context.root |> actual_cut(parent) |> lose_source()
+    captured = placement(parent)
+    owned = launch(fixture.plan, :source_absence)
+    {id, events} = hold_absence(owned, 9, 0, [])
+    assert Enum.count(events, &match?({:acknowledged, _, :source_absence, :error}, &1)) == 9
+    assert Enum.count(events, &match?({:issued, _, :source_absence}, &1)) == 10
+    assert {:issued, ^id, :source_absence} = hd(events)
+    assert Enum.count(events, &match?({:issued, _, {:restore_phase, "destination_proofs"}}, &1)) == 1
+    refute Enum.any?(events, &match?({:issued, _, {:restore_phase, "claim_release"}}, &1))
+    root_admin = Path.join(fixture.destination, ".loopex-restore/lineage/00000001")
+    committed = Path.join(root_admin, "committed")
+    assert File.lstat(committed) == {:error, :enoent}
+    retained =
+      for path <-
+            [Path.join(root_admin, "intent"), Path.join(root_admin, "source-retirement")] ++
+              for(
+                declaration <- fixture.plan["ledgers"],
+                suffix <- ["generation", "restore-lineage/00000001/committed"],
+                do: Path.join([fixture.destination, declaration["relative_root"], suffix])
+              ),
+          into: %{} do
+        assert File.regular?(path)
+        {path, File.read!(path)}
+      end
+
+    moved = parent <> "-captured"
+    File.rename!(parent, moved)
+    assert File.lstat(parent) == {:error, :enoent}
+    assert File.lstat(fixture.source) == {:error, :enoent}
+    assert Map.drop(placement(moved), ["expanded_root"]) == Map.drop(captured, ["expanded_root"])
+    send(owned.guardian, {:proceed, owned.reference, id})
+    {result, events} = finish(owned, events)
+    assert {:joined,
+            {:ok, %{restore_result: {:commit_unknown, "inventory_unavailable"}, release_claims: []}},
+            evidence} = result
+    assert evidence.restore == %{phase: "destination_proofs", intent: true}
+    assert evidence.claim_count == 1 and evidence.opens == evidence.closes
+    assert evidence.work_cutoff == owned.work_cutoff
+    [{:stopping, :complete, stop, cutoff}] =
+      for {:stopping, :complete, _, _} = event <- events, do: event
+    assert cutoff == stop + max(10_000, @grace + 2_000)
+    assert evidence.cleanup_cutoff == cutoff
+    assert Enum.count(events, &match?({:acknowledged, _, :source_absence, :error}, &1)) == 10
+    refute Enum.any?(events, &match?({:terminal_release_installed, _}, &1))
+    exact_joins(owned)
+    assert File.lstat(committed) == {:error, :enoent}
+    for {path, bytes} <- retained, do: assert(File.read!(path) == bytes)
+    [source_claim, destination_claim] = claims(fixture.plan)
+    assert File.lstat(source_claim) == {:error, :enoent}
+    assert File.dir?(destination_claim)
+    assert File.lstat(parent) == {:error, :enoent}
+    assert File.lstat(fixture.source) == {:error, :enoent}
+    assert manifest(fixture.backup) == fixture.baseline
+    assert {:error, :restore_incomplete} = RestoreGuard.state(fixture.destination)
+    for declaration <- fixture.plan["ledgers"] do
+      assert {:error, {:ledger_unavailable, :restore_incomplete}} =
+               Ledger.prepare(Path.join(fixture.destination, declaration["relative_root"]),
+                 declaration["executor_identity"], @grace)
+    end
+  end
+
   for dependency <- [:receipt, :artifact, :resource] do
     test "lost backup missing historical #{dependency} refuses before intent", context do
       fixture = actual_cut(context.root)
@@ -755,16 +820,17 @@ defmodule LoopexComposition.RestoreWorkflowTest do
   defp hold_absence(owned, wanted, completed, events) do
     guardian = owned.guardian
     reference = owned.reference
+    worker = owned.worker
     tag = owned.tag
     receive do
-      {:restore_io, ^guardian, _worker, ^reference, {:issued, id, :source_absence} = event} ->
+      {:restore_io, ^guardian, ^worker, ^reference, {:issued, id, :source_absence} = event} ->
         if completed == wanted do
           {id, [event | events]}
         else
           send(guardian, {:proceed, reference, id})
           hold_absence(owned, wanted, completed, [event | events])
         end
-      {:restore_io, ^guardian, _worker, ^reference, {:acknowledged, _, :source_absence, :error} = event} ->
+      {:restore_io, ^guardian, ^worker, ^reference, {:acknowledged, _, :source_absence, :error} = event} ->
         hold_absence(owned, wanted, completed + 1, [event | events])
       {:restore_io, ^guardian, _worker, ^reference, event} ->
         hold_absence(owned, wanted, completed, [event | events])
