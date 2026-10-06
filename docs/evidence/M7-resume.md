@@ -53,7 +53,10 @@ reviewed runnerfd8781209e017fe2973943684ab9efa0b48e4a7015a4509a486f1ba82b1875e6,
 fresh siblingM7/resource-capture-audit-execution-20261005-v3. Current identity
 and formatter AST checks pass, formatter delta empty. Current dev/test compile
 47.474s/47.136s, focused52/2excluded/0skipped21.261s and adjacent33/0/0
-32.301s pass; ordinary Composition is running. Native worktree and merged
+32.301s pass; ordinary Composition623/3/0 passes334.240s and owned IO
+long2/52/0 passes21.751s. Floor compilation35.190s/34.192s and focused52/2/0
+20.893s, adjacent33/0/0 32.265s pass. Floor ordinary and long proof remain
+pending. Native worktree and merged
 local/remote branches are removed after the proved source/evidence push at
 9eedace0. The immutable native evidence remains outside the checkout.
 
@@ -64,7 +67,18 @@ explicit schedule uses a captured1,000ms cutoff, so source-only timed reads
 are authorized in the added case. Preserve the existing seven live child-ID
 preconditions, exact empty records/model/executor assertions, all18 old cases,
 joins/trace/Logger/8,192-row bounds, and production APIs. Worker
-private_task_causal_resume prepares a clean child and gated v2 packet, no VM.
+private_task_causal_resume committed the exact17-insert/5-delete correction at
+2ca493a11729b5359dc15ecd4ad4ce25b7ff90af, clean direct child of0f6abc76,
+and pushed the source branch. Root read the complete delta and verified5 source
+packet artifacts,7 runner artifacts,13 actual/Git source records/modes,
+identical helpers and pin-only runner. Reviewed queued v2 runner digest
+d95881d3f95c77a58c5953bb51bfceb5bae2434a6ad76d3026b455d1f257aa14,
+completion a6ad7ae570c1ffa19318f9772631063ce38d7acdb1b007604b7b20613e5cdeea,
+in siblingM7/runtime-preparation-startup-runner-2ca493a1-v2. Source packet
+completion952cb5d4fff2ed0cac71cc194cb0583e9c343a810f3b05f70078e3a58aaedff2.
+V1 packets remain unexecuted and immutable. Expected18 focused/1 excluded and
+Core1,314/10, zero skips, are not results. Joining this one case after the
+native ten would make the next combined Core population1,324/10. No VM grant.
 Successful whole-case cutoff compliance is required; synchronous existing
 constructor/Logger internals do not establish a universal failed-fixture
 wall-time bound. No prior runner or test failure is claimed for unexecuted v1.
