@@ -27,6 +27,54 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current proof, execution and source ownership
 
+ROOT VM RUNNING, 2026-10-06: original86524 is the sole root verification VM
+handle for diagnostic-test formatter only. Initial frozen source is
+6d5f0fb51694b25457de73b3b82be75c91c2ca92, one-file child of e2. Source report
+`/private/tmp/loopex-m7-retirement-unexpected-source-6d5f0fb5-v1/report.md` is
+`213a2937cbaa97d6bb3aa596670a0cd5fb3df44ffe8ea0aeb8a604ee222ef0aa`, inventory
+`9a3993f7e549b79713bc62891ce0c180ef6dcccaf086c613b3a8bb1bf350dc39`.
+Root verified9 source artifacts,27 disabled formatter artifacts,21 external
+references and134 actual/Git records, exact whole-parent test reconstruction
+and literal formatter function bodies. Enabled
+`M7/retirement-unexpected-format-runner-20261006-v1` has config
+`8ce75abba9cec2cee55b4de312fa29ee6b455d69ecb487cae540a4adb6ce386b`, inventory
+`69e1e289199ed123b97eefe7cb3a529cc44f7ccd80701b45d289dbade20d297d` (59 artifacts).
+Output `M7/m7-retirement-unexpected-format-v1`; fresh
+`M7/retirement-unexpected-format-stage-attempt-registry.json` starts436 keys.
+Root source-review report is
+`37ffbfdd17decc20f34a7f1d14a1cff47304cdd42a9185bb76a30a546a7f73ff`.
+Author43910 fully collected exit0. Automatic review admitted only this existing
+Core test formatting scope; rejected restore admission remains disabled.
+Collect original86524 completely before another VM grant. At most one AST-equal
+owned-test formatter child, no runtime runner/tests or unknown-message acceptance.
+
+INDEPENDENT SOURCE WORK, 2026-10-06: current-index owns only
+apps/loopex_composition/lib/loopex_composition/restore/workflow.ex and a new pure
+canonical reconstruction test in `/private/tmp/loopex-m7-restore-retained-construction`,
+branch codex/m7-restore-retained-construction, original parent3d79. This is only
+the accepted ADR0051 unit2 allocation/construction split with exact original
+retained candidates and canonical intent byte equality. Preserve the existing
+fresh output; no new epoch/preimage, public receipt/facade, claim handoff,
+publication, arbitrary prefix implementation or persistent grammar. Root read
+unit2 plan f91f27fead637a5618ae91983c42028b39c22a2f34a7b8dbe59f19c4c0009e59.
+Source-only local commit/audit, no parser/VM/test/formatter, runtime admission,
+private push/export or task completion is granted. Existing frozen3d79 restore
+runner and unanswered verification-gate choice remain separate.
+
+NEXT INTERNAL CHANGE, 2026-10-06: root reviewed and authorized the bounded
+four-clause failure diagnostic proposal
+`/private/tmp/m7-owner-group-unexpected-trace-proposal-20261006-v1.md`, digest
+`a323cca22451edb66a0dd8a60a434ef7097ba0cdb4bffb08f3d87cd9e3e18342`.
+Private-task owns only owner_group_retirement_test.exs in its existing separate
+writer and may commit one child of e2. Bind the actual unexpected row, preserve
+each original failure label and append bounded inspected evidence, marking
+omitted tails unavailable. All accepting clauses, cases, cutoff/cap, schedule,
+joins/fence, production and105 older files stay literal. No successful sink or
+coverage claim is added. The worker prepares only a disabled one-file formatter
+with436-key seed; no worker VM grant or runtime runner yet. Root retains review,
+execution and integration. This diagnoses the observed failure without relaxing
+what the test proves; it requires no new maintainer contract decision.
+
 LATEST COLLECTION, 2026-10-06: root original74970 is fully collected
 FAIL_OR_UNAVAILABLE after264.321s/15 current stages. The sole verification VM
 is FREE. Source e2b835d745ff9c2c3d02c2d4841503a18e9aac09 remains clean/unchanged.
