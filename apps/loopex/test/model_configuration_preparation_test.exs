@@ -509,9 +509,15 @@ defmodule Loopex.ModelConfigurationPreparationTest do
         GenServer.call(f.runtime.supervisor, :which_children, startup_left(cutoff))
         |> Map.new(fn {id, pid, _type, _modules} -> {id, pid} end)
 
-      for id <- [Loopex.ToolRegistry, Loopex.Runtime.Control, Loopex.Runtime.Workers,
-                  Loopex.Runtime.OwnerGroups, Loopex.Runtime.SessionSupervisor,
-                  Loopex.Runtime.EventDispatcher, Loopex.Trace] do
+      for id <- [
+            Loopex.ToolRegistry,
+            Loopex.Runtime.Control,
+            Loopex.Runtime.Workers,
+            Loopex.Runtime.OwnerGroups,
+            Loopex.Runtime.SessionSupervisor,
+            Loopex.Runtime.EventDispatcher,
+            Loopex.Trace
+          ] do
         assert is_pid(Map.get(resolved, id))
       end
 
@@ -521,12 +527,16 @@ defmodule Loopex.ModelConfigurationPreparationTest do
       startup_monitor(key, group)
       %{owner_workers: workers} = :sys.get_state(owner, startup_left(cutoff))
       startup_monitor(key, workers)
+
       assert %{workers: ^workers, coordinator: ^owner, monitor: group_owner_monitor} =
                :sys.get_state(group, startup_left(cutoff))
+
       actors = MapSet.new([owner, group, workers])
 
       {collector, collector_monitor} =
-        spawn_monitor(fn -> startup_acquire(observer, owner, group, workers, actors, cutoff, []) end)
+        spawn_monitor(fn ->
+          startup_acquire(observer, owner, group, workers, actors, cutoff, [])
+        end)
 
       startup_track(key, collector_monitor, collector)
       Process.put({key, :resources}, %{collector: collector, session: nil, filters: filters})
@@ -535,18 +545,32 @@ defmodule Loopex.ModelConfigurationPreparationTest do
 
       assert [] == GenServer.call(workers, :which_children, startup_left(cutoff))
       startup_install_trace(session, owner, group, workers)
-      enabled = Keyword.update!(filters, :logger_translator, fn {callback, config} ->
-        {callback, %{config | sasl: true}}
-      end)
+
+      enabled =
+        Keyword.update!(filters, :logger_translator, fn {callback, config} ->
+          {callback, %{config | sasl: true}}
+        end)
+
       :ok = :logger.set_primary_config(:filters, enabled)
-      :ok = :logger.add_primary_filter(filter, {&__MODULE__.observe_startup_report/2, {observer, workers}})
+
+      :ok =
+        :logger.add_primary_filter(
+          filter,
+          {&__MODULE__.observe_startup_report/2, {observer, workers}}
+        )
+
       debug = {observer, owner, nonce, cutoff, :before_start}
       :ok = :sys.install(workers, {nonce, &startup_barrier/3, debug}, startup_left(cutoff))
 
-      {caller, caller_monitor} = spawn_monitor(fn ->
-        send(observer, {:startup_command_result, nonce, self(),
-          Loopex.command(f.attachment, configure("pre-start-owner-loss"))})
-      end)
+      {caller, caller_monitor} =
+        spawn_monitor(fn ->
+          send(
+            observer,
+            {:startup_command_result, nonce, self(),
+             Loopex.command(f.attachment, configure("pre-start-owner-loss"))}
+          )
+        end)
+
       startup_track(key, caller_monitor, caller)
       assert_receive {:startup_blocked, ^nonce, ^workers}, startup_left(cutoff)
       Process.exit(owner, :kill)
@@ -559,34 +583,66 @@ defmodule Loopex.ModelConfigurationPreparationTest do
       # Technical depth: accept noproc only for this test monitor, never in place
       # of the child's own exact owner-monitor DOWN and compound exit below.
       child_monitor = startup_monitor(key, child)
-      assert_receive {:startup_child_exited, ^collector, ^child, {:shutdown, :noproc}}, startup_left(cutoff)
+
+      assert_receive {:startup_child_exited, ^collector, ^child, {:shutdown, :noproc}},
+                     startup_left(cutoff)
+
       assert_receive {:DOWN, ^child_monitor, :process, ^child, child_reason}
-                     when child_reason in [{:shutdown, :noproc}, :noproc], startup_left(cutoff)
+                     when child_reason in [{:shutdown, :noproc}, :noproc],
+                     startup_left(cutoff)
+
       startup_joined(key, child_monitor, child, child_reason)
       assert startup_queued(workers, group, child)
       send(workers, {:startup_release, nonce, :finish})
-      assert_receive {:startup_supervisor_report, ^workers, ^child, {:shutdown, :noproc}, 5_000}, startup_left(cutoff)
+
+      assert_receive {:startup_supervisor_report, ^workers, ^child, {:shutdown, :noproc}, 5_000},
+                     startup_left(cutoff)
+
       assert_receive {:startup_command_result, ^nonce, ^caller, {:error, _}}, startup_left(cutoff)
       assert Agent.get(f.controller, & &1.calls, startup_left(cutoff)) == 0
-      records = GenServer.call(f.store, :inspect_state, startup_left(cutoff)).sessions
+
+      records =
+        GenServer.call(f.store, :inspect_state, startup_left(cutoff)).sessions
         |> Map.get(f.session, %{records: []})
         |> Map.fetch!(:records)
+
       assert Enum.filter(records, &(&1.payload.kind == "session_configuration_admitted_v2")) == []
-      assert (Agent.get(f.model, & &1.seen, startup_left(cutoff)) |> Enum.reverse()) == []
-      assert (Agent.get(f.executor, & &1.jobs, startup_left(cutoff)) |> Enum.reverse()) == []
+      assert Agent.get(f.model, & &1.seen, startup_left(cutoff)) |> Enum.reverse() == []
+      assert Agent.get(f.executor, & &1.jobs, startup_left(cutoff)) |> Enum.reverse() == []
 
       startup_join_set(key, MapSet.new([group, workers, caller]), cutoff)
       :ok = Supervisor.stop(f.runtime.supervisor, :normal, startup_left(cutoff))
+
       for pid <- [f.controller, f.model, f.executor, f.store] do
         :ok = GenServer.stop(pid, :normal, startup_left(cutoff))
       end
-      startup_join_set(key, MapSet.new([f.runtime.supervisor, f.controller, f.model, f.executor, f.store]), cutoff)
+
+      startup_join_set(
+        key,
+        MapSet.new([f.runtime.supervisor, f.controller, f.model, f.executor, f.store]),
+        cutoff
+      )
+
       send(collector, {:startup_finish, observer, session})
       assert_receive {:startup_trace, ^collector, records}, startup_left(cutoff)
-      assert_receive {:DOWN, ^collector_monitor, :process, ^collector, :normal}, startup_left(cutoff)
+
+      assert_receive {:DOWN, ^collector_monitor, :process, ^collector, :normal},
+                     startup_left(cutoff)
+
       startup_joined(key, collector_monitor, collector, :normal)
-      evidence = records ++ [%{"event" => "supervisor_report", "supervisor" => startup_identity(workers),
-        "pid" => startup_identity(child), "reason" => "shutdown:noproc", "shutdown" => 5_000}]
+
+      evidence =
+        records ++
+          [
+            %{
+              "event" => "supervisor_report",
+              "supervisor" => startup_identity(workers),
+              "pid" => startup_identity(child),
+              "reason" => "shutdown:noproc",
+              "shutdown" => 5_000
+            }
+          ]
+
       startup_retain("runtime-startup-chain", evidence)
       startup_assert_chain(records, owner, group, workers, child, group_owner_monitor)
       assert Process.get(key).pending == %{}
@@ -603,34 +659,49 @@ defmodule Loopex.ModelConfigurationPreparationTest do
         Process.unlink(pid)
         Process.exit(pid, :kill)
       end
-      cleanup = try do
-        startup_join_set(key, MapSet.new(Map.values(Process.get(key).pending)) |> MapSet.delete(collector), cutoff)
-        if is_pid(collector) and Process.alive?(collector) do
-          send(collector, {:startup_finish, observer, session})
-          receive do
-            {:startup_trace, ^collector, records} -> startup_retain("runtime-startup-partial", records)
-          after
-            startup_left(cutoff) -> :unproved
+
+      cleanup =
+        try do
+          startup_join_set(
+            key,
+            MapSet.new(Map.values(Process.get(key).pending)) |> MapSet.delete(collector),
+            cutoff
+          )
+
+          if is_pid(collector) and Process.alive?(collector) do
+            send(collector, {:startup_finish, observer, session})
+
+            receive do
+              {:startup_trace, ^collector, records} ->
+                startup_retain("runtime-startup-partial", records)
+            after
+              startup_left(cutoff) -> :unproved
+            end
           end
+
+          startup_join_set(key, MapSet.new([collector]), cutoff)
+          :joined
+        catch
+          _, _ -> :unproved
         end
-        startup_join_set(key, MapSet.new([collector]), cutoff)
-        :joined
-      catch
-        _, _ -> :unproved
-      end
+
       if session != nil, do: :trace.session_destroy(session)
       :logger.remove_primary_filter(filter)
       :ok = :logger.set_primary_config(:filters, filters)
       evidence = Process.delete(key)
+
       startup_retain("runtime-startup-cleanup", %{
         "joined" => Enum.reverse(evidence.joined),
-        "unjoined" => Enum.map(evidence.pending, fn {reference, pid} ->
-          %{"pid" => startup_identity(pid), "monitor" => startup_identity(reference)}
-        end),
+        "unjoined" =>
+          Enum.map(evidence.pending, fn {reference, pid} ->
+            %{"pid" => startup_identity(pid), "monitor" => startup_identity(reference)}
+          end),
         "status" => Atom.to_string(cleanup),
         "cutoff_met" => System.monotonic_time(:millisecond) <= cutoff
       })
+
       Process.delete({key, :resources})
+
       if Process.delete({key, :complete}) do
         assert cleanup == :joined
         assert evidence.pending == %{}
@@ -677,7 +748,10 @@ defmodule Loopex.ModelConfigurationPreparationTest do
   defp startup_identity(pid) when is_pid(pid), do: List.to_string(:erlang.pid_to_list(pid))
   defp startup_identity(ref) when is_reference(ref), do: List.to_string(:erlang.ref_to_list(ref))
   defp startup_reason({:shutdown, :noproc}), do: "shutdown:noproc"
-  defp startup_reason(reason) when reason in [:normal, :shutdown, :noproc, :killed], do: Atom.to_string(reason)
+
+  defp startup_reason(reason) when reason in [:normal, :shutdown, :noproc, :killed],
+    do: Atom.to_string(reason)
+
   defp startup_reason(_), do: "other"
 
   defp startup_monitor(key, pid) do
@@ -694,12 +768,24 @@ defmodule Loopex.ModelConfigurationPreparationTest do
   defp startup_joined(key, reference, pid, reason) do
     state = Process.get(key)
     ^pid = Map.fetch!(state.pending, reference)
-    record = %{"pid" => startup_identity(pid), "monitor" => startup_identity(reference), "reason" => startup_reason(reason), "observed_at_ns" => System.monotonic_time(:nanosecond)}
-    Process.put(key, %{pending: Map.delete(state.pending, reference), joined: [record | state.joined]})
+
+    record = %{
+      "pid" => startup_identity(pid),
+      "monitor" => startup_identity(reference),
+      "reason" => startup_reason(reason),
+      "observed_at_ns" => System.monotonic_time(:nanosecond)
+    }
+
+    Process.put(key, %{
+      pending: Map.delete(state.pending, reference),
+      joined: [record | state.joined]
+    })
   end
 
   defp startup_join_set(key, actors, cutoff) do
-    pending = Map.filter(Process.get(key).pending, fn {_ref, pid} -> MapSet.member?(actors, pid) end)
+    pending =
+      Map.filter(Process.get(key).pending, fn {_ref, pid} -> MapSet.member?(actors, pid) end)
+
     if map_size(pending) > 0 do
       receive do
         {:DOWN, reference, :process, pid, reason} when is_map_key(pending, reference) ->
@@ -711,15 +797,21 @@ defmodule Loopex.ModelConfigurationPreparationTest do
     end
   end
 
-  defp startup_barrier({observer, owner, nonce, cutoff, :before_start},
-         {:in, {:"$gen_call", {owner, _tag}, {:start_task, _args, _restart, _shutdown}}}, _name) do
+  defp startup_barrier(
+         {observer, owner, nonce, cutoff, :before_start},
+         {:in, {:"$gen_call", {owner, _tag}, {:start_task, _args, _restart, _shutdown}}},
+         _name
+       ) do
     send(observer, {:startup_blocked, nonce, self()})
     startup_release(nonce, :start, cutoff)
     {observer, owner, nonce, cutoff, :after_start}
   end
 
-  defp startup_barrier({observer, owner, nonce, cutoff, :after_start},
-         {:out, {:ok, child}, {owner, _tag}, _state}, _name) do
+  defp startup_barrier(
+         {observer, owner, nonce, cutoff, :after_start},
+         {:out, {:ok, child}, {owner, _tag}, _state},
+         _name
+       ) do
     send(observer, {:startup_started, nonce, self(), child})
     startup_release(nonce, :finish, cutoff)
     :done
@@ -736,31 +828,76 @@ defmodule Loopex.ModelConfigurationPreparationTest do
   end
 
   defp startup_install_trace(session, owner, group, workers) do
-    patterns = for reason <- [:normal, :shutdown, :noproc, :killed, {:shutdown, :noproc}] do
-      [
-        {[:_, :_, {:EXIT, :"$1", reason}], [{:is_pid, :"$1"}], []},
-        {[:_, :_, {:DOWN, :"$1", :process, :"$2", reason}], [{:is_reference, :"$1"}, {:is_pid, :"$2"}], []}
-      ]
-    end
+    patterns =
+      for reason <- [:normal, :shutdown, :noproc, :killed, {:shutdown, :noproc}] do
+        [
+          {[:_, :_, {:EXIT, :"$1", reason}], [{:is_pid, :"$1"}], []},
+          {[:_, :_, {:DOWN, :"$1", :process, :"$2", reason}],
+           [{:is_reference, :"$1"}, {:is_pid, :"$2"}], []}
+        ]
+      end
+
     :trace.recv(session, List.flatten(patterns), [])
-    assert :trace.function(session, {:erlang, :monitor, 2}, [
-      {[:process, owner], [], [{:message, {:const, owner}}, {:return_trace}]},
-      {[:process, :"$1"], [{:"=:=", {:self}, workers}, {:is_pid, :"$1"}], [{:message, :"$1"}, {:return_trace}]}
-    ], []) > 0
-    assert :trace.function(session, {DynamicSupervisor, :monitor_child, 1}, [
-      {[:"$1"], [{:"=:=", {:self}, workers}, {:is_pid, :"$1"}], [{:message, :"$1"}, {:return_trace}]}
-    ], [:local]) > 0
-    assert :trace.function(session, {:erlang, :send, 3}, [
-      {[workers, {:system, {group, :_}, {:terminate, :shutdown}}, :_], [], [{:message, {:const, workers}}, {:return_trace}]}
-    ], []) > 0
-    assert :trace.function(session, {:erlang, :unlink, 1}, [
-      {[:"$1"], [{:"=:=", {:self}, workers}, {:is_pid, :"$1"}], [{:message, :"$1"}, {:return_trace}]}
-    ], []) > 0
+
+    assert :trace.function(
+             session,
+             {:erlang, :monitor, 2},
+             [
+               {[:process, owner], [], [{:message, {:const, owner}}, {:return_trace}]},
+               {[:process, :"$1"], [{:"=:=", {:self}, workers}, {:is_pid, :"$1"}],
+                [{:message, :"$1"}, {:return_trace}]}
+             ],
+             []
+           ) > 0
+
+    assert :trace.function(
+             session,
+             {DynamicSupervisor, :monitor_child, 1},
+             [
+               {[:"$1"], [{:"=:=", {:self}, workers}, {:is_pid, :"$1"}],
+                [{:message, :"$1"}, {:return_trace}]}
+             ],
+             [:local]
+           ) > 0
+
+    assert :trace.function(
+             session,
+             {:erlang, :send, 3},
+             [
+               {[workers, {:system, {group, :_}, {:terminate, :shutdown}}, :_], [],
+                [{:message, {:const, workers}}, {:return_trace}]}
+             ],
+             []
+           ) > 0
+
+    assert :trace.function(
+             session,
+             {:erlang, :unlink, 1},
+             [
+               {[:"$1"], [{:"=:=", {:self}, workers}, {:is_pid, :"$1"}],
+                [{:message, :"$1"}, {:return_trace}]}
+             ],
+             []
+           ) > 0
+
     for pid <- [owner, group] do
-      assert :trace.process(session, pid, true, [:call, :arity, :procs, :receive, :monotonic_timestamp]) == 1
+      assert :trace.process(session, pid, true, [
+               :call,
+               :arity,
+               :procs,
+               :receive,
+               :monotonic_timestamp
+             ]) == 1
     end
-    assert :trace.process(session, workers, true, [:call, :arity, :procs, :receive,
-      :monotonic_timestamp, :set_on_first_spawn]) == 1
+
+    assert :trace.process(session, workers, true, [
+             :call,
+             :arity,
+             :procs,
+             :receive,
+             :monotonic_timestamp,
+             :set_on_first_spawn
+           ]) == 1
   end
 
   # Concept: acquire only this supervisor's one async child after the real stop.
@@ -778,15 +915,30 @@ defmodule Loopex.ModelConfigurationPreparationTest do
       {:trace_ts, ^group, :call, {:erlang, :send, 3}, ^workers, at} ->
         record = startup_record("stop_send", group, workers, at)
         startup_acquire(observer, owner, group, workers, actors, cutoff, [record | records])
+
       {:trace_ts, ^group, :return_from, {:erlang, :send, 3}, :ok, at} ->
         assert Enum.any?(records, &(&1["event"] == "stop_send"))
         send(observer, {:startup_stop_enqueued, self(), group, workers})
         record = startup_record("stop_enqueued", group, workers, at)
         startup_acquire(observer, owner, group, workers, actors, cutoff, [record | records])
-      {:trace_ts, ^workers, :spawn, child, {Task.Supervised, :reply, _args}, at} when is_pid(child) ->
+
+      {:trace_ts, ^workers, :spawn, child, {Task.Supervised, :reply, _args}, at}
+      when is_pid(child) ->
         record = startup_record("child_acquired", workers, child, at)
-        startup_collect(observer, owner, group, workers, child, MapSet.put(actors, child),
-          cutoff, [record | records], %{}, nil)
+
+        startup_collect(
+          observer,
+          owner,
+          group,
+          workers,
+          child,
+          MapSet.put(actors, child),
+          cutoff,
+          [record | records],
+          %{},
+          nil
+        )
+
       {:trace_ts, ^workers, :spawn, _child, _mfa, _at} ->
         startup_retain("runtime-startup-partial", Enum.reverse(records))
         exit(:runtime_startup_unexpected_spawn)
@@ -798,34 +950,84 @@ defmodule Loopex.ModelConfigurationPreparationTest do
   end
 
   defp startup_record(event, actor, target, at) do
-    %{"event" => event, "actor" => startup_identity(actor), "target" => startup_identity(target),
-      "at_ns" => System.convert_time_unit(at, :native, :nanosecond)}
+    %{
+      "event" => event,
+      "actor" => startup_identity(actor),
+      "target" => startup_identity(target),
+      "at_ns" => System.convert_time_unit(at, :native, :nanosecond)
+    }
   end
 
-  defp startup_collect(_observer, _owner, _group, _workers, _child, _actors, _cutoff, records, _targets, _fence)
+  defp startup_collect(
+         _observer,
+         _owner,
+         _group,
+         _workers,
+         _child,
+         _actors,
+         _cutoff,
+         records,
+         _targets,
+         _fence
+       )
        when length(records) >= 8_192 do
     startup_retain("runtime-startup-partial", Enum.reverse(records))
     exit(:runtime_startup_trace_limit)
   end
 
-  defp startup_collect(observer, owner, group, workers, child, actors, cutoff, records, targets, fence) do
+  defp startup_collect(
+         observer,
+         owner,
+         group,
+         workers,
+         child,
+         actors,
+         cutoff,
+         records,
+         targets,
+         fence
+       ) do
     receive do
       {:startup_finish, ^observer, session} when fence == nil ->
-        startup_collect(observer, owner, group, workers, child, actors, cutoff, records,
-          targets, :trace.delivered(session, :all))
+        startup_collect(
+          observer,
+          owner,
+          group,
+          workers,
+          child,
+          actors,
+          cutoff,
+          records,
+          targets,
+          :trace.delivered(session, :all)
+        )
+
       {:trace_delivered, :all, reference} when reference == fence and fence != nil ->
         startup_retain("runtime-startup-trace", Enum.reverse(records))
         send(observer, {:startup_trace, self(), Enum.reverse(records)})
+
       frame ->
-        {record, updated} = try do
-          startup_frame(frame, actors, targets, child, observer)
-        catch
-          kind, reason ->
-            startup_retain("runtime-startup-partial", Enum.reverse(records))
-            :erlang.raise(kind, reason, __STACKTRACE__)
-        end
-        startup_collect(observer, owner, group, workers, child, actors, cutoff,
-          [record | records], updated, fence)
+        {record, updated} =
+          try do
+            startup_frame(frame, actors, targets, child, observer)
+          catch
+            kind, reason ->
+              startup_retain("runtime-startup-partial", Enum.reverse(records))
+              :erlang.raise(kind, reason, __STACKTRACE__)
+          end
+
+        startup_collect(
+          observer,
+          owner,
+          group,
+          workers,
+          child,
+          actors,
+          cutoff,
+          [record | records],
+          updated,
+          fence
+        )
     after
       startup_left(cutoff) ->
         startup_retain("runtime-startup-partial", Enum.reverse(records))
@@ -833,63 +1035,145 @@ defmodule Loopex.ModelConfigurationPreparationTest do
     end
   end
 
-  defp startup_frame({:trace_ts, pid, :call, {DynamicSupervisor, :monitor_child, 1}, target, at}, actors, targets, _child, _observer) do
+  defp startup_frame(
+         {:trace_ts, pid, :call, {DynamicSupervisor, :monitor_child, 1}, target, at},
+         actors,
+         targets,
+         _child,
+         _observer
+       ) do
     assert MapSet.member?(actors, pid) and MapSet.member?(actors, target)
-    {startup_record("monitor_child_call", pid, target, at), Map.put(targets, {pid, :monitor_child}, target)}
+
+    {startup_record("monitor_child_call", pid, target, at),
+     Map.put(targets, {pid, :monitor_child}, target)}
   end
 
-  defp startup_frame({:trace_ts, pid, :return_from, {DynamicSupervisor, :monitor_child, 1}, result, at}, actors, targets, _child, _observer) do
+  defp startup_frame(
+         {:trace_ts, pid, :return_from, {DynamicSupervisor, :monitor_child, 1}, result, at},
+         actors,
+         targets,
+         _child,
+         _observer
+       ) do
     assert MapSet.member?(actors, pid)
-    rendered = case result do
-      :ok -> "ok"
-      {:error, {:shutdown, :noproc}} -> "error:shutdown:noproc"
-      _ -> "other"
-    end
-    record = Map.put(startup_record("monitor_child_return", pid, Map.fetch!(targets, {pid, :monitor_child}), at), "result", rendered)
+
+    rendered =
+      case result do
+        :ok -> "ok"
+        {:error, {:shutdown, :noproc}} -> "error:shutdown:noproc"
+        _ -> "other"
+      end
+
+    record =
+      Map.put(
+        startup_record(
+          "monitor_child_return",
+          pid,
+          Map.fetch!(targets, {pid, :monitor_child}),
+          at
+        ),
+        "result",
+        rendered
+      )
+
     {record, targets}
   end
 
-  defp startup_frame({:trace_ts, pid, :call, {:erlang, function, arity}, target, at}, actors, targets, _child, _observer)
+  defp startup_frame(
+         {:trace_ts, pid, :call, {:erlang, function, arity}, target, at},
+         actors,
+         targets,
+         _child,
+         _observer
+       )
        when (function == :monitor and arity == 2) or (function == :unlink and arity == 1) do
     assert MapSet.member?(actors, pid) and MapSet.member?(actors, target)
-    {startup_record(Atom.to_string(function) <> "_call", pid, target, at), Map.put(targets, {pid, function}, target)}
+
+    {startup_record(Atom.to_string(function) <> "_call", pid, target, at),
+     Map.put(targets, {pid, function}, target)}
   end
 
-  defp startup_frame({:trace_ts, pid, :return_from, {:erlang, :monitor, 2}, ref, at}, actors, targets, _child, _observer)
+  defp startup_frame(
+         {:trace_ts, pid, :return_from, {:erlang, :monitor, 2}, ref, at},
+         actors,
+         targets,
+         _child,
+         _observer
+       )
        when is_reference(ref) do
     assert MapSet.member?(actors, pid)
     target = Map.fetch!(targets, {pid, :monitor})
-    record = Map.put(startup_record("monitor_installed", pid, target, at), "monitor", startup_identity(ref))
+
+    record =
+      Map.put(
+        startup_record("monitor_installed", pid, target, at),
+        "monitor",
+        startup_identity(ref)
+      )
+
     {record, targets}
   end
 
-  defp startup_frame({:trace_ts, pid, :return_from, {:erlang, :unlink, 1}, true, at}, actors, targets, _child, _observer) do
+  defp startup_frame(
+         {:trace_ts, pid, :return_from, {:erlang, :unlink, 1}, true, at},
+         actors,
+         targets,
+         _child,
+         _observer
+       ) do
     assert MapSet.member?(actors, pid)
     {startup_record("unlink_return", pid, Map.fetch!(targets, {pid, :unlink}), at), targets}
   end
 
-  defp startup_frame({:trace_ts, pid, :receive, {:DOWN, ref, :process, target, reason}, at}, actors, targets, _child, _observer) do
+  defp startup_frame(
+         {:trace_ts, pid, :receive, {:DOWN, ref, :process, target, reason}, at},
+         actors,
+         targets,
+         _child,
+         _observer
+       ) do
     assert MapSet.member?(actors, pid) and MapSet.member?(actors, target)
-    record = startup_record("down_received", pid, target, at)
-      |> Map.put("monitor", startup_identity(ref)) |> Map.put("reason", startup_reason(reason))
+
+    record =
+      startup_record("down_received", pid, target, at)
+      |> Map.put("monitor", startup_identity(ref))
+      |> Map.put("reason", startup_reason(reason))
+
     {record, targets}
   end
 
-  defp startup_frame({:trace_ts, pid, :receive, {:EXIT, target, reason}, at}, actors, targets, _child, _observer) do
+  defp startup_frame(
+         {:trace_ts, pid, :receive, {:EXIT, target, reason}, at},
+         actors,
+         targets,
+         _child,
+         _observer
+       ) do
     assert MapSet.member?(actors, pid) and MapSet.member?(actors, target)
-    {Map.put(startup_record("exit_received", pid, target, at), "reason", startup_reason(reason)), targets}
+
+    {Map.put(startup_record("exit_received", pid, target, at), "reason", startup_reason(reason)),
+     targets}
   end
 
   defp startup_frame({:trace_ts, pid, :exit, reason, at}, actors, targets, child, observer) do
     assert MapSet.member?(actors, pid)
+
     if pid == child do
       notice = if reason == {:shutdown, :noproc}, do: {:shutdown, :noproc}, else: :other
       send(observer, {:startup_child_exited, self(), child, notice})
     end
-    {Map.put(startup_record("actor_exit", pid, pid, at), "reason", startup_reason(reason)), targets}
+
+    {Map.put(startup_record("actor_exit", pid, pid, at), "reason", startup_reason(reason)),
+     targets}
   end
 
-  defp startup_frame({:trace_ts, pid, :spawned, parent, {Task.Supervised, :reply, _args}, at}, actors, targets, child, _observer)
+  defp startup_frame(
+         {:trace_ts, pid, :spawned, parent, {Task.Supervised, :reply, _args}, at},
+         actors,
+         targets,
+         child,
+         _observer
+       )
        when pid == child do
     assert MapSet.member?(actors, parent)
     {startup_record("child_spawned", pid, parent, at), targets}
@@ -898,8 +1182,14 @@ defmodule Loopex.ModelConfigurationPreparationTest do
   defp startup_frame({:trace_ts, pid, event, target, at}, actors, targets, _child, _observer)
        when event in [:link, :unlink, :getting_linked, :getting_unlinked] do
     assert MapSet.member?(actors, pid)
-    record = %{"event" => Atom.to_string(event), "actor" => startup_identity(pid),
-      "selected_target" => MapSet.member?(actors, target), "at_ns" => System.convert_time_unit(at, :native, :nanosecond)}
+
+    record = %{
+      "event" => Atom.to_string(event),
+      "actor" => startup_identity(pid),
+      "selected_target" => MapSet.member?(actors, target),
+      "at_ns" => System.convert_time_unit(at, :native, :nanosecond)
+    }
+
     {record, targets}
   end
 
@@ -909,7 +1199,8 @@ defmodule Loopex.ModelConfigurationPreparationTest do
     {startup_record(Atom.to_string(event), pid, pid, at), targets}
   end
 
-  defp startup_frame(_frame, _actors, _targets, _child, _observer), do: exit(:runtime_startup_trace_shape)
+  defp startup_frame(_frame, _actors, _targets, _child, _observer),
+    do: exit(:runtime_startup_trace_shape)
 
   # Concept: the queue read observes this controlled schedule without consuming it.
   # Technical depth: inspect only two messages on this fixture's held supervisor,
@@ -918,18 +1209,26 @@ defmodule Loopex.ModelConfigurationPreparationTest do
     assert {:message_queue_len, 2} = Process.info(workers, :message_queue_len)
     assert {:messages, messages} = Process.info(workers, :messages)
     assert length(messages) == 2
+
     assert Enum.all?(messages, fn
-      {:system, {^group, _tag}, {:terminate, :shutdown}} -> true
-      {:EXIT, ^child, {:shutdown, :noproc}} -> true
-      _ -> false
-    end)
+             {:system, {^group, _tag}, {:terminate, :shutdown}} -> true
+             {:EXIT, ^child, {:shutdown, :noproc}} -> true
+             _ -> false
+           end)
+
     assert Enum.any?(messages, &match?({:system, {^group, _}, {:terminate, :shutdown}}, &1))
     Enum.any?(messages, &match?({:EXIT, ^child, {:shutdown, :noproc}}, &1))
   end
 
   defp startup_assert_chain(records, owner, group, workers, child, group_owner_monitor) do
-    select = fn event, actor, target -> Enum.find(records,
-      &(&1["event"] == event and &1["actor"] == startup_identity(actor) and &1["target"] == startup_identity(target))) end
+    select = fn event, actor, target ->
+      Enum.find(
+        records,
+        &(&1["event"] == event and &1["actor"] == startup_identity(actor) and
+            &1["target"] == startup_identity(target))
+      )
+    end
+
     call = select.("monitor_call", child, owner)
     installed = select.("monitor_installed", child, owner)
     down = select.("down_received", child, owner)
@@ -963,18 +1262,24 @@ defmodule Loopex.ModelConfigurationPreparationTest do
   def observe_startup_report(%{msg: {:report, %{report: report}}} = event, {observer, workers})
       when is_list(report) do
     offender = Keyword.get(report, :offender, [])
-    supervisor = case Keyword.get(report, :supervisor) do
-      {pid, _} when is_pid(pid) -> pid
-      pid when is_pid(pid) -> pid
-      _ -> nil
-    end
-    if supervisor == workers and Keyword.get(report, :errorContext) == :shutdown_error and is_list(offender) do
+
+    supervisor =
+      case Keyword.get(report, :supervisor) do
+        {pid, _} when is_pid(pid) -> pid
+        pid when is_pid(pid) -> pid
+        _ -> nil
+      end
+
+    if supervisor == workers and Keyword.get(report, :errorContext) == :shutdown_error and
+         is_list(offender) do
       child = Keyword.get(offender, :pid)
       reason = Keyword.get(report, :reason)
       shutdown = Keyword.get(offender, :shutdown)
+
       if is_pid(child) and reason == {:shutdown, :noproc} and shutdown == 5_000,
         do: send(observer, {:startup_supervisor_report, workers, child, reason, shutdown})
     end
+
     event
   end
 
@@ -982,7 +1287,9 @@ defmodule Loopex.ModelConfigurationPreparationTest do
 
   defp startup_retain(label, records) do
     case System.get_env("LOOPEX_RUNTIME_STARTUP_EVIDENCE_DIR") do
-      nil -> :ok
+      nil ->
+        :ok
+
       directory ->
         expanded = Path.expand(directory)
         assert String.starts_with?(expanded, Path.expand(System.tmp_dir!()) <> "/")
