@@ -26,6 +26,7 @@ defmodule LoopexComposition.RestoreRetainedConstructionTest do
         assert {:ok, _} = RestoreCodec.decode(:ledger_retired, ledger.retired)
       else
         assert ledger.retired == nil
+
         assert retirement["ledger_retirements"] == [
                  %{"relative_root" => "receipts", "record_sha256" => nil}
                ]
@@ -47,7 +48,9 @@ defmodule LoopexComposition.RestoreRetainedConstructionTest do
     assert {:ok, ^first} = construct(fixture)
     assert {:ok, ^first} = construct(fixture)
     assert first.intent == fixture.intent_bytes
-    assert hd(first.ledgers).candidate == hd(fixture.intent["generations"])["destination_generation_bytes"]
+
+    assert hd(first.ledgers).candidate ==
+             hd(fixture.intent["generations"])["destination_generation_bytes"]
   end
 
   test "changed canonical plan cannot consume the retained original intent" do
@@ -182,7 +185,10 @@ defmodule LoopexComposition.RestoreRetainedConstructionTest do
     destination = placement("/retained/next-destination", 5)
     destination_ledger = placement("/retained/next-destination/receipts", 6)
     plan = plan("available", source, source_ledger, compiled.final, 1)
-    candidate = candidate(old["destination_generation_bytes"], epoch, source_ledger, destination_ledger)
+
+    candidate =
+      candidate(old["destination_generation_bytes"], epoch, source_ledger, destination_ledger)
+
     intent = intent(plan, destination, candidate)
     [ledger] = compiled.ledgers
 
@@ -197,14 +203,27 @@ defmodule LoopexComposition.RestoreRetainedConstructionTest do
       "receipts/generation" => ledger.candidate
     }
 
-    %{plan: plan, baseline: compiled.final, intent: intent, intent_bytes: encode!(:intent, intent), prior_files: files}
+    %{
+      plan: plan,
+      baseline: compiled.final,
+      intent: intent,
+      intent_bytes: encode!(:intent, intent),
+      prior_files: files
+    }
   end
 
   defp rebind_baseline(fixture, baseline) do
     plan = %{fixture.plan | "manifest_sha256" => hash(baseline)}
     {:ok, digest} = RestoreCodec.plan_digest(plan)
     intent = %{fixture.intent | "plan" => plan, "plan_digest" => digest}
-    %{fixture | plan: plan, baseline: baseline, intent: intent, intent_bytes: encode!(:intent, intent)}
+
+    %{
+      fixture
+      | plan: plan,
+        baseline: baseline,
+        intent: intent,
+        intent_bytes: encode!(:intent, intent)
+    }
   end
 
   defp plan(status, source, source_ledger, baseline, prior) do
@@ -219,7 +238,8 @@ defmodule LoopexComposition.RestoreRetainedConstructionTest do
       "source_state_placement" => source,
       "source_status" => status,
       "backup_state_root" => "/retained/backup-#{prior}",
-      "destination_state_root" => if(prior == 0, do: "/retained/destination", else: "/retained/next-destination"),
+      "destination_state_root" =>
+        if(prior == 0, do: "/retained/destination", else: "/retained/next-destination"),
       "manifest_sha256" => hash(baseline),
       "cut_id" => hash("pure-cut-#{prior}"),
       "prior_restore_count" => prior,
@@ -234,7 +254,10 @@ defmodule LoopexComposition.RestoreRetainedConstructionTest do
           "source_placement" => source_ledger
         }
       ],
-      "workspace" => %{"root" => "/retained/workspace", "workspace_ref" => "workspace:" <> hash("workspace")},
+      "workspace" => %{
+        "root" => "/retained/workspace",
+        "workspace_ref" => "workspace:" <> hash("workspace")
+      },
       "host_attestation" => %{
         "latest_cut" => true,
         "no_post_cut_activity" => true,
@@ -299,19 +322,36 @@ defmodule LoopexComposition.RestoreRetainedConstructionTest do
     ])
   end
 
-  defp empty_baseline, do: encode!(:manifest, ["loopex:current-state-manifest:v1", [directory(".")]])
+  defp empty_baseline,
+    do: encode!(:manifest, ["loopex:current-state-manifest:v1", [directory(".")]])
 
   defp directory(path),
     do: %{"path" => path, "kind" => "directory", "mode" => 0o700, "size" => 0, "sha256" => nil}
 
   defp file(path, bytes, mode),
-    do: %{"path" => path, "kind" => "regular", "mode" => mode, "size" => byte_size(bytes), "sha256" => hash(bytes)}
+    do: %{
+      "path" => path,
+      "kind" => "regular",
+      "mode" => mode,
+      "size" => byte_size(bytes),
+      "sha256" => hash(bytes)
+    }
 
-  defp placement(root, inode), do: %{"expanded_root" => root, "major_device" => 1, "inode" => inode}
-  defp reserved?(path), do: Enum.any?(Path.split(path), &(&1 in [".loopex-restore", "restore-lineage"]))
+  defp placement(root, inode),
+    do: %{"expanded_root" => root, "major_device" => 1, "inode" => inode}
+
+  defp reserved?(path),
+    do: Enum.any?(Path.split(path), &(&1 in [".loopex-restore", "restore-lineage"]))
 
   defp construct(fixture, total \\ @total),
-    do: Workflow.retained_construction(fixture.plan, fixture.baseline, fixture.intent_bytes, fixture.prior_files, total)
+    do:
+      Workflow.retained_construction(
+        fixture.plan,
+        fixture.baseline,
+        fixture.intent_bytes,
+        fixture.prior_files,
+        total
+      )
 
   defp encode!(type, value) do
     assert {:ok, bytes} = RestoreCodec.encode(type, value)

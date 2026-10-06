@@ -122,7 +122,11 @@ defmodule LoopexComposition.Restore.Workflow do
           baseline,
           entries,
           intent["generations"],
-          construction_bindings!(plan, plan["source_state_placement"], intent["destination_state_placement"]),
+          construction_bindings!(
+            plan,
+            plan["source_state_placement"],
+            intent["destination_state_placement"]
+          ),
           max_total
         )
 
@@ -146,7 +150,10 @@ defmodule LoopexComposition.Restore.Workflow do
       {:ok, source} = Ledger.decode_bytes(original, "local_executor_generation_v1")
 
       {:ok, destination} =
-        Ledger.decode_bytes(candidate["destination_generation_bytes"], "local_executor_generation_v1")
+        Ledger.decode_bytes(
+          candidate["destination_generation_bytes"],
+          "local_executor_generation_v1"
+        )
 
       entry = Enum.find(entries, &(&1["path"] == Path.join(relative, "generation")))
 
@@ -160,7 +167,10 @@ defmodule LoopexComposition.Restore.Workflow do
         Map.get(lineage.epochs, relative, MapSet.new())
         |> MapSet.put(source["executor_epoch"])
 
-      ensure!(not MapSet.member?(excluded, destination["executor_epoch"]), "invalid_current_history")
+      ensure!(
+        not MapSet.member?(excluded, destination["executor_epoch"]),
+        "invalid_current_history"
+      )
     end)
   end
 
