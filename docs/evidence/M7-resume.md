@@ -27,6 +27,54 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Latest Store integration and next verification
 
+LATEST: Native corrected source657257684edbea05079a3f17789e79c9cb00695c
+has the sole verification VM grant for v3. Worker restore_manifest_resume owns
+polling and terminal collection. Runner siblingM7/
+configure-checkpoint-runner-65725768-v3/run.py digest
+ed436c8427b8c49e47d42dc95c47b0f615a62bc245cf9295ad5e14ffa2584457,
+packet inventoryaf6eed69c3256c8f7d0e0156a625ddddfa068288fa4b6a65123b428999f62cc1.
+Root reviewed the complete source correction and independently verified all12
+packet artifacts,1,098 actual/Git records, pin-only runner change, unchanged
+helpers and exact updated three-path Core patch. The two prior failed runs
+remain immutable, not reclassified. No native source is integrated.
+
+The coverage fix authenticates original prefix/source identity before deriving
+the new boundary after complete old coverage. Existing nonnil boundary and
+cumulative range/digest checks remain; historical nil must match its actual
+complete old lineage. Ten cases preserve prompts/time/cleanup/parent bounds,
+use accepted compact-specific maintenance_active, retain exacttool_calls:[],
+and explicitly prove the ordinary prelude before automatic pressure. Captured
+context fixture data5000 replaces invalid4000 only for that valid prelude;
+no production or time/cleanup bound is enlarged. Held real second settlement
+adds forged prefix/boundary/endpoint controls inside the existing uncovered
+case. Expected10/0,63/1,1323/10 per pair, zero skips; not results.
+
+Resource capture source6ea56e83e0f5c3ec2cec3909c3ebe5fcc7e4c1f7 is clean
+and root-reviewed in its isolated worktree. Root verified29 actual/Git source
+records, seven packet artifacts and exact two-file patch. Packet siblingM7/
+resource-capture-audit-source-20261005-v1, report digest
+e150cacaaba9c958a06ad07b8243c4dfb67f15dc76c0e6d0b865587421e64e5b,
+source inventoryb84357e14a374eeefdfb056be55afefec8d640ed4b05573cd154a4f6f2fdf6a9.
+Eleven added cases preserve all previous tests and cuts. Runner v1 is unexecuted;
+root read it and requested v2 private Hex/Rebar/cache/environment isolation and
+hook refusal before setup. Worker current_index_cleanup prepares source-only
+v2, no VM grant. Target focused52/2,adjacent33/0,ordinary623/3,
+owned IO long2/52; zero skips. The third ordinary exclusion is real_provider,
+not a third long case. No Resource capture source is integrated.
+
+Causal worker private_task_causal_resume owns ONLY existing
+model_configuration_preparation_test.exs in new isolated
+/private/tmp/loopex-m7-runtime-preparation-startup-witness,
+codex/m7-runtime-preparation-startup-witness, base325e750e. One source-only
+actual-runtime startup owner-loss witness is authorized, retaining exact
+coordinator/OwnerGroup/async-child/report binding, zero callback acquisition,
+1,000ms/8,192-row bounds and exact joins. No production repair, prior-report
+attribution or unsupported quiet guarantee. Old failed four-case file stays
+unmerged. One new T16 row is open. Prospective separate witness Core1314/10;
+if later joined with native10cases,1324/10. Actual proof is pending.
+Counts T01–T19 originals78/95/6, added294/22; includingT00 originals78/101/7,
+added298/23. All active statements below are superseded snapshots.
+
 LATEST: Native checkpoint v2 handle80977 is TERMINAL exit1 and collected;
 exclusive VM slot is FREE. Source remains cleand00fdaec2d87b433ae57037fbe3125d2e53fe344,
 formatter unchanged, first17stages pass. Current focused2/10passed with

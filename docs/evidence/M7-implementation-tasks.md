@@ -13174,6 +13174,7 @@ open.
 - [x] Resolve the repeated provider-call public-event identity decision; implement the accepted compatibility path and prove old replay, repeated calls, cancellation, reconciliation and mutation uncertainty without rewriting retained events.
 - [x] Adapt the composition authority inventory to the approved contextual question adapter; retain the failed no-callback assertion and verify absent/nil host refusal plus denied bare/contextual decisions for every shipped tool generation on both toolchains.
 - [ ] Investigate Task.Supervisor and OwnerGroup shutdown_error/noproc diagnostics for Task.Supervised and coordinator children in configuration/input/interaction cleanup; retain reproduction and actual task-lifetime evidence, including the coordinator-child report in the maintenance-view full Core run.
+- [ ] Prove actual Runtime configuration-preparation startup owner loss before callback acquisition with exact coordinator/OwnerGroup/child/report identities and bounded joins on both supported pairs; retain the controlled schedule without claiming attribution of the six earlier untraced reports or weakening cleanup truth.
 - [x] Investigate and fix the AllowAll notice table ETS-transfer diagnostic emitted to `:init` during host-policy tests; retain a failing-before short-lived caller witness, exact DOWN and concurrent once-per-VM proof on both toolchains.
 
 ## T17 — Assemble and test the closure candidate
