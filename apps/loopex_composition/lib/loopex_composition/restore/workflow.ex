@@ -120,12 +120,15 @@ defmodule LoopexComposition.Restore.Workflow do
   catch
     {:restore_refusal, code} -> refusal(code)
     {:io_error, _reason} -> refusal("inventory_unavailable")
+    {:stopped, _reason} -> refusal("inventory_unavailable")
   end
 
   # Concept: a pre-intent IO refusal still releases positively acquired claims.
   # Technical depth: only the original worker's completed acquisition records
   # enter this list. The guardian retains partial acquisitions separately and
-  # runs release through its existing terminal owner and captured cutoffs.
+  # runs release through its existing terminal owner and captured cutoffs. Its
+  # original stop reason still owns deadline/caller-loss outcomes; possible
+  # intent persistence still produces commit_unknown and retains every claim.
   defp refusal(code) do
     claims = Process.get(:restore_workflow_claims, [])
     release = if Process.get(:restore_workflow_changed), do: [], else: claims

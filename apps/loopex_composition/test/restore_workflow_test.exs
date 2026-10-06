@@ -258,6 +258,57 @@ defmodule LoopexComposition.RestoreWorkflowTest do
     exact_joins(owned)
   end
 
+  test "caller loss releases the first acquired claim without deleting the partial second claim", context do
+    fixture = actual_cut(context.root)
+    [first, second] = ordered_claims(fixture.plan)
+    source_before = manifest(fixture.source)
+    destination_before = manifest(fixture.destination)
+    owned = launch(fixture.plan)
+    {_id, events} = pause_after_claim_create(owned, second, false, [])
+    Process.exit(owned.caller, :kill)
+    {result, events} = finish_cancelled(owned, events)
+    assert {:joined, {:error, :caller_lost}, evidence} = result
+    assert evidence.stop == :caller_lost
+    assert evidence.restore.intent == false and evidence.claim_count == 1
+    assert evidence.opens == evidence.closes
+    assert evidence.work_cutoff == owned.work_cutoff
+    [{:stopping, :caller_lost, stop, cutoff}] = for {:stopping, :caller_lost, _, _} = event <- events, do: event
+    assert cutoff == stop + max(10_000, @grace + 2_000)
+    assert evidence.cleanup_cutoff == cutoff
+    assert [{:terminal_release_installed, ^cutoff}] = for {:terminal_release_installed, _} = event <- events, do: event
+    assert File.lstat(first) == {:error, :enoent}
+    assert File.ls!(second) == []
+    assert manifest(fixture.source) == source_before
+    assert manifest(fixture.destination) == destination_before
+    assert Enum.any?(events, &match?({:acknowledged, _, {:restore_claim_released, ^first}, :completed}, &1))
+    refute Enum.any?(events, &match?({:issued, _, {:restore_claim_released, ^second}}, &1))
+    caller = owned.caller
+    caller_monitor = owned.caller_monitor
+    assert_receive {:DOWN, ^caller_monitor, :process, ^caller, :killed}, 1_000
+    actors = [{owned.worker, owned.worker_monitor}, {owned.guardian, owned.guardian_monitor}] ++ Process.delete({:restore_release_monitors, owned.reference})
+    for {actor, monitor} <- actors, do: assert_receive({:DOWN, ^monitor, :process, ^actor, :normal}, 1_000)
+  end
+
+  defp finish_cancelled(owned, events) do
+    guardian = owned.guardian
+    reference = owned.reference
+    receive do
+      {:restore_io, ^guardian, worker, ^reference, {:terminal_release_installed, _} = event} ->
+        monitors = Process.get({:restore_release_monitors, reference})
+        Process.put({:restore_release_monitors, reference}, [{worker, Process.monitor(worker)} | monitors])
+        finish_cancelled(owned, [event | events])
+      {:restore_io, ^guardian, _worker, ^reference, {:issued, id, {:open, _}} = event} ->
+        send(guardian, {:proceed, reference, id})
+        finish_cancelled(owned, [event | events])
+      {:restore_io, ^guardian, _worker, ^reference, {:terminal, result} = event} ->
+        {result, Enum.reverse([event | events])}
+      {:restore_io, ^guardian, _worker, ^reference, event} ->
+        finish_cancelled(owned, [event | events])
+    after
+      max(0, owned.work_cutoff + max(10_000, @grace + 2_000) - System.monotonic_time(:millisecond)) -> flunk("original restore work/cleanup cutoff reached")
+    end
+  end
+
   # Concept: the partial-publication control changes only the newly owned claim.
   # Technical depth: the exact guardian acknowledges second mkdir, then its next
   # real open is held before creating the exclusive owner.tmp collision. Every
