@@ -16,7 +16,7 @@ defmodule LoopexComposition.Restore.Workflow do
   starts another guardian or refreshes this invocation's work or cleanup allowance.
   """
 
-  alias Loopex.Executor.Local.{Ledger, RestoreCodec}
+  alias Loopex.Executor.Local.{Ledger, RestoreCodec, RestoreGuard}
   alias LoopexComposition.Restore.Audit
   alias LoopexComposition.WorkspaceIdentity
 
@@ -97,6 +97,71 @@ defmodule LoopexComposition.Restore.Workflow do
       _ ->
         throw({:restore_refusal, "inventory_unavailable"})
     end
+  end
+
+  # Concept: reconstruct private records without allocation or IO, never a receipt.
+  # Technical depth: exact captured baseline/intent and the existing prior-lineage
+  # reducer bind current grammar, placements and epochs. This validates retained
+  # facts, not live identity, complete ordinary history or claim custody. All
+  # compiled caps apply and canonical intent must equal the original bytes.
+  @doc false
+  def retained_construction(plan, baseline, intent_bytes, prior_files, max_total) do
+    try do
+      {:ok, _} = RestoreCodec.encode(:plan, plan)
+      ensure!(plan["prior_restore_count"] < 64, "inventory_limit_exceeded")
+      {:ok, entries} = RestoreCodec.manifest(baseline, max_total)
+      ensure!(hash(baseline) == plan["manifest_sha256"], "inventory_mismatch")
+      {:ok, intent} = RestoreCodec.decode(:intent, intent_bytes)
+      ensure!(intent["plan"] == plan, "restore_conflict")
+      {:ok, lineage} = RestoreGuard.validate_captured_lineage(plan, entries, prior_files)
+      retained_candidates!(intent["generations"], entries, lineage)
+
+      compiled =
+        compile_records!(
+          plan,
+          baseline,
+          entries,
+          intent["generations"],
+          construction_bindings!(plan, plan["source_state_placement"], intent["destination_state_placement"]),
+          max_total
+        )
+
+      ensure!(compiled.intent == intent_bytes, "invalid_current_history")
+      {:ok, Map.delete(compiled, :receipt)}
+    rescue
+      _error in [MatchError, KeyError, ArgumentError] -> {:error, "invalid_current_history"}
+    catch
+      {:restore_refusal, code} -> {:error, code}
+    end
+  end
+
+  # Concept: retained candidates preserve the baseline and all earlier epochs.
+  # Technical depth: the intent codec already checks coverage and candidate
+  # bindings. These additional baseline/lineage relations use the same prior
+  # reducer as fresh construction, with no replacement generation serialization.
+  defp retained_candidates!(candidates, entries, lineage) do
+    Enum.each(candidates, fn candidate ->
+      relative = candidate["relative_root"]
+      original = candidate["source_generation_bytes"]
+      {:ok, source} = Ledger.decode_bytes(original, "local_executor_generation_v1")
+
+      {:ok, destination} =
+        Ledger.decode_bytes(candidate["destination_generation_bytes"], "local_executor_generation_v1")
+
+      entry = Enum.find(entries, &(&1["path"] == Path.join(relative, "generation")))
+
+      ensure!(
+        not is_nil(entry) and entry["kind"] == "regular" and
+          entry["size"] == byte_size(original) and entry["sha256"] == hash(original),
+        "inventory_mismatch"
+      )
+
+      excluded =
+        Map.get(lineage.epochs, relative, MapSet.new())
+        |> MapSet.put(source["executor_epoch"])
+
+      ensure!(not MapSet.member?(excluded, destination["executor_epoch"]), "invalid_current_history")
+    end)
   end
 
   @doc false
@@ -377,11 +442,12 @@ defmodule LoopexComposition.Restore.Workflow do
   end
 
   defp compile!(plan, baseline, entries, facts, lineage, source, destination, max_total, io) do
-    root_admin = root_admin(plan)
-    {:ok, plan_digest} = RestoreCodec.plan_digest(plan)
-    {:ok, source_binding} = RestoreCodec.state_binding(source)
-    {:ok, destination_binding} = RestoreCodec.state_binding(destination)
+    bindings = construction_bindings!(plan, source, destination)
+    candidates = allocate_candidates!(plan, facts, lineage, io)
+    compile_records!(plan, baseline, entries, candidates, bindings, max_total)
+  end
 
+  defp allocate_candidates!(plan, facts, lineage, io) do
     {candidates, _epochs} =
       Enum.map_reduce(plan["ledgers"], MapSet.new(), fn declaration, epochs ->
         relative = declaration["relative_root"]
@@ -423,6 +489,20 @@ defmodule LoopexComposition.Restore.Workflow do
 
         {candidate, MapSet.put(epochs, epoch)}
       end)
+
+    candidates
+  end
+
+  defp construction_bindings!(plan, source, destination) do
+    root_admin = root_admin(plan)
+    {:ok, plan_digest} = RestoreCodec.plan_digest(plan)
+    {:ok, source_binding} = RestoreCodec.state_binding(source)
+    {:ok, destination_binding} = RestoreCodec.state_binding(destination)
+    {root_admin, plan_digest, source_binding, destination_binding, destination}
+  end
+
+  defp compile_records!(plan, baseline, entries, candidates, bindings, max_total) do
+    {root_admin, plan_digest, source_binding, destination_binding, destination} = bindings
 
     intent =
       encode!(
