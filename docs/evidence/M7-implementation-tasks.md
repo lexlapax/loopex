@@ -31,6 +31,21 @@ they do not mean the original task is complete. This follows the maintainer's
 
 ## Latest bounded progress, 2026-10-06
 
+Clean58fb33ba full fast check77114 is failed and fully collected after1293.977s,
+exit130 following root's native phase-trap termination of the observed92
+Composition failures. The wrapper's complete output, partial Composition
+output and all11 captured process/group joins are retained. Ordinary provider
+cleanup notices reached the exhaustive coordinator dispatcher without a
+handler. Confined correction1bd9d59f and two actual-runtime/Store regressions
+are source-only, under independent review; both-pair and new integrated proof
+remain open. Original67819 retirement formatting failed floor wrapping after
+51.979s; all11 stages/joins are collected and an isolated assertion rewrite is
+in progress. Source-only generation1a8cc8d9 and live projection1e173979 are
+frozen for review. No new original item or added proof closes here. Current
+T01–T19 originals78done/95todo/6retired; added299done/37todo. IncludingT00,
+original78/101/7 and added303/38. Exact references are in the
+[restart checkpoint](M7-resume.md); older progress below remains historical.
+
 T15 retained canonical construction on frozen `f5e26af3` passed all ten pure
 tests on both supported toolchains. Original74464 is fully collected after
 116.366 seconds/eight stages. The strict retained-publication helper is now
@@ -13549,6 +13564,8 @@ long-bound observation witness are required before this row closes again.
 - [ ] Independently review integration changes and fix confirmed defects without weakening checks.
 
 ### Added implementation subtasks
+
+- [ ] Repair ordinary provider cleanup notices reaching the SessionCoordinator dispatcher after the cleanup integration; retain failed58fb33ba full-check evidence, prove actual Local Store completion through the same live owner and distinct caretaker delivery, preserve existing cleanup windows and native joins, and verify both supported pairs plus a new full integration candidate.
 
 - [ ] Repair the inherited long-temporary-path fixture failures exposed by Ledger6baa and receiptfdd6 ordinary checks: supply bounded explicit instructions only to seven failed model startup cases while preserving the 1,000-token ceiling and give only the actual Unix socket/exact8MiB cases fresh short temporary workspaces. Preserve real HTTP/effects/questions/cleanup, actual special files, all exact path-byte/first-over assertions and original deadlines; prove focused, adjacent and complete affected application populations on both supported pairs with both original failed runs retained.
 - [x] Repair the e327e46c incomplete foreground revision-3 snapshot and superseded policy-answer admission fixture; prove all ten captured fields, exact historical cursor parity after live advancement, actual answer-admission order and the complete AppServer population on both supported pairs without changing generation activation or implementing unaccepted ADR0052.

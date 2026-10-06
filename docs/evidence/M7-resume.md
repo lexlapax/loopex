@@ -27,6 +27,59 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current proof, execution and source ownership
 
+ROOT VM FREE after original67819 was fully collected, exit1 after51.979s.
+Current formatting and whole-file non-line AST equality passed for all three
+retirement paths; floor formatting failed one multiline tuple assertion at
+clean formatter child `ed40f47118c6c88bfa784a346d73aa1439894991` of6219f80f.
+All69 retained artifacts,53 actual/Git source rows and11 original
+EOF/wait/PID/group joins were verified. Collection
+`M7/retained-source-retirement-format-original-collection-20261006-v1.json`
+SHA-256 `b5ba35e128850091e2315b84af169e6805bd3f5716c8a8b76e427978900ec6b2`.
+The failed formatter is not a both-pair proof; no runtime stage ran. Never
+repoll67819 or rerun its stage keys. Latest full registry601 keys, SHA-256
+`674efbe0cc948d4af8790f13bfae5dd6ebf99aff851870b3cccb1bdbcdffecbd`.
+An isolated writer simplifies only that assertion at ed40; old source stays frozen.
+
+The clean58fb33ba full fast check, original77114, failed with92 observed
+Composition failure headers before root terminated its owned check process
+through the native phase trap. Original wrapper exit130,1293.977s, complete
+raw EOF/wait and all11 captured process identities/group absence are retained.
+Collection `M7/integrated-fast-58fb33ba-original-collection-20261006-v1.json`
+SHA-256 `9c59274c063822376769b6d1cef4869b080529fe5d1fa348f699f74bb271ca5d`;
+complete wrapper log SHA-256
+`b9c6c4f0aee4737d7da1e9c3d0416ba53f14947e013677d5dc556abb8324b48c`.
+The partial Composition output is retained separately. Compilation, formatting,
+structure and docs passed, but the application suite did not finish. No full
+or floor PASS exists. A harmless case-sensitive executable-name assertion in
+the first stop helper failed before capture or signaling and was corrected;
+no product stage was repeated. Never repoll77114.
+
+Root and an independent source investigation confirmed that OwnerGroup sends
+ordinary cleanup notices to SessionCoordinator's exhaustive dispatcher, which
+has no matching clause. Isolated clean `1bd9d59f9675885358e2757e0834845b6a49dbcd`
+changes the recipient to the distinct caretaker and adds two real native
+Composition regressions. Independent review and disabled verification-packet
+preparation run in parallel. This fix has no runtime proof yet and is unrejoined.
+The next integration candidate still requires the full fast check.
+
+Generation installation is frozen source-only at
+`1a8cc8d9fceca35ddbd9c8644ab9c8dd2a47e5f9`, parent6219f80f, with19 prospective
+cases. It stops before final proofs, receipt and claim release. Live model
+question projection fixtures are frozen at1e173979,20 prospective cases in two
+new adapter files. Root transport is04903e79 and model terminal codec isd79d10f0,
+with331 vectors. These units remain unverified/unrejoined. The codec review's
+two JavaScript end-anchor findings were false positives: the literals have no
+multiline flag. Corrected independent review retracts them; d79 removes the
+unneeded guards and retains negative controls. No runtime bug fix is claimed.
+
+ADR0053 remains the single pending maintainer question. ADR0054/0055 are
+Proposed and unasked;58fb retains the reviewed0055 pair. No dependent
+implementation or acceptance is authorized. T01–T19 originals78done/95todo/
+6retired; added299done/37todo, including the newly tracked cleanup-notification
+regression. IncludingT00, originals78/101/7 and added303/38.
+
+Earlier execution entries below are retained history.
+
 ROOT VM FREE after original58629, fully collected
 PASS_FOCUSED_RETAINED_CLAIM_HANDOFF_ONLY157.839s/14stages. Both toolchains pass
 test compilation under warnings as errors and the exact34/17/10/16 handoff,
