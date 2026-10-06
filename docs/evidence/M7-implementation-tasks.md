@@ -1,5 +1,17 @@
 # M7 Implementation Tasks
 
+Independent source reviews found two blockers; neither unit is applied or
+verified. Retained finalization cannot issue the destination committed-proof
+step through the existing closed IO guard. Its isolated writer is correcting
+that guard and reusing the identical existing fence helper. The revised neutral
+fixture proposal removes its suspension defect but still lacks an actual-UTC
+expiry precondition. A bounded proof-design review continues; no proof change
+is asked or approved. Six original source/review packets are retained under
+`M7/review-packets-original-retention-20261006-v1.json`, SHA
+`166b2a0fcd0b4a5ad333648c486dc1ac214628c79ae990b97dee0118fa202d10`.
+The verification VM is free; no new product attempt or checklist closure.
+Original T01–T19:78 done/95 todo/6 retired; added302 done/38 todo.
+
 Boundary original79496 fully collected FAIL335.274s at5b46: current Core318,
 Protocol28 and Node7 pass; foreground34/36 fails two neutral-question fixtures
 at their unchanged5,000ms cutoff. Daemon/floor unexecuted.54 artifacts,133source

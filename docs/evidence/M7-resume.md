@@ -28,6 +28,39 @@ physical restore implementation; it does not waive any full-history proof.
 ### Current work and restart order
 
 Continue the existing ACTIVE unlimited goal on `m7`. Do not create another goal.
+Primary pushed checkpoint before this source-review record is
+`3b9e097a21ffd255fd9f15ae7b7edf4feec5298f`. No new product execution occurred.
+Six blocked/unapplied author and review packets are durably copied outside the
+repository with all183 indexed payload hashes verified. Retention report
+`M7/review-packets-original-retention-20261006-v1.json`, SHA
+`166b2a0fcd0b4a5ad333648c486dc1ac214628c79ae990b97dee0118fa202d10`,
+names every exact source and retained directory/index. These are source evidence,
+not successful runtime tests or maintainer decisions.
+
+Retained finalization v1 is BLOCKED_SOURCE: destination `committed` is rejected
+by the private IO step guard before publication. Independent report
+`M7/m7-retained-finalization-independent-review-20261006-v1/report.md`, SHA
+`20a0bbcfee64a3e12936057cc22f2e116b223ba4cba893a63446ec77fc8e324a`;
+index `b1a0170fb365e972ee57d4533efcbec69f8234ecffc17cd1eae85c8139337d28`.
+The existing isolated writer now owns the confined destination-only guard
+correction and removal of the identical new fence helper. Preserve v1; obtain
+a new source packet/review before root formatting/native execution.32 new cases
+remain unrun; partial released-claim sets and public restore remain unfinished.
+
+Neutral fixture v1's suspension cleanup is blocked; v2 removes suspension but
+still lacks actual UTC eligibility for its strict expiry expectation. Ordinary
+independent source audit
+`M7/m7-neutral-revision-source-audit-20261006-v2/report.md`, SHA
+`dd099ff73124f817992fee0782fd4ed62cdbfd8b5c11893515377f44c4f8460d`;
+index `596fa20649374b5d271dfdfb68cd95e4d365cfd993194e33a564c3234822e9aa`.
+Neither proposal is applied or ready for approval. `authored_bounds_review`
+owns only a new source-only proof-design disposition directory
+`/private/tmp/loopex-m7-neutral-proof-design-disposition-20261006-v3` and must
+preserve timer identity, provenance and original5,000ms cutoff. ADR0054 remains
+the sole asked pending decision. Product VM remains FREE; latest825-key union
+and original79496 failure remain unchanged. Counts remain78/95/6 original and
+302/38 added for T01–T19.
+
 Primary preceding pushed checkpoint is `349f8207`; this commit rejoins the
 literal tested restore unit and supersedes its resume record. Historical detail
 remains at `bdc88a05:docs/evidence/M7-resume.md` and in the task ledger.
