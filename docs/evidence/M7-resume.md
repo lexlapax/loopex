@@ -27,6 +27,47 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current proof, execution and source ownership
 
+LATEST FORMATTER PREPARATION, 2026-10-06: source-only fixture repair ed1e4371
+passed independent focused review. Root retained its conclusion in
+`M7/resource-admission-fixture-review-ed1e4371-20261006-v1`, report
+`a557b35a87a2b334636cb0bff08d16ea94a1bf09b1b2320d2832e6d2c05c1716`, inventory
+`941af257157bb92099612f054bf0aaae1d9598bd0f386d59dc62d007679a38fe`.
+The disabled formatter adaptation has 25 sealed artifacts, inventory
+`37cc2da22948e576acabb3de69e688da6c15e8cdf509a35040779ad46d91f603`.
+Root compared the whole executable with the reviewed template, allowing only
+six fixed identity/description substitutions; all four helper files are exact.
+Separate enabled sibling `M7/resource-admission-format-runner-20261006-v2`
+retains the complete disabled proposal. Config
+`309550cfa6e1ef4c42a7cf18bf2f03e4a39d45ef82d195d8b32d158bca73a87e`, root inventory
+`84e626fb7c1616f44bc161a7841a43906b01148d6b575f355030cc4e9fb41227`.
+
+Original root handle 17954 is fully collected with exit 0 after 45.488 seconds.
+All eleven stages passed, including the four complete-file NON_LINE_AST_EQUAL
+rows and current/floor formatter checks. At most one permitted formatter child
+was produced: clean `f870aa3ea19eff6b6362db011548fb488de1a8af`, sole parent
+`ed1e437161430319b98cca6ea8951f8b658c6441`, in
+`/private/tmp/loopex-m7-restore-resource-admission`. Two of four owned paths have
+format-only changes. No compiler, ordinary/long test or causal run occurred.
+All eleven actual original PIDs and groups are absent. No active VM remains;
+never repeat the completed formatter stages or reset their eleven keys.
+
+Output `M7/m7-resource-admission-format-v1`: report
+`cef763765d83a8e47c602be3bbe96cc1f95b5f3293f64079bc2cdbe19bf38539`, inventory
+`c7dbe3f52b63b023582ab81c9777756ffcceb0aa21bc533baba686a737bdebb0`.
+Root collection `M7/resource-admission-format-original-collection-20261006-v1.json`,
+SHA-256 `4d36ed3cddbbc39fc989dcabd6a4b0f2b1e92680baf214f2945bb6714460690b`,
+verifies 72 retained artifacts, 45 actual/Git kind/mode/blob/source records,
+eleven original raw EOF/wait/status/process-group joins and unique consumed
+keys. Final registry
+`c10d5a6b7dfe3abe618f73ad7b28f113142bf9ef29921e459de66644afdb0174`.
+Current-index owns only a disabled current-then-floor runtime proposal at f870,
+with unchanged twelve lanes, workflow 27/0 and ordinary Composition 704/4;
+IO remains 106/3, selected long 3/106 and all skips zero. Retained old causal
+negative evidence must stay bound to its actual fdfe source, with a strict
+unchanged guardian/complete IO-test boundary check for its relevance to f870.
+No runtime grant, source export, primary rejoin or new PASS is implied.
+T01–T19 totals remain originals 78/95/6 and added 298/27.
+
 CURRENT COLLECTED FAILURE, 2026-10-06: original outer handle 28778 is fully
 collected with exit 1. current_index_cleanup returned the sole verification VM
 slot after confirming all twelve original PIDs and process groups absent.
@@ -60,8 +101,8 @@ CLI committed the fixture-only repair at
 `codex/m7-restore-resource-admission`, now clean at ed1e4371. Root read the full diff. It preserves all 27
 cases and cutoffs, strengthens exact manifest binding and fixes generated
 unreachable-clause warnings without suppressing them. No VM is granted.
-Current-index prepares only a disabled formatter adaptation; private-task will
-review the committed fixture diff. Frozen fdfe/db584 and failed output remain
+Independent fixture review and formatter preparation are now complete as
+recorded above; current-index prepares only disabled runtime verification. Frozen fdfe/db584 and failed output remain
 unchanged. No private source branch export is authorized.
 
 Full disabled v1 runner review found no execution blocker but required a
