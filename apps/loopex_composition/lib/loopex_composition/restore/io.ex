@@ -557,9 +557,6 @@ defmodule LoopexComposition.Restore.IO do
     end
   end
 
-  defp resource_role(:manifest), do: {"manifests", @max_resource_manifest}
-  defp resource_role(:provenance), do: {"provenance", @max_resource_provenance}
-
   defp execute({:publish, path, temp, bytes, mode, expected}) do
     current =
       case primitive(:stat, fn -> :prim_file.read_link_info(path) end) do
@@ -596,6 +593,9 @@ defmodule LoopexComposition.Restore.IO do
     if read(path, byte_size(bytes)) != bytes, do: throw({:io_error, :readback_mismatch})
     {:ok, RestoreCodec.digest_bytes(bytes)}
   end
+
+  defp resource_role(:manifest), do: {"manifests", @max_resource_manifest}
+  defp resource_role(:provenance), do: {"provenance", @max_resource_provenance}
 
   defp audit_store_bytes(bytes) do
     with {:ok, frames, :complete} <- primitive(:store_decode, fn -> Log.decode_bytes(bytes) end),
