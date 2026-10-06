@@ -27,6 +27,54 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Latest Store integration and next verification
 
+LATEST: The repeated maintainer reply "approve 1000 ms" confirms the existing
+[diagnostic setup override](../developer/agent-context-map.md#disposition-m7-diagnostic-setup-cutoff-2026-10-05).
+It changes no production deadline and accepts no queued ADR.
+
+Both latest verification runs are terminal failures; the exclusive VM slot is
+free. Native v3 handle51888 is collected, never restart or poll it. Formatted
+source dc5797c7eeb99128fb2420f89141160376700c4b passes10 focused cases and
+63 adjacent cases with1 exclusion, zero skips. Ordinary Core passes1322/1323,
+10 excluded, zero skipped, and fails the new automatic-preparation cancellation
+fixture at strict recovery with private_public_projection_mismatch. No floor
+stage ran. Root verified66 sealed artifact records plus the seal inventory,
+all20 stage outcomes and process-group absence. Terminal digest
+e285df29d0bfc7f8ca741192867297c8a6ac9f11f40fc203ff8bb2b40aeac089;
+ordinary raw031ed41c420e925232fe1ce61d64ac470d1746c3c2e711046287cdad6042efd6,
+in siblingM7/configure-checkpoint-runner-65725768-v3/execution-001.
+Focused1.902s, adjacent6.629s, ordinary223.018s are measured stage durations.
+
+Read-only source investigation establishes two separate fixture Store reads for
+records/events while cancellation may still commit. Store commits both vectors
+atomically; pairing old records with new events is invalid. The raw failure
+retains this call path but not the returned vectors or intervening transaction,
+so its exact interleaving is unproved. Worker restore_manifest_resume is
+authorized only to change the new test's recover/1 to one Store snapshot,
+preserving strict recovery, all assertions, cases, joins and deadlines. Prepare
+a new clean child and pin-only v4 packet, no VM grant or retry of old bytes.
+
+Resource capture v2 handle46942 is collected, never restart or poll it.
+Formatted source ae9b66752f1cda812687817924d36ac2a130f918 fails current dev
+compilation because resource_role/1 separates execute/1 clauses. No test or
+floor stage ran. Root verified38 retained artifacts, all7 stage outcomes and
+process-group absence. Pipeline63.344s, failed compile44.253s. Terminal digest
+2a36b65b15e8c30e413392edff422e2135650062a91cc221705697ce2b469680;
+compile raw5ef33bb000f1febed908d21c6ce1eef16f8ce4ce8526c35e35698502de029cfd,
+in siblingM7/resource-capture-audit-execution-20261005-v1. Worker
+current_index_cleanup is authorized only to move the unchanged resource_role/1
+clauses after all execute/1 clauses, retain a clean direct child and new gated
+pin-only runner. No VM grant, test assertion or bound change.
+
+Actual-runtime startup witness source0f6abc761f9021b14cba03b1708b6d7776047f75
+is clean and source-only in its isolated worktree. Root read its complete
+461-line delta in existing model_configuration_preparation_test.exs. Worker
+private_task_causal_resume prepares a gated both-pair packet, no VM grant;
+one captured1,000ms cutoff,8,192-row cap and exact joins remain. Expected
+focused18/1 excluded and ordinary Core1314/10, zero skips, are not results.
+The old four-case causal file remains unmerged. Native and Resource bounded
+rows remain open. Counts remain originals78/95/6 and added294/22 for T01–T19.
+All active statements below are historical snapshots superseded here.
+
 LATEST: Native corrected source657257684edbea05079a3f17789e79c9cb00695c
 has the sole verification VM grant for v3. Worker restore_manifest_resume owns
 polling and terminal collection, live handle51888. Formatter direct child
