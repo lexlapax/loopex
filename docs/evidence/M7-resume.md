@@ -27,6 +27,49 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current proof, execution and source ownership
 
+ROOT VM FREE after original35120, fully collected
+PASS_FOCUSED_CORE_CLEANUP_ONLY at clean3261e9a4,522.697 seconds/30stages.
+Both pairs pass production AST against51cd before compilation, warning-as-error
+dev/test compilation, metadata gates and private3/provider2/groups2/preparation18
+ordinary+1excluded/retirement3, zero skips. Root verified272 artifacts,134 inputs,
+all30 original process joins and actual scoped shutdown/preparation diagnostics.
+Collection `M7/provider-map-five-core-runtime-original-collection-20261006-v1.json`
+SHA-256 `5d87153d5186861d0786dac431fe8a337c295a40fda1acb8d4f5c56c0daa3146`;
+report `85d2d98c88491338acc06d1b0b2da5450a002029a17190ffc7bd0a4f5e7e2522`,
+inventory `ebb3a1b6604314763ea4037af1ba522f288eee82ec29f1d6d69b5c867ded2064`.
+Latest registry565 keys, SHA-256
+`8d03e4dc75e9d5826388f42987547098703776912b0a8dd8ce51cd0bd9d415f7`.
+Never repoll35120 or repeat its exact keys. Core's five paths rejoin m7;
+133/134 recorded input entries remain literal. The sole difference is the
+context map's newly approved decisions. Full integration/long checks and actual
+intermediate-membership branch remain open.
+
+Original85967 is collected PASS_FORMAT_PREPARATION_ONLY114.260s/9stages,
+no source child. Collection SHA-256
+`b7daa75a0414003f87e61fe131a8a0e7895b3a5809478e3457caafdf25dc10af`.
+A copied disabled packet refused writing its0444 config before any VM attempt;
+root finished its own unadmitted copy, then ran85967. Original93882 stays failed.
+
+Checkpoint4ee52100 is pushed. Its docs check passed24.226s; complete output
+`M7/approvals-docs-4ee52100-20261006-v1/check.log`, SHA-256
+`21ba7bfeb3697af859b85610ea5c61139eaec0242ced558a286b9e7b8089b7e5`.
+Claim handoffa578e8cf passed source review9874c134;34 native cases unexecuted.
+Policy native/codec68f2ac12 has185 unexecuted vectors. Root transport projection
+f5ae2555 is unformatted/unexecuted in its isolated worktree. These remain
+unrejoined. A hook-disabling commit was rejected by automatic approval review;
+root found no active commit hooks and used an ordinary successful commit.
+
+Current parallel work: cli prepares claim formatting; current-index writes
+compact-only ingress; private-task builds complete current manifests. Root owns
+transport integration and every VM grant. Configure request grammar (Proposed
+ADR0053), compaction-progress payload and remote creation-option grammar are
+new exact-contract gaps; dependent branches wait for governed decisions.
+Previously approved ADR0052/read-gate remain accepted. New T05 subtasks track
+these obligations; T01–T19 originals78done/95todo/6retired, added298done/35todo.
+No original outcome, full-check PASS or goal closure follows.
+
+Earlier checkpoint entries below are historical.
+
 ROOT VM FREE, 2026-10-06. Original93882 is terminal and fully collected
 FAIL_OR_UNAVAILABLE after166.873 seconds/eight stages. Frozen source
 `6f437227b248eb42fecc2661b96ca8b3565414c3` passed all three retirement cases

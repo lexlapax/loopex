@@ -44,25 +44,20 @@ continuation, complete prefix/activation audit, public facade and release remain
 open. Callback runtime regression waits for actual wiring. Exact outputs and
 collection hashes are in the [restart checkpoint](M7-resume.md).
 
-T16 originals57030 and49984 remain failed. The native stopper reply is matched
-to its exact caller/tag/alias; liveness metadata now requires a known-target
-native2 call/ref, subsequent :ok return and matching Boolean receive. The fixture
-is frozen at `6f437227`, with actual whole-file AST equivalence and current/floor
-formatting proved. Original93882 is fully collected after166.873 seconds/eight
-stages: current three cases pass, floor two pass and the no-window case fails
-on actual Enumerable.Map loading traffic. Keep the failure and strict trace
-admission. A pretrace validation of the actual provider map is being implemented
-inside the existing cutoff. Actual native traceability/order and intermediate
-live membership remain unproved. All broader Core/integration proofs remain
-open. No checklist row closes from these prerequisites.
+T16 original35120 passes all five focused cleanup selections on both supported
+pairs at clean3261e9a4,522.697s/30stages, fully collected. Production AST against51cd,
+actual scoped diagnostics and272 artifacts are verified. Core's five paths
+rejoin m7 with133/134 recorded inputs literal; the context map differs only by
+approved decisions. Earlier93882/57030/49984 remain failed. Broader integration,
+long proofs and actual intermediate-membership coverage remain open.
 
-The maintainer approved the restore read-gate rule and exact ADR0052 pair;
-both decisions are durable in the context map. Three source-only workers cover
-claim handoff, the narrow retirement fixture correction and native policy-event
-history/projection. Root owns rejoin and all verification VM grants. No decision
-is waiting for the maintainer; broad restore execution waits for current-source
-review. T01–T19 stay78 done/95 todo/6 retired; added298 done/32 todo.
-Including T00, original78/101/7 and added302/33.
+Claim handoffa578e8cf passes independent source review;34 native cases await
+runtime proof. Policy native/codec68f2ac12 and two-transport projectionf5ae2555
+are unverified source checkpoints. Parallel workers cover claim formatting,
+compact ingress and manifests. Exact configure/progress/remote-create schema
+gaps need decisions; accepted ADR0052/read-gate stay accepted. No original row
+closes here. T01–T19 remain78done/95todo/6retired; added298done/35todo, including
+three new T05 obligations. IncludingT00, original78/101/7 and added302/36.
 
 ## Current restore source and verification, 2026-10-05
 
@@ -12970,6 +12965,10 @@ or check was relaxed.
 - [ ] Run the required independent-client workflows.
 
 ### Added implementation subtasks
+
+- [ ] Finish accepted ADR0052 native answer provenance, exact policy cursor/replay relations and shared Elixir/Node payload projection in both transports; prove focused current/floor and independent vectors after rejoin, complete negotiated manifests and real answered-command workflows.
+- [ ] Pin and implement the exact configure request and versioned remote creation-option grammars through governed decisions; preserve authored aliases, central preparation, host-only bindings, current command replay and both transport authority gates.
+- [ ] Pin and implement the closed transient compaction-progress payload and its actual owned emission/loss/succession behavior; exclude summaries and private captures and prove both transports/clients before complete generation activation.
 
 - [x] Prepare the exact proposed ADR0052 policy public-event pair from current native/accepted sources, retain root review and complete once-only docs gate at ec9e8fbe with bound Proposed digests; required maintainer acceptance, native/event implementation, complete /3-/4 manifests and live clients remain open.
 
