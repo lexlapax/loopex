@@ -1200,7 +1200,9 @@ defmodule LoopexComposition.RestoreLookupTest do
   defp finish_paused(owned, pause) do
     receive do
       {:restore_io, guardian, worker, reference, {:terminal_release_installed, _}}
-      when guardian == owned.guardian and reference == owned.reference ->
+      when guardian == owned.guardian and reference == owned.reference and pause == :directory_sync ->
+        # The release worker pauses at directory_sync before it can finish.
+        # A rename-only fixture has no such release barrier and adds no late monitor.
         assert worker != owned.worker
         assert Process.get({:lookup_release_worker, reference}) == nil
         Process.put({:lookup_release_worker, reference}, {worker, Process.monitor(worker)})
