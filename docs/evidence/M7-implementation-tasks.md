@@ -51,11 +51,14 @@ rejoin m7 with133/134 recorded inputs literal; the context map differs only by
 approved decisions. Earlier93882/57030/49984 remain failed. Broader integration,
 long proofs and actual intermediate-membership coverage remain open.
 
-Claim handoffa578e8cf passes independent source review;34 native cases await
-runtime proof. Policy native/codec68f2ac12 and two-transport projectionf5ae2555
-are unverified source checkpoints. Parallel workers cover claim formatting,
-compact ingress and manifests. Exact configure/progress/remote-create schema
-gaps need decisions; accepted ADR0052/read-gate stay accepted. No original row
+Claim handoffa578e8cf passes independent source review and both-pair formatting
+at its whole-file AST-equal childed550f10. Original87718 is fully collected,
+52.902s/11stages;34 native cases and adjacent pending17/construction10/publication16
+await runtime proof. Policy native/codec68f2ac12, compact ingress28c8e86b and
+two-transport projectionf5ae2555 remain unverified source checkpoints.
+Configure ADR0053 is Proposed at pushed838cf0e3, with a22.097s docs-check PASS;
+maintainer choice is pending. Parallel workers prepare focused restore proof
+and progress/remote-create proposals. Accepted ADR0052/read-gate stay accepted. No original row
 closes here. T01–T19 remain78done/95todo/6retired; added298done/35todo, including
 three new T05 obligations. IncludingT00, original78/101/7 and added302/36.
 

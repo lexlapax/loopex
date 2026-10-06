@@ -27,6 +27,40 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current proof, execution and source ownership
 
+ROOT VM FREE after original87718, fully collected
+PASS_FORMAT_PREPARATION_ONLY52.902s/11stages. The three retained claim-handoff
+files have exact whole-file non-line AST equality and one confined sole-parent
+formatter child `ed550f10af1584a2f0c3447a142688e9ba448977` of a578e8cf;
+both supported formatters admit those same clean bytes. Root verified71
+artifacts,52 actual/Git inputs and all11 original process joins. Collection
+`M7/retained-claim-handoff-format-original-collection-20261006-v1.json`
+SHA-256 `2f4583ba134227d4222999ab139589e6123ceca068e9b27f5a2ca3cbbaa43ab0`;
+report `0d3f34147522e9091f4b4967413611d67d00fe65911638fb385aa295e2d3eee0`,
+inventory `f85de5f774dd39aebf4aabe91615c74866e2cbccd64fc07b4f79ba006844c745`.
+Latest registry576 keys, SHA-256
+`fa8a214b35512acd8baefb43371c3747f91195986e5bedb892c23ad1d95374ff`.
+Never repoll87718 or repeat its keys. A collector first used the wrong snapshot
+field name before creating its collection; the retained authoring correction
+reads `head` and reruns no product stage. The34 handoff cases and adjacent
+pending17/construction10/publication16 still need both-pair runtime proof.
+
+Configure ADR0053's exact Proposed pair is committed and pushed at
+`838cf0e3a9faa0fe13a8824465115a3372bad15b`. Documentation check passes22.097s,
+complete output `M7/configure-proposal-docs-838cf0e3-20261006-v1/check.log`,
+SHA-256 `2ea027f24b8930cdca653f93cc1542f42b74e8b5518325bbf78bcfbdf0f85118`.
+Root asked the maintainer to accept `changes` or revise to `configuration`;
+no response or acceptance is inferred. Dependent configure implementation waits.
+The cleanup integration2351ab13 is also pushed. Current parallel ownership:
+cli prepares the focused handoff runner; current-index proposes the exact
+transient progress contract; private-task proposes complete remote creation
+grammar and preparation semantics. Their source worktrees remain isolated;
+root owns integration and every verification VM. Compact ingress28c8e86b,
+policy68f2ac12 and projectionf5ae2555 remain unverified and unrejoined. No
+checklist row closes from formatting or proposals.
+
+The preceding checkpoint below is retained history; the576-key registry above
+supersedes its execution state.
+
 ROOT VM FREE after original35120, fully collected
 PASS_FOCUSED_CORE_CLEANUP_ONLY at clean3261e9a4,522.697 seconds/30stages.
 Both pairs pass production AST against51cd before compilation, warning-as-error
