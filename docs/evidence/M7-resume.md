@@ -27,6 +27,35 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Latest Store integration and next verification
 
+LATEST: Native checkpoint configuration is proved and joined through
+88cd84a28d84d61c7422b543e8a3d3ec4d61047a, tested clean source
+9aa2cf82742b3204fe1c57206ec8d2af579aea90. Handle72477 is terminal exit0,
+collected and sealed; never poll/restart. Both pairs10 focused/0 excluded,
+63 adjacent/1 excluded and1,323 ordinary Core/10 excluded pass, zero skips.
+All34 stages pass and OS groups are absent. Root verified98 terminal artifacts,
+100 sealed records,1,098 final actual/Git source records and exact tested bytes
+in all three integrated paths. Formatter delta is empty. Independent read-only
+review found no concrete issue within the bounded native slice. Old failures
+remain immutable; no historical schedule attribution or silence claim.
+
+SiblingM7/configure-checkpoint-runner-9aa2cf82-v4/execution-001 terminal
+digest a8437e0344bb5557df8cbd368fc0e9ef3ef44daee36e54d845e83c116ea68ee7;
+seal b50aa4127dceb229455b4d4bd865a072a892906b7128a306c2d80d51ec00fbe2;
+completion aabcbe88b7ed1ff7cdc7006285cc703e496f6ac6d509eb548965bb0c95e5df57.
+Measured stage sums current348.044s and floor317.640s, not whole-pipeline time.
+Only the bounded T08 added row closes. T01–T19 originals78/95/6,
+added295/21; includingT00 originals78/101/7, added299/22. Whole host routing,
+coordinated wire and next combined full current fast check remain pending.
+
+Resource v4 now holds the sole VM grant, worker current_index_cleanup, live
+handle54345. Exact clean source3ecf76623ab2a47fe7edc612135b6529c66634c8,
+reviewed runnerfd8781209e017fe2973943684ab9efa0b48e4a7015a4509a486f1ba82b1875e6,
+fresh siblingM7/resource-capture-audit-execution-20261005-v3. Current identity
+and formatter AST checks pass, formatter delta empty; tests pending. Actual
+Runtime witness source0f6abc76 and runner5ae246ec are reviewed and queued
+without VM grant. No other VM before Resource terminal collection. All active
+statements below are historical snapshots superseded here.
+
 LATEST: Native v4 now holds the sole verification VM grant. Worker
 restore_manifest_resume owns live handle72477, exact initial
 9aa2cf82742b3204fe1c57206ec8d2af579aea90 and reviewed runner

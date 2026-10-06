@@ -29,6 +29,40 @@ grouped by T00–T19. Empty added sections mean no added subtasks are recorded;
 they do not mean the original task is complete. This follows the maintainer's
 2026-10-01 update to the active implementation goal.
 
+## Native checkpoint configuration joined — 2026-10-05
+
+Bounded T08 checkpoint-aware native configuration is complete at tested source
+`9aa2cf82742b3204fe1c57206ec8d2af579aea90`, joined through
+`88cd84a28d84d61c7422b543e8a3d3ec4d61047a`. Both supported pairs pass10
+focused cases,63 adjacent cases/1 excluded and1,323 ordinary Core cases/10
+excluded, zero failures or skips. Current durations1.893s/6.496s/225.806s;
+floor1.794s/6.463s/226.259s. All34 stages pass. Their measured durations sum
+665.684s; this is a stage sum, not a measured whole-pipeline duration.
+
+Root independently verified98 terminal artifacts, all100 sealed records,
+all1,098 final actual/Git source records, stage exits/process-group absence,
+empty formatter delta and exact integrated bytes in all three paths. An
+independent read-only review found no concrete issue in surviving lineage,
+cumulative original-prefix/boundary authentication, historical nil endpoint,
+forged controls, strict replay and maintenance admission/cleanup cases.
+Scripted providers/executors and the memory Store constrain this proof; remote
+host routing, wire activation, real providers and whole M7 remain separate.
+
+Immutable outputs:
+`/Users/spuri/projects/lexlapax/loopex-evidence/M7/configure-checkpoint-runner-9aa2cf82-v4/execution-001`.
+Terminal digest`a8437e0344bb5557df8cbd368fc0e9ef3ef44daee36e54d845e83c116ea68ee7`;
+seal`b50aa4127dceb229455b4d4bd865a072a892906b7128a306c2d80d51ec00fbe2`;
+completion`aabcbe88b7ed1ff7cdc7006285cc703e496f6ac6d509eb548965bb0c95e5df57`;
+source inventory`e3e9a445251ea2091b7e15633cb23a8320141af34dfb9d55b1d129d95fe0605d`.
+All three failed predecessors remain immutable; the failed v3 cancellation
+interleaving was not captured and is not retrospectively claimed as proved.
+Runtime fault diagnostics remain in full output; no silence claim is made.
+
+T01–T19 originals stay78 done/95 todo/6 retired. Added295 done/21 todo;
+including T00 added299/22. T08 added27 done/1 todo. Resource v4 alone now
+holds the VM grant, handle54345; startup witness is reviewed and queued.
+The next combined full current fast check remains pending.
+
 ## Checkpoint and Resource first failures retained — 2026-10-05
 
 Latest continuation: Resource corrected10f71808 passes compilation, then
@@ -12824,7 +12858,7 @@ the still-open real-provider, live protocol, persistent-fault or closure lanes.
 - [x] Prove configuration restart, commit-unknown re-presentation and owner crashes before/after linearization through the live runtime.
 - [x] Join host configure resolution to the ordered chat driver through the public prepared facade; retain only confirmed candidates and prove busy/history refusal, exact unknown observation, canonical aliases and changed live model allowances on both toolchains.
 - [ ] Join host resolution and prepared daemon routing; extend configuration preflight to committed checkpoints and maintenance quiescence.
-- [ ] Validate native configuration against checkpoint-surviving history and exact summary/tail staging; prove actual committed checkpoints, covered/uncovered terminal-tool capability, unchanged refusals/replay/next-request capture, and maintenance refusal before host resolution through work, commitment, cleanup and recovery. Remote configure and coordinated protocol activation remain separate.
+- [x] Validate native configuration against checkpoint-surviving history and exact summary/tail staging; prove actual committed checkpoints, covered/uncovered terminal-tool capability, unchanged refusals/replay/next-request capture, and maintenance refusal before host resolution through work, commitment, cleanup and recovery. Remote configure and coordinated protocol activation remain separate.
 - [x] Capture bounded limits and source bindings from the exact pinned packaged catalog without mutable lookup; preserve unknown limits and the literal accepted alias.
 - [x] Register all nine literal reasoning cells after deterministic native request/response, bound, disclosure and terminal-history conformance; share exact mappings with transport validation.
 - [x] Join registered reasoning subsets and exact mapping resolution to whole-profile preparation.
