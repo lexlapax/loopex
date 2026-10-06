@@ -27,6 +27,113 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current proof, execution and source ownership
 
+ROOT VM RUNNING, 2026-10-06: original74464 is the sole verification VM,
+eight-stage pure construction run on frozenf5. Enabled
+`M7/retained-construction-pure-runtime-runner-20261006-v1` has config
+`99477897862b585c4d29a782b5f8e92222cd2f3f2023ea9e959ed8a3e8d7efec`,
+73-artifact inventory
+`341f49355edb523d43ffe66a2cb005dadfbd77621197114a8acb6bab5772f98e`.
+Output `M7/m7-retained-construction-pure-runtime-v1`; fresh registry
+`M7/retained-construction-pure-runtime-stage-attempt-registry.json` starts475 keys,
+digest `97a788d5f84cedb8aeef53e812cee076dfd24190b2f34701128eb7f0b57fc818`.
+Root report `f9a559990ed479035676e968bfc978e804e06fb29a57449b123dcff0ab328c6b`
+and independent report
+`64959a767a6478a4de99638b089a7153e016334bc83ec989331efccf3b75d012`
+admit pure10-case editing verification only. Author60160 fully collected exit0.
+Earlier author57175 refused an overbroad source-key check before any mutation;
+v2 permits the four retained f5 formatter keys while retaining exact proposed
+runtime-key refusal. No test attempt was repeated. Collect original74464 before
+another VM grant. No worker, physical restore or pending causal gate is enabled.
+
+LATEST COLLECTION, 2026-10-06: original33955 fully collected
+PASS_FORMAT_PREPARATION_ONLY after135.794s/12 stages. Clean source
+9ca23ebb71340fc36a7e134356948426a2b17098 is the one whole-file AST-equal fixture
+child of fbdd. Root verified73 artifacts,134 actual/Git rows and12 original joins.
+Collection `M7/retirement-stop-reply-format-original-collection-20261006-v1.json`
+is `d191284127bce174512dd8f86dd89a2b25e5fc42cd5e5e0fdc59bfbb73c170db`;
+report `752f42fcc3478fc7fdf175dd3a9a833af60810acb5ca5d6982afbd9aa37df135`,
+inventory `8621c7aab66ec85848b3b3f54cc6d631848cb1e9f4bfdb49284f03b3002a4c37`,
+collector `ffe552fafcce3a01a5cfaa0800102fc960438accc4fc8c321efe74bd19336899`.
+Collector66902 and author55883 are fully collected exit0. One wrong grant-variable
+prefix refused before VM/output/attempt creation; the corrected original run
+used the inherited reviewed prefix. Source remains frozen, no test result yet.
+Private-task sealed DISABLED scoped retirement runtime v2 with actual provenance,
+`/private/tmp/loopex-m7-retirement-stop-reply-runtime-runner-9ca23ebb-v2`;
+inventory `5672d78399a39b551b8e62a9a360a85a8659fd9996d09e7a111c1f1ebc45f4a2`.
+Root has not enabled it. Its old452 snapshot is historical; next enable must
+seed the complete later registry union. Original failures stay failed.
+
+Publication implementation follows accepted ADR0051's individual primitive
+permit/ack custody and host-owned access exclusion. Do not group multiple IO
+operations under one permit or claim hostile-host atomic compare-and-swap.
+Coupled descriptor/path/ancestor checks occur through the explicit sequence;
+native overwrite controls precede final validation. This is an internal choice
+preserving the accepted contract; claim custody remains an unwired prerequisite.
+
+LATEST COLLECTION, 2026-10-06: original58811 fully collected
+PASS_FORMAT_PREPARATION_ONLY after50.614s/11 stages. The sole VM is FREE.
+Clean source f5e26af3376d40b6444ce1489f55ff75c8826c55 is the sole whole-file
+non-line AST-equal owned child of bfc. Both current/floor formatting passed.
+Root verified70 immutable artifacts,50 actual/Git source records and11 original
+process joins. Collection
+`M7/retained-construction-format-original-collection-20261006-v1.json` is
+`202d1ecd5065e68923cbdbc313d6b0fb9bc94d3fa595505b16fa727229d6880b`;
+report `290be1bc14c3eba4c29e87ffc9e8ff3a306a805b4b6510984ad708a5590a614a`,
+inventory `c400c6dd8af3c1800900e6655cf3e26c958f02f404734fb5075518e6be247012`,
+registry `5dec9d1a05da77741ce53f32a236cd6d8bc5efcef218637e1fc04db129aac7dd`
+has463 unique keys. Collector is
+`765f9eb7de7c79e71ddcc4b3eb68b5f0e87fbe12bc180aebdd1327822d8a6d72`.
+Never repoll58811 or repeat its source/pair/stage keys. Current-index prepares
+only a disabled eight-stage pure10-case construction verification runner.
+No physical restore, old-suite transfer, pending causal gate or worker VM grant.
+
+SOURCE OWNERSHIP, 2026-10-06: CLI owns only Restore.IO and a new standalone
+retained-publication test in `/private/tmp/loopex-m7-restore-retained-publication`,
+branch `codex/m7-restore-retained-publication`, parent frozenf5. The accepted
+ADR0051 unit2 plan permits a restore-specific exact named temp/final publication
+primitive. Preserve generic publication and all old tests; require physical
+identities, modes/caps, native sync/readback and exact retained bytes. Source-only
+local implementation, no parser/VM/test/formatter, remote push, claim handoff,
+prefix audit, workflow exposure or public receipt. Stop at new authority/grammar.
+Private-task separately owns only the reviewed alias-correlated stop-reply
+fixture patch, child of8c, and its disabled formatter. Root reviewed proposal
+`/private/tmp/loopex-m7-retirement-stop-reply-proposal-8c9e18f3-v2/report.md`,
+digest `b2e8aca8c66843e80bb981ccb729fc1988c385965c1a440643dfa387623428d6`.
+Its single accepting clause requires one earlier exact stopper request/tag,
+exact alias target and no duplicate; every fence/cap/cutoff/join stays unchanged.
+
+LATEST COLLECTION, 2026-10-06: original57030 is fully collected
+FAIL_OR_UNAVAILABLE after92.515s/four current stages. Both positive retirement
+cases reject the captured native send `{[:alias | Ref], :ok}` to `Ref`; the
+third case passes. Current compilation passed. No floor stage ran. Root verified
+36 immutable artifacts,134 actual/Git source rows and four original process
+joins; source8c remains clean. Collection
+`M7/retirement-diagnostic-runtime-original-collection-20261006-v1.json` is
+`786f0e883e5a8a7c954729d13ff510264d557c1a25984c89c99f08b5af94e938`;
+report `edd578a135687208ee0ca72f3e9e7467ad253e779aa7d221d29bc9418156e933`,
+inventory `861817655e080b5b113ca06c0596ae39e32fea066420d6df8b452e2c2067fe2f`,
+registry `35e50c051634790577092073188a400b1de9df468d43e7fefad4af9eda7e23d2`
+has452 keys. Collector13699 fully collected exit0, script
+`21acdf112657fd19c9e49eefe414f461a6fd4cb3a1fe4b2741fe759e74b3d852`.
+Original command exit2 and evidence/outer exit1 remain unchanged. Never repeat
+these source/pair/stage keys. Private-task prepares only a strict native
+stop-request/reply correlation proposal; no generic `:ok` acceptance is granted.
+
+ROOT VM RUNNING, 2026-10-06: original58811 now owns the sole VM for two-file
+retained-construction formatting only. Initial clean source is bfc; enabled
+`M7/retained-construction-format-runner-20261006-v1` has config
+`d6630c3be196142aa1c672b1c1f412a7a2e698877f74d02c341945f906c13ff4`
+and73-artifact inventory
+`d913be53fdb2a2e284e298c81156430bf29ee4a033db0a1400a3ee1d691ce333`.
+Output `M7/m7-retained-construction-format-v1`, registry
+`M7/retained-construction-format-stage-attempt-registry.json` starts452 keys.
+Root verified34 disabled artifacts,22 references and50 actual/Git rows;
+independent packet report is
+`0154db76283963e8f4bd196258aa509a356d9d5eaab3754ffa8c04255945c2dc`,
+inventory `13ead91c66c64f217a39c90303e9af4da9d976bb79af8d45dee2fa6933f3b810`.
+Author81625 is fully collected exit0. Collect original58811 before another grant.
+No compiler/tests, public receipt, blocked restore gate or worker VM is enabled.
+
 ROOT VM RUNNING, 2026-10-06: original57030 owns the sole verification VM for
 the diagnostic-only frozen8c run. Collect this original handle fully before any
 other grant. Enabled `M7/retirement-diagnostic-runtime-runner-20261006-v1` has
