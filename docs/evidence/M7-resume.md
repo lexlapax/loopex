@@ -28,21 +28,34 @@ physical restore implementation; it does not waive any full-history proof.
 ### Current work and restart order
 
 Continue the existing ACTIVE unlimited goal on `m7`. Do not create another goal.
-Primary previous pushed checkpoint is `dad171f2`; this commit supersedes its
+Primary previous pushed checkpoint is `8b5a169d`; this commit supersedes its
 resume record. Historical detail remains at
 `bdc88a05:docs/evidence/M7-resume.md` and in the task ledger.
 
-Root verification VM is OCCUPIED by original native handle2817 at exact
-`d6afe045c34e27538ad69971857ca0b50d6e0b9b` in the Core/protocol worktree.
-Enabled packet `M7/core-configure-native-runner-20261006-v1`, config
-`c05ff8431f33ec3ef883c2cd4ab00b864e5e61e9c6661f081751b7dde8076371`,
-root review `6a28ab7f4354cdbf37d4def0bc5ddcc726b586af6c9741e6cb71ad429a6a0868`.
-Output `M7/m7-core-configure-native-v1`; registry
-`M7/core-configure-native-v1-stage-attempt-registry.json`, seed757. It requires
-18 stages,383 selected cases per pair: Core315, Protocol19 including4 Node,
-foreground27, daemon22. Both original31620 final format checks are consumed,
-never replayed. Collect original2817 before any next product VM. First failure
-seals; no result is inferred before terminal collection.
+Root verification VM is OCCUPIED by original native handle81659 at exact
+`f3086bdd1aa894017e582cd8d896244becf1a613` in the generation worktree.
+Enabled packet `M7/generation-payload-links-native-runner-20261006-v1`, config
+`ffde11e9835960a889b35ab564dadf15509201b964817637146f5aab58d3a8b6`,
+root review `52047c9054d1d66e3748dc4d12d46bec4976ab9cf9507ed8d4d1b2f5fe4fc16b`.
+Output `M7/m7-generation-payload-links-native-v1`; registry
+`M7/generation-payload-links-native-v1-stage-attempt-registry.json`, seed762.
+It requires22 stages and143 selected cases per supported pair, zero exclusions
+or skips. Both original24989 format checks are consumed, never replayed. Collect
+original81659 before another product VM. First failure seals the campaign.
+
+Original2817 is fully collected FAIL272.016s at exactd6afe045: current identity,
+Node and dev/test project compilation pass; Core312/315, three failures, zero
+exclusions/skips. Protocol, Node-vector, transport and floor lanes did not run.
+Collection `M7/core-configure-native-original-collection-20261006-v1.json`, SHA
+`cc487dd9ead673cbcfaa8d6f6cfb5bd34fcaeb0eb6c5daf1de626f112d1102c4`;
+terminal report `cd2a36b18eb85751a360d764767b92818a13877d7093734e5babbd6dae9c462a`,
+inventory `83ae3cc95008e8b25bc32f75896c92993d34cc85a9c04c01e3206923696bfd14`.
+All44 artifacts,91 actual/Git rows and5 original joins verified. Never repoll2817
+or rerun its keys. Source diagnosis identifies two fixture causes: wrong resumed
+runtime identity and an unconsumed earlier model-invoked message. Question
+settlement has a run/interaction expiry race and terminal-before-cancellation
+collector issue; its unchanged assertions need a truthful production correction.
+The pending source report will distinguish expiry from derived cancellation.
 
 Restore formatter24989 is fully collected PASS61.047s at final
 `f3086bdd1aa894017e582cd8d896244becf1a613`, sole d2 child. All5 ASTs, both
@@ -76,33 +89,45 @@ formatting results rather than repeating their keys.
 
 Source ownership, all separate worktrees and source-only agents:
 
-- `authored_bounds_review` authors only disabled generation-native packet
-  `/private/tmp/loopex-m7-generation-payload-links-native-runner-f3086bdd-20261006-v1`.
-  Freeze f308 source and consume both24989 formatting keys. All seven files,
-  143 cases per pair and22 fresh stages; no exclusions/skips or duplicate format.
-  Its completed independent fixture review remains immutable at
+- `authored_bounds_review` diagnoses the three failed2817 cases, source-only,
+  in `/private/tmp/loopex-m7-core-configure-native-failure-audit-d6afe045-20261006-v1`.
+  Frozen failed source stays literal; no production edits or proof weakening.
+  Its completed generation-native author packet is admitted above. Its independent
+  d2 fixture review remains immutable at
   `/private/tmp/loopex-m7-generation-payload-links-independent-review-d2c3cfa7-20261006-v1`,
   report `1698686f4d8d874e832417a3a27d233504364d9fee630ff798a2c171ba16d8e2`,
   index `1bf84fc0230396066e704a09147822a616399f4cdffaead890ea7c7391fe58ca`.
-  Root read full report/patch and rehashed87 indexed artifacts. Original21
-  cases remain literal, two physical controls add23; actual runtime unproved.
-- `private_task_causal_resume` writes only accepted prompt/follow-up dormant
+  Root read full report/patch and rehashed87 indexed artifacts. Original21 cases
+  remain literal; two physical controls add23. Native proof is active81659.
+- `private_task_causal_resume` completed accepted prompt/follow-up dormant
   ingress in `/private/tmp/loopex-m7-authored-run-ingress`, branch
   `codex/m7-authored-run-ingress`, basef4cb1cf5. Ten paths: new RunRequest,
   schema/vectors/test/Node files, two adapter tests and only dormant Mapping/Request
-  helpers. Preserve omission, empty and partial bounds, exact bytes and current
-  domains; no clocks/defaults, routes or manifests activate. Its prior compact
+  helpers. Clean leaf `2e30dd74f409e143215a48273715c26aaf5aa2d1`, sole f4 child.
+  Sealed report `9df8106802167c97c6c30017aaa48825ae94d860fe97d8d78cf379fe2c04419b`,
+  inventory `70bc1bb5b179f7d2b99ad5e03d73ae60a39c2c5be4b03f89d6c922abdabdf2ea`,
+  at `/private/tmp/loopex-m7-authored-run-ingress-source-2e30dd74-20261006-v1`.
+  It now independently reviews the answer leaf. The run review has found four
+  shared lone-surrogate vectors rejected by the native fixture loader; retain the
+  frozen leaf and correct only in a reviewed child. No runtime attempt occurred.
+  Omission, empty and partial bounds remain exact; no clocks/defaults/routes or
+  manifests activate. Its prior compact
   formatter packet is sealed but unreviewed/unexecuted at
   `/private/tmp/loopex-m7-compact-formatted-runner-f4cb1cf5-20261006-v1`,
   report `2c84eb624c71dd7245b9b2091c30ca760aa7db102e13765cf8f131dfa52afce4`,
   inventory `a38b825cfb921ca6b80d0ac94d725c3b84c056c94f50afe3abfb760d3847f0ce`.
   UNIT10/OWNED6, all6 ASTs and both final formatting checks remain required.
-- `restore_prefix_source_audit` writes only accepted interaction-answer dormant
+- `restore_prefix_source_audit` completed accepted interaction-answer dormant
   ingress in `/private/tmp/loopex-m7-interaction-answer-ingress`, branch
   `codex/m7-interaction-answer-ingress`, basef4cb1cf5. Ten paths: new AnswerRequest,
   schema/vector/test/Node files, two adapter tests and dormant Mapping/Request
   helpers. Reuse current Answer codec; producer/policy/controller validation stays
-  with native owners. No route or generation activation. Its completed d6 native
+  with native owners. Clean leaf `b9679df77eb93ad452fd567ab34f99dcf27cdc3f`, sole f4 child.
+  Packet `/private/tmp/loopex-m7-interaction-answer-ingress-source-b9679df7-20261006-v1`,
+  report `8f1d5f84b762ada2452d47d421d32636faa412e2e9cd99e66d2d77d9ddad2b89`,
+  inventory `d982af09743c8192bda427e109f665d1a577325b4434e3f142184a7febec7dca`.
+  It now independently reviews the run leaf. No route or generation activation.
+  Its completed d6 native
   author packet is immutable at
   `/private/tmp/loopex-m7-core-configure-native-runner-d6afe045-20261006-v1`,
   report `073f5400f85f8ab4b7be9472651733efd9eb228ab66156b45b2e372a750e9837`,
@@ -124,7 +149,8 @@ normal commit succeeded. No approval remains blocked by that rejection.
 One root integrator owns all execution, collection, rejoin and push. The
 combined candidate incorporates reviewed authored bounds/abort timer recovery,
 policy provenance/terminal projection and accepted0053 configure grammar,
-including corrected literal cap-plus-one fixtures. Its native proof is pending.
+including corrected literal cap-plus-one fixtures. Original2817 native proof failed.
+No original or added checklist row closes from source authoring or formatting.
 No source agent may run a parser, product import, VM, Node, formatter, compiler,
 test, grant, registry mutation or runtime output collection.
 
@@ -147,9 +173,9 @@ proposal review49c17036 and docs proof below; no acceptance follows.
 ### Latest complete evidence and attempt union
 
 Evidence base is `/Users/spuri/projects/lexlapax/loopex-evidence/M7`.
-Latest fully collected registry has757 keys, before active2817:
-`generation-payload-links-format-v1-stage-attempt-registry.json`, SHA
-`25b0aceeada48cb1b59ce36c1da0b586563f2bbaf6cd21576b2ca06176b9ff4e`.
+Latest fully collected registry has762 keys, before active81659:
+`core-configure-native-v1-stage-attempt-registry.json`, SHA
+`8eb980ec71e8f2744e95c174b114279fdc4aa6ae1c44f48b4c2d4841c479352a`.
 Reconcile every retained registry into the same unique exact(source,pair,stage)
 union before any fresh grant. A source child is not permission to reroll a case.
 

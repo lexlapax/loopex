@@ -42,6 +42,17 @@ remain failed. T01–T19 originals78done/95todo/6retired; added300done/39todo.
 IncludingT00 originals78/101/7, added304/40. Exact identities are in the restart
 checkpoint. Earlier progress below remains historical.
 
+Latest native original2817 is fully collected FAILED272.016s at d6afe045:
+Core312/315, three failures, zero exclusions/skips; later protocol, transport
+and floor lanes did not run. Two fixture causes and a question-expiry race are
+under source diagnosis. Generation formatter24989 passed both toolchains at
+f3086bdd after61.047s; fresh original81659 now owns the VM for143 generation
+cases per pair. Prompt/follow-up and answer ingress leaves are sealed and cross
+reviewed; a shared lone-surrogate run-vector fixture blocker is retained before
+any native attempt. No original or added row closes. T01–T19 originals78/95/6,
+added300/39 remain unchanged. Exact collection hashes and live ownership are in
+the restart checkpoint. Earlier paragraphs remain historical.
+
 Subsequent verification retained original4121 as FAILED at `9d744079`: current
 identity/dev/test compilation pass, generation install20/21 with one compound
 closure/payload assertion failure; prefix, adjacent and floor stages did not
