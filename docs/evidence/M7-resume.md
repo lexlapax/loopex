@@ -28,48 +28,50 @@ physical restore implementation; it does not waive any full-history proof.
 ### Current work and restart order
 
 Continue the existing ACTIVE unlimited goal on `m7`. Do not create another goal.
-Primary last pushed source/decision checkpoint is `bdc88a05`; this file's commit
-will supersede its resume record. The full earlier checkpoint is retained in Git
+Primary last pushed checkpoint is `3344353d`; this file's commit supersedes
+its resume record. The full earlier checkpoint is retained in Git
 at `bdc88a05:docs/evidence/M7-resume.md`; consult it selectively for historical
 proof pointers. The task ledger retains outcome mappings and the frozen checklist.
 
-Root verification VM is FREE. Every original handle below is fully collected;
-never poll it again. The next eligible campaign is generation native v3, after
-its independent source review and root admission. Native v1/v2 were never run.
+Root verification VM is OCCUPIED by original generation-native v3 handle
+`4121`, exact source `9d74407937897b9298d8228cff6d317c29bf9b48`. Collect this
+original before any next product VM. Every older handle below is fully collected
+and must never be polled again. Native v1/v2 were never run.
 
 Current isolated source ownership:
 
-- `current_index_cleanup`: accepted0053 configure decoder/vector prerequisite,
-  separate writer `/private/tmp/loopex-m7-configure-current-grammar`, branch
-  `codex/m7-configure-current-grammar` fromd995ed35. Owned shared pure configure
-  request codec/tests/schema/vectors/Node consumer plus Mapping, Request and new
-  focused ingress tests. No old-generation route registration or complete wire
-  activation; whole manifest rejoin remains separate.
-- `cli_current_fixtures`: Core abort/deadline recovery correction, separate
-  writer `/private/tmp/loopex-m7-authored-abort-cutoff`, branch
-  `codex/m7-authored-abort-cutoff` fromf6b791ab. Own Coordinator and
-  authored_run_deadline_test only. Preserve committed abort precedence and make
-  model:nil/prepared successors progress the existing abort cleanup rather than
-  selecting a new deadline ending or remaining stuck. Source-only native proofs
-  and a clean sole child are required before independent review.
-- `authored_bounds_review`: sealed Core9f2 P2 missing-model timer finding;
-  subsequent f6b791ab correction fixes that but introduces a durable-abort timer
-  recovery blocker. Correction audit report
-  `380cd1ea823899f54d2519527796e138fec62fc9f7a687b711c6a7ff6dbc25c2`,
-  SHA256SUMS `2b70210f919c738bbe232a07531262a9afd5691ede7899100564a1ea0f24d187`
-  at `/private/tmp/loopex-m7-authored-run-bounds-correction-source-audit-f6b791ab-20261006-v1`.
-  Both are source findings, never runtime failures or passes. Re-review the next
-  actual child before formatting/compilation/testing.
-- `restore_prefix_source_audit`: independent source admission of disabled
-  generation nativev3 for clean9d744079 at
-  `/private/tmp/loopex-m7-generation-native-focused-runtime-runner-20261006-v3`.
-  V3 consumes both original18466 formatting proofs and selects22 fresh stages,
- 141 cases per pair. Report01c8eeab, inventoryabe6676d,109 artifacts,59 actual/Git
-  rows,29 refs; root enable script
-  `/private/tmp/m7-enable-generation-native-runtime-v3.py` is authored but
-  unexecuted, seed724. V2 duplicate-key blocker remains retained in report
-  `2511eee207fa1b05f2ebb6d535b53d8cb2c14ea29352e17f535e9821d64ceb9c`.
-  Neither v1 nor v2 nor v3 has made a native attempt. No source report grants execution.
+- Configure writer stopped at clean `f06ec74daa1116c8cdc3bb3d40678a8a242602ee`
+  in `/private/tmp/loopex-m7-configure-current-grammar`. Packet
+  `/private/tmp/loopex-m7-configure-current-grammar-source-f06ec74d-20261006-v1`,
+  report `33addbfbb400d6e790f50812f894debb8bc5b3d43f647e2ccac44f5b83644c53`,
+  inventory `b390094b0c90dc80e68fa2ea74d179b8f9bdeb2f30be96abf1ea36d309375025`.
+  Shared pure decoder, dormant adapters and independent client vectors await
+  `restore_prefix_source_audit` source review. No served route activation or
+  product verification occurred. All 375 old test files remain literal.
+- Abort correction writer stopped at clean
+  `a322f5e0115e194f3f4f5cdf7fccebcfeb0cf745`, sole f6b791ab child in
+  `/private/tmp/loopex-m7-authored-abort-cutoff`. Packet
+  `/private/tmp/loopex-m7-authored-abort-cutoff-source-a322f5e0-20261006-v1`,
+  report `7ee34ad7bb27b33ae6aeeb11f89e1b993bc201de79f0941c25fbe7ccb4361d88`,
+  inventory `5bc1ddbf4a92d8123603aac4204c0e7d0d99dae6507f55a5bbd7d00ad9e918d4`.
+  Exactly Coordinator and authored deadline test changed. All eleven old cases
+  and helpers remain literal; two Store-backed abort recovery cases add thirteen
+  prospective cases. Original bounds retained. `authored_bounds_review` is
+  independently reviewing the actual child before root composition/format/tests.
+- Generation-native v3 source review is sealed at
+  `/private/tmp/loopex-m7-generation-native-runtime-source-audit-9d744079-20261006-v3`,
+  report `b40b00c3f4ba413457420855621151f9437b146269bcdc763259188a671d2473`,
+  SHA256SUMS `8fc92bd1fcd8a540840debf3357bd2375aee85516492f09d815bc43305de56ba`.
+  Root read the full report and rehashed all 204 indexed artifacts. Enabled copy
+  `/Users/spuri/projects/lexlapax/loopex-evidence/M7/generation-native-focused-runtime-runner-20261006-v3`,
+  config `4c2b6fb11fdf22a342dc0eb5c76587e8b7d1991f7153f5863f2cf80bca01eb30`,
+  root review `cdf205627ca777b22a126846751cfbb38e8197b6a79a3ac3503ce1b08d3e85c5`.
+  Root admission rehashed actual packet/source/proof and the complete724-key
+  union. Original handle4121 targets 22 fresh stages,141 native cases per pair,
+  consumes both unchanged original18466 format checks, and writes new output
+  `M7/m7-generation-native-focused-runtime-v3` with registry
+  `M7/generation-native-runtime-v3-stage-attempt-registry.json`. No native result
+  is inferred. V2 duplicate-key refusal remains retained, never retroactively run.
 
 One integrator owns rejoin. Core9f2 and protocol c364 both change SessionState;
 compose the approved policy provenance/cursor changes with authored command v4
