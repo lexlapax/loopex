@@ -10,7 +10,9 @@ defmodule Loopex.Executor.Local.RestoreGuard do
   This private reader shares Local's existing synchronous startup IO posture.
   Exact file, path, mode, byte and lineage-count ceilings bound admission. It
   adds no elapsed-time, cancellation or joined administrative-cleanup guarantee;
-  restore and lookup retain their separate explicit owned-IO limits. Claim
+  restore and lookup retain their separate explicit owned-IO limits. The same
+  closed chain reducer accepts manifest-bound bytes from restore's original
+  worker; that private seam performs no IO and grants no executor authority. Claim
   deadlines remain the original caller's deadlines and are rechecked afterward.
   """
 
@@ -107,19 +109,102 @@ defmodule Loopex.Executor.Local.RestoreGuard do
     end
   end
 
+  # Concept: prior lineage uses the same semantic reducer as ordinary opens.
+  # Technical depth: restore supplies manifest-bound bytes captured and closed by
+  # its original IO worker. Placements are the retained source captures, so older
+  # unavailable roots are never opened and copied backup inodes grant no authority.
+  @doc false
+  def validate_captured_lineage(plan, entries, files) do
+    try do
+      root = plan["source_state_root"]
+      index = Map.new(entries, &{&1["path"], &1})
+      placements =
+        Map.new(plan["ledgers"], fn ledger ->
+          {Path.join(root, ledger["relative_root"]), ledger["source_placement"]}
+        end)
+        |> Map.put(root, plan["source_state_placement"])
+
+      context = %{root: root, index: index, files: files, placements: placements}
+      reserved = Enum.filter(entries, &reserved_entry?/1)
+      {:ok, digest} = RestoreCodec.lineage_digest(reserved)
+      ensure!(digest == plan["prior_lineage_sha256"])
+
+      if plan["prior_restore_count"] == 0 do
+        ensure!(reserved == [])
+        {:ok, %{candidates: %{}, epochs: %{}, previous: 0}}
+      else
+        state = checked_state!({root, context})
+        ensure!(state.previous == plan["prior_restore_count"])
+        ensure!(reserved == state.lineage)
+        if MapSet.member?(state.tx_ids, plan["tx_id"]), do: throw(:restore_conflict)
+        declarations = Map.new(plan["ledgers"], &{&1["relative_root"], &1})
+
+        Enum.each(state.candidates, fn {relative, candidate} ->
+          declaration = Map.fetch!(declarations, relative)
+          ensure!(candidate["executor_identity"] == declaration["executor_identity"])
+          ensure!(hash(candidate["destination_generation_bytes"]) ==
+                    declaration["source_generation_sha256"])
+        end)
+
+        Enum.each(reserved, fn entry ->
+          path = entry["path"]
+          ensure!(path == @root_admin or String.starts_with?(path, @root_admin <> "/") or
+                    Enum.any?(state.candidates, fn {relative, _} ->
+                      prefix = Path.join(relative, "restore-lineage")
+                      path == prefix or String.starts_with?(path, prefix <> "/")
+                    end))
+        end)
+
+        {:ok, state}
+      end
+    rescue
+      _ -> {:error, :history_invalid}
+    catch
+      :restore_conflict -> {:error, :restore_conflict}
+      reason when reason in [:source_retired, :restore_incomplete, :history_invalid] ->
+        {:error, :history_invalid}
+    end
+  end
+
+  defp reserved_entry?(entry),
+    do: Enum.any?(Path.split(entry["path"]), &(&1 in [@root_admin, "restore-lineage"]))
+
+  defp history_root({path, _context}), do: path
+  defp history_root(path), do: path
+
+  defp history_path({path, context}, parts),
+    do: {Path.join([path | List.wrap(parts)]), context}
+
+  defp history_path(path, parts), do: Path.join([path | List.wrap(parts)])
+
+  defp generation_mode!({path, context}) do
+    entry = captured_entry!(path, context)
+    ensure!(entry["kind"] == "regular")
+    entry["mode"]
+  end
+
+  defp generation_mode!(path) do
+    {:ok, stat} = File.lstat(path)
+    Bitwise.band(stat.mode, 0o7777)
+  end
+
+  defp captured_entry!(path, context),
+    do: Map.fetch!(context.index, Path.relative_to(path, context.root))
+
   defp checked_state!(root) do
-    names!(Path.join(root, @root_admin), ["lineage"])
-    ordinals = ordinals!(Path.join([root, @root_admin, "lineage"]))
+    names!(history_path(root, @root_admin), ["lineage"])
+    ordinals = ordinals!(history_path(root, [@root_admin, "lineage"]))
     ensure!(ordinals == Enum.map(1..length(ordinals), &ordinal/1))
     placement = placement!(root)
     {:ok, binding} = RestoreCodec.state_binding(placement)
 
     result =
-      Enum.reduce(ordinals, %{candidates: %{}, epochs: %{}, previous: 0}, fn name, state ->
-        directory = Path.join([root, @root_admin, "lineage", name])
-        intent = record!(:intent, Path.join(directory, "intent"))
+      Enum.reduce(ordinals, %{candidates: %{}, epochs: %{}, previous: 0, tx_ids: MapSet.new(), lineage: []}, fn name, state ->
+        directory = history_path(root, [@root_admin, "lineage", name])
+        intent = record!(:intent, history_path(directory, "intent"))
         ensure!(intent["ordinal"] == state.previous + 1 and ordinal(intent["ordinal"]) == name)
         ensure!(intent["plan"]["prior_restore_count"] == state.previous)
+        ensure!(not MapSet.member?(state.tx_ids, intent["tx_id"]))
         actual_names = names!(directory)
 
         ensure!(
@@ -130,7 +215,7 @@ defmodule Loopex.Executor.Local.RestoreGuard do
         )
 
         if intent["source_state_binding"] == binding and
-             intent["plan"]["source_state_root"] == root,
+             intent["plan"]["source_state_root"] == history_root(root),
            do: throw(:source_retired)
 
         if actual_names != Enum.sort(["baseline", "intent", "source-retirement", "committed"]),
@@ -140,15 +225,14 @@ defmodule Loopex.Executor.Local.RestoreGuard do
       end)
 
     Enum.each(result.candidates, fn {relative, candidate} ->
-      ledger = Path.join(root, relative)
+      ledger = history_path(root, relative)
       observed = placement!(ledger)
       ensure!(observed == candidate["destination_ledger_placement"])
-      ensure!(ordinals!(Path.join(ledger, "restore-lineage")) == candidate[:covered_ordinals])
-      {:ok, stat} = File.lstat(Path.join(ledger, "generation"))
-      ensure!(Bitwise.band(stat.mode, 0o7777) == candidate[:generation_mode])
+      ensure!(ordinals!(history_path(ledger, "restore-lineage")) == candidate[:covered_ordinals])
+      ensure!(generation_mode!(history_path(ledger, "generation")) == candidate[:generation_mode])
 
       ensure!(
-        read!(Path.join(ledger, "generation"), 2048, :baseline) ==
+        read!(history_path(ledger, "generation"), 2048, :baseline) ==
           candidate["destination_generation_bytes"]
       )
     end)
@@ -156,13 +240,13 @@ defmodule Loopex.Executor.Local.RestoreGuard do
     # Highest transition governs this physical root; older destination placements
     # are captured history and never compared to today's directory identity.
     ensure!(result.latest["destination_state_placement"] == placement)
-    %{candidates: result.candidates, latest: result.latest}
+    if is_tuple(root), do: result, else: %{candidates: result.candidates, latest: result.latest}
   end
 
   defp complete_transition!(root, directory, intent, previous) do
-    intent_bytes = read!(Path.join(directory, "intent"), @record_cap)
+    intent_bytes = read!(history_path(directory, "intent"), @record_cap)
     intent_hash = hash(intent_bytes)
-    baseline = read!(Path.join(directory, "baseline"), 4_194_304)
+    baseline = read!(history_path(directory, "baseline"), 4_194_304)
     {:ok, entries} = RestoreCodec.manifest(baseline, 18_446_744_073_709_551_615)
     ensure!(hash(baseline) == intent["plan"]["manifest_sha256"])
 
@@ -174,8 +258,13 @@ defmodule Loopex.Executor.Local.RestoreGuard do
 
     {:ok, lineage_hash} = RestoreCodec.lineage_digest(lineage)
     ensure!(lineage_hash == intent["prior_lineage_sha256"])
+    # Concept: every earlier administrative fact remains in the complete cut.
+    # Technical depth: compare the full prior reconstructed projection, not only
+    # whatever subset the next baseline happens to list. Ordinary runtime files
+    # may evolve and are excluded only from this lineage comparison.
+    ensure!(lineage == previous.lineage)
     Enum.each(lineage, fn entry -> verify_historical_entry!(root, entry) end)
-    retired_bytes = read!(Path.join(directory, "source-retirement"), @record_cap)
+    retired_bytes = read!(history_path(directory, "source-retirement"), @record_cap)
     {:ok, retired} = RestoreCodec.decode(:source_retirement, retired_bytes)
     common!(retired, intent, intent_hash)
     ensure!(retired["source_state_binding"] == intent["source_state_binding"])
@@ -192,7 +281,7 @@ defmodule Loopex.Executor.Local.RestoreGuard do
         if(available, do: "source_retired", else: "lost_source_host_excluded")
     )
 
-    committed_bytes = read!(Path.join(directory, "committed"), @record_cap)
+    committed_bytes = read!(history_path(directory, "committed"), @record_cap)
     {:ok, committed} = RestoreCodec.decode(:committed, committed_bytes)
     common!(committed, intent, intent_hash)
     ensure!(committed["plan_digest"] == intent["plan_digest"])
@@ -213,23 +302,23 @@ defmodule Loopex.Executor.Local.RestoreGuard do
 
     ordinal_name = ordinal(intent["ordinal"])
 
-    {candidates, epochs, replacements, records} =
+    {candidates, epochs, replacements, records, committed_records} =
       Enum.reduce(
         intent["generations"],
-        {previous.candidates, previous.epochs, [], []},
-        fn candidate, {candidates, epochs, replacements, records} ->
+        {previous.candidates, previous.epochs, [], [], []},
+        fn candidate, {candidates, epochs, replacements, records, committed_records} ->
           relative = candidate["relative_root"]
-          ledger_directory = Path.join([root, relative, "restore-lineage", ordinal_name])
+          ledger_directory = history_path(root, [relative, "restore-lineage", ordinal_name])
 
           expected_names =
             ["intent", "committed"] ++ if(available, do: ["source-retired"], else: [])
 
           names!(ledger_directory, expected_names)
-          ledger_intent_bytes = read!(Path.join(ledger_directory, "intent"), @record_cap)
+          ledger_intent_bytes = read!(history_path(ledger_directory, "intent"), @record_cap)
           {:ok, ledger_intent} = RestoreCodec.decode(:ledger_intent, ledger_intent_bytes)
           common!(ledger_intent, intent, intent_hash)
           candidate_bindings!(ledger_intent, intent, candidate)
-          proof_bytes = read!(Path.join(ledger_directory, "committed"), @record_cap)
+          proof_bytes = read!(history_path(ledger_directory, "committed"), @record_cap)
           {:ok, proof} = RestoreCodec.decode(:ledger_committed, proof_bytes)
           common!(proof, intent, intent_hash)
           ensure!(proof["relative_root"] == relative)
@@ -253,7 +342,7 @@ defmodule Loopex.Executor.Local.RestoreGuard do
 
           files =
             if available do
-              bytes = read!(Path.join(ledger_directory, "source-retired"), @record_cap)
+              bytes = read!(history_path(ledger_directory, "source-retired"), @record_cap)
               {:ok, record} = RestoreCodec.decode(:ledger_retired, bytes)
               common!(record, intent, intent_hash)
               ensure!(record["ledger_intent_sha256"] == hash(ledger_intent_bytes))
@@ -311,7 +400,9 @@ defmodule Loopex.Executor.Local.RestoreGuard do
              relative,
              MapSet.put(prior_epochs, destination_generation["executor_epoch"])
            ), [candidate | replacements],
-           [{Path.join([relative, "restore-lineage", ordinal_name]), files} | records]}
+           [{Path.join([relative, "restore-lineage", ordinal_name]), files} | records],
+           [{Path.join([relative, "restore-lineage", ordinal_name]), [{"committed", proof_bytes}]} |
+            committed_records]}
         end
       )
 
@@ -323,7 +414,15 @@ defmodule Loopex.Executor.Local.RestoreGuard do
       ])
 
     ensure!(hash(activation) == committed["activation_manifest_sha256"])
-    %{candidates: candidates, epochs: epochs, previous: intent["ordinal"], latest: intent}
+    {:ok, activation_entries} = RestoreCodec.manifest(activation, 18_446_744_073_709_551_615)
+    final = reconstruct(activation_entries, [], [
+      {Path.join([@root_admin, "lineage", ordinal_name]), [{"committed", committed_bytes}]} |
+      committed_records
+    ])
+    {:ok, final_entries} = RestoreCodec.manifest(final, 18_446_744_073_709_551_615)
+    %{candidates: candidates, epochs: epochs, previous: intent["ordinal"], latest: intent,
+      tx_ids: MapSet.put(previous.tx_ids, intent["tx_id"]),
+      lineage: Enum.filter(final_entries, &reserved_entry?/1)}
   end
 
   defp candidate_bindings!(record, intent, candidate) do
@@ -374,7 +473,7 @@ defmodule Loopex.Executor.Local.RestoreGuard do
         acc =
           directory
           |> Path.split()
-          |> Enum.scan(&Path.join/2)
+          |> Enum.scan(fn part, parent -> Path.join(parent, part) end)
           |> Enum.reduce(acc, fn path, map ->
             Map.put_new(map, path, %{
               "path" => path,
@@ -408,10 +507,10 @@ defmodule Loopex.Executor.Local.RestoreGuard do
   end
 
   defp verify_historical_entry!(root, entry) do
-    path = Path.join(root, entry["path"])
+    path = history_path(root, entry["path"])
 
     if entry["kind"] == "regular" do
-      bytes = read!(path, if(Path.basename(path) == "baseline", do: 4_194_304, else: @record_cap))
+      bytes = read!(path, if(Path.basename(history_root(path)) == "baseline", do: 4_194_304, else: @record_cap))
       ensure!(byte_size(bytes) == entry["size"] and hash(bytes) == entry["sha256"])
     else
       directory!(path)
@@ -435,6 +534,11 @@ defmodule Loopex.Executor.Local.RestoreGuard do
     root
   end
 
+  defp placement!({path, context}) do
+    ensure!(captured_entry!(path, context)["kind"] == "directory")
+    Map.fetch!(context.placements, path)
+  end
+
   defp placement!(root) do
     Enum.each(ancestors(root), fn path ->
       {:ok, %File.Stat{type: :directory}} = File.lstat(path)
@@ -447,10 +551,28 @@ defmodule Loopex.Executor.Local.RestoreGuard do
   defp ancestors("/"), do: ["/"]
   defp ancestors(root), do: [root | ancestors(Path.dirname(root))]
 
+  defp directory!({path, context}) do
+    entry = captured_entry!(path, context)
+    ensure!(entry["kind"] == "directory" and entry["mode"] == 0o700)
+    :ok
+  end
+
   defp directory!(path) do
     {:ok, %File.Stat{type: :directory} = stat} = File.lstat(path)
     ensure!(Bitwise.band(stat.mode, 0o7777) == 0o700)
     :ok
+  end
+
+  defp names!({path, context} = captured) do
+    directory!(captured)
+    relative = Path.relative_to(path, context.root)
+    names =
+      context.index
+      |> Map.keys()
+      |> Enum.filter(&(Path.dirname(&1) == relative and &1 != relative))
+      |> Enum.map(&Path.basename/1)
+    ensure!(length(names) <= 64 and Enum.all?(names, &String.valid?/1))
+    Enum.sort(names)
   end
 
   defp names!(path) do
@@ -478,7 +600,18 @@ defmodule Loopex.Executor.Local.RestoreGuard do
     record
   end
 
-  defp read!(path, cap, role \\ :administrative) do
+  defp read!(path, cap, role \\ :administrative)
+
+  defp read!({path, context}, cap, role) do
+    entry = captured_entry!(path, context)
+    bytes = Map.fetch!(context.files, Path.relative_to(path, context.root))
+    ensure!(entry["kind"] == "regular" and entry["size"] <= cap)
+    ensure!(role == :baseline or entry["mode"] == 0o600)
+    ensure!(byte_size(bytes) == entry["size"] and hash(bytes) == entry["sha256"])
+    bytes
+  end
+
+  defp read!(path, cap, role) do
     {:ok, %File.Stat{type: :regular, links: 1, size: size} = before} = File.lstat(path)
     ensure!(size <= cap and (role == :baseline or Bitwise.band(before.mode, 0o7777) == 0o600))
     {:ok, descriptor} = :file.open(String.to_charlist(path), [:raw, :binary, :read])

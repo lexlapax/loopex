@@ -21,8 +21,9 @@ defmodule LoopexComposition.Restore.IO do
   canonical retained Resource or Local ledger record audit, and complete Local
   generation/marker/open-plane enumeration and selected reference-bound artifact
   use capture and one locator-selected streaming object audit to composition only.
-  A private first-transition worker sequences available-source retirement or
-  lost-source host-exclusion evidence, exact copy/publication and terminal
+  A private transition worker validates retained prior lineage and sequences
+  available-source retirement or lost-source host-exclusion evidence, exact
+  copy/publication and terminal
   claim release without replacing the original guardian or deadlines. Public
   restore/lookup and the remaining accepted variants are unfinished. Validated
   maps and recovered facts remain private; standalone audit operations grant no
@@ -37,7 +38,7 @@ defmodule LoopexComposition.Restore.IO do
   Record.defrecordp(:file_info, Record.extract(:file_info, from_lib: "kernel/include/file.hrl"))
 
   alias Loopex.ArtifactStore
-  alias Loopex.Executor.Local.{Ledger, RestoreCodec}
+  alias Loopex.Executor.Local.{Ledger, RestoreCodec, RestoreGuard}
   alias Loopex.Runtime.SessionState
   alias Loopex.Store.Local.{Artifacts, Log, State}
   alias LoopexComposition.ResourcePacks
@@ -1062,6 +1063,50 @@ defmodule LoopexComposition.Restore.IO do
     end
   end
 
+  defp execute({:audit_restore_lineage, root, plan, manifest}) do
+    with {:ok, _} <- primitive(:restore_history_plan, fn -> RestoreCodec.encode(:plan, plan) end),
+         {:ok, entries} <- primitive(:restore_history_manifest, fn ->
+           RestoreCodec.manifest(manifest, @max_uint64)
+         end) do
+      index = Map.new(entries, &{&1["path"], &1})
+      generations = MapSet.new(plan["ledgers"], &Path.join(&1["relative_root"], "generation"))
+      selected =
+        Enum.filter(entries, fn entry ->
+          entry["kind"] == "regular" and
+            (MapSet.member?(generations, entry["path"]) or
+               Enum.any?(Path.split(entry["path"]), &(&1 in [".loopex-restore", "restore-lineage"])))
+        end)
+
+      # Concept: current record caps apply before any lineage file is opened.
+      # Technical depth: every captured byte remains in the original manifest's
+      # caller-checked total. No nested guardian, allowance or old-root IO exists.
+      ceilings =
+        Map.new(selected, fn entry ->
+          ceiling = cond do
+            MapSet.member?(generations, entry["path"]) -> @max_ledger_generation
+            Path.basename(entry["path"]) == "baseline" -> @max_manifest
+            true -> @max_ledger_record
+          end
+          if entry["size"] > ceiling, do: throw({:io_error, :inventory_mismatch})
+          {entry["path"], ceiling}
+        end)
+
+      captured =
+        Enum.reduce(selected, %{}, fn entry, acc ->
+          {:ok, bytes} = audit_captured_record(root, entry["path"], index,
+            ceilings[entry["path"]], :restore_history_digest, :restore_history_bytes,
+            fn bytes -> {:ok, bytes} end)
+          Map.put(acc, entry["path"], bytes)
+        end)
+
+      primitive(:restore_history_decode, fn ->
+        RestoreGuard.validate_captured_lineage(plan, entries, captured)
+      end)
+    else
+      _ -> {:error, :history_invalid}
+    end
+  end
+
   defp execute({:audit_artifact_use, root, reference, manifest}) do
     # Concept: one retained use is private evidence bound to its current reference.
     # Technical depth: the existing Core facade validates the reference before path
@@ -1923,10 +1968,13 @@ defmodule LoopexComposition.Restore.IO do
 
   defp valid_operation?({:restore_first, plan, invocation}),
     do:
-      RestoreCodec.eligible_plan(plan) == :ok and
+      match?({:ok, _}, RestoreCodec.encode(:plan, plan)) and
         match?({:ok, _}, RestoreCodec.encode(:invocation, invocation)) and
-        plan["prior_restore_count"] == 0 and
         invocation["prior_admin_authority"] == "none"
+
+  defp valid_operation?({:audit_restore_lineage, root, plan, manifest}),
+    do: valid_path?(root) and is_map(plan) and is_binary(manifest) and
+          byte_size(manifest) <= @max_manifest
 
   defp valid_operation?({:audit_store, root, declaration, manifest}),
     do:

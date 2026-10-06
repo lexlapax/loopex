@@ -2,7 +2,7 @@ defmodule LoopexComposition.Restore.Workflow do
   @moduledoc """
   ## Concept
 
-  The private first transition restores one complete shipped current baseline
+  The private transition restores one complete shipped current baseline
   into an empty root. Available sources retire before activation; lost sources
   require positive absence and the retained host exclusion attestation.
 
@@ -10,24 +10,26 @@ defmodule LoopexComposition.Restore.Workflow do
 
   This development path sequences existing physical audits, streaming copy and
   canonical ADR 0051 publication inside one Restore.IO worker. It has no public
-  restore/lookup entry point. Repeated lineage and original-tx
-  continuation remain implementation work. The IO callback never starts another
-  guardian or refreshes this invocation's work or cleanup allowance.
+  restore/lookup entry point. It validates and appends complete prior lineage;
+  Original-tx continuation remains implementation work. The IO callback never
+  starts another guardian or refreshes this invocation's work or cleanup allowance.
   """
 
   alias Loopex.Executor.Local.{Ledger, RestoreCodec}
   alias LoopexComposition.Restore.Audit
   alias LoopexComposition.WorkspaceIdentity
 
-  @ordinal "00000001"
-  @root_admin Path.join([".loopex-restore", "lineage", @ordinal])
-
   @doc false
   def execute(plan, invocation, io) do
     Process.put(:restore_workflow_claims, [])
     Process.put(:restore_workflow_changed, false)
     Process.put(:restore_workflow_intent, false)
+    root_admin = root_admin(plan)
     phase(io, "claim")
+    # Concept: transition 65 refuses before acquiring or changing physical state.
+    # Technical depth: the existing metadata-only phase remains observable before
+    # this admission gate; every claim and physical IO operation follows the gate.
+    ensure!(plan["prior_restore_count"] < 64, "inventory_limit_exceeded")
     claims = claims!(plan, io)
     Process.put(:restore_workflow_claims, claims)
     phase(io, "inventory")
@@ -58,9 +60,14 @@ defmodule LoopexComposition.Restore.Workflow do
       do: ensure!(value!(io.({:manifest, source, max_total})) == baseline, "inventory_mismatch")
 
     {:ok, entries} = RestoreCodec.manifest(baseline, max_total)
-    {:ok, empty_lineage} = RestoreCodec.lineage_digest([])
-    ensure!(plan["prior_lineage_sha256"] == empty_lineage, "inventory_mismatch")
-    ensure!(not Enum.any?(entries, &admin_entry?/1), "invalid_current_history")
+    {:ok, lineage_digest} = RestoreCodec.lineage_digest(Enum.filter(entries, &admin_entry?/1))
+    ensure!(plan["prior_lineage_sha256"] == lineage_digest, "inventory_mismatch")
+    lineage =
+      case io.({:audit_restore_lineage, backup, plan, baseline}) do
+        {:ok, lineage} -> lineage
+        {:error, :restore_conflict} -> throw({:restore_refusal, "restore_conflict"})
+        _ -> throw({:restore_refusal, "invalid_current_history"})
+      end
     facts = Audit.complete(plan, baseline, max_total, io)
 
     phase(io, "baseline_copy")
@@ -105,6 +112,7 @@ defmodule LoopexComposition.Restore.Workflow do
         baseline,
         entries,
         facts,
+        lineage,
         source_placement,
         destination_placement,
         max_total,
@@ -114,19 +122,19 @@ defmodule LoopexComposition.Restore.Workflow do
     # All independent whole-record ceilings and exact activation bytes have
     # already been checked; no intent temp exists before this point.
     phase(io, "destination_intent")
-    admin_directories!(destination, @root_admin, entries, io)
-    publish!(destination, Path.join(@root_admin, "baseline"), baseline, io)
+    admin_directories!(destination, root_admin, entries, io)
+    publish!(destination, Path.join(root_admin, "baseline"), baseline, io)
     Process.put(:restore_workflow_intent, true)
     value!(io.({:intent_may_persist, "destination_intent"}))
-    publish!(destination, Path.join(@root_admin, "intent"), compiled.intent, io)
+    publish!(destination, Path.join(root_admin, "intent"), compiled.intent, io)
 
     phase(io, "source_retirement")
 
     if available do
       ensure!(value!(io.({:manifest, source, max_total})) == baseline, "source_changed")
       ensure!(value!(io.({:placement, source})) == source_placement, "source_changed")
-      admin_directories!(source, @root_admin, entries, io)
-      publish!(source, Path.join(@root_admin, "intent"), compiled.intent, io)
+      admin_directories!(source, root_admin, entries, io)
+      publish!(source, Path.join(root_admin, "intent"), compiled.intent, io)
 
       Enum.each(compiled.ledgers, fn ledger ->
         admin_directories!(source, ledger.directory, entries, io)
@@ -134,12 +142,12 @@ defmodule LoopexComposition.Restore.Workflow do
         publish!(source, Path.join(ledger.directory, "source-retired"), ledger.retired, io)
       end)
 
-      publish!(source, Path.join(@root_admin, "source-retirement"), compiled.retirement, io)
+      publish!(source, Path.join(root_admin, "source-retirement"), compiled.retirement, io)
     else
       lost_source!(source, source_observation, io)
     end
 
-    publish!(destination, Path.join(@root_admin, "source-retirement"), compiled.retirement, io)
+    publish!(destination, Path.join(root_admin, "source-retirement"), compiled.retirement, io)
 
     phase(io, "destination_generations")
 
@@ -155,7 +163,7 @@ defmodule LoopexComposition.Restore.Workflow do
 
       value!(
         io.(
-          {:publish, path, path <> ".restore-00000001.tmp", ledger.candidate, ledger.mode,
+          {:publish, path, path <> ".restore-" <> ordinal(plan) <> ".tmp", ledger.candidate, ledger.mode,
            ledger.original}
         )
       )
@@ -174,7 +182,7 @@ defmodule LoopexComposition.Restore.Workflow do
     end)
 
     if not available, do: lost_source!(source, source_observation, io)
-    publish!(destination, Path.join(@root_admin, "committed"), compiled.committed, io)
+    publish!(destination, Path.join(root_admin, "committed"), compiled.committed, io)
     final = value!(io.({:manifest, destination, max_total}))
     ensure!(final == compiled.final, "inventory_mismatch")
     phase(io, "claim_release")
@@ -248,7 +256,8 @@ defmodule LoopexComposition.Restore.Workflow do
     end)
   end
 
-  defp compile!(plan, baseline, entries, facts, source, destination, max_total, io) do
+  defp compile!(plan, baseline, entries, facts, lineage, source, destination, max_total, io) do
+    root_admin = root_admin(plan)
     {:ok, plan_digest} = RestoreCodec.plan_digest(plan)
     {:ok, source_binding} = RestoreCodec.state_binding(source)
     {:ok, destination_binding} = RestoreCodec.state_binding(destination)
@@ -261,7 +270,11 @@ defmodule LoopexComposition.Restore.Workflow do
         ensure!(hash(original) == declaration["source_generation_sha256"], "inventory_mismatch")
         placement = value!(io.({:placement, Path.join(plan["destination_state_root"], relative)}))
         {:ok, binding} = RestoreCodec.ledger_binding(placement)
-        epoch = fresh_epoch(MapSet.put(epochs, old["executor_epoch"]))
+        excluded =
+          epochs
+          |> MapSet.union(Map.get(lineage.epochs, relative, MapSet.new()))
+          |> MapSet.put(old["executor_epoch"])
+        epoch = fresh_epoch(excluded)
 
         generation = %{
           old
@@ -347,7 +360,7 @@ defmodule LoopexComposition.Restore.Workflow do
 
         %{
           relative: relative,
-          directory: Path.join([relative, "restore-lineage", @ordinal]),
+          directory: Path.join([relative, "restore-lineage", ordinal(plan)]),
           intent: ledger_intent,
           retired: retired,
           candidate: candidate["destination_generation_bytes"],
@@ -405,7 +418,7 @@ defmodule LoopexComposition.Restore.Workflow do
       |> Map.new(&{&1["path"], &1})
       |> replace_generations(ledgers)
       |> add_records([
-        {@root_admin,
+        {root_admin,
          [{"baseline", baseline}, {"intent", intent}, {"source-retirement", retirement}]}
         | Enum.map(
             ledgers,
@@ -446,7 +459,7 @@ defmodule LoopexComposition.Restore.Workflow do
     final =
       activation_entries
       |> add_records([
-        {@root_admin, [{"committed", committed}]}
+        {root_admin, [{"committed", committed}]}
         | Enum.map(ledgers, &{&1.directory, [{"committed", &1.committed}]})
       ])
       |> manifest!()
@@ -572,7 +585,13 @@ defmodule LoopexComposition.Restore.Workflow do
   defp admin_entry?(entry),
     do: Enum.any?(Path.split(entry["path"]), &(&1 in [".loopex-restore", "restore-lineage"]))
 
-  defp common(plan, kind), do: %{"kind" => kind, "ordinal" => 1, "tx_id" => plan["tx_id"]}
+  defp ordinal(plan),
+    do: (plan["prior_restore_count"] + 1) |> Integer.to_string() |> String.pad_leading(8, "0")
+
+  defp root_admin(plan), do: Path.join([".loopex-restore", "lineage", ordinal(plan)])
+
+  defp common(plan, kind),
+    do: %{"kind" => kind, "ordinal" => plan["prior_restore_count"] + 1, "tx_id" => plan["tx_id"]}
   defp proof(plan, kind, intent), do: Map.put(common(plan, kind), "intent_sha256", intent)
   defp phase(io, phase), do: value!(io.({:restore_phase, phase}))
 

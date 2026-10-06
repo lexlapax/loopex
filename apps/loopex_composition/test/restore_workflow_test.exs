@@ -860,6 +860,242 @@ defmodule LoopexComposition.RestoreWorkflowTest do
     assert manifest(fixture.backup) == fixture.baseline
   end
 
+  for {first_status, second_status} <-
+        [{:available, :available}, {:available, :lost}, {:lost, :available}, {:lost, :lost}] do
+    test "successive #{first_status}/#{second_status} restores retain real A to B to C lineage",
+         context do
+      first = context.root |> actual_cut() |> with_source_status(unquote(first_status))
+      first_receipt = restore_joined(first)
+      assert first_receipt["ordinal"] == 1
+      assert_complete_copy(first)
+      assert {:ok, _} = RestoreGuard.state(first.destination)
+
+      second = next_cut(first, context.root)
+      # Older captured placements are history. Removing A must not prevent the
+      # complete B cut from moving to C, with either current source disposition.
+      File.rm_rf!(first.source)
+      assert File.lstat(first.source) == {:error, :enoent}
+      second = with_source_status(second, unquote(second_status))
+      second_receipt = restore_joined(second)
+      assert second_receipt["ordinal"] == 2
+      assert second_receipt["prior_lineage_sha256"] == second.plan["prior_lineage_sha256"]
+      assert_successive_copy(second)
+      assert manifest(first.backup) == first.baseline
+      assert File.read!(Path.join(second.destination, "store.log")) == first.store_bytes
+      assert File.read!(Path.join(first.workspace, "unknown-ready")) == "ready"
+      assert File.lstat(first.source) == {:error, :enoent}
+
+      assert {:ok, %{latest: latest, candidates: candidates}} =
+               RestoreGuard.state(second.destination)
+      assert latest["ordinal"] == 2 and latest["plan"] == second.plan
+      for declaration <- second.plan["ledgers"] do
+        relative = declaration["relative_root"]
+        assert candidates[relative][:covered_ordinals] == ["00000001", "00000002"]
+        assert :ok = RestoreGuard.ledger(Path.join(second.destination, relative))
+        original = generation(Path.join([first.backup, relative, "generation"]))
+        middle = generation(Path.join([second.backup, relative, "generation"]))
+        current = generation(Path.join([second.destination, relative, "generation"]))
+        assert MapSet.size(MapSet.new([
+                 original["executor_epoch"], middle["executor_epoch"], current["executor_epoch"]
+               ])) == 3
+      end
+
+      assert File.read!(Path.join(second.destination, ".loopex-restore/lineage/00000001/committed")) ==
+               File.read!(Path.join(second.backup, ".loopex-restore/lineage/00000001/committed"))
+      assert second_receipt["tx_id"] != first_receipt["tx_id"]
+      assert_second_source_disposition(second, unquote(second_status))
+    end
+  end
+
+  test "a real ledger introduced at B retains sparse provenance starting at ordinal two", context do
+    first = actual_cut(context.root)
+    restore_joined(first)
+    extra = "additional-receipts"
+    assert {:ok, _prepared} =
+             Ledger.prepare(Path.join(first.destination, extra), "additional-executor", @grace)
+    second = next_cut(first, context.root, [extra, "receipts", "resource-packs/receipts"])
+    restore_joined(second)
+    assert_successive_copy(second)
+    assert {:ok, %{candidates: candidates}} = RestoreGuard.state(second.destination)
+    assert candidates[extra][:covered_ordinals] == ["00000002"]
+    assert candidates["receipts"][:covered_ordinals] == ["00000001", "00000002"]
+    assert candidates["resource-packs/receipts"][:covered_ordinals] == ["00000001", "00000002"]
+    assert File.lstat(Path.join([second.destination, extra, "restore-lineage", "00000001"])) ==
+             {:error, :enoent}
+    assert :ok = RestoreGuard.ledger(Path.join(second.destination, extra))
+    assert File.read!(Path.join(first.workspace, "unknown-ready")) == "ready"
+  end
+
+  for fault <- [:corrupt_proof, :incomplete_higher_head, :extra_ledger_record] do
+    test "successive restore rejects actual #{fault} lineage before destination mutation", context do
+      first = actual_cut(context.root)
+      restore_joined(first)
+      second = next_cut(first, context.root)
+      for root <- [second.source, second.backup], do: damage_lineage(root, unquote(fault))
+      baseline = manifest(second.backup)
+      assert manifest(second.source) == baseline
+      second = %{second | baseline: baseline, plan: refresh_lineage_plan(second.plan, baseline)}
+      owned = launch(second.plan)
+      assert_preintent_refusal(owned, second, "invalid_current_history")
+    end
+  end
+
+  test "a later transition cannot reuse any earlier transaction with a changed canonical plan",
+       context do
+    first = actual_cut(context.root)
+    restore_joined(first)
+    second = next_cut(first, context.root)
+    restore_joined(second)
+    third_parent = Path.join(context.root, "third-transition")
+    File.mkdir!(third_parent)
+    third = next_cut(second, third_parent)
+    assert third.plan["prior_restore_count"] == 2
+    third = %{third | plan: %{third.plan | "tx_id" => first.plan["tx_id"]}}
+    owned = launch(third.plan)
+    assert_preintent_refusal(owned, third, "restore_conflict")
+  end
+
+  test "a declared 64-transition cut refuses transition 65 before claim or baseline IO", context do
+    first = actual_cut(context.root)
+    restore_joined(first)
+    second = next_cut(first, context.root)
+    plan = %{second.plan | "prior_restore_count" => 64}
+    assert {:ok, _} = RestoreCodec.encode(:plan, plan)
+    owned = launch(plan, {:restore_phase, "claim"})
+    guardian = owned.guardian
+    worker = owned.worker
+    reference = owned.reference
+    assert_receive {:restore_io, ^guardian, ^worker, ^reference,
+                    {:issued, id, {:restore_phase, "claim"}} = phase}, 1_000
+    send(guardian, {:proceed, reference, id})
+    {result, events} = finish(owned, [phase])
+    assert {:joined,
+            {:ok, %{restore_result: {:not_committed, "inventory_limit_exceeded"}, release_claims: []}},
+            evidence} = result
+    assert evidence.restore.intent == false and evidence.claim_count == 0
+    assert evidence.opens == 0 and evidence.closes == 0
+    assert for({:issued, _, kind} <- events, do: kind) == [{:restore_phase, "claim"}]
+    exact_joins(owned)
+    assert File.ls!(second.destination) == []
+    assert Enum.all?(claims(plan), &(File.lstat(&1) == {:error, :enoent}))
+    assert manifest(second.source) == second.baseline
+    assert manifest(second.backup) == second.baseline
+  end
+
+  defp with_source_status(fixture, :available), do: fixture
+  defp with_source_status(fixture, :lost), do: lose_source(fixture)
+
+  defp assert_second_source_disposition(fixture, :available),
+    do: assert({:error, :source_retired} == RestoreGuard.state(fixture.source))
+
+  defp assert_second_source_disposition(fixture, :lost),
+    do: assert(File.lstat(fixture.source) == {:error, :enoent})
+
+  defp restore_joined(fixture) do
+    owned = launch(fixture.plan)
+    {result, events} = finish(owned)
+    assert {:joined, {:ok, %{restore_result: {:committed, receipt}, release_claims: []}}, evidence} = result
+    assert evidence.claim_count == 0 and evidence.opens == evidence.closes
+    assert evidence.work_cutoff == owned.work_cutoff
+    assert evidence.restore == %{phase: "claim_release", intent: true}
+    [{:stopping, :complete, stop, cutoff}] =
+      for {:stopping, :complete, _, _} = event <- events, do: event
+    assert cutoff == stop + max(10_000, @grace + 2_000)
+    assert evidence.cleanup_cutoff == cutoff
+    assert [{:terminal_release_installed, ^cutoff}] =
+             for({:terminal_release_installed, _} = event <- events, do: event)
+    exact_joins(owned)
+    assert Enum.all?(claims(fixture.plan), &(File.lstat(&1) == {:error, :enoent}))
+    receipt
+  end
+
+  defp next_cut(first, root, relatives \\ ["receipts", "resource-packs/receipts"]) do
+    source = first.destination
+    prior = first.plan["prior_restore_count"] + 1
+    backup = Path.join(root, "backup-#{prior + 1}")
+    destination = Path.join(root, "destination-#{prior + 1}")
+    File.mkdir!(destination)
+    assert {:ok, _} = File.cp_r(source, backup)
+    baseline = manifest(backup)
+    assert manifest(source) == baseline
+    ledgers =
+      for relative <- Enum.sort(relatives) do
+        bytes = File.read!(Path.join([backup, relative, "generation"]))
+        {:ok, generation} = RestoreCodec.decode(:generation, bytes)
+        %{"relative_root" => relative, "executor_identity" => generation["executor_identity"],
+          "source_generation_sha256" => hash(bytes),
+          "source_placement" => placement(Path.join(source, relative))}
+      end
+    plan =
+      %{first.plan | "tx_id" => hash("restore-#{prior + 1}"), "cut_id" => hash("joined-cut-#{prior + 1}"),
+        "source_state_root" => source, "source_state_placement" => placement(source),
+        "source_status" => "available", "backup_state_root" => backup,
+        "destination_state_root" => destination, "prior_restore_count" => prior, "ledgers" => ledgers}
+      |> refresh_lineage_plan(baseline)
+    assert {:ok, _} = RestoreCodec.encode(:plan, plan)
+    %{first | source: source, backup: backup, destination: destination, baseline: baseline, plan: plan}
+  end
+
+  defp refresh_lineage_plan(plan, baseline) do
+    {:ok, entries} = RestoreCodec.manifest(baseline, @total)
+    reserved =
+      Enum.filter(entries, fn entry ->
+        Enum.any?(Path.split(entry["path"]), &(&1 in [".loopex-restore", "restore-lineage"]))
+      end)
+    {:ok, digest} = RestoreCodec.lineage_digest(reserved)
+    %{plan | "manifest_sha256" => hash(baseline), "prior_lineage_sha256" => digest}
+  end
+
+  defp damage_lineage(root, :corrupt_proof),
+    do: File.write!(Path.join(root, ".loopex-restore/lineage/00000001/committed"), "corrupt proof")
+
+  defp damage_lineage(root, :incomplete_higher_head) do
+    path = Path.join(root, ".loopex-restore/lineage/00000002")
+    File.mkdir!(path)
+    File.chmod!(path, 0o700)
+  end
+
+  defp damage_lineage(root, :extra_ledger_record),
+    do: File.write!(Path.join(root, "receipts/restore-lineage/00000001/extra"), "extra record")
+
+  defp assert_successive_copy(fixture) do
+    {:ok, baseline} = RestoreCodec.manifest(fixture.baseline, @total)
+    {:ok, restored} = RestoreCodec.manifest(manifest(fixture.destination), @total)
+    index = Map.new(restored, &{&1["path"], &1})
+    generation_paths = Enum.map(fixture.plan["ledgers"], &Path.join(&1["relative_root"], "generation"))
+    for entry <- baseline do
+      if entry["path"] in generation_paths do
+        assert Map.drop(index[entry["path"]], ["size", "sha256"]) ==
+                 Map.drop(entry, ["size", "sha256"])
+        original = generation(Path.join(fixture.backup, entry["path"]))
+        current = generation(Path.join(fixture.destination, entry["path"]))
+        assert Map.drop(current, ["executor_epoch", "generation_id", "root_binding"]) ==
+                 Map.drop(original, ["executor_epoch", "generation_id", "root_binding"])
+      else
+        assert index[entry["path"]] == entry
+      end
+    end
+    ordinal = (fixture.plan["prior_restore_count"] + 1) |> Integer.to_string() |> String.pad_leading(8, "0")
+    root_admin = Path.join([".loopex-restore", "lineage", ordinal])
+    records =
+      [{root_admin, ~w(baseline intent source-retirement committed)} |
+        Enum.map(fixture.plan["ledgers"], fn declaration ->
+          {Path.join([declaration["relative_root"], "restore-lineage", ordinal]), ledger_record_names(fixture.plan)}
+        end)]
+    expected =
+      Enum.flat_map(records, fn {directory, names} ->
+        dirs = directory |> Path.split() |> Enum.scan(fn part, parent -> Path.join(parent, part) end)
+        dirs ++ Enum.map(names, &Path.join(directory, &1))
+      end) |> Enum.uniq()
+    added = Map.keys(index) -- Enum.map(baseline, & &1["path"])
+    assert Enum.sort(added) == Enum.sort(expected -- Enum.map(baseline, & &1["path"]))
+    for path <- added do
+      entry = index[path]
+      assert entry["mode"] == if(entry["kind"] == "directory", do: 0o700, else: 0o600)
+    end
+    assert manifest(fixture.backup) == fixture.baseline
+  end
+
   # Concept: source loss happens only after the actual original writers joined.
   # Technical depth: preserve their captured source placements and exact latest
   # backup/workspace/host attestation. Removing the temporary source models loss;
