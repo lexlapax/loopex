@@ -86,7 +86,7 @@ defmodule Loopex.Runtime.OwnerGroupRetirementTest do
           )
       end
 
-      %{monitor: group_coordinator_monitor, providers: %{^reference => retained}} =
+      %{monitor: group_coordinator_monitor, providers: %{^reference => retained} = providers} =
         :sys.get_state(group, left(cutoff))
 
       expected_down =
@@ -97,6 +97,11 @@ defmodule Loopex.Runtime.OwnerGroupRetirementTest do
         ])
 
       assert Enum.sort(retained.original_members) == Enum.sort([guard, worker, resource])
+
+      # Concept: validate the captured provider map before observing actor retirement.
+      # Technical depth: this real map enumeration initializes its protocol inside
+      # the original cutoff; cold dependency loading is outside the fixed trace claim.
+      assert Enum.all?(providers, &(&1 == {reference, retained}))
 
       if mode == :selected_window do
         :ok = :sys.suspend(group, left(cutoff))
