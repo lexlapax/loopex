@@ -1246,7 +1246,8 @@ defmodule LoopexComposition.RestoreIOTest do
     end
   end
 
-  test "Ledger audit preserves all actual current writer records and raw job identities", context do
+  test "Ledger audit preserves all actual current writer records and raw job identities",
+       context do
     fixture = ledger_fixture(context.root)
     assert not String.valid?(fixture.jobs.admission)
     assert fixture.records.open["origin_executor_epoch"] == 7
@@ -1267,7 +1268,8 @@ defmodule LoopexComposition.RestoreIOTest do
     end
   end
 
-  test "captured Ledger copies authenticate the original source placement without activation", context do
+  test "captured Ledger copies authenticate the original source placement without activation",
+       context do
     fixture = ledger_fixture(context.root)
     backup = fixture.root <> "-backup"
     File.cp_r!(fixture.root, backup)
@@ -1295,8 +1297,10 @@ defmodule LoopexComposition.RestoreIOTest do
     owned = launch(ledger_operation(changed, :generation), :ledger_decode)
     assert {{:joined, {:error, :history_invalid}, %{opens: 1, closes: 1}}, _} = drive(owned)
     joined(owned)
+
     assert File.read!(Path.join(backup, "ledger/generation")) ==
              File.read!(fixture.paths.generation)
+
     refute File.exists?(Path.join(backup, "ledger/claim"))
   end
 
@@ -1305,33 +1309,46 @@ defmodule LoopexComposition.RestoreIOTest do
     {:audit_ledger, root, declaration, _, _, manifest} = ledger_operation(fixture, :generation)
 
     for {role, job_id} <- [
-          {:generation, "job"}, {:open, nil}, {:open, <<>>},
-          {:open, :job}, {:open, :binary.copy(<<0>>, 8_193)}, {:other, nil}
+          {:generation, "job"},
+          {:open, nil},
+          {:open, <<>>},
+          {:open, :job},
+          {:open, :binary.copy(<<0>>, 8_193)},
+          {:other, nil}
         ] do
       assert RestoreIO.run(
-               {:audit_ledger, root, declaration, role, job_id, manifest}, limits(1_000, 100)
+               {:audit_ledger, root, declaration, role, job_id, manifest},
+               limits(1_000, 100)
              ) == {:error, :invalid_io_request}
     end
 
     for changed <- [
-          Map.put(declaration, "extra", true), Map.delete(declaration, "executor_identity"),
+          Map.put(declaration, "extra", true),
+          Map.delete(declaration, "executor_identity"),
           %{declaration | "relative_root" => "../ledger"},
           %{declaration | "relative_root" => "/ledger"},
           %{declaration | "relative_root" => "ledger/./nested"},
           %{declaration | "source_generation_sha256" => String.duplicate("A", 64)}
         ] do
-      owned = launch({:audit_ledger, root, changed, :generation, nil, manifest}, :ledger_declaration)
-      assert {{:joined, {:error, :history_invalid}, %{opens: 0, closes: 0}}, events} = drive(owned)
+      owned =
+        launch({:audit_ledger, root, changed, :generation, nil, manifest}, :ledger_declaration)
+
+      assert {{:joined, {:error, :history_invalid}, %{opens: 0, closes: 0}}, events} =
+               drive(owned)
+
       refute :ledger_decode in issued_kinds(events)
       joined(owned)
     end
   end
 
-  test "Ledger capture requires canonical file and every parent in the physical manifest", context do
+  test "Ledger capture requires canonical file and every parent in the physical manifest",
+       context do
     fixture = ledger_fixture(context.root)
 
     for role <- [:generation, :admission, :refusal, :open] do
-      {:audit_ledger, root, declaration, ^role, job_id, manifest} = ledger_operation(fixture, role)
+      {:audit_ledger, root, declaration, ^role, job_id, manifest} =
+        ledger_operation(fixture, role)
+
       [domain, entries] = :erlang.binary_to_term(manifest, [:safe])
       relative = Path.relative_to(fixture.paths[role], root)
       parent = Path.dirname(relative)
@@ -1342,7 +1359,8 @@ defmodule LoopexComposition.RestoreIOTest do
             Enum.reject(entries, &(&1["path"] == ".")),
             Enum.map(entries, fn entry ->
               if entry["path"] == relative,
-                do: %{entry | "kind" => "directory", "size" => 0, "sha256" => nil}, else: entry
+                do: %{entry | "kind" => "directory", "size" => 0, "sha256" => nil},
+                else: entry
             end)
           ] do
         bytes = :erlang.term_to_binary([domain, changed], [:deterministic])
@@ -1358,11 +1376,16 @@ defmodule LoopexComposition.RestoreIOTest do
       assert {{:joined, {:error, :io_error}, %{opens: 0, closes: 0}}, _} = drive(owned)
       refute File.exists?(fixture.paths[role])
       joined(owned)
-      File.write!(fixture.paths[role], :erlang.term_to_binary(fixture.records[role], [:deterministic]))
+
+      File.write!(
+        fixture.paths[role],
+        :erlang.term_to_binary(fixture.records[role], [:deterministic])
+      )
     end
   end
 
-  test "Ledger generation hash identity and original binding are independent required relations", context do
+  test "Ledger generation hash identity and original binding are independent required relations",
+       context do
     fixture = ledger_fixture(context.root)
     declaration = fixture.declaration
     placement = declaration["source_placement"]
@@ -1373,7 +1396,9 @@ defmodule LoopexComposition.RestoreIOTest do
           %{declaration | "source_placement" => %{placement | "inode" => placement["inode"] + 1}},
           %{declaration | "source_placement" => %{placement | "expanded_root" => fixture.root}}
         ] do
-      owned = launch(ledger_operation(%{fixture | declaration: changed}, :generation), :ledger_decode)
+      owned =
+        launch(ledger_operation(%{fixture | declaration: changed}, :generation), :ledger_decode)
+
       assert {{:joined, {:error, :history_invalid}, %{opens: 1, closes: 1}}, _} = drive(owned)
       joined(owned)
     end
@@ -1384,7 +1409,8 @@ defmodule LoopexComposition.RestoreIOTest do
     joined(owned)
   end
 
-  test "Ledger basename job identity and expected kind cannot substitute for each other", context do
+  test "Ledger basename job identity and expected kind cannot substitute for each other",
+       context do
     fixture = ledger_fixture(context.root)
     wrong = <<255, 0, "another-job">>
 
@@ -1407,7 +1433,8 @@ defmodule LoopexComposition.RestoreIOTest do
     end
   end
 
-  test "all Ledger roles refuse their actual first over-cap file before open or decode", context do
+  test "all Ledger roles refuse their actual first over-cap file before open or decode",
+       context do
     for {role, ceiling} <- [generation: 2_048, admission: 65_536, refusal: 65_536, open: 65_536] do
       fixture = ledger_fixture(context.root)
       File.write!(fixture.paths[role], :binary.copy(<<0>>, ceiling + 1))
@@ -1480,7 +1507,8 @@ defmodule LoopexComposition.RestoreIOTest do
     end
   end
 
-  test "Ledger descriptor and post-decode file or ancestor replacement cannot publish a record", context do
+  test "Ledger descriptor and post-decode file or ancestor replacement cannot publish a record",
+       context do
     for role <- [:generation, :admission, :refusal, :open],
         change <- [:descriptor, :file, :ancestor] do
       fixture = ledger_fixture(context.root)
@@ -1509,7 +1537,8 @@ defmodule LoopexComposition.RestoreIOTest do
     end
   end
 
-  test "physical Ledger equality cannot admit compressed trailing alternate or malformed records", context do
+  test "physical Ledger equality cannot admit compressed trailing alternate or malformed records",
+       context do
     for role <- [:generation, :admission, :refusal, :open] do
       fixture = ledger_fixture(context.root)
       record = fixture.records[role]
@@ -1517,16 +1546,28 @@ defmodule LoopexComposition.RestoreIOTest do
       compressed = :erlang.term_to_binary(record, [:deterministic, :compressed])
       assert <<131, 80, _::binary>> = compressed
 
-      for bytes <- [compressed, canonical <> <<0>>,
+      for bytes <- [
+            compressed,
+            canonical <> <<0>>,
             :erlang.term_to_binary([record], [:deterministic]),
             :erlang.term_to_binary(Map.put(record, "extra", true), [:deterministic]),
-            :erlang.term_to_binary(Map.delete(record, :ledger_kind), [:deterministic])] do
+            :erlang.term_to_binary(Map.delete(record, :ledger_kind), [:deterministic])
+          ] do
         File.write!(fixture.paths[role], bytes)
-        changed = if role == :generation,
-          do: %{fixture | declaration: %{fixture.declaration | "source_generation_sha256" => hash(bytes)}},
-          else: fixture
+
+        changed =
+          if role == :generation,
+            do: %{
+              fixture
+              | declaration: %{fixture.declaration | "source_generation_sha256" => hash(bytes)}
+            },
+            else: fixture
+
         owned = launch(ledger_operation(changed, role), :ledger_decode)
-        assert {{:joined, {:error, :history_invalid}, %{opens: 1, closes: 1}}, events} = drive(owned)
+
+        assert {{:joined, {:error, :history_invalid}, %{opens: 1, closes: 1}}, events} =
+                 drive(owned)
+
         assert index(issued_kinds(events), :close) < index(issued_kinds(events), :ledger_decode)
         assert File.read!(fixture.paths[role]) == bytes
         joined(owned)
@@ -1534,7 +1575,8 @@ defmodule LoopexComposition.RestoreIOTest do
     end
   end
 
-  test "Ledger semantic work retains the original cutoff after explicit descriptor close", context do
+  test "Ledger semantic work retains the original cutoff after explicit descriptor close",
+       context do
     for role <- [:generation, :admission, :refusal, :open] do
       fixture = ledger_fixture(context.root)
       owned = launch(ledger_operation(fixture, role), :ledger_decode, 500)
@@ -1753,10 +1795,11 @@ defmodule LoopexComposition.RestoreIOTest do
     open = Ledger.open_entry(job, identity)
     assert {:ok, refusal} = Ledger.refusal(refused, :workspace_lease_lost)
 
-    assert :ok = Ledger.with_claim(prepared, fn claimed ->
-      assert :ok = Ledger.admit(claimed, marker, open)
-      Ledger.refuse(claimed, refusal)
-    end)
+    assert :ok =
+             Ledger.with_claim(prepared, fn claimed ->
+               assert :ok = Ledger.admit(claimed, marker, open)
+               Ledger.refuse(claimed, refusal)
+             end)
 
     paths = %{
       generation: Path.join(ledger, "generation"),
@@ -1768,18 +1811,24 @@ defmodule LoopexComposition.RestoreIOTest do
     bytes = File.read!(paths.generation)
     generation = :erlang.binary_to_term(bytes, [:safe])
     info = File.stat!(ledger)
+
     declaration = %{
       "relative_root" => "ledger",
       "executor_identity" => identity,
       "source_generation_sha256" => hash(bytes),
       "source_placement" => %{
-        "expanded_root" => ledger, "major_device" => info.major_device, "inode" => info.inode
+        "expanded_root" => ledger,
+        "major_device" => info.major_device,
+        "inode" => info.inode
       }
     }
 
     assert {:ok, _} = RestoreCodec.encode(:ledger_descriptor, declaration)
+
     %{
-      root: state, declaration: declaration, paths: paths,
+      root: state,
+      declaration: declaration,
+      paths: paths,
       jobs: %{generation: nil, admission: job.job_id, refusal: refused.job_id, open: job.job_id},
       records: %{generation: generation, admission: marker, refusal: refusal, open: open}
     }
@@ -1787,7 +1836,7 @@ defmodule LoopexComposition.RestoreIOTest do
 
   defp ledger_operation(fixture, role) do
     assert {:joined, {:ok, manifest}, _} =
-      RestoreIO.run({:manifest, fixture.root, 1_048_576}, limits(1_000, 100))
+             RestoreIO.run({:manifest, fixture.root, 1_048_576}, limits(1_000, 100))
 
     {:audit_ledger, fixture.root, fixture.declaration, role, fixture.jobs[role], manifest}
   end

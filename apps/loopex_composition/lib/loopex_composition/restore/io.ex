@@ -491,12 +491,21 @@ defmodule LoopexComposition.Restore.IO do
       {directory, ceiling} = resource_role(kind)
       relative = Path.join(["resource-packs", directory, identity <> ".etf"])
       index = Map.new(entries, &{&1["path"], &1})
-      audit_captured_record(root, relative, index, ceiling, :resource_digest, :resource_decode, fn bytes ->
-        case kind do
-          :manifest -> ResourcePacks.decode_retained_manifest(bytes, identity)
-          :provenance -> ResourcePacks.decode_retained_provenance(bytes, identity)
+
+      audit_captured_record(
+        root,
+        relative,
+        index,
+        ceiling,
+        :resource_digest,
+        :resource_decode,
+        fn bytes ->
+          case kind do
+            :manifest -> ResourcePacks.decode_retained_manifest(bytes, identity)
+            :provenance -> ResourcePacks.decode_retained_provenance(bytes, identity)
+          end
         end
-      end)
+      )
     else
       _ -> {:error, :history_invalid}
     end
@@ -508,21 +517,31 @@ defmodule LoopexComposition.Restore.IO do
     # Source placement authenticates the retained generation, not the backup's
     # current inode; complete ledger, receipt and job-history relations stay separate.
     with {:ok, _} <-
-           primitive(:ledger_declaration, fn -> RestoreCodec.encode(:ledger_descriptor, declaration) end),
+           primitive(:ledger_declaration, fn ->
+             RestoreCodec.encode(:ledger_descriptor, declaration)
+           end),
          {:ok, entries} <-
            primitive(:ledger_manifest, fn -> RestoreCodec.manifest(manifest, @max_uint64) end) do
       {suffix, ceiling, kind} = ledger_role(role, job_id)
       relative = Path.join(declaration["relative_root"], suffix)
       index = Map.new(entries, &{&1["path"], &1})
 
-      audit_captured_record(root, relative, index, ceiling, :ledger_digest, :ledger_decode, fn bytes ->
-        with {:ok, record} <- Ledger.decode_bytes(bytes, kind),
-             true <- ledger_relations?(record, bytes, declaration, role, job_id) do
-          {:ok, record}
-        else
-          _ -> {:error, :history_invalid}
+      audit_captured_record(
+        root,
+        relative,
+        index,
+        ceiling,
+        :ledger_digest,
+        :ledger_decode,
+        fn bytes ->
+          with {:ok, record} <- Ledger.decode_bytes(bytes, kind),
+               true <- ledger_relations?(record, bytes, declaration, role, job_id) do
+            {:ok, record}
+          else
+            _ -> {:error, :history_invalid}
+          end
         end
-      end)
+      )
     else
       _ -> {:error, :history_invalid}
     end
@@ -572,16 +591,19 @@ defmodule LoopexComposition.Restore.IO do
     do: {"generation", @max_ledger_generation, "local_executor_generation_v1"}
 
   defp ledger_role(:admission, job_id),
-    do: {Path.join("markers", RestoreCodec.digest_bytes(job_id)), @max_ledger_record,
-         "local_effect_admission_v1"}
+    do:
+      {Path.join("markers", RestoreCodec.digest_bytes(job_id)), @max_ledger_record,
+       "local_effect_admission_v1"}
 
   defp ledger_role(:refusal, job_id),
-    do: {Path.join("markers", RestoreCodec.digest_bytes(job_id)), @max_ledger_record,
-         "local_pre_effect_refusal_v1"}
+    do:
+      {Path.join("markers", RestoreCodec.digest_bytes(job_id)), @max_ledger_record,
+       "local_pre_effect_refusal_v1"}
 
   defp ledger_role(:open, job_id),
-    do: {Path.join("open", RestoreCodec.digest_bytes(job_id)), @max_ledger_record,
-         "local_open_effect_v1"}
+    do:
+      {Path.join("open", RestoreCodec.digest_bytes(job_id)), @max_ledger_record,
+       "local_open_effect_v1"}
 
   defp ledger_relations?(record, bytes, declaration, :generation, nil) do
     {:ok, binding} = RestoreCodec.ledger_binding(declaration["source_placement"])
