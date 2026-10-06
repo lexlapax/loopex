@@ -106,7 +106,34 @@ only the omitted nonce's 69 bytes. Root authorized a source-only replacement
 with `byte_size(term_to_binary(five_member_observation, [:deterministic])) + 69`.
 Live encoding retains its actual claim nonce. Worker must retain `0c` and seal a
 new correction, followed by independent review before a disabled runner grant.
-No VM, formatter or test has run for enumeration.
+No VM, formatter or test has run for enumeration at this checkpoint.
+
+ENUMERATION GRANT: exact correction `bbf5265cc1a545f0ffef2b8bede7dc447d131853`
+resolves the size proof gap. Root read its complete one-expression delta and
+nonce derivation and verified46 listed artifacts plus inventory and32 actual/
+Git/mode sources. Independent final report
+`458152f8c518f3603ccddf9268816ad3efcba07820b895d05bcb50b987e364b5`
+reports no bounded source blocker; root read it and verified six listed artifacts,
+15 Git and nine external inputs. Original review remains retained as a proof gap,
+not a reproduced differing-size defect.
+Root reviewed the entire authored run delta from Artifact v4, config/schema and
+four-path formatter AST helper. Only source/main functions change; helper and
+toolchain bytes remain identical. It verified130 listed packet artifacts plus
+inventory,106 actual/Git/kind/mode sources,16 external inputs and every title/file
+population. Disabled packet `M7/ledger-enumeration-runner-20261005-v1` remains
+unchanged. Root finalized separate v2 with run
+`e943313c27357d9988b7c0bc974fded90511ab4569a373aa55e0fa71cbf2f29d`, config
+`e2941d5006fd7f11ac7b1afa3bc7e549168d912f4389c9f22c2227209e8c1323`
+and132 independently verified finalization files. New canonical
+`M7/ledger-enumeration-stage-attempt-registry.json` starts at digest
+`1a5f5f5aa0ba2c8e25a6d0994e96d5911cd7194ee78b447a194f0321f46bdbf0`;
+do not reset it. Fresh output `M7/ledger-enumeration-execution-20261005-v1`
+is not created yet. Root grants current_index_cleanup the sole verification VM
+for one sequential current/floor execution: IO80/2, Ledger23/0, Composition651/3,
+Local300/2, owned IO long2/80, zero skips. Permit only owned AST-equal formatting
+and exact direct-child re-pin. Stop/retain first failure; no rerun, source repair,
+assertion or bound change, second VM, full fast or paid/attended lane.
+Execution handle and measured outcomes remain pending. Receipt work is source-only.
 
 LATEST ARTIFACT PROOF: handle24595 is terminal exit zero, collected and sealed;
 exclusive VM slot returned. Both pairs pass focused29/0 and Store105/0, no
@@ -152,6 +179,25 @@ bounded arity-only BIF trace and positive control; preserve other assertions
 and deadlines. Actual-writer bytes and hostile captured-byte controls remain
 pending. No VM, formatter, test, push or primary source edit is granted.
 Stop after committed source/pins/report or a material decision.
+Candidate `f46804354698b4c8ad65797833149d2d278f9c00` is source-only committed
+and clean. Root read both full deltas/report and verified eight sealed files,
+32 actual/Git/mode sources,four prior references,unchanged production prefix and
+29 original case bodies. Every nonprobe line in the migrated case is retained.
+Independent initial review found no production blocker but an unknown-input-atom
+coverage gap. Source-only test child `f6e731bdafd09f2abd3174ed199b36c24cfcc809`
+adds20 lines: manually encoded uninterned ETF atom, noncreating before/after
+existing-atom checks and actual BIF entry under the same captured1,000ms matrix
+cutoff. Production/helper/populations are unchanged; root read the correction
+and report. Independent correction review and packet verification are pending.
+No VM, formatter, compiler, test or push ran for receipts. Initial/final source
+packets remain under their separate temporary names; durable inventory copy is
+`M7/receipt-captured-byte-inventory-20261005-v1`, copy inventory
+`0c4e91d1d2a83ba7ddfd3021a33aba2365479078b1e65362b5e6f53640ea510f`.
+Initial Ledger independent review is copied under
+`M7/ledger-enumeration-independent-review-0c4b805d-20261005-v1`;
+copy inventory `2ded435828fa0b68dbca3730b0ea683e5c2bbe822f553e117c65cafe15b082e6`.
+Standalone receipt expectations on its base remain32 focused/35 adjacent/
+Local298 ordinary+2 excluded; these do not include the isolated new Ledger cases.
 
 PRIOR FULL-CHECK REGISTRY: root read and verified five packet artifacts,116
 inputs,78 Git source/toolchain identities,17 supplemental actual logs and75

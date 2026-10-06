@@ -31,6 +31,15 @@ they do not mean the original task is complete. This follows the maintainer's
 
 ## Current source review and receipt extraction, 2026-10-05
 
+Ledger source correction `bbf5265c` has passed root and independent source
+review. Root reviewed and finalized a separate one-shot runner, granting the
+sole verification VM for the sequential current/floor metadata checks. No
+execution handle or test result exists yet; the Ledger row remains open.
+Receipt candidate `f4680435` has no production review blocker; its test-only
+`f6e731bd` child adds the missing unknown-atom/no-creation witness under the
+unchanged 1,000 ms observer cutoff. Correction review and all execution remain
+pending. Both isolated branches preserve original source and evidence packets.
+
 Artifact source/evidence is pushed at `87be37e7`; its clean merged worktree and
 local/remote topic branches are removed. No verification VM runs.
 Root reviewed the complete four-path Ledger enumeration candidate `0c4b805d`,
