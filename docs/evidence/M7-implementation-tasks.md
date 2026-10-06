@@ -33,36 +33,36 @@ they do not mean the original task is complete. This follows the maintainer's
 
 The bounded T16 startup witness is complete at tested clean source
 `590b997c305697e94a2b9ae8585bbaf4e1bf4202`, joined through
-`dfd4a76ad35e1eb5218f7a575ff4b4de7c0875e9`. Both pairs pass18 focused/1 excluded
-and1,314 ordinary Core/10 excluded, zero failures/skips. Current focused/Core
-durations are6.902/226.110 seconds; floor6.825/225.124, pipeline688.548 seconds.
-Root verified125 terminal artifacts,129 final inventory records,28 original
-waited/absent OS groups,13 actual/Git/mode records and all four full witness
+`dfd4a76ad35e1eb5218f7a575ff4b4de7c0875e9`. Both pairs pass 18 focused/1 excluded
+and 1,314 ordinary Core/10 excluded, zero failures/skips. Current focused/Core
+durations are 6.902/226.110 seconds; floor 6.825/225.124, pipeline 688.548 seconds.
+Root verified 125 terminal artifacts, 129 final inventory records, 28 original
+waited/absent OS groups, 13 actual/Git/mode records and all four full witness
 sets against actual raw outputs. The integrated file equals tested source.
 
 Each witness retains four exact traced actors, matching sent/enqueued stop
 reference, separate queue insertion on observation one before child spawn and
-eleven unique original process joins within the unchanged1,000-ms cutoff.
-The8192-row trace cap and64-observation cap remain. Actual child owner-monitor
+eleven unique original process joins within the unchanged 1,000-ms cutoff.
+The 8,192-row trace cap and 64-observation cap remain. Actual child owner-monitor
 DOWN, compound exit and same-child supervisor report are proved. This does not
 attribute the six old untraced reports or prove registered-resource semantic
 cleanup. Old failures remain unchanged. A collector-only generic-status
 assertion error is retained with its source; correcting it reran no VM/test.
 
 Immutable sibling output `M7/runtime-preparation-startup-execution-20261005-v3`:
-terminal digest`dcc4ad681c4549f1c7a6bc3288d6d6274395157c6a01edaee586f474453bdafd`;
-collection Markdown`e1b4fb73b55b4aa7940008deea851509c2567212b984514bd1331a703b05aaa0`;
-collection JSON`d9331534346cc63fddd489e3165afbacf34c43ef1d88b2e9699531c95d4be9a0`;
-final inventory`85b7087f4f60b8ebe8f27f29541db6a1c70617dd911d75fa9f1fac913674689f`.
+terminal digest `dcc4ad681c4549f1c7a6bc3288d6d6274395157c6a01edaee586f474453bdafd`;
+collection Markdown `e1b4fb73b55b4aa7940008deea851509c2567212b984514bd1331a703b05aaa0`;
+collection JSON `d9331534346cc63fddd489e3165afbacf34c43ef1d88b2e9699531c95d4be9a0`;
+final inventory `85b7087f4f60b8ebe8f27f29541db6a1c70617dd911d75fa9f1fac913674689f`.
 No full combined check or release claim follows from these isolated suites.
 
 One new T15 artifact-use decoder row records the next accepted-restore
 prerequisite, owned in an isolated source-only worktree. No completed row was
-reopened. T01–T19 originals78 done/95 todo/6 retired; added297 done/21 todo.
-Including T00 originals78/101/7, added301/22. T16 added53/5; T15 added15/6.
-Ledger alone now owns live handle21956; root independently confirmed startup
+reopened. T01–T19 originals 78 done/95 todo/6 retired; added 297 done/21 todo.
+Including T00 originals 78/101/7, added 301/22. T16 added 53/5; T15 added 15/6.
+Ledger alone now owns live handle 21956; root independently confirmed startup
 groups absent before its grant. Artifact source and the reviewed disabled full
-check runner have no VM grant. ADR0052 exact-pair acceptance remains pending.
+check runner have no VM grant. ADR 0052 exact-pair acceptance remains pending.
 
 ## Resource physical capture joined — 2026-10-05
 

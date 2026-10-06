@@ -25,7 +25,7 @@ physical restore implementation; it does not waive any full-history proof.
 <a id="technical-depth"></a>
 ## Technical depth
 
-### Latest Store integration and next verification
+### Current proof, execution and source ownership
 
 LATEST STARTUP PROOF: `private_task_causal_resume` collected terminal handle
 `51106`. Root reviewed and pushed corrected source
@@ -52,6 +52,8 @@ original joins, no unjoined actors and the unchanged cutoff met. Root reviewed
 the complete formatter delta, which changes only formatting. Tested source is
 joined through `dfd4a76ad35e1eb5218f7a575ff4b4de7c0875e9`; root verified the
 integrated file byte-for-byte against tested590b. Only the bounded T16 row closes.
+Its clean merged worktree and local/remote topic branches are removed after the
+m7 source/evidence push at `cd179fb9`.
 The first collection script expected generic PASS instead of the runner's exact
 status; the collector-only error and original verifier are retained. No test was
 rerun and original execution bytes are unchanged. Terminal digest
@@ -71,7 +73,11 @@ per pair are source-derived expectations, not results. Runner digest
 Ledger now owns the exclusive grant and live handle21956; formatter AST equality
 passed for both paths, and tested clean direct child is
 `fef3c28bece368c8ab44c9cf0f72d27c0f47a867`. Current verification is underway.
-Worker owns polling, first-failure sealing and slot return. Independent read-only exact-source review found
+Current focused 64/2 excluded passes in 25.690 seconds and adjacent Ledger 19/0
+in 1.724 seconds, zero failures/skips. Whole ordinary Composition is running;
+floor and owned long checks remain pending. Root read the complete 734-to-fef
+formatter delta, which only changes formatting. Worker owns polling, first-failure
+sealing and slot return. Independent read-only exact-source review found
 no blocking issue; root read it and verified its seven exact inputs. Immutable
 review sibling `M7/ledger-capture-audit-independent-review-20261005-v1`, report
 `c3a8548b105527bab98803ab5f2e24880ddbfe29e9efda8340ac8fdfd915fec5`.
