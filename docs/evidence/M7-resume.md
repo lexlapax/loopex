@@ -27,6 +27,67 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current proof, execution and source ownership
 
+CURRENT EXECUTION: Ledger enumeration handle2090 is terminal exit1 and fully
+collected. The original current Composition command exited2 with644/651 passed,
+seven failures,3 excluded and zero skips in354.531 seconds; pipeline677.138.
+Focused IO80/2 and adjacent Ledger23/0 passed in36.661/2.152 seconds. Local,
+owned long and all floor lanes did not run. Source is the clean formatter-only
+child `6baa7364824b5db95a9075fcbb14afba2304c6f5`. Root read the complete formatter
+patch and verified93 terminal artifacts,22 original raw stages/started handles,
+106 actual/Git/kind/mode source records and22 unique consumed registry attempts.
+Independent read-only OS probes confirm all22 original PIDs/groups absent.
+The original slot returned before the separate receipt grant below. No retry,
+repair or integration occurred. Seven failures returned
+`invalid_session_configuration` in unchanged ephemeral integration cases;
+CLI agent diagnoses their cause read-only. The bounded enumeration row stays open.
+Sibling `M7/ledger-enumeration-execution-20261005-v1`: terminal
+`a6879eb5a314e76e4ab4b5b86398bf1b9b699b9c982dc54f73b77e605c3bf474`, inventory
+`466cb17beb754755061bd41ecf61295b34e1a8e08c1dff4b5ba428a29a38e969`;
+ordinary raw `d1ffc382d42345e094a3a6e92f8e91a8335238234c3e70c1158b45313d5906c8`.
+Collection sibling `M7/ledger-enumeration-execution-20261005-v1-collection`
+retains original handle/status and exact assertions; collection verification
+`0be5dcbce69336a2262880889eedb2696e14cdce6967b52201cee5c6c7f9af9c`.
+
+CURRENT RECEIPT GRANT: source `f6e731bdafd09f2abd3174ed199b36c24cfcc809` remains
+clean, reviewed and isolated. Root reviewed the complete authored run/AST delta,
+actual changed source/main, config/schema and finalization; verified54 sealed
+artifacts plus inventory,38 external inputs,32 actual/Git/kind/mode sources,
+16 source populations,11 unchanged shared runner functions and identical helpers.
+Disabled sibling `M7/receipt-captured-decoding-runner-f6-20261005-v2` remains
+immutable, inventory `4bbf2f6b8c753433c44e2ebc6113a84bde17463c43f774aabb93638f479006f5`.
+New enabled v3 retains run
+`c8867cda142a2754d4b83036f60804c728cda0cf246c4de48e03d6960f963b6a`, config
+`982d5d42bb10ad7eadf1db0f1377fb20644de1a8c3f7b6d809b83489e1f51152`, finalization
+`cc12cb80c7363b52c975f125a7d7d064084e39d3e4aecbcb0f5b427c5137c084` and root-grant.
+New canonical `M7/receipt-captured-byte-stage-attempt-registry.json` is seeded
+empty after confirming no earlier unit execution or registry; initial digest
+`1a5f5f5aa0ba2c8e25a6d0994e96d5911cd7194ee78b447a194f0321f46bdbf0`.
+Never reset it. Root grants private_task_causal_resume one exclusive sequential
+current/floor verification: focused32/0, adjacent35/0, ordinaryLocal298/2,
+zero skips. Only two owned AST-equal formatter changes and exact direct-child
+re-pin are permitted. Stop and retain first failure; no retry, source repair,
+second VM, full fast, paid/attended lane or integration. Exact new output is
+`M7/receipt-captured-decoding-execution-20261005-v1`. At this checkpoint no
+receipt handle exists yet; dispatch follows the saved grant. The bounded
+receipt row remains open. Four source/review packets remain retained unchanged.
+
+NEXT ARTIFACT INVENTORY: root read the complete selected-use capture report and
+schema; verified four listed artifacts plus inventory,11 actual/Git/kind/mode
+sources and three prior reports. Immutable copy sibling
+`M7/artifact-physical-capture-inventory-fe9c08cc-20261005-v1` preserves its
+historical0644 source-mode inventory and records new0444 copy modes, retention
+map `25727f58d32fec834d2d1ab8996bf78bf4f5f9fa29002054db8acc085bd77228`.
+Report `9f52de85f2dea47c20ef4140844e631f8998736ab56ca30f29e01c21c4d4d683`
+recommends reusing owned capture and the existing reference-bound facade for one
+selected use. No implementation or VM grant exists. Object hashing/complete
+namespace/history remain separate; the writer64MiB cap does not narrow the
+current uint64 reader/reference domain, and legitimate orphan objects remain.
+The repeated maintainer1,000ms diagnostic approval confirms the existing
+setup-only disposition and changes no other bound or ADR acceptance.
+
+The following paragraphs retain earlier checkpoints; the current execution,
+receipt grant and inventory above supersede their live-state descriptions.
+
 LATEST STARTUP PROOF: `private_task_causal_resume` collected terminal handle
 `51106`. Root reviewed and pushed corrected source
 `7ca8b9161739842ecf4da4b3a37567b5f67b8464` and granted reviewed runner
@@ -77,27 +138,148 @@ collection `4ce2d6545727cdde39d74a882f566aff700c9bdfcab31789b5bc797e4a63255e`.
 Floor ordinary raw retains erl_child_setup error32; both ordinary logs retain
 the unavailable Darwin invalid filename/Linux-required witness. These remain
 visible. Only the bounded T15 capture row closes. Complete ledger/receipt/job/
-Store/artifact/history/restore relations stay open. No live verification handle
-remains and no next VM grant has been issued.
+Store/artifact/history/restore relations stay open. Ledger has no live verification handle. Its slot was returned before the
+subsequent artifact grant recorded below.
 
-ARTIFACT SOURCE REVIEW: exact e8f01716923b62873872cee548a0de3dafa5c7e8 in
-`/private/tmp/loopex-m7-artifact-use-decoder`, branch
-`codex/m7-artifact-use-decoder`, is unproved. Only Store artifacts.ex and
-artifact_store_conformance_test.exs are owned. Root read the full two-file delta
-and final independent report and verified six artifacts/eighteen actual/Git/
-installed-source inputs. Improper projected pairs, nested lists and tuple/map-
-hidden improper lists can raise FunctionClauseError before integrity refusal.
-Explicit structural refusal and real decoder hostile controls are authorized
-as a separate source-only child; no Core/port/Canonical changes, VM, formatter,
-test or network work yet. Final sibling
-`M7/artifact-use-decoder-independent-review-e8-20261005-v2`, report
-`777e13a74ecd160800b5a74afb5be7bfffba3bc485174f3c0bf7f99c862570c3`;
-input `50c6c73eff3d59d0a78576a8d3c4688bb9876039079b441e952a5d67c66d3572`.
-Earlier v1 snapshot is preserved; v2 is final. Root rejected disabled v1 runner
-before execution: ordinary expectation290 disagrees with source105; missing
-owned formatter/AST repin; original command exit/PID/group cleanup insufficient.
-The worker is sealing a disabled modern v2 runner and repairing source. Future
-both-pair focus29/0 and Store105/0 are source-derived, not test results.
+LEDGER CLEANUP: source/evidence push `d730ee46` completed. The clean merged
+`/private/tmp/loopex-m7-ledger-capture-audit` worktree and local/remote
+`codex/m7-ledger-capture-audit` branches are removed. No live Git handle remains.
+
+NEXT LEDGER SOURCE: root read the complete source-hashed enumeration inventory
+`/private/tmp/loopex-m7-ledger-enumeration-inventory-v1/report.md`, digest
+`e2d4eb4b3b8eee0f05d282d6465f1a669159850fd059974f752e351b16b65662`, and verified
+five actual/Git/mode sources plus the prior inventory. Worker owns NEW isolated
+`/private/tmp/loopex-m7-ledger-enumeration`, branch
+`codex/m7-ledger-enumeration`, base `d730ee46`. Source-only complete private
+marker/open/generation namespace capture is authorized; only restore IO/test
+and, if actual validator reuse requires it, Local ledger/conformance paths.
+One original guardian/cutoff, exact current writers/crash cuts and private
+structural bounds. No synthetic authority, claim reclamation, public contract,
+receipt/Store/history certification, VM, formatter, test or network work.
+This develops the existing incomplete backup/restore outcome; no row closes.
+Candidate `0c4b805d9269c773830ee8536a60b8560a36b528` is committed cleanly.
+Root read the complete four-path delta, report, runner proposal and nonce proof;
+independently verified 44 listed sealed artifacts plus their inventory,
+32 actual/Git/mode sources and 85 unchanged original case bodies. Independent
+review found no other blocker. The exact-size proof is held: installed OTP
+`external_size` documentation promises an upper bound, while the packet proves
+only the omitted nonce's 69 bytes. Root authorized a source-only replacement
+with `byte_size(term_to_binary(five_member_observation, [:deterministic])) + 69`.
+Live encoding retains its actual claim nonce. Worker must retain `0c` and seal a
+new correction, followed by independent review before a disabled runner grant.
+No VM, formatter or test has run for enumeration at this checkpoint.
+
+ENUMERATION GRANT: exact correction `bbf5265cc1a545f0ffef2b8bede7dc447d131853`
+resolves the size proof gap. Root read its complete one-expression delta and
+nonce derivation and verified46 listed artifacts plus inventory and32 actual/
+Git/mode sources. Independent final report
+`458152f8c518f3603ccddf9268816ad3efcba07820b895d05bcb50b987e364b5`
+reports no bounded source blocker; root read it and verified six listed artifacts,
+15 Git and nine external inputs. Original review remains retained as a proof gap,
+not a reproduced differing-size defect.
+Root reviewed the entire authored run delta from Artifact v4, config/schema and
+four-path formatter AST helper. Only source/main functions change; helper and
+toolchain bytes remain identical. It verified130 listed packet artifacts plus
+inventory,106 actual/Git/kind/mode sources,16 external inputs and every title/file
+population. Disabled packet `M7/ledger-enumeration-runner-20261005-v1` remains
+unchanged. Root finalized separate v2 with run
+`e943313c27357d9988b7c0bc974fded90511ab4569a373aa55e0fa71cbf2f29d`, config
+`e2941d5006fd7f11ac7b1afa3bc7e549168d912f4389c9f22c2227209e8c1323`
+and132 independently verified finalization files. New canonical
+`M7/ledger-enumeration-stage-attempt-registry.json` starts at digest
+`1a5f5f5aa0ba2c8e25a6d0994e96d5911cd7194ee78b447a194f0321f46bdbf0`;
+do not reset it. Fresh output `M7/ledger-enumeration-execution-20261005-v1`
+is not created yet. Root grants current_index_cleanup the sole verification VM
+for one sequential current/floor execution: IO80/2, Ledger23/0, Composition651/3,
+Local300/2, owned IO long2/80, zero skips. Permit only owned AST-equal formatting
+and exact direct-child re-pin. Stop/retain first failure; no rerun, source repair,
+assertion or bound change, second VM, full fast or paid/attended lane.
+Execution is active under original persistent handle2090, owned by
+current_index_cleanup. Preflight confirms exact run/config, clean bbf source,
+unconsumed initial registry and fresh output; initial private cache copy is
+completed. Worker reports formatter/four-path AST equality and exact formatting
+child `6baa7364824b5db95a9075fcbb14afba2304c6f5`, current product dev/test
+compiles48.681/45.204 seconds,format/five source gates,focusedIO80/2/0 in36.661
+seconds and independent summary80 passed. Dependency warnings remain raw.
+Handle2090 is live; adjacent/ordinary/long and floor proof remain pending.
+These interim results await root's terminal collection verification. Do not
+start another VM,rerun or poll the agent-owned handle independently. Receipt
+work is source-only. CLI agent now inventories the next accepted artifact
+physical namespace/caps/reference gap read-only; no implementation or VM grant.
+
+LATEST ARTIFACT PROOF: handle24595 is terminal exit zero, collected and sealed;
+exclusive VM slot returned. Both pairs pass focused29/0 and Store105/0, no
+failures/exclusions/skips. Current durations1.956/12.338 seconds; floor
+1.945/12.171; pipeline285.189. Exact tested formatter-only child
+`10006bc27618b1308e1390a834bca0652b6b1f95` is pushed and joined through
+`a4a31986ed9ac1e6dd3e0bd99567ee5dde5eba93`. Only the two owned Store paths
+changed; root verified exact integrated bytes. Root read complete source/
+correction/formatter and runner deltas, source reports and independent reviews.
+It independently verified136 sealed artifacts,35 raw stages/started groups,
+35 original PIDs/groups absent,23 actual/Git/mode sources,four raw populations,
+12 handoff artifacts and35 unique registry attempts. No forced cleanup/retry.
+Dependency warnings and actual fault crashes remain visible; product compile
+with warnings-as-errors and all source gates passed. Only bounded T15 decoder
+row closes. Pure current canonical transport is distinct from unchanged Core
+closed reference/use admission; physical capture/object/history stays open.
+
+Sibling `M7/artifact-use-decoder-execution-20261005-v1`: terminal report
+`b3da8169a2f25c90b6333139f836460571d3fbe20fd4bd08aaae76b5cfb0d61e`;
+inventory `d6ef1c8c1ffd09c8aaa278ebfc4365cee927bce954030a2790db8e96fd13b1b0`.
+Sibling `M7/artifact-use-decoder-paired-handoff-10006bc2-20261005-v1`, report
+`4dd06049353f9c07d3f694dea4132fde2261e825532eaf00bff66e8e8bbef34f`;
+packet `4b61611414a808ce3fd6cc4c9024083fafdff179dd2c4e95cd7ff77de2021b65`.
+Exact reviewed initiald18, frozen e8 finding and disabledv1/v2/v3/finalv4 remain
+retained. Final v4 runner841b83f0/config8bdad8c5 have no further grant. Canonical
+artifact stage registry has35 consumed keys; do not reset it or repeat stages.
+No verification VM currently runs. Source/evidence push87be37e7 completed;
+the clean merged artifact worktree and local/remote topic branches are removed.
+Ledger enumeration remains isolated source-only.
+
+RECEIPT SOURCE: root read the full sealed inventory report and concrete boundary;
+verified four sealed files, 22 Git/mode inputs, 21 fixed actual inputs and three
+prior references. Moving resume documentation has separate retained hashes.
+Report `f5e73d591faaa0adcea70643b7a411480ffcc4c6b6c7d86066bb7bd1fb570b9c`;
+input inventory `8759ef5d71295426a18c749e9b80c6fc25fdf39f361e456d8e8877baaec6ea4d`.
+Private agent now owns source-only extraction in isolated
+`/private/tmp/loopex-m7-receipt-captured-decoding`, branch
+`codex/m7-receipt-captured-decoding`, base `87be37e7`. Exactly Local executor.ex
+and local_authority_contract_test.exs are authorized. Preserve native 28-field
+ETF, 65536 cap, live raw-job equality, claim/finality, 17 job comparisons and
+separate solicited Core recovery. Replace injected decoder proof with actual
+bounded arity-only BIF trace and positive control; preserve other assertions
+and deadlines. Actual-writer bytes and hostile captured-byte controls remain
+pending. No VM, formatter, test, push or primary source edit is granted.
+Stop after committed source/pins/report or a material decision.
+Candidate `f46804354698b4c8ad65797833149d2d278f9c00` is source-only committed
+and clean. Root read both full deltas/report and verified eight sealed files,
+32 actual/Git/mode sources,four prior references,unchanged production prefix and
+29 original case bodies. Every nonprobe line in the migrated case is retained.
+Independent initial review found no production blocker but an unknown-input-atom
+coverage gap. Source-only test child `f6e731bdafd09f2abd3174ed199b36c24cfcc809`
+adds20 lines: manually encoded uninterned ETF atom, noncreating before/after
+existing-atom checks and actual BIF entry under the same captured1,000ms matrix
+cutoff. Production/helper/populations are unchanged; root read the correction
+and report. Independent correction review is complete with no source blocker. Root read
+initial/final reports and verified initial five listed artifacts plus inventory,
+12 Git/eight external inputs,final four listed artifacts plus inventory,
+12 Git/ten external inputs,nine sealed correction files and32 actual/Git/mode
+sources. Final report
+`ea00006cbc9676f8ba4623884085e81383dd4279715952dfb189cbb9f605e1a7`;
+inputs `6d820b7cd622319511e677f0284e84fdb3de8e24b3dd611abbdb7662a960cbce`.
+Private worker now prepares a new immutable execution-disabled modern runner,
+source f6 frozen, only two owned formatter paths,source-derived32/35/298+2
+populations,all gates/private caches/strict actual counts/one-shot registry and
+original group/source/status custody. No execution grant exists; Ledger owns
+sole VM. No VM, formatter, compiler, test or push ran for receipts. Initial/final source
+packets remain under their separate temporary names; durable inventory copy is
+`M7/receipt-captured-byte-inventory-20261005-v1`, copy inventory
+`0c4e91d1d2a83ba7ddfd3021a33aba2365479078b1e65362b5e6f53640ea510f`.
+Initial Ledger independent review is copied under
+`M7/ledger-enumeration-independent-review-0c4b805d-20261005-v1`;
+copy inventory `2ded435828fa0b68dbca3730b0ea683e5c2bbe822f553e117c65cafe15b082e6`.
+Standalone receipt expectations on its base remain32 focused/35 adjacent/
+Local298 ordinary+2 excluded; these do not include the isolated new Ledger cases.
 
 PRIOR FULL-CHECK REGISTRY: root read and verified five packet artifacts,116
 inputs,78 Git source/toolchain identities,17 supplemental actual logs and75
@@ -123,12 +305,17 @@ unchanged. Runner changes only explicit malformed-summary refusal. Runner digest
 helper `51d8030cd1e7cc7bc6a24c0b837585e92a76c114a7c0ab7cae1de8df51ac7843`.
 Final source, populations and exact canonical attempt-registry pins remain pending.
 Registry seeding is now complete as recorded above.
-No execution is enabled. Startup and Ledger are now joined;
+No execution is enabled. Batch the source-reviewed Ledger enumeration slice
+before the next full integration candidate to avoid immediately repeating the
+full suite for another source change. This is sequencing only: every required
+check remains, no recorded source is rerun, and final populations/pins wait for
+verified rejoin. Startup and the single-file Ledger capture are now joined;
 expected Core1324/10 and Composition635/3 supersede the draft's initial
-Composition623/3; Local296/2 and CLI635/6 remain prospective. Store becomes105/0 only if the
-artifact decoder joins after paired proof; current primary Store remains100/0. A read-only Docker
+Composition623/3; Local296/2 and CLI635/6 remain prospective. Store is now105/0 after paired artifact proof and exact source rejoin. A read-only Docker
 platform/image inventory found the daemon unavailable; no app, container or
-image pull was started. The actual Linux filename witness remains unavailable.
+image pull was started. The actual Linux filename witness remains unavailable. A strict read-only
+SSH OS probe to configured serenity timed out before connection; no remote
+files or VM changed. Do not claim either environment as a Linux witness.
 
 SECOND STARTUP FAILURE, retained unchanged: the second execution stopped at source
 `559017602d06d74e3bf73104ec5b5c068e09aac2`. Handle `25505` is terminal exit 1,

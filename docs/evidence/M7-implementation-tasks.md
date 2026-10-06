@@ -29,6 +29,94 @@ grouped by T00–T19. Empty added sections mean no added subtasks are recorded;
 they do not mean the original task is complete. This follows the maintainer's
 2026-10-01 update to the active implementation goal.
 
+## Current source review and receipt extraction, 2026-10-05
+
+Ledger source correction `bbf5265c` has passed root and independent source
+review. Its one-shot verification is terminal FAIL_OR_UNAVAILABLE at clean
+formatter child `6baa7364`: current IO80/2 and Ledger23/0 pass; Composition
+644/651 passed with seven configuration failures,3 excluded and zero skips.
+Original handle2090 exit1 is collected and all22 PIDs/groups are absent. Local,
+long and floor lanes did not run. No retry or integration occurred. Root verified
+93 sealed artifacts,106 actual/Git/kind/mode sources and22 unique attempts.
+The Ledger row remains open while the unchanged integration failures are diagnosed.
+Receipt `f6e731bd` passed final independent/root source review, including its
+unknown-atom/no-creation witness under the unchanged1,000ms observer cutoff.
+Root verified the disabled modern runner and retained a separate v3 grant after
+the Ledger slot returned. One current/floor sequence expects32 focused,35 adjacent
+and298 ordinary Local with2 excluded,zero skips; no receipt handle exists at
+this saved checkpoint. Both isolated branches preserve original source/evidence.
+
+Root verified the next artifact physical inventory; selected-use capture can
+reuse the existing owner and reference-bound facade. Its implementation is
+not yet assigned. Object/complete namespace/history obligations remain separate.
+These are current facts; the following paragraphs retain historical checkpoints.
+
+Artifact source/evidence is pushed at `87be37e7`; its clean merged worktree and
+local/remote topic branches are removed. No verification VM runs.
+Root reviewed the complete four-path Ledger enumeration candidate `0c4b805d`,
+verified 44 listed packet artifacts,32 actual/Git/mode sources and 85 unchanged
+old case bodies. Its exact-size proof awaits a source-only correction from
+`external_size` to actual encoded byte size plus the proved 69-byte nonce
+footprint. Installed documentation promises only an upper bound; this is a
+proof gap, not a reproduced differing-size failure. Live nonce serialization,
+current bounds and all old assertions remain. Independent correction review
+and both-pair execution are pending; the enumeration row stays open.
+
+Root read and verified the private receipt inventory: four sealed files,
+22 Git/mode inputs,21 fixed actual sources and three prior references. A
+separately recorded moving resume document does not alter production pins.
+Private receipt source extraction now owns only Local executor and its
+local_authority_contract_test in an isolated `87be37e7` worktree. No VM or test
+result is claimed. One added T15 receipt decoder row tracks this work.
+The next full check stays disabled until reviewed source slices are rejoined;
+this sequences checks without waiving or repeating a recorded full attempt.
+T01–T19 originals: 78 done/95 todo/6 retired; added: 299 done/21 todo.
+Including T00 originals: 78/101/7, added: 303/22. T15 added: 17 done/6 todo.
+
+## Current artifact-use decoder joined, 2026-10-05
+
+The bounded T15 artifact decoder row is complete at tested clean source
+`10006bc27618b1308e1390a834bca0652b6b1f95`, joined through
+`a4a31986ed9ac1e6dd3e0bd99567ee5dde5eba93`. Both supported toolchains pass
+29 focused artifact conformance and 105 ordinary Store cases, zero failures,
+exclusions or skips. Current durations are 1.956/12.338 seconds; floor
+1.945/12.171. Pipeline took 285.189 seconds. Product compilation with
+`--warnings-as-errors`, source gates and independent exact suite counts pass.
+Existing dependency warnings and genuine fault diagnostics remain in raw output.
+
+Source review found improper-list exceptions in e8 before any artifact execution.
+The independently reviewed d18 child explicitly walks pairs/lists/tuples/native
+maps; nine hostile current-ETF vectors require actual decoder entry, typed
+refusal and original normal worker joins. Exact current writer bytes, raw cap,
+full consumption, canonical/digest ordering and Core semantic authority stay
+intact. The owned formatter proves equal non-line AST and only changes test
+formatting. Root read all deltas and independently checked four original raw
+suite populations, 136 terminal artifacts, 35 complete raw stages and original
+PIDs/groups absent, 23 actual/Git/mode records, 12 handoff artifacts and
+35 unique consumed stage keys. Integrated source equals tested bytes.
+Handle 24595 is terminal exit zero and collected; exclusive VM slot returned.
+
+Immutable siblings `M7/artifact-use-decoder-execution-20261005-v1` and
+`M7/artifact-use-decoder-paired-handoff-10006bc2-20261005-v1` retain exact
+sources, raw logs, source modes, original waits, inventories and collection.
+Terminal report digest
+`b3da8169a2f25c90b6333139f836460571d3fbe20fd4bd08aaae76b5cfb0d61e`;
+terminal inventory
+`d6ef1c8c1ffd09c8aaa278ebfc4365cee927bce954030a2790db8e96fd13b1b0`;
+handoff report
+`4dd06049353f9c07d3f694dea4132fde2261e825532eaf00bff66e8e8bbef34f`.
+No full check, release or complete physical restore claim follows.
+
+One new T15 row tracks the active source-only complete generation/marker/open
+namespace step. T01–T19 originals remain 78 done/95 todo/6 retired; added
+299 done/20 todo. Including T00 originals78/101/7, added303/21. T15 added17/5.
+No VM currently runs. Ledger enumeration is isolated/source-only; private
+receipt decoding is being inventoried. The next full check remains disabled
+for final source/pops/grant review. A read-only SSH OS probe to the configured
+serenity host timed out without a connection; no remote VM or file change ran.
+Docker daemon remains unavailable. The required actual Linux filename proof
+remains unavailable, not PASS. ADR 0052 acceptance remains pending.
+
 ## Local ledger physical capture joined, 2026-10-05
 
 The bounded T15 ledger capture row is complete at tested clean source
@@ -13236,7 +13324,9 @@ open.
 
 ### Added implementation subtasks
 
-- [ ] Extract the current Local artifact-use captured-byte decoder with the existing 131,072-byte ceiling, exact canonical bytes and filename digest; reuse the existing ArtifactStore facade through a private captured-bytes handle for closed reference-bound admission. Prove actual writers, deleted-source decoding, opaque identities, hostile bytes and existing semantic negatives on both pairs; physical capture, object bytes and complete history relations remain separate.
+- [ ] Extract one private captured-byte Local receipt decoder shared with live reads; preserve the native current 28-field ETF schema, 65,536-byte cap, exact raw job binding, closed predicates and all claim/finality/job/recovery authority. Replace the injected decoder seam with actual bounded BIF proof and actual writer/hostile controls on both supported pairs; physical receipt capture and complete history audit remain separate.
+- [ ] Enumerate the complete current Local generation/marker/open namespace under one original restore IO guardian; require exact physical name membership, current marker-plane grammar, open cardinality/whole-byte bounds and source/job/digest relations. Preserve actual writer crash cuts and claim observations; complete receipts/Store/job/history/restore certification remains separate.
+- [x] Extract the current Local artifact-use captured-byte decoder with the existing 131,072-byte ceiling, exact canonical bytes and filename digest; reuse the existing ArtifactStore facade through a private captured-bytes handle for closed reference-bound admission. Prove actual writers, deleted-source decoding, opaque identities, hostile bytes and existing semantic negatives on both pairs; physical capture, object bytes and complete history relations remain separate.
 - [x] Capture one canonical current Local generation, admission, refusal or open ledger file through the guardian-owned restore IO worker; bind exact descriptor, pathname, raw job identity, original source placement and role ceiling before decode; prove actual current writers, hostile physical captures and unchanged cleanup on both pairs. Complete ledger enumeration, receipt/Store/artifact relations and restore activation remain separate.
 - [x] Audit every declared current Store history through the existing owned IO worker, enforcing descriptor/path/hash identity, complete transaction replay and recovery of every session; prove actual retained unknown truth, faults and cleanup on both pairs without claiming scripted executors prove OS effects.
 - [x] Capture one exact retained Resource manifest or provenance record through the existing guardian-owned restore IO worker, binding canonical pathname/identity to the physical manifest, enforcing its raw ceiling before open/read, revalidating descriptors and ancestors, and proving current writers, hostile captures and unchanged cleanup on both pairs. Complete catalog/reference orchestration remains separate.
