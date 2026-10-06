@@ -32,19 +32,26 @@ Primary previous pushed checkpoint is `740698ba`; this commit supersedes its
 resume record. Historical detail remains at
 `bdc88a05:docs/evidence/M7-resume.md` and in the task ledger.
 
-Root verification VM is OCCUPIED by original formatter handle31620, initial
-`e7f630da756de6918f7f85fac2a1f6456387716c`, worktree
-`/private/tmp/loopex-m7-core-protocol-rejoin`. Collect this original handle once
-before any next VM grant. Both older4121 and47417 are FAILED and fully collected;
-never repoll or retry their bytes. Formatting owns34 Elixir paths in the46-path
-unit, requires all34 whole-file non-line ASTs and both supported formatting
-checks, and permits at most one confined direct child. No native PASS is inferred.
+Root verification VM is FREE. Original formatter31620 is PASS and fully
+collected at final `d6afe045c34e27538ad69971857ca0b50d6e0b9b`, sole e7 child in
+`/private/tmp/loopex-m7-core-protocol-rejoin`. All34 whole-file non-line ASTs,
+both supported formatting checks,102 artifacts,72 actual/Git source rows and
+11 original process joins verified after41.414s. No native PASS is inferred.
 Enabled packet `M7/core-configure-format-runner-20261006-v1`, config
 `5b31f83c7537c5bbaf145b1a5c913b0b4f945711149456757209b9f7edfd50ec`,
 root source review `f6804c300574a81063eb9bf77d68028329b34dbdc5b76c407212d99f89590dbb`.
-Output `M7/m7-core-configure-format-v1`; registry
-`M7/core-configure-format-v1-stage-attempt-registry.json`, admitted seed735.
-Native verification must consume both exact final formatting results.
+Output `M7/m7-core-configure-format-v1`; collection
+`M7/core-configure-format-original-collection-20261006-v1.json`, SHA
+`6055a613e84e06a25e1a46125dc011e2c29ebde9d3656b95840059127b6f0a91`.
+Collection assertions verified735seed/746total keys, but its summary retained
+stale literal723. Explicit immutable metadata correction
+`M7/core-configure-format-original-collection-metadata-correction-20261006-v1.json`,
+SHA `d8aceef89f692a7c86595ab972b24a511e2ee3126bd0dd7f06a0f5e5d51e8382`,
+corrects only that field to746; original output remains immutable.
+Terminal report `46a3fe0024b2fcf75efb18afc8b2770e37312de5f12283fe7c6b5c43f7d8a113`,
+inventory `090366fd050eea14585b47807e028264e8a593f4572ce3d7d95132dd373d855b`.
+Never repoll31620,4121 or47417. Native verification must consume both exact final
+formatting results rather than repeating their keys.
 
 Source ownership, all separate worktrees and source-only agents:
 
@@ -65,7 +72,12 @@ Source ownership, all separate worktrees and source-only agents:
   SHA256SUMS `6c4959fab87633ccb5ca21a8a01763118e8f20c7c39396709cf4e624f210b238`.
   Existing routes/manifests stay literal;307 vectors and11 prospective tests
   are source evidence only. No accepted0054/0055 dependent work is implemented.
-- `restore_prefix_source_audit` stopped after sealing that compact source.
+- `restore_prefix_source_audit` prepares only disabled focused-native packet
+  `/private/tmp/loopex-m7-core-configure-native-runner-d6afe045-20261006-v1`.
+  Select all14 changed Core test files, three Protocol ordinary/Node files,
+  three foreground and three daemon files. Actual expanded source populations,
+  warning-free compile and both supported pairs remain required. Original
+  formatter results are consumed; no duplicate formatting is admitted.
 
 One root integrator owns all execution, collection, rejoin and push. The
 combined candidate incorporates reviewed authored bounds/abort timer recovery,
@@ -93,10 +105,9 @@ proposal review49c17036 and docs proof below; no acceptance follows.
 ### Latest complete evidence and attempt union
 
 Evidence base is `/Users/spuri/projects/lexlapax/loopex-evidence/M7`.
-Latest fully collected registry has735 keys:
-`generation-install-diagnostic-v1-stage-attempt-registry.json`, SHA
-`80c698662e9cfcffa886687c411a0d29edd91fec18b4b1c46e6f6218c3c6a54a`.
-Formatter31620 owns the next active registry; reconcile its terminal result first.
+Latest fully collected registry has746 keys:
+`core-configure-format-v1-stage-attempt-registry.json`, SHA
+`fe6daacd79de613b6a6c1e40fd6f7506a39c08210da5f1d11290af3a0672ad33`.
 Reconcile every retained registry into the same unique exact(source,pair,stage)
 union before any fresh grant. A source child is not permission to reroll a case.
 

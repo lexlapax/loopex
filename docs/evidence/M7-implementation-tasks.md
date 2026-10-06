@@ -54,7 +54,8 @@ values do not identify the changed field. A confined filesystem-aware fixture
 correction d2c3cfa7 preserves21 old cases and adds two physical controls; it is
 under independent source review. No generation row closes. Reviewed authored deadline/interaction
 and accepted0053 configure prerequisites are composed at isolated `e7f630da`,
-46 paths, now formatting as original31620 before a focused native campaign.
+46 paths, formatted to d6afe045 by original31620 after41.414s. All34 ASTs
+and both supported formatting checks pass; native verification is pending.
 Dormant compact prerequisite9c8df940 is separately under independent source review.
 The configure fixture correction preserves all371 vectors and supplies the four
 actual cap+1 controls. ADR0053 is accepted;0054 is the sole asked pending
