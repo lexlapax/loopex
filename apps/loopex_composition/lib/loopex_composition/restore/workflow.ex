@@ -10,8 +10,9 @@ defmodule LoopexComposition.Restore.Workflow do
 
   This development path sequences existing physical audits, streaming copy and
   canonical ADR 0051 publication inside one Restore.IO worker. It has no public
-  restore/lookup entry point. It validates and appends complete prior lineage;
-  Original-tx continuation remains implementation work. The IO callback never
+  restore entry point. It classifies exact committed duplicates before fresh
+  work and validates and appends complete prior lineage. Original-tx
+  continuation remains implementation work. The IO callback never
   starts another guardian or refreshes this invocation's work or cleanup allowance.
   """
 
@@ -30,6 +31,9 @@ defmodule LoopexComposition.Restore.Workflow do
     # Technical depth: the existing metadata-only phase remains observable before
     # this admission gate; every claim and physical IO operation follows the gate.
     ensure!(plan["prior_restore_count"] < 64, "inventory_limit_exceeded")
+    classify!(plan["destination_state_root"], plan, io)
+    if plan["source_status"] == "available",
+      do: classify!(plan["source_state_root"], plan, io)
     claims = claims!(plan, io)
     Process.put(:restore_workflow_claims, claims)
     phase(io, "inventory")
@@ -190,9 +194,24 @@ defmodule LoopexComposition.Restore.Workflow do
     phase(io, "claim_release")
     {:ok, %{restore_result: {:committed, compiled.receipt}, release_claims: claims}}
   catch
+    {:restore_duplicate, receipt} ->
+      {:ok, %{restore_result: {:committed, receipt}, release_claims: []}}
     {:restore_refusal, code} -> refusal(code)
     {:io_error, _reason} -> refusal("inventory_unavailable")
     {:stopped, _reason} -> refusal("inventory_unavailable")
+  end
+
+  # Concept: classify retained completion before fresh claims or allocation.
+  # Technical depth: administrative capture and reduction remain in this one
+  # worker. Duplicates never inspect the old source/backup or allocate epochs;
+  # pending continuation remains a separate unfinished implementation unit.
+  defp classify!(root, plan, io) do
+    case value!(io.({:restore_classification, root, plan})) do
+      :fresh -> :ok
+      {:committed, receipt} -> throw({:restore_duplicate, receipt})
+      {:error, %{"code" => code}} -> throw({:restore_refusal, code})
+      _ -> throw({:restore_refusal, "invalid_current_history"})
+    end
   end
 
   # Concept: a pre-intent IO refusal still releases positively acquired claims.

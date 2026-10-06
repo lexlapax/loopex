@@ -638,7 +638,15 @@ defmodule LoopexComposition.Restore.IO do
     end
   end
 
-  defp execute({:restore_lookup, root, tx_id}) do
+  defp execute({:restore_lookup, root, tx_id}), do: lookup_operation(root, tx_id, nil)
+
+  defp execute({:restore_classification, root, plan}),
+    do: lookup_operation(root, plan["tx_id"], plan)
+
+  # Concept: resolution and lookup use the same owned administrative capture.
+  # Technical depth: classification adds only a pure plan/transaction reduction;
+  # it neither starts another guardian nor renews this worker's cutoffs.
+  defp lookup_operation(root, tx_id, plan) do
     try do
       ancestors = manifest_ancestors(root)
       {:ok, placement} = execute({:placement, root})
@@ -715,19 +723,17 @@ defmodule LoopexComposition.Restore.IO do
       claim_path = Path.join(Path.dirname(root), ".loopex-restore-claim-" <> claim_digest)
       {claim, state} = lookup_claim(root, claim_path, state)
       lookup_recheck(root, ancestors, state)
-
-      result =
+      result = if is_nil(plan) do
         primitive(:restore_lookup_decode, fn ->
-          Loopex.Executor.Local.RestoreGuard.lookup_captured(
-            root,
-            tx_id,
-            state.index,
-            state.files,
-            state.placements,
-            claim
-          )
+          Loopex.Executor.Local.RestoreGuard.lookup_captured(root, tx_id, state.index,
+            state.files, state.placements, claim)
         end)
-
+      else
+        primitive(:restore_classification_decode, fn ->
+          Loopex.Executor.Local.RestoreGuard.classify_captured(root, plan, state.index,
+            state.files, state.placements, claim)
+        end)
+      end
       {:ok, result}
     catch
       {:lookup_error, code} -> {:ok, lookup_refusal(tx_id, code)}

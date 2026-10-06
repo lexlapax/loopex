@@ -343,6 +343,53 @@ defmodule Loopex.Executor.Local.RestoreGuard do
     end
   end
 
+  # Concept: a duplicate returns completion evidence without placement authority.
+  # Technical depth: the lookup reducer first validates the complete captured
+  # chain. Exact retained plan bytes bind the original transaction. A claim or
+  # fresh transaction over a pending higher transition cannot enter fresh work.
+  @doc false
+  def classify_captured(root, plan, index, files, placements, claim) do
+    tx_id = plan["tx_id"]
+    result = lookup_captured(root, tx_id, index, files, placements, claim)
+
+    case result do
+      {:committed, %{"receipt" => receipt}} when is_nil(claim) ->
+        path = Path.join([@root_admin, "lineage", ordinal(receipt["ordinal"]), "intent"])
+        with {:ok, bytes} <- Map.fetch(files, path),
+             {:ok, intent} <- RestoreCodec.decode(:intent, bytes),
+             {:ok, digest} <- RestoreCodec.plan_digest(plan),
+             true <- root == plan["destination_state_root"] and intent["plan"] == plan and
+               intent["plan_digest"] == digest do
+          {:committed, receipt}
+        else
+          _ -> lookup_failure(tx_id, "restore_conflict")
+        end
+
+      {:absent, _} when is_nil(claim) ->
+        intents = files |> Enum.filter(fn {path, _bytes} ->
+          case Path.split(path) do
+            [@root_admin, "lineage", _ordinal, name] -> name in ["intent", "intent.tmp"]
+            _ -> false
+          end
+        end) |> Enum.sort_by(&elem(&1, 0))
+
+        case List.last(intents) do
+          nil -> :fresh
+          {_path, bytes} ->
+            with {:ok, latest} <- RestoreCodec.decode(:intent, bytes),
+                 {:committed, %{"view" => "current"}} <-
+                   lookup_captured(root, latest["tx_id"], index, files, placements, claim) do
+              :fresh
+            else
+              _ -> lookup_failure(tx_id, "restore_conflict")
+            end
+        end
+
+      {:error, _} = failure -> failure
+      _ -> lookup_failure(tx_id, "restore_conflict")
+    end
+  end
+
   defp lookup_absent_or_claim(tx_id, nil),
     do: {:absent, %{"tx_id" => tx_id, "observation" => "not_present"}}
 
