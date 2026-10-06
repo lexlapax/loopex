@@ -56,6 +56,13 @@ Expected per pair: IO94/2, Model28/0, Composition
 adjacent21/0, Receipt32/0, Ledger23/0, ReadOnly22/0, Local adjacent21/0,
 Artifact29/0, Composition665/3, Local302/2 and owned IO long2/94; zero skips.
 These are source expectations, not results.
+Formatter whole-file non-line AST checks passed for all eight paths. Exact
+permitted single-parent formatter child is
+`0e5af3cc587b2d2409a3efd213cc38b0def86070`; complete patch is retained in the
+live output. Current dev compilation passed in47.673 seconds; formatter and
+first four source gates have command/evidence0. Test compilation, named suites
+and floor results remain pending; the original outer handle8713 still belongs
+to current_index_cleanup. These stage results close no task.
 
 CURRENT OBJECT SOURCE WORK: root read the complete selected-object inventory
 and schema, verified four artifacts plus inventory, nine actual/Git/mode
