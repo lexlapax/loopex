@@ -4,6 +4,7 @@ defmodule LoopexComposition.RestoreRetainedClaimHandoffTest do
   alias Loopex.Executor.Local.{Ledger, RestoreCodec}
   alias LoopexComposition.{Restore, WorkspaceIdentity}
   alias LoopexComposition.Restore.IO, as: RestoreIO
+  alias LoopexComposition.Restore.Workflow
 
   @limits %{"work_ms" => 10_000, "cleanup_grace_ms" => 1_000}
   @total 16_777_216
@@ -136,6 +137,29 @@ defmodule LoopexComposition.RestoreRetainedClaimHandoffTest do
     for invoke <- [invocation(), invocation("joined", nil)] do
       assert RestoreIO.run({:restore_retained_claim_handoff, cut.plan, invoke}, @limits, probe: self()) ==
                {:error, :invalid_io_request}
+      refute_receive {:restore_io, _, _, _, {:installed, _, _}}, 100
+      assert image(root) == before
+    end
+  end
+
+  test "malformed Workflow invocation refuses before its actual IO callback is entered", %{root: root} do
+    cut = prepare(root, "available")
+    prior = strand(cut, "source_retirement")
+    before = image(root)
+    invoke = invocation("joined", prior)
+    caller = self()
+
+    io = fn operation ->
+      send(caller, {:handoff_callback_entered, operation})
+      RestoreIO.run(operation, @limits, probe: caller)
+    end
+
+    for {plan, invocation} <- [
+          {Map.put(cut.plan, "destination_state_root", "relative-root"), invoke},
+          {cut.plan, Map.put(invoke, "work_ms", 0)}
+        ] do
+      assert Workflow.retained_claim_handoff(plan, invocation, io) == {:error, "invalid_plan"}
+      refute_receive {:handoff_callback_entered, _}, 100
       refute_receive {:restore_io, _, _, _, {:installed, _, _}}, 100
       assert image(root) == before
     end
