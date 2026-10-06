@@ -24,6 +24,7 @@ defmodule LoopexComposition.RestoreIOTest do
 
   alias LoopexComposition.Restore.IO, as: RestoreIO
   alias Loopex.ConfiguredGenesisFixture
+  alias Loopex.Executor.Local.{Ledger, RestoreCodec}
   alias Loopex.Runtime.SessionState
   alias Loopex.Store
   alias Loopex.Store.Local.{Log, State}
@@ -1245,6 +1246,304 @@ defmodule LoopexComposition.RestoreIOTest do
     end
   end
 
+  test "Ledger audit preserves all actual current writer records and raw job identities", context do
+    fixture = ledger_fixture(context.root)
+    assert not String.valid?(fixture.jobs.admission)
+    assert fixture.records.open["origin_executor_epoch"] == 7
+
+    for role <- [:generation, :admission, :refusal, :open] do
+      record = fixture.records[role]
+      path = fixture.paths[role]
+      bytes = File.read!(path)
+      mode = File.stat!(path).mode
+      owned = launch(ledger_operation(fixture, role), :ledger_decode)
+      assert {{:joined, {:ok, ^record}, %{opens: 1, closes: 1}}, events} = drive(owned)
+      kinds = issued_kinds(events)
+      assert index(kinds, :close) < index(kinds, :ledger_decode)
+      assert index(kinds, :ledger_digest) < index(kinds, :ledger_decode)
+      assert File.read!(path) == bytes
+      assert File.stat!(path).mode == mode
+      joined(owned)
+    end
+  end
+
+  test "captured Ledger copies authenticate the original source placement without activation", context do
+    fixture = ledger_fixture(context.root)
+    backup = fixture.root <> "-backup"
+    File.cp_r!(fixture.root, backup)
+    original = fixture.declaration["source_placement"]
+    copied = %{fixture | root: backup}
+
+    for role <- [:generation, :admission, :refusal, :open] do
+      record = fixture.records[role]
+      owned = launch(ledger_operation(copied, role), :ledger_decode)
+      assert {{:joined, {:ok, ^record}, %{opens: 1, closes: 1}}, _} = drive(owned)
+      joined(owned)
+    end
+
+    info = File.stat!(Path.join(backup, "ledger"))
+    assert info.inode != original["inode"]
+    assert Path.join(backup, "ledger") != original["expanded_root"]
+
+    moved = %{
+      "expanded_root" => Path.join(backup, "ledger"),
+      "major_device" => info.major_device,
+      "inode" => info.inode
+    }
+
+    changed = %{copied | declaration: %{fixture.declaration | "source_placement" => moved}}
+    owned = launch(ledger_operation(changed, :generation), :ledger_decode)
+    assert {{:joined, {:error, :history_invalid}, %{opens: 1, closes: 1}}, _} = drive(owned)
+    joined(owned)
+    assert File.read!(Path.join(backup, "ledger/generation")) ==
+             File.read!(fixture.paths.generation)
+    refute File.exists?(Path.join(backup, "ledger/claim"))
+  end
+
+  test "Ledger selection and descriptor admission refuse unsafe or alternate requests", context do
+    fixture = ledger_fixture(context.root)
+    {:audit_ledger, root, declaration, _, _, manifest} = ledger_operation(fixture, :generation)
+
+    for {role, job_id} <- [
+          {:generation, "job"}, {:open, nil}, {:open, <<>>},
+          {:open, :job}, {:open, :binary.copy(<<0>>, 8_193)}, {:other, nil}
+        ] do
+      assert RestoreIO.run(
+               {:audit_ledger, root, declaration, role, job_id, manifest}, limits(1_000, 100)
+             ) == {:error, :invalid_io_request}
+    end
+
+    for changed <- [
+          Map.put(declaration, "extra", true), Map.delete(declaration, "executor_identity"),
+          %{declaration | "relative_root" => "../ledger"},
+          %{declaration | "relative_root" => "/ledger"},
+          %{declaration | "relative_root" => "ledger/./nested"},
+          %{declaration | "source_generation_sha256" => String.duplicate("A", 64)}
+        ] do
+      owned = launch({:audit_ledger, root, changed, :generation, nil, manifest}, :ledger_declaration)
+      assert {{:joined, {:error, :history_invalid}, %{opens: 0, closes: 0}}, events} = drive(owned)
+      refute :ledger_decode in issued_kinds(events)
+      joined(owned)
+    end
+  end
+
+  test "Ledger capture requires canonical file and every parent in the physical manifest", context do
+    fixture = ledger_fixture(context.root)
+
+    for role <- [:generation, :admission, :refusal, :open] do
+      {:audit_ledger, root, declaration, ^role, job_id, manifest} = ledger_operation(fixture, role)
+      [domain, entries] = :erlang.binary_to_term(manifest, [:safe])
+      relative = Path.relative_to(fixture.paths[role], root)
+      parent = Path.dirname(relative)
+
+      for changed <- [
+            Enum.reject(entries, &(&1["path"] == relative)),
+            Enum.reject(entries, &(&1["path"] == parent)),
+            Enum.reject(entries, &(&1["path"] == ".")),
+            Enum.map(entries, fn entry ->
+              if entry["path"] == relative,
+                do: %{entry | "kind" => "directory", "size" => 0, "sha256" => nil}, else: entry
+            end)
+          ] do
+        bytes = :erlang.term_to_binary([domain, changed], [:deterministic])
+        owned = launch({:audit_ledger, root, declaration, role, job_id, bytes}, :ledger_manifest)
+        assert {{:joined, {:error, reason}, %{opens: 0, closes: 0}}, events} = drive(owned)
+        assert reason in [:io_error, :history_invalid]
+        refute :ledger_decode in issued_kinds(events)
+        joined(owned)
+      end
+
+      File.rm!(fixture.paths[role])
+      owned = launch({:audit_ledger, root, declaration, role, job_id, manifest}, :ledger_manifest)
+      assert {{:joined, {:error, :io_error}, %{opens: 0, closes: 0}}, _} = drive(owned)
+      refute File.exists?(fixture.paths[role])
+      joined(owned)
+      File.write!(fixture.paths[role], :erlang.term_to_binary(fixture.records[role], [:deterministic]))
+    end
+  end
+
+  test "Ledger generation hash identity and original binding are independent required relations", context do
+    fixture = ledger_fixture(context.root)
+    declaration = fixture.declaration
+    placement = declaration["source_placement"]
+
+    for changed <- [
+          %{declaration | "source_generation_sha256" => String.duplicate("0", 64)},
+          %{declaration | "executor_identity" => "other-executor"},
+          %{declaration | "source_placement" => %{placement | "inode" => placement["inode"] + 1}},
+          %{declaration | "source_placement" => %{placement | "expanded_root" => fixture.root}}
+        ] do
+      owned = launch(ledger_operation(%{fixture | declaration: changed}, :generation), :ledger_decode)
+      assert {{:joined, {:error, :history_invalid}, %{opens: 1, closes: 1}}, _} = drive(owned)
+      joined(owned)
+    end
+
+    changed = %{fixture | declaration: %{declaration | "executor_identity" => "other-executor"}}
+    owned = launch(ledger_operation(changed, :open), :ledger_decode)
+    assert {{:joined, {:error, :history_invalid}, %{opens: 1, closes: 1}}, _} = drive(owned)
+    joined(owned)
+  end
+
+  test "Ledger basename job identity and expected kind cannot substitute for each other", context do
+    fixture = ledger_fixture(context.root)
+    wrong = <<255, 0, "another-job">>
+
+    for role <- [:admission, :refusal, :open] do
+      path = Path.join(Path.dirname(fixture.paths[role]), hash(wrong))
+      File.cp!(fixture.paths[role], path)
+      changed = %{fixture | jobs: Map.put(fixture.jobs, role, wrong)}
+      owned = launch(ledger_operation(changed, role), :ledger_decode)
+      assert {{:joined, {:error, :history_invalid}, %{opens: 1, closes: 1}}, _} = drive(owned)
+      assert File.read!(path) == File.read!(fixture.paths[role])
+      joined(owned)
+      File.rm!(path)
+    end
+
+    for {selected, actual} <- [{:admission, :refusal}, {:refusal, :admission}] do
+      changed = %{fixture | jobs: Map.put(fixture.jobs, selected, fixture.jobs[actual])}
+      owned = launch(ledger_operation(changed, selected), :ledger_decode)
+      assert {{:joined, {:error, :history_invalid}, %{opens: 1, closes: 1}}, _} = drive(owned)
+      joined(owned)
+    end
+  end
+
+  test "all Ledger roles refuse their actual first over-cap file before open or decode", context do
+    for {role, ceiling} <- [generation: 2_048, admission: 65_536, refusal: 65_536, open: 65_536] do
+      fixture = ledger_fixture(context.root)
+      File.write!(fixture.paths[role], :binary.copy(<<0>>, ceiling + 1))
+      owned = launch(ledger_operation(fixture, role), :ledger_manifest)
+      assert {{:joined, {:error, :io_error}, %{opens: 0, closes: 0}}, events} = drive(owned)
+      refute :read in issued_kinds(events)
+      refute :ledger_decode in issued_kinds(events)
+      assert File.stat!(fixture.paths[role]).size == ceiling + 1
+      joined(owned)
+    end
+  end
+
+  test "Ledger size mode and same-size content must match the captured inventory", context do
+    for role <- [:generation, :admission, :refusal, :open] do
+      fixture = ledger_fixture(context.root)
+      operation = ledger_operation(fixture, role)
+      path = fixture.paths[role]
+      bytes = File.read!(path)
+      mode = Bitwise.band(File.stat!(path).mode, 0o7777)
+
+      for change <- [:size, :mode, :content] do
+        File.write!(path, bytes)
+        File.chmod!(path, mode)
+
+        case change do
+          :size -> File.write!(path, bytes <> <<0>>)
+          :mode -> File.chmod!(path, Bitwise.bxor(mode, 0o100))
+          :content -> File.write!(path, :binary.copy(<<0>>, byte_size(bytes)))
+        end
+
+        owned = launch(operation, :ledger_manifest)
+        assert {{:joined, {:error, :io_error}, evidence}, events} = drive(owned)
+        assert evidence.opens == evidence.closes
+        refute :ledger_decode in issued_kinds(events)
+        joined(owned)
+      end
+    end
+  end
+
+  test "Ledger hardlinks symlinks ancestors and FIFO substitutions refuse before open", context do
+    for role <- [:generation, :admission, :refusal, :open] do
+      fixture = ledger_fixture(context.root)
+      operation = ledger_operation(fixture, role)
+      path = fixture.paths[role]
+      other = Path.join(fixture.root, "other")
+      File.ln!(path, other)
+      owned = launch(operation, :ledger_manifest)
+      assert {{:joined, {:error, :io_error}, %{opens: 0, closes: 0}}, _} = drive(owned)
+      joined(owned)
+      File.rm!(other)
+      File.rename!(path, other)
+      File.ln_s!(other, path)
+      owned = launch(operation, :ledger_manifest)
+      assert {{:joined, {:error, :io_error}, %{opens: 0, closes: 0}}, _} = drive(owned)
+      joined(owned)
+      File.rm!(path)
+      assert {_, 0} = System.cmd("mkfifo", [path])
+      owned = launch(operation, :ledger_manifest)
+      assert {{:joined, {:error, :io_error}, %{opens: 0, closes: 0}}, _} = drive(owned)
+      joined(owned)
+      File.rm!(path)
+      File.rename!(other, path)
+      directory = Path.dirname(path)
+      moved = directory <> "-moved"
+      File.rename!(directory, moved)
+      File.ln_s!(moved, directory)
+      owned = launch(operation, :ledger_manifest)
+      assert {{:joined, {:error, :io_error}, %{opens: 0, closes: 0}}, _} = drive(owned)
+      joined(owned)
+    end
+  end
+
+  test "Ledger descriptor and post-decode file or ancestor replacement cannot publish a record", context do
+    for role <- [:generation, :admission, :refusal, :open],
+        change <- [:descriptor, :file, :ancestor] do
+      fixture = ledger_fixture(context.root)
+      path = fixture.paths[role]
+      pause = if change == :descriptor, do: :descriptor_stat, else: :ledger_decode
+      owned = launch(ledger_operation(fixture, role), pause)
+      {id, _} = paused_operation(owned, pause)
+
+      if change == :ancestor do
+        directory = Path.dirname(path)
+        moved = directory <> "-moved"
+        File.rename!(directory, moved)
+        File.mkdir!(directory)
+        File.rename!(Path.join(moved, Path.basename(path)), path)
+      else
+        replacement = path <> ".replacement"
+        File.write!(replacement, File.read!(path))
+        File.chmod!(replacement, Bitwise.band(File.stat!(path).mode, 0o7777))
+        File.rename!(replacement, path)
+      end
+
+      send(owned.guardian, {:proceed, owned.reference, id})
+      assert {{:joined, {:error, :io_error}, %{opens: 1, closes: 1}}, events} = drive(owned)
+      if change == :descriptor, do: refute(:ledger_decode in issued_kinds(events))
+      joined(owned)
+    end
+  end
+
+  test "physical Ledger equality cannot admit compressed trailing alternate or malformed records", context do
+    for role <- [:generation, :admission, :refusal, :open] do
+      fixture = ledger_fixture(context.root)
+      record = fixture.records[role]
+      canonical = File.read!(fixture.paths[role])
+      compressed = :erlang.term_to_binary(record, [:deterministic, :compressed])
+      assert <<131, 80, _::binary>> = compressed
+
+      for bytes <- [compressed, canonical <> <<0>>,
+            :erlang.term_to_binary([record], [:deterministic]),
+            :erlang.term_to_binary(Map.put(record, "extra", true), [:deterministic]),
+            :erlang.term_to_binary(Map.delete(record, :ledger_kind), [:deterministic])] do
+        File.write!(fixture.paths[role], bytes)
+        changed = if role == :generation,
+          do: %{fixture | declaration: %{fixture.declaration | "source_generation_sha256" => hash(bytes)}},
+          else: fixture
+        owned = launch(ledger_operation(changed, role), :ledger_decode)
+        assert {{:joined, {:error, :history_invalid}, %{opens: 1, closes: 1}}, events} = drive(owned)
+        assert index(issued_kinds(events), :close) < index(issued_kinds(events), :ledger_decode)
+        assert File.read!(fixture.paths[role]) == bytes
+        joined(owned)
+      end
+    end
+  end
+
+  test "Ledger semantic work retains the original cutoff after explicit descriptor close", context do
+    for role <- [:generation, :admission, :refusal, :open] do
+      fixture = ledger_fixture(context.root)
+      owned = launch(ledger_operation(fixture, role), :ledger_decode, 500)
+      paused_operation(owned, :ledger_decode)
+      assert {{:joined, {:error, :deadline}, %{opens: 1, closes: 1}}, _} = drive(owned, false)
+      joined(owned)
+    end
+  end
+
   test "an actual Local Store retains unknown effect truth through offline semantic audit",
        context do
     previous = System.get_env("LOOPEX_HOME")
@@ -1431,6 +1730,66 @@ defmodule LoopexComposition.RestoreIOTest do
 
     declaration = %{"relative_path" => "store/history.log", "sha256" => hash(fixture.bytes)}
     {:audit_store, fixture.root, declaration, manifest}
+  end
+
+  defp ledger_fixture(root) do
+    state = Path.join(physical_root(root), "ledger-state-#{System.unique_integer([:positive])}")
+    File.mkdir!(state)
+    ledger = Path.join(state, "ledger")
+    identity = "ledger-audit"
+    assert {:ok, prepared} = Ledger.prepare(ledger, identity, 100)
+
+    job = %{
+      job_id: <<0, 255, 128, "admitted">>,
+      operation_id: "ledger-operation",
+      attempt: 1,
+      canonical_request_digest: String.duplicate("a", 64),
+      cleanup_grace_ms: 100,
+      origin_executor_epoch: 7
+    }
+
+    refused = %{job | job_id: "refused", operation_id: "refused-operation"}
+    marker = Ledger.marker(job)
+    open = Ledger.open_entry(job, identity)
+    assert {:ok, refusal} = Ledger.refusal(refused, :workspace_lease_lost)
+
+    assert :ok = Ledger.with_claim(prepared, fn claimed ->
+      assert :ok = Ledger.admit(claimed, marker, open)
+      Ledger.refuse(claimed, refusal)
+    end)
+
+    paths = %{
+      generation: Path.join(ledger, "generation"),
+      admission: Path.join([ledger, "markers", hash(job.job_id)]),
+      refusal: Path.join([ledger, "markers", hash(refused.job_id)]),
+      open: Path.join([ledger, "open", hash(job.job_id)])
+    }
+
+    bytes = File.read!(paths.generation)
+    generation = :erlang.binary_to_term(bytes, [:safe])
+    info = File.stat!(ledger)
+    declaration = %{
+      "relative_root" => "ledger",
+      "executor_identity" => identity,
+      "source_generation_sha256" => hash(bytes),
+      "source_placement" => %{
+        "expanded_root" => ledger, "major_device" => info.major_device, "inode" => info.inode
+      }
+    }
+
+    assert {:ok, _} = RestoreCodec.encode(:ledger_descriptor, declaration)
+    %{
+      root: state, declaration: declaration, paths: paths,
+      jobs: %{generation: nil, admission: job.job_id, refusal: refused.job_id, open: job.job_id},
+      records: %{generation: generation, admission: marker, refusal: refusal, open: open}
+    }
+  end
+
+  defp ledger_operation(fixture, role) do
+    assert {:joined, {:ok, manifest}, _} =
+      RestoreIO.run({:manifest, fixture.root, 1_048_576}, limits(1_000, 100))
+
+    {:audit_ledger, fixture.root, fixture.declaration, role, fixture.jobs[role], manifest}
   end
 
   defp resource_fixture(root, width \\ 40) do
