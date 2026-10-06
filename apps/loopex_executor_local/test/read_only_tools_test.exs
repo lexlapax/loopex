@@ -2,11 +2,30 @@ defmodule Loopex.Executor.Local.ReadOnlyToolsTest do
   use ExUnit.Case, async: true
   alias Loopex.Executor.Local.{CodingTools, ReadOnlyTools, ToolGlob}
 
-  setup do
-    root = Path.join(System.tmp_dir!(), "loopex-read-only-#{System.unique_integer([:positive])}")
+  setup context do
+    if context[:short_workspace] do
+      {:ok, root: short_workspace!()}
+    else
+      root =
+        Path.join(System.tmp_dir!(), "loopex-read-only-#{System.unique_integer([:positive])}")
+
+      File.mkdir!(root)
+      on_exit(fn -> File.rm_rf!(root) end)
+      {:ok, root: root}
+    end
+  end
+
+  # Concept: physical path limits remain separate from relative traversal budgets.
+  # Technical depth: only the socket and exact raw-path-byte witnesses use this
+  # short root. The existing OS temp parent must be a directory, and mkdir
+  # exclusively claims a random name before any fixture file is written.
+  defp short_workspace! do
+    %File.Stat{type: :directory} = File.stat!("/tmp")
+    suffix = Base.encode16(:crypto.strong_rand_bytes(12), case: :lower)
+    root = Path.join("/tmp", "loopex-ro-" <> suffix)
     File.mkdir!(root)
     on_exit(fn -> File.rm_rf!(root) end)
-    {:ok, root: root}
+    root
   end
 
   defp execute(root, kind, arguments, limit \\ 16_384) do
@@ -114,6 +133,7 @@ defmodule Loopex.Executor.Local.ReadOnlyToolsTest do
     end
   end
 
+  @tag :short_workspace
   test "real FIFO socket and symlinks are entries and grep never opens them", %{root: root} do
     fifo = Path.join(root, "fifo")
     assert {_, 0} = System.cmd("mkfifo", [fifo])
@@ -462,6 +482,7 @@ defmodule Loopex.Executor.Local.ReadOnlyToolsTest do
     assert {:completed, "N\ttruncated\n"} = execute(root, "find", %{"pattern" => "z"})
   end
 
+  @tag :short_workspace
   test "cumulative raw path bytes admit exactly 8 MiB before the next entry", %{root: root} do
     relative = Enum.join(List.duplicate(String.duplicate("d", 250), 3), "/")
     directory = Path.join(root, relative)

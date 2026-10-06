@@ -18,10 +18,16 @@ defmodule LoopexComposition.Restore.IO do
 
   This private prerequisite exposes bounded reads, complete physical manifests,
   durable record publication, complete declared-Store semantic auditing and one
-  canonical retained Resource or Local ledger record audit to composition only. Validated maps
-  and recovered session facts remain private; the
-  operation grants no effect authority and does not validate other backup
-  formats or activate a restored root. Host exclusion remains the caller's
+  canonical retained Resource or Local ledger record audit, and complete Local
+  generation/marker/open-plane enumeration and selected reference-bound artifact
+  use capture and one locator-selected streaming object audit to composition only.
+  A private transition worker validates retained prior lineage and sequences
+  available-source retirement or lost-source host-exclusion evidence, exact
+  copy/publication and terminal
+  claim release without replacing the original guardian or deadlines. Public
+  restore/lookup and the remaining accepted variants are unfinished. Validated
+  maps and recovered facts remain private; standalone audit operations grant no
+  effect authority and do not activate a restored root. Host exclusion remains the caller's
   obligation. The caller must first validate the captured manifest against the
   original invocation's total-file-byte limit. This operation validates canonical
   membership and the selected file and ancestors; it does not re-hash
@@ -31,9 +37,10 @@ defmodule LoopexComposition.Restore.IO do
   require Record
   Record.defrecordp(:file_info, Record.extract(:file_info, from_lib: "kernel/include/file.hrl"))
 
-  alias Loopex.Executor.Local.{Ledger, RestoreCodec}
+  alias Loopex.ArtifactStore
+  alias Loopex.Executor.Local.{Ledger, RestoreCodec, RestoreGuard}
   alias Loopex.Runtime.SessionState
-  alias Loopex.Store.Local.{Log, State}
+  alias Loopex.Store.Local.{Artifacts, Log, State}
   alias LoopexComposition.ResourcePacks
 
   @max_receive_timeout 4_294_967_295
@@ -69,40 +76,60 @@ defmodule LoopexComposition.Restore.IO do
         end)
 
       send(guardian, {:start, reference})
-      wait(guardian, monitor, reference, admitted + limits.work_ms + limits.cleanup_window_ms)
+
+      wait(
+        guardian,
+        monitor,
+        reference,
+        admitted + limits.work_ms + limits.cleanup_window_ms,
+        initial_restore_observation(operation)
+      )
     else
       _ -> {:error, :invalid_io_request}
     end
   end
 
-  defp wait(guardian, monitor, reference, cutoff) do
+  defp wait(guardian, monitor, reference, cutoff, observation) do
     receive do
-      {^reference, ^guardian, result} ->
-        await_guardian_down(guardian, monitor, result, cutoff)
-
-      {:DOWN, ^monitor, :process, ^guardian, _reason} ->
-        {:unconfirmed, :guardian_lost}
-    after
-      wait_chunk(cutoff) ->
-        if remaining(cutoff) > 0 do
-          wait(guardian, monitor, reference, cutoff)
+      {:restore_progress, ^reference, ^guardian, progress} when not is_nil(observation) ->
+        if match?({:ok, _}, RestoreCodec.encode(:observation, progress)) and
+             progress["tx_id"] == observation["tx_id"] do
+          wait(guardian, monitor, reference, cutoff, progress)
         else
           Process.exit(guardian, :kill)
           Process.demonitor(monitor, [:flush])
-          {:unconfirmed, :guardian_unjoined}
+          unconfirmed_restore(:history_invalid, observation)
+        end
+
+      {^reference, ^guardian, result} ->
+        await_guardian_down(guardian, monitor, result, cutoff, observation)
+
+      {:DOWN, ^monitor, :process, ^guardian, _reason} ->
+        unconfirmed_restore(:guardian_lost, observation)
+    after
+      wait_chunk(cutoff) ->
+        if remaining(cutoff) > 0 do
+          wait(guardian, monitor, reference, cutoff, observation)
+        else
+          Process.exit(guardian, :kill)
+          Process.demonitor(monitor, [:flush])
+          unconfirmed_restore(:guardian_unjoined, observation)
         end
     end
   end
 
-  defp await_guardian_down(guardian, monitor, result, cutoff) do
+  defp await_guardian_down(guardian, monitor, result, cutoff, observation) do
     receive do
-      {:DOWN, ^monitor, :process, ^guardian, :normal} -> result
-      {:DOWN, ^monitor, :process, ^guardian, _reason} -> {:unconfirmed, :guardian_lost}
+      {:DOWN, ^monitor, :process, ^guardian, :normal} ->
+        result
+
+      {:DOWN, ^monitor, :process, ^guardian, _reason} ->
+        unconfirmed_restore(:guardian_lost, observation)
     after
       wait_chunk(cutoff) ->
         if remaining(cutoff) > 0,
-          do: await_guardian_down(guardian, monitor, result, cutoff),
-          else: {:unconfirmed, :guardian_unjoined}
+          do: await_guardian_down(guardian, monitor, result, cutoff, observation),
+          else: unconfirmed_restore(:guardian_unjoined, observation)
     end
   end
 
@@ -139,13 +166,19 @@ defmodule LoopexComposition.Restore.IO do
           payload: nil,
           finished: false,
           down: false,
+          worker_exit_seen: false,
+          final_observation: :off,
           forced: false,
           work_cutoff: admitted + limits.work_ms,
           grace: limits.cleanup_grace_ms,
           cleanup_window: limits.cleanup_window_ms,
           stop: nil,
           cooperative_cutoff: nil,
-          cleanup_cutoff: nil
+          cleanup_cutoff: nil,
+          restore: initial_restore_state(operation),
+          restore_progress: nil,
+          terminal_release: false,
+          terminal_payload: nil
         }
 
         notify(state, {:installed, admitted, state.work_cutoff})
@@ -156,24 +189,37 @@ defmodule LoopexComposition.Restore.IO do
 
   defp guard(state) do
     state = check_cutoffs(state)
+    state = retain_restore_progress(state)
 
+    # Concept: join admission ends at the original cleanup observation cutoff.
+    # Technical depth: a queued normal DOWN consumed late cannot let clean state
+    # bypass expiry or admit terminal release under the caller's later bound.
     cond do
+      state.cleanup_cutoff && now() >= state.cleanup_cutoff ->
+        finish(state, {:unconfirmed, uncertainty(state)})
+
+      clean?(state) and release_needed?(state) and now() >= state.cooperative_cutoff ->
+        finish(state, {:unconfirmed, :claim_release_unconfirmed})
+
+      clean?(state) and release_needed?(state) ->
+        start_terminal_release(state)
+
       clean?(state) ->
         finish(
           state,
           {:joined, terminal_payload(state),
-           %{
-             opens: state.opens,
-             closes: state.closes,
-             operations: state.acknowledgements,
-             stop: state.stop,
-             work_cutoff: state.work_cutoff,
-             cleanup_cutoff: state.cleanup_cutoff
-           }}
+           Map.merge(
+             %{
+               opens: state.opens,
+               closes: state.closes,
+               operations: state.acknowledgements,
+               stop: state.stop,
+               work_cutoff: state.work_cutoff,
+               cleanup_cutoff: state.cleanup_cutoff
+             },
+             restore_evidence(state)
+           )}
         )
-
-      state.cleanup_cutoff && now() >= state.cleanup_cutoff ->
-        finish(state, {:unconfirmed, uncertainty(state)})
 
       true ->
         receive_event(state)
@@ -181,6 +227,7 @@ defmodule LoopexComposition.Restore.IO do
   end
 
   defp receive_event(state) do
+    state = pause_final_observation(state)
     worker = state.worker
     reference = state.reference
     caller_monitor = state.caller_monitor
@@ -188,11 +235,14 @@ defmodule LoopexComposition.Restore.IO do
 
     receive do
       {:issued, ^worker, ^reference, id, kind} when id == state.next and is_nil(state.pending) ->
-        state = check_cutoffs(%{state | pending: {id, kind}, next: id + 1})
+        state =
+          check_cutoffs(observe_restore_issue(%{state | pending: {id, kind}, next: id + 1}, kind))
+          |> retain_restore_progress()
+
         notify(state, {:issued, id, kind})
 
         cond do
-          state.stop && not close_operation?(kind) ->
+          state.stop && not cleanup_operation?(state, kind) ->
             send(worker, {:stop, reference})
             guard(state)
 
@@ -208,13 +258,24 @@ defmodule LoopexComposition.Restore.IO do
             guard(state)
         end
 
+      {:proceed_final_observation, ^reference, id} when state.paused ->
+        state = check_cutoffs(state)
+
+        if state.pending && elem(state.pending, 0) == id && is_nil(state.stop) &&
+             state.final_observation == :off do
+          permit(state, id, elem(state.pending, 1))
+          guard(%{state | paused: false, final_observation: :armed})
+        else
+          guard(state)
+        end
+
       {:proceed, ^reference, id} when state.paused ->
         state = check_cutoffs(state)
 
         if state.pending && elem(state.pending, 0) == id do
           kind = elem(state.pending, 1)
 
-          if state.stop && not close_operation?(kind),
+          if state.stop && not cleanup_operation?(state, kind),
             do: send(worker, {:stop, reference}),
             else: permit(state, id, kind)
 
@@ -242,28 +303,99 @@ defmodule LoopexComposition.Restore.IO do
 
       {:not_issued, ^worker, ^reference, id} ->
         if state.pending && elem(state.pending, 0) == id,
-          do: guard(%{state | pending: nil, paused: false}),
+          do: guard(not_issued(%{state | pending: nil, paused: false}, elem(state.pending, 1))),
           else: guard(stop(state, :history_invalid, now()))
 
       {:payload, ^worker, ^reference, result} ->
+        result = if state.terminal_release, do: release_payload(state, result), else: result
         state = %{state | payload: result}
         guard(stop(state, if(match?({:ok, _}, result), do: :complete, else: :io_error), now()))
+
+      {:retained_restore_claim, ^worker, ^reference} when not is_nil(state.restore) ->
+        guard(%{state | restore: %{state.restore | prior_claim: true}})
 
       {:finished, ^worker, ^reference} ->
         guard(%{state | finished: true})
 
-      {:EXIT, ^worker, _reason} ->
+      {:EXIT, ^worker, reason} ->
+        state =
+          if state.final_observation == :armed,
+            do: %{state | worker_exit_seen: reason == :normal},
+            else: state
+
         guard(state)
 
       {:DOWN, ^caller_monitor, :process, _caller, _reason} ->
         guard(stop(state, :caller_lost, now()))
 
       {:DOWN, ^worker_monitor, :process, ^worker, reason} ->
+        if state.final_observation == :continued,
+          do: notify(state, {:worker_down_observed, worker_monitor, reason == :normal, now()})
+
         state = %{state | down: reason == :normal}
         state = if state.stop, do: state, else: stop(state, :worker_unjoined, now())
         guard(state)
     after
       min(next_wait(state), @max_receive_timeout) -> guard(state)
+    end
+  end
+
+  # Concept: a private scheduling control holds only final join observation.
+  # Technical depth: arm through the exact already-paused primitive after fixture
+  # monitors exist. Finished/closed acknowledgements and the genuine normal EXIT
+  # are consumed first; DOWN remains for this already-entered receive to scan.
+  # Continuation never rechecks cutoffs before that scan, renews an allowance or
+  # changes a result. Only the following ordinary guard admits or refuses join.
+  defp pause_final_observation(
+         %{
+           final_observation: :armed,
+           finished: true,
+           down: false,
+           worker_exit_seen: true,
+           pending: nil,
+           forced: false
+         } = state
+       ) do
+    if MapSet.size(state.open) == 0 and not is_nil(state.payload) and
+         not is_nil(state.cleanup_cutoff) and now() < state.cleanup_cutoff do
+      reference = state.reference
+      paused_at = now()
+
+      notify(
+        state,
+        {:final_observation_paused, state.worker_monitor, paused_at,
+         %{
+           finished: true,
+           down: false,
+           pending: false,
+           open_count: 0,
+           worker_exit_seen: true,
+           opens: state.opens,
+           closes: state.closes,
+           stop: state.stop,
+           stop_at: state.cooperative_cutoff - state.grace,
+           work_cutoff: state.work_cutoff,
+           cleanup_cutoff: state.cleanup_cutoff
+         }}
+      )
+
+      continuation = await_final_observation(reference, state.cleanup_cutoff)
+
+      notify(state, {:final_observation_continued, continuation, now()})
+      %{state | final_observation: :continued}
+    else
+      state
+    end
+  end
+
+  defp pause_final_observation(state), do: state
+
+  defp await_final_observation(reference, cutoff) do
+    receive do
+      {:continue_final_observation, ^reference} -> :continued
+    after
+      wait_chunk(cutoff) ->
+        if remaining(cutoff) > 0, do: await_final_observation(reference, cutoff), else: :expired
     end
   end
 
@@ -273,11 +405,46 @@ defmodule LoopexComposition.Restore.IO do
   defp acknowledge(state, {:close, token}, :closed),
     do: %{state | open: MapSet.delete(state.open, token), closes: state.closes + 1}
 
+  defp acknowledge(state, {:restore_claim_create, claim}, observation) do
+    status =
+      case observation do
+        :created -> :partial
+        :foreign -> :foreign
+        _ -> :uncertain
+      end
+
+    retain_claim(state, claim, status)
+  end
+
+  defp acknowledge(state, {:restore_claim_acquired, claim}, :completed),
+    do: retain_claim(state, claim, :acquired)
+
+  defp acknowledge(state, {:restore_claim_released, directory}, :completed),
+    do: %{
+      state
+      | restore: %{
+          state.restore
+          | claims: Enum.reject(state.restore.claims, &(&1.directory == directory))
+        }
+    }
+
   defp acknowledge(state, _kind, _observation), do: state
+
+  defp not_issued(state, {:restore_claim_create, claim}),
+    do: %{
+      state
+      | restore: %{
+          state.restore
+          | claims: Enum.reject(state.restore.claims, &(&1.directory == claim.directory))
+        }
+    }
+
+  defp not_issued(state, _kind), do: state
 
   defp clean?(state),
     do:
-      state.stop && state.finished && state.down && not state.forced && is_nil(state.pending) &&
+      not is_nil(state.stop) && state.finished && state.down && not state.forced &&
+        is_nil(state.pending) &&
         MapSet.size(state.open) == 0 && not is_nil(state.payload)
 
   defp stop(%{stop: reason} = state, _new, _at) when not is_nil(reason), do: state
@@ -323,6 +490,26 @@ defmodule LoopexComposition.Restore.IO do
     end
   end
 
+  defp terminal_payload(%{restore: %{intake: true}, stop: reason})
+       when reason in [:deadline, :caller_lost, :worker_unjoined, :history_invalid],
+       do: {:error, reason}
+
+  defp terminal_payload(%{restore: %{intake: true}} = state), do: state.payload
+
+  defp terminal_payload(%{restore: %{intent: true}} = state) do
+    case state.payload do
+      {:ok, %{restore_result: {:committed, _}, release_claims: []}}
+      when state.stop == :complete ->
+        state.payload
+
+      {:ok, %{restore_result: {:commit_unknown, _}}} ->
+        state.payload
+
+      _ ->
+        {:error, :restore_commit_unknown}
+    end
+  end
+
   defp terminal_payload(%{stop: reason})
        when reason in [:deadline, :caller_lost, :worker_unjoined, :history_invalid],
        do: {:error, reason}
@@ -330,6 +517,15 @@ defmodule LoopexComposition.Restore.IO do
   defp terminal_payload(state), do: state.payload
 
   defp finish(state, result) do
+    result =
+      case result do
+        {:unconfirmed, reason} ->
+          unconfirmed_restore(reason, restore_observation(state, "unconfirmed"))
+
+        _ ->
+          result
+      end
+
     notify(state, {:terminal, result})
     send(state.caller, {state.reference, self(), result})
   end
@@ -338,6 +534,277 @@ defmodule LoopexComposition.Restore.IO do
     do: send(probe, {:restore_io, self(), state.worker, state.reference, event})
 
   defp notify(_state, _event), do: :ok
+  # Concept: claim release is terminal cleanup, never a new work invocation.
+  # Technical depth: only a fresh monitored serial release worker may issue the
+  # fixed claim-only operations after original payload DOWN. It shares the
+  # already captured cooperative and final cleanup cutoffs, tokens and counts.
+  defp cleanup_operation?(state, kind),
+    do:
+      close_operation?(kind) or
+        (state.terminal_release and
+           kind_name(kind) in [
+             :open,
+             :stat,
+             :read,
+             :file_sync,
+             :directory_sync,
+             :claim_delete,
+             :claim_directory_delete,
+             :restore_claim_released,
+             :descriptor_stat,
+             :manifest_stat,
+             :list
+           ])
+
+  defp release_needed?(%{terminal_release: false, payload: {:ok, %{release_claims: [_ | _]}}}),
+    do: true
+
+  defp release_needed?(_), do: false
+
+  defp start_terminal_release(state) do
+    {:ok, %{release_claims: claims}} = state.payload
+    guardian = self()
+    reference = state.reference
+
+    {worker, monitor} =
+      :erlang.spawn_opt(
+        fn -> worker_start(guardian, reference, {:release_restore_claims, claims}) end,
+        [:link, :monitor]
+      )
+
+    state = %{
+      state
+      | worker: worker,
+        worker_monitor: monitor,
+        terminal_release: true,
+        terminal_payload: state.payload,
+        payload: nil,
+        finished: false,
+        down: false,
+        worker_exit_seen: false,
+        pending: nil,
+        paused: false,
+        next: 1
+    }
+
+    notify(state, {:terminal_release_installed, state.cleanup_cutoff})
+    send(worker, {:start, reference})
+    guard(state)
+  end
+
+  defp release_payload(state, {:ok, :released}) do
+    {:ok, payload} = state.terminal_payload
+    {:ok, %{payload | release_claims: []}}
+  end
+
+  defp release_payload(_state, _), do: {:error, :claim_release_unconfirmed}
+
+  defp observe_restore_issue(%{restore: nil} = state, _), do: state
+
+  defp observe_restore_issue(state, {:restore_phase, phase}),
+    do: %{state | restore: %{state.restore | phase: phase}}
+
+  defp observe_restore_issue(state, {:intent_may_persist, phase}),
+    do: %{state | restore: %{state.restore | phase: phase, intent: true}}
+
+  defp observe_restore_issue(state, {:restore_intent_facts, ordinal, intent}),
+    do: %{
+      state
+      | restore: %{state.restore | ordinal: ordinal, intent: true, intent_status: intent}
+    }
+
+  defp observe_restore_issue(state, {:restore_observation_facts, observation}),
+    do: %{
+      state
+      | restore: %{
+          state.restore
+          | ordinal: observation["ordinal"],
+            phase: observation["phase"],
+            intent: true,
+            intent_status: observation["intent"],
+            prior_claim: true
+        }
+    }
+
+  defp observe_restore_issue(state, {:restore_claim_create, claim}),
+    do: retain_claim(state, claim, :uncertain)
+
+  defp observe_restore_issue(state, {:restore_claim_handoff, claim}),
+    do: retain_claim(state, claim, :uncertain)
+
+  defp observe_restore_issue(state, _), do: state
+
+  # Concept: completed release removes only its proved claim, never a sibling.
+  # Technical depth: mkdir issue is uncertain until acknowledged; EEXIST is
+  # foreign, successful mkdir remains partial until owner publication and sync
+  # complete. These private states never authorize deletion of a partial claim.
+  defp retain_claim(state, claim, status) do
+    claims = Enum.reject(state.restore.claims, &(&1.directory == claim.directory))
+    %{state | restore: %{state.restore | claims: [Map.put(claim, :status, status) | claims]}}
+  end
+
+  defp restore_evidence(%{restore: nil}), do: %{}
+
+  defp restore_evidence(state),
+    do: %{
+      restore: Map.take(state.restore, [:phase, :intent]),
+      claim_count: Enum.count(state.restore.claims, &(&1.status != :foreign)),
+      restore_observation: restore_observation(state, "joined")
+    }
+
+  # Concept: loss of an owner retains uncertainty, not an absent-intent claim.
+  # Technical depth: the guardian sends only changed codec-bounded facts before
+  # permitting IO. Exact caller/ref custody survives guardian DOWN; observations
+  # contain no paths, claim owners, handles or arbitrary OS failure terms.
+  defp initial_restore_state(operation) do
+    case initial_restore_observation(operation) do
+      nil ->
+        nil
+
+      observation ->
+        %{
+          tx_id: observation["tx_id"],
+          ordinal: nil,
+          phase: "claim",
+          claims: [],
+          intake:
+            match?(
+              {kind, _, _}
+              when kind in [:restore_pending_intake, :restore_retained_claim_handoff],
+              operation
+            ),
+          intent:
+            match?(
+              {kind, _, _}
+              when kind in [:restore_pending_intake, :restore_retained_claim_handoff],
+              operation
+            ),
+          intent_status: observation["intent"],
+          prior_claim: observation["claim"] == "retained"
+        }
+    end
+  end
+
+  defp initial_restore_observation({kind, plan, _invocation})
+       when kind in [:restore_first, :restore_pending_intake, :restore_retained_claim_handoff] do
+    %{
+      "kind" => "loopex_current_restore_observation_v1",
+      "tx_id" => plan["tx_id"],
+      "ordinal" => nil,
+      "phase" => "claim",
+      "intent" => "may_exist",
+      "cleanup" => "unconfirmed",
+      "claim" => "none",
+      "reason" => "none"
+    }
+  end
+
+  defp initial_restore_observation(_), do: nil
+
+  defp retain_restore_progress(%{restore: nil} = state), do: state
+
+  defp retain_restore_progress(state) do
+    identity = {state.restore, state.stop}
+
+    if state.restore_progress && elem(state.restore_progress, 0) == identity do
+      state
+    else
+      observation = restore_observation(state, "unconfirmed")
+      previous = if state.restore_progress, do: elem(state.restore_progress, 1), else: nil
+
+      if observation != previous,
+        do: send(state.caller, {:restore_progress, state.reference, self(), observation})
+
+      %{state | restore_progress: {identity, observation}}
+    end
+  end
+
+  defp restore_observation(%{restore: nil}, _cleanup), do: nil
+
+  defp restore_observation(state, cleanup) do
+    restore = state.restore
+    retained = restore.prior_claim or Enum.any?(restore.claims, &(&1.status != :foreign))
+    intent = if restore.intent, do: restore.intent_status, else: "absent"
+    intent = if cleanup == "unconfirmed" and intent == "absent", do: "may_exist", else: intent
+
+    observation = %{
+      "kind" => "loopex_current_restore_observation_v1",
+      "tx_id" => restore.tx_id,
+      "ordinal" => restore.ordinal,
+      "phase" => restore.phase,
+      "intent" => intent,
+      "cleanup" => cleanup,
+      "claim" => if(retained, do: "retained", else: "none"),
+      "reason" => restore_terminal_reason(state)
+    }
+
+    {:ok, _} = RestoreCodec.encode(:observation, observation)
+    observation
+  end
+
+  defp unconfirmed_restore(reason, nil), do: {:unconfirmed, reason}
+
+  defp unconfirmed_restore(reason, observation) do
+    observation =
+      observation
+      |> Map.put("cleanup", "unconfirmed")
+      |> Map.put("reason", restore_reason(reason))
+
+    observation =
+      if observation["intent"] == "absent",
+        do: Map.put(observation, "intent", "may_exist"),
+        else: observation
+
+    {:ok, _} = RestoreCodec.encode(:observation, observation)
+    {:unconfirmed, reason, %{restore_observation: observation}}
+  end
+
+  defp restore_reason(reason) when reason in [nil, :complete], do: "none"
+
+  defp restore_reason(reason)
+       when reason in [
+              :deadline,
+              :caller_lost,
+              :descriptor_unclosed,
+              :history_invalid,
+              :claim_release_unconfirmed
+            ],
+       do: Atom.to_string(reason)
+
+  defp restore_reason(reason)
+       when reason in [:guardian_lost, :guardian_unjoined, :worker_unjoined],
+       do: "worker_unjoined"
+
+  defp restore_reason(_), do: "io_error"
+
+  defp restore_terminal_reason(%{stop: stop, payload: {:error, code}})
+       when stop == :io_error and is_binary(code) do
+    restore_refusal_reason(code)
+  end
+
+  defp restore_terminal_reason(%{
+         stop: :complete,
+         payload: {:ok, %{restore_result: {_tag, code}}}
+       })
+       when is_binary(code),
+       do: restore_refusal_reason(code)
+
+  defp restore_terminal_reason(state), do: restore_reason(state.stop)
+
+  defp restore_refusal_reason("authority_unconfirmed"), do: "authority_unconfirmed"
+  defp restore_refusal_reason("inventory_mismatch"), do: "readback_mismatch"
+
+  defp restore_refusal_reason(code)
+       when code in [
+              "invalid_current_history",
+              "restore_conflict",
+              "restore_history_invalid",
+              "physical_destination_changed"
+            ],
+       do: "history_invalid"
+
+  defp restore_refusal_reason(_), do: "io_error"
+
   defp close_operation?({:close, _token}), do: true
   defp close_operation?(_kind), do: false
   defp kind_name({name, _token}), do: name
@@ -345,7 +812,7 @@ defmodule LoopexComposition.Restore.IO do
 
   defp permit(state, id, kind) do
     cutoff =
-      if state.stop && close_operation?(kind),
+      if state.stop && cleanup_operation?(state, kind),
         do: state.cooperative_cutoff,
         else: state.work_cutoff
 
@@ -382,6 +849,342 @@ defmodule LoopexComposition.Restore.IO do
         cleanup_descriptors()
         send(guardian, {:finished, self(), reference})
     end
+  end
+
+  defp execute({:restore_lookup, root, tx_id}), do: lookup_operation(root, tx_id, nil)
+
+  defp execute({:restore_classification, root, plan}),
+    do: lookup_operation(root, plan["tx_id"], plan)
+
+  defp execute({:restore_first, plan, invocation}),
+    do: LoopexComposition.Restore.Workflow.execute(plan, invocation, &execute/1)
+
+  defp execute({:restore_pending_intake, plan, invocation}),
+    do: LoopexComposition.Restore.Workflow.pending_intake(plan, invocation, &execute/1)
+
+  defp execute({:restore_pending_capture, root, plan, invocation}),
+    do: lookup_operation(root, plan["tx_id"], {:pending, plan, invocation})
+
+  defp execute({:restore_retained_claim_handoff, plan, invocation} = operation) do
+    if not valid_operation?(operation), do: throw({:io_error, :invalid_io_request})
+    LoopexComposition.Restore.Workflow.retained_claim_handoff(plan, invocation, &execute/1)
+  end
+
+  defp execute({:restore_claim_capture, root, plan, invocation}) do
+    if not valid_operation?({:restore_retained_claim_handoff, plan, invocation}) or
+         root not in [plan["source_state_root"], plan["destination_state_root"]] or
+         (root == plan["source_state_root"] and plan["source_status"] != "available"),
+       do: throw({:io_error, :invalid_io_request})
+
+    lookup_operation(root, plan["tx_id"], {:pending, plan, invocation}, true)
+  end
+
+  defp execute({:restore_claim_handoff, capture, plan, invocation, nonce}) do
+    if not valid_operation?({:restore_retained_claim_handoff, plan, invocation}) or
+         not is_binary(nonce) or not Regex.match?(~r/\A[0-9a-f]{64}\z/, nonce),
+       do: throw({:io_error, :invalid_io_request})
+
+    {:ok, digest} = RestoreCodec.plan_digest(plan)
+    root = capture.root
+    role = if root == plan["destination_state_root"], do: "destination", else: "source"
+    owner = capture.retained.claim
+    claim = capture.claim
+    {:ok, claim_digest} = RestoreCodec.claim_digest(root)
+    directory = Path.join(Path.dirname(root), ".loopex-restore-claim-" <> claim_digest)
+
+    if root not in [plan["source_state_root"], plan["destination_state_root"]] or
+         (role == "source" and plan["source_status"] != "available") or
+         owner["tx_id"] != plan["tx_id"] or owner["plan_digest"] != digest or
+         owner["state_root"] != root or owner["role"] != role or owner["claim_nonce"] == nonce or
+         claim.directory != directory or
+         RestoreCodec.decode(:claim, claim.owner) != {:ok, owner},
+       do: throw({:io_error, :invalid_io_request})
+
+    {:ok, bytes} = RestoreCodec.encode(:claim, Map.put(owner, "claim_nonce", nonce))
+    primitive({:restore_claim_handoff, claim}, fn -> :ok end)
+    lookup_recheck(root, capture.ancestors, capture.state)
+    ancestors = capture.claim_ancestors
+    retained_publication_ancestors!(ancestors)
+    retained_claim_namespace!(claim)
+    path = Path.join(directory, "owner")
+
+    if primitive(:retained_publication_stat, fn -> :prim_file.read_link_info(path <> ".tmp") end) !=
+         {:error, :enoent},
+       do: throw({:io_error, :changed_destination})
+
+    retained_publish(path, bytes, 0o600, claim.owner, 2048, %{
+      ancestors: ancestors,
+      original: claim.owner_identity
+    })
+
+    retained_publication_ancestors!(ancestors)
+    retained_claim_namespace!(claim)
+    final = retained_publication_file(path, 2048, 0o600)
+
+    if final == :absent or final.bytes != bytes or
+         RestoreCodec.decode(:claim, final.bytes) !=
+           {:ok, Map.put(owner, "claim_nonce", nonce)},
+       do: throw({:io_error, :readback_mismatch})
+
+    retained_publication_ancestors!(ancestors)
+    retained_claim_namespace!(claim)
+    require_same_identity(final.info, manifest_stat(path))
+    acquired = %{claim | owner: bytes, owner_identity: final.info}
+    primitive({:restore_claim_acquired, acquired}, fn -> :ok end)
+    {:ok, acquired}
+  end
+
+  defp execute({:restore_phase, phase}) do
+    primitive({:restore_phase, phase}, fn -> :ok end)
+    {:ok, phase}
+  end
+
+  defp execute({:intent_may_persist, phase}) do
+    primitive({:intent_may_persist, phase}, fn -> :ok end)
+    {:ok, phase}
+  end
+
+  defp execute({:restore_intent_facts, ordinal, intent}) do
+    primitive({:restore_intent_facts, ordinal, intent}, fn -> :ok end)
+    {:ok, :retained}
+  end
+
+  defp execute({:restore_observation_facts, observation}) do
+    primitive({:restore_observation_facts, observation}, fn -> :ok end)
+    {:ok, :retained}
+  end
+
+  defp execute({:placement, root}) do
+    manifest_ancestors(root)
+    info = manifest_stat(root)
+    if file_info(info, :type) != :directory, do: throw({:io_error, :invalid_placement})
+
+    {:ok,
+     %{
+       "expanded_root" => root,
+       "major_device" => file_info(info, :major_device),
+       "inode" => file_info(info, :inode)
+     }}
+  end
+
+  # Concept: a lost source is an absent endpoint beneath existing physical directories.
+  # Technical depth: only native lstat ENOENT qualifies. Capture and recheck every
+  # nonsymlink ancestor around both endpoint observations; missing, inaccessible
+  # or replaced ancestors never establish absence. The workflow retains this
+  # vector across phases under the same guardian and original cutoffs.
+  defp execute({:lost_source_absent, root}) do
+    ancestors = manifest_ancestors(Path.dirname(root))
+    require_source_absent(root)
+
+    Enum.each(ancestors, fn {path, identity} ->
+      if directory_identity(manifest_stat(path)) != identity,
+        do: throw({:io_error, :source_changed})
+    end)
+
+    require_source_absent(root)
+
+    Enum.each(ancestors, fn {path, identity} ->
+      if directory_identity(manifest_stat(path)) != identity,
+        do: throw({:io_error, :source_changed})
+    end)
+
+    {:ok, ancestors}
+  end
+
+  defp execute({:directory_names, root}) do
+    {:ok, require_value(primitive(:list, fn -> :prim_file.list_dir_all(root) end))}
+  end
+
+  defp execute({:make_directory, path, mode}) do
+    manifest_ancestors(Path.dirname(path))
+    require_ok(primitive(:make_directory, fn -> :prim_file.make_dir(path) end))
+
+    require_ok(
+      primitive(:mode, fn -> :prim_file.write_file_info(path, file_info(mode: mode)) end)
+    )
+
+    directory_sync(Path.dirname(path))
+    {:ok, :created}
+  end
+
+  defp execute({:ensure_admin_directory, path}) do
+    case primitive(:stat, fn -> :prim_file.read_link_info(path) end) do
+      {:error, :enoent} ->
+        execute({:make_directory, path, 0o700})
+
+      {:ok, info} ->
+        if file_info(info, :type) != :directory or
+             Bitwise.band(file_info(info, :mode), 0o7777) != 0o700,
+           do: throw({:io_error, :invalid_administration})
+
+        {:ok, :present}
+
+      _ ->
+        throw({:io_error, :invalid_administration})
+    end
+  end
+
+  defp execute({:require_directory, path, mode}) do
+    info = manifest_stat(path)
+
+    if file_info(info, :type) != :directory or
+         Bitwise.band(file_info(info, :mode), 0o7777) != mode,
+       do: throw({:io_error, :source_changed})
+
+    {:ok, :present}
+  end
+
+  defp execute({:set_directory_mode, path, mode}) do
+    info = manifest_stat(path)
+    if file_info(info, :type) != :directory, do: throw({:io_error, :source_changed})
+
+    require_ok(
+      primitive(:mode, fn -> :prim_file.write_file_info(path, file_info(mode: mode)) end)
+    )
+
+    directory_sync(path)
+    directory_sync(Path.dirname(path))
+    {:ok, :synced}
+  end
+
+  defp execute({:acquire_restore_claim, claim}) do
+    manifest_ancestors(Path.dirname(claim.directory))
+
+    require_ok(
+      primitive({:restore_claim_create, claim}, fn -> :prim_file.make_dir(claim.directory) end)
+    )
+
+    require_ok(
+      primitive(:mode, fn ->
+        :prim_file.write_file_info(claim.directory, file_info(mode: 0o700))
+      end)
+    )
+
+    directory_sync(Path.dirname(claim.directory))
+    owner = Path.join(claim.directory, "owner")
+    execute({:publish, owner, owner <> ".tmp", claim.owner, 0o600, :absent})
+    directory_sync(Path.dirname(claim.directory))
+
+    acquired =
+      Map.merge(claim, %{
+        directory_identity: directory_identity(manifest_stat(claim.directory)),
+        owner_identity: manifest_stat(owner)
+      })
+
+    primitive({:restore_claim_acquired, acquired}, fn -> :ok end)
+    {:ok, acquired}
+  end
+
+  defp execute({:release_restore_claims, claims}) do
+    Enum.each(claims, fn claim ->
+      owner = Path.join(claim.directory, "owner")
+      ancestors = manifest_ancestors(Path.dirname(claim.directory))
+
+      if directory_identity(manifest_stat(claim.directory)) != claim.directory_identity,
+        do: throw({:io_error, :restore_claim_changed})
+
+      names =
+        require_value(primitive(:list, fn -> :prim_file.list_dir_all(claim.directory) end))
+        |> Enum.map(&manifest_name/1)
+
+      if names != ["owner"],
+        do: throw({:io_error, :restore_claim_changed})
+
+      require_same_identity(claim.owner_identity, manifest_stat(owner))
+      descriptor = open(owner, [:raw, :binary, :read])
+
+      require_same_identity(
+        claim.owner_identity,
+        require_value(
+          primitive(:descriptor_stat, fn -> :prim_file.read_handle_info(descriptor) end)
+        )
+      )
+
+      bytes = read_chunks(descriptor, 2048, [])
+
+      require_same_identity(
+        claim.owner_identity,
+        require_value(
+          primitive(:descriptor_stat, fn -> :prim_file.read_handle_info(descriptor) end)
+        )
+      )
+
+      close(descriptor)
+      require_same_identity(claim.owner_identity, manifest_stat(owner))
+      if bytes != claim.owner, do: throw({:io_error, :restore_claim_changed})
+
+      Enum.each(ancestors, fn {path, identity} ->
+        if directory_identity(manifest_stat(path)) != identity,
+          do: throw({:io_error, :restore_claim_changed})
+      end)
+
+      require_ok(primitive(:claim_delete, fn -> :prim_file.delete(owner) end))
+      directory_sync(claim.directory)
+
+      require_ok(
+        primitive(:claim_directory_delete, fn -> :prim_file.del_dir(claim.directory) end)
+      )
+
+      directory_sync(Path.dirname(claim.directory))
+      primitive({:restore_claim_released, claim.directory}, fn -> :ok end)
+    end)
+
+    {:ok, :released}
+  end
+
+  defp execute({:audit_receipt, root, relative, manifest}) do
+    {:ok, entries} = RestoreCodec.manifest(manifest, @max_uint64)
+
+    audit_captured_record(
+      root,
+      relative,
+      Map.new(entries, &{&1["path"], &1}),
+      65_536,
+      :receipt_digest,
+      :receipt_decode,
+      &Loopex.Executor.Local.decode_receipt_bytes/1
+    )
+  end
+
+  defp execute({:copy_file, source, destination, entry}) do
+    source_ancestors = manifest_ancestors(Path.dirname(source))
+    destination_ancestors = manifest_ancestors(Path.dirname(destination))
+    before = manifest_stat(source)
+    require_audit_file(before, entry)
+    input = open(source, [:raw, :binary, :read])
+
+    opened =
+      require_value(primitive(:descriptor_stat, fn -> :prim_file.read_handle_info(input) end))
+
+    require_same_identity(before, opened)
+    output = open(destination, [:raw, :binary, :write, :exclusive])
+
+    require_ok(
+      primitive(:mode, fn ->
+        :prim_file.write_file_info(destination, file_info(mode: entry["mode"]))
+      end)
+    )
+
+    digest = copy_chunks(input, output, entry["size"], :crypto.hash_init(:sha256))
+    require_ok(primitive(:file_sync, fn -> :prim_file.sync(output) end))
+    close(output)
+
+    require_same_identity(
+      before,
+      require_value(primitive(:descriptor_stat, fn -> :prim_file.read_handle_info(input) end))
+    )
+
+    require_same_identity(before, manifest_stat(source))
+    close(input)
+    directory_sync(Path.dirname(destination))
+    if digest != entry["sha256"], do: throw({:io_error, :source_changed})
+
+    Enum.each(source_ancestors ++ destination_ancestors, fn {path, identity} ->
+      if directory_identity(manifest_stat(path)) != identity,
+        do: throw({:io_error, :source_changed})
+    end)
+
+    {:ok, :copied}
   end
 
   defp execute({:read, path, cap}), do: {:ok, read(path, cap)}
@@ -547,6 +1350,142 @@ defmodule LoopexComposition.Restore.IO do
     end
   end
 
+  defp execute({:audit_ledger_index, root, declaration, manifest}) do
+    # Concept: enumerate the complete generation/marker/open metadata plane.
+    # Technical depth: all IO and reductions remain in this one owned worker.
+    # Receipts, recovered jobs and restore history are separate obligations.
+    with {:ok, _} <-
+           primitive(:ledger_declaration, fn ->
+             RestoreCodec.encode(:ledger_descriptor, declaration)
+           end),
+         {:ok, entries} <-
+           primitive(:ledger_manifest, fn -> RestoreCodec.manifest(manifest, @max_uint64) end) do
+      audit_ledger_index(root, declaration, Map.new(entries, &{&1["path"], &1}))
+    else
+      _ -> {:error, :history_invalid}
+    end
+  end
+
+  defp execute({:audit_restore_lineage, root, plan, manifest}) do
+    with {:ok, _} <- primitive(:restore_history_plan, fn -> RestoreCodec.encode(:plan, plan) end),
+         {:ok, entries} <-
+           primitive(:restore_history_manifest, fn ->
+             RestoreCodec.manifest(manifest, @max_uint64)
+           end) do
+      index = Map.new(entries, &{&1["path"], &1})
+      generations = MapSet.new(plan["ledgers"], &Path.join(&1["relative_root"], "generation"))
+
+      selected =
+        Enum.filter(entries, fn entry ->
+          entry["kind"] == "regular" and
+            (MapSet.member?(generations, entry["path"]) or
+               Enum.any?(
+                 Path.split(entry["path"]),
+                 &(&1 in [".loopex-restore", "restore-lineage"])
+               ))
+        end)
+
+      # Concept: current record caps apply before any lineage file is opened.
+      # Technical depth: every captured byte remains in the original manifest's
+      # caller-checked total. No nested guardian, allowance or old-root IO exists.
+      ceilings =
+        Map.new(selected, fn entry ->
+          ceiling =
+            cond do
+              MapSet.member?(generations, entry["path"]) -> @max_ledger_generation
+              Path.basename(entry["path"]) == "baseline" -> @max_manifest
+              true -> @max_ledger_record
+            end
+
+          if entry["size"] > ceiling, do: throw({:io_error, :inventory_mismatch})
+          {entry["path"], ceiling}
+        end)
+
+      captured =
+        Enum.reduce(selected, %{}, fn entry, acc ->
+          {:ok, bytes} =
+            audit_captured_record(
+              root,
+              entry["path"],
+              index,
+              ceilings[entry["path"]],
+              :restore_history_digest,
+              :restore_history_bytes,
+              fn bytes -> {:ok, bytes} end
+            )
+
+          Map.put(acc, entry["path"], bytes)
+        end)
+
+      primitive(:restore_history_decode, fn ->
+        RestoreGuard.validate_captured_lineage(plan, entries, captured)
+      end)
+    else
+      _ -> {:error, :history_invalid}
+    end
+  end
+
+  defp execute({:audit_artifact_use, root, reference, manifest}) do
+    # Concept: one retained use is private evidence bound to its current reference.
+    # Technical depth: the existing Core facade validates the reference before path
+    # selection and closes the captured use after descriptor close. Its synchronous
+    # telemetry runs inside the same owned semantic operation and original cutoff.
+    # Object bytes, other uses and complete artifact history remain separate proofs.
+    with true <-
+           primitive(:artifact_reference, fn -> ArtifactStore.valid_reference?(reference) end),
+         {:ok, entries} <-
+           primitive(:artifact_manifest, fn -> RestoreCodec.manifest(manifest, @max_uint64) end) do
+      digest = reference.use_digest
+      relative = Path.join(["artifacts", "uses", binary_part(digest, 0, 2), digest])
+      index = Map.new(entries, &{&1["path"], &1})
+
+      audit_captured_record(
+        root,
+        relative,
+        index,
+        ArtifactStore.max_use_bytes(),
+        :artifact_digest,
+        :artifact_describe,
+        fn bytes ->
+          ArtifactStore.describe(
+            %{module: Artifacts, handle: {:captured_artifact_use, bytes, digest}},
+            reference
+          )
+        end
+      )
+    else
+      _ -> {:error, :history_invalid}
+    end
+  end
+
+  defp execute({:audit_artifact_object, root, reference, manifest, max_total}) do
+    # Concept: one selected object's bytes bind its existing reference triple.
+    # Technical depth: Local fetch selects by locator and verifies requested
+    # digest/size; its reader does not equate locator with digest or apply put's
+    # 64 MiB cap. The original total-file-byte limit is checked before open.
+    with true <-
+           primitive(:artifact_reference, fn -> ArtifactStore.valid_reference?(reference) end),
+         true <-
+           primitive(:artifact_object_locator, fn ->
+             byte_size(reference.locator) == 64 and
+               Regex.match?(~r/\A[0-9a-f]{64}\z/, reference.locator)
+           end),
+         {:ok, entries} <-
+           primitive(:artifact_manifest, fn -> RestoreCodec.manifest(manifest, max_total) end) do
+      relative = Path.join(["artifacts", binary_part(reference.locator, 0, 2), reference.locator])
+      index = Map.new(entries, &{&1["path"], &1})
+      entry = Map.get(index, relative)
+
+      if not match?(%{"kind" => "regular"}, entry) or entry["size"] != reference.size or
+           entry["sha256"] != reference.digest,
+         do: throw({:io_error, :inventory_mismatch})
+
+      audit_artifact_object(root, relative, index, entry, reference)
+    else
+      _ -> {:error, :history_invalid}
+    end
+  end
+
   defp execute({:publish, path, temp, bytes, mode, expected}) do
     current =
       case primitive(:stat, fn -> :prim_file.read_link_info(path) end) do
@@ -584,6 +1523,364 @@ defmodule LoopexComposition.Restore.IO do
     {:ok, RestoreCodec.digest_bytes(bytes)}
   end
 
+  # Concept: original-tx publication reuses only the exact named retained payload.
+  # Technical depth: callers supply already compiled current bytes under proved
+  # host exclusion/claim custody. This private, unwired operation grants neither;
+  # its role selects existing caps, and its only temporary is the final's sibling.
+  defp execute({:restore_publish, role, path, bytes, mode, expected} = operation) do
+    if not valid_operation?(operation), do: throw({:io_error, :invalid_io_request})
+
+    retained_publish(path, bytes, mode, expected, retained_publication_cap(role))
+  end
+
+  # Concept: resolution and lookup use the same owned administrative capture.
+  # Technical depth: classification adds only a pure plan/transaction reduction;
+  # it neither starts another guardian nor renews this worker's cutoffs.
+  defp lookup_operation(root, tx_id, plan, retain_claim \\ false) do
+    try do
+      ancestors = manifest_ancestors(root)
+      {:ok, placement} = execute({:placement, root})
+
+      state = %{
+        index: %{"." => manifest_directory(".", 0)},
+        files: %{},
+        placements: %{root => placement},
+        identities: %{},
+        directories: %{},
+        absent: [],
+        count: 1
+      }
+
+      admin = Path.join(root, ".loopex-restore")
+      state = lookup_optional_tree(root, admin, state)
+
+      intents =
+        state.files
+        |> Enum.filter(fn {path, _} ->
+          case Path.split(path) do
+            [".loopex-restore", "lineage", _ordinal, name] -> name in ["intent", "intent.tmp"]
+            _ -> false
+          end
+        end)
+
+      ledgers =
+        Enum.flat_map(intents, fn {_path, bytes} ->
+          case primitive(:lookup_intent_decode, fn -> RestoreCodec.decode(:intent, bytes) end) do
+            {:ok, intent} -> Enum.map(intent["generations"], & &1["relative_root"])
+            _ -> throw({:lookup_error, "restore_history_invalid"})
+          end
+        end)
+        |> Enum.uniq()
+
+      state =
+        Enum.reduce(ledgers, state, fn relative, current ->
+          path = Path.join(root, relative)
+          manifest_ancestors(path)
+          original = manifest_stat(path)
+
+          observed = %{
+            "expanded_root" => path,
+            "major_device" => file_info(original, :major_device),
+            "inode" => file_info(original, :inode)
+          }
+
+          info =
+            require_value(
+              primitive(:lookup_ledger_placement_stat, fn -> :prim_file.read_link_info(path) end)
+            )
+
+          if file_info(original, :type) != :directory or
+               manifest_identity(info) != manifest_identity(original),
+             do: throw({:lookup_error, "physical_destination_changed"})
+
+          current = %{
+            current
+            | placements: Map.put(current.placements, path, observed),
+              identities: Map.put(current.identities, path, original),
+              index:
+                Map.put(
+                  current.index,
+                  relative,
+                  manifest_directory(relative, Bitwise.band(file_info(info, :mode), 0o7777))
+                )
+          }
+
+          current = lookup_optional_tree(root, Path.join(path, "restore-lineage"), current)
+          lookup_capture(root, Path.join(path, "generation"), 2048, current, false)
+        end)
+
+      {:ok, claim_digest} = RestoreCodec.claim_digest(root)
+      claim_path = Path.join(Path.dirname(root), ".loopex-restore-claim-" <> claim_digest)
+      {claim, state} = lookup_claim(root, claim_path, state)
+      lookup_recheck(root, ancestors, state)
+
+      if not is_nil(plan) and not is_nil(claim) do
+        {guardian, reference, _monitor} = Process.get(:restore_io_owner)
+        send(guardian, {:retained_restore_claim, self(), reference})
+      end
+
+      result =
+        if is_nil(plan) do
+          primitive(:restore_lookup_decode, fn ->
+            Loopex.Executor.Local.RestoreGuard.lookup_captured(
+              root,
+              tx_id,
+              state.index,
+              state.files,
+              state.placements,
+              claim
+            )
+          end)
+        else
+          case plan do
+            {:pending, original, invocation} ->
+              primitive(:restore_pending_decode, fn ->
+                Loopex.Executor.Local.RestoreGuard.pending_captured(
+                  root,
+                  original,
+                  invocation,
+                  state.index,
+                  state.files,
+                  state.placements,
+                  claim
+                )
+              end)
+
+            _ ->
+              primitive(:restore_classification_decode, fn ->
+                Loopex.Executor.Local.RestoreGuard.classify_captured(
+                  root,
+                  plan,
+                  state.index,
+                  state.files,
+                  state.placements,
+                  claim
+                )
+              end)
+          end
+        end
+
+      if match?({:pending, _, _}, plan), do: lookup_recheck(root, ancestors, state)
+
+      if retain_claim and match?({:pending, _}, result) do
+        {:pending, retained} = result
+        owner_path = Path.join(claim_path, "owner")
+
+        custody = %{
+          directory: claim_path,
+          owner: Map.fetch!(state.files, Path.relative_to(owner_path, root)),
+          directory_identity: directory_identity(Map.fetch!(state.identities, claim_path)),
+          owner_identity: Map.fetch!(state.identities, owner_path)
+        }
+
+        claim_ancestors = retained_publication_ancestors(claim_path)
+        lookup_recheck(root, ancestors, state)
+        retained_claim_namespace!(custody)
+
+        {:ok,
+         {:pending,
+          %{
+            root: root,
+            retained: retained,
+            claim: custody,
+            state: state,
+            ancestors: ancestors,
+            claim_ancestors: claim_ancestors
+          }}}
+      else
+        {:ok, result}
+      end
+    catch
+      {:lookup_error, code} -> {:ok, lookup_refusal(tx_id, code)}
+      {:io_error, :inventory_limit} -> {:ok, lookup_refusal(tx_id, "inventory_limit_exceeded")}
+      {:io_error, _} -> {:ok, lookup_refusal(tx_id, "administrative_path_unavailable")}
+    end
+  end
+
+  defp lookup_refusal(tx_id, code),
+    do:
+      {:error,
+       %{
+         "kind" => "loopex_current_restore_lookup_refusal_v1",
+         "tx_id" => tx_id,
+         "code" => code,
+         "cleanup" => "joined"
+       }}
+
+  # Concept: lookup captures only administrative history and selected generations.
+  # Technical depth: caps precede open, all descriptors close before reduction,
+  # and the original worker rechecks file, directory and ancestor identities.
+  defp lookup_optional_tree(root, path, state) do
+    case primitive(:lookup_stat, fn -> :prim_file.read_link_info(path) end) do
+      {:error, :enoent} -> %{state | absent: [path | state.absent]}
+      {:ok, info} -> lookup_tree(root, path, info, state)
+      _ -> throw({:lookup_error, "administrative_path_unavailable"})
+    end
+  end
+
+  defp lookup_tree(root, path, info, state) do
+    relative = Path.relative_to(path, root)
+
+    if byte_size(relative) > 8192 or state.count >= @max_entries,
+      do: throw({:lookup_error, "inventory_limit_exceeded"})
+
+    mode = Bitwise.band(file_info(info, :mode), 0o7777)
+
+    case file_info(info, :type) do
+      :directory when mode == 0o700 ->
+        names = require_value(primitive(:lookup_list, fn -> :prim_file.list_dir_all(path) end))
+        if length(names) > 64, do: throw({:lookup_error, "inventory_limit_exceeded"})
+        names = Enum.map(names, &manifest_name/1) |> Enum.sort()
+
+        state = %{
+          state
+          | count: state.count + 1,
+            index: Map.put(state.index, relative, manifest_directory(relative, mode)),
+            identities: Map.put(state.identities, path, info),
+            directories: Map.put(state.directories, path, names)
+        }
+
+        Enum.reduce(names, state, fn name, current ->
+          child = Path.join(path, name)
+          lookup_tree(root, child, manifest_stat(child), current)
+        end)
+
+      :regular ->
+        cap =
+          if Path.basename(path) in ["baseline", "baseline.tmp"],
+            do: @max_manifest,
+            else: @max_ledger_record
+
+        lookup_capture(root, path, cap, state, true)
+
+      _ ->
+        throw({:lookup_error, "restore_history_invalid"})
+    end
+  end
+
+  defp lookup_capture(root, path, cap, state, administrative) do
+    before = manifest_stat(path)
+    if state.count >= @max_entries, do: throw({:lookup_error, "inventory_limit_exceeded"})
+
+    if file_info(before, :type) != :regular or file_info(before, :links) != 1 or
+         (administrative and Bitwise.band(file_info(before, :mode), 0o7777) != 0o600),
+       do: throw({:lookup_error, "restore_history_invalid"})
+
+    if file_info(before, :size) > cap,
+      do: throw({:lookup_error, "inventory_limit_exceeded"})
+
+    ancestors = manifest_ancestors(Path.dirname(path))
+    descriptor = open(path, [:raw, :binary, :read])
+
+    opened =
+      require_value(
+        primitive(:lookup_descriptor_stat, fn -> :prim_file.read_handle_info(descriptor) end)
+      )
+
+    if manifest_identity(opened) != manifest_identity(before),
+      do: throw({:lookup_error, "restore_history_invalid"})
+
+    bytes = read_chunks(descriptor, cap, [])
+    close(descriptor)
+
+    if byte_size(bytes) != file_info(before, :size) or
+         manifest_identity(manifest_stat(path)) != manifest_identity(before),
+       do: throw({:lookup_error, "restore_history_invalid"})
+
+    Enum.each(ancestors, fn {ancestor, identity} ->
+      if directory_identity(manifest_stat(ancestor)) != identity,
+        do: throw({:lookup_error, "physical_destination_changed"})
+    end)
+
+    relative = Path.relative_to(path, root)
+
+    entry = %{
+      "path" => relative,
+      "kind" => "regular",
+      "mode" => Bitwise.band(file_info(before, :mode), 0o7777),
+      "size" => byte_size(bytes),
+      "sha256" => RestoreCodec.digest_bytes(bytes)
+    }
+
+    %{
+      state
+      | count: state.count + 1,
+        index: Map.put(state.index, relative, entry),
+        files: Map.put(state.files, relative, bytes),
+        identities: Map.put(state.identities, path, before)
+    }
+  end
+
+  defp lookup_claim(root, path, state) do
+    case primitive(:lookup_claim_stat, fn -> :prim_file.read_link_info(path) end) do
+      {:error, :enoent} ->
+        {nil, %{state | absent: [path | state.absent]}}
+
+      {:ok, info} ->
+        if file_info(info, :type) != :directory or
+             Bitwise.band(file_info(info, :mode), 0o7777) != 0o700,
+           do: throw({:lookup_error, "restore_conflict"})
+
+        names =
+          require_value(primitive(:lookup_claim_names, fn -> :prim_file.list_dir_all(path) end))
+          |> Enum.map(&manifest_name/1)
+          |> Enum.sort()
+
+        if file_info(info, :type) != :directory or
+             Bitwise.band(file_info(info, :mode), 0o7777) != 0o700 or names != ["owner"],
+           do: throw({:lookup_error, "restore_conflict"})
+
+        state = %{
+          state
+          | identities: Map.put(state.identities, path, info),
+            directories: Map.put(state.directories, path, names)
+        }
+
+        state = lookup_capture(root, Path.join(path, "owner"), 2048, state, true)
+        bytes = Map.fetch!(state.files, Path.relative_to(Path.join(path, "owner"), root))
+
+        case primitive(:lookup_claim_decode, fn -> RestoreCodec.decode(:claim, bytes) end) do
+          {:ok, claim} ->
+            if claim["state_root"] == root,
+              do: {claim, state},
+              else: throw({:lookup_error, "restore_conflict"})
+
+          _ ->
+            throw({:lookup_error, "restore_conflict"})
+        end
+
+      _ ->
+        throw({:lookup_error, "restore_conflict"})
+    end
+  end
+
+  defp lookup_recheck(_root, ancestors, state) do
+    Enum.each(ancestors, fn {path, identity} ->
+      if directory_identity(manifest_stat(path)) != identity,
+        do: throw({:lookup_error, "physical_destination_changed"})
+    end)
+
+    Enum.each(state.identities, fn {path, info} ->
+      if manifest_identity(manifest_stat(path)) != manifest_identity(info),
+        do: throw({:lookup_error, "physical_destination_changed"})
+    end)
+
+    Enum.each(state.directories, fn {path, expected} ->
+      actual =
+        require_value(primitive(:lookup_recheck_names, fn -> :prim_file.list_dir_all(path) end))
+        |> Enum.map(&manifest_name/1)
+        |> Enum.sort()
+
+      if actual != expected, do: throw({:lookup_error, "restore_history_invalid"})
+    end)
+
+    Enum.each(state.absent, fn path ->
+      if primitive(:lookup_recheck_absent, fn -> :prim_file.read_link_info(path) end) !=
+           {:error, :enoent},
+         do: throw({:lookup_error, "restore_history_invalid"})
+    end)
+  end
+
   defp resource_role(:manifest), do: {"manifests", @max_resource_manifest}
   defp resource_role(:provenance), do: {"provenance", @max_resource_provenance}
 
@@ -618,7 +1915,197 @@ defmodule LoopexComposition.Restore.IO do
       record["job_id"] == job_id and
         (role != :open or record["executor_identity"] == declaration["executor_identity"])
 
-  # Concept: Resource and ledger audits share one owned physical capture.
+  defp audit_ledger_index(root, declaration, index) do
+    relative = declaration["relative_root"]
+    ancestors = manifest_ancestors(root)
+    claim = Path.join(relative, "claim")
+    claim_directories = if Map.has_key?(index, claim), do: [claim], else: []
+
+    selected_directories =
+      [relative, Path.join(relative, "markers"), Path.join(relative, "open")] ++ claim_directories
+
+    directories = Enum.flat_map(selected_directories, &audit_directories(root, &1, index))
+
+    namespaces =
+      Map.new(
+        selected_directories,
+        fn directory -> {directory, audit_ledger_names(root, directory, index)} end
+      )
+
+    if claim_directories != [] and namespaces[claim] != [],
+      do: throw({:io_error, :inventory_mismatch})
+
+    marker_names = namespaces[Path.join(relative, "markers")]
+    open_names = namespaces[Path.join(relative, "open")]
+
+    if not Enum.all?(marker_names ++ open_names, &Regex.match?(~r/\A[0-9a-f]{64}\z/, &1)),
+      do: throw({:io_error, :unsupported_path})
+
+    require_ok(
+      primitive(:ledger_capacity, fn -> Ledger.open_index_capacity(length(open_names)) end)
+    )
+
+    members =
+      [
+        {Path.join(relative, "generation"), @max_ledger_generation}
+        | Enum.map(marker_names, &{Path.join([relative, "markers", &1]), @max_ledger_record}) ++
+            Enum.map(open_names, &{Path.join([relative, "open", &1]), @max_ledger_record})
+      ]
+
+    observed =
+      Map.new(members, fn {path, ceiling} ->
+        entry = index[path]
+
+        if not match?(%{"kind" => "regular"}, entry) or entry["size"] > ceiling,
+          do: throw({:io_error, :inventory_mismatch})
+
+        info = manifest_stat(Path.join(root, path))
+        require_audit_file(info, entry)
+        {path, manifest_identity(info)}
+      end)
+
+    with {:ok, generation} <-
+           audit_captured_record(
+             root,
+             Path.join(relative, "generation"),
+             index,
+             @max_ledger_generation,
+             :ledger_digest,
+             :ledger_decode,
+             fn bytes ->
+               with {:ok, record} <- Ledger.decode_bytes(bytes, "local_executor_generation_v1"),
+                    true <- ledger_relations?(record, bytes, declaration, :generation, nil) do
+                 {:ok, record}
+               else
+                 _ -> {:error, :history_invalid}
+               end
+             end
+           ),
+         {:ok, markers} <-
+           audit_ledger_plane(root, relative, "markers", marker_names, index, declaration),
+         {:ok, open_records} <-
+           audit_ledger_plane(root, relative, "open", open_names, index, declaration),
+         {:ok, snapshot} <-
+           primitive(:ledger_snapshot, fn ->
+             Ledger.validate_captured_open_index(
+               declaration["source_generation_sha256"],
+               generation["root_binding"],
+               open_records
+             )
+           end),
+         true <- ledger_index_pairs?(markers, open_records) do
+      Enum.each(namespaces, fn {directory, names} ->
+        if audit_ledger_names(root, directory, index) != names,
+          do: throw({:io_error, :source_changed})
+      end)
+
+      Enum.each(observed, fn {path, identity} ->
+        if manifest_identity(manifest_stat(Path.join(root, path))) != identity,
+          do: throw({:io_error, :source_changed})
+      end)
+
+      Enum.each(directories, fn {path, identity} ->
+        if manifest_identity(manifest_stat(path)) != identity,
+          do: throw({:io_error, :source_changed})
+      end)
+
+      Enum.each(ancestors, fn {path, identity} ->
+        if directory_identity(manifest_stat(path)) != identity,
+          do: throw({:io_error, :source_changed})
+      end)
+
+      # Presence is evidence only. No owner is inferred, joined or reclaimed.
+      {:ok,
+       %{
+         generation: generation,
+         markers: markers,
+         open: snapshot,
+         claim_present: Map.has_key?(index, Path.join(relative, "claim"))
+       }}
+    else
+      _ -> {:error, :history_invalid}
+    end
+  end
+
+  defp audit_ledger_names(root, relative, index) do
+    raw =
+      require_value(
+        primitive(:ledger_names, fn ->
+          :prim_file.list_dir_all(Path.join(root, relative))
+        end)
+      )
+
+    if length(raw) > @max_entries, do: throw({:io_error, :inventory_limit})
+    names = Enum.sort(Enum.map(raw, &manifest_name/1))
+
+    expected =
+      index
+      |> Map.keys()
+      |> Enum.filter(&(Path.dirname(&1) == relative))
+      |> Enum.map(&Path.basename/1)
+      |> Enum.sort()
+
+    if names != expected, do: throw({:io_error, :inventory_mismatch})
+    names
+  end
+
+  defp audit_ledger_plane(root, relative, plane, names, index, declaration) do
+    Enum.reduce_while(names, {:ok, []}, fn name, {:ok, records} ->
+      result =
+        audit_captured_record(
+          root,
+          Path.join([relative, plane, name]),
+          index,
+          @max_ledger_record,
+          :ledger_digest,
+          :ledger_decode,
+          fn bytes ->
+            decoded =
+              if plane == "markers",
+                do: Ledger.decode_marker_bytes(bytes),
+                else: Ledger.decode_bytes(bytes, "local_open_effect_v1")
+
+            with {:ok, record} <- decoded,
+                 true <- RestoreCodec.digest_bytes(record["job_id"]) == name,
+                 true <-
+                   plane != "open" or
+                     record["executor_identity"] == declaration["executor_identity"] do
+              {:ok, record}
+            else
+              _ -> {:error, :history_invalid}
+            end
+          end
+        )
+
+      case result do
+        {:ok, record} -> {:cont, {:ok, [{name, record} | records]}}
+        _ -> {:halt, {:error, :history_invalid}}
+      end
+    end)
+    |> case do
+      {:ok, records} -> {:ok, Enum.reverse(records)}
+      error -> error
+    end
+  end
+
+  defp ledger_index_pairs?(markers, open) do
+    markers = Map.new(markers)
+
+    Enum.all?(open, fn {name, record} ->
+      case markers[name] do
+        %{ledger_kind: "local_effect_admission_v1"} = marker ->
+          Enum.all?(
+            ~w(job_id canonical_request_digest cleanup_grace_ms),
+            &(marker[&1] == record[&1])
+          )
+
+        _ ->
+          true
+      end
+    end)
+  end
+
+  # Concept: Resource, ledger and artifact-use audits share one owned physical capture.
   # Technical depth: exact inventory membership and role size precede open;
   # decoding follows explicit close, then file and ancestor identities are checked.
   defp audit_captured_record(root, relative, index, ceiling, digest_kind, decode_kind, decode) do
@@ -682,6 +2169,56 @@ defmodule LoopexComposition.Restore.IO do
     result
   end
 
+  # Concept: object verification streams bytes without materializing a payload.
+  # Technical depth: the existing manifest hash owns each bounded raw read and
+  # exact EOF witness. Shared identity guards surround the same explicit close;
+  # only the private reference triple is returned after physical revalidation.
+  defp audit_artifact_object(root, relative, index, entry, reference) do
+    ancestors = manifest_ancestors(root)
+    directories = audit_directories(root, Path.dirname(relative), index)
+    path = Path.join(root, relative)
+    before = manifest_stat(path)
+    require_audit_file(before, entry)
+    descriptor = open(path, [:raw, :binary, :read])
+
+    opened =
+      require_value(
+        primitive(:descriptor_stat, fn -> :prim_file.read_handle_info(descriptor) end)
+      )
+
+    require_same_identity(before, opened)
+    digest = manifest_hash(descriptor, entry["size"], :crypto.hash_init(:sha256))
+
+    after_read =
+      require_value(
+        primitive(:descriptor_stat, fn -> :prim_file.read_handle_info(descriptor) end)
+      )
+
+    require_same_identity(before, after_read)
+    require_same_identity(before, manifest_stat(path))
+    close(descriptor)
+
+    matched =
+      primitive(:artifact_object_digest, fn ->
+        digest == reference.digest and digest == entry["sha256"]
+      end)
+
+    if not matched, do: throw({:io_error, :inventory_mismatch})
+    require_same_identity(before, manifest_stat(path))
+
+    Enum.each(directories, fn {directory, observed} ->
+      if manifest_identity(manifest_stat(directory)) != observed,
+        do: throw({:io_error, :source_changed})
+    end)
+
+    Enum.each(ancestors, fn {ancestor, observed} ->
+      if directory_identity(manifest_stat(ancestor)) != observed,
+        do: throw({:io_error, :source_changed})
+    end)
+
+    {:ok, Map.take(reference, [:digest, :size, :locator])}
+  end
+
   defp audit_store_bytes(bytes) do
     with {:ok, frames, :complete} <- primitive(:store_decode, fn -> Log.decode_bytes(bytes) end),
          {:ok, store} <- primitive(:store_replay, fn -> State.replay(frames) end) do
@@ -721,6 +2258,26 @@ defmodule LoopexComposition.Restore.IO do
       else: [own | audit_directories(root, Path.dirname(relative), index)]
   end
 
+  defp copy_chunks(input, output, remaining, context) do
+    case primitive(:copy_read, fn -> :prim_file.read(input, min(@chunk, remaining + 1)) end) do
+      :eof when remaining == 0 ->
+        :crypto.hash_final(context) |> Base.encode16(case: :lower)
+
+      {:ok, bytes} when byte_size(bytes) > 0 and byte_size(bytes) <= remaining ->
+        write(output, bytes)
+
+        copy_chunks(
+          input,
+          output,
+          remaining - byte_size(bytes),
+          :crypto.hash_update(context, bytes)
+        )
+
+      _ ->
+        throw({:io_error, :source_changed})
+    end
+  end
+
   defp require_audit_file(info, entry) do
     if file_info(info, :type) != :regular or file_info(info, :links) != 1 or
          file_info(info, :size) != entry["size"] or
@@ -739,6 +2296,13 @@ defmodule LoopexComposition.Restore.IO do
     parent = Path.dirname(path)
     own = {path, directory_identity(info)}
     if parent == path, do: [own], else: [own | manifest_ancestors(parent)]
+  end
+
+  defp require_source_absent(root) do
+    case primitive(:source_absence, fn -> :prim_file.read_link_info(root) end) do
+      {:error, :enoent} -> :ok
+      _ -> throw({:io_error, :source_not_absent})
+    end
   end
 
   defp manifest_stat(path),
@@ -908,6 +2472,247 @@ defmodule LoopexComposition.Restore.IO do
     end
   end
 
+  # Concept: claim nonce publication shares the checked native publication path.
+  # Technical depth: its private cap is 2048 bytes, while existing record roles retain
+  # their original ceilings. This helper grants no claim or mutation authority.
+  defp retained_publish(path, bytes, mode, expected, cap, custody \\ nil) do
+    temp = path <> ".tmp"
+
+    ancestors =
+      if custody, do: custody.ancestors, else: retained_publication_ancestors(Path.dirname(path))
+
+    current = retained_publication_file(path, cap, mode)
+    temporary = retained_publication_file(temp, cap, mode)
+
+    if custody do
+      if current == :absent or temporary != :absent,
+        do: throw({:io_error, :changed_destination})
+
+      require_same_identity(custody.original, current.info)
+    end
+
+    if current != :absent and current.bytes != bytes and current.bytes != expected,
+      do: throw({:io_error, :changed_destination})
+
+    if current == :absent and expected != :absent,
+      do: throw({:io_error, :changed_destination})
+
+    if temporary != :absent and temporary.bytes != bytes,
+      do: throw({:io_error, :changed_destination})
+
+    retained_publication_ancestors!(ancestors)
+
+    cond do
+      current != :absent and current.bytes == bytes ->
+        if temporary == :absent,
+          do: retained_publication_sync(path, current),
+          else: retained_publication_delete(path, current, temp, temporary, ancestors)
+
+      true ->
+        temporary =
+          if temporary == :absent,
+            do: retained_publication_create(temp, bytes, mode, cap),
+            else: temporary
+
+        retained_publication_namespace!(ancestors, [{path, current}, {temp, temporary}])
+        retained_publication_sync(temp, temporary)
+        retained_publication_namespace!(ancestors, [{path, current}, {temp, temporary}])
+        require_ok(primitive(:rename, fn -> :prim_file.rename(temp, path) end))
+    end
+
+    retained_publication_directory_sync(Path.dirname(path), ancestors)
+    final = retained_publication_file(path, cap, mode)
+    if final == :absent or final.bytes != bytes, do: throw({:io_error, :readback_mismatch})
+    retained_publication_ancestors!(ancestors)
+    {:ok, RestoreCodec.digest_bytes(bytes)}
+  end
+
+  defp retained_claim_namespace!(claim) do
+    info = manifest_stat(claim.directory)
+
+    if directory_identity(info) != claim.directory_identity or
+         file_info(info, :type) != :directory or
+         Bitwise.band(file_info(info, :mode), 0o7777) != 0o700,
+       do: throw({:io_error, :source_changed})
+
+    names =
+      require_value(
+        primitive(:lookup_claim_names, fn -> :prim_file.list_dir_all(claim.directory) end)
+      )
+      |> Enum.map(&manifest_name/1)
+      |> Enum.sort()
+
+    if names != ["owner"], do: throw({:io_error, :changed_destination})
+  end
+
+  defp retained_publication_cap(:baseline), do: @max_manifest
+  defp retained_publication_cap(:record), do: @max_ledger_record
+  defp retained_publication_cap(:generation), do: @max_ledger_generation
+
+  # Concept: existing files are admitted without repairing modes or following links.
+  # Technical depth: the role cap is checked before raw open, followed by coupled
+  # descriptor/path identities around bounded bytes, explicit close and recheck.
+  defp retained_publication_file(path, cap, mode) do
+    case primitive(:retained_publication_stat, fn -> :prim_file.read_link_info(path) end) do
+      {:error, :enoent} ->
+        :absent
+
+      {:ok, info} ->
+        if file_info(info, :type) != :regular or file_info(info, :links) != 1 or
+             file_info(info, :size) > cap or Bitwise.band(file_info(info, :mode), 0o7777) != mode,
+           do: throw({:io_error, :invalid_retained_file})
+
+        descriptor = open(path, [:raw, :binary, :read])
+        retained_publication_descriptor!(descriptor, path, info)
+        bytes = read_chunks(descriptor, cap, [])
+        retained_publication_descriptor!(descriptor, path, info)
+        close(descriptor)
+        require_same_identity(info, manifest_stat(path))
+        %{bytes: bytes, info: info}
+
+      _ ->
+        throw({:io_error, :stat_failed})
+    end
+  end
+
+  defp retained_publication_descriptor!(descriptor, path, info) do
+    opened =
+      require_value(
+        primitive(:descriptor_stat, fn -> :prim_file.read_handle_info(descriptor) end)
+      )
+
+    require_same_identity(info, opened)
+    require_same_identity(info, manifest_stat(path))
+  end
+
+  defp retained_publication_create(temp, bytes, mode, cap) do
+    descriptor = open(temp, [:raw, :binary, :write, :exclusive])
+    created = manifest_stat(temp)
+
+    if file_info(created, :type) != :regular or file_info(created, :links) != 1 or
+         file_info(created, :size) != 0,
+       do: throw({:io_error, :invalid_retained_file})
+
+    retained_publication_descriptor!(descriptor, temp, created)
+
+    require_ok(
+      primitive(:mode, fn -> :prim_file.write_file_info(temp, file_info(mode: mode)) end)
+    )
+
+    configured = manifest_stat(temp)
+    require_audit_file(configured, %{"size" => 0, "mode" => mode})
+
+    if directory_identity(configured) != directory_identity(created),
+      do: throw({:io_error, :source_changed})
+
+    retained_publication_descriptor!(descriptor, temp, configured)
+    write(descriptor, bytes)
+    info = manifest_stat(temp)
+    require_audit_file(info, %{"size" => byte_size(bytes), "mode" => mode})
+    retained_publication_descriptor!(descriptor, temp, info)
+    require_ok(primitive(:file_sync, fn -> :prim_file.sync(descriptor) end))
+    retained_publication_descriptor!(descriptor, temp, info)
+    close(descriptor)
+    captured = retained_publication_file(temp, cap, mode)
+    if captured == :absent or captured.bytes != bytes, do: throw({:io_error, :readback_mismatch})
+    require_same_identity(info, captured.info)
+    captured
+  end
+
+  defp retained_publication_sync(path, captured) do
+    descriptor = open(path, [:raw, :binary, :read])
+    retained_publication_descriptor!(descriptor, path, captured.info)
+
+    if read_chunks(descriptor, byte_size(captured.bytes), []) != captured.bytes,
+      do: throw({:io_error, :changed_destination})
+
+    require_ok(primitive(:file_sync, fn -> :prim_file.sync(descriptor) end))
+    retained_publication_descriptor!(descriptor, path, captured.info)
+    close(descriptor)
+    require_same_identity(captured.info, manifest_stat(path))
+  end
+
+  # Concept: equal final bytes allow removal only of the exact equal owned sibling.
+  # Technical depth: each raw check/read/sync/close/delete has its own original
+  # permit/ack. Host exclusion holds through the final validation and mutation;
+  # this operation supplies no hostile-host atomic compare-and-swap guarantee.
+  defp retained_publication_delete(path, current, temp, temporary, ancestors) do
+    files = [{path, current}, {temp, temporary}]
+    retained_publication_namespace!(ancestors, files)
+    retained_publication_sync(path, current)
+    retained_publication_sync(temp, temporary)
+    retained_publication_namespace!(ancestors, files)
+    require_ok(primitive(:delete, fn -> :prim_file.delete(temp) end))
+
+    case primitive(:retained_publication_stat, fn -> :prim_file.read_link_info(temp) end) do
+      {:error, :enoent} -> :ok
+      _ -> throw({:io_error, :changed_destination})
+    end
+
+    require_same_identity(current.info, manifest_stat(path))
+  end
+
+  # Concept: mutations stay bound to captured names and unchanged ancestors.
+  # Technical depth: the first real metadata call supplies the private pause seam
+  # before final byte revalidation. Every synchronous call is separately owned.
+  defp retained_publication_namespace!(ancestors, files) do
+    Enum.each(ancestors, fn {path, identity} ->
+      info =
+        require_value(
+          primitive(:retained_publication_recheck, fn -> :prim_file.read_link_info(path) end)
+        )
+
+      if retained_publication_directory_identity(info) != identity,
+        do: throw({:io_error, :source_changed})
+    end)
+
+    Enum.each(files, fn {path, captured} ->
+      case {captured,
+            primitive(:retained_publication_recheck, fn -> :prim_file.read_link_info(path) end)} do
+        {:absent, {:error, :enoent}} -> :ok
+        {%{info: info}, {:ok, observed}} -> require_same_identity(info, observed)
+        _ -> throw({:io_error, :source_changed})
+      end
+    end)
+  end
+
+  defp retained_publication_ancestors(parent) do
+    Enum.map(manifest_ancestors(parent), fn {path, identity} ->
+      info = manifest_stat(path)
+      if directory_identity(info) != identity, do: throw({:io_error, :source_changed})
+      {path, retained_publication_directory_identity(info)}
+    end)
+  end
+
+  defp retained_publication_directory_identity(info),
+    do: {directory_identity(info), Bitwise.band(file_info(info, :mode), 0o7777)}
+
+  defp retained_publication_ancestors!(ancestors) do
+    Enum.each(ancestors, fn {path, identity} ->
+      if retained_publication_directory_identity(manifest_stat(path)) != identity,
+        do: throw({:io_error, :source_changed})
+    end)
+  end
+
+  defp retained_publication_directory_sync(parent, ancestors) do
+    retained_publication_ancestors!(ancestors)
+    descriptor = open(parent, [:raw, :read, :directory])
+
+    info =
+      require_value(
+        primitive(:descriptor_stat, fn -> :prim_file.read_handle_info(descriptor) end)
+      )
+
+    {^parent, identity} = Enum.find(ancestors, fn {path, _} -> path == parent end)
+
+    if retained_publication_directory_identity(info) != identity,
+      do: throw({:io_error, :source_changed})
+
+    require_ok(primitive(:directory_sync, fn -> :prim_file.sync(descriptor) end))
+    close(descriptor)
+    retained_publication_ancestors!(ancestors)
+  end
+
   defp read(path, cap) do
     info = require_value(primitive(:stat, fn -> :prim_file.read_link_info(path) end))
 
@@ -1033,6 +2838,8 @@ defmodule LoopexComposition.Restore.IO do
 
           observation =
             case {kind, result} do
+              {{:restore_claim_create, _}, :ok} -> :created
+              {{:restore_claim_create, _}, {:error, :eexist}} -> :foreign
               {{:open, _}, {:ok, _}} -> :opened
               {{:close, _}, :ok} -> :closed
               {_, {:error, _}} -> :error
@@ -1076,6 +2883,31 @@ defmodule LoopexComposition.Restore.IO do
   defp byte_size_or_zero(:absent), do: 0
   defp byte_size_or_zero(bytes), do: byte_size(bytes)
 
+  defp valid_operation?({:restore_lookup, root, tx_id}),
+    do: valid_path?(root) and is_binary(tx_id) and Regex.match?(~r/\A[0-9a-f]{64}\z/, tx_id)
+
+  defp valid_operation?({:restore_first, plan, invocation}),
+    do:
+      match?({:ok, _}, RestoreCodec.encode(:plan, plan)) and
+        match?({:ok, _}, RestoreCodec.encode(:invocation, invocation)) and
+        invocation["prior_admin_authority"] == "none"
+
+  defp valid_operation?({:restore_pending_intake, plan, invocation}),
+    do:
+      match?({:ok, _}, RestoreCodec.encode(:plan, plan)) and
+        match?({:ok, _}, RestoreCodec.encode(:invocation, invocation))
+
+  defp valid_operation?({:restore_retained_claim_handoff, plan, invocation}),
+    do:
+      match?({:ok, _}, RestoreCodec.encode(:plan, plan)) and
+        match?({:ok, _}, RestoreCodec.encode(:invocation, invocation)) and
+        invocation["prior_admin_authority"] in ["joined", "host_rebooted"]
+
+  defp valid_operation?({:audit_restore_lineage, root, plan, manifest}),
+    do:
+      valid_path?(root) and is_map(plan) and is_binary(manifest) and
+        byte_size(manifest) <= @max_manifest
+
   defp valid_operation?({:audit_store, root, declaration, manifest}),
     do:
       valid_path?(root) and is_map(declaration) and is_binary(manifest) and
@@ -1095,11 +2927,37 @@ defmodule LoopexComposition.Restore.IO do
               byte_size(job_id) in 1..8192)) and
         is_binary(manifest) and byte_size(manifest) <= @max_manifest
 
+  defp valid_operation?({:audit_ledger_index, root, declaration, manifest}),
+    do:
+      valid_path?(root) and is_map(declaration) and
+        is_binary(manifest) and byte_size(manifest) <= @max_manifest
+
+  defp valid_operation?({:audit_artifact_use, root, reference, manifest}),
+    do:
+      valid_path?(root) and is_map(reference) and is_binary(manifest) and
+        byte_size(manifest) <= @max_manifest
+
+  defp valid_operation?({:audit_artifact_object, root, reference, manifest, max_total}),
+    do:
+      valid_path?(root) and is_map(reference) and is_binary(manifest) and
+        byte_size(manifest) <= @max_manifest and is_integer(max_total) and
+        max_total in 0..@max_uint64
+
   defp valid_operation?({:manifest, root, max_total}),
     do: valid_path?(root) and is_integer(max_total) and max_total in 0..@max_uint64
 
   defp valid_operation?({:read, path, cap}),
     do: valid_path?(path) and is_integer(cap) and cap >= 0 and cap <= @max_read
+
+  defp valid_operation?({:restore_publish, role, path, bytes, mode, expected}),
+    do:
+      role in [:baseline, :record, :generation] and valid_path?(path) and
+        valid_path?(path <> ".tmp") and is_binary(bytes) and
+        byte_size(bytes) <= retained_publication_cap(role) and
+        is_integer(mode) and mode in 0..4095 and
+        (role == :generation or mode == 0o600) and
+        (expected == :absent or
+           (is_binary(expected) and byte_size(expected) <= retained_publication_cap(role)))
 
   defp valid_operation?({:publish, path, temp, bytes, mode, expected}),
     do:

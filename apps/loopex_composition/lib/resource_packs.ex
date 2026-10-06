@@ -1579,9 +1579,15 @@ defmodule LoopexComposition.ResourcePacks do
   defp open_import_executor(config) do
     ledger = Path.join([config.state_root, "resource-packs", "receipts"])
     lease_id = "resource-import-" <> nonce()
-    identity = "resource-import-executor:" <> Canonical.digest_bytes(Path.expand(ledger))
+    ordinary_identity = "resource-import-executor:" <> Canonical.digest_bytes(Path.expand(ledger))
 
-    with :ok <- ensure_applications(),
+    with {:ok, identity} <-
+           Loopex.Executor.Local.RestoreGuard.identity(
+             config.state_root,
+             Path.join("resource-packs", "receipts"),
+             ordinary_identity
+           ),
+         :ok <- ensure_applications(),
          :ok <- File.mkdir_p(ledger),
          {:ok, lease} <-
            WorkspaceLease.start_link(id: lease_id, path: config.workspace, fencing_token: 1) do

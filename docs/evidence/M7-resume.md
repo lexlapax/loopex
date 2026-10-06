@@ -27,6 +27,42 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current proof, execution and source ownership
 
+ROOT VM FREE after original58629, fully collected
+PASS_FOCUSED_RETAINED_CLAIM_HANDOFF_ONLY157.839s/14stages. Both toolchains pass
+test compilation under warnings as errors and the exact34/17/10/16 handoff,
+pending, construction and publication cases, with zero exclusions/skips.
+Root verified72 artifacts,52 actual/Git inputs and all14 original process joins.
+Collection `M7/retained-claim-handoff-focused-runtime-original-collection-20261006-v1.json`
+SHA-256 `956affe0d307cf4dcb8caee4ad3bd10c2a32e4a4b3fbf1efca3ba8e460c35dda`;
+report `6c18862cc328ae55faaa5df2b2693d0c3b5e2070fee61401b7767ef6602cb412`,
+inventory `17f7bc3e3a75a0273e7ebbdd6db4b10e3c52e41db63f22c88fa4aacb5d23bd92`.
+Latest registry590 keys, SHA-256
+`9d4a3af0964bd9db17ecbba08c6591cce828d4a6ed6b293c9e3dffc0ca031177`.
+Never repoll58629 or repeat its keys. A collector summary-format mismatch was
+retained and corrected before collection, preserving both exact raw grammars
+and all numeric count assertions; no product stage was rerun.
+
+Restore prerequisite/verified handoff lineageed550 now rejoins m7 without
+conflict. All21 staged source paths equal its literal bytes; the five integrated
+Core cleanup paths remain unchanged. Of52 recorded handoff inputs,51 remain
+literal; only the context map carries newer approved decisions. This rejoin
+does not establish full integrated verification, original-tx continuation,
+candidate activation, receipt/release, public restore completion or the remaining
+long/latency proofs. The original2055/22595 and earlier failures remain failed.
+Source-retirement continuation is still isolated and unfinished. The new bounded
+T15 handoff subtask is proved; source retirement has its own open subtask.
+T01–T19 originals78done/95todo/6retired; added299done/36todo.
+
+Root's transport source checkpoint is nowca84db9c, adding closed model-ending
+calls, unverified/unrejoined pending the allocated codecb53de021. That codec
+has271 unexecuted terminal vectors and preserves requested141; it still needs
+independent root review and both-pair focused proof. ADR0054 stays Proposed;
+ADR0055aa87 needs revision for exact concurrent-create admission and positive
+Store absence semantics. Configure0053 remains the only question asked so far.
+All three agents have separate source/proposal worktrees; root owns the VM.
+
+Earlier execution entries below are retained history.
+
 ROOT VM OCCUPIED by original58629, launched once for the frozened550 handoff
 and adjacent runtime selections. Enabled packet
 `M7/retained-claim-handoff-focused-runtime-runner-20261006-v1`, config SHA-256

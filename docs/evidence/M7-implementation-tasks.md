@@ -51,16 +51,21 @@ rejoin m7 with133/134 recorded inputs literal; the context map differs only by
 approved decisions. Earlier93882/57030/49984 remain failed. Broader integration,
 long proofs and actual intermediate-membership coverage remain open.
 
-Claim handoffa578e8cf passes independent source review and both-pair formatting
-at its whole-file AST-equal childed550f10. Original87718 is fully collected,
-52.902s/11stages;34 native cases and adjacent pending17/construction10/publication16
-await runtime proof. Policy native/codec68f2ac12, compact ingress28c8e86b and
-two-transport projectionf5ae2555 remain unverified source checkpoints.
+Claim handoffa578e8cf passes independent source review, whole-file AST-equal
+formatting childed550f10 and both-pair runtime proof. Original58629 is fully
+collected157.839s/14stages;34 native handoff cases and adjacent pending17,
+construction10/publication16 all pass with zero exclusions/skips. The21 restore
+prerequisite/handoff source paths rejoin literally while Core cleanup stays
+unchanged;51/52 recorded inputs remain literal, only the approved context map
+differs. Full integration, original-tx continuation and long/latency proofs stay
+open. Policy68f2ac12, compact28c8e86b, terminal codecb53de021 and transportca84db9c
+remain unverified/unrejoined source checkpoints.
 Configure ADR0053 is Proposed at pushed838cf0e3, with a22.097s docs-check PASS;
 maintainer choice is pending. Parallel workers prepare focused restore proof
 and progress/remote-create proposals. Accepted ADR0052/read-gate stay accepted. No original row
-closes here. T01–T19 remain78done/95todo/6retired; added298done/35todo, including
-three new T05 obligations. IncludingT00, original78/101/7 and added302/36.
+closes here. T01–T19 remain78done/95todo/6retired; added299done/36todo, including
+the proved handoff unit and open source-retirement unit. IncludingT00,
+original78/101/7 and added303/37.
 
 ## Current restore source and verification, 2026-10-05
 
@@ -13483,6 +13488,9 @@ in the [restart record](M7-resume.md#technical-depth).
 - [ ] Isolate complete historical administrative projection by omitting a prior source-retired manifest member from an actual later baseline while keeping the physical fact and fully rebinding all dependent canonical records and hashes; require a subsequent transition to refuse before destination mutation with exact joined cleanup.
 - [ ] Implement accepted ADR 0051 bounded read-only public lookup with exact current, historical, pending, absent and error outcomes; preserve retained claims and incomplete higher-head truth, perform no reclaim/continuation/activation, and prove physical faults, caps and original cleanup bounds on both pairs.
 - [ ] Implement accepted ADR 0051 public restore outcomes and original-transaction resolution: validate matching retained canonical intent/candidates and authority termination, re-sync equal stages, finish only remaining stages, and return the same validated receipt for committed duplicates without new generations or source activation. Prove each phase fault and uncertainty path on both pairs before exposing the complete public contract.
+
+- [x] Hand off retained restore claims by changing only the original live nonce after positive prior-authority termination; preserve exact intent/candidates, directory/owner custody, mixed-nonce partial failure and original IO cutoffs. Prove34 actual writer/native cases plus pending17/construction10/publication16 on both toolchains at ed550 and rejoin the literal source; this grants no receipt, release or complete continuation.
+- [ ] Continue the same retained restore IO worker through checked available/lost source retirement and destination retirement-evidence publication, preserving original transaction/candidate bytes and claim fences. Prove actual native faults and joined cleanup before candidate activation, receipt or release work.
 
 - [ ] Recheck the captured source ancestor type/device/inode identities after the second native absence observation, including the final pre-root-commit phase. Prove actual persistent parent removal at the held final read refuses completion while preserving original cutoffs, post-intent fencing, retained destination claim and all prior case bodies on both supported pairs.
 - [ ] Preserve positively acquired restore claims through pre-intent IO failures and release them with the original joined terminal owner/cutoffs when neither state root changed; retain partial/unproved or foreign claims and truthful remaining-claim accounting. Prove actual second-claim failure, known first-claim removal and partial-publication fencing on both supported pairs without changing the six existing workflow cases or bounds.

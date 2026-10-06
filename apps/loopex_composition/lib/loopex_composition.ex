@@ -186,7 +186,8 @@ defmodule LoopexComposition do
     }
 
   defp compose({options, root, workspace, runtime_id, policy}) do
-    with :ok <- WorkspaceIdentity.validate_manifest(options, workspace),
+    with {:ok, _restore} <- Loopex.Executor.Local.RestoreGuard.state(root),
+         :ok <- WorkspaceIdentity.validate_manifest(options, workspace),
          :ok <- start_applications(),
          :ok <- File.mkdir_p(root),
          {:ok, options} <- LoopexComposition.ResourcePacks.retain_launch_option(options, root),
