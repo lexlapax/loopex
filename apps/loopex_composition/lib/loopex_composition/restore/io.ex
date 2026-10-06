@@ -2432,7 +2432,11 @@ defmodule LoopexComposition.Restore.IO do
   end
 
   defp retained_publication_descriptor!(descriptor, path, info) do
-    opened = require_value(primitive(:descriptor_stat, fn -> :prim_file.read_handle_info(descriptor) end))
+    opened =
+      require_value(
+        primitive(:descriptor_stat, fn -> :prim_file.read_handle_info(descriptor) end)
+      )
+
     require_same_identity(info, opened)
     require_same_identity(info, manifest_stat(path))
   end
@@ -2440,15 +2444,23 @@ defmodule LoopexComposition.Restore.IO do
   defp retained_publication_create(temp, bytes, mode, cap) do
     descriptor = open(temp, [:raw, :binary, :write, :exclusive])
     created = manifest_stat(temp)
+
     if file_info(created, :type) != :regular or file_info(created, :links) != 1 or
          file_info(created, :size) != 0,
        do: throw({:io_error, :invalid_retained_file})
+
     retained_publication_descriptor!(descriptor, temp, created)
-    require_ok(primitive(:mode, fn -> :prim_file.write_file_info(temp, file_info(mode: mode)) end))
+
+    require_ok(
+      primitive(:mode, fn -> :prim_file.write_file_info(temp, file_info(mode: mode)) end)
+    )
+
     configured = manifest_stat(temp)
     require_audit_file(configured, %{"size" => 0, "mode" => mode})
+
     if directory_identity(configured) != directory_identity(created),
       do: throw({:io_error, :source_changed})
+
     retained_publication_descriptor!(descriptor, temp, configured)
     write(descriptor, bytes)
     info = manifest_stat(temp)
@@ -2466,8 +2478,10 @@ defmodule LoopexComposition.Restore.IO do
   defp retained_publication_sync(path, captured) do
     descriptor = open(path, [:raw, :binary, :read])
     retained_publication_descriptor!(descriptor, path, captured.info)
+
     if read_chunks(descriptor, byte_size(captured.bytes), []) != captured.bytes,
       do: throw({:io_error, :changed_destination})
+
     require_ok(primitive(:file_sync, fn -> :prim_file.sync(descriptor) end))
     retained_publication_descriptor!(descriptor, path, captured.info)
     close(descriptor)
@@ -2499,12 +2513,18 @@ defmodule LoopexComposition.Restore.IO do
   # before final byte revalidation. Every synchronous call is separately owned.
   defp retained_publication_namespace!(ancestors, files) do
     Enum.each(ancestors, fn {path, identity} ->
-      info = require_value(primitive(:retained_publication_recheck, fn -> :prim_file.read_link_info(path) end))
-      if retained_publication_directory_identity(info) != identity, do: throw({:io_error, :source_changed})
+      info =
+        require_value(
+          primitive(:retained_publication_recheck, fn -> :prim_file.read_link_info(path) end)
+        )
+
+      if retained_publication_directory_identity(info) != identity,
+        do: throw({:io_error, :source_changed})
     end)
 
     Enum.each(files, fn {path, captured} ->
-      case {captured, primitive(:retained_publication_recheck, fn -> :prim_file.read_link_info(path) end)} do
+      case {captured,
+            primitive(:retained_publication_recheck, fn -> :prim_file.read_link_info(path) end)} do
         {:absent, {:error, :enoent}} -> :ok
         {%{info: info}, {:ok, observed}} -> require_same_identity(info, observed)
         _ -> throw({:io_error, :source_changed})
@@ -2533,9 +2553,17 @@ defmodule LoopexComposition.Restore.IO do
   defp retained_publication_directory_sync(parent, ancestors) do
     retained_publication_ancestors!(ancestors)
     descriptor = open(parent, [:raw, :read, :directory])
-    info = require_value(primitive(:descriptor_stat, fn -> :prim_file.read_handle_info(descriptor) end))
+
+    info =
+      require_value(
+        primitive(:descriptor_stat, fn -> :prim_file.read_handle_info(descriptor) end)
+      )
+
     {^parent, identity} = Enum.find(ancestors, fn {path, _} -> path == parent end)
-    if retained_publication_directory_identity(info) != identity, do: throw({:io_error, :source_changed})
+
+    if retained_publication_directory_identity(info) != identity,
+      do: throw({:io_error, :source_changed})
+
     require_ok(primitive(:directory_sync, fn -> :prim_file.sync(descriptor) end))
     close(descriptor)
     retained_publication_ancestors!(ancestors)

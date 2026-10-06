@@ -15,7 +15,8 @@ defmodule LoopexComposition.RestoreRetainedPublicationTest do
     %{root: root}
   end
 
-  test "fresh canonical ledger intent closes and synchronizes before native rename and readback", context do
+  test "fresh canonical ledger intent closes and synchronizes before native rename and readback",
+       context do
     path = Path.join(context.root, "intent")
     bytes = record_bytes()
     owned = launch(operation(:record, path, bytes, 0o600, :absent))
@@ -48,7 +49,8 @@ defmodule LoopexComposition.RestoreRetainedPublicationTest do
     joined(owned)
   end
 
-  test "original imported generation admits fresh or exact retained candidate with its original mode", context do
+  test "original imported generation admits fresh or exact retained candidate with its original mode",
+       context do
     original = generation_bytes(1)
     candidate = generation_bytes(2)
 
@@ -69,7 +71,8 @@ defmodule LoopexComposition.RestoreRetainedPublicationTest do
     end
   end
 
-  test "equal final is resynced in place and only the exact equal retained sibling may be removed", context do
+  test "equal final is resynced in place and only the exact equal retained sibling may be removed",
+       context do
     bytes = record_bytes()
 
     for retained <- [false, true] do
@@ -86,7 +89,7 @@ defmodule LoopexComposition.RestoreRetainedPublicationTest do
       refute :write in kinds(events)
       refute :rename in kinds(events)
       assert :file_sync in kinds(events)
-      assert (:delete in kinds(events)) == retained
+      assert :delete in kinds(events) == retained
       assert File.lstat!(path).inode == inode
       assert File.read!(path) == bytes and mode(path) == 0o600
       assert File.read!(other) == "foreign retained bytes"
@@ -95,10 +98,14 @@ defmodule LoopexComposition.RestoreRetainedPublicationTest do
     end
   end
 
-  test "canonical baseline uses its existing manifest role and keeps exact encoded bytes", context do
+  test "canonical baseline uses its existing manifest role and keeps exact encoded bytes",
+       context do
     path = Path.join(context.root, "baseline")
     entry = %{"path" => ".", "kind" => "directory", "mode" => 0o700, "size" => 0, "sha256" => nil}
-    assert {:ok, bytes} = RestoreCodec.encode(:manifest, ["loopex:current-state-manifest:v1", [entry]])
+
+    assert {:ok, bytes} =
+             RestoreCodec.encode(:manifest, ["loopex:current-state-manifest:v1", [entry]])
+
     put(path <> ".tmp", bytes, 0o600)
     owned = launch(operation(:baseline, path, bytes, 0o600, :absent))
     assert {{:joined, {:ok, _}, %{opens: opens, closes: opens}}, _} = drive(owned)
@@ -106,7 +113,8 @@ defmodule LoopexComposition.RestoreRetainedPublicationTest do
     joined(owned)
   end
 
-  test "third preimages and wrong existing modes refuse without mutation or temp removal", context do
+  test "third preimages and wrong existing modes refuse without mutation or temp removal",
+       context do
     bytes = record_bytes()
 
     for {final, temporary, file_mode} <- [
@@ -123,14 +131,18 @@ defmodule LoopexComposition.RestoreRetainedPublicationTest do
       if temporary != :absent, do: put(path <> ".tmp", temporary, file_mode)
       before = image(directory)
       owned = launch(operation(:record, path, bytes, 0o600, :absent))
-      assert {{:joined, {:error, :io_error}, %{opens: opens, closes: opens}}, events} = drive(owned)
+
+      assert {{:joined, {:error, :io_error}, %{opens: opens, closes: opens}}, events} =
+               drive(owned)
+
       refute Enum.any?(kinds(events), &(&1 in [:write, :mode, :rename, :delete]))
       assert image(directory) == before
       joined(owned)
     end
   end
 
-  test "missing original generation cannot be replaced merely because a candidate temp exists", context do
+  test "missing original generation cannot be replaced merely because a candidate temp exists",
+       context do
     path = Path.join(context.root, "generation")
     candidate = generation_bytes(2)
     put(path <> ".tmp", candidate, 0o640)
@@ -143,7 +155,11 @@ defmodule LoopexComposition.RestoreRetainedPublicationTest do
   end
 
   test "each role rejects an oversized existing file before raw open", context do
-    for {role, cap, file_mode} <- [{:baseline, 4_194_304, 0o600}, {:record, 65_536, 0o600}, {:generation, 2_048, 0o640}],
+    for {role, cap, file_mode} <- [
+          {:baseline, 4_194_304, 0o600},
+          {:record, 65_536, 0o600},
+          {:generation, 2_048, 0o640}
+        ],
         location <- [:final, :temp] do
       path = Path.join(context.root, Atom.to_string(role) <> "-" <> Atom.to_string(location))
       observed = if location == :final, do: path, else: path <> ".tmp"
@@ -157,7 +173,8 @@ defmodule LoopexComposition.RestoreRetainedPublicationTest do
     end
   end
 
-  test "role byte and mode admission refuses before actors and leaves native state intact", context do
+  test "role byte and mode admission refuses before actors and leaves native state intact",
+       context do
     path = Path.join(context.root, "intent")
     put(path, record_bytes(), 0o600)
     before = image(context.root)
@@ -197,7 +214,8 @@ defmodule LoopexComposition.RestoreRetainedPublicationTest do
     end
   end
 
-  test "replacement after native open refuses the coupled original descriptor and path", context do
+  test "replacement after native open refuses the coupled original descriptor and path",
+       context do
     path = Path.join(context.root, "intent")
     bytes = record_bytes()
     put(path, bytes, 0o600)
@@ -206,13 +224,17 @@ defmodule LoopexComposition.RestoreRetainedPublicationTest do
     File.rename!(path, path <> ".old")
     put(path, bytes, 0o600)
     send(owned.guardian, {:proceed, owned.reference, id})
-    assert {{:joined, {:error, :io_error}, %{opens: 1, closes: 1}}, events} = drive(owned, [{:issued, id, kind}])
+
+    assert {{:joined, {:error, :io_error}, %{opens: 1, closes: 1}}, events} =
+             drive(owned, [{:issued, id, kind}])
+
     refute :delete in kinds(events)
     assert File.read!(path) == bytes and File.read!(path <> ".old") == bytes
     joined(owned)
   end
 
-  test "same-size temp overwrite before final validation refuses rather than deleting foreign bytes", context do
+  test "same-size temp overwrite before final validation refuses rather than deleting foreign bytes",
+       context do
     path = Path.join(context.root, "intent")
     bytes = record_bytes()
     put(path, bytes, 0o600)
@@ -222,13 +244,17 @@ defmodule LoopexComposition.RestoreRetainedPublicationTest do
     foreign = :binary.copy("x", byte_size(bytes))
     File.write!(path <> ".tmp", foreign)
     send(owned.guardian, {:proceed, owned.reference, id})
-    assert {{:joined, {:error, :io_error}, %{opens: opens, closes: opens}}, events} = drive(owned, [{:issued, id, kind}])
+
+    assert {{:joined, {:error, :io_error}, %{opens: opens, closes: opens}}, events} =
+             drive(owned, [{:issued, id, kind}])
+
     refute :delete in kinds(events)
     assert File.read!(path) == bytes and File.read!(path <> ".tmp") == foreign
     joined(owned)
   end
 
-  test "persistent ancestor replacement before final validation refuses and retains the real temp", context do
+  test "persistent ancestor replacement before final validation refuses and retains the real temp",
+       context do
     directory = Path.join(context.root, "parent")
     moved = Path.join(context.root, "moved")
     File.mkdir!(directory)
@@ -240,14 +266,18 @@ defmodule LoopexComposition.RestoreRetainedPublicationTest do
     File.rename!(directory, moved)
     File.mkdir!(directory)
     send(owned.guardian, {:proceed, owned.reference, id})
-    assert {{:joined, {:error, :io_error}, %{opens: opens, closes: opens}}, events} = drive(owned, [{:issued, id, kind}])
+
+    assert {{:joined, {:error, :io_error}, %{opens: opens, closes: opens}}, events} =
+             drive(owned, [{:issued, id, kind}])
+
     refute :rename in kinds(events)
     assert File.read!(Path.join(moved, "intent.tmp")) == bytes
     assert File.lstat(path) == {:error, :enoent}
     joined(owned)
   end
 
-  test "native final readback observes changed bytes and refuses after the real rename", context do
+  test "native final readback observes changed bytes and refuses after the real rename",
+       context do
     path = Path.join(context.root, "intent")
     bytes = record_bytes()
     owned = launch(operation(:record, path, bytes, 0o600, :absent), :read)
@@ -255,14 +285,18 @@ defmodule LoopexComposition.RestoreRetainedPublicationTest do
     foreign = :binary.copy("x", byte_size(bytes))
     File.write!(path, foreign)
     send(owned.guardian, {:proceed, owned.reference, id})
-    assert {{:joined, {:error, :io_error}, %{opens: opens, closes: opens}}, events} = drive(owned, events)
+
+    assert {{:joined, {:error, :io_error}, %{opens: opens, closes: opens}}, events} =
+             drive(owned, events)
+
     assert :rename in kinds(events) and :directory_sync in kinds(events)
     assert File.read!(path) == foreign
     refute File.exists?(path <> ".tmp")
     joined(owned)
   end
 
-  test "guardian death with an actual temp descriptor remains unconfirmed after exact actor joins", context do
+  test "guardian death with an actual temp descriptor remains unconfirmed after exact actor joins",
+       context do
     path = Path.join(context.root, "intent")
     bytes = record_bytes()
     owned = launch(operation(:record, path, bytes, 0o600, :absent), :file_sync)
@@ -282,7 +316,8 @@ defmodule LoopexComposition.RestoreRetainedPublicationTest do
     assert File.read!(path <> ".tmp") == bytes
   end
 
-  test "caller loss before actual temp sync closes its descriptor and leaves payload unpromoted", context do
+  test "caller loss before actual temp sync closes its descriptor and leaves payload unpromoted",
+       context do
     path = Path.join(context.root, "intent")
     bytes = record_bytes()
     owned = launch(operation(:record, path, bytes, 0o600, :absent), :file_sync)
@@ -294,8 +329,11 @@ defmodule LoopexComposition.RestoreRetainedPublicationTest do
     guardian = owned.guardian
     worker = owned.worker
     reference = owned.reference
+
     assert_receive {:restore_io, ^guardian, ^worker, ^reference,
-                    {:terminal, {:joined, {:error, :caller_lost}, %{opens: 1, closes: 1}}}}, 1_000
+                    {:terminal, {:joined, {:error, :caller_lost}, %{opens: 1, closes: 1}}}},
+                   1_000
+
     assert File.lstat(path) == {:error, :enoent}
     assert File.read!(path <> ".tmp") == bytes
     joined(owned, false)
@@ -303,22 +341,35 @@ defmodule LoopexComposition.RestoreRetainedPublicationTest do
 
   defp record_bytes do
     hash = hash("current retained publication vector")
-    assert {:ok, bytes} = RestoreCodec.encode(:ledger_intent, %{
-      "kind" => "loopex_current_restore_ledger_intent_v1", "ordinal" => 1,
-      "tx_id" => hash, "intent_sha256" => hash, "relative_root" => "receipts",
-      "source_state_binding" => hash, "destination_state_binding" => hash,
-      "source_generation_sha256" => hash, "destination_generation_sha256" => hash,
-      "source_ledger_binding" => hash, "destination_ledger_binding" => hash
-    })
+
+    assert {:ok, bytes} =
+             RestoreCodec.encode(:ledger_intent, %{
+               "kind" => "loopex_current_restore_ledger_intent_v1",
+               "ordinal" => 1,
+               "tx_id" => hash,
+               "intent_sha256" => hash,
+               "relative_root" => "receipts",
+               "source_state_binding" => hash,
+               "destination_state_binding" => hash,
+               "source_generation_sha256" => hash,
+               "destination_generation_sha256" => hash,
+               "source_ledger_binding" => hash,
+               "destination_ledger_binding" => hash
+             })
+
     bytes
   end
 
   defp generation_bytes(epoch) do
-    assert {:ok, bytes} = RestoreCodec.encode(:generation, %{
-      :ledger_kind => "local_executor_generation_v1", "executor_identity" => "retained-executor",
-      "executor_epoch" => epoch, "generation_id" => Base.encode16(<<epoch::unsigned-256>>, case: :lower),
-      "root_binding" => hash("retained physical generation binding")
-    })
+    assert {:ok, bytes} =
+             RestoreCodec.encode(:generation, %{
+               :ledger_kind => "local_executor_generation_v1",
+               "executor_identity" => "retained-executor",
+               "executor_epoch" => epoch,
+               "generation_id" => Base.encode16(<<epoch::unsigned-256>>, case: :lower),
+               "root_binding" => hash("retained physical generation binding")
+             })
+
     bytes
   end
 
@@ -333,7 +384,9 @@ defmodule LoopexComposition.RestoreRetainedPublicationTest do
     |> Enum.map(fn name ->
       path = Path.join(root, name)
       info = File.lstat!(path)
-      {name, info.type, Bitwise.band(info.mode, 0o7777), info.size, info.links, info.inode, File.read!(path)}
+
+      {name, info.type, Bitwise.band(info.mode, 0o7777), info.size, info.links, info.inode,
+       File.read!(path)}
     end)
   end
 
@@ -354,12 +407,18 @@ defmodule LoopexComposition.RestoreRetainedPublicationTest do
   defp launch(operation, pause \\ :retained_publication_stat) do
     parent = self()
     tag = make_ref()
-    {caller, caller_monitor} = spawn_monitor(fn ->
-      send(parent, {tag, RestoreIO.run(operation, limits(), probe: parent, pause_at: pause)})
-    end)
-    assert_receive {:restore_io, guardian, worker, reference, {:installed, admitted, cutoff}}, 1_000
+
+    {caller, caller_monitor} =
+      spawn_monitor(fn ->
+        send(parent, {tag, RestoreIO.run(operation, limits(), probe: parent, pause_at: pause)})
+      end)
+
+    assert_receive {:restore_io, guardian, worker, reference, {:installed, admitted, cutoff}},
+                   1_000
+
     guardian_monitor = Process.monitor(guardian)
     worker_monitor = Process.monitor(worker)
+
     on_exit(fn ->
       for actor <- [caller, guardian, worker], Process.alive?(actor) do
         monitor = Process.monitor(actor)
@@ -367,20 +426,34 @@ defmodule LoopexComposition.RestoreRetainedPublicationTest do
         assert_receive {:DOWN, ^monitor, :process, ^actor, _}, 1_000
       end
     end)
+
     assert cutoff == admitted + 10_000
-    %{caller: caller, caller_monitor: caller_monitor, guardian: guardian,
-      guardian_monitor: guardian_monitor, worker: worker, worker_monitor: worker_monitor,
-      reference: reference, tag: tag, pause: pause, observation_cutoff: admitted + 20_000}
+
+    %{
+      caller: caller,
+      caller_monitor: caller_monitor,
+      guardian: guardian,
+      guardian_monitor: guardian_monitor,
+      worker: worker,
+      worker_monitor: worker_monitor,
+      reference: reference,
+      tag: tag,
+      pause: pause,
+      observation_cutoff: admitted + 20_000
+    }
   end
 
   defp held(owned, expected) do
     guardian = owned.guardian
     worker = owned.worker
     reference = owned.reference
+
     receive do
       {:restore_io, ^guardian, ^worker, ^reference, {:issued, id, kind}} ->
         if name(kind) == expected, do: {id, kind}, else: held(owned, expected)
-      {:restore_io, ^guardian, ^worker, ^reference, _} -> held(owned, expected)
+
+      {:restore_io, ^guardian, ^worker, ^reference, _} ->
+        held(owned, expected)
     after
       left(owned.observation_cutoff) -> flunk("the exact original primitive was not held")
     end
@@ -394,17 +467,21 @@ defmodule LoopexComposition.RestoreRetainedPublicationTest do
     worker = owned.worker
     reference = owned.reference
     tag = owned.tag
+
     receive do
       {:restore_io, ^guardian, ^worker, ^reference, {:issued, id, :read} = event} ->
         events = [event | events]
+
         if File.exists?(path) and not File.exists?(path <> ".tmp") do
           {id, events}
         else
           send(guardian, {:proceed, reference, id})
           held_readback(owned, path, events)
         end
+
       {:restore_io, ^guardian, ^worker, ^reference, event} ->
         held_readback(owned, path, [event | events])
+
       {^tag, result} ->
         flunk("publication ended before its actual final read: #{inspect(result)}")
     after
@@ -417,15 +494,21 @@ defmodule LoopexComposition.RestoreRetainedPublicationTest do
     worker = owned.worker
     reference = owned.reference
     tag = owned.tag
+
     receive do
       {:restore_io, ^guardian, ^worker, ^reference, event} ->
         case event do
           {:issued, id, kind} ->
             if name(kind) == owned.pause, do: send(guardian, {:proceed, reference, id})
-          _ -> :ok
+
+          _ ->
+            :ok
         end
+
         drive(owned, [event | events])
-      {^tag, result} -> {result, Enum.reverse(events)}
+
+      {^tag, result} ->
+        {result, Enum.reverse(events)}
     after
       left(owned.observation_cutoff) -> flunk("original publication invocation did not join")
     end
@@ -438,6 +521,7 @@ defmodule LoopexComposition.RestoreRetainedPublicationTest do
     gm = owned.guardian_monitor
     assert_receive {:DOWN, ^wm, :process, ^worker, :normal}, 1_000
     assert_receive {:DOWN, ^gm, :process, ^guardian, :normal}, 1_000
+
     if caller? do
       caller = owned.caller
       cm = owned.caller_monitor
