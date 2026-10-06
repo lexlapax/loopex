@@ -133,6 +133,11 @@ defmodule LoopexComposition.RestoreWorkflowTest do
              )
 
     runtime_monitor = Process.monitor(runtime.supervisor)
+    # Concept: reopened physical state still needs an explicit live session owner.
+    # Technical depth: resume commits succession and recovers history before attach.
+    assert Loopex.resume_session(runtime, fixture.session, command_id: "restore-reopen") ==
+             {:ok, fixture.session}
+
     assert {:ok, _attachment} = Loopex.attach(runtime, fixture.session, after_event_sequence: 0)
     assert {:ok, status} = Loopex.session_status(runtime, fixture.session)
     assert is_map(status)
@@ -534,6 +539,9 @@ defmodule LoopexComposition.RestoreWorkflowTest do
         assert_receive {:DOWN, ^cleanup_monitor, :process, _supervisor, :killed}, 1_000
       end
     end)
+
+    assert Loopex.resume_session(runtime, fixture.session, command_id: "restore-reopen") ==
+             {:ok, fixture.session}
 
     assert {:ok, _} = Loopex.attach(runtime, fixture.session, after_event_sequence: 0)
     assert {:ok, status} = Loopex.session_status(runtime, fixture.session)
