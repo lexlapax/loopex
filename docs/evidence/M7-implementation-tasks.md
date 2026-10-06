@@ -42,6 +42,20 @@ remain failed. T01–T19 originals78done/95todo/6retired; added300done/39todo.
 IncludingT00 originals78/101/7, added304/40. Exact identities are in the restart
 checkpoint. Earlier progress below remains historical.
 
+Subsequent verification retained original4121 as FAILED at `9d744079`: current
+identity/dev/test compilation pass, generation install20/21 with one compound
+closure/payload assertion failure; prefix, adjacent and floor stages did not
+run. Complete failure collection verifies41 artifacts,59 source rows and5
+original process joins after130.482s. A confined `dbd143f3` diagnostic child
+splits the same two assertions without changing any proof or bound and remains
+unexecuted. No generation row closes. Reviewed authored deadline/interaction
+and accepted0053 configure prerequisites are composed at isolated `e7f630da`,
+46 paths, awaiting one current/floor formatting and focused native campaign.
+The configure fixture correction preserves all371 vectors and supplies the four
+actual cap+1 controls. ADR0053 is accepted;0054 is the sole asked pending
+question. T01–T19 and added tallies remain unchanged. Exact source, report,
+collection identities and live ownership are in the restart checkpoint.
+
 
 Retirement native verification runs as original35594 at clean `3e77431d`,
 99 selected cases per supported pair. Protocol original63288 is fully collected

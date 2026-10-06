@@ -28,17 +28,19 @@ physical restore implementation; it does not waive any full-history proof.
 ### Current work and restart order
 
 Continue the existing ACTIVE unlimited goal on `m7`. Do not create another goal.
-Primary last pushed checkpoint is `8be2ce96`; this file's commit supersedes
+Primary last pushed checkpoint is `6b590add`; this file's commit supersedes
 its resume record. The full earlier checkpoint is retained in Git
 at `bdc88a05:docs/evidence/M7-resume.md`; consult it selectively for historical
 proof pointers. The task ledger retains outcome mappings and the frozen checklist.
 
-Root verification VM is FREE. Original generation-native v3 handle4121 is fully
+Root verification VM is OCCUPIED by original diagnostic handle47417, exact
+`dbd143f3532069b4b26f207b355d3dac2c22cc51`; collect the original before any
+next VM. Original generation-native v3 handle4121 is fully
 collected FAILED at exact9d, never poll or retry it. Root has frozen a one-test diagnostic child
 `dbd143f3532069b4b26f207b355d3dac2c22cc51` in
 `/private/tmp/loopex-m7-generation-install-diagnostic`: the failed compound
 assertion is split into the same two exact assertions, no production change.
-No diagnostic execution occurred yet. Every older handle below
+Original diagnostic47417 is now running; no result is inferred. Every older handle below
 is also fully collected. Native v1/v2 were never run.
 
 Current isolated source ownership:
@@ -224,3 +226,59 @@ wire generations, helper execution/accounting/ledger, attempts ownership/events,
 full current-format physical restore, integrated checks and the separately
 approved closure/release stages. No main merge, closure, tag or publication is
 currently authorized.
+
+### Current follow-up ownership
+
+Root read the complete482 source audit and rehashed59 indexed artifacts:
+report `32c5d3bd080d2eb97b7213cbe433ade51a01d8e098280454aab2f050fef040c4`,
+SHA256SUMS `b6ff0ade393fc8d8af1875fc2886a4a40745759999b79cb30a03612de768fe68`
+at `/private/tmp/loopex-m7-core-protocol-rejoin-source-audit-482b5c25-20261006-v1`.
+Root independently reviewed configure correction `1a50ac4c5aa27ffd959ddb47c01519431fb0eca9`
+in `/private/tmp/loopex-m7-configure-vector-correction`, report
+`ffa3dae5be59f1c5d39e6fb0047cf98086a7161702287f27f51c58c0ed8dae72`,
+index `7ea4846e83ce89217792419425b47daac7059c72b0ac939bdf43b6385cbe8e21`.
+All25 actual indexed artifacts and four actual JSON cap+1 values were checked;
+reversing only four quoted JSON tokens reconstructs the entire old vector file.
+Root's scoped correction report/index are
+`9b3b61cea0ab475908a3d598aaf0a6d0cf673b786d0eb5abad52d31278005e5d` /
+`099e88d5f8ceb6e47e206028838ff1db89bfe9baa4d19a88950e40c647c6a531`
+at `/private/tmp/loopex-m7-configure-vector-correction-root-review-1a50ac4c-20261006-v1`.
+
+Root checked configure10 parent-owned baselines matched482 and paths were wholly
+disjoint, then appended their exact patch as sole482 child
+`e7f630da756de6918f7f85fac2a1f6456387716c` in the Core/protocol rejoin worktree.
+Final unit46paths; formatter-owned34Elixir paths. No source has yet rejoined
+primary and no native check has run on this combined candidate.
+
+- `authored_bounds_review` authors only disabled formatter packet
+  `/private/tmp/loopex-m7-core-configure-format-runner-e7f630da-20261006-v1`.
+  Generic declaration pins replace restore-only inventory, separate UNIT46 and
+  OWNED34, all34 whole-file non-line AST proofs and both exact final formatter
+  checks required. Existing lifecycle/helpers/environment remain literal where
+  applicable. All execution/review/grant/registry/output gates stay unset.
+- `private_task_causal_resume` authors only disabled current-pair diagnostic
+  runner `/private/tmp/loopex-m7-generation-install-diagnostic-runner-dbd143f3-20261006-v1`.
+  Select line259, one case/20excluded/zero skips; fresh private environments,
+  source confinement and exact first result. This diagnostic is not a full
+  matrix or waiver. Root's original-failure audit report24336b5a and inventory
+  eafb5b38 remain retained in its source-audit packet.
+- `restore_prefix_source_audit` owns only current wire activation source map
+  `/private/tmp/loopex-m7-current-wire-activation-source-map-20261006-v1`, identifying
+  accepted actionable route/manifest work versus unaccepted0054/0055 dependencies.
+  No route implementation or dependent decision is granted by an inventory.
+
+VM is now occupied by original47417; admission seeded complete union729. Root must read/hash the exact new
+runner packet before enabling a fresh copy and run only one product VM at once.
+
+Root read the complete diagnostic author report, actual artifact-inventory map
+and full operative template delta; verified29 packet artifacts,59 actual/Git
+rows,71 external refs,41 original failure artifacts, exact assertion inverse
+and full unique729-key union. Enabled diagnostic copy:
+`/Users/spuri/projects/lexlapax/loopex-evidence/M7/generation-install-diagnostic-runner-20261006-v1`,
+config `6a8b2126f0a464a80c5817c79d8343edf0ec08b5cbc8f257062c959972980b77`,
+root review `51a098ddf24643bd73dfeefe6da92acc86ab24069a28ddd85fee5519d4dfadcc`.
+Original handle47417 writes `M7/m7-generation-install-diagnostic-runtime-v1`
+and registry `M7/generation-install-diagnostic-v1-stage-attempt-registry.json`.
+Six current-only stages; one selected case with20 explicit line exclusions.
+No full matrix, floor, mutation or retry of original9d is authorized. Collect
+its exact first result before enabling the combined formatter packet.
