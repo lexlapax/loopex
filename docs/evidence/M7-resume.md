@@ -27,6 +27,33 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Latest Store integration and next verification
 
+LATEST: Captured Local ledger decoder proof is complete and joined through
+58bcad07f9b2721cbdfd2c127daf53b19c375a92, tested source
+1e604aed7f651beaae6e2331e455282f0a5c9cda. Both pairs pass19focused/0excluded,
+296ordinary/2excluded, zero skips; all32loggedstages pass, total552s.
+Root verified45sealedoutputs plus inventory, all21source records and all four
+actual populations. Result digest1d1c266a6c2bfcf9ea536938d713948cc4f842e6f9850903f368a9b995093716,
+inventory6b9c187cd909a6714cb3bdd4410fffb395126acf0638320d68865b44703740be,
+in siblingM7/ledger-captured-decoding-execution-20261005-v1. Handle42740 is
+terminal and collected, never poll/restart. Whole offline ledger/restore open.
+
+The sole active verification VM is now native checkpoint handle80977, worker
+restore_manifest_resume. Its exact corrected initial source isd00fdaec,
+reviewed siblingM7/configure-checkpoint-runner-d00fdaec-v2/run.py;
+formatter/version probes have passed. Root confirmed the population JSON delta
+only updates exact source, fixture hash and actual three-path Core patch.
+No other VM. Preserve old native/causal failures; this run is not a reroll.
+
+Source-only Resource physical-capture writer current_index_cleanup owns ONLY
+restore/io.ex and restore_io_test.exs in
+/private/tmp/loopex-m7-resource-capture-audit, codex/m7-resource-capture-audit,
+baseb50bf885. Canonical catalog paths, identity/manifest binding, role caps
+before open, descriptor/ancestor consistency and exact guardian joins are its
+bounded deliverable. No setup/VM/tests, public contract, activation or whole
+catalog proof. One new T15 row is open. Counts now originals78/95/6,
+added294/21; includingT00 originals78/101/7, added298/22. All active statements
+below are superseded snapshots. ADR0052 remains unanswered.
+
 LATEST: The sole active verification VM is root handle42740, captured Local
 ledger decoder source1e604aed7f651beaae6e2331e455282f0a5c9cda, in
 /private/tmp/loopex-m7-ledger-captured-decoding. Current focused19/0excluded

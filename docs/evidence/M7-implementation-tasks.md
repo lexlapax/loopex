@@ -29,6 +29,47 @@ grouped by T00–T19. Empty added sections mean no added subtasks are recorded;
 they do not mean the original task is complete. This follows the maintainer's
 2026-10-01 update to the active implementation goal.
 
+## Captured Local ledger decoder joined — 2026-10-05
+
+The bounded T15 pure captured-byte decoder is complete at tested source
+`1e604aed7f651beaae6e2331e455282f0a5c9cda`, joined through
+`58bcad07f9b2721cbdfd2c127daf53b19c375a92`. Both supported pairs pass
+19 focused/0 excluded and296 ordinary Local executor/2 excluded, zero skips.
+Current ExUnit durations1.3s/179.1s; floor1.3s/187.0s; pipeline552s.
+All32 logged command and tee statuses are zero. Root independently verified
+all45 sealed outputs plus their inventory, all21 reviewed/pinned/final source
+records, four actual suite populations and the source/formatter deltas.
+Independent read-only review found no concrete contract/correctness issue.
+
+Immutable output directory:
+`/Users/spuri/projects/lexlapax/loopex-evidence/M7/ledger-captured-decoding-execution-20261005-v1`.
+Result SHA-256`1d1c266a6c2bfcf9ea536938d713948cc4f842e6f9850903f368a9b995093716`;
+output inventory`6b9c187cd909a6714cb3bdd4410fffb395126acf0638320d68865b44703740be`;
+pinned/final source inventory`edb6e9e7445382061f01abd44a0c723e5ac3af9d6418ad56dc0370a598a866d6`.
+Raw current focused/ordinary digests:
+`8b6a25c0b09bcc36590e56d171fa83aac837fcdcd143c40d29c052ba97aea921`/
+`dc130a96a50dfc38add76a96c770af2de00cf62b88c91ab01232ca0e1b3744b4`;
+floor`8091112de0553eb84ddec5b17292f9629450a1951e655855ca71aa40c22f34f9`/
+`ec62b21645d910aa4dac01f8682eb9b1bd010e6429214fffd04600315eb3efc2`.
+Handle42740 is terminal exit0 and collected; never poll/restart it.
+
+Live and captured bytes share the existing current kind/schema/semantic,
+uncompressed safe/full-consumption and exact deterministic validation. Actual
+writer outputs remain decodable after root deletion; exact2,048-byte generation
+and all kind-plus-one boundaries are exercised. This performs no IO, repairs,
+runtime activation or authority grant. Physical capture, complete basename/job/
+receipt/history relations, Linux filenames and full restore remain open.
+
+One new T15 Resource physical-capture subtask is open. Its isolated source-only
+writer owns restore/io.ex and restore_io_test.exs in
+/private/tmp/loopex-m7-resource-capture-audit, baseb50bf885; no VM grant.
+Only the corrected native checkpoint worker has the exclusive verification VM,
+handle80977, exact initial sourced00fdaec and reviewed v2 runner. The prior
+ten-case invalid-genesis failure remains retained; no passing result is inferred.
+T01–T19 originals78done/95todo/6retired; added294done/21todo.
+IncludingT00: originals78/101/7, added298/22. T15 added14done/5todo.
+The next combined full current fast check remains pending.
+
 ## Retained Local ledger byte guard joined — 2026-10-05
 
 The bounded T15 decoder-entry subtask is complete at tested source
@@ -13004,9 +13045,10 @@ open.
 ### Added implementation subtasks
 
 - [x] Audit every declared current Store history through the existing owned IO worker, enforcing descriptor/path/hash identity, complete transaction replay and recovery of every session; prove actual retained unknown truth, faults and cleanup on both pairs without claiming scripted executors prove OS effects.
+- [ ] Capture one exact retained Resource manifest or provenance record through the existing guardian-owned restore IO worker, binding canonical pathname/identity to the physical manifest, enforcing its raw ceiling before open/read, revalidating descriptors and ancestors, and proving current writers, hostile captures and unchanged cleanup on both pairs. Complete catalog/reference orchestration remains separate.
 - [x] Decode retained current resource manifest/provenance bytes under derived physical ceilings before parsing, preserve exact normalization/content/Git identities and deterministic bytes, and prove actual current writers, hostile bytes and real decoder-entry controls on both pairs. Whole catalog capture/reference/backup orchestration remains separate.
 - [x] Refuse compressed/wrong-root retained Local ledger records before actual term decoding, enforce captured byte caps and full consumption, and prove all current record readers plus positive real-BIF trace control on both pairs. Whole owned offline ledger capture/audit remains separate.
-- [ ] Extract the existing current Local ledger validator as a pure captured-byte decoder with fixed kind ceilings; prove actual writers, hostile captured bytes and complete Local conformance on both pairs. Physical capture and complete generation/basename/receipt/history audit remain separate.
+- [x] Extract the existing current Local ledger validator as a pure captured-byte decoder with fixed kind ceilings; prove actual writers, hostile captured bytes and complete Local conformance on both pairs. Physical capture and complete generation/basename/receipt/history audit remain separate.
 
 - [x] Extract and prove bounded internal Store captured-byte decoding through the existing current decoder, preserving actual whole-log caps, complete/torn/corrupt evidence, cold fixed-schema loading and no IO/actors/repair; verify actual boundary/capacity and complete Store suite on both supported pairs before full backup audit integration.
 
