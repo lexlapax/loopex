@@ -448,6 +448,69 @@ collector proposal pinned to the actual formatted source and local control.
 No VM or registry activation is granted. Subsequent corrected paired proof must
 admit retained exact-source formatting evidence without repeating formatters.
 
+DISABLED CAUSAL PROPOSAL: frozen sibling
+`M7/final-observation-causal-runner-20261005-v1` pins actual local control
+`22fb279b` and corrected parent `fdfe1488`. Runner
+`de68ec8df165af240f1d5cd6a0b9a77ff86d161434439119923c72d4f15fcbb0`, disabled config
+`a7bb98378cc21335427b82943f8ea963fca168e27801f3dfcf5b8a37071632d2`, report
+`25a9d05d998945c03cbdf6a162cff712b77d8f9873602e7064fda4e797ab5b08`, final inventory
+`af9bad9d1cd127da624af22e30ffc2c6c6323d267a4b63c021e025fccb18e83a`.
+Root verified 32 sealed artifacts, 132 actual/Git source pins, 27 references,
+89 unchanged test files, eleven exact admitted lifecycle functions, both full
+patches and the NUL tree. Complete collector/admission and authored runner
+changes were read. Original positive test failure stays unchanged and the
+pipeline fails; separate PASS_CAUSAL_RED requires the unique line-3490 late
+assertion in line-3306 case, one failed/executed case, 108 exclusions, zero
+skips, both genuine complete timelines, exact source and all original joins.
+Missing records, an unrelated failure or missed barrier are unavailable.
+Root audit `M7/final-observation-causal-runner-root-audit-20261005-v1`, result
+`c60461e2464a3d73cf490ddc6adb2be50a65fe690c2af7eb465191a6852284df`, inventory
+`b0948f931df439719532ad616a8385dd3e426d965f2d098bbe5c958d63dadb8b`.
+The initial root verifier's full-index assumption for the abbreviated integration
+patch is retained beside its corrected exact authored-format comparison; this
+is a read-only verifier correction, not a product/VM failure. Private-task agent
+owns the independent disabled-runner review. Registry/output paths remain absent;
+no VM, formatter, compiler, test or source rejoin is granted yet.
+
+CAUSAL EXECUTION GRANT: independent disabled-runner review found no blocker.
+Root read the full report and verified eight sealed artifacts and 192 input pins.
+Review `M7/final-observation-causal-runner-independent-review-20261005-v1`, report
+`fa1cfe4f2a11c474608c1c283fbfce760bd5c1b39ca30ed1fbcad89530c40b49`, inventory
+`4b0e874e68ac33ef299762379742244a63a84de3f403bc0294dcc82c6c329114`.
+Root finalized separate enabled sibling
+`M7/final-observation-causal-runner-20261005-v2`, preserving the entire disabled
+packet under `disabled-review-packet`. All 49 active/historical artifacts plus
+root inventory were verified; run/helper/collector/admission bytes are unchanged.
+Enabled config `d6ba6bf4d89efbb3c2dcbc656784b5cdd99e24e8b6de1aa662e2c2ac3d8d5c69`, root inventory
+`8f01095276093b50d9e738938cf59b678008767173c70b3df5b51809a54968c3`.
+Fresh `M7/final-observation-causal-stage-attempt-registry.json` is seeded empty at
+`1a5f5f5aa0ba2c8e25a6d0994e96d5911cd7194ee78b447a194f0321f46bdbf0`;
+never reset. Current-index agent has the sole VM for one sequential current-only
+causal campaign on local control `22fb279b`, fresh output
+`M7/m7-final-observation-causal-v1`. It owns the original outer handle and exact
+terminal collection; root must not poll that handle. Stop first failure, retain
+the unchanged original positive test status and failed outer pipeline, both real
+timeline files and separate judgment. Return the slot only after full original
+collection and OS group joins. No retry, repair, formatter, floor/ordinary/other
+test, source switch, provider/network campaign, source-branch export, full-fast,
+release or primary source rejoin is granted. Other agents are source-only or
+stopped. This grant adds no test result; corrected proof remains pending.
+
+PARALLEL LOST-SOURCE UNIT: CLI agent owns only Restore entry, IO, Workflow and
+workflow-test source in clean-base isolated
+`/private/tmp/loopex-m7-restore-lost-source-first`, branch
+`codex/m7-restore-lost-source-first`, created from `fdfe1488`. Implement the
+accepted first-ordinal lost-source branch under existing ADR 0051 codecs/guards:
+positively absent endpoint with checked ancestors, retained original placement,
+complete latest backup/workspace audit, only destination claim and canonical
+lost_source_host_excluded retirement with nil per-ledger retirement digests.
+Do not fabricate missing-source files. Preserve all nine existing workflow
+case bodies and complete IO test. Coherent private first/restore_first migration
+changes the owned workflow launch helper. Public entry/lookup, repeated lineage,
+original-tx continuation and helper grammar remain unfinished. This writer has
+no VM, formatter, compiler, test, registry or source-branch push grant; root owns
+review and rejoin after the frozen prerequisite proof.
+
 PRE-INTENT CORRECTION: clean frozen
 `c71e8dc88f0a49a1fe613fbbc5940824ad296fc1` on
 `codex/m7-restore-preintent-cleanup` retains acquired claims through typed IO

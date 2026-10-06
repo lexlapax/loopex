@@ -127,6 +127,11 @@ The separately owned causal runner/collector proposal is disabled.
 One added cleanup row stays open; no checkbox closes.
 Lost-source,
 repeated restore, fault/cleanup and helper-ledger proofs remain required.
+CLI owns the first-ordinal lost-source implementation in separate
+`codex/m7-restore-lost-source-first`, based on frozen `fdfe1488`, under the
+existing open T15 restore obligation. It reuses accepted codecs and guards;
+only the four entry/IO/workflow/workflow-test paths are writable there.
+No formatter, compiler, tests or source-branch push is granted to this writer.
 Root retained the source gap inventory and ordinary-guard authority review.
 The guard preserves existing synchronous ownership and the original claim
 deadline; administrative restore and public lookup retain explicit owned IO.
