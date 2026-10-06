@@ -27,6 +27,96 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current proof, execution and source ownership
 
+SAFE SOURCE CHECKPOINT, 2026-10-06: the sole VM is FREE and all workers are
+terminal. No goal pause or completion is recorded. Next root work is review of
+the liveness proposal and publication source below; no dependent grant exists.
+
+Publication writer froze clean `2beb2e8b146ba52aefce1fd5bd6769c110c7a5e8`, sole
+parentf5, in `/private/tmp/loopex-m7-restore-retained-publication`, branch
+`codex/m7-restore-retained-publication`. Exactly Restore.IO and a new standalone
+publication test change,649 additive lines. Generic publication and all109 old
+IO declarations/bodies are reported literal;16 new native cases are UNEXECUTED.
+Source packet `/private/tmp/loopex-m7-restore-retained-publication-source-20261006-v1`
+report is `878cdc5c2667f01b8385a76ae93c699c694080d707d14f0d4fda1f481bbde4a2`,
+inventory `1b35535157615506c91875243fa250544e6005a16dcf71bd1604271ca879aae0`.
+This is an unwired private primitive; no custody, prefix, facade, receipt or
+runtime proof follows. Root source review and focused verification remain open.
+No private topic was pushed. Worker ownership is released.
+
+Liveness proposal only, no apply-ready patch or source change:
+`/private/tmp/loopex-m7-retirement-liveness-reply-proposal-9ca23ebb-v1/report.md`
+is `447efeaffb57e7254d62516288f47610c4f382fd7881de8b6073effc505d4af8`,
+inventory `d14e2fbf7dcedac8682829b6f482c40c04690ef77ba9044eb0674c03a914e041`.
+Installed native helper creates/ref-binds a liveness request; proposed fixed-target
+Group-only native2 call/return tracing must prove the actual ref/target/order
+before any Boolean receive is admitted. Public native1 trace cannot bind the
+hidden ref. Native C trap/traceability is not proved by available installed
+source. Preserve pattern ownership/restoration, unknown-message refusal,
+original1000ms/8192-row cap, schedules, fences and joins. Otherwise provenance
+stays unavailable. Original49984 remains failed; no repeat is authorized.
+Original T01–T19 remain78 done/95 todo/6 retired; added298 done/32 todo.
+The separate restore verification-gate choice remains unanswered and disabled.
+
+LATEST COLLECTION, 2026-10-06: original49984 fully collected
+FAIL_OR_UNAVAILABLE after91.735s/four current stages. The sole VM is FREE.
+Compilation passes; live-window and negative retirement cases pass. Selected
+window rejects the actual receive `{Ref, true}` from Group's traced mailbox.
+The exact native BIF call/ref/target is unavailable in this failed log. No floor
+stage ran. Source9ca remains clean/frozen. Root verified36 immutable artifacts,
+134 actual/Git source rows and four original process joins. Collection
+`M7/retirement-stop-reply-runtime-original-collection-20261006-v1.json` is
+`2b19f06db99d565d4944d835ac618c0d4f6a15f8f482a2f430e4a6103feff56b`;
+report `c186908331738b29da22169b3f39c2c4b5020b146bdc034f171ed2034fe11d17`,
+inventory `2f9e3c6a75eb470b7141741d56c4496805df935c30257241936478bafdcfd22f`,
+registry `c7492c15eb48eaca718d6c4cd3e14ab663eb5475e1af8fcc21da77b836b3f29d`
+has487 unique keys. Collector65840 fully collected exit0; script
+`f3b2f6b81d745d85718a4d4d445f80464902f5cef6c7341471a157a94b4bdb66`.
+Original command exit2 and evidence/outer exit1 remain unchanged. Never repoll
+49984 or repeat these source/pair/stage keys. Private-task prepares only a
+source-backed bounded native BIF call/ref/target correlation proposal. Installed
+current/floor erts_internal source creates a Ref and receives `{Ref, Res}`;
+this is a candidate explanation, not runtime proof or generic message admission.
+No source edit, VM grant, larger bound or broad proof is authorized by it.
+
+ROOT VM RUNNING, 2026-10-06: original49984 owns the sole VM for scoped
+retirement diagnosis on clean frozen9ca. Enabled
+`M7/retirement-stop-reply-runtime-runner-20261006-v1` config is
+`9226a340c42457fb81183a70302e94ea0c0a992fd8a1ed4cd80f8bf56b1cbf93`,
+65-artifact inventory
+`6f8d142b372cb84cce4f9414ab9193e3d811abbe0d069e09813fcaccd5f67bfa`.
+Output `M7/m7-retirement-stop-reply-runtime-v1`; fresh registry
+`M7/retirement-stop-reply-runtime-stage-attempt-registry.json` starts483 keys,
+digest `19e1bb5278a4a466f2ec89b33734c407a7457784a7272e58f99a26d7710e0e4b`.
+Independent source/runner report is
+`6429e35aacc8aa136b3d836c8008ea6a345f471fada68760cba49cbf7735957d`,
+inventory `647c873212d5e2bfd3b8775f169c0ad3732baa32238e596aa462e8f7f26292c8`.
+Author72338 fully collected exit0. Exactly tools/Node/test compilation/three
+retirement cases per pair; first failure stops. No broader proof/restore gate
+or worker grant. Collect original49984 completely before another VM.
+
+LATEST COLLECTION, 2026-10-06: original74464 fully collected
+PASS_PURE_RETAINED_CONSTRUCTION_ONLY after116.366s/eight stages. The sole VM is
+FREE. Ten pure tests pass current and floor with warning-free test compilation;
+sourcef5 remains clean/frozen. Root verified54 immutable artifacts,50 actual/Git
+source records and eight original process joins. Collection
+`M7/retained-construction-pure-runtime-original-collection-20261006-v1.json`
+is `8f1f9ae453b5ca9e6242b5ead4d909f5f164b43d20f4eab7e57941a955ec7bac`;
+report `84359f8b86ed43679eaf6618cf22ae350a3c2145d2cc24c960df522418e66619`,
+inventory `a1601f7868e32a29a1bb0ff881d4c341ea7a90ea27ac849af366067ebc0d643c`,
+registry `19e1bb5278a4a466f2ec89b33734c407a7457784a7272e58f99a26d7710e0e4b`
+has483 unique keys. Collector96227 fully collected exit0; script
+`e4b1c28e238326d543d469b54207e56cc1cb56a99b2886d2bb4b932e8a5a4260`.
+Never repoll74464 or repeat these source/pair/stage keys. T15 remains open;
+pure construction proves no physical restore, custody, publication, prefix or
+release. The task ledger now points to this bounded proof without closing a row.
+Current-index independently reviews the disabled9ca runtime v2. Root verified
+30 artifacts,27 references,134 actual/Git rows and eleven literal predecessor
+engine functions; root report
+`/private/tmp/m7-retirement-stop-reply-runtime-root-review-9ca-v1.md` is
+`6a17e5409108ccf649c8cc5bf65e9ec367b04d8a83649bdd17b974e283af399d`.
+No runtime grant exists yet. Publication worker remains source-only in its
+separate worktree. All checklist counts and pending decisions remain unchanged.
+
 ROOT VM RUNNING, 2026-10-06: original74464 is the sole verification VM,
 eight-stage pure construction run on frozenf5. Enabled
 `M7/retained-construction-pure-runtime-runner-20261006-v1` has config

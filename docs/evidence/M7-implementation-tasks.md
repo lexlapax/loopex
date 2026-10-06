@@ -29,6 +29,25 @@ grouped by T00–T19. Empty added sections mean no added subtasks are recorded;
 they do not mean the original task is complete. This follows the maintainer's
 2026-10-01 update to the active implementation goal.
 
+## Latest bounded progress, 2026-10-06
+
+T15 retained canonical construction on frozen `f5e26af3` passed all ten pure
+tests on both supported toolchains, with warning-free test compilation.
+Original74464 is fully collected after116.366 seconds/eight stages. Its result
+does not prove physical continuation, claim custody, publication, complete prefix
+audit or release, so the enclosing original and added rows remain open. Exact
+outputs and collection hashes are in the [restart checkpoint](M7-resume.md).
+
+T16's diagnostic-only original57030 remains failed: both positive retirement
+cases rejected a native stopper acknowledgement. The strict caller/tag/alias
+correction is now frozen at `9ca23ebb`, with current/floor formatting and whole
+non-line AST equivalence proved. Original49984 then passed two of three current
+cases and rejected a native `{Ref, true}` receive in the selected window; no
+floor stage ran. The failed run is fully collected and remains failed. A bounded
+native call/reference correlation proposal is pending source review. All broader
+Core and native intermediate-membership proofs remain open. No checklist count
+changes.
+
 ## Current restore source and verification, 2026-10-05
 
 Original combined handle 8713 is terminal exit 1 and fully collected at frozen
