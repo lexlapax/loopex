@@ -27,6 +27,24 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current proof, execution and source ownership
 
+CURRENT ACTIVE FORMATTER, 2026-10-06: root owns the sole verification VM
+for one five-file current/floor formatter campaign at clean combined c63d.
+Original outer handle 46796 was launched once; root alone collects it.
+Enabled `M7/successive-format-runner-20261006-v2`: config
+`224a758b7224b9eddff93c8d05746887f2dc33e11056288ed082cae08cec92c8`,
+root inventory
+`716a98f6ef3a5cdd3c0dbbe0a18fde788362f27a3426a80175e57540521a0c0c`.
+Root verified 26 disabled artifacts, 22 external references, 46 actual/Git
+kind/mode/blob inputs and complete candidate/parent NUL trees. Exact combined
+source review `M7/successive-combined-source-review-c63d-20261006-v1/report.md`
+is `c41cfe7f5d40b6bc0e7c3224f4a9744f737d3dc9cee085d49e9275fbb5f39292`.
+The formatter may create at most one five-path AST-equivalent child and check
+same bytes on both pairs. No compiler, tests, other VM, runtime/control repeat,
+source export or primary rejoin is granted. New output is
+`M7/m7-successive-format-v1`; never reset its fresh registry
+`M7/successive-format-stage-attempt-registry.json`. CLI may continue only its
+isolated test-source fixture work. No new PASS is inferred before collection.
+
 LATEST SOURCE REVIEW AND NEXT PROOFS, 2026-10-06: root read the full independent
 eee5 source review, which found no additional blocker with the known prefix
 repair rejoined. Retained exact report
