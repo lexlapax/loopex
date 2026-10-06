@@ -27,6 +27,37 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current proof, execution and source ownership
 
+ROOT VM OCCUPIED by original47584, retirement-payload formatting at
+`fe742eeadd7dc3f8d50e83d6357ba150785e4f45`, branch
+`codex/m7-retirement-payload-projection`. Enabled
+`M7/retained-source-retirement-format-runner-20261006-v4`, config SHA-256
+`fb368ef3240d8c4ac1c44441bc89af607659680cf989e4f3be48711e94589728`, root review
+`552cc9020e9049f8078303dd7623fb06f78250fee6110896c7c04b7b1d6476aa`.
+Output `M7/m7-retained-source-retirement-format-v4`. Root verified96 artifacts,
+53actual/Git rows,68refs and663-key seed. All3AST and both formatchecks required;
+8mandatory or11child stages. No terminal result yet; collect47584 before any
+other VM grant. Partial staticv3 author failed on a copied0444 artifact before
+execution; preserved, freshv4 owns only its new copies. Runtime99/pair remains
+unexecuted. Independent oracle/setup review report
+`c7c5d43f9fea85e6a6cc39c5aa2b72cf36eb178597350381953552fada84059d`, inventory
+`a1f07c43e867b804f7799cc10a8dffa868add82294a05fd174157fbbf6d62297`.
+
+Parallel source lanes: disabled a0b2 protocol native runtime preparation,
+generation-test oracle writer at `/private/tmp/loopex-m7-generation-payload-projection`
+from frozeneb73 prefix, and independent Proposed0056 audit. Prefix scoped source
+audit report `4513fbae5420609c6b95c30c626a5aaf0b5da5f7fa75545f36e10d43ecb50679`,
+inventory `b359618b0e5dda82f64f52bf3af0e70d9d65a32139436fce8562ce93bec19df3`
+finds no new production defect but keeps the generation nlink oracle blocker.
+No prefix runtime result or release approval exists. Proposed0056 is frozen
+at `cf82825e633c0a99ef879c00f912ddabebc8254c`, four documentation/index paths,
+in `/private/tmp/loopex-m7-helper-ledger-recipe-proposal`. Pair hashes Concept
+`d118b85ed18bcfcbf12b7476de56a5d9be837882e2cbe4a84a78acd24f023c01`, Technical
+`3335b461e19b741ae08662a1838e9636fd0b05038557bfb7d5c69f79db11edfe`.
+Its byte/credit recipe is source-only, under review; typed whole-run accounting
+and representability are unresolved prerequisites. It is unasked/unaccepted;
+ADR0053 remains the sole pending maintainer question. No task closes here.
+
+
 ROOT VM FREE after original80431 PASS_FORMAT_PREPARATION_ONLY26.691s/eight
 stages. Source stayed exact `8f4b19fd3d37b60acba119ce8ec25948ec06379a`; all13
 AST comparisons and both formatters pass, eight Node/JSON files literal.
