@@ -6867,3 +6867,44 @@ of what the setup observation proves, not a disposition of the other queued
 contracts or a verification result. The earlier external packet is absent after
 restart; the current question and scope are retained in the
 [restart record](../evidence/M7-resume.md).
+
+
+<a id="disposition-m7-restore-read-gate-2026-10-06"></a>
+### M7 restore read-only verification admission approved, 2026-10-06
+
+The maintainer replied "1. approve, 2. approve" to the two pending decisions.
+The first approves the reviewed read-only equivalence rule at candidate
+`3d79a9a25517111244cd0193ef35ba5587afe531`, retained report
+`/private/tmp/loopex-m7-read-causal-boundary-proposal-3d79a9a2-20261006-v2/report.md`,
+SHA-256 `3b5be537fb00c0e4e11996dd45e9bed2c643d6dcb6a365d413dfcd8e595c41b3`.
+Replace the whole-lifecycle literal admission gate with the reviewed source-bound
+nil/read reachability predicate. Independent source and predicate review digests
+are `8e4737eb4a02b32b49a5d8604a1ef990f8125f20b70d02f380bc7f04c1042d0e`
+and `92ef57d030020f31ee487ed5a5c10f17a7d2d40e4fda25b225835677695ea7f5`.
+
+All three actual IO long cases, their limits and the full required restore lanes
+remain required. No timings or passes transfer to changed source. The original
+failures remain retained. A runner needs review against its exact current source
+and root admission before execution; this approval supplies neither a test result
+nor closure evidence.
+
+<a id="disposition-m7-policy-public-events-2026-10-06"></a>
+### M7 policy interaction public events accepted, 2026-10-06
+
+The second approval in the maintainer's "1. approve, 2. approve" accepts the
+consistent question-and-answer vocabulary of [ADR 0052](../adr/0052-policy-interaction-public-events.md#concept)
+and its [technical companion](../adr/0052-policy-interaction-public-events-technical.md#technical-depth)
+at candidate `ec9e8fbe6c2ed3fb427a93a5d3361e356de01795`.
+Historical Proposed Concept SHA-256 is
+`50350c393f74002a4123031ac7f36e393371336c89ff4ae132efb552acebb8e8`;
+Technical SHA-256 is
+`2c59a51bef945000f4083360de3ceee7590d30a44597a3541cc22bcf168ad82c`.
+Within the pair, acceptance changes only Status and the empty Acceptance row.
+
+Implement the exact native turn and actual answer-command provenance, closed
+request/terminal wire projections, current-history cursor validation and complete
+foreground generation 3 / daemon generation 4 manifests together. Answer admission
+and host-policy permission remain distinct. Remove superseded readers before 1.0;
+never rewrite retained journals or fill missing terminal events. Activation still
+requires the coordinated schemas, transports, independent clients and durability
+proofs. This acceptance closes the decision, not T07, M7 or any required proof.

@@ -32,21 +32,37 @@ they do not mean the original task is complete. This follows the maintainer's
 ## Latest bounded progress, 2026-10-06
 
 T15 retained canonical construction on frozen `f5e26af3` passed all ten pure
-tests on both supported toolchains, with warning-free test compilation.
-Original74464 is fully collected after116.366 seconds/eight stages. Its result
-does not prove physical continuation, claim custody, publication, complete prefix
-audit or release, so the enclosing original and added rows remain open. Exact
-outputs and collection hashes are in the [restart checkpoint](M7-resume.md).
+tests on both supported toolchains. Original74464 is fully collected after
+116.366 seconds/eight stages. The strict retained-publication helper is now
+frozen at `db378e78`, including callback admission before any native IO.
+Original57366 passed all16 native publication cases on both toolchains with
+zero exclusions/skips and test compilation under warnings as errors. It is
+fully collected after120.715 seconds/eight stages. Physical file replacement,
+retained-temp reuse, role caps/modes, descriptor/ancestor changes and actual
+caller/guardian loss are selected helper proofs. Claim custody, original-tx
+continuation, complete prefix/activation audit, public facade and release remain
+open. Callback runtime regression waits for actual wiring. Exact outputs and
+collection hashes are in the [restart checkpoint](M7-resume.md).
 
-T16's diagnostic-only original57030 remains failed: both positive retirement
-cases rejected a native stopper acknowledgement. The strict caller/tag/alias
-correction is now frozen at `9ca23ebb`, with current/floor formatting and whole
-non-line AST equivalence proved. Original49984 then passed two of three current
-cases and rejected a native `{Ref, true}` receive in the selected window; no
-floor stage ran. The failed run is fully collected and remains failed. A bounded
-native call/reference correlation proposal is pending source review. All broader
-Core and native intermediate-membership proofs remain open. No checklist count
-changes.
+T16 originals57030 and49984 remain failed. The native stopper reply is matched
+to its exact caller/tag/alias; liveness metadata now requires a known-target
+native2 call/ref, subsequent :ok return and matching Boolean receive. The fixture
+is frozen at `6f437227`, with actual whole-file AST equivalence and current/floor
+formatting proved. Original93882 is fully collected after166.873 seconds/eight
+stages: current three cases pass, floor two pass and the no-window case fails
+on actual Enumerable.Map loading traffic. Keep the failure and strict trace
+admission. A pretrace validation of the actual provider map is being implemented
+inside the existing cutoff. Actual native traceability/order and intermediate
+live membership remain unproved. All broader Core/integration proofs remain
+open. No checklist row closes from these prerequisites.
+
+The maintainer approved the restore read-gate rule and exact ADR0052 pair;
+both decisions are durable in the context map. Three source-only workers cover
+claim handoff, the narrow retirement fixture correction and native policy-event
+history/projection. Root owns rejoin and all verification VM grants. No decision
+is waiting for the maintainer; broad restore execution waits for current-source
+review. T01–T19 stay78 done/95 todo/6 retired; added298 done/32 todo.
+Including T00, original78/101/7 and added302/33.
 
 ## Current restore source and verification, 2026-10-05
 

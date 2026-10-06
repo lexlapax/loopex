@@ -27,6 +27,98 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current proof, execution and source ownership
 
+ROOT VM FREE, 2026-10-06. Original93882 is terminal and fully collected
+FAIL_OR_UNAVAILABLE after166.873 seconds/eight stages. Frozen source
+`6f437227b248eb42fecc2661b96ca8b3565414c3` passed all three retirement cases
+on the current pair and two on the floor; the floor no-window case rejected
+Group's genuine `Enumerable.Map` code-loading request. Keep unknown-message
+rejection, original1000ms/8192-row/64-observation bounds and original joins.
+No retry or broader proof is admitted. Collection
+`M7/retirement-liveness-runtime-original-collection-20261006-v1.json` digest
+`b5e906b9fa6b13c291244a2d24e9b78e014e53561f814d74cf6e5a9dc8668072`;
+report `c7dbe66b19d841d28fbb94b8ec81005518a3cd3fedc8586ed0d813ffb052a38c`,
+inventory `ab9a78d57317ad799b543234d047c312a2bc58235d10e075a686f57cbb833a91`.
+Root verified52 artifacts,134 source inputs and eight original process joins.
+The full registry now has526 unique keys, digest
+`f30bd88bba0529d35362666773ddcb6c32892caaea56aa81735a156a5b8ab6ed`.
+Never repoll93882 or repeat its exact source/pair/stage keys.
+
+Both pending decisions are approved and recorded: [restore read-gate admission](../developer/agent-context-map.md#disposition-m7-restore-read-gate-2026-10-06)
+and [ADR0052 exact-pair acceptance](../developer/agent-context-map.md#disposition-m7-policy-public-events-2026-10-06).
+No human decision is pending. The broad restore runner stays disabled until
+source rejoin and review against the current exact candidate.
+
+Three parallel writers have separate worktrees and source-only grants.
+`current_index_cleanup` owns Restore.Workflow/IO and a new native claim-handoff
+test in `/private/tmp/loopex-m7-restore-retained-publication`, based on db378.
+`private_task_causal_resume` owns only the retirement fixture in
+`/private/tmp/loopex-m7-private-task-cleanup-order`, based on6f437227.
+Its exact proposed pretrace provider-map assertion is retained at
+`/private/tmp/loopex-m7-retirement-map-protocol-proposal-6f437227-v1`, report
+`3d2da82969852c66d49c84e2563ae5f62e550868ab3e9cd56fbb1d5237d882d6`.
+It initializes the actual map protocol while validating the captured provider
+inside the same cutoff. Cold loading is outside this fixed trace claim.
+`cli_current_fixtures` owns the nine native policy-history/codec/schema/vector
+paths listed in `/private/tmp/loopex-m7-adr0052-implementation-inventory-ec9e8fbe-20261006-v1/report.md`
+SHA-256 `a4d47e21432d4eecc35665517df95a59834384552c4dbc0cff2ad430de69a4d3`,
+in `/Users/spuri/.codex/worktrees/m7-protocol-manifests/loopex`.
+No worker may run a VM or push; root owns integration and verification.
+
+Original57366 is fully collected PASS_FOCUSED_RETAINED_PUBLICATION_ONLY,
+120.715s/eight stages. All16 native publication cases pass current and floor,
+zero exclusions/skips; test compilation under warnings as errors passes.
+Source db378 is clean/frozen. Root verified54 immutable artifacts,51 actual/Git
+source rows and eight original process joins. Collection
+`M7/retained-publication-focused-runtime-original-collection-20261006-v1.json`
+digest `5bf7528c8837ed4c0bca99feb603fcd2de13232868dabdf239d7ef9d0d3dca69`;
+report `97493715dfa354b72e6e8ff5d672ca21babf8ad46db3ea63918794edba25fd6e`,
+inventory `cddce1af577474a028d3fe496705550e7d6e7ea2381055b40abe8b31446aca8b`;
+registry has518 unique keys. Never repoll57366 or repeat these exact stages.
+This selected helper proof supplies no claim custody, original-tx continuation,
+complete prefix/activation audit, public receipt or release. T15 remains open.
+
+Publication callback repair is committed eeb6, sole parent2beb. The new entry
+calls the full existing admission predicate before any native primitive.
+Independent2beb finding report is
+`aa2d725274dc70abc2b81add6dee859aad3f8e265fde2010b7c2b954e4db6ca0`;
+correction report
+`80c236d86252b260ba4b27cd490f68377f35ec06135ccddf834dd44a6fd328cd`.
+Root verified the inverse whole-file replacement. Runtime callback regression
+remains open until actual workflow wiring; no test-only public route was added.
+
+Original15740 is fully collected PASS_FORMAT_PREPARATION_ONLY,51.656s/11stages.
+Its one clean AST-equal formatter child is db378, parenteeb6. Collection
+`M7/retained-publication-format-original-collection-20261006-v1.json` digest
+`c6abd380ab987a7386391cf01972de4f32498841e46e6590dcdd6a74964a390b`;
+report `cf330d8bec32f7bc52e3d31580513ca958f7ddd0e44cb28c26f5771612f8cd1f`,
+inventory `649c94e6b6de820144f2e0c4af6675d2493efe4851b8abbd216477f645b46e92`.
+Root verified70 artifacts,51 actual/committed Git inputs and11 original joins.
+Never repoll15740 or rerun these exact source/pair/stage keys.
+
+Native liveness source a924 is committed, reviewed and formatted to clean
+`6f437227b248eb42fecc2661b96ca8b3565414c3`. Known-target native2 call/ref,
+subsequent :ok return and matching Boolean receive are required in observed
+order; missing or unsupported correlation fails. Initial false trace pattern,
+pre-mutation custody and finally restoration preserve original1000ms/8192-row,
+64 native observations, three schedules and original actor joins. Independent
+source review `be508127f8b426af651942674d88c18f3dfcb26d087067d69d69a209f13678e4`.
+Original97063 is fully collected PASS_FORMAT_PREPARATION_ONLY,134.818s/12stages.
+Collection `M7/retirement-liveness-format-original-collection-20261006-v1.json`
+digest `757bd3a39490e5599be4f9bf6e08036a9daefe7c7dabf7656da4c1fe02bacc37`;
+report `d2dabe8c3cdee29d36538d5c04fc961e52042eab6b71052b1d985fd1016b0ebd`,
+inventory `0408310558b87098f56c0d678ad5a3dd85a20286e0239a732c06b5c4ea98a5b6`.
+Root verified73 artifacts,134 actual/committed Git rows and12 original joins.
+One wrong grant variable refused before VM/output/stage creation; only corrected
+original97063 ran. Do not repoll or repeat. Actual native BIF traceability/order
+and intermediate live membership remain unproved. The later93882 floor failure
+is retained above; it supersedes the earlier disabled-packet state below.
+No private-topic push or source rejoin occurred.
+
+The diagnostic setup-only1000ms approval remains durable. Both later decisions
+are accepted above. Original T01–T19 stay78 done/95 todo/6 retired;
+added298 done/32 todo. No goal pause, completion, full test PASS or milestone
+closure is recorded. Earlier dated checkpoints below are historical.
+
 SAFE SOURCE CHECKPOINT, 2026-10-06: the sole VM is FREE and all workers are
 terminal. No goal pause or completion is recorded. Next root work is review of
 the liveness proposal and publication source below; no dependent grant exists.
