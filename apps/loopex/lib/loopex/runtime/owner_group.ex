@@ -46,8 +46,11 @@ defmodule Loopex.Runtime.OwnerGroup do
 
   @doc false
   def provider_cleanup(group, reference, sampled) do
-    bounded_call(group, {:provider_cleanup, reference, sampled},
-      {:monotonic, sampled.observation_deadline})
+    bounded_call(
+      group,
+      {:provider_cleanup, reference, sampled},
+      {:monotonic, sampled.observation_deadline}
+    )
   end
 
   # Concept: retaining cleanup identities cannot outlive the original work/window.
@@ -71,10 +74,15 @@ defmodule Loopex.Runtime.OwnerGroup do
       remaining ->
         case :gen_server.wait_response(request_id, min(remaining, @timer_slice_ms)) do
           {:reply, reply} ->
-            if bound_remaining(bound) > 0, do: reply,
+            if bound_remaining(bound) > 0,
+              do: reply,
               else: {:error, :owner_group_unavailable}
-          {:error, _reason} -> {:error, :owner_group_unavailable}
-          :timeout -> await_bounded_reply(request_id, bound)
+
+          {:error, _reason} ->
+            {:error, :owner_group_unavailable}
+
+          :timeout ->
+            await_bounded_reply(request_id, bound)
         end
     end
   end
@@ -116,24 +124,41 @@ defmodule Loopex.Runtime.OwnerGroup do
     else
       caretaker = if retainer == state.coordinator, do: nil, else: retainer
       caretaker_monitor = if caretaker, do: Process.monitor(caretaker), else: nil
+
       provider = %{
-        guard: guard, guard_monitor: Process.monitor(guard), worker: nil,
-        worker_monitor: nil, resource: nil, resource_monitor: nil,
-        caretaker: caretaker, caretaker_monitor: caretaker_monitor, retainer: retainer,
-        original_members: Enum.filter([guard, caretaker], &is_pid/1), grace: grace, cleanup: nil
+        guard: guard,
+        guard_monitor: Process.monitor(guard),
+        worker: nil,
+        worker_monitor: nil,
+        resource: nil,
+        resource_monitor: nil,
+        caretaker: caretaker,
+        caretaker_monitor: caretaker_monitor,
+        retainer: retainer,
+        original_members: Enum.filter([guard, caretaker], &is_pid/1),
+        grace: grace,
+        cleanup: nil
       }
+
       {:reply, :ok, %{state | providers: Map.put(state.providers, reference, provider)}}
     end
   end
 
-  def handle_call({:bind_provider, reference, worker}, {retainer, _}, state) when is_pid(worker) do
+  def handle_call({:bind_provider, reference, worker}, {retainer, _}, state)
+      when is_pid(worker) do
     case state.providers do
       %{^reference => %{worker: nil, retainer: ^retainer} = provider} ->
-        provider = %{provider | worker: worker, worker_monitor: Process.monitor(worker),
-          original_members: [worker | provider.original_members]}
+        provider = %{
+          provider
+          | worker: worker,
+            worker_monitor: Process.monitor(worker),
+            original_members: [worker | provider.original_members]
+        }
+
         {:reply, :ok, %{state | providers: Map.put(state.providers, reference, provider)}}
 
-      _ -> {:reply, {:error, :owner_group_unavailable}, state}
+      _ ->
+        {:reply, {:error, :owner_group_unavailable}, state}
     end
   end
 
@@ -141,10 +166,17 @@ defmodule Loopex.Runtime.OwnerGroup do
       when is_pid(resource) do
     case state.providers do
       %{^reference => %{guard: ^guard, resource: nil} = provider} ->
-        provider = %{provider | resource: resource, resource_monitor: Process.monitor(resource),
-          original_members: [resource | provider.original_members]}
+        provider = %{
+          provider
+          | resource: resource,
+            resource_monitor: Process.monitor(resource),
+            original_members: [resource | provider.original_members]
+        }
+
         {:reply, :ok, %{state | providers: Map.put(state.providers, reference, provider)}}
-      _ -> {:reply, {:error, :owner_group_unavailable}, state}
+
+      _ ->
+        {:reply, {:error, :owner_group_unavailable}, state}
     end
   end
 
@@ -172,7 +204,9 @@ defmodule Loopex.Runtime.OwnerGroup do
 
   def handle_info({:DOWN, monitor, :process, pid, _reason}, state) do
     providers = retire_provider(state.providers, monitor, pid)
-    completed = Enum.filter(providers, fn {_reference, provider} -> provider_complete?(provider) end)
+
+    completed =
+      Enum.filter(providers, fn {_reference, provider} -> provider_complete?(provider) end)
 
     # Concept: actor DOWN cannot discard the last native child identity.
     # Technical depth: ordinary retirement spends only the already selected
@@ -182,6 +216,7 @@ defmodule Loopex.Runtime.OwnerGroup do
       {:stop, :provider_cleanup_unproved, %{state | providers: providers}}
     else
       providers = retire_supervised_members(providers, state.workers, :await)
+
       if Enum.any?(providers, fn {_reference, provider} -> provider_complete?(provider) end),
         do: {:stop, :provider_cleanup_unproved, %{state | providers: providers}},
         else: {:noreply, %{state | providers: providers}}
@@ -210,13 +245,15 @@ defmodule Loopex.Runtime.OwnerGroup do
 
   defp select_cleanup(providers, reference, sampled, caller) do
     case providers do
-      %{^reference => provider} when caller == provider.guard or caller == provider.worker or
-                                       caller == provider.retainer ->
+      %{^reference => provider}
+      when caller == provider.guard or caller == provider.worker or
+             caller == provider.retainer ->
         cleanup = earlier_cleanup(provider.cleanup, sampled)
         notify_cleanup(provider, reference, cleanup)
         {{:ok, cleanup}, Map.put(providers, reference, %{provider | cleanup: cleanup})}
 
-      _ -> {{:error, :owner_group_unavailable}, providers}
+      _ ->
+        {{:error, :owner_group_unavailable}, providers}
     end
   end
 
@@ -237,20 +274,31 @@ defmodule Loopex.Runtime.OwnerGroup do
 
   defp begin_provider_cleanup(providers) do
     started = System.monotonic_time(:millisecond)
+
     Map.new(providers, fn {reference, provider} ->
       if is_nil(provider.cleanup) and provider_complete?(provider) do
         # No selected window exists for this failed startup-only record. Keep
         # its native identities for unproved fallback without selecting one.
         {reference, provider}
       else
-        {:ok, %{executor_observe_ms: observation}} = Loopex.Executor.cancellation_bounds(provider.grace)
-        sampled = %{cooperative_deadline: started + provider.grace,
-                    observation_deadline: started + observation}
+        {:ok, %{executor_observe_ms: observation}} =
+          Loopex.Executor.cancellation_bounds(provider.grace)
+
+        sampled = %{
+          cooperative_deadline: started + provider.grace,
+          observation_deadline: started + observation
+        }
+
         cleanup = earlier_cleanup(provider.cleanup, sampled)
         notify_cleanup(provider, reference, cleanup)
+
         if is_pid(provider.guard) do
-          send(provider.guard, {:loopex_provider_tree_stop, reference, make_ref(), self(), cleanup})
+          send(
+            provider.guard,
+            {:loopex_provider_tree_stop, reference, make_ref(), self(), cleanup}
+          )
         end
+
         {reference, %{provider | cleanup: cleanup}}
       end
     end)
@@ -261,29 +309,41 @@ defmodule Loopex.Runtime.OwnerGroup do
   defp await_provider_cleanup(providers, workers) do
     providers = retire_supervised_members(providers, workers)
     now = System.monotonic_time(:millisecond)
-    {expired, remaining} = Enum.split_with(providers, fn {_ref, provider} ->
-      is_nil(provider.cleanup) or now >= provider.cleanup.observation_deadline
-    end)
+
+    {expired, remaining} =
+      Enum.split_with(providers, fn {_ref, provider} ->
+        is_nil(provider.cleanup) or now >= provider.cleanup.observation_deadline
+      end)
 
     for {reference, provider} <- expired do
       if is_pid(provider.guard) do
         try do
-          Loopex.Runtime.SessionCoordinator.force_owned_provider(provider.guard, reference, provider.cleanup)
+          Loopex.Runtime.SessionCoordinator.force_owned_provider(
+            provider.guard,
+            reference,
+            provider.cleanup
+          )
         catch
           :exit, :provider_cleanup_unproved -> :ok
         end
       end
+
       if is_pid(provider.worker), do: Process.exit(provider.worker, :kill)
       if is_pid(provider.caretaker), do: Process.exit(provider.caretaker, :kill)
     end
 
     remaining = Map.new(remaining)
+
     if map_size(remaining) > 0 do
-      deadline = remaining |> Map.values() |> Enum.map(& &1.cleanup.observation_deadline) |> Enum.min()
-      wait = if Enum.all?(remaining, fn {_ref, provider} ->
-        is_nil(provider.guard) and is_nil(provider.worker) and is_nil(provider.resource) and
-        is_nil(provider.caretaker)
-      end), do: 0, else: wait_slice(deadline)
+      deadline =
+        remaining |> Map.values() |> Enum.map(& &1.cleanup.observation_deadline) |> Enum.min()
+
+      wait =
+        if Enum.all?(remaining, fn {_ref, provider} ->
+             is_nil(provider.guard) and is_nil(provider.worker) and is_nil(provider.resource) and
+               is_nil(provider.caretaker)
+           end), do: 0, else: wait_slice(deadline)
+
       receive do
         {:DOWN, monitor, :process, pid, _reason} ->
           await_provider_cleanup(retire_provider(remaining, monitor, pid), workers)
@@ -297,9 +357,11 @@ defmodule Loopex.Runtime.OwnerGroup do
           GenServer.reply(from, {:error, :owner_group_unavailable})
           await_provider_cleanup(remaining, workers)
 
-        {:EXIT, ^workers, _reason} -> :ok
+        {:EXIT, ^workers, _reason} ->
+          :ok
 
-        _message -> await_provider_cleanup(remaining, workers)
+        _message ->
+          await_provider_cleanup(remaining, workers)
       after
         wait ->
           :erlang.yield()
@@ -313,33 +375,45 @@ defmodule Loopex.Runtime.OwnerGroup do
   # payloads are inspected. Every query spends the same observation remainder,
   # avoiding a fresh late-monitor race when bulk termination begins.
   defp retire_supervised_members(providers, workers, progress \\ :once) do
-    completed = Enum.filter(providers, fn {_reference, provider} ->
-      provider_complete?(provider) and not is_nil(provider.cleanup)
-    end)
+    completed =
+      Enum.filter(providers, fn {_reference, provider} ->
+        provider_complete?(provider) and not is_nil(provider.cleanup)
+      end)
+
     if completed == [] do
       providers
     else
-      deadline = completed |> Enum.map(fn {_reference, provider} ->
-        provider.cleanup.observation_deadline
-      end) |> Enum.min()
+      deadline =
+        completed
+        |> Enum.map(fn {_reference, provider} ->
+          provider.cleanup.observation_deadline
+        end)
+        |> Enum.min()
+
       remaining = wait_slice(deadline)
+
       if remaining == 0 do
         providers
       else
         try do
-          members = GenServer.call(workers, :which_children, remaining)
-                    |> Enum.map(fn {_id, pid, _type, _modules} -> pid end)
+          members =
+            GenServer.call(workers, :which_children, remaining)
+            |> Enum.map(fn {_id, pid, _type, _modules} -> pid end)
+
           if System.monotonic_time(:millisecond) >= deadline do
             providers
           else
-            retained = Enum.reduce(completed, providers, fn {reference, provider}, retained ->
-              if Enum.any?(provider.original_members, &(&1 in members)),
-                do: retained,
-                else: Map.delete(retained, reference)
-            end)
-            if progress == :await and Enum.any?(retained, fn {_reference, provider} ->
-              provider_complete?(provider)
-            end) do
+            retained =
+              Enum.reduce(completed, providers, fn {reference, provider}, retained ->
+                if Enum.any?(provider.original_members, &(&1 in members)),
+                  do: retained,
+                  else: Map.delete(retained, reference)
+              end)
+
+            if progress == :await and
+                 Enum.any?(retained, fn {_reference, provider} ->
+                   provider_complete?(provider)
+                 end) do
               # Concept: a live native supervisor may still be reducing genuine EXITs.
               # Technical depth: a successful intermediate census spends only the
               # selected observation remainder; fault, nil window and expiry do
@@ -361,22 +435,30 @@ defmodule Loopex.Runtime.OwnerGroup do
     do: min(max(deadline - System.monotonic_time(:millisecond), 0), @timer_slice_ms)
 
   defp provider_complete?(provider),
-    do: is_nil(provider.guard) and is_nil(provider.worker) and is_nil(provider.resource) and
-      is_nil(provider.caretaker)
+    do:
+      is_nil(provider.guard) and is_nil(provider.worker) and is_nil(provider.resource) and
+        is_nil(provider.caretaker)
 
   defp retire_provider(providers, monitor, pid) do
     Enum.reduce(providers, %{}, fn {reference, provider}, retained ->
-      provider = cond do
-        provider.guard == pid and provider.guard_monitor == monitor ->
-          %{provider | guard: nil, guard_monitor: nil}
-        provider.worker == pid and provider.worker_monitor == monitor ->
-          %{provider | worker: nil, worker_monitor: nil}
-        provider.resource == pid and provider.resource_monitor == monitor ->
-          %{provider | resource: nil, resource_monitor: nil}
-        provider.caretaker == pid and provider.caretaker_monitor == monitor ->
-          %{provider | caretaker: nil, caretaker_monitor: nil}
-        true -> provider
-      end
+      provider =
+        cond do
+          provider.guard == pid and provider.guard_monitor == monitor ->
+            %{provider | guard: nil, guard_monitor: nil}
+
+          provider.worker == pid and provider.worker_monitor == monitor ->
+            %{provider | worker: nil, worker_monitor: nil}
+
+          provider.resource == pid and provider.resource_monitor == monitor ->
+            %{provider | resource: nil, resource_monitor: nil}
+
+          provider.caretaker == pid and provider.caretaker_monitor == monitor ->
+            %{provider | caretaker: nil, caretaker_monitor: nil}
+
+          true ->
+            provider
+        end
+
       Map.put(retained, reference, provider)
     end)
   end
