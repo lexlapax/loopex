@@ -1,5 +1,16 @@
 # M7 Implementation Tasks
 
+Built-chat original22058 is fully collected FAIL123.368s, current9/10 with
+warning-free project compilation and floor unrun. The new case reached two
+successful prompts/quit before inspecting the wrong temporary state root.
+Independent source review identifies the fixture's LOOPEX_HOME-over-file
+precedence mismatch. Root committed the exact one-literal correction as isolated
+e06acd5e; original60433 now verifies it on both toolchains. All assertions and
+prior failures remain. Collection identities and live handle are in the
+[restart checkpoint](M7-resume.md#technical-depth). Reviewed T15 claim-release
+source is saved at isolatedd6347049, untested/unjoined. No row closes yet.
+Original T01–T19 remains78 done/95 todo/6 retired; added302 done/39 todo.
+
 The maintainer directed work back to completing original task outcomes.
 Next is T06's configured built-command conversation: two prompts, clean quit,
 restart after changed file defaults, and retained history/instructions. A bounded

@@ -27,6 +27,36 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+Built-chat corrected source `e06acd5eaa2f892389179086966ab6493a41f04b`
+is running under root original60433, output
+`M7/built-chat-focused-20261006-v2`. The sole product VM is busy; do not start
+another product command until that original is terminal and collected.
+Runner `/private/tmp/m7-built-chat-focused-run-v2.py`, SHA
+`b2e8854915194d2e1fa3d36db2337653d454931d65758c924c882d07f9ebf2f3`,
+uses the complete842-key seed and the existing retained process engine.
+Independent review found no source blocker in raw17bbc6; root formatting proved
+whole-file non-line AST equality and made clean047de720. Original22058 then
+FAILED after123.368 seconds: current compilation passed and9/10 focused cases
+passed, but the built test inspected root/state while its LOOPEX_HOME override
+selected root/home. Removed fixture files supply no observed alternate-root
+claim. Source review confirms the accepted env-over-file precedence. Root's sole
+child e06acd5e aligns that one temporary environment value with root/state and
+preserves every assertion. No same-source retry or floor PASS is claimed.
+Collection `M7/built-chat-focused-20261006-v1/original-collection.json`, SHA
+`05c6cbbba5fbeeae27ee88c62d81dbca0f22973c219bcdb469bd2b4a17bc4856`,
+verifies37 artifacts,9 original process joins and the complete842-key registry,
+SHA `dbcad40ad3c2a786e5816b5d68afe27db82412e2cc841b89ee586c2332090c48`.
+Original22058 is fully collected and must not be repolled. No row closes.
+
+The already reviewed T15 claim-release source is saved in clean isolated
+`d6347049`, sole child ofb83725bd, with all four actual files matching the sealed
+22-row packet. Independent source report SHA
+`14ca0c9a9bbedae910eaecb70e2235b575b82fd97e8489dcada6e824f0351164`.
+It is unformatted, untested and unjoined; no new restore workstream is assigned.
+All source agents are stopped. T06.2/T06.4 may close only after both-pair focused
+proof and literal integration; hosted/attended T06.7 and required T16 proofs
+remain separately open. Original78/95/6 and added302/39 are unchanged.
+
 The maintainer asked to prioritize completing original tasks over further
 restore decomposition. Next is the complete configured built-chat workflow for
 T06: two prompts, clean quit, restart by retained session identity after changing
