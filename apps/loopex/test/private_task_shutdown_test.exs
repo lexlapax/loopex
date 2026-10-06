@@ -145,8 +145,8 @@ defmodule Loopex.PrivateTaskShutdownTest do
 
       send(
         observer,
-        {:supervisor_report, supervisor, pid, context, safe_reason(Keyword.get(report, :reason)),
-         safe_shutdown(shutdown)}
+        {:supervisor_report, self(), supervisor, pid, context,
+         safe_reason(Keyword.get(report, :reason)), safe_shutdown(shutdown)}
       )
     end
 
@@ -415,6 +415,18 @@ defmodule Loopex.PrivateTaskShutdownTest do
       evidence = evidence ++ records ++ drain_reports(runs, [])
       evidence = evidence ++ causal_classifications(evidence)
       retain(label, evidence)
+
+      # Concept: every observed supervisor report comes from its joined producer.
+      # Technical depth: the primary filter runs in the local logging caller.
+      # Its send precedes that supervisor's original DOWN, so report custody uses
+      # the existing actor fence rather than an added Logger wait allowance.
+      for report <- evidence, report["event"] == "supervisor_report" do
+        assert report["logger_producer"] == report["supervisor"]
+        assert Enum.any?(evidence, fn event ->
+                 event["event"] == "original_down" and
+                   event["pid"] == report["logger_producer"]
+               end)
+      end
 
       if mode == :explicit_stop do
         for run <- runs do
@@ -758,11 +770,12 @@ defmodule Loopex.PrivateTaskShutdownTest do
           | records
         ])
 
-      {:supervisor_report, supervisor, child, context, reason, shutdown}
+      {:supervisor_report, producer, supervisor, child, context, reason, shutdown}
       when is_map_key(watched, supervisor) ->
         drain_reports(runs, [
           %{
             "event" => "supervisor_report",
+            "logger_producer" => identity(producer),
             "supervisor" => identity(supervisor),
             "pid" => identity(child),
             "context" => Atom.to_string(context),
