@@ -79,6 +79,11 @@ defmodule Loopex.Store.Local.Artifacts do
   """
   @type handle :: %{required(:root) => binary(), optional(:fault_probe) => pid()}
 
+  # Concept: offline describe can inspect one captured use without a live root.
+  # Technical depth: this adapter-private handle carries only captured bytes and
+  # their selected filename digest. It serves describe alone and never opens IO.
+  @typep captured_use_handle :: {:captured_artifact_use, binary(), binary()}
+
   @doc """
   ## Concept
 
@@ -181,11 +186,18 @@ defmodule Loopex.Store.Local.Artifacts do
   def stat(_handle, _locator), do: {:error, :unknown_artifact}
 
   @impl Loopex.ArtifactStore
-  @spec describe(handle(), binary()) :: {:ok, ArtifactStore.artifact_use()} | {:error, term()}
+  @spec describe(handle() | captured_use_handle(), binary()) ::
+          {:ok, ArtifactStore.artifact_use()} | {:error, term()}
+  def describe({:captured_artifact_use, bytes, expected_digest}, @use_locator_prefix <> digest) do
+    if digest == expected_digest,
+      do: decode_use_bytes(bytes, expected_digest),
+      else: {:error, :unknown_artifact_use}
+  end
+
   def describe(%{root: root}, @use_locator_prefix <> use_digest) when is_binary(use_digest) do
     if mine?(use_digest) do
       case read_use(use_path(root, use_digest)) do
-        {:ok, bytes} -> decode_use(bytes)
+        {:ok, bytes} -> decode_use_bytes(bytes, use_digest)
         {:error, :enoent} -> {:error, :unknown_artifact_use}
         {:error, :artifact_integrity_failed} -> {:error, :artifact_integrity_failed}
         {:error, reason} -> {:error, {:artifact_unreadable, reason}}
@@ -432,20 +444,24 @@ defmodule Loopex.Store.Local.Artifacts do
 
   defp fault_point(_handle, _phase), do: :ok
 
-  # Concept: a stored use is trusted only after the bytes reproduce it exactly.
-  #
-  # Technical depth: `Canonical.encode/1` projects maps to key-sorted pairs, so
-  # decoding reverses that projection and then re-encodes. The comparison against
-  # the bytes on disk is what makes the file's own name a verified digest rather
-  # than a label. `:safe` refuses a term carrying a pid, port, reference,
-  # function, or an atom this VM does not already know, and a truncated or
-  # foreign file raises rather than decoding into a plausible record.
-  defp decode_use(<<131, 80, _compressed::binary>>), do: {:error, :artifact_integrity_failed}
-
-  defp decode_use(bytes) do
-    with [@use_tag, ordered] <- :erlang.binary_to_term(bytes, [:safe]),
+  @doc false
+  @spec decode_use_bytes(binary(), binary()) :: {:ok, map()} | {:error, term()}
+  # Concept: captured use bytes retain their exact transport and filename identity.
+  # Technical depth: enforce the existing raw ceiling before safe full-consumption
+  # decode. Only the current uncompressed two-member list ETF and exact canonical bytes
+  # enter. This pure helper does not close the use schema or bind an object,
+  # reference or job. The existing ArtifactStore.describe facade supplies those
+  # semantic checks through the captured handle; its synchronous telemetry span
+  # remains an effect of that facade, not an effect of this byte decoder.
+  def decode_use_bytes(<<131, 108, 2::unsigned-big-32, _::binary>> = bytes, expected_digest)
+      when is_binary(expected_digest) do
+    with true <- byte_size(bytes) <= ArtifactStore.max_use_bytes(),
+         true <- byte_size(expected_digest) == 64 and mine?(expected_digest),
+         {[@use_tag, ordered], used} <- :erlang.binary_to_term(bytes, [:safe, :used]),
+         true <- used == byte_size(bytes),
          artifact_use when is_map(artifact_use) <- unorder(ordered),
-         ^bytes <- Canonical.encode([@use_tag, artifact_use]) do
+         ^bytes <- Canonical.encode([@use_tag, artifact_use]),
+         ^expected_digest <- Canonical.digest_bytes(bytes) do
       {:ok, artifact_use}
     else
       _mismatch -> {:error, :artifact_integrity_failed}
@@ -453,6 +469,8 @@ defmodule Loopex.Store.Local.Artifacts do
   rescue
     ArgumentError -> {:error, :artifact_integrity_failed}
   end
+
+  def decode_use_bytes(_bytes, _expected_digest), do: {:error, :artifact_integrity_failed}
 
   defp unorder({:loopex_map, pairs}) when is_list(pairs) do
     if Enum.all?(pairs, &match?({_key, _value}, &1)),
