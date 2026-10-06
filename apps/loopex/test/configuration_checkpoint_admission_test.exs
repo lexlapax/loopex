@@ -109,7 +109,7 @@ defmodule Loopex.ConfigurationCheckpointAdmissionTest do
         assert calls(f) == 2
         assert recover(f).configuration == unchanged.configuration
         assert recover(f).active_checkpoint == covered.active_checkpoint
-        compact(f, "second-compact")
+        compact_with_boundary_proofs(f, "second-compact", covered)
       end
 
       committed = recover(f)
@@ -164,7 +164,11 @@ defmodule Loopex.ConfigurationCheckpointAdmissionTest do
                  )
 
       assert Enum.count(entries, &(&1 == summary_entry)) == 1
-      assert elem(List.last(entries), 1) == %{"role" => "assistant", "content" => "tail finished"}
+      assert elem(List.last(entries), 1) == %{
+               "role" => "assistant",
+               "content" => "tail finished",
+               "tool_calls" => []
+             }
 
       command =
         configure("too-small", %{"context_token_budget" => 600, "system_class_tokens" => 500})
@@ -191,6 +195,7 @@ defmodule Loopex.ConfigurationCheckpointAdmissionTest do
 
   for owner_kind <- [:compact, :automatic] do
     @owner_kind owner_kind
+    @busy_reason if(owner_kind == :compact, do: :maintenance_active, else: :configuration_not_settled)
     test "#{owner_kind} preparation refuses configure before resolution and joins on cancellation" do
       f = maintenance_fixture(@owner_kind, [])
       coordinator = owner(f)
@@ -200,7 +205,7 @@ defmodule Loopex.ConfigurationCheckpointAdmissionTest do
       assert_receive {:held_preparation, worker}, 5_000
       monitor = Process.monitor(worker)
       command = configure("while-preparing")
-      assert {:error, :configuration_not_settled} = Loopex.command(f.attachment, command)
+      assert {:error, @busy_reason} = Loopex.command(f.attachment, command)
       assert calls(f) == 0
       assert recover(f).configuration == f.initial
 
@@ -211,7 +216,7 @@ defmodule Loopex.ConfigurationCheckpointAdmissionTest do
       assert reason in [:killed, :shutdown]
       await_settled(f)
       assert Task.Supervisor.children(supervisor) == []
-      assert {:error, :configuration_not_settled} = Loopex.command(f.attachment, command)
+      assert {:error, @busy_reason} = Loopex.command(f.attachment, command)
       assert calls(f) == 0
       assert {:accepted, "settled"} = Loopex.command(f.attachment, configure("settled"))
       assert calls(f) == 1
@@ -228,9 +233,10 @@ defmodule Loopex.ConfigurationCheckpointAdmissionTest do
       assert_receive {:registered_resource, child}, 5_000
       child_monitor = Process.monitor(child)
       assert_receive {:holding, callback}, 5_000
+      assert_maintenance_owner(f, @owner_kind)
       callback_monitor = Process.monitor(callback)
 
-      assert {:error, :configuration_not_settled} =
+      assert {:error, @busy_reason} =
                Loopex.command(f.attachment, configure("during-summary"))
 
       assert calls(f) == 0
@@ -239,7 +245,7 @@ defmodule Loopex.ConfigurationCheckpointAdmissionTest do
       assert_receive {:cleanup_pending, ^child}, 5_000
       assert Process.alive?(child)
 
-      assert {:error, :configuration_not_settled} =
+      assert {:error, @busy_reason} =
                Loopex.command(f.attachment, configure("during-cleanup"))
 
       assert calls(f) == 0
@@ -260,6 +266,7 @@ defmodule Loopex.ConfigurationCheckpointAdmissionTest do
       f = maintenance_fixture(@owner_kind, [summary_turn("retained fact", hold: self())])
       begin_maintenance(f, @owner_kind)
       assert_receive {:holding, callback}, 5_000
+      assert_maintenance_owner(f, @owner_kind)
       callback_monitor = Process.monitor(callback)
 
       kind =
@@ -290,7 +297,7 @@ defmodule Loopex.ConfigurationCheckpointAdmissionTest do
       assert {:ok, attachment} = Loopex.attach(f.runtime, f.session, after_event_sequence: 0)
       resumed = %{f | attachment: attachment}
       command = configure("before-completion")
-      assert {:error, :configuration_not_settled} = Loopex.command(attachment, command)
+      assert {:error, @busy_reason} = Loopex.command(attachment, command)
       assert calls(f) == 0
       assert recover(f).configuration == before.configuration
       assert recover(f).active_checkpoint == before.active_checkpoint
@@ -300,7 +307,7 @@ defmodule Loopex.ConfigurationCheckpointAdmissionTest do
       assert session == f.session
       await_settled(resumed)
       assert summary_count(f) == 1
-      assert {:error, :configuration_not_settled} = Loopex.command(attachment, command)
+      assert {:error, @busy_reason} = Loopex.command(attachment, command)
       assert calls(f) == 0
       {:ok, entries, nil} = SessionState.projected_lineage(recover(f), :session, 0)
       assert {:accepted, "settled"} = Loopex.command(attachment, configure("settled"))
@@ -416,13 +423,30 @@ defmodule Loopex.ConfigurationCheckpointAdmissionTest do
   end
 
   defp maintenance_fixture(kind, summary_script, options \\ []) do
+    # Concept: the prelude must dispatch before cumulative history triggers maintenance.
+    # Technical depth: the identical 12,000-byte prompt costs over 4,000 tokens
+    # after canonical framing. The 5,000-token fixture data admits that prompt,
+    # while adding the unchanged 4,000-byte next prompt exceeds the same ceiling.
+    # Time, cleanup, attempt and parent bounds remain the captured fixture values.
     options =
-      if kind == :automatic, do: Keyword.put(options, :context_token_budget, 4_000), else: options
+      if kind == :automatic, do: Keyword.put(options, :context_token_budget, 5_000), else: options
 
     f =
       fixture([normal("old finished")] ++ summary_script ++ [normal("current finished")], options)
 
     prompt(f, "old", String.duplicate("o", 12_000))
+    prelude = recover(f)
+    assert prelude.maintenance_episodes == %{}
+    assert prelude.active_maintenance == nil
+    assert prelude.active_checkpoint == nil
+    assert [request] = Script.dispatched(f.model)
+    assert List.last(request.messages) == %{"role" => "user", "content" => String.duplicate("o", 12_000)}
+    assert Enum.any?(Fixture.records(f, f.session), fn row ->
+      row.payload.kind == "model_attempt_settled_v3" and
+        get_in(row.payload, ["result", "reply", "completion"]) == "natural"
+      end)
+    assert [ending] = Enum.filter(Fixture.events(f, f.session), &(&1.kind == "run.finished"))
+    assert ending["outcome"] == "completed"
     f
   end
 
@@ -486,6 +510,74 @@ defmodule Loopex.ConfigurationCheckpointAdmissionTest do
     assert completed.commands[id].result["disposition"] == "checkpointed"
     assert completed.commands[id].result["cleanup"] == "confirmed"
     assert is_binary(completed.active_checkpoint)
+  end
+
+  defp compact_with_boundary_proofs(f, id, prior) do
+    kind = "maintenance_attempt_settled_v3"
+    assert :ok = TestStore.delay_after_record(f.store, kind, self())
+    assert {:accepted, ^id} = Loopex.command(f.attachment, compact_command(id))
+
+    assert_receive {:record_linearized, waiter, _, ^kind, :session_journal_commit,
+                    {:committed, _, _}}, 5_000
+
+    monitor = Process.monitor(waiter)
+    pending = recover(f)
+    episode = pending.maintenance_episodes[pending.active_maintenance]
+    assert episode["stage"] == "checkpoint_pending"
+    assert pending.active_checkpoint == prior.active_checkpoint
+    assert prior.checkpoints[prior.active_checkpoint]["covered_range"]["first_kept"] == nil
+    now = System.system_time(:millisecond)
+    assert {:ok, candidate} = SessionState.preflight_maintenance_checkpoint(pending, now, fn -> :ok end)
+    assert is_map(candidate.consumed_range["first"])
+    assert candidate.prior_checkpoint_id == prior.active_checkpoint
+
+    prior_count = prior.checkpoints[prior.active_checkpoint]["covered_range"]["unit_count"]
+    assert candidate.covered_range["unit_count"] == prior_count + candidate.consumed_range["unit_count"]
+    assert candidate.covered_range["first"] == prior.checkpoints[prior.active_checkpoint]["covered_range"]["first"]
+    assert candidate.covered_range["first_kept"] == nil
+
+    # Concept: appended history cannot justify an invented old prefix or boundary.
+    # Technical depth: positive state comes from the held actual settlement.
+    # These transient negative copies never reach the Store or replace raw facts.
+    forged_prefix = put_in(pending.checkpoints[prior.active_checkpoint]["covered_range"]["unit_count"], prior_count + 1)
+    forged_boundary = put_in(pending.checkpoints[prior.active_checkpoint]["covered_range"]["first_kept"], candidate.consumed_range["last"])
+    forged_endpoint = put_in(pending.checkpoints[prior.active_checkpoint]["lineage"]["through_run_id"], List.last(pending.run_order))
+    refute candidate.consumed_range["first"] == candidate.consumed_range["last"]
+
+    for forged <- [forged_prefix, forged_boundary, forged_endpoint] do
+      assert {:error, :context_projection_invalid} = SessionState.preflight_maintenance_checkpoint(forged, now, fn -> :ok end)
+    end
+
+    TestStore.release(waiter)
+    assert_receive {:DOWN, ^monitor, :process, ^waiter, :normal}, 5_000
+    completed = await_settled(f)
+    assert completed.commands[id].result["disposition"] == "checkpointed"
+    assert completed.commands[id].result["cleanup"] == "confirmed"
+    assert completed.active_checkpoint != prior.active_checkpoint
+    assert completed.checkpoints[completed.active_checkpoint]["covered_range"] == candidate.covered_range
+    assert completed.conversation == pending.conversation
+    assert_replay(f)
+  end
+
+  defp assert_maintenance_owner(f, kind) do
+    state = recover(f)
+    episode = state.maintenance_episodes[state.active_maintenance]
+    assert episode["stage"] == "model_attempt_open"
+    assert summary_count(f) == 1
+
+    case kind do
+      :compact ->
+        assert episode.kind == "standalone_maintenance_episode_admitted_v1"
+        assert episode["command_id"] == "compact"
+        assert state.pending_compact["episode_id"] == state.active_maintenance
+
+      :automatic ->
+        assert episode.kind == "maintenance_episode_admitted_v1"
+        assert episode["origin"] == "automatic"
+        assert episode["trigger"] == "ordinary_limit"
+        assert episode["run_id"] == state.active_run_id
+        assert state.pending_compact == nil
+    end
   end
 
   defp prompt(f, id, content) do
