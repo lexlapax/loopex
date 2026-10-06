@@ -433,11 +433,13 @@ defmodule LoopexComposition.RestoreWorkflowTest do
     assert evidence.claim_count == 0 and evidence.opens == evidence.closes
     assert evidence.restore == %{phase: "claim_release", intent: true}
     assert evidence.work_cutoff == owned.work_cutoff
+
     [{:stopping, :complete, stop, cutoff}] =
       for {:stopping, :complete, _, _} = event <- events, do: event
 
     assert cutoff == stop + max(10_000, @grace + 2_000)
     assert evidence.cleanup_cutoff == cutoff
+
     assert [{:terminal_release_installed, ^cutoff}] =
              for({:terminal_release_installed, _} = event <- events, do: event)
 
@@ -449,6 +451,7 @@ defmodule LoopexComposition.RestoreWorkflowTest do
           do: path
 
     assert acquired == [destination_claim]
+
     refute Enum.any?(events, fn
              {:issued, _, {:restore_claim_create, %{directory: ^source_claim}}} -> true
              _ -> false
@@ -464,8 +467,10 @@ defmodule LoopexComposition.RestoreWorkflowTest do
     assert_complete_copy(fixture)
     assert File.read!(Path.join(fixture.destination, "store.log")) == fixture.store_bytes
     assert {:ok, backup_frames, :complete} = Log.decode_bytes(fixture.store_bytes)
+
     assert {:ok, copied_frames, :complete} =
              Log.decode_bytes(File.read!(Path.join(fixture.destination, "store.log")))
+
     assert {:ok, backup_state} = State.replay(backup_frames)
     assert {:ok, ^backup_state} = State.replay(copied_frames)
 
@@ -474,22 +479,40 @@ defmodule LoopexComposition.RestoreWorkflowTest do
     assert intent["plan"] == fixture.plan
     assert {:ok, binding} = RestoreCodec.state_binding(fixture.plan["source_state_placement"])
     assert intent["source_state_binding"] == binding
+
     assert {:ok, retirement} =
-             RestoreCodec.decode(:source_retirement, File.read!(Path.join(admin, "source-retirement")))
+             RestoreCodec.decode(
+               :source_retirement,
+               File.read!(Path.join(admin, "source-retirement"))
+             )
 
     assert retirement["disposition"] == "lost_source_host_excluded"
     assert retirement["source_state_binding"] == binding
-    assert retirement["host_evidence_sha256"] == fixture.plan["host_attestation"]["evidence_sha256"]
+
+    assert retirement["host_evidence_sha256"] ==
+             fixture.plan["host_attestation"]["evidence_sha256"]
+
     assert retirement["ledger_retirements"] ==
-             Enum.map(fixture.plan["ledgers"], &%{"relative_root" => &1["relative_root"], "record_sha256" => nil})
+             Enum.map(
+               fixture.plan["ledgers"],
+               &%{"relative_root" => &1["relative_root"], "record_sha256" => nil}
+             )
 
     for declaration <- fixture.plan["ledgers"] do
-      directory = Path.join([fixture.destination, declaration["relative_root"], "restore-lineage", "00000001"])
+      directory =
+        Path.join([
+          fixture.destination,
+          declaration["relative_root"],
+          "restore-lineage",
+          "00000001"
+        ])
+
       assert Enum.sort(File.ls!(directory)) == ["committed", "intent"]
       assert File.lstat(Path.join(directory, "source-retired")) == {:error, :enoent}
     end
 
     assert {:ok, _} = RestoreGuard.state(fixture.destination)
+
     assert {:ok, runtime} =
              LoopexComposition.TestHost.start(
                runtime_id: @runtime,
@@ -503,6 +526,7 @@ defmodule LoopexComposition.RestoreWorkflowTest do
              )
 
     monitor = Process.monitor(runtime.supervisor)
+
     on_exit(fn ->
       if Process.alive?(runtime.supervisor) do
         cleanup_monitor = Process.monitor(runtime.supervisor)
@@ -516,9 +540,13 @@ defmodule LoopexComposition.RestoreWorkflowTest do
     assert is_map(status)
     rows = effect_rows(runtime, fixture.session, nil, [])
     assert Enum.count(rows, &(&1.kind == "intent")) == 2
-    assert Enum.count(rows, &(&1.kind == "terminal" and &1.disposition == "receipt_committed")) == 2
+
+    assert Enum.count(rows, &(&1.kind == "terminal" and &1.disposition == "receipt_committed")) ==
+             2
+
     assert {:ok, original_frames, :complete} = Log.decode_bytes(fixture.store_bytes)
     assert {:ok, original_state} = State.replay(original_frames)
+
     receipts =
       for %{payload: %{kind: "executor_receipt_committed_v2"} = payload} <-
             original_state.sessions[fixture.session].records,
@@ -533,6 +561,7 @@ defmodule LoopexComposition.RestoreWorkflowTest do
 
     before = generation(Path.join(fixture.destination, "resource-packs/receipts/generation"))
     assert before["executor_identity"] == fixture.import_identity
+
     assert {:ok, imported} =
              ResourcePacks.add(fixture.workspace, fixture.git_source,
                workspace_ref: fixture.workspace_ref,
@@ -544,13 +573,17 @@ defmodule LoopexComposition.RestoreWorkflowTest do
              )
 
     assert imported["name"] == "second"
-    assert generation(Path.join(fixture.destination, "resource-packs/receipts/generation")) == before
+
+    assert generation(Path.join(fixture.destination, "resource-packs/receipts/generation")) ==
+             before
+
     assert File.read!(Path.join(fixture.workspace, "unknown-ready")) == "ready"
     assert File.lstat(fixture.source) == {:error, :enoent}
   end
 
   for endpoint <- [:directory, :regular, :symlink] do
-    test "lost source refuses a present #{endpoint} endpoint before any baseline mutation", context do
+    test "lost source refuses a present #{endpoint} endpoint before any baseline mutation",
+         context do
       fixture = context.root |> actual_cut() |> lose_source()
       install_source_endpoint(fixture, unquote(endpoint))
       before = File.lstat!(fixture.source)
@@ -573,7 +606,8 @@ defmodule LoopexComposition.RestoreWorkflowTest do
     end
   end
 
-  test "lost endpoint replacement between two actual absence checks refuses before intent", context do
+  test "lost endpoint replacement between two actual absence checks refuses before intent",
+       context do
     fixture = context.root |> actual_cut() |> lose_source()
     owned = launch(fixture.plan, :source_absence)
     {id, events} = hold_absence(owned, 1, 0, [])
@@ -589,22 +623,36 @@ defmodule LoopexComposition.RestoreWorkflowTest do
     fixture = context.root |> actual_cut() |> lose_source()
     owned = launch(fixture.plan, :source_absence)
     {id, events} = hold_absence(owned, 4, 0, [])
-    assert File.regular?(Path.join(fixture.destination, ".loopex-restore/lineage/00000001/intent"))
+
+    assert File.regular?(
+             Path.join(fixture.destination, ".loopex-restore/lineage/00000001/intent")
+           )
+
     File.mkdir!(fixture.source)
     send(owned.guardian, {:proceed, owned.reference, id})
     {result, events} = finish(owned, events)
-    assert {:joined, {:ok, %{restore_result: {:commit_unknown, "inventory_unavailable"}, release_claims: []}}, evidence} = result
+
+    assert {:joined,
+            {:ok,
+             %{restore_result: {:commit_unknown, "inventory_unavailable"}, release_claims: []}},
+            evidence} = result
+
     assert evidence.restore.intent == true and evidence.claim_count == 1
     assert evidence.opens == evidence.closes and evidence.work_cutoff == owned.work_cutoff
     [source_claim, destination_claim] = claims(fixture.plan)
     assert File.lstat(source_claim) == {:error, :enoent}
     assert File.dir?(destination_claim)
-    assert File.lstat(Path.join(fixture.destination, ".loopex-restore/lineage/00000001/committed")) == {:error, :enoent}
+
+    assert File.lstat(
+             Path.join(fixture.destination, ".loopex-restore/lineage/00000001/committed")
+           ) == {:error, :enoent}
+
     for declaration <- fixture.plan["ledgers"] do
       original = Path.join([fixture.backup, declaration["relative_root"], "generation"])
       copied = Path.join([fixture.destination, declaration["relative_root"], "generation"])
       assert File.read!(copied) == File.read!(original)
     end
+
     refute Enum.any?(events, &match?({:terminal_release_installed, _}, &1))
     exact_joins(owned)
   end
@@ -620,11 +668,15 @@ defmodule LoopexComposition.RestoreWorkflowTest do
     assert Enum.count(events, &match?({:acknowledged, _, :source_absence, :error}, &1)) == 9
     assert Enum.count(events, &match?({:issued, _, :source_absence}, &1)) == 10
     assert {:issued, ^id, :source_absence} = hd(events)
-    assert Enum.count(events, &match?({:issued, _, {:restore_phase, "destination_proofs"}}, &1)) == 1
+
+    assert Enum.count(events, &match?({:issued, _, {:restore_phase, "destination_proofs"}}, &1)) ==
+             1
+
     refute Enum.any?(events, &match?({:issued, _, {:restore_phase, "claim_release"}}, &1))
     root_admin = Path.join(fixture.destination, ".loopex-restore/lineage/00000001")
     committed = Path.join(root_admin, "committed")
     assert File.lstat(committed) == {:error, :enoent}
+
     retained =
       for path <-
             [Path.join(root_admin, "intent"), Path.join(root_admin, "source-retirement")] ++
@@ -645,14 +697,19 @@ defmodule LoopexComposition.RestoreWorkflowTest do
     assert Map.drop(placement(moved), ["expanded_root"]) == Map.drop(captured, ["expanded_root"])
     send(owned.guardian, {:proceed, owned.reference, id})
     {result, events} = finish(owned, events)
+
     assert {:joined,
-            {:ok, %{restore_result: {:commit_unknown, "inventory_unavailable"}, release_claims: []}},
+            {:ok,
+             %{restore_result: {:commit_unknown, "inventory_unavailable"}, release_claims: []}},
             evidence} = result
+
     assert evidence.restore == %{phase: "destination_proofs", intent: true}
     assert evidence.claim_count == 1 and evidence.opens == evidence.closes
     assert evidence.work_cutoff == owned.work_cutoff
+
     [{:stopping, :complete, stop, cutoff}] =
       for {:stopping, :complete, _, _} = event <- events, do: event
+
     assert cutoff == stop + max(10_000, @grace + 2_000)
     assert evidence.cleanup_cutoff == cutoff
     assert Enum.count(events, &match?({:acknowledged, _, :source_absence, :error}, &1)) == 10
@@ -667,10 +724,14 @@ defmodule LoopexComposition.RestoreWorkflowTest do
     assert File.lstat(fixture.source) == {:error, :enoent}
     assert manifest(fixture.backup) == fixture.baseline
     assert {:error, :restore_incomplete} = RestoreGuard.state(fixture.destination)
+
     for declaration <- fixture.plan["ledgers"] do
       assert {:error, {:ledger_unavailable, :restore_incomplete}} =
-               Ledger.prepare(Path.join(fixture.destination, declaration["relative_root"]),
-                 declaration["executor_identity"], @grace)
+               Ledger.prepare(
+                 Path.join(fixture.destination, declaration["relative_root"]),
+                 declaration["executor_identity"],
+                 @grace
+               )
     end
   end
 
@@ -678,11 +739,13 @@ defmodule LoopexComposition.RestoreWorkflowTest do
     test "lost backup missing historical #{dependency} refuses before intent", context do
       fixture = actual_cut(context.root)
       relative = historical_dependency_path(fixture, unquote(dependency))
+
       for root <- [fixture.source, fixture.backup] do
         path = Path.join(root, relative)
         assert {:ok, %File.Stat{type: :regular, links: 1}} = File.lstat(path)
         File.rm!(path)
       end
+
       baseline = manifest(fixture.backup)
       plan = refresh_plan(fixture.plan, baseline, fixture.backup)
       fixture = lose_source(%{fixture | plan: plan, baseline: baseline})
@@ -701,7 +764,8 @@ defmodule LoopexComposition.RestoreWorkflowTest do
     assert_preintent_refusal(owned, %{fixture | baseline: changed}, "inventory_mismatch")
   end
 
-  test "lost native generation cannot use a different captured source ledger placement", context do
+  test "lost native generation cannot use a different captured source ledger placement",
+       context do
     fixture = context.root |> actual_cut() |> lose_source()
     [first | rest] = fixture.plan["ledgers"]
     altered = put_in(first, ["source_placement", "inode"], first["source_placement"]["inode"] + 1)
@@ -711,27 +775,52 @@ defmodule LoopexComposition.RestoreWorkflowTest do
     assert_preintent_refusal(owned, fixture, "invalid_current_history")
   end
 
-  test "lost source destination foreign claim refuses without touching either foreign owner", context do
+  test "lost source destination foreign claim refuses without touching either foreign owner",
+       context do
     fixture = context.root |> actual_cut() |> lose_source()
     [source_claim, destination_claim] = claims(fixture.plan)
+
     for claim <- [source_claim, destination_claim] do
       File.mkdir!(claim)
       File.write!(Path.join(claim, "owner"), "foreign", [:exclusive])
     end
+
     before = Enum.map([source_claim, destination_claim], &File.lstat!(Path.join(&1, "owner")))
     owned = launch(fixture.plan)
     {result, events} = finish(owned)
-    assert {:joined, {:ok, %{restore_result: {:not_committed, "inventory_unavailable"}, release_claims: []}}, evidence} = result
+
+    assert {:joined,
+            {:ok,
+             %{restore_result: {:not_committed, "inventory_unavailable"}, release_claims: []}},
+            evidence} = result
+
     assert evidence.claim_count == 0 and evidence.restore.intent == false
     assert evidence.opens == evidence.closes
-    assert Enum.map([source_claim, destination_claim], &File.lstat!(Path.join(&1, "owner"))) == before
-    assert Enum.all?([source_claim, destination_claim], &(File.read!(Path.join(&1, "owner")) == "foreign"))
+
+    assert Enum.map([source_claim, destination_claim], &File.lstat!(Path.join(&1, "owner"))) ==
+             before
+
+    assert Enum.all?(
+             [source_claim, destination_claim],
+             &(File.read!(Path.join(&1, "owner")) == "foreign")
+           )
+
     assert File.ls!(fixture.destination) == []
+
     refute Enum.any?(events, fn
-      {:issued, _, {:restore_claim_create, %{directory: ^source_claim}}} -> true
-      _ -> false
-    end)
-    assert Enum.any?(events, &match?({:acknowledged, _, {:restore_claim_create, %{directory: ^destination_claim}}, :foreign}, &1))
+             {:issued, _, {:restore_claim_create, %{directory: ^source_claim}}} -> true
+             _ -> false
+           end)
+
+    assert Enum.any?(
+             events,
+             &match?(
+               {:acknowledged, _, {:restore_claim_create, %{directory: ^destination_claim}},
+                :foreign},
+               &1
+             )
+           )
+
     exact_joins(owned)
   end
 
@@ -745,6 +834,7 @@ defmodule LoopexComposition.RestoreWorkflowTest do
 
   test "lost source requires every explicit host latestness and exclusion attestation", context do
     fixture = context.root |> actual_cut() |> lose_source()
+
     invocation = %{
       "work_ms" => @work,
       "cleanup_grace_ms" => @grace,
@@ -752,14 +842,18 @@ defmodule LoopexComposition.RestoreWorkflowTest do
       "prior_admin_authority" => "none",
       "prior_admin_evidence_sha256" => nil
     }
-    for field <- ~w(latest_cut no_post_cut_activity all_other_copies_excluded host_ledgers_validated) do
+
+    for field <-
+          ~w(latest_cut no_post_cut_activity all_other_copies_excluded host_ledgers_validated) do
       plan = put_in(fixture.plan, ["host_attestation", field], false)
       assert {:error, :invalid_restore_input} = Restore.first(plan, invocation)
     end
+
     for {field, value} <- [{"old_authority_termination", "unconfirmed"}, {"evidence_sha256", nil}] do
       plan = put_in(fixture.plan, ["host_attestation", field], value)
       assert {:error, :invalid_restore_input} = Restore.first(plan, invocation)
     end
+
     assert File.ls!(fixture.destination) == []
     assert Enum.all?(claims(fixture.plan), &(File.lstat(&1) == {:error, :enoent}))
     assert File.lstat(fixture.source) == {:error, :enoent}
@@ -780,7 +874,10 @@ defmodule LoopexComposition.RestoreWorkflowTest do
 
   defp assert_preintent_refusal(owned, fixture, code, events \\ []) do
     {result, _events} = finish(owned, events)
-    assert {:joined, {:ok, %{restore_result: {:not_committed, ^code}, release_claims: []}}, evidence} = result
+
+    assert {:joined, {:ok, %{restore_result: {:not_committed, ^code}, release_claims: []}},
+            evidence} = result
+
     assert evidence.restore.intent == false and evidence.claim_count == 0
     assert evidence.opens == evidence.closes and evidence.work_cutoff == owned.work_cutoff
     assert File.ls!(fixture.destination) == []
@@ -799,6 +896,7 @@ defmodule LoopexComposition.RestoreWorkflowTest do
     reference = owned.reference
     worker = owned.worker
     tag = owned.tag
+
     receive do
       {:restore_io, ^guardian, ^worker, ^reference, {:issued, id, :source_absence} = event} ->
         if completed == wanted do
@@ -807,14 +905,21 @@ defmodule LoopexComposition.RestoreWorkflowTest do
           send(guardian, {:proceed, reference, id})
           hold_absence(owned, wanted, completed, [event | events])
         end
-      {:restore_io, ^guardian, ^worker, ^reference, {:acknowledged, _, :source_absence, :error} = event} ->
+
+      {:restore_io, ^guardian, ^worker, ^reference,
+       {:acknowledged, _, :source_absence, :error} = event} ->
         hold_absence(owned, wanted, completed + 1, [event | events])
+
       {:restore_io, ^guardian, _worker, ^reference, event} ->
         hold_absence(owned, wanted, completed, [event | events])
+
       {^tag, result} ->
         flunk("restore ended before actual absence control: #{inspect(result)}")
     after
-      max(0, owned.work_cutoff + max(10_000, @grace + 2_000) - System.monotonic_time(:millisecond)) ->
+      max(
+        0,
+        owned.work_cutoff + max(10_000, @grace + 2_000) - System.monotonic_time(:millisecond)
+      ) ->
         flunk("original restore work/cleanup cutoff reached")
     end
   end

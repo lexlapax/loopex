@@ -53,6 +53,7 @@ defmodule LoopexComposition.Restore.Workflow do
     ensure!(value!(io.({:directory_names, destination})) == [], "destination_not_empty")
     baseline = value!(io.({:manifest, backup, max_total}))
     ensure!(hash(baseline) == plan["manifest_sha256"], "inventory_mismatch")
+
     if available,
       do: ensure!(value!(io.({:manifest, source, max_total})) == baseline, "inventory_mismatch")
 
@@ -147,7 +148,8 @@ defmodule LoopexComposition.Restore.Workflow do
       publish!(destination, Path.join(ledger.directory, "intent"), ledger.intent, io)
 
       if available,
-        do: publish!(destination, Path.join(ledger.directory, "source-retired"), ledger.retired, io)
+        do:
+          publish!(destination, Path.join(ledger.directory, "source-retired"), ledger.retired, io)
 
       path = Path.join([destination, ledger.relative, "generation"])
 
@@ -409,10 +411,12 @@ defmodule LoopexComposition.Restore.Workflow do
             ledgers,
             fn ledger ->
               records = [{"intent", ledger.intent}]
+
               records =
                 if ledger.retired,
                   do: records ++ [{"source-retired", ledger.retired}],
                   else: records
+
               {ledger.directory, records}
             end
           )
