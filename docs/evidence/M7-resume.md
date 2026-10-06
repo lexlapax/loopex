@@ -29,7 +29,12 @@ physical restore implementation; it does not waive any full-history proof.
 
 LATEST: Native corrected source657257684edbea05079a3f17789e79c9cb00695c
 has the sole verification VM grant for v3. Worker restore_manifest_resume owns
-polling and terminal collection. Runner siblingM7/
+polling and terminal collection, live handle51888. Formatter direct child
+dc5797c7eeb99128fb2420f89141160376700c4b is pinned after all three AST
+equivalence checks; current dev/test compilation, metadata and new10focused
+cases pass,0excluded/0skipped, focused1.902s. Current adjacent is underway.
+Both-pair adjacent/ordinary proof remains pending; do not close the row yet.
+Runner siblingM7/
 configure-checkpoint-runner-65725768-v3/run.py digest
 ed436c8427b8c49e47d42dc95c47b0f615a62bc245cf9295ad5e14ffa2584457,
 packet inventoryaf6eed69c3256c8f7d0e0156a625ddddfa068288fa4b6a65123b428999f62cc1.
@@ -55,10 +60,17 @@ records, seven packet artifacts and exact two-file patch. Packet siblingM7/
 resource-capture-audit-source-20261005-v1, report digest
 e150cacaaba9c958a06ad07b8243c4dfb67f15dc76c0e6d0b865587421e64e5b,
 source inventoryb84357e14a374eeefdfb056be55afefec8d640ed4b05573cd154a4f6f2fdf6a9.
-Eleven added cases preserve all previous tests and cuts. Runner v1 is unexecuted;
-root read it and requested v2 private Hex/Rebar/cache/environment isolation and
-hook refusal before setup. Worker current_index_cleanup prepares source-only
-v2, no VM grant. Target focused52/2,adjacent33/0,ordinary623/3,
+Eleven added cases preserve all previous tests and cuts. Runner v1 is unexecuted.
+V2 is ready and independently root-reviewed, no VM grant:
+siblingM7/resource-capture-audit-runner-20261005-v2/run.py digest
+3d716addb15248312a95b291d353d02f14a44b1ef4cfa4e473d0f37cd19c8383,
+artifact inventory9529a0253505fc3d43894d71c60ee59b9f8b941d0bb45ac11c749e2a4c248b32.
+Root read all runner/helper source and the complete isolation-only v1→v2 delta,
+verified eight packet artifacts and unchanged helpers, Python/Bash syntax.
+Private Hex/Rebar/cache roots and broad child environment filtering now preserve
+host isolation; configured/active Git hooks refuse before formatter mutation.
+Worker current_index_cleanup is stopped pending native's terminal slot return.
+Target focused52/2,adjacent33/0,ordinary623/3,
 owned IO long2/52; zero skips. The third ordinary exclusion is real_provider,
 not a third long case. No Resource capture source is integrated.
 
