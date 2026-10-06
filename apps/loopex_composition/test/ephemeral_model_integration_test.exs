@@ -226,8 +226,11 @@ defmodule LoopexComposition.Ephemeral.ModelIntegrationTest do
       port = start_server([{:tool, "ls", %{"path" => "."}}])
       prior_roots = ephemeral_roots()
 
+      instruction_options =
+        if unquote(enabled), do: [instructions: fixture_instructions()], else: []
+
       assert {:error, :interaction_requires_session} =
-               Ephemeral.run("list the workspace",
+               Ephemeral.run("list the workspace", instruction_options ++ [
                  policy: DeferringPolicy,
                  model: "ollama:llama3.2",
                  base_url: "http://127.0.0.1:#{port}/v1",
@@ -236,7 +239,7 @@ defmodule LoopexComposition.Ephemeral.ModelIntegrationTest do
                  questions: unquote(enabled),
                  max_tokens: 128,
                  timeout: 15_000
-               )
+               ])
 
       assert_receive {:model_request, request}, 15_000
       assert request =~ "POST /v1/chat/completions HTTP/1.1"
@@ -435,6 +438,7 @@ defmodule LoopexComposition.Ephemeral.ModelIntegrationTest do
                base_url: "http://127.0.0.1:#{port}/v1",
                cwd: root,
                tools: :read_only,
+               instructions: fixture_instructions(),
                questions: true,
                max_tokens: 128,
                timeout: 15_000
@@ -486,6 +490,7 @@ defmodule LoopexComposition.Ephemeral.ModelIntegrationTest do
                  base_url: "http://127.0.0.1:#{port}/v1",
                  cwd: root,
                  tools: :read_only,
+                 instructions: fixture_instructions(),
                  questions: true,
                  max_tokens: 128,
                  timeout: 15_000
@@ -894,6 +899,18 @@ defmodule LoopexComposition.Ephemeral.ModelIntegrationTest do
     root
   end
 
+  # Concept: effect and question witnesses admit the complete selected tools.
+  # Technical depth: fixed host instructions keep the original 1,000-token
+  # system ceiling independent of the isolated fixture workspace path.
+  defp fixture_instructions do
+    %{
+      "version" => "fixture.model.v1",
+      "base" => "Complete the task using the selected tools and operator answers.",
+      "environment" => "",
+      "appendix" => ""
+    }
+  end
+
   defp responder_options(root, port, callback) do
     [
       policy: Policy,
@@ -956,6 +973,7 @@ defmodule LoopexComposition.Ephemeral.ModelIntegrationTest do
                base_url: "http://127.0.0.1:#{port}/v1",
                cwd: root,
                tools: :coding,
+               instructions: fixture_instructions(),
                max_tokens: 128,
                timeout: 15_000
              )
@@ -1001,6 +1019,7 @@ defmodule LoopexComposition.Ephemeral.ModelIntegrationTest do
                model: "ollama:llama3.2",
                cwd: workspace,
                tools: :coding,
+               instructions: fixture_instructions(),
                timeout: 15_000
              )
 
