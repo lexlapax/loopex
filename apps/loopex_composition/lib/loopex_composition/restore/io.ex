@@ -1445,7 +1445,9 @@ defmodule LoopexComposition.Restore.IO do
   # Technical depth: callers supply already compiled current bytes under proved
   # host exclusion/claim custody. This private, unwired operation grants neither;
   # its role selects existing caps, and its only temporary is the final's sibling.
-  defp execute({:restore_publish, role, path, bytes, mode, expected}) do
+  defp execute({:restore_publish, role, path, bytes, mode, expected} = operation) do
+    if not valid_operation?(operation), do: throw({:io_error, :invalid_io_request})
+
     cap = retained_publication_cap(role)
     temp = path <> ".tmp"
     ancestors = retained_publication_ancestors(Path.dirname(path))
