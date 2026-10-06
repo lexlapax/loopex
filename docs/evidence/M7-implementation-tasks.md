@@ -31,6 +31,18 @@ they do not mean the original task is complete. This follows the maintainer's
 
 ## Latest bounded progress, 2026-10-06
 
+Retirement native verification runs as original35594 at clean `3e77431d`,
+99 selected cases per supported pair. Protocol original63288 is fully collected
+as compilation failure; no runtime tests ran. New `717d7074` makes the exact
+one-line explicit range-step correction and awaits fresh verification.
+The accepted ADR0046 generic Core authored-bounds prerequisite is now an
+explicit added T11 item, supported by the source-gap audit and active isolated
+writer. The corrected Proposed0056 pair remains unaccepted at `f3fc594b`.
+No item closes here. T01–T19 originals78done/95todo/6retired, added299done/40todo;
+includingT00 originals78/101/7 and added303/41. Exact identities are in the
+restart checkpoint; earlier progress is historical.
+
+
 Protocol/cleanup native verification is running as original63288 at composed
 `a0b2ea1e`. Retirement payload formatting47584 passed both toolchains and is
 fully collected; runtime99/pair remains pending. Parallel agents prepare that
@@ -13373,6 +13385,8 @@ the still-open real-provider, live protocol, persistent-fault or closure lanes.
 - [ ] Prove both role demonstrations with unchanged child workspaces and separate/combined usage.
 
 ### Added implementation subtasks
+
+- [ ] Implement accepted ADR 0046 generic authored prompt bounds and follow-up absolute ceilings in Core: bind omission-preserving current command identity before defaults/clock, retain exact accepted/refused admission through uncertainty and replay, enforce earlier relative/absolute cutoff across preparation, staging, dispatch and recovery with one monotonic live-owner allowance, and prove no parent-ceiling inheritance or pre-stage dispatch after expiry. Keep native and wire activation proofs separate.
 
 - [x] Install/read immutable validated retained-object bytes with actual content-addressed filesystem durability, exclusive host ownership, symlink/root guards and physical crash/fsync/uncertainty proof on both pairs; use the existing GenesisCodec as a concrete client without inventing ledger or catalog schemas.
 - [ ] Pin the complete private delegation ledger byte recipe and closed object/mutation field grammars under accepted ADR 0046 semantics before implementing append/recovery/transaction reduction; refuse incomplete or corrupt current frames without introducing a compatibility decoder.

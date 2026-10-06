@@ -27,6 +27,46 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current proof, execution and source ownership
 
+ROOT VM OCCUPIED by original35594, retirement native v4 at exact clean
+`3e77431d004b2220ebdb79720fc8beeafd355755`. Enabled
+`M7/retained-source-retirement-focused-runtime-runner-20261006-v4`, config
+`649b12d88581b7c38c7aa51760cf66a85e4a0e89ffb4df9438b8b93060b7e650`, root
+review `963ddcaa6aa3e5b66cf239bef82af88187a04fa5989cd95b90186af76c7fbc95`.
+Output `M7/m7-retained-source-retirement-focused-runtime-v4`; complete677-key
+seed. Sixteen prospective stages,99 native tests per pair; no terminal result.
+Independent admission report `ba220b3d2963041f888bf029ac393e424a9bcd18924f121bf0d9e176f9e94b9d`,
+inventory `e6290421a95d9b9aba5866912717d0bcd996bde69aa88faac44d23c409435d45`,
+all seven artifacts rehashed by root. Collect35594 before another VM grant.
+
+Original63288 fully collected FAIL_OR_UNAVAILABLE61.943s/three stages,
+36 artifacts,59 actual/Git sources and all three process joins. Current
+compile fails on PolicyInteractionEvent's variable range without explicit step
+under Elixir1.20 warnings as errors. No runtime or floor test ran. Collection
+`M7/protocol-cleanup-native-runtime-original-collection-20261006-v2.json`
+SHA-256 `f7d85e903c0662de03d57d763331dc3dec53ca1587f9556ef5d02ab917171ade`;
+registry677 SHA-256 `d1ed4eed4e0490c165677c4c9f7a65dce33b074d7e148f78e2b7989fe8813a5a`.
+Never repoll63288. New source `717d7074ed79b7be8c977197928a605b1b4df94f` is
+a0b2's sole one-line guard child, `1..maximum//1`; agent prepares fresh disabled
+v3 with both-pair format checks and unchanged78-case native populations.
+
+Parallel Core authored-bounds writer owns the three Core modules and allocated
+fixtures in `/private/tmp/loopex-m7-authored-run-bounds` from d87e5923. Source
+inspection at e9f30809 report `bb7f6db8773d0129ab15e35d8daf0c3b2109d77f2d0116bb7deb8e66f800b99b`
+proves this accepted0046 prerequisite missing; added T11 row records it.
+Strict invalid bounds refusal stays separate from a valid pending-maintenance
+fixture. No public ActiveBounds field or wire generation activation is added.
+Another source agent independently audits generation oracle de01dcb9.
+
+Corrected Proposed0056 is `f3fc594becea5fe659ecb7a4af383286aa407824`, solecf828
+child, pair hashes Concept `85493c14a269b41a4d6b45a28994d665597894b3b69ee9cf265f90fb0cd4cae4`,
+Technical `3d1a80e749d467baaf37e423eca0f0e0c4d30f09ca9448f1855a56f4ed1437ac`.
+Source report `22159728da01aa97a30c672484fb8722924f013f6fe1bf4bdf8ac07d4fb7c2ba`,
+inventory `2a1625aea3ea2791f1d3d2724ce60e05f05168d79317561b87bd01b88cee5fc0`.
+Root read its complete two-path patch. Revised bytes await independent review
+and documentation proof; unasked/unaccepted. Sole asked maintainer decision
+remains0053. No checklist proof closes. Earlier run paragraphs are historical.
+
+
 ROOT VM OCCUPIED by original63288, bounded protocol/cleanup native verification
 at clean `a0b2ea1e1875bfa44957b5e3e97a7005a09ace70`, worktree
 `/private/tmp/loopex-m7-protocol-cleanup-native`. Enabled packet
