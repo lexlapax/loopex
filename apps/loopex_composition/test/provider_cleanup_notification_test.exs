@@ -55,7 +55,9 @@ defmodule LoopexComposition.ProviderCleanupNotificationTest do
   # Technical depth: Local commits the actual two runs. Original monitors are
   # established while callbacks are held, before their normal cleanup and exits.
   test "ordinary cleanup completes two real runs without notifying or replacing the coordinator" do
-    root = Path.join(System.tmp_dir!(), "loopex-cleanup-notice-#{System.unique_integer([:positive])}")
+    root =
+      Path.join(System.tmp_dir!(), "loopex-cleanup-notice-#{System.unique_integer([:positive])}")
+
     File.mkdir_p!(root)
     {:ok, store_pid} = Local.start_link(path: Path.join(root, "store.log"))
     {:ok, store} = Loopex.Store.new(Local, store_pid)
@@ -65,7 +67,11 @@ defmodule LoopexComposition.ProviderCleanupNotificationTest do
         runtime_id: "cleanup-notice",
         context_token_budget: 8_192,
         store: store,
-        model: %{module: Model, model: "scripted:v1", options: [observer: self(), max_tokens: 1_024]},
+        model: %{
+          module: Model,
+          model: "scripted:v1",
+          options: [observer: self(), max_tokens: 1_024]
+        },
         executor: %{
           module: Executor,
           reference: self(),
@@ -241,8 +247,12 @@ defmodule LoopexComposition.ProviderCleanupNotificationTest do
     assert System.monotonic_time(:millisecond) < cutoff
 
     case Loopex.next_event(attachment) do
-      {:ok, %{kind: "run.finished"} = event} -> Enum.reverse([event | events])
-      {:ok, event} -> until_finished(attachment, cutoff, [event | events])
+      {:ok, %{kind: "run.finished"} = event} ->
+        Enum.reverse([event | events])
+
+      {:ok, event} ->
+        until_finished(attachment, cutoff, [event | events])
+
       _ ->
         Process.sleep(5)
         until_finished(attachment, cutoff, events)
