@@ -64,7 +64,7 @@ defmodule LoopexComposition.Restore.Audit do
       ensure!(ArtifactStore.valid_reference?(reference))
       ensure!(hex?(reference.locator))
       use = Path.join(["artifacts", "uses", binary_part(reference.use_digest, 0, 2), reference.use_digest])
-      object = Path.join(["artifacts", "objects", binary_part(reference.locator, 0, 2), reference.locator])
+      object = Path.join(["artifacts", binary_part(reference.locator, 0, 2), reference.locator])
       ensure!(match?(%{"kind" => "regular"}, index[use]))
       ensure!(match?(%{"kind" => "regular"}, index[object]))
       require!(io.({:audit_artifact_use, root, reference, manifest}))

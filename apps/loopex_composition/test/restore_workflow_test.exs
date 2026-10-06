@@ -126,8 +126,15 @@ defmodule LoopexComposition.RestoreWorkflowTest do
         :artifact -> fixture.object_path
         :resource -> fixture.manifest_path
       end
-      File.rm!(Path.join(fixture.source, path))
-      File.rm!(Path.join(fixture.backup, path))
+      source_path = Path.join(fixture.source, path)
+      backup_path = Path.join(fixture.backup, path)
+      assert {:ok, %File.Stat{type: :regular, links: 1}} = File.lstat(source_path)
+      assert {:ok, %File.Stat{type: :regular, links: 1}} = File.lstat(backup_path)
+      assert File.read!(source_path) == File.read!(backup_path)
+      File.rm!(source_path)
+      File.rm!(backup_path)
+      assert File.lstat(source_path) == {:error, :enoent}
+      assert File.lstat(backup_path) == {:error, :enoent}
       baseline = manifest(fixture.backup)
       plan = refresh_plan(fixture.plan, baseline, fixture.backup)
       owned = launch(plan)
@@ -301,7 +308,7 @@ defmodule LoopexComposition.RestoreWorkflowTest do
     %{source: source, backup: backup, destination: destination, workspace: workspace,
       workspace_ref: workspace_ref, session: session, baseline: baseline, plan: plan,
       store_bytes: store_bytes, receipt_path: receipt_path,
-      object_path: Path.join(["artifacts", "objects", binary_part(reference["locator"], 0, 2), reference["locator"]]),
+      object_path: Path.join(["artifacts", binary_part(reference["locator"], 0, 2), reference["locator"]]),
       manifest_path: Path.join(["resource-packs", "manifests", manifest_digest <> ".etf"]),
       git_source: git_source, commit: commit, import_identity: import_generation["executor_identity"]}
   end
