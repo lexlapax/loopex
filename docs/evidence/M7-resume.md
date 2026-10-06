@@ -400,12 +400,46 @@ artifacts plus root inventory were verified. Enabled config
 The fresh canonical `M7/final-observation-format-stage-attempt-registry.json`
 was seeded empty at
 `1a5f5f5aa0ba2c8e25a6d0994e96d5911cd7194ee78b447a194f0321f46bdbf0`; never reset.
-New output is `M7/m7-final-observation-format-v1`. Current-index agent has the
-sole VM grant for this formatting-only campaign and owns original handle
-polling/collection. Preserve the clean or dirty resulting source, exact original
-EOF/status and process/group joins; stop first failure and return the slot only
-after terminal collection. No compiler, gate, ordinary/long or causal test,
-repair, retry, second VM, source switch, primary rejoin or push is granted.
+Original handle 79207 is terminal exit 0, fully collected; the exclusive VM
+slot is returned and this formatting grant has ended. Never poll or rerun it.
+Output `M7/m7-final-observation-format-v1` reports PASS_FORMAT_PREPARATION_ONLY
+in 118.565 seconds. All eleven stages passed, including fifteen non-line AST
+comparisons and both toolchain formatting checks. Clean formatter child
+`fdfe148889b76fae8738573d3442d2daf5e2c569` has sole parent `91eb4ae2`.
+Seven of fifteen owned files changed by formatting. No compilation, metadata
+gate, ordinary/long or causal test ran. Terminal report
+`ec9d2452b135889b107370c5a23a3ae79c48942198d13fcfdbfe6ba790c0a682`, inventory
+`9d6c7257af431df6b5b4df36d8220ed475926fc695450c8485275f8fc34a056d`, formatter patch
+`281c087278ecce9b8cd381ecb0fda0a7d5ada897bcdaac3b982d75facd3ec96f`.
+The format registry retains eleven unique consumed keys at
+`b0327bd285a11b823666d836d21bb83310a91ca32c2f01e513f630547e5b6a17`;
+never reset it. Root independently verified 77 artifacts, all eleven original
+stage/status/EOF records and absent PID/group pairs, 132 actual Git source
+records, 264 snapshot blob identities, the complete NUL tree and exact patch.
+Sealed root audit `M7/final-observation-format-root-audit-20261005-v1`, result
+`ff3ebf6f40bde20a8cc713e0347697adba4883effcd029faa2d4d2e72b0ab6db`, inventory
+`f42f10c618a8b3eb57048e602806f980ff72f9626c07bf5ca68ff1408ad04920`.
+
+Root saved separate LOCAL TEST-ONLY control
+`22fb279b46a62a0a32492367ffb041e994b26a69`, sole parent `fdfe1488`, in
+`/private/tmp/loopex-m7-restore-old-order-causal-control` on
+`codex/m7-restore-old-order-causal-control`. Its only six-line change moves the
+expiry block after clean admission. Removing that block reconstructs identical
+complete IO bytes; the complete test file and all other paths are unchanged.
+Boolean repair, private barrier, real monitors and existing bounds remain.
+No runtime has executed on this control; do not push or merge it into product.
+Root audit `M7/final-observation-old-order-control-root-audit-20261005-v1`
+retains seven mode-0444 artifacts, full-index patch and complete Git tree;
+inventory `ce9895c5336246d82a201a3ca253f933b2eba78f4a52ee044434dede9ec79a61`.
+Independent source review and a separately disabled causal runner are pending.
+Collector/control/success mechanics are saved at the source-only boundary in
+`/private/tmp/loopex-m7-final-observation-proof-mechanics-20261005-v1`, thirty-three
+listed artifacts plus inventory. Static completion audit is pending; both final
+source/config revisions remain unset and both configurations are disabled.
+Current-index agent now owns only completion of one disabled causal runner and
+collector proposal pinned to the actual formatted source and local control.
+No VM or registry activation is granted. Subsequent corrected paired proof must
+admit retained exact-source formatting evidence without repeating formatters.
 
 PRE-INTENT CORRECTION: clean frozen
 `c71e8dc88f0a49a1fe613fbbc5940824ad296fc1` on

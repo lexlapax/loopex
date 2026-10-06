@@ -114,8 +114,16 @@ Git patches and exact reconstruction of the original 108 IO cases. Independent
 source review found no blocker; root verified its five artifacts and eighty-five
 exact input pins. Clean root integration `91eb4ae2` joins the correction without
 conflicts and preserves every old IO case plus the unchanged nine expanded
-workflow cases. No formatter, compiler, test or causal control has executed on
-the integration. The separately owned runner/collector proposal is disabled.
+workflow cases. Formatting-only original 79207 is collected, exit 0, in
+118.565 seconds; clean child `fdfe1488` passes all fifteen non-line AST checks
+and both supported formatter checks. Root verified 77 sealed artifacts,
+eleven original stages/consumed keys and absent PID/group pairs, 132 actual Git
+source records, 264 snapshot blob identities and the exact formatter patch.
+No compilation, gate or test ran on the resulting source. Separate local
+test-only control `22fb279b`, direct child of `fdfe1488`, changes only the six-line
+expiry-block ordering and preserves all test bytes, monitors and bounds.
+It remains unexecuted and must not be merged or pushed as product source.
+The separately owned causal runner/collector proposal is disabled.
 One added cleanup row stays open; no checkbox closes.
 Lost-source,
 repeated restore, fault/cleanup and helper-ledger proofs remain required.
