@@ -27,6 +27,53 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current proof, execution and source ownership
 
+ROOT VM FREE after original80431 PASS_FORMAT_PREPARATION_ONLY26.691s/eight
+stages. Source stayed exact `8f4b19fd3d37b60acba119ce8ec25948ec06379a`; all13
+AST comparisons and both formatters pass, eight Node/JSON files literal.
+All71 artifacts,30 actual/Git inputs and eight original joins verified.
+Collection `M7/model-policy-integration-format-original-collection-20261006-v2.json`
+SHA-256 `55eaae27890a57e1d6b31eee3e86b2ffa337590392a301186630b6f10f1527c5`.
+Latest663-key registry SHA-256
+`dba6d792b75b1ef2fc208432d1df8b344e399b01728b4eb885d5b415a5f3d455`.
+Never repoll80431. Source-only combined protocol/cleanup candidate
+`a0b2ea1e1875bfa44957b5e3e97a7005a09ace70` is clean in
+`/private/tmp/loopex-m7-protocol-cleanup-native`. All21 protocol paths equal8f,
+two cleanup paths equalf9. Root composition proof
+`/private/tmp/loopex-m7-protocol-cleanup-native-source-a0b2ea1e-20261006-v1.json`
+SHA-256 `eb1386ece8b3716ed382d05a88454efe16bb6f1c2cdb691c1300cc776c880587`.
+No composed runtime or generation activation proof yet. Prospective native
+matrix25Core/14Protocol/22foreground/17daemon includes Node vectors,78/pair;
+counts are source planning, not observed PASS.
+
+Original90817 fully collected FAIL_OR_UNAVAILABLE73.477s/four stages,
+36artifacts,53actual/Git rows, all four joins. Current compile passes; first
+retirement lane12/20 passes, eight failures compare baseline directory links
+before/after required administrative child-directory installation. No adjacent
+or floor tests ran. Collection
+`M7/retained-source-retirement-focused-runtime-original-collection-20261006-v2.json`
+SHA-256 `ee1eaeaac9383994cd35fbf3eece0e699344f72492e14658fcbbdaee6320a5b7`.
+Never repoll90817. Root correction2e94976e preserves regular-file links/bytes/
+inodes/modes and subtracts only canonical new admin direct-child directories
+absent from the baseline, with unknown-directory and hardlink controls. An
+independent source audit found the new controls had not populated destination;
+sole childfe742eea fixes actual baseline copy before capture. Both revisions
+remain unexecuted, under review in `/private/tmp/loopex-m7-retirement-payload-projection`.
+No required test or original bound is removed. A corresponding generation-test
+oracle issue remains open.
+
+Prefix source `eb73d877791334eeda34bd644277a4658b5abcb9` is frozen/clean in
+`/private/tmp/loopex-m7-retained-generation-prefix`; packet report
+`accece778e77625817376969604ba75a33a5057cb3c587517c0ed9e3c60e43e4`, inventory
+`52e4d59e6b6a90bd842229f21f364ed2f7d696df41025cfd0fcf8780a1313f64`.
+Independent scoped source audit runs; it is not a release approval. The first
+release_reviewer role stopped before inspection because workspace-write could
+not meet its enforced read-only sandbox prerequisite. A separate default
+source auditor makes no enforced-isolation/release-review claim. No source
+runtime proof exists. ADR0056 remains a draft Proposed pair,0053 sole pending
+maintainer question. Task counts unchanged299/39 added and78/95/6 originals
+forT01–T19.
+
+
 ROOT VM OCCUPIED by original90817, exactf2b422bc native retirement runtime.
 Enabled `M7/retained-source-retirement-focused-runtime-runner-20261006-v2`,
 config `5b3fab7087557296904bd5e0c8b90038be33f240a37e5a9c6596c0f4ea03288b`,
