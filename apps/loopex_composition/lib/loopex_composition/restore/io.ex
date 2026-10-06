@@ -765,7 +765,9 @@ defmodule LoopexComposition.Restore.IO do
   defp restore_reason(_), do: "io_error"
 
   defp restore_terminal_reason(%{stop: stop, payload: {:error, code}})
-       when stop == :io_error and is_binary(code), do: restore_refusal_reason(code)
+       when stop == :io_error and is_binary(code) do
+    restore_refusal_reason(code)
+  end
 
   defp restore_terminal_reason(%{
          stop: :complete,
