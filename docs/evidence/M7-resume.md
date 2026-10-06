@@ -27,6 +27,48 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current proof, execution and source ownership
 
+LATEST EXECUTION, 2026-10-06: root original exec71975 owns the sole verification
+VM for frozen formatted010. Earlier FREE and active-handle entries below are
+historical. Reviewed intermediate scope is current then floor IO106/3 and
+lookup38/0, twenty-six stages including structural prerequisites and independent
+population checks. Known workflow39 failures remain recorded and unrun here;
+combined workflow, ordinary and long proofs remain required. No formatter,
+control, consumer or known failed stage is repeated.
+
+Enabled packet `M7/lookup-focused-success-runner-20261006-v1` config is
+`df324e56feb640ac17b2b10921f8f9749ab0d55c014edf32ea18e8326ecb3866`, root inventory
+`e68f0d5448a6f7c95547958eb1b1b605e867cb509943a8b77a69fb848aa0a3b1`.
+Source review `M7/lookup-focused-success-source-review-010-20261006-v1/report.md`
+is `a24debaef1f277cb17ae502df323fa8efbc74ef4da425ee813fac6988a88bca5`.
+Root independently admitted41 packet artifacts,113 external pins,133 actual
+Git/kind/mode/blob/hash source rows and full source/parent trees. The fresh
+registry preserves349 unique historical keys. Output is
+`M7/m7-lookup-focused-success-v1`; root alone collects71975. Source010 remains
+clean and frozen; no primary rejoin or broad task completion is claimed.
+
+Manifest7694 independent review found no correctness blocker. Both callers
+retain encoder-validated entries, unsigned64 aggregate bounds and canonical
+activation/reserved projections. No measured latency result; actual64 remains
+unproved. Review packet
+`/private/tmp/loopex-m7-manifest-validation-inspection-7694e0f3-20261006-v2/report.md`
+is `0e637d470fd7c6e03c0d5a6e2f8cab9a360a46684b472769a8e475b67a835a02`, inventory
+`1d876661ba9c4dcfca9dde09b6fe00a4bc87a89e3bfd9cf86ef2fcf7538c81c1`.
+Original-tx794 inspection found two blockers: early preflight bypassed two
+native foreign-claim collision fixtures, and restore leaked lookup's history
+refusal vocabulary. CLI owns a separate source repair preserving original
+assertions via held native-create collisions, adding early-exclusion controls,
+and mapping only restore history refusal to its accepted vocabulary. Packet
+`/private/tmp/loopex-m7-original-tx-inspection-79464b40-20261006-v1/report.md`
+is `8d9ddea2d5537840b894b0c5058ffdeb509c4975b661bf1290b409d0e6a2fd6e`, inventory
+`6762b0b75e9745456adfb7dbc4ec441e09a30704ab5e64d4b98ffe006f6d4de9`.
+
+The latest maintainer approval reconfirms1000ms only for diagnostic setup and
+the actual device-write handshake, as already disposed in the context map.
+Production and post-fault cleanup deadlines remain unchanged. Diagnostic
+cleanup-order implementation is still source-only in its separate writer;
+no worker holds a VM grant. Task totals remain78done/95todo/6retired original
+T01–T19 and298done/32todo added.
+
 LATEST STATE, 2026-10-06: all root exec handles are terminal and fully
 collected. Verification VM is FREE. Original2055 finished FAIL after381.768s,
 12 current stages: IO106/3 passed, workflow36/39 passed with three failures,
