@@ -3107,8 +3107,9 @@ defmodule Loopex.Runtime.SessionState do
   end
 
   # Concept: cumulative coverage authenticates originals rather than summaries.
-  # Technical depth: the prior first-kept identity must begin the new raw cut.
-  # Rebuild the complete prefix from original lineage units and hash original
+  # Technical depth: authenticate the prior prefix before deriving the new raw
+  # boundary. A nil first-kept identity ends that checkpoint's finite lineage;
+  # later runs may append new units. Rebuild the prefix and hash original
   # journal records directly. Never hash a previous digest or trust a summed
   # count without proving the exact source identities already substituted.
   defp maintenance_checkpoint_coverage(
@@ -3124,8 +3125,7 @@ defmodule Loopex.Runtime.SessionState do
     prior = state.checkpoints[state.active_checkpoint]
     prior_count = prior["covered_range"]["unit_count"]
 
-    with true <- prior["covered_range"]["first_kept"] == consumed["first"],
-         {:ok, originals} <-
+    with {:ok, originals} <-
            compaction_units_from(
              state,
              maintenance_scope(episode),
@@ -3133,6 +3133,10 @@ defmodule Loopex.Runtime.SessionState do
            ),
          covered = originals |> Enum.take(prior_count) |> Enum.flat_map(& &1.elements),
          true <- MapSet.new(covered, &Conversation.source_reference/1) == state.compacted_sources,
+         %{elements: [next | _]} <- Enum.at(originals, prior_count),
+         boundary = Conversation.source_reference(next),
+         true <- boundary == consumed["first"],
+         true <- maintenance_prior_boundary?(state, prior, boundary),
          {:ok, range} <-
            maintenance_covered_range(state, episode, originals, prior_count + count, check),
          true <-
@@ -3141,6 +3145,25 @@ defmodule Loopex.Runtime.SessionState do
     else
       {:error, _} = error -> error
       _ -> {:error, :context_projection_invalid}
+    end
+  end
+
+  # Concept: complete coverage ends at the original lineage retained then.
+  # Technical depth: nil cannot release an unsummarized historical tail. Its
+  # exact old source set must equal the authenticated prefix; a nonnil boundary
+  # retains its original identity even when more conversation follows it.
+  defp maintenance_prior_boundary?(state, prior, boundary) do
+    case prior["covered_range"]["first_kept"] do
+      nil ->
+        prior_sources =
+          state
+          |> lineage_elements(prior["lineage"]["through_run_id"])
+          |> MapSet.new(&Conversation.source_reference/1)
+
+        prior_sources == state.compacted_sources
+
+      first_kept ->
+        first_kept == boundary
     end
   end
 
@@ -6849,7 +6872,7 @@ defmodule Loopex.Runtime.SessionState do
       :ok ->
         SessionConfiguration.preflight_history(
           candidate,
-          Enum.flat_map(state.run_order, &elements(state, &1)),
+          uncompacted_elements(state, lineage_elements(state, :session)),
           state.run_order
         )
 
