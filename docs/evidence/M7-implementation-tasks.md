@@ -69,17 +69,26 @@ Root and independent source/runner reviews found no blocker. Root verified
 shared functions and the independent review's 370 hashed inputs. A separate
 220-artifact enabled packet and fresh object-call registry now grant the sole
 verification VM to current-index agent for one current/floor run. Original
-outer handle 13676 is live and polled/collected only by that agent. Both early
+outer handle 13676 is now terminal exit 0, fully collected and its slot returned.
+Both early
 formatter checks passed without changing source; current compilation and all
 five gates passed. All eight current focused/adjacent lanes passed with zero
 skips, including IO 106/2. Ordinary Composition passed 677/3 with zero skips in
 356.395 s; Local passed 302/2 in 180.623 s and long IO passed 2/106 in
 22.740 s, all zero skips. All eleven current lanes/gates passed. Floor
-compilation/five gates and IO 106/2 passed; remaining floor lanes are pending.
+compilation/five gates and all eleven lanes passed. Floor ordinary Composition
+677/3 passed in 347.614 s, Local 302/2 in 191.381 s and long IO 2/106 in
+22.703 s, all zero skips. Pipeline duration was 2,213.591 s. Root independently
+verified 246 sealed artifacts, 70 original stages/unique consumed keys and
+absent PIDs/groups, 124 actual/Git kind/mode sources, exact raw suite and separate
+summary counts, and complete NUL-delimited Git-tree bytes. The retained root
+audit and exact digests are in the restart record.
 Both formats
 precede compilation/tests and first failure stops the run. Expected IO 106/2,
 Composition 677/3 and long 2/106 stay unchanged; no checkbox closes. No old-source
-retry or primary rejoin is authorized.
+retry is authorized. Root has prepared a separate source-only integration of
+these eight byte-identical tested paths and the reviewed workflow/claim repair;
+its fifteen affected paths have not run a formatter, compiler or test.
 The first integrated available-source restore workflow is frozen in isolated
 `codex/m7-current-restore-workflow` at corrected child `32417023`, using existing
 open bounded T15 work. The artifact-path blocker is resolved in source; root
@@ -90,13 +99,24 @@ a separate cleanup defect: a second claim IO failure drops the known first
 claim from terminal cleanup despite unchanged roots and absent intent. CLI
 owns a separate source-only correction in `codex/m7-restore-preintent-cleanup`,
 now frozen at `c71e8dc8` with three new drafted cases and the original six
-unchanged. Root verified its packet/source preservation; independent review
-and runtime proof are pending. A separate inherited cleanup observation gap
+unchanged. Root verified its packet/source preservation and independent source
+review; runtime proof is pending. A separate inherited cleanup observation gap
 reopens the owned raw IO prerequisite: the caller's later maximum does not
 enforce the earlier final cleanup cutoff, and a late normal DOWN can reach
 clean admission first. CLI owns the isolated ordering/real long-witness source
 unit; original limits/outcomes/monitors remain required. No runtime reproduction
-or second VM is claimed. One added cleanup row stays open; no checkbox closes.
+or second VM is claimed. Final clean source `f30bb135` carries expiry-first
+admission, a separate inherited Boolean `clean?` repair and one real
+timely/late-observation long-bound case with a bounded optional timeline sink.
+Root verified its seventeen packet artifacts, forty-two actual/Git inputs,
+seven external inputs, eighty-eight unchanged source/test records, all three
+Git patches and exact reconstruction of the original 108 IO cases. Independent
+source review found no blocker; root verified its five artifacts and eighty-five
+exact input pins. Clean root integration `91eb4ae2` joins the correction without
+conflicts and preserves every old IO case plus the unchanged nine expanded
+workflow cases. No formatter, compiler, test or causal control has executed on
+the integration. The separately owned runner/collector proposal is disabled.
+One added cleanup row stays open; no checkbox closes.
 Lost-source,
 repeated restore, fault/cleanup and helper-ledger proofs remain required.
 Root retained the source gap inventory and ordinary-guard authority review.

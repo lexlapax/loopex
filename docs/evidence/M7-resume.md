@@ -182,7 +182,8 @@ Enabled config
 The old 43-key and eight-key registries and both failed outputs remain unchanged.
 Root grants current_index_cleanup the sole verification VM for one sequential
 current/floor run, new output `M7/m7-object-call-join-v1`. Original outer handle
-13676 is live; only that agent polls and collects it.
+13676 is now terminal exit 0 and fully collected by that agent. Its exclusive
+VM slot is returned; never poll or rerun that original handle.
 Both early formatter checks passed without a source change: current 0.398 s,
 floor 0.371 s. Current dev/test compilation and all five gates passed. All
 eight current focused/adjacent lanes passed with zero skips: IO 106/2 in
@@ -197,8 +198,10 @@ passed. All eight floor focused/adjacent lanes passed with zero skips: IO
 106/2 in 36.461 s, Model 28/0 in 27.143 s, Composition adjacent 21/0 in
 4.596 s, Receipt 32/0 in 21.477 s, Ledger 23/0 in 2.074 s, ReadOnly 22/0 in
 29.739 s, Local adjacent 21/0 in 17.853 s and Artifact 29/0 in 1.908 s.
-Floor ordinary Composition is running; Local/long lanes remain pending.
-Original handle 13676 is still live and only current-index agent collects it.
+Floor ordinary Composition passed 677/3 in 347.614 s, Local passed 302/2 in
+191.381 s and long IO passed 2/106 in 22.703 s, all with zero skips. Both pairs
+passed all eleven selected lanes. Pipeline duration was 2,213.591 seconds.
+Original handle 13676 is collected and its execution grant ended.
 The Darwin invalid-filename witness remains unavailable, not PASS.
 Both formatter checks precede compilation, gates and suites. Preserve all
 original statuses, raw EOF, source modes and exact process joins; stop at first
@@ -206,6 +209,40 @@ failure, collect the original handle, then return the slot. Only the reviewed
 eight-path AST-equal clean single-parent formatter child/re-pin is permitted.
 No source repair, old-source retry, second VM, full-fast/provider/release,
 attended/Linux lane, primary rejoin or full restore claim is granted.
+
+COLLECTED OBJECT-CALL PROOF: sibling `M7/m7-object-call-join-v1` retains terminal
+report `da42f26dad2ad258432582a37e1fd5b647d2e9410fafecdfdb060fbc3d5535b0`,
+inventory `7a67dce68d4475d36750adea3853fe41c91b2be05a2d24360171082cc7be0795`
+and the 70-key consumed object-call registry at
+`2d4c3ed5680489ad2911cb2ec1e14919be00ded7ebe6b7ca4c179063198e291e`.
+Root independently verified 246 sealed artifacts, all 70 original
+stage/started/raw EOF/wait/status records and absent PIDs/groups, 124 actual/Git
+kind/mode/blob sources, exact suite and separate summary counts, and complete
+NUL-delimited Git-tree bytes. Root audit sibling
+`M7/object-call-join-root-audit-20261005-v1` retains result
+`26bc894e352052fcafa5bf2dc0491f3d0314f53dc18318e7de9b0b7f9a33780c`, report
+`89054350c00217a44dab91a4c5858c03000771857be1fd824705b8c362c22b28`
+and inventory `5dd34d78bc8d32dc3905bb8f103475198fdca3f1b80b97561d4589c436b538c7`.
+All three audit files and inventory are mode 0444. This proves the selected
+prerequisites at `2826b30b`, not the newer workflow or cleanup corrections.
+The reopened owned IO prerequisite stays open for the known observation gap.
+
+Root owns a separate source-only rejoin in
+`/private/tmp/loopex-m7-restore-final-observation-integration`, branch
+`codex/m7-restore-final-observation-integration`, starting at primary
+`63d28d17b04d6d0d58ddad73ea2dd9ddee5daa56`. Merge `58b35af4` preserves all eight
+tested prerequisite paths byte-for-byte; merge `e65abd1` adds the reviewed
+`c71e8dc8` first-transition workflow and claim cleanup without conflicts.
+Fifteen source/test paths are affected. Neither integration commit has run a
+formatter, compiler or test. Independent cutoff review found no blocker; root
+verified its five artifacts, eighty-five exact input pins and two Git patches.
+Merge `91eb4ae28d4f28146ef17f0991336b0c3bea2108` then joined frozen `f30bb135`
+without conflicts. Thirteen other paths match their selected source parent
+exactly; removing the new witness region reconstructs the entire tested `2826`
+IO file, and the IO prefix through workflow/ledger clauses matches `f30` exactly.
+Remaining IO differences from `f30` are reviewed foundation formatting.
+The integration is clean and source only. A separately reviewed verification
+runner is still required; no VM grant exists.
 
 
 CURRENT RESTORE WORKFLOW: the source-only first transition is frozen in isolated
@@ -281,6 +318,45 @@ existing cutoffs/outcomes; add one real long-bound timely/late control through a
 fixed-state extension of the existing private probe/pause seam. Original
 monitors, genuine normal DOWN and separate termination/observation instants are
 required. No fake clock/signal, shorter cleanup window, retry or VM is granted.
+
+FINAL OBSERVATION SOURCE: clean frozen
+`f30bb135d4657735183cfc1c486f8691149bc122`, direct child of `14bbbcb3`, moves expiry
+before every clean result or terminal-release admission. It also repairs the
+inherited workflow's `clean?` nil result used by strict Boolean `and`. The fixed
+private barrier pauses an already-entered receive after closed/finished facts
+and the genuine normal linked EXIT, leaving original monitor DOWN for the
+admitted scan. Its continuation wait recurs against the same captured C across
+timer chunks. A single new long-bound case pairs timely and delayed observation
+under unchanged work 1,000 ms, grace 100 ms and cleanup window 10,000 ms.
+The optional test-local sink records actual actor/monitor/timestamp joins before
+the outcome assertion; a future runner must provide private physical mode-0700
+TMPDIR and an empty direct-child sink, then retain both complete timeline files.
+No witness, formatter, compiler or suite has run on these bytes.
+
+Hash-pinned sibling
+`M7/current-restore-observation-cutoff-source-f30bb135-20261005-v2` retains report
+`a24f3115a427422399fdefb7866f49e41e66afa5ef85f09ee73647634786bcb3` and inventory
+`8895f93c2cf114ab0cc42e738ff028e8561723142fbbe6014971e640dc3523d5`; actual packet
+modes are 0644. Root read the source and packet and verified all seventeen
+artifacts, forty-two actual/Git inputs, seven external inputs, eighty-eight
+unchanged source/test records and all three exact Git patches. Removing the one
+new region reconstructs the original 108-case IO file exactly. Source declares
+109 IO cases, 106 ordinary and three long; these are not measured populations.
+The complete nine-case workflow file remains unchanged. An additional
+source-only old-order causal control preserves the Boolean repair, barrier and
+chunked wait; no causal red has executed. Independent source review found no
+blocker. Sibling `M7/current-restore-observation-cutoff-independent-review-f30-20261005-v1`
+retains report `f172a1acca8a38394d76c61b00363bb7fc9dfea0e87e0b306c3870732a5db555`
+and inventory `5e972f6fcea586f325a8aa5b996c8408bc7131930eb6d9e01db924fec39ba60c`.
+Root verified its five mode-0444 artifacts and eighty-five exact input pins.
+Root source/rejoin audit sibling
+`M7/current-restore-observation-root-audit-20261005-v1` retains seven mode-0444
+artifacts, the fifteen actual/Git source inputs, complete integration patch and
+NUL Git tree. Report
+`6c2798728ea8d00055b28db828bc9a9eaa1ab8b5e2068cb40a8f702a4a69b6ea`, inventory
+`10de518ec009d37c08cd7012527f899ba6706820969c18d30b5f56b8987911ae`.
+Current-index agent owns a separate disabled runner/collector proposal only;
+it has no VM, source mutation or registry activation grant.
 
 PRE-INTENT CORRECTION: clean frozen
 `c71e8dc88f0a49a1fe613fbbc5940824ad296fc1` on
