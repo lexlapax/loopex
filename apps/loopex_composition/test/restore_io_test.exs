@@ -3303,7 +3303,8 @@ defmodule LoopexComposition.RestoreIOTest do
   end
 
   @tag :long_bound
-  test "late final guardian observation refuses join despite the real worker's timely normal termination", context do
+  test "late final guardian observation refuses join despite the real worker's timely normal termination",
+       context do
     sink = final_observation_sink()
     path = Path.join(context.root, "observation-record")
     File.write!(path, "retained")
@@ -3319,35 +3320,56 @@ defmodule LoopexComposition.RestoreIOTest do
       {guardian_worker_monitor, paused_at, facts, events} = final_observation_ready(owned, [])
       cutoff = facts.cleanup_cutoff
       caller_cutoff = owned.work_cutoff + 10_000
-      assert facts == %{finished: true, down: false, pending: false, open_count: 0,
-        worker_exit_seen: true, opens: 1, closes: 1, stop: :complete,
-        stop_at: facts.stop_at, work_cutoff: owned.work_cutoff, cleanup_cutoff: cutoff}
+
+      assert facts == %{
+               finished: true,
+               down: false,
+               pending: false,
+               open_count: 0,
+               worker_exit_seen: true,
+               opens: 1,
+               closes: 1,
+               stop: :complete,
+               stop_at: facts.stop_at,
+               work_cutoff: owned.work_cutoff,
+               cleanup_cutoff: cutoff
+             }
+
       assert [{:stopping, :complete, stop_at, ^cutoff}] =
-        for {:stopping, :complete, _, _} = event <- events, do: event
+               for({:stopping, :complete, _, _} = event <- events, do: event)
+
       assert stop_at == facts.stop_at
       assert cutoff == facts.stop_at + 10_000
       assert facts.stop_at <= owned.work_cutoff
       assert paused_at < cutoff and cutoff < caller_cutoff
+
       assert [{:acknowledged, _, {:open, token}, :opened}] =
-        for {:acknowledged, _, {:open, _}, :opened} = event <- events, do: event
+               for({:acknowledged, _, {:open, _}, :opened} = event <- events, do: event)
+
       assert [{:acknowledged, _, {:close, ^token}, :closed}] =
-        for {:acknowledged, _, {:close, _}, :closed} = event <- events, do: event
+               for({:acknowledged, _, {:close, _}, :closed} = event <- events, do: event)
 
       suspension_key = {:restore_observation_suspended, guardian}
+
       try do
-        suspended_at = if mode == :late do
-          assert :erlang.suspend_process(guardian)
-          Process.put(suspension_key, true)
-          at = System.monotonic_time(:millisecond)
-          assert at < cutoff
-          at
-        end
+        suspended_at =
+          if mode == :late do
+            assert :erlang.suspend_process(guardian)
+            Process.put(suspension_key, true)
+            at = System.monotonic_time(:millisecond)
+            assert at < cutoff
+            at
+          end
+
         worker_monitor = owned.worker_monitor
+
         receive do
           {:DOWN, ^worker_monitor, :process, ^worker, :normal} -> :ok
         after
-          max(0, cutoff - System.monotonic_time(:millisecond)) -> flunk("actual worker normal DOWN was not observed before original cleanup cutoff")
+          max(0, cutoff - System.monotonic_time(:millisecond)) ->
+            flunk("actual worker normal DOWN was not observed before original cleanup cutoff")
         end
+
         worker_down_at = System.monotonic_time(:millisecond)
         assert paused_at <= worker_down_at and worker_down_at < cutoff
         refute Process.alive?(worker)
@@ -3359,25 +3381,35 @@ defmodule LoopexComposition.RestoreIOTest do
           after
             max(0, cutoff - System.monotonic_time(:millisecond)) -> :ok
           end
+
           crossed_at = System.monotonic_time(:millisecond)
           assert crossed_at >= cutoff and crossed_at < caller_cutoff
         end
+
         continued_at = System.monotonic_time(:millisecond)
         send(guardian, {:continue_final_observation, reference})
-        resumed_at = if mode == :late do
-          assert Process.delete(suspension_key)
-          assert :erlang.resume_process(guardian)
-          System.monotonic_time(:millisecond)
-        end
-        {result, events, result_received_at} = final_observation_result(owned, caller_cutoff, events)
+
+        resumed_at =
+          if mode == :late do
+            assert Process.delete(suspension_key)
+            assert :erlang.resume_process(guardian)
+            System.monotonic_time(:millisecond)
+          end
+
+        {result, events, result_received_at} =
+          final_observation_result(owned, caller_cutoff, events)
+
         assert [{:worker_down_observed, ^guardian_worker_monitor, true, observed_at}] =
-          for {:worker_down_observed, _, _, _} = event <- events, do: event
+                 for({:worker_down_observed, _, _, _} = event <- events, do: event)
+
         assert [{:final_observation_continued, continuation, barrier_continued_at}] =
-          for {:final_observation_continued, _, _} = event <- events, do: event
+                 for({:final_observation_continued, _, _} = event <- events, do: event)
+
         assert continuation in [:continued, :expired]
         assert continued_at <= barrier_continued_at and barrier_continued_at <= observed_at
         assert worker_down_at <= observed_at
         assert observed_at < caller_cutoff
+
         if mode == :timely do
           assert observed_at < cutoff
         else
@@ -3386,38 +3418,73 @@ defmodule LoopexComposition.RestoreIOTest do
           assert resumed_at >= cutoff and resumed_at < caller_cutoff
           assert observed_at >= cutoff
         end
-        guardian_joined_at = final_observation_join(guardian, owned.guardian_monitor, caller_cutoff)
-        caller_joined_at = final_observation_join(owned.caller, owned.caller_monitor, caller_cutoff)
+
+        guardian_joined_at =
+          final_observation_join(guardian, owned.guardian_monitor, caller_cutoff)
+
+        caller_joined_at =
+          final_observation_join(owned.caller, owned.caller_monitor, caller_cutoff)
+
         assert File.read!(path) == "retained"
-        {result_tag, result_reason} = case result do
-          {:joined, {:ok, "retained"}, _} -> {"joined", nil}
-          {:unconfirmed, :worker_unjoined} -> {"unconfirmed", "worker_unjoined"}
-          _ -> {"unexpected", nil}
-        end
+
+        {result_tag, result_reason} =
+          case result do
+            {:joined, {:ok, "retained"}, _} -> {"joined", nil}
+            {:unconfirmed, :worker_unjoined} -> {"unconfirmed", "worker_unjoined"}
+            _ -> {"unexpected", nil}
+          end
+
         final_observation_retain(sink, mode, %{
-          "kind" => "restore_io_observation_witness_v1", "mode" => Atom.to_string(mode),
-          "caller" => inspect(owned.caller), "guardian" => inspect(guardian), "worker" => inspect(worker),
+          "kind" => "restore_io_observation_witness_v1",
+          "mode" => Atom.to_string(mode),
+          "caller" => inspect(owned.caller),
+          "guardian" => inspect(guardian),
+          "worker" => inspect(worker),
           "caller_monitor" => inspect(owned.caller_monitor),
           "guardian_monitor" => inspect(owned.guardian_monitor),
           "fixture_worker_monitor" => inspect(worker_monitor),
           "guardian_worker_monitor" => inspect(guardian_worker_monitor),
-          "work_ms" => 1_000, "cleanup_grace_ms" => 100, "cleanup_window_ms" => 10_000,
-          "admitted_at" => owned.work_cutoff - 1_000, "stop_at" => facts.stop_at,
-          "work_cutoff" => owned.work_cutoff, "cleanup_cutoff" => cutoff, "caller_cutoff" => caller_cutoff,
-          "barrier_paused_at" => paused_at, "guardian_suspended_at" => suspended_at,
-          "fixture_worker_down_observed_at" => worker_down_at, "fixture_worker_down_normal" => true,
-          "continuation_sent_at" => continued_at, "guardian_resumed_at" => resumed_at,
-          "barrier_continued_at" => barrier_continued_at, "barrier_continuation" => Atom.to_string(continuation),
+          "work_ms" => 1_000,
+          "cleanup_grace_ms" => 100,
+          "cleanup_window_ms" => 10_000,
+          "admitted_at" => owned.work_cutoff - 1_000,
+          "stop_at" => facts.stop_at,
+          "work_cutoff" => owned.work_cutoff,
+          "cleanup_cutoff" => cutoff,
+          "caller_cutoff" => caller_cutoff,
+          "barrier_paused_at" => paused_at,
+          "guardian_suspended_at" => suspended_at,
+          "fixture_worker_down_observed_at" => worker_down_at,
+          "fixture_worker_down_normal" => true,
+          "continuation_sent_at" => continued_at,
+          "guardian_resumed_at" => resumed_at,
+          "barrier_continued_at" => barrier_continued_at,
+          "barrier_continuation" => Atom.to_string(continuation),
           "worker_down_consumed_by_guardian_at" => observed_at,
           "result_received_at" => result_received_at,
-          "guardian_join_observed_at" => guardian_joined_at, "caller_join_observed_at" => caller_joined_at,
-          "opens" => 1, "closes" => 1, "finished" => true, "pending" => false,
-          "worker_exit_seen_before_barrier" => true, "open_count_at_barrier" => 0,
+          "guardian_join_observed_at" => guardian_joined_at,
+          "caller_join_observed_at" => caller_joined_at,
+          "opens" => 1,
+          "closes" => 1,
+          "finished" => true,
+          "pending" => false,
+          "worker_exit_seen_before_barrier" => true,
+          "open_count_at_barrier" => 0,
           "complete_original_actor_joins" => true,
-          "result" => result_tag, "reason" => result_reason})
+          "result" => result_tag,
+          "reason" => result_reason
+        })
+
         if mode == :timely do
-          assert {:joined, {:ok, "retained"}, %{opens: 1, closes: 1, stop: :complete,
-            work_cutoff: work_cutoff, cleanup_cutoff: ^cutoff}} = result
+          assert {:joined, {:ok, "retained"},
+                  %{
+                    opens: 1,
+                    closes: 1,
+                    stop: :complete,
+                    work_cutoff: work_cutoff,
+                    cleanup_cutoff: ^cutoff
+                  }} = result
+
           assert work_cutoff == owned.work_cutoff
         else
           assert result == {:unconfirmed, :worker_unjoined}
@@ -3438,17 +3505,26 @@ defmodule LoopexComposition.RestoreIOTest do
     worker = owned.worker
     reference = owned.reference
     tag = owned.tag
+
     receive do
-      {:restore_io, ^guardian, ^worker, ^reference, {:final_observation_paused, monitor, at, facts} = event} ->
+      {:restore_io, ^guardian, ^worker, ^reference,
+       {:final_observation_paused, monitor, at, facts} = event} ->
         {monitor, at, facts, Enum.reverse([event | events])}
+
       {:restore_io, ^guardian, ^worker, ^reference, {:issued, id, :stat} = event} ->
         send(guardian, {:proceed, reference, id})
         final_observation_ready(owned, [event | events])
+
       {:restore_io, ^guardian, ^worker, ^reference, event} ->
         final_observation_ready(owned, [event | events])
-      {^tag, result} -> flunk("real IO finished without establishing the fixed final observation barrier: #{inspect(result)}")
+
+      {^tag, result} ->
+        flunk(
+          "real IO finished without establishing the fixed final observation barrier: #{inspect(result)}"
+        )
     after
-      max(0, owned.work_cutoff - System.monotonic_time(:millisecond)) -> flunk("fixed final observation barrier was not established by original work cutoff")
+      max(0, owned.work_cutoff - System.monotonic_time(:millisecond)) ->
+        flunk("fixed final observation barrier was not established by original work cutoff")
     end
   end
 
@@ -3457,15 +3533,18 @@ defmodule LoopexComposition.RestoreIOTest do
     worker = owned.worker
     reference = owned.reference
     tag = owned.tag
+
     receive do
       {:restore_io, ^guardian, ^worker, ^reference, event} ->
         final_observation_result(owned, cutoff, events ++ [event])
+
       {^tag, result} ->
         at = System.monotonic_time(:millisecond)
         assert at < cutoff
         {result, events, at}
     after
-      max(0, cutoff - System.monotonic_time(:millisecond)) -> flunk("late observation result exceeded original caller cutoff")
+      max(0, cutoff - System.monotonic_time(:millisecond)) ->
+        flunk("late observation result exceeded original caller cutoff")
     end
   end
 
@@ -3476,7 +3555,8 @@ defmodule LoopexComposition.RestoreIOTest do
         assert at < cutoff
         at
     after
-      max(0, cutoff - System.monotonic_time(:millisecond)) -> flunk("original observation actor did not join inside original caller cutoff")
+      max(0, cutoff - System.monotonic_time(:millisecond)) ->
+        flunk("original observation actor did not join inside original caller cutoff")
     end
   end
 
@@ -3488,7 +3568,9 @@ defmodule LoopexComposition.RestoreIOTest do
   # retained, and monitor strings describe the actual original local actors.
   defp final_observation_sink() do
     case System.get_env("LOOPEX_RESTORE_OBSERVATION_EVIDENCE_DIR") do
-      nil -> nil
+      nil ->
+        nil
+
       directory ->
         assert {:ok, temp} = LoopexComposition.WorkspaceIdentity.resolve_path(System.tmp_dir!())
         assert {:ok, physical} = LoopexComposition.WorkspaceIdentity.resolve_path(directory)
@@ -3497,19 +3579,31 @@ defmodule LoopexComposition.RestoreIOTest do
         temp_stat = File.lstat!(temp)
         directory_stat = File.lstat!(physical)
         assert temp_stat.type == :directory and Bitwise.band(temp_stat.mode, 0o7777) == 0o700
-        assert directory_stat.type == :directory and Bitwise.band(directory_stat.mode, 0o7777) == 0o700
+
+        assert directory_stat.type == :directory and
+                 Bitwise.band(directory_stat.mode, 0o7777) == 0o700
+
         assert File.ls!(physical) == []
-        %{directory: physical, temp: temp, temp_identity: {temp_stat.major_device, temp_stat.inode},
-          directory_identity: {directory_stat.major_device, directory_stat.inode}}
+
+        %{
+          directory: physical,
+          temp: temp,
+          temp_identity: {temp_stat.major_device, temp_stat.inode},
+          directory_identity: {directory_stat.major_device, directory_stat.inode}
+        }
     end
   end
 
   defp final_observation_retain(nil, _mode, _record), do: :ok
+
   defp final_observation_retain(sink, mode, record) do
     temp_stat = File.lstat!(sink.temp)
     directory_stat = File.lstat!(sink.directory)
     assert temp_stat.type == :directory and Bitwise.band(temp_stat.mode, 0o7777) == 0o700
-    assert directory_stat.type == :directory and Bitwise.band(directory_stat.mode, 0o7777) == 0o700
+
+    assert directory_stat.type == :directory and
+             Bitwise.band(directory_stat.mode, 0o7777) == 0o700
+
     assert {temp_stat.major_device, temp_stat.inode} == sink.temp_identity
     assert {directory_stat.major_device, directory_stat.inode} == sink.directory_identity
     expected = if mode == :timely, do: [], else: ["timely.json"]
