@@ -1128,7 +1128,7 @@ defmodule Loopex.Executor.Local.RestoreGuard do
         end
       )
 
-    activation =
+    {activation, activation_entries} =
       reconstruct(entries, replacements, [
         {Path.join([@root_admin, "lineage", ordinal_name]),
          [{"baseline", baseline}, {"intent", intent_bytes}, {"source-retirement", retired_bytes}]}
@@ -1136,15 +1136,11 @@ defmodule Loopex.Executor.Local.RestoreGuard do
       ])
 
     ensure!(hash(activation) == committed["activation_manifest_sha256"])
-    {:ok, activation_entries} = RestoreCodec.manifest(activation, 18_446_744_073_709_551_615)
-
-    final =
+    {_final, final_entries} =
       reconstruct(activation_entries, [], [
         {Path.join([@root_admin, "lineage", ordinal_name]), [{"committed", committed_bytes}]}
         | committed_records
       ])
-
-    {:ok, final_entries} = RestoreCodec.manifest(final, 18_446_744_073_709_551_615)
 
     %{
       candidates: candidates,
@@ -1228,13 +1224,14 @@ defmodule Loopex.Executor.Local.RestoreGuard do
         end)
       end)
 
-    {:ok, bytes} =
-      RestoreCodec.encode(:manifest, [
-        "loopex:current-state-manifest:v1",
-        index |> Map.values() |> Enum.sort_by(& &1["path"])
-      ])
+    entries = index |> Map.values() |> Enum.sort_by(& &1["path"])
+    {:ok, bytes} = RestoreCodec.encode(:manifest, ["loopex:current-state-manifest:v1", entries])
 
-    bytes
+    # Concept: reuse the exact manifest entries whose canonical encoding was validated.
+    # Technical depth: encoding proves the entry and tree grammar and byte ceiling;
+    # retain manifest/2's total-size bound without decoding and encoding those same bytes again.
+    ensure!(Enum.reduce(entries, 0, &(&1["size"] + &2)) <= 18_446_744_073_709_551_615)
+    {bytes, entries}
   end
 
   defp verify_historical_entry!(root, entry) do
