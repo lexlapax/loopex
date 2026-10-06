@@ -72,8 +72,8 @@ verification VM to current-index agent for one current/floor run. Original
 outer handle 13676 is live and polled/collected only by that agent. Both early
 formatter checks passed without changing source; current compilation and all
 five gates passed. All eight current focused/adjacent lanes passed with zero
-skips, including IO 106/2. Ordinary Composition is running; the remaining
-ordinary/long and floor suites are pending. Both formats
+skips, including IO 106/2. Ordinary Composition passed 677/3 with zero skips in
+356.395 s; ordinary Local is running. Long and floor suites are pending. Both formats
 precede compilation/tests and first failure stops the run. Expected IO 106/2,
 Composition 677/3 and long 2/106 stay unchanged; no checkbox closes. No old-source
 retry or primary rejoin is authorized.

@@ -189,7 +189,8 @@ eight current focused/adjacent lanes passed with zero skips: IO 106/2 in
 42.647 s, Model 28/0 in 27.430 s, Composition adjacent 21/0 in 4.721 s,
 Receipt 32/0 in 24.040 s, Ledger 23/0 in 2.203 s, ReadOnly 22/0 in 19.953 s,
 Local adjacent 21/0 in 19.205 s and Artifact 29/0 in 1.965 s. Ordinary
-Composition is running; remaining ordinary/long and floor suites are pending.
+Composition passed 677/3 with zero skips in 356.395 s; ordinary Local is running.
+Remaining long and floor suites are pending.
 The Darwin invalid-filename witness remains unavailable, not PASS.
 Both formatter checks precede compilation, gates and suites. Preserve all
 original statuses, raw EOF, source modes and exact process joins; stop at first
@@ -243,6 +244,24 @@ One new open T15 cleanup subtask is tracked. T01–T19 originals remain
 78 done / 95 todo / 6 retired; added subtasks are 299 done / 25 todo.
 Including T00, originals are 78 / 101 / 7 and added subtasks 303 / 26.
 T15 added is 17 / 9; T16 added is 53 / 6. No checkbox closes from this review.
+
+The independent IO/guard review is sealed in
+`M7/current-restore-workflow-324-io-guard-review-20261005-v1`, report
+`0a6c9c78055267a66f1494dc4f4c7288c9968e2a28c010ca957d70041b122078`, inventory
+`c201aa0fb45dae067bf97577749aae4533944044776cc408b316e7232b718ff7`.
+Root read it and verified four artifacts, thirteen actual/Git/mode inputs and
+three external pointers. Its inherited clean-before-cutoff ordering concern
+is retained as a source-derived proof question, not an executed failure.
+Private agent is analyzing a deterministic witness read-only; no source edit or
+VM is granted for that concern.
+
+Primary task/resume checkpoint `82b043b0` is pushed to `m7`. Automatic approval
+review rejected the separate source-topic push to origin, stating authorization
+covers `m7` but not exporting `codex/m7-current-restore-workflow` to that remote.
+The explicit branch-push permission question is pending. Do not bypass or retry
+the rejected action without approval or new authorization evidence. Source
+`32417023` remains committed and clean locally; unaffected verification and
+cleanup correction continue.
 
 Root verified the complete gap inventory's three artifacts and thirty pinned
 Git records. Sibling
