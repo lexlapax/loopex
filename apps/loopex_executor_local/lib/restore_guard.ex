@@ -186,79 +186,147 @@ defmodule Loopex.Executor.Local.RestoreGuard do
 
     try do
       admin = history_path(captured, @root_admin)
+
       if Map.has_key?(index, @root_admin) do
         admin_names = names!(admin)
         ensure!(admin_names in [[], ["lineage"]])
-        names = if admin_names == [], do: [], else: names!(history_path(captured, [@root_admin, "lineage"]))
+
+        names =
+          if admin_names == [],
+            do: [],
+            else: names!(history_path(captured, [@root_admin, "lineage"]))
+
         ensure!(length(names) <= 64)
         ensure!(names == if(names == [], do: [], else: Enum.map(1..length(names), &ordinal/1)))
         if names == [], do: lookup_ensure!(not is_nil(claim), "restore_history_invalid")
         initial = %{candidates: %{}, epochs: %{}, previous: 0, tx_ids: MapSet.new(), lineage: []}
-        {state, receipts, pending} = Enum.reduce(names, {initial, %{}, nil}, fn name, {state, receipts, pending} ->
-          ensure!(is_nil(pending))
-          directory = history_path(captured, [@root_admin, "lineage", name])
-          actual = names!(directory)
-          allowed = ~w(baseline baseline.tmp intent intent.tmp source-retirement source-retirement.tmp committed committed.tmp)
-          ensure!(Enum.all?(actual, &(&1 in allowed)))
-          intent_name = cond do
-            "intent" in actual -> "intent"
-            "intent.tmp" in actual -> "intent.tmp"
-            true -> nil
-          end
-          if is_nil(intent_name) do
-            lookup_ensure!(not is_nil(claim), "restore_history_invalid")
-            ensure!(Enum.all?(actual, &(&1 in ["baseline", "baseline.tmp"])))
-            {state, receipts, lookup_observation(claim["tx_id"], nil, "destination_intent", "may_exist", claim)}
-          else
-            intent = record!(:intent, history_path(directory, intent_name))
-            ensure!(intent["ordinal"] == state.previous + 1 and ordinal(intent["ordinal"]) == name)
-            ensure!(intent["plan"]["prior_restore_count"] == state.previous)
-            lookup_ensure!(not MapSet.member?(state.tx_ids, intent["tx_id"]), "restore_conflict")
-            if name == List.last(names) do
-              lookup_claim_intent!(claim, root, intent)
-              lookup_ensure!(root in [intent["plan"]["source_state_root"], intent["plan"]["destination_state_root"]], "physical_destination_changed")
-              expected_placement = if root == intent["plan"]["destination_state_root"],
-                do: intent["destination_state_placement"], else: intent["plan"]["source_state_placement"]
-              lookup_ensure!(placements[root] == expected_placement, "physical_destination_changed")
-            end
-            phase = if root == intent["plan"]["source_state_root"],
-              do: lookup_outgoing!(captured, directory, intent, actual, state),
-              else: lookup_partial!(captured, directory, intent, actual, state)
-            complete = is_nil(phase) and root == intent["plan"]["destination_state_root"]
-            if complete do
-              next = complete_transition!(captured, directory, intent, state)
-              receipt = lookup_receipt!(directory, intent)
-              {next, Map.put(receipts, intent["tx_id"], receipt), nil}
+
+        {state, receipts, pending} =
+          Enum.reduce(names, {initial, %{}, nil}, fn name, {state, receipts, pending} ->
+            ensure!(is_nil(pending))
+            directory = history_path(captured, [@root_admin, "lineage", name])
+            actual = names!(directory)
+
+            allowed =
+              ~w(baseline baseline.tmp intent intent.tmp source-retirement source-retirement.tmp committed committed.tmp)
+
+            ensure!(Enum.all?(actual, &(&1 in allowed)))
+
+            intent_name =
+              cond do
+                "intent" in actual -> "intent"
+                "intent.tmp" in actual -> "intent.tmp"
+                true -> nil
+              end
+
+            if is_nil(intent_name) do
+              lookup_ensure!(not is_nil(claim), "restore_history_invalid")
+              ensure!(Enum.all?(actual, &(&1 in ["baseline", "baseline.tmp"])))
+
+              {state, receipts,
+               lookup_observation(claim["tx_id"], nil, "destination_intent", "may_exist", claim)}
             else
-              phase = phase || "destination_generations"
-              lookup_pending_previous!(captured, state, intent)
-              {state, receipts, lookup_observation(intent["tx_id"], intent["ordinal"], phase,
-                if(intent_name == "intent", do: "validated", else: "may_exist"), claim)}
+              intent = record!(:intent, history_path(directory, intent_name))
+
+              ensure!(
+                intent["ordinal"] == state.previous + 1 and ordinal(intent["ordinal"]) == name
+              )
+
+              ensure!(intent["plan"]["prior_restore_count"] == state.previous)
+
+              lookup_ensure!(
+                not MapSet.member?(state.tx_ids, intent["tx_id"]),
+                "restore_conflict"
+              )
+
+              if name == List.last(names) do
+                lookup_claim_intent!(claim, root, intent)
+
+                lookup_ensure!(
+                  root in [
+                    intent["plan"]["source_state_root"],
+                    intent["plan"]["destination_state_root"]
+                  ],
+                  "physical_destination_changed"
+                )
+
+                expected_placement =
+                  if root == intent["plan"]["destination_state_root"],
+                    do: intent["destination_state_placement"],
+                    else: intent["plan"]["source_state_placement"]
+
+                lookup_ensure!(
+                  placements[root] == expected_placement,
+                  "physical_destination_changed"
+                )
+              end
+
+              phase =
+                if root == intent["plan"]["source_state_root"],
+                  do: lookup_outgoing!(captured, directory, intent, actual, state),
+                  else: lookup_partial!(captured, directory, intent, actual, state)
+
+              complete = is_nil(phase) and root == intent["plan"]["destination_state_root"]
+
+              if complete do
+                next = complete_transition!(captured, directory, intent, state)
+                receipt = lookup_receipt!(directory, intent)
+                {next, Map.put(receipts, intent["tx_id"], receipt), nil}
+              else
+                phase = phase || "destination_generations"
+                lookup_pending_previous!(captured, state, intent)
+
+                {state, receipts,
+                 lookup_observation(
+                   intent["tx_id"],
+                   intent["ordinal"],
+                   phase,
+                   if(intent_name == "intent", do: "validated", else: "may_exist"),
+                   claim
+                 )}
+              end
             end
-          end
-        end)
-        if state.previous > 0 and (is_nil(pending) or pending["intent"] == "may_exist" and is_nil(pending["ordinal"]) and pending["tx_id"] != tx_id),
-          do: lookup_current!(captured, state)
+          end)
+
+        if state.previous > 0 and
+             (is_nil(pending) or
+                (pending["intent"] == "may_exist" and is_nil(pending["ordinal"]) and
+                   pending["tx_id"] != tx_id)),
+           do: lookup_current!(captured, state)
+
         if names == [], do: lookup_ensure!(claim["tx_id"] == tx_id, "restore_conflict")
+
         if pending && pending["tx_id"] == tx_id do
           {:pending, pending}
         else
           case Map.fetch(receipts, tx_id) do
             {:ok, receipt} ->
               current = is_nil(pending) and receipt["ordinal"] == state.previous
+
               if current do
                 if claim do
                   lookup_ensure!(claim["tx_id"] == tx_id, "restore_conflict")
-                  {:pending, lookup_observation(tx_id, receipt["ordinal"], "claim_release", "validated", claim)}
+
+                  {:pending,
+                   lookup_observation(
+                     tx_id,
+                     receipt["ordinal"],
+                     "claim_release",
+                     "validated",
+                     claim
+                   )}
                 else
                   {:committed, %{"receipt" => receipt, "view" => "current"}}
                 end
               else
                 {:committed, %{"receipt" => receipt, "view" => "historical"}}
               end
+
             :error ->
               if names == [],
-                do: {:pending, lookup_observation(tx_id, nil, "destination_intent", "may_exist", claim)},
+                do:
+                  {:pending,
+                   lookup_observation(tx_id, nil, "destination_intent", "may_exist", claim)},
                 else: lookup_absent_or_claim(tx_id, claim)
           end
         end
@@ -266,7 +334,8 @@ defmodule Loopex.Executor.Local.RestoreGuard do
         lookup_absent_or_claim(tx_id, claim)
       end
     rescue
-      _error in [MatchError, KeyError, ArgumentError] -> lookup_failure(tx_id, "restore_history_invalid")
+      _error in [MatchError, KeyError, ArgumentError] ->
+        lookup_failure(tx_id, "restore_history_invalid")
     catch
       {:lookup_refusal, code} -> lookup_failure(tx_id, code)
       :history_invalid -> lookup_failure(tx_id, "restore_history_invalid")
@@ -283,16 +352,30 @@ defmodule Loopex.Executor.Local.RestoreGuard do
   end
 
   defp lookup_observation(tx_id, ordinal, phase, intent, claim) do
-    observation = %{"kind" => "loopex_current_restore_observation_v1", "tx_id" => tx_id,
-      "ordinal" => ordinal, "phase" => phase, "intent" => intent, "cleanup" => "joined",
-      "claim" => if(is_nil(claim), do: "none", else: "retained"), "reason" => "none"}
+    observation = %{
+      "kind" => "loopex_current_restore_observation_v1",
+      "tx_id" => tx_id,
+      "ordinal" => ordinal,
+      "phase" => phase,
+      "intent" => intent,
+      "cleanup" => "joined",
+      "claim" => if(is_nil(claim), do: "none", else: "retained"),
+      "reason" => "none"
+    }
+
     {:ok, _} = RestoreCodec.encode(:observation, observation)
     observation
   end
 
   defp lookup_failure(tx_id, code),
-    do: {:error, %{"kind" => "loopex_current_restore_lookup_refusal_v1", "tx_id" => tx_id,
-      "code" => code, "cleanup" => "joined"}}
+    do:
+      {:error,
+       %{
+         "kind" => "loopex_current_restore_lookup_refusal_v1",
+         "tx_id" => tx_id,
+         "code" => code,
+         "cleanup" => "joined"
+       }}
 
   defp lookup_ensure!(true, _code), do: :ok
   defp lookup_ensure!(_, code), do: throw({:lookup_refusal, code})
@@ -300,14 +383,20 @@ defmodule Loopex.Executor.Local.RestoreGuard do
   # Concept: an administrative claim names the actual current transition, not the queried historical receipt.
   # Technical depth: its canonical digest, root role and transaction must all agree with the retained final intent.
   defp lookup_claim_intent!(nil, _root, _intent), do: :ok
+
   defp lookup_claim_intent!(claim, root, intent) do
-    role = cond do
-      root == intent["plan"]["destination_state_root"] -> "destination"
-      root == intent["plan"]["source_state_root"] -> "source"
-      true -> nil
-    end
-    lookup_ensure!(not is_nil(role) and claim["state_root"] == root and claim["role"] == role and
-      claim["tx_id"] == intent["tx_id"] and claim["plan_digest"] == intent["plan_digest"], "restore_conflict")
+    role =
+      cond do
+        root == intent["plan"]["destination_state_root"] -> "destination"
+        root == intent["plan"]["source_state_root"] -> "source"
+        true -> nil
+      end
+
+    lookup_ensure!(
+      not is_nil(role) and claim["state_root"] == root and claim["role"] == role and
+        claim["tx_id"] == intent["tx_id"] and claim["plan_digest"] == intent["plan_digest"],
+      "restore_conflict"
+    )
   end
 
   # Concept: a pending higher transition cannot hide an earlier ledger's present binding.
@@ -316,89 +405,182 @@ defmodule Loopex.Executor.Local.RestoreGuard do
   defp lookup_pending_previous!(root, previous, intent) do
     outgoing = history_root(root) == intent["plan"]["source_state_root"]
     named = Map.new(intent["generations"], &{&1["relative_root"], &1})
+
     if previous.previous > 0 and outgoing,
-      do: lookup_ensure!(placement!(root) == previous.latest["destination_state_placement"], "physical_destination_changed")
+      do:
+        lookup_ensure!(
+          placement!(root) == previous.latest["destination_state_placement"],
+          "physical_destination_changed"
+        )
+
     Enum.each(previous.candidates, fn {relative, prior} ->
       ledger = history_path(root, relative)
       replacement = named[relative]
-      expected = cond do
-        is_nil(replacement) -> prior["destination_ledger_placement"]
-        outgoing -> intent["plan"]["ledgers"] |> Enum.find(&(&1["relative_root"] == relative)) |> Map.fetch!("source_placement")
-        true -> replacement["destination_ledger_placement"]
-      end
+
+      expected =
+        cond do
+          is_nil(replacement) ->
+            prior["destination_ledger_placement"]
+
+          outgoing ->
+            intent["plan"]["ledgers"]
+            |> Enum.find(&(&1["relative_root"] == relative))
+            |> Map.fetch!("source_placement")
+
+          true ->
+            replacement["destination_ledger_placement"]
+        end
+
       lookup_ensure!(placement!(ledger) == expected, "physical_destination_changed")
       generation = read!(history_path(ledger, "generation"), 2048, :baseline)
-      allowed = cond do
-        is_nil(replacement) -> [prior["destination_generation_bytes"]]
-        outgoing -> [replacement["source_generation_bytes"]]
-        true -> [replacement["source_generation_bytes"], replacement["destination_generation_bytes"]]
-      end
+
+      allowed =
+        cond do
+          is_nil(replacement) ->
+            [prior["destination_generation_bytes"]]
+
+          outgoing ->
+            [replacement["source_generation_bytes"]]
+
+          true ->
+            [replacement["source_generation_bytes"], replacement["destination_generation_bytes"]]
+        end
+
       ensure!(generation in allowed)
       ensure!(generation_mode!(history_path(ledger, "generation")) == prior[:generation_mode])
       names = ordinals!(history_path(ledger, "restore-lineage"))
       tail = ordinal(intent["ordinal"])
-      allowed_names = if replacement, do: [prior[:covered_ordinals], prior[:covered_ordinals] ++ [tail]],
-        else: [prior[:covered_ordinals]]
+
+      allowed_names =
+        if replacement,
+          do: [prior[:covered_ordinals], prior[:covered_ordinals] ++ [tail]],
+          else: [prior[:covered_ordinals]]
+
       ensure!(names in allowed_names)
     end)
   end
 
   defp lookup_outgoing!(root, directory, intent, actual, previous) do
     ensure!(intent["plan"]["source_status"] == "available")
-    ensure!(Enum.all?(actual, &(&1 in ~w(intent intent.tmp source-retirement source-retirement.tmp))))
+
+    ensure!(
+      Enum.all?(actual, &(&1 in ~w(intent intent.tmp source-retirement source-retirement.tmp)))
+    )
+
     {:ok, lineage_hash} = RestoreCodec.lineage_digest(previous.lineage)
     ensure!(lineage_hash == intent["prior_lineage_sha256"])
-    intent_bytes = read!(history_path(directory, if("intent" in actual, do: "intent", else: "intent.tmp")), @record_cap)
+
+    intent_bytes =
+      read!(
+        history_path(directory, if("intent" in actual, do: "intent", else: "intent.tmp")),
+        @record_cap
+      )
+
     intent_hash = hash(intent_bytes)
+
     if "intent" in actual and "intent.tmp" in actual,
       do: ensure!(read!(history_path(directory, "intent.tmp"), @record_cap) == intent_bytes)
-    retired = lookup_optional_record(root, directory, "source-retirement", :source_retirement, actual)
+
+    retired =
+      lookup_optional_record(root, directory, "source-retirement", :source_retirement, actual)
+
     if retired do
       common!(retired, intent, intent_hash)
       ensure!(retired["disposition"] == "source_retired")
-      Enum.each(["source_state_binding", "destination_state_binding"], &ensure!(retired[&1] == intent[&1]))
-      ensure!(retired["host_evidence_sha256"] == intent["plan"]["host_attestation"]["evidence_sha256"])
-      ensure!(Enum.map(retired["ledger_retirements"], & &1["relative_root"]) == Enum.map(intent["generations"], & &1["relative_root"]))
+
+      Enum.each(
+        ["source_state_binding", "destination_state_binding"],
+        &ensure!(retired[&1] == intent[&1])
+      )
+
+      ensure!(
+        retired["host_evidence_sha256"] == intent["plan"]["host_attestation"]["evidence_sha256"]
+      )
+
+      ensure!(
+        Enum.map(retired["ledger_retirements"], & &1["relative_root"]) ==
+          Enum.map(intent["generations"], & &1["relative_root"])
+      )
     end
+
     Enum.each(intent["generations"], fn candidate ->
       relative = candidate["relative_root"]
+
       if prior = previous.candidates[relative],
         do: ensure!(prior["destination_generation_bytes"] == candidate["source_generation_bytes"])
+
       ledger = history_path(root, relative)
       {:ok, binding} = RestoreCodec.ledger_binding(placement!(ledger))
-      lookup_ensure!(binding == candidate["source_ledger_binding"], "physical_destination_changed")
-      ensure!(read!(history_path(ledger, "generation"), 2048, :baseline) == candidate["source_generation_bytes"])
+
+      lookup_ensure!(
+        binding == candidate["source_ledger_binding"],
+        "physical_destination_changed"
+      )
+
+      ensure!(
+        read!(history_path(ledger, "generation"), 2048, :baseline) ==
+          candidate["source_generation_bytes"]
+      )
+
       tail = history_path(ledger, ["restore-lineage", ordinal(intent["ordinal"])])
       {path, context} = tail
+
       if Map.has_key?(context.index, Path.relative_to(path, context.root)) do
         names = names!(tail)
-        ensure!(Enum.all?(names, &(&1 in ~w(intent intent.tmp source-retired source-retired.tmp))))
+
+        ensure!(
+          Enum.all?(names, &(&1 in ~w(intent intent.tmp source-retired source-retired.tmp)))
+        )
+
         ledger_intent = lookup_optional_record(root, tail, "intent", :ledger_intent, names)
-        ledger_retired = lookup_optional_record(root, tail, "source-retired", :ledger_retired, names)
+
+        ledger_retired =
+          lookup_optional_record(root, tail, "source-retired", :ledger_retired, names)
+
         if ledger_intent do
           common!(ledger_intent, intent, intent_hash)
           candidate_bindings!(ledger_intent, intent, candidate)
         end
+
         if ledger_retired do
           ensure!(not is_nil(ledger_intent))
           common!(ledger_retired, intent, intent_hash)
           candidate_bindings!(ledger_retired, intent, candidate)
-          ensure!(ledger_retired["ledger_intent_sha256"] == hash(read!(history_path(tail, "intent"), @record_cap)))
+
+          ensure!(
+            ledger_retired["ledger_intent_sha256"] ==
+              hash(read!(history_path(tail, "intent"), @record_cap))
+          )
         end
+
         if retired do
           ensure!(not is_nil(ledger_retired))
-          ensure!(Enum.find(retired["ledger_retirements"], &(&1["relative_root"] == relative))["record_sha256"] == hash(read!(history_path(tail, "source-retired"), @record_cap)))
+
+          ensure!(
+            Enum.find(retired["ledger_retirements"], &(&1["relative_root"] == relative))[
+              "record_sha256"
+            ] == hash(read!(history_path(tail, "source-retired"), @record_cap))
+          )
         end
       else
         ensure!(is_nil(retired))
       end
     end)
+
     if is_nil(retired) or Enum.any?(actual, &String.ends_with?(&1, ".tmp")),
-      do: "source_retirement", else: "destination_generations"
+      do: "source_retirement",
+      else: "destination_generations"
   end
 
   defp lookup_partial!(root, directory, intent, actual, previous) do
-    hash = hash(read!(history_path(directory, if("intent" in actual, do: "intent", else: "intent.tmp")), @record_cap))
+    hash =
+      hash(
+        read!(
+          history_path(directory, if("intent" in actual, do: "intent", else: "intent.tmp")),
+          @record_cap
+        )
+      )
+
     baseline = read!(history_path(directory, "baseline"), 4_194_304)
     ensure!(hash(baseline) == intent["plan"]["manifest_sha256"])
     {:ok, entries} = RestoreCodec.manifest(baseline, 18_446_744_073_709_551_615)
@@ -407,126 +589,284 @@ defmodule Loopex.Executor.Local.RestoreGuard do
     {:ok, lineage_digest} = RestoreCodec.lineage_digest(lineage)
     ensure!(lineage_digest == intent["prior_lineage_sha256"])
     Enum.each(lineage, &verify_historical_entry!(root, &1))
+
     if "intent.tmp" in actual and "intent" in actual,
-      do: ensure!(read!(history_path(directory, "intent.tmp"), @record_cap) == read!(history_path(directory, "intent"), @record_cap))
-    if "baseline.tmp" in actual, do: ensure!(read!(history_path(directory, "baseline.tmp"), 4_194_304) == baseline)
+      do:
+        ensure!(
+          read!(history_path(directory, "intent.tmp"), @record_cap) ==
+            read!(history_path(directory, "intent"), @record_cap)
+        )
+
+    if "baseline.tmp" in actual,
+      do: ensure!(read!(history_path(directory, "baseline.tmp"), 4_194_304) == baseline)
+
     Enum.each(intent["generations"], fn candidate ->
       relative = candidate["relative_root"]
       generation_entry = Enum.find(entries, &(&1["path"] == Path.join(relative, "generation")))
       ensure!(not is_nil(generation_entry) and generation_entry["kind"] == "regular")
       ensure!(generation_entry["sha256"] == hash(candidate["source_generation_bytes"]))
       ensure!(generation_entry["size"] == byte_size(candidate["source_generation_bytes"]))
-      if old = previous.candidates[relative], do: ensure!(old["destination_generation_bytes"] == candidate["source_generation_bytes"])
-      {:ok, source_generation} = RestoreCodec.decode(:generation, candidate["source_generation_bytes"])
-      {:ok, destination_generation} = RestoreCodec.decode(:generation, candidate["destination_generation_bytes"])
-      epochs = Map.get(previous.epochs, relative, MapSet.new()) |> MapSet.put(source_generation["executor_epoch"])
+
+      if old = previous.candidates[relative],
+        do: ensure!(old["destination_generation_bytes"] == candidate["source_generation_bytes"])
+
+      {:ok, source_generation} =
+        RestoreCodec.decode(:generation, candidate["source_generation_bytes"])
+
+      {:ok, destination_generation} =
+        RestoreCodec.decode(:generation, candidate["destination_generation_bytes"])
+
+      epochs =
+        Map.get(previous.epochs, relative, MapSet.new())
+        |> MapSet.put(source_generation["executor_epoch"])
+
       ensure!(not MapSet.member?(epochs, destination_generation["executor_epoch"]))
     end)
-    retired = lookup_optional_record(root, directory, "source-retirement", :source_retirement, actual)
+
+    retired =
+      lookup_optional_record(root, directory, "source-retirement", :source_retirement, actual)
+
     committed = lookup_optional_record(root, directory, "committed", :committed, actual)
+
     if retired do
       common!(retired, intent, hash)
-      Enum.each(["source_state_binding", "destination_state_binding"], &ensure!(retired[&1] == intent[&1]))
-      ensure!(retired["host_evidence_sha256"] == intent["plan"]["host_attestation"]["evidence_sha256"])
-      ensure!(retired["disposition"] == if(intent["plan"]["source_status"] == "available", do: "source_retired", else: "lost_source_host_excluded"))
-      ensure!(Enum.map(retired["ledger_retirements"], & &1["relative_root"]) == Enum.map(intent["generations"], & &1["relative_root"]))
+
+      Enum.each(
+        ["source_state_binding", "destination_state_binding"],
+        &ensure!(retired[&1] == intent[&1])
+      )
+
+      ensure!(
+        retired["host_evidence_sha256"] == intent["plan"]["host_attestation"]["evidence_sha256"]
+      )
+
+      ensure!(
+        retired["disposition"] ==
+          if(intent["plan"]["source_status"] == "available",
+            do: "source_retired",
+            else: "lost_source_host_excluded"
+          )
+      )
+
+      ensure!(
+        Enum.map(retired["ledger_retirements"], & &1["relative_root"]) ==
+          Enum.map(intent["generations"], & &1["relative_root"])
+      )
     end
+
     if committed do
       ensure!(not is_nil(retired))
       common!(committed, intent, hash)
       ensure!(committed["plan_digest"] == intent["plan_digest"])
       ensure!(committed["prior_lineage_sha256"] == intent["prior_lineage_sha256"])
       ensure!(committed["baseline_manifest_sha256"] == hash(baseline))
-      ensure!(committed["source_retirement_sha256"] == hash(read!(history_path(directory, "source-retirement"), @record_cap)))
+
+      ensure!(
+        committed["source_retirement_sha256"] ==
+          hash(read!(history_path(directory, "source-retirement"), @record_cap))
+      )
+
       ensure!(committed["destination_state_binding"] == intent["destination_state_binding"])
     end
-    ledger_phases = Enum.map(intent["generations"], fn candidate ->
-      lookup_ledger!(root, intent, candidate, retired, committed, hash)
-    end)
+
+    ledger_phases =
+      Enum.map(intent["generations"], fn candidate ->
+        lookup_ledger!(root, intent, candidate, retired, committed, hash)
+      end)
+
     cond do
-      "baseline.tmp" in actual or "intent.tmp" in actual -> "destination_intent"
-      is_nil(retired) or "source-retirement.tmp" in actual -> "source_retirement"
-      "destination_generations" in ledger_phases -> "destination_generations"
-      is_nil(committed) or "committed.tmp" in actual or "destination_proofs" in ledger_phases -> "destination_proofs"
-      true -> nil
+      "baseline.tmp" in actual or "intent.tmp" in actual ->
+        "destination_intent"
+
+      is_nil(retired) or "source-retirement.tmp" in actual ->
+        "source_retirement"
+
+      "destination_generations" in ledger_phases ->
+        "destination_generations"
+
+      is_nil(committed) or "committed.tmp" in actual or "destination_proofs" in ledger_phases ->
+        "destination_proofs"
+
+      true ->
+        nil
     end
   end
 
   defp lookup_optional_record(_root, directory, name, type, actual) do
-    file = cond do
-      name in actual -> name
-      (name <> ".tmp") in actual -> name <> ".tmp"
-      true -> nil
-    end
+    file =
+      cond do
+        name in actual -> name
+        (name <> ".tmp") in actual -> name <> ".tmp"
+        true -> nil
+      end
+
     if file do
       record = record!(type, history_path(directory, file))
+
       if name in actual and (name <> ".tmp") in actual,
-        do: ensure!(read!(history_path(directory, name), @record_cap) == read!(history_path(directory, name <> ".tmp"), @record_cap))
+        do:
+          ensure!(
+            read!(history_path(directory, name), @record_cap) ==
+              read!(history_path(directory, name <> ".tmp"), @record_cap)
+          )
+
       record
     end
   end
 
   defp lookup_ledger!({path, context} = root, intent, candidate, retired, committed, intent_hash) do
     relative = candidate["relative_root"]
-    if is_nil(committed), do: lookup_ensure!(placement!(history_path(root, relative)) == candidate["destination_ledger_placement"], "physical_destination_changed")
+
+    if is_nil(committed),
+      do:
+        lookup_ensure!(
+          placement!(history_path(root, relative)) == candidate["destination_ledger_placement"],
+          "physical_destination_changed"
+        )
+
     directory = history_path(root, [relative, "restore-lineage", ordinal(intent["ordinal"])])
+
     if not Map.has_key?(context.index, Path.relative_to(history_root(directory), path)) do
       ensure!(is_nil(committed))
       "destination_generations"
     else
       actual = names!(directory)
-      ensure!(Enum.all?(actual, &(&1 in ~w(intent intent.tmp source-retired source-retired.tmp committed committed.tmp))))
+
+      ensure!(
+        Enum.all?(
+          actual,
+          &(&1 in ~w(intent intent.tmp source-retired source-retired.tmp committed committed.tmp))
+        )
+      )
+
       ledger_intent = lookup_optional_record(root, directory, "intent", :ledger_intent, actual)
-      ledger_retired = lookup_optional_record(root, directory, "source-retired", :ledger_retired, actual)
+
+      ledger_retired =
+        lookup_optional_record(root, directory, "source-retired", :ledger_retired, actual)
+
       proof = lookup_optional_record(root, directory, "committed", :ledger_committed, actual)
+
       if ledger_intent do
         common!(ledger_intent, intent, intent_hash)
         candidate_bindings!(ledger_intent, intent, candidate)
       end
+
       if ledger_retired do
         ensure!(not is_nil(ledger_intent) and intent["plan"]["source_status"] == "available")
         common!(ledger_retired, intent, intent_hash)
         candidate_bindings!(ledger_retired, intent, candidate)
-        ensure!(ledger_retired["ledger_intent_sha256"] == hash(read!(history_path(directory, "intent"), @record_cap)))
-        if retired, do: ensure!(Enum.find(retired["ledger_retirements"], &(&1["relative_root"] == relative))["record_sha256"] == hash(read!(history_path(directory, "source-retired"), @record_cap)))
+
+        ensure!(
+          ledger_retired["ledger_intent_sha256"] ==
+            hash(read!(history_path(directory, "intent"), @record_cap))
+        )
+
+        if retired,
+          do:
+            ensure!(
+              Enum.find(retired["ledger_retirements"], &(&1["relative_root"] == relative))[
+                "record_sha256"
+              ] == hash(read!(history_path(directory, "source-retired"), @record_cap))
+            )
       end
+
       if proof do
         ensure!(not is_nil(ledger_intent) and not is_nil(retired))
         common!(proof, intent, intent_hash)
         ensure!(proof["relative_root"] == relative)
-        ensure!(proof["ledger_intent_sha256"] == hash(read!(history_path(directory, "intent"), @record_cap)))
-        ensure!(proof["source_retirement_sha256"] == hash(read!(history_path(history_path(root, [@root_admin, "lineage", ordinal(intent["ordinal"])]), "source-retirement"), @record_cap)))
+
+        ensure!(
+          proof["ledger_intent_sha256"] ==
+            hash(read!(history_path(directory, "intent"), @record_cap))
+        )
+
+        ensure!(
+          proof["source_retirement_sha256"] ==
+            hash(
+              read!(
+                history_path(
+                  history_path(root, [@root_admin, "lineage", ordinal(intent["ordinal"])]),
+                  "source-retirement"
+                ),
+                @record_cap
+              )
+            )
+        )
+
         ensure!(proof["destination_state_binding"] == intent["destination_state_binding"])
         ensure!(proof["destination_ledger_binding"] == candidate["destination_ledger_binding"])
-        ensure!(proof["destination_generation_sha256"] == hash(candidate["destination_generation_bytes"]))
-        if committed, do: ensure!(Enum.find(committed["ledger_proofs"], &(&1["relative_root"] == relative))["record_sha256"] == hash(read!(history_path(directory, "committed"), @record_cap)))
+
+        ensure!(
+          proof["destination_generation_sha256"] ==
+            hash(candidate["destination_generation_bytes"])
+        )
+
+        if committed,
+          do:
+            ensure!(
+              Enum.find(committed["ledger_proofs"], &(&1["relative_root"] == relative))[
+                "record_sha256"
+              ] == hash(read!(history_path(directory, "committed"), @record_cap))
+            )
       end
+
       generation = read!(history_path(root, [relative, "generation"]), 2048, :baseline)
-      if is_nil(committed), do: ensure!(generation in [candidate["source_generation_bytes"], candidate["destination_generation_bytes"]])
+
+      if is_nil(committed),
+        do:
+          ensure!(
+            generation in [
+              candidate["source_generation_bytes"],
+              candidate["destination_generation_bytes"]
+            ]
+          )
+
       cond do
-        is_nil(committed) and generation != candidate["destination_generation_bytes"] -> "destination_generations"
-        is_nil(proof) or Enum.any?(actual, &String.ends_with?(&1, ".tmp")) -> "destination_proofs"
-        true -> nil
+        is_nil(committed) and generation != candidate["destination_generation_bytes"] ->
+          "destination_generations"
+
+        is_nil(proof) or Enum.any?(actual, &String.ends_with?(&1, ".tmp")) ->
+          "destination_proofs"
+
+        true ->
+          nil
       end
     end
   end
 
   defp lookup_current!(root, state) do
-    lookup_ensure!(placement!(root) == state.latest["destination_state_placement"], "physical_destination_changed")
+    lookup_ensure!(
+      placement!(root) == state.latest["destination_state_placement"],
+      "physical_destination_changed"
+    )
+
     Enum.each(state.candidates, fn {relative, candidate} ->
       ledger = history_path(root, relative)
-      lookup_ensure!(placement!(ledger) == candidate["destination_ledger_placement"], "physical_destination_changed")
+
+      lookup_ensure!(
+        placement!(ledger) == candidate["destination_ledger_placement"],
+        "physical_destination_changed"
+      )
+
       ensure!(ordinals!(history_path(ledger, "restore-lineage")) == candidate[:covered_ordinals])
       ensure!(generation_mode!(history_path(ledger, "generation")) == candidate[:generation_mode])
-      ensure!(read!(history_path(ledger, "generation"), 2048, :baseline) == candidate["destination_generation_bytes"])
+
+      ensure!(
+        read!(history_path(ledger, "generation"), 2048, :baseline) ==
+          candidate["destination_generation_bytes"]
+      )
     end)
   end
 
   defp lookup_receipt!(directory, intent) do
     committed_bytes = read!(history_path(directory, "committed"), @record_cap)
     {:ok, committed} = RestoreCodec.decode(:committed, committed_bytes)
-    receipt = %{"kind" => "loopex_current_restore_receipt_v1", "tx_id" => intent["tx_id"],
-      "ordinal" => intent["ordinal"], "plan_digest" => intent["plan_digest"],
+
+    receipt = %{
+      "kind" => "loopex_current_restore_receipt_v1",
+      "tx_id" => intent["tx_id"],
+      "ordinal" => intent["ordinal"],
+      "plan_digest" => intent["plan_digest"],
       "intent_sha256" => hash(read!(history_path(directory, "intent"), @record_cap)),
       "committed_sha256" => hash(committed_bytes),
       "source_retirement_sha256" => committed["source_retirement_sha256"],
@@ -534,7 +874,9 @@ defmodule Loopex.Executor.Local.RestoreGuard do
       "activation_manifest_sha256" => committed["activation_manifest_sha256"],
       "prior_lineage_sha256" => committed["prior_lineage_sha256"],
       "destination_state_binding" => committed["destination_state_binding"],
-      "ledger_count" => length(intent["generations"])}
+      "ledger_count" => length(intent["generations"])
+    }
+
     {:ok, _} = RestoreCodec.encode(:receipt, receipt)
     receipt
   end

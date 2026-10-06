@@ -36,11 +36,20 @@ defmodule LoopexComposition.Restore do
 
     if valid_lookup_root?(root) and valid_tx and match?({:ok, _}, RestoreCodec.limits(limits)) do
       case RestoreIO.run({:restore_lookup, root, tx_id}, limits) do
-        {:joined, {:ok, result}, _evidence} -> result
-        {:joined, {:error, :deadline}, _evidence} -> lookup_error(tx_id, "deadline", "joined")
-        {:joined, {:error, _}, _evidence} -> lookup_error(tx_id, "administrative_path_unavailable", "joined")
-        {:unconfirmed, _reason} -> lookup_error(tx_id, "cleanup_unconfirmed", "unconfirmed")
-        _ -> lookup_error(tx_id, "cleanup_unconfirmed", "unconfirmed")
+        {:joined, {:ok, result}, _evidence} ->
+          result
+
+        {:joined, {:error, :deadline}, _evidence} ->
+          lookup_error(tx_id, "deadline", "joined")
+
+        {:joined, {:error, _}, _evidence} ->
+          lookup_error(tx_id, "administrative_path_unavailable", "joined")
+
+        {:unconfirmed, _reason} ->
+          lookup_error(tx_id, "cleanup_unconfirmed", "unconfirmed")
+
+        _ ->
+          lookup_error(tx_id, "cleanup_unconfirmed", "unconfirmed")
       end
     else
       lookup_error(if(valid_tx, do: tx_id, else: nil), "invalid_query", "joined")
@@ -48,12 +57,20 @@ defmodule LoopexComposition.Restore do
   end
 
   defp valid_lookup_root?(root),
-    do: is_binary(root) and byte_size(root) in 1..8192 and String.valid?(root) and
-      not String.contains?(root, <<0>>) and Path.type(root) == :absolute and Path.expand(root) == root
+    do:
+      is_binary(root) and byte_size(root) in 1..8192 and String.valid?(root) and
+        not String.contains?(root, <<0>>) and Path.type(root) == :absolute and
+        Path.expand(root) == root
 
   defp lookup_error(tx_id, code, cleanup),
-    do: {:error, %{"kind" => "loopex_current_restore_lookup_refusal_v1", "tx_id" => tx_id,
-      "code" => code, "cleanup" => cleanup}}
+    do:
+      {:error,
+       %{
+         "kind" => "loopex_current_restore_lookup_refusal_v1",
+         "tx_id" => tx_id,
+         "code" => code,
+         "cleanup" => cleanup
+       }}
 
   @doc false
   def first(plan, invocation, options \\ []) do
