@@ -174,6 +174,104 @@ defmodule LoopexComposition.Restore.Workflow do
     end)
   end
 
+  # Concept: hand off only the live owner nonce of an exact retained transaction.
+  # Technical depth: intake, every participating capture and canonical candidate
+  # reconstruction precede mutation. The existing owner remains the fence through
+  # partial failure; this private result authorizes no publication or release.
+  @doc false
+  def retained_claim_handoff(plan, invocation, io) do
+    ensure!(match?({:ok, _}, RestoreCodec.encode(:plan, plan)), "invalid_plan")
+    ensure!(match?({:ok, _}, RestoreCodec.encode(:invocation, invocation)), "invalid_plan")
+    ensure!(invocation["prior_admin_authority"] in ["joined", "host_rebooted"], "authority_unconfirmed")
+
+    retained =
+      case pending_intake(plan, invocation, io) do
+        {:ok, retained} -> retained
+        {:error, code} -> throw({:restore_refusal, code})
+      end
+
+    ensure!(is_binary(retained.intent), "invalid_current_history")
+
+    roots =
+      if plan["source_status"] == "available",
+        do: [plan["source_state_root"], plan["destination_state_root"]],
+        else: [plan["destination_state_root"]]
+
+    source_observation =
+      if plan["source_status"] == "lost",
+        do: value!(io.({:lost_source_absent, plan["source_state_root"]})),
+        else: nil
+
+    captures = Enum.map(Enum.sort(roots), &claim_capture!(&1, plan, invocation, io))
+    destination = Enum.find(captures, &(&1.root == plan["destination_state_root"]))
+    ensure!(destination.retained.intent == retained.intent, "restore_conflict")
+    ensure!(destination.retained.baseline == retained.baseline, "restore_conflict")
+
+    Enum.each(captures, fn capture ->
+      if capture.retained.intent,
+        do: ensure!(capture.retained.intent == retained.intent, "restore_conflict")
+    end)
+
+    # The pure prior reducer consumes the exact baseline generation projection,
+    # not a partially installed current candidate. Physical phase admission above
+    # remains separate; all earlier captured administrative bytes are unchanged.
+    {:ok, intent} = RestoreCodec.decode(:intent, retained.intent)
+
+    prior_files =
+      Enum.reduce(intent["generations"], destination.state.files, fn candidate, files ->
+        Map.put(files, Path.join(candidate["relative_root"], "generation"), candidate["source_generation_bytes"])
+      end)
+
+    case retained_construction(
+           plan,
+           retained.baseline,
+           retained.intent,
+           prior_files,
+           invocation["max_total_file_bytes"]
+         ) do
+      {:ok, _compiled} -> :ok
+      {:error, code} -> throw({:restore_refusal, code})
+    end
+
+    nonce = handoff_nonce(captures)
+
+    claims =
+      Enum.map(captures, fn capture ->
+        if source_observation,
+          do: lost_source!(plan["source_state_root"], source_observation, io)
+
+        value!(io.({:restore_claim_handoff, capture, plan, invocation, nonce}))
+      end)
+
+    if source_observation,
+      do: lost_source!(plan["source_state_root"], source_observation, io)
+
+    {:ok, %{claims: claims, intent: retained.intent}}
+  catch
+    {:restore_refusal, code} -> {:error, code}
+    {:io_error, _} -> {:error, "inventory_unavailable"}
+    {:lookup_error, _} -> {:error, "inventory_unavailable"}
+    {:stopped, _} -> {:error, "inventory_unavailable"}
+  end
+
+  defp handoff_nonce(captures) do
+    nonce = random_hex()
+    if Enum.any?(captures, &(&1.retained.claim["claim_nonce"] == nonce)),
+      do: handoff_nonce(captures),
+      else: nonce
+  end
+
+  defp claim_capture!(root, plan, invocation, io) do
+    case io.({:restore_claim_capture, root, plan, invocation}) do
+      {:ok, {:pending, capture}} -> capture
+      {:ok, {:error, :authority_unconfirmed}} -> throw({:restore_refusal, "authority_unconfirmed"})
+      {:ok, {:error, %{"code" => "restore_history_invalid"}}} ->
+        throw({:restore_refusal, "invalid_current_history"})
+      {:ok, {:error, %{"code" => code}}} -> throw({:restore_refusal, code})
+      _ -> throw({:restore_refusal, "inventory_unavailable"})
+    end
+  end
+
   @doc false
   def execute(plan, invocation, io) do
     Process.put(:restore_workflow_claims, [])

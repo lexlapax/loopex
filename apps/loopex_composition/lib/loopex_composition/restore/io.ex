@@ -629,6 +629,9 @@ defmodule LoopexComposition.Restore.IO do
   defp observe_restore_issue(state, {:restore_claim_create, claim}),
     do: retain_claim(state, claim, :uncertain)
 
+  defp observe_restore_issue(state, {:restore_claim_handoff, claim}),
+    do: retain_claim(state, claim, :uncertain)
+
   defp observe_restore_issue(state, _), do: state
 
   # Concept: completed release removes only its proved claim, never a sibling.
@@ -664,8 +667,8 @@ defmodule LoopexComposition.Restore.IO do
           ordinal: nil,
           phase: "claim",
           claims: [],
-          intake: match?({:restore_pending_intake, _, _}, operation),
-          intent: match?({:restore_pending_intake, _, _}, operation),
+          intake: match?({kind, _, _} when kind in [:restore_pending_intake, :restore_retained_claim_handoff], operation),
+          intent: match?({kind, _, _} when kind in [:restore_pending_intake, :restore_retained_claim_handoff], operation),
           intent_status: observation["intent"],
           prior_claim: observation["claim"] == "retained"
         }
@@ -673,7 +676,7 @@ defmodule LoopexComposition.Restore.IO do
   end
 
   defp initial_restore_observation({kind, plan, _invocation})
-       when kind in [:restore_first, :restore_pending_intake] do
+       when kind in [:restore_first, :restore_pending_intake, :restore_retained_claim_handoff] do
     %{
       "kind" => "loopex_current_restore_observation_v1",
       "tx_id" => plan["tx_id"],
@@ -851,6 +854,71 @@ defmodule LoopexComposition.Restore.IO do
 
   defp execute({:restore_pending_capture, root, plan, invocation}),
     do: lookup_operation(root, plan["tx_id"], {:pending, plan, invocation})
+
+  defp execute({:restore_retained_claim_handoff, plan, invocation} = operation) do
+    if not valid_operation?(operation), do: throw({:io_error, :invalid_io_request})
+    LoopexComposition.Restore.Workflow.retained_claim_handoff(plan, invocation, &execute/1)
+  end
+
+  defp execute({:restore_claim_capture, root, plan, invocation}) do
+    if not valid_operation?({:restore_retained_claim_handoff, plan, invocation}) or
+         root not in [plan["source_state_root"], plan["destination_state_root"]] or
+         (root == plan["source_state_root"] and plan["source_status"] != "available"),
+      do: throw({:io_error, :invalid_io_request})
+
+    lookup_operation(root, plan["tx_id"], {:pending, plan, invocation}, true)
+  end
+
+  defp execute({:restore_claim_handoff, capture, plan, invocation, nonce}) do
+    if not valid_operation?({:restore_retained_claim_handoff, plan, invocation}) or
+         not is_binary(nonce) or not Regex.match?(~r/\A[0-9a-f]{64}\z/, nonce),
+      do: throw({:io_error, :invalid_io_request})
+
+    {:ok, digest} = RestoreCodec.plan_digest(plan)
+    root = capture.root
+    role = if root == plan["destination_state_root"], do: "destination", else: "source"
+    owner = capture.retained.claim
+    claim = capture.claim
+    {:ok, claim_digest} = RestoreCodec.claim_digest(root)
+    directory = Path.join(Path.dirname(root), ".loopex-restore-claim-" <> claim_digest)
+
+    if root not in [plan["source_state_root"], plan["destination_state_root"]] or
+         (role == "source" and plan["source_status"] != "available") or
+         owner["tx_id"] != plan["tx_id"] or owner["plan_digest"] != digest or
+         owner["state_root"] != root or owner["role"] != role or owner["claim_nonce"] == nonce or
+         claim.directory != directory or
+         RestoreCodec.decode(:claim, claim.owner) != {:ok, owner},
+      do: throw({:io_error, :invalid_io_request})
+
+    {:ok, bytes} = RestoreCodec.encode(:claim, Map.put(owner, "claim_nonce", nonce))
+    primitive({:restore_claim_handoff, claim}, fn -> :ok end)
+    lookup_recheck(root, capture.ancestors, capture.state)
+    ancestors = capture.claim_ancestors
+    retained_publication_ancestors!(ancestors)
+    retained_claim_namespace!(claim)
+    path = Path.join(directory, "owner")
+
+    if primitive(:retained_publication_stat, fn -> :prim_file.read_link_info(path <> ".tmp") end) !=
+         {:error, :enoent},
+      do: throw({:io_error, :changed_destination})
+
+    retained_publish(path, bytes, 0o600, claim.owner, 2048, %{ancestors: ancestors, original: claim.owner_identity})
+    retained_publication_ancestors!(ancestors)
+    retained_claim_namespace!(claim)
+    final = retained_publication_file(path, 2048, 0o600)
+
+    if final == :absent or final.bytes != bytes or
+         RestoreCodec.decode(:claim, final.bytes) !=
+           {:ok, Map.put(owner, "claim_nonce", nonce)},
+      do: throw({:io_error, :readback_mismatch})
+
+    retained_publication_ancestors!(ancestors)
+    retained_claim_namespace!(claim)
+    require_same_identity(final.info, manifest_stat(path))
+    acquired = %{claim | owner: bytes, owner_identity: final.info}
+    primitive({:restore_claim_acquired, acquired}, fn -> :ok end)
+    {:ok, acquired}
+  end
 
   defp execute({:restore_phase, phase}) do
     primitive({:restore_phase, phase}, fn -> :ok end)
@@ -1448,52 +1516,13 @@ defmodule LoopexComposition.Restore.IO do
   defp execute({:restore_publish, role, path, bytes, mode, expected} = operation) do
     if not valid_operation?(operation), do: throw({:io_error, :invalid_io_request})
 
-    cap = retained_publication_cap(role)
-    temp = path <> ".tmp"
-    ancestors = retained_publication_ancestors(Path.dirname(path))
-    current = retained_publication_file(path, cap, mode)
-    temporary = retained_publication_file(temp, cap, mode)
-
-    if current != :absent and current.bytes != bytes and current.bytes != expected,
-      do: throw({:io_error, :changed_destination})
-
-    if current == :absent and expected != :absent,
-      do: throw({:io_error, :changed_destination})
-
-    if temporary != :absent and temporary.bytes != bytes,
-      do: throw({:io_error, :changed_destination})
-
-    retained_publication_ancestors!(ancestors)
-
-    cond do
-      current != :absent and current.bytes == bytes ->
-        if temporary == :absent,
-          do: retained_publication_sync(path, current),
-          else: retained_publication_delete(path, current, temp, temporary, ancestors)
-
-      true ->
-        temporary =
-          if temporary == :absent,
-            do: retained_publication_create(temp, bytes, mode, cap),
-            else: temporary
-
-        retained_publication_namespace!(ancestors, [{path, current}, {temp, temporary}])
-        retained_publication_sync(temp, temporary)
-        retained_publication_namespace!(ancestors, [{path, current}, {temp, temporary}])
-        require_ok(primitive(:rename, fn -> :prim_file.rename(temp, path) end))
-    end
-
-    retained_publication_directory_sync(Path.dirname(path), ancestors)
-    final = retained_publication_file(path, cap, mode)
-    if final == :absent or final.bytes != bytes, do: throw({:io_error, :readback_mismatch})
-    retained_publication_ancestors!(ancestors)
-    {:ok, RestoreCodec.digest_bytes(bytes)}
+    retained_publish(path, bytes, mode, expected, retained_publication_cap(role))
   end
 
   # Concept: resolution and lookup use the same owned administrative capture.
   # Technical depth: classification adds only a pure plan/transaction reduction;
   # it neither starts another guardian nor renews this worker's cutoffs.
-  defp lookup_operation(root, tx_id, plan) do
+  defp lookup_operation(root, tx_id, plan, retain_claim \\ false) do
     try do
       ancestors = manifest_ancestors(root)
       {:ok, placement} = execute({:placement, root})
@@ -1618,7 +1647,27 @@ defmodule LoopexComposition.Restore.IO do
         end
 
       if match?({:pending, _, _}, plan), do: lookup_recheck(root, ancestors, state)
-      {:ok, result}
+
+      if retain_claim and match?({:pending, _}, result) do
+        {:pending, retained} = result
+        owner_path = Path.join(claim_path, "owner")
+
+        custody = %{
+          directory: claim_path,
+          owner: Map.fetch!(state.files, Path.relative_to(owner_path, root)),
+          directory_identity: directory_identity(Map.fetch!(state.identities, claim_path)),
+          owner_identity: Map.fetch!(state.identities, owner_path)
+        }
+
+        claim_ancestors = retained_publication_ancestors(claim_path)
+        lookup_recheck(root, ancestors, state)
+        retained_claim_namespace!(custody)
+
+        {:ok, {:pending, %{root: root, retained: retained, claim: custody, state: state,
+                          ancestors: ancestors, claim_ancestors: claim_ancestors}}}
+      else
+        {:ok, result}
+      end
     catch
       {:lookup_error, code} -> {:ok, lookup_refusal(tx_id, code)}
       {:io_error, :inventory_limit} -> {:ok, lookup_refusal(tx_id, "inventory_limit_exceeded")}
@@ -2401,6 +2450,74 @@ defmodule LoopexComposition.Restore.IO do
     end
   end
 
+  # Concept: claim nonce publication shares the checked native publication path.
+  # Technical depth: its private cap is 2048 bytes, while existing record roles retain
+  # their original ceilings. This helper grants no claim or mutation authority.
+  defp retained_publish(path, bytes, mode, expected, cap, custody \\ nil) do
+    temp = path <> ".tmp"
+    ancestors = if custody, do: custody.ancestors, else: retained_publication_ancestors(Path.dirname(path))
+    current = retained_publication_file(path, cap, mode)
+    temporary = retained_publication_file(temp, cap, mode)
+
+    if custody do
+      if current == :absent or temporary != :absent,
+        do: throw({:io_error, :changed_destination})
+
+      require_same_identity(custody.original, current.info)
+    end
+
+    if current != :absent and current.bytes != bytes and current.bytes != expected,
+      do: throw({:io_error, :changed_destination})
+
+    if current == :absent and expected != :absent,
+      do: throw({:io_error, :changed_destination})
+
+    if temporary != :absent and temporary.bytes != bytes,
+      do: throw({:io_error, :changed_destination})
+
+    retained_publication_ancestors!(ancestors)
+
+    cond do
+      current != :absent and current.bytes == bytes ->
+        if temporary == :absent,
+          do: retained_publication_sync(path, current),
+          else: retained_publication_delete(path, current, temp, temporary, ancestors)
+
+      true ->
+        temporary =
+          if temporary == :absent,
+            do: retained_publication_create(temp, bytes, mode, cap),
+            else: temporary
+
+        retained_publication_namespace!(ancestors, [{path, current}, {temp, temporary}])
+        retained_publication_sync(temp, temporary)
+        retained_publication_namespace!(ancestors, [{path, current}, {temp, temporary}])
+        require_ok(primitive(:rename, fn -> :prim_file.rename(temp, path) end))
+    end
+
+    retained_publication_directory_sync(Path.dirname(path), ancestors)
+    final = retained_publication_file(path, cap, mode)
+    if final == :absent or final.bytes != bytes, do: throw({:io_error, :readback_mismatch})
+    retained_publication_ancestors!(ancestors)
+    {:ok, RestoreCodec.digest_bytes(bytes)}
+  end
+
+  defp retained_claim_namespace!(claim) do
+    info = manifest_stat(claim.directory)
+
+    if directory_identity(info) != claim.directory_identity or
+         file_info(info, :type) != :directory or
+         Bitwise.band(file_info(info, :mode), 0o7777) != 0o700,
+      do: throw({:io_error, :source_changed})
+
+    names =
+      require_value(primitive(:lookup_claim_names, fn -> :prim_file.list_dir_all(claim.directory) end))
+      |> Enum.map(&manifest_name/1)
+      |> Enum.sort()
+
+    if names != ["owner"], do: throw({:io_error, :changed_destination})
+  end
+
   defp retained_publication_cap(:baseline), do: @max_manifest
   defp retained_publication_cap(:record), do: @max_ledger_record
   defp retained_publication_cap(:generation), do: @max_ledger_generation
@@ -2752,6 +2869,12 @@ defmodule LoopexComposition.Restore.IO do
     do:
       match?({:ok, _}, RestoreCodec.encode(:plan, plan)) and
         match?({:ok, _}, RestoreCodec.encode(:invocation, invocation))
+
+  defp valid_operation?({:restore_retained_claim_handoff, plan, invocation}),
+    do:
+      match?({:ok, _}, RestoreCodec.encode(:plan, plan)) and
+        match?({:ok, _}, RestoreCodec.encode(:invocation, invocation)) and
+        invocation["prior_admin_authority"] in ["joined", "host_rebooted"]
 
   defp valid_operation?({:audit_restore_lineage, root, plan, manifest}),
     do:
