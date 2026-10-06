@@ -6908,3 +6908,21 @@ and host-policy permission remain distinct. Remove superseded readers before 1.0
 never rewrite retained journals or fill missing terminal events. Activation still
 requires the coordinated schemas, transports, independent clients and durability
 proofs. This acceptance closes the decision, not T07, M7 or any required proof.
+
+
+<a id="disposition-m7-configure-request-2026-10-06"></a>
+### M7 configure request grammar accepted, 2026-10-06
+
+The maintainer selected "1. Approve `changes`" for the exact
+[ADR 0053](../adr/0053-current-configure-request.md#concept) pair at candidate
+`838cf0e3a9faa0fe13a8824465115a3372bad15b`. Historical Proposed Concept SHA-256
+is `4b15cd997d612b39769274c3614988f0911f2c3a804a2db8fa0541ea806691b6`;
+Technical SHA-256 is
+`faee5f4558fcc40658b601aaa107979123efb5a64cdd68279cc3abd8451e1a21`.
+Within the pair, only Status and the empty Acceptance row change.
+
+Implement the closed `changes` request in both transports and independent
+clients, preserving central preparation, authored alias identity, authority,
+exact quantities and current replay. Complete generation activation and its
+required proof remain separate. This accepts no other queued proposal and
+supplies no test result, milestone closure or publication authority.

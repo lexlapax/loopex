@@ -3,7 +3,7 @@
 
 Technical depth: [Configure request grammar](0053-current-configure-request-technical.md#technical-depth).
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-06
 - **Decision owner:** Maintainer
 - **Proposed amendment:** [ADR 0044](0044-run-model-and-reasoning-configuration.md#concept), only the exact configure request grammar in its current foreground generation 3 and daemon generation 4.
@@ -75,4 +75,4 @@ partial manifest or authorize milestone closure, publication or relaxed checks.
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | — | — | — |
+| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-m7-configure-request-2026-10-06) | candidate `838cf0e3a9faa0fe13a8824465115a3372bad15b`; concept `sha256:4b15cd997d612b39769274c3614988f0911f2c3a804a2db8fa0541ea806691b6`; technical `sha256:faee5f4558fcc40658b601aaa107979123efb5a64cdd68279cc3abd8451e1a21` |
