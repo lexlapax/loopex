@@ -27,6 +27,46 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current proof, execution and source ownership
 
+T16 FORMATTER COLLECTED, 2026-10-06: root original 5073 is fully collected,
+exit 0 after 37.104 seconds, eleven stages, complete-file AST equality and
+both toolchain formatting checks. Clean child
+`32ef61aad47bbea10ff8ffa7fc29b1b4cd2778c5` has sole parent f04; only witness
+formatting changed. Root verified all 69 artifacts, 35 actual/Git source
+rows, eleven original raw EOF/wait/status/PID-group joins, 301 unchanged
+seed keys and eleven new keys. No compiler/tests ran. All original actors
+are absent. Output `M7/m7-private-task-format-v1` report is
+`961fac58f7394a1f2aa47cc4fab8c26d1150209e7ada931f16c4da5335d2062a`, inventory
+`e66420b30b38f1e97b9429901d13cd4b39ef47209465553771c70b1db471934f`.
+Original collection `M7/private-task-format-original-collection-20261006-v1.json`
+is `977638a84e28ee3894ff7a374394afe24a7dbedaeed4bdabf31b224ec2157c3e`;
+audit `M7/private-task-format-collection-20261006-v1.py` is
+`8b1a252d4f826054f507df77f06fdde8d6bdb6cb6bb379bd69f05d63bdfc1307`.
+Final registry is `b806b7cb6061a753d3d51299c6f6681492fec6f75066c034df2e0fcd2d7b1d79`.
+Never poll 5073 or repeat it. Private-task now owns only disabled focused
+three-case diagnostic runtime preparation at frozen 32ef. It must collect
+actual sink files after failure, retain incomplete evidence honestly, use
+modern original-status/EOF/wait/group mechanics, and repeat no formatter,
+older control or ordinary suite. No VM execution is granted to that worker.
+
+NEXT EXCLUSIVE FORMATTER GRANT: root reviewed the disabled two-file 058bf
+formatter and narrow independent correction inspection, which found no
+blocker. Enabled `M7/guard-time-format-runner-20261006-v2` config is
+`13197202b8c248cb04aad527e8b04fa33d2381a260b3c26c4fe697b699edaa69`,
+root inventory `b6f2a60336d9c221268c39c3f546700504250039aed74536286bdd1ece866fde`.
+Source report `M7/guard-time-format-source-review-058bf-20261006-v1/report.md`
+is `76819e2dc220d967e2e874ad8a87a817d03ab8236758ed7ae61c8234cfc58d69`.
+Fresh output is `M7/m7-guard-time-format-v1`; separate registry
+`M7/guard-time-format-stage-attempt-registry.json` preserves all 312 distinct
+historical keys. The eleven-stage schema includes three optional Git stages;
+no child is required if both files are already formatted. No compiler/tests.
+Root alone executes and collects. Independent correction report
+`/private/tmp/loopex-m7-lineage-guard-correction-inspection-058bf9e7-20261006-v2/report.md`
+is `91529f13768c391e1536876a7345e02d4dd49283a8269843316e934ad433020a`, inventory
+`43bb7ee9cd47915ec09fe9e717f4b4bbb0a6fa3f0b55e8754b888f2246d8baa7`.
+Current-index now owns independent read-only inspection of lookup fix 4d0,
+no VM or source edits. Primary and all frozen source checkouts remain clean;
+all task totals remain unchanged.
+
 RUNTIME FAILURE COLLECTED, 2026-10-06: root original 89580 is fully
 collected, exit 1 after 314.498 seconds, twelve current stages. IO 106/3
 passed in 43.172 seconds; workflow 27/39 passed, twelve failed in 48.334
