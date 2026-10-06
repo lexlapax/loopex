@@ -189,8 +189,16 @@ eight current focused/adjacent lanes passed with zero skips: IO 106/2 in
 42.647 s, Model 28/0 in 27.430 s, Composition adjacent 21/0 in 4.721 s,
 Receipt 32/0 in 24.040 s, Ledger 23/0 in 2.203 s, ReadOnly 22/0 in 19.953 s,
 Local adjacent 21/0 in 19.205 s and Artifact 29/0 in 1.965 s. Ordinary
-Composition passed 677/3 with zero skips in 356.395 s; ordinary Local is running.
-Remaining long and floor suites are pending.
+Composition passed 677/3 with zero skips in 356.395 s.
+Current Local passed 302/2 with zero skips in 180.623 s and long IO passed
+2/106 with zero skips in 22.740 s. All eleven current lanes/gates passed.
+Floor dev/test compilation passed in 34.759/34.029 s, all five floor gates
+passed. All eight floor focused/adjacent lanes passed with zero skips: IO
+106/2 in 36.461 s, Model 28/0 in 27.143 s, Composition adjacent 21/0 in
+4.596 s, Receipt 32/0 in 21.477 s, Ledger 23/0 in 2.074 s, ReadOnly 22/0 in
+29.739 s, Local adjacent 21/0 in 17.853 s and Artifact 29/0 in 1.908 s.
+Floor ordinary Composition is running; Local/long lanes remain pending.
+Original handle 13676 is still live and only current-index agent collects it.
 The Darwin invalid-filename witness remains unavailable, not PASS.
 Both formatter checks precede compilation, gates and suites. Preserve all
 original statuses, raw EOF, source modes and exact process joins; stop at first
@@ -240,20 +248,68 @@ Root's five immutable audit files are in
 `M7/current-restore-workflow-root-source-audit-20261005-v1`, report
 `6130bb2abb26569e8f69cbe848a96c5aaf22d245663477784bf2c442b94c42d4`, inventory
 `86c04c5e70ec5c4b29db8aaf7788b96513c551ccf051f0273930e36b8be096d0`.
-One new open T15 cleanup subtask is tracked. T01–T19 originals remain
-78 done / 95 todo / 6 retired; added subtasks are 299 done / 25 todo.
-Including T00, originals are 78 / 101 / 7 and added subtasks 303 / 26.
-T15 added is 17 / 9; T16 added is 53 / 6. No checkbox closes from this review.
+One new open T15 cleanup subtask is tracked. The owned raw IO prerequisite is
+reopened below for its confirmed source admission gap; no row closes from
+these current-only results. T01–T19 originals remain 78 done / 95 todo / 6 retired;
+added subtasks are 298 done / 26 todo. Including T00, originals are
+78 / 101 / 7 and added subtasks 302 / 27. T15 added is 16 / 10;
+T16 added is 53 / 6.
 
 The independent IO/guard review is sealed in
 `M7/current-restore-workflow-324-io-guard-review-20261005-v1`, report
 `0a6c9c78055267a66f1494dc4f4c7288c9968e2a28c010ca957d70041b122078`, inventory
 `c201aa0fb45dae067bf97577749aae4533944044776cc408b316e7232b718ff7`.
 Root read it and verified four artifacts, thirteen actual/Git/mode inputs and
-three external pointers. Its inherited clean-before-cutoff ordering concern
-is retained as a source-derived proof question, not an executed failure.
-Private agent is analyzing a deterministic witness read-only; no source edit or
-VM is granted for that concern.
+three external pointers. The follow-up establishes the inherited cleanup
+admission gap in source: early stop makes C earlier than the caller maximum O,
+so an already-entered receive can consume normal DOWN after C and reach the
+clean branch before expiry. Actual worker termination may be timely; late
+guardian observation is the disputed proof. Root accepted correction under the
+existing ADR 0051 cutoff; runtime reproduction remains unproved. The original
+passing outputs remain immutable, but the owned IO prerequisite cannot remain
+complete while this admission path exists.
+
+Follow-up sibling `M7/restore-observation-cutoff-analysis-20261005-v1`, report
+`6c0da3f64e194b2461a58cef27b0ac8655b605dc34fe59930d7127f69f6b0dc7`, inventory
+`ee9c90415069748df01f3bee58bd5ae887c8350604b669f4dca25b4755a9ed63`.
+Root verified four artifacts, six Git inputs, five supplied actual paths and two
+external references. Existing IO pause points cannot isolate final observation
+deterministically. CLI owns a separate source-only correction in
+`codex/m7-restore-observation-cutoff`, new isolated checkout from frozen `c71e8dc8`.
+Only IO and its test are owned. Admit expiry before clean/join/release, preserving
+existing cutoffs/outcomes; add one real long-bound timely/late control through a
+fixed-state extension of the existing private probe/pause seam. Original
+monitors, genuine normal DOWN and separate termination/observation instants are
+required. No fake clock/signal, shorter cleanup window, retry or VM is granted.
+
+PRE-INTENT CORRECTION: clean frozen
+`c71e8dc88f0a49a1fe613fbbc5940824ad296fc1` on
+`codex/m7-restore-preintent-cleanup` retains acquired claims through typed IO
+errors and stops, releases only proved ownership and counts partial/uncertain
+claims after a subset releases. Parent `a8bf7451` retains the IO-error correction;
+the child adds typed-stop/caller-loss coverage. The three new drafted cases
+preserve the entire original six-case file; nine focused cases are proposed,
+none executed. Sibling
+`M7/current-restore-preintent-cleanup-source-c71e8dc8-20261005-v1`, report
+`10f9eb7aebefcc647ef6b13ef080d63e6558451eacf2211c2ed943e27b4cca5b`, inventory
+`5a894e2758993d89d560a2802861862abf302d2be4372e3923ac95545aa8ad9c`.
+Root read the source/report and verified thirteen artifacts, forty actual/Git
+inputs, three external inputs, 87 old test files and exact six-case file
+reconstruction. Its public run preservation row incorrectly hashes zero private
+clauses; root separately verified the actual unchanged 937-byte public block.
+The frozen packet is not overwritten. Independent source review is complete
+with no new scoped blocker. Sibling
+`M7/current-restore-preintent-cleanup-independent-review-c71-20261005-v1`, report
+`2fb9256c5a260b92baa744474f0d02408513b5e2dff0e20b0a5291eddc69a9cc`, inventory
+`55d4615777d3bb23ac3488a1e9964b5453166a599ec7306c7b7a6d36e872f3de`.
+Root read the report and verified six artifacts, 58 hashed inputs including
+forty actual/Git sources, and the complete abbreviated-index patch against
+Git. Runtime proof remains pending; no source rejoin or execution is granted.
+
+Root's two immutable audit files are in
+`M7/current-restore-cleanup-root-audit-20261005-v1`, result
+`3272284e697df389b7439748e04433fd95faff84b8e2f1b4d7cac65671aa434a`, inventory
+`7458800cc7009683a355247fca5b65dfd64cd266e228b4cb5b3034f924d26f8c`.
 
 Primary task/resume checkpoint `82b043b0` is pushed to `m7`. Automatic approval
 review rejected the separate source-topic push to origin, stating authorization

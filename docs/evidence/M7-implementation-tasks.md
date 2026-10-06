@@ -73,7 +73,10 @@ outer handle 13676 is live and polled/collected only by that agent. Both early
 formatter checks passed without changing source; current compilation and all
 five gates passed. All eight current focused/adjacent lanes passed with zero
 skips, including IO 106/2. Ordinary Composition passed 677/3 with zero skips in
-356.395 s; ordinary Local is running. Long and floor suites are pending. Both formats
+356.395 s; Local passed 302/2 in 180.623 s and long IO passed 2/106 in
+22.740 s, all zero skips. All eleven current lanes/gates passed. Floor
+compilation/five gates and IO 106/2 passed; remaining floor lanes are pending.
+Both formats
 precede compilation/tests and first failure stops the run. Expected IO 106/2,
 Composition 677/3 and long 2/106 stay unchanged; no checkbox closes. No old-source
 retry or primary rejoin is authorized.
@@ -85,9 +88,16 @@ verified the twelve writer artifacts, forty exact source inputs, six references,
 formatter, compiler or test ran on this workflow. Independent IO review found
 a separate cleanup defect: a second claim IO failure drops the known first
 claim from terminal cleanup despite unchanged roots and absent intent. CLI
-owns a separate source-only correction in `codex/m7-restore-preintent-cleanup`;
-the original claims, cutoffs and foreign/uncertain ownership must be preserved.
-One added T15 cleanup row is open; no checkbox closes. Lost-source,
+owns a separate source-only correction in `codex/m7-restore-preintent-cleanup`,
+now frozen at `c71e8dc8` with three new drafted cases and the original six
+unchanged. Root verified its packet/source preservation; independent review
+and runtime proof are pending. A separate inherited cleanup observation gap
+reopens the owned raw IO prerequisite: the caller's later maximum does not
+enforce the earlier final cleanup cutoff, and a late normal DOWN can reach
+clean admission first. CLI owns the isolated ordering/real long-witness source
+unit; original limits/outcomes/monitors remain required. No runtime reproduction
+or second VM is claimed. One added cleanup row stays open; no checkbox closes.
+Lost-source,
 repeated restore, fault/cleanup and helper-ledger proofs remain required.
 Root retained the source gap inventory and ordinary-guard authority review.
 The guard preserves existing synchronous ownership and the original claim
@@ -99,8 +109,9 @@ setup-only cutoff. No other bound or pending ADR is accepted by that reply.
 [The restart record](M7-resume.md#technical-depth) retains exact source, output,
 review, mode and SHA-256 pointers. No checkbox changes from source-only review
 or current-only passes. T01–T19 originals are 78 done / 95 todo / 6 retired;
-added subtasks are 299 done / 25 todo. Including T00, originals are
-78 / 101 / 7 and added subtasks are 303 / 26. T15 added is 17 / 9;
+added subtasks are 298 done / 26 todo after reopening the IO prerequisite.
+Including T00, originals are 78 / 101 / 7 and added subtasks are 302 / 27.
+T15 added is 16 / 10;
 T16 added is 53 / 6. The following paragraphs retain historical checkpoints.
 
 Artifact source/evidence is pushed at `87be37e7`; its clean merged worktree and
@@ -13396,7 +13407,12 @@ open.
 - [ ] Produce the accepted complete physical manifest through the existing single owned restore IO worker: stream exact file hashes, preserve all paths/modes/empty directories and prior metadata, enforce all count/byte caps while accumulating, reject links/special/unsafe entries and prove actual faults and cleanup on both supported toolchains. Full history audit and restore orchestration remain separate.
 
 
-- [x] Implement and independently review the accepted ADR 0051 private restore codec and owned raw IO prerequisite; prove closed exact bytes, captured cleanup bounds and actual descriptor/guardian faults on both toolchains. Preserve required current-format audit, claims, guards, lineage and activation as subsequent work.
+- [ ] Implement and independently review the accepted ADR 0051 private restore codec and owned raw IO prerequisite; prove closed exact bytes, captured cleanup bounds and actual descriptor/guardian faults on both toolchains. Preserve required current-format audit, claims, guards, lineage and activation as subsequent work.
+
+Reopened on 2026-10-05: source review establishes that clean admission precedes
+final cleanup expiry after an already-entered receive consumes a late normal
+DOWN. Earlier passing proof remains historical; enforcement and a real paired
+long-bound observation witness are required before this row closes again.
 
 
 - [ ] Prove a bounded current-format physical Store/executor backup/restore slice with quiescent exact owner joins, complete unexcluded manifests, empty destination roots, separate workspace restoration and unknown-effect nonredispatch on both pairs. This does not close operator attendance or future helper/catalog/ledger coverage; isolated test preparation waits for the current full check before verification.
