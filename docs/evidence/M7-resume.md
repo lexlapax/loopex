@@ -27,6 +27,20 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current proof, execution and source ownership
 
+ROOT VM OCCUPIED by original12820, exact source
+`038401b76cbcff0f2546697354287d9210b64c3d`, protocol formatting only.
+Enabled `M7/model-policy-integration-format-runner-20261006-v1`, config SHA-256
+`a884d74cc667979411888d926230944cc7d44bb2773959ece021cf8bd75f9f78`;
+root review `46145fee6ef14afab7a93301e5fb88db408f92e5a719d09d408956a454d46cfc`.
+Output `M7/m7-model-policy-integration-format-v1`. Root verified61 artifacts,
+30 actual/Git sources,9 external references and635-key complete registry seed.
+Thirteen Elixir files are AST-constrained; eight Node/JSON files stay literal.
+Eight mandatory stages or eleven with one direct formatting child. No compiler,
+tests or wire activation. Collect original12820 before another execution grant;
+no terminal result exists at this checkpoint. Static admission corrected three
+metadata-only filename/shape assumptions before enabling or product execution.
+
+
 ROOT VM FREE after original34176 fully collected, exit0,511.8 seconds,
 PASS_FOCUSED_CLEANUP_NOTIFICATION_ONLY at
 `f9ac9c82818c5de8e70a1f32a068e8dd0f1768f3`. Current and floor each pass43
