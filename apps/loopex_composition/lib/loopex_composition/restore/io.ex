@@ -20,7 +20,8 @@ defmodule LoopexComposition.Restore.IO do
   durable record publication, complete declared-Store semantic auditing and one
   canonical retained Resource or Local ledger record audit, and complete Local
   generation/marker/open-plane enumeration and selected reference-bound artifact
-  use capture to composition only. Validated maps
+  use capture and one locator-selected streaming object audit to composition only.
+  Validated maps
   and recovered session facts remain private; the
   operation grants no effect authority and does not validate other backup
   formats or activate a restored root. Host exclusion remains the caller's
@@ -599,6 +600,32 @@ defmodule LoopexComposition.Restore.IO do
     end
   end
 
+  defp execute({:audit_artifact_object, root, reference, manifest, max_total}) do
+    # Concept: one selected object's bytes bind its existing reference triple.
+    # Technical depth: Local fetch selects by locator and verifies requested
+    # digest/size; its reader does not equate locator with digest or apply put's
+    # 64 MiB cap. The original total-file-byte limit is checked before open.
+    with true <- primitive(:artifact_reference, fn -> ArtifactStore.valid_reference?(reference) end),
+         true <- primitive(:artifact_object_locator, fn ->
+           byte_size(reference.locator) == 64 and
+             Regex.match?(~r/\A[0-9a-f]{64}\z/, reference.locator)
+         end),
+         {:ok, entries} <-
+           primitive(:artifact_manifest, fn -> RestoreCodec.manifest(manifest, max_total) end) do
+      relative = Path.join(["artifacts", binary_part(reference.locator, 0, 2), reference.locator])
+      index = Map.new(entries, &{&1["path"], &1})
+      entry = Map.get(index, relative)
+
+      if not match?(%{"kind" => "regular"}, entry) or entry["size"] != reference.size or
+           entry["sha256"] != reference.digest,
+        do: throw({:io_error, :inventory_mismatch})
+
+      audit_artifact_object(root, relative, index, entry, reference)
+    else
+      _ -> {:error, :history_invalid}
+    end
+  end
+
   defp execute({:publish, path, temp, bytes, mode, expected}) do
     current =
       case primitive(:stat, fn -> :prim_file.read_link_info(path) end) do
@@ -921,6 +948,55 @@ defmodule LoopexComposition.Restore.IO do
     end)
 
     result
+  end
+
+  # Concept: object verification streams bytes without materializing a payload.
+  # Technical depth: the existing manifest hash owns each bounded raw read and
+  # exact EOF witness. Shared identity guards surround the same explicit close;
+  # only the private reference triple is returned after physical revalidation.
+  defp audit_artifact_object(root, relative, index, entry, reference) do
+    ancestors = manifest_ancestors(root)
+    directories = audit_directories(root, Path.dirname(relative), index)
+    path = Path.join(root, relative)
+    before = manifest_stat(path)
+    require_audit_file(before, entry)
+    descriptor = open(path, [:raw, :binary, :read])
+
+    opened =
+      require_value(
+        primitive(:descriptor_stat, fn -> :prim_file.read_handle_info(descriptor) end)
+      )
+
+    require_same_identity(before, opened)
+    digest = manifest_hash(descriptor, entry["size"], :crypto.hash_init(:sha256))
+
+    after_read =
+      require_value(
+        primitive(:descriptor_stat, fn -> :prim_file.read_handle_info(descriptor) end)
+      )
+
+    require_same_identity(before, after_read)
+    require_same_identity(before, manifest_stat(path))
+    close(descriptor)
+
+    matched = primitive(:artifact_object_digest, fn ->
+      digest == reference.digest and digest == entry["sha256"]
+    end)
+
+    if not matched, do: throw({:io_error, :inventory_mismatch})
+    require_same_identity(before, manifest_stat(path))
+
+    Enum.each(directories, fn {directory, observed} ->
+      if manifest_identity(manifest_stat(directory)) != observed,
+        do: throw({:io_error, :source_changed})
+    end)
+
+    Enum.each(ancestors, fn {ancestor, observed} ->
+      if directory_identity(manifest_stat(ancestor)) != observed,
+        do: throw({:io_error, :source_changed})
+    end)
+
+    {:ok, Map.take(reference, [:digest, :size, :locator])}
   end
 
   defp audit_store_bytes(bytes) do
@@ -1345,6 +1421,12 @@ defmodule LoopexComposition.Restore.IO do
     do:
       valid_path?(root) and is_map(reference) and is_binary(manifest) and
         byte_size(manifest) <= @max_manifest
+
+  defp valid_operation?({:audit_artifact_object, root, reference, manifest, max_total}),
+    do:
+      valid_path?(root) and is_map(reference) and is_binary(manifest) and
+        byte_size(manifest) <= @max_manifest and is_integer(max_total) and
+        max_total in 0..@max_uint64
 
   defp valid_operation?({:manifest, root, max_total}),
     do: valid_path?(root) and is_integer(max_total) and max_total in 0..@max_uint64
