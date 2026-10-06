@@ -549,6 +549,88 @@ defmodule LoopexComposition.RestoreLookupTest do
     end
   end
 
+  for phase <- ~w(source_retirement destination_generations destination_proofs claim_release) do
+    test "a second incoming destination at #{phase} preserves prior receipt and candidate membership", %{root: root} do
+      first = first(root)
+      source_generation = File.read!(Path.join(first.destination, "receipts/generation"))
+      {:ok, source_record} = Ledger.decode_bytes(source_generation, "local_executor_generation_v1")
+      first_intent_path = ".loopex-restore/lineage/00000001/intent"
+      first_intent_bytes = File.read!(Path.join(first.destination, first_intent_path))
+      {:ok, first_intent} = RestoreCodec.decode(:intent, first_intent_bytes)
+      assert [prior_candidate] = first_intent["generations"]
+      assert prior_candidate["destination_generation_bytes"] == source_generation
+      assert prior_candidate["relative_root"] == "receipts"
+      cut = prepare_cut(root, first.destination, first.workspace, 1)
+      owned = launch_restore(cut)
+      try do
+        {id, _events} = hold_phase(owned, unquote(phase), [])
+        try do
+          intent_path = Path.join(cut.destination, ".loopex-restore/lineage/00000002/intent")
+          intent_bytes = File.read!(intent_path)
+          {:ok, intent} = RestoreCodec.decode(:intent, intent_bytes)
+          assert intent["ordinal"] == 2 and intent["tx_id"] == cut.plan["tx_id"]
+          assert intent["plan"] == cut.plan
+          assert [candidate] = intent["generations"]
+          assert candidate["relative_root"] == "receipts"
+          assert candidate["source_generation_bytes"] == source_generation
+          {:ok, destination_record} = Ledger.decode_bytes(candidate["destination_generation_bytes"], "local_executor_generation_v1")
+          assert destination_record["executor_identity"] == source_record["executor_identity"]
+          refute destination_record["executor_epoch"] == source_record["executor_epoch"]
+          assert File.read!(Path.join(cut.source, "receipts/generation")) == source_generation
+          assert File.read!(Path.join(cut.destination, first_intent_path)) == first_intent_bytes
+
+          assert File.read!(Path.join(cut.destination, "receipts/generation")) ==
+            incoming_generation(candidate, unquote(phase))
+          assert_incoming_root_commit(cut, unquote(phase))
+
+          {:ok, plan_digest} = RestoreCodec.plan_digest(cut.plan)
+          owners = Enum.map([{cut.source, "source"}, {cut.destination, "destination"}], fn {state_root, role} ->
+            owner = Path.join(claim_path(state_root), "owner")
+            bytes = File.read!(owner)
+            {:ok, claim} = RestoreCodec.decode(:claim, bytes)
+            assert claim["tx_id"] == cut.plan["tx_id"] and claim["plan_digest"] == plan_digest
+            assert claim["state_root"] == state_root and claim["role"] == role
+            {owner, bytes}
+          end)
+          # Concept: lookup validates an incoming ordinal with genuine prior candidates.
+          # Technical depth: capture every temporary tree and both actual claims;
+          # source/candidate membership is checked before the read-only queries.
+          before = manifest(root)
+          assert Restore.lookup(cut.destination, cut.plan["tx_id"], @limits) ==
+            {:pending, %{"kind" => "loopex_current_restore_observation_v1", "tx_id" => cut.plan["tx_id"],
+              "ordinal" => 2, "phase" => unquote(phase), "intent" => "validated", "cleanup" => "joined",
+              "claim" => "retained", "reason" => "none"}}
+          assert Restore.lookup(cut.destination, first.plan["tx_id"], @limits) ==
+            {:committed, %{"receipt" => first.receipt, "view" => "historical"}}
+          assert manifest(root) == before
+          for {owner, bytes} <- owners, do: assert(File.read!(owner) == bytes)
+        after
+          send(owned.guardian, {:proceed, owned.reference, id})
+          finish_restore(owned)
+        end
+        assert File.lstat(claim_path(cut.source)) == {:error, :enoent}
+        assert File.lstat(claim_path(cut.destination)) == {:error, :enoent}
+        assert {:committed, %{"receipt" => current, "view" => "current"}} =
+          Restore.lookup(cut.destination, cut.plan["tx_id"], @limits)
+        assert current["ordinal"] == 2 and current["tx_id"] == cut.plan["tx_id"]
+        assert Restore.lookup(cut.destination, first.plan["tx_id"], @limits) ==
+          {:committed, %{"receipt" => first.receipt, "view" => "historical"}}
+      after
+        cleanup_owned(owned)
+      end
+    end
+  end
+
+  defp incoming_generation(candidate, phase) when phase in ~w(source_retirement destination_generations),
+    do: candidate["source_generation_bytes"]
+  defp incoming_generation(candidate, phase) when phase in ~w(destination_proofs claim_release),
+    do: candidate["destination_generation_bytes"]
+
+  defp assert_incoming_root_commit(cut, "claim_release"),
+    do: assert({:ok, %File.Stat{type: :regular}} = File.lstat(Path.join(cut.destination, ".loopex-restore/lineage/00000002/committed")))
+  defp assert_incoming_root_commit(cut, phase) when phase in ~w(source_retirement destination_generations destination_proofs),
+    do: assert(File.lstat(Path.join(cut.destination, ".loopex-restore/lineage/00000002/committed")) == {:error, :enoent})
+
   defp assert_root_commit_boundary(cut, "claim_release") do
     assert {:ok, %File.Stat{type: :regular}} = File.lstat(Path.join(cut.destination, ".loopex-restore/lineage/00000001/committed"))
   end
