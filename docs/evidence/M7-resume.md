@@ -27,6 +27,54 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current proof, execution and source ownership
 
+LATEST INTEGRATION SOURCE, 2026-10-06: clean
+`c63d6aa398f0401c684177af52f1d5842d587774` in
+`/private/tmp/loopex-m7-restore-successive-integration`, branch
+`codex/m7-restore-successive-integration`, combines the prefix repair with
+successive-lineage source `eee5df420dfc761d71b6e7dca92bf9c3e6a973fd`.
+The latter is a clean sole child of f870, five owned paths, 503 insertions and
+67 deletions. Its complete 45,941-byte full-index patch is
+`147a667e4a8620e110399661f72dafe38ee6d3aedc660fbe750685d12a9f4fce`.
+All original 27 workflow cases and complete IO test bytes remain. Ten new
+ordinary cases make the prospective workflow population 37/0; no new test has
+run. Source implements captured complete prior administrative projection,
+next ordinal, sparse cumulative candidate provenance, historical placement
+retention, epoch exclusions and duplicate transaction refusal. Source review
+is underway. Actual 64-transition success and a fully rebound historical
+administrative-omission attack remain required proofs. Public lookup and
+original-transaction continuation remain subsequent units, not completed APIs.
+
+PREFIX FORMATTER COLLECTED, 2026-10-06: original root handle 62546 is fully
+collected, exit 0 after 46.026 seconds. All eleven stages passed, including
+whole-file NON_LINE_AST_EQUAL and current/floor formatting. Clean formatter
+child `16b3f22f89e4d2bd82c1bf2e78f8cb389e78a2ca` has sole parent 49ee;
+only Workflow formatting changed. No compiler or test ran. Root verified all
+70 retained artifacts, 45 actual/Git kind/mode/blob source records, eleven raw
+EOF/wait/status/original PID-group joins, and eleven unique consumed keys.
+No active VM remains. The initial invocation omitted the required execution
+arguments and refused before admission, registry consumption or VM start;
+the corrected invocation above is the sole admitted formatter campaign.
+
+Enabled packet `M7/path-prefix-format-runner-20261006-v2`: config
+`c4d8b1e70e70e3e9f2b7a7a58b5090884caca7db19c1222cad47a026af2d921d`,
+root inventory
+`554e2da5405392841c9cddfeabf9dbcfbcccc0e3b3cfc050715a4f40cc67ba03`.
+Retained focused source review
+`M7/path-prefix-source-review-49ee729c-20261006-v1/report.md` is
+`98ca4696ed1781ec9bb94e172dc1304b5d531d923ead97736da7c2ad85573936`.
+Output `M7/m7-path-prefix-format-v1`: terminal report
+`22971d65eb03e939d65da1ca69fe7f25d3097e328f8cd5e1972c1ffdb2e57721`,
+inventory `3714b02fa2b7b8741e95cda62315a556847d3e2e4f48a460c65d9b499335d520`.
+Original collection
+`M7/path-prefix-format-original-collection-20261006-v1.json` is
+`6df1f1a84788c95d186788c4d9a911340d08e56fec4ecd036282ea4983427d2b`;
+audit reader `M7/path-prefix-format-collection-20261006-v1.py` is
+`e047c0cf8b7428de6fec75acddabdae45376ad9f1cbcf3e340c89b837d55a622`.
+Final eleven-key registry
+`M7/path-prefix-format-stage-attempt-registry.json` is
+`718747c652b82472b36fb9f16959b8e57b98161ab947824e7d79f481da714aea`;
+never reset or repeat its stages. Task totals remain unchanged.
+
 LATEST FORMATTER PREPARATION, 2026-10-06: source-only fixture repair ed1e4371
 passed independent focused review. Root retained its conclusion in
 `M7/resource-admission-fixture-review-ed1e4371-20261006-v1`, report
