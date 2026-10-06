@@ -1,14 +1,18 @@
 # M7 Implementation Tasks
 
-The reviewed conversation/compaction and provider-cleanup unit is recovered,
-integrated and pushed at `cf98ea6c` after the maintainer reboot. Current Core81
-passed; the warning-corrected CLI170 run was interrupted and floor was unrun.
-Continue paired affected-boundary verification and the integrated full fast
-check before closing T06.3/.5/.6 or the four remaining T10 original rows.
-No restore work replaces those capability tasks. The
-[restart checkpoint](M7-resume.md#technical-depth) retains exact source and
-interruption identities. Original T01–T19:80 done/93 todo/6 retired;
-added302 done/39 todo. Older entries below describe their named revisions.
+Reviewed configure grammar and fixture corrections are integrated at `bab921b2`.
+Paired chat/provider proof is collected PASS. The full integration check remains
+FAIL: overlong temporary paths, absent public offline Hex cache and mode-copy
+assumptions prevented valid fixture setup. Corrected restore133/134 passed;
+the64 actual successive restores case hit its unchanged60,000-ms test cutoff,
+which also failed before the new helper. A source worker examines redundant
+immutable captured-history work. Independent unrun provider, packaging, drain,
+CLI and floor configure stages continue in root original59352. No failed test
+is retried unchanged, no cutoff is increased, and no original row closes yet.
+The [restart checkpoint](M7-resume.md#technical-depth) retains exact source,
+original terminal collections and the next verification order. Original T01–T19:
+80 done/93 todo/6 retired; added302 done/41 todo. Older entries below describe
+their named revisions.
 
 Original T06.2 and T06.4 are complete. The literally integrated built-command
 witness passed all ten selected ordinary cases on both supported toolchains:
@@ -13195,6 +13199,7 @@ or check was relaxed.
 
 - [ ] Finish accepted ADR0052 native answer provenance, exact policy cursor/replay relations and shared Elixir/Node payload projection in both transports; prove focused current/floor and independent vectors after rejoin, complete negotiated manifests and real answered-command workflows.
 - [ ] Pin and implement the exact configure request and versioned remote creation-option grammars through governed decisions; preserve authored aliases, central preparation, host-only bindings, current command replay and both transport authority gates.
+- [ ] Prove the accepted standalone configure `changes` grammar, exact schema and371 literal vectors through shared Elixir and independent Node codecs plus both transport preparation wrappers on both supported pairs. Keep live configure routing, remote creation and whole-generation activation separate.
 - [ ] Pin and implement the closed transient compaction-progress payload and its actual owned emission/loss/succession behavior; exclude summaries and private captures and prove both transports/clients before complete generation activation.
 
 - [x] Prepare the exact proposed ADR0052 policy public-event pair from current native/accepted sources, retain root review and complete once-only docs gate at ec9e8fbe with bound Proposed digests; required maintainer acceptance, native/event implementation, complete /3-/4 manifests and live clients remain open.
@@ -13778,6 +13783,7 @@ long-bound observation witness are required before this row closes again.
 - [ ] Repair ordinary provider cleanup notices reaching the SessionCoordinator dispatcher after the cleanup integration; retain failed58fb33ba full-check evidence, prove actual Local Store completion through the same live owner and distinct caretaker delivery, preserve existing cleanup windows and native joins, and verify both supported pairs plus a new full integration candidate.
 
 - [ ] Repair the inherited long-temporary-path fixture failures exposed by Ledger6baa and receiptfdd6 ordinary checks: supply bounded explicit instructions only to seven failed model startup cases while preserving the 1,000-token ceiling and give only the actual Unix socket/exact8MiB cases fresh short temporary workspaces. Preserve real HTTP/effects/questions/cleanup, actual special files, all exact path-byte/first-over assertions and original deadlines; prove focused, adjacent and complete affected application populations on both supported pairs with both original failed runs retained.
+- [ ] Preserve captured restore fixture permissions under ordinary022 through exact copied modes and baseline-bound generation payload normalization; retain wrong-mode, wrong-byte and wrong-ordinal controls, all134 affected cases, actual64-transition witness and original actor/deadline proofs on both supported pairs. Retain the original full-check and focused failures; broader temporary-path repairs remain separate.
 - [x] Repair the e327e46c incomplete foreground revision-3 snapshot and superseded policy-answer admission fixture; prove all ten captured fields, exact historical cursor parity after live advancement, actual answer-admission order and the complete AppServer population on both supported pairs without changing generation activation or implementing unaccepted ADR0052.
 
 - [x] Include composition's actual owned restore IO long-bound cases in the existing release long_bound group and prove the real selected composition lane. Preserve nonzero executed-case judgment, credential exclusion, all deadlines and prior required lanes; focused worker runs do not substitute for runner selection.

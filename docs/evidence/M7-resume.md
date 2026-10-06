@@ -27,30 +27,71 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
-After the maintainer's 2026-10-06 reboot, work continues directly in the primary
-`m7` checkout. Exact reviewed source from isolated `37ac673f` is integrated and
-pushed as `cf98ea6cb8f14e6ad6364c88a9ad7090c74c617b`: immutable provider attempt
-positions, cleanup before owner succession, literal `/abort`, and `/compact`
-with physical bounds delivery, committed results and cursor-bound status. All
-eight recovered paths match the retained source hashes. Temporary checkouts were
-removed by reboot; their committed branch references remain. No application
-data restore is underway, and no temporary checkout is needed for this unit.
+M7 continues on primary branch `m7`. Reviewed configure grammar, mode-faithful
+restore copies and bounded private socket fixtures are integrated at
+`bab921b250ee6f7b3d88d5184c3f9d964434d90e`. Its four source commits are
+c9d3feb4, 38757b9e, 9414a898 and formatting-only bab921b2. Current contracts
+and all original test cutoffs remain. Live foreground/daemon configure activation
+and complete generation manifests remain open.
 
-Current Core81 passed at `57044cc9`. The same run's CLI170 assertions passed,
-but its check failed on generated-test compiler warnings. Those three tests now
-use the same assertions through a parameterized helper. Current warning-free
-compilation and formatting passed at `37ac673f`; its CLI170 run was interrupted
-before a final result and floor stages were unrun. Never repoll original34233
-or signal its pre-reboot PIDs. Retained interruption
-`M7/chat-compact-reboot-interruption-20261006-v1.json`, SHA-256
-`5db87ae4efa50da58748c45f0426d7f70b36dcbb6f7aedf5fb4d8cc3c55eab16`,
-preserves the incomplete run and complete936-key consumed registry, SHA-256
-`c02887e7b1b2ab81105842573ce200e27f718ee766069d17b66444c7570435b0`.
-Continue current CLI170 and unrun floor Core81/CLI170 from the clean integrated
-candidate, retaining unchanged current Core success, then run its full current
-fast check once. Original T06.3/.5/.6 and four T10 rows remain open until those
-proofs; hosted/attended, release and milestone closure remain separate.
-Original T01–T19:80 done/93 todo/6 retired; added302 done/39 todo.
+Paired chat/provider proof original1121 is complete and collected: current
+CLI170, floor Core81 and floor CLI170 passed with warning-free compilation and
+formatting. Unchanged current Core81 is retained from its original successful
+run. Collection `M7/chat-post-reboot-focused-20261006-v1/original-collection.json`,
+SHA-256 `4dd4d85343968d06fbcf31638b1ad5b620d06eb397e235cf50966f818fc4be70`,
+binds39 artifacts, nine joins and the945-key registry. Never repoll1121.
+
+Original full check88662 at a620 is collected FAIL_OR_UNAVAILABLE after
+2453.958 seconds. Core1332, Executor302, AppServer102 and Protocol141 passed.
+Composition33, ReqLLM8 plus5 invalid packaging cases, CLI36 and Daemon130
+failed. Its wrapper's overlong TMPDIR caused Unix socket refusals and failed
+startup prerequisites; empty private HEX_HOME prevented offline materialization.
+Restore fixtures assumed a restrictive umask instead of preserving captured
+modes. Once those causes were established, root stopped the repeated socket
+failures through the original check's cleanup trap. Remaining ReferenceClient,
+Store and Telemetry applications are unrun, not passed. Every required full
+check remains due on the corrected candidate. Original group termination, wait,
+EOF and stdout closure are confirmed. Partial application snapshots and the
+controlled stop are retained alongside the full raw log. Collection
+`M7/chat-integration-full-fast-20261006-v2/original-collection.json`, SHA-256
+`237d19b6df73cd1b5d9711e77508860548ee94a98110a7518870af1248337613`,
+binds13 artifacts and946 consumed keys. Never repoll88662 or signal its PIDs.
+
+Isolated corrected-boundary original58622 at bab921b2 is collected FAIL after
+193.364 seconds. Current configure15 passed, including independent Node vectors.
+Restore133/134 passed; the64 actual sequential restores case exceeded its
+unchanged implicit60,000-ms ExUnit cutoff. A retained earlier run at058bf9e7
+also timed out in this same case, so the mode-copy correction is not its cause.
+The cited earlier147-case proof excludes the workflow file and supplies no
+positive64-transition witness. A separate worker owns only RestoreGuard and
+narrow retained-construction tests to remove redundant immutable digest/child
+scans without weakening historical validation, physical IO or any cutoff.
+Collection `M7/mode-configure-boundaries-20261006-v1/original-collection.json`,
+SHA-256 `17f5ca08d90adcfb9958a6ff10e9c202c7cd8a0ea98a3b66fa987215218b40e0`,
+binds42 artifacts, ten original joins and956 consumed keys. Never repoll58622.
+
+LIVE root original59352 executes only unrun independent stages at frozen
+isolated bab921b2 in `/Users/spuri/.codex/worktrees/m7-restore-copy-fixtures/loopex`:
+current provider/packaging62, drain1 with nine subcases and CLI44 including Node;
+floor configure15 and the same provider/drain/CLI selection. Total229 native
+cases and18 drain subcases. Its persistent runner
+`M7/m7-independent-unrun-20261006-v1.py`, SHA-256
+`5e6af11baeb1eeb2bb845f076613479ec0ac06fba049266805d0bf8c191a6385`,
+seeds the complete956-key registry and copies only public registry metadata and
+22 exact lock-checksummed archives into private Hex roots. Fresh short private
+TMPDIR roots retain exact ownership and are removed only after original joins.
+Output `M7/independent-unrun-boundaries-20261006-v1` is incomplete until original
+terminal collection. No current configure or failed restore stage is retried.
+
+Next: collect59352 once; independently review and prove any captured-history
+optimization through complete affected files with all original cutoffs; resolve
+the64-transition failure causally; run corrected whole current fast once with
+ordinary022, short private TMPDIR, public offline Hex cache, four application
+VMs maximum and provider alone as CI. Then close eligible T06/T10 and T12.9
+rows only from complete passing proof. ADR0054 remains the sole asked pending
+question;0055 and0056 remain queued proposals. No milestone closure, main merge,
+tag, release, publication or paid campaign is authorized. Original T01–T19:
+80 done/93 todo/6 retired; added302 done/41 todo.
 
 The named results below remain evidence of their specific revisions.
 
