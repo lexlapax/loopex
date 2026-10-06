@@ -226,6 +226,12 @@ and inventory `5dd34d78bc8d32dc3905bb8f103475198fdca3f1b80b97561d4589c436b538c7`
 All three audit files and inventory are mode 0444. This proves the selected
 prerequisites at `2826b30b`, not the newer workflow or cleanup corrections.
 The reopened owned IO prerequisite stays open for the known observation gap.
+Supplemental sibling `M7/object-call-snapshot-root-audit-20261005-v1` verifies
+every one of the 17,360 recorded source-snapshot rows against Git kind, mode,
+blob, size and byte digest, all three complete NUL Git trees, and both old
+failure registries unchanged. Result
+`f264358a949d76daedb0ad5adedd421d3d6e7f588b45b0d5c1b6947e3288f68c`, inventory
+`f36b0c7800b90c8cb240ef806ca663cac9a904a6760dfae61a4528db400e405b`.
 
 Root owns a separate source-only rejoin in
 `/private/tmp/loopex-m7-restore-final-observation-integration`, branch
@@ -357,6 +363,49 @@ NUL Git tree. Report
 `10de518ec009d37c08cd7012527f899ba6706820969c18d30b5f56b8987911ae`.
 Current-index agent owns a separate disabled runner/collector proposal only;
 it has no VM, source mutation or registry activation grant.
+The planned proof sequence has three separately reviewed grants: formatting
+preparation and exact terminal collection; one separately frozen old-order
+causal control from the resulting clean source; corrected paired proof that
+admits retained exact-source formatter evidence instead of repeating it.
+No in-place source switching is permitted. The causal control must preserve
+the Boolean repair, private barrier and same-C wait, retain both actual timeline
+files and the original known assertion failure, and never substitute an
+unrelated failure or missing record for the red. Prospective final populations
+are IO 106/3, workflow nine expanded ordinary cases, Composition 686/4,
+Local 302/2 and selected IO long 3/106. No population has been measured on
+`91eb4ae2`; disabled proposals must be frozen and reviewed before any grant.
+
+FORMATTING PREPARATION GRANT: the separate disabled packet is frozen in
+`M7/final-observation-format-runner-20261005-v1`. Root verified its thirty-three
+artifacts, 132 actual/Git inputs, twenty-one references, all eleven unchanged
+lifecycle functions and complete tree/patch. Runner
+`df69d6368ced2c36dfc9aad86469126d36f886ba7fcfa0f80c26b36a9fb203d7`, disabled config
+`f2eb1ec8c3f3611fd766b308989f7247f99a0cdd2cf57d546faf23c4e80ff754`, inventory
+`e44f6f86ad806cff25a55e5f49b4abfc1fb13eb20ba98d3d9b5be3c85af154d3`.
+Independent review found no blocker; root verified its seven sealed artifacts
+and 192 exact input pins. Review sibling
+`M7/final-observation-format-runner-independent-review-20261005-v1`, report
+`51d429fb6bdb329ecbb69c1962d1142e6fc04c223c84929e5a362c04c5020061`, inventory
+`67a131c868ac6aaf0baec9bf9645818f0d77f1dcb9a958a31b11babdd244dc7f`.
+The Bash entrypoint matches the original v1 and v2's historical disabled copy;
+v2's active root has no `stage.sh`. The recorded metadata verifier corrections
+are source-audit limitations, not product or VM failures.
+
+Root finalized a separate enabled sibling
+`M7/final-observation-format-runner-20261005-v2`, preserving the complete frozen
+disabled packet under `disabled-review-packet`. All forty-nine active/historical
+artifacts plus root inventory were verified. Enabled config
+`9a58cbae01641e3319b4fcc487b12ca4d43f311f6e81b21297342fe0f80fab09`, root inventory
+`041d96267c34b08fe4e05ef7165d6dd4803e0ceccebd9e6c89a86759a285f7c0`.
+The fresh canonical `M7/final-observation-format-stage-attempt-registry.json`
+was seeded empty at
+`1a5f5f5aa0ba2c8e25a6d0994e96d5911cd7194ee78b447a194f0321f46bdbf0`; never reset.
+New output is `M7/m7-final-observation-format-v1`. Current-index agent has the
+sole VM grant for this formatting-only campaign and owns original handle
+polling/collection. Preserve the clean or dirty resulting source, exact original
+EOF/status and process/group joins; stop first failure and return the slot only
+after terminal collection. No compiler, gate, ordinary/long or causal test,
+repair, retry, second VM, source switch, primary rejoin or push is granted.
 
 PRE-INTENT CORRECTION: clean frozen
 `c71e8dc88f0a49a1fe613fbbc5940824ad296fc1` on
