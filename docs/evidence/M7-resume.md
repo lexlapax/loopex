@@ -60,7 +60,7 @@ verifies 72 retained artifacts, 45 actual/Git kind/mode/blob/source records,
 eleven original raw EOF/wait/status/process-group joins and unique consumed
 keys. Final registry
 `c10d5a6b7dfe3abe618f73ad7b28f113142bf9ef29921e459de66644afdb0174`.
-Current-index owns only a disabled current-then-floor runtime proposal at f870,
+Current-index prepared the disabled current-then-floor runtime proposal at f870,
 with unchanged twelve lanes, workflow 27/0 and ordinary Composition 704/4;
 IO remains 106/3, selected long 3/106 and all skips zero. Retained old causal
 negative evidence must stay bound to its actual fdfe source, with a strict
@@ -92,24 +92,59 @@ lifecycle functions. The independent causal closure review confirms the actual
 read-witness dependencies are unchanged; the gate transfers only historical
 negative relevance, not current runtime success.
 
-CURRENT ACTIVE VM GRANT, 2026-10-06: current_index_cleanup owns the sole VM for
-one current-then-floor corrected resource-admission campaign at exact f870.
-Enabled sibling `M7/resource-admission-success-runner-20261006-v2` preserves
-all disabled bytes. Config
-`029b11dc2c3fcee7a64dd6f6ff03d7659c9db93869cfdd0d5ce3317febc8c280`, root inventory
+LATEST COLLECTED FAILURE, 2026-10-06: original outer handle 30452 is fully
+collected with exit 1. Current-index returned the sole verification VM slot;
+all twelve original PIDs and groups were proved absent. Frozen clean source
+`f870aa3ea19eff6b6362db011548fb488de1a8af` is unchanged. The campaign took
+297.637 seconds. Current IO passed 106 cases with three long cases excluded in
+41.206 seconds. Workflow passed 20 of 27 cases with seven failures in
+28.592 seconds. No remaining current lane, floor lane or long proof ran; no
+new cleanup timeline was produced. Preserve every failure and consumed key.
+
+Enabled sibling `M7/resource-admission-success-runner-20261006-v2` retains
+config `029b11dc2c3fcee7a64dd6f6ff03d7659c9db93869cfdd0d5ce3317febc8c280`
+and root inventory
 `3be21004a0af0e06e1733676912a9e96448905871534ff6d04894da2ea3790da`.
-Fresh `M7/resource-admission-success-stage-attempt-registry.json` was seeded at
-`1a5f5f5aa0ba2c8e25a6d0994e96d5911cd7194ee78b447a194f0321f46bdbf0`;
-never reset it. New output is `M7/m7-resource-admission-success-v1`.
-Original outer handle 30452 launched exactly once. Current-index alone owns
-its original waits and collection; root must never poll it. Stop the first
-failure, collect original raw EOF/wait/status/source/registry/actual PID-group
-joins, retain terminal collection and then explicitly return the VM slot.
-No root/other-agent VM, retries, formatter/control/consumer repeats, source
-repair/switch, provider/Linux/full-fast/release, primary rejoin or export is
-granted. CLI may continue isolated source-only successive-lineage work.
-The pre-launch read-only root-grant filename assumption used .md; actual config
-correctly names .json. Its correction preceded execution and caused no retry.
+Output `M7/m7-resource-admission-success-v1` has terminal report
+`fa81418884c17a4cae963f7da48baac313dbd36c3e312644e3ffd540f4dbeda7`
+and terminal inventory
+`1c2c2a97953756bd2aac0a83dc44bf2ba70155a2cc844951473c340559ae2ac9`.
+Root rehashed all 58 retained artifacts and their modes, the terminal report,
+inventory, final twelve-key registry and original collection. Registry
+`M7/resource-admission-success-stage-attempt-registry.json` is now
+`4036d99f042d14e94d96cd61d112e9d09c3873e324e36048eb0947d802c274ff`;
+never reset it. Collection
+`M7/resource-admission-success-original-collection-20261006-v1.json` is
+`6a4fa611c9d8ab0703c2dfd46586d2f17e436a2a1e524975ae70af34c60f20ee`.
+Its audit reader is
+`M7/resource-admission-success-collection-audit-20261006-v1.py`,
+`bc434d18459d28c94d857862254ce21989ab45a35d258983f957a79aad8a863e`.
+The pre-launch read-only root-grant filename correction preceded execution;
+no admission retry occurred. Do not poll original handle 30452 again.
+
+ROOT SOURCE REPAIR, 2026-10-06: clean
+`49ee729c3013455bd6ae5e7ab5f718e45144bcfe`, sole parent f870, is isolated in
+`/private/tmp/loopex-m7-restore-path-prefixes`, branch
+`codex/m7-restore-path-prefixes`. Workflow's prefix scan now joins the parent
+before the next component. The old reversed join produced malformed manifest
+parents, causing six failures before intent. The remaining failure expected
+ENOENT for a never-acquired lost-source claim below the fixture's deliberately
+nondirectory ancestor; that branch now expects native ENOTDIR. Destination
+ENOENT and original zero-claim, intent, backup, cap, deadline and exact-join
+assertions remain unchanged. No production bound or record schema changed.
+Independent focused review found no source blocker, retained at
+`/private/tmp/m7-restore-path-prefixes-review-49ee729c-v1.md`, SHA-256
+`98ca4696ed1781ec9bb94e172dc1304b5d531d923ead97736da7c2ad85573936`.
+Root read the full report. All 27 workflow cases remain; runtime proof is pending.
+Current-index owns only a disabled two-file formatter proposal. No VM execution
+grant is active. CLI preserves its separate successive-lineage edits and will
+commit before root rejoins this repair; it also fixes the same reversed prefix
+scan in its owned Guard reconstruction. No source export is authorized.
+
+The maintainer reconfirmed "approve 1000 ms" on 2026-10-06. This confirms the
+[diagnostic setup-only disposition](../developer/agent-context-map.md#disposition-m7-diagnostic-setup-cutoff-2026-10-05);
+it changes no production deadline, restore contract or evidence requirement.
+Task counts remain originals 78/95/6 and added 298/30 for T01–T19.
 
 CURRENT COLLECTED FAILURE, 2026-10-06: original outer handle 28778 is fully
 collected with exit 1. current_index_cleanup returned the sole verification VM
