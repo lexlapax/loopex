@@ -46,10 +46,11 @@ Latest native original2817 is fully collected FAILED272.016s at d6afe045:
 Core312/315, three failures, zero exclusions/skips; later protocol, transport
 and floor lanes did not run. Two fixture causes and a question-expiry race are
 under source diagnosis. Generation formatter24989 passed both toolchains at
-f3086bdd after61.047s; fresh original81659 now owns the VM for143 generation
-cases per pair. Prompt/follow-up and answer ingress leaves are sealed and cross
-reviewed; a shared lone-surrogate run-vector fixture blocker is retained before
-any native attempt. No original or added row closes. T01–T19 originals78/95/6,
+f3086bdd after61.047s; original81659 is fully collected FAILED142.996s: install23/23 passes,
+prefix15/21 with6 failures; remaining files/floor unexecuted. VM is free.
+Prompt/follow-up and answer ingress leaves are sealed and cross reviewed; the
+shared lone-surrogate vector correction is in a separate child under re-review.
+The Core correction adds three causal controls while preserving all old assertions. No original or added row closes. T01–T19 originals78/95/6,
 added300/39 remain unchanged. Exact collection hashes and live ownership are in
 the restart checkpoint. Earlier paragraphs remain historical.
 
