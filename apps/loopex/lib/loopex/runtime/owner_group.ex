@@ -30,26 +30,60 @@ defmodule Loopex.Runtime.OwnerGroup do
   end
 
   @doc false
-  def retain_provider(group, guard, reference, grace) do
-    GenServer.call(group, {:retain_provider, guard, reference, grace}, :infinity)
+  def retain_provider(group, guard, reference, grace, work_bound) do
+    bounded_call(group, {:retain_provider, guard, reference, grace}, work_bound)
   end
 
   @doc false
-  def bind_provider(group, reference, worker) do
-    GenServer.call(group, {:bind_provider, reference, worker}, :infinity)
+  def bind_provider(group, reference, worker, work_bound) do
+    bounded_call(group, {:bind_provider, reference, worker}, work_bound)
   end
 
   @doc false
-  def retain_resource(group, reference, resource) do
-    GenServer.call(group, {:retain_resource, reference, resource}, :infinity)
+  def retain_resource(group, reference, resource, work_bound) do
+    bounded_call(group, {:retain_resource, reference, resource}, work_bound)
   end
 
   @doc false
   def provider_cleanup(group, reference, sampled) do
-    GenServer.call(group, {:provider_cleanup, reference, sampled}, :infinity)
-  catch
-    :exit, _reason -> exit(:provider_cleanup_unproved)
+    bounded_call(group, {:provider_cleanup, reference, sampled},
+      {:monotonic, sampled.observation_deadline})
   end
+
+  # Concept: retaining cleanup identities cannot outlive the original work/window.
+  # Technical depth: one OTP request alias spans all native timer slices. Expiry
+  # abandons it without resending, renewing the cutoff or admitting a late reply.
+  defp bounded_call(group, request, bound) do
+    if bound_remaining(bound) == 0 do
+      {:error, :owner_group_unavailable}
+    else
+      request_id = :gen_server.send_request(group, request)
+      await_bounded_reply(request_id, bound)
+    end
+  end
+
+  defp await_bounded_reply(request_id, bound) do
+    case bound_remaining(bound) do
+      0 ->
+        _ = :gen_server.receive_response(request_id, 0)
+        {:error, :owner_group_unavailable}
+
+      remaining ->
+        case :gen_server.wait_response(request_id, min(remaining, @timer_slice_ms)) do
+          {:reply, reply} ->
+            if bound_remaining(bound) > 0, do: reply,
+              else: {:error, :owner_group_unavailable}
+          {:error, _reason} -> {:error, :owner_group_unavailable}
+          :timeout -> await_bounded_reply(request_id, bound)
+        end
+    end
+  end
+
+  defp bound_remaining({:system, deadline}),
+    do: max(deadline - System.system_time(:millisecond), 0)
+
+  defp bound_remaining({:monotonic, deadline}),
+    do: max(deadline - System.monotonic_time(:millisecond), 0)
 
   @impl GenServer
   def init(_options) do
@@ -162,20 +196,23 @@ defmodule Loopex.Runtime.OwnerGroup do
 
   defp select_cleanup(providers, reference, sampled, caller) do
     case providers do
-      %{^reference => %{cleanup: nil}} when is_nil(sampled) ->
-        {{:error, :owner_group_unavailable}, providers}
-
       %{^reference => provider} when caller == provider.guard or caller == provider.worker or
                                        caller == provider.retainer ->
         cleanup = earlier_cleanup(provider.cleanup, sampled)
+        notify_cleanup(provider, reference, cleanup)
         {{:ok, cleanup}, Map.put(providers, reference, %{provider | cleanup: cleanup})}
 
       _ -> {{:error, :owner_group_unavailable}, providers}
     end
   end
 
+  defp notify_cleanup(provider, reference, cleanup) do
+    for pid <- Enum.uniq([provider.guard, provider.worker, provider.retainer]), is_pid(pid) do
+      send(pid, {:loopex_provider_cleanup_window, self(), reference, cleanup})
+    end
+  end
+
   defp earlier_cleanup(nil, sampled), do: sampled
-  defp earlier_cleanup(retained, nil), do: retained
 
   defp earlier_cleanup(retained, sampled) do
     %{
@@ -191,6 +228,7 @@ defmodule Loopex.Runtime.OwnerGroup do
       sampled = %{cooperative_deadline: started + provider.grace,
                   observation_deadline: started + observation}
       cleanup = earlier_cleanup(provider.cleanup, sampled)
+      notify_cleanup(provider, reference, cleanup)
       if is_pid(provider.guard) do
         send(provider.guard, {:loopex_provider_tree_stop, reference, make_ref(), self(), cleanup})
       end

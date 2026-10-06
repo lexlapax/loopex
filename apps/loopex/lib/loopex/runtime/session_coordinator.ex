@@ -3049,6 +3049,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
     deadline = System.monotonic_time(:millisecond) + 60_000
     send(owner, {:configuration_preparation_started, self(), deadline})
     context = %{deadline_monotonic_ms: deadline, cleanup_grace_ms: grace}
+    work_bound = {:monotonic, deadline}
     reference = make_ref()
     Process.put(:loopex_provider_cleanup_owner, {owner_group, reference})
     key = {:loopex_configuration_preparation_children, reference}
@@ -3064,19 +3065,20 @@ defmodule Loopex.Runtime.SessionCoordinator do
             Task.Supervisor.start_child(
               owner_workers,
               fn ->
-                guard_provider_call(caretaker, reference, grace, owner_workers, owner_group)
+                guard_provider_call(caretaker, reference, grace, owner_workers, owner_group, work_bound)
               end,
               shutdown: :brutal_kill
             )
 
           retain_configuration_child(key, guard)
           Process.put(:loopex_provider_cleanup_guard, guard)
-          :ok = OwnerGroup.retain_provider(owner_group, guard, reference, grace)
+          :ok = OwnerGroup.retain_provider(owner_group, guard, reference, grace, work_bound)
 
           worker =
             Task.Supervisor.async_nolink(owner_workers, fn ->
               Process.put(:loopex_provider_cleanup_owner, {owner_group, reference})
               Process.put(:loopex_provider_cleanup_guard, guard)
+              Process.put(:loopex_provider_work_bound, work_bound)
               call_provider(
                 guard,
                 reference,
@@ -3090,7 +3092,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
             end)
 
           retain_configuration_child(key, worker.pid)
-          :ok = OwnerGroup.bind_provider(owner_group, reference, worker.pid)
+          :ok = OwnerGroup.bind_provider(owner_group, reference, worker.pid, work_bound)
           send(guard, {:loopex_provider_guard_bind, reference, caretaker, worker.pid})
 
           await_configuration_preparation(
@@ -6042,6 +6044,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
     module = state.model.module
     options = state.model.options
     deadline = committed_deadline(state, run_id)
+    work_bound = {:system, deadline}
     cleanup_grace_ms = state.durable.cleanup_grace_ms
     {stream, progress} = model_progress_fun(state, work)
     coordinator = self()
@@ -6070,15 +6073,16 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
     {:ok, guard} =
       Task.Supervisor.start_child(owner_workers, fn ->
-        guard_provider_call(coordinator, provider_reference, cleanup_grace_ms, owner_workers, owner_group)
+        guard_provider_call(coordinator, provider_reference, cleanup_grace_ms, owner_workers, owner_group, work_bound)
       end)
 
-    :ok = OwnerGroup.retain_provider(owner_group, guard, provider_reference, cleanup_grace_ms)
+    :ok = OwnerGroup.retain_provider(owner_group, guard, provider_reference, cleanup_grace_ms, work_bound)
 
     task =
       Task.Supervisor.async_nolink(state.owner_workers, fn ->
         Process.put(:loopex_provider_cleanup_owner, {owner_group, provider_reference})
         Process.put(:loopex_provider_cleanup_guard, guard)
+        Process.put(:loopex_provider_work_bound, work_bound)
         receive do
           {:loopex_provider_permit, ^permit_reference, ^binding} ->
             complete_provider_attempt(
@@ -6095,7 +6099,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
         end
       end)
 
-    :ok = OwnerGroup.bind_provider(owner_group, provider_reference, task.pid)
+    :ok = OwnerGroup.bind_provider(owner_group, provider_reference, task.pid, work_bound)
     send(guard, {:loopex_provider_guard_bind, provider_reference, coordinator, task.pid})
 
     authority = %{
@@ -6377,10 +6381,11 @@ defmodule Loopex.Runtime.SessionCoordinator do
     end
   end
 
-  defp guard_provider_call(coordinator, reference, cleanup_grace_ms, owner_workers, owner_group) do
+  defp guard_provider_call(coordinator, reference, cleanup_grace_ms, owner_workers, owner_group, work_bound) do
     Process.flag(:trap_exit, true)
     Process.put(:loopex_provider_cleanup_owner, {owner_group, reference})
     Process.put(:loopex_provider_cleanup_guard, self())
+    Process.put(:loopex_provider_work_bound, work_bound)
     coordinator_monitor = Process.monitor(coordinator)
 
     receive do
@@ -6423,11 +6428,13 @@ defmodule Loopex.Runtime.SessionCoordinator do
        identities} ->
         preparation_cleanup_context(module)
         guard = self()
+        work_bound = Process.get(:loopex_provider_work_bound)
 
         {callback, callback_monitor} =
           start_model_callback(module, owner_workers, fn ->
             Process.put(:loopex_provider_cleanup_owner, {owner_group, reference})
             Process.put(:loopex_provider_cleanup_guard, guard)
+            Process.put(:loopex_provider_work_bound, work_bound)
             receive do
               {:loopex_provider_callback_start, ^reference, ^guard} ->
                 result =
@@ -6661,7 +6668,8 @@ defmodule Loopex.Runtime.SessionCoordinator do
     case Process.get(key) do
       nil ->
         {group, ^reference} = Process.get(:loopex_provider_cleanup_owner)
-        :ok = OwnerGroup.retain_resource(group, reference, resource)
+        :ok = OwnerGroup.retain_resource(group, reference, resource,
+          Process.get(:loopex_provider_work_bound))
         monitor = Process.monitor(resource)
 
         Process.put(key, %{
@@ -7000,16 +7008,49 @@ defmodule Loopex.Runtime.SessionCoordinator do
     end
   end
 
-  defp share_provider_cleanup_for(group, reference, sampled) do
-    reply = try do
-      OwnerGroup.provider_cleanup(group, reference, sampled)
-    catch
-      :exit, :provider_cleanup_unproved -> {:error, :provider_cleanup_unproved}
+  defp share_provider_cleanup_for(group, reference, nil) do
+    case retained_provider_cleanup(group, reference) do
+      nil -> force_provider_without_window(reference)
+      cleanup -> cleanup
     end
-    case reply do
-      {:ok, cleanup} -> cleanup
+  end
+
+  defp share_provider_cleanup_for(group, reference, sampled) do
+    sampled = case retained_provider_cleanup(group, reference) do
+      nil -> sampled
+      retained -> earlier_provider_cleanup(retained, sampled)
+    end
+    case OwnerGroup.provider_cleanup(group, reference, sampled) do
+      {:ok, cleanup} ->
+        Process.put({:loopex_provider_cleanup_window, reference}, cleanup)
+        cleanup
       _ -> force_provider_without_window(reference)
     end
+  end
+
+  # Concept: caretaker loss may use an exact window already retained locally.
+  # Technical depth: only notices from the invocation's exact Group/reference
+  # tighten the cached window. No nil-window query waits or chooses a new cutoff.
+  defp retained_provider_cleanup(group, reference) do
+    key = {:loopex_provider_cleanup_window, reference}
+    receive do
+      {:loopex_provider_cleanup_window, ^group, ^reference, cleanup} ->
+        retained = case Process.get(key) do
+          nil -> cleanup
+          retained -> earlier_provider_cleanup(retained, cleanup)
+        end
+        Process.put(key, retained)
+        retained_provider_cleanup(group, reference)
+    after
+      0 -> Process.get(key)
+    end
+  end
+
+  defp earlier_provider_cleanup(retained, sampled) do
+    %{
+      cooperative_deadline: min(retained.cooperative_deadline, sampled.cooperative_deadline),
+      observation_deadline: min(retained.observation_deadline, sampled.observation_deadline)
+    }
   end
 
   # Concept: loss of the window custodian remains uncertain cleanup.
