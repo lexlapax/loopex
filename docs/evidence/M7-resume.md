@@ -27,14 +27,30 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current proof, execution and source ownership
 
-CURRENT ACTIVE GRANT, 2026-10-06: current_index_cleanup owns the sole verification
-VM for one current-then-floor corrected-source prerequisite campaign at frozen
-`fdfe148889b76fae8738573d3442d2daf5e2c569`. It alone owns the original outer handle
-and waits; root must never poll that handle. Original handle identity is pending
-its launch report. Stop the first failure, fully collect original raw EOF, wait,
-status, source and PID/group joins, then return the slot. No retry, repair,
-formatter/consumer repetition, source switch, lost-source execution, provider,
-Linux, full-fast/release, primary rejoin or source export is granted.
+CURRENT COLLECTED FAILURE, 2026-10-06: original outer handle 28778 is fully
+collected with exit 1. current_index_cleanup returned the sole verification VM
+slot after confirming all twelve original PIDs and process groups absent.
+Frozen source `fdfe148889b76fae8738573d3442d2daf5e2c569` remains clean and unchanged.
+The campaign took 278.715 seconds and stopped at current/focused-workflow.
+Current IO passed 106 cases with three long cases excluded in 43.217 seconds.
+All nine workflow cases failed the same required
+`model_request_committed_resources_v2` history assertion in 8.745 seconds.
+The raw output also retains generated unreachable-clause warnings. No later
+focused, ordinary, long or floor lane ran. No corrected cleanup timeline was
+proved. Preserve the failure; diagnose and repair on a new source candidate.
+Do not retry the frozen failed source or reset its twelve consumed stage keys.
+
+Retained output `M7/m7-final-observation-success-v1`: terminal report
+`7bb75e7fb42bee2391ed4dc69f9fa655b328ed6b224bfcbf644e807bd36ad774`, inventory
+`13996329cb44309ba07db91e8892935bba38be98b24d98a7658f3887be523f52`.
+Original collection `M7/final-observation-success-original-collection-v1.json`,
+SHA-256 `cc632dace70a91b366ca5c30b11d7875ac584afa72ceac725ca589afa2625d6a`,
+records 58 artifacts, 132 source/Git records, twelve raw EOF/wait/status joins
+and unchanged historical registries. Root rehashed the collection, report,
+inventory and first-failure raw identity pins. Active registry ends at
+`ae7c1b7cbc59366327ef72c354dda7bde22b20d3af4a64bdfbd53e0ba09aae36`.
+The execution grant ended. Current-index agent now owns read-only diagnosis of
+the missing resource history, with no VM or edit permission.
 
 Full disabled v1 runner review found no execution blocker but required a
 provenance-label correction. Root read its full report and rehashed fourteen
@@ -83,10 +99,20 @@ completed a separately disabled formatting proposal at
 It preserves original missing-wrapper and later audit-only interruptions;
 stage.sh matches the actual formatter predecessor, which alone has that wrapper.
 All eleven lifecycle functions/helper/toolchain match b17. Ownership is released.
-Root review, durable retention and independent formatting-runner review remain
-pending; no second VM is granted. Private-task agent is available for that
-read-only review. T01–T19 counts remain originals 78/95/6 and added 298/27;
+Root completed static review and retained a separate 0444 copy in
+`M7/lost-source-format-runner-db584914-20261006-v2`, retention map
+`24c142429c009a17c0d14e3a8a450e3085a4235dcb2a8c68d2fe55d1445b671c`.
+Independent disabled-formatter review found no source blocker in
+`M7/lost-source-format-independent-review-20261006-v1`. Root read the report and
+rehashed nine artifacts and 118 input pins. Report
+`fd1e2bda3d34b311898465df2ac42cad869a871fda5a90beb3342dd9cd8dfe9a`, inventory
+`6f9bcdb98df8e9d277e7b6fd2a7e73d0616492d22a57ae7b397c1b20b1c14d33`.
+Formatting remains disabled: db584 inherits the failed fdfe workflow fixture,
+so first diagnose that failure and carry the correction into the intended
+source chain. No formatter, compiler or test ran for lost-source db584.
+T01–T19 counts remain originals 78/95/6 and added 298/27;
 T00-inclusive totals remain originals 78/101/7 and added 302/28. No row closes.
+
 Earlier entries below retain their historical execution and ownership states.
 
 Latest state after the maintainer's repeated 1,000-ms diagnostic approval:
