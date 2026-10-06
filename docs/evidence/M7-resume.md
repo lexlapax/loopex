@@ -97,49 +97,34 @@ structural bounds. No synthetic authority, claim reclamation, public contract,
 receipt/Store/history certification, VM, formatter, test or network work.
 This develops the existing incomplete backup/restore outcome; no row closes.
 
-CURRENT ARTIFACT VERIFICATION GRANT: source-only correction
-`d18ac9e74eb73baf57d33b2f9313678331dca74d` is pushed on
-`codex/m7-artifact-use-decoder` in `/private/tmp/loopex-m7-artifact-use-decoder`.
-Root read its complete delta/report and verified nine artifacts, seven actual/
-Git/mode source records, ten population files and six external inputs. Explicit
-pair/list/tuple/native-map traversal fixes improper-list exceptions under the
-existing narrow ArgumentError refusal; cap/BIF/canonical/hash sequence and
-original observer/joins remain unchanged. Nine hostile vectors extend the
-existing matrix; no current writer contract or Core/Canonical bytes change.
-Independent source review reports no blockers. Root read it and verified four
-artifacts/twenty-one exact inputs, including inverse parent hashes against Git.
-Sibling `M7/artifact-use-decoder-independent-review-d18-20261005-v1`, report
-`12dfac90d242463e1c46372de83e79041ced73d21eeb827d19b51d232833ab67`.
+LATEST ARTIFACT PROOF: handle24595 is terminal exit zero, collected and sealed;
+exclusive VM slot returned. Both pairs pass focused29/0 and Store105/0, no
+failures/exclusions/skips. Current durations1.956/12.338 seconds; floor
+1.945/12.171; pipeline285.189. Exact tested formatter-only child
+`10006bc27618b1308e1390a834bca0652b6b1f95` is pushed and joined through
+`a4a31986ed9ac1e6dd3e0bd99567ee5dde5eba93`. Only the two owned Store paths
+changed; root verified exact integrated bytes. Root read complete source/
+correction/formatter and runner deltas, source reports and independent reviews.
+It independently verified136 sealed artifacts,35 raw stages/started groups,
+35 original PIDs/groups absent,23 actual/Git/mode sources,four raw populations,
+12 handoff artifacts and35 unique registry attempts. No forced cleanup/retry.
+Dependency warnings and actual fault crashes remain visible; product compile
+with warnings-as-errors and all source gates passed. Only bounded T15 decoder
+row closes. Pure current canonical transport is distinct from unchanged Core
+closed reference/use admission; physical capture/object/history stays open.
 
-Root read the complete modern v2 runner/helper/checker source and complete
-v2-to-v3 correction, reports, schemas and finalization. It verified twenty-one
-v3 artifact records, twenty-three actual/Git/mode source records, all external
-inputs and unchanged helpers. The v1 proposal was refused before execution;
-v2/v3 remain immutable disabled drafts. Final reviewed enabled sibling
-`M7/artifact-use-decoder-runner-d18-20261005-v4`, runner digest
-`841b83f00e66a4764999e230fcedc309e63518dfe860f2bc441ada907eeaaab9`, config
-`8bdad8c57cc6d56ba69414f2c826ccf00bde51fb29d65e197c4520a01c097e91`.
-Its root-grant and separate finalization inventory own final config bytes;
-the copied draft inventory remains historical. Canonical artifact-stage registry
-`M7/artifact-use-stage-attempt-registry.json` starts empty because no artifact
-runner has executed. Never reset it after consumption. Exact fresh output
-`M7/artifact-use-decoder-execution-20261005-v1`.
-
-The CLI worker now owns the sole VM grant and live unified exec handle24595,
-polls, first-failure sealing, original process/group collection and slot return.
-Root must not poll that handle. Preflight verified exact final runner/config,
-all seven admitted packet hashes, registry, twenty-three source records and
-fresh output. Owned formatter/AST proof passed; tested formatter-only child is
-`10006bc27618b1308e1390a834bca0652b6b1f95`, exact child of d18, changing only test
-formatting. Root read its complete formatting delta. Current Elixir/OTP/Node
-preflight passed; compile-dev is underway. No suite result exists yet. Root owns integration.
-Owned-only formatting must prove non-line AST equality and optional exact
-formatter direct child; both pairs require focused29/0 and ordinary Store105/0,
-zero skips/failures. These remain prospective counts. No extra adjacent/long/
-full/release lane or source repair/retry is authorized. Terminal prior handles
-get read-only group checks, never signals to a reused PGID; dirty final source
-refuses PASS and is retained. Complete physical capture/object/history remains
-open. No full check is enabled. Ledger enumeration is source-only elsewhere.
+Sibling `M7/artifact-use-decoder-execution-20261005-v1`: terminal report
+`b3da8169a2f25c90b6333139f836460571d3fbe20fd4bd08aaae76b5cfb0d61e`;
+inventory `d6ef1c8c1ffd09c8aaa278ebfc4365cee927bce954030a2790db8e96fd13b1b0`.
+Sibling `M7/artifact-use-decoder-paired-handoff-10006bc2-20261005-v1`, report
+`4dd06049353f9c07d3f694dea4132fde2261e825532eaf00bff66e8e8bbef34f`;
+packet `4b61611414a808ce3fd6cc4c9024083fafdff179dd2c4e95cd7ff77de2021b65`.
+Exact reviewed initiald18, frozen e8 finding and disabledv1/v2/v3/finalv4 remain
+retained. Final v4 runner841b83f0/config8bdad8c5 have no further grant. Canonical
+artifact stage registry has35 consumed keys; do not reset it or repeat stages.
+No verification VM currently runs. Root owns m7 push/clean merged worktree and
+local/remote topic cleanup next. Ledger enumeration remains isolated source-only.
+Private agent owns read-only receipt-decoder inventory, no source or VM grant.
 
 PRIOR FULL-CHECK REGISTRY: root read and verified five packet artifacts,116
 inputs,78 Git source/toolchain identities,17 supplemental actual logs and75
@@ -167,10 +152,11 @@ Final source, populations and exact canonical attempt-registry pins remain pendi
 Registry seeding is now complete as recorded above.
 No execution is enabled. Startup and Ledger are now joined;
 expected Core1324/10 and Composition635/3 supersede the draft's initial
-Composition623/3; Local296/2 and CLI635/6 remain prospective. Store becomes105/0 only if the
-artifact decoder joins after paired proof; current primary Store remains100/0. A read-only Docker
+Composition623/3; Local296/2 and CLI635/6 remain prospective. Store is now105/0 after paired artifact proof and exact source rejoin. A read-only Docker
 platform/image inventory found the daemon unavailable; no app, container or
-image pull was started. The actual Linux filename witness remains unavailable.
+image pull was started. The actual Linux filename witness remains unavailable. A strict read-only
+SSH OS probe to configured serenity timed out before connection; no remote
+files or VM changed. Do not claim either environment as a Linux witness.
 
 SECOND STARTUP FAILURE, retained unchanged: the second execution stopped at source
 `559017602d06d74e3bf73104ec5b5c068e09aac2`. Handle `25505` is terminal exit 1,
