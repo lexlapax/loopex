@@ -1804,10 +1804,10 @@ defmodule LoopexComposition.RestoreIOTest do
     end
 
     for invalid <- [-1, 18_446_744_073_709_551_616, "1048576"] do
+      invalid_operation = {:audit_artifact_object, root, reference, manifest, invalid}
+
       assert {:error, :invalid_io_request} =
-               RestoreIO.run(
-                 {:audit_artifact_object, root, reference, manifest, invalid},
-                 limits(1_000, 100), probe: self())
+               RestoreIO.run(invalid_operation, limits(1_000, 100), probe: self())
 
       refute_receive {:restore_io, _, _, _, _}
     end
