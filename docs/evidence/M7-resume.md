@@ -55,15 +55,32 @@ failure: the primary Logger filter list is empty and the fixture requires
 `:logger_translator`. This occurs before public configure dispatch. Current
 focused population is 18 executed, 17 passed, one failed, one excluded and zero
 skipped. Ordinary Core and the floor pair were not reached. Pipeline duration
-is 136.028 seconds. Root is reviewing the evidence and a narrow fixture repair;
-no repair or retry is authorized yet.
+is 136.028 seconds. Root reviewed the immutable failure and minimal filter-list repair. Only the
+new fixture's required-key update may change to a map over existing entries,
+enabling SASL only on existing translators. Empty lists stay empty. Observer,
+complete filter restoration, captured cutoff and all causal/join assertions stay
+unchanged. The worker may commit this correction and prepare a pin-only runner
+revision; no new VM grant exists yet. The read-only proposal is sibling
+`M7/runtime-startup-logger-filter-proposal-20261005-v1`, report digest
+`ecd29909ec13809739b1624a50e5e75ded4e27283244d61eac112ccece1ad621`,
+patch digest `1993e55a49ecf5107ca0799ec47a1754fa94101d99691311d95f938c0ecabb65`.
+Root read the complete report and patch and verified all four packet artifacts
+and 23 source/evidence inputs.
 
 Retained output is sibling `M7/runtime-preparation-startup-execution-20261005-v1`.
 Terminal digest `d94568bcec54cffcbf43f3e963fd9807abf15180a85883e8ca07ccf17626bb3c`;
 complete focused raw digest
 `f4a0f0e993ecfbe2deb23ca82c5a4497d86b51623112d55dad8c633e45d66a97`.
-Worker collection report digest
-`8e8cde35e6351cd843fc46b2963079fe81a2c3c3a98661c298966b680eb4575e`.
+Worker `collection-report.json` digest
+`8e8cde35e6351cd843fc46b2963079fe81a2c3c3a98661c298966b680eb4575e`;
+`collection-report.md` digest
+`6a38fa5f3190775a0acc02d67d1ec8532c7202d80bd66efbf37a04dc1ab250aa`.
+Root independently verified all 65 terminal artifacts, 65 collection records,
+15 recorded stage waits and actual OS-group absences, and 13 final source records
+against actual bytes and Git. The witness diff from its base has only additions;
+formatting retains `NON_LINE_AST_EQUAL` against its unformatted parent.
+Resource worktree and merged local/remote topic branches are removed after the
+source/evidence push at `90a5169a`.
 The empty partial trace is retained; required full trace and chain are missing.
 Cleanup records eight original joins and one unjoined collector, with status
 unproved and cutoff false. Later VM/group exit does not replace that proof.
