@@ -19,7 +19,8 @@ defmodule LoopexComposition.Restore.IO do
   This private prerequisite exposes bounded reads, complete physical manifests,
   durable record publication, complete declared-Store semantic auditing and one
   canonical retained Resource or Local ledger record audit, and complete Local
-  generation/marker/open-plane enumeration to composition only. Validated maps
+  generation/marker/open-plane enumeration and selected reference-bound artifact
+  use capture to composition only. Validated maps
   and recovered session facts remain private; the
   operation grants no effect authority and does not validate other backup
   formats or activate a restored root. Host exclusion remains the caller's
@@ -32,9 +33,10 @@ defmodule LoopexComposition.Restore.IO do
   require Record
   Record.defrecordp(:file_info, Record.extract(:file_info, from_lib: "kernel/include/file.hrl"))
 
+  alias Loopex.ArtifactStore
   alias Loopex.Executor.Local.{Ledger, RestoreCodec}
   alias Loopex.Runtime.SessionState
-  alias Loopex.Store.Local.{Log, State}
+  alias Loopex.Store.Local.{Artifacts, Log, State}
   alias LoopexComposition.ResourcePacks
 
   @max_receive_timeout 4_294_967_295
@@ -564,6 +566,38 @@ defmodule LoopexComposition.Restore.IO do
     end
   end
 
+  defp execute({:audit_artifact_use, root, reference, manifest}) do
+    # Concept: one retained use is private evidence bound to its current reference.
+    # Technical depth: the existing Core facade validates the reference before path
+    # selection and closes the captured use after descriptor close. Its synchronous
+    # telemetry runs inside the same owned semantic operation and original cutoff.
+    # Object bytes, other uses and complete artifact history remain separate proofs.
+    with true <- primitive(:artifact_reference, fn -> ArtifactStore.valid_reference?(reference) end),
+         {:ok, entries} <-
+           primitive(:artifact_manifest, fn -> RestoreCodec.manifest(manifest, @max_uint64) end) do
+      digest = reference.use_digest
+      relative = Path.join(["artifacts", "uses", binary_part(digest, 0, 2), digest])
+      index = Map.new(entries, &{&1["path"], &1})
+
+      audit_captured_record(
+        root,
+        relative,
+        index,
+        ArtifactStore.max_use_bytes(),
+        :artifact_digest,
+        :artifact_describe,
+        fn bytes ->
+          ArtifactStore.describe(
+            %{module: Artifacts, handle: {:captured_artifact_use, bytes, digest}},
+            reference
+          )
+        end
+      )
+    else
+      _ -> {:error, :history_invalid}
+    end
+  end
+
   defp execute({:publish, path, temp, bytes, mode, expected}) do
     current =
       case primitive(:stat, fn -> :prim_file.read_link_info(path) end) do
@@ -824,7 +858,7 @@ defmodule LoopexComposition.Restore.IO do
     end)
   end
 
-  # Concept: Resource and ledger audits share one owned physical capture.
+  # Concept: Resource, ledger and artifact-use audits share one owned physical capture.
   # Technical depth: exact inventory membership and role size precede open;
   # decoding follows explicit close, then file and ancestor identities are checked.
   defp audit_captured_record(root, relative, index, ceiling, digest_kind, decode_kind, decode) do
@@ -1305,6 +1339,11 @@ defmodule LoopexComposition.Restore.IO do
     do:
       valid_path?(root) and is_map(declaration) and
         is_binary(manifest) and byte_size(manifest) <= @max_manifest
+
+  defp valid_operation?({:audit_artifact_use, root, reference, manifest}),
+    do:
+      valid_path?(root) and is_map(reference) and is_binary(manifest) and
+        byte_size(manifest) <= @max_manifest
 
   defp valid_operation?({:manifest, root, max_total}),
     do: valid_path?(root) and is_integer(max_total) and max_total in 0..@max_uint64
