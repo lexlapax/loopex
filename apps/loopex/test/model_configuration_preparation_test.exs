@@ -580,11 +580,19 @@ defmodule Loopex.ModelConfigurationPreparationTest do
       Process.exit(owner, :kill)
       assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :killed}, startup_left(cutoff)
       startup_joined(key, owner_monitor, owner, :killed)
+
       assert_receive {:startup_stop_sent, ^collector, ^group, ^workers, stop_reference},
                      startup_left(cutoff)
 
-      {observed_at, observations} = startup_queued_stop(workers, group, stop_reference, cutoff, 64)
-      send(collector, {:startup_stop_observed, observer, group, workers, stop_reference, observed_at, observations})
+      {observed_at, observations} =
+        startup_queued_stop(workers, group, stop_reference, cutoff, 64)
+
+      send(
+        collector,
+        {:startup_stop_observed, observer, group, workers, stop_reference, observed_at,
+         observations}
+      )
+
       assert_receive {:startup_stop_enqueued, ^collector, ^group, ^workers}, startup_left(cutoff)
       send(workers, {:startup_release, nonce, :start})
       assert_receive {:startup_started, ^nonce, ^workers, child}, startup_left(cutoff)
@@ -926,18 +934,31 @@ defmodule Loopex.ModelConfigurationPreparationTest do
        ^workers, at}
       when is_reference(reference) ->
         assert not Enum.any?(records, &(&1["event"] == "stop_send"))
-        record = Map.put(startup_record("stop_send", group, workers, at), "monitor", startup_identity(reference))
+
+        record =
+          Map.put(
+            startup_record("stop_send", group, workers, at),
+            "monitor",
+            startup_identity(reference)
+          )
+
         send(observer, {:startup_stop_sent, self(), group, workers, reference})
         startup_acquire(observer, owner, group, workers, actors, cutoff, [record | records])
 
       {:startup_stop_observed, ^observer, ^group, ^workers, reference, at, observations}
       when is_reference(reference) and is_integer(at) and observations in 1..64 ->
-        assert Enum.any?(records, &(&1["event"] == "stop_send" and &1["monitor"] == startup_identity(reference)))
+        assert Enum.any?(
+                 records,
+                 &(&1["event"] == "stop_send" and &1["monitor"] == startup_identity(reference))
+               )
+
         assert not Enum.any?(records, &(&1["event"] == "stop_enqueued"))
+
         record =
           startup_record("stop_enqueued", group, workers, at)
           |> Map.put("monitor", startup_identity(reference))
           |> Map.put("observations", observations)
+
         send(observer, {:startup_stop_enqueued, self(), group, workers})
         startup_acquire(observer, owner, group, workers, actors, cutoff, [record | records])
 
@@ -1237,6 +1258,7 @@ defmodule Loopex.ModelConfigurationPreparationTest do
       {:message_queue_len, 1} ->
         assert {:messages, [{:system, {^group, ^reference}, {:terminate, :shutdown}}]} =
                  Process.info(workers, :messages)
+
         observed_at = System.monotonic_time()
         assert startup_left(cutoff) > 0
         {observed_at, 65 - remaining}
