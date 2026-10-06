@@ -27,6 +27,72 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current proof, execution and source ownership
 
+LATEST COLLECTION, 2026-10-06: root original76436 is fully collected FAIL
+after130.643s/12 stages. The sole verification VM is FREE. Its initial source
+was8824c0fd49c9d908d610ad58af069fde87306646 in the private-task writer.
+Output `M7/m7-private-task-cleanup-format-v3`, enabled packet
+`M7/private-task-cleanup-format-runner-20261006-v3`, config
+`a2f318ec92b59819737c8fb3e8594ecb8a114e589cf4922b8114b3df78c78f5a`.
+Source child fixes only original_downs syntax; independent review report
+`/private/tmp/loopex-m7-private-task-syntax-review-8824c0fd-20261006-v1/report.md`
+is `8f6ee01561e5b10895e144d35f25691e219994d50295181a7cd5b90c6c47d2a0`.
+The new current owned-syntax-admission stage passed all4 affected files.
+Current4 whole-file AST comparisons and formatting passed; clean formatter
+child iscc892ce24e62354452812ade505558614d3e0780. Floor rejected one OwnerGroup
+inline conditional layout at line345. Root verified74 artifacts,134 actual
+source rows and12 EOF/wait/PID-group joins, including the retained syntax
+script. Collection `M7/private-task-cleanup-format-original-collection-20261006-v3.json`
+is `5917e4658ee65d0c8e0ceb056144d451f3e245f6ec4278f539d2c524a36c8e37`, report
+`e82f9888ced9b47fb642771571f085425dbfd546e676e8d59a0e83fa1b66702e`, inventory
+`d23ad859e7050e817236d5e24c24cb43ae299f19bac179c1202ff736b486e89c` and registry
+`e6ab3c813b66fb1c8381aa54c5891d699321aec1626c80126a14999602ba6009`
+has412 unique keys. No compiler/tests ran. Private-task prepares one ordinary
+if-block layout correction and a disabled one-owned-file formatter. No worker
+VM grant exists. Never repoll76436 or repeat its source/pair/stage keys.
+
+LATEST COLLECTION, 2026-10-06: root original57338 is fully collected FAIL
+after37.820s/3 stages for diagnostic syntax source
+dbf2060ce9e04b9b6fcbe338abf876a1ac342774. The sole verification VM is FREE.
+Output `M7/m7-private-task-cleanup-format-v2` uses enabled packet
+`M7/private-task-cleanup-format-runner-20261006-v2`, config
+`aabe2db115eb9162430fa286198fa726fca65ae30664dbf285fed60ad72f9d0b`.
+The first invocation used wrong grant variable names and refused before any
+stage/output; the corrected invocation failed at current/format-owned on a
+second malformed multiline comprehension, original_downs at line358. Source
+remains clean/unchanged; no AST, compilation, floor or tests ran. Root verified
+36 immutable artifacts,134 committed source rows and3 EOF/wait/PID-group joins.
+Collection `M7/private-task-cleanup-format-original-collection-20261006-v2.json`
+is `c02630f27f7ed78aed0e041266246f89fdb2bdec99bb6f8ba6f66cb66a54217c`, report
+`02f096438869e661651035365070c6a87fd8efdc503a06bb33f6851560a8f352`, inventory
+`bd998c304e6f83ce97510029ab317c72df4a09d8c581479b1a818cf0261c4b63`, registry
+`e23d380793efbb35b7cae20a54627eb1b17eaccc11ddbecabf5b83d8f20af6c8`
+has400 unique keys. Never repoll57338 or repeat its source/pair/stage keys.
+Private-task prepares a syntax-only child after reviewing all helpers, plus
+an owned-file syntax admission stage checking every file before formatting.
+No worker VM grant exists.
+Original residue2b4e51636d07109911fb908592e9ef2264963508 exactly preserves90833
+dirty output; dbf changes only the new test comprehension to ordinary do/end.
+Independent bounded review
+`/private/tmp/loopex-m7-private-task-syntax-review-dbf2060c-20261006-v1/report.md`
+is `e806d3113272589f51a3c163ae21add40fd7dcae0fc7bd6b95cf6e28dd5e1fa8`.
+All105 old files and3 new prospective cases remain. The intermediate membership
+branch and residue production AST equivalence remain unproved; new formatting
+compares dbf to its own possible child and cannot prove the earlier residue.
+
+Restore runtime packet preparation found the inherited whole-lifecycle causal
+transfer predicate refuses the changed restore progress code. That refusal is
+retained. Current-index prepares a separate exact-source read-branch equivalence
+proposal; CLI independently reviews nil-state reachability. No gate is silently
+loosened and no earlier result is relabeled current. All3 original actual long
+cases remain mandatory on3d79. Primary checkpoint94998bd1 is pushed on m7;
+the subsequent packets remain isolated and unexecuted.
+CLI read-branch analysis is sealed at
+`/private/tmp/loopex-m7-restore-read-causal-transfer-analysis-3d79a9a2-20261006-v1/report.md`,
+SHA `8e4737eb4a02b32b49a5d8604a1ef990f8125f20b70d02f380bc7f04c1042d0e`.
+It confirms reviewed read-path equivalence with exact old primitive/admission
+sections and inert nil restore branches. Added calls consume reductions;
+timing and new-source runtime evidence remain unproved.
+
 LATEST, 2026-10-06: the maintainer reconfirmed the existing diagnostic
 setup-only1,000ms cutoff. Production and post-fault deadlines are unchanged.
 T01–T19 totals remain originals78 done/95 todo/6 retired and added298 done/32
