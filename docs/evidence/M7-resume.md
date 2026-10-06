@@ -40,17 +40,23 @@ send/reference/queue observation distinguishes send from actual insertion;
 eleven original joins and all old cases/assertions unchanged.
 
 Authorized formatter AST equality passed; tested clean direct child is
-`590b997c305697e94a2b9ae8585bbaf4e1bf4202`. Current focused tests pass 18 executed,
-one excluded and zero skipped in 6.902 seconds. The retained witness validator
-passes: four traced actors, exact matching stop reference, queue insertion on
-observation one before child spawn, eleven unique original joins, no unjoined
-actors and cutoff met. Current dev/test compilation passed in 48.204/47.311
-seconds. Current ordinary Core passes 1,314 executed, ten excluded and zero
-skipped in 226.110 seconds; its witness validator also passes. Floor compilation
-is running and floor tests remain pending. These are worker-reported stage
-results; the paired proof is not complete. Worker owns every poll, first-failure seal,
-process-group join and slot return. No other verification VM or same-source
-retry is authorized. Both old failures below remain immutable.
+`590b997c305697e94a2b9ae8585bbaf4e1bf4202`. Handle 51106 is terminal exit zero,
+collected and sealed, with the VM slot returned. Both pairs focused18/1 excluded
+and Core1314/10 excluded pass, zero failures/skips. Current focused/Core durations
+are 6.902/226.110 seconds; floor 6.825/225.124. Pipeline took688.548 seconds.
+Root independently verified125 terminal artifacts,129 final inventory records,
+28 actual absent OS groups,13 actual/Git/mode source records and all four raw
+populations and complete witness sets. Each proves exact four actors, matching
+sent/enqueued reference, observation one before child spawn, eleven unique
+original joins, no unjoined actors and the unchanged cutoff met. Root reviewed
+the complete formatter delta, which changes only formatting. Integration is next.
+The first collection script expected generic PASS instead of the runner's exact
+status; the collector-only error and original verifier are retained. No test was
+rerun and original execution bytes are unchanged. Terminal digest
+`dcc4ad681c4549f1c7a6bc3288d6d6274395157c6a01edaee586f474453bdafd`;
+collection Markdown `e1b4fb73b55b4aa7940008deea851509c2567212b984514bd1331a703b05aaa0`.
+Both old failures remain immutable. Historical reports and registered-resource
+semantic cleanup are not attributed or proved by this controlled witness.
 
 LEDGER QUEUED: clean source `7340024dd056af931478bd6afcf1472733612202` is
 pushed on `codex/m7-ledger-capture-audit`, still unintegrated. Root read the full
@@ -60,20 +66,27 @@ Git/mode records and byte-identical stage/AST/toolchain helpers. Expected IO
 64/2 excluded, adjacent Ledger19/0, ordinary Composition635/3 and owned long2/64
 per pair are source-derived expectations, not results. Runner digest
 `57995802ba94e2121f185bc0a43abb915c60adf657aee341997286fb6b0acd06`.
-There is no Ledger VM grant. Independent read-only exact-source review found
+Ledger now owns the exclusive grant and live handle21956; formatter AST equality
+passed for both paths, and tested clean direct child is
+`fef3c28bece368c8ab44c9cf0f72d27c0f47a867`. Current verification is underway.
+Worker owns polling, first-failure sealing and slot return. Independent read-only exact-source review found
 no blocking issue; root read it and verified its seven exact inputs. Immutable
 review sibling `M7/ledger-capture-audit-independent-review-20261005-v1`, report
 `c3a8548b105527bab98803ab5f2e24880ddbfe29e9efda8340ac8fdfd915fec5`.
 Complete ledger/receipt/history/restore remains open.
 
 NEXT INTEGRATION: disabled draft retained byte-identically under sibling
-`M7/integration-next-current-runner-draft-20261005-v1`. Root read its review,
-complete 425-line runner, helper and configuration. Twelve of thirteen input
-records still match bytes and modes; the startup fixture record predates the
-reviewed 7ca/590b repair. The worker is preparing a new disabled v2 packet with
-the exact v4 witness validator and strict summary parsing. Final source,
-validator, population and attempt-registry pins remain pending. No execution
-is enabled. If startup and Ledger both join,
+`M7/integration-next-current-runner-draft-20261005-v1` remains unchanged. Root
+reviewed and retained its disabled successor under sibling
+`M7/integration-next-current-runner-draft-20261005-v2`. All eighteen v2 inputs
+match bytes and modes. Root read the complete authored delta, collection review,
+finalization instructions and fifteen Python parser examples. Its validator is
+byte-identical to startup v4; helper AST outside population/validate_witness is
+unchanged. Runner changes only explicit malformed-summary refusal. Runner digest
+`c0ba6836b099ce85e66425f10acafb72cb95d3e5668ef4f7ca1c5c97e15a0402`;
+helper `51d8030cd1e7cc7bc6a24c0b837585e92a76c114a7c0ab7cae1de8df51ac7843`.
+Final source, populations and canonical attempt-registry pins remain pending.
+No execution is enabled. If startup and Ledger both join,
 expected Core1324/10 and Composition635/3 supersede the draft's initial
 Composition623/3; Local296/2 and CLI635/6 remain prospective. A read-only Docker
 platform/image inventory found the daemon unavailable; no app, container or
@@ -127,12 +140,19 @@ open; no public or persistent schema changes are authorized. The original
 physical-manifest row remains open for its unavailable Linux native-name proof;
 later integrated IO verification covers its supported-platform cases.
 
-The ledger capture assignment adds one explicit T15 subtask. Current T01–T19
-originals remain 78 done / 95 todo / 6 retired; added 296 done / 21 todo.
-Including T00: originals 78 / 101 / 7, added 300 / 22. No completed row was
-reopened. A read-only combined current full-fast runner packet is also assigned
-to `cli_current_fixtures`; candidate pin and execution wait for root review and
-startup verification. No paid/provider lane is authorized.
+NEXT ARTIFACT SOURCE: `cli_current_fixtures` owns only Local.Artifacts source
+and its artifact conformance file in `/private/tmp/loopex-m7-artifact-use-decoder`,
+branch `codex/m7-artifact-use-decoder`, base991636a2. One internal captured-use
+decoder and private captured-bytes adapter handle may reuse the existing facade
+without a new Core/port/schema. No VM, formatter or compiler is granted. Root
+read the complete prerequisite report and verified twelve actual/Git/mode inputs;
+retained sibling `M7/artifact-captured-byte-inventory-20261005-v1`, report digest
+`bdded140761a0ca73059c496681893795a2cd232b47f47dae12504962d6aa462`.
+Physical capture, object bytes and whole-history relations remain separate.
+The assignment adds one explicit T15 row. Before startup integration, T01–T19
+originals remain78 done/95 todo/6 retired, added296 done/22 todo; including T00
+originals78/101/7, added300/23. No completed row was reopened. No paid/provider
+lane is authorized.
 
 LATEST: Resource physical capture is proved and joined through
 c137b2ce7a7656ea1d165494f69a3cac5c1b7126, tested clean source
