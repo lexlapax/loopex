@@ -31,6 +31,14 @@ they do not mean the original task is complete. This follows the maintainer's
 
 ## Checkpoint and Resource first failures retained — 2026-10-05
 
+Latest continuation: Resource corrected10f71808 passes compilation, then
+fails one new local-manifest setup case before audit,51/52 pass,2 excluded,
+zero skipped. All59 sealed outputs and15 process joins are verified; handle
+78954 is terminal. Its next source-only fixture correction uses the accepted
+project skill location, preserving assertions and bounds. Native fixture
+correction9aa2cf82 now has the sole VM grant, handle72477. No row closes.
+Exact outputs and source decisions are retained in the restart record below.
+
 The maintainer's repeated "approve 1000 ms" confirms the existing diagnostic
 setup override and accepts no other contract. No checklist row closes here.
 Native checkpoint source dc5797c7 passes10 focused and63 adjacent cases,

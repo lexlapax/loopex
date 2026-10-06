@@ -27,6 +27,34 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Latest Store integration and next verification
 
+LATEST: Native v4 now holds the sole verification VM grant. Worker
+restore_manifest_resume owns live handle72477, exact initial
+9aa2cf82742b3204fe1c57206ec8d2af579aea90 and reviewed runner
+a4121a93a91f57ac5c644b12154e09ab83b4f1ce07798317d86aac22f40bb516,
+in siblingM7/configure-checkpoint-runner-9aa2cf82-v4. Initial toolchain/Node
+probes pass; no test result yet. No other VM until terminal collection.
+
+Resource v3 handle78954 is terminal exit1 and collected. Clean10f71808
+passes current dev/test compilation47.441s/46.831s, but focused51/52 pass,
+1 fail,2 excluded,0 skipped,20.739s; total pipeline164.755s. No adjacent,
+ordinary, selected long or floor stage ran. Root verified59 sealed artifacts,
+all15 stage outcomes and process-group absence. Retained siblingM7/
+resource-capture-audit-execution-20261005-v2 terminal digest
+649b752ccbd3efc768c9d6c7f1a149dfdcf648d05b80249506ccf1d02bf7c690;
+focused raw55d499a0eae1bb913367c2e72abe53b01ad36409e37163f0f802648d9cf82b2a.
+Never restart/poll78954. The one failure is new local manifest fixture setup:
+root/review is deliberately unclassified by the existing directory contract.
+It fails before audit. Source and existing negative tests establish that a
+contained project skill must be root/.agents/skills/review. Frontmatter already
+matches the basename. Worker current_index_cleanup is authorized only that
+fixture path plus mkdir_p!, keeping workspace root, actual writer, every nil-
+and missing-provenance assertion, case and bound. New direct child and pin-only
+packet must be reviewed before a separate grant; old failure remains immutable.
+
+The actual-runtime startup witness packet remains source-only. No native,
+Resource or causal bounded row closes. Counts remain originals78/95/6 and
+added294/22 for T01–T19. All active statements below are superseded snapshots.
+
 LATEST: The repeated maintainer reply "approve 1000 ms" confirms the existing
 [diagnostic setup override](../developer/agent-context-map.md#disposition-m7-diagnostic-setup-cutoff-2026-10-05).
 It changes no production deadline and accepts no queued ADR.
