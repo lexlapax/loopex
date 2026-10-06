@@ -27,6 +27,85 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current proof, execution and source ownership
 
+LATEST STATE, 2026-10-06: all root exec handles are terminal and fully
+collected. Verification VM is FREE. Original2055 finished FAIL after381.768s,
+12 current stages: IO106/3 passed, workflow36/39 passed with three failures,
+command2/evidence1, seed515668. No successors/floor/long ran. Two native
+reopen fixtures omitted explicit resume before attach; actual64 case exceeded
+the unchanged60000ms ExUnit timeout. Earlier universal-time and pause-admission
+failures no longer occurred in this campaign. Source058 remains clean/frozen;
+never poll2055 or rerun its stage keys. Root verified59 artifacts,132 actual/Git
+sources,12 original raw EOF/wait/status/PID-group joins and326 preserved plus
+12 new registry keys, all original actors absent. Output
+`M7/m7-guard-time-success-v1` report is
+`be814e9edab1d049a5d898467710ec9d453629f522e413a450f8bc3aa8fef282`, inventory
+`90af101c49c4bd6d4b721b4d3af8a504c3379932e65886c5554d4dfa40190904`.
+Original collection `M7/guard-time-success-original-collection-20261006-v1.json`
+is `cba7823d033231ce6482e2334e971d81ec0df760850157d934108e14c4f37b1f`;
+audit `M7/guard-time-success-collection-audit-20261006-v1.py` is
+`3c906ce6fe61884683ace5a7326dadd0bba389dbf761b1dabf28bb913f2e4c1f`.
+Final registry is `f588273c686daf463ea32e3e6d6327a94fd41463cabc8a55eb68f91b13ebd385`.
+
+Lookup formatter84232 is fully collected PASS after48.244s,11 stages,
+all four whole-file AST equalities and current/floor checks. Clean formatter
+child `010c269e34ba3f12bec84aa52200bcdd4656db4a`, soleparent7d3, is frozen in
+`/private/tmp/loopex-m7-restore-lookup-integration`. Root verified72 artifacts,
+47 source rows,11 original process joins and338 preserved plus11 new keys.
+No compiler/tests ran. Output `M7/m7-lookup-format-v1` report is
+`63e89799d941ff553620e020e55053c95c20ddee001f38fabe2568d1d40f7a0a`, inventory
+`e386f1b8c9f01676f8e57f270b3ddf1526618644fca95a2ac1a150821628638d`.
+Original collection `M7/lookup-format-original-collection-20261006-v1.json`
+is `83eff0dd544168bdc0b3589f18eba272322feee6163c1bf456b6d7b2c6a9669d`;
+audit `M7/lookup-format-collection-20261006-v1.py` is
+`b44d961cf73d0aa9e1f8e8e2b2c665b4951e9cfcd3c48c481774d52a038dc23e`.
+Final registry is `48e2fd439ef78d6a8d10398f7dd7ef0f7fd84b1033f0aa5f95a9ac03028617ea`.
+CLI prepares only disabled focused IO106/3 pluslookup38/0 paired verification
+at010, with structural prerequisites. Known failing inherited workflow39 is
+explicitly unrun in that intermediate scope; final combined proof stays open.
+
+New source-only work, not runtime PASS:
+
+- Two exact resume-before-attach additions are clean886e72d1dc17cbe060197c711034776599988e79,
+  soleparent058, in `/private/tmp/loopex-m7-restore-reopen-fixtures`.
+  Only eight lines added; all39cases/bounds/actual64timeout unchanged.
+  Packet `/private/tmp/loopex-m7-restore-reopen-fixtures-source-886e72d1-20261006-v1`
+  report `bf1dbc06451862ec8c2f5bf837c5249de4c976eba0cb1869d5ba29bcd4baf6d2`,
+  inventory `26052b64887dadf4b885b989a755a52ea48f919bd82410abac55c63ec563b0a6`.
+- Root narrow manifest optimization is clean7694e0f3b251f729522493f76c192713a7d70481,
+  soleparent010, in `/private/tmp/loopex-m7-restore-manifest-validation`.
+  Only private Guard reconstruct returns already-encoded/validated entries,
+  retaining the same unsigned64 aggregate-size check and every physical read.
+  Codec and38lookup/39workflow/109IOtests are byte-identical. No claimed latency
+  result; actual64 remains unproved. Packet
+  `/private/tmp/loopex-m7-manifest-validation-source-v1` report
+  `3599ca88bd0fba206257c11bfb7dee07c9258787db4203fd13fae36f1bd12605`, inventory
+  `3e03c1fde2cf5383fb5b9749108a55ecacee859e4bb5a07a45565f862b27dca9`.
+- Original-tx committed-duplicate unit is clean79464b40a7c29a9bd871f4666ffccd0180235e50,
+  soleparent7d3, in `/private/tmp/loopex-m7-restore-original-tx`: four owned
+  paths plusseven native-writer cases; complete public restore/pending continuation
+  remain open. Packet `/private/tmp/loopex-m7-restore-original-tx-source-79464b40-v1`
+  report `457b88058ecf066ed205d2c22bda851fec2c46216641b8c4fe30c810cfaed97b`, inventory
+  `1875591d5fc92a05cb71a5bdadbecd46edc6f2c5c7df30c02ec4e8fc30d25543`.
+  Current-index independently reviews it. Early concrete finding: fresh
+  preflight claim inspection bypasses two existing ordered foreign-claim
+  acquisition/release proofs. Do not rejoin/verify it before disposition.
+- Diagnostic analysis of actual serial and32concurrent witnesses identifies
+  registered resources killed by the private Task.Supervisor before guard stop/ack
+  can finish. Unproved reports are truthful. Packet
+  `/private/tmp/loopex-m7-private-task-diagnostic-analysis-32ef61aa-20261006-v1`
+  report `01214fb646a9f57deb60102351cb5bbaee5c069b49cdf890b4d1e3fcb5f1a971`,
+  inventory `0889e857eb0d1a12cdf2cb4c739798da65ddd9517c4bac2c30c7c5c785d8c361`.
+  Private-task owns source-only internal cleanup-order implementation in
+  `/private/tmp/loopex-m7-private-task-cleanup-order`, base32ef: OwnerGroup,
+  SessionCoordinator and only Control's existing owner_group option entry.
+  Preserve caretaker census/joins, original sampled absolute windows and
+  brutal-kill fallback; coordination never extends a window. Tests/public
+  starter/register remain immutable. No VM or new deadline is granted.
+
+All task totals unchanged. Original T01–T19:78done/95todo/6retired;
+added298done/32todo. T15/T16 remain open. Earlier active-handle entries below
+are historical. No closure, main merge, publication or paid campaign follows.
+
 CURRENT EXECUTION, 2026-10-06: root original exec2055 owns the only
 verification VM. Clean corrected058 is frozen; lookup is absent from this
 campaign. Enabled `M7/guard-time-success-runner-20261006-v2` config is
