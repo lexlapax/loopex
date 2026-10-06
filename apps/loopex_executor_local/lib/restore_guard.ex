@@ -118,6 +118,7 @@ defmodule Loopex.Executor.Local.RestoreGuard do
     try do
       root = plan["source_state_root"]
       index = Map.new(entries, &{&1["path"], &1})
+
       placements =
         Map.new(plan["ledgers"], fn ledger ->
           {Path.join(root, ledger["relative_root"]), ledger["source_placement"]}
@@ -142,17 +143,23 @@ defmodule Loopex.Executor.Local.RestoreGuard do
         Enum.each(state.candidates, fn {relative, candidate} ->
           declaration = Map.fetch!(declarations, relative)
           ensure!(candidate["executor_identity"] == declaration["executor_identity"])
-          ensure!(hash(candidate["destination_generation_bytes"]) ==
-                    declaration["source_generation_sha256"])
+
+          ensure!(
+            hash(candidate["destination_generation_bytes"]) ==
+              declaration["source_generation_sha256"]
+          )
         end)
 
         Enum.each(reserved, fn entry ->
           path = entry["path"]
-          ensure!(path == @root_admin or String.starts_with?(path, @root_admin <> "/") or
-                    Enum.any?(state.candidates, fn {relative, _} ->
-                      prefix = Path.join(relative, "restore-lineage")
-                      path == prefix or String.starts_with?(path, prefix <> "/")
-                    end))
+
+          ensure!(
+            path == @root_admin or String.starts_with?(path, @root_admin <> "/") or
+              Enum.any?(state.candidates, fn {relative, _} ->
+                prefix = Path.join(relative, "restore-lineage")
+                path == prefix or String.starts_with?(path, prefix <> "/")
+              end)
+          )
         end)
 
         {:ok, state}
@@ -160,7 +167,9 @@ defmodule Loopex.Executor.Local.RestoreGuard do
     rescue
       _ -> {:error, :history_invalid}
     catch
-      :restore_conflict -> {:error, :restore_conflict}
+      :restore_conflict ->
+        {:error, :restore_conflict}
+
       reason when reason in [:source_retired, :restore_incomplete, :history_invalid] ->
         {:error, :history_invalid}
     end
@@ -199,30 +208,34 @@ defmodule Loopex.Executor.Local.RestoreGuard do
     {:ok, binding} = RestoreCodec.state_binding(placement)
 
     result =
-      Enum.reduce(ordinals, %{candidates: %{}, epochs: %{}, previous: 0, tx_ids: MapSet.new(), lineage: []}, fn name, state ->
-        directory = history_path(root, [@root_admin, "lineage", name])
-        intent = record!(:intent, history_path(directory, "intent"))
-        ensure!(intent["ordinal"] == state.previous + 1 and ordinal(intent["ordinal"]) == name)
-        ensure!(intent["plan"]["prior_restore_count"] == state.previous)
-        ensure!(not MapSet.member?(state.tx_ids, intent["tx_id"]))
-        actual_names = names!(directory)
+      Enum.reduce(
+        ordinals,
+        %{candidates: %{}, epochs: %{}, previous: 0, tx_ids: MapSet.new(), lineage: []},
+        fn name, state ->
+          directory = history_path(root, [@root_admin, "lineage", name])
+          intent = record!(:intent, history_path(directory, "intent"))
+          ensure!(intent["ordinal"] == state.previous + 1 and ordinal(intent["ordinal"]) == name)
+          ensure!(intent["plan"]["prior_restore_count"] == state.previous)
+          ensure!(not MapSet.member?(state.tx_ids, intent["tx_id"]))
+          actual_names = names!(directory)
 
-        ensure!(
-          Enum.all?(
-            actual_names,
-            &(&1 in ["baseline", "intent", "source-retirement", "committed"])
+          ensure!(
+            Enum.all?(
+              actual_names,
+              &(&1 in ["baseline", "intent", "source-retirement", "committed"])
+            )
           )
-        )
 
-        if intent["source_state_binding"] == binding and
-             intent["plan"]["source_state_root"] == history_root(root),
-           do: throw(:source_retired)
+          if intent["source_state_binding"] == binding and
+               intent["plan"]["source_state_root"] == history_root(root),
+             do: throw(:source_retired)
 
-        if actual_names != Enum.sort(["baseline", "intent", "source-retirement", "committed"]),
-          do: throw(:restore_incomplete)
+          if actual_names != Enum.sort(["baseline", "intent", "source-retirement", "committed"]),
+            do: throw(:restore_incomplete)
 
-        complete_transition!(root, directory, intent, state)
-      end)
+          complete_transition!(root, directory, intent, state)
+        end
+      )
 
     Enum.each(result.candidates, fn {relative, candidate} ->
       ledger = history_path(root, relative)
@@ -401,8 +414,11 @@ defmodule Loopex.Executor.Local.RestoreGuard do
              MapSet.put(prior_epochs, destination_generation["executor_epoch"])
            ), [candidate | replacements],
            [{Path.join([relative, "restore-lineage", ordinal_name]), files} | records],
-           [{Path.join([relative, "restore-lineage", ordinal_name]), [{"committed", proof_bytes}]} |
-            committed_records]}
+           [
+             {Path.join([relative, "restore-lineage", ordinal_name]),
+              [{"committed", proof_bytes}]}
+             | committed_records
+           ]}
         end
       )
 
@@ -415,14 +431,23 @@ defmodule Loopex.Executor.Local.RestoreGuard do
 
     ensure!(hash(activation) == committed["activation_manifest_sha256"])
     {:ok, activation_entries} = RestoreCodec.manifest(activation, 18_446_744_073_709_551_615)
-    final = reconstruct(activation_entries, [], [
-      {Path.join([@root_admin, "lineage", ordinal_name]), [{"committed", committed_bytes}]} |
-      committed_records
-    ])
+
+    final =
+      reconstruct(activation_entries, [], [
+        {Path.join([@root_admin, "lineage", ordinal_name]), [{"committed", committed_bytes}]}
+        | committed_records
+      ])
+
     {:ok, final_entries} = RestoreCodec.manifest(final, 18_446_744_073_709_551_615)
-    %{candidates: candidates, epochs: epochs, previous: intent["ordinal"], latest: intent,
+
+    %{
+      candidates: candidates,
+      epochs: epochs,
+      previous: intent["ordinal"],
+      latest: intent,
       tx_ids: MapSet.put(previous.tx_ids, intent["tx_id"]),
-      lineage: Enum.filter(final_entries, &reserved_entry?/1)}
+      lineage: Enum.filter(final_entries, &reserved_entry?/1)
+    }
   end
 
   defp candidate_bindings!(record, intent, candidate) do
@@ -510,7 +535,12 @@ defmodule Loopex.Executor.Local.RestoreGuard do
     path = history_path(root, entry["path"])
 
     if entry["kind"] == "regular" do
-      bytes = read!(path, if(Path.basename(history_root(path)) == "baseline", do: 4_194_304, else: @record_cap))
+      bytes =
+        read!(
+          path,
+          if(Path.basename(history_root(path)) == "baseline", do: 4_194_304, else: @record_cap)
+        )
+
       ensure!(byte_size(bytes) == entry["size"] and hash(bytes) == entry["sha256"])
     else
       directory!(path)
@@ -566,11 +596,13 @@ defmodule Loopex.Executor.Local.RestoreGuard do
   defp names!({path, context} = captured) do
     directory!(captured)
     relative = Path.relative_to(path, context.root)
+
     names =
       context.index
       |> Map.keys()
       |> Enum.filter(&(Path.dirname(&1) == relative and &1 != relative))
       |> Enum.map(&Path.basename/1)
+
     ensure!(length(names) <= 64 and Enum.all?(names, &String.valid?/1))
     Enum.sort(names)
   end

@@ -62,12 +62,14 @@ defmodule LoopexComposition.Restore.Workflow do
     {:ok, entries} = RestoreCodec.manifest(baseline, max_total)
     {:ok, lineage_digest} = RestoreCodec.lineage_digest(Enum.filter(entries, &admin_entry?/1))
     ensure!(plan["prior_lineage_sha256"] == lineage_digest, "inventory_mismatch")
+
     lineage =
       case io.({:audit_restore_lineage, backup, plan, baseline}) do
         {:ok, lineage} -> lineage
         {:error, :restore_conflict} -> throw({:restore_refusal, "restore_conflict"})
         _ -> throw({:restore_refusal, "invalid_current_history"})
       end
+
     facts = Audit.complete(plan, baseline, max_total, io)
 
     phase(io, "baseline_copy")
@@ -163,8 +165,8 @@ defmodule LoopexComposition.Restore.Workflow do
 
       value!(
         io.(
-          {:publish, path, path <> ".restore-" <> ordinal(plan) <> ".tmp", ledger.candidate, ledger.mode,
-           ledger.original}
+          {:publish, path, path <> ".restore-" <> ordinal(plan) <> ".tmp", ledger.candidate,
+           ledger.mode, ledger.original}
         )
       )
     end)
@@ -270,10 +272,12 @@ defmodule LoopexComposition.Restore.Workflow do
         ensure!(hash(original) == declaration["source_generation_sha256"], "inventory_mismatch")
         placement = value!(io.({:placement, Path.join(plan["destination_state_root"], relative)}))
         {:ok, binding} = RestoreCodec.ledger_binding(placement)
+
         excluded =
           epochs
           |> MapSet.union(Map.get(lineage.epochs, relative, MapSet.new()))
           |> MapSet.put(old["executor_epoch"])
+
         epoch = fresh_epoch(excluded)
 
         generation = %{
@@ -592,6 +596,7 @@ defmodule LoopexComposition.Restore.Workflow do
 
   defp common(plan, kind),
     do: %{"kind" => kind, "ordinal" => plan["prior_restore_count"] + 1, "tx_id" => plan["tx_id"]}
+
   defp proof(plan, kind, intent), do: Map.put(common(plan, kind), "intent_sha256", intent)
   defp phase(io, phase), do: value!(io.({:restore_phase, phase}))
 

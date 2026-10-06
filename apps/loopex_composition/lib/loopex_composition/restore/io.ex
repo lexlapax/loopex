@@ -1065,16 +1065,21 @@ defmodule LoopexComposition.Restore.IO do
 
   defp execute({:audit_restore_lineage, root, plan, manifest}) do
     with {:ok, _} <- primitive(:restore_history_plan, fn -> RestoreCodec.encode(:plan, plan) end),
-         {:ok, entries} <- primitive(:restore_history_manifest, fn ->
-           RestoreCodec.manifest(manifest, @max_uint64)
-         end) do
+         {:ok, entries} <-
+           primitive(:restore_history_manifest, fn ->
+             RestoreCodec.manifest(manifest, @max_uint64)
+           end) do
       index = Map.new(entries, &{&1["path"], &1})
       generations = MapSet.new(plan["ledgers"], &Path.join(&1["relative_root"], "generation"))
+
       selected =
         Enum.filter(entries, fn entry ->
           entry["kind"] == "regular" and
             (MapSet.member?(generations, entry["path"]) or
-               Enum.any?(Path.split(entry["path"]), &(&1 in [".loopex-restore", "restore-lineage"])))
+               Enum.any?(
+                 Path.split(entry["path"]),
+                 &(&1 in [".loopex-restore", "restore-lineage"])
+               ))
         end)
 
       # Concept: current record caps apply before any lineage file is opened.
@@ -1082,20 +1087,30 @@ defmodule LoopexComposition.Restore.IO do
       # caller-checked total. No nested guardian, allowance or old-root IO exists.
       ceilings =
         Map.new(selected, fn entry ->
-          ceiling = cond do
-            MapSet.member?(generations, entry["path"]) -> @max_ledger_generation
-            Path.basename(entry["path"]) == "baseline" -> @max_manifest
-            true -> @max_ledger_record
-          end
+          ceiling =
+            cond do
+              MapSet.member?(generations, entry["path"]) -> @max_ledger_generation
+              Path.basename(entry["path"]) == "baseline" -> @max_manifest
+              true -> @max_ledger_record
+            end
+
           if entry["size"] > ceiling, do: throw({:io_error, :inventory_mismatch})
           {entry["path"], ceiling}
         end)
 
       captured =
         Enum.reduce(selected, %{}, fn entry, acc ->
-          {:ok, bytes} = audit_captured_record(root, entry["path"], index,
-            ceilings[entry["path"]], :restore_history_digest, :restore_history_bytes,
-            fn bytes -> {:ok, bytes} end)
+          {:ok, bytes} =
+            audit_captured_record(
+              root,
+              entry["path"],
+              index,
+              ceilings[entry["path"]],
+              :restore_history_digest,
+              :restore_history_bytes,
+              fn bytes -> {:ok, bytes} end
+            )
+
           Map.put(acc, entry["path"], bytes)
         end)
 
@@ -1973,8 +1988,9 @@ defmodule LoopexComposition.Restore.IO do
         invocation["prior_admin_authority"] == "none"
 
   defp valid_operation?({:audit_restore_lineage, root, plan, manifest}),
-    do: valid_path?(root) and is_map(plan) and is_binary(manifest) and
-          byte_size(manifest) <= @max_manifest
+    do:
+      valid_path?(root) and is_map(plan) and is_binary(manifest) and
+        byte_size(manifest) <= @max_manifest
 
   defp valid_operation?({:audit_store, root, declaration, manifest}),
     do:
