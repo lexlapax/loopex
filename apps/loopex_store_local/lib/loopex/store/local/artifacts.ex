@@ -473,13 +473,34 @@ defmodule Loopex.Store.Local.Artifacts do
   def decode_use_bytes(_bytes, _expected_digest), do: {:error, :artifact_integrity_failed}
 
   defp unorder({:loopex_map, pairs}) when is_list(pairs) do
-    if Enum.all?(pairs, &match?({_key, _value}, &1)),
-      do: Map.new(pairs, fn {key, value} -> {unorder(key), unorder(value)} end),
-      else: :invalid_artifact_use
+    unorder_pairs(pairs, %{})
   end
 
-  defp unorder(term) when is_list(term), do: Enum.map(term, &unorder/1)
+  defp unorder(term) when is_list(term), do: unorder_list(term)
+
+  defp unorder(term) when is_tuple(term),
+    do: term |> Tuple.to_list() |> unorder_list() |> List.to_tuple()
+
+  defp unorder(term) when is_map(term), do: unorder_pairs(:maps.to_list(term), %{})
   defp unorder(term), do: term
+
+  # Concept: malformed list structure produces an integrity refusal.
+  # Technical depth: is_list accepts improper cons cells. Walk each tail with
+  # explicit clauses, including keys and tuple/map-contained values, before
+  # canonical encoding can enter a partial Enum traversal.
+  defp unorder_pairs([], map), do: map
+
+  defp unorder_pairs([{key, value} | rest], map),
+    do: unorder_pairs(rest, Map.put(map, unorder(key), unorder(value)))
+
+  defp unorder_pairs(_malformed, _map),
+    do: raise(ArgumentError, "artifact use map projection requires proper pairs")
+
+  defp unorder_list([]), do: []
+  defp unorder_list([value | rest]), do: [unorder(value) | unorder_list(rest)]
+
+  defp unorder_list(_improper_tail),
+    do: raise(ArgumentError, "artifact use projection requires proper lists")
 
   # Concept: an object already present must be the object it claims to be.
   #

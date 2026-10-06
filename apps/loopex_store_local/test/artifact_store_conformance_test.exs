@@ -652,6 +652,18 @@ defmodule Loopex.Store.Local.ArtifactStoreConformanceTest do
       {key, if(key == :object_locator, do: self(), else: value)}
     end)
 
+    improper_shapes = [
+      [hd(pairs) | 0],
+      [[1 | 0]],
+      [{[1 | 0], :metadata}],
+      [{:metadata, [1 | 0]}],
+      [{:metadata, [[1 | 0]]}],
+      [{:metadata, {:loopex_map, [{"a", 1} | 0]}}],
+      [{{:loopex_map, [{"a", 1} | 0]}, :metadata}],
+      [{:metadata, {:metadata, [1 | 0]}}],
+      [{:metadata, %{:metadata => {:metadata, [1 | 0]}}}]
+    ]
+
     decoded = [
       bytes <> <<0>>,
       binary_part(bytes, 0, byte_size(bytes) - 1),
@@ -662,7 +674,12 @@ defmodule Loopex.Store.Local.ArtifactStoreConformanceTest do
       :erlang.term_to_binary([tag, {:loopex_map, nonplain}], [:deterministic])
     ]
 
+    decoded = decoded ++ Enum.map(improper_shapes, fn shape ->
+      :erlang.term_to_binary([tag, {:loopex_map, shape}], [:deterministic])
+    end)
+
     for hostile <- decoded do
+      assert <<131, 108, 2::unsigned-big-32, _::binary>> = hostile
       assert {{:error, :artifact_integrity_failed}, 1} =
                observed_use_decode(hostile, Canonical.digest_bytes(hostile))
     end
