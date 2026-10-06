@@ -505,8 +505,17 @@ defmodule Loopex.ModelConfigurationPreparationTest do
     Process.put({key, :complete}, false)
 
     try do
-      {:ok, children} = Loopex.Runtime.Supervisor.children(f.runtime.supervisor)
-      control = :sys.get_state(children.control, startup_left(cutoff))
+      resolved =
+        GenServer.call(f.runtime.supervisor, :which_children, startup_left(cutoff))
+        |> Map.new(fn {id, pid, _type, _modules} -> {id, pid} end)
+
+      for id <- [Loopex.ToolRegistry, Loopex.Runtime.Control, Loopex.Runtime.Workers,
+                  Loopex.Runtime.OwnerGroups, Loopex.Runtime.SessionSupervisor,
+                  Loopex.Runtime.EventDispatcher, Loopex.Trace] do
+        assert is_pid(Map.get(resolved, id))
+      end
+
+      control = :sys.get_state(Map.fetch!(resolved, Loopex.Runtime.Control), startup_left(cutoff))
       %{coordinator: owner, owner_group: group} = Map.fetch!(control.sessions, f.session)
       owner_monitor = startup_monitor(key, owner)
       startup_monitor(key, group)
@@ -559,9 +568,12 @@ defmodule Loopex.ModelConfigurationPreparationTest do
       assert_receive {:startup_supervisor_report, ^workers, ^child, {:shutdown, :noproc}, 5_000}, startup_left(cutoff)
       assert_receive {:startup_command_result, ^nonce, ^caller, {:error, _}}, startup_left(cutoff)
       assert Agent.get(f.controller, & &1.calls, startup_left(cutoff)) == 0
-      assert configuration_records(f) == []
-      assert Loopex.AgentLoopTestModel.dispatched(f.model) == []
-      assert Loopex.AgentLoopTestExecutor.jobs(f.executor) == []
+      records = GenServer.call(f.store, :inspect_state, startup_left(cutoff)).sessions
+        |> Map.get(f.session, %{records: []})
+        |> Map.fetch!(:records)
+      assert Enum.filter(records, &(&1.payload.kind == "session_configuration_admitted_v2")) == []
+      assert (Agent.get(f.model, & &1.seen, startup_left(cutoff)) |> Enum.reverse()) == []
+      assert (Agent.get(f.executor, & &1.jobs, startup_left(cutoff)) |> Enum.reverse()) == []
 
       startup_join_set(key, MapSet.new([group, workers, caller]), cutoff)
       :ok = Supervisor.stop(f.runtime.supervisor, :normal, startup_left(cutoff))
