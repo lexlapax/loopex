@@ -27,6 +27,39 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current proof, execution and source ownership
 
+ROOT VM OCCUPIED by original90817, exactf2b422bc native retirement runtime.
+Enabled `M7/retained-source-retirement-focused-runtime-runner-20261006-v2`,
+config `5b3fab7087557296904bd5e0c8b90038be33f240a37e5a9c6596c0f4ea03288b`,
+root review `e3e2cf1383765f526d6d2b2914c26041a2650ce34cbc1b3c1ca9ec107e347dda`.
+Output `M7/m7-retained-source-retirement-focused-runtime-v2`. Exact97 cases
+per pair20/34/17/10/16,16 stages, zero skips/exclusions. All43 disabled
+artifacts,64refs and53actual/Git rows verified. Actual original27061 replaces
+only the disabled validator's prospective handle. No terminal runtime result;
+collect90817 before another VM grant. Same-author audit is not independent
+review; root separately reviewed source/packet but makes no independent-worker
+claim. No public restore, generation-prefix, receipt or closure proof follows.
+
+Original27061 fully collected PASS_FORMAT_PREPARATION_ONLY42.086s/eight stages,
+61artifacts,53actual/Git rows, all original joins. Source stayed exactf2, no
+child; all three ASTs and both format checks pass. Collection
+`M7/retained-source-retirement-format-original-collection-20261006-v2.json`
+SHA-256 `653f94fe59035ff030da7b33efbdb13eec2139c583e0d827a078bfb5fd756b32`.
+Latest651-key registry SHA-256
+`baac23e0b07f0a1424d84eb9c94292598e9e12d6530676509d7cbb1909b26637`.
+Never repoll27061. Original67819 remains failed.
+
+Protocol original12820 fully collected FAIL_OR_UNAVAILABLE25.165s/eight stages,
+66artifacts,30actual/Git inputs and all original joins. All13 AST checks pass;
+child `ccf2cda58ce33288bd6fdfdffbf19c764abf4e8c` fails current format-check on
+a System.cmd call layout. Floor/compiler/tests did not run. Collection
+`M7/model-policy-integration-format-original-collection-20261006-v1.json`
+SHA-256 `f8d7ce7f5f6d926d86abb06ee1c668d1753f24f04c39a5fbde2e0b415727ce14`.
+Never repoll12820. Isolated correction `8f4b19fd3d37b60acba119ce8ec25948ec06379a`
+captures identical command arguments in a variable, preserves all assertions,
+and is an intentional source AST rewrite. Source/v2packet authoring is ongoing;
+no future result is claimed. Prefix worker and ADR0056 author continue separately.
+
+
 ROOT VM OCCUPIED by original12820, exact source
 `038401b76cbcff0f2546697354287d9210b64c3d`, protocol formatting only.
 Enabled `M7/model-policy-integration-format-runner-20261006-v1`, config SHA-256
