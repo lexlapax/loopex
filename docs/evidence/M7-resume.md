@@ -27,6 +27,44 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current proof, execution and source ownership
 
+ROOT VM RUNNING, 2026-10-06: original57030 owns the sole verification VM for
+the diagnostic-only frozen8c run. Collect this original handle fully before any
+other grant. Enabled `M7/retirement-diagnostic-runtime-runner-20261006-v1` has
+config `9fe2377afc4cea87d5f2ed2963a5b6da8061617583a0c26475b7891bdcacf11b`
+and51-artifact root inventory
+`a728f613d158c10fe9ce15144b0c794f57ccd421eb7812934eca920ac2cd1b5b`.
+Output is `M7/m7-retirement-diagnostic-runtime-v1`; fresh registry
+`M7/retirement-diagnostic-runtime-stage-attempt-registry.json` starts448 keys,
+digest `23766fd579d9678c95fe16028f7ba6f577b269e0598c07eaf6e3a0da97ef8a3a`.
+Independent source/runner report is
+`cd5f2d9c61ae4909648867848296edeea1819c83c806266ce89a49046a8ef53e`,
+inventory `621a1d175de1f292c9ee05b098cb5857fbdff737ad3d185f8fce348e8c0124d5`.
+Author98627 is fully collected exit0. Automatic review admitted only this Core
+diagnostic scope. No restore gate or broader proof is enabled; no worker grant.
+
+CURRENT RESUME, 2026-10-06: the maintainer again replied "approve 1000 ms".
+This reconfirms only the diagnostic pre-fault setup disposition at
+[the retained decision](../developer/agent-context-map.md#disposition-m7-diagnostic-setup-cutoff-2026-10-05).
+Production and post-fault deadlines remain unchanged; the separate restore
+read-branch verification-gate decision remains unanswered and disabled.
+The existing M7 goal remains active. No worker VM grant exists.
+
+Root reviewed the disabled eight-stage diagnostic runner on frozen8c, verifying
+23 packet artifacts,21 external inputs,134 actual/Git source records and eleven
+literal predecessor engine functions. Root report
+`/private/tmp/m7-retirement-diagnostic-root-review-8c-v1.md` is
+`32e0c35d4084bacca2ff786e7102995f7d5d01fa3244834144270963dd6ffcf2`.
+Independent runner review is finishing; no runtime execution has begun.
+Root also verified15 retained-construction source artifacts,17 source/parent
+Git records and7 independent actual/Git inputs on frozenbfc. Independent report
+`/private/tmp/loopex-m7-retained-construction-independent-review-bfcbb6a1-20261006-v1/report.md`
+is `a84b891e632372ff6a5521c0e95524fb0ef535410e613a3081d57a2bea24e499`;
+its inventory is `2f9b95ff3f17c8a90410101cf8dd3c15fe2ddd3c7e71ebb44dade835607b69ac`.
+No bounded source blocker was found. Ten pure construction tests remain
+unexecuted. A separate writer prepares only a disabled two-file formatter;
+physical continuation, custody, publication and release proofs remain open.
+Original T01–T19 counts remain78 done/95 todo/6 retired; added298 done/32 todo.
+
 LATEST COLLECTION, 2026-10-06: root original86524 is fully collected
 PASS_FORMAT_PREPARATION_ONLY after134.888s/12 stages. The sole VM is FREE;
 clean frozen final source8c9e18f3808e627ff603d7a4a9686def92295c00 is the sole
