@@ -580,6 +580,11 @@ defmodule Loopex.ModelConfigurationPreparationTest do
       Process.exit(owner, :kill)
       assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :killed}, startup_left(cutoff)
       startup_joined(key, owner_monitor, owner, :killed)
+      assert_receive {:startup_stop_sent, ^collector, ^group, ^workers, stop_reference},
+                     startup_left(cutoff)
+
+      {observed_at, observations} = startup_queued_stop(workers, group, stop_reference, cutoff, 64)
+      send(collector, {:startup_stop_observed, observer, group, workers, stop_reference, observed_at, observations})
       assert_receive {:startup_stop_enqueued, ^collector, ^group, ^workers}, startup_left(cutoff)
       send(workers, {:startup_release, nonce, :start})
       assert_receive {:startup_started, ^nonce, ^workers, child}, startup_left(cutoff)
@@ -864,15 +869,14 @@ defmodule Loopex.ModelConfigurationPreparationTest do
              [:local]
            ) > 0
 
-    assert :trace.function(
+    assert :trace.send(
              session,
-             {:erlang, :send, 3},
              [
-               {[workers, {:system, {group, :_}, {:terminate, :shutdown}}, :_], [],
-                [{:message, {:const, workers}}, {:return_trace}]}
+               {[workers, {:system, {group, :"$1"}, {:terminate, :shutdown}}],
+                [{:"=:=", {:self}, group}, {:is_reference, :"$1"}], []}
              ],
              []
-           ) > 0
+           ) == 1
 
     assert :trace.function(
              session,
@@ -894,6 +898,8 @@ defmodule Loopex.ModelConfigurationPreparationTest do
              ]) == 1
     end
 
+    assert :trace.process(session, group, true, [:send]) == 1
+
     assert :trace.process(session, workers, true, [
              :call,
              :arity,
@@ -905,8 +911,8 @@ defmodule Loopex.ModelConfigurationPreparationTest do
   end
 
   # Concept: acquire only this supervisor's one async child after the real stop.
-  # Technical depth: process the known group's stop-send/return before spawn, so
-  # the barrier cannot deadlock. Child frames wait for acquisition and the actor
+  # Technical depth: retain the exact group's send event and the separate bounded
+  # queue observation before spawn. Child frames wait for acquisition and the actor
   # set then seals; no arguments, requests or recursively discovered actors persist.
   defp startup_acquire(_observer, _owner, _group, _workers, _actors, _cutoff, records)
        when length(records) >= 8_192 do
@@ -916,14 +922,23 @@ defmodule Loopex.ModelConfigurationPreparationTest do
 
   defp startup_acquire(observer, owner, group, workers, actors, cutoff, records) do
     receive do
-      {:trace_ts, ^group, :call, {:erlang, :send, 3}, ^workers, at} ->
-        record = startup_record("stop_send", group, workers, at)
+      {:trace_ts, ^group, :send, {:system, {^group, reference}, {:terminate, :shutdown}},
+       ^workers, at}
+      when is_reference(reference) ->
+        assert not Enum.any?(records, &(&1["event"] == "stop_send"))
+        record = Map.put(startup_record("stop_send", group, workers, at), "monitor", startup_identity(reference))
+        send(observer, {:startup_stop_sent, self(), group, workers, reference})
         startup_acquire(observer, owner, group, workers, actors, cutoff, [record | records])
 
-      {:trace_ts, ^group, :return_from, {:erlang, :send, 3}, :ok, at} ->
-        assert Enum.any?(records, &(&1["event"] == "stop_send"))
+      {:startup_stop_observed, ^observer, ^group, ^workers, reference, at, observations}
+      when is_reference(reference) and is_integer(at) and observations in 1..64 ->
+        assert Enum.any?(records, &(&1["event"] == "stop_send" and &1["monitor"] == startup_identity(reference)))
+        assert not Enum.any?(records, &(&1["event"] == "stop_enqueued"))
+        record =
+          startup_record("stop_enqueued", group, workers, at)
+          |> Map.put("monitor", startup_identity(reference))
+          |> Map.put("observations", observations)
         send(observer, {:startup_stop_enqueued, self(), group, workers})
-        record = startup_record("stop_enqueued", group, workers, at)
         startup_acquire(observer, owner, group, workers, actors, cutoff, [record | records])
 
       {:trace_ts, ^workers, :spawn, child, {Task.Supervised, :reply, _args}, at}
@@ -1206,6 +1221,31 @@ defmodule Loopex.ModelConfigurationPreparationTest do
   defp startup_frame(_frame, _actors, _targets, _child, _observer),
     do: exit(:runtime_startup_trace_shape)
 
+  # Concept: a send trace and a queued request are separate observations.
+  # Technical depth: while before-start is held, make at most 64 observations.
+  # Only an empty queue may yield within the same cutoff; nonempty queues must
+  # contain the sole exact stop/reference. No message is consumed or retained.
+  defp startup_queued_stop(workers, group, reference, cutoff, remaining) do
+    assert remaining in 1..64 and startup_left(cutoff) > 0
+
+    case Process.info(workers, :message_queue_len) do
+      {:message_queue_len, 0} ->
+        assert remaining > 1
+        :erlang.yield()
+        startup_queued_stop(workers, group, reference, cutoff, remaining - 1)
+
+      {:message_queue_len, 1} ->
+        assert {:messages, [{:system, {^group, ^reference}, {:terminate, :shutdown}}]} =
+                 Process.info(workers, :messages)
+        observed_at = System.monotonic_time()
+        assert startup_left(cutoff) > 0
+        {observed_at, 65 - remaining}
+
+      _ ->
+        flunk("runtime startup stop queue has an unexpected population")
+    end
+  end
+
   # Concept: the queue read observes this controlled schedule without consuming it.
   # Technical depth: inspect only two messages on this fixture's held supervisor,
   # require its known group's stop and exact child EXIT, and discard all raw terms.
@@ -1245,11 +1285,15 @@ defmodule Loopex.ModelConfigurationPreparationTest do
     stop = select.("stop_enqueued", group, workers)
     acquired = select.("child_acquired", workers, child)
     owner_exit = select.("actor_exit", owner, owner)
-    assert stop != nil and acquired != nil and owner_exit != nil
-    assert owner_exit["at_ns"] <= stop["at_ns"] and stop["at_ns"] <= acquired["at_ns"]
+    sent = select.("stop_send", group, workers)
+    assert stop != nil and sent != nil and acquired != nil and owner_exit != nil
+    assert stop["monitor"] == sent["monitor"]
+    assert owner_exit["at_ns"] <= sent["at_ns"] and sent["at_ns"] <= stop["at_ns"]
+    assert stop["at_ns"] <= acquired["at_ns"]
     group_down = select.("down_received", group, owner)
     assert group_down != nil and group_down["monitor"] == startup_identity(group_owner_monitor)
-    assert group_down["reason"] == "killed" and group_down["at_ns"] <= stop["at_ns"]
+    assert group_down["reason"] == "killed" and group_down["at_ns"] <= sent["at_ns"]
+    assert stop["observations"] in 1..64
     received = select.("exit_received", workers, child)
     assert received != nil and received["reason"] == "shutdown:noproc"
     unlink = select.("unlink_call", workers, child)
