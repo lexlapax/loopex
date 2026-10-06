@@ -31,8 +31,10 @@ LATEST: Native v4 now holds the sole verification VM grant. Worker
 restore_manifest_resume owns live handle72477, exact initial
 9aa2cf82742b3204fe1c57206ec8d2af579aea90 and reviewed runner
 a4121a93a91f57ac5c644b12154e09ab83b4f1ce07798317d86aac22f40bb516,
-in siblingM7/configure-checkpoint-runner-9aa2cf82-v4. Initial toolchain/Node
-probes pass; no test result yet. No other VM until terminal collection.
+in siblingM7/configure-checkpoint-runner-9aa2cf82-v4. Current focused10/0,
+adjacent63/1 and ordinary Core1323/10 pass, zero skips. Measured stage durations
+1.893s,6.496s and225.806s respectively. Floor identity probes pass and floor
+dev compilation is underway. No other VM until terminal collection.
 
 Resource v3 handle78954 is terminal exit1 and collected. Clean10f71808
 passes current dev/test compilation47.441s/46.831s, but focused51/52 pass,
@@ -50,8 +52,26 @@ matches the basename. Worker current_index_cleanup is authorized only that
 fixture path plus mkdir_p!, keeping workspace root, actual writer, every nil-
 and missing-provenance assertion, case and bound. New direct child and pin-only
 packet must be reviewed before a separate grant; old failure remains immutable.
+That exact two-line fixture correction is committed at
+3ecf76623ab2a47fe7edc612135b6529c66634c8. Root read the complete delta,
+verified6 correction artifacts,8 runner artifacts and29 actual/Git source
+records/modes, unchanged helpers and pin-only runner. Reviewed Resource v4
+runner digest fd8781209e017fe2973943684ab9efa0b48e4a7015a4509a486f1ba82b1875e6,
+packet inventorye2aff07f531c687fd0a1889a3dfbf9cd2a234f80e4fa028f04baf9d040a5c1fe,
+in siblingM7/resource-capture-audit-runner-20261005-v4. It is queued without
+VM grant, eventual fresh output resource-capture-audit-execution-20261005-v3.
 
-The actual-runtime startup witness packet remains source-only. No native,
+The actual-runtime startup witness packet remains source-only and reviewed:
+siblingM7/runtime-preparation-startup-runner-0f6abc76-v1/run.py digest
+5ae246ec492334e826709d99034df5c040f254e4d4d7fdef044956afc08f58cf;
+completion digest3cb0be119149f92805fa54a7d3cd6bace91e609fc01cbdd516fc8b7749543d11.
+Root read all629 runner lines and both Elixir helpers, verified5 packet
+artifacts and13 actual/Git source/mode records and identical isolation helpers.
+Earlier source packet5 artifacts/15 live records and exact Git delta also
+verify. Native TMPDIR spelling, exact trace/report chain,11 unique joins,
+1,000ms cutoff and8,192-row cap remain required. No VM grant or proof yet.
+All three source branches are pushed at9aa2cf82,3ecf7662 and0f6abc76.
+No native,
 Resource or causal bounded row closes. Counts remain originals78/95/6 and
 added294/22 for T01–T19. All active statements below are superseded snapshots.
 
