@@ -667,8 +667,18 @@ defmodule LoopexComposition.Restore.IO do
           ordinal: nil,
           phase: "claim",
           claims: [],
-          intake: match?({kind, _, _} when kind in [:restore_pending_intake, :restore_retained_claim_handoff], operation),
-          intent: match?({kind, _, _} when kind in [:restore_pending_intake, :restore_retained_claim_handoff], operation),
+          intake:
+            match?(
+              {kind, _, _}
+              when kind in [:restore_pending_intake, :restore_retained_claim_handoff],
+              operation
+            ),
+          intent:
+            match?(
+              {kind, _, _}
+              when kind in [:restore_pending_intake, :restore_retained_claim_handoff],
+              operation
+            ),
           intent_status: observation["intent"],
           prior_claim: observation["claim"] == "retained"
         }
@@ -864,7 +874,7 @@ defmodule LoopexComposition.Restore.IO do
     if not valid_operation?({:restore_retained_claim_handoff, plan, invocation}) or
          root not in [plan["source_state_root"], plan["destination_state_root"]] or
          (root == plan["source_state_root"] and plan["source_status"] != "available"),
-      do: throw({:io_error, :invalid_io_request})
+       do: throw({:io_error, :invalid_io_request})
 
     lookup_operation(root, plan["tx_id"], {:pending, plan, invocation}, true)
   end
@@ -872,7 +882,7 @@ defmodule LoopexComposition.Restore.IO do
   defp execute({:restore_claim_handoff, capture, plan, invocation, nonce}) do
     if not valid_operation?({:restore_retained_claim_handoff, plan, invocation}) or
          not is_binary(nonce) or not Regex.match?(~r/\A[0-9a-f]{64}\z/, nonce),
-      do: throw({:io_error, :invalid_io_request})
+       do: throw({:io_error, :invalid_io_request})
 
     {:ok, digest} = RestoreCodec.plan_digest(plan)
     root = capture.root
@@ -888,7 +898,7 @@ defmodule LoopexComposition.Restore.IO do
          owner["state_root"] != root or owner["role"] != role or owner["claim_nonce"] == nonce or
          claim.directory != directory or
          RestoreCodec.decode(:claim, claim.owner) != {:ok, owner},
-      do: throw({:io_error, :invalid_io_request})
+       do: throw({:io_error, :invalid_io_request})
 
     {:ok, bytes} = RestoreCodec.encode(:claim, Map.put(owner, "claim_nonce", nonce))
     primitive({:restore_claim_handoff, claim}, fn -> :ok end)
@@ -900,9 +910,13 @@ defmodule LoopexComposition.Restore.IO do
 
     if primitive(:retained_publication_stat, fn -> :prim_file.read_link_info(path <> ".tmp") end) !=
          {:error, :enoent},
-      do: throw({:io_error, :changed_destination})
+       do: throw({:io_error, :changed_destination})
 
-    retained_publish(path, bytes, 0o600, claim.owner, 2048, %{ancestors: ancestors, original: claim.owner_identity})
+    retained_publish(path, bytes, 0o600, claim.owner, 2048, %{
+      ancestors: ancestors,
+      original: claim.owner_identity
+    })
+
     retained_publication_ancestors!(ancestors)
     retained_claim_namespace!(claim)
     final = retained_publication_file(path, 2048, 0o600)
@@ -910,7 +924,7 @@ defmodule LoopexComposition.Restore.IO do
     if final == :absent or final.bytes != bytes or
          RestoreCodec.decode(:claim, final.bytes) !=
            {:ok, Map.put(owner, "claim_nonce", nonce)},
-      do: throw({:io_error, :readback_mismatch})
+       do: throw({:io_error, :readback_mismatch})
 
     retained_publication_ancestors!(ancestors)
     retained_claim_namespace!(claim)
@@ -1663,8 +1677,16 @@ defmodule LoopexComposition.Restore.IO do
         lookup_recheck(root, ancestors, state)
         retained_claim_namespace!(custody)
 
-        {:ok, {:pending, %{root: root, retained: retained, claim: custody, state: state,
-                          ancestors: ancestors, claim_ancestors: claim_ancestors}}}
+        {:ok,
+         {:pending,
+          %{
+            root: root,
+            retained: retained,
+            claim: custody,
+            state: state,
+            ancestors: ancestors,
+            claim_ancestors: claim_ancestors
+          }}}
       else
         {:ok, result}
       end
@@ -2455,7 +2477,10 @@ defmodule LoopexComposition.Restore.IO do
   # their original ceilings. This helper grants no claim or mutation authority.
   defp retained_publish(path, bytes, mode, expected, cap, custody \\ nil) do
     temp = path <> ".tmp"
-    ancestors = if custody, do: custody.ancestors, else: retained_publication_ancestors(Path.dirname(path))
+
+    ancestors =
+      if custody, do: custody.ancestors, else: retained_publication_ancestors(Path.dirname(path))
+
     current = retained_publication_file(path, cap, mode)
     temporary = retained_publication_file(temp, cap, mode)
 
@@ -2508,10 +2533,12 @@ defmodule LoopexComposition.Restore.IO do
     if directory_identity(info) != claim.directory_identity or
          file_info(info, :type) != :directory or
          Bitwise.band(file_info(info, :mode), 0o7777) != 0o700,
-      do: throw({:io_error, :source_changed})
+       do: throw({:io_error, :source_changed})
 
     names =
-      require_value(primitive(:lookup_claim_names, fn -> :prim_file.list_dir_all(claim.directory) end))
+      require_value(
+        primitive(:lookup_claim_names, fn -> :prim_file.list_dir_all(claim.directory) end)
+      )
       |> Enum.map(&manifest_name/1)
       |> Enum.sort()
 

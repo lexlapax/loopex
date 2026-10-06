@@ -182,7 +182,11 @@ defmodule LoopexComposition.Restore.Workflow do
   def retained_claim_handoff(plan, invocation, io) do
     ensure!(match?({:ok, _}, RestoreCodec.encode(:plan, plan)), "invalid_plan")
     ensure!(match?({:ok, _}, RestoreCodec.encode(:invocation, invocation)), "invalid_plan")
-    ensure!(invocation["prior_admin_authority"] in ["joined", "host_rebooted"], "authority_unconfirmed")
+
+    ensure!(
+      invocation["prior_admin_authority"] in ["joined", "host_rebooted"],
+      "authority_unconfirmed"
+    )
 
     retained =
       case pending_intake(plan, invocation, io) do
@@ -219,7 +223,11 @@ defmodule LoopexComposition.Restore.Workflow do
 
     prior_files =
       Enum.reduce(intent["generations"], destination.state.files, fn candidate, files ->
-        Map.put(files, Path.join(candidate["relative_root"], "generation"), candidate["source_generation_bytes"])
+        Map.put(
+          files,
+          Path.join(candidate["relative_root"], "generation"),
+          candidate["source_generation_bytes"]
+        )
       end)
 
     case retained_construction(
@@ -256,6 +264,7 @@ defmodule LoopexComposition.Restore.Workflow do
 
   defp handoff_nonce(captures) do
     nonce = random_hex()
+
     if Enum.any?(captures, &(&1.retained.claim["claim_nonce"] == nonce)),
       do: handoff_nonce(captures),
       else: nonce
@@ -263,12 +272,20 @@ defmodule LoopexComposition.Restore.Workflow do
 
   defp claim_capture!(root, plan, invocation, io) do
     case io.({:restore_claim_capture, root, plan, invocation}) do
-      {:ok, {:pending, capture}} -> capture
-      {:ok, {:error, :authority_unconfirmed}} -> throw({:restore_refusal, "authority_unconfirmed"})
+      {:ok, {:pending, capture}} ->
+        capture
+
+      {:ok, {:error, :authority_unconfirmed}} ->
+        throw({:restore_refusal, "authority_unconfirmed"})
+
       {:ok, {:error, %{"code" => "restore_history_invalid"}}} ->
         throw({:restore_refusal, "invalid_current_history"})
-      {:ok, {:error, %{"code" => code}}} -> throw({:restore_refusal, code})
-      _ -> throw({:restore_refusal, "inventory_unavailable"})
+
+      {:ok, {:error, %{"code" => code}}} ->
+        throw({:restore_refusal, code})
+
+      _ ->
+        throw({:restore_refusal, "inventory_unavailable"})
     end
   end
 
