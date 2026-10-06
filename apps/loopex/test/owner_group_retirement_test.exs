@@ -328,10 +328,11 @@ defmodule Loopex.Runtime.OwnerGroupRetirementTest do
     end
   end
 
-  defp membership_queries(rows, group, workers), do: for
-    {:trace, ^group, :send,
-     {:'$gen_call', {^group, [:alias | request_id]}, :which_children}, ^workers} <- rows,
-    do: request_id
+  defp membership_queries(rows, group, workers) do
+    for {:trace, ^group, :send,
+         {:'$gen_call', {^group, [:alias | request_id]}, :which_children}, ^workers} <- rows,
+      do: request_id
+  end
 
   defp membership_observations(rows, group, workers) do
     queries = membership_queries(rows, group, workers)
