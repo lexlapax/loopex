@@ -24,7 +24,9 @@ defmodule LoopexComposition.Restore.IO do
   A private transition worker validates retained prior lineage and sequences
   available-source retirement or lost-source host-exclusion evidence, exact
   copy/publication and terminal
-  claim release without replacing the original guardian or deadlines. Public
+  claim release without replacing the original guardian or deadlines. A private
+  retained continuation reuses original candidates/intent and checked claim
+  custody through source retirement only, without candidate activation or release. Public
   restore/lookup and the remaining accepted variants are unfinished. Validated
   maps and recovered facts remain private; standalone audit operations grant no
   effect authority and do not activate a restored root. Host exclusion remains the caller's
@@ -670,13 +672,21 @@ defmodule LoopexComposition.Restore.IO do
           intake:
             match?(
               {kind, _, _}
-              when kind in [:restore_pending_intake, :restore_retained_claim_handoff],
+              when kind in [
+                     :restore_pending_intake,
+                     :restore_retained_claim_handoff,
+                     :restore_retained_source_retirement
+                   ],
               operation
             ),
           intent:
             match?(
               {kind, _, _}
-              when kind in [:restore_pending_intake, :restore_retained_claim_handoff],
+              when kind in [
+                     :restore_pending_intake,
+                     :restore_retained_claim_handoff,
+                     :restore_retained_source_retirement
+                   ],
               operation
             ),
           intent_status: observation["intent"],
@@ -686,7 +696,12 @@ defmodule LoopexComposition.Restore.IO do
   end
 
   defp initial_restore_observation({kind, plan, _invocation})
-       when kind in [:restore_first, :restore_pending_intake, :restore_retained_claim_handoff] do
+       when kind in [
+              :restore_first,
+              :restore_pending_intake,
+              :restore_retained_claim_handoff,
+              :restore_retained_source_retirement
+            ] do
     %{
       "kind" => "loopex_current_restore_observation_v1",
       "tx_id" => plan["tx_id"],
@@ -870,6 +885,75 @@ defmodule LoopexComposition.Restore.IO do
     LoopexComposition.Restore.Workflow.retained_claim_handoff(plan, invocation, &execute/1)
   end
 
+  defp execute({:restore_retained_source_retirement, plan, invocation} = operation) do
+    if not valid_operation?(operation), do: throw({:io_error, :invalid_io_request})
+    LoopexComposition.Restore.Workflow.retained_source_retirement(plan, invocation, &execute/1)
+  end
+
+  # Concept: every retirement publication retains the original live claim custody.
+  # Technical depth: only the private workflow reaches this callback. Exact owner
+  # bytes/inode, directory identity and captured ancestors must still match; no
+  # claim mutation, reacquisition, release or new IO owner is created here.
+  defp execute({:restore_retirement_claim_check, claims, plan}) do
+    expected_count = if plan["source_status"] == "available", do: 2, else: 1
+
+    if not match?({:ok, _}, RestoreCodec.encode(:plan, plan)) or length(claims) != expected_count,
+      do: throw({:io_error, :invalid_io_request})
+
+    {:ok, digest} = RestoreCodec.plan_digest(plan)
+
+    roots =
+      if plan["source_status"] == "available",
+        do: [plan["source_state_root"], plan["destination_state_root"]],
+        else: [plan["destination_state_root"]]
+
+    expected =
+      Enum.sort(
+        Enum.map(roots, fn root ->
+          {:ok, claim_digest} = RestoreCodec.claim_digest(root)
+          Path.join(Path.dirname(root), ".loopex-restore-claim-" <> claim_digest)
+        end)
+      )
+
+    if Enum.sort(Enum.map(claims, & &1.directory)) != expected,
+      do: throw({:io_error, :invalid_io_request})
+
+    primitive(:restore_retirement_claim_check, fn -> :ok end)
+
+    Enum.each(claims, fn claim ->
+      retained_publication_ancestors!(claim.claim_ancestors)
+      retained_claim_namespace!(claim)
+      owner = retained_publication_file(Path.join(claim.directory, "owner"), 2048, 0o600)
+
+      if owner == :absent or owner.bytes != claim.owner,
+        do: throw({:io_error, :changed_destination})
+
+      require_same_identity(claim.owner_identity, owner.info)
+      {:ok, decoded} = RestoreCodec.decode(:claim, owner.bytes)
+      root = decoded["state_root"]
+      role = if root == plan["destination_state_root"], do: "destination", else: "source"
+
+      if root not in roots or decoded["role"] != role or decoded["tx_id"] != plan["tx_id"] or
+           decoded["plan_digest"] != digest,
+         do: throw({:io_error, :changed_destination})
+
+      retained_publication_ancestors!(claim.claim_ancestors)
+      retained_claim_namespace!(claim)
+      require_same_identity(owner.info, manifest_stat(Path.join(claim.directory, "owner")))
+    end)
+
+    {:ok, :checked}
+  end
+
+  defp execute({:restore_retirement_step, side, name}) do
+    if side not in ["source", "destination"] or
+         name not in ["baseline", "intent", "source-retired", "source-retirement"],
+       do: throw({:io_error, :invalid_io_request})
+
+    primitive({:restore_retirement_step, side, name}, fn -> :ok end)
+    {:ok, :step}
+  end
+
   defp execute({:restore_claim_capture, root, plan, invocation}) do
     if not valid_operation?({:restore_retained_claim_handoff, plan, invocation}) or
          root not in [plan["source_state_root"], plan["destination_state_root"]] or
@@ -930,6 +1014,7 @@ defmodule LoopexComposition.Restore.IO do
     retained_claim_namespace!(claim)
     require_same_identity(final.info, manifest_stat(path))
     acquired = %{claim | owner: bytes, owner_identity: final.info}
+    acquired = Map.put(acquired, :claim_ancestors, ancestors)
     primitive({:restore_claim_acquired, acquired}, fn -> :ok end)
     {:ok, acquired}
   end
@@ -2902,6 +2987,9 @@ defmodule LoopexComposition.Restore.IO do
       match?({:ok, _}, RestoreCodec.encode(:plan, plan)) and
         match?({:ok, _}, RestoreCodec.encode(:invocation, invocation)) and
         invocation["prior_admin_authority"] in ["joined", "host_rebooted"]
+
+  defp valid_operation?({:restore_retained_source_retirement, plan, invocation}),
+    do: valid_operation?({:restore_retained_claim_handoff, plan, invocation})
 
   defp valid_operation?({:audit_restore_lineage, root, plan, manifest}),
     do:

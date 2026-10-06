@@ -27,6 +27,31 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current proof, execution and source ownership
 
+ROOT VM FREE after original93010 fully collected
+PASS_FOCUSED_RETAINED_SOURCE_RETIREMENT_ONLY187.704s/18stages at clean
+`a4b14867951a31fbab7f820fc4380493b216456e`. All99cases eachpair pass with
+zeroexclusions/skips,198 total; all85artifacts53actual/Git sources18original
+joins verified. Collection
+`M7/retained-source-retirement-focused-runtime-original-collection-20261006-v5.json`
+`6f57267dd76d817a41ad9cb860ce56d67482d542a662e9c5ea634502a1a60e06`;
+registry705 `c255992181d52671e070ca95d33e6ddc6901f0dccbc76cae72fbec2661ef0e89`.
+Never repoll93010. Root joins all three literal a4 paths after proving primary's
+owned prior files match ed550 baseline. One addedT15 source-retirement item
+closes; full/public restore, generation-prefix/receipt/release/long remain open.
+T01–T19 originals78/95/6; added300/39; includingT00 originals78/101/7,
+added304/40. Prior failed sources remain failed.
+
+Protocol c364 disablednativev4 passed source admission review; report
+`2fb8e5fa988832dd4c7bcab6a84690a210de6bfe951108395542a4c2299639e0`,
+SHA256SUMS inventory `a54861ab6c97420162105637edede9c24ed4e340167c9280ee3e2feddcdf6365`
+from `/private/tmp/loopex-m7-protocol-cleanup-native-v4-source-audit-c36433ec-20261006-v1`.
+Root read full review in chunks. Enablev4 script is authored but unexecuted;
+replace its prospective687 seed with the actual complete705union and consume
+this review's SHA256SUMS inventory, not an invented inventory.json.
+Core bounds writer and source-only generation5path formatter preparation remain
+parallel. Earlier occupied-handle records are historical.
+
+
 ROOT VM OCCUPIED by original93010, retirementnativev5 at clean
 `a4b14867951a31fbab7f820fc4380493b216456e`. Enabled packet
 `M7/retained-source-retirement-focused-runtime-runner-20261006-v5`, config

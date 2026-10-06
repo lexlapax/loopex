@@ -12,7 +12,9 @@ defmodule LoopexComposition.Restore.Workflow do
   canonical ADR 0051 publication inside one Restore.IO worker. It has no public
   restore entry point. It classifies exact committed duplicates before fresh
   work and validates and appends complete prior lineage. Original-tx
-  continuation remains implementation work. The IO callback never
+  continuation through source retirement reuses retained claim custody and exact
+  native records. Candidate installation, committed receipts, claim release and
+  arbitrary-prefix continuation remain implementation work. The IO callback never
   starts another guardian or refreshes this invocation's work or cleanup allowance.
   """
 
@@ -180,6 +182,178 @@ defmodule LoopexComposition.Restore.Workflow do
   # partial failure; this private result authorizes no publication or release.
   @doc false
   def retained_claim_handoff(plan, invocation, io) do
+    {:ok, Map.take(retained_handoff!(plan, invocation, io, false), [:claims, :intent])}
+  catch
+    {:restore_refusal, code} -> {:error, code}
+    {:io_error, _} -> {:error, "inventory_unavailable"}
+    {:lookup_error, _} -> {:error, "inventory_unavailable"}
+    {:stopped, _} -> {:error, "inventory_unavailable"}
+  end
+
+  # Concept: continue the original transaction only through checked source retirement.
+  # Technical depth: handoff, equal-stage sync and retirement stay in the same IO
+  # worker and original permits/cutoffs. No candidate, receipt or release follows.
+  # Installed-candidate/committed cuts remain explicitly unfinished development.
+  @doc false
+  def retained_source_retirement(plan, invocation, io) do
+    retained = retained_handoff!(plan, invocation, io, true)
+    compiled = retained.compiled
+    {:ok, entries} = RestoreCodec.manifest(retained.baseline, invocation["max_total_file_bytes"])
+    root_admin = root_admin(plan)
+    destination = plan["destination_state_root"]
+    source = plan["source_state_root"]
+
+    phase(io, "destination_intent")
+
+    retained_retirement_publish!(
+      retained,
+      plan,
+      destination,
+      root_admin,
+      "baseline",
+      :baseline,
+      retained.baseline,
+      entries,
+      io
+    )
+
+    retained_retirement_publish!(
+      retained,
+      plan,
+      destination,
+      root_admin,
+      "intent",
+      :record,
+      compiled.intent,
+      entries,
+      io
+    )
+
+    value!(io.({:restore_intent_facts, plan["prior_restore_count"] + 1, "validated"}))
+    phase(io, "source_retirement")
+
+    if plan["source_status"] == "available" do
+      retained_retirement_publish!(
+        retained,
+        plan,
+        source,
+        root_admin,
+        "intent",
+        :record,
+        compiled.intent,
+        entries,
+        io
+      )
+
+      Enum.each(compiled.ledgers, fn ledger ->
+        retained_retirement_publish!(
+          retained,
+          plan,
+          source,
+          ledger.directory,
+          "intent",
+          :record,
+          ledger.intent,
+          entries,
+          io
+        )
+
+        retained_retirement_publish!(
+          retained,
+          plan,
+          source,
+          ledger.directory,
+          "source-retired",
+          :record,
+          ledger.retired,
+          entries,
+          io
+        )
+      end)
+
+      retained_retirement_publish!(
+        retained,
+        plan,
+        source,
+        root_admin,
+        "source-retirement",
+        :record,
+        compiled.retirement,
+        entries,
+        io
+      )
+
+      retained_retirement_complete!(plan, invocation, retained, source, io)
+    else
+      lost_source!(source, retained.source_observation, io)
+    end
+
+    # Actual source proof is fully synced/read back before its destination copies.
+    Enum.each(compiled.ledgers, fn ledger ->
+      retained_retirement_publish!(
+        retained,
+        plan,
+        destination,
+        ledger.directory,
+        "intent",
+        :record,
+        ledger.intent,
+        entries,
+        io
+      )
+
+      if ledger.retired do
+        retained_retirement_publish!(
+          retained,
+          plan,
+          destination,
+          ledger.directory,
+          "source-retired",
+          :record,
+          ledger.retired,
+          entries,
+          io
+        )
+      end
+    end)
+
+    retained_retirement_publish!(
+      retained,
+      plan,
+      destination,
+      root_admin,
+      "source-retirement",
+      :record,
+      compiled.retirement,
+      entries,
+      io
+    )
+
+    retained_retirement_complete!(plan, invocation, retained, destination, io)
+    retained_retirement_custody!(retained, plan, io)
+    if retained.source_observation, do: lost_source!(source, retained.source_observation, io)
+    workspace!(plan, value!(io.({:placement, plan["workspace"]["root"]})))
+
+    {:ok,
+     %{claims: retained.claims, intent: retained.intent, source_retirement: compiled.retirement}}
+  catch
+    {:retained_retirement_unfinished, phase} ->
+      {:development_incomplete, {:retained_retirement_cut, phase}}
+
+    {:restore_refusal, code} ->
+      {:error, code}
+
+    {:io_error, _} ->
+      {:error, "inventory_unavailable"}
+
+    {:lookup_error, _} ->
+      {:error, "inventory_unavailable"}
+
+    {:stopped, _} ->
+      {:error, "inventory_unavailable"}
+  end
+
+  defp retained_handoff!(plan, invocation, io, retirement) do
     ensure!(match?({:ok, _}, RestoreCodec.encode(:plan, plan)), "invalid_plan")
     ensure!(match?({:ok, _}, RestoreCodec.encode(:invocation, invocation)), "invalid_plan")
 
@@ -230,15 +404,20 @@ defmodule LoopexComposition.Restore.Workflow do
         )
       end)
 
-    case retained_construction(
-           plan,
-           retained.baseline,
-           retained.intent,
-           prior_files,
-           invocation["max_total_file_bytes"]
-         ) do
-      {:ok, _compiled} -> :ok
-      {:error, code} -> throw({:restore_refusal, code})
+    compiled =
+      case retained_construction(
+             plan,
+             retained.baseline,
+             retained.intent,
+             prior_files,
+             invocation["max_total_file_bytes"]
+           ) do
+        {:ok, compiled} -> compiled
+        {:error, code} -> throw({:restore_refusal, code})
+      end
+
+    if retirement do
+      retained_retirement_admit!(plan, invocation, retained, compiled, captures, io)
     end
 
     nonce = handoff_nonce(captures)
@@ -254,12 +433,226 @@ defmodule LoopexComposition.Restore.Workflow do
     if source_observation,
       do: lost_source!(plan["source_state_root"], source_observation, io)
 
-    {:ok, %{claims: claims, intent: retained.intent}}
-  catch
-    {:restore_refusal, code} -> {:error, code}
-    {:io_error, _} -> {:error, "inventory_unavailable"}
-    {:lookup_error, _} -> {:error, "inventory_unavailable"}
-    {:stopped, _} -> {:error, "inventory_unavailable"}
+    %{
+      claims: claims,
+      intent: retained.intent,
+      baseline: retained.baseline,
+      compiled: compiled,
+      source_observation: source_observation
+    }
+  end
+
+  defp retained_retirement_admit!(plan, invocation, retained, compiled, captures, io) do
+    destination = Enum.find(captures, &(&1.root == plan["destination_state_root"]))
+    phase = destination.retained.observation["phase"]
+
+    if phase not in ["destination_intent", "source_retirement", "destination_generations"],
+      do: throw({:retained_retirement_unfinished, phase})
+
+    {:ok, intent} = RestoreCodec.decode(:intent, retained.intent)
+
+    Enum.each(intent["generations"], fn candidate ->
+      generation = destination.state.files[Path.join(candidate["relative_root"], "generation")]
+
+      if generation == candidate["destination_generation_bytes"],
+        do: throw({:retained_retirement_unfinished, "destination_generations"})
+
+      ensure!(generation == candidate["source_generation_bytes"], "inventory_mismatch")
+    end)
+
+    workspace!(plan, value!(io.({:placement, plan["workspace"]["root"]})))
+
+    Enum.each(captures, fn capture ->
+      expected =
+        if capture.root == plan["source_state_root"],
+          do: plan["source_state_placement"],
+          else: intent["destination_state_placement"]
+
+      ensure!(value!(io.({:placement, capture.root})) == expected, "source_changed")
+
+      actual =
+        retained_retirement_manifest!(
+          plan,
+          invocation,
+          retained.baseline,
+          compiled,
+          capture.root,
+          false,
+          io
+        )
+
+      # This changes only the audit reader's physical placement, never authored
+      # plan/intent bytes. Reuse every shipped Store/Local/artifact/Resource fold.
+      Audit.complete(
+        Map.put(plan, "backup_state_root", capture.root),
+        actual,
+        invocation["max_total_file_bytes"],
+        io
+      )
+
+      Enum.each(intent["generations"], fn candidate ->
+        placement =
+          if capture.root == plan["source_state_root"],
+            do:
+              Enum.find(plan["ledgers"], &(&1["relative_root"] == candidate["relative_root"]))[
+                "source_placement"
+              ],
+            else: candidate["destination_ledger_placement"]
+
+        ensure!(
+          value!(io.({:placement, Path.join(capture.root, candidate["relative_root"])})) ==
+            placement,
+          "source_changed"
+        )
+      end)
+
+      ensure!(value!(io.({:placement, capture.root})) == expected, "source_changed")
+    end)
+  end
+
+  defp retained_retirement_records(plan, baseline, compiled, root) do
+    root_admin = root_admin(plan)
+    destination = root == plan["destination_state_root"]
+    root_records = [{"intent", compiled.intent}, {"source-retirement", compiled.retirement}]
+    root_records = if destination, do: [{"baseline", baseline} | root_records], else: root_records
+
+    Map.new(
+      [
+        {root_admin, root_records}
+        | Enum.map(compiled.ledgers, fn ledger ->
+            records = [{"intent", ledger.intent}]
+
+            records =
+              if ledger.retired,
+                do: records ++ [{"source-retired", ledger.retired}],
+                else: records
+
+            {ledger.directory, records}
+          end)
+      ]
+      |> Enum.flat_map(fn {directory, records} ->
+        Enum.map(records, fn {name, bytes} -> {Path.join(directory, name), bytes} end)
+      end)
+    )
+  end
+
+  # Concept: a retained baseline remains complete, including every unexcluded byte.
+  # Technical depth: only exact named canonical retirement records and their
+  # temporaries/directories may extend it. Generation replacement is unsupported.
+  defp retained_retirement_manifest!(plan, invocation, baseline, compiled, root, complete, io) do
+    max_total = invocation["max_total_file_bytes"]
+    {:ok, entries} = RestoreCodec.manifest(baseline, max_total)
+    original = Map.new(entries, &{&1["path"], &1})
+    records = retained_retirement_records(plan, baseline, compiled, root)
+
+    allowed =
+      add_records(
+        original,
+        Enum.map(records, fn {path, bytes} ->
+          {Path.dirname(path),
+           [{Path.basename(path), bytes}, {Path.basename(path) <> ".tmp", bytes}]}
+        end)
+      )
+
+    actual = value!(io.({:manifest, root, max_total}))
+    {:ok, observed} = RestoreCodec.manifest(actual, max_total)
+    index = Map.new(observed, &{&1["path"], &1})
+
+    Enum.each(original, fn {path, entry} ->
+      ensure!(index[path] == entry, "inventory_mismatch")
+    end)
+
+    Enum.each(index, fn {path, entry} -> ensure!(allowed[path] == entry, "inventory_mismatch") end)
+
+    if complete do
+      expected =
+        add_records(
+          original,
+          Enum.map(records, fn {path, bytes} ->
+            {Path.dirname(path), [{Path.basename(path), bytes}]}
+          end)
+        )
+
+      ensure!(index == expected, "inventory_mismatch")
+    end
+
+    actual
+  end
+
+  defp retained_retirement_complete!(plan, invocation, retained, root, io) do
+    retained_retirement_manifest!(
+      plan,
+      invocation,
+      retained.baseline,
+      retained.compiled,
+      root,
+      true,
+      io
+    )
+
+    retained_retirement_placements!(plan, retained, root, io)
+  end
+
+  # Concept: retirement evidence names the actual preserved root and ledger placements.
+  # Technical depth: admission alone cannot cover a later physical replacement.
+  # Recheck the original root/ledger bindings before and after each publication,
+  # within the existing individual permits and host access exclusion.
+  defp retained_retirement_placements!(plan, retained, root, io) do
+    {:ok, intent} = RestoreCodec.decode(:intent, retained.intent)
+
+    expected =
+      if root == plan["source_state_root"],
+        do: plan["source_state_placement"],
+        else: intent["destination_state_placement"]
+
+    ensure!(value!(io.({:placement, root})) == expected, "source_changed")
+
+    Enum.each(intent["generations"], fn candidate ->
+      expected_ledger =
+        if root == plan["source_state_root"],
+          do:
+            Enum.find(plan["ledgers"], &(&1["relative_root"] == candidate["relative_root"]))[
+              "source_placement"
+            ],
+          else: candidate["destination_ledger_placement"]
+
+      ensure!(
+        value!(io.({:placement, Path.join(root, candidate["relative_root"])})) == expected_ledger,
+        "source_changed"
+      )
+    end)
+  end
+
+  defp retained_retirement_custody!(retained, plan, io),
+    do: value!(io.({:restore_retirement_claim_check, retained.claims, plan}))
+
+  defp retained_retirement_publish!(
+         retained,
+         plan,
+         root,
+         directory,
+         name,
+         role,
+         bytes,
+         entries,
+         io
+       ) do
+    side = if root == plan["source_state_root"], do: "source", else: "destination"
+    value!(io.({:restore_retirement_step, side, name}))
+    retained_retirement_custody!(retained, plan, io)
+
+    if retained.source_observation,
+      do: lost_source!(plan["source_state_root"], retained.source_observation, io)
+
+    retained_retirement_placements!(plan, retained, root, io)
+    admin_directories!(root, directory, entries, io)
+    path = Path.join([root, directory, name])
+    value!(io.({:restore_publish, role, path, bytes, 0o600, :absent}))
+    retained_retirement_placements!(plan, retained, root, io)
+    retained_retirement_custody!(retained, plan, io)
+
+    if retained.source_observation,
+      do: lost_source!(plan["source_state_root"], retained.source_observation, io)
   end
 
   defp handoff_nonce(captures) do

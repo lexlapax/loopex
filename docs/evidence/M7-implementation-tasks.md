@@ -31,6 +31,18 @@ they do not mean the original task is complete. This follows the maintainer's
 
 ## Latest bounded progress, 2026-10-06
 
+T15 retained source retirement is complete at tested `a4b14867`, rejoining
+three literal source paths. Original93010 passes99 selected native cases on
+each supported toolchain,198 total with zero exclusions/skips, after187.704s
+and18 stages. Both format and warning-free test compilation checks pass; all
+85 retained artifacts,53 actual/Git source rows and18 original process joins
+are verified. Generation-prefix installation, public restore, receipts, claim
+release, long cap proof and full integration remain open. The failed predecessors
+remain failed. T01–T19 originals78done/95todo/6retired; added300done/39todo.
+IncludingT00 originals78/101/7, added304/40. Exact identities are in the restart
+checkpoint. Earlier progress below remains historical.
+
+
 Retirement native verification runs as original35594 at clean `3e77431d`,
 99 selected cases per supported pair. Protocol original63288 is fully collected
 as compilation failure; no runtime tests ran. New `717d7074` makes the exact
@@ -13531,7 +13543,7 @@ in the [restart record](M7-resume.md#technical-depth).
 - [ ] Implement accepted ADR 0051 public restore outcomes and original-transaction resolution: validate matching retained canonical intent/candidates and authority termination, re-sync equal stages, finish only remaining stages, and return the same validated receipt for committed duplicates without new generations or source activation. Prove each phase fault and uncertainty path on both pairs before exposing the complete public contract.
 
 - [x] Hand off retained restore claims by changing only the original live nonce after positive prior-authority termination; preserve exact intent/candidates, directory/owner custody, mixed-nonce partial failure and original IO cutoffs. Prove34 actual writer/native cases plus pending17/construction10/publication16 on both toolchains at ed550 and rejoin the literal source; this grants no receipt, release or complete continuation.
-- [ ] Continue the same retained restore IO worker through checked available/lost source retirement and destination retirement-evidence publication, preserving original transaction/candidate bytes and claim fences. Prove actual native faults and joined cleanup before candidate activation, receipt or release work.
+- [x] Continue the same retained restore IO worker through checked available/lost source retirement and destination retirement-evidence publication, preserving original transaction/candidate bytes and claim fences. Prove actual native faults and joined cleanup before candidate activation, receipt or release work.
 - [ ] Install only the original retained destination generations after checked source retirement in the same IO worker; require exact full activation-manifest equality, original ordinal temporary names and claim/physical fences, and prove the native publication and failure cases on both supported toolchains. Committed proofs, receipt, release and public restore remain separate.
 - [ ] Resume exact original/candidate generation prefixes and complete ordinal staging after positively joined prior authority; audit the genuine complete backup and the full current physical transformation before nonce handoff. Prove real multi-ledger interruption/restart, available/lost source, corruption/refusal and original joins on both pairs without changing transaction, candidates, epochs or history authority.
 
