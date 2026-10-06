@@ -431,7 +431,14 @@ No runtime has executed on this control; do not push or merge it into product.
 Root audit `M7/final-observation-old-order-control-root-audit-20261005-v1`
 retains seven mode-0444 artifacts, full-index patch and complete Git tree;
 inventory `ce9895c5336246d82a201a3ca253f933b2eba78f4a52ee044434dede9ec79a61`.
-Independent source review and a separately disabled causal runner are pending.
+Independent source review found no blocker for this deliberately incorrect
+local test control. Root read the full report and verified six sealed files,
+nineteen actual/Git source and parent pins, and the exact complete parent patch.
+Review `M7/final-observation-old-order-control-independent-review-20261005-v1`,
+report `4cc004e63ccfe536fab2ff2d5e1d4cf3369981e5a4b2ddff70aaa37839212a81`, inventory
+`e8e98594e85a724f82a3b72fbb1385094c3df495f7b87fe1c9b71ec1ac925a4f`.
+The separately disabled causal runner remains pending. No runtime grant is
+active. Private-task agent is stopped and available for its independent review.
 Collector/control/success mechanics are saved at the source-only boundary in
 `/private/tmp/loopex-m7-final-observation-proof-mechanics-20261005-v1`, thirty-three
 listed artifacts plus inventory. Static completion audit is pending; both final
