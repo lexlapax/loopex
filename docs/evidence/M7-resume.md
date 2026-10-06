@@ -51,10 +51,25 @@ Resource v4 now holds the sole VM grant, worker current_index_cleanup, live
 handle54345. Exact clean source3ecf76623ab2a47fe7edc612135b6529c66634c8,
 reviewed runnerfd8781209e017fe2973943684ab9efa0b48e4a7015a4509a486f1ba82b1875e6,
 fresh siblingM7/resource-capture-audit-execution-20261005-v3. Current identity
-and formatter AST checks pass, formatter delta empty; tests pending. Actual
-Runtime witness source0f6abc76 and runner5ae246ec are reviewed and queued
-without VM grant. No other VM before Resource terminal collection. All active
-statements below are historical snapshots superseded here.
+and formatter AST checks pass, formatter delta empty. Current dev/test compile
+47.474s/47.136s, focused52/2excluded/0skipped21.261s and adjacent33/0/0
+32.301s pass; ordinary Composition is running. Native worktree and merged
+local/remote branches are removed after the proved source/evidence push at
+9eedace0. The immutable native evidence remains outside the checkout.
+
+Actual Runtime witness source0f6abc76 and runner5ae246ec remain unexecuted.
+Independent source review found three new assertion reads with default5,000ms
+timeouts; root also found a default-timeout runtime children lookup. The new
+explicit schedule uses a captured1,000ms cutoff, so source-only timed reads
+are authorized in the added case. Preserve the existing seven live child-ID
+preconditions, exact empty records/model/executor assertions, all18 old cases,
+joins/trace/Logger/8,192-row bounds, and production APIs. Worker
+private_task_causal_resume prepares a clean child and gated v2 packet, no VM.
+Successful whole-case cutoff compliance is required; synchronous existing
+constructor/Logger internals do not establish a universal failed-fixture
+wall-time bound. No prior runner or test failure is claimed for unexecuted v1.
+No other VM before Resource terminal collection. All active statements below
+are historical snapshots superseded here.
 
 LATEST: Native v4 now holds the sole verification VM grant. Worker
 restore_manifest_resume owns live handle72477, exact initial
