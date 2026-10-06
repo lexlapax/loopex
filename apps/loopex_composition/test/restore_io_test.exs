@@ -27,6 +27,7 @@ defmodule LoopexComposition.RestoreIOTest do
   alias Loopex.Runtime.SessionState
   alias Loopex.Store
   alias Loopex.Store.Local.{Log, State}
+  alias LoopexComposition.ResourcePacks
 
   setup do
     root = Path.join(System.tmp_dir!(), "loopex-restore-io-#{System.unique_integer([:positive])}")
@@ -910,6 +911,306 @@ defmodule LoopexComposition.RestoreIOTest do
     assert File.read!(fixture.path) == fixture.bytes
   end
 
+  test "Resource audit preserves actual current writer records for both Git widths", context do
+    for width <- [40, 64] do
+      fixture = resource_fixture(context.root, width)
+
+      for kind <- [:manifest, :provenance] do
+        record = fixture.records[kind]
+        bytes = File.read!(fixture.paths[kind])
+        mode = File.stat!(fixture.paths[kind]).mode
+        owned = launch(resource_operation(fixture, kind), :resource_decode)
+        assert {{:joined, {:ok, ^record}, %{opens: 1, closes: 1}}, events} = drive(owned)
+        kinds = issued_kinds(events)
+        assert Enum.count(kinds, &(&1 == :read)) >= 3
+        assert index(kinds, :close) < index(kinds, :resource_decode)
+        assert index(kinds, :resource_digest) < index(kinds, :resource_decode)
+        assert File.read!(fixture.paths[kind]) == bytes
+        assert File.stat!(fixture.paths[kind]).mode == mode
+        assert byte_size(fixture.records.provenance["commit"]) == width
+        joined(owned)
+      end
+    end
+  end
+
+  test "actual local Resource manifests retain nil provenance without a fallback", context do
+    root = physical_root(context.root)
+    directory = Path.join(root, "review")
+    File.mkdir!(directory)
+    File.write!(Path.join(directory, "SKILL.md"), "---\nname: review\ndescription: Review.\n---\nbody\n")
+    File.write!(Path.join(directory, "opaque.bin"), <<0, 255, 128>>)
+    assert {:ok, %{manifest: manifest}} = ResourcePacks.read_directories([directory], workspace: root)
+    [pack] = manifest["packs"]
+    assert pack["origin"] == nil
+    assert pack["commit"] == nil
+    assert pack["tree_digest"] == nil
+    state = Path.join(root, "state")
+    assert {:ok, digest} = ResourcePacks.retain(manifest, state)
+    {:joined, {:ok, inventory}, _} = RestoreIO.run({:manifest, state, 1_048_576}, limits(1_000, 100))
+    path = Path.join([state, "resource-packs", "manifests", digest <> ".etf"])
+    bytes = File.read!(path)
+    owned = launch({:audit_resource, state, :manifest, digest, inventory}, :resource_decode)
+    assert {{:joined, {:ok, ^manifest}, %{opens: 1, closes: 1}}, _} = drive(owned)
+    joined(owned)
+    refute File.exists?(Path.join([state, "resource-packs", "provenance"]))
+    identity = resource_content_identity(pack)
+    missing = launch({:audit_resource, state, :provenance, identity, inventory}, :resource_manifest)
+    assert {{:joined, {:error, :io_error}, %{opens: 0, closes: 0}}, events} = drive(missing)
+    refute :resource_decode in issued_kinds(events)
+    assert File.read!(path) == bytes
+    joined(missing)
+  end
+
+  test "Resource selection requires canonical membership and every parent directory", context do
+    fixture = resource_fixture(context.root)
+
+    for kind <- [:manifest, :provenance] do
+      {:audit_resource, root, ^kind, identity, manifest} = resource_operation(fixture, kind)
+      [domain, entries] = :erlang.binary_to_term(manifest, [:safe])
+      relative = Path.relative_to(fixture.paths[kind], root)
+      parent = Path.dirname(relative)
+
+      alternatives = [
+        Enum.reject(entries, &(&1["path"] == relative)),
+        Enum.reject(entries, &(&1["path"] == parent)),
+        Enum.map(entries, fn entry ->
+          if entry["path"] == relative,
+            do: %{entry | "kind" => "directory", "size" => 0, "sha256" => nil},
+            else: entry
+        end),
+        Enum.map(entries, fn entry ->
+          if entry["path"] == parent,
+            do: %{entry | "mode" => Bitwise.bxor(entry["mode"], 0o100)},
+            else: entry
+        end)
+      ]
+
+      for changed <- alternatives do
+        bytes = :erlang.term_to_binary([domain, changed], [:deterministic])
+        owned = launch({:audit_resource, root, kind, identity, bytes}, :resource_manifest)
+        assert {{:joined, {:error, reason}, %{opens: 0, closes: 0}}, events} = drive(owned)
+        assert reason in [:io_error, :history_invalid]
+        refute :resource_decode in issued_kinds(events)
+        joined(owned)
+      end
+    end
+  end
+
+  test "Resource canonical filenames must bind the actual decoded identity", context do
+    fixture = resource_fixture(context.root)
+    wrong = String.duplicate("0", 64)
+
+    for kind <- [:manifest, :provenance] do
+      path = Path.join(Path.dirname(fixture.paths[kind]), wrong <> ".etf")
+      File.cp!(fixture.paths[kind], path)
+      {:joined, {:ok, inventory}, _} =
+        RestoreIO.run({:manifest, fixture.root, 1_048_576}, limits(1_000, 100))
+
+      owned = launch({:audit_resource, fixture.root, kind, wrong, inventory}, :resource_decode)
+      assert {{:joined, {:error, :history_invalid}, %{opens: 1, closes: 1}}, _} = drive(owned)
+      assert File.read!(path) == File.read!(fixture.paths[kind])
+      joined(owned)
+      File.rm!(path)
+
+      for identity <- [String.duplicate("A", 64), "../" <> wrong, nil] do
+        assert RestoreIO.run({:audit_resource, fixture.root, kind, identity, inventory}, limits(1_000, 100)) ==
+                 {:error, :invalid_io_request}
+      end
+    end
+
+    assert RestoreIO.run({:audit_resource, fixture.root, :other, wrong, <<>>}, limits(1_000, 100)) ==
+             {:error, :invalid_io_request}
+  end
+
+  test "each Resource role refuses its real first over-cap file before opening", context do
+    for {kind, ceiling} <- [manifest: 72_081_510, provenance: 1_126_241] do
+      fixture = resource_fixture(context.root)
+      {:audit_resource, root, ^kind, identity, manifest} = resource_operation(fixture, kind)
+      path = fixture.paths[kind]
+      size = ceiling + 1
+
+      assert {digest, 0} =
+               System.cmd("python3", [
+                 "-c",
+                 "import sys,hashlib; p=sys.argv[1]; n=int(sys.argv[2]); f=open(p,'wb'); f.truncate(n); f.close(); h=hashlib.sha256(); f=open(p,'rb'); [h.update(b) for b in iter(lambda:f.read(65536),b'')]; f.close(); print(h.hexdigest())",
+                 path,
+                 Integer.to_string(size)
+               ])
+
+      digest = String.trim_trailing(digest, "\n")
+      assert File.stat!(path).size == size
+      [domain, entries] = :erlang.binary_to_term(manifest, [:safe])
+      relative = Path.relative_to(path, root)
+
+      entries = Enum.map(entries, fn entry ->
+        if entry["path"] == relative, do: %{entry | "size" => size, "sha256" => digest}, else: entry
+      end)
+
+      manifest = :erlang.term_to_binary([domain, entries], [:deterministic])
+      owned = launch({:audit_resource, root, kind, identity, manifest}, :resource_manifest)
+      assert {{:joined, {:error, :io_error}, %{opens: 0, closes: 0}}, events} = drive(owned)
+      refute :read in issued_kinds(events)
+      refute :resource_decode in issued_kinds(events)
+      assert File.stat!(path).size == size
+      joined(owned)
+    end
+  end
+
+  test "Resource size mode and same-size content must match the physical inventory", context do
+    fixture = resource_fixture(context.root)
+
+    for kind <- [:manifest, :provenance] do
+      operation = resource_operation(fixture, kind)
+      path = fixture.paths[kind]
+      bytes = File.read!(path)
+      mode = Bitwise.band(File.stat!(path).mode, 0o7777)
+
+      for change <- [:size, :mode, :content, :digest] do
+        File.write!(path, bytes)
+        File.chmod!(path, mode)
+
+        altered = case change do
+          :size ->
+            File.write!(path, bytes <> <<0>>)
+            operation
+          :mode ->
+            File.chmod!(path, Bitwise.bxor(mode, 0o100))
+            operation
+          :content ->
+            File.write!(path, :binary.copy(<<0>>, byte_size(bytes)))
+            operation
+          :digest ->
+            {:audit_resource, root, ^kind, identity, manifest} = operation
+            [domain, entries] = :erlang.binary_to_term(manifest, [:safe])
+            relative = Path.relative_to(path, root)
+            entries = Enum.map(entries, fn entry ->
+              if entry["path"] == relative, do: %{entry | "sha256" => String.duplicate("0", 64)}, else: entry
+            end)
+            {:audit_resource, root, kind, identity, :erlang.term_to_binary([domain, entries], [:deterministic])}
+        end
+
+        owned = launch(altered, :resource_manifest)
+        assert {{:joined, {:error, :io_error}, evidence}, events} = drive(owned)
+        assert evidence.opens == evidence.closes
+        refute :resource_decode in issued_kinds(events)
+        joined(owned)
+      end
+
+      File.write!(path, bytes)
+      File.chmod!(path, mode)
+    end
+  end
+
+  test "Resource hardlinks symlinks and symlink ancestors refuse before opening", context do
+    for kind <- [:manifest, :provenance] do
+      fixture = resource_fixture(context.root)
+      operation = resource_operation(fixture, kind)
+      path = fixture.paths[kind]
+      other = Path.join(fixture.root, "other")
+      File.ln!(path, other)
+      owned = launch(operation, :resource_manifest)
+      assert {{:joined, {:error, :io_error}, %{opens: 0, closes: 0}}, _} = drive(owned)
+      joined(owned)
+      File.rm!(other)
+      File.rename!(path, other)
+      File.ln_s!(other, path)
+      owned = launch(operation, :resource_manifest)
+      assert {{:joined, {:error, :io_error}, %{opens: 0, closes: 0}}, _} = drive(owned)
+      joined(owned)
+      File.rm!(path)
+      File.rename!(other, path)
+      directory = Path.dirname(path)
+      moved = directory <> "-moved"
+      File.rename!(directory, moved)
+      File.ln_s!(moved, directory)
+      owned = launch(operation, :resource_manifest)
+      assert {{:joined, {:error, :io_error}, %{opens: 0, closes: 0}}, _} = drive(owned)
+      joined(owned)
+    end
+  end
+
+  test "Resource descriptor identity refuses replacement with identical writer bytes", context do
+    fixture = resource_fixture(context.root)
+
+    for kind <- [:manifest, :provenance] do
+      path = fixture.paths[kind]
+      owned = launch(resource_operation(fixture, kind), :descriptor_stat)
+      {id, _} = paused_operation(owned, :descriptor_stat)
+      replacement = path <> ".replacement"
+      File.write!(replacement, File.read!(path))
+      File.chmod!(replacement, Bitwise.band(File.stat!(path).mode, 0o7777))
+      File.rename!(replacement, path)
+      send(owned.guardian, {:proceed, owned.reference, id})
+      assert {{:joined, {:error, :io_error}, %{opens: 1, closes: 1}}, events} = drive(owned)
+      refute :resource_decode in issued_kinds(events)
+      joined(owned)
+    end
+  end
+
+  test "Resource semantic completion revalidates both file and ancestor identities", context do
+    for kind <- [:manifest, :provenance], change <- [:file, :ancestor] do
+      fixture = resource_fixture(context.root)
+      path = fixture.paths[kind]
+      owned = launch(resource_operation(fixture, kind), :resource_decode)
+      {id, _} = paused_operation(owned, :resource_decode)
+
+      case change do
+        :file ->
+          replacement = path <> ".replacement"
+          File.write!(replacement, File.read!(path))
+          File.chmod!(replacement, Bitwise.band(File.stat!(path).mode, 0o7777))
+          File.rename!(replacement, path)
+        :ancestor ->
+          directory = Path.dirname(path)
+          moved = directory <> "-moved"
+          File.rename!(directory, moved)
+          File.mkdir!(directory)
+          File.rename!(Path.join(moved, Path.basename(path)), path)
+      end
+
+      send(owned.guardian, {:proceed, owned.reference, id})
+      assert {{:joined, {:error, :io_error}, %{opens: 1, closes: 1}}, _} = drive(owned)
+      joined(owned)
+    end
+  end
+
+  test "physical Resource equality does not admit malformed or alternate retained formats", context do
+    fixture = resource_fixture(context.root)
+
+    for kind <- [:manifest, :provenance] do
+      record = fixture.records[kind]
+      path = fixture.paths[kind]
+      bytes = File.read!(path)
+      required = if kind == :manifest, do: "revision", else: "commit"
+
+      for candidate <- [
+            :erlang.term_to_binary(record, [:deterministic, :compressed]),
+            bytes <> <<0>>,
+            :erlang.term_to_binary(Map.delete(record, required), [:deterministic]),
+            :erlang.term_to_binary(Map.put(record, "extra", "closed"), [:deterministic])
+          ] do
+        File.write!(path, candidate)
+        owned = launch(resource_operation(fixture, kind), :resource_decode)
+        assert {{:joined, {:error, :history_invalid}, %{opens: 1, closes: 1}}, _} = drive(owned)
+        assert File.read!(path) == candidate
+        joined(owned)
+      end
+
+      File.write!(path, bytes)
+    end
+  end
+
+  test "Resource decoding obeys the original work cutoff after explicit descriptor close", context do
+    fixture = resource_fixture(context.root)
+
+    for kind <- [:manifest, :provenance] do
+      owned = launch(resource_operation(fixture, kind), :resource_decode, 500)
+      paused_operation(owned, :resource_decode)
+      assert {{:joined, {:error, :deadline}, %{opens: 1, closes: 1}}, _} = drive(owned, false)
+      joined(owned)
+    end
+  end
+
   test "an actual Local Store retains unknown effect truth through offline semantic audit",
        context do
     previous = System.get_env("LOOPEX_HOME")
@@ -1096,6 +1397,70 @@ defmodule LoopexComposition.RestoreIOTest do
 
     declaration = %{"relative_path" => "store/history.log", "sha256" => hash(fixture.bytes)}
     {:audit_store, fixture.root, declaration, manifest}
+  end
+
+  defp resource_fixture(root, width \\ 40) do
+    root = physical_root(root)
+    state = Path.join(root, "resource-state-#{System.unique_integer([:positive])}")
+    File.mkdir!(state)
+
+    files = for {label, content} <- [{"SKILL.md", "summary\n"}, {"opaque.bin", :binary.copy(<<0, 255, 128>>, 50_000)}] do
+      %{
+        "label" => label,
+        "size" => byte_size(content),
+        "digest" => LoopexProtocol.Canonical.digest_bytes(content),
+        "content" => content,
+        "contained" => true
+      }
+    end
+
+    pack = %{
+      "source_id" => "git:restore-audit",
+      "origin" => "https://example.invalid/skills",
+      "commit" => String.duplicate("a", width),
+      "tree_digest" => String.duplicate("b", width),
+      "name" => "review",
+      "description" => "Review retained bytes.",
+      "manual_only" => false,
+      "files" => files
+    }
+
+    manifest = %{
+      "version" => "loopex.resource_pack/1",
+      "workspace_ref" => "workspace:restore-audit",
+      "revision" => nil,
+      "packs" => [pack]
+    }
+
+    assert {:ok, digest, manifest} = Loopex.ResourcePack.digest(manifest)
+    [pack] = manifest["packs"]
+    identity = resource_content_identity(pack)
+    assert {:ok, ^digest} = ResourcePacks.retain(manifest, state)
+
+    %{
+      root: state,
+      identities: %{manifest: digest, provenance: identity},
+      records: %{manifest: manifest, provenance: pack},
+      paths: %{
+        manifest: Path.join([state, "resource-packs", "manifests", digest <> ".etf"]),
+        provenance: Path.join([state, "resource-packs", "provenance", identity <> ".etf"])
+      }
+    }
+  end
+
+  defp resource_content_identity(pack) do
+    LoopexProtocol.Canonical.digest(%{
+      "encoding" => LoopexProtocol.Canonical.version(),
+      "kind" => "loopex.retained_resource_content/1",
+      "value" => pack["files"] |> Enum.map(&[&1["label"], &1["digest"]]) |> Enum.sort_by(&hd/1)
+    })
+  end
+
+  defp resource_operation(fixture, kind) do
+    assert {:joined, {:ok, manifest}, _} =
+             RestoreIO.run({:manifest, fixture.root, 1_048_576}, limits(1_000, 100))
+
+    {:audit_resource, fixture.root, kind, fixture.identities[kind], manifest}
   end
 
   defp physical_root(root) do

@@ -17,13 +17,14 @@ defmodule LoopexComposition.Restore.IO do
   BEAM termination is observed. No shared file-server convenience IO is used.
 
   This private prerequisite exposes bounded reads, complete physical manifests,
-  durable record publication and complete declared-Store semantic auditing to
-  composition only. Store maps and recovered session facts remain private; the
+  durable record publication, complete declared-Store semantic auditing and one
+  canonical retained Resource record audit to composition only. Validated maps
+  and recovered session facts remain private; the
   operation grants no effect authority and does not validate other backup
   formats or activate a restored root. Host exclusion remains the caller's
   obligation. The caller must first validate the captured manifest against the
   original invocation's total-file-byte limit. This operation validates canonical
-  membership and the selected Store file and ancestors; it does not re-hash
+  membership and the selected file and ancestors; it does not re-hash
   other inventory members or establish whole-backup validity.
   """
 
@@ -33,10 +34,13 @@ defmodule LoopexComposition.Restore.IO do
   alias Loopex.Executor.Local.RestoreCodec
   alias Loopex.Runtime.SessionState
   alias Loopex.Store.Local.{Log, State}
+  alias LoopexComposition.ResourcePacks
 
   @max_receive_timeout 4_294_967_295
   @chunk 65_536
   @max_read 268_435_456
+  @max_resource_manifest 72_081_510
+  @max_resource_provenance 1_126_241
   @max_entries 65_536
   @max_manifest 4_194_304
   @max_uint64 18_446_744_073_709_551_615
@@ -428,10 +432,10 @@ defmodule LoopexComposition.Restore.IO do
          do: throw({:io_error, :inventory_mismatch})
 
       ancestors = manifest_ancestors(root)
-      directories = store_directories(root, Path.dirname(relative), index)
+      directories = audit_directories(root, Path.dirname(relative), index)
       path = Path.join(root, relative)
       before = manifest_stat(path)
-      require_store_file(before, entry)
+      require_audit_file(before, entry)
       descriptor = open(path, [:raw, :binary, :read])
 
       opened =
@@ -473,6 +477,86 @@ defmodule LoopexComposition.Restore.IO do
       _ -> {:error, :history_invalid}
     end
   end
+
+  defp execute({:audit_resource, root, kind, identity, manifest}) do
+    # Concept: one canonical current writer record is checked without loading a
+    # catalog, rediscovering provenance or granting resource admission.
+    # Technical depth: role determines the filename and raw ETF ceiling before
+    # open. Capture, streaming hash, decoding and physical revalidation remain
+    # in the same owned worker; the guardian joins it before exposing the map.
+    with {:ok, entries} <-
+           primitive(:resource_manifest, fn -> RestoreCodec.manifest(manifest, @max_uint64) end) do
+      {directory, ceiling} = resource_role(kind)
+      relative = Path.join(["resource-packs", directory, identity <> ".etf"])
+      index = Map.new(entries, &{&1["path"], &1})
+      entry = Map.get(index, relative)
+
+      if not match?(%{"kind" => "regular"}, entry) or entry["size"] > ceiling,
+        do: throw({:io_error, :inventory_mismatch})
+
+      ancestors = manifest_ancestors(root)
+      directories = audit_directories(root, Path.dirname(relative), index)
+      path = Path.join(root, relative)
+      before = manifest_stat(path)
+      require_audit_file(before, entry)
+      descriptor = open(path, [:raw, :binary, :read])
+
+      opened =
+        require_value(
+          primitive(:descriptor_stat, fn -> :prim_file.read_handle_info(descriptor) end)
+        )
+
+      require_same_identity(before, opened)
+      {bytes, context} = read_resource_chunks(descriptor, entry["size"], [], :crypto.hash_init(:sha256))
+
+      after_read =
+        require_value(
+          primitive(:descriptor_stat, fn -> :prim_file.read_handle_info(descriptor) end)
+        )
+
+      require_same_identity(before, after_read)
+      require_same_identity(before, manifest_stat(path))
+      close(descriptor)
+
+      digest =
+        primitive(:resource_digest, fn ->
+          :crypto.hash_final(context) |> Base.encode16(case: :lower)
+        end)
+
+      if byte_size(bytes) != entry["size"] or digest != entry["sha256"],
+        do: throw({:io_error, :inventory_mismatch})
+
+      result =
+        case primitive(:resource_decode, fn ->
+               case kind do
+                 :manifest -> ResourcePacks.decode_retained_manifest(bytes, identity)
+                 :provenance -> ResourcePacks.decode_retained_provenance(bytes, identity)
+               end
+             end) do
+          {:ok, record} -> {:ok, record}
+          _ -> {:error, :history_invalid}
+        end
+
+      require_same_identity(before, manifest_stat(path))
+
+      Enum.each(directories, fn {directory, observed} ->
+        if manifest_identity(manifest_stat(directory)) != observed,
+          do: throw({:io_error, :source_changed})
+      end)
+
+      Enum.each(ancestors, fn {ancestor, observed} ->
+        if directory_identity(manifest_stat(ancestor)) != observed,
+          do: throw({:io_error, :source_changed})
+      end)
+
+      result
+    else
+      _ -> {:error, :history_invalid}
+    end
+  end
+
+  defp resource_role(:manifest), do: {"manifests", @max_resource_manifest}
+  defp resource_role(:provenance), do: {"provenance", @max_resource_provenance}
 
   defp execute({:publish, path, temp, bytes, mode, expected}) do
     current =
@@ -533,7 +617,7 @@ defmodule LoopexComposition.Restore.IO do
     end
   end
 
-  defp store_directories(root, relative, index) do
+  defp audit_directories(root, relative, index) do
     entry = Map.get(index, relative)
     path = if relative == ".", do: root, else: Path.join(root, relative)
     info = manifest_stat(path)
@@ -547,10 +631,10 @@ defmodule LoopexComposition.Restore.IO do
 
     if relative == ".",
       do: [own],
-      else: [own | store_directories(root, Path.dirname(relative), index)]
+      else: [own | audit_directories(root, Path.dirname(relative), index)]
   end
 
-  defp require_store_file(info, entry) do
+  defp require_audit_file(info, entry) do
     if file_info(info, :type) != :regular or file_info(info, :links) != 1 or
          file_info(info, :size) != entry["size"] or
          Bitwise.band(file_info(info, :mode), 0o7777) != entry["mode"],
@@ -762,6 +846,24 @@ defmodule LoopexComposition.Restore.IO do
     end
   end
 
+  defp read_resource_chunks(descriptor, remaining, chunks, context) do
+    case primitive(:read, fn -> :prim_file.read(descriptor, min(@chunk, remaining + 1)) end) do
+      :eof ->
+        {chunks |> Enum.reverse() |> IO.iodata_to_binary(), context}
+
+      {:ok, bytes} when byte_size(bytes) > 0 and byte_size(bytes) <= remaining ->
+        read_resource_chunks(
+          descriptor,
+          remaining - byte_size(bytes),
+          [bytes | chunks],
+          :crypto.hash_update(context, bytes)
+        )
+
+      _ ->
+        throw({:io_error, :read_failed})
+    end
+  end
+
   defp write(_descriptor, <<>>), do: :ok
 
   defp write(descriptor, bytes) do
@@ -891,6 +993,12 @@ defmodule LoopexComposition.Restore.IO do
     do:
       valid_path?(root) and is_map(declaration) and is_binary(manifest) and
         byte_size(manifest) <= @max_manifest
+
+  defp valid_operation?({:audit_resource, root, kind, identity, manifest}),
+    do:
+      valid_path?(root) and kind in [:manifest, :provenance] and is_binary(identity) and
+        byte_size(identity) == 64 and Regex.match?(~r/\A[0-9a-f]{64}\z/, identity) and
+        is_binary(manifest) and byte_size(manifest) <= @max_manifest
 
   defp valid_operation?({:manifest, root, max_total}),
     do: valid_path?(root) and is_integer(max_total) and max_total in 0..@max_uint64
