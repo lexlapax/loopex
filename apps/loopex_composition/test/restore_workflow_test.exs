@@ -175,14 +175,7 @@ defmodule LoopexComposition.RestoreWorkflowTest do
     test "missing historical #{dependency} refuses before intent with actual writer histories",
          context do
       fixture = actual_cut(context.root)
-      dependency = unquote(dependency)
-
-      path =
-        case dependency do
-          :receipt -> fixture.receipt_path
-          :artifact -> fixture.object_path
-          :resource -> fixture.manifest_path
-        end
+      path = historical_dependency_path(fixture, unquote(dependency))
 
       source_path = Path.join(fixture.source, path)
       backup_path = Path.join(fixture.backup, path)
@@ -559,11 +552,7 @@ defmodule LoopexComposition.RestoreWorkflowTest do
   for endpoint <- [:directory, :regular, :symlink] do
     test "lost source refuses a present #{endpoint} endpoint before any baseline mutation", context do
       fixture = context.root |> actual_cut() |> lose_source()
-      case unquote(endpoint) do
-        :directory -> File.mkdir!(fixture.source)
-        :regular -> File.write!(fixture.source, "present endpoint", [:exclusive])
-        :symlink -> File.ln_s!(fixture.backup, fixture.source)
-      end
+      install_source_endpoint(fixture, unquote(endpoint))
       before = File.lstat!(fixture.source)
       owned = launch(fixture.plan)
       assert_preintent_refusal(owned, fixture, "inventory_unavailable")
@@ -576,15 +565,7 @@ defmodule LoopexComposition.RestoreWorkflowTest do
       parent = Path.join(context.root, "source-parent")
       File.mkdir!(parent)
       fixture = context.root |> actual_cut(parent) |> lose_source()
-      case unquote(ancestor) do
-        :missing -> File.rmdir!(parent)
-        :nondirectory ->
-          File.rmdir!(parent)
-          File.write!(parent, "not a directory", [:exclusive])
-        :symlink ->
-          File.rename!(parent, parent <> "-captured")
-          File.ln_s!(parent <> "-captured", parent)
-      end
+      replace_source_ancestor(parent, unquote(ancestor))
       expected = if unquote(ancestor) == :nondirectory, do: :enotdir, else: :enoent
       assert File.lstat(fixture.source) == {:error, expected}
       owned = launch(fixture.plan)
@@ -696,11 +677,7 @@ defmodule LoopexComposition.RestoreWorkflowTest do
   for dependency <- [:receipt, :artifact, :resource] do
     test "lost backup missing historical #{dependency} refuses before intent", context do
       fixture = actual_cut(context.root)
-      relative = case unquote(dependency) do
-        :receipt -> fixture.receipt_path
-        :artifact -> fixture.object_path
-        :resource -> fixture.manifest_path
-      end
+      relative = historical_dependency_path(fixture, unquote(dependency))
       for root <- [fixture.source, fixture.backup] do
         path = Path.join(root, relative)
         assert {:ok, %File.Stat{type: :regular, links: 1}} = File.lstat(path)
@@ -918,6 +895,30 @@ defmodule LoopexComposition.RestoreWorkflowTest do
     end)
   end
 
+  defp historical_dependency_path(fixture, :receipt), do: fixture.receipt_path
+  defp historical_dependency_path(fixture, :artifact), do: fixture.object_path
+  defp historical_dependency_path(fixture, :resource), do: fixture.manifest_path
+
+  defp install_source_endpoint(fixture, :directory), do: File.mkdir!(fixture.source)
+
+  defp install_source_endpoint(fixture, :regular),
+    do: File.write!(fixture.source, "present endpoint", [:exclusive])
+
+  defp install_source_endpoint(fixture, :symlink),
+    do: File.ln_s!(fixture.backup, fixture.source)
+
+  defp replace_source_ancestor(parent, :missing), do: File.rmdir!(parent)
+
+  defp replace_source_ancestor(parent, :nondirectory) do
+    File.rmdir!(parent)
+    File.write!(parent, "not a directory", [:exclusive])
+  end
+
+  defp replace_source_ancestor(parent, :symlink) do
+    File.rename!(parent, parent <> "-captured")
+    File.ln_s!(parent <> "-captured", parent)
+  end
+
   defp actual_cut(root, source_parent \\ nil) do
     source = Path.join(source_parent || root, "source")
     backup = Path.join(root, "backup")
@@ -1054,6 +1055,26 @@ defmodule LoopexComposition.RestoreWorkflowTest do
              Loopex.create_session(runtime, %{}, command_id: "create", genesis: genesis)
 
     assert {:ok, attachment} = Loopex.attach(runtime, session, after_event_sequence: 0)
+
+    assert {:accepted, "admit"} =
+             Loopex.command(attachment, %{
+               type: :admit_resources,
+               command_id: "admit",
+               manifest_digest: manifest_digest,
+               decision: %{
+                 manifest_digest: manifest_digest,
+                 workspace_ref: workspace_ref,
+                 trust_scope: "project_skills",
+                 decision_source: "host_supplied",
+                 issued_at: "2026-10-06T00:00:00Z",
+                 expires_at: nil,
+                 revocation_state: "active"
+               }
+             })
+
+    assert {:ok, %{"admitted_manifest_digest" => ^manifest_digest, "entries" => [_entry]}} =
+             Loopex.resource_catalog(runtime, session)
+
     prompt(attachment, "read", %{"tool" => "read", "arguments" => %{"path" => "source.txt"}})
     completed = await_settled(attachment, System.monotonic_time(:millisecond) + 5_000, [])
     assert Enum.find(completed, &(&1.kind == "run.finished"))["outcome"] == "completed"
@@ -1084,6 +1105,12 @@ defmodule LoopexComposition.RestoreWorkflowTest do
     {:ok, replayed} = State.replay(frames)
     records = replayed.sessions[session].records
     assert Enum.any?(records, &(&1.payload.kind == "model_request_committed_resources_v2"))
+
+    for record <- records,
+        record.payload.kind == "model_request_committed_resources_v2" do
+      assert record.payload["context_receipt"]["resource_packs"]["manifest_digest"] ==
+               manifest_digest
+    end
 
     [receipt_row, unknown_row] =
       Enum.filter(records, &(&1.payload.kind == "executor_receipt_committed_v2"))
