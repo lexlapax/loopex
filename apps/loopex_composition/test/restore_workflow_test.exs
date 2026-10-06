@@ -1173,31 +1173,36 @@ defmodule LoopexComposition.RestoreWorkflowTest do
     assert manifest(fixture.backup) == fixture.baseline
   end
 
-  test "64 actual one-ledger restores retain every ordinal and refuse 65 without physical IO", context do
+  test "64 actual one-ledger restores retain every ordinal and refuse 65 without physical IO",
+       context do
     first = empty_ledger_cut(context.root)
     original = generation(Path.join(first.source, "l/generation"))
 
     {last, epochs, backups} =
-      Enum.reduce(1..64, {first, MapSet.new([original["executor_epoch"]]), []},
-        fn ordinal, {fixture, epochs, backups} ->
-          receipt = restore_joined(fixture)
-          assert receipt["ordinal"] == ordinal
-          assert receipt["ledger_count"] == 1
-          assert_successive_copy(fixture)
-          assert_current_record_caps(fixture)
-          assert :ok = RestoreGuard.ledger(Path.join(fixture.destination, "l"))
-          current = generation(Path.join(fixture.destination, "l/generation"))
-          refute MapSet.member?(epochs, current["executor_epoch"])
-          assert current["executor_identity"] == original["executor_identity"]
-          epochs = MapSet.put(epochs, current["executor_epoch"])
-          backups = [{fixture.backup, fixture.baseline} | backups]
-          next = if ordinal == 64, do: fixture, else: next_cut(fixture, context.root, ["l"])
-          {next, epochs, backups}
-        end)
+      Enum.reduce(1..64, {first, MapSet.new([original["executor_epoch"]]), []}, fn ordinal,
+                                                                                   {fixture,
+                                                                                    epochs,
+                                                                                    backups} ->
+        receipt = restore_joined(fixture)
+        assert receipt["ordinal"] == ordinal
+        assert receipt["ledger_count"] == 1
+        assert_successive_copy(fixture)
+        assert_current_record_caps(fixture)
+        assert :ok = RestoreGuard.ledger(Path.join(fixture.destination, "l"))
+        current = generation(Path.join(fixture.destination, "l/generation"))
+        refute MapSet.member?(epochs, current["executor_epoch"])
+        assert current["executor_identity"] == original["executor_identity"]
+        epochs = MapSet.put(epochs, current["executor_epoch"])
+        backups = [{fixture.backup, fixture.baseline} | backups]
+        next = if ordinal == 64, do: fixture, else: next_cut(fixture, context.root, ["l"])
+        {next, epochs, backups}
+      end)
 
     assert MapSet.size(epochs) == 65
+
     assert {:ok, %{latest: latest, candidates: %{"l" => candidate}}} =
              RestoreGuard.state(last.destination)
+
     assert latest["ordinal"] == 64
     ordinals = Enum.map(1..64, &lineage_ordinal/1)
     assert Enum.sort(File.ls!(Path.join(last.destination, ".loopex-restore/lineage"))) == ordinals
@@ -1213,13 +1218,19 @@ defmodule LoopexComposition.RestoreWorkflowTest do
     guardian = owned.guardian
     worker = owned.worker
     reference = owned.reference
+
     assert_receive {:restore_io, ^guardian, ^worker, ^reference,
-                    {:issued, id, {:restore_phase, "claim"}} = phase}, 1_000
+                    {:issued, id, {:restore_phase, "claim"}} = phase},
+                   1_000
+
     send(guardian, {:proceed, reference, id})
     {result, events} = finish(owned, [phase])
+
     assert {:joined,
-            {:ok, %{restore_result: {:not_committed, "inventory_limit_exceeded"}, release_claims: []}},
+            {:ok,
+             %{restore_result: {:not_committed, "inventory_limit_exceeded"}, release_claims: []}},
             evidence} = result
+
     assert evidence.restore.intent == false and evidence.claim_count == 0
     assert evidence.work_cutoff == owned.work_cutoff
     assert evidence.opens == 0 and evidence.closes == 0
@@ -1231,7 +1242,8 @@ defmodule LoopexComposition.RestoreWorkflowTest do
     assert manifest(next.backup) == next.baseline
   end
 
-  test "a fully rebound historical omission cannot make an incomplete baseline authoritative", context do
+  test "a fully rebound historical omission cannot make an incomplete baseline authoritative",
+       context do
     first = actual_cut(context.root)
     restore_joined(first)
     second = next_cut(first, context.root)
@@ -1250,6 +1262,7 @@ defmodule LoopexComposition.RestoreWorkflowTest do
     before_index = Map.new(before_entries, &{&1["path"], &1})
     after_index = Map.new(after_entries, &{&1["path"], &1})
     assert Enum.sort(Map.keys(before_index)) == Enum.sort(Map.keys(after_index))
+
     for {path, entry} <- before_index do
       if Map.has_key?(rebound.records, path) do
         assert Map.drop(after_index[path], ["size", "sha256"]) ==
@@ -1258,6 +1271,7 @@ defmodule LoopexComposition.RestoreWorkflowTest do
         assert after_index[path] == entry
       end
     end
+
     assert after_index[omitted] == before_index[omitted]
     assert manifest(second.backup) == second.baseline
     assert {:error, :history_invalid} = RestoreGuard.state(second.destination)
@@ -1288,25 +1302,57 @@ defmodule LoopexComposition.RestoreWorkflowTest do
     assert manifest(source) == baseline
     {:ok, lineage} = RestoreCodec.lineage_digest([])
     observed_workspace = placement(workspace)
-    workspace_ref = WorkspaceIdentity.from_verified_root(workspace,
-      {observed_workspace["major_device"], observed_workspace["inode"]})
+
+    workspace_ref =
+      WorkspaceIdentity.from_verified_root(
+        workspace,
+        {observed_workspace["major_device"], observed_workspace["inode"]}
+      )
+
     plan = %{
-      "version" => 1, "tx_id" => hash("empty-ledger-first"), "cut_id" => hash("empty-ledger-cut"),
-      "source_state_root" => source, "source_state_placement" => placement(source),
-      "source_status" => "available", "backup_state_root" => backup,
-      "destination_state_root" => destination, "manifest_sha256" => hash(baseline),
-      "prior_restore_count" => 0, "prior_lineage_sha256" => lineage,
-      "runtime_ids" => [], "stores" => [],
-      "ledgers" => [%{"relative_root" => "l", "executor_identity" => generation["executor_identity"],
-        "source_generation_sha256" => hash(bytes), "source_placement" => placement(Path.join(source, "l"))}],
+      "version" => 1,
+      "tx_id" => hash("empty-ledger-first"),
+      "cut_id" => hash("empty-ledger-cut"),
+      "source_state_root" => source,
+      "source_state_placement" => placement(source),
+      "source_status" => "available",
+      "backup_state_root" => backup,
+      "destination_state_root" => destination,
+      "manifest_sha256" => hash(baseline),
+      "prior_restore_count" => 0,
+      "prior_lineage_sha256" => lineage,
+      "runtime_ids" => [],
+      "stores" => [],
+      "ledgers" => [
+        %{
+          "relative_root" => "l",
+          "executor_identity" => generation["executor_identity"],
+          "source_generation_sha256" => hash(bytes),
+          "source_placement" => placement(Path.join(source, "l"))
+        }
+      ],
       "workspace" => %{"root" => workspace, "workspace_ref" => workspace_ref},
-      "host_attestation" => %{"latest_cut" => true, "no_post_cut_activity" => true,
-        "all_other_copies_excluded" => true, "old_authority_termination" => "joined",
-        "host_ledgers_validated" => true, "evidence_sha256" => hash("native-writer-completed")}
+      "host_attestation" => %{
+        "latest_cut" => true,
+        "no_post_cut_activity" => true,
+        "all_other_copies_excluded" => true,
+        "old_authority_termination" => "joined",
+        "host_ledgers_validated" => true,
+        "evidence_sha256" => hash("native-writer-completed")
+      }
     }
+
     assert {:ok, _} = RestoreCodec.encode(:plan, plan)
-    %{source: source, backup: backup, destination: destination, workspace: workspace,
-      workspace_ref: workspace_ref, baseline: baseline, plan: plan}
+
+    %{
+      source: source,
+      backup: backup,
+      destination: destination,
+      workspace: workspace,
+      workspace_ref: workspace_ref,
+      baseline: baseline,
+      plan: plan
+    }
   end
 
   defp lineage_ordinal(value), do: value |> Integer.to_string() |> String.pad_leading(8, "0")
@@ -1317,12 +1363,27 @@ defmodule LoopexComposition.RestoreWorkflowTest do
     baseline = File.read!(Path.join([fixture.destination, root, "baseline"]))
     assert byte_size(baseline) <= 4_194_304
     assert {:ok, _} = RestoreCodec.manifest(baseline, @total)
-    for {name, type} <- [{"intent", :intent}, {"source-retirement", :source_retirement}, {"committed", :committed}],
+
+    for {name, type} <- [
+          {"intent", :intent},
+          {"source-retirement", :source_retirement},
+          {"committed", :committed}
+        ],
         do: read_fixture_record(fixture.destination, Path.join(root, name), type)
+
     for ledger <- fixture.plan["ledgers"],
-        {name, type} <- [{"intent", :ledger_intent}, {"source-retired", :ledger_retired}, {"committed", :ledger_committed}],
-        do: read_fixture_record(fixture.destination,
-          Path.join([ledger["relative_root"], "restore-lineage", ordinal, name]), type)
+        {name, type} <- [
+          {"intent", :ledger_intent},
+          {"source-retired", :ledger_retired},
+          {"committed", :ledger_committed}
+        ],
+        do:
+          read_fixture_record(
+            fixture.destination,
+            Path.join([ledger["relative_root"], "restore-lineage", ordinal, name]),
+            type
+          )
+
     assert {:ok, _} = RestoreCodec.manifest(manifest(fixture.destination), @total)
   end
 
@@ -1343,68 +1404,142 @@ defmodule LoopexComposition.RestoreWorkflowTest do
     old_intent = read_fixture_record(root, Path.join(directory, "intent"), :intent)
     plan = refresh_lineage_plan(old_intent["plan"], baseline)
     {:ok, plan_digest} = RestoreCodec.plan_digest(plan)
-    intent = %{old_intent | "plan" => plan, "plan_digest" => plan_digest,
-      "prior_lineage_sha256" => plan["prior_lineage_sha256"]}
+
+    intent = %{
+      old_intent
+      | "plan" => plan,
+        "plan_digest" => plan_digest,
+        "prior_lineage_sha256" => plan["prior_lineage_sha256"]
+    }
+
     intent_bytes = fixture_record_bytes(:intent, intent)
     intent_digest = hash(intent_bytes)
     refute intent_digest == hash(File.read!(Path.join(root, Path.join(directory, "intent"))))
+
     ledger_rows =
       Enum.map(intent["generations"], fn candidate ->
         path = Path.join([candidate["relative_root"], "restore-lineage", "00000002"])
         original_intent = read_fixture_record(root, Path.join(path, "intent"), :ledger_intent)
         ledger_intent = %{original_intent | "intent_sha256" => intent_digest}
         ledger_intent_bytes = fixture_record_bytes(:ledger_intent, ledger_intent)
-        original_retired = read_fixture_record(root, Path.join(path, "source-retired"), :ledger_retired)
-        retired = %{original_retired | "intent_sha256" => intent_digest,
-          "ledger_intent_sha256" => hash(ledger_intent_bytes)}
+
+        original_retired =
+          read_fixture_record(root, Path.join(path, "source-retired"), :ledger_retired)
+
+        retired = %{
+          original_retired
+          | "intent_sha256" => intent_digest,
+            "ledger_intent_sha256" => hash(ledger_intent_bytes)
+        }
+
         retired_bytes = fixture_record_bytes(:ledger_retired, retired)
         %{path: path, candidate: candidate, intent: ledger_intent_bytes, retired: retired_bytes}
       end)
-    original_retirement = read_fixture_record(root, Path.join(directory, "source-retirement"), :source_retirement)
-    retirement = %{original_retirement | "intent_sha256" => intent_digest,
-      "ledger_retirements" => Enum.map(ledger_rows, fn row ->
-        %{"relative_root" => row.candidate["relative_root"], "record_sha256" => hash(row.retired)}
-      end)}
+
+    original_retirement =
+      read_fixture_record(root, Path.join(directory, "source-retirement"), :source_retirement)
+
+    retirement = %{
+      original_retirement
+      | "intent_sha256" => intent_digest,
+        "ledger_retirements" =>
+          Enum.map(ledger_rows, fn row ->
+            %{
+              "relative_root" => row.candidate["relative_root"],
+              "record_sha256" => hash(row.retired)
+            }
+          end)
+    }
+
     retirement_bytes = fixture_record_bytes(:source_retirement, retirement)
+
     ledger_rows =
       Enum.map(ledger_rows, fn row ->
         original = read_fixture_record(root, Path.join(row.path, "committed"), :ledger_committed)
-        committed = %{original | "intent_sha256" => intent_digest,
-          "ledger_intent_sha256" => hash(row.intent), "source_retirement_sha256" => hash(retirement_bytes)}
+
+        committed = %{
+          original
+          | "intent_sha256" => intent_digest,
+            "ledger_intent_sha256" => hash(row.intent),
+            "source_retirement_sha256" => hash(retirement_bytes)
+        }
+
         Map.put(row, :committed, fixture_record_bytes(:ledger_committed, committed))
       end)
+
     activation_records =
-      [{directory, [{"baseline", baseline}, {"intent", intent_bytes}, {"source-retirement", retirement_bytes}]} |
-        Enum.map(ledger_rows, &{&1.path, [{"intent", &1.intent}, {"source-retired", &1.retired}]})]
+      [
+        {directory,
+         [
+           {"baseline", baseline},
+           {"intent", intent_bytes},
+           {"source-retirement", retirement_bytes}
+         ]}
+        | Enum.map(
+            ledger_rows,
+            &{&1.path, [{"intent", &1.intent}, {"source-retired", &1.retired}]}
+          )
+      ]
+
     activation = rebound_activation(altered, intent["generations"], activation_records)
     assert {:ok, _} = RestoreCodec.manifest(activation, @total)
     original_committed = read_fixture_record(root, Path.join(directory, "committed"), :committed)
-    committed = %{original_committed | "intent_sha256" => intent_digest, "plan_digest" => plan_digest,
-      "prior_lineage_sha256" => plan["prior_lineage_sha256"], "baseline_manifest_sha256" => hash(baseline),
-      "activation_manifest_sha256" => hash(activation), "source_retirement_sha256" => hash(retirement_bytes),
-      "ledger_proofs" => Enum.map(ledger_rows, fn row ->
-        %{"relative_root" => row.candidate["relative_root"], "record_sha256" => hash(row.committed)}
-      end)}
+
+    committed = %{
+      original_committed
+      | "intent_sha256" => intent_digest,
+        "plan_digest" => plan_digest,
+        "prior_lineage_sha256" => plan["prior_lineage_sha256"],
+        "baseline_manifest_sha256" => hash(baseline),
+        "activation_manifest_sha256" => hash(activation),
+        "source_retirement_sha256" => hash(retirement_bytes),
+        "ledger_proofs" =>
+          Enum.map(ledger_rows, fn row ->
+            %{
+              "relative_root" => row.candidate["relative_root"],
+              "record_sha256" => hash(row.committed)
+            }
+          end)
+    }
+
     committed_bytes = fixture_record_bytes(:committed, committed)
-    records = Map.new([
-      {Path.join(directory, "baseline"), {:manifest, baseline}},
-      {Path.join(directory, "intent"), {:intent, intent_bytes}},
-      {Path.join(directory, "source-retirement"), {:source_retirement, retirement_bytes}},
-      {Path.join(directory, "committed"), {:committed, committed_bytes}} |
-      Enum.flat_map(ledger_rows, fn row ->
-        [{Path.join(row.path, "intent"), {:ledger_intent, row.intent}},
-         {Path.join(row.path, "source-retired"), {:ledger_retired, row.retired}},
-         {Path.join(row.path, "committed"), {:ledger_committed, row.committed}}]
-      end)])
+
+    records =
+      Map.new([
+        {Path.join(directory, "baseline"), {:manifest, baseline}},
+        {Path.join(directory, "intent"), {:intent, intent_bytes}},
+        {Path.join(directory, "source-retirement"), {:source_retirement, retirement_bytes}},
+        {Path.join(directory, "committed"), {:committed, committed_bytes}}
+        | Enum.flat_map(ledger_rows, fn row ->
+            [
+              {Path.join(row.path, "intent"), {:ledger_intent, row.intent}},
+              {Path.join(row.path, "source-retired"), {:ledger_retired, row.retired}},
+              {Path.join(row.path, "committed"), {:ledger_committed, row.committed}}
+            ]
+          end)
+      ])
+
     for {path, {_type, bytes}} <- records do
       target = Path.join(root, path)
       assert Bitwise.band(File.lstat!(target).mode, 0o7777) == 0o600
       File.write!(target, bytes)
     end
-    %{records: records, omitted: omitted, original_entries: entries, altered_entries: altered,
-      baseline: baseline, intent: intent, intent_bytes: intent_bytes,
-      retirement: retirement, retirement_bytes: retirement_bytes, ledgers: ledger_rows,
-      activation: activation, committed: committed, committed_bytes: committed_bytes}
+
+    %{
+      records: records,
+      omitted: omitted,
+      original_entries: entries,
+      altered_entries: altered,
+      baseline: baseline,
+      intent: intent,
+      intent_bytes: intent_bytes,
+      retirement: retirement,
+      retirement_bytes: retirement_bytes,
+      ledgers: ledger_rows,
+      activation: activation,
+      committed: committed,
+      committed_bytes: committed_bytes
+    }
   end
 
   defp fixture_record_bytes(type, value) do
@@ -1423,25 +1558,51 @@ defmodule LoopexComposition.RestoreWorkflowTest do
 
   defp rebound_activation(entries, candidates, additions) do
     index = Map.new(entries, &{&1["path"], &1})
-    index = Enum.reduce(candidates, index, fn candidate, index ->
-      Map.update!(index, Path.join(candidate["relative_root"], "generation"), fn entry ->
-        %{entry | "size" => byte_size(candidate["destination_generation_bytes"]),
-          "sha256" => hash(candidate["destination_generation_bytes"])}
-      end)
-    end)
-    index = Enum.reduce(additions, index, fn {directory, records}, index ->
-      index = directory |> Path.split() |> Enum.scan(fn part, parent -> Path.join(parent, part) end)
-        |> Enum.reduce(index, fn path, index ->
-          Map.put_new(index, path, %{"path" => path, "kind" => "directory", "mode" => 0o700,
-            "size" => 0, "sha256" => nil})
+
+    index =
+      Enum.reduce(candidates, index, fn candidate, index ->
+        Map.update!(index, Path.join(candidate["relative_root"], "generation"), fn entry ->
+          %{
+            entry
+            | "size" => byte_size(candidate["destination_generation_bytes"]),
+              "sha256" => hash(candidate["destination_generation_bytes"])
+          }
         end)
-      Enum.reduce(records, index, fn {name, bytes}, index ->
-        path = Path.join(directory, name)
-        Map.put(index, path, %{"path" => path, "kind" => "regular", "mode" => 0o600,
-          "size" => byte_size(bytes), "sha256" => hash(bytes)})
       end)
-    end)
-    fixture_record_bytes(:manifest, ["loopex:current-state-manifest:v1", Enum.sort_by(Map.values(index), & &1["path"])])
+
+    index =
+      Enum.reduce(additions, index, fn {directory, records}, index ->
+        index =
+          directory
+          |> Path.split()
+          |> Enum.scan(fn part, parent -> Path.join(parent, part) end)
+          |> Enum.reduce(index, fn path, index ->
+            Map.put_new(index, path, %{
+              "path" => path,
+              "kind" => "directory",
+              "mode" => 0o700,
+              "size" => 0,
+              "sha256" => nil
+            })
+          end)
+
+        Enum.reduce(records, index, fn {name, bytes}, index ->
+          path = Path.join(directory, name)
+
+          Map.put(index, path, %{
+            "path" => path,
+            "kind" => "regular",
+            "mode" => 0o600,
+            "size" => byte_size(bytes),
+            "sha256" => hash(bytes)
+          })
+        end)
+      end)
+
+    fixture_record_bytes(:manifest, [
+      "loopex:current-state-manifest:v1",
+      Enum.sort_by(Map.values(index), & &1["path"])
+    ])
   end
 
   defp assert_rebound_record_closure(root, rebound, physical) do
@@ -1450,42 +1611,63 @@ defmodule LoopexComposition.RestoreWorkflowTest do
       assert {:ok, value} = RestoreCodec.decode(type, bytes)
       assert {:ok, ^bytes} = RestoreCodec.encode(type, value)
     end
+
     intent_hash = hash(rebound.intent_bytes)
     {:ok, plan_digest} = RestoreCodec.plan_digest(rebound.intent["plan"])
     assert rebound.intent["plan_digest"] == plan_digest
     assert rebound.intent["plan"]["manifest_sha256"] == hash(rebound.baseline)
-    reserved = Enum.filter(rebound.altered_entries, fn entry ->
-      Enum.any?(Path.split(entry["path"]), &(&1 in [".loopex-restore", "restore-lineage"]))
-    end)
+
+    reserved =
+      Enum.filter(rebound.altered_entries, fn entry ->
+        Enum.any?(Path.split(entry["path"]), &(&1 in [".loopex-restore", "restore-lineage"]))
+      end)
+
     {:ok, lineage_digest} = RestoreCodec.lineage_digest(reserved)
     assert rebound.intent["prior_lineage_sha256"] == lineage_digest
     assert rebound.intent["plan"]["prior_lineage_sha256"] == lineage_digest
-    assert rebound.altered_entries == Enum.reject(rebound.original_entries, &(&1["path"] == rebound.omitted))
-    {:ok, original_digest} = RestoreCodec.lineage_digest(Enum.filter(rebound.original_entries, fn entry ->
-      Enum.any?(Path.split(entry["path"]), &(&1 in [".loopex-restore", "restore-lineage"]))
-    end))
+
+    assert rebound.altered_entries ==
+             Enum.reject(rebound.original_entries, &(&1["path"] == rebound.omitted))
+
+    {:ok, original_digest} =
+      RestoreCodec.lineage_digest(
+        Enum.filter(rebound.original_entries, fn entry ->
+          Enum.any?(Path.split(entry["path"]), &(&1 in [".loopex-restore", "restore-lineage"]))
+        end)
+      )
+
     refute lineage_digest == original_digest
     assert rebound.retirement["intent_sha256"] == intent_hash
     assert rebound.retirement["ordinal"] == rebound.intent["ordinal"]
     assert rebound.retirement["tx_id"] == rebound.intent["tx_id"]
     assert rebound.retirement["disposition"] == "source_retired"
     assert rebound.retirement["source_state_binding"] == rebound.intent["source_state_binding"]
-    assert rebound.retirement["destination_state_binding"] == rebound.intent["destination_state_binding"]
-    assert rebound.retirement["host_evidence_sha256"] == rebound.intent["plan"]["host_attestation"]["evidence_sha256"]
+
+    assert rebound.retirement["destination_state_binding"] ==
+             rebound.intent["destination_state_binding"]
+
+    assert rebound.retirement["host_evidence_sha256"] ==
+             rebound.intent["plan"]["host_attestation"]["evidence_sha256"]
+
     assert rebound.committed["intent_sha256"] == intent_hash
     assert rebound.committed["ordinal"] == rebound.intent["ordinal"]
     assert rebound.committed["tx_id"] == rebound.intent["tx_id"]
-    assert rebound.committed["destination_state_binding"] == rebound.intent["destination_state_binding"]
+
+    assert rebound.committed["destination_state_binding"] ==
+             rebound.intent["destination_state_binding"]
+
     {:ok, destination_binding} = RestoreCodec.state_binding(placement(root))
     assert rebound.intent["destination_state_binding"] == destination_binding
     assert rebound.committed["plan_digest"] == plan_digest
     assert rebound.committed["prior_lineage_sha256"] == lineage_digest
     assert rebound.committed["baseline_manifest_sha256"] == hash(rebound.baseline)
     assert rebound.committed["source_retirement_sha256"] == hash(rebound.retirement_bytes)
+
     for row <- rebound.ledgers do
       {:ok, ledger_intent} = RestoreCodec.decode(:ledger_intent, row.intent)
       {:ok, retired} = RestoreCodec.decode(:ledger_retired, row.retired)
       {:ok, committed} = RestoreCodec.decode(:ledger_committed, row.committed)
+
       for record <- [ledger_intent, retired, committed] do
         assert record["intent_sha256"] == intent_hash
         assert record["ordinal"] == rebound.intent["ordinal"]
@@ -1493,40 +1675,93 @@ defmodule LoopexComposition.RestoreWorkflowTest do
         assert record["relative_root"] == row.candidate["relative_root"]
         assert record["destination_state_binding"] == rebound.intent["destination_state_binding"]
       end
+
       for record <- [ledger_intent, retired] do
         assert record["source_state_binding"] == rebound.intent["source_state_binding"]
         assert record["source_ledger_binding"] == row.candidate["source_ledger_binding"]
-        assert record["source_generation_sha256"] == hash(row.candidate["source_generation_bytes"])
-        assert record["destination_generation_sha256"] == hash(row.candidate["destination_generation_bytes"])
+
+        assert record["source_generation_sha256"] ==
+                 hash(row.candidate["source_generation_bytes"])
+
+        assert record["destination_generation_sha256"] ==
+                 hash(row.candidate["destination_generation_bytes"])
       end
-      assert ledger_intent["destination_ledger_binding"] == row.candidate["destination_ledger_binding"]
-      assert committed["destination_ledger_binding"] == row.candidate["destination_ledger_binding"]
-      {:ok, ledger_binding} = RestoreCodec.ledger_binding(placement(Path.join(root, row.candidate["relative_root"])))
+
+      assert ledger_intent["destination_ledger_binding"] ==
+               row.candidate["destination_ledger_binding"]
+
+      assert committed["destination_ledger_binding"] ==
+               row.candidate["destination_ledger_binding"]
+
+      {:ok, ledger_binding} =
+        RestoreCodec.ledger_binding(placement(Path.join(root, row.candidate["relative_root"])))
+
       assert row.candidate["destination_ledger_binding"] == ledger_binding
-      assert row.candidate["destination_ledger_placement"] == placement(Path.join(root, row.candidate["relative_root"]))
-      source_entry = Enum.find(rebound.altered_entries, &(&1["path"] == Path.join(row.candidate["relative_root"], "generation")))
+
+      assert row.candidate["destination_ledger_placement"] ==
+               placement(Path.join(root, row.candidate["relative_root"]))
+
+      source_entry =
+        Enum.find(
+          rebound.altered_entries,
+          &(&1["path"] == Path.join(row.candidate["relative_root"], "generation"))
+        )
+
       assert source_entry["size"] == byte_size(row.candidate["source_generation_bytes"])
       assert source_entry["sha256"] == hash(row.candidate["source_generation_bytes"])
-      assert committed["destination_generation_sha256"] == hash(row.candidate["destination_generation_bytes"])
+
+      assert committed["destination_generation_sha256"] ==
+               hash(row.candidate["destination_generation_bytes"])
+
       assert retired["intent_sha256"] == intent_hash
       assert retired["ledger_intent_sha256"] == hash(row.intent)
       assert committed["intent_sha256"] == intent_hash
       assert committed["ledger_intent_sha256"] == hash(row.intent)
       assert committed["source_retirement_sha256"] == hash(rebound.retirement_bytes)
-      retirement = Enum.find(rebound.retirement["ledger_retirements"], &(&1["relative_root"] == row.candidate["relative_root"]))
+
+      retirement =
+        Enum.find(
+          rebound.retirement["ledger_retirements"],
+          &(&1["relative_root"] == row.candidate["relative_root"])
+        )
+
       assert retirement["record_sha256"] == hash(row.retired)
-      proof = Enum.find(rebound.committed["ledger_proofs"], &(&1["relative_root"] == row.candidate["relative_root"]))
+
+      proof =
+        Enum.find(
+          rebound.committed["ledger_proofs"],
+          &(&1["relative_root"] == row.candidate["relative_root"])
+        )
+
       assert proof["record_sha256"] == hash(row.committed)
-      actual_generation = File.read!(Path.join(root, Path.join(row.candidate["relative_root"], "generation")))
+
+      actual_generation =
+        File.read!(Path.join(root, Path.join(row.candidate["relative_root"], "generation")))
+
       assert actual_generation == row.candidate["destination_generation_bytes"]
     end
+
     {:ok, physical_entries} = RestoreCodec.manifest(physical, @total)
-    commit_paths = [".loopex-restore/lineage/00000002/committed" |
-      Enum.map(rebound.ledgers, &Path.join(&1.path, "committed"))]
+
+    commit_paths = [
+      ".loopex-restore/lineage/00000002/committed"
+      | Enum.map(rebound.ledgers, &Path.join(&1.path, "committed"))
+    ]
+
     actual_activation_entries = Enum.reject(physical_entries, &(&1["path"] in commit_paths))
-    actual_activation = fixture_record_bytes(:manifest, ["loopex:current-state-manifest:v1", actual_activation_entries])
-    forged_activation = fixture_record_bytes(:manifest, ["loopex:current-state-manifest:v1",
-      Enum.reject(actual_activation_entries, &(&1["path"] == rebound.omitted))])
+
+    actual_activation =
+      fixture_record_bytes(:manifest, [
+        "loopex:current-state-manifest:v1",
+        actual_activation_entries
+      ])
+
+    forged_activation =
+      fixture_record_bytes(:manifest, [
+        "loopex:current-state-manifest:v1",
+        Enum.reject(actual_activation_entries, &(&1["path"] == rebound.omitted))
+      ])
+
     assert forged_activation == rebound.activation
     assert rebound.committed["activation_manifest_sha256"] == hash(forged_activation)
     refute rebound.committed["activation_manifest_sha256"] == hash(actual_activation)
