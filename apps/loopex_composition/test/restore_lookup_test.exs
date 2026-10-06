@@ -556,7 +556,13 @@ defmodule LoopexComposition.RestoreLookupTest do
             else: unquote(value)
 
         {:ok, hostile} = RestoreCodec.encode(:claim, Map.put(claim, unquote(field), replacement))
+        retained = claim_path(cut.destination) <> ".retained"
+        identity = claim_owner_identity(owner)
+        File.rename!(claim_path(cut.destination), retained)
+        File.mkdir!(claim_path(cut.destination))
+        File.chmod!(claim_path(cut.destination), 0o700)
         File.write!(owner, hostile)
+        File.chmod!(owner, 0o600)
         before = manifest(cut.destination)
 
         try do
@@ -565,7 +571,10 @@ defmodule LoopexComposition.RestoreLookupTest do
 
           assert File.read!(owner) == hostile and manifest(cut.destination) == before
         after
-          File.write!(owner, bytes)
+          File.rm_rf!(claim_path(cut.destination))
+          File.rename!(retained, claim_path(cut.destination))
+          assert File.read!(owner) == bytes
+          assert claim_owner_identity(owner) == identity
           send(owned.guardian, {:proceed, owned.reference, id})
 
           try do
@@ -1190,8 +1199,21 @@ defmodule LoopexComposition.RestoreLookupTest do
 
   defp finish_paused(owned, pause) do
     receive do
+      {:restore_io, guardian, worker, reference, {:terminal_release_installed, _}}
+      when guardian == owned.guardian and reference == owned.reference ->
+        assert worker != owned.worker
+        assert Process.get({:lookup_release_worker, reference}) == nil
+        Process.put({:lookup_release_worker, reference}, {worker, Process.monitor(worker)})
+        finish_paused(owned, pause)
+
       {:restore_io, guardian, worker, reference, {:issued, id, ^pause}}
       when guardian == owned.guardian and worker == owned.worker and reference == owned.reference ->
+        send(guardian, {:proceed, reference, id})
+        finish_paused(owned, pause)
+
+      {:restore_io, guardian, worker, reference, {:issued, id, ^pause}}
+      when guardian == owned.guardian and reference == owned.reference ->
+        assert {^worker, _monitor} = Process.get({:lookup_release_worker, reference})
         send(guardian, {:proceed, reference, id})
         finish_paused(owned, pause)
 
@@ -1213,6 +1235,10 @@ defmodule LoopexComposition.RestoreLookupTest do
     exact_down(owned, owned.caller, owned.caller_monitor, :normal)
     exact_down(owned, owned.guardian, owned.guardian_monitor, :normal)
     exact_down(owned, owned.worker, owned.worker_monitor, :normal)
+    if release = Process.get({:lookup_release_worker, owned.reference}) do
+      {worker, monitor} = release
+      exact_down(owned, worker, monitor, :normal)
+    end
   end
 
   defp exact_down(owned, actor, monitor, reason) do
@@ -1226,12 +1252,18 @@ defmodule LoopexComposition.RestoreLookupTest do
   end
 
   defp cleanup_owned(owned) do
+    releases =
+      case Process.get({:lookup_release_worker, owned.reference}) do
+        nil -> []
+        release -> [release]
+      end
+
     Enum.each(
       [
         {owned.caller, owned.caller_monitor},
         {owned.guardian, owned.guardian_monitor},
         {owned.worker, owned.worker_monitor}
-      ],
+      ] ++ releases,
       fn {actor, monitor} ->
         if is_nil(Process.get({:lookup_original_down, monitor})) do
           Process.exit(actor, :kill)
@@ -1247,4 +1279,8 @@ defmodule LoopexComposition.RestoreLookupTest do
       end
     )
   end
+
+  defp claim_owner_identity(owner),
+    do: owner |> File.lstat!(time: :posix)
+      |> Map.take([:type, :major_device, :minor_device, :inode, :mode, :size, :links, :mtime, :ctime])
 end

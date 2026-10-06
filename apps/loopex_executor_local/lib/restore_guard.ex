@@ -266,7 +266,12 @@ defmodule Loopex.Executor.Local.RestoreGuard do
                   do: lookup_outgoing!(captured, directory, intent, actual, state),
                   else: lookup_partial!(captured, directory, intent, actual, state)
 
-              complete = is_nil(phase) and root == intent["plan"]["destination_state_root"]
+              # Concept: copied complete ordinals remain historical receipts.
+              # Technical depth: only the final ordinal binds today's physical
+              # root; earlier ordinals are verified through their retained chain.
+              complete =
+                is_nil(phase) and
+                  (name != List.last(names) or root == intent["plan"]["destination_state_root"])
 
               if complete do
                 next = complete_transition!(captured, directory, intent, state)
@@ -730,6 +735,11 @@ defmodule Loopex.Executor.Local.RestoreGuard do
       Enum.map(intent["generations"], fn candidate ->
         lookup_ledger!(root, intent, candidate, retired, committed, hash)
       end)
+
+    # Concept: root commitment requires the complete ledger proof chain.
+    # Technical depth: the root record is published last. A missing ledger proof
+    # beneath it is invalid history, not an unfinished publication prefix.
+    if committed, do: ensure!(Enum.all?(ledger_phases, &is_nil/1))
 
     cond do
       "baseline.tmp" in actual or "intent.tmp" in actual ->
