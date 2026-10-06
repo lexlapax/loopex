@@ -268,12 +268,49 @@ defmodule LoopexComposition.RestoreWorkflowTest do
     [first, second] = ordered_claims(fixture.plan)
     source_before = manifest(fixture.source)
     destination_before = manifest(fixture.destination)
+    # Concept: the native collision races acquisition after read-only exclusion.
+    # Technical depth: hold the exact second mkdir after the first acquired ack;
+    # preinstalling it would prove preflight refusal instead of terminal release.
+    owned = launch(fixture.plan, :restore_claim_create)
+    guardian = owned.guardian
+    worker = owned.worker
+    reference = owned.reference
+    tag = owned.tag
+
+    hold_second = fn recur, events ->
+      receive do
+        {:restore_io, ^guardian, ^worker, ^reference,
+         {:issued, id, {:restore_claim_create, %{directory: directory}}} = event} ->
+          if directory == second do
+            {id, [event | events]}
+          else
+            assert directory == first
+            send(guardian, {:proceed, reference, id})
+            recur.(recur, [event | events])
+          end
+
+        {:restore_io, ^guardian, ^worker, ^reference, event} ->
+          recur.(recur, [event | events])
+
+        {^tag, result} ->
+          flunk("restore ended before native second claim race: #{inspect(result)}")
+      after
+        max(0, owned.work_cutoff + max(10_000, @grace + 2_000) -
+          System.monotonic_time(:millisecond)) ->
+          flunk("original restore work/cleanup cutoff reached")
+      end
+    end
+
+    {id, events} = hold_second.(hold_second, [])
+    assert Enum.any?(events, &match?(
+      {:acknowledged, _, {:restore_claim_acquired, %{directory: ^first}}, :completed}, &1))
+    assert File.lstat(second) == {:error, :enoent}
     File.mkdir!(second)
     foreign_owner = Path.join(second, "owner")
     File.write!(foreign_owner, "foreign claim", [:exclusive])
     foreign_before = File.lstat!(foreign_owner)
-    owned = launch(fixture.plan)
-    {result, events} = finish(owned)
+    send(guardian, {:proceed, reference, id})
+    {result, events} = finish(owned, events)
 
     assert {:joined,
             {:ok,
@@ -788,14 +825,42 @@ defmodule LoopexComposition.RestoreWorkflowTest do
     fixture = context.root |> actual_cut() |> lose_source()
     [source_claim, destination_claim] = claims(fixture.plan)
 
-    for claim <- [source_claim, destination_claim] do
-      File.mkdir!(claim)
-      File.write!(Path.join(claim, "owner"), "foreign", [:exclusive])
+    File.mkdir!(source_claim)
+    File.write!(Path.join(source_claim, "owner"), "foreign", [:exclusive])
+    # Concept: lost-source exclusion and destination acquisition are distinct proofs.
+    # Technical depth: the foreign source stays untouched; install the destination
+    # collision only at its exact held native mkdir after captured preflight.
+    owned = launch(fixture.plan, :restore_claim_create)
+    guardian = owned.guardian
+    worker = owned.worker
+    reference = owned.reference
+    tag = owned.tag
+
+    hold_destination = fn recur, events ->
+      receive do
+        {:restore_io, ^guardian, ^worker, ^reference,
+         {:issued, id, {:restore_claim_create, %{directory: ^destination_claim}}} = event} ->
+          {id, [event | events]}
+
+        {:restore_io, ^guardian, ^worker, ^reference, event} ->
+          recur.(recur, [event | events])
+
+        {^tag, result} ->
+          flunk("restore ended before native destination claim race: #{inspect(result)}")
+      after
+        max(0, owned.work_cutoff + max(10_000, @grace + 2_000) -
+          System.monotonic_time(:millisecond)) ->
+          flunk("original restore work/cleanup cutoff reached")
+      end
     end
 
+    {id, events} = hold_destination.(hold_destination, [])
+    assert File.lstat(destination_claim) == {:error, :enoent}
+    File.mkdir!(destination_claim)
+    File.write!(Path.join(destination_claim, "owner"), "foreign", [:exclusive])
     before = Enum.map([source_claim, destination_claim], &File.lstat!(Path.join(&1, "owner")))
-    owned = launch(fixture.plan)
-    {result, events} = finish(owned)
+    send(guardian, {:proceed, reference, id})
+    {result, events} = finish(owned, events)
 
     assert {:joined,
             {:ok,

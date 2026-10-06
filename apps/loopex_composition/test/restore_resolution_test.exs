@@ -68,6 +68,21 @@ defmodule LoopexComposition.RestoreResolutionTest do
     assert File.read!(Path.join(claim, "owner")) == bytes
   end
 
+  for status <- ~w(available lost) do
+    test "preinstalled foreign destination claim excludes fresh #{status} restore before native acquisition", %{root: root} do
+      {source, workspace} = source(root)
+      cut = root |> prepare_cut(source, workspace, 0) |> with_source_status(unquote(status))
+      foreign = %{cut | plan: %{cut.plan | "tx_id" => hash("foreign-preflight")}}
+      claim = install_claim(foreign)
+      original = File.read!(Path.join(claim, "owner"))
+      before = manifest(root)
+      assert_resolution(cut, {:not_committed, "restore_conflict"})
+      assert manifest(root) == before
+      assert File.read!(Path.join(claim, "owner")) == original
+      assert File.lstat(claim_path(cut.source)) == {:error, :enoent}
+    end
+  end
+
   test "fresh tx cannot replace a real unfinished original transition", %{root: root} do
     {source, workspace} = source(root)
     cut = prepare_cut(root, source, workspace, 0)
@@ -92,7 +107,7 @@ defmodule LoopexComposition.RestoreResolutionTest do
     fixture = first(root)
     File.rm!(Path.join(fixture.destination, "receipts/restore-lineage/00000001/committed"))
     before = manifest(root)
-    assert_resolution(fixture, {:not_committed, "restore_history_invalid"})
+    assert_resolution(fixture, {:not_committed, "invalid_current_history"})
     assert manifest(root) == before
   end
 
@@ -147,6 +162,12 @@ defmodule LoopexComposition.RestoreResolutionTest do
     after
       left(owned.cutoff) -> flunk("resolution unavailable at original cutoff")
     end
+  end
+
+  defp with_source_status(cut, "available"), do: cut
+  defp with_source_status(cut, "lost") do
+    File.rm_rf!(cut.source)
+    %{cut | plan: %{cut.plan | "source_status" => "lost"}}
   end
 
   defp source(root) do

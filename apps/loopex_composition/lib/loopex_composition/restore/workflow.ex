@@ -209,6 +209,8 @@ defmodule LoopexComposition.Restore.Workflow do
     case value!(io.({:restore_classification, root, plan})) do
       :fresh -> :ok
       {:committed, receipt} -> throw({:restore_duplicate, receipt})
+      {:error, %{"code" => "restore_history_invalid"}} ->
+        throw({:restore_refusal, "invalid_current_history"})
       {:error, %{"code" => code}} -> throw({:restore_refusal, code})
       _ -> throw({:restore_refusal, "invalid_current_history"})
     end
