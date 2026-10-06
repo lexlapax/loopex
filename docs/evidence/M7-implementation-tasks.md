@@ -1,5 +1,11 @@
 # M7 Implementation Tasks
 
+Original93428 boundary formatter FAIL53.392s fullycollected: all46ASTs pass,
+currentfinalformat rejects one call layout, floor/native unexecuted. Root sole
+child5b46a72c corrects only the exact reported whitespace; new source review and
+formatter packet are underway. Prefix formatter original75543 is now running
+with776 attempted keys retained. All original/added task counts remain unchanged.
+
 Current boundary formatter original93428 is running at9acf03a3 under root's
 exclusive VM grant. Complete70-path source/46 formatter paths independently
 reviewed, all221 author and92 review artifacts rehashed; latest768 union retained.

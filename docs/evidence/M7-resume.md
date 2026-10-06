@@ -28,32 +28,45 @@ physical restore implementation; it does not waive any full-history proof.
 ### Current work and restart order
 
 Continue the existing ACTIVE unlimited goal on `m7`. Do not create another goal.
-Primary previous pushed checkpoint is `ff33985d`; this commit supersedes its
+Primary previous pushed checkpoint is `3a97256f`; this commit supersedes its
 resume record. Historical detail remains at
 `bdc88a05:docs/evidence/M7-resume.md` and in the task ledger.
 
-Root verification VM is BUSY with original formatter handle93428 at clean9acf.
-Enabled `M7/current-boundary-format-runner-20261006-v1`, config
-`47be6c390aec584a3faa538759097afa683c8067940473fa07a7e555aa7b8c5f`,
-root review `cdf1f4300cb54fbb6db376ac056e186cf470281c96dbe61be51634dac6e22cd0`.
-Independent combined review report53c2992c/index80ba0156 has92 rehashed rows;
-root read full report and133 live/Git source rows,221 author artifacts and all
-36 external inputs before finalization. Latest768 union reconciled. All46 ASTs
-and both same-final-source formatters are required, with at most one confined
-sole child. Output `M7/m7-current-boundary-format-v1`; root collector prepared
-at `/private/tmp/m7-collect-current-boundary-format-v1.py`. Collect this original
-handle once, then run collector with its actual exit; do not repoll terminal
-handles or grant a second product VM before collection. Native proof remains
-unrun. Primary evidence documents are disjoint from the70-path unit.
+Root verification VM is BUSY with original prefix formatter75543 atf2d9bae9.
+Enabled `M7/generation-prefix-format-runner-20261006-v1`, config
+`fc704d45cb366054fcee9be0fcc58c4f0aaffb278a432357af124a3e2dee6fcc`,
+root reviewa0c496c8. Independent formatter report7ec72c32/index856fec5c has56
+rehashed artifacts; root read full author/semantic/formatter reports and all
+120 author artifacts,29 external rows and59 actual/Git facts before admission.
+Latest776 union reconciled. All5 ASTs and both same-final-source formatters
+are required, maximum one sole confined child. Output
+`M7/m7-generation-prefix-format-v1`; root collector
+`/private/tmp/m7-collect-generation-prefix-format-v1.py`, arguments original
+handle, actual outer exit, seed count776. Collect this original handle once;
+never repoll terminal handles or grant another product VM before collection.
 
-Prefixf2 semantic review is complete with no source blocker. Root read full
-reportb1589791 and rehashed81 artifacts. Disabled prefix formatter packet is
-sealed at `/private/tmp/loopex-m7-generation-prefix-format-runner-f2d9bae9-20261006-v1`,
-reportfac24719/index460d2aae; root read report/main delta, rehashed120 artifacts
-and29 external rows. `authored_bounds_review` independently reviews that packet;
-`private_task_causal_resume` derives actual boundary native populations and
-commands at9acf, source-only. Neither author may execute. Prefix formatter
-root enabler is prepared but unexecuted; it must reconcile the union after93428.
+Boundary original93428 is fully collected FAIL53.392s at final formatter child
+`c35ca42dabfec014a04f1e34ba3f253bb766107f`, sole9acf child. All46 whole-file
+non-line AST comparisons pass, but current final format-check rejects the
+System.cmd layout in run_request_test.exs. Floor and native did not run.
+Collection `M7/current-boundary-format-failed-original-collection-20261006-v1.json`,
+SHA `2bef8b1afb2e83a35485163cfe4f2a7ce1d4b2034e1e23386df788acc80477c1`;
+report `16b6655ce6587b6f9fb4c053f9cabaa3ac3782a6446590ebac7849193f31874c`,
+inventory `12ddde3b5588954c1ed6a743f8e8fd98184f669c80b7fa6901fd17c106bf9bf2`.
+All100 artifacts,133 actual/Git rows and8 original joins verified; never retry
+that source/pair/stage. Root's exact log-reported whitespace correction is clean
+`5b46a72c6bb04e9b53e01cdb66c12a18590ae5da`, solec35 child, one fixture path.
+All70 unit paths and46 Elixir ownership remain. `authored_bounds_review` seals
+its new disabled formatter packet; `restore_prefix_source_audit` independently
+reviews it plus a separate corrected-Core carry-forward report. No new runtime
+claim follows. Primary evidence updates remain disjoint from70-path source unit.
+
+`private_task_causal_resume` sealed prospective native population420/pair at
+frozen9acf, and verified declarations/generator domains unchanged at5b46.
+Packet `/private/tmp/loopex-m7-current-boundary-native-population-9acf03a3-20261006-v1`,
+report77b42195/index800275c3; root must read/rehash before native admission.
+Core318, Protocol ordinary28/7excluded plusNode7/28excluded over same6files,
+foreground36, daemon31. No native execution or final formatted-source admission.
 
 Historical terminal records follow. Original81659 is fully collected FAIL142.996s
 at exact `f3086bdd1aa894017e582cd8d896244becf1a613`: current identity/dev/test
@@ -239,9 +252,9 @@ proposal review49c17036 and docs proof below; no acceptance follows.
 ### Latest complete evidence and attempt union
 
 Evidence base is `/Users/spuri/projects/lexlapax/loopex-evidence/M7`.
-Latest fully collected registry has768 keys:
-`generation-payload-links-native-v1-stage-attempt-registry.json`, SHA
-`4d2e7d29af551b5ecb0b73d7f9c2492b45ab1f34fdd64fbce2c4797f3e33ed76`.
+Latest fully collected registry has776 keys:
+`current-boundary-format-v1-stage-attempt-registry.json`, SHA
+`8d85a34d58cae2c5bf8935217dd3348c540f14cf3ce1e749df61542d4d70a4b1`.
 Reconcile every retained registry into the same unique exact(source,pair,stage)
 union before any fresh grant. A source child is not permission to reroll a case.
 
