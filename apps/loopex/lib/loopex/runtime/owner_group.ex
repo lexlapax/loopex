@@ -295,6 +295,12 @@ defmodule Loopex.Runtime.OwnerGroup do
         cleanup = earlier_cleanup(provider.cleanup, sampled)
         notify_cleanup(provider, reference, cleanup)
 
+        # Concept: the dead owner's result worker stops before guard cleanup waits.
+        # Technical depth: retain its original monitor for the join below. The
+        # guard and resource keep the selected window and remain alive to prove
+        # cleanup; the final supervisor stop still gates the group's DOWN.
+        if is_pid(provider.worker), do: Process.exit(provider.worker, :kill)
+
         if is_pid(provider.guard) do
           send(
             provider.guard,

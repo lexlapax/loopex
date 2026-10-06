@@ -8,6 +8,431 @@ defmodule LoopexCli.ChatDriverTest do
   alias LoopexCli.ChatDriver
   alias Loopex.AgentLoopFixture, as: Fixture
 
+  for disposition <- [:unchanged, :checkpointed, :failed] do
+    @compact_disposition disposition
+    test "literal /compact reports #{@compact_disposition} through actual public completion and status" do
+      assert_compact_disposition(@compact_disposition)
+    end
+  end
+
+  defp assert_compact_disposition(disposition) do
+    prepared = prepared_configuration()
+    configuration = prepared.selection.configuration
+
+    maintenance = %{
+      "model" => configuration["model"],
+      "reasoning" => "none",
+      "model_capabilities" => %{
+        configuration["model_capabilities"]
+        | "reasoning_levels" => ["none", "default"]
+      },
+      "provider_mapping" => Map.put(configuration["provider_mapping"], "thinking_disabled", true)
+    }
+
+    options =
+      if disposition == :checkpointed,
+        do: [
+          maintenance_model: maintenance,
+          maintenance_instructions: %{"version" => "summary.v1", "body" => "Keep facts"}
+        ],
+        else: []
+
+    script =
+      if disposition == :unchanged,
+        do: [],
+        else: [%{text: String.duplicate("retained fact ", 400), calls: []}]
+
+    script =
+      if disposition == :checkpointed,
+        do:
+          script ++
+            [
+              %{
+                text:
+                  ~s({"summary":"retain this fact","carry_forward":{"files_read":[],"files_changed":[]}}),
+                calls: [],
+                reply_overrides: %{completion: "natural", continuation: nil}
+              }
+            ],
+        else: script
+
+    fixture = start_fixture(script, [model: configuration["model"]] ++ options)
+
+    {:ok, session} =
+      Loopex.create_session(fixture.runtime, prepared.session_options,
+        command_id: "create",
+        genesis: prepared.genesis
+      )
+
+    prefix = if disposition == :unchanged, do: "", else: "remember\n/wait\n"
+
+    {:ok, input} =
+      StringIO.open(prefix <> "/compact\n/wait\n/status\n/quit\n", encoding: :latin1)
+
+    {:ok, output} = StringIO.open("", encoding: :latin1)
+    test = self()
+
+    facade = fn module, function, arguments ->
+      if function == :command and match?([_, %{type: :compact}], arguments),
+        do: send(test, {:literal_compact, List.last(arguments)})
+
+      apply(module, function, arguments)
+    end
+
+    {host, driver} =
+      start_host(fixture.runtime, session, input, output,
+        configuration: prepared,
+        facade: facade
+      )
+
+    expected_exit = if disposition == :failed, do: 1, else: 0
+
+    assert_receive {:provisional, ^host, %{exit_code: ^expected_exit, cleanup: :confirmed}},
+                   5_000
+
+    assert_receive {:literal_compact, command}
+
+    assert command.bounds == %{
+             "max_attempts" => 4,
+             "deadline_ms" => 60_000,
+             "token_budget" => 32_768
+           }
+
+    completion =
+      Enum.find(Fixture.events(fixture, session), &(&1.kind == "context.compaction_finished"))
+
+    assert completion["command_id"] == command.command_id
+    assert completion["result"]["disposition"] == Atom.to_string(disposition)
+    assert completion["result"]["cleanup"] == "confirmed"
+    {_, transcript} = StringIO.contents(output)
+    rows = records(transcript)
+    status = Enum.find(rows, &(&1["event"] == "status"))
+    last = status["maintenance"]["last_compact"]
+    assert last["command_id"] == Base.url_encode64(command.command_id, padding: false)
+    assert last["episode_id"] == Base.url_encode64(completion["episode_id"], padding: false)
+    assert last["result"]["disposition"] == Atom.to_string(disposition)
+    refute Map.has_key?(last, "run_id")
+    refute Map.has_key?(last, "outcome")
+    assert status["maintenance"]["active_model"] == nil
+
+    assert byte_position(transcript, "Compaction bounds:") <
+             byte_position(transcript, "Compaction result:")
+
+    assert byte_position(transcript, "Compaction bounds:") <
+             byte_position(transcript, ~s("command_id":"#{last["command_id"]}"))
+
+    acks = Enum.filter(rows, &(&1["event"] == "input"))
+
+    assert Enum.find(acks, &(&1["command_id"] == last["command_id"]))["disposition"] ==
+             "admitted"
+
+    waits = Enum.filter(rows, &(&1["event"] == "wait"))
+    assert List.last(waits)["state"] == "settled"
+
+    if disposition == :unchanged,
+      do: assert(List.last(waits)["outcome"] == nil),
+      else: assert(List.last(waits)["outcome"]["outcome"] == "completed")
+
+    expected_runs = if disposition == :unchanged, do: 0, else: 1
+
+    assert Enum.count(Fixture.events(fixture, session), &(&1.kind == "run.finished")) ==
+             expected_runs
+
+    assert Agent.get(fixture.executor, & &1.jobs) == []
+    assert :sys.get_state(driver).compact_commands == MapSet.new()
+    assert :sys.get_state(driver).workers == %{}
+    close_host_and_fixture(fixture, host, driver, expected_exit)
+    {_, closed} = StringIO.contents(output)
+    closing = Enum.find(records(closed), &(&1["event"] == "closing"))
+    assert closing["exit_code"] == expected_exit
+
+    if disposition == :unchanged,
+      do: assert(closing["last_outcome"] == nil),
+      else: assert(closing["last_outcome"]["outcome"] == "completed")
+
+    stop_devices([input, output], :gen_server)
+  end
+
+  test "literal /compact refuses active work and aborts without a maintenance result" do
+    fixture = start_fixture([%{text: "must not publish", calls: [], hold: self()}])
+    {:ok, session} = Loopex.create_session(fixture.runtime, %{}, command_id: "create")
+    input = pipe_input("one\n")
+    output = observing_output()
+    {host, driver} = start_host(fixture.runtime, session, input, output)
+    assert_receive {:holding, callback}, 5_000
+    callback_monitor = Process.monitor(callback)
+    send(input, {:bytes, "/compact\n"})
+    assert_receive {:provisional, ^host, %{exit_code: 1, cleanup: :confirmed}}, 5_000
+    assert_receive {:DOWN, ^callback_monitor, :process, ^callback, _}, 5_000
+    refusal = await_record(&(&1["event"] == "input" and &1["input_sequence"] == "2"))
+    assert refusal["disposition"] == "refused"
+    assert refusal["code"] == "run_active"
+
+    refute Enum.any?(
+             Fixture.events(fixture, session),
+             &(&1.kind == "context.compaction_finished")
+           )
+
+    assert :sys.get_state(driver).last_compact == nil
+    assert :sys.get_state(driver).compact_commands == MapSet.new()
+    close_host_and_fixture(fixture, host, driver, 1)
+    stop_devices([input, output])
+  end
+
+  test "a replayed historical compact failure is visible without failing this invocation" do
+    prepared = prepared_configuration()
+
+    fixture =
+      start_fixture([%{text: "retained fact", calls: []}],
+        model: prepared.selection.configuration["model"]
+      )
+
+    {:ok, session} =
+      Loopex.create_session(fixture.runtime, prepared.session_options,
+        command_id: "create",
+        genesis: prepared.genesis
+      )
+
+    {:ok, first_input} = StringIO.open("one\n/wait\n/compact\n/wait\n/quit\n", encoding: :latin1)
+    {:ok, first_output} = StringIO.open("", encoding: :latin1)
+
+    {first_host, first_driver} =
+      start_host(fixture.runtime, session, first_input, first_output, configuration: prepared)
+
+    assert_receive {:provisional, ^first_host, %{exit_code: 1, cleanup: :confirmed}}, 5_000
+    first_writer = :sys.get_state(first_driver).writer
+    monitors = monitor_processes([first_host, first_driver, first_writer])
+    send(first_host, {:close, :confirmed})
+    assert_receive {:closed, ^first_host, 1}, 5_000
+    assert_processes_joined(monitors)
+
+    completion =
+      Enum.find(Fixture.events(fixture, session), &(&1.kind == "context.compaction_finished"))
+
+    assert completion["result"]["disposition"] == "failed"
+    {:ok, input} = StringIO.open("/status\n/quit\n", encoding: :latin1)
+    {:ok, output} = StringIO.open("", encoding: :latin1)
+    {host, driver} = start_host(fixture.runtime, session, input, output, configuration: prepared)
+    assert_receive {:provisional, ^host, %{exit_code: 0, cleanup: :confirmed}}, 5_000
+    {_, transcript} = StringIO.contents(output)
+    status = Enum.find(records(transcript), &(&1["event"] == "status"))
+    assert status["maintenance"]["last_compact"]["result"]["disposition"] == "failed"
+
+    assert status["maintenance"]["last_compact"]["command_id"] ==
+             Base.url_encode64(completion["command_id"], padding: false)
+
+    assert :sys.get_state(driver).compact_commands == MapSet.new()
+    close_host_and_fixture(fixture, host, driver, 0)
+    stop_devices([first_input, first_output, input, output], :gen_server)
+  end
+
+  test "status excludes a later compact completion while its earlier cursor read is held" do
+    prepared = prepared_configuration()
+    fixture = start_fixture([], model: prepared.selection.configuration["model"])
+
+    {:ok, session} =
+      Loopex.create_session(fixture.runtime, prepared.session_options,
+        command_id: "create",
+        genesis: prepared.genesis
+      )
+
+    input = pipe_input("/status\n")
+    output = observing_output()
+    test = self()
+
+    facade = fn module, function, arguments ->
+      result = apply(module, function, arguments)
+
+      if function == :session_status do
+        count = Process.get(:compact_status_reads, 0) + 1
+        Process.put(:compact_status_reads, count)
+
+        if count == 2 do
+          reference = make_ref()
+          send(test, {:held_compact_projection, self(), reference, result})
+
+          receive do
+            {:release_compact_projection, ^reference} -> :ok
+          end
+        end
+      end
+
+      result
+    end
+
+    {host, driver} =
+      start_host(fixture.runtime, session, input, output, configuration: prepared, facade: facade)
+
+    assert_receive {:held_compact_projection, command_worker, reference, {:ok, before}}, 5_000
+    assert before.event_sequence == 0
+    {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
+
+    assert {:accepted, "later-compact"} =
+             Loopex.command(attachment, %{
+               type: :compact,
+               command_id: "later-compact",
+               bounds: %{"max_attempts" => 4, "deadline_ms" => 60_000, "token_budget" => 32_768}
+             })
+
+    send(command_worker, {:release_compact_projection, reference})
+    first = await_record(&(&1["event"] == "status"))
+    assert first["maintenance"]["last_compact"] == nil
+    send(input, {:bytes, "/wait\n/status\n/quit\n"})
+    later = await_record(&(&1["event"] == "status"))
+
+    assert later["maintenance"]["last_compact"]["command_id"] ==
+             Base.url_encode64("later-compact", padding: false)
+
+    assert_receive {:provisional, ^host, %{exit_code: 0, cleanup: :confirmed}}, 5_000
+    close_host_and_fixture(fixture, host, driver, 0)
+    stop_devices([input, output])
+  end
+
+  test "status shows the actual held compact model and wait joins its callback before completion" do
+    prepared = prepared_configuration()
+    configuration = prepared.selection.configuration
+
+    maintenance = %{
+      "model" => configuration["model"],
+      "reasoning" => "none",
+      "model_capabilities" =>
+        Map.put(configuration["model_capabilities"], "reasoning_levels", ["none", "default"]),
+      "provider_mapping" => Map.put(configuration["provider_mapping"], "thinking_disabled", true)
+    }
+
+    fixture =
+      start_fixture(
+        [
+          %{text: String.duplicate("retained fact ", 400), calls: []},
+          %{
+            text:
+              ~s({"summary":"retain this fact","carry_forward":{"files_read":[],"files_changed":[]}}),
+            calls: [],
+            hold: self(),
+            reply_overrides: %{completion: "natural", continuation: nil}
+          }
+        ],
+        model: configuration["model"],
+        maintenance_model: maintenance,
+        maintenance_instructions: %{"version" => "summary.v1", "body" => "Keep facts"}
+      )
+
+    {:ok, session} =
+      Loopex.create_session(fixture.runtime, prepared.session_options,
+        command_id: "create",
+        genesis: prepared.genesis
+      )
+
+    input = pipe_input("remember\n/wait\n/compact\n")
+    output = observing_output()
+    {host, driver} = start_host(fixture.runtime, session, input, output, configuration: prepared)
+    assert_receive {:holding, callback}, 5_000
+    callback_monitor = Process.monitor(callback)
+    send(input, {:bytes, "/status\n/wait\n"})
+    status = await_record(&(&1["event"] == "status"))
+    assert status["maintenance"]["active_model"] == maintenance["model"]
+    assert status["maintenance"]["last_compact"] == nil
+    assert {:ok, %{compact_pending: true}} = Loopex.session_status(fixture.runtime, session)
+    send(callback, :release)
+    assert_receive {:DOWN, ^callback_monitor, :process, ^callback, :normal}, 5_000
+    barrier = await_record(&(&1["event"] == "wait" and &1["input_sequence"] == "5"))
+    assert barrier["state"] == "settled"
+    assert barrier["outcome"]["outcome"] == "completed"
+    send(input, {:bytes, "/status\n/quit\n"})
+    final_status = await_record(&(&1["event"] == "status"))
+    assert final_status["maintenance"]["active_model"] == nil
+    assert final_status["maintenance"]["last_compact"]["result"]["disposition"] == "checkpointed"
+    assert_receive {:provisional, ^host, %{exit_code: 0, cleanup: :confirmed}}, 5_000
+    close_host_and_fixture(fixture, host, driver, 0)
+    stop_devices([input, output])
+  end
+
+  for display <- [:delivered, :failed, :lost, :interrupt] do
+    @compact_display display
+    test "compact waits for actual bound-display IO join and handles #{@compact_display} without premature admission" do
+      fixture = start_fixture([])
+      {:ok, session} = Loopex.create_session(fixture.runtime, %{}, command_id: "create")
+      input = pipe_input("/compact\n/wait\n/quit\n")
+      output = blocked_control_output(false)
+      test = self()
+      io_identity = :ets.new(:compact_display_io_identity, [:public])
+
+      facade = fn module, function, arguments ->
+        if function == :command and match?([_, %{type: :compact}], arguments) do
+          assert [{:io_worker, original_io_worker}] = :ets.lookup(io_identity, :io_worker)
+          refute Process.alive?(original_io_worker)
+          send(test, {:compact_submission, List.last(arguments)})
+        end
+
+        apply(module, function, arguments)
+      end
+
+      {host, driver} = start_host(fixture.runtime, session, input, output, facade: facade)
+      assert_receive {:blocked_control_output, ^output}, 5_000
+      %{writer: writer, pending: {:compact_display, command, cutoff}} = :sys.get_state(driver)
+      assert is_integer(cutoff)
+      %{current: %{pid: io_worker}, bytes: bytes} = :sys.get_state(writer)
+      assert bytes > 0 and Process.alive?(io_worker)
+      true = :ets.insert(io_identity, {:io_worker, io_worker})
+      monitor = Process.monitor(io_worker)
+      refute_receive {:compact_submission, _}, 0
+
+      refute Enum.any?(
+               Fixture.records(fixture, session),
+               &(&1.payload.kind == "compact_command_admitted_v1")
+             )
+
+      assert Loopex.AgentLoopTestModel.dispatched(fixture.model) == []
+      assert Agent.get(fixture.executor, & &1.jobs) == []
+
+      case @compact_display do
+        :delivered ->
+          send(output, {:release_output, :ok})
+
+        :failed ->
+          send(output, {:release_output, {:error, :closed}})
+
+        :lost ->
+          Process.exit(output, :kill)
+
+        :interrupt ->
+          ChatDriver.interrupt(driver)
+          assert :sys.get_state(driver).stopping
+          send(output, {:release_output, :ok})
+      end
+
+      assert_receive {:DOWN, ^monitor, :process, ^io_worker, _}, 5_000
+      refute Process.alive?(io_worker)
+      expected_exit = if @compact_display == :delivered, do: 0, else: 1
+      assert_receive {:provisional, ^host, %{exit_code: ^expected_exit}}, 5_000
+
+      if @compact_display == :delivered do
+        assert_receive {:compact_submission, ^command}
+
+        completion =
+          Enum.find(Fixture.events(fixture, session), &(&1.kind == "context.compaction_finished"))
+
+        assert completion["command_id"] == command.command_id
+        assert completion["result"]["disposition"] == "unchanged"
+      else
+        refute_receive {:compact_submission, _}, 0
+
+        refute Enum.any?(
+                 Fixture.records(fixture, session),
+                 &(&1.payload.kind == "compact_command_admitted_v1")
+               )
+
+        refute Enum.any?(
+                 Fixture.events(fixture, session),
+                 &(&1.kind == "context.compaction_finished")
+               )
+      end
+
+      close_host_and_fixture(fixture, host, driver, expected_exit)
+      if @compact_display == :lost, do: stop_devices([input]), else: stop_devices([input, output])
+    end
+  end
+
   defp hold_compact_status(:interrupt, 2, test) do
     reference = make_ref()
     send(test, {:compact_status_held, self(), reference})
@@ -1130,6 +1555,133 @@ defmodule LoopexCli.ChatDriverTest do
       assert_receive {:DOWN, ^monitor, :process, ^pid, _}
       refute Process.alive?(pid)
     end
+  end
+
+  # Concept: an explicit abort ends its run while keeping the chat usable.
+  # Technical depth: literal pipe input crosses the real driver and Core abort
+  # path. Both model workers are held inside actual supervised attempts, and
+  # the replacement checks its predecessor is gone before dispatch proceeds.
+  test "literal abort settles the held run and permits a later prompt with exact actor joins" do
+    fixture =
+      start_fixture([
+        %{text: "must not publish", calls: [], hold: self()},
+        %{text: "continued", calls: [], hold: self(), require_previous_worker_down: true}
+      ])
+
+    {:ok, session} = Loopex.create_session(fixture.runtime, %{}, command_id: "create")
+    input = pipe_input("one\n")
+    output = observing_output()
+    {host, driver} = start_host(fixture.runtime, session, input, output)
+    assert_receive {:holding, first_model}, 5_000
+    assert_receive {:blocked_input, ^input, first_reader}, 5_000
+    first_model_monitor = Process.monitor(first_model)
+    first_reader_monitor = Process.monitor(first_reader)
+    first_ack = await_record(&(&1["event"] == "input" and &1["input_sequence"] == "1"))
+    assert first_ack["disposition"] == "admitted"
+    assert {:ok, status} = Loopex.session_status(fixture.runtime, session)
+    assert is_binary(status.active_run_id)
+    original_run = status.active_run_id
+    wire_session = LoopexProtocol.Wire.encode_identity(session)
+    wire_original_run = LoopexProtocol.Wire.encode_identity(original_run)
+
+    send(input, {:bytes, "/abort\n/wait\n"})
+    abort_ack = await_record(&(&1["event"] == "input" and &1["input_sequence"] == "2"))
+    assert abort_ack["disposition"] == "admitted"
+    assert abort_ack["command_id"] != first_ack["command_id"]
+    assert_receive {:DOWN, ^first_model_monitor, :process, ^first_model, :killed}, 5_000
+    assert_receive {:DOWN, ^first_reader_monitor, :process, ^first_reader, :normal}, 5_000
+    refute Process.alive?(first_model)
+    refute Process.alive?(first_reader)
+    aborted_wait = await_record(&(&1["event"] == "wait" and &1["input_sequence"] == "3"))
+    assert aborted_wait["state"] == "settled"
+    assert aborted_wait["session_id"] == wire_session
+    assert aborted_wait["run_id"] == wire_original_run
+    assert aborted_wait["outcome"]["outcome"] == "cancelled"
+
+    assert {:ok, %{active_run_id: nil, open_interaction: nil, status: :active}} =
+             Loopex.session_status(fixture.runtime, session)
+
+    assert {:ok, abort_command} = LoopexProtocol.Wire.identity(abort_ack["command_id"])
+
+    assert [abort_record] =
+             Enum.filter(Fixture.records(fixture, session), fn record ->
+               record.payload.kind == "command_admitted" and
+                 record.payload["command_type"] == "abort"
+             end)
+
+    assert abort_record.payload["command_id"] == abort_command
+    assert abort_record.payload["run_id"] == original_run
+
+    assert Enum.any?(Fixture.events(fixture, session), fn event ->
+             event.kind == "run.finished" and event["run_id"] == original_run and
+               event["outcome"] == "cancelled"
+           end)
+
+    assert_receive {:blocked_input, ^input, next_reader}, 5_000
+    next_reader_monitor = Process.monitor(next_reader)
+    send(input, {:bytes, "two\n/wait\n"})
+    assert_receive {:holding, second_model}, 5_000
+    second_model_monitor = Process.monitor(second_model)
+    assert_receive {:DOWN, ^next_reader_monitor, :process, ^next_reader, :normal}, 5_000
+    next_ack = await_record(&(&1["event"] == "input" and &1["input_sequence"] == "4"))
+    assert next_ack["disposition"] == "admitted"
+
+    assert length(
+             Enum.uniq([first_ack["command_id"], abort_ack["command_id"], next_ack["command_id"]])
+           ) == 3
+
+    send(second_model, :release)
+    assert_receive {:DOWN, ^second_model_monitor, :process, ^second_model, :normal}, 5_000
+    refute Process.alive?(second_model)
+    completed_wait = await_record(&(&1["event"] == "wait" and &1["input_sequence"] == "5"))
+    assert completed_wait["state"] == "settled"
+    assert completed_wait["session_id"] == wire_session
+    assert completed_wait["run_id"] != wire_original_run
+    assert completed_wait["outcome"]["outcome"] == "completed"
+    assert_receive {:blocked_input, ^input, final_reader}, 5_000
+    actors = monitor_processes(Map.keys(:sys.get_state(driver).workers))
+    assert Enum.any?(actors, fn {pid, _monitor} -> pid == final_reader end)
+    send(input, {:bytes, "/quit\n"})
+
+    # Concept: later success does not erase the earlier cancelled ending.
+    # Technical depth: the existing driver accumulates exit1 while its truthful
+    # last outcome becomes completed; abort does not force transport shutdown.
+    assert_receive {:provisional, ^host,
+                    %{
+                      exit_code: 1,
+                      cleanup: :confirmed,
+                      transport: nil,
+                      last_outcome: %{outcome: :completed}
+                    }},
+                   5_000
+
+    assert_processes_joined(actors)
+    closing_wait = await_record(&(&1["event"] == "wait" and &1["input_sequence"] == "6"))
+    assert closing_wait["run_id"] == completed_wait["run_id"]
+    assert closing_wait["outcome"]["outcome"] == "completed"
+
+    events = Fixture.events(fixture, session)
+
+    assert Enum.map(Enum.filter(events, &(&1.kind == "run.finished")), & &1["outcome"]) ==
+             ["cancelled", "completed"]
+
+    assert Enum.map(
+             Enum.filter(events, &(&1.kind == "assistant.message_appended")),
+             & &1["content"]
+           ) ==
+             ["continued"]
+
+    [one, two] = Loopex.AgentLoopTestModel.dispatched(fixture.model)
+    assert List.last(one.messages)["content"] == "one"
+    assert List.last(two.messages)["content"] == "two"
+    assert Enum.any?(two.messages, &(&1["role"] == "user" and &1["content"] == "one"))
+    refute Enum.any?(two.messages, &(&1["content"] == "must not publish"))
+    assert Loopex.AgentLoopTestExecutor.jobs(fixture.executor) == []
+    close_host_and_fixture(fixture, host, driver, 1)
+    closing = await_record(&(&1["event"] == "closing"))
+    assert closing["cleanup"] == "confirmed" and closing["exit_code"] == 1
+    assert closing["last_outcome"]["outcome"] == "completed"
+    stop_devices([input, output])
   end
 
   test "wait does not read the next prompt while an actual model call is held" do

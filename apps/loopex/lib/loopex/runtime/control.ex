@@ -34,6 +34,7 @@ defmodule Loopex.Runtime.Control do
   alias Loopex.Runtime.OwnerGroup
   alias Loopex.Runtime.ProviderAttempt
   alias Loopex.Runtime.SessionCoordinator
+  alias Loopex.Runtime.SessionState
   alias Loopex.Runtime.SessionGenesis
   alias Loopex.Runtime.SessionConfiguration
   alias Loopex.Runtime.Instructions
@@ -3677,33 +3678,73 @@ defmodule Loopex.Runtime.Control do
   # before the spend, and Control registers no attempt identity of its own: its
   # session entry holds the journal position and the owner, and the post-commit
   # receipt holds positions only. The one honest registered state is therefore
-  # the committed record, read here through the Store at exactly
-  # `authority.journal_version` -- the position `provider_position_current/2`
-  # has already proved is this session's current one, and the position each
-  # attempt-open commits at. The binding is admitted only when it equals the
-  # closed ordinary or maintenance identity rebuilt from that row plus the
-  # session it was read from. A row that is absent, of another kind, or
-  # unreadable registers no identity, so it refuses; treating it as a pass is
-  # the defect itself. Nothing has been sent at this point, so the coordinator
-  # settles the refusal as ADR 0018's exact pre-transport `not_dispatched`. The
-  # read costs one single-row Store page, bounded in both senses by
-  # `bounded_position_read/3`, inside Control's serialized handler, which is the
-  # price of comparing against durable truth rather than against the argument
-  # being checked. An exact already-spent re-presentation is refused by
-  # `provider_attempt_unspent/2` before this read, retaining its own refusal name.
-  defp provider_position_binding(state, session_id, %{journal_version: version}, binding)
-       when is_integer(version) and version > 0 do
-    with {:ok, [%{journal_version: ^version, payload: payload}]} <-
-           bounded_position_read(state.store, session_id, version),
-         {:ok, ^binding} <- ProviderAttempt.binding_from_opened(session_id, payload) do
-      :ok
+  # the committed attempt-open row and the contiguous tail to the current
+  # head. Harmless admissions advance the head without replacing that attempt.
+  # One cardinality-capped interval uses the existing bounded Store guardian;
+  # every row retains this owner and no intervening row may invalidate authority.
+  defp provider_position_binding(
+         state,
+         session_id,
+         %{journal_version: version, attempt_open_version: opened, owner: owner},
+         binding
+       )
+       when is_integer(version) and is_integer(opened) and opened > 0 and opened <= version do
+    count = version - opened + 1
+
+    if count <= Store.max_item_cardinality() do
+      case bounded_store_read(fn ->
+             with {:ok, [first | tail] = records} <-
+                    collect_receipt_records(state.store, session_id, opened - 1, count, []),
+                  true <- length(records) == count,
+                  true <- Enum.all?(records, &provider_record_owner?(&1, owner)),
+                  {:ok, ^binding} <-
+                    ProviderAttempt.binding_from_opened(session_id, first.payload),
+                  true <- provider_admission_tail?(tail, binding) do
+               :ok
+             else
+               _other -> {:error, :invalid_provider_attempt_binding}
+             end
+           end) do
+        :ok -> :ok
+        _ -> {:error, :invalid_provider_attempt_binding}
+      end
     else
-      _other -> {:error, :invalid_provider_attempt_binding}
+      {:error, :invalid_provider_attempt_binding}
     end
   end
 
   defp provider_position_binding(_state, _session_id, _authority, _binding),
     do: {:error, :invalid_provider_attempt_binding}
+
+  defp provider_record_owner?(
+         %{owner_epoch: epoch, owner_incarnation_id: incarnation, payload: payload},
+         owner
+       )
+       when is_map(payload),
+       do: epoch == owner.owner_epoch and incarnation == owner.owner_incarnation_id
+
+  defp provider_record_owner?(_record, _owner), do: false
+
+  # Concept: one serial run remains the parent of an open maintenance attempt.
+  # Technical depth: maintenance bindings name an episode rather than its parent.
+  # No run-changing row may intervene; accepted tail admissions all name the
+  # same sole parent. Ordinary attempts already pin that run directly.
+  defp provider_admission_tail?(records, binding) do
+    Enum.reduce_while(records, {:ok, binding["run_id"], MapSet.new()}, fn %{payload: payload},
+                                                                          {:ok, parent, commands} ->
+      parent =
+        if is_nil(parent) and payload["admission"] == "accepted",
+          do: payload["run_id"],
+          else: parent
+
+      command_id = payload["command_id"]
+
+      if not MapSet.member?(commands, command_id) and
+           SessionState.provider_attempt_tail_record?(payload, parent, binding["session_id"]),
+         do: {:cont, {:ok, parent, MapSet.put(commands, command_id)}},
+         else: {:halt, :error}
+    end) != :error
+  end
 
   # Concept: Control waits a bounded moment for that row, and a store that does
   # not answer inside it registers no identity.
@@ -3724,14 +3765,6 @@ defmodule Loopex.Runtime.Control do
   # preserving the rule that a missing answer is never a dispatch verdict. An
   # adapter that raises or exits is contained the same way instead of taking the
   # whole runtime's Control down with it.
-  defp bounded_position_read(store, session_id, version) do
-    bounded_records_read(store, session_id, version - 1, 1)
-  end
-
-  defp bounded_records_read(store, session_id, after_position, limit) do
-    bounded_store_read(fn -> Store.load_records(store, session_id, after_position, limit) end)
-  end
-
   defp bounded_receipt_records_read(store, session_id, after_position, limit) do
     # A Store page may be shorter than the caller's limit. Keep the complete
     # finite receipt scan under one guardian and therefore one existing deadline.
@@ -3748,16 +3781,27 @@ defmodule Loopex.Runtime.Control do
       {:ok, []} ->
         {:error, :incomplete_settlement_range}
 
-      {:ok, page} ->
-        last = List.last(page).journal_version
+      {:ok, page} when is_list(page) ->
+        contiguous? =
+          Enum.with_index(page, after_position + 1)
+          |> Enum.all?(fn {record, expected} ->
+            is_map(record) and Map.get(record, :journal_version) == expected
+          end)
 
-        collect_receipt_records(
-          store,
-          session_id,
-          last,
-          remaining - length(page),
-          Enum.reverse(page, records)
-        )
+        if length(page) <= remaining and contiguous? do
+          collect_receipt_records(
+            store,
+            session_id,
+            List.last(page).journal_version,
+            remaining - length(page),
+            Enum.reverse(page, records)
+          )
+        else
+          {:error, :incomplete_settlement_range}
+        end
+
+      {:ok, _malformed_page} ->
+        {:error, :incomplete_settlement_range}
 
       other ->
         other

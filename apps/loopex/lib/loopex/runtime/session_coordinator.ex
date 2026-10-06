@@ -6030,6 +6030,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
       Map.merge(work, %{
         request: episode["request"],
         model_attempt: episode["model_attempt"],
+        attempt_open_version: episode["attempt_open_version"],
         maintenance_binding: binding
       })
     else
@@ -6134,6 +6135,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
       worker: task.pid,
       permit_reference: permit_reference,
       journal_version: state.durable.journal_version,
+      attempt_open_version: work.attempt_open_version,
       deadline: deadline
     }
 
@@ -6435,11 +6437,16 @@ defmodule Loopex.Runtime.SessionCoordinator do
           owner_workers
         )
 
-      {:loopex_provider_tree_stop, ^reference, stop, ^owner_group, _cleanup}
+      {:loopex_provider_tree_stop, ^reference, stop, ^owner_group, cleanup}
       when is_reference(stop) ->
+        _ = share_provider_cleanup(cleanup)
         acknowledge_provider_stop(owner_group, stop)
 
       {:DOWN, ^coordinator_monitor, :process, ^coordinator, _reason} ->
+        # Concept: startup loss selects cleanup before the last known actor exits.
+        # Technical depth: no worker identity was bound here. Group termination's
+        # final worker-supervisor stop joins any unregistered startup child.
+        _ = provider_cleanup_window(cleanup_grace_ms)
         :ok
 
       {:EXIT, _owner_workers, _reason} ->
@@ -6513,18 +6520,85 @@ defmodule Loopex.Runtime.SessionCoordinator do
       when is_reference(stop) ->
         acknowledge_provider_stop(coordinator, stop)
 
-      {:loopex_provider_tree_stop, ^reference, stop, ^owner_group, _cleanup}
+      {:loopex_provider_tree_stop, ^reference, stop, ^owner_group, cleanup}
       when is_reference(stop) ->
+        stop_unstarted_provider_owner(owner, owner_monitor, share_provider_cleanup(cleanup))
         acknowledge_provider_stop(owner_group, stop)
 
       {:DOWN, ^owner_monitor, :process, ^owner, _reason} ->
-        :ok
+        cleanup = provider_cleanup_window(cleanup_grace_ms)
+        await_unstarted_provider_stop(coordinator, coordinator_monitor, reference, cleanup)
 
       {:DOWN, ^coordinator_monitor, :process, ^coordinator, _reason} ->
-        :ok
+        stop_unstarted_provider_owner(
+          owner,
+          owner_monitor,
+          provider_cleanup_window(cleanup_grace_ms)
+        )
 
       {:EXIT, _owner_workers, _reason} ->
+        stop_unstarted_provider_owner(
+          owner,
+          owner_monitor,
+          provider_cleanup_window(cleanup_grace_ms)
+        )
+    end
+  end
+
+  # Concept: a dead blocked worker leaves its live guard available for refusal cleanup.
+  # Technical depth: the original worker DOWN is already the join. Retain the
+  # selected window while Control returns its refusal; a normal guard exit would
+  # discard the coordinator's opportunity to obtain the exact stop receipt.
+  defp await_unstarted_provider_stop(coordinator, monitor, reference, cleanup) do
+    {group, ^reference} = Process.get(:loopex_provider_cleanup_owner)
+
+    receive do
+      {:loopex_provider_tree_stop, ^reference, stop, ^coordinator, incoming}
+      when is_reference(stop) ->
+        acknowledge_unstarted_provider_stop(
+          coordinator,
+          stop,
+          earlier_provider_cleanup(cleanup, incoming)
+        )
+
+      {:loopex_provider_tree_stop, ^reference, stop, ^group, incoming}
+      when is_reference(stop) ->
+        acknowledge_unstarted_provider_stop(
+          group,
+          stop,
+          earlier_provider_cleanup(cleanup, incoming)
+        )
+
+      {:DOWN, ^monitor, :process, ^coordinator, _reason} ->
         :ok
+
+      {:EXIT, _workers, _reason} ->
+        :ok
+    after
+      provider_wait_slice(cleanup.observation_deadline) ->
+        if provider_deadline_reached?(cleanup.observation_deadline),
+          do: exit(:provider_cleanup_unproved),
+          else: await_unstarted_provider_stop(coordinator, monitor, reference, cleanup)
+    end
+  end
+
+  defp acknowledge_unstarted_provider_stop(requester, stop, cleanup) do
+    if provider_deadline_reached?(cleanup.observation_deadline),
+      do: exit(:provider_cleanup_unproved),
+      else: acknowledge_provider_stop(requester, stop)
+  end
+
+  defp stop_unstarted_provider_owner(owner, monitor, cleanup) do
+    Process.exit(owner, :kill)
+
+    case await_provider_process_down(owner, monitor, cleanup.observation_deadline) do
+      {:ok, _reason} ->
+        if provider_deadline_reached?(cleanup.observation_deadline),
+          do: exit(:provider_cleanup_unproved),
+          else: :ok
+
+      :timeout ->
+        exit(:provider_cleanup_unproved)
     end
   end
 
@@ -7554,9 +7628,17 @@ defmodule Loopex.Runtime.SessionCoordinator do
         _absent -> nil
       end
 
+    # Concept: refusal cleanup owns its window before any member can retire.
+    # Technical depth: the never-permitted worker keeps the group populated
+    # while the waiting guard acknowledges and joins under the selected window.
+    # Killing the worker first lets its guard return without a stop receipt.
+    case stop_provider_tree(tree) do
+      :ok -> :ok
+      {:error, :provider_cleanup_unproved} -> exit(:provider_cleanup_unproved)
+    end
+
     _ = Task.Supervisor.terminate_child(state.owner_workers, task.pid)
     _ = take_worker_result(task.ref)
-    stop_provider_tree(tree)
 
     state
     |> Map.put(:in_flight, Map.delete(state.in_flight, task.ref))

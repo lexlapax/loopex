@@ -6200,7 +6200,7 @@ defmodule Loopex.Runtime.SessionState do
     if version == state.journal_version + 1 and owner_epoch == state.owner_epoch and
          incarnation == state.owner_incarnation_id and is_binary(incarnation) and
          context_refusal_tail?(state, kind) do
-      case apply_admitted_internal_record(state, record) do
+      case apply_admitted_internal_record(state, record, version) do
         {:ok, next, events} ->
           {:ok,
            %{
@@ -7014,13 +7014,16 @@ defmodule Loopex.Runtime.SessionState do
   defp maintenance_terminal_tail?(%{maintenance_terminal: %{next: :compact_terminal}}, kind),
     do: kind == "compact_command_completed_v1"
 
-  defp apply_admitted_internal_record(state, record, version \\ nil)
-
   defp apply_admitted_internal_record(state, %{kind: kind} = record, version) do
     if maintenance_terminal_tail?(state, kind) and maintenance_request_tail?(state, kind) do
       with {:ok, next, events} <- apply_internal_record(state, record),
            {:ok, next} <-
              retain_pending_settlement_source(next, record, version || state.journal_version + 1) do
+        # Concept: dispatch retains the attempt's own authenticated position.
+        # Technical depth: proposal and replay derive this from the envelope
+        # sequence, including paired first opens and single-record retries.
+        next = retain_attempt_open_version(next, record, version || state.journal_version + 1)
+
         next =
           if kind in [
                "maintenance_episode_admitted_v1",
@@ -7062,6 +7065,18 @@ defmodule Loopex.Runtime.SessionState do
       {:error, :incomplete_maintenance_terminal_transaction}
     end
   end
+
+  defp retain_attempt_open_version(state, %{kind: "model_attempt_opened_v1"} = record, version),
+    do: put_in(state.pending_work[record["run_id"]][:attempt_open_version], version)
+
+  defp retain_attempt_open_version(state, %{kind: "maintenance_attempt_opened_v1"}, version),
+    do:
+      put_in(
+        state.maintenance_episodes[state.active_maintenance]["attempt_open_version"],
+        version
+      )
+
+  defp retain_attempt_open_version(state, _record, _version), do: state
 
   # Concept: public maintenance changes are committed facts of the serial owner.
   # Technical depth: proposal and recovery share this reducer. Derive only the
@@ -11566,6 +11581,94 @@ defmodule Loopex.Runtime.SessionState do
       :error -> Map.fetch(map, Atom.to_string(key))
     end
   end
+
+  @doc false
+  # Concept: harmless admissions cannot replace an open provider authority.
+  # Technical depth: Control uses the current closed command grammar on its
+  # independently read tail. Accepted content recomputes its exact identity;
+  # refused rows retain only the fields their current writers actually emit.
+  def provider_attempt_tail_record?(record, run_id, session_id)
+      when is_map(record) and not is_struct(record) do
+    base = [:kind, "command_id", "command_digest", "command_type", "admission"]
+    type = record["command_type"]
+    admission = record["admission"]
+
+    identity? =
+      is_binary(record["command_id"]) and byte_size(record["command_id"]) > 0 and
+        is_binary(record["command_digest"]) and
+        Regex.match?(~r/\A[0-9a-f]{64}\z/, record["command_digest"])
+
+    identity? and
+      case Map.get(record, :kind) do
+        "command_admitted" when admission == "accepted" and type in ["steer", "follow_up"] ->
+          command = %{
+            type: if(type == "steer", do: :steer, else: :follow_up),
+            command_id: record["command_id"],
+            content: record["content"]
+          }
+
+          command = if type == "steer", do: Map.put(command, :run_id, run_id), else: command
+
+          closed_history_map?(record, base ++ ["run_id", "content"]) and
+            is_binary(run_id) and record["run_id"] == run_id and
+            is_binary(record["content"]) and record["content"] != "" and
+            command_digest(command) == {:ok, record["command_digest"]}
+
+        "command_admitted" ->
+          (closed_history_map?(record, base) and
+             {type, admission} in [
+               {"prompt", "rejected_run_active"},
+               {"steer", "rejected_run_mismatch"},
+               {"steer", "rejected_steer_pending"},
+               {"steer", "rejected_no_active_run"},
+               {"follow_up", "rejected_follow_up_pending"},
+               {"follow_up", "rejected_no_active_run"},
+               {"abort", "rejected_no_active_run"},
+               {"interaction_answer", "rejected_interaction_absent"},
+               {"interaction_answer", "rejected_interaction_resolved"},
+               {"interaction_answer", "rejected_invalid_interaction_answer"}
+             ]) or
+            (closed_history_map?(record, base) and admission == "rejected_maintenance_active" and
+               type in ~w(prompt steer follow_up configure compact interaction_answer))
+
+        "command_admission_refused_v1" ->
+          closed_history_map?(record, base ++ ["dimension", "candidate", "observed", "limit"]) and
+            type in ~w(prompt steer follow_up interaction_answer) and
+            admissible_command_kind?(record.kind, record)
+
+        "session_configuration_admitted_v2" ->
+          closed_history_map?(
+            record,
+            base ++ ["changes", "prior_configuration_version", "configuration"]
+          ) and
+            type == "configure" and admission == "rejected_configuration_not_settled" and
+            is_nil(record["configuration"]) and
+            is_integer(record["prior_configuration_version"]) and
+            record["prior_configuration_version"] > 0 and
+            SessionConfiguration.validate_update(record["changes"]) == :ok and
+            command_digest(%{
+              type: :configure,
+              command_id: record["command_id"],
+              changes: record["changes"]
+            }) == {:ok, record["command_digest"]}
+
+        "compact_command_admitted_v1" ->
+          closed_history_map?(record, base ++ ["bounds", "episode_id"]) and
+            type == "compact" and admission == "rejected_run_active" and
+            normalize_compact_bounds(record["bounds"]) == {:ok, record["bounds"]} and
+            record["episode_id"] == stable_id("compact", session_id, record["command_id"]) and
+            command_digest(%{
+              type: :compact,
+              command_id: record["command_id"],
+              bounds: record["bounds"]
+            }) == {:ok, record["command_digest"]}
+
+        _ ->
+          false
+      end
+  end
+
+  def provider_attempt_tail_record?(_record, _run_id, _session_id), do: false
 
   defp command_digest(command) do
     bytes = :erlang.term_to_binary(["loopex_command_v1", command], [:deterministic])

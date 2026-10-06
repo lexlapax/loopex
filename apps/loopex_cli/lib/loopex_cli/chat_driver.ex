@@ -21,14 +21,14 @@ defmodule LoopexCli.ChatDriver do
   closing record cannot precede those proofs. Status reads committed settings
   and runtime trace counters through the command worker. Its continuation
   warning requires an exact confirmed configuration cache. Active maintenance
-  and completed compact observations await the live episode integration.
+  and completed compact observations come from committed public facts.
   Configuration, maintenance,
   tracing and process-signal startup are joined by the outer command host.
   """
 
   use GenServer
   alias LoopexCli.{ChatControl, ChatInput, ChatOutput, ProgressConsumer, Render}
-  alias LoopexProtocol.Session.Outcome
+  alias LoopexProtocol.Session.{CompactResult, Outcome}
 
   @outcomes %{
     "completed" => :completed,
@@ -189,6 +189,8 @@ defmodule LoopexCli.ChatDriver do
       last_run: nil,
       known_run: nil,
       last_outcome: nil,
+      last_compact: nil,
+      compact_commands: MapSet.new(),
       barrier: nil,
       status: nil,
       exit_code: 0,
@@ -373,7 +375,12 @@ defmodule LoopexCli.ChatDriver do
   def handle_info({pid, ref, :event, result}, state) do
     if owned(state, pid, ref) == :reader do
       state = %{state | waiting_event: result, reader_busy: false}
-      {:noreply, if(state.pending == nil, do: consume_event(state), else: state)}
+
+      {:noreply,
+       if(state.pending == nil or match?({:inspect_tail, _, _}, state.pending),
+         do: consume_event(state),
+         else: state
+       )}
     else
       {:noreply, state}
     end
@@ -436,11 +443,35 @@ defmodule LoopexCli.ChatDriver do
 
   def handle_info({:loopex_chat_output_deadline, writer, deadline}, %{writer: writer} = state)
       when is_integer(deadline) or is_nil(deadline) do
+    state = retain_display_deadline(state, deadline)
     {:noreply, shorten_stop(%{state | output_deadline: deadline}, deadline)}
   end
 
   def handle_info({:loopex_chat_output_failed, writer, code}, %{writer: writer} = state),
     do: {:noreply, fail(state, code)}
+
+  def handle_info(
+        {:compact_displayed, id, cutoff},
+        %{pending: {:compact_display, %{command_id: id} = command, cutoff}} = state
+      ) do
+    if not state.stopping and System.monotonic_time(:millisecond) < cutoff do
+      state = %{state | pending: nil, compact_commands: MapSet.put(state.compact_commands, id)}
+      {:noreply, admit(state, command)}
+    else
+      {:noreply, fail(state, :output_drain_timeout)}
+    end
+  end
+
+  def handle_info(
+        {:compact_displayed, id, _},
+        %{pending: {:compact_display, %{command_id: id}, _}} = state
+      ),
+      do: {:noreply, schedule(state)}
+
+  def handle_info({:compact_displayed, _, _}, state), do: {:noreply, state}
+
+  def handle_info(:poll, %{pending: {:compact_display, _, _}} = state),
+    do: {:noreply, poll_compact_display(%{state | timer: nil})}
 
   def handle_info(:poll, state) do
     state = %{state | timer: nil}
@@ -539,7 +570,7 @@ defmodule LoopexCli.ChatDriver do
     with {:ok, %{compact_pending: busy} = status} when is_boolean(busy) <-
            state.facade.(Loopex, :session_status, [state.runtime, state.session]),
          {:ok, trace} <- inspected_trace(state),
-         {:ok, maintenance} <- inspected_maintenance(state.configuration, status.configuration),
+         {:ok, maintenance} <- inspected_maintenance(state.configuration, status),
          policy when is_map(policy) <- inspected_policy(state) do
       configuration = status.configuration || %{}
 
@@ -555,7 +586,8 @@ defmodule LoopexCli.ChatDriver do
            if(status.open_interaction, do: status.open_interaction["interaction_id"]),
          trace: trace,
          maintenance: maintenance,
-         policy: policy
+         policy: policy,
+         event_sequence: status.event_sequence
        }}
     else
       _ -> {:error, :chat_status_unavailable}
@@ -575,10 +607,11 @@ defmodule LoopexCli.ChatDriver do
     end
   end
 
-  defp inspected_maintenance(nil, nil),
+  defp inspected_maintenance(nil, %{configuration: nil}),
     do: {:ok, %{configured_model: nil, active_model: nil, warning: nil, last_compact: nil}}
 
-  defp inspected_maintenance(%{selection: selection}, public) when is_map(public) do
+  defp inspected_maintenance(%{selection: selection}, %{configuration: public} = status)
+       when is_map(public) do
     captured = selection.configuration
 
     if Loopex.Runtime.SessionConfiguration.public_view(captured) == public do
@@ -589,7 +622,12 @@ defmodule LoopexCli.ChatDriver do
           do: :maintenance_unconfigured
 
       {:ok,
-       %{configured_model: configured, active_model: nil, warning: warning, last_compact: nil}}
+       %{
+         configured_model: configured,
+         active_model: if(status.active_maintenance, do: status.active_maintenance["model"]),
+         warning: warning,
+         last_compact: nil
+       }}
     else
       {:error, :chat_status_unavailable}
     end
@@ -752,6 +790,32 @@ defmodule LoopexCli.ChatDriver do
       :abort ->
         admit(state, %{type: :abort, command_id: id})
 
+      :compact ->
+        # Concept: display the fixed reference bounds before submitting compact.
+        # Technical depth: the existing writer charges the active IO until its
+        # original worker DOWN. One captured output ceiling gates submission;
+        # input and event grants stay paused without another writer or receipt.
+        cutoff = System.monotonic_time(:millisecond) + 5_000
+        cutoff = if state.output_deadline, do: min(cutoff, state.output_deadline), else: cutoff
+
+        state =
+          write_text(
+            state,
+            "Compaction bounds: max_attempts=4, deadline_ms=60000, token_budget=32768"
+          )
+
+        if state.stopping do
+          state
+        else
+          command = %{
+            type: :compact,
+            command_id: id,
+            bounds: %{"max_attempts" => 4, "deadline_ms" => 60_000, "token_budget" => 32_768}
+          }
+
+          schedule(%{state | pending: {:compact_display, command, cutoff}})
+        end
+
       {:configure, changes} ->
         send_worker(
           state,
@@ -785,6 +849,51 @@ defmodule LoopexCli.ChatDriver do
         |> error(:chat_action_unavailable)
         |> local_refusal()
     end
+  end
+
+  defp retain_display_deadline(
+         %{pending: {:compact_display, command, captured}} = state,
+         deadline
+       )
+       when is_integer(deadline),
+       do: %{state | pending: {:compact_display, command, min(captured, deadline)}}
+
+  defp retain_display_deadline(state, _deadline), do: state
+
+  defp poll_compact_display(%{pending: {:compact_display, command, cutoff}} = state) do
+    remaining = cutoff - System.monotonic_time(:millisecond)
+
+    if remaining <= 0 do
+      fail(state, :output_drain_timeout)
+    else
+      # Concept: inspect the same writer without renewing its display deadline.
+      # Technical depth: this is ChatOutput.status's existing owner-only endpoint,
+      # with the captured remaining wait instead of a fresh default call timeout.
+      case GenServer.call(state.writer, :status, remaining) do
+        %{bytes: 0, failure: nil} ->
+          if not state.stopping and System.monotonic_time(:millisecond) < cutoff do
+            # Concept: already queued cancellation wins before compact submission.
+            # Technical depth: the self message follows the successful IO/join
+            # observation, so an interrupt skipped by the synchronous status
+            # receive is handled before this final original-cutoff gate.
+            send(self(), {:compact_displayed, command.command_id, cutoff})
+            state
+          else
+            fail(state, :output_drain_timeout)
+          end
+
+        %{failure: nil} ->
+          schedule(state)
+
+        %{failure: code} ->
+          fail(state, code)
+
+        _ ->
+          fail(state, :output_failed)
+      end
+    end
+  catch
+    :exit, _ -> fail(state, :output_failed)
   end
 
   defp admit(state, command) do
@@ -878,6 +987,7 @@ defmodule LoopexCli.ChatDriver do
     state =
       state
       |> Map.put(:pending, nil)
+      |> Map.update!(:compact_commands, &MapSet.delete(&1, id))
       |> acknowledge(id, :refused, stable_code(code))
       |> error(stable_code(code))
 
@@ -891,15 +1001,13 @@ defmodule LoopexCli.ChatDriver do
     check_barrier(state)
   end
 
-  defp command_reply(%{pending: :inspect_status} = state, {:ok, fields}) do
-    state
-    |> Map.put(:pending, nil)
-    |> checked_emit(
-      :status,
-      Map.merge(fields, %{input_sequence: state.sequence, session_id: state.session})
-    )
-    |> consume_event()
-    |> after_command()
+  defp command_reply(%{pending: :inspect_status} = state, {:ok, %{event_sequence: tail} = fields})
+       when is_integer(tail) and tail >= state.cursor do
+    # Concept: last compact and status share one committed public prefix.
+    # Technical depth: keep input blocked until the existing reader reaches the
+    # native status cursor. No new reader or live private result fills the view.
+    state = %{state | pending: {:inspect_tail, Map.delete(fields, :event_sequence), tail}}
+    state |> finish_inspection() |> consume_inspection_event()
   end
 
   defp command_reply(%{pending: :inspect_status} = state, _) do
@@ -935,6 +1043,13 @@ defmodule LoopexCli.ChatDriver do
   defp consume_event(%{waiting_event: {:error, :empty}} = state),
     do: schedule(%{state | waiting_event: nil})
 
+  defp consume_event(
+         %{pending: {:inspect_tail, _, tail}, waiting_event: {:ok, %{event_sequence: seq}}} =
+           state
+       )
+       when seq > tail,
+       do: fail(%{state | pending: nil, waiting_event: nil}, :chat_status_unavailable)
+
   defp consume_event(%{waiting_event: {:ok, %{event_sequence: seq} = event}} = state)
        when is_integer(seq) and seq > state.cursor do
     state = %{state | waiting_event: nil, cursor: seq}
@@ -946,7 +1061,7 @@ defmodule LoopexCli.ChatDriver do
     # Concept: input or output failure still requires observing cancellation truth.
     # Technical depth: reader grants continue until the existing barrier/reap join;
     # the captured shutdown cutoff remains the bound on unavailable truth.
-    grant_event(state)
+    state |> finish_inspection() |> grant_event()
   end
 
   defp consume_event(state), do: fail(%{state | waiting_event: nil}, :event_reader_failed)
@@ -1024,9 +1139,76 @@ defmodule LoopexCli.ChatDriver do
     end
   end
 
+  defp project_event(state, %{kind: "context.compaction_finished"} = event) do
+    completion = Map.drop(event, [:kind, :event_id, :event_sequence])
+
+    case CompactResult.encode_completion(completion) do
+      {:ok, encoded} ->
+        # Concept: a past compact failure is history, not this invocation's failure.
+        # Technical depth: retain only unsettled locally submitted identities and
+        # retire each on refusal/completion; replay never fabricates a run outcome.
+        owned = MapSet.member?(state.compact_commands, completion["command_id"])
+
+        state = %{
+          state
+          | compact_commands: MapSet.delete(state.compact_commands, completion["command_id"]),
+            last_compact: %{
+              episode_id: completion["episode_id"],
+              command_id: completion["command_id"],
+              result: completion["result"]
+            }
+        }
+
+        state =
+          if owned and completion["result"]["disposition"] == "failed",
+            do: %{state | exit_code: max(state.exit_code, 1)},
+            else: state
+
+        write_text(state, "Compaction result: " <> IO.iodata_to_binary(:json.encode(encoded)))
+
+      _ ->
+        fail(state, :invalid_terminal_event)
+    end
+  end
+
   defp project_event(state, _), do: state
 
+  defp write_text(state, text) do
+    with {:ok, rendered} <- Render.chat_text(text),
+         :ok <- ChatOutput.write(state.writer, :text, rendered),
+         do: state,
+         else: ({:error, code} -> fail(state, code))
+  catch
+    :exit, _ -> fail(state, :output_failed)
+  end
+
+  defp finish_inspection(%{pending: {:inspect_tail, fields, tail}, cursor: cursor} = state)
+       when cursor == tail do
+    fields = put_in(fields, [:maintenance, :last_compact], state.last_compact)
+
+    state
+    |> Map.put(:pending, nil)
+    |> checked_emit(
+      :status,
+      Map.merge(fields, %{input_sequence: state.sequence, session_id: state.session})
+    )
+    |> after_command()
+  end
+
+  defp finish_inspection(state), do: state
+
+  defp consume_inspection_event(%{pending: {:inspect_tail, _, _}} = state),
+    do: state |> consume_event() |> grant_event()
+
+  defp consume_inspection_event(%{pending: nil} = state),
+    do: state |> consume_event() |> grant_event()
+
+  defp consume_inspection_event(state), do: state
+
   defp grant_event(%{reaping: true} = state), do: state
+
+  defp grant_event(%{pending: :inspect_status} = state), do: state
+  defp grant_event(%{pending: {:compact_display, _, _}} = state), do: state
 
   defp grant_event(
          %{reader: pid, waiting_event: nil, reader_busy: false, finished: false} = state
@@ -1099,6 +1281,14 @@ defmodule LoopexCli.ChatDriver do
   end
 
   defp check_barrier(state), do: schedule(state)
+
+  defp begin_stop(%{pending: {:compact_display, _, cutoff}} = state) do
+    # Concept: cancellation before display has no compact command to resolve.
+    # Technical depth: retain the already selected ceiling in ordinary shutdown;
+    # clearing this local wait neither submits a command nor renews delivery time.
+    deadline = if state.output_deadline, do: min(cutoff, state.output_deadline), else: cutoff
+    begin_stop(%{state | pending: nil, output_deadline: deadline})
+  end
 
   defp begin_stop(%{stopping: true} = state), do: state
 

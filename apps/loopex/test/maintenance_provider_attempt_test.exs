@@ -470,6 +470,7 @@ defmodule Loopex.Runtime.MaintenanceProviderAttemptTest do
       worker: worker,
       permit_reference: make_ref(),
       journal_version: position,
+      attempt_open_version: Keyword.get(options, :attempt_open_version, position),
       deadline: Keyword.get(options, :deadline, System.system_time(:millisecond) + 60_000)
     }
 

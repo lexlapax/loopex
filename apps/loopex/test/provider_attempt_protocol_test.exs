@@ -766,6 +766,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
       worker: worker,
       permit_reference: make_ref(),
       journal_version: entry.journal_version,
+      attempt_open_version: entry.journal_version,
       deadline: System.system_time(:millisecond) + 60_000
     }
 
@@ -2562,6 +2563,20 @@ defmodule Loopex.ProviderAttemptProtocolTest do
              old_reference: attempt.permit_reference
            }) == {:error, :stale_attempt_open_position}
 
+    assert replay_retired_request(
+             attempt.control,
+             attempt.control_request,
+             %{
+               coordinator: attempt.coordinator,
+               owner: predecessor.owner,
+               old_coordinator: attempt.coordinator,
+               old_owner: predecessor.owner,
+               old_worker: attempt.worker,
+               old_reference: attempt.permit_reference
+             },
+             fresh_head: true
+           ) == {:error, :invalid_provider_attempt_binding}
+
     Process.exit(attempt.control, :kill)
     restarted = await_restarted_control(fixture.runtime, attempt.control)
 
@@ -2580,6 +2595,20 @@ defmodule Loopex.ProviderAttemptProtocolTest do
              old_worker: attempt.worker,
              old_reference: attempt.permit_reference
            }) == {:error, :stale_attempt_open_position}
+
+    assert replay_retired_request(
+             restarted,
+             attempt.control_request,
+             %{
+               coordinator: successor.coordinator,
+               owner: successor.owner,
+               old_coordinator: attempt.coordinator,
+               old_owner: predecessor.owner,
+               old_worker: attempt.worker,
+               old_reference: attempt.permit_reference
+             },
+             fresh_head: true
+           ) == {:error, :invalid_provider_attempt_binding}
 
     assert spent_attempt_bindings(restarted) == []
     assert length(AgentLoopTestModel.dispatched(fixture.model)) == 1
@@ -2649,6 +2678,169 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     {_declared, charged} = SessionState.accounting(recovered, settlement["run_id"])
     assert charged.tokens == 0
     assert charged.source == nil
+  end
+
+  # Concept: an admitted successor does not replace the predecessor's permit identity.
+  # Technical depth: the real Store cut queues follow-up before the open's next
+  # dispatch turn, retaining the old chat race instead of gating its input away.
+  test "a follow-up admitted after staging permits the original attempt before its successor" do
+    fixture =
+      start(
+        script: [
+          %{text: "first", calls: [], hold: self()},
+          %{text: "followed", calls: [], hold: self(), require_previous_worker_down: true}
+        ],
+        record_page_size_one: true
+      )
+
+    :ok =
+      M1RuntimeTestStore.hold_next_record_before_linearization(
+        fixture.store,
+        "model_attempt_opened_v1",
+        self()
+      )
+
+    {session_id, attachment, {:accepted, "prompt-1"}} = Fixture.run(fixture, "first prompt")
+
+    assert_receive {:record_held_before_linearization, waiter, _store, "model_attempt_opened_v1",
+                    transaction},
+                   5_000
+
+    coordinator = coordinator_of(fixture.runtime)
+
+    following =
+      Task.async(fn ->
+        Loopex.command(
+          attachment,
+          %{type: :follow_up, command_id: "between-open-and-permit", content: "next prompt"}
+        )
+      end)
+
+    try do
+      assert await_queued_command_id(coordinator, "between-open-and-permit")
+      M1RuntimeTestStore.release(waiter)
+      assert Task.await(following, 5_000) == {:accepted, "between-open-and-permit"}
+      assert_receive {:holding, first}, 5_000
+      first_monitor = Process.monitor(first)
+      records = Fixture.records(fixture, session_id)
+      [opened] = Enum.filter(records, &(record_kind(&1.payload) == "model_attempt_opened_v1"))
+      [followed] = Enum.filter(records, &(&1.payload["command_id"] == "between-open-and-permit"))
+      assert opened.journal_version < followed.journal_version
+      assert record_kind(List.last(records).payload) == "command_admitted"
+
+      assert Enum.map(transaction.records, &record_kind/1) == [
+               "model_request_committed_v2",
+               "model_attempt_opened_v1"
+             ]
+
+      assert [request] = AgentLoopTestModel.dispatched(fixture.model)
+      original_run = opened.payload["run_id"]
+
+      assert {:ok, %{active_run_id: ^original_run}} =
+               Loopex.session_status(fixture.runtime, session_id)
+
+      {:ok, recovered} =
+        SessionState.recover(session_id, records, Fixture.events(fixture, session_id))
+
+      assert recovered.pending_work[original_run].attempt_open_version == opened.journal_version
+      send(first, :release)
+      assert_receive {:DOWN, ^first_monitor, :process, ^first, :normal}, 5_000
+      assert_receive {:holding, second}, 5_000
+      second_monitor = Process.monitor(second)
+      assert await_event(attachment, "run.finished")["run_id"] == original_run
+      [^request, successor] = AgentLoopTestModel.dispatched(fixture.model)
+
+      assert {:ok, %{active_run_id: successor_run}} =
+               Loopex.session_status(fixture.runtime, session_id)
+
+      assert successor_run != original_run
+      assert List.last(successor.messages)["content"] == "next prompt"
+      send(second, :release)
+      assert_receive {:DOWN, ^second_monitor, :process, ^second, :normal}, 5_000
+      assert await_event(attachment, "run.finished")["outcome"] == "completed"
+
+      assert length(
+               records_of_kind(Fixture.records(fixture, session_id), "model_attempt_opened_v1")
+             ) == 2
+    after
+      M1RuntimeTestStore.release(waiter)
+      if Process.alive?(following.pid), do: Task.shutdown(following, :brutal_kill)
+    end
+  end
+
+  test "a proved pre-permit refusal stops the guard under its window before terminating the worker" do
+    fixture = start(script: [%{text: "retry only", calls: []}])
+    attempt = queue_provider_permit_request(fixture, "refusal cleanup ordering")
+    group = attempt.owner_group
+    {:ok, workers} = Loopex.Runtime.OwnerGroup.workers(group)
+    %{providers: providers} = :sys.get_state(group)
+
+    [{reference, provider}] =
+      Enum.filter(providers, fn {_ref, p} -> p.worker == attempt.worker end)
+
+    guard = provider.guard
+    worker = attempt.worker
+    guard_monitor = Process.monitor(guard)
+    worker_monitor = Process.monitor(worker)
+    coordinator = attempt.coordinator
+    :erlang.trace(coordinator, true, [:send, :receive])
+    suspend_process(coordinator)
+
+    try do
+      :ok = M1RuntimeTestStore.fail_reads(fixture.store, true)
+      resume_process(attempt.control)
+      {:"$gen_call", {_caller, reply_tag}, _request} = attempt.control_message
+      control = attempt.control
+
+      assert_receive {:trace, ^control, :send,
+                      {^reply_tag, {:error, :invalid_provider_attempt_binding}}, ^coordinator},
+                     5_000
+
+      refute_receive {:trace, ^control, :send, {:loopex_provider_permit, _ref, _binding},
+                      ^worker},
+                     0
+
+      :ok = M1RuntimeTestStore.fail_reads(fixture.store, false)
+      resume_process(coordinator)
+
+      assert_receive {:trace, ^coordinator, :send,
+                      {:"$gen_call", {_from, cleanup_tag},
+                       {:provider_cleanup, ^reference, window}}, ^group},
+                     5_000
+
+      assert_receive {:trace, ^coordinator, :receive, {^cleanup_tag, {:ok, ^window}}}, 5_000
+
+      assert_receive {:trace, ^coordinator, :send,
+                      {:loopex_provider_tree_stop, ^reference, stop, ^coordinator, ^window},
+                      ^guard},
+                     5_000
+
+      assert_receive {:trace, ^coordinator, :receive,
+                      {:loopex_provider_tree_stopped, ^stop, ^guard}},
+                     5_000
+
+      assert_receive {:DOWN, ^guard_monitor, :process, ^guard, :normal}, 5_000
+
+      assert_receive {:trace, ^coordinator, :send,
+                      {:"$gen_call", _from, {:terminate_child, ^worker}}, ^workers},
+                     5_000
+
+      assert_receive {:DOWN, ^worker_monitor, :process, ^worker, :shutdown}, 5_000
+      assert await_event(attempt.attachment, "run.finished")["outcome"] == "completed"
+      assert Process.alive?(group) and Process.alive?(coordinator)
+      assert length(AgentLoopTestModel.dispatched(fixture.model)) == 1
+
+      [settled | _] =
+        records_of_kind(Fixture.records(fixture, attempt.session_id), "model_attempt_settled_v3")
+
+      assert settled["transport"] == "not_dispatched"
+      assert settled["accounting"] == %{"source" => "none", "basis" => "not_dispatched"}
+    after
+      M1RuntimeTestStore.fail_reads(fixture.store, false)
+      resume_process(attempt.control)
+      resume_process(coordinator)
+      if Process.alive?(coordinator), do: :erlang.trace(coordinator, false, [:all])
+    end
   end
 
   test "an attempt-two retry settlement is refused at replay rather than opening a third attempt" do
@@ -4078,6 +4270,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     [request_record, opened] = transaction.records
     binding = Map.put(attempt_identity(opened), "session_id", session_id)
     coordinator = coordinator_of(fixture.runtime)
+    group = control_entry(control, session_id).owner_group
 
     suspend_process(control)
     M1RuntimeTestStore.release(waiter)
@@ -4104,6 +4297,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
       binding: binding,
       coordinator: coordinator,
       control: control,
+      owner_group: group,
       control_message: control_message,
       control_request: control_request,
       worker: worker,
@@ -4217,7 +4411,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     assert spent_attempt_bindings(control) == [binding]
   end
 
-  defp replay_retired_request(control, request, replacements) do
+  defp replay_retired_request(control, request, replacements, options \\ []) do
     observer = self()
 
     worker =
@@ -4235,6 +4429,17 @@ defmodule Loopex.ProviderAttemptProtocolTest do
       |> replace_exact(replacements.old_owner, replacements.owner)
       |> replace_exact(replacements.old_worker, worker)
       |> replace_exact(replacements.old_reference, make_ref())
+
+    replay =
+      if Keyword.get(options, :fresh_head, false) do
+        {:provider_dispatch, binding, authority} = replay
+        current = control_entry(control, binding["session_id"])
+
+        {:provider_dispatch, binding,
+         Map.put(authority, :journal_version, current.journal_version)}
+      else
+        replay
+      end
 
     reply_alias = :erlang.alias([:reply])
     send(control, {:"$gen_call", {replacements.coordinator, [:alias | reply_alias]}, replay})
@@ -6396,6 +6601,24 @@ defmodule Loopex.ProviderAttemptProtocolTest do
   # The abort is in the coordinator's mailbox once it is queued behind the commit
   # the coordinator is blocked in. Polling the queue is what makes the ordering a
   # fact rather than a sleep that a loaded machine can invalidate.
+  defp await_queued_command_id(coordinator, id, attempts \\ 1_000)
+  defp await_queued_command_id(_coordinator, _id, 0), do: false
+
+  defp await_queued_command_id(coordinator, id, attempts) do
+    {:messages, messages} = Process.info(coordinator, :messages)
+
+    if Enum.any?(messages, fn
+         {:"$gen_call", _from, {:command, _owner, %{command_id: ^id, type: :follow_up}}} -> true
+         _ -> false
+       end),
+       do: true,
+       else:
+         (
+           Process.sleep(5)
+           await_queued_command_id(coordinator, id, attempts - 1)
+         )
+  end
+
   defp await_queued_command(coordinator, attempts \\ 1_000)
   defp await_queued_command(_coordinator, 0), do: false
 
@@ -6772,6 +6995,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
       owner_incarnation_id: state.owner.owner_incarnation_id,
       coordinator: coordinator,
       journal_version: stamped_open.journal_version,
+      attempt_open_version: stamped_open.journal_version,
       worker: worker,
       deadline: deadline
     }
