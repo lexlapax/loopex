@@ -33,8 +33,25 @@ T06: two prompts, clean quit, restart by retained session identity after changin
 file defaults, and a third prompt using retained history and instructions.
 The ordinary built-process proof and required hosted/attended acceptance remain
 distinct. Do not add another restore workstream beyond the assigned claim-release
-correction. `neutral_revision_source_audit` owns a source-only design using
-existing build/configuration/provider edges, with no execution or source edits.
+correction. `authored_bounds_review` now owns the new
+`apps/loopex_cli/test/chat_built_workflow_test.exs` in the isolated
+`/private/tmp/loopex-m7-built-chat-workflow`, branch
+`codex/m7-built-chat-workflow`, based on `3c242017`. It uses existing
+ProviderIsolationFixture and compile-time ProviderLaunch binding with the
+original LoopexCli.main; no public endpoint field or driver injection.
+The concise source-only design is
+`/private/tmp/loopex-m7-built-chat-witness-design-20261006-v1.md`.
+Observe every provider child at its own settled barrier because fixture marker
+files are overwritten by the next call. Use one absolute process cutoff.
+Root alone commits, formats and runs the resulting test.
+
+The already assigned claim-release writer has stopped with four owned dirty
+paths at baseb837. Its sealed source report is
+`/private/tmp/loopex-m7-retained-claim-release-source-20261006-v1/report.md`,
+SHA `d306650468d2e99599c25979fc31fe475b04ff628b63736cd224fba88fe2d0dc`;
+index SHA `cf784fad406c3227d4d9ec4ff33b1e049e1b7c9ec051139081e859d7c244d8b3`.
+Nineteen prospective cases remain unrun. `neutral_revision_source_audit` reviews
+that existing correction only; no new restore workstream or proof claim.
 
 Latest finalization formatter original79544 is terminal and fully collected,
 FAIL after44.903 seconds. All three whole-file non-line AST comparisons passed;
