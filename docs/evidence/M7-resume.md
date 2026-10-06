@@ -183,6 +183,14 @@ The old 43-key and eight-key registries and both failed outputs remain unchanged
 Root grants current_index_cleanup the sole verification VM for one sequential
 current/floor run, new output `M7/m7-object-call-join-v1`. Original outer handle
 13676 is live; only that agent polls and collects it.
+Both early formatter checks passed without a source change: current 0.398 s,
+floor 0.371 s. Current dev/test compilation and all five gates passed. All
+eight current focused/adjacent lanes passed with zero skips: IO 106/2 in
+42.647 s, Model 28/0 in 27.430 s, Composition adjacent 21/0 in 4.721 s,
+Receipt 32/0 in 24.040 s, Ledger 23/0 in 2.203 s, ReadOnly 22/0 in 19.953 s,
+Local adjacent 21/0 in 19.205 s and Artifact 29/0 in 1.965 s. Ordinary
+Composition is running; remaining ordinary/long and floor suites are pending.
+The Darwin invalid-filename witness remains unavailable, not PASS.
 Both formatter checks precede compilation, gates and suites. Preserve all
 original statuses, raw EOF, source modes and exact process joins; stop at first
 failure, collect the original handle, then return the slot. Only the reviewed
@@ -191,7 +199,7 @@ No source repair, old-source retry, second VM, full-fast/provider/release,
 attended/Linux lane, primary rejoin or full restore claim is granted.
 
 
-CURRENT RESTORE WORKFLOW: CLI agent owns source-only implementation in isolated
+CURRENT RESTORE WORKFLOW: the source-only first transition is frozen in isolated
 `/private/tmp/loopex-m7-current-restore-workflow`, branch
 `codex/m7-current-restore-workflow`, base `8c9c4f92`. One deliverable is the first
 integrated available-source ordinal-1 path: complete current audit, copy to an
@@ -199,9 +207,42 @@ empty root, source retirement, fresh private Local generation, root commit last,
 claim release and guarded actual reopen, all under the original administrative
 owner and allowances. Private Workflow/Audit modules and narrow existing
 Composition/Resource/Local guard paths are owned; core, wire contracts, docs and
-other worktrees are excluded. Source is still being written, not frozen or
-runtime verified. Lost-source, repeated restores, full fault matrix and unfinished
+other worktrees are excluded. Frozen predecessor `cbe7698f` carries the artifact
+namespace blocker. Corrected clean child
+`32417023d94628769071c60ae10969b627f356a6` removes only the two incorrect object
+path components and adds actual-file deletion pre/postconditions. All ten source
+paths are released. No formatter, compiler or runtime proof exists for this
+workflow. Lost-source, repeated restores, full fault matrix and unfinished
 helper-ledger contracts remain required. The existing bounded T15 row stays open.
+
+Sibling `M7/current-restore-workflow-source-32417023-20261005-v2` retains writer
+report `f34fe4c68026e59f0a02288d2644efa48086878b8a269fdbdc32a315da45e39b`
+and inventory `6d0cc737a53e471007e623e01cd0c8dd6502326b4eb4801cedae340e9ac0a53b`.
+The supplied packet has actual 0644 modes; hashes identify its reviewed bytes.
+Root verified twelve writer artifacts, forty actual/Git/kind/mode sources, six
+external inputs, all 87 unchanged old test files, four independent artifacts
+and sixty independent hashed inputs. Independent correction/six-case report
+`d515bf1968480e19f7fca6173e604fb531c6f493325164b1df7c4acae3e9c4f2` is in
+`M7/current-restore-workflow-324-independent-review-20261005-v1`.
+
+Independent IO review found a separate pre-intent cleanup blocker: a second
+claim-acquisition IO failure loses the positively acquired first claim from
+the worker payload, so joined unchanged-root cleanup never releases it.
+Root accepted that finding and assigned CLI a separate source-only correction
+from frozen `32417023`, owning only Workflow, IO and the workflow test in
+`codex/m7-restore-preintent-cleanup`. Preserve original owners/cutoffs, release
+only proved ownership and retain partial/unproved or foreign claims. A released
+subset must not be reported as zero remaining claims. No VM or source rejoin
+is granted. Private agent continues read-only IO/guard review; it owns no source.
+
+Root's five immutable audit files are in
+`M7/current-restore-workflow-root-source-audit-20261005-v1`, report
+`6130bb2abb26569e8f69cbe848a96c5aaf22d245663477784bf2c442b94c42d4`, inventory
+`86c04c5e70ec5c4b29db8aaf7788b96513c551ccf051f0273930e36b8be096d0`.
+One new open T15 cleanup subtask is tracked. T01–T19 originals remain
+78 done / 95 todo / 6 retired; added subtasks are 299 done / 25 todo.
+Including T00, originals are 78 / 101 / 7 and added subtasks 303 / 26.
+T15 added is 17 / 9; T16 added is 53 / 6. No checkbox closes from this review.
 
 Root verified the complete gap inventory's three artifacts and thirty pinned
 Git records. Sibling

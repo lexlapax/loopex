@@ -69,15 +69,25 @@ Root and independent source/runner reviews found no blocker. Root verified
 shared functions and the independent review's 370 hashed inputs. A separate
 220-artifact enabled packet and fresh object-call registry now grant the sole
 verification VM to current-index agent for one current/floor run. Original
-outer handle 13676 is live and polled/collected only by that agent; results
-remain pending. Both formats
+outer handle 13676 is live and polled/collected only by that agent. Both early
+formatter checks passed without changing source; current compilation and all
+five gates passed. All eight current focused/adjacent lanes passed with zero
+skips, including IO 106/2. Ordinary Composition is running; the remaining
+ordinary/long and floor suites are pending. Both formats
 precede compilation/tests and first failure stops the run. Expected IO 106/2,
 Composition 677/3 and long 2/106 stay unchanged; no checkbox closes. No old-source
 retry or primary rejoin is authorized.
-CLI agent implements the first integrated available-source restore workflow in
-isolated `codex/m7-current-restore-workflow`, using existing open bounded T15
-work. The required full audit, source retirement, destination generation/root
-commit and guarded real reopen are being written, not verified. Lost-source,
+The first integrated available-source restore workflow is frozen in isolated
+`codex/m7-current-restore-workflow` at corrected child `32417023`, using existing
+open bounded T15 work. The artifact-path blocker is resolved in source; root
+verified the twelve writer artifacts, forty exact source inputs, six references,
+87 unchanged old test files and independent correction/six-case report. No
+formatter, compiler or test ran on this workflow. Independent IO review found
+a separate cleanup defect: a second claim IO failure drops the known first
+claim from terminal cleanup despite unchanged roots and absent intent. CLI
+owns a separate source-only correction in `codex/m7-restore-preintent-cleanup`;
+the original claims, cutoffs and foreign/uncertain ownership must be preserved.
+One added T15 cleanup row is open; no checkbox closes. Lost-source,
 repeated restore, fault/cleanup and helper-ledger proofs remain required.
 Root retained the source gap inventory and ordinary-guard authority review.
 The guard preserves existing synchronous ownership and the original claim
@@ -89,8 +99,8 @@ setup-only cutoff. No other bound or pending ADR is accepted by that reply.
 [The restart record](M7-resume.md#technical-depth) retains exact source, output,
 review, mode and SHA-256 pointers. No checkbox changes from source-only review
 or current-only passes. T01–T19 originals are 78 done / 95 todo / 6 retired;
-added subtasks are 299 done / 24 todo. Including T00, originals are
-78 / 101 / 7 and added subtasks are 303 / 25. T15 added is 17 / 8;
+added subtasks are 299 done / 25 todo. Including T00, originals are
+78 / 101 / 7 and added subtasks are 303 / 26. T15 added is 17 / 9;
 T16 added is 53 / 6. The following paragraphs retain historical checkpoints.
 
 Artifact source/evidence is pushed at `87be37e7`; its clean merged worktree and
@@ -13366,6 +13376,7 @@ open.
 
 ### Added implementation subtasks
 
+- [ ] Preserve positively acquired restore claims through pre-intent IO failures and release them with the original joined terminal owner/cutoffs when neither state root changed; retain partial/unproved or foreign claims and truthful remaining-claim accounting. Prove actual second-claim failure, known first-claim removal and partial-publication fencing on both supported pairs without changing the six existing workflow cases or bounds.
 - [ ] Audit one selected current Local artifact object through the existing owned streaming hash, binding the locator-derived physical path to the reference digest/size, complete captured manifest and descriptor/ancestor identities under original total/work/cleanup bounds. Preserve current direct-fetch locator semantics, writer-only limits and all orphan/staging bytes; prove actual writer and physical refusal cases on both pairs. Complete object enumeration, history relations and restore activation remain separate.
 - [ ] Capture one selected current artifact-use sidecar through the existing guardian-owned restore IO worker and real captured Local/Core describe facade; require exact reference-derived pathname, physical manifest membership, current raw ceiling, hash/mode/link/ancestor identity and close-before-semantics under original cutoffs. Prove actual writers and physical/semantic refusals on both pairs; object bytes, complete namespace/orphans and history/restore relations remain separate.
 - [ ] Extract one private captured-byte Local receipt decoder shared with live reads; preserve the native current 28-field ETF schema, 65,536-byte cap, exact raw job binding, closed predicates and all claim/finality/job/recovery authority. Replace the injected decoder seam with actual bounded BIF proof and actual writer/hostile controls on both supported pairs; physical receipt capture and complete history audit remain separate.
