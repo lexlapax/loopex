@@ -547,8 +547,12 @@ defmodule Loopex.ModelConfigurationPreparationTest do
       startup_install_trace(session, owner, group, workers)
 
       enabled =
-        Keyword.update!(filters, :logger_translator, fn {callback, config} ->
-          {callback, %{config | sasl: true}}
+        Enum.map(filters, fn
+          {:logger_translator, {callback, config}} ->
+            {:logger_translator, {callback, %{config | sasl: true}}}
+
+          entry ->
+            entry
         end)
 
       :ok = :logger.set_primary_config(:filters, enabled)
