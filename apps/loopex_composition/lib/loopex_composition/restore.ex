@@ -3,7 +3,7 @@ defmodule LoopexComposition.Restore do
   ## Concept
 
   Private development entry for current physical restore transitions, with an
-  available or lost source. ADR 0051's public restore and lookup remain unfinished.
+  available or lost source, and bounded public read-only transaction lookup.
 
   ## Technical depth
 
@@ -17,6 +17,43 @@ defmodule LoopexComposition.Restore do
 
   alias Loopex.Executor.Local.RestoreCodec
   alias LoopexComposition.Restore.IO, as: RestoreIO
+
+  @doc """
+  ## Concept
+
+  Read retained restore completion or uncertainty without granting authority.
+
+  ## Technical depth
+
+  ADR 0051 fixes current/historical receipts, pending observations and present
+  absence. One monitored raw-IO invocation owns the reads and original explicit
+  work/cleanup limits. Lookup never writes, reclaims, continues or activates.
+  """
+  @spec lookup(binary(), binary(), map()) ::
+          {:committed, map()} | {:pending, map()} | {:absent, map()} | {:error, map()}
+  def lookup(root, tx_id, limits) do
+    valid_tx = is_binary(tx_id) and Regex.match?(~r/\A[0-9a-f]{64}\z/, tx_id)
+
+    if valid_lookup_root?(root) and valid_tx and match?({:ok, _}, RestoreCodec.limits(limits)) do
+      case RestoreIO.run({:restore_lookup, root, tx_id}, limits) do
+        {:joined, {:ok, result}, _evidence} -> result
+        {:joined, {:error, :deadline}, _evidence} -> lookup_error(tx_id, "deadline", "joined")
+        {:joined, {:error, _}, _evidence} -> lookup_error(tx_id, "administrative_path_unavailable", "joined")
+        {:unconfirmed, _reason} -> lookup_error(tx_id, "cleanup_unconfirmed", "unconfirmed")
+        _ -> lookup_error(tx_id, "cleanup_unconfirmed", "unconfirmed")
+      end
+    else
+      lookup_error(if(valid_tx, do: tx_id, else: nil), "invalid_query", "joined")
+    end
+  end
+
+  defp valid_lookup_root?(root),
+    do: is_binary(root) and byte_size(root) in 1..8192 and String.valid?(root) and
+      not String.contains?(root, <<0>>) and Path.type(root) == :absolute and Path.expand(root) == root
+
+  defp lookup_error(tx_id, code, cleanup),
+    do: {:error, %{"kind" => "loopex_current_restore_lookup_refusal_v1", "tx_id" => tx_id,
+      "code" => code, "cleanup" => cleanup}}
 
   @doc false
   def first(plan, invocation, options \\ []) do
