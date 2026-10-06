@@ -18,7 +18,7 @@ defmodule LoopexComposition.Restore.IO do
 
   This private prerequisite exposes bounded reads, complete physical manifests,
   durable record publication, complete declared-Store semantic auditing and one
-  canonical retained Resource record audit to composition only. Validated maps
+  canonical retained Resource or Local ledger record audit to composition only. Validated maps
   and recovered session facts remain private; the
   operation grants no effect authority and does not validate other backup
   formats or activate a restored root. Host exclusion remains the caller's
@@ -31,7 +31,7 @@ defmodule LoopexComposition.Restore.IO do
   require Record
   Record.defrecordp(:file_info, Record.extract(:file_info, from_lib: "kernel/include/file.hrl"))
 
-  alias Loopex.Executor.Local.RestoreCodec
+  alias Loopex.Executor.Local.{Ledger, RestoreCodec}
   alias Loopex.Runtime.SessionState
   alias Loopex.Store.Local.{Log, State}
   alias LoopexComposition.ResourcePacks
@@ -41,6 +41,8 @@ defmodule LoopexComposition.Restore.IO do
   @max_read 268_435_456
   @max_resource_manifest 72_081_510
   @max_resource_provenance 1_126_241
+  @max_ledger_generation 2_048
+  @max_ledger_record 65_536
   @max_entries 65_536
   @max_manifest 4_194_304
   @max_uint64 18_446_744_073_709_551_615
@@ -489,69 +491,57 @@ defmodule LoopexComposition.Restore.IO do
       {directory, ceiling} = resource_role(kind)
       relative = Path.join(["resource-packs", directory, identity <> ".etf"])
       index = Map.new(entries, &{&1["path"], &1})
-      entry = Map.get(index, relative)
 
-      if not match?(%{"kind" => "regular"}, entry) or entry["size"] > ceiling,
-        do: throw({:io_error, :inventory_mismatch})
-
-      ancestors = manifest_ancestors(root)
-      directories = audit_directories(root, Path.dirname(relative), index)
-      path = Path.join(root, relative)
-      before = manifest_stat(path)
-      require_audit_file(before, entry)
-      descriptor = open(path, [:raw, :binary, :read])
-
-      opened =
-        require_value(
-          primitive(:descriptor_stat, fn -> :prim_file.read_handle_info(descriptor) end)
-        )
-
-      require_same_identity(before, opened)
-
-      {bytes, context} =
-        read_resource_chunks(descriptor, entry["size"], [], :crypto.hash_init(:sha256))
-
-      after_read =
-        require_value(
-          primitive(:descriptor_stat, fn -> :prim_file.read_handle_info(descriptor) end)
-        )
-
-      require_same_identity(before, after_read)
-      require_same_identity(before, manifest_stat(path))
-      close(descriptor)
-
-      digest =
-        primitive(:resource_digest, fn ->
-          :crypto.hash_final(context) |> Base.encode16(case: :lower)
-        end)
-
-      if byte_size(bytes) != entry["size"] or digest != entry["sha256"],
-        do: throw({:io_error, :inventory_mismatch})
-
-      result =
-        case primitive(:resource_decode, fn ->
-               case kind do
-                 :manifest -> ResourcePacks.decode_retained_manifest(bytes, identity)
-                 :provenance -> ResourcePacks.decode_retained_provenance(bytes, identity)
-               end
-             end) do
-          {:ok, record} -> {:ok, record}
-          _ -> {:error, :history_invalid}
+      audit_captured_record(
+        root,
+        relative,
+        index,
+        ceiling,
+        :resource_digest,
+        :resource_decode,
+        fn bytes ->
+          case kind do
+            :manifest -> ResourcePacks.decode_retained_manifest(bytes, identity)
+            :provenance -> ResourcePacks.decode_retained_provenance(bytes, identity)
+          end
         end
+      )
+    else
+      _ -> {:error, :history_invalid}
+    end
+  end
 
-      require_same_identity(before, manifest_stat(path))
+  defp execute({:audit_ledger, root, declaration, role, job_id, manifest}) do
+    # Concept: retained ledger metadata is evidence without live root authority.
+    # Technical depth: the exact role fixes both canonical path and pre-open cap.
+    # Source placement authenticates the retained generation, not the backup's
+    # current inode; complete ledger, receipt and job-history relations stay separate.
+    with {:ok, _} <-
+           primitive(:ledger_declaration, fn ->
+             RestoreCodec.encode(:ledger_descriptor, declaration)
+           end),
+         {:ok, entries} <-
+           primitive(:ledger_manifest, fn -> RestoreCodec.manifest(manifest, @max_uint64) end) do
+      {suffix, ceiling, kind} = ledger_role(role, job_id)
+      relative = Path.join(declaration["relative_root"], suffix)
+      index = Map.new(entries, &{&1["path"], &1})
 
-      Enum.each(directories, fn {directory, observed} ->
-        if manifest_identity(manifest_stat(directory)) != observed,
-          do: throw({:io_error, :source_changed})
-      end)
-
-      Enum.each(ancestors, fn {ancestor, observed} ->
-        if directory_identity(manifest_stat(ancestor)) != observed,
-          do: throw({:io_error, :source_changed})
-      end)
-
-      result
+      audit_captured_record(
+        root,
+        relative,
+        index,
+        ceiling,
+        :ledger_digest,
+        :ledger_decode,
+        fn bytes ->
+          with {:ok, record} <- Ledger.decode_bytes(bytes, kind),
+               true <- ledger_relations?(record, bytes, declaration, role, job_id) do
+            {:ok, record}
+          else
+            _ -> {:error, :history_invalid}
+          end
+        end
+      )
     else
       _ -> {:error, :history_invalid}
     end
@@ -596,6 +586,101 @@ defmodule LoopexComposition.Restore.IO do
 
   defp resource_role(:manifest), do: {"manifests", @max_resource_manifest}
   defp resource_role(:provenance), do: {"provenance", @max_resource_provenance}
+
+  defp ledger_role(:generation, nil),
+    do: {"generation", @max_ledger_generation, "local_executor_generation_v1"}
+
+  defp ledger_role(:admission, job_id),
+    do:
+      {Path.join("markers", RestoreCodec.digest_bytes(job_id)), @max_ledger_record,
+       "local_effect_admission_v1"}
+
+  defp ledger_role(:refusal, job_id),
+    do:
+      {Path.join("markers", RestoreCodec.digest_bytes(job_id)), @max_ledger_record,
+       "local_pre_effect_refusal_v1"}
+
+  defp ledger_role(:open, job_id),
+    do:
+      {Path.join("open", RestoreCodec.digest_bytes(job_id)), @max_ledger_record,
+       "local_open_effect_v1"}
+
+  defp ledger_relations?(record, bytes, declaration, :generation, nil) do
+    {:ok, binding} = RestoreCodec.ledger_binding(declaration["source_placement"])
+
+    RestoreCodec.digest_bytes(bytes) == declaration["source_generation_sha256"] and
+      record["executor_identity"] == declaration["executor_identity"] and
+      record["root_binding"] == binding
+  end
+
+  defp ledger_relations?(record, _bytes, declaration, role, job_id),
+    do:
+      record["job_id"] == job_id and
+        (role != :open or record["executor_identity"] == declaration["executor_identity"])
+
+  # Concept: Resource and ledger audits share one owned physical capture.
+  # Technical depth: exact inventory membership and role size precede open;
+  # decoding follows explicit close, then file and ancestor identities are checked.
+  defp audit_captured_record(root, relative, index, ceiling, digest_kind, decode_kind, decode) do
+    entry = Map.get(index, relative)
+
+    if not match?(%{"kind" => "regular"}, entry) or entry["size"] > ceiling,
+      do: throw({:io_error, :inventory_mismatch})
+
+    ancestors = manifest_ancestors(root)
+    directories = audit_directories(root, Path.dirname(relative), index)
+    path = Path.join(root, relative)
+    before = manifest_stat(path)
+    require_audit_file(before, entry)
+    descriptor = open(path, [:raw, :binary, :read])
+
+    opened =
+      require_value(
+        primitive(:descriptor_stat, fn -> :prim_file.read_handle_info(descriptor) end)
+      )
+
+    require_same_identity(before, opened)
+
+    {bytes, context} =
+      read_captured_chunks(descriptor, entry["size"], [], :crypto.hash_init(:sha256))
+
+    after_read =
+      require_value(
+        primitive(:descriptor_stat, fn -> :prim_file.read_handle_info(descriptor) end)
+      )
+
+    require_same_identity(before, after_read)
+    require_same_identity(before, manifest_stat(path))
+    close(descriptor)
+
+    digest =
+      primitive(digest_kind, fn ->
+        :crypto.hash_final(context) |> Base.encode16(case: :lower)
+      end)
+
+    if byte_size(bytes) != entry["size"] or digest != entry["sha256"],
+      do: throw({:io_error, :inventory_mismatch})
+
+    result =
+      case primitive(decode_kind, fn -> decode.(bytes) end) do
+        {:ok, record} -> {:ok, record}
+        _ -> {:error, :history_invalid}
+      end
+
+    require_same_identity(before, manifest_stat(path))
+
+    Enum.each(directories, fn {directory, observed} ->
+      if manifest_identity(manifest_stat(directory)) != observed,
+        do: throw({:io_error, :source_changed})
+    end)
+
+    Enum.each(ancestors, fn {ancestor, observed} ->
+      if directory_identity(manifest_stat(ancestor)) != observed,
+        do: throw({:io_error, :source_changed})
+    end)
+
+    result
+  end
 
   defp audit_store_bytes(bytes) do
     with {:ok, frames, :complete} <- primitive(:store_decode, fn -> Log.decode_bytes(bytes) end),
@@ -848,13 +933,13 @@ defmodule LoopexComposition.Restore.IO do
     end
   end
 
-  defp read_resource_chunks(descriptor, remaining, chunks, context) do
+  defp read_captured_chunks(descriptor, remaining, chunks, context) do
     case primitive(:read, fn -> :prim_file.read(descriptor, min(@chunk, remaining + 1)) end) do
       :eof ->
         {chunks |> Enum.reverse() |> IO.iodata_to_binary(), context}
 
       {:ok, bytes} when byte_size(bytes) > 0 and byte_size(bytes) <= remaining ->
-        read_resource_chunks(
+        read_captured_chunks(
           descriptor,
           remaining - byte_size(bytes),
           [bytes | chunks],
@@ -1000,6 +1085,14 @@ defmodule LoopexComposition.Restore.IO do
     do:
       valid_path?(root) and kind in [:manifest, :provenance] and is_binary(identity) and
         byte_size(identity) == 64 and Regex.match?(~r/\A[0-9a-f]{64}\z/, identity) and
+        is_binary(manifest) and byte_size(manifest) <= @max_manifest
+
+  defp valid_operation?({:audit_ledger, root, declaration, role, job_id, manifest}),
+    do:
+      valid_path?(root) and is_map(declaration) and
+        ((role == :generation and is_nil(job_id)) or
+           (role in [:admission, :refusal, :open] and is_binary(job_id) and
+              byte_size(job_id) in 1..8192)) and
         is_binary(manifest) and byte_size(manifest) <= @max_manifest
 
   defp valid_operation?({:manifest, root, max_total}),
