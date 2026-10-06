@@ -28,25 +28,55 @@ physical restore implementation; it does not waive any full-history proof.
 ### Current work and restart order
 
 Continue the existing ACTIVE unlimited goal on `m7`. Do not create another goal.
-Primary previous pushed checkpoint is `cfa66fda`; this commit supersedes its
-resume record. Historical detail remains at
-`bdc88a05:docs/evidence/M7-resume.md` and in the task ledger.
+Primary preceding pushed checkpoint is `349f8207`; this commit rejoins the
+literal tested restore unit and supersedes its resume record. Historical detail
+remains at `bdc88a05:docs/evidence/M7-resume.md` and in the task ledger.
 
-Root verification VM is BUSY with original restore native handle18936 at
-`4b7c9249248ffebbadf30d40aed1a2d004bbf40c`. Enabled
-`M7/generation-prefix-native-runner-20261006-v1`, config
-`509fe343576cf03e0cc2103800b945e72c1e55dd35f2662c5591293cca174d95`,
-root review2ef2101c. Independent report7e91543d/index57368ee6 has63 rehashed rows;
-root read full report/operative delta,120 author artifacts,36 external inputs,
-59 actual/Git source facts and both collected4b7 formatter receipts. Latest795
-union reconciled.22 stages,147cases/pair294both, seven full files, zero exclusions
-or skips; both final-format keys are consumed, never repeated. Output
-`M7/m7-generation-prefix-native-v1`; collector
-`/private/tmp/m7-collect-generation-prefix-native-v1.py` arguments original
-handle, actual outer exit, seed795. Collect18936 once; no next product VM until
-all original output/EOF/wait/group/source/registry facts are collected. A failure
-requires a failure collector preserving its real status; the prepared collector
-accepts PASS only. Never repoll terminal handles. No task row closes yet.
+Restore original18936 is fully collected PASS_FOCUSED_RETAINED_GENERATION_ONLY
+333.057s at `4b7c9249248ffebbadf30d40aed1a2d004bbf40c`:147cases per pair294both,
+zero exclusions/skips,22 original stages/joins,98 artifacts,59 actual/Git rows.
+Collection `M7/generation-prefix-native-original-collection-20261006-v1.json`,
+SHA `5209bb64e79ce8f766fc4932634fc1cd9642285d18de36042f4aa47e0ba327bb`;
+report `deb84e4d5cda8d3bc2bcfcd6255a219f71f19e66639bae43ff94afdb3fa408d2`,
+inventory `abec06f37f84c324e57c92b45b6d17da6dc9dcc8e950961bd006df05e8719243`.
+Registry817 `M7/generation-prefix-native-v1-stage-attempt-registry.json`, SHA
+`f5ee2fb72dd93957a2410234ad7259ac7275f44479bc8e669382342367bf124f`.
+Never repoll18936 or replay its stages. Root read full production delta and
+rehashed166-row eligibility plus55-row divergence addendum; exact historical
+whole-file AST evidence connects retained retirement6219 and primary bytes.
+Root copied the exact tested5-path unit (4writes/1already literal), preserving
+1,120 primary unowned entries. Join report
+`M7/generation-prefix-primary-literal-rejoin-20261006-v1/report.json`, SHA
+`8dd9498a6e596f925e925633907f6695362bffe6b75d3892c68ba344e4b73940`.
+The two T15 added installation/prefix rows close. Public restore/proof completion,
+receipt/release, helper audit, long/full integration/release remain open.
+
+Root verification VM is BUSY original boundary native handle79496 at clean
+`5b46a72c6bb04e9b53e01cdb66c12a18590ae5da` in
+`/private/tmp/loopex-m7-current-boundary-rejoin`. Enabled
+`M7/current-boundary-native-runner-20261006-v1`, config
+`b296d2d6cefea10623be1ffcb97e526689a87eb2a2f5291b8e15149ba28fbe31`,
+root review7fc05e5d. Independent source report4a5d16c6/indexbcc4d22b60rows;
+separate Core carry1d7a2be6/indexdda1724a82rows. Root read full reports/source/
+formatter validation/closed gates and rehashed200 author rows/28 external inputs/
+133 actual/Git facts. Latest817 union reconciled;18 fresh stages,420cases per
+pair840both. Core318, Protocol28/ex7 plusNode7/ex28 SAME6files, foreground36,
+daemon31; no skips/other exclusions. Both formatter86465 keys consumed, no replay
+or source child. Output `M7/m7-current-boundary-native-v1`. Collect79496 once and
+reconcile the whole final union before another product VM. No boundary native
+PASS, task closure or literal primary join is inferred yet. Draft collector
+`/private/tmp/m7-collect-current-boundary-native-v1.py` awaits root source review.
+
+Next restore source inventory
+`/private/tmp/loopex-m7-public-restore-next-source-20261006-v1`, report4459a1bf/
+index5a9c3f6e8rows, selects retained destination proofs/root commit last, original
+claim release and derived receipt under accepted0051. Existing decoder/fixture
+repairs are already primary ancestors; do not duplicate them. Independent full
+public helper audit remains Proposed0056 scope. Authored-bounds agent now maps
+configure activation after dormant ingress proof; restore-source reviewer drafts
+unexecuted boundary collector. All agents remain source-only until an explicit
+owned isolated implementation assignment. ADR0054 is the sole asked pending
+question; do not infer approval or implement its dependent progress stream.
 
 Boundary original86465 is fully collected PASS_FORMAT_PREPARATION_ONLY56.325s
 at unchanged5b46a72c6bb04e9b53e01cdb66c12a18590ae5da. All46 ASTs, both supported
@@ -55,11 +85,9 @@ Collection `M7/current-boundary-reformat-original-collection-20261006-v1.json`,
 SHA `c40ac442523e2987aaed899657f89f5cb036bb1139d24a71703419845b078a13`;
 report `064c4e5775068d03a087e1f42b05a80e6977b93b9ce3bd94f696c3d624bf09fa`,
 inventory `8960c52b3f4e6e072c4f189dada7a63afdd777dc67d26ff8165910295a5fffc5`.
-Never repoll86465. Its native proof must consume both final-format keys. Prior
-93428 remains failed. `private_task_causal_resume` finishes disabled420/pair native
-packet with this exact receipt; `restore_prefix_source_audit` reviews it separately.
-`authored_bounds_review` inventories primary/boundary/generation literal join
-eligibility only; root owns any join after proof. All agents are source-only.
+Never repoll86465. Current native79496 consumes both final-format keys. Prior
+93428 remains failed. The source review and enabled packet above supersede the
+earlier preparation state.
 
 Historical prefix proof: Prefix formatter original75543 is fully collected
 PASS_FORMAT_PREPARATION_ONLY60.687s at clean

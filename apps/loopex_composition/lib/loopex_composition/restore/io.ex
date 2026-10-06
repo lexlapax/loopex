@@ -26,7 +26,8 @@ defmodule LoopexComposition.Restore.IO do
   copy/publication and terminal
   claim release without replacing the original guardian or deadlines. A private
   retained continuation reuses original candidates/intent and checked claim
-  custody through source retirement only, without candidate activation or release. Public
+  custody through source retirement and optional exact retained generation installation,
+  without committed proofs, receipts or release. Public
   restore/lookup and the remaining accepted variants are unfinished. Validated
   maps and recovered facts remain private; standalone audit operations grant no
   effect authority and do not activate a restored root. Host exclusion remains the caller's
@@ -675,7 +676,8 @@ defmodule LoopexComposition.Restore.IO do
               when kind in [
                      :restore_pending_intake,
                      :restore_retained_claim_handoff,
-                     :restore_retained_source_retirement
+                     :restore_retained_source_retirement,
+                     :restore_retained_generation_install
                    ],
               operation
             ),
@@ -685,7 +687,8 @@ defmodule LoopexComposition.Restore.IO do
               when kind in [
                      :restore_pending_intake,
                      :restore_retained_claim_handoff,
-                     :restore_retained_source_retirement
+                     :restore_retained_source_retirement,
+                     :restore_retained_generation_install
                    ],
               operation
             ),
@@ -700,7 +703,8 @@ defmodule LoopexComposition.Restore.IO do
               :restore_first,
               :restore_pending_intake,
               :restore_retained_claim_handoff,
-              :restore_retained_source_retirement
+              :restore_retained_source_retirement,
+              :restore_retained_generation_install
             ] do
     %{
       "kind" => "loopex_current_restore_observation_v1",
@@ -890,10 +894,69 @@ defmodule LoopexComposition.Restore.IO do
     LoopexComposition.Restore.Workflow.retained_source_retirement(plan, invocation, &execute/1)
   end
 
+  defp execute({:restore_retained_generation_install, plan, invocation} = operation) do
+    if not valid_operation?(operation), do: throw({:io_error, :invalid_io_request})
+    LoopexComposition.Restore.Workflow.retained_generation_install(plan, invocation, &execute/1)
+  end
+
+  defp execute({:restore_generation_step, relative}) do
+    if not is_binary(relative) or byte_size(relative) not in 1..8192,
+      do: throw({:io_error, :invalid_io_request})
+
+    primitive({:restore_generation_step, relative}, fn -> :ok end)
+    {:ok, :step}
+  end
+
+  # Concept: a candidate temporary names the original retained restore ordinal.
+  # Technical depth: admission reuses generation's existing cap/mode/byte domain;
+  # the workflow supplies checked custody and retirement. The exact named raw
+  # publication shares one worker, individual permits and unchanged cutoffs.
+  defp execute({:restore_generation_install, path, bytes, mode, original, ordinal}) do
+    if not valid_operation?({:restore_publish, :generation, path, bytes, mode, original}) or
+         not is_integer(ordinal) or ordinal not in 1..64 or not is_binary(original),
+       do: throw({:io_error, :invalid_io_request})
+
+    temp = path <> ".restore-" <> String.pad_leading(Integer.to_string(ordinal), 8, "0") <> ".tmp"
+    if not valid_path?(temp), do: throw({:io_error, :invalid_io_request})
+
+    retained_publish_named(
+      path,
+      temp,
+      bytes,
+      mode,
+      original,
+      retained_publication_cap(:generation),
+      nil
+    )
+  end
+
   # Concept: every retirement publication retains the original live claim custody.
   # Technical depth: only the private workflow reaches this callback. Exact owner
   # bytes/inode, directory identity and captured ancestors must still match; no
   # claim mutation, reacquisition, release or new IO owner is created here.
+  # Concept: before handoff, native generation bytes must be exact retained facts.
+  # Technical depth: final and original-ordinal staging are capped before open,
+  # coupled to descriptor/path/ancestors and explicitly closed. This capture
+  # grants no authority and performs no repair, sync or publication.
+  defp execute({:restore_generation_capture, path, original, candidate, mode, ordinal}) do
+    if not valid_operation?({:restore_publish, :generation, path, candidate, mode, original}) or
+         not is_binary(original) or not is_integer(ordinal) or ordinal not in 1..64,
+       do: throw({:io_error, :invalid_io_request})
+
+    temp = path <> ".restore-" <> String.pad_leading(Integer.to_string(ordinal), 8, "0") <> ".tmp"
+    if not valid_path?(temp), do: throw({:io_error, :invalid_io_request})
+    ancestors = retained_publication_ancestors(Path.dirname(path))
+    current = retained_publication_file(path, @max_ledger_generation, mode)
+    temporary = retained_publication_file(temp, @max_ledger_generation, mode)
+
+    if current == :absent or current.bytes not in [original, candidate] or
+         (temporary != :absent and temporary.bytes != candidate),
+       do: throw({:io_error, :invalid_retained_file})
+
+    retained_publication_namespace!(ancestors, [{path, current}, {temp, temporary}])
+    {:ok, %{current: current.bytes, temporary: temporary != :absent}}
+  end
+
   defp execute({:restore_retirement_claim_check, claims, plan}) do
     expected_count = if plan["source_status"] == "available", do: 2, else: 1
 
@@ -2560,9 +2623,14 @@ defmodule LoopexComposition.Restore.IO do
   # Concept: claim nonce publication shares the checked native publication path.
   # Technical depth: its private cap is 2048 bytes, while existing record roles retain
   # their original ceilings. This helper grants no claim or mutation authority.
-  defp retained_publish(path, bytes, mode, expected, cap, custody \\ nil) do
-    temp = path <> ".tmp"
+  defp retained_publish(path, bytes, mode, expected, cap, custody \\ nil),
+    do: retained_publish_named(path, path <> ".tmp", bytes, mode, expected, cap, custody)
 
+  # Concept: claim/record and ordinal-bound generation publication share the
+  # same native identity, sync, close, rename and readback proof.
+  # Technical depth: only the callers choose an exact checked sibling temporary;
+  # this extraction changes no generic/default named publication behavior.
+  defp retained_publish_named(path, temp, bytes, mode, expected, cap, custody) do
     ancestors =
       if custody, do: custody.ancestors, else: retained_publication_ancestors(Path.dirname(path))
 
@@ -2989,6 +3057,9 @@ defmodule LoopexComposition.Restore.IO do
         invocation["prior_admin_authority"] in ["joined", "host_rebooted"]
 
   defp valid_operation?({:restore_retained_source_retirement, plan, invocation}),
+    do: valid_operation?({:restore_retained_claim_handoff, plan, invocation})
+
+  defp valid_operation?({:restore_retained_generation_install, plan, invocation}),
     do: valid_operation?({:restore_retained_claim_handoff, plan, invocation})
 
   defp valid_operation?({:audit_restore_lineage, root, plan, manifest}),

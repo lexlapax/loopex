@@ -1,5 +1,20 @@
 # M7 Implementation Tasks
 
+Restore original18936 fully collected PASS333.057s at4b7c9249:147 cases per
+pair294 both,22 stages/joins,98 retained artifacts,59 actual/Git source facts,
+zero exclusions/skips. Root reviewed the production delta and historical whole-file
+retirement AST bridge, then copied the exact tested five-path unit (four writes,
+one already literal), preserving1,120 primary unowned entries. Two T15 added
+generation-install/prefix rows close; public restore/proofs/receipt/release stay
+open. Original T01–T19 remains78 done/95 todo/6 retired; added302 done/37 todo.
+Collection M7/generation-prefix-native-original-collection-20261006-v1.json
+SHA5209bb64e79ce8f766fc4932634fc1cd9642285d18de36042f4aa47e0ba327bb;
+join M7/generation-prefix-primary-literal-rejoin-20261006-v1/report.json
+SHA8dd9498a6e596f925e925633907f6695362bffe6b75d3892c68ba344e4b73940.
+Boundary native original79496 is running at5b46,18stages/420cases per pair,
+817seedkeys; formatter86465 is consumed, never replayed. No boundary row closes
+yet. Earlier checkpoint paragraphs below are historical.
+
 Boundary formatter86465 PASS56.325s at unchanged5b46, all46ASTs/bothsamefinal
 formatters verified; no native proof yet. Restore native original18936 is running
 at4b7c9249 with22stages/147cases perpair and795seedkeys after independent review.
@@ -13611,8 +13626,8 @@ in the [restart record](M7-resume.md#technical-depth).
 
 - [x] Hand off retained restore claims by changing only the original live nonce after positive prior-authority termination; preserve exact intent/candidates, directory/owner custody, mixed-nonce partial failure and original IO cutoffs. Prove34 actual writer/native cases plus pending17/construction10/publication16 on both toolchains at ed550 and rejoin the literal source; this grants no receipt, release or complete continuation.
 - [x] Continue the same retained restore IO worker through checked available/lost source retirement and destination retirement-evidence publication, preserving original transaction/candidate bytes and claim fences. Prove actual native faults and joined cleanup before candidate activation, receipt or release work.
-- [ ] Install only the original retained destination generations after checked source retirement in the same IO worker; require exact full activation-manifest equality, original ordinal temporary names and claim/physical fences, and prove the native publication and failure cases on both supported toolchains. Committed proofs, receipt, release and public restore remain separate.
-- [ ] Resume exact original/candidate generation prefixes and complete ordinal staging after positively joined prior authority; audit the genuine complete backup and the full current physical transformation before nonce handoff. Prove real multi-ledger interruption/restart, available/lost source, corruption/refusal and original joins on both pairs without changing transaction, candidates, epochs or history authority.
+- [x] Install only the original retained destination generations after checked source retirement in the same IO worker; require exact full activation-manifest equality, original ordinal temporary names and claim/physical fences, and prove the native publication and failure cases on both supported toolchains. Committed proofs, receipt, release and public restore remain separate.
+- [x] Resume exact original/candidate generation prefixes and complete ordinal staging after positively joined prior authority; audit the genuine complete backup and the full current physical transformation before nonce handoff. Prove real multi-ledger interruption/restart, available/lost source, corruption/refusal and original joins on both pairs without changing transaction, candidates, epochs or history authority.
 
 - [ ] Recheck the captured source ancestor type/device/inode identities after the second native absence observation, including the final pre-root-commit phase. Prove actual persistent parent removal at the held final read refuses completion while preserving original cutoffs, post-intent fencing, retained destination claim and all prior case bodies on both supported pairs.
 - [ ] Preserve positively acquired restore claims through pre-intent IO failures and release them with the original joined terminal owner/cutoffs when neither state root changed; retain partial/unproved or foreign claims and truthful remaining-claim accounting. Prove actual second-claim failure, known first-claim removal and partial-publication fencing on both supported pairs without changing the six existing workflow cases or bounds.

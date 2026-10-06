@@ -13,8 +13,9 @@ defmodule LoopexComposition.Restore.Workflow do
   restore entry point. It classifies exact committed duplicates before fresh
   work and validates and appends complete prior lineage. Original-tx
   continuation through source retirement reuses retained claim custody and exact
-  native records. Candidate installation, committed receipts, claim release and
-  arbitrary-prefix continuation remain implementation work. The IO callback never
+  native records. A private continuation installs exact retained generation prefixes
+  and validates the complete activation manifest. Committed receipts, claim release and
+  later proof-prefix continuation remain implementation work. The IO callback never
   starts another guardian or refreshes this invocation's work or cleanup allowance.
   """
 
@@ -196,7 +197,101 @@ defmodule LoopexComposition.Restore.Workflow do
   # Installed-candidate/committed cuts remain explicitly unfinished development.
   @doc false
   def retained_source_retirement(plan, invocation, io) do
-    retained = retained_handoff!(plan, invocation, io, true)
+    retained = retained_retire!(plan, invocation, io)
+
+    {:ok,
+     %{
+       claims: retained.claims,
+       intent: retained.intent,
+       source_retirement: retained.compiled.retirement
+     }}
+  catch
+    {:retained_retirement_unfinished, phase} ->
+      {:development_incomplete, {:retained_retirement_cut, phase}}
+
+    {:restore_refusal, code} ->
+      {:error, code}
+
+    {:io_error, _} ->
+      {:error, "inventory_unavailable"}
+
+    {:lookup_error, _} ->
+      {:error, "inventory_unavailable"}
+
+    {:stopped, _} ->
+      {:error, "inventory_unavailable"}
+  end
+
+  # Concept: install only the original retained destination generations after retirement.
+  # Technical depth: this private development path shares retirement's one worker,
+  # custody and cutoffs. It returns an audited activation image, never a receipt or
+  # committed proof. Exact original/candidate prefixes resume after full native
+  # baseline/history/retirement admission; torn bytes and later proofs refuse.
+  @doc false
+  def retained_generation_install(plan, invocation, io) do
+    retained = retained_retire!(plan, invocation, io, :generations)
+    destination = plan["destination_state_root"]
+    phase(io, "destination_generations")
+
+    Enum.each(retained.compiled.ledgers, fn ledger ->
+      value!(io.({:restore_generation_step, ledger.relative}))
+      retained_generation_fences!(plan, invocation, retained, io)
+      path = Path.join([destination, ledger.relative, "generation"])
+
+      value!(
+        io.(
+          {:restore_generation_install, path, ledger.candidate, ledger.mode, ledger.original,
+           plan["prior_restore_count"] + 1}
+        )
+      )
+
+      retained_generation_fences!(plan, invocation, retained, io)
+    end)
+
+    retained_generation_fences!(plan, invocation, retained, io)
+    activation = value!(io.({:manifest, destination, invocation["max_total_file_bytes"]}))
+    ensure!(activation == retained.compiled.activation, "inventory_mismatch")
+    retained_generation_fences!(plan, invocation, retained, io)
+
+    {:ok,
+     %{
+       claims: retained.claims,
+       intent: retained.intent,
+       source_retirement: retained.compiled.retirement,
+       activation_manifest: activation
+     }}
+  catch
+    {:retained_retirement_unfinished, phase} ->
+      {:development_incomplete, {:retained_retirement_cut, phase}}
+
+    {:restore_refusal, code} ->
+      {:error, code}
+
+    {:io_error, _} ->
+      {:error, "inventory_unavailable"}
+
+    {:lookup_error, _} ->
+      {:error, "inventory_unavailable"}
+
+    {:stopped, _} ->
+      {:error, "inventory_unavailable"}
+  end
+
+  defp retained_generation_fences!(plan, invocation, retained, io) do
+    retained_retirement_custody!(retained, plan, io)
+
+    if retained.source_observation do
+      lost_source!(plan["source_state_root"], retained.source_observation, io)
+    else
+      retained_retirement_complete!(plan, invocation, retained, plan["source_state_root"], io)
+    end
+
+    retained_retirement_placements!(plan, retained, plan["destination_state_root"], io)
+    workspace!(plan, value!(io.({:placement, plan["workspace"]["root"]})))
+  end
+
+  defp retained_retire!(plan, invocation, io, admission \\ true) do
+    retained = retained_handoff!(plan, invocation, io, admission)
     compiled = retained.compiled
     {:ok, entries} = RestoreCodec.manifest(retained.baseline, invocation["max_total_file_bytes"])
     root_admin = root_admin(plan)
@@ -333,24 +428,7 @@ defmodule LoopexComposition.Restore.Workflow do
     retained_retirement_custody!(retained, plan, io)
     if retained.source_observation, do: lost_source!(source, retained.source_observation, io)
     workspace!(plan, value!(io.({:placement, plan["workspace"]["root"]})))
-
-    {:ok,
-     %{claims: retained.claims, intent: retained.intent, source_retirement: compiled.retirement}}
-  catch
-    {:retained_retirement_unfinished, phase} ->
-      {:development_incomplete, {:retained_retirement_cut, phase}}
-
-    {:restore_refusal, code} ->
-      {:error, code}
-
-    {:io_error, _} ->
-      {:error, "inventory_unavailable"}
-
-    {:lookup_error, _} ->
-      {:error, "inventory_unavailable"}
-
-    {:stopped, _} ->
-      {:error, "inventory_unavailable"}
+    retained
   end
 
   defp retained_handoff!(plan, invocation, io, retirement) do
@@ -416,9 +494,18 @@ defmodule LoopexComposition.Restore.Workflow do
         {:error, code} -> throw({:restore_refusal, code})
       end
 
-    if retirement do
-      retained_retirement_admit!(plan, invocation, retained, compiled, captures, io)
-    end
+    generation_prefix =
+      case retirement do
+        :generations ->
+          retained_generation_admit!(plan, invocation, retained, compiled, captures, io)
+
+        true ->
+          retained_retirement_admit!(plan, invocation, retained, compiled, captures, io)
+          false
+
+        false ->
+          false
+      end
 
     nonce = handoff_nonce(captures)
 
@@ -438,8 +525,161 @@ defmodule LoopexComposition.Restore.Workflow do
       intent: retained.intent,
       baseline: retained.baseline,
       compiled: compiled,
-      source_observation: source_observation
+      source_observation: source_observation,
+      generation_prefix: generation_prefix
     }
+  end
+
+  # Concept: continuation audits real baseline bytes and the current exact transformation.
+  # Technical depth: a candidate never impersonates its source generation for
+  # Ledger/receipt/open validation. Audit the held native backup, then bind all
+  # current bytes/modes and original physical roles before changing a claim nonce.
+  defp retained_generation_admit!(plan, invocation, retained, compiled, captures, io) do
+    destination = Enum.find(captures, &(&1.root == plan["destination_state_root"]))
+    observed_phase = destination.retained.observation["phase"]
+
+    ensure!(
+      observed_phase in [
+        "destination_intent",
+        "source_retirement",
+        "destination_generations",
+        "destination_proofs"
+      ],
+      "invalid_current_history"
+    )
+
+    max_total = invocation["max_total_file_bytes"]
+    backup = value!(io.({:manifest, plan["backup_state_root"], max_total}))
+    ensure!(backup == retained.baseline, "inventory_mismatch")
+    Audit.complete(plan, backup, max_total, io)
+
+    ensure!(
+      value!(io.({:manifest, plan["backup_state_root"], max_total})) == backup,
+      "inventory_mismatch"
+    )
+
+    projected = Map.put(retained, :compiled, compiled)
+    prefix = retained_generation_manifest!(plan, invocation, projected, false, io)
+    prefix = prefix or observed_phase == "destination_proofs"
+
+    Enum.each(captures, fn capture ->
+      retained_retirement_placements!(plan, projected, capture.root, io)
+    end)
+
+    workspace!(plan, value!(io.({:placement, plan["workspace"]["root"]})))
+
+    if prefix do
+      # Candidate/staging or proof-free all-installed prefixes require complete
+      # retirement already retained, including the empty candidate vector;
+      # admission cannot invent missing retirement after such a publication cut.
+      retained_generation_manifest!(plan, invocation, projected, true, io)
+
+      if plan["source_status"] == "available" do
+        retained_retirement_complete!(plan, invocation, projected, plan["source_state_root"], io)
+      else
+        value!(io.({:lost_source_absent, plan["source_state_root"]}))
+      end
+    else
+      # Original, unstaged cuts preserve retirement's admission and complete its
+      # native proof before this operation publishes the first candidate.
+      retained_retirement_admit!(plan, invocation, retained, compiled, captures, io)
+    end
+
+    prefix
+  end
+
+  # Concept: every current payload remains the baseline plus exact original stages.
+  # Technical depth: only listed O/C generations, baseline modes and original
+  # ordinal C temporaries may vary. Whole native captures share the same worker
+  # and caps; foreign, torn, missing and committed-proof entries refuse.
+  defp retained_generation_manifest!(plan, invocation, retained, complete, io) do
+    root = plan["destination_state_root"]
+    max_total = invocation["max_total_file_bytes"]
+    {:ok, entries} = RestoreCodec.manifest(retained.baseline, max_total)
+    original = Map.new(entries, &{&1["path"], &1})
+    records = retained_retirement_records(plan, retained.baseline, retained.compiled, root)
+
+    final =
+      add_records(
+        original,
+        Enum.map(records, fn {path, bytes} ->
+          {Path.dirname(path), [{Path.basename(path), bytes}]}
+        end)
+      )
+
+    allowed =
+      add_records(
+        original,
+        Enum.map(records, fn {path, bytes} ->
+          {Path.dirname(path),
+           [{Path.basename(path), bytes}, {Path.basename(path) <> ".tmp", bytes}]}
+        end)
+      )
+
+    actual = value!(io.({:manifest, root, max_total}))
+    {:ok, observed} = RestoreCodec.manifest(actual, max_total)
+    index = Map.new(observed, &{&1["path"], &1})
+
+    {projected, temps, prefix} =
+      Enum.reduce(retained.compiled.ledgers, {original, %{}, false}, fn ledger,
+                                                                        {current, staging,
+                                                                         progressed} ->
+        relative = Path.join(ledger.relative, "generation")
+        path = Path.join(root, relative)
+
+        selected =
+          value!(
+            io.(
+              {:restore_generation_capture, path, ledger.original, ledger.candidate, ledger.mode,
+               plan["prior_restore_count"] + 1}
+            )
+          )
+
+        generation = %{
+          original[relative]
+          | "size" => byte_size(selected.current),
+            "sha256" => hash(selected.current)
+        }
+
+        ensure!(index[relative] == generation, "inventory_mismatch")
+        temporary = relative <> ".restore-" <> ordinal(plan) <> ".tmp"
+
+        staging =
+          if selected.temporary do
+            entry = %{
+              "path" => temporary,
+              "kind" => "regular",
+              "mode" => ledger.mode,
+              "size" => byte_size(ledger.candidate),
+              "sha256" => hash(ledger.candidate)
+            }
+
+            ensure!(index[temporary] == entry, "inventory_mismatch")
+            Map.put(staging, temporary, entry)
+          else
+            ensure!(not Map.has_key?(index, temporary), "inventory_mismatch")
+            staging
+          end
+
+        {Map.put(current, relative, generation), staging,
+         progressed or selected.current == ledger.candidate or selected.temporary}
+      end)
+
+    Enum.each(projected, fn {path, entry} ->
+      ensure!(index[path] == entry, "inventory_mismatch")
+    end)
+
+    allowed = Map.merge(allowed, projected) |> Map.merge(temps)
+
+    Enum.each(index, fn {path, entry} -> ensure!(allowed[path] == entry, "inventory_mismatch") end)
+
+    if complete do
+      expected = Map.merge(final, projected) |> Map.merge(temps)
+      ensure!(index == expected, "inventory_mismatch")
+    end
+
+    ensure!(value!(io.({:manifest, root, max_total})) == actual, "inventory_mismatch")
+    prefix
   end
 
   defp retained_retirement_admit!(plan, invocation, retained, compiled, captures, io) do
@@ -554,6 +794,25 @@ defmodule LoopexComposition.Restore.Workflow do
         end)
       )
 
+    candidate_temps =
+      if root == plan["destination_state_root"] do
+        Map.new(compiled.ledgers, fn ledger ->
+          path = Path.join(ledger.relative, "generation.restore-" <> ordinal(plan) <> ".tmp")
+
+          {path,
+           %{
+             "path" => path,
+             "kind" => "regular",
+             "mode" => ledger.mode,
+             "size" => byte_size(ledger.candidate),
+             "sha256" => hash(ledger.candidate)
+           }}
+        end)
+      else
+        %{}
+      end
+
+    allowed = Map.merge(allowed, candidate_temps)
     actual = value!(io.({:manifest, root, max_total}))
     {:ok, observed} = RestoreCodec.manifest(actual, max_total)
     index = Map.new(observed, &{&1["path"], &1})
@@ -563,6 +822,9 @@ defmodule LoopexComposition.Restore.Workflow do
     end)
 
     Enum.each(index, fn {path, entry} -> ensure!(allowed[path] == entry, "inventory_mismatch") end)
+
+    if Enum.any?(candidate_temps, fn {path, _} -> Map.has_key?(index, path) end),
+      do: throw({:retained_retirement_unfinished, "destination_generations"})
 
     if complete do
       expected =
@@ -580,15 +842,19 @@ defmodule LoopexComposition.Restore.Workflow do
   end
 
   defp retained_retirement_complete!(plan, invocation, retained, root, io) do
-    retained_retirement_manifest!(
-      plan,
-      invocation,
-      retained.baseline,
-      retained.compiled,
-      root,
-      true,
-      io
-    )
+    if root == plan["destination_state_root"] and Map.get(retained, :generation_prefix, false) do
+      retained_generation_manifest!(plan, invocation, retained, true, io)
+    else
+      retained_retirement_manifest!(
+        plan,
+        invocation,
+        retained.baseline,
+        retained.compiled,
+        root,
+        true,
+        io
+      )
+    end
 
     retained_retirement_placements!(plan, retained, root, io)
   end
