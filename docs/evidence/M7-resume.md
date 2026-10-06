@@ -27,6 +27,22 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current proof, execution and source ownership
 
+LATEST REVIEW FINDING, 2026-10-06: diagnostic5fc MUST NOT be verified.
+Independent source review found ordinary DOWN handling prunes the last provider
+record before proving its original Task.Supervisor membership absent, so a
+subsequent coordinator DOWN can bypass the intended membership fence. This is
+a source proof gap, not an executed5fc failure. CLI is sealing the exact report;
+private-task will make a fresh bounded correction only after that report is read.
+No new allowance, actor, public contract or test weakening is authorized.
+The disabled5fc formatter is sealed at
+`/private/tmp/loopex-m7-private-task-cleanup-order-format-runner-5fc08b3b-v2`;
+report `ed3941c2d2ed236b8784ee74dd81587c213edc1f50fc3016189e0e155f653ab2`, inventory
+`c1e3fe5045f1b63fdc01e0ba603b87009bb0a4dc573768cd494a8dd61351fd94`.
+Its execution/review/grant/output/registry gates stay unset. It preserves28
+artifacts,133 source inputs including105 unchanged test/support files and23
+external references. This packet remains a proposal for the known flawed source.
+All root handles are collected and the VM remains FREE; task totals unchanged.
+
 LATEST FORMAT COLLECTION, 2026-10-06: root86356 is fully collected PASS
 after49.273s,11 original stages. Sole verification VM is FREE. Whole-file AST
 equality holds for all five owned files and current/floor formatting checks
