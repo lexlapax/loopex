@@ -28,19 +28,30 @@ physical restore implementation; it does not waive any full-history proof.
 ### Current work and restart order
 
 Continue the existing ACTIVE unlimited goal on `m7`. Do not create another goal.
-Primary previous pushed checkpoint is `04b0294f`; this commit supersedes its
+Primary previous pushed checkpoint is `dad171f2`; this commit supersedes its
 resume record. Historical detail remains at
 `bdc88a05:docs/evidence/M7-resume.md` and in the task ledger.
 
-Root verification VM is OCCUPIED by original restore formatter24989 at
-initial d2c3cfa7 in the generation-payload-links worktree. Its enabled packet
-`M7/generation-payload-links-format-runner-20261006-v1` has config
-`3e469478dea6ea9908db759d9e9055f286fa0ecf3d974dae6c92b5c195ceeec6`,
-root review `bad70873213b7ab0f947324853c5379eeeef59da5d80a96a05931bfde46a237d`.
-Output `M7/m7-generation-payload-links-format-v1`, registry
-`M7/generation-payload-links-format-v1-stage-attempt-registry.json`, seed746.
-All five whole-file ASTs and both final formatting checks required. No native
-proof is inferred. Collect original24989 before any next product VM.
+Root verification VM is OCCUPIED by original native handle2817 at exact
+`d6afe045c34e27538ad69971857ca0b50d6e0b9b` in the Core/protocol worktree.
+Enabled packet `M7/core-configure-native-runner-20261006-v1`, config
+`c05ff8431f33ec3ef883c2cd4ab00b864e5e61e9c6661f081751b7dde8076371`,
+root review `6a28ab7f4354cdbf37d4def0bc5ddcc726b586af6c9741e6cb71ad429a6a0868`.
+Output `M7/m7-core-configure-native-v1`; registry
+`M7/core-configure-native-v1-stage-attempt-registry.json`, seed757. It requires
+18 stages,383 selected cases per pair: Core315, Protocol19 including4 Node,
+foreground27, daemon22. Both original31620 final format checks are consumed,
+never replayed. Collect original2817 before any next product VM. First failure
+seals; no result is inferred before terminal collection.
+
+Restore formatter24989 is fully collected PASS61.047s at final
+`f3086bdd1aa894017e582cd8d896244becf1a613`, sole d2 child. All5 ASTs, both
+formatting checks,73 artifacts,59 actual/Git rows and11 original joins verified.
+Collection `M7/generation-payload-links-format-original-collection-20261006-v1.json`,
+SHA `e71fbe476dd60380edaa9c702226a22e0de4d40dc4061f6dbd987ddd2a069300`;
+terminal report `a3d90ba3d95854e6542ee65042ff5c224aa3cbbc4fd9f721814cc1ea24d8d138`,
+inventory `71688c530e057d39a91a59648fc86db500c315479f6a9a5c9f6d6d5d04fd1929`.
+No native proof follows. Never repoll24989.
 
 Original formatter31620 is PASS and fully
 collected at final `d6afe045c34e27538ad69971857ca0b50d6e0b9b`, sole e7 child in
@@ -65,38 +76,50 @@ formatting results rather than repeating their keys.
 
 Source ownership, all separate worktrees and source-only agents:
 
-- `authored_bounds_review` completed fixture source review d2c3cfa7, source-ready
-  with no blocker. Review packet
+- `authored_bounds_review` authors only disabled generation-native packet
+  `/private/tmp/loopex-m7-generation-payload-links-native-runner-f3086bdd-20261006-v1`.
+  Freeze f308 source and consume both24989 formatting keys. All seven files,
+  143 cases per pair and22 fresh stages; no exclusions/skips or duplicate format.
+  Its completed independent fixture review remains immutable at
   `/private/tmp/loopex-m7-generation-payload-links-independent-review-d2c3cfa7-20261006-v1`,
   report `1698686f4d8d874e832417a3a27d233504364d9fee630ff798a2c171ba16d8e2`,
   index `1bf84fc0230396066e704a09147822a616399f4cdffaead890ea7c7391fe58ca`.
-  Root read full report/fixture patch and rehashed87 indexed artifacts. Only
-  install fixture changes, all21 bodies remain literal and two controls add23.
-  Disabled formatter packet
-  `/private/tmp/loopex-m7-generation-payload-links-format-runner-d2c3cfa7-20261006-v1`,
-  report `1d9451c8bda8ba17dcfcd816f48728c0b6a507b6d18d04e6f511c4bd6bc28cb0`,
-  inventory `2e0113649c6ca8f91e3d7b7c823bc76c217b50e07ffe3750a9c2d56087f5133f`.
-  Root reviewed full delta,108 artifacts,59 Git/live facts,17 external refs and
-  complete746-key union before enabling original24989. Writer stopped.
-- `private_task_causal_resume` completed independent compact9c8 source review,
-  report `eb3fb9492f33975ea58f29de5c446bd823e0c09b1b073071cb8a78da2b12e610`,
-  inventory `804b8d473a20671ea0ed9ddcc9e4e0453e64e9068a6740341b67470ad1f16346`
-  at `/private/tmp/loopex-m7-compact-current-grammar-independent-review-9c8df940-20261006-v1`.
-  Root read full report and rehashed6 actual review artifacts. Exact compact
-  patch composed cleanly into a separate d6 worktree as sole child
-  `f4cb1cf5c88bb44be42788a5de80fbd3d8e3541c` at
-  `/private/tmp/loopex-m7-compact-formatted-rejoin`. Automatic review rejected
-  explicitly disabled hooks; root used normal Git commit successfully. No
-  blocking approval remains from that rejection. Agent now authors only disabled
-  compact formatter packet f4cb1cf5, UNIT10/OWNED6, complete adapter inverses
-  and unowned projection; source/grant/output/registry gates unset. No routes
-  activate. All earlier source packets remain immutable.
-- `restore_prefix_source_audit` prepares only disabled focused-native packet
-  `/private/tmp/loopex-m7-core-configure-native-runner-d6afe045-20261006-v1`.
-  Select all14 changed Core test files, three Protocol ordinary/Node files,
-  three foreground and three daemon files. Actual expanded source populations,
-  warning-free compile and both supported pairs remain required. Original
-  formatter results are consumed; no duplicate formatting is admitted.
+  Root read full report/patch and rehashed87 indexed artifacts. Original21
+  cases remain literal, two physical controls add23; actual runtime unproved.
+- `private_task_causal_resume` writes only accepted prompt/follow-up dormant
+  ingress in `/private/tmp/loopex-m7-authored-run-ingress`, branch
+  `codex/m7-authored-run-ingress`, basef4cb1cf5. Ten paths: new RunRequest,
+  schema/vectors/test/Node files, two adapter tests and only dormant Mapping/Request
+  helpers. Preserve omission, empty and partial bounds, exact bytes and current
+  domains; no clocks/defaults, routes or manifests activate. Its prior compact
+  formatter packet is sealed but unreviewed/unexecuted at
+  `/private/tmp/loopex-m7-compact-formatted-runner-f4cb1cf5-20261006-v1`,
+  report `2c84eb624c71dd7245b9b2091c30ca760aa7db102e13765cf8f131dfa52afce4`,
+  inventory `a38b825cfb921ca6b80d0ac94d725c3b84c056c94f50afe3abfb760d3847f0ce`.
+  UNIT10/OWNED6, all6 ASTs and both final formatting checks remain required.
+- `restore_prefix_source_audit` writes only accepted interaction-answer dormant
+  ingress in `/private/tmp/loopex-m7-interaction-answer-ingress`, branch
+  `codex/m7-interaction-answer-ingress`, basef4cb1cf5. Ten paths: new AnswerRequest,
+  schema/vector/test/Node files, two adapter tests and dormant Mapping/Request
+  helpers. Reuse current Answer codec; producer/policy/controller validation stays
+  with native owners. No route or generation activation. Its completed d6 native
+  author packet is immutable at
+  `/private/tmp/loopex-m7-core-configure-native-runner-d6afe045-20261006-v1`,
+  report `073f5400f85f8ab4b7be9472651733efd9eb228ab66156b45b2e372a750e9837`,
+  inventory `e6a4d7ba2d494711b8e92c127081595c702629e1c2036b87ee4cc4b940c997d6`,
+  index `8fa50397adb628b0e04163615f038e0fded0dcb9301ad03994dde3e8ac887d48`.
+  Root independently read full operative admission/validator/main changes,
+  rehashed137 artifacts/138 index rows,91 sources,1143 tracked entries,32 external
+  refs and102 original formatter artifacts before enabling2817 at seed757.
+
+Root compact composition is exact clean
+`f4cb1cf5c88bb44be42788a5de80fbd3d8e3541c`, sole d6 child in
+`/private/tmp/loopex-m7-compact-formatted-rejoin`. Independent compact9c8 review
+report `eb3fb9492f33975ea58f29de5c446bd823e0c09b1b073071cb8a78da2b12e610`,
+inventory `804b8d473a20671ea0ed9ddcc9e4e0453e64e9068a6740341b67470ad1f16346`
+remain at its review packet. Root read full report and rehashed6 artifacts,
+composed exact patch cleanly. Automatic review rejected explicit hook disabling;
+normal commit succeeded. No approval remains blocked by that rejection.
 
 One root integrator owns all execution, collection, rejoin and push. The
 combined candidate incorporates reviewed authored bounds/abort timer recovery,
@@ -124,9 +147,9 @@ proposal review49c17036 and docs proof below; no acceptance follows.
 ### Latest complete evidence and attempt union
 
 Evidence base is `/Users/spuri/projects/lexlapax/loopex-evidence/M7`.
-Latest fully collected registry has746 keys, before active24989:
-`core-configure-format-v1-stage-attempt-registry.json`, SHA
-`fe6daacd79de613b6a6c1e40fd6f7506a39c08210da5f1d11290af3a0672ad33`.
+Latest fully collected registry has757 keys, before active2817:
+`generation-payload-links-format-v1-stage-attempt-registry.json`, SHA
+`25b0aceeada48cb1b59ce36c1da0b586563f2bbaf6cd21576b2ca06176b9ff4e`.
 Reconcile every retained registry into the same unique exact(source,pair,stage)
 union before any fresh grant. A source child is not permission to reroll a case.
 
