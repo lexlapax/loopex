@@ -1,8 +1,11 @@
+Code.require_file("support/restore_fixture_copy.ex", __DIR__)
+
 defmodule LoopexComposition.RestoreResolutionTest do
   use ExUnit.Case, async: false
 
   alias Loopex.Executor.Local.{Ledger, RestoreCodec}
   alias LoopexComposition.{Restore, WorkspaceIdentity}
+  alias LoopexComposition.RestoreFixtureCopy
   alias LoopexComposition.Restore.IO, as: RestoreIO
 
   @limits %{"work_ms" => 10_000, "cleanup_grace_ms" => 1_000}
@@ -253,7 +256,7 @@ defmodule LoopexComposition.RestoreResolutionTest do
     backup = Path.join(root, "backup-#{prior}")
     destination = Path.join(root, "destination-#{prior}")
     File.mkdir!(destination)
-    assert {:ok, _} = File.cp_r(source, backup)
+    assert {:ok, _} = RestoreFixtureCopy.copy(source, backup)
     baseline = manifest(backup)
     {:ok, entries} = RestoreCodec.manifest(baseline, @total)
 

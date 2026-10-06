@@ -1,8 +1,10 @@
+Code.require_file("support/restore_fixture_copy.ex", __DIR__)
+
 defmodule LoopexComposition.RestoreRetainedGenerationInstallTest do
   use ExUnit.Case, async: false
 
   alias Loopex.Executor.Local.{Ledger, RestoreCodec, RestoreGuard}
-  alias LoopexComposition.{Restore, WorkspaceIdentity}
+  alias LoopexComposition.{Restore, RestoreFixtureCopy, WorkspaceIdentity}
   alias LoopexComposition.Restore.IO, as: RestoreIO
 
   @limits %{"work_ms" => 10_000, "cleanup_grace_ms" => 1_000}
@@ -352,7 +354,7 @@ defmodule LoopexComposition.RestoreRetainedGenerationInstallTest do
     before = File.lstat!(ledger)
     aside = Path.join(root, "original-destination-ledger")
     File.rename!(ledger, aside)
-    File.cp_r!(aside, ledger)
+    assert {:ok, _} = RestoreFixtureCopy.copy(aside, ledger)
     assert File.lstat!(ledger).inode != before.inode
 
     assert File.read!(Path.join(ledger, "generation")) ==
@@ -567,7 +569,11 @@ defmodule LoopexComposition.RestoreRetainedGenerationInstallTest do
     backup = cut.plan["backup_state_root"]
 
     for relative <- File.ls!(backup) do
-      File.cp_r!(Path.join(backup, relative), Path.join(cut.destination, relative))
+      assert {:ok, _} =
+               RestoreFixtureCopy.copy(
+                 Path.join(backup, relative),
+                 Path.join(cut.destination, relative)
+               )
     end
   end
 
@@ -646,7 +652,8 @@ defmodule LoopexComposition.RestoreRetainedGenerationInstallTest do
 
   # Concept: The staging exception belongs to the original retained transaction alone.
   # Technical depth: Only the destination ledger's exact ordinal name, absent from the baseline,
-  # with the retained intent's complete bounded candidate bytes/mode/link identity is normalized.
+  # with the retained intent's complete bounded candidate bytes, baseline generation mode and
+  # single-link identity is normalized.
   # Unrecognized or invalid files remain visible through the residual direct-child projection.
   defp payload_temporaries(cut, entries, root, entry) do
     if root == cut.destination do
@@ -671,7 +678,11 @@ defmodule LoopexComposition.RestoreRetainedGenerationInstallTest do
           relative =
             Path.join(candidate["relative_root"], "generation.restore-" <> ordinal <> ".tmp")
 
-          if Path.dirname(relative) == entry["path"] and
+          generation =
+            Enum.find(entries, &(&1["path"] == Path.join(candidate["relative_root"], "generation")))
+
+          if is_map(generation) and generation["kind"] == "regular" and
+               Path.dirname(relative) == entry["path"] and
                not Enum.any?(entries, &(&1["path"] == relative)) and
                Enum.any?(
                  cut.plan["ledgers"],
@@ -681,7 +692,8 @@ defmodule LoopexComposition.RestoreRetainedGenerationInstallTest do
                  placement(Path.join(root, candidate["relative_root"])) and
                payload_temporary?(
                  Path.join(root, relative),
-                 candidate["destination_generation_bytes"]
+                 candidate["destination_generation_bytes"],
+                 generation["mode"]
                ) do
             [relative]
           else
@@ -696,9 +708,9 @@ defmodule LoopexComposition.RestoreRetainedGenerationInstallTest do
     end
   end
 
-  defp payload_temporary?(path, expected) do
+  defp payload_temporary?(path, expected, expected_mode) do
     with {:ok, before} <- File.lstat(path),
-         true <- before.type == :regular and Bitwise.band(before.mode, 0o7777) == 0o600,
+         true <- before.type == :regular and Bitwise.band(before.mode, 0o7777) == expected_mode,
          true <- before.links == 1 and before.size <= 2_048,
          true <- before.size == byte_size(expected),
          {:ok, ^expected} <- File.read(path),
@@ -901,7 +913,7 @@ defmodule LoopexComposition.RestoreRetainedGenerationInstallTest do
     for path <- [source, destination, workspace], do: File.mkdir!(path)
     assert {:ok, _} = Ledger.prepare(Path.join(source, "receipts"), "handoff-local", 1_000)
     File.write!(Path.join(source, "ordinary"), <<0, 255, 1, 254, 2, 0, 128>>)
-    assert {:ok, _} = File.cp_r(source, backup)
+    assert {:ok, _} = RestoreFixtureCopy.copy(source, backup)
     baseline = manifest(backup)
     generation = File.read!(Path.join(source, "receipts/generation"))
     assert {:ok, workspace_ref} = WorkspaceIdentity.reference(workspace)

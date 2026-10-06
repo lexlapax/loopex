@@ -1,8 +1,11 @@
+Code.require_file("support/restore_fixture_copy.ex", __DIR__)
+
 defmodule LoopexComposition.RestoreLookupTest do
   use ExUnit.Case, async: false
 
   alias Loopex.Executor.Local.{Ledger, RestoreCodec}
   alias LoopexComposition.{Restore, WorkspaceIdentity}
+  alias LoopexComposition.RestoreFixtureCopy
   alias LoopexComposition.Restore.IO, as: RestoreIO
 
   @limits %{"work_ms" => 10_000, "cleanup_grace_ms" => 1_000}
@@ -189,7 +192,7 @@ defmodule LoopexComposition.RestoreLookupTest do
   test "physical destination replacement cannot preserve current authority", %{root: root} do
     fixture = first(root)
     File.rename!(fixture.destination, fixture.destination <> "-old")
-    assert {:ok, _} = File.cp_r(fixture.destination <> "-old", fixture.destination)
+    assert {:ok, _} = RestoreFixtureCopy.copy(fixture.destination <> "-old", fixture.destination)
     before = manifest(fixture.destination)
 
     assert {:error, %{"code" => "physical_destination_changed"}} =
@@ -516,7 +519,7 @@ defmodule LoopexComposition.RestoreLookupTest do
       try do
         id = hold_when(owned, :lookup_ledger_placement_stat, fn -> true end)
         File.rename!(path, path <> "-old")
-        assert {:ok, _} = File.cp_r(path <> "-old", path)
+        assert {:ok, _} = RestoreFixtureCopy.copy(path <> "-old", path)
         before = manifest(fixture.destination)
         send(owned.guardian, {:proceed, owned.reference, id})
 
@@ -646,7 +649,7 @@ defmodule LoopexComposition.RestoreLookupTest do
           File.write!(Path.join(ledger, "generation"), "changed-current-generation")
         else
           File.rename!(ledger, ledger <> "-old")
-          assert {:ok, _} = File.cp_r(ledger <> "-old", ledger)
+          assert {:ok, _} = RestoreFixtureCopy.copy(ledger <> "-old", ledger)
         end
 
         try do
@@ -727,7 +730,7 @@ defmodule LoopexComposition.RestoreLookupTest do
           File.write!(Path.join(ledger, "generation"), "changed-unmentioned-generation")
         else
           File.rename!(ledger, ledger <> "-old")
-          assert {:ok, _} = File.cp_r(ledger <> "-old", ledger)
+          assert {:ok, _} = RestoreFixtureCopy.copy(ledger <> "-old", ledger)
         end
 
         before = manifest(fixture.destination)
@@ -928,7 +931,7 @@ defmodule LoopexComposition.RestoreLookupTest do
     backup = Path.join(root, "backup-#{prior}")
     destination = Path.join(root, "destination-#{prior}")
     File.mkdir!(destination)
-    assert {:ok, _} = File.cp_r(source, backup)
+    assert {:ok, _} = RestoreFixtureCopy.copy(source, backup)
     baseline = manifest(backup)
     {:ok, entries} = RestoreCodec.manifest(baseline, @total)
 

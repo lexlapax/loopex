@@ -1,4 +1,5 @@
 Code.require_file("../../loopex/test/support/configured_genesis_helper.exs", __DIR__)
+Code.require_file("support/restore_fixture_copy.ex", __DIR__)
 
 defmodule LoopexComposition.RestoreWorkflowTest do
   use ExUnit.Case, async: false
@@ -8,6 +9,7 @@ defmodule LoopexComposition.RestoreWorkflowTest do
   alias Loopex.Store.Local, as: Store
   alias Loopex.Store.Local.{Artifacts, Log, State, Transfers}
   alias LoopexComposition.{Placement, ResourcePacks, Restore, WorkspaceIdentity}
+  alias LoopexComposition.RestoreFixtureCopy
   alias LoopexComposition.Restore.IO, as: RestoreIO
   alias LoopexComposition.Delegation.{GenesisCodec, RetainedObjects}
   alias LoopexProtocol.{Canonical, Frame}
@@ -1131,7 +1133,7 @@ defmodule LoopexComposition.RestoreWorkflowTest do
     backup = Path.join(root, "backup-#{prior + 1}")
     destination = Path.join(root, "destination-#{prior + 1}")
     File.mkdir!(destination)
-    assert {:ok, _} = File.cp_r(source, backup)
+    assert {:ok, _} = RestoreFixtureCopy.copy(source, backup)
     baseline = manifest(backup)
     assert manifest(source) == baseline
 
@@ -1383,7 +1385,7 @@ defmodule LoopexComposition.RestoreWorkflowTest do
     assert File.ls!(Path.join(source, "l/open")) == []
     bytes = File.read!(Path.join(source, "l/generation"))
     assert {:ok, generation} = RestoreCodec.decode(:generation, bytes)
-    assert {:ok, _} = File.cp_r(source, backup)
+    assert {:ok, _} = RestoreFixtureCopy.copy(source, backup)
     baseline = manifest(backup)
     assert manifest(source) == baseline
     {:ok, lineage} = RestoreCodec.lineage_digest([])
@@ -2242,7 +2244,7 @@ defmodule LoopexComposition.RestoreWorkflowTest do
     assert_receive {:DOWN, ^object_monitor, :process, ^object_owner, :normal}, 1_000
     assert :ok = Placement.release(placement)
 
-    assert {:ok, _} = File.cp_r(source, backup)
+    assert {:ok, _} = RestoreFixtureCopy.copy(source, backup)
     assert manifest(source) == manifest(backup)
     baseline = manifest(backup)
     {:ok, lineage} = RestoreCodec.lineage_digest([])
