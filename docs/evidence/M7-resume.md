@@ -157,10 +157,20 @@ No source blocker; formatting/runtime remains pending. Durable sibling
 `6455bed8cd2bf79be6c06be28e053503e25c28eecf218154d9de454f48a8660d` and full patch
 `2b530c466948dd941acca69348ea85574fe3d4d18492a2f81ed1e4153968d4e1`.
 One new added T16 row tracks this genuine fixture portability correction.
-Root now prepares one new isolated integration candidate containing reviewed
-Ledger6baa, receiptfdd6, artifactb5 and fixtured754 source. No primary source
-rejoin or VM grant exists for that combined candidate yet. Root owns integration;
-do not execute old failed candidates again or reset either22-key registry.
+Root prepared new isolated integration candidate
+`015341efde4d4c28c92aa3f65ea40da1c2623c7f` at
+`/private/tmp/loopex-m7-current-restore-integration`, branch
+`codex/m7-current-restore-integration`, base saved m7 `3030f46a`.
+Three conflict-free merges combine reviewed Ledger6baa/artifactb5,
+fixtured754 and receiptfdd6 source. Root verified the clean checkout and exactly
+eight changed paths, byte-identical to the respective reviewed source commits.
+Primary m7 source remains unchanged. No combined formatter/compiler/test has
+run and no VM grant exists. current_index_cleanup prepares a new disabled
+modern runner/source/population packet only; root owns review, new registry
+audit/finalization and exclusive execution grant. Proposed ordinary Composition
+665/3 and Local302/2 reflect joined source; precise focused/adjacent counts and
+all macro populations must be source-pinned in that packet before execution.
+Do not execute old failed candidates again or reset either22-key registry.
 
 T01–T19 originals remain78 done/95 todo/6 retired; added299 done/23 todo.
 Including T00 originals78/101/7, added303/24. T15 added17/7; T16 added53/6.

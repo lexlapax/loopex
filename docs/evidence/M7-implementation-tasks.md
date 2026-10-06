@@ -61,8 +61,10 @@ returned. Root verified91 terminal artifacts,32 actual/Git/kind/mode sources,
 Its32 focused/35 adjacent pass; no floor ran. Artifact capture source-only
 `b5ce08de` passed root and independent source review, with no runtime proof.
 Fixture-only `d754e78b` passed root source review. Both complete source packets
-and original failure evidence are retained. Root prepares one new isolated
-combined candidate; no old candidate retry, primary source rejoin or VM is granted.
+and original failure evidence are retained. Root prepared clean isolated
+combined candidate `015341ef`, exactly eight paths equal reviewed source bytes.
+A new disabled runner is being prepared. No old candidate retry, primary source
+rejoin or VM is granted.
 A source-only T16
 repair now owns only the failed Model integration startup options and the two
 ReadOnly physical cases' workspace setup. Existing1,000 ceiling, actual Unix
