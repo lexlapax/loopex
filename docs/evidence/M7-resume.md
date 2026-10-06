@@ -27,6 +27,22 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current proof, execution and source ownership
 
+ROOT VM FREE after original18466 fully collected PASS_FORMAT_PREPARATION_ONLY,
+59.879 seconds and11 stages. Final clean sole formatting child
+`9d74407937897b9298d8228cff6d317c29bf9b48` preserves all five whole-file non-line
+ASTs and both toolchains pass formatting. All73 artifacts,59 actual/Git rows
+and11 original process joins verified. Collection
+`M7/generation-native-format-original-collection-20261006-v1.json`
+`bcdc6aaf3758269bc523ed054b68529bd7e8a6130114b5db8826f8a0e4d6cb26`;
+latest complete723-key registry
+`d940425ccc6413abfcf7f63f93a8403ee66091c0601b03a8cdfcd082e237f6f2`.
+Never repoll18466. Agent prepares disabled141-case-per-pair native generation
+packet for9d744079; no runtime proof yet. Source-only independent audit of the
+Proposed0056 one-stage docs runner continues. Core writer confirmed pending
+model questions lose their run timer at provider settlement and is implementing
+the accepted run-wide timer fix without fixture injection or changed bounds.
+Checklist unchanged; older occupancy entries are historical.
+
 ROOT VM OCCUPIED by original18466, generation formatter v1 at clean initial
 `9f17c0264e89ff0020c0bd9c92ec9fbf80bedf5c`. Enabled packet
 `M7/generation-native-format-runner-20261006-v1`, config
