@@ -27,6 +27,55 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current proof, execution and source ownership
 
+LATEST FORMAT COLLECTION, 2026-10-06: root86356 is fully collected PASS
+after49.273s,11 original stages. Sole verification VM is FREE. Whole-file AST
+equality holds for all five owned files and current/floor formatting checks
+passed. Frozen clean formatter child is
+`3da1dcdbf9330c5958abe4069229ec449b6d8a75`, soleparent4ae9, in the combined
+writer. No compilation or runtime test has run on3da. Root verified73 artifacts,
+48 actual Git source rows and11 original EOF/wait/status/PID-group joins.
+Output `M7/m7-combined-format-v1` report is
+`c3913f01fc605b556bd02a75d31848f7caeddae58a92ed51f250e22779cff4c7`, inventory
+`9c8257c7a5f9f6b2e1bf1464eb26f1b48c087691c01453ab4ac35217a365eb86`.
+Original collection `M7/combined-format-original-collection-20261006-v1.json`
+is `0f24967ffca7353b754171db76cb444cb90da674f9f823abf572c1d7b8915015`; audit
+`M7/combined-format-collection-20261006-v1.py` is
+`1634f2388b13f64e601ea2f4ae19fd7c1a2966d8e51fb5b9282271811585520f`.
+Registry preserves352 prior keys plus11 new keys, SHA
+`ac9ba594d78af75c65280b0c0c3b29d4adc0798f7a48275f4f9172879befd4a2`.
+Never poll86356 or repeat its formatter keys.
+
+Enabled formatter `M7/combined-format-runner-20261006-v1` config is
+`10011916299b0e79a1455620ddee93078f6c6b9add1f303a077757bc72edbbb7`, root inventory
+`7cd8a51e67c79b2271708f809c7faa49860a0bb3b4631289d9f1fec95b1cbe28`.
+Root review report is `aa7f85bc5c50abf6e40904be9a57ab82560df6cd87a4824580488e58a85a9771`.
+Root admitted32 packet artifacts,129 external inputs and48 source rows. Combined
+rejoin review found no blocker; packet
+`/private/tmp/loopex-m7-combined-rejoin-inspection-4ae9e86d-20261006-v2/report.md`
+is `97ce2dfe8a3d3020842a127c98a12a3bfea5b1b865ef0c9a9be79fc358e40caa`, inventory
+`c20d4abe529c9c6aeb1f5c6c7d91c1bc8c660c8c473367f449f339a0e7b8f34f`.
+It proves exact reviewed rejoin bodies, all26 contiguous dispatch clauses and
+the whole-file helper-movement inverse; it supplies no runtime PASS.
+
+Diagnostic bounded-call child is clean5fc08b3b3c946b278ee7a14001ea74b42b6d4a5b,
+soleparent flawed2b436. Packet
+`/private/tmp/loopex-m7-private-task-cleanup-order-source-5fc08b3b-20261006-v2/report.md`
+is `7bdcb3b624a2953733154db85fcbdf480024e39a9a3c81da00e71e292d73d490`, inventory
+`4633dc80a7ba2db06276516ac783eece7009cc3728897c440c7c9864b1cdc797`.
+Independent source review is active and a disabled three-file formatter is in
+preparation. No VM, format or compile result exists. All105 Core test/support
+files remain unchanged; original77347 FAIL and63 missing observations remain.
+
+Current-index owns unit1 pending-intake source work in the separately prepared
+writer at4ae9: Workflow, IO, narrow captured Guard seam and a new pending-intake
+test file. Existing tests/public facade remain untouched; no reclaim, candidate
+allocation or incomplete public exposure is authorized by that bounded unit.
+CLI reviews5fc first; next queued task is disabled3da paired runtime preparation,
+IO106/3→lookup38/0→resolution9/0→workflow39/0 plus original adjacent/ordinary/long
+lanes, deriving all exact expanded populations. Root must review and enable it;
+no runtime grant yet. Task totals remain unchanged and the1000ms approval stays
+setup-only. Primary source rejoin and full T15/T16 proof remain open.
+
 LATEST SOURCE, 2026-10-06: sole verification VM remains FREE. Root combined
 reviewed7694,886,79464 and corrected3fc79 in isolated
 `/private/tmp/loopex-m7-restore-combined`, branch `codex/m7-restore-combined`.
