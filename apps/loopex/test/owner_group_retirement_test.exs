@@ -422,6 +422,32 @@ defmodule Loopex.Runtime.OwnerGroupRetirementTest do
           cutoff
         )
 
+      # Concept: this is the retained stopper's system-request reply, not cleanup proof.
+      # Technical depth: require its exact prior caller/tag and alias destination;
+      # unrelated or repeated replies still fail under the original cutoff and cap.
+      {:trace, ^group, :send, {[:alias | stop_reference] = tag, :ok}, target} = row
+      when is_reference(stop_reference) and target == stop_reference ->
+        record_trace()
+
+        assert Enum.count(rows, fn
+                 {:trace, ^group, :receive,
+                  {:system, {^stopper, ^tag}, {:terminate, :normal}}} -> true
+                 _row -> false
+               end) == 1
+
+        refute row in rows
+
+        await_empty_then_stop(
+          group,
+          workers,
+          actors,
+          coordinator,
+          coordinator_monitor,
+          stopper,
+          rows ++ [row],
+          cutoff
+        )
+
       {:trace, ^group, :send, {:EXIT, ^group, :shutdown}, ^coordinator} = row ->
         record_trace()
 
