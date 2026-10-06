@@ -27,6 +27,58 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Latest Store integration and next verification
 
+LATEST: The sole active verification VM is root handle42740, captured Local
+ledger decoder source1e604aed7f651beaae6e2331e455282f0a5c9cda, in
+/private/tmp/loopex-m7-ledger-captured-decoding. Current focused19/0excluded
+and ordinary296/2excluded pass, zero skips; the floor run is underway.
+Root owns polling, terminal review and rejoin. Runner siblingM7/
+ledger-captured-decoding-runner-20261005-v1/stage.sh has digest
+abbd0b462164398e0a9d89abedf8861b95543414e4388c3671fbc8d294ebf99d;
+outputs are siblingM7/ledger-captured-decoding-execution-20261005-v1.
+No other VM may start until terminal collection returns the slot. All active
+statements below are historical snapshots superseded by this entry.
+
+Native checkpoint handle99172 is TERMINAL exit1 and collected, not active.
+Formatted source10d16fd5e9bf8fab07dce0b5681cb8b5019a97d2 passes setup,
+format, dev/test compilation and metadata; all ten focused cases fail at
+invalid_session_genesis before behavior assertions. Adjacent, ordinary and
+floor stages never run. Root independently verified56 retained artifacts.
+Terminal digest0bdca43e592edbc8662668ba97e938c1dec144e0f2a1e12fd69b0435bbfeaf2c;
+focused rawfbc13ef2f7a952e2e5611692c14149112495a726c2c43a200d4b04ea0f293056,
+in siblingM7/configure-checkpoint-runner-4168dee7-v1/execution-001.
+Keep the first failure; do not poll/restart99172.
+
+Source-only corrected direct childd00fdaec2d87b433ae57037fbe3125d2e53fe344
+adds only existing scripted-fixture reasoning levels and mapping/renderer
+revisions. Production, assertions, case counts and bounds are unchanged.
+Root read its entire three-line diff and verified1,098 actual/Git source
+records and all ten packet artifacts. V2 runner changes only the exact source
+pin; Elixir helpers remain identical. SiblingM7/
+configure-checkpoint-runner-d00fdaec-v2/run.py digest
+6669125ce149e0b6947244b4aa765c34deb404524602426ecda6a96e0f49bec4;
+packet inventorye26bb67f84da69eb6c98991099bdd769ef24dc989dde21bc9345bd358bcfe17e.
+This distinct source is unexecuted, queued after the root ledger proof.
+Expected per pair10new/0excluded,63adjacent/1excluded,1323ordinary/10excluded,
+zero skips. Actual outputs remain authoritative. No causal file is integrated.
+
+The read-only causal investigation is complete. Exact serial and all29
+concurrent failures arise when private-supervisor removal kills registered
+resources before exact cleanup acknowledgement. The guard conservatively
+reports provider_cleanup_unproved, as accepted ADR0039 requires when semantic
+proof is lost. This does not establish a universal quiet tree-destruction
+guarantee or attribute the six earlier48ca Runtime reports. The new four-case
+fixture remains unintegrated and unproved; no production/assertion/cutoff
+change or suppression is authorized by this finding. Report siblingM7/
+private-task-cleanup-unproved-cause-20261005-v1/report.md digest
+05ca8593d5ca4d5299280aed556da7fc5078f3e335f82b93f4c888ee679f443c.
+Root read the report and accepted ADR0039's explicit destruction limitation.
+
+The repeated maintainer approval of1,000ms confirms the already recorded
+diagnostic setup override and both-pair twenty-case proof. It does not accept
+ADR0052. Counts stay originals78done/95todo/6retired, added293done/21todo.
+Independent read-only next-step restore inventory is running; no writer or VM
+grant. Continue the existing active goal, never recreate or self-close it.
+
 LATEST: Causal v3 handle38955 is terminal exit1 and collected. Current dev/test
 compile and matrix pass; focused2/4 pass, zero exclusions/skips, floor never
 ran. Root independently rehashed all41 terminal-listed artifacts. Serial and
