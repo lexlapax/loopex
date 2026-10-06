@@ -605,11 +605,13 @@ defmodule LoopexComposition.Restore.IO do
     # Technical depth: Local fetch selects by locator and verifies requested
     # digest/size; its reader does not equate locator with digest or apply put's
     # 64 MiB cap. The original total-file-byte limit is checked before open.
-    with true <- primitive(:artifact_reference, fn -> ArtifactStore.valid_reference?(reference) end),
-         true <- primitive(:artifact_object_locator, fn ->
-           byte_size(reference.locator) == 64 and
-             Regex.match?(~r/\A[0-9a-f]{64}\z/, reference.locator)
-         end),
+    with true <-
+           primitive(:artifact_reference, fn -> ArtifactStore.valid_reference?(reference) end),
+         true <-
+           primitive(:artifact_object_locator, fn ->
+             byte_size(reference.locator) == 64 and
+               Regex.match?(~r/\A[0-9a-f]{64}\z/, reference.locator)
+           end),
          {:ok, entries} <-
            primitive(:artifact_manifest, fn -> RestoreCodec.manifest(manifest, max_total) end) do
       relative = Path.join(["artifacts", binary_part(reference.locator, 0, 2), reference.locator])
@@ -618,7 +620,7 @@ defmodule LoopexComposition.Restore.IO do
 
       if not match?(%{"kind" => "regular"}, entry) or entry["size"] != reference.size or
            entry["sha256"] != reference.digest,
-        do: throw({:io_error, :inventory_mismatch})
+         do: throw({:io_error, :inventory_mismatch})
 
       audit_artifact_object(root, relative, index, entry, reference)
     else
@@ -980,9 +982,10 @@ defmodule LoopexComposition.Restore.IO do
     require_same_identity(before, manifest_stat(path))
     close(descriptor)
 
-    matched = primitive(:artifact_object_digest, fn ->
-      digest == reference.digest and digest == entry["sha256"]
-    end)
+    matched =
+      primitive(:artifact_object_digest, fn ->
+        digest == reference.digest and digest == entry["sha256"]
+      end)
 
     if not matched, do: throw({:io_error, :inventory_mismatch})
     require_same_identity(before, manifest_stat(path))
