@@ -912,11 +912,17 @@ defmodule Loopex.Executor.Local.Ledger do
          true <- entries == Enum.sort_by(entries, &elem(&1, 0)),
          true <- length(Enum.uniq_by(entries, &elem(&1, 0))) == length(entries) do
       observation = [
-        "loopex:local-root-snapshot:v1", generation, binding, length(entries),
+        "loopex:local-root-snapshot:v1",
+        generation,
+        binding,
+        length(entries),
         snapshot_members(entries)
       ]
 
-      bound_snapshot_size(byte_size(:erlang.term_to_binary(observation, [:deterministic])) + 69, entries)
+      bound_snapshot_size(
+        byte_size(:erlang.term_to_binary(observation, [:deterministic])) + 69,
+        entries
+      )
     else
       {:error, _} = error -> error
       _ -> {:error, {:ledger_unavailable, :malformed_open_entry}}

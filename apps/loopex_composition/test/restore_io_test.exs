@@ -1251,82 +1251,121 @@ defmodule LoopexComposition.RestoreIOTest do
     owned = launch(ledger_index_operation(fixture), :ledger_snapshot)
     assert {{:joined, {:ok, result}, %{opens: 4, closes: 4}}, events} = drive(owned)
     assert result.generation == fixture.records.generation
-    assert result.markers == Enum.sort([
-      {hash(fixture.jobs.admission), fixture.records.admission},
-      {hash(fixture.jobs.refusal), fixture.records.refusal}])
+
+    assert result.markers ==
+             Enum.sort([
+               {hash(fixture.jobs.admission), fixture.records.admission},
+               {hash(fixture.jobs.refusal), fixture.records.refusal}
+             ])
+
     assert result.open == [fixture.records.open]
     refute result.claim_present
     assert Enum.count(issued_kinds(events), &(&1 == :ledger_decode)) == 4
     assert Enum.count(issued_kinds(events), &(&1 == :ledger_snapshot)) == 1
-    assert index(issued_kinds(events), :ledger_decode) < index(issued_kinds(events), :ledger_snapshot)
+
+    assert index(issued_kinds(events), :ledger_decode) <
+             index(issued_kinds(events), :ledger_snapshot)
+
     joined(owned)
   end
 
-  test "ledger index preserves actual close restore and open-before-marker writer cuts", context do
+  test "ledger index preserves actual close restore and open-before-marker writer cuts",
+       context do
     fixture = ledger_fixture(context.root)
-    assert :ok = Ledger.with_claim(fixture.prepared, fn claimed ->
-      Ledger.close_open(claimed, fixture.jobs.open)
-    end)
+
+    assert :ok =
+             Ledger.with_claim(fixture.prepared, fn claimed ->
+               Ledger.close_open(claimed, fixture.jobs.open)
+             end)
+
     assert {:joined, {:ok, %{open: []}}, _} =
-      RestoreIO.run(ledger_index_operation(fixture), limits(1_000, 100))
-    assert :ok = Ledger.with_claim(fixture.prepared, fn claimed ->
-      Ledger.restore_open(claimed, fixture.records.open)
-    end)
+             RestoreIO.run(ledger_index_operation(fixture), limits(1_000, 100))
+
+    assert :ok =
+             Ledger.with_claim(fixture.prepared, fn claimed ->
+               Ledger.restore_open(claimed, fixture.records.open)
+             end)
+
     request = %{fixture.request | job_id: "partial-publication"}
     marker = Ledger.marker(request)
     open = Ledger.open_entry(request, fixture.declaration["executor_identity"])
     blocked = Path.join([fixture.prepared.root, "markers", hash(request.job_id)])
     File.mkdir!(blocked)
-    assert {:error, _} = Ledger.with_claim(fixture.prepared, fn claimed ->
-      Ledger.admit(claimed, marker, open)
-    end)
+
+    assert {:error, _} =
+             Ledger.with_claim(fixture.prepared, fn claimed ->
+               Ledger.admit(claimed, marker, open)
+             end)
+
     File.rmdir!(blocked)
+
     assert {:joined, {:ok, result}, _} =
-      RestoreIO.run(ledger_index_operation(fixture), limits(1_000, 100))
+             RestoreIO.run(ledger_index_operation(fixture), limits(1_000, 100))
+
     assert Enum.sort(result.open) == Enum.sort([fixture.records.open, open])
     refute List.keymember?(result.markers, hash(request.job_id), 0)
-    assert File.read!(fixture.paths.admission) == :erlang.term_to_binary(fixture.records.admission, [:deterministic])
+
+    assert File.read!(fixture.paths.admission) ==
+             :erlang.term_to_binary(fixture.records.admission, [:deterministic])
   end
 
   test "ledger index retains a refusal alongside an unresolved open warning", context do
     fixture = ledger_fixture(context.root)
     record = %{fixture.records.open | "job_id" => fixture.jobs.refusal}
-    assert :ok = Ledger.with_claim(fixture.prepared, fn claimed ->
-      Ledger.restore_open(claimed, record)
-    end)
+
+    assert :ok =
+             Ledger.with_claim(fixture.prepared, fn claimed ->
+               Ledger.restore_open(claimed, record)
+             end)
+
     assert {:joined, {:ok, result}, _} =
-      RestoreIO.run(ledger_index_operation(fixture), limits(1_000, 100))
+             RestoreIO.run(ledger_index_operation(fixture), limits(1_000, 100))
+
     assert record in result.open
     assert {hash(fixture.jobs.refusal), fixture.records.refusal} in result.markers
   end
 
   test "ledger index records a current held claim without reclaiming or granting it", context do
     fixture = ledger_fixture(context.root)
-    assert :ok = Ledger.with_claim(fixture.prepared, fn _claimed ->
-      operation = ledger_index_operation(fixture)
-      assert {:joined, {:ok, %{claim_present: true}}, _} =
-        RestoreIO.run(operation, limits(1_000, 100))
-      assert File.dir?(Path.join(fixture.prepared.root, "claim"))
-      :ok
-    end)
+
+    assert :ok =
+             Ledger.with_claim(fixture.prepared, fn _claimed ->
+               operation = ledger_index_operation(fixture)
+
+               assert {:joined, {:ok, %{claim_present: true}}, _} =
+                        RestoreIO.run(operation, limits(1_000, 100))
+
+               assert File.dir?(Path.join(fixture.prepared.root, "claim"))
+               :ok
+             end)
+
     refute File.exists?(Path.join(fixture.prepared.root, "claim"))
   end
 
-  test "ledger index copies retain original source binding and reject relocated descriptors", context do
+  test "ledger index copies retain original source binding and reject relocated descriptors",
+       context do
     fixture = ledger_fixture(context.root)
     backup = fixture.root <> "-index-backup"
     File.cp_r!(fixture.root, backup)
     on_exit(fn -> File.rm_rf!(backup) end)
     copied = %{fixture | root: backup}
+
     assert {:joined, {:ok, %{generation: generation}}, _} =
-      RestoreIO.run(ledger_index_operation(copied), limits(1_000, 100))
+             RestoreIO.run(ledger_index_operation(copied), limits(1_000, 100))
+
     assert generation == fixture.records.generation
     info = File.stat!(Path.join(backup, "ledger"))
-    moved = %{"expanded_root" => Path.join(backup, "ledger"),
-              "major_device" => info.major_device, "inode" => info.inode}
+
+    moved = %{
+      "expanded_root" => Path.join(backup, "ledger"),
+      "major_device" => info.major_device,
+      "inode" => info.inode
+    }
+
     changed = %{copied | declaration: %{copied.declaration | "source_placement" => moved}}
+
     assert {:joined, {:error, :history_invalid}, _} =
-      RestoreIO.run(ledger_index_operation(changed), limits(1_000, 100))
+             RestoreIO.run(ledger_index_operation(changed), limits(1_000, 100))
   end
 
   test "ledger index refuses omitted inventory members and actual extra names", context do
@@ -1334,16 +1373,24 @@ defmodule LoopexComposition.RestoreIOTest do
       fixture = ledger_fixture(context.root)
       {:audit_ledger_index, root, declaration, manifest} = ledger_index_operation(fixture)
       assert {:ok, entries} = RestoreCodec.manifest(manifest, 1_048_576)
-      manifest = if change == :omitted do
-        path = "ledger/open/" <> hash(fixture.jobs.open)
-        changed = Enum.reject(entries, &(&1["path"] == path))
-        assert {:ok, bytes} = RestoreCodec.encode(:manifest,
-          ["loopex:current-state-manifest:v1", changed])
-        bytes
-      else
-        File.write!(Path.join([fixture.prepared.root, "open", hash("unlisted")]), "extra")
-        manifest
-      end
+
+      manifest =
+        if change == :omitted do
+          path = "ledger/open/" <> hash(fixture.jobs.open)
+          changed = Enum.reject(entries, &(&1["path"] == path))
+
+          assert {:ok, bytes} =
+                   RestoreCodec.encode(
+                     :manifest,
+                     ["loopex:current-state-manifest:v1", changed]
+                   )
+
+          bytes
+        else
+          File.write!(Path.join([fixture.prepared.root, "open", hash("unlisted")]), "extra")
+          manifest
+        end
+
       owned = launch({:audit_ledger_index, root, declaration, manifest}, :ledger_names)
       assert {{:joined, {:error, :io_error}, %{opens: 0, closes: 0}}, events} = drive(owned)
       refute :ledger_decode in issued_kinds(events)
@@ -1351,7 +1398,8 @@ defmodule LoopexComposition.RestoreIOTest do
     end
   end
 
-  test "ledger index requires generation and both physical directories without initialization", context do
+  test "ledger index requires generation and both physical directories without initialization",
+       context do
     for role <- [:generation, :markers, :open] do
       fixture = ledger_fixture(context.root)
       path = Path.join(fixture.prepared.root, Atom.to_string(role))
@@ -1363,10 +1411,14 @@ defmodule LoopexComposition.RestoreIOTest do
     end
   end
 
-  test "ledger index rejects nested staging and noncanonical committed names before opening", context do
+  test "ledger index rejects nested staging and noncanonical committed names before opening",
+       context do
     for {plane, name, directory?} <- [
-      {"markers", hash("nested"), true}, {"markers", hash("staged") <> ".tmp-1", false},
-      {"open", String.duplicate("A", 64), false}, {"open", "unknown", false}] do
+          {"markers", hash("nested"), true},
+          {"markers", hash("staged") <> ".tmp-1", false},
+          {"open", String.duplicate("A", 64), false},
+          {"open", "unknown", false}
+        ] do
       fixture = ledger_fixture(context.root)
       path = Path.join([fixture.prepared.root, plane, name])
       if directory?, do: File.mkdir!(path), else: File.write!(path, "record")
@@ -1389,13 +1441,17 @@ defmodule LoopexComposition.RestoreIOTest do
 
   test "ledger index refuses 1025 actual open writer entries before record opening", context do
     fixture = ledger_fixture(context.root)
-    assert :ok = Ledger.with_claim(fixture.prepared, fn claimed ->
-      for number <- 1..1_024 do
-        record = %{fixture.records.open | "job_id" => "open-#{number}"}
-        assert :ok = Ledger.restore_open(claimed, record)
-      end
-      :ok
-    end)
+
+    assert :ok =
+             Ledger.with_claim(fixture.prepared, fn claimed ->
+               for number <- 1..1_024 do
+                 record = %{fixture.records.open | "job_id" => "open-#{number}"}
+                 assert :ok = Ledger.restore_open(claimed, record)
+               end
+
+               :ok
+             end)
+
     owned = launch(ledger_index_operation(fixture), :ledger_capacity)
     assert {{:joined, {:error, :io_error}, %{opens: 0, closes: 0}}, events} = drive(owned)
     assert :ledger_capacity in issued_kinds(events)
@@ -1405,14 +1461,18 @@ defmodule LoopexComposition.RestoreIOTest do
 
   test "ledger marker retention does not borrow the open index cardinality limit", context do
     fixture = ledger_fixture(context.root)
-    assert :ok = Ledger.with_claim(fixture.prepared, fn claimed ->
-      for number <- 1..1_023 do
-        request = %{fixture.request | job_id: "refusal-#{number}"}
-        assert {:ok, refusal} = Ledger.refusal(request, :workspace_lease_lost)
-        assert :ok = Ledger.refuse(claimed, refusal)
-      end
-      :ok
-    end)
+
+    assert :ok =
+             Ledger.with_claim(fixture.prepared, fn claimed ->
+               for number <- 1..1_023 do
+                 request = %{fixture.request | job_id: "refusal-#{number}"}
+                 assert {:ok, refusal} = Ledger.refusal(request, :workspace_lease_lost)
+                 assert :ok = Ledger.refuse(claimed, refusal)
+               end
+
+               :ok
+             end)
+
     owned = launch(ledger_index_operation(fixture, 5_000), :ledger_snapshot, 5_000)
     assert {{:joined, {:ok, result}, %{opens: 1_027, closes: 1_027}}, _} = drive(owned)
     assert length(result.markers) == 1_025
@@ -1422,15 +1482,20 @@ defmodule LoopexComposition.RestoreIOTest do
 
   test "ledger index uses the live whole-snapshot exact byte ceiling", context do
     fixture = ledger_fixture(context.root)
-    assert :ok = Ledger.with_claim(fixture.prepared, fn claimed ->
-      Ledger.close_open(claimed, fixture.jobs.open)
-    end)
-    entries = Ledger.with_claim(fixture.prepared, fn claimed ->
-      entries = ledger_ceiling_entries(claimed, fixture.records.open)
-      assert byte_size(ledger_snapshot_bytes(claimed, entries)) == 4_194_304
-      for {_name, record} <- entries, do: assert(:ok == Ledger.restore_open(claimed, record))
-      entries
-    end)
+
+    assert :ok =
+             Ledger.with_claim(fixture.prepared, fn claimed ->
+               Ledger.close_open(claimed, fixture.jobs.open)
+             end)
+
+    entries =
+      Ledger.with_claim(fixture.prepared, fn claimed ->
+        entries = ledger_ceiling_entries(claimed, fixture.records.open)
+        assert byte_size(ledger_snapshot_bytes(claimed, entries)) == 4_194_304
+        for {_name, record} <- entries, do: assert(:ok == Ledger.restore_open(claimed, record))
+        entries
+      end)
+
     owned = launch(ledger_index_operation(fixture, 5_000), :ledger_snapshot, 5_000)
     expected = Enum.map(entries, &elem(&1, 1))
     assert {{:joined, {:ok, %{open: ^expected}}, %{opens: 515, closes: 515}}, _} = drive(owned)
@@ -1440,36 +1505,46 @@ defmodule LoopexComposition.RestoreIOTest do
     # remains canonical and below its role cap; only the whole observation grows.
     assert byte_size(first["job_id"]) < 8_192
     larger = %{first | "job_id" => first["job_id"] <> "x"}
-    assert :ok = Ledger.with_claim(fixture.prepared, fn claimed ->
-      assert :ok = Ledger.close_open(claimed, first["job_id"])
-      Ledger.restore_open(claimed, larger)
-    end)
+
+    assert :ok =
+             Ledger.with_claim(fixture.prepared, fn claimed ->
+               assert :ok = Ledger.close_open(claimed, first["job_id"])
+               Ledger.restore_open(claimed, larger)
+             end)
+
     Ledger.with_claim(fixture.prepared, fn claimed ->
       larger_entries = Enum.sort([{hash(larger["job_id"]), larger} | rest])
       assert byte_size(ledger_snapshot_bytes(claimed, larger_entries)) == 4_194_305
     end)
+
     owned = launch(ledger_index_operation(fixture, 5_000), :ledger_snapshot, 5_000)
     assert {{:joined, {:error, :history_invalid}, %{opens: 515, closes: 515}}, _} = drive(owned)
     joined(owned)
   end
 
-  test "ledger index refuses linked or replaced later records without decoding their bytes", context do
+  test "ledger index refuses linked or replaced later records without decoding their bytes",
+       context do
     for change <- [:symlink, :hardlink, :changed_after_generation] do
       fixture = ledger_fixture(context.root)
       operation = ledger_index_operation(fixture)
       owned = launch(operation, :ledger_decode)
       {id, :ledger_decode} = paused_operation(owned, :ledger_decode)
       path = fixture.paths.open
+
       case change do
         :symlink ->
           external = Path.join(fixture.root, "external-open")
           File.rename!(path, external)
           File.ln_s!(external, path)
-        :hardlink -> File.ln!(path, Path.join(fixture.root, "linked-open"))
+
+        :hardlink ->
+          File.ln!(path, Path.join(fixture.root, "linked-open"))
+
         :changed_after_generation ->
           changed = %{fixture.records.open | "origin_executor_epoch" => 8}
           File.write!(path, :erlang.term_to_binary(changed, [:deterministic]))
       end
+
       send(owned.guardian, {:proceed, owned.reference, id})
       assert {{:joined, {:error, :io_error}, _}, events} = drive(owned)
       # Generation was decoded; the changed later open record must not be.
@@ -1478,54 +1553,83 @@ defmodule LoopexComposition.RestoreIOTest do
     end
   end
 
-  test "ledger index rejects marker basenames open identity and admission-pair disagreements", context do
+  test "ledger index rejects marker basenames open identity and admission-pair disagreements",
+       context do
     for change <- [:basename, :executor, :request, :cleanup, :wrong_plane] do
       fixture = ledger_fixture(context.root)
       path = if change == :basename, do: fixture.paths.admission, else: fixture.paths.open
+
       case change do
-        :basename -> File.rename!(path, Path.join(Path.dirname(path), hash("other-job")))
+        :basename ->
+          File.rename!(path, Path.join(Path.dirname(path), hash("other-job")))
+
         _ ->
-          record = case change do
-            :executor -> %{fixture.records.open | "executor_identity" => "other"}
-            :request -> %{fixture.records.open | "canonical_request_digest" => String.duplicate("b", 64)}
-            :cleanup -> %{fixture.records.open | "cleanup_grace_ms" => 101}
-            :wrong_plane -> fixture.records.admission
-          end
+          record =
+            case change do
+              :executor ->
+                %{fixture.records.open | "executor_identity" => "other"}
+
+              :request ->
+                %{fixture.records.open | "canonical_request_digest" => String.duplicate("b", 64)}
+
+              :cleanup ->
+                %{fixture.records.open | "cleanup_grace_ms" => 101}
+
+              :wrong_plane ->
+                fixture.records.admission
+            end
+
           File.write!(path, :erlang.term_to_binary(record, [:deterministic]))
       end
+
       owned = launch(ledger_index_operation(fixture), :ledger_snapshot)
       assert {{:joined, {:error, :history_invalid}, _}, _} = drive(owned)
       joined(owned)
     end
   end
 
-  test "ledger index rechecks namespaces earlier records and ancestors after the final decode", context do
+  test "ledger index rechecks namespaces earlier records and ancestors after the final decode",
+       context do
     for change <- [:addition, :earlier_record, :ancestor] do
       fixture = ledger_fixture(context.root)
       owned = launch(ledger_index_operation(fixture), :ledger_snapshot)
       {id, :ledger_snapshot} = paused_operation(owned, :ledger_snapshot)
+
       case change do
-        :addition -> File.write!(Path.join([fixture.prepared.root, "markers", hash("late")]), "late")
+        :addition ->
+          File.write!(Path.join([fixture.prepared.root, "markers", hash("late")]), "late")
+
         :earlier_record ->
           replacement = fixture.paths.generation <> ".replacement"
           File.write!(replacement, File.read!(fixture.paths.generation))
-          File.chmod!(replacement, Bitwise.band(File.stat!(fixture.paths.generation).mode, 0o7777))
+
+          File.chmod!(
+            replacement,
+            Bitwise.band(File.stat!(fixture.paths.generation).mode, 0o7777)
+          )
+
           File.rename!(replacement, fixture.paths.generation)
+
         :ancestor ->
           directory = Path.join(fixture.prepared.root, "markers")
           moved = directory <> "-moved"
           File.rename!(directory, moved)
           File.mkdir!(directory)
-          for name <- File.ls!(moved), do: File.rename!(Path.join(moved, name), Path.join(directory, name))
+
+          for name <- File.ls!(moved),
+              do: File.rename!(Path.join(moved, name), Path.join(directory, name))
+
           File.rmdir!(moved)
       end
+
       send(owned.guardian, {:proceed, owned.reference, id})
       assert {{:joined, {:error, :io_error}, %{opens: 4, closes: 4}}, _} = drive(owned)
       joined(owned)
     end
   end
 
-  test "ledger index captures the original cutoff across all members and snapshot reduction", context do
+  test "ledger index captures the original cutoff across all members and snapshot reduction",
+       context do
     fixture = ledger_fixture(context.root)
     owned = launch(ledger_index_operation(fixture), :ledger_snapshot, 500)
     paused_operation(owned, :ledger_snapshot)
@@ -2132,40 +2236,52 @@ defmodule LoopexComposition.RestoreIOTest do
       end
       |> Enum.sort()
     end
+
     width = ledger_fitting_width(claimed, build, 0, 8_188)
     entries = build.(width)
     remaining = 4_194_304 - byte_size(ledger_snapshot_bytes(claimed, entries))
     # Distribute the final bytes within actual identifier domains. Leave one
     # byte in the first entry for the exact first-over control.
-    {entries, 0} = Enum.map_reduce(entries, remaining, fn {_name, record}, left ->
-      added = min(left, 8_191 - byte_size(record["job_id"]))
-      record = %{record | "job_id" => record["job_id"] <> String.duplicate("j", added)}
-      {{hash(record["job_id"]), record}, left - added}
-    end)
+    {entries, 0} =
+      Enum.map_reduce(entries, remaining, fn {_name, record}, left ->
+        added = min(left, 8_191 - byte_size(record["job_id"]))
+        record = %{record | "job_id" => record["job_id"] <> String.duplicate("j", added)}
+        {{hash(record["job_id"]), record}, left - added}
+      end)
+
     Enum.sort(entries)
   end
 
   defp ledger_fitting_width(_claimed, _build, low, high) when low == high, do: low
+
   defp ledger_fitting_width(claimed, build, low, high) do
     middle = div(low + high + 1, 2)
+
     if byte_size(ledger_snapshot_bytes(claimed, build.(middle))) <= 4_194_304,
       do: ledger_fitting_width(claimed, build, middle, high),
       else: ledger_fitting_width(claimed, build, low, middle - 1)
   end
 
   defp ledger_snapshot_bytes(claimed, entries) do
-    :erlang.term_to_binary([
-      "loopex:local-root-snapshot:v1", claimed.generation_digest, claimed.root_binding,
-      claimed.root_claim_nonce, length(entries),
-      Enum.map(entries, fn {name, record} ->
-        [name, hash(:erlang.term_to_binary(record, [:deterministic])), record]
-      end)
-    ], [:deterministic])
+    :erlang.term_to_binary(
+      [
+        "loopex:local-root-snapshot:v1",
+        claimed.generation_digest,
+        claimed.root_binding,
+        claimed.root_claim_nonce,
+        length(entries),
+        Enum.map(entries, fn {name, record} ->
+          [name, hash(:erlang.term_to_binary(record, [:deterministic])), record]
+        end)
+      ],
+      [:deterministic]
+    )
   end
 
   defp ledger_index_operation(fixture, work_ms \\ 1_000) do
     assert {:joined, {:ok, manifest}, _} =
-      RestoreIO.run({:manifest, fixture.root, 16_777_216}, limits(work_ms, 100))
+             RestoreIO.run({:manifest, fixture.root, 16_777_216}, limits(work_ms, 100))
+
     {:audit_ledger_index, fixture.root, fixture.declaration, manifest}
   end
 

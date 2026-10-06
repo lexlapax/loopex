@@ -691,20 +691,41 @@ defmodule Loopex.Executor.Local.LedgerRecordConformanceTest do
     marker = Ledger.marker(context.job)
     refused_job = job(%{job_id: <<0, 255, "refused">>, operation_id: "captured-refused"})
     assert {:ok, refusal} = Ledger.refusal(refused_job, :workspace_lease_lost)
-    assert :ok = Ledger.with_claim(context.prepared, fn claimed ->
-      assert :ok = Ledger.admit(claimed, marker, Ledger.open_entry(context.job, context.job.executor_identity))
-      Ledger.refuse(claimed, refusal)
-    end)
+
+    assert :ok =
+             Ledger.with_claim(context.prepared, fn claimed ->
+               assert :ok =
+                        Ledger.admit(
+                          claimed,
+                          marker,
+                          Ledger.open_entry(context.job, context.job.executor_identity)
+                        )
+
+               Ledger.refuse(claimed, refusal)
+             end)
+
     for record <- [marker, refusal] do
       bytes = File.read!(marker_path(context.root, record["job_id"]))
       assert {:ok, ^record} = Ledger.decode_marker_bytes(bytes)
-      for hostile <- [bytes <> <<0>>, :erlang.term_to_binary(record, [:compressed]),
-                      encode(Map.put(record, "extra", 1)), :binary.copy(<<0>>, 65_537)] do
+
+      for hostile <- [
+            bytes <> <<0>>,
+            :erlang.term_to_binary(record, [:compressed]),
+            encode(Map.put(record, "extra", 1)),
+            :binary.copy(<<0>>, 65_537)
+          ] do
         assert_unavailable(Ledger.decode_marker_bytes(hostile))
       end
     end
-    assert_unavailable(Ledger.decode_marker_bytes(encode(Ledger.open_entry(context.job, "identity"))))
-    assert_unavailable(Ledger.decode_marker_bytes(File.read!(Path.join(context.root, "generation"))))
+
+    assert_unavailable(
+      Ledger.decode_marker_bytes(encode(Ledger.open_entry(context.job, "identity")))
+    )
+
+    assert_unavailable(
+      Ledger.decode_marker_bytes(File.read!(Path.join(context.root, "generation")))
+    )
+
     assert_unavailable(Ledger.decode_marker_bytes(:invalid))
   end
 
@@ -714,10 +735,21 @@ defmodule Loopex.Executor.Local.LedgerRecordConformanceTest do
     assert :ok = restore(context.prepared, record)
     entries = [{digest(record["job_id"]), record}]
     assert {:ok, [^record]} = snapshot(context.prepared)
-    assert {:ok, [^record]} = Ledger.validate_captured_open_index(
-      context.prepared.generation_digest, context.prepared.root_binding, entries)
-    assert {:ok, []} = Ledger.validate_captured_open_index(
-      context.prepared.generation_digest, context.prepared.root_binding, [])
+
+    assert {:ok, [^record]} =
+             Ledger.validate_captured_open_index(
+               context.prepared.generation_digest,
+               context.prepared.root_binding,
+               entries
+             )
+
+    assert {:ok, []} =
+             Ledger.validate_captured_open_index(
+               context.prepared.generation_digest,
+               context.prepared.root_binding,
+               []
+             )
+
     refute File.exists?(Path.join(context.root, "claim"))
   end
 
@@ -726,33 +758,54 @@ defmodule Loopex.Executor.Local.LedgerRecordConformanceTest do
       entries = ceiling_entries(claimed, context.job)
       assert byte_size(snapshot_bytes(claimed, entries)) == @snapshot_bytes
       expected = Enum.map(entries, &elem(&1, 1))
-      assert {:ok, ^expected} = Ledger.validate_captured_open_index(
-        claimed.generation_digest, claimed.root_binding, entries)
+
+      assert {:ok, ^expected} =
+               Ledger.validate_captured_open_index(
+                 claimed.generation_digest,
+                 claimed.root_binding,
+                 entries
+               )
+
       [{name, first} | rest] = entries
       larger = Map.update!(first, "executor_identity", &(&1 <> "x"))
       assert byte_size(snapshot_bytes(claimed, [{name, larger} | rest])) == @snapshot_bytes + 1
+
       assert {:error, {:ledger_unavailable, :snapshot_too_large}} =
-        Ledger.validate_captured_open_index(claimed.generation_digest,
-          claimed.root_binding, [{name, larger} | rest])
+               Ledger.validate_captured_open_index(
+                 claimed.generation_digest,
+                 claimed.root_binding,
+                 [{name, larger} | rest]
+               )
     end)
   end
 
-  test "captured open index refuses count basename shape ordering and binding violations", context do
+  test "captured open index refuses count basename shape ordering and binding violations",
+       context do
     generation = context.prepared.generation_digest
     binding = context.prepared.root_binding
     record = Ledger.open_entry(context.job, context.job.executor_identity)
     entry = {digest(record["job_id"]), record}
     assert :ok = Ledger.open_index_capacity(1_024)
     assert_unavailable(Ledger.open_index_capacity(1_025))
-    for entries <- [[entry, entry], [{"wrong", record}], [:invalid],
-                    [{elem(entry, 0), Map.put(record, "extra", 1)}],
-                    List.duplicate(entry, 1_025)] do
+
+    for entries <- [
+          [entry, entry],
+          [{"wrong", record}],
+          [:invalid],
+          [{elem(entry, 0), Map.put(record, "extra", 1)}],
+          List.duplicate(entry, 1_025)
+        ] do
       assert_unavailable(Ledger.validate_captured_open_index(generation, binding, entries))
     end
+
     other = Map.put(record, "job_id", "other")
     sorted = Enum.sort([{digest(other["job_id"]), other}, entry])
     assert {:ok, _} = Ledger.validate_captured_open_index(generation, binding, sorted)
-    assert_unavailable(Ledger.validate_captured_open_index(generation, binding, Enum.reverse(sorted)))
+
+    assert_unavailable(
+      Ledger.validate_captured_open_index(generation, binding, Enum.reverse(sorted))
+    )
+
     assert_unavailable(Ledger.validate_captured_open_index("bad", binding, [entry]))
     assert_unavailable(Ledger.validate_captured_open_index(generation, "bad", [entry]))
     assert_unavailable(Ledger.validate_captured_open_index(generation, binding, :invalid))
