@@ -474,9 +474,12 @@ defmodule Loopex.Runtime.OwnerGroupRetirementTest do
         pretty: false
       )
 
-    flunk(label <> "; bounded actual row: " <>
-      String.slice(rendered, 0, 1_024) <>
-      "; any omitted tail is UNAVAILABLE, no complete-shape claim")
+    flunk(
+      label <>
+        "; bounded actual row: " <>
+        String.slice(rendered, 0, 1_024) <>
+        "; any omitted tail is UNAVAILABLE, no complete-shape claim"
+    )
   end
 
   defp membership_queries(rows, group, workers) do
