@@ -32,13 +32,24 @@ they do not mean the original task is complete. This follows the maintainer's
 ## Current source review and receipt extraction, 2026-10-05
 
 Ledger source correction `bbf5265c` has passed root and independent source
-review. Root reviewed and finalized a separate one-shot runner, granting the
-sole verification VM for the sequential current/floor metadata checks. No
-execution handle or test result exists yet; the Ledger row remains open.
-Receipt candidate `f4680435` has no production review blocker; its test-only
-`f6e731bd` child adds the missing unknown-atom/no-creation witness under the
-unchanged 1,000 ms observer cutoff. Correction review and all execution remain
-pending. Both isolated branches preserve original source and evidence packets.
+review. Its one-shot verification is terminal FAIL_OR_UNAVAILABLE at clean
+formatter child `6baa7364`: current IO80/2 and Ledger23/0 pass; Composition
+644/651 passed with seven configuration failures,3 excluded and zero skips.
+Original handle2090 exit1 is collected and all22 PIDs/groups are absent. Local,
+long and floor lanes did not run. No retry or integration occurred. Root verified
+93 sealed artifacts,106 actual/Git/kind/mode sources and22 unique attempts.
+The Ledger row remains open while the unchanged integration failures are diagnosed.
+Receipt `f6e731bd` passed final independent/root source review, including its
+unknown-atom/no-creation witness under the unchanged1,000ms observer cutoff.
+Root verified the disabled modern runner and retained a separate v3 grant after
+the Ledger slot returned. One current/floor sequence expects32 focused,35 adjacent
+and298 ordinary Local with2 excluded,zero skips; no receipt handle exists at
+this saved checkpoint. Both isolated branches preserve original source/evidence.
+
+Root verified the next artifact physical inventory; selected-use capture can
+reuse the existing owner and reference-bound facade. Its implementation is
+not yet assigned. Object/complete namespace/history obligations remain separate.
+These are current facts; the following paragraphs retain historical checkpoints.
 
 Artifact source/evidence is pushed at `87be37e7`; its clean merged worktree and
 local/remote topic branches are removed. No verification VM runs.

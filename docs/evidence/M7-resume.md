@@ -27,6 +27,67 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current proof, execution and source ownership
 
+CURRENT EXECUTION: Ledger enumeration handle2090 is terminal exit1 and fully
+collected. The original current Composition command exited2 with644/651 passed,
+seven failures,3 excluded and zero skips in354.531 seconds; pipeline677.138.
+Focused IO80/2 and adjacent Ledger23/0 passed in36.661/2.152 seconds. Local,
+owned long and all floor lanes did not run. Source is the clean formatter-only
+child `6baa7364824b5db95a9075fcbb14afba2304c6f5`. Root read the complete formatter
+patch and verified93 terminal artifacts,22 original raw stages/started handles,
+106 actual/Git/kind/mode source records and22 unique consumed registry attempts.
+Independent read-only OS probes confirm all22 original PIDs/groups absent.
+The original slot returned before the separate receipt grant below. No retry,
+repair or integration occurred. Seven failures returned
+`invalid_session_configuration` in unchanged ephemeral integration cases;
+CLI agent diagnoses their cause read-only. The bounded enumeration row stays open.
+Sibling `M7/ledger-enumeration-execution-20261005-v1`: terminal
+`a6879eb5a314e76e4ab4b5b86398bf1b9b699b9c982dc54f73b77e605c3bf474`, inventory
+`466cb17beb754755061bd41ecf61295b34e1a8e08c1dff4b5ba428a29a38e969`;
+ordinary raw `d1ffc382d42345e094a3a6e92f8e91a8335238234c3e70c1158b45313d5906c8`.
+Collection sibling `M7/ledger-enumeration-execution-20261005-v1-collection`
+retains original handle/status and exact assertions; collection verification
+`0be5dcbce69336a2262880889eedb2696e14cdce6967b52201cee5c6c7f9af9c`.
+
+CURRENT RECEIPT GRANT: source `f6e731bdafd09f2abd3174ed199b36c24cfcc809` remains
+clean, reviewed and isolated. Root reviewed the complete authored run/AST delta,
+actual changed source/main, config/schema and finalization; verified54 sealed
+artifacts plus inventory,38 external inputs,32 actual/Git/kind/mode sources,
+16 source populations,11 unchanged shared runner functions and identical helpers.
+Disabled sibling `M7/receipt-captured-decoding-runner-f6-20261005-v2` remains
+immutable, inventory `4bbf2f6b8c753433c44e2ebc6113a84bde17463c43f774aabb93638f479006f5`.
+New enabled v3 retains run
+`c8867cda142a2754d4b83036f60804c728cda0cf246c4de48e03d6960f963b6a`, config
+`982d5d42bb10ad7eadf1db0f1377fb20644de1a8c3f7b6d809b83489e1f51152`, finalization
+`cc12cb80c7363b52c975f125a7d7d064084e39d3e4aecbcb0f5b427c5137c084` and root-grant.
+New canonical `M7/receipt-captured-byte-stage-attempt-registry.json` is seeded
+empty after confirming no earlier unit execution or registry; initial digest
+`1a5f5f5aa0ba2c8e25a6d0994e96d5911cd7194ee78b447a194f0321f46bdbf0`.
+Never reset it. Root grants private_task_causal_resume one exclusive sequential
+current/floor verification: focused32/0, adjacent35/0, ordinaryLocal298/2,
+zero skips. Only two owned AST-equal formatter changes and exact direct-child
+re-pin are permitted. Stop and retain first failure; no retry, source repair,
+second VM, full fast, paid/attended lane or integration. Exact new output is
+`M7/receipt-captured-decoding-execution-20261005-v1`. At this checkpoint no
+receipt handle exists yet; dispatch follows the saved grant. The bounded
+receipt row remains open. Four source/review packets remain retained unchanged.
+
+NEXT ARTIFACT INVENTORY: root read the complete selected-use capture report and
+schema; verified four listed artifacts plus inventory,11 actual/Git/kind/mode
+sources and three prior reports. Immutable copy sibling
+`M7/artifact-physical-capture-inventory-fe9c08cc-20261005-v1` preserves its
+historical0644 source-mode inventory and records new0444 copy modes, retention
+map `25727f58d32fec834d2d1ab8996bf78bf4f5f9fa29002054db8acc085bd77228`.
+Report `9f52de85f2dea47c20ef4140844e631f8998736ab56ca30f29e01c21c4d4d683`
+recommends reusing owned capture and the existing reference-bound facade for one
+selected use. No implementation or VM grant exists. Object hashing/complete
+namespace/history remain separate; the writer64MiB cap does not narrow the
+current uint64 reader/reference domain, and legitimate orphan objects remain.
+The repeated maintainer1,000ms diagnostic approval confirms the existing
+setup-only disposition and changes no other bound or ADR acceptance.
+
+The following paragraphs retain earlier checkpoints; the current execution,
+receipt grant and inventory above supersede their live-state descriptions.
+
 LATEST STARTUP PROOF: `private_task_causal_resume` collected terminal handle
 `51106`. Root reviewed and pushed corrected source
 `7ca8b9161739842ecf4da4b3a37567b5f67b8464` and granted reviewed runner
