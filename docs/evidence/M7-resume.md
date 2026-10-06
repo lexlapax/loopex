@@ -27,6 +27,44 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current proof, execution and source ownership
 
+LATEST COLLECTION, 2026-10-06: root22595 is fully collected, exit1 after
+320.204s and12 current-toolchain stages. The verification VM is FREE. Project
+development/test compilation and structural gates passed. Focused IO passed
+106/3; focused lookup passed27/38 with11 failures in48.673s, seed744275.
+No resolution, workflow, other runtime lane or floor stage ran. Original3da
+remains clean/frozen; never poll22595 or repeat its source/pair/stage keys.
+Failures include retained historical receipts and four higher incoming phases
+refused as invalid history, missing proof reported pending, paused native
+writers reporting descriptor_unclosed, and a foreign plan-digest claim cleanup
+reporting commit_unknown. Attribution is pending source diagnosis; no failure
+has been waived or promoted to PASS.
+
+Root verified59 immutable artifacts,134 actual Git source rows and12 original
+raw EOF/wait/status/PID-group joins, with363 preserved plus12 new unique registry
+keys. Output `M7/m7-combined-success-v1` report is
+`97ffde7425aab274cde26fbaadba66f256590e77171f3b4e72fd00b905d4a1bd`, inventory
+`a8f02caa36e6b0dc13a3d96efe1a59ab28d35bfcac0172eed3cf7d8f93eb04be`, registry
+`ea9576b96d147413c44639a59d8d0565cb01eab3191f974140dc59933628901f`.
+Original collection `M7/combined-success-original-collection-20261006-v1.json`
+is `b18d79791f175492583c94d79159b4ec55ed23653ffa38f1edf3766ab93e7f7d`; audit
+`M7/combined-success-collection-audit-20261006-v1.py` is
+`255bb98050f2326712d67186d16a3564bce2be967c7fb0c7cd0c94f9a2b8c0e5`.
+
+Diagnostic R1 source correction is clean
+`4f2dd8ef5f7fbe4b5991200b3f1f76a5fa17b6da`, direct child of5fc, in the private-task
+writer. Ordinary DOWN retains original native members until positive supervisor
+absence under the already selected cutoff; missing windows remain unproved.
+Child changes OwnerGroup and adds two native retirement witnesses; all105 older
+Core test/support files remain unchanged. Sealed source packet
+`/private/tmp/loopex-m7-private-task-cleanup-order-r1-source-4f2dd8ef-20261006-v1/report.md`
+is `608c915b7265bf594397c0fde249c429d55d687c89897b56e200a1ae358c6472`, inventory
+`aa0913618f8f2a3d97feb0652286b430ef764fe5dc31395028c4ef6aa055edaa`.
+CLI independently reviews only R1 disposal and the new witness bounds.
+Private-task diagnoses the original11 lookup failures without edits or VM;
+current-index continues pending-intake unit1 in its separate writer. The old5fc
+formatter stays disabled. No new VM grant exists. The maintainer's1000ms
+approval remains diagnostic setup only; task totals remain unchanged.
+
 LATEST EXECUTION, 2026-10-06: root original22595 owns the sole verification
 VM on frozen clean3da. Current then floor,37 stages and14 lanes per pair,
 74 total stages. IO106/3→lookup38/0→resolution9/0→workflow39/0 precede original
