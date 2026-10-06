@@ -77,27 +77,63 @@ collection `4ce2d6545727cdde39d74a882f566aff700c9bdfcab31789b5bc797e4a63255e`.
 Floor ordinary raw retains erl_child_setup error32; both ordinary logs retain
 the unavailable Darwin invalid filename/Linux-required witness. These remain
 visible. Only the bounded T15 capture row closes. Complete ledger/receipt/job/
-Store/artifact/history/restore relations stay open. No live verification handle
-remains and no next VM grant has been issued.
+Store/artifact/history/restore relations stay open. Ledger has no live verification handle. Its slot was returned before the
+subsequent artifact grant recorded below.
 
-ARTIFACT SOURCE REVIEW: exact e8f01716923b62873872cee548a0de3dafa5c7e8 in
-`/private/tmp/loopex-m7-artifact-use-decoder`, branch
-`codex/m7-artifact-use-decoder`, is unproved. Only Store artifacts.ex and
-artifact_store_conformance_test.exs are owned. Root read the full two-file delta
-and final independent report and verified six artifacts/eighteen actual/Git/
-installed-source inputs. Improper projected pairs, nested lists and tuple/map-
-hidden improper lists can raise FunctionClauseError before integrity refusal.
-Explicit structural refusal and real decoder hostile controls are authorized
-as a separate source-only child; no Core/port/Canonical changes, VM, formatter,
-test or network work yet. Final sibling
-`M7/artifact-use-decoder-independent-review-e8-20261005-v2`, report
-`777e13a74ecd160800b5a74afb5be7bfffba3bc485174f3c0bf7f99c862570c3`;
-input `50c6c73eff3d59d0a78576a8d3c4688bb9876039079b441e952a5d67c66d3572`.
-Earlier v1 snapshot is preserved; v2 is final. Root rejected disabled v1 runner
-before execution: ordinary expectation290 disagrees with source105; missing
-owned formatter/AST repin; original command exit/PID/group cleanup insufficient.
-The worker is sealing a disabled modern v2 runner and repairing source. Future
-both-pair focus29/0 and Store105/0 are source-derived, not test results.
+LEDGER CLEANUP: source/evidence push `d730ee46` completed. The clean merged
+`/private/tmp/loopex-m7-ledger-capture-audit` worktree and local/remote
+`codex/m7-ledger-capture-audit` branches are removed. No live Git handle remains.
+
+NEXT LEDGER SOURCE: root read the complete source-hashed enumeration inventory
+`/private/tmp/loopex-m7-ledger-enumeration-inventory-v1/report.md`, digest
+`e2d4eb4b3b8eee0f05d282d6465f1a669159850fd059974f752e351b16b65662`, and verified
+five actual/Git/mode sources plus the prior inventory. Worker owns NEW isolated
+`/private/tmp/loopex-m7-ledger-enumeration`, branch
+`codex/m7-ledger-enumeration`, base `d730ee46`. Source-only complete private
+marker/open/generation namespace capture is authorized; only restore IO/test
+and, if actual validator reuse requires it, Local ledger/conformance paths.
+One original guardian/cutoff, exact current writers/crash cuts and private
+structural bounds. No synthetic authority, claim reclamation, public contract,
+receipt/Store/history certification, VM, formatter, test or network work.
+This develops the existing incomplete backup/restore outcome; no row closes.
+
+CURRENT ARTIFACT VERIFICATION GRANT: source-only correction
+`d18ac9e74eb73baf57d33b2f9313678331dca74d` is pushed on
+`codex/m7-artifact-use-decoder` in `/private/tmp/loopex-m7-artifact-use-decoder`.
+Root read its complete delta/report and verified nine artifacts, seven actual/
+Git/mode source records, ten population files and six external inputs. Explicit
+pair/list/tuple/native-map traversal fixes improper-list exceptions under the
+existing narrow ArgumentError refusal; cap/BIF/canonical/hash sequence and
+original observer/joins remain unchanged. Nine hostile vectors extend the
+existing matrix; no current writer contract or Core/Canonical bytes change.
+Independent source review reports no blockers. Root read it and verified four
+artifacts/twenty-one exact inputs, including inverse parent hashes against Git.
+Sibling `M7/artifact-use-decoder-independent-review-d18-20261005-v1`, report
+`12dfac90d242463e1c46372de83e79041ced73d21eeb827d19b51d232833ab67`.
+
+Root read the complete modern v2 runner/helper/checker source and complete
+v2-to-v3 correction, reports, schemas and finalization. It verified twenty-one
+v3 artifact records, twenty-three actual/Git/mode source records, all external
+inputs and unchanged helpers. The v1 proposal was refused before execution;
+v2/v3 remain immutable disabled drafts. Final reviewed enabled sibling
+`M7/artifact-use-decoder-runner-d18-20261005-v4`, runner digest
+`841b83f00e66a4764999e230fcedc309e63518dfe860f2bc441ada907eeaaab9`, config
+`8bdad8c57cc6d56ba69414f2c826ccf00bde51fb29d65e197c4520a01c097e91`.
+Its root-grant and separate finalization inventory own final config bytes;
+the copied draft inventory remains historical. Canonical artifact-stage registry
+`M7/artifact-use-stage-attempt-registry.json` starts empty because no artifact
+runner has executed. Never reset it after consumption. Exact fresh output
+`M7/artifact-use-decoder-execution-20261005-v1`.
+
+The CLI worker now owns the sole VM grant, polls, first-failure sealing,
+original process/group collection and slot return. Root owns integration.
+Owned-only formatting must prove non-line AST equality and optional exact
+formatter direct child; both pairs require focused29/0 and ordinary Store105/0,
+zero skips/failures. These remain prospective counts. No extra adjacent/long/
+full/release lane or source repair/retry is authorized. Terminal prior handles
+get read-only group checks, never signals to a reused PGID; dirty final source
+refuses PASS and is retained. Complete physical capture/object/history remains
+open. No full check is enabled. Ledger enumeration is source-only elsewhere.
 
 PRIOR FULL-CHECK REGISTRY: root read and verified five packet artifacts,116
 inputs,78 Git source/toolchain identities,17 supplemental actual logs and75
