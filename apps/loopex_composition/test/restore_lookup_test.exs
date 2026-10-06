@@ -265,6 +265,290 @@ defmodule LoopexComposition.RestoreLookupTest do
     assert {:error, %{"code" => "invalid_query"}} = Restore.lookup(root, hash("tx"), Map.put(@limits, "extra", true))
   end
 
+  for prefix <- ["admin", "lineage"] do
+    test "actual empty #{prefix} prefix is conservative pending before ordinal creation", %{root: root} do
+      {source, workspace} = source(root)
+      cut = prepare_cut(root, source, workspace, 0)
+      owned = launch_paused(cut, :directory_sync)
+      try do
+        path = if unquote(prefix) == "admin", do: Path.join(cut.destination, ".loopex-restore"),
+          else: Path.join(cut.destination, ".loopex-restore/lineage")
+        id = hold_when(owned, :directory_sync, fn -> File.ls(path) == {:ok, []} end)
+        before = manifest(cut.destination)
+        try do
+          assert {:pending, observation} = Restore.lookup(cut.destination, cut.plan["tx_id"], @limits)
+          assert observation["phase"] == "destination_intent"
+          assert observation["intent"] == "may_exist" and observation["claim"] == "retained"
+          assert observation["ordinal"] == nil and observation["cleanup"] == "joined"
+          assert manifest(cut.destination) == before
+        after
+          send(owned.guardian, {:proceed, owned.reference, id})
+          try do
+            finish_paused(owned, :directory_sync)
+          after
+            cleanup_owned(owned)
+          end
+        end
+      after
+        cleanup_owned(owned)
+      end
+    end
+  end
+
+  for {record, phase, intent_status} <- [{"baseline", "destination_intent", "may_exist"},
+      {"source-retirement", "source_retirement", "validated"}, {"committed", "destination_proofs", "validated"}] do
+    test "actual root #{record} temporary retains its earliest writer phase", %{root: root} do
+      {source, workspace} = source(root)
+      cut = prepare_cut(root, source, workspace, 0)
+      owned = launch_paused(cut, :rename)
+      try do
+        path = Path.join(cut.destination, ".loopex-restore/lineage/00000001/" <> unquote(record))
+        id = hold_when(owned, :rename, fn -> File.regular?(path <> ".tmp") and File.lstat(path) == {:error, :enoent} end)
+        before = manifest(cut.destination)
+        try do
+          assert {:pending, observation} = Restore.lookup(cut.destination, cut.plan["tx_id"], @limits)
+          assert observation["phase"] == unquote(phase)
+          assert observation["intent"] == unquote(intent_status) and observation["claim"] == "retained"
+          assert manifest(cut.destination) == before
+          assert File.regular?(path <> ".tmp") and File.lstat(path) == {:error, :enoent}
+        after
+          send(owned.guardian, {:proceed, owned.reference, id})
+          try do
+            finish_paused(owned, :rename)
+          after
+            cleanup_owned(owned)
+          end
+        end
+      after
+        cleanup_owned(owned)
+      end
+    end
+  end
+
+  test "a retained destination intent never invents a missing final baseline", %{root: root} do
+    {source, workspace} = source(root)
+    cut = prepare_cut(root, source, workspace, 0)
+    owned = launch_restore(cut)
+    try do
+      {id, _} = hold_phase(owned, "source_retirement", [])
+      path = Path.join(cut.destination, ".loopex-restore/lineage/00000001/baseline")
+      bytes = File.read!(path)
+      File.rm!(path)
+      try do
+        assert {:error, %{"code" => "restore_history_invalid", "cleanup" => "joined"}} =
+          Restore.lookup(cut.destination, cut.plan["tx_id"], @limits)
+        assert File.lstat(path) == {:error, :enoent}
+      after
+        File.write!(path, bytes, [:exclusive])
+        File.chmod!(path, 0o600)
+        send(owned.guardian, {:proceed, owned.reference, id})
+        try do
+          finish_restore(owned)
+        after
+          cleanup_owned(owned)
+        end
+      end
+    after
+      cleanup_owned(owned)
+    end
+  end
+
+  test "lookup refuses replacement between original ledger placement and capture", %{root: root} do
+    fixture = first(root)
+    parent = self()
+    {caller, caller_monitor} = spawn_monitor(fn ->
+      send(parent, {:lookup_result, self(), RestoreIO.run({:restore_lookup, fixture.destination, fixture.plan["tx_id"]}, @limits,
+        probe: parent, pause_at: :lookup_ledger_placement_stat)})
+    end)
+    owned = installed_lookup(caller, caller_monitor)
+    try do
+      path = Path.join(fixture.destination, "receipts")
+      try do
+        id = hold_when(owned, :lookup_ledger_placement_stat, fn -> true end)
+        File.rename!(path, path <> "-old")
+        assert {:ok, _} = File.cp_r(path <> "-old", path)
+        before = manifest(fixture.destination)
+        send(owned.guardian, {:proceed, owned.reference, id})
+        assert_receive {:lookup_result, ^caller, {:joined, {:ok, {:error, %{"code" => "physical_destination_changed"}}}, evidence}}, left(owned.cutoff)
+        assert evidence.opens == evidence.closes
+        join(owned)
+        assert manifest(fixture.destination) == before
+      after
+        cleanup_owned(owned)
+      end
+    after
+      cleanup_owned(owned)
+    end
+  end
+
+  for {field, value} <- [{"tx_id", "foreign"}, {"plan_digest", "foreign"}, {"role", "source"}] do
+    test "actual pending intent refuses foreign claim #{field} identity without reclaim", %{root: root} do
+      {source, workspace} = source(root)
+      cut = prepare_cut(root, source, workspace, 0)
+      owned = launch_restore(cut)
+      try do
+        {id, _} = hold_phase(owned, "destination_generations", [])
+        owner = Path.join(claim_path(cut.destination), "owner")
+        bytes = File.read!(owner)
+        {:ok, claim} = RestoreCodec.decode(:claim, bytes)
+        replacement = if unquote(value) == "foreign", do: hash("foreign-" <> unquote(field)), else: unquote(value)
+        {:ok, hostile} = RestoreCodec.encode(:claim, Map.put(claim, unquote(field), replacement))
+        File.write!(owner, hostile)
+        before = manifest(cut.destination)
+        try do
+          assert {:error, %{"code" => "restore_conflict", "cleanup" => "joined"}} =
+            Restore.lookup(cut.destination, cut.plan["tx_id"], @limits)
+          assert File.read!(owner) == hostile and manifest(cut.destination) == before
+        after
+          File.write!(owner, bytes)
+          send(owned.guardian, {:proceed, owned.reference, id})
+          try do
+            finish_restore(owned)
+          after
+            cleanup_owned(owned)
+          end
+        end
+      after
+        cleanup_owned(owned)
+      end
+    end
+  end
+
+  test "an older historical query validates the actual newer claim identity", %{root: root} do
+    fixture = first(root)
+    cut = prepare_cut(root, fixture.destination, fixture.workspace, 1)
+    owned = launch_restore(cut)
+    try do
+      {id, _} = hold_phase(owned, "destination_generations", [])
+      owner = Path.join(claim_path(fixture.destination), "owner")
+      bytes = File.read!(owner)
+      {:ok, claim} = RestoreCodec.decode(:claim, bytes)
+      {:ok, hostile} = RestoreCodec.encode(:claim, %{claim | "role" => "destination"})
+      File.write!(owner, hostile)
+      try do
+        assert {:error, %{"code" => "restore_conflict", "cleanup" => "joined"}} =
+          Restore.lookup(fixture.destination, fixture.plan["tx_id"], @limits)
+        assert File.read!(owner) == hostile
+        File.write!(owner, bytes)
+        assert {:committed, %{"receipt" => receipt, "view" => "historical"}} =
+          Restore.lookup(fixture.destination, fixture.plan["tx_id"], @limits)
+        assert receipt == fixture.receipt
+      after
+        File.write!(owner, bytes)
+        send(owned.guardian, {:proceed, owned.reference, id})
+        try do
+          finish_restore(owned)
+        after
+          cleanup_owned(owned)
+        end
+      end
+    after
+      cleanup_owned(owned)
+    end
+  end
+
+  for fault <- [:generation, :placement] do
+    test "a real higher empty outgoing ordinal cannot hide earlier #{fault}", %{root: root} do
+      fixture = first(root)
+      cut = prepare_cut(root, fixture.destination, fixture.workspace, 1)
+      owned = launch_paused(cut, :directory_sync)
+      try do
+        path = Path.join(fixture.destination, ".loopex-restore/lineage/00000002")
+        # The actual writer has created/chmodded source ordinal2 and is held
+        # at its parent-directory sync before issuing the source intent.
+        id = hold_when(owned, :directory_sync, fn -> File.ls(path) == {:ok, []} end)
+        ledger = Path.join(fixture.destination, "receipts")
+        bytes = File.read!(Path.join(ledger, "generation"))
+        if unquote(fault) == :generation do
+          File.write!(Path.join(ledger, "generation"), "changed-current-generation")
+        else
+          File.rename!(ledger, ledger <> "-old")
+          assert {:ok, _} = File.cp_r(ledger <> "-old", ledger)
+        end
+        try do
+          assert {:error, %{"code" => code, "cleanup" => "joined"}} =
+            Restore.lookup(fixture.destination, fixture.plan["tx_id"], @limits)
+          assert code == if(unquote(fault) == :generation, do: "restore_history_invalid", else: "physical_destination_changed")
+        after
+          if unquote(fault) == :generation do
+            File.write!(Path.join(ledger, "generation"), bytes)
+          else
+            File.rm_rf!(ledger)
+            File.rename!(ledger <> "-old", ledger)
+          end
+          send(owned.guardian, {:proceed, owned.reference, id})
+          try do
+            finish_paused(owned, :directory_sync)
+          after
+            cleanup_owned(owned)
+          end
+        end
+      after
+        cleanup_owned(owned)
+      end
+    end
+  end
+
+  for fault <- [:generation, :placement] do
+    test "a hostile sparse outgoing intent cannot hide an unmentioned current #{fault}", %{root: root} do
+      {source, workspace} = source(root)
+      assert {:ok, _} = Ledger.prepare(Path.join(source, "sparse"), "lookup-sparse", 1_000)
+      fixture = execute_cut(prepare_pair_cut(root, source, workspace, 0))
+      cut = prepare_pair_cut(root, fixture.destination, fixture.workspace, 1)
+      owned = launch_paused(cut, :rename)
+      try do
+        temp = Path.join(fixture.destination, ".loopex-restore/lineage/00000002/intent.tmp")
+        id = hold_when(owned, :rename, fn -> File.regular?(temp) end)
+        intent_bytes = File.read!(temp)
+        {:ok, intent} = RestoreCodec.decode(:intent, intent_bytes)
+        plan = %{intent["plan"] | "ledgers" => Enum.reject(intent["plan"]["ledgers"], &(&1["relative_root"] == "sparse"))}
+        {:ok, digest} = RestoreCodec.plan_digest(plan)
+        {:ok, hostile_intent} = RestoreCodec.encode(:intent, %{intent | "plan" => plan, "plan_digest" => digest,
+          "generations" => Enum.reject(intent["generations"], &(&1["relative_root"] == "sparse"))})
+        assert {:ok, _} = RestoreCodec.decode(:intent, hostile_intent)
+        owner = Path.join(claim_path(fixture.destination), "owner")
+        claim_bytes = File.read!(owner)
+        {:ok, claim} = RestoreCodec.decode(:claim, claim_bytes)
+        {:ok, hostile_claim} = RestoreCodec.encode(:claim, %{claim | "plan_digest" => digest})
+        File.write!(temp, hostile_intent)
+        File.write!(owner, hostile_claim)
+        ledger = Path.join(fixture.destination, "sparse")
+        generation = File.read!(Path.join(ledger, "generation"))
+        if unquote(fault) == :generation do
+          File.write!(Path.join(ledger, "generation"), "changed-unmentioned-generation")
+        else
+          File.rename!(ledger, ledger <> "-old")
+          assert {:ok, _} = File.cp_r(ledger <> "-old", ledger)
+        end
+        before = manifest(fixture.destination)
+        try do
+          assert {:error, %{"code" => code, "cleanup" => "joined"}} =
+            Restore.lookup(fixture.destination, fixture.plan["tx_id"], @limits)
+          assert code == if(unquote(fault) == :generation, do: "restore_history_invalid", else: "physical_destination_changed")
+          assert manifest(fixture.destination) == before
+          assert File.read!(temp) == hostile_intent and File.read!(owner) == hostile_claim
+        after
+          if unquote(fault) == :generation do
+            File.write!(Path.join(ledger, "generation"), generation)
+          else
+            File.rm_rf!(ledger)
+            File.rename!(ledger <> "-old", ledger)
+          end
+          File.write!(temp, intent_bytes)
+          File.write!(owner, claim_bytes)
+          send(owned.guardian, {:proceed, owned.reference, id})
+          try do
+            finish_paused(owned, :rename)
+          after
+            cleanup_owned(owned)
+          end
+        end
+      after
+        cleanup_owned(owned)
+      end
+    end
+  end
+
   defp assert_root_commit_boundary(cut, "claim_release") do
     assert {:ok, %File.Stat{type: :regular}} = File.lstat(Path.join(cut.destination, ".loopex-restore/lineage/00000001/committed"))
   end
@@ -405,6 +689,63 @@ defmodule LoopexComposition.RestoreLookupTest do
       left(owned.cutoff) -> flunk("lookup read barrier unavailable")
     end
   end
+  defp prepare_pair_cut(root, source, workspace, prior) do
+    cut = prepare_cut(root, source, workspace, prior)
+    bytes = File.read!(Path.join(source, "sparse/generation"))
+    {:ok, generation} = Ledger.decode_bytes(bytes, "local_executor_generation_v1")
+    descriptor = %{"relative_root" => "sparse", "executor_identity" => generation["executor_identity"],
+      "source_generation_sha256" => hash(bytes), "source_placement" => placement(Path.join(source, "sparse"))}
+    %{cut | plan: %{cut.plan | "ledgers" => Enum.sort_by([descriptor | cut.plan["ledgers"]], & &1["relative_root"])}}
+  end
+
+  defp launch_paused(cut, pause) do
+    parent = self()
+    {caller, monitor} = spawn_monitor(fn -> send(parent, {:restore_result, self(), Restore.first(cut.plan, invocation(), probe: parent, pause_at: pause)}) end)
+    installed_lookup(caller, monitor)
+  end
+
+  defp installed_lookup(caller, monitor) do
+    receive do
+      {:restore_io, guardian, worker, reference, {:installed, _, cutoff}} ->
+        %{caller: caller, caller_monitor: monitor, guardian: guardian, worker: worker, reference: reference,
+          guardian_monitor: Process.monitor(guardian), worker_monitor: Process.monitor(worker), cutoff: cutoff + 10_000}
+    after
+      10_000 -> flunk("original lookup/writer actors did not install")
+    end
+  end
+
+  defp hold_when(owned, pause, predicate) do
+    receive do
+      {:restore_io, guardian, worker, reference, {:issued, id, ^pause}}
+      when guardian == owned.guardian and worker == owned.worker and reference == owned.reference ->
+        if predicate.() do
+          id
+        else
+          send(guardian, {:proceed, reference, id})
+          hold_when(owned, pause, predicate)
+        end
+      {:restore_io, _, _, _, _} -> hold_when(owned, pause, predicate)
+    after
+      left(owned.cutoff) -> flunk("actual writer primitive cut unavailable within original bound")
+    end
+  end
+
+  defp finish_paused(owned, pause) do
+    receive do
+      {:restore_io, guardian, worker, reference, {:issued, id, ^pause}}
+      when guardian == owned.guardian and worker == owned.worker and reference == owned.reference ->
+        send(guardian, {:proceed, reference, id})
+        finish_paused(owned, pause)
+      {:restore_io, _, _, _, _} -> finish_paused(owned, pause)
+      {:restore_result, caller, result} when caller == owned.caller ->
+        assert {:joined, {:ok, %{restore_result: {:committed, _}, release_claims: []}}, evidence} = result
+        assert evidence.opens == evidence.closes and evidence.claim_count == 0
+        join(owned)
+    after
+      left(owned.cutoff) -> flunk("actual writer result unavailable within original bound")
+    end
+  end
+
   defp join(owned) do
     exact_down(owned, owned.caller, owned.caller_monitor, :normal)
     exact_down(owned, owned.guardian, owned.guardian_monitor, :normal)

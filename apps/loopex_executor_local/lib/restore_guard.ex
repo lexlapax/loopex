@@ -187,9 +187,12 @@ defmodule Loopex.Executor.Local.RestoreGuard do
     try do
       admin = history_path(captured, @root_admin)
       if Map.has_key?(index, @root_admin) do
-        names!(admin, ["lineage"])
-        names = ordinals!(history_path(captured, [@root_admin, "lineage"]))
-        ensure!(names == Enum.map(1..length(names), &ordinal/1))
+        admin_names = names!(admin)
+        ensure!(admin_names in [[], ["lineage"]])
+        names = if admin_names == [], do: [], else: names!(history_path(captured, [@root_admin, "lineage"]))
+        ensure!(length(names) <= 64)
+        ensure!(names == if(names == [], do: [], else: Enum.map(1..length(names), &ordinal/1)))
+        if names == [], do: lookup_ensure!(not is_nil(claim), "restore_history_invalid")
         initial = %{candidates: %{}, epochs: %{}, previous: 0, tx_ids: MapSet.new(), lineage: []}
         {state, receipts, pending} = Enum.reduce(names, {initial, %{}, nil}, fn name, {state, receipts, pending} ->
           ensure!(is_nil(pending))
@@ -204,15 +207,15 @@ defmodule Loopex.Executor.Local.RestoreGuard do
           end
           if is_nil(intent_name) do
             lookup_ensure!(not is_nil(claim), "restore_history_invalid")
-            lookup_ensure!(claim["tx_id"] == tx_id, "restore_conflict")
-            {state, receipts, lookup_observation(tx_id, nil, "destination_intent", "may_exist", claim)}
+            ensure!(Enum.all?(actual, &(&1 in ["baseline", "baseline.tmp"])))
+            {state, receipts, lookup_observation(claim["tx_id"], nil, "destination_intent", "may_exist", claim)}
           else
             intent = record!(:intent, history_path(directory, intent_name))
             ensure!(intent["ordinal"] == state.previous + 1 and ordinal(intent["ordinal"]) == name)
             ensure!(intent["plan"]["prior_restore_count"] == state.previous)
             lookup_ensure!(not MapSet.member?(state.tx_ids, intent["tx_id"]), "restore_conflict")
-            if claim && claim["tx_id"] == intent["tx_id"], do: ensure!(claim["plan_digest"] == intent["plan_digest"])
             if name == List.last(names) do
+              lookup_claim_intent!(claim, root, intent)
               lookup_ensure!(root in [intent["plan"]["source_state_root"], intent["plan"]["destination_state_root"]], "physical_destination_changed")
               expected_placement = if root == intent["plan"]["destination_state_root"],
                 do: intent["destination_state_placement"], else: intent["plan"]["source_state_placement"]
@@ -228,12 +231,15 @@ defmodule Loopex.Executor.Local.RestoreGuard do
               {next, Map.put(receipts, intent["tx_id"], receipt), nil}
             else
               phase = phase || "destination_generations"
+              lookup_pending_previous!(captured, state, intent)
               {state, receipts, lookup_observation(intent["tx_id"], intent["ordinal"], phase,
                 if(intent_name == "intent", do: "validated", else: "may_exist"), claim)}
             end
           end
         end)
-        if is_nil(pending), do: lookup_current!(captured, state)
+        if state.previous > 0 and (is_nil(pending) or pending["intent"] == "may_exist" and is_nil(pending["ordinal"]) and pending["tx_id"] != tx_id),
+          do: lookup_current!(captured, state)
+        if names == [], do: lookup_ensure!(claim["tx_id"] == tx_id, "restore_conflict")
         if pending && pending["tx_id"] == tx_id do
           {:pending, pending}
         else
@@ -250,7 +256,10 @@ defmodule Loopex.Executor.Local.RestoreGuard do
               else
                 {:committed, %{"receipt" => receipt, "view" => "historical"}}
               end
-            :error -> lookup_absent_or_claim(tx_id, claim)
+            :error ->
+              if names == [],
+                do: {:pending, lookup_observation(tx_id, nil, "destination_intent", "may_exist", claim)},
+                else: lookup_absent_or_claim(tx_id, claim)
           end
         end
       else
@@ -287,6 +296,52 @@ defmodule Loopex.Executor.Local.RestoreGuard do
 
   defp lookup_ensure!(true, _code), do: :ok
   defp lookup_ensure!(_, code), do: throw({:lookup_refusal, code})
+
+  # Concept: an administrative claim names the actual current transition, not the queried historical receipt.
+  # Technical depth: its canonical digest, root role and transaction must all agree with the retained final intent.
+  defp lookup_claim_intent!(nil, _root, _intent), do: :ok
+  defp lookup_claim_intent!(claim, root, intent) do
+    role = cond do
+      root == intent["plan"]["destination_state_root"] -> "destination"
+      root == intent["plan"]["source_state_root"] -> "source"
+      true -> nil
+    end
+    lookup_ensure!(not is_nil(role) and claim["state_root"] == root and claim["role"] == role and
+      claim["tx_id"] == intent["tx_id"] and claim["plan_digest"] == intent["plan_digest"], "restore_conflict")
+  end
+
+  # Concept: a pending higher transition cannot hide an earlier ledger's present binding.
+  # Technical depth: named replacements admit only their captured source/destination generation;
+  # sparse unmentioned candidates retain their previous placement, generation, mode and ordinal coverage.
+  defp lookup_pending_previous!(root, previous, intent) do
+    outgoing = history_root(root) == intent["plan"]["source_state_root"]
+    named = Map.new(intent["generations"], &{&1["relative_root"], &1})
+    if previous.previous > 0 and outgoing,
+      do: lookup_ensure!(placement!(root) == previous.latest["destination_state_placement"], "physical_destination_changed")
+    Enum.each(previous.candidates, fn {relative, prior} ->
+      ledger = history_path(root, relative)
+      replacement = named[relative]
+      expected = cond do
+        is_nil(replacement) -> prior["destination_ledger_placement"]
+        outgoing -> intent["plan"]["ledgers"] |> Enum.find(&(&1["relative_root"] == relative)) |> Map.fetch!("source_placement")
+        true -> replacement["destination_ledger_placement"]
+      end
+      lookup_ensure!(placement!(ledger) == expected, "physical_destination_changed")
+      generation = read!(history_path(ledger, "generation"), 2048, :baseline)
+      allowed = cond do
+        is_nil(replacement) -> [prior["destination_generation_bytes"]]
+        outgoing -> [replacement["source_generation_bytes"]]
+        true -> [replacement["source_generation_bytes"], replacement["destination_generation_bytes"]]
+      end
+      ensure!(generation in allowed)
+      ensure!(generation_mode!(history_path(ledger, "generation")) == prior[:generation_mode])
+      names = ordinals!(history_path(ledger, "restore-lineage"))
+      tail = ordinal(intent["ordinal"])
+      allowed_names = if replacement, do: [prior[:covered_ordinals], prior[:covered_ordinals] ++ [tail]],
+        else: [prior[:covered_ordinals]]
+      ensure!(names in allowed_names)
+    end)
+  end
 
   defp lookup_outgoing!(root, directory, intent, actual, previous) do
     ensure!(intent["plan"]["source_status"] == "available")
@@ -389,10 +444,10 @@ defmodule Loopex.Executor.Local.RestoreGuard do
       lookup_ledger!(root, intent, candidate, retired, committed, hash)
     end)
     cond do
-      Enum.any?(actual, &String.ends_with?(&1, ".tmp")) -> "destination_intent"
-      is_nil(retired) -> "source_retirement"
+      "baseline.tmp" in actual or "intent.tmp" in actual -> "destination_intent"
+      is_nil(retired) or "source-retirement.tmp" in actual -> "source_retirement"
       "destination_generations" in ledger_phases -> "destination_generations"
-      is_nil(committed) or "destination_proofs" in ledger_phases -> "destination_proofs"
+      is_nil(committed) or "committed.tmp" in actual or "destination_proofs" in ledger_phases -> "destination_proofs"
       true -> nil
     end
   end

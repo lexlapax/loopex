@@ -660,9 +660,15 @@ defmodule LoopexComposition.Restore.IO do
       end) |> Enum.uniq()
       state = Enum.reduce(ledgers, state, fn relative, current ->
         path = Path.join(root, relative)
-        {:ok, observed} = execute({:placement, path})
-        info = manifest_stat(path)
+        manifest_ancestors(path)
+        original = manifest_stat(path)
+        observed = %{"expanded_root" => path, "major_device" => file_info(original, :major_device),
+          "inode" => file_info(original, :inode)}
+        info = require_value(primitive(:lookup_ledger_placement_stat, fn -> :prim_file.read_link_info(path) end))
+        if file_info(original, :type) != :directory or manifest_identity(info) != manifest_identity(original),
+          do: throw({:lookup_error, "physical_destination_changed"})
         current = %{current | placements: Map.put(current.placements, path, observed),
+          identities: Map.put(current.identities, path, original),
           index: Map.put(current.index, relative, manifest_directory(relative, Bitwise.band(file_info(info, :mode), 0o7777)))}
         current = lookup_optional_tree(root, Path.join(path, "restore-lineage"), current)
         lookup_capture(root, Path.join(path, "generation"), 2048, current, false)
