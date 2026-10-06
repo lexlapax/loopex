@@ -27,6 +27,67 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current proof, execution and source ownership
 
+ROOT REVIEW IN PROGRESS, 2026-10-06: the maintainer's latest "approve1000ms"
+reconfirms the recorded diagnostic setup cutoff only; see
+[its disposition](../developer/agent-context-map.md#disposition-m7-diagnostic-setup-cutoff-2026-10-05).
+The separate restore admission question below remains unanswered. Core runtime
+packet v5 is disabled at
+`/private/tmp/loopex-m7-private-task-cleanup-core-runtime-runner-e2b835d7-v5`.
+Root verified43 active artifacts,20 external references and134 actual/committed
+source records. Its run digest is
+`15220ac9c73b781c0c5ea2d06d49a61ce671d687b28c4a61906a21e04353facc`, config
+`02d59ba5fc125558d508e145232cc2bcb0231f4fba5068a9a5d991d0185768e6`, report
+`f546206983508fa779c0df4b8fc1d1227e55c7fd5678608d278cf8afc2f9c341`, inventory
+`1b37a8228adcb7e01c8b3fe80f186b06a37dbd66744e4f0834db7c274ca0809f`.
+V2 setup review caught a missing nested-copy parent and stale retirement-case
+metadata before execution; v5 corrects both, retaining the earlier packets.
+Independent CLI runner review is still running; no VM or new runtime result.
+Proposed30 stages cover both toolchains, production-residue AST, warning-free
+compilation, five metadata gates and five focused suites28ordinary/1excluded
+per pair. Seed421 keys; no formatter repeats, retirement intermediate-branch
+proof or full-suite/closure claim. Source remains clean/frozen e2b835d7.
+
+LATEST COLLECTION, 2026-10-06: root original92348 is fully collected
+PASS_FORMAT_PREPARATION_ONLY after107.088s/9 stages. The sole verification VM
+is FREE. Clean e2b835d745ff9c2c3d02c2d4841503a18e9aac09 is unchanged, no child.
+One-owned-file OwnerGroup output `M7/m7-private-task-owner-format-v1`, enabled
+packet `M7/private-task-owner-format-runner-20261006-v1`, config
+`bf001706c7d6d2f0ac3cb08c36836813cecd01119af8c5c81212bf43123891ed`.
+The exact parent-file inverse preserves the original Enum.all? condition and
+0/wait_slice(deadline) branches. Independent layout review report
+`/private/tmp/loopex-m7-private-task-layout-review-e2b835d7-20261006-v1/report.md`
+is `0cb1becee14814daa190359743f1fd004ab62b051e1b73d459d7869a22f20b46`.
+Other3 files/test and all105 old test/support files are literal parentcc892.
+Root verified63 artifacts,134 actual committed source rows and9 original
+EOF/wait/PID-group joins. Collection
+`M7/private-task-owner-format-original-collection-20261006-v1.json` is
+`ed8721b015c87f7f37c8b4e15c692c2fec57d70a3a2bc67b8bc16be38ee357e8`, report
+`ca9578f5974771c49262c2a1fb0a3b04e04d49792ec3cb3469c4e3ff11d5fd6e`, inventory
+`cd72681233dc3c303b8c1e48baec58de58b1ee71cd26221bc396bb5f995c8c05`, registry
+`eb03b7844c786106ed07a579a1a997dc0ae53d92b2047225bfb309fb41831fca`
+has421 unique keys. Never repoll92348 or repeat its source/pair/stage keys.
+No worker VM grant or runtime proof exists. Private-task prepares only a
+disabled Core runner, including three-production-file residue AST admission.
+Current-index prepares only a read-only unit2 continuation plan; blocked
+restore admission stays disabled pending the explicit maintainer choice.
+
+DECISION PENDING: automatic approval review rejected enabling the reviewed
+restore read-branch predicate on3d79. It classified replacement of the inherited
+byte-identity gate as a verification-gate change needing specific approval;
+general M7 test authorization was insufficient. Nothing in that rejected shell
+call ran or wrote its proposed enabled packet. Do not work around the rejection.
+An explicit question offers approved exact reviewed read-branch admission with
+all3 new long cases on both pairs, or a fresh negative-control campaign under
+the old gate. The existing1,000ms approval covers neither choice. Full disabled
+runner `/private/tmp/loopex-m7-pending-intake-success-runner-20261006-v4/report.md`
+is `ba9e80f3feaa073065b9d2f4eca702fd7b8aa36e5e81cc69aae19dfe13f7365b`;
+its source stays3d79 and its15 lanes/78 stages remain. Independent predicate
+review report
+`/private/tmp/loopex-m7-read-causal-boundary-predicate-review-3d79a9a2-20261006-v1/report.md`
+is `92ef57d030020f31ee487ed5a5c10f17a7d2d40e4fda25b225835677695ea7f5`.
+No dependent restore execution is admitted. Existing Core formatting/testing
+scope remains authorized. The earlier separate ADR0052 question is unchanged.
+
 LATEST COLLECTION, 2026-10-06: root original76436 is fully collected FAIL
 after130.643s/12 stages. The sole verification VM is FREE. Its initial source
 was8824c0fd49c9d908d610ad58af069fde87306646 in the private-task writer.
