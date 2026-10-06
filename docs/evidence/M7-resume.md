@@ -125,8 +125,14 @@ the copied draft inventory remains historical. Canonical artifact-stage registry
 runner has executed. Never reset it after consumption. Exact fresh output
 `M7/artifact-use-decoder-execution-20261005-v1`.
 
-The CLI worker now owns the sole VM grant, polls, first-failure sealing,
-original process/group collection and slot return. Root owns integration.
+The CLI worker now owns the sole VM grant and live unified exec handle24595,
+polls, first-failure sealing, original process/group collection and slot return.
+Root must not poll that handle. Preflight verified exact final runner/config,
+all seven admitted packet hashes, registry, twenty-three source records and
+fresh output. Owned formatter/AST proof passed; tested formatter-only child is
+`10006bc27618b1308e1390a834bca0652b6b1f95`, exact child of d18, changing only test
+formatting. Root read its complete formatting delta. Current Elixir/OTP/Node
+preflight passed; compile-dev is underway. No suite result exists yet. Root owns integration.
 Owned-only formatting must prove non-line AST equality and optional exact
 formatter direct child; both pairs require focused29/0 and ordinary Store105/0,
 zero skips/failures. These remain prospective counts. No extra adjacent/long/
