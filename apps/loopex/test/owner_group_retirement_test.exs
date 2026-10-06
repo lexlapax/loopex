@@ -430,9 +430,11 @@ defmodule Loopex.Runtime.OwnerGroupRetirementTest do
         record_trace()
 
         assert Enum.count(rows, fn
-                 {:trace, ^group, :receive,
-                  {:system, {^stopper, ^tag}, {:terminate, :normal}}} -> true
-                 _row -> false
+                 {:trace, ^group, :receive, {:system, {^stopper, ^tag}, {:terminate, :normal}}} ->
+                   true
+
+                 _row ->
+                   false
                end) == 1
 
         refute row in rows
