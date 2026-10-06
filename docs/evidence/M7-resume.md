@@ -27,7 +27,53 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+The maintainer asked to prioritize completing original tasks over further
+restore decomposition. Next is the complete configured built-chat workflow for
+T06: two prompts, clean quit, restart by retained session identity after changing
+file defaults, and a third prompt using retained history and instructions.
+The ordinary built-process proof and required hosted/attended acceptance remain
+distinct. Do not add another restore workstream beyond the assigned claim-release
+correction. `neutral_revision_source_audit` owns a source-only design using
+existing build/configuration/provider edges, with no execution or source edits.
+
+Latest finalization formatter original79544 is terminal and fully collected,
+FAIL after44.903 seconds. All three whole-file non-line AST comparisons passed;
+current final formatting rejected one multiline fixture call. Floor and native
+stages did not run. Collection
+`M7/retained-finalization-format-failed-original-collection-20261006-v1.json`,
+SHA `668dfeaac30a042607bbcfc7b686dcecfc38bd95366de3cd8e535105e8b34ac4`.
+Root committed the exact reported whitespace correction as
+`762c97fb29ef56a0409ade5bd28f6dbd6a42ccae`, sole child of formatter child
+`c689a04008b97171ec7fd628570e06858188af57`, in the clean finalization worktree.
+That correction has not been executed or joined to primary. Original79544 and
+its collection7356 must never be repolled or replayed. The product VM is free;
+the complete consumed union has833 keys, registry
+`M7/retained-finalization-format-v1-stage-attempt-registry.json`, SHA
+`07311adfa92d74fb381a67bfb1e8bde290e404ed43b72da53c56c05752372178`.
+T01–T19 totals remain original78 done/95 todo/6 retired and added302 done/39 todo.
+
+Earlier checkpoint details below describe their named revisions and attempts.
+
 Continue the existing ACTIVE unlimited goal on `m7`. Do not create another goal.
+Latest parallel assignment: root created clean isolated
+`/private/tmp/loopex-m7-retained-claim-release`, branch
+`codex/m7-retained-claim-release`, atb83725bd. `private_task_causal_resume`
+owns only Restore IO/Workflow, a necessary small pure Guard captured reduction
+if needed, and new restore_retained_claim_release_test.exs. It implements only
+the accepted post-commit intact-owner/whole-directory-absence subset after
+complete current canonical proofs and independent prior-authority/exclusion.
+Actual all-absent sync obligations must enter the existing terminal worker;
+absence never becomes a claim/nonce/custody or old-worker completion proof.
+Incomplete intake, historical duplicate reads and ownerless stranded identity
+remain separate. No public facade/schema/codec or worker execution/Git mutation.
+Independent source/contract review reported no new-contract blocker with these
+conditions and is sealing its exact report/index at
+`/private/tmp/loopex-m7-partial-claim-release-next-source-independent-review-20261006-v1`.
+Root must collect/retain that report before final source admission. The new
+T15 added row remains open: original78/95/6, added302/39 for T01–T19. Earlier
+count records below are historical. Finalization formatting remains a separate
+root-owned verification path; no new product attempt has run.
+
 Latest source progress: root committed reviewed raw retained finalization as
 `b83725bdad032476665f003fc27f97e66cad9ff1`, sole child of402ebf8a, in the clean
 isolated writer worktree. All three committed paths match frozen v2 bytes; root

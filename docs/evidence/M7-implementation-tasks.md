@@ -1,5 +1,30 @@
 # M7 Implementation Tasks
 
+The maintainer directed work back to completing original task outcomes.
+Next is T06's configured built-command conversation: two prompts, clean quit,
+restart after changed file defaults, and retained history/instructions. A bounded
+source-only design uses existing provider/build edges. Required hosted and
+attended acceptance stays distinct; component/source proofs do not close it.
+Keep the already assigned T15 claim-release correction bounded and do not add
+further restore workstreams in place of original capability completion.
+
+Finalization formatter original79544 failed after44.903 seconds and is fully
+collected. Three whole-file non-line AST proofs passed; one multiline call failed
+current final formatting, so floor/native stages did not run. The exact whitespace
+correction is saved at isolated `762c97fb29ef56a0409ade5bd28f6dbd6a42ccae`,
+not executed or joined. Collection and833-key registry identities are in the
+[restart checkpoint](M7-resume.md#technical-depth). No row closes.
+Original T01–T19 remains78 done/95 todo/6 retired; added302 done/39 todo.
+
+Added one bounded T15 post-commit claim-release recovery subtask. Independent
+source/contract review permits the existing accepted intact-owner/whole-directory-
+absence subset, with complete current proofs, prior administrative termination,
+continuous exclusion, native parent sync/rechecks and original terminal joins.
+An isolated writer atb83725bd implements that subset while finalization formatter
+preparation proceeds independently. Ownerless identity loss stays separately
+fenced/unapproved. Original T01–T19 remains78 done/95 todo/6 retired; added now
+302 done/39 todo. No new product test, task closure or verification waiver.
+
 Corrected private retained finalization has independent SOURCE_NO_BLOCKER review
 and root raw source commitb83725bd in its isolated worktree. It is not joined,
 formatted, compiled or natively proved. Disabled formatter preparation continues.
@@ -13665,6 +13690,7 @@ in the [restart record](M7-resume.md#technical-depth).
 - [x] Install only the original retained destination generations after checked source retirement in the same IO worker; require exact full activation-manifest equality, original ordinal temporary names and claim/physical fences, and prove the native publication and failure cases on both supported toolchains. Committed proofs, receipt, release and public restore remain separate.
 - [x] Resume exact original/candidate generation prefixes and complete ordinal staging after positively joined prior authority; audit the genuine complete backup and the full current physical transformation before nonce handoff. Prove real multi-ledger interruption/restart, available/lost source, corruption/refusal and original joins on both pairs without changing transaction, candidates, epochs or history authority.
 - [ ] Complete private retained destination finalization using exact original proof prefixes, canonical per-ledger commits and root commit last; validate the full final manifest, join the original captured-claim release and derive the existing receipt without new transaction/candidates/epochs or renewed work/cleanup bounds. Prove real multi-ledger available/lost-source interruption/refusal/release cuts before joining; complete public facade and helper audit remain separate.
+- [ ] Complete private post-commit original-transaction claim cleanup for intact matching owners mixed with wholly absent claim directories, including explicit all-absent sync obligations. Require complete current canonical proofs, independent prior-authority termination/exclusion, captured native absence/ancestor/parent sync rechecks, the original terminal worker/cutoffs and exact joins before the existing receipt. Keep incomplete payload intake, historical receipt reads and ownerless stranded recovery distinct; prove real partial-delete/sync/actor-loss/refusal cuts without recreating missing claims or changing retained payload bytes.
 
 - [ ] Recheck the captured source ancestor type/device/inode identities after the second native absence observation, including the final pre-root-commit phase. Prove actual persistent parent removal at the held final read refuses completion while preserving original cutoffs, post-intent fencing, retained destination claim and all prior case bodies on both supported pairs.
 - [ ] Preserve positively acquired restore claims through pre-intent IO failures and release them with the original joined terminal owner/cutoffs when neither state root changed; retain partial/unproved or foreign claims and truthful remaining-claim accounting. Prove actual second-claim failure, known first-claim removal and partial-publication fencing on both supported pairs without changing the six existing workflow cases or bounds.
