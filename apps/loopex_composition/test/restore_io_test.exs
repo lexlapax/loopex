@@ -935,8 +935,8 @@ defmodule LoopexComposition.RestoreIOTest do
 
   test "actual local Resource manifests retain nil provenance without a fallback", context do
     root = physical_root(context.root)
-    directory = Path.join(root, "review")
-    File.mkdir!(directory)
+    directory = Path.join([root, ".agents", "skills", "review"])
+    File.mkdir_p!(directory)
 
     File.write!(
       Path.join(directory, "SKILL.md"),
