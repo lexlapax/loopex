@@ -27,6 +27,71 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current proof, execution and source ownership
 
+RUNTIME FAILURE COLLECTED, 2026-10-06: root original 89580 is fully
+collected, exit 1 after 314.498 seconds, twelve current stages. IO 106/3
+passed in 43.172 seconds; workflow 27/39 passed, twelve failed in 48.334
+seconds, command exit 2/evidence exit 1. No adjacent, ordinary, long or floor
+lane ran. All 58 artifacts, 132 actual/Git source rows, twelve original raw
+EOF/wait/status/PID-group joins and all unchanged predecessor registries
+were verified. Source 93739 remains clean and frozen. All original actors
+are absent. No new causal timeline exists; no repeated attempt is allowed.
+Output `M7/m7-lineage-boundary-success-v1` report is
+`9b28f191274b5ca8e5c59c371dcc430d1067d20b4a56c438b7d54ca651ec7315`, inventory
+`521569ef31ffcfa01df716a26b317a1146cba5fdf3968ec2df7ba7366552d6b7`;
+workflow raw `34093a12e37f8179aa1de54a4ca15261ab7051e702b1d1839ccce14dfa90758b`.
+Original collection `M7/lineage-boundary-success-original-collection-20261006-v1.json`
+is `94748fd97cf1634e89b3765d4660bca71e3361252621db5ff446b7d1c502c838`;
+audit `M7/lineage-boundary-success-collection-audit-20261006-v1.py` is
+`0f37c87af9fc5c58586d7c621de32c24df247614dd215a44e061049555c9fff3`.
+Final registry has 289 preserved seed keys plus twelve new keys, digest
+`bb62ca556836bae1e18205a753076e515b2829c6af267646749a92c448ef7349`.
+Never poll 89580, reset that registry or rerun that source.
+
+Source diagnosis identifies universal-time path stat versus default local-time
+descriptor stat in live Guard identity comparison, plus two tuple pauses that
+the existing atom-only probe grammar rejects. The failed raw has no inner
+predicate trace; this is deterministic source diagnosis, not retroactive
+measured inner attribution. Separate clean child
+`058bf9e74b2c40be49d1246f4610bc254fc9c293` of 93739 in
+`/private/tmp/loopex-m7-restore-guard-time-basis` changes two paths, five
+insertions/three deletions: universal descriptor option with invariant comments
+and the two existing atom pause requests. No identity field, cap, cutoff,
+assertion or timezone override changed. No formatter or tests ran. Current-index
+owns narrow independent source inspection; CLI owns only disabled two-file
+formatter preparation. Frozen diagnosis report
+`/private/tmp/loopex-m7-lineage-guard-read-diagnosis-93739dc2-20261006-v1/report.md`
+is `a789c26b2123f72f95d3577e43155988ccd02f9e3ed767d2b7d8bc2dd9e619d6`, inventory
+`43dc3f59ad8a18c8f11f60714810321b58d32b2e57f9038dc2001590c02fcbb5`.
+
+T16 one-file formatter is root-reviewed and enabled separately at
+`M7/private-task-format-runner-20261006-v3`, config
+`feba58afe5ac962e0ee6de98e7a3a9fab97c909919fb3351529c167953a632c8`, root inventory
+`b13db7ff8d4432ef23fb4a205ca3d5eb49d669a421b89dea086fe2c313480db4`.
+Source f04 remains clean. Source report
+`M7/private-task-format-source-review-f04-20261006-v1/report.md` is
+`0c3efbe980548eb486bce1766689d994c70d3e0818ad6c29909372be954704cb`.
+Fresh output `M7/m7-private-task-format-v1` and separate registry
+`M7/private-task-format-stage-attempt-registry.json` retain all 301 historical
+keys, coalescing only byte-identical already-seeded records. Eleven-stage
+formatter-only grant; no compiler or tests. Root alone launches and collects.
+Independent packet review found no blocker, report
+`/private/tmp/loopex-m7-private-task-format-inspection-f04b8f63-20261006-v2/report.md`
+is `0eb94cadaec16cf899a44a62fcf0b1f047aa0b2f73d23caff3518c46df24d85e`, inventory
+`06ba230a7c9e0c5f8afb354775bc18315874a2eaf5fc6bac70480f57e2602cb4`.
+
+Lookup source corrections are clean 4d0ce51fa5169a356e665eb38e7fcfc5ab4f54e7,
+sole child f470, three authorized paths, 415 insertions/thirteen deletions.
+All original nineteen lookup cases remain; fifteen added proposed cases make
+34 ordinary cases. No runtime or formatting ran; root review remains pending.
+Packet `/private/tmp/loopex-m7-public-lookup-fixes-source-v1` report is
+`f570151e91aa948852e92d2b7da4d5578b8001903e3fdf3586a15caf4cac34ac`, inventory
+`88df54d5c9579e599007a50026defa2c6dd5da56ed8f5397fea4018c13bc11d2`.
+The original-transaction continuation analysis is also sealed, source-only at
+`/private/tmp/loopex-m7-public-restore-resolution-analysis-93739-v1/report.md`,
+`27c6a9f1ec6ed58c30a5b2edb4d262dbe444e4e38bd328dcd7ceb613048abca0`, inventory
+`be63688fd744b1fdaa6ded64eaa97b881b4346b30adf683a0f6949e52d5a1e30`.
+No dependent implementation started. All task counts remain unchanged.
+
 CURRENT RUNTIME GRANT, 2026-10-06: root reviewed the complete disabled
 39-case runner delta and all final packet/source/external inventories, then
 enabled `M7/lineage-boundary-success-runner-20261006-v4` for frozen clean
