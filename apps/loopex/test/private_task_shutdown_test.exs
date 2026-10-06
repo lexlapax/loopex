@@ -321,7 +321,10 @@ defmodule Loopex.PrivateTaskShutdownTest do
       assert :trace.function(
                session,
                {DynamicSupervisor, :monitor_child, 1},
-               for(pid <- child_pids, do: {[pid], [], [{:message, {:const, pid}}, {:return_trace}]}),
+               for(
+                 pid <- child_pids,
+                 do: {[pid], [], [{:message, {:const, pid}}, {:return_trace}]}
+               ),
                [:local]
              ) > 0
 
@@ -338,7 +341,10 @@ defmodule Loopex.PrivateTaskShutdownTest do
       assert :trace.function(
                session,
                {:erlang, :unlink, 1},
-               for(pid <- child_pids, do: {[pid], [], [{:message, {:const, pid}}, {:return_trace}]}),
+               for(
+                 pid <- child_pids,
+                 do: {[pid], [], [{:message, {:const, pid}}, {:return_trace}]}
+               ),
                []
              ) > 0
 
@@ -422,6 +428,7 @@ defmodule Loopex.PrivateTaskShutdownTest do
       # the existing actor fence rather than an added Logger wait allowance.
       for report <- evidence, report["event"] == "supervisor_report" do
         assert report["logger_producer"] == report["supervisor"]
+
         assert Enum.any?(evidence, fn event ->
                  event["event"] == "original_down" and
                    event["pid"] == report["logger_producer"]
@@ -505,8 +512,9 @@ defmodule Loopex.PrivateTaskShutdownTest do
     end
   end
 
-  defp collect(_observer, _records, count, _fence, _targets, _actors, _resources) when count >= 8_192,
-    do: exit(:private_task_trace_limit)
+  defp collect(_observer, _records, count, _fence, _targets, _actors, _resources)
+       when count >= 8_192,
+       do: exit(:private_task_trace_limit)
 
   defp collect(observer, records, count, fence, targets, actors, resources) do
     receive do
@@ -722,7 +730,15 @@ defmodule Loopex.PrivateTaskShutdownTest do
         collect(observer, records, count + 1, fence, targets, actors, resources)
 
       {:finish, ^observer, session} when fence == nil ->
-        collect(observer, records, count, :trace.delivered(session, :all), targets, actors, resources)
+        collect(
+          observer,
+          records,
+          count,
+          :trace.delivered(session, :all),
+          targets,
+          actors,
+          resources
+        )
 
       {:trace_delivered, :all, reference} when reference == fence ->
         send(observer, {:causal_trace, self(), Enum.reverse(records)})
