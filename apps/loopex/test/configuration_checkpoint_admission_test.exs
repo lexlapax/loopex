@@ -164,6 +164,7 @@ defmodule Loopex.ConfigurationCheckpointAdmissionTest do
                  )
 
       assert Enum.count(entries, &(&1 == summary_entry)) == 1
+
       assert elem(List.last(entries), 1) == %{
                "role" => "assistant",
                "content" => "tail finished",
@@ -195,7 +196,10 @@ defmodule Loopex.ConfigurationCheckpointAdmissionTest do
 
   for owner_kind <- [:compact, :automatic] do
     @owner_kind owner_kind
-    @busy_reason if(owner_kind == :compact, do: :maintenance_active, else: :configuration_not_settled)
+    @busy_reason if(owner_kind == :compact,
+                   do: :maintenance_active,
+                   else: :configuration_not_settled
+                 )
     test "#{owner_kind} preparation refuses configure before resolution and joins on cancellation" do
       f = maintenance_fixture(@owner_kind, [])
       coordinator = owner(f)
@@ -440,11 +444,17 @@ defmodule Loopex.ConfigurationCheckpointAdmissionTest do
     assert prelude.active_maintenance == nil
     assert prelude.active_checkpoint == nil
     assert [request] = Script.dispatched(f.model)
-    assert List.last(request.messages) == %{"role" => "user", "content" => String.duplicate("o", 12_000)}
+
+    assert List.last(request.messages) == %{
+             "role" => "user",
+             "content" => String.duplicate("o", 12_000)
+           }
+
     assert Enum.any?(Fixture.records(f, f.session), fn row ->
-      row.payload.kind == "model_attempt_settled_v3" and
-        get_in(row.payload, ["result", "reply", "completion"]) == "natural"
-      end)
+             row.payload.kind == "model_attempt_settled_v3" and
+               get_in(row.payload, ["result", "reply", "completion"]) == "natural"
+           end)
+
     assert [ending] = Enum.filter(Fixture.events(f, f.session), &(&1.kind == "run.finished"))
     assert ending["outcome"] == "completed"
     f
@@ -518,7 +528,8 @@ defmodule Loopex.ConfigurationCheckpointAdmissionTest do
     assert {:accepted, ^id} = Loopex.command(f.attachment, compact_command(id))
 
     assert_receive {:record_linearized, waiter, _, ^kind, :session_journal_commit,
-                    {:committed, _, _}}, 5_000
+                    {:committed, _, _}},
+                   5_000
 
     monitor = Process.monitor(waiter)
     pending = recover(f)
@@ -527,25 +538,49 @@ defmodule Loopex.ConfigurationCheckpointAdmissionTest do
     assert pending.active_checkpoint == prior.active_checkpoint
     assert prior.checkpoints[prior.active_checkpoint]["covered_range"]["first_kept"] == nil
     now = System.system_time(:millisecond)
-    assert {:ok, candidate} = SessionState.preflight_maintenance_checkpoint(pending, now, fn -> :ok end)
+
+    assert {:ok, candidate} =
+             SessionState.preflight_maintenance_checkpoint(pending, now, fn -> :ok end)
+
     assert is_map(candidate.consumed_range["first"])
     assert candidate.prior_checkpoint_id == prior.active_checkpoint
 
     prior_count = prior.checkpoints[prior.active_checkpoint]["covered_range"]["unit_count"]
-    assert candidate.covered_range["unit_count"] == prior_count + candidate.consumed_range["unit_count"]
-    assert candidate.covered_range["first"] == prior.checkpoints[prior.active_checkpoint]["covered_range"]["first"]
+
+    assert candidate.covered_range["unit_count"] ==
+             prior_count + candidate.consumed_range["unit_count"]
+
+    assert candidate.covered_range["first"] ==
+             prior.checkpoints[prior.active_checkpoint]["covered_range"]["first"]
+
     assert candidate.covered_range["first_kept"] == nil
 
     # Concept: appended history cannot justify an invented old prefix or boundary.
     # Technical depth: positive state comes from the held actual settlement.
     # These transient negative copies never reach the Store or replace raw facts.
-    forged_prefix = put_in(pending.checkpoints[prior.active_checkpoint]["covered_range"]["unit_count"], prior_count + 1)
-    forged_boundary = put_in(pending.checkpoints[prior.active_checkpoint]["covered_range"]["first_kept"], candidate.consumed_range["last"])
-    forged_endpoint = put_in(pending.checkpoints[prior.active_checkpoint]["lineage"]["through_run_id"], List.last(pending.run_order))
+    forged_prefix =
+      put_in(
+        pending.checkpoints[prior.active_checkpoint]["covered_range"]["unit_count"],
+        prior_count + 1
+      )
+
+    forged_boundary =
+      put_in(
+        pending.checkpoints[prior.active_checkpoint]["covered_range"]["first_kept"],
+        candidate.consumed_range["last"]
+      )
+
+    forged_endpoint =
+      put_in(
+        pending.checkpoints[prior.active_checkpoint]["lineage"]["through_run_id"],
+        List.last(pending.run_order)
+      )
+
     refute candidate.consumed_range["first"] == candidate.consumed_range["last"]
 
     for forged <- [forged_prefix, forged_boundary, forged_endpoint] do
-      assert {:error, :context_projection_invalid} = SessionState.preflight_maintenance_checkpoint(forged, now, fn -> :ok end)
+      assert {:error, :context_projection_invalid} =
+               SessionState.preflight_maintenance_checkpoint(forged, now, fn -> :ok end)
     end
 
     TestStore.release(waiter)
@@ -554,7 +589,10 @@ defmodule Loopex.ConfigurationCheckpointAdmissionTest do
     assert completed.commands[id].result["disposition"] == "checkpointed"
     assert completed.commands[id].result["cleanup"] == "confirmed"
     assert completed.active_checkpoint != prior.active_checkpoint
-    assert completed.checkpoints[completed.active_checkpoint]["covered_range"] == candidate.covered_range
+
+    assert completed.checkpoints[completed.active_checkpoint]["covered_range"] ==
+             candidate.covered_range
+
     assert completed.conversation == pending.conversation
     assert_replay(f)
   end
