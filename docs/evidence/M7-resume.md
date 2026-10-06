@@ -151,12 +151,45 @@ NEXT SOURCE CANDIDATE: root created isolated
 invalid artifact request tuple to `invalid_operation` before the existing
 RestoreIO.run call. All arguments, probe, assertions and 1,000/100-ms fixture
 limits remain exact; no test or production bound changes. This avoids the
-formatter's unstable multiline call shape. No formatter/compiler/test has run
-on the new source. Private agent reviews the tiny source change read-only;
-current-index agent prepares a new disabled runner using the same early
-formatter sequencing and unchanged eleven populations. Fresh proposed object
-call registry and output `M7/m7-object-call-join-v1` remain absent. New source
-review, runner review and grant are required; no old-source retry is authorized.
+formatter's unstable multiline call shape. Independent source review found no blocker; root verified its six
+artifacts, 33 exact Git inputs and four original failure references. Report
+`669295dc69e8b4f839835ec062bb0afee02e660452acd9b82255c086978c6557` and inventory
+`574b76dd43b5c4f638e449cfefbf070660cfd3c115a0750a5bba43a2655f4dac` are retained in
+`M7/object-call-2826-independent-review-20261005-v1`. Inlining the tuple binding
+reconstructs the complete parent test bytes; no bound or assertion changes.
+
+CURRENT OBJECT-CALL GRANT: root reviewed disabled sibling
+`M7/object-call-integration-runner-20261005-v1`, verifying 198 artifacts plus
+inventory, 124 actual/Git/kind/mode source inputs, 38 external references,
+eleven unchanged shared functions and unchanged source populations. Run
+`b17b280c2e5ec86c69f55c258feba05d318413e28b2cbb87ddaa8d67ccbd1a92`, disabled config
+`7bc397c27d3215087246c050560c535b023e4caa305d2f51c3dbbb222e0255fd`, inventory
+`b62ef535e9bb6c4adf2137f20153ca9e73f768cf76287933758d3f2b66d68b36`. Independent
+runner review found no blocker; root verified its five artifacts and 370 hashed
+inputs. Review sibling
+`M7/object-call-integration-runner-independent-review-20261005-v1`, report
+`0a46ea206af22a3a9cc60fad02b975fa0ddca687ca72bf3c349ac7a4515cdb41`, inventory
+`5c122da774e97bb601ccc00d2bb6091c055de223abf311c451bd905d2e85582e`.
+
+Root finalized separate enabled sibling
+`M7/object-call-integration-runner-20261005-v2`, retaining exact code and a full
+historical disabled copy. Root verified 220 active artifacts plus inventory.
+Enabled config
+`ab7f4446dd42d31099970463d5c3ce0bc1270c94bd5da6576e43f31fb313e48b`, root inventory
+`e83bb109e019e49462d0cf9ef9c57065027aea424f76041c9d10f90a4eb7e0e9`. Fresh canonical
+`M7/object-call-stage-attempt-registry.json` was seeded empty at
+`1a5f5f5aa0ba2c8e25a6d0994e96d5911cd7194ee78b447a194f0321f46bdbf0`; never reset.
+The old 43-key and eight-key registries and both failed outputs remain unchanged.
+Root grants current_index_cleanup the sole verification VM for one sequential
+current/floor run, new output `M7/m7-object-call-join-v1`. Original outer handle
+13676 is live; only that agent polls and collects it.
+Both formatter checks precede compilation, gates and suites. Preserve all
+original statuses, raw EOF, source modes and exact process joins; stop at first
+failure, collect the original handle, then return the slot. Only the reviewed
+eight-path AST-equal clean single-parent formatter child/re-pin is permitted.
+No source repair, old-source retry, second VM, full-fast/provider/release,
+attended/Linux lane, primary rejoin or full restore claim is granted.
+
 
 CURRENT RESTORE WORKFLOW: CLI agent owns source-only implementation in isolated
 `/private/tmp/loopex-m7-current-restore-workflow`, branch

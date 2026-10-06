@@ -64,8 +64,14 @@ and new consumed eight-key registry are unchanged and may never be reset.
 Root committed and pushed new source `2826b30b` in isolated
 `codex/m7-object-call-fixture`: bind the identical invalid-request tuple before
 the existing call, preserving every argument, assertion, probe and cutoff.
-Private agent reviews source; current-index agent prepares a fresh disabled
-runner. No VM runs and no new execution is granted. Expected IO 106/2,
+Root and independent source/runner reviews found no blocker. Root verified
+198 disabled artifacts, 124 actual Git/mode inputs, 38 references, eleven exact
+shared functions and the independent review's 370 hashed inputs. A separate
+220-artifact enabled packet and fresh object-call registry now grant the sole
+verification VM to current-index agent for one current/floor run. Original
+outer handle 13676 is live and polled/collected only by that agent; results
+remain pending. Both formats
+precede compilation/tests and first failure stops the run. Expected IO 106/2,
 Composition 677/3 and long 2/106 stay unchanged; no checkbox closes. No old-source
 retry or primary rejoin is authorized.
 CLI agent implements the first integrated available-source restore workflow in
