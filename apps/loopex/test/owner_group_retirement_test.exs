@@ -6,6 +6,7 @@ defmodule Loopex.Runtime.OwnerGroupRetirementTest do
 
   @trace_cap 8_192
   @trace_key {__MODULE__, :trace_rows}
+  @liveness_mfa {:erts_internal, :is_process_alive, 2}
 
   test "ordinary actor DOWN retains native child identities until the suspended supervisor removes them" do
     witness(:selected_window)
@@ -25,7 +26,7 @@ defmodule Loopex.Runtime.OwnerGroupRetirementTest do
   defp witness(mode) do
     cutoff = System.monotonic_time(:millisecond) + 1_000
     key = make_ref()
-    Process.put(key, %{actors: [], joined: MapSet.new(), traced: false})
+    Process.put(key, %{actors: [], joined: MapSet.new(), traced: false, liveness_pattern: false})
     Process.put(@trace_key, 0)
     parent = self()
     coordinator = spawn(fn -> coordinator_loop(parent) end)
@@ -102,8 +103,21 @@ defmodule Loopex.Runtime.OwnerGroupRetirementTest do
         :ok = :sys.suspend(workers, left(cutoff))
       end
 
-      assert :erlang.trace(group, true, [:receive, :send, {:tracer, self()}]) == 1
+      # Concept: native liveness replies require their original target and reference.
+      # Technical depth: only this Group gains call tracing; the two fixed heads
+      # retain no arbitrary arguments. Mark pattern custody before its mutation
+      # so failed setup still restores the initially absent global pattern.
+      assert :erlang.trace_info(@liveness_mfa, :match_spec) == {:match_spec, false}
+      Process.put(key, %{Process.get(key) | liveness_pattern: true})
+
+      pattern = [
+        {[coordinator, :"$1"], [{:is_reference, :"$1"}], [{:return_trace}]},
+        {[workers, :"$1"], [{:is_reference, :"$1"}], [{:return_trace}]}
+      ]
+
+      assert :erlang.trace_pattern(@liveness_mfa, pattern, []) == 1
       Process.put(key, %{Process.get(key) | traced: true})
+      assert :erlang.trace(group, true, [:receive, :send, :call, {:tracer, self()}]) == 1
       for pid <- [guard, worker, resource], do: send(pid, :finish)
       join(key, guard, guard_monitor, :normal, cutoff)
       join(key, worker, worker_monitor, :normal, cutoff)
@@ -118,7 +132,7 @@ defmodule Loopex.Runtime.OwnerGroupRetirementTest do
           remaining
         end
 
-      {rows, action} = await_action(group, workers, expected_down, [], cutoff)
+      {rows, action} = await_action(group, workers, coordinator, expected_down, [], cutoff)
       assert original_downs(rows, group) == expected_down
 
       if mode in [:selected_window, :live_window] do
@@ -304,14 +318,28 @@ defmodule Loopex.Runtime.OwnerGroupRetirementTest do
     end
   end
 
-  defp await_action(group, workers, expected, rows, cutoff) do
+  defp await_action(group, workers, coordinator, expected, rows, cutoff) do
     assert length(rows) < @trace_cap
 
     receive do
+      {:trace, ^group, :call, {:erts_internal, :is_process_alive, [target, reference]}} = row
+      when is_reference(reference) and target in [coordinator, workers] ->
+        rows = retain_liveness_row(rows, group, coordinator, workers, row)
+        await_action(group, workers, coordinator, expected, rows, cutoff)
+
+      {:trace, ^group, :return_from, {:erts_internal, :is_process_alive, 2}, :ok} = row ->
+        rows = retain_liveness_row(rows, group, coordinator, workers, row)
+        await_action(group, workers, coordinator, expected, rows, cutoff)
+
+      {:trace, ^group, :receive, {reference, result}} = row
+      when is_reference(reference) and is_boolean(result) ->
+        rows = retain_liveness_row(rows, group, coordinator, workers, row)
+        await_action(group, workers, coordinator, expected, rows, cutoff)
+
       {:trace, ^group, :receive, {:DOWN, monitor, :process, pid, :normal}} = row ->
         record_trace()
         assert MapSet.member?(expected, {monitor, pid})
-        await_action(group, workers, expected, rows ++ [row], cutoff)
+        await_action(group, workers, coordinator, expected, rows ++ [row], cutoff)
 
       {:trace, ^group, :send, {:"$gen_call", {^group, [:alias | request_id]}, :which_children},
        ^workers} = row ->
@@ -326,18 +354,21 @@ defmodule Loopex.Runtime.OwnerGroupRetirementTest do
       {:trace, ^group, :receive, {:system, {caller, tag}, :resume}} = row ->
         record_trace()
         assert caller == self() and native_request_tag?(tag)
-        await_action(group, workers, expected, rows ++ [row], cutoff)
+        await_action(group, workers, coordinator, expected, rows ++ [row], cutoff)
 
       {:trace, ^group, :send, {tag, :ok}, target} = row ->
         record_trace()
         assert resume_reply?(rows, group, tag, target)
-        await_action(group, workers, expected, rows ++ [row], cutoff)
+        await_action(group, workers, coordinator, expected, rows ++ [row], cutoff)
 
       {:trace, ^group, _kind, _term} = row ->
         unexpected_trace("unexpected Group receive trace shape in the fixed actor witness", row)
 
       {:trace, ^group, :send, _term, _target} = row ->
         unexpected_trace("unexpected Group send trace shape in the fixed actor witness", row)
+
+      {:trace, ^group, _kind, _term, _extra} = row ->
+        unexpected_trace("unexpected Group trace shape in the fixed actor witness", row)
     after
       left(cutoff) -> flunk("native membership/stop observation missed the original cutoff")
     end
@@ -356,6 +387,47 @@ defmodule Loopex.Runtime.OwnerGroupRetirementTest do
     assert length(rows) < @trace_cap
 
     receive do
+      {:trace, ^group, :call, {:erts_internal, :is_process_alive, [target, reference]}} = row
+      when is_reference(reference) and target in [coordinator, workers] ->
+        rows = retain_liveness_row(rows, group, coordinator, workers, row)
+        await_empty_then_stop(
+          group,
+          workers,
+          actors,
+          coordinator,
+          coordinator_monitor,
+          stopper,
+          rows,
+          cutoff
+        )
+
+      {:trace, ^group, :return_from, {:erts_internal, :is_process_alive, 2}, :ok} = row ->
+        rows = retain_liveness_row(rows, group, coordinator, workers, row)
+        await_empty_then_stop(
+          group,
+          workers,
+          actors,
+          coordinator,
+          coordinator_monitor,
+          stopper,
+          rows,
+          cutoff
+        )
+
+      {:trace, ^group, :receive, {reference, result}} = row
+      when is_reference(reference) and is_boolean(result) ->
+        rows = retain_liveness_row(rows, group, coordinator, workers, row)
+        await_empty_then_stop(
+          group,
+          workers,
+          actors,
+          coordinator,
+          coordinator_monitor,
+          stopper,
+          rows,
+          cutoff
+        )
+
       {:trace, ^group, :receive, {[:alias | request_id], members}} = row when is_list(members) ->
         record_trace()
         queries = membership_queries(rows, group, workers)
@@ -405,6 +477,17 @@ defmodule Loopex.Runtime.OwnerGroupRetirementTest do
       {:trace, ^group, :send, {:system, {^group, _stop}, {:terminate, :shutdown}}, ^workers} = row ->
         record_trace()
         assert List.last(membership_observations(rows, group, workers)).members == []
+
+        assert Enum.count(rows, fn
+                 {:trace, ^group, :call, {:erts_internal, :is_process_alive, _arguments}} -> true
+                 _row -> false
+               end) ==
+                 Enum.count(rows, fn
+                   {:trace, ^group, :receive, {reference, result}}
+                   when is_reference(reference) and is_boolean(result) -> true
+                   _row -> false
+                 end)
+
         rows ++ [row]
 
       {:trace, ^group, :receive, {:system, {^stopper, tag}, {:terminate, :normal}}} = row ->
@@ -484,9 +567,61 @@ defmodule Loopex.Runtime.OwnerGroupRetirementTest do
 
       {:trace, ^group, :send, _term, _target} = row ->
         unexpected_trace("unexpected native progress send trace shape", row)
+
+      {:trace, ^group, _kind, _term, _extra} = row ->
+        unexpected_trace("unexpected native progress trace shape", row)
     after
       left(cutoff) -> flunk("positive membership fence did not precede native bulk stop")
     end
+  end
+
+  # Concept: an internal Boolean is liveness evidence only for its actual native request.
+  # Technical depth: replay only already validated fixed-Group metadata. A unique
+  # native2 call, its :ok return and matching receive must appear in strict order;
+  # receive tracing can report insertion early, which fails rather than infers a chain.
+  defp retain_liveness_row(rows, group, coordinator, workers, row) do
+    record_trace()
+
+    state =
+      Enum.reduce(rows, %{references: MapSet.new(), pending: nil}, fn
+        {:trace, ^group, :call, {:erts_internal, :is_process_alive, [target, reference]}}, state ->
+          %{
+            references: MapSet.put(state.references, reference),
+            pending: %{target: target, reference: reference, returned: false}
+          }
+
+        {:trace, ^group, :return_from, {:erts_internal, :is_process_alive, 2}, :ok}, state ->
+          %{state | pending: %{state.pending | returned: true}}
+
+        {:trace, ^group, :receive, {reference, result}}, state
+        when is_reference(reference) and is_boolean(result) ->
+          %{state | pending: nil}
+
+        _row, state ->
+          state
+      end)
+
+    valid =
+      case row do
+        {:trace, ^group, :call, {:erts_internal, :is_process_alive, [target, reference]}} ->
+          target in [coordinator, workers] and is_reference(reference) and
+            is_nil(state.pending) and not MapSet.member?(state.references, reference)
+
+        {:trace, ^group, :return_from, {:erts_internal, :is_process_alive, 2}, :ok} ->
+          match?(%{returned: false}, state.pending)
+
+        {:trace, ^group, :receive, {reference, result}} ->
+          is_reference(reference) and is_boolean(result) and
+            match?(%{reference: ^reference, returned: true}, state.pending)
+
+        _row ->
+          false
+      end
+
+    unless valid,
+      do: unexpected_trace("native liveness call/return/reference correspondence unavailable", row)
+
+    rows ++ [row]
   end
 
   # Concept: the actual observed row is diagnostic evidence; the clause still fails.
@@ -585,18 +720,26 @@ defmodule Loopex.Runtime.OwnerGroupRetirementTest do
   defp cleanup(key, cutoff) do
     state = Process.get(key)
 
-    unjoined =
-      Enum.reject(state.actors, fn {_pid, monitor} ->
-        MapSet.member?(state.joined, monitor)
-      end)
+    try do
+      unjoined =
+        Enum.reject(state.actors, fn {_pid, monitor} ->
+          MapSet.member?(state.joined, monitor)
+        end)
 
-    for {pid, _monitor} <- unjoined, do: Process.exit(pid, :kill)
+      for {pid, _monitor} <- unjoined, do: Process.exit(pid, :kill)
 
-    for {pid, monitor} <- unjoined do
-      receive do
-        {:DOWN, ^monitor, :process, ^pid, _reason} -> :ok
-      after
-        left(cutoff) -> flunk("original fixture actor join remains unproved")
+      for {pid, monitor} <- unjoined do
+        receive do
+          {:DOWN, ^monitor, :process, ^pid, _reason} -> :ok
+        after
+          left(cutoff) -> flunk("original fixture actor join remains unproved")
+        end
+      end
+
+    after
+      if state.liveness_pattern do
+        :erlang.trace_pattern(@liveness_mfa, false, [])
+        assert :erlang.trace_info(@liveness_mfa, :match_spec) == {:match_spec, false}
       end
     end
 
