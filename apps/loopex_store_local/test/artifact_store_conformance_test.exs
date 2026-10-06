@@ -560,6 +560,364 @@ defmodule Loopex.Store.Local.ArtifactStoreConformanceTest do
     metadata
   end
 
+  test "captured current uses decode after source deletion with opaque IDs and positive bignums" do
+    {root, handle} = open_local("captured-use")
+
+    metadata =
+      caller_metadata(%{
+        "session_id" => <<0, 255, 1>>,
+        "run_id" => <<2, 254, 3>>,
+        "operation_id" => <<4, 253, 5>>,
+        "tool_call_id" => <<6, 252, 7>>,
+        "attempt" => :binary.decode_unsigned(:binary.copy(<<255>>, 32))
+      })
+
+    captures =
+      for labels <- [caller_metadata(), metadata] do
+        assert {:ok, reference} = put_artifact(Artifacts, handle, "captured object", labels)
+        use = expected_use(reference, labels)
+        path = local_use_path(handle, use)
+        bytes = File.read!(path)
+        assert bytes == Canonical.encode(["artifact-use-v2", use])
+        assert byte_size(bytes) <= ArtifactStore.max_use_bytes()
+        assert File.stat!(path).type == :regular
+        assert {:ok, ^use} = Artifacts.describe(handle, reference.use_locator)
+        {reference, use, bytes}
+      end
+
+    File.rm_rf!(root)
+
+    for {reference, use, bytes} <- captures do
+      assert {:ok, ^use} = Artifacts.decode_use_bytes(bytes, reference.use_digest)
+
+      assert {:ok, ^use} =
+               describe_artifact(Artifacts, captured_use_handle(bytes, reference), reference)
+    end
+
+    refute File.exists?(root)
+  end
+
+  test "captured use decoder admits the exact existing writer cap and rejects cap plus one early" do
+    {root, handle} = open_local("captured-use-limit")
+    object_bytes = "exact captured use boundary"
+    assert ArtifactStore.max_use_bytes() == 131_072
+    assert {:ok, seed} = put_artifact(Artifacts, handle, object_bytes)
+    metadata = metadata_for_exact_use_size(seed, 131_072)
+    assert {:ok, reference} = put_artifact(Artifacts, handle, object_bytes, metadata)
+    use = expected_use(reference, metadata)
+    path = local_use_path(handle, use)
+    bytes = File.read!(path)
+    mode = File.stat!(path).mode
+    assert byte_size(bytes) == 131_072
+    over_metadata = metadata_for_exact_use_size(seed, 131_073)
+    over = Canonical.encode(["artifact-use-v2", expected_use(seed, over_metadata)])
+    assert byte_size(over) == 131_073
+
+    assert {:error, :artifact_use_too_large} =
+             put_artifact(Artifacts, handle, object_bytes, over_metadata)
+
+    assert File.read!(path) == bytes
+    assert File.stat!(path).mode == mode
+    File.rm_rf!(root)
+
+    assert {{:ok, ^use}, 1} = observed_use_decode(bytes, reference.use_digest)
+
+    assert {{:error, :artifact_integrity_failed}, 0} =
+             observed_use_decode(over, Canonical.digest_bytes(over))
+
+    assert {:ok, ^use} =
+             describe_artifact(Artifacts, captured_use_handle(bytes, reference), reference)
+
+    refute File.exists?(root)
+  end
+
+  test "captured use decoder refuses hostile transport before or at actual safe decode" do
+    {root, handle} = open_local("captured-use-hostile")
+    assert {:ok, reference} = put_artifact(Artifacts, handle, "hostile use control")
+    use = expected_use(reference, caller_metadata())
+    bytes = File.read!(local_use_path(handle, use))
+    [tag, {:loopex_map, pairs}] = :erlang.binary_to_term(bytes, [:safe])
+    File.rm_rf!(root)
+
+    compressed =
+      :erlang.term_to_binary([tag, {:loopex_map, pairs}], [:compressed, :deterministic])
+
+    assert <<131, 80, _::binary>> = compressed
+
+    early = [
+      compressed,
+      Canonical.encode(use),
+      Canonical.encode([tag]),
+      Canonical.encode([tag, use, use]),
+      :binary.copy(<<0>>, 131_073)
+    ]
+
+    for hostile <- early do
+      assert {{:error, :artifact_integrity_failed}, 0} =
+               observed_use_decode(hostile, Canonical.digest_bytes(hostile))
+    end
+
+    for digest <- [String.duplicate("A", 64), String.duplicate("a", 63), nil] do
+      assert {{:error, :artifact_integrity_failed}, 0} = observed_use_decode(bytes, digest)
+    end
+
+    nonplain =
+      Enum.map(pairs, fn {key, value} ->
+        {key, if(key == :object_locator, do: self(), else: value)}
+      end)
+
+    improper_shapes = [
+      [hd(pairs) | 0],
+      [[1 | 0]],
+      [{[1 | 0], :metadata}],
+      [{:metadata, [1 | 0]}],
+      [{:metadata, [[1 | 0]]}],
+      [{:metadata, {:loopex_map, [{"a", 1} | 0]}}],
+      [{{:loopex_map, [{"a", 1} | 0]}, :metadata}],
+      [{:metadata, {:metadata, [1 | 0]}}],
+      [{:metadata, %{:metadata => {:metadata, [1 | 0]}}}]
+    ]
+
+    decoded = [
+      bytes <> <<0>>,
+      binary_part(bytes, 0, byte_size(bytes) - 1),
+      Canonical.encode(["artifact-use-other", use]),
+      :erlang.term_to_binary([tag, {:loopex_map, [hd(pairs) | pairs]}], [:deterministic]),
+      :erlang.term_to_binary([tag, {:loopex_map, Enum.reverse(pairs)}], [:deterministic]),
+      :erlang.term_to_binary([tag, {:loopex_map, [:invalid_pair]}], [:deterministic]),
+      :erlang.term_to_binary([tag, {:loopex_map, nonplain}], [:deterministic])
+    ]
+
+    decoded =
+      decoded ++
+        Enum.map(improper_shapes, fn shape ->
+          :erlang.term_to_binary([tag, {:loopex_map, shape}], [:deterministic])
+        end)
+
+    for hostile <- decoded do
+      assert <<131, 108, 2::unsigned-big-32, _::binary>> = hostile
+
+      assert {{:error, :artifact_integrity_failed}, 1} =
+               observed_use_decode(hostile, Canonical.digest_bytes(hostile))
+    end
+
+    unknown = "loopex_artifact_use_unknown_#{System.unique_integer([:positive])}"
+    assert_raise ArgumentError, fn -> String.to_existing_atom(unknown) end
+    <<131, tag_bytes::binary>> = :erlang.term_to_binary(tag, [:deterministic])
+
+    hostile =
+      <<131, 108, 2::unsigned-big-32>> <>
+        tag_bytes <>
+        <<119, byte_size(unknown)>> <> unknown <> <<106>>
+
+    assert {{:error, :artifact_integrity_failed}, 1} =
+             observed_use_decode(hostile, Canonical.digest_bytes(hostile))
+
+    assert_raise ArgumentError, fn -> String.to_existing_atom(unknown) end
+    assert {{:ok, ^use}, 1} = observed_use_decode(bytes, reference.use_digest)
+  end
+
+  test "live and captured Local describe bind the exact selected use filename with no fallback" do
+    {root, handle} = open_local("captured-use-binding")
+    assert {:ok, reference} = put_artifact(Artifacts, handle, "filename binding")
+    use = expected_use(reference, caller_metadata())
+    path = local_use_path(handle, use)
+    bytes = File.read!(path)
+    changed = %{use | metadata: %{use.metadata | "tool_call_id" => "another-call"}}
+    replacement = Canonical.encode(["artifact-use-v2", changed])
+    digest = Canonical.digest_bytes(replacement)
+    refute digest == reference.use_digest
+    File.write!(path, replacement)
+
+    assert {:error, :artifact_integrity_failed} =
+             Artifacts.describe(handle, reference.use_locator)
+
+    assert File.read!(path) == replacement
+
+    assert {:error, :artifact_integrity_failed} =
+             Artifacts.decode_use_bytes(bytes, String.duplicate("0", 64))
+
+    assert {:error, :artifact_integrity_failed} =
+             Artifacts.describe(
+               captured_use_handle(replacement, reference),
+               reference.use_locator
+             )
+
+    assert {:error, :unknown_artifact_use} =
+             Artifacts.describe(
+               {:captured_artifact_use, bytes, reference.use_digest},
+               "use:" <> digest
+             )
+
+    assert {:error, :unknown_artifact_use} = Artifacts.describe(%{}, reference.use_locator)
+    File.rm_rf!(root)
+
+    assert {:ok, ^use} =
+             describe_artifact(Artifacts, captured_use_handle(bytes, reference), reference)
+
+    refute File.exists?(root)
+  end
+
+  test "real captured Local describe leaves closed use and reference admission to Core" do
+    {root, handle} = open_local("captured-use-semantics")
+    assert {:ok, reference} = put_artifact(Artifacts, handle, "semantic control")
+    use = expected_use(reference, caller_metadata())
+    bytes = File.read!(local_use_path(handle, use))
+    File.rm_rf!(root)
+
+    changed_uses =
+      [
+        Map.put(use, :extra, true),
+        Map.delete(use, :metadata),
+        %{use | canonicalization_version: "loopex.canonical.future"},
+        %{use | object_digest: String.duplicate("a", 64)},
+        %{use | object_size: use.object_size + 1},
+        %{use | object_locator: "different-object"},
+        %{use | media_type: "text/plain"},
+        %{use | role: "input"},
+        %{use | media_type: :invalid_media_type},
+        %{use | metadata: Map.put(use.metadata, "extra", true)},
+        %{use | metadata: Map.delete(use.metadata, "attempt")},
+        %{use | metadata: %{use.metadata | "attempt" => 0}},
+        %{use | metadata: %{use.metadata | "run_id" => :existing_atom}}
+      ] ++
+        Enum.map(~w(session_id run_id operation_id tool_call_id), fn field ->
+          %{use | metadata: Map.put(use.metadata, field, "")}
+        end)
+
+    for changed <- changed_uses do
+      captured = Canonical.encode(["artifact-use-v2", changed])
+      digest = Canonical.digest_bytes(captured)
+      selected = %{reference | use_digest: digest, use_locator: "use:" <> digest}
+      assert ArtifactStore.valid_reference?(selected)
+      assert {:ok, ^changed} = Artifacts.decode_use_bytes(captured, digest)
+
+      assert {:ok, ^changed} =
+               Artifacts.describe(captured_use_handle(captured, selected), selected.use_locator)
+
+      assert {:error, :artifact_use_mismatch} =
+               describe_artifact(Artifacts, captured_use_handle(captured, selected), selected)
+    end
+
+    for changed <- [
+          %{reference | digest: String.duplicate("a", 64)},
+          %{reference | size: reference.size + 1},
+          %{reference | locator: "different-object"},
+          %{reference | media_type: "text/plain"}
+        ] do
+      assert ArtifactStore.valid_reference?(changed)
+
+      assert {:error, :artifact_use_mismatch} =
+               describe_artifact(Artifacts, captured_use_handle(bytes, reference), changed)
+    end
+
+    for changed <- [
+          %{reference | use_canonicalization_version: "loopex.canonical.future"},
+          %{reference | role: "input"},
+          %{reference | use_locator: "use:" <> String.duplicate("0", 64)},
+          Map.put(reference, :extra, true)
+        ] do
+      assert {:error, :invalid_artifact_reference} =
+               describe_artifact(Artifacts, captured_use_handle(bytes, reference), changed)
+    end
+
+    substituted = %{
+      reference
+      | use_digest: String.duplicate("0", 64),
+        use_locator: "use:" <> String.duplicate("0", 64)
+    }
+
+    assert ArtifactStore.valid_reference?(substituted)
+
+    assert {:error, :unknown_artifact_use} =
+             describe_artifact(Artifacts, captured_use_handle(bytes, reference), substituted)
+
+    assert {:ok, ^use} =
+             describe_artifact(Artifacts, captured_use_handle(bytes, reference), reference)
+
+    refute File.exists?(root)
+  end
+
+  defp captured_use_handle(bytes, reference),
+    do: {:captured_artifact_use, bytes, reference.use_digest}
+
+  # Concept: actual decode entry is observed without retaining captured payloads.
+  # Technical depth: the exact worker's arity-only BIF trace and normal DOWN share
+  # one captured fixture cutoff. A barrier drains trace before its controlled stop.
+  defp observed_use_decode(bytes, digest) do
+    parent = self()
+    tag = make_ref()
+    cutoff = System.monotonic_time(:millisecond) + 1_000
+    pattern = {:erlang, :binary_to_term, 2}
+
+    {worker, monitor} =
+      spawn_monitor(fn ->
+        receive do
+          {^tag, :decode} ->
+            send(parent, {tag, Artifacts.decode_use_bytes(bytes, digest)})
+
+            receive do
+              {^tag, :stop} -> :ok
+            end
+
+          {^tag, :stop} ->
+            :ok
+        end
+      end)
+
+    try do
+      assert :erlang.trace_pattern(pattern, true, []) == 1
+      assert :erlang.trace(worker, true, [:call, :arity, {:tracer, parent}]) == 1
+      send(worker, {tag, :decode})
+      {result, count} = collect_use_decode(worker, tag, cutoff, 0)
+      delivery = :erlang.trace_delivered(worker)
+      count = finish_use_decode_trace(worker, delivery, cutoff, count)
+      {result, count}
+    after
+      :erlang.trace(worker, false, [:call])
+      :erlang.trace_pattern(pattern, false, [])
+      send(worker, {tag, :stop})
+
+      receive do
+        {:DOWN, ^monitor, :process, ^worker, :normal} ->
+          :ok
+
+        {:DOWN, ^monitor, :process, ^worker, reason} ->
+          flunk("decode observer worker failed: #{inspect(reason)}")
+      after
+        max(0, cutoff - System.monotonic_time(:millisecond)) ->
+          Process.exit(worker, :kill)
+          flunk("decode observer worker did not join before its captured cutoff")
+      end
+    end
+  end
+
+  defp collect_use_decode(worker, tag, cutoff, count) do
+    receive do
+      {:trace, ^worker, :call, {:erlang, :binary_to_term, 2}} ->
+        collect_use_decode(worker, tag, cutoff, count + 1)
+
+      {^tag, result} ->
+        {result, count}
+    after
+      max(0, cutoff - System.monotonic_time(:millisecond)) ->
+        flunk("captured use decoder did not report before its cutoff")
+    end
+  end
+
+  defp finish_use_decode_trace(worker, delivery, cutoff, count) do
+    receive do
+      {:trace, ^worker, :call, {:erlang, :binary_to_term, 2}} ->
+        finish_use_decode_trace(worker, delivery, cutoff, count + 1)
+
+      {:trace_delivered, ^worker, ^delivery} ->
+        count
+    after
+      max(0, cutoff - System.monotonic_time(:millisecond)) ->
+        flunk("captured use decode trace did not drain before its cutoff")
+    end
+  end
+
   test "one object supports two exact immutable uses in every artifact adapter" do
     for {module, handle} <- implementations() do
       bytes = "conformance bytes for #{inspect(module)}"
