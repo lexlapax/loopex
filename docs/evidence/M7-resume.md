@@ -27,6 +27,51 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Latest Store integration and next verification
 
+LATEST: Resource physical capture is proved and joined through
+c137b2ce7a7656ea1d165494f69a3cac5c1b7126, tested clean source
+3ecf76623ab2a47fe7edc612135b6529c66634c8. Handle54345 is terminal exit0,
+collected/sealed; never poll/restart. Both pairs focused52/2 excluded,
+adjacent33/0, ordinary Composition623/3 and selected owned IO long2/52 pass,
+zero failures/skips. All32 stages pass; pipeline1,084.309s. Root verified117
+sealed artifacts, all stage waits/OS-group absence,29 final actual/Git source
+records/modes, empty formatter delta and exact bytes in both integrated paths.
+Terminal siblingM7/resource-capture-audit-execution-20261005-v3 digest
+54ed22415ebfa941d813ab11fc402967877933415803bb9a40450eb014e1984c;
+source inventorye8e689840b9c5702b1fc2e382be8d712f6d48929ad87e72b64ca0bd940c682fb.
+Both failed predecessors stay immutable. Raw error-32 and Darwin unavailable
+filename-witness notices remain visible; Linux proof and complete catalog/
+reference orchestration/restore remain open. Only the bounded T15 row closes.
+
+Native tested9aa2cf82 is already joined88cd84a2, evidence9eedace0 pushed,
+worktree/local/remote branches removed. Current T01–T19 originals78/95/6,
+added296/20; includingT00 originals78/101/7, added300/21. Next combined full
+current fast check remains pending; no full check is rerun on old bytes.
+
+Runtime startup witness first execution has stopped. Handle `28528` is
+terminal exit 1, collected and sealed; the exclusive VM slot is returned.
+Tested formatter-only child `0bad1bc678d7cc2caa0d3c723f9b71e1983f23b4`
+passes current dev/test compilation but focused tests have one new-case setup
+failure: the primary Logger filter list is empty and the fixture requires
+`:logger_translator`. This occurs before public configure dispatch. Current
+focused population is 18 executed, 17 passed, one failed, one excluded and zero
+skipped. Ordinary Core and the floor pair were not reached. Pipeline duration
+is 136.028 seconds. Root is reviewing the evidence and a narrow fixture repair;
+no repair or retry is authorized yet.
+
+Retained output is sibling `M7/runtime-preparation-startup-execution-20261005-v1`.
+Terminal digest `d94568bcec54cffcbf43f3e963fd9807abf15180a85883e8ca07ccf17626bb3c`;
+complete focused raw digest
+`f4a0f0e993ecfbe2deb23ca82c5a4497d86b51623112d55dad8c633e45d66a97`.
+Worker collection report digest
+`8e8cde35e6351cd843fc46b2963079fe81a2c3c3a98661c298966b680eb4575e`.
+The empty partial trace is retained; required full trace and chain are missing.
+Cleanup records eight original joins and one unjoined collector, with status
+unproved and cutoff false. Later VM/group exit does not replace that proof.
+All 15 stage groups are absent; the worker rehashed 65 terminal artifacts.
+The approved 1,000 ms cutoff and required eleven-actor causal witness remain
+unchanged and unproved. No actual startup or historical-report attribution is
+claimed. Earlier active statements below are historical snapshots superseded here.
+
 LATEST: Native checkpoint configuration is proved and joined through
 88cd84a28d84d61c7422b543e8a3d3ec4d61047a, tested clean source
 9aa2cf82742b3204fe1c57206ec8d2af579aea90. Handle72477 is terminal exit0,

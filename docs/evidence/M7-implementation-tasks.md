@@ -29,6 +29,40 @@ grouped by T00–T19. Empty added sections mean no added subtasks are recorded;
 they do not mean the original task is complete. This follows the maintainer's
 2026-10-01 update to the active implementation goal.
 
+## Resource physical capture joined — 2026-10-05
+
+Bounded T15 Resource capture is complete at tested source
+`3ecf76623ab2a47fe7edc612135b6529c66634c8`, joined through
+`c137b2ce7a7656ea1d165494f69a3cac5c1b7126`. Both pairs pass52 focused/2
+excluded,33 adjacent/0 excluded,623 ordinary Composition/3 excluded and2
+selected owned IO long/52 excluded, zero failures or skips. Current durations
+21.261s/32.301s/334.240s/21.751s; floor20.893s/32.265s/336.367s/21.700s.
+All32 stages pass; whole pipeline1,084.309s. Root independently verified117
+sealed artifacts, every process wait/group absence,29 final actual/Git source
+records/modes, the empty formatter delta and exact integrated bytes.
+
+The private guardian-owned operation captures one canonical manifest/provenance
+file, requires physical inventory membership and role cap before opening,
+hashes exact bytes, closes the descriptor before pure decoding and revalidates
+file/ancestor identities. Actual current writers, both Git widths, opaque
+bodies, nil/missing provenance and hostile physical/byte captures are covered.
+This grants no authority or restored-root activation. Whole catalog/reference
+orchestration, Linux filename proof and the complete restore remain open.
+
+Immutable outputs:
+`/Users/spuri/projects/lexlapax/loopex-evidence/M7/resource-capture-audit-execution-20261005-v3`.
+Terminal digest`54ed22415ebfa941d813ab11fc402967877933415803bb9a40450eb014e1984c`;
+source inventory`e8e689840b9c5702b1fc2e382be8d712f6d48929ad87e72b64ca0bd940c682fb`.
+All eight complete raw suites are separately hashed in the terminal inventory.
+Earlier failed compilation and fixture-location runs remain immutable. Raw
+error-32 diagnostics and Darwin invalid-name witness limitations remain visible;
+this proves no diagnostic silence or unavailable Linux observation.
+
+T01–T19 originals stay78 done/95 todo/6 retired. Added296 done/20 todo;
+including T00 added300/21. T15 added15 done/4 todo. The first runtime startup
+witness execution stopped on a Logger filter setup error before dispatch. Its
+VM slot is returned; the causal witness and combined integration remain pending.
+
 ## Native checkpoint configuration joined — 2026-10-05
 
 Bounded T08 checkpoint-aware native configuration is complete at tested source
@@ -13111,7 +13145,7 @@ open.
 ### Added implementation subtasks
 
 - [x] Audit every declared current Store history through the existing owned IO worker, enforcing descriptor/path/hash identity, complete transaction replay and recovery of every session; prove actual retained unknown truth, faults and cleanup on both pairs without claiming scripted executors prove OS effects.
-- [ ] Capture one exact retained Resource manifest or provenance record through the existing guardian-owned restore IO worker, binding canonical pathname/identity to the physical manifest, enforcing its raw ceiling before open/read, revalidating descriptors and ancestors, and proving current writers, hostile captures and unchanged cleanup on both pairs. Complete catalog/reference orchestration remains separate.
+- [x] Capture one exact retained Resource manifest or provenance record through the existing guardian-owned restore IO worker, binding canonical pathname/identity to the physical manifest, enforcing its raw ceiling before open/read, revalidating descriptors and ancestors, and proving current writers, hostile captures and unchanged cleanup on both pairs. Complete catalog/reference orchestration remains separate.
 - [x] Decode retained current resource manifest/provenance bytes under derived physical ceilings before parsing, preserve exact normalization/content/Git identities and deterministic bytes, and prove actual current writers, hostile bytes and real decoder-entry controls on both pairs. Whole catalog capture/reference/backup orchestration remains separate.
 - [x] Refuse compressed/wrong-root retained Local ledger records before actual term decoding, enforce captured byte caps and full consumption, and prove all current record readers plus positive real-BIF trace control on both pairs. Whole owned offline ledger capture/audit remains separate.
 - [x] Extract the existing current Local ledger validator as a pure captured-byte decoder with fixed kind ceilings; prove actual writers, hostile captured bytes and complete Local conformance on both pairs. Physical capture and complete generation/basename/receipt/history audit remain separate.
