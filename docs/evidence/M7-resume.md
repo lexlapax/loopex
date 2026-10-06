@@ -27,6 +27,68 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current proof, execution and source ownership
 
+CURRENT ACTIVE GRANT, 2026-10-06: current_index_cleanup owns the sole verification
+VM for one current-then-floor corrected-source prerequisite campaign at frozen
+`fdfe148889b76fae8738573d3442d2daf5e2c569`. It alone owns the original outer handle
+and waits; root must never poll that handle. Original handle identity is pending
+its launch report. Stop the first failure, fully collect original raw EOF, wait,
+status, source and PID/group joins, then return the slot. No retry, repair,
+formatter/consumer repetition, source switch, lost-source execution, provider,
+Linux, full-fast/release, primary rejoin or source export is granted.
+
+Full disabled v1 runner review found no execution blocker but required a
+provenance-label correction. Root read its full report and rehashed fourteen
+artifacts and 403 inputs in
+`M7/final-observation-success-independent-review-20261005-v1`, report
+`f9eacc0eb3373fa1de2e32980779781c49ff9a9fa900952a77c3eb8e2fd41f74`, inventory
+`b591267ea82acdf58b2a14aff4be8447e3603122e3a65876f6b4425d046b7f81`.
+Disabled metadata child `M7/final-observation-success-runner-20261005-v2`
+correctly distinguishes differing workflow source bytes from retained complete
+AST equality. Active retention inventory
+`0ed5b725a326e0d36e6cc3de13af8cdb1b16c549c42794f53abbb41212d78c4b` covers 45 files.
+All executable/source/population bytes remain exact. Root verified those files,
+only three non-index metadata changes plus two refreshed indexes, the exact
+33502-byte before/36364-byte current Git files, and all fifteen original
+NON_LINE_AST_EQUAL rows without repeating AST evaluation. Initial root index,
+function-newline and list-schema verifier assumptions are retained beside the
+corrected audits; they are read-only audit limitations, not product/VM failures.
+Independent narrow amendment review found no blocker. Root read and rehashed
+five artifacts and 465 inputs in
+`M7/final-observation-success-independent-review-20261006-v2`, report
+`79f9c84431bfc80ecff42a5c656cf4e1c3a90363f41a3b76ab875bcedcaf785d`, inventory
+`c1482799404271e77a0850764aee1140f9ebbc85f7f60586184176eca4d21556`.
+
+Root finalized separate enabled sibling
+`M7/final-observation-success-runner-20261006-v3`, preserving the complete
+metadata-corrected disabled packet. All 73 active/historical artifacts are
+verified; runner `39e25a9861a5cb767d044b23b92e34b736ce37cf9b0ad0e44174ff6461c88ad3`,
+enabled config `0bf369be313edd7833c451cb546ba5ae1b0ab212c5cc2ed572200d4e6c823a86`,
+root inventory `efa6628b3b7ff7f1435dc371fde6108059b643419aacba567a4703c227864fab`.
+Fresh canonical `M7/final-observation-success-stage-attempt-registry.json` was
+seeded at `1a5f5f5aa0ba2c8e25a6d0994e96d5911cd7194ee78b447a194f0321f46bdbf0`;
+never reset it. New output is `M7/m7-final-observation-success-v1`.
+The exact existing formatter 79207 and separate b535 causal judgment/original
+non-VM collection are admitted without repeats. Proposed 66 stages cover twelve
+lanes per pair, with zero skips: IO 106/3, workflow 9/0, Model 28/0, Composition
+adjacent 21/0, Receipt 32/0, Ledger 23/0, ReadOnly 22/0, Local adjacent 21/0,
+Artifact 29/0, Composition ordinary 686/4, Local ordinary 302/2, IO long 3/106.
+Require both complete corrected timely/late original actor/monitor/cutoff
+records and late unconfirmed/worker_unjoined. No prospective count is a pass.
+
+Lost-source R1 source db584 remains frozen, reviewed and unexecuted. CLI has
+completed a separately disabled formatting proposal at
+`/private/tmp/loopex-m7-lost-source-format-runner-db584914-v2`, final inventory
+`b25286d81beaf158d1b2dbdab69eb1a2fb20a6de18f6d44872e0c00d66281d68`, report
+`64f91d9997aceebacc843ca4ac88f1f8d3487fa8053f300e5f0880d4237cd4c3`.
+It preserves original missing-wrapper and later audit-only interruptions;
+stage.sh matches the actual formatter predecessor, which alone has that wrapper.
+All eleven lifecycle functions/helper/toolchain match b17. Ownership is released.
+Root review, durable retention and independent formatting-runner review remain
+pending; no second VM is granted. Private-task agent is available for that
+read-only review. T01–T19 counts remain originals 78/95/6 and added 298/27;
+T00-inclusive totals remain originals 78/101/7 and added 302/28. No row closes.
+Earlier entries below retain their historical execution and ownership states.
+
 Latest state after the maintainer's repeated 1,000-ms diagnostic approval:
 that approval confirms only the already recorded diagnostic setup cutoff,
 whose complete twenty-case file passed on both pairs. It changes no restore,
