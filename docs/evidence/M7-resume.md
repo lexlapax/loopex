@@ -27,7 +27,7 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Latest Store integration and next verification
 
-CURRENT EXECUTION: `private_task_causal_resume` alone owns live handle
+LATEST STARTUP PROOF: `private_task_causal_resume` collected terminal handle
 `51106`. Root reviewed and pushed corrected source
 `7ca8b9161739842ecf4da4b3a37567b5f67b8464` and granted reviewed runner
 `a0862eca0c9bf4944a9cf04e1f796865089c0fb132a4eb83c92c8710aa2ae461` with fresh
@@ -49,7 +49,9 @@ Root independently verified125 terminal artifacts,129 final inventory records,
 populations and complete witness sets. Each proves exact four actors, matching
 sent/enqueued reference, observation one before child spawn, eleven unique
 original joins, no unjoined actors and the unchanged cutoff met. Root reviewed
-the complete formatter delta, which changes only formatting. Integration is next.
+the complete formatter delta, which changes only formatting. Tested source is
+joined through `dfd4a76ad35e1eb5218f7a575ff4b4de7c0875e9`; root verified the
+integrated file byte-for-byte against tested590b. Only the bounded T16 row closes.
 The first collection script expected generic PASS instead of the runner's exact
 status; the collector-only error and original verifier are retained. No test was
 rerun and original execution bytes are unchanged. Terminal digest
@@ -58,7 +60,7 @@ collection Markdown `e1b4fb73b55b4aa7940008deea851509c2567212b984514bd1331a703b0
 Both old failures remain immutable. Historical reports and registered-resource
 semantic cleanup are not attributed or proved by this controlled witness.
 
-LEDGER QUEUED: clean source `7340024dd056af931478bd6afcf1472733612202` is
+CURRENT LEDGER EXECUTION: clean source `7340024dd056af931478bd6afcf1472733612202` is
 pushed on `codex/m7-ledger-capture-audit`, still unintegrated. Root read the full
 two-file production/test delta and complete runner delta from reviewed Resource
 v4. It verified 37 source-packet artifacts, eight runner artifacts, 32 actual/
@@ -126,7 +128,7 @@ post-child two-message queue proof. The reviewed correction is the active 7ca/59
 execution above; this failed execution was not retried.
 Earlier first-failure results below remain immutable.
 
-NEXT SOURCE: `current_index_cleanup` owns only restore IO source/test in
+EARLIER LEDGER SOURCE ASSIGNMENT: `current_index_cleanup` owns only restore IO source/test in
 `/private/tmp/loopex-m7-ledger-capture-audit`, branch
 `codex/m7-ledger-capture-audit`, base `d79d171f`. It may implement one private
 physical Local ledger file capture under the accepted restore contract, using
@@ -149,9 +151,10 @@ read the complete prerequisite report and verified twelve actual/Git/mode inputs
 retained sibling `M7/artifact-captured-byte-inventory-20261005-v1`, report digest
 `bdded140761a0ca73059c496681893795a2cd232b47f47dae12504962d6aa462`.
 Physical capture, object bytes and whole-history relations remain separate.
-The assignment adds one explicit T15 row. Before startup integration, T01–T19
-originals remain78 done/95 todo/6 retired, added296 done/22 todo; including T00
-originals78/101/7, added300/23. No completed row was reopened. No paid/provider
+The assignment adds one explicit T15 row. After startup integration, T01–T19
+originals remain78 done/95 todo/6 retired, added297 done/21 todo; including T00
+originals78/101/7, added301/22. T16 added53/5; T15 added15/6. No completed row was
+reopened. No paid/provider
 lane is authorized.
 
 LATEST: Resource physical capture is proved and joined through
