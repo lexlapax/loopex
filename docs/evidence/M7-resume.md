@@ -66,7 +66,50 @@ IO remains 106/3, selected long 3/106 and all skips zero. Retained old causal
 negative evidence must stay bound to its actual fdfe source, with a strict
 unchanged guardian/complete IO-test boundary check for its relevance to f870.
 No runtime grant, source export, primary rejoin or new PASS is implied.
-T01–T19 totals remain originals 78/95/6 and added 298/27.
+Added three open T15 subtask rows for accepted successive lineage, bounded
+public lookup and original-transaction/public-outcome resolution. These make
+existing ADR 0051 obligations explicit; they add no new scope or approval.
+T01–T19 totals are now originals 78/95/6 and added 298/30. T00-inclusive totals
+are originals 78/101/7 and added 302/31; T15 added is 16 done/14 todo.
+CLI owns the accepted successive-lineage implementation, without VM execution,
+in isolated `/private/tmp/loopex-m7-restore-successive-lineage`, branch
+`codex/m7-restore-successive-lineage`, based on f870. Owned paths are Restore
+entry, Workflow, IO, the narrowly necessary captured lineage-validation portion
+of Local RestoreGuard, and workflow tests. Frozen f870 stays unchanged.
+Public lookup and original-transaction continuation remain subsequent units.
+
+Disabled runtime proposal is frozen at
+`/private/tmp/loopex-m7-resource-admission-success-runner-v1`, 36 sealed artifacts,
+inventory `a06dc45ab8865d1028b399e92b5f9c0a1eecdd51dd1aaf2be970f569d9c7df0b`.
+Run `add8f95dbd95bc9866e0208a9697319c83225984a41bcf1e89350e9b3117aacf`, config
+`c844919cb252c4bd099da466c673f1982476af7a4fec8c73d9b35f334da7d46d`.
+Independent runtime execution review found no blocker. Root read the full
+report, retained at `M7/resource-admission-success-runner-20261006-v2/independent-review.md`,
+SHA-256 `baf6cb25faaa4b22a5076533989f954fa2573f5b868cf53fbc3c966687a95afb`.
+Root also verified 36 sealed artifacts, 29 external pins, 132 actual/Git
+kind/mode/blob/source records, the complete clean tree and eleven exact shared
+lifecycle functions. The independent causal closure review confirms the actual
+read-witness dependencies are unchanged; the gate transfers only historical
+negative relevance, not current runtime success.
+
+CURRENT ACTIVE VM GRANT, 2026-10-06: current_index_cleanup owns the sole VM for
+one current-then-floor corrected resource-admission campaign at exact f870.
+Enabled sibling `M7/resource-admission-success-runner-20261006-v2` preserves
+all disabled bytes. Config
+`029b11dc2c3fcee7a64dd6f6ff03d7659c9db93869cfdd0d5ce3317febc8c280`, root inventory
+`3be21004a0af0e06e1733676912a9e96448905871534ff6d04894da2ea3790da`.
+Fresh `M7/resource-admission-success-stage-attempt-registry.json` was seeded at
+`1a5f5f5aa0ba2c8e25a6d0994e96d5911cd7194ee78b447a194f0321f46bdbf0`;
+never reset it. New output is `M7/m7-resource-admission-success-v1`.
+Original outer handle 30452 launched exactly once. Current-index alone owns
+its original waits and collection; root must never poll it. Stop the first
+failure, collect original raw EOF/wait/status/source/registry/actual PID-group
+joins, retain terminal collection and then explicitly return the VM slot.
+No root/other-agent VM, retries, formatter/control/consumer repeats, source
+repair/switch, provider/Linux/full-fast/release, primary rejoin or export is
+granted. CLI may continue isolated source-only successive-lineage work.
+The pre-launch read-only root-grant filename assumption used .md; actual config
+correctly names .json. Its correction preceded execution and caused no retry.
 
 CURRENT COLLECTED FAILURE, 2026-10-06: original outer handle 28778 is fully
 collected with exit 1. current_index_cleanup returned the sole verification VM
