@@ -572,7 +572,8 @@ defmodule LoopexComposition.Restore.IO do
     # selection and closes the captured use after descriptor close. Its synchronous
     # telemetry runs inside the same owned semantic operation and original cutoff.
     # Object bytes, other uses and complete artifact history remain separate proofs.
-    with true <- primitive(:artifact_reference, fn -> ArtifactStore.valid_reference?(reference) end),
+    with true <-
+           primitive(:artifact_reference, fn -> ArtifactStore.valid_reference?(reference) end),
          {:ok, entries} <-
            primitive(:artifact_manifest, fn -> RestoreCodec.manifest(manifest, @max_uint64) end) do
       digest = reference.use_digest

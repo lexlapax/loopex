@@ -6,7 +6,9 @@ defmodule Loopex.Executor.Local.ReadOnlyToolsTest do
     if context[:short_workspace] do
       {:ok, root: short_workspace!()}
     else
-      root = Path.join(System.tmp_dir!(), "loopex-read-only-#{System.unique_integer([:positive])}")
+      root =
+        Path.join(System.tmp_dir!(), "loopex-read-only-#{System.unique_integer([:positive])}")
+
       File.mkdir!(root)
       on_exit(fn -> File.rm_rf!(root) end)
       {:ok, root: root}

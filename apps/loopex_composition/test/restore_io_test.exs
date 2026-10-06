@@ -1246,7 +1246,8 @@ defmodule LoopexComposition.RestoreIOTest do
     end
   end
 
-  test "artifact use capture preserves actual writer bytes after original root deletion", context do
+  test "artifact use capture preserves actual writer bytes after original root deletion",
+       context do
     for bytes <- [<<>>, "retained text", <<0, 255, 128>>] do
       metadata = artifact_metadata()
       fixture = artifact_fixture(context.root, bytes, [metadata, %{metadata | "attempt" => 2}])
@@ -1258,13 +1259,27 @@ defmodule LoopexComposition.RestoreIOTest do
       File.mkdir!(Path.join(fixture.root, "empty-directory"))
 
       for {reference, use} <- Enum.zip(fixture.references, fixture.uses) do
-        selected = %{fixture | reference: reference, use: use, path: artifact_use_path(fixture.root, reference)}
+        selected = %{
+          fixture
+          | reference: reference,
+            use: use,
+            path: artifact_use_path(fixture.root, reference)
+        }
+
         owned = launch(artifact_operation(selected), :artifact_describe)
         assert {{:joined, {:ok, ^use}, %{opens: 1, closes: 1}}, events} = drive(owned)
         kinds = issued_kinds(events)
         assert index(kinds, :close) < index(kinds, :artifact_describe)
-        assert use.metadata == Map.drop(if(reference == first, do: metadata, else: %{metadata | "attempt" => 2}), ["role", "media_type"])
-        assert File.read!(selected.path) == LoopexProtocol.Canonical.encode(["artifact-use-v2", use])
+
+        assert use.metadata ==
+                 Map.drop(
+                   if(reference == first, do: metadata, else: %{metadata | "attempt" => 2}),
+                   ["role", "media_type"]
+                 )
+
+        assert File.read!(selected.path) ==
+                 LoopexProtocol.Canonical.encode(["artifact-use-v2", use])
+
         joined(owned)
       end
 
@@ -1275,9 +1290,18 @@ defmodule LoopexComposition.RestoreIOTest do
     end
   end
 
-  test "selected artifact use does not certify objects or narrow the uint64 use size grammar", context do
+  test "selected artifact use does not certify objects or narrow the uint64 use size grammar",
+       context do
     fixture = artifact_fixture(context.root)
-    object = Path.join([fixture.root, "artifacts", binary_part(fixture.reference.digest, 0, 2), fixture.reference.digest])
+
+    object =
+      Path.join([
+        fixture.root,
+        "artifacts",
+        binary_part(fixture.reference.digest, 0, 2),
+        fixture.reference.digest
+      ])
+
     File.rm!(object)
 
     for size <- [67_108_865, 18_446_744_073_709_551_615] do
@@ -1299,22 +1323,31 @@ defmodule LoopexComposition.RestoreIOTest do
     {:audit_artifact_use, root, reference, manifest} = artifact_operation(fixture)
 
     for changed <- [
-          Map.put(reference, :extra, true), Map.delete(reference, :digest),
+          Map.put(reference, :extra, true),
+          Map.delete(reference, :digest),
           %{reference | use_digest: String.duplicate("A", 64)},
           %{reference | use_digest: "../unsafe"},
           %{reference | use_locator: "use:" <> String.duplicate("0", 64)},
           %{reference | use_canonicalization_version: "loopex.canonical.future"},
-          %{reference | role: "input"}, %{reference | size: -1},
+          %{reference | role: "input"},
+          %{reference | size: -1},
           %{reference | size: 18_446_744_073_709_551_616}
         ] do
       owned = launch({:audit_artifact_use, root, changed, manifest}, :artifact_reference)
-      assert {{:joined, {:error, :history_invalid}, %{opens: 0, closes: 0}}, events} = drive(owned)
+
+      assert {{:joined, {:error, :history_invalid}, %{opens: 0, closes: 0}}, events} =
+               drive(owned)
+
       refute :artifact_manifest in issued_kinds(events)
       refute :artifact_describe in issued_kinds(events)
       joined(owned)
     end
 
-    assert {:error, :invalid_io_request} = RestoreIO.run({:audit_artifact_use, root, nil, manifest}, limits(1_000, 100), probe: self())
+    assert {:error, :invalid_io_request} =
+             RestoreIO.run({:audit_artifact_use, root, nil, manifest}, limits(1_000, 100),
+               probe: self()
+             )
+
     refute_receive {:restore_io, _, _, _, _}
   end
 
@@ -1328,8 +1361,16 @@ defmodule LoopexComposition.RestoreIOTest do
     for changed <- [
           Enum.reject(entries, &(&1["path"] == relative)),
           Enum.reject(entries, &(&1["path"] == parent)),
-          Enum.map(entries, fn entry -> if entry["path"] == relative, do: %{entry | "kind" => "directory", "size" => 0, "sha256" => nil}, else: entry end),
-          Enum.map(entries, fn entry -> if entry["path"] == parent, do: %{entry | "mode" => Bitwise.bxor(entry["mode"], 0o100)}, else: entry end)
+          Enum.map(entries, fn entry ->
+            if entry["path"] == relative,
+              do: %{entry | "kind" => "directory", "size" => 0, "sha256" => nil},
+              else: entry
+          end),
+          Enum.map(entries, fn entry ->
+            if entry["path"] == parent,
+              do: %{entry | "mode" => Bitwise.bxor(entry["mode"], 0o100)},
+              else: entry
+          end)
         ] do
       altered = :erlang.term_to_binary([domain, changed], [:deterministic])
       owned = launch({:audit_artifact_use, root, reference, altered}, :artifact_manifest)
@@ -1345,7 +1386,8 @@ defmodule LoopexComposition.RestoreIOTest do
     joined(owned)
   end
 
-  test "artifact selected digest must authenticate the actual canonical filename bytes", context do
+  test "artifact selected digest must authenticate the actual canonical filename bytes",
+       context do
     fixture = artifact_fixture(context.root)
     wrong = String.duplicate("0", 64)
     reference = %{fixture.reference | use_digest: wrong, use_locator: "use:" <> wrong}
@@ -1359,7 +1401,8 @@ defmodule LoopexComposition.RestoreIOTest do
     joined(owned)
   end
 
-  test "artifact use actual writer cap succeeds and first over-cap refuses before open", context do
+  test "artifact use actual writer cap succeeds and first over-cap refuses before open",
+       context do
     seed = artifact_fixture(context.root)
     assert Loopex.ArtifactStore.max_use_bytes() == 131_072
     metadata = artifact_metadata()
@@ -1392,23 +1435,35 @@ defmodule LoopexComposition.RestoreIOTest do
       File.chmod!(fixture.path, mode)
       operation = artifact_operation(fixture)
 
-      altered = case change do
-        :size ->
-          File.write!(fixture.path, fixture.bytes <> <<0>>)
-          operation
-        :mode ->
-          File.chmod!(fixture.path, Bitwise.bxor(mode, 0o100))
-          operation
-        :content ->
-          File.write!(fixture.path, :binary.copy(<<0>>, byte_size(fixture.bytes)))
-          operation
-        :digest ->
-          {:audit_artifact_use, root, reference, manifest} = operation
-          [domain, entries] = :erlang.binary_to_term(manifest, [:safe])
-          relative = Path.relative_to(fixture.path, root)
-          changed = Enum.map(entries, fn entry -> if entry["path"] == relative, do: %{entry | "sha256" => String.duplicate("0", 64)}, else: entry end)
-          {:audit_artifact_use, root, reference, :erlang.term_to_binary([domain, changed], [:deterministic])}
-      end
+      altered =
+        case change do
+          :size ->
+            File.write!(fixture.path, fixture.bytes <> <<0>>)
+            operation
+
+          :mode ->
+            File.chmod!(fixture.path, Bitwise.bxor(mode, 0o100))
+            operation
+
+          :content ->
+            File.write!(fixture.path, :binary.copy(<<0>>, byte_size(fixture.bytes)))
+            operation
+
+          :digest ->
+            {:audit_artifact_use, root, reference, manifest} = operation
+            [domain, entries] = :erlang.binary_to_term(manifest, [:safe])
+            relative = Path.relative_to(fixture.path, root)
+
+            changed =
+              Enum.map(entries, fn entry ->
+                if entry["path"] == relative,
+                  do: %{entry | "sha256" => String.duplicate("0", 64)},
+                  else: entry
+              end)
+
+            {:audit_artifact_use, root, reference,
+             :erlang.term_to_binary([domain, changed], [:deterministic])}
+        end
 
       owned = launch(altered, :artifact_manifest)
       assert {{:joined, {:error, :io_error}, evidence}, events} = drive(owned)
@@ -1418,7 +1473,8 @@ defmodule LoopexComposition.RestoreIOTest do
     end
   end
 
-  test "artifact hardlink symlink FIFO and symlink parent substitutions refuse before open", context do
+  test "artifact hardlink symlink FIFO and symlink parent substitutions refuse before open",
+       context do
     fixture = artifact_fixture(context.root)
     operation = artifact_operation(fixture)
     path = fixture.path
@@ -1460,7 +1516,12 @@ defmodule LoopexComposition.RestoreIOTest do
           directory = Path.dirname(fixture.path)
           File.rename!(directory, directory <> "-moved")
           File.mkdir!(directory)
-          File.rename!(Path.join(directory <> "-moved", Path.basename(fixture.path)), fixture.path)
+
+          File.rename!(
+            Path.join(directory <> "-moved", Path.basename(fixture.path)),
+            fixture.path
+          )
+
         :external_ancestor ->
           parent = Path.dirname(fixture.root)
           moved = parent <> "-moved-#{System.unique_integer([:positive])}"
@@ -1468,6 +1529,7 @@ defmodule LoopexComposition.RestoreIOTest do
           File.mkdir!(parent)
           File.rename!(Path.join(moved, Path.basename(fixture.root)), fixture.root)
           on_exit(fn -> File.rm_rf!(moved) end)
+
         _ ->
           replacement = fixture.path <> ".replacement"
           File.write!(replacement, fixture.bytes)
@@ -1482,16 +1544,25 @@ defmodule LoopexComposition.RestoreIOTest do
     end
   end
 
-  test "artifact physical equality cannot admit hostile or alternate current transport", context do
+  test "artifact physical equality cannot admit hostile or alternate current transport",
+       context do
     fixture = artifact_fixture(context.root)
     ordered = :erlang.binary_to_term(fixture.bytes, [:safe])
     compressed = :erlang.term_to_binary(ordered, [:deterministic, :compressed])
     assert <<131, 80, _::binary>> = compressed
 
-    for bytes <- [compressed, fixture.bytes <> <<0>>, <<131>>, :erlang.term_to_binary(fixture.use, [:deterministic])] do
+    for bytes <- [
+          compressed,
+          fixture.bytes <> <<0>>,
+          <<131>>,
+          :erlang.term_to_binary(fixture.use, [:deterministic])
+        ] do
       File.write!(fixture.path, bytes)
       owned = launch(artifact_operation(fixture), :artifact_describe)
-      assert {{:joined, {:error, :history_invalid}, %{opens: 1, closes: 1}}, events} = drive(owned)
+
+      assert {{:joined, {:error, :history_invalid}, %{opens: 1, closes: 1}}, events} =
+               drive(owned)
+
       assert index(issued_kinds(events), :close) < index(issued_kinds(events), :artifact_describe)
       assert File.read!(fixture.path) == bytes
       joined(owned)
@@ -1501,22 +1572,36 @@ defmodule LoopexComposition.RestoreIOTest do
   test "artifact captured transport alone cannot substitute for real Core use closure", context do
     fixture = artifact_fixture(context.root)
     use = fixture.use
-    changed_uses = [
-      Map.put(use, :extra, true), Map.delete(use, :metadata),
-      %{use | canonicalization_version: "loopex.canonical.future"},
-      %{use | object_digest: String.duplicate("a", 64)},
-      %{use | object_size: use.object_size + 1},
-      %{use | object_locator: "different-object"}, %{use | media_type: "text/plain"},
-      %{use | role: "input"}, %{use | media_type: :invalid_media_type},
-      %{use | metadata: Map.put(use.metadata, "extra", true)},
-      %{use | metadata: Map.delete(use.metadata, "attempt")},
-      %{use | metadata: %{use.metadata | "attempt" => 0}},
-      %{use | metadata: %{use.metadata | "run_id" => :existing_atom}}
-    ] ++ Enum.map(~w(session_id run_id operation_id tool_call_id), fn field -> %{use | metadata: Map.put(use.metadata, field, "")} end)
+
+    changed_uses =
+      [
+        Map.put(use, :extra, true),
+        Map.delete(use, :metadata),
+        %{use | canonicalization_version: "loopex.canonical.future"},
+        %{use | object_digest: String.duplicate("a", 64)},
+        %{use | object_size: use.object_size + 1},
+        %{use | object_locator: "different-object"},
+        %{use | media_type: "text/plain"},
+        %{use | role: "input"},
+        %{use | media_type: :invalid_media_type},
+        %{use | metadata: Map.put(use.metadata, "extra", true)},
+        %{use | metadata: Map.delete(use.metadata, "attempt")},
+        %{use | metadata: %{use.metadata | "attempt" => 0}},
+        %{use | metadata: %{use.metadata | "run_id" => :existing_atom}}
+      ] ++
+        Enum.map(~w(session_id run_id operation_id tool_call_id), fn field ->
+          %{use | metadata: Map.put(use.metadata, field, "")}
+        end)
 
     for changed <- changed_uses do
       selected = artifact_use_control(fixture, changed, fixture.reference)
-      assert {:ok, ^changed} = Loopex.Store.Local.Artifacts.decode_use_bytes(selected.bytes, selected.reference.use_digest)
+
+      assert {:ok, ^changed} =
+               Loopex.Store.Local.Artifacts.decode_use_bytes(
+                 selected.bytes,
+                 selected.reference.use_digest
+               )
+
       owned = launch(artifact_operation(selected), :artifact_describe)
       assert {{:joined, {:error, :history_invalid}, %{opens: 1, closes: 1}}, _} = drive(owned)
       joined(owned)
@@ -1539,7 +1624,8 @@ defmodule LoopexComposition.RestoreIOTest do
     end
   end
 
-  test "artifact semantic permit retains the original work cutoff after explicit close", context do
+  test "artifact semantic permit retains the original work cutoff after explicit close",
+       context do
     fixture = artifact_fixture(context.root)
     owned = launch(artifact_operation(fixture), :artifact_describe, 500)
     paused_operation(owned, :artifact_describe)
@@ -1547,11 +1633,20 @@ defmodule LoopexComposition.RestoreIOTest do
     joined(owned)
   end
 
-  test "real artifact describe synchronous telemetry remains within the original semantic lifetime", context do
+  test "real artifact describe synchronous telemetry remains within the original semantic lifetime",
+       context do
     fixture = artifact_fixture(context.root)
     parent = self()
     handler = "restore-artifact-describe-#{System.unique_integer([:positive])}"
-    assert :ok = :telemetry.attach(handler, [:loopex, :artifact, :describe, :start], &__MODULE__.pause_artifact_describe/4, parent)
+
+    assert :ok =
+             :telemetry.attach(
+               handler,
+               [:loopex, :artifact, :describe, :start],
+               &__MODULE__.pause_artifact_describe/4,
+               parent
+             )
+
     on_exit(fn -> :telemetry.detach(handler) end)
     owned = launch(artifact_operation(fixture), :artifact_describe, 500)
     {id, _} = paused_operation(owned, :artifact_describe)
@@ -1561,7 +1656,11 @@ defmodule LoopexComposition.RestoreIOTest do
     assert metadata == %{use_locator: fixture.reference.use_locator}
     guardian = owned.guardian
     reference = owned.reference
-    assert_receive {:restore_io, ^guardian, ^worker, ^reference, {:stopping, :deadline, stop, cleanup}}, 1_000
+
+    assert_receive {:restore_io, ^guardian, ^worker, ^reference,
+                    {:stopping, :deadline, stop, cleanup}},
+                   1_000
+
     assert stop >= owned.work_cutoff
     assert cleanup == stop + 10_000
     send(worker, :continue_artifact_describe)
@@ -2650,11 +2749,12 @@ defmodule LoopexComposition.RestoreIOTest do
     assert {:ok, handle} = Loopex.Store.Local.Artifacts.open(Path.join(original, "artifacts"))
     store = %{module: Loopex.Store.Local.Artifacts, handle: handle}
 
-    records = Enum.map(metadata, fn labels ->
-      assert {:ok, reference} = Loopex.ArtifactStore.put(store, bytes, labels)
-      assert {:ok, use} = Loopex.ArtifactStore.describe(store, reference)
-      {reference, use}
-    end)
+    records =
+      Enum.map(metadata, fn labels ->
+        assert {:ok, reference} = Loopex.ArtifactStore.put(store, bytes, labels)
+        assert {:ok, use} = Loopex.ArtifactStore.describe(store, reference)
+        {reference, use}
+      end)
 
     File.cp_r!(original, backup)
     File.rm_rf!(original)
@@ -2665,14 +2765,26 @@ defmodule LoopexComposition.RestoreIOTest do
     assert captured == LoopexProtocol.Canonical.encode(["artifact-use-v2", use])
 
     %{
-      root: backup, original: original, path: path, bytes: captured,
-      reference: reference, use: use,
-      references: Enum.map(records, &elem(&1, 0)), uses: Enum.map(records, &elem(&1, 1))
+      root: backup,
+      original: original,
+      path: path,
+      bytes: captured,
+      reference: reference,
+      use: use,
+      references: Enum.map(records, &elem(&1, 0)),
+      uses: Enum.map(records, &elem(&1, 1))
     }
   end
 
   defp artifact_use_path(root, reference),
-    do: Path.join([root, "artifacts", "uses", binary_part(reference.use_digest, 0, 2), reference.use_digest])
+    do:
+      Path.join([
+        root,
+        "artifacts",
+        "uses",
+        binary_part(reference.use_digest, 0, 2),
+        reference.use_digest
+      ])
 
   defp artifact_use_control(fixture, use, reference) do
     bytes = LoopexProtocol.Canonical.encode(["artifact-use-v2", use])

@@ -230,16 +230,20 @@ defmodule LoopexComposition.Ephemeral.ModelIntegrationTest do
         if unquote(enabled), do: [instructions: fixture_instructions()], else: []
 
       assert {:error, :interaction_requires_session} =
-               Ephemeral.run("list the workspace", instruction_options ++ [
-                 policy: DeferringPolicy,
-                 model: "ollama:llama3.2",
-                 base_url: "http://127.0.0.1:#{port}/v1",
-                 cwd: root,
-                 tools: :read_only,
-                 questions: unquote(enabled),
-                 max_tokens: 128,
-                 timeout: 15_000
-               ])
+               Ephemeral.run(
+                 "list the workspace",
+                 instruction_options ++
+                   [
+                     policy: DeferringPolicy,
+                     model: "ollama:llama3.2",
+                     base_url: "http://127.0.0.1:#{port}/v1",
+                     cwd: root,
+                     tools: :read_only,
+                     questions: unquote(enabled),
+                     max_tokens: 128,
+                     timeout: 15_000
+                   ]
+               )
 
       assert_receive {:model_request, request}, 15_000
       assert request =~ "POST /v1/chat/completions HTTP/1.1"
