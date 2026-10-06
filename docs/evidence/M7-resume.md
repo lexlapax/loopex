@@ -28,63 +28,51 @@ physical restore implementation; it does not waive any full-history proof.
 ### Current work and restart order
 
 Continue the existing ACTIVE unlimited goal on `m7`. Do not create another goal.
-Primary last pushed checkpoint is `6b590add`; this file's commit supersedes
-its resume record. The full earlier checkpoint is retained in Git
-at `bdc88a05:docs/evidence/M7-resume.md`; consult it selectively for historical
-proof pointers. The task ledger retains outcome mappings and the frozen checklist.
+Primary previous pushed checkpoint is `740698ba`; this commit supersedes its
+resume record. Historical detail remains at
+`bdc88a05:docs/evidence/M7-resume.md` and in the task ledger.
 
-Root verification VM is OCCUPIED by original diagnostic handle47417, exact
-`dbd143f3532069b4b26f207b355d3dac2c22cc51`; collect the original before any
-next VM. Original generation-native v3 handle4121 is fully
-collected FAILED at exact9d, never poll or retry it. Root has frozen a one-test diagnostic child
-`dbd143f3532069b4b26f207b355d3dac2c22cc51` in
-`/private/tmp/loopex-m7-generation-install-diagnostic`: the failed compound
-assertion is split into the same two exact assertions, no production change.
-Original diagnostic47417 is now running; no result is inferred. Every older handle below
-is also fully collected. Native v1/v2 were never run.
+Root verification VM is OCCUPIED by original formatter handle31620, initial
+`e7f630da756de6918f7f85fac2a1f6456387716c`, worktree
+`/private/tmp/loopex-m7-core-protocol-rejoin`. Collect this original handle once
+before any next VM grant. Both older4121 and47417 are FAILED and fully collected;
+never repoll or retry their bytes. Formatting owns34 Elixir paths in the46-path
+unit, requires all34 whole-file non-line ASTs and both supported formatting
+checks, and permits at most one confined direct child. No native PASS is inferred.
+Enabled packet `M7/core-configure-format-runner-20261006-v1`, config
+`5b31f83c7537c5bbaf145b1a5c913b0b4f945711149456757209b9f7edfd50ec`,
+root source review `f6804c300574a81063eb9bf77d68028329b34dbdc5b76c407212d99f89590dbb`.
+Output `M7/m7-core-configure-format-v1`; registry
+`M7/core-configure-format-v1-stage-attempt-registry.json`, admitted seed735.
+Native verification must consume both exact final formatting results.
 
-Current isolated source ownership:
+Source ownership, all separate worktrees and source-only agents:
 
-- Configure writer stopped at clean `f06ec74daa1116c8cdc3bb3d40678a8a242602ee`
-  in `/private/tmp/loopex-m7-configure-current-grammar`. Packet
-  `/private/tmp/loopex-m7-configure-current-grammar-source-f06ec74d-20261006-v1`,
-  report `33addbfbb400d6e790f50812f894debb8bc5b3d43f647e2ccac44f5b83644c53`,
-  inventory `b390094b0c90dc80e68fa2ea74d179b8f9bdeb2f30be96abf1ea36d309375025`.
-  Shared pure decoder, dormant adapters and independent client vectors await
-  `restore_prefix_source_audit` source review. No served route activation or
-  product verification occurred. All 375 old test files remain literal.
-- Abort correction writer stopped at clean
-  `a322f5e0115e194f3f4f5cdf7fccebcfeb0cf745`, sole f6b791ab child in
-  `/private/tmp/loopex-m7-authored-abort-cutoff`. Packet
-  `/private/tmp/loopex-m7-authored-abort-cutoff-source-a322f5e0-20261006-v1`,
-  report `7ee34ad7bb27b33ae6aeeb11f89e1b993bc201de79f0941c25fbe7ccb4361d88`,
-  inventory `5bc1ddbf4a92d8123603aac4204c0e7d0d99dae6507f55a5bbd7d00ad9e918d4`.
-  Exactly Coordinator and authored deadline test changed. All eleven old cases
-  and helpers remain literal; two Store-backed abort recovery cases add thirteen
-  prospective cases. Original bounds retained. `authored_bounds_review` is
-  independently reviewing the actual child before root composition/format/tests.
-- Generation-native v3 source review is sealed at
-  `/private/tmp/loopex-m7-generation-native-runtime-source-audit-9d744079-20261006-v3`,
-  report `b40b00c3f4ba413457420855621151f9437b146269bcdc763259188a671d2473`,
-  SHA256SUMS `8fc92bd1fcd8a540840debf3357bd2375aee85516492f09d815bc43305de56ba`.
-  Root read the full report and rehashed all 204 indexed artifacts. Enabled copy
-  `/Users/spuri/projects/lexlapax/loopex-evidence/M7/generation-native-focused-runtime-runner-20261006-v3`,
-  config `4c2b6fb11fdf22a342dc0eb5c76587e8b7d1991f7153f5863f2cf80bca01eb30`,
-  root review `cdf205627ca777b22a126846751cfbb38e8197b6a79a3ac3503ce1b08d3e85c5`.
-  Root admission rehashed actual packet/source/proof and the complete724-key
-  union. Original handle4121 targets 22 fresh stages,141 native cases per pair,
-  consumes both unchanged original18466 format checks, and writes new output
-  `M7/m7-generation-native-focused-runtime-v3` with registry
-  `M7/generation-native-runtime-v3-stage-attempt-registry.json`. Original4121 is now FAILED and fully collected: current install20/21, four
-  preceding identity/compile stages passed; no prefix/adjacent/floor cases ran.
-  V2 duplicate-key refusal remains retained, never retroactively run.
+- `authored_bounds_review` independently reviews fixture correction
+  `d2c3cfa769cab82a5fb4e9111e0f55af4d6ad1f5`, sole dbd143f3 child in
+  `/private/tmp/loopex-m7-generation-payload-links`. Only the install test changes;
+  all21 existing cases remain literal, two physical controls add23 prospective
+  cases. Portable link profile, exact temporary normalization and namespace
+  projection preserve payload/cleanup bounds. Packet
+  `/private/tmp/loopex-m7-generation-payload-links-source-d2c3cfa7-20261006-v1`,
+  report `bbacadb7de2d02c19f97453e128bc9180747a4446260bbc965f811beb69fe5bd`,
+  inventory `bb40b054ced2df9f71e0e6a976edc67d08317e5c215c97b829d4be0a92f6f2fd`.
+- `private_task_causal_resume` independently reviews dormant compact prerequisite
+  `9c8df940328c232f1f5a3a413f98d3916675e398`, sole e7 child in
+  `/private/tmp/loopex-m7-compact-current-grammar`, exactly10 paths. Source packet
+  `/private/tmp/loopex-m7-compact-current-grammar-source-9c8df940-20261006-v1`,
+  report `86ef3822f9d238b03bed0be2e2dd9d1440d8de2683888797d6f0bbe808434948`,
+  SHA256SUMS `6c4959fab87633ccb5ca21a8a01763118e8f20c7c39396709cf4e624f210b238`.
+  Existing routes/manifests stay literal;307 vectors and11 prospective tests
+  are source evidence only. No accepted0054/0055 dependent work is implemented.
+- `restore_prefix_source_audit` stopped after sealing that compact source.
 
-One integrator owns rejoin. Core9f2 and protocol c364 both change SessionState;
-compose the approved policy provenance/cursor changes with authored command v4
-and digest v2, preserving both before verification. The protocol projection
-fixture's four missing-run-timer failures are corrected in Core source through
-real pending/recovered-question timer arming; they still need composed runtime
-proof. Do not inject a timer, soften assertions, increase bounds or retry old bytes.
+One root integrator owns all execution, collection, rejoin and push. The
+combined candidate incorporates reviewed authored bounds/abort timer recovery,
+policy provenance/terminal projection and accepted0053 configure grammar,
+including corrected literal cap-plus-one fixtures. Its native proof is pending.
+No source agent may run a parser, product import, VM, Node, formatter, compiler,
+test, grant, registry mutation or runtime output collection.
 
 ### Decisions
 
@@ -105,9 +93,10 @@ proposal review49c17036 and docs proof below; no acceptance follows.
 ### Latest complete evidence and attempt union
 
 Evidence base is `/Users/spuri/projects/lexlapax/loopex-evidence/M7`.
-Latest complete registry has729 keys:
-`generation-native-runtime-v3-stage-attempt-registry.json`, SHA
-`2dbbf73bece4cf2dca7645597676ad57b534ce0f24bf43876cb85cdaac619f85`.
+Latest fully collected registry has735 keys:
+`generation-install-diagnostic-v1-stage-attempt-registry.json`, SHA
+`80c698662e9cfcffa886687c411a0d29edd91fec18b4b1c46e6f6218c3c6a54a`.
+Formatter31620 owns the next active registry; reconcile its terminal result first.
 Reconcile every retained registry into the same unique exact(source,pair,stage)
 union before any fresh grant. A source child is not permission to reroll a case.
 
@@ -117,6 +106,7 @@ union before any fresh grant. A source child is not permission to reroll a case.
 | 95286 | c36433ec6ed152c9dd329ddbf401a756abda1a5f | FAIL112.905s/seven stages; Core25 and Protocol14 pass including3 Node; foreground18/22; four missing original run timers; daemon/floor unexecuted;50 artifacts,59 rows,7 joins |
 | 18466 | initial9f17c0264e89ff0020c0bd9c92ec9fbf80bedf5c; final9d74407937897b9298d8228cff6d317c29bf9b48 | PASS formatting only59.879s/11 stages; all5 whole-file non-line ASTs, both formatters;73 artifacts,59 rows,11 joins |
 | 4121 | 9d74407937897b9298d8228cff6d317c29bf9b48 | FAIL130.482s/five stages; current dev/test compilation pass, install20/21; staging-cut resume compound closure/payload assertion fails;41 artifacts,59 rows,5 joins; floor unexecuted |
+| 47417 | dbd143f3532069b4b26f207b355d3dac2c22cc51 | FAIL128.971s/six stages; sole-file format and warning-free compilation pass; selected install0/1,20 explicit line exclusions; closure assertion passes, payload assertion fails;44 artifacts,59 rows,6 joins; floor/full matrix unexecuted |
 | 72925 | f3fc594becea5fe659ecb7a4af383286aa407824 | PASS docs only68.034s/one stage; all4 command steps;29 artifacts,complete1121 Git/live rows,one join; Proposed0056 unaccepted |
 
 Exact collection references and hashes:
@@ -227,58 +217,23 @@ full current-format physical restore, integrated checks and the separately
 approved closure/release stages. No main merge, closure, tag or publication is
 currently authorized.
 
-### Current follow-up ownership
+### Latest diagnostic collection
 
-Root read the complete482 source audit and rehashed59 indexed artifacts:
-report `32c5d3bd080d2eb97b7213cbe433ade51a01d8e098280454aab2f050fef040c4`,
-SHA256SUMS `b6ff0ade393fc8d8af1875fc2886a4a40745759999b79cb30a03612de768fe68`
-at `/private/tmp/loopex-m7-core-protocol-rejoin-source-audit-482b5c25-20261006-v1`.
-Root independently reviewed configure correction `1a50ac4c5aa27ffd959ddb47c01519431fb0eca9`
-in `/private/tmp/loopex-m7-configure-vector-correction`, report
-`ffa3dae5be59f1c5d39e6fb0047cf98086a7161702287f27f51c58c0ed8dae72`,
-index `7ea4846e83ce89217792419425b47daac7059c72b0ac939bdf43b6385cbe8e21`.
-All25 actual indexed artifacts and four actual JSON cap+1 values were checked;
-reversing only four quoted JSON tokens reconstructs the entire old vector file.
-Root's scoped correction report/index are
-`9b3b61cea0ab475908a3d598aaf0a6d0cf673b786d0eb5abad52d31278005e5d` /
-`099e88d5f8ceb6e47e206028838ff1db89bfe9baa4d19a88950e40c647c6a531`
-at `/private/tmp/loopex-m7-configure-vector-correction-root-review-1a50ac4c-20261006-v1`.
+Original47417 is fully collected. Collection
+`M7/generation-install-diagnostic-original-collection-20261006-v1.json`, SHA
+`1252f68556b60e67bf8027fcaa9785cd4be23d48eeefbb791284f794cb4d47dc`;
+terminal report `ea05685ef062643d4dc705a7398bb4ce62d88803e2b06b869c8d25089d414ebf`,
+terminal inventory `7352fad0be3956a84ebbf941fac257b6d846a3c9ffe7a91ee2b0e236a53b18bb`.
+Resource closure passed; the original-payload assertion failed. Inspect truncates
+nested values, so the changed field remains unidentified. The source-supported
+filesystem hypothesis is not an attribution or PASS.
 
-Root checked configure10 parent-owned baselines matched482 and paths were wholly
-disjoint, then appended their exact patch as sole482 child
-`e7f630da756de6918f7f85fac2a1f6456387716c` in the Core/protocol rejoin worktree.
-Final unit46paths; formatter-owned34Elixir paths. No source has yet rejoined
-primary and no native check has run on this combined candidate.
-
-- `authored_bounds_review` authors only disabled formatter packet
-  `/private/tmp/loopex-m7-core-configure-format-runner-e7f630da-20261006-v1`.
-  Generic declaration pins replace restore-only inventory, separate UNIT46 and
-  OWNED34, all34 whole-file non-line AST proofs and both exact final formatter
-  checks required. Existing lifecycle/helpers/environment remain literal where
-  applicable. All execution/review/grant/registry/output gates stay unset.
-- `private_task_causal_resume` authors only disabled current-pair diagnostic
-  runner `/private/tmp/loopex-m7-generation-install-diagnostic-runner-dbd143f3-20261006-v1`.
-  Select line259, one case/20excluded/zero skips; fresh private environments,
-  source confinement and exact first result. This diagnostic is not a full
-  matrix or waiver. Root's original-failure audit report24336b5a and inventory
-  eafb5b38 remain retained in its source-audit packet.
-- `restore_prefix_source_audit` owns only current wire activation source map
-  `/private/tmp/loopex-m7-current-wire-activation-source-map-20261006-v1`, identifying
-  accepted actionable route/manifest work versus unaccepted0054/0055 dependencies.
-  No route implementation or dependent decision is granted by an inventory.
-
-VM is now occupied by original47417; admission seeded complete union729. Root must read/hash the exact new
-runner packet before enabling a fresh copy and run only one product VM at once.
-
-Root read the complete diagnostic author report, actual artifact-inventory map
-and full operative template delta; verified29 packet artifacts,59 actual/Git
-rows,71 external refs,41 original failure artifacts, exact assertion inverse
-and full unique729-key union. Enabled diagnostic copy:
-`/Users/spuri/projects/lexlapax/loopex-evidence/M7/generation-install-diagnostic-runner-20261006-v1`,
-config `6a8b2126f0a464a80c5817c79d8343edf0ec08b5cbc8f257062c959972980b77`,
-root review `51a098ddf24643bd73dfeefe6da92acc86ab24069a28ddd85fee5519d4dfadcc`.
-Original handle47417 writes `M7/m7-generation-install-diagnostic-runtime-v1`
-and registry `M7/generation-install-diagnostic-v1-stage-attempt-registry.json`.
-Six current-only stages; one selected case with20 explicit line exclusions.
-No full matrix, floor, mutation or retry of original9d is authorized. Collect
-its exact first result before enabling the combined formatter packet.
+Exploratory physical control is retained at
+`M7/directory-link-exploratory-control-20261006-v1`, index SHA
+`1218384d375013d25e83acece0ad72fdf318e56fc88acbafa10be365c724d195`,
+observations SHA `67884c156c246ad23172cb1fad9649ee764a95b71b8e4f8a730e9e5caea4fec4`.
+These explicitly transcribe earlier tool chunk c6bd6a, rather than claiming
+original redirected output. The directory inode/device remained constant;
+empty links2, plus regular file3, plus directory4, removal reverses to2.
+Scratch cleanup completed. No product VM/test or product PASS is claimed.
+The independent fixture review and full current/floor proof remain required.

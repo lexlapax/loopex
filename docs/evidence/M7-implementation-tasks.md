@@ -47,10 +47,15 @@ identity/dev/test compilation pass, generation install20/21 with one compound
 closure/payload assertion failure; prefix, adjacent and floor stages did not
 run. Complete failure collection verifies41 artifacts,59 source rows and5
 original process joins after130.482s. A confined `dbd143f3` diagnostic child
-splits the same two assertions without changing any proof or bound and remains
-unexecuted. No generation row closes. Reviewed authored deadline/interaction
+splits the same two assertions without changing any proof or bound. Original47417
+is now fully collected FAILED128.971s: resource closure passes, payload assertion
+fails;44 artifacts,59 source rows and6 joins verified. The truncated compared
+values do not identify the changed field. A confined filesystem-aware fixture
+correction d2c3cfa7 preserves21 old cases and adds two physical controls; it is
+under independent source review. No generation row closes. Reviewed authored deadline/interaction
 and accepted0053 configure prerequisites are composed at isolated `e7f630da`,
-46 paths, awaiting one current/floor formatting and focused native campaign.
+46 paths, now formatting as original31620 before a focused native campaign.
+Dormant compact prerequisite9c8df940 is separately under independent source review.
 The configure fixture correction preserves all371 vectors and supplies the four
 actual cap+1 controls. ADR0053 is accepted;0054 is the sole asked pending
 question. T01–T19 and added tallies remain unchanged. Exact source, report,
