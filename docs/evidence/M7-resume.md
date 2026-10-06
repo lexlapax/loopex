@@ -136,8 +136,15 @@ assertion or bound change, second VM, full fast or paid/attended lane.
 Execution is active under original persistent handle2090, owned by
 current_index_cleanup. Preflight confirms exact run/config, clean bbf source,
 unconsumed initial registry and fresh output; initial private cache copy is
-underway. No stage or test result is claimed yet. Do not start another VM,
-rerun or poll that agent-owned handle independently. Receipt work is source-only.
+completed. Worker reports formatter/four-path AST equality and exact formatting
+child `6baa7364824b5db95a9075fcbb14afba2304c6f5`, current product dev/test
+compiles48.681/45.204 seconds,format/five source gates,focusedIO80/2/0 in36.661
+seconds and independent summary80 passed. Dependency warnings remain raw.
+Handle2090 is live; adjacent/ordinary/long and floor proof remain pending.
+These interim results await root's terminal collection verification. Do not
+start another VM,rerun or poll the agent-owned handle independently. Receipt
+work is source-only. CLI agent now inventories the next accepted artifact
+physical namespace/caps/reference gap read-only; no implementation or VM grant.
 
 LATEST ARTIFACT PROOF: handle24595 is terminal exit zero, collected and sealed;
 exclusive VM slot returned. Both pairs pass focused29/0 and Store105/0, no
@@ -192,8 +199,18 @@ coverage gap. Source-only test child `f6e731bdafd09f2abd3174ed199b36c24cfcc809`
 adds20 lines: manually encoded uninterned ETF atom, noncreating before/after
 existing-atom checks and actual BIF entry under the same captured1,000ms matrix
 cutoff. Production/helper/populations are unchanged; root read the correction
-and report. Independent correction review and packet verification are pending.
-No VM, formatter, compiler, test or push ran for receipts. Initial/final source
+and report. Independent correction review is complete with no source blocker. Root read
+initial/final reports and verified initial five listed artifacts plus inventory,
+12 Git/eight external inputs,final four listed artifacts plus inventory,
+12 Git/ten external inputs,nine sealed correction files and32 actual/Git/mode
+sources. Final report
+`ea00006cbc9676f8ba4623884085e81383dd4279715952dfb189cbb9f605e1a7`;
+inputs `6d820b7cd622319511e677f0284e84fdb3de8e24b3dd611abbdb7662a960cbce`.
+Private worker now prepares a new immutable execution-disabled modern runner,
+source f6 frozen, only two owned formatter paths,source-derived32/35/298+2
+populations,all gates/private caches/strict actual counts/one-shot registry and
+original group/source/status custody. No execution grant exists; Ledger owns
+sole VM. No VM, formatter, compiler, test or push ran for receipts. Initial/final source
 packets remain under their separate temporary names; durable inventory copy is
 `M7/receipt-captured-byte-inventory-20261005-v1`, copy inventory
 `0c4e91d1d2a83ba7ddfd3021a33aba2365479078b1e65362b5e6f53640ea510f`.
