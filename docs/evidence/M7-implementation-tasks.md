@@ -36,7 +36,9 @@ setup override and accepts no other contract. No checklist row closes here.
 Native checkpoint source dc5797c7 passes10 focused and63 adjacent cases,
 1 adjacent exclusion, zero skips, but ordinary Core fails1 of1323 cases,
 10 excluded. Resource capture source ae9b6675 fails warning-free compilation
-before tests. Both runs are collected and immutable; the VM slot is free.
+before tests. Both runs are collected and immutable. Resource corrected source
+10f71808 has the sole VM grant, live handle78954; native corrected source
+9aa2cf82 is independently reviewed and queued, not executed.
 The [restart record](M7-resume.md#technical-depth) retains exact source/output
 identities, measured durations and root verification of the sealed artifacts.
 
@@ -45,7 +47,8 @@ Store snapshot for the new checkpoint fixture's records/events, and grouping
 the unchanged Resource execute/1 clauses. Neither changes assertions, deadlines
 or populations. The actual cancellation interleaving was not captured and is
 not claimed. The actual-runtime startup witness is source-only and awaiting a
-reviewed verification packet. No corrected run is yet authorized.
+reviewed verification packet. Resource v3 alone is executing; no native or
+startup-witness VM grant is active.
 
 T01–T19 originals remain78 done/95 todo/6 retired; added294 done/22 todo.
 Including T00 originals78/101/7, added298/23. Original186 rows stay frozen.

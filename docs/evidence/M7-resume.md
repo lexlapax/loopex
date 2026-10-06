@@ -31,8 +31,10 @@ LATEST: The repeated maintainer reply "approve 1000 ms" confirms the existing
 [diagnostic setup override](../developer/agent-context-map.md#disposition-m7-diagnostic-setup-cutoff-2026-10-05).
 It changes no production deadline and accepts no queued ADR.
 
-Both latest verification runs are terminal failures; the exclusive VM slot is
-free. Native v3 handle51888 is collected, never restart or poll it. Formatted
+Both prior verification runs are terminal failures. The exclusive VM slot now
+belongs to Resource v3, worker current_index_cleanup, live handle78954, exact
+source10f71808c9b3d3fb4e9aabe222147490ede89238. Native v3 handle51888 is
+collected, never restart or poll it. Formatted
 source dc5797c7eeb99128fb2420f89141160376700c4b passes10 focused cases and
 63 adjacent cases with1 exclusion, zero skips. Ordinary Core passes1322/1323,
 10 excluded, zero skipped, and fails the new automatic-preparation cancellation
@@ -52,6 +54,13 @@ so its exact interleaving is unproved. Worker restore_manifest_resume is
 authorized only to change the new test's recover/1 to one Store snapshot,
 preserving strict recovery, all assertions, cases, joins and deadlines. Prepare
 a new clean child and pin-only v4 packet, no VM grant or retry of old bytes.
+That exact correction is committed at9aa2cf82742b3204fe1c57206ec8d2af579aea90.
+Root read the entire7-insert/2-delete delta, verified12 packet artifacts and
+all1,098 actual/Git source records, unchanged helpers and pin-only runner.
+Reviewed v4 runner digest
+a4121a93a91f57ac5c644b12154e09ab83b4f1ce07798317d86aac22f40bb516,
+packet inventory07aa73e7a1ad955c1b7822a7775e79e82f562504e69a2909bade4f9358de8e53,
+in siblingM7/configure-checkpoint-runner-9aa2cf82-v4. It is queued, unexecuted.
 
 Resource capture v2 handle46942 is collected, never restart or poll it.
 Formatted source ae9b66752f1cda812687817924d36ac2a130f918 fails current dev
@@ -63,7 +72,14 @@ compile raw5ef33bb000f1febed908d21c6ce1eef16f8ce4ce8526c35e35698502de029cfd,
 in siblingM7/resource-capture-audit-execution-20261005-v1. Worker
 current_index_cleanup is authorized only to move the unchanged resource_role/1
 clauses after all execute/1 clauses, retain a clean direct child and new gated
-pin-only runner. No VM grant, test assertion or bound change.
+pin-only runner. That correction is committed at10f71808c9b3d3fb4e9aabe222147490ede89238.
+Root read the complete3-line move and pin-only runner change, verified6
+correction artifacts,8 runner artifacts and29 actual/Git source records.
+Reviewed runner siblingM7/resource-capture-audit-runner-20261005-v3/run.py
+digest a5e18324f047118015fcb79ebde6ca0ee9d1d8c059e245117fda339a5a9fdf21
+is now executing once in fresh siblingM7/resource-capture-audit-execution-20261005-v2.
+Current preparation identities and formatter AST checks pass; formatter delta
+is empty. No test result yet. No other VM may start before terminal collection.
 
 Actual-runtime startup witness source0f6abc761f9021b14cba03b1708b6d7776047f75
 is clean and source-only in its isolated worktree. Root read its complete
