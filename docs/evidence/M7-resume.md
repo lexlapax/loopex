@@ -27,14 +27,36 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Latest Store integration and next verification
 
-CURRENT EXECUTION: the reviewed startup correction is committed and pushed at
-`559017602d06d74e3bf73104ec5b5c068e09aac2`. Root read its complete map-only
-source delta and runner pin-only delta, verified five source and seven runner
-artifacts, 13 actual/Git/mode records, unchanged helpers and the new output
-absence. The worker `private_task_causal_resume` has the sole VM grant for
-runner digest `e548b76d3a4c19f6aff2f03a66379faba72f82788e8dee2b0757845779a50e10`
-and fresh sibling `M7/runtime-preparation-startup-execution-20261005-v2`.
-Handle is pending launch. No other VM or same-source retry is authorized.
+LATEST STARTUP RESULT: the second execution stopped at source
+`559017602d06d74e3bf73104ec5b5c068e09aac2`. Handle `25505` is terminal exit 1,
+collected and sealed; the exclusive VM slot is returned. The map-only Logger
+repair passed setup. The new case then failed awaiting the actual stop-enqueued
+notification, with 997 ms left in its original captured cutoff. Public configure
+returned session_unavailable. Current focused tests have 17/18 passed, one
+failure, one excluded and zero skipped. No ordinary Core or floor run occurred.
+Pipeline duration is 134.252 seconds; dev/test compilation passed in
+47.679/46.497 seconds. No formatter source change occurred.
+
+Immutable output sibling `M7/runtime-preparation-startup-execution-20261005-v2`:
+terminal `a454e2cafcdb0c425b7bb3f4e3b887649a2eb682c7c2fbf858dc7809efcaa46f`;
+complete focused raw
+`55d6f0583f2f490481e1893f5e1ed982c967e4e3ac456bff95215a477df6275a`;
+collection JSON `f0f15f597aec31ca39c93c64bba23a08e5aac52faa0af1257c435f2c084df7e2`;
+collection Markdown `26f337a027cb3c028c9440a094c128d9d82fbb1a94f7d159d016c58a5c691dd0`.
+Root read the report and independently verified 62 inventoried artifacts plus
+the terminal digest, all 15 actual absent OS groups and 13 final actual/Git
+source records. Failed cleanup stays unproved: nine original joins, one
+unjoined collector and cutoff false. The empty partial trace and missing full
+trace/chain are retained; group exit does not promote them to proof.
+
+Next diagnosis is read-only. Installed current and floor source show actual
+OwnerGroup Supervisor.stop(..., :infinity) routes through GenServer.stop and
+proc_lib.stop to sys.terminate, then gen.call's local/infinity send operator.
+The fixture's send/3-and-ok-return trace assumes the different finite-timeout
+primitive path. No helper is spawned by this direct-PID route. A proposed
+narrow dedicated send trace must retain exact queue insertion before startup,
+four fixed actors, eleven original joins, the 1,000 ms cutoff and unchanged
+post-child two-message queue proof. No repair, retry or VM grant exists yet.
 Earlier first-failure results below remain immutable.
 
 NEXT SOURCE: `current_index_cleanup` owns only restore IO source/test in
