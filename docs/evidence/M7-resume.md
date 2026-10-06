@@ -51,21 +51,30 @@ Root copied the exact tested5-path unit (4writes/1already literal), preserving
 The two T15 added installation/prefix rows close. Public restore/proof completion,
 receipt/release, helper audit, long/full integration/release remain open.
 
-Root verification VM is BUSY original boundary native handle79496 at clean
-`5b46a72c6bb04e9b53e01cdb66c12a18590ae5da` in
-`/private/tmp/loopex-m7-current-boundary-rejoin`. Enabled
-`M7/current-boundary-native-runner-20261006-v1`, config
-`b296d2d6cefea10623be1ffcb97e526689a87eb2a2f5291b8e15149ba28fbe31`,
-root review7fc05e5d. Independent source report4a5d16c6/indexbcc4d22b60rows;
-separate Core carry1d7a2be6/indexdda1724a82rows. Root read full reports/source/
-formatter validation/closed gates and rehashed200 author rows/28 external inputs/
-133 actual/Git facts. Latest817 union reconciled;18 fresh stages,420cases per
-pair840both. Core318, Protocol28/ex7 plusNode7/ex28 SAME6files, foreground36,
-daemon31; no skips/other exclusions. Both formatter86465 keys consumed, no replay
-or source child. Output `M7/m7-current-boundary-native-v1`. Collect79496 once and
-reconcile the whole final union before another product VM. No boundary native
-PASS, task closure or literal primary join is inferred yet. Draft collector
-`/private/tmp/m7-collect-current-boundary-native-v1.py` awaits root source review.
+Root verification VM is FREE after original79496 is fully collected
+FAIL_OR_UNAVAILABLE335.274s at clean5b46. Current identity/dev/test compilation,
+Core318, Protocol28 and independentNode7 pass. Foreground34/36 fails two neutral
+text/choice projection fixtures at their unchanged5,000ms cutoff. Daemon and all
+floor native stages did not run. No generic Core task closes and no70-path primary
+join follows.54 artifacts,133actual/Git rows, complete1,167trackedentries and8
+original joins verified. Collection
+`M7/current-boundary-native-original-collection-20261006-v1.json`, SHA
+`8672800a602a67d163953d55f7649e0d3af2a84367188d68ff74dbbc6501eae7`;
+collector rootf020c284 (only compact console output differs from unexecuted agent
+draftd4df87e9). Never repoll79496/88711 or replay their source/pair/stage keys.
+Registry825 `M7/current-boundary-native-v1-stage-attempt-registry.json` is the
+latest whole union, SHA
+`5d71f83ebf55fe0830108904de295dc9c9e4ccfaf74f3858b05949b7fffa4c7c`;
+rehash/reconcile it before another grant. Enabled/root/source
+reviews remain at `M7/current-boundary-native-runner-20261006-v1`, configb296d2d6,
+root7fc05e5d, independent4a5d16c6/indexbcc4d22b60rows and separate Corecarry
+1d7a2be6/indexdda1724a82rows. Original86465's46ASTs and both same-source formatters
+remain passed and consumed; they do not excuse the two native failures.
+`authored_bounds_review` diagnoses neutral timer expectations and masked primary
+failure from exact5b/raw evidence, including the analogous unexecuted daemon
+fixture. No hidden terminal event is inferred, no widened cutoff or repeated
+attempt is authorized. Corrected source requires independent review/new exact
+keys before execution. Full native840total remains unavailable.
 
 Next restore source inventory
 `/private/tmp/loopex-m7-public-restore-next-source-20261006-v1`, report4459a1bf/
@@ -74,8 +83,19 @@ claim release and derived receipt under accepted0051. Existing decoder/fixture
 repairs are already primary ancestors; do not duplicate them. Independent full
 public helper audit remains Proposed0056 scope. Authored-bounds agent now maps
 configure activation after dormant ingress proof; restore-source reviewer drafts
-unexecuted boundary collector. All agents remain source-only until an explicit
-owned isolated implementation assignment. ADR0054 is the sole asked pending
+unexecuted boundary collector. `private_task_causal_resume` now implements private retained finalization in
+`/private/tmp/loopex-m7-retained-destination-finalization`, branch
+`codex/m7-retained-destination-finalization` at402ebf8a. It owns only Restore IO,
+Workflow and new restore_retained_finalization_test.exs. No facade/codec/schema
+changes or worker VM/Git/formatter/test/runner execution; root owns verification
+and rejoin. The new T15 added row is open (302done/38todo for T01–T19).
+Other agents remain source-only. Lost-source final-ancestor audit2064f674/index75cbb797
+(22rows) found the existing402 guard and physical workflow test complete in
+source; no duplicate patch. Exact current/floor whole-workflow native proof is
+unavailable in inspected prior evidence, so its T15 row remains open. Configure
+activation map08b5f3ab/index0ca6c054 (112rows) keeps the accepted central route
+connections separate from whole /3-/4 manifests and Proposed0055 remote creation
+grammar. No new implementation or public activation follows from those maps. ADR0054 is the sole asked pending
 question; do not infer approval or implement its dependent progress stream.
 
 Boundary original86465 is fully collected PASS_FORMAT_PREPARATION_ONLY56.325s

@@ -1,5 +1,17 @@
 # M7 Implementation Tasks
 
+Boundary original79496 fully collected FAIL335.274s at5b46: current Core318,
+Protocol28 and Node7 pass; foreground34/36 fails two neutral-question fixtures
+at their unchanged5,000ms cutoff. Daemon/floor unexecuted.54 artifacts,133source
+facts,8 original joins and825-key union retained; no boundary row closes or
+source unit joins. Collection M7/current-boundary-native-original-collection-20261006-v1.json
+SHA8672800a602a67d163953d55f7649e0d3af2a84367188d68ff74dbbc6501eae7.
+Source diagnosis checks terminal expectation versus cleanup masking; no retry
+or timeout change. Retained-finalization writer continues independently.
+
+A new bounded T15 retained-finalization subtask is assigned in an isolated writer
+worktree at402ebf8a. Added T01–T19 now302 done/38 todo; no other status changes.
+
 Restore original18936 fully collected PASS333.057s at4b7c9249:147 cases per
 pair294 both,22 stages/joins,98 retained artifacts,59 actual/Git source facts,
 zero exclusions/skips. Root reviewed the production delta and historical whole-file
@@ -13628,6 +13640,7 @@ in the [restart record](M7-resume.md#technical-depth).
 - [x] Continue the same retained restore IO worker through checked available/lost source retirement and destination retirement-evidence publication, preserving original transaction/candidate bytes and claim fences. Prove actual native faults and joined cleanup before candidate activation, receipt or release work.
 - [x] Install only the original retained destination generations after checked source retirement in the same IO worker; require exact full activation-manifest equality, original ordinal temporary names and claim/physical fences, and prove the native publication and failure cases on both supported toolchains. Committed proofs, receipt, release and public restore remain separate.
 - [x] Resume exact original/candidate generation prefixes and complete ordinal staging after positively joined prior authority; audit the genuine complete backup and the full current physical transformation before nonce handoff. Prove real multi-ledger interruption/restart, available/lost source, corruption/refusal and original joins on both pairs without changing transaction, candidates, epochs or history authority.
+- [ ] Complete private retained destination finalization using exact original proof prefixes, canonical per-ledger commits and root commit last; validate the full final manifest, join the original captured-claim release and derive the existing receipt without new transaction/candidates/epochs or renewed work/cleanup bounds. Prove real multi-ledger available/lost-source interruption/refusal/release cuts before joining; complete public facade and helper audit remain separate.
 
 - [ ] Recheck the captured source ancestor type/device/inode identities after the second native absence observation, including the final pre-root-commit phase. Prove actual persistent parent removal at the held final read refuses completion while preserving original cutoffs, post-intent fencing, retained destination claim and all prior case bodies on both supported pairs.
 - [ ] Preserve positively acquired restore claims through pre-intent IO failures and release them with the original joined terminal owner/cutoffs when neither state root changed; retain partial/unproved or foreign claims and truthful remaining-claim accounting. Prove actual second-claim failure, known first-claim removal and partial-publication fencing on both supported pairs without changing the six existing workflow cases or bounds.
