@@ -937,16 +937,27 @@ defmodule LoopexComposition.RestoreIOTest do
     root = physical_root(context.root)
     directory = Path.join(root, "review")
     File.mkdir!(directory)
-    File.write!(Path.join(directory, "SKILL.md"), "---\nname: review\ndescription: Review.\n---\nbody\n")
+
+    File.write!(
+      Path.join(directory, "SKILL.md"),
+      "---\nname: review\ndescription: Review.\n---\nbody\n"
+    )
+
     File.write!(Path.join(directory, "opaque.bin"), <<0, 255, 128>>)
-    assert {:ok, %{manifest: manifest}} = ResourcePacks.read_directories([directory], workspace: root)
+
+    assert {:ok, %{manifest: manifest}} =
+             ResourcePacks.read_directories([directory], workspace: root)
+
     [pack] = manifest["packs"]
     assert pack["origin"] == nil
     assert pack["commit"] == nil
     assert pack["tree_digest"] == nil
     state = Path.join(root, "state")
     assert {:ok, digest} = ResourcePacks.retain(manifest, state)
-    {:joined, {:ok, inventory}, _} = RestoreIO.run({:manifest, state, 1_048_576}, limits(1_000, 100))
+
+    {:joined, {:ok, inventory}, _} =
+      RestoreIO.run({:manifest, state, 1_048_576}, limits(1_000, 100))
+
     path = Path.join([state, "resource-packs", "manifests", digest <> ".etf"])
     bytes = File.read!(path)
     owned = launch({:audit_resource, state, :manifest, digest, inventory}, :resource_decode)
@@ -954,7 +965,10 @@ defmodule LoopexComposition.RestoreIOTest do
     joined(owned)
     refute File.exists?(Path.join([state, "resource-packs", "provenance"]))
     identity = resource_content_identity(pack)
-    missing = launch({:audit_resource, state, :provenance, identity, inventory}, :resource_manifest)
+
+    missing =
+      launch({:audit_resource, state, :provenance, identity, inventory}, :resource_manifest)
+
     assert {{:joined, {:error, :io_error}, %{opens: 0, closes: 0}}, events} = drive(missing)
     refute :resource_decode in issued_kinds(events)
     assert File.read!(path) == bytes
@@ -1003,6 +1017,7 @@ defmodule LoopexComposition.RestoreIOTest do
     for kind <- [:manifest, :provenance] do
       path = Path.join(Path.dirname(fixture.paths[kind]), wrong <> ".etf")
       File.cp!(fixture.paths[kind], path)
+
       {:joined, {:ok, inventory}, _} =
         RestoreIO.run({:manifest, fixture.root, 1_048_576}, limits(1_000, 100))
 
@@ -1013,7 +1028,10 @@ defmodule LoopexComposition.RestoreIOTest do
       File.rm!(path)
 
       for identity <- [String.duplicate("A", 64), "../" <> wrong, nil] do
-        assert RestoreIO.run({:audit_resource, fixture.root, kind, identity, inventory}, limits(1_000, 100)) ==
+        assert RestoreIO.run(
+                 {:audit_resource, fixture.root, kind, identity, inventory},
+                 limits(1_000, 100)
+               ) ==
                  {:error, :invalid_io_request}
       end
     end
@@ -1042,9 +1060,12 @@ defmodule LoopexComposition.RestoreIOTest do
       [domain, entries] = :erlang.binary_to_term(manifest, [:safe])
       relative = Path.relative_to(path, root)
 
-      entries = Enum.map(entries, fn entry ->
-        if entry["path"] == relative, do: %{entry | "size" => size, "sha256" => digest}, else: entry
-      end)
+      entries =
+        Enum.map(entries, fn entry ->
+          if entry["path"] == relative,
+            do: %{entry | "size" => size, "sha256" => digest},
+            else: entry
+        end)
 
       manifest = :erlang.term_to_binary([domain, entries], [:deterministic])
       owned = launch({:audit_resource, root, kind, identity, manifest}, :resource_manifest)
@@ -1069,25 +1090,35 @@ defmodule LoopexComposition.RestoreIOTest do
         File.write!(path, bytes)
         File.chmod!(path, mode)
 
-        altered = case change do
-          :size ->
-            File.write!(path, bytes <> <<0>>)
-            operation
-          :mode ->
-            File.chmod!(path, Bitwise.bxor(mode, 0o100))
-            operation
-          :content ->
-            File.write!(path, :binary.copy(<<0>>, byte_size(bytes)))
-            operation
-          :digest ->
-            {:audit_resource, root, ^kind, identity, manifest} = operation
-            [domain, entries] = :erlang.binary_to_term(manifest, [:safe])
-            relative = Path.relative_to(path, root)
-            entries = Enum.map(entries, fn entry ->
-              if entry["path"] == relative, do: %{entry | "sha256" => String.duplicate("0", 64)}, else: entry
-            end)
-            {:audit_resource, root, kind, identity, :erlang.term_to_binary([domain, entries], [:deterministic])}
-        end
+        altered =
+          case change do
+            :size ->
+              File.write!(path, bytes <> <<0>>)
+              operation
+
+            :mode ->
+              File.chmod!(path, Bitwise.bxor(mode, 0o100))
+              operation
+
+            :content ->
+              File.write!(path, :binary.copy(<<0>>, byte_size(bytes)))
+              operation
+
+            :digest ->
+              {:audit_resource, root, ^kind, identity, manifest} = operation
+              [domain, entries] = :erlang.binary_to_term(manifest, [:safe])
+              relative = Path.relative_to(path, root)
+
+              entries =
+                Enum.map(entries, fn entry ->
+                  if entry["path"] == relative,
+                    do: %{entry | "sha256" => String.duplicate("0", 64)},
+                    else: entry
+                end)
+
+              {:audit_resource, root, kind, identity,
+               :erlang.term_to_binary([domain, entries], [:deterministic])}
+          end
 
         owned = launch(altered, :resource_manifest)
         assert {{:joined, {:error, :io_error}, evidence}, events} = drive(owned)
@@ -1160,6 +1191,7 @@ defmodule LoopexComposition.RestoreIOTest do
           File.write!(replacement, File.read!(path))
           File.chmod!(replacement, Bitwise.band(File.stat!(path).mode, 0o7777))
           File.rename!(replacement, path)
+
         :ancestor ->
           directory = Path.dirname(path)
           moved = directory <> "-moved"
@@ -1174,7 +1206,8 @@ defmodule LoopexComposition.RestoreIOTest do
     end
   end
 
-  test "physical Resource equality does not admit malformed or alternate retained formats", context do
+  test "physical Resource equality does not admit malformed or alternate retained formats",
+       context do
     fixture = resource_fixture(context.root)
 
     for kind <- [:manifest, :provenance] do
@@ -1200,7 +1233,8 @@ defmodule LoopexComposition.RestoreIOTest do
     end
   end
 
-  test "Resource decoding obeys the original work cutoff after explicit descriptor close", context do
+  test "Resource decoding obeys the original work cutoff after explicit descriptor close",
+       context do
     fixture = resource_fixture(context.root)
 
     for kind <- [:manifest, :provenance] do
@@ -1404,15 +1438,19 @@ defmodule LoopexComposition.RestoreIOTest do
     state = Path.join(root, "resource-state-#{System.unique_integer([:positive])}")
     File.mkdir!(state)
 
-    files = for {label, content} <- [{"SKILL.md", "summary\n"}, {"opaque.bin", :binary.copy(<<0, 255, 128>>, 50_000)}] do
-      %{
-        "label" => label,
-        "size" => byte_size(content),
-        "digest" => LoopexProtocol.Canonical.digest_bytes(content),
-        "content" => content,
-        "contained" => true
-      }
-    end
+    files =
+      for {label, content} <- [
+            {"SKILL.md", "summary\n"},
+            {"opaque.bin", :binary.copy(<<0, 255, 128>>, 50_000)}
+          ] do
+        %{
+          "label" => label,
+          "size" => byte_size(content),
+          "digest" => LoopexProtocol.Canonical.digest_bytes(content),
+          "content" => content,
+          "contained" => true
+        }
+      end
 
     pack = %{
       "source_id" => "git:restore-audit",

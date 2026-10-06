@@ -507,7 +507,9 @@ defmodule LoopexComposition.Restore.IO do
         )
 
       require_same_identity(before, opened)
-      {bytes, context} = read_resource_chunks(descriptor, entry["size"], [], :crypto.hash_init(:sha256))
+
+      {bytes, context} =
+        read_resource_chunks(descriptor, entry["size"], [], :crypto.hash_init(:sha256))
 
       after_read =
         require_value(
