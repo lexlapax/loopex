@@ -155,7 +155,7 @@ defmodule LoopexComposition.Restore.IO do
           cooperative_cutoff: nil,
           cleanup_cutoff: nil,
           restore:
-            if(match?({:restore_available_first, _, _}, operation),
+            if(match?({:restore_first, _, _}, operation),
               do: %{phase: "claim", intent: false, claims: []},
               else: nil
             ),
@@ -637,7 +637,7 @@ defmodule LoopexComposition.Restore.IO do
     end
   end
 
-  defp execute({:restore_available_first, plan, invocation}),
+  defp execute({:restore_first, plan, invocation}),
     do: LoopexComposition.Restore.Workflow.execute(plan, invocation, &execute/1)
 
   defp execute({:restore_phase, phase}) do
@@ -661,6 +661,24 @@ defmodule LoopexComposition.Restore.IO do
        "major_device" => file_info(info, :major_device),
        "inode" => file_info(info, :inode)
      }}
+  end
+
+  # Concept: a lost source is an absent endpoint beneath existing physical directories.
+  # Technical depth: only native lstat ENOENT qualifies. Capture and recheck every
+  # nonsymlink ancestor around both endpoint observations; missing, inaccessible
+  # or replaced ancestors never establish absence. The workflow retains this
+  # vector across phases under the same guardian and original cutoffs.
+  defp execute({:lost_source_absent, root}) do
+    ancestors = manifest_ancestors(Path.dirname(root))
+    require_source_absent(root)
+
+    Enum.each(ancestors, fn {path, identity} ->
+      if directory_identity(manifest_stat(path)) != identity,
+        do: throw({:io_error, :source_changed})
+    end)
+
+    require_source_absent(root)
+    {:ok, ancestors}
   end
 
   defp execute({:directory_names, root}) do
@@ -1553,6 +1571,13 @@ defmodule LoopexComposition.Restore.IO do
     if parent == path, do: [own], else: [own | manifest_ancestors(parent)]
   end
 
+  defp require_source_absent(root) do
+    case primitive(:source_absence, fn -> :prim_file.read_link_info(root) end) do
+      {:error, :enoent} -> :ok
+      _ -> throw({:io_error, :source_not_absent})
+    end
+  end
+
   defp manifest_stat(path),
     do: require_value(primitive(:manifest_stat, fn -> :prim_file.read_link_info(path) end))
 
@@ -1890,11 +1915,11 @@ defmodule LoopexComposition.Restore.IO do
   defp byte_size_or_zero(:absent), do: 0
   defp byte_size_or_zero(bytes), do: byte_size(bytes)
 
-  defp valid_operation?({:restore_available_first, plan, invocation}),
+  defp valid_operation?({:restore_first, plan, invocation}),
     do:
       RestoreCodec.eligible_plan(plan) == :ok and
         match?({:ok, _}, RestoreCodec.encode(:invocation, invocation)) and
-        plan["source_status"] == "available" and plan["prior_restore_count"] == 0 and
+        plan["prior_restore_count"] == 0 and
         invocation["prior_admin_authority"] == "none"
 
   defp valid_operation?({:audit_store, root, declaration, manifest}),

@@ -422,6 +422,360 @@ defmodule LoopexComposition.RestoreWorkflowTest do
         do: assert_receive({:DOWN, ^monitor, :process, ^actor, :normal}, 1_000)
   end
 
+  test "lost first transition preserves the captured binding and joins guarded real reopen",
+       context do
+    fixture = context.root |> actual_cut() |> lose_source()
+    [source_claim, destination_claim] = claims(fixture.plan)
+    File.mkdir!(source_claim)
+    foreign_owner = Path.join(source_claim, "owner")
+    File.write!(foreign_owner, "excluded lost source claim", [:exclusive])
+    foreign_before = File.lstat!(foreign_owner)
+    owned = launch(fixture.plan)
+    {result, events} = finish(owned)
+
+    assert {:joined, {:ok, %{restore_result: {:committed, receipt}, release_claims: []}},
+            evidence} = result
+
+    assert receipt["ordinal"] == 1 and receipt["ledger_count"] == 2
+    assert evidence.claim_count == 0 and evidence.opens == evidence.closes
+    assert evidence.restore == %{phase: "claim_release", intent: true}
+    assert evidence.work_cutoff == owned.work_cutoff
+    [{:stopping, :complete, stop, cutoff}] =
+      for {:stopping, :complete, _, _} = event <- events, do: event
+
+    assert cutoff == stop + max(10_000, @grace + 2_000)
+    assert evidence.cleanup_cutoff == cutoff
+    assert [{:terminal_release_installed, ^cutoff}] =
+             for({:terminal_release_installed, _} = event <- events, do: event)
+
+    assert for({:issued, _, {:restore_phase, phase}} <- events, do: phase) ==
+             ~w(claim inventory baseline_copy destination_intent source_retirement destination_generations destination_proofs claim_release)
+
+    acquired =
+      for {:acknowledged, _, {:restore_claim_acquired, %{directory: path}}, :completed} <- events,
+          do: path
+
+    assert acquired == [destination_claim]
+    refute Enum.any?(events, fn
+             {:issued, _, {:restore_claim_create, %{directory: ^source_claim}}} -> true
+             _ -> false
+           end)
+
+    exact_joins(owned)
+    assert File.lstat(fixture.source) == {:error, :enoent}
+    assert File.lstat(destination_claim) == {:error, :enoent}
+    assert File.lstat!(foreign_owner) == foreign_before
+    assert File.read!(foreign_owner) == "excluded lost source claim"
+    assert File.ls!(source_claim) == ["owner"]
+    assert manifest(fixture.backup) == fixture.baseline
+    assert_complete_copy(fixture)
+    assert File.read!(Path.join(fixture.destination, "store.log")) == fixture.store_bytes
+    assert {:ok, backup_frames, :complete} = Log.decode_bytes(fixture.store_bytes)
+    assert {:ok, copied_frames, :complete} =
+             Log.decode_bytes(File.read!(Path.join(fixture.destination, "store.log")))
+    assert {:ok, backup_state} = State.replay(backup_frames)
+    assert {:ok, ^backup_state} = State.replay(copied_frames)
+
+    admin = Path.join(fixture.destination, ".loopex-restore/lineage/00000001")
+    assert {:ok, intent} = RestoreCodec.decode(:intent, File.read!(Path.join(admin, "intent")))
+    assert intent["plan"] == fixture.plan
+    assert {:ok, binding} = RestoreCodec.state_binding(fixture.plan["source_state_placement"])
+    assert intent["source_state_binding"] == binding
+    assert {:ok, retirement} =
+             RestoreCodec.decode(:source_retirement, File.read!(Path.join(admin, "source-retirement")))
+
+    assert retirement["disposition"] == "lost_source_host_excluded"
+    assert retirement["source_state_binding"] == binding
+    assert retirement["host_evidence_sha256"] == fixture.plan["host_attestation"]["evidence_sha256"]
+    assert retirement["ledger_retirements"] ==
+             Enum.map(fixture.plan["ledgers"], &%{"relative_root" => &1["relative_root"], "record_sha256" => nil})
+
+    for declaration <- fixture.plan["ledgers"] do
+      directory = Path.join([fixture.destination, declaration["relative_root"], "restore-lineage", "00000001"])
+      assert Enum.sort(File.ls!(directory)) == ["committed", "intent"]
+      assert File.lstat(Path.join(directory, "source-retired")) == {:error, :enoent}
+    end
+
+    assert {:ok, _} = RestoreGuard.state(fixture.destination)
+    assert {:ok, runtime} =
+             LoopexComposition.TestHost.start(
+               runtime_id: @runtime,
+               state_root: fixture.destination,
+               workspace: fixture.workspace,
+               model: "openai:test",
+               policy: Policy,
+               policy_identity: @policy,
+               artifact_transfers: true,
+               active_tools: ~w(loopex.read loopex.bash)
+             )
+
+    monitor = Process.monitor(runtime.supervisor)
+    on_exit(fn ->
+      if Process.alive?(runtime.supervisor) do
+        cleanup_monitor = Process.monitor(runtime.supervisor)
+        Process.exit(runtime.supervisor, :kill)
+        assert_receive {:DOWN, ^cleanup_monitor, :process, _supervisor, :killed}, 1_000
+      end
+    end)
+
+    assert {:ok, _} = Loopex.attach(runtime, fixture.session, after_event_sequence: 0)
+    assert {:ok, status} = Loopex.session_status(runtime, fixture.session)
+    assert is_map(status)
+    rows = effect_rows(runtime, fixture.session, nil, [])
+    assert Enum.count(rows, &(&1.kind == "intent")) == 2
+    assert Enum.count(rows, &(&1.kind == "terminal" and &1.disposition == "receipt_committed")) == 2
+    assert {:ok, original_frames, :complete} = Log.decode_bytes(fixture.store_bytes)
+    assert {:ok, original_state} = State.replay(original_frames)
+    receipts =
+      for %{payload: %{kind: "executor_receipt_committed_v2"} = payload} <-
+            original_state.sessions[fixture.session].records,
+          do: payload["receipt"]
+
+    assert Enum.count(receipts, &(&1["outcome"] == "outcome_unknown")) == 1
+    assert File.read!(Path.join(fixture.workspace, "unknown-ready")) == "ready"
+    reopened = File.read!(Path.join(fixture.destination, "store.log"))
+    assert binary_part(reopened, 0, byte_size(fixture.store_bytes)) == fixture.store_bytes
+    assert :ok = Loopex.stop(runtime)
+    assert_receive {:DOWN, ^monitor, :process, _supervisor, :normal}, 1_000
+
+    before = generation(Path.join(fixture.destination, "resource-packs/receipts/generation"))
+    assert before["executor_identity"] == fixture.import_identity
+    assert {:ok, imported} =
+             ResourcePacks.add(fixture.workspace, fixture.git_source,
+               workspace_ref: fixture.workspace_ref,
+               state_root: fixture.destination,
+               path: "second",
+               rev: fixture.commit,
+               git_executable: System.find_executable("git"),
+               executor_authorization: {:host_policy, :allow}
+             )
+
+    assert imported["name"] == "second"
+    assert generation(Path.join(fixture.destination, "resource-packs/receipts/generation")) == before
+    assert File.read!(Path.join(fixture.workspace, "unknown-ready")) == "ready"
+    assert File.lstat(fixture.source) == {:error, :enoent}
+  end
+
+  for endpoint <- [:directory, :regular, :symlink] do
+    test "lost source refuses a present #{endpoint} endpoint before any baseline mutation", context do
+      fixture = context.root |> actual_cut() |> lose_source()
+      case unquote(endpoint) do
+        :directory -> File.mkdir!(fixture.source)
+        :regular -> File.write!(fixture.source, "present endpoint", [:exclusive])
+        :symlink -> File.ln_s!(fixture.backup, fixture.source)
+      end
+      before = File.lstat!(fixture.source)
+      owned = launch(fixture.plan)
+      assert_preintent_refusal(owned, fixture, "inventory_unavailable")
+      assert File.lstat!(fixture.source) == before
+    end
+  end
+
+  for ancestor <- [:missing, :nondirectory, :symlink] do
+    test "lost endpoint ENOENT cannot hide a #{ancestor} ancestor", context do
+      parent = Path.join(context.root, "source-parent")
+      File.mkdir!(parent)
+      fixture = context.root |> actual_cut(parent) |> lose_source()
+      case unquote(ancestor) do
+        :missing -> File.rmdir!(parent)
+        :nondirectory ->
+          File.rmdir!(parent)
+          File.write!(parent, "not a directory", [:exclusive])
+        :symlink ->
+          File.rename!(parent, parent <> "-captured")
+          File.ln_s!(parent <> "-captured", parent)
+      end
+      expected = if unquote(ancestor) == :nondirectory, do: :enotdir, else: :enoent
+      assert File.lstat(fixture.source) == {:error, expected}
+      owned = launch(fixture.plan)
+      assert_preintent_refusal(owned, fixture, "inventory_unavailable")
+    end
+  end
+
+  test "lost endpoint replacement between two actual absence checks refuses before intent", context do
+    fixture = context.root |> actual_cut() |> lose_source()
+    owned = launch(fixture.plan, :source_absence)
+    {id, events} = hold_absence(owned, 1, 0, [])
+    assert Enum.any?(events, &match?({:acknowledged, _, :source_absence, :error}, &1))
+    File.mkdir!(fixture.source)
+    before = File.lstat!(fixture.source)
+    send(owned.guardian, {:proceed, owned.reference, id})
+    assert_preintent_refusal(owned, fixture, "inventory_unavailable", events)
+    assert File.lstat!(fixture.source) == before
+  end
+
+  test "lost endpoint reappearance after intent stays unknown and destination claimed", context do
+    fixture = context.root |> actual_cut() |> lose_source()
+    owned = launch(fixture.plan, :source_absence)
+    {id, events} = hold_absence(owned, 4, 0, [])
+    assert File.regular?(Path.join(fixture.destination, ".loopex-restore/lineage/00000001/intent"))
+    File.mkdir!(fixture.source)
+    send(owned.guardian, {:proceed, owned.reference, id})
+    {result, events} = finish(owned, events)
+    assert {:joined, {:ok, %{restore_result: {:commit_unknown, "inventory_unavailable"}, release_claims: []}}, evidence} = result
+    assert evidence.restore.intent == true and evidence.claim_count == 1
+    assert evidence.opens == evidence.closes and evidence.work_cutoff == owned.work_cutoff
+    [source_claim, destination_claim] = claims(fixture.plan)
+    assert File.lstat(source_claim) == {:error, :enoent}
+    assert File.dir?(destination_claim)
+    assert File.lstat(Path.join(fixture.destination, ".loopex-restore/lineage/00000001/committed")) == {:error, :enoent}
+    for declaration <- fixture.plan["ledgers"] do
+      original = Path.join([fixture.backup, declaration["relative_root"], "generation"])
+      copied = Path.join([fixture.destination, declaration["relative_root"], "generation"])
+      assert File.read!(copied) == File.read!(original)
+    end
+    refute Enum.any?(events, &match?({:terminal_release_installed, _}, &1))
+    exact_joins(owned)
+  end
+
+  for dependency <- [:receipt, :artifact, :resource] do
+    test "lost backup missing historical #{dependency} refuses before intent", context do
+      fixture = actual_cut(context.root)
+      relative = case unquote(dependency) do
+        :receipt -> fixture.receipt_path
+        :artifact -> fixture.object_path
+        :resource -> fixture.manifest_path
+      end
+      for root <- [fixture.source, fixture.backup] do
+        path = Path.join(root, relative)
+        assert {:ok, %File.Stat{type: :regular, links: 1}} = File.lstat(path)
+        File.rm!(path)
+      end
+      baseline = manifest(fixture.backup)
+      plan = refresh_plan(fixture.plan, baseline, fixture.backup)
+      fixture = lose_source(%{fixture | plan: plan, baseline: baseline})
+      owned = launch(fixture.plan)
+      assert_preintent_refusal(owned, fixture, "invalid_current_history")
+    end
+  end
+
+  test "lost backup must still match the exact captured latest manifest", context do
+    fixture = context.root |> actual_cut() |> lose_source()
+    path = Path.join(fixture.backup, "orphan")
+    File.write!(path, "changed after capture")
+    changed = manifest(fixture.backup)
+    refute changed == fixture.baseline
+    owned = launch(fixture.plan)
+    assert_preintent_refusal(owned, %{fixture | baseline: changed}, "inventory_mismatch")
+  end
+
+  test "lost native generation cannot use a different captured source ledger placement", context do
+    fixture = context.root |> actual_cut() |> lose_source()
+    [first | rest] = fixture.plan["ledgers"]
+    altered = put_in(first, ["source_placement", "inode"], first["source_placement"]["inode"] + 1)
+    plan = %{fixture.plan | "ledgers" => [altered | rest]}
+    assert {:ok, _} = RestoreCodec.encode(:plan, plan)
+    owned = launch(plan)
+    assert_preintent_refusal(owned, fixture, "invalid_current_history")
+  end
+
+  test "lost source destination foreign claim refuses without touching either foreign owner", context do
+    fixture = context.root |> actual_cut() |> lose_source()
+    [source_claim, destination_claim] = claims(fixture.plan)
+    for claim <- [source_claim, destination_claim] do
+      File.mkdir!(claim)
+      File.write!(Path.join(claim, "owner"), "foreign", [:exclusive])
+    end
+    before = Enum.map([source_claim, destination_claim], &File.lstat!(Path.join(&1, "owner")))
+    owned = launch(fixture.plan)
+    {result, events} = finish(owned)
+    assert {:joined, {:ok, %{restore_result: {:not_committed, "inventory_unavailable"}, release_claims: []}}, evidence} = result
+    assert evidence.claim_count == 0 and evidence.restore.intent == false
+    assert evidence.opens == evidence.closes
+    assert Enum.map([source_claim, destination_claim], &File.lstat!(Path.join(&1, "owner"))) == before
+    assert Enum.all?([source_claim, destination_claim], &(File.read!(Path.join(&1, "owner")) == "foreign"))
+    assert File.ls!(fixture.destination) == []
+    refute Enum.any?(events, fn
+      {:issued, _, {:restore_claim_create, %{directory: ^source_claim}}} -> true
+      _ -> false
+    end)
+    assert Enum.any?(events, &match?({:acknowledged, _, {:restore_claim_create, %{directory: ^destination_claim}}, :foreign}, &1))
+    exact_joins(owned)
+  end
+
+  test "lost source cannot replace the retained physical workspace", context do
+    fixture = context.root |> actual_cut() |> lose_source()
+    File.rename!(fixture.workspace, fixture.workspace <> "-captured")
+    File.mkdir!(fixture.workspace)
+    owned = launch(fixture.plan)
+    assert_preintent_refusal(owned, fixture, "invalid_placement")
+  end
+
+  test "lost source requires every explicit host latestness and exclusion attestation", context do
+    fixture = context.root |> actual_cut() |> lose_source()
+    invocation = %{
+      "work_ms" => @work,
+      "cleanup_grace_ms" => @grace,
+      "max_total_file_bytes" => @total,
+      "prior_admin_authority" => "none",
+      "prior_admin_evidence_sha256" => nil
+    }
+    for field <- ~w(latest_cut no_post_cut_activity all_other_copies_excluded host_ledgers_validated) do
+      plan = put_in(fixture.plan, ["host_attestation", field], false)
+      assert {:error, :invalid_restore_input} = Restore.first(plan, invocation)
+    end
+    for {field, value} <- [{"old_authority_termination", "unconfirmed"}, {"evidence_sha256", nil}] do
+      plan = put_in(fixture.plan, ["host_attestation", field], value)
+      assert {:error, :invalid_restore_input} = Restore.first(plan, invocation)
+    end
+    assert File.ls!(fixture.destination) == []
+    assert Enum.all?(claims(fixture.plan), &(File.lstat(&1) == {:error, :enoent}))
+    assert File.lstat(fixture.source) == {:error, :enoent}
+    assert manifest(fixture.backup) == fixture.baseline
+  end
+
+  # Concept: source loss happens only after the actual original writers joined.
+  # Technical depth: preserve their captured source placements and exact latest
+  # backup/workspace/host attestation. Removing the temporary source models loss;
+  # no fabricated replacement generation, identity or source tombstone is used.
+  defp lose_source(fixture) do
+    File.rm_rf!(fixture.source)
+    assert File.lstat(fixture.source) == {:error, :enoent}
+    plan = %{fixture.plan | "source_status" => "lost"}
+    assert {:ok, _} = RestoreCodec.encode(:plan, plan)
+    %{fixture | plan: plan}
+  end
+
+  defp assert_preintent_refusal(owned, fixture, code, events \\ []) do
+    {result, _events} = finish(owned, events)
+    assert {:joined, {:ok, %{restore_result: {:not_committed, ^code}, release_claims: []}}, evidence} = result
+    assert evidence.restore.intent == false and evidence.claim_count == 0
+    assert evidence.opens == evidence.closes and evidence.work_cutoff == owned.work_cutoff
+    assert File.ls!(fixture.destination) == []
+    assert File.lstat(Path.join(fixture.destination, ".loopex-restore")) == {:error, :enoent}
+    assert manifest(fixture.backup) == fixture.baseline
+    assert Enum.all?(claims(fixture.plan), &(File.lstat(&1) == {:error, :enoent}))
+    exact_joins(owned)
+  end
+
+  # Concept: replacement is injected at one exact real native absence check.
+  # Technical depth: count completed ENOENT lstat acknowledgements, then hold the
+  # next primitive on the original worker/reference/id. Every wait spends the
+  # already captured work/cleanup cutoff; no fake IO result or fresh allowance.
+  defp hold_absence(owned, wanted, completed, events) do
+    guardian = owned.guardian
+    reference = owned.reference
+    tag = owned.tag
+    receive do
+      {:restore_io, ^guardian, _worker, ^reference, {:issued, id, :source_absence} = event} ->
+        if completed == wanted do
+          {id, [event | events]}
+        else
+          send(guardian, {:proceed, reference, id})
+          hold_absence(owned, wanted, completed, [event | events])
+        end
+      {:restore_io, ^guardian, _worker, ^reference, {:acknowledged, _, :source_absence, :error} = event} ->
+        hold_absence(owned, wanted, completed + 1, [event | events])
+      {:restore_io, ^guardian, _worker, ^reference, event} ->
+        hold_absence(owned, wanted, completed, [event | events])
+      {^tag, result} ->
+        flunk("restore ended before actual absence control: #{inspect(result)}")
+    after
+      max(0, owned.work_cutoff + max(10_000, @grace + 2_000) - System.monotonic_time(:millisecond)) ->
+        flunk("original restore work/cleanup cutoff reached")
+    end
+  end
+
   defp finish_cancelled(owned, events) do
     guardian = owned.guardian
     reference = owned.reference
@@ -498,8 +852,8 @@ defmodule LoopexComposition.RestoreWorkflowTest do
     end)
   end
 
-  defp actual_cut(root) do
-    source = Path.join(root, "source")
+  defp actual_cut(root, source_parent \\ nil) do
+    source = Path.join(source_parent || root, "source")
     backup = Path.join(root, "backup")
     destination = Path.join(root, "destination")
     workspace = Path.join(root, "workspace")
@@ -796,7 +1150,7 @@ defmodule LoopexComposition.RestoreWorkflowTest do
         ) ++
         for(
           relative <- ["receipts", "resource-packs/receipts"],
-          name <- ["intent", "source-retired", "committed"],
+          name <- ledger_record_names(fixture.plan),
           do: Path.join([relative, "restore-lineage", "00000001", name])
         )
 
@@ -804,7 +1158,10 @@ defmodule LoopexComposition.RestoreWorkflowTest do
     assert Enum.sort(added) == Enum.sort(admin)
   end
 
-  defp launch(plan) do
+  defp ledger_record_names(%{"source_status" => "lost"}), do: ["intent", "committed"]
+  defp ledger_record_names(_), do: ["intent", "source-retired", "committed"]
+
+  defp launch(plan, pause \\ :open) do
     parent = self()
     tag = make_ref()
 
@@ -820,7 +1177,7 @@ defmodule LoopexComposition.RestoreWorkflowTest do
       spawn_monitor(fn ->
         send(
           parent,
-          {tag, Restore.available_first(plan, invocation, probe: parent, pause_at: :open)}
+          {tag, Restore.first(plan, invocation, probe: parent, pause_at: pause)}
         )
       end)
 
@@ -837,7 +1194,8 @@ defmodule LoopexComposition.RestoreWorkflowTest do
       worker_monitor: Process.monitor(worker),
       reference: reference,
       tag: tag,
-      work_cutoff: work_cutoff
+      work_cutoff: work_cutoff,
+      pause: pause
     }
 
     assert work_cutoff == admitted + @work
@@ -872,7 +1230,11 @@ defmodule LoopexComposition.RestoreWorkflowTest do
         finish(owned, [event | events])
 
       {:restore_io, ^guardian, _worker, ^reference, {:issued, id, {:open, _}} = event} ->
-        send(guardian, {:proceed, reference, id})
+        if owned.pause == :open, do: send(guardian, {:proceed, reference, id})
+        finish(owned, [event | events])
+
+      {:restore_io, ^guardian, _worker, ^reference, {:issued, id, :source_absence} = event} ->
+        if owned.pause == :source_absence, do: send(guardian, {:proceed, reference, id})
         finish(owned, [event | events])
 
       {:restore_io, ^guardian, _worker, ^reference, event} ->

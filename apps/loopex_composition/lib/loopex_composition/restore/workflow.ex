@@ -2,14 +2,15 @@ defmodule LoopexComposition.Restore.Workflow do
   @moduledoc """
   ## Concept
 
-  The private available-source first transition restores one complete shipped
-  current baseline into an empty root and retires the source before activation.
+  The private first transition restores one complete shipped current baseline
+  into an empty root. Available sources retire before activation; lost sources
+  require positive absence and the retained host exclusion attestation.
 
   ## Technical depth
 
   This development path sequences existing physical audits, streaming copy and
   canonical ADR 0051 publication inside one Restore.IO worker. It has no public
-  restore/lookup entry point. Lost-source, repeated lineage and original-tx
+  restore/lookup entry point. Repeated lineage and original-tx
   continuation remain implementation work. The IO callback never starts another
   guardian or refreshes this invocation's work or cleanup allowance.
   """
@@ -34,8 +35,17 @@ defmodule LoopexComposition.Restore.Workflow do
     backup = plan["backup_state_root"]
     destination = plan["destination_state_root"]
     max_total = invocation["max_total_file_bytes"]
-    source_placement = value!(io.({:placement, source}))
-    ensure!(source_placement == plan["source_state_placement"], "invalid_placement")
+    available = plan["source_status"] == "available"
+    source_placement = plan["source_state_placement"]
+
+    source_observation =
+      if available do
+        ensure!(value!(io.({:placement, source})) == source_placement, "invalid_placement")
+        nil
+      else
+        value!(io.({:lost_source_absent, source}))
+      end
+
     destination_placement = value!(io.({:placement, destination}))
     value!(io.({:placement, backup}))
     workspace = value!(io.({:placement, plan["workspace"]["root"]}))
@@ -43,7 +53,9 @@ defmodule LoopexComposition.Restore.Workflow do
     ensure!(value!(io.({:directory_names, destination})) == [], "destination_not_empty")
     baseline = value!(io.({:manifest, backup, max_total}))
     ensure!(hash(baseline) == plan["manifest_sha256"], "inventory_mismatch")
-    ensure!(value!(io.({:manifest, source, max_total})) == baseline, "inventory_mismatch")
+    if available,
+      do: ensure!(value!(io.({:manifest, source, max_total})) == baseline, "inventory_mismatch")
+
     {:ok, entries} = RestoreCodec.manifest(baseline, max_total)
     {:ok, empty_lineage} = RestoreCodec.lineage_digest([])
     ensure!(plan["prior_lineage_sha256"] == empty_lineage, "inventory_mismatch")
@@ -74,13 +86,17 @@ defmodule LoopexComposition.Restore.Workflow do
 
     ensure!(value!(io.({:manifest, destination, max_total})) == baseline, "inventory_mismatch")
 
-    Enum.each(plan["ledgers"], fn declaration ->
-      ensure!(
-        value!(io.({:placement, Path.join(source, declaration["relative_root"])})) ==
-          declaration["source_placement"],
-        "source_changed"
-      )
-    end)
+    if available do
+      Enum.each(plan["ledgers"], fn declaration ->
+        ensure!(
+          value!(io.({:placement, Path.join(source, declaration["relative_root"])})) ==
+            declaration["source_placement"],
+          "source_changed"
+        )
+      end)
+    else
+      lost_source!(source, source_observation, io)
+    end
 
     compiled =
       compile!(
@@ -104,18 +120,24 @@ defmodule LoopexComposition.Restore.Workflow do
     publish!(destination, Path.join(@root_admin, "intent"), compiled.intent, io)
 
     phase(io, "source_retirement")
-    ensure!(value!(io.({:manifest, source, max_total})) == baseline, "source_changed")
-    ensure!(value!(io.({:placement, source})) == source_placement, "source_changed")
-    admin_directories!(source, @root_admin, entries, io)
-    publish!(source, Path.join(@root_admin, "intent"), compiled.intent, io)
 
-    Enum.each(compiled.ledgers, fn ledger ->
-      admin_directories!(source, ledger.directory, entries, io)
-      publish!(source, Path.join(ledger.directory, "intent"), ledger.intent, io)
-      publish!(source, Path.join(ledger.directory, "source-retired"), ledger.retired, io)
-    end)
+    if available do
+      ensure!(value!(io.({:manifest, source, max_total})) == baseline, "source_changed")
+      ensure!(value!(io.({:placement, source})) == source_placement, "source_changed")
+      admin_directories!(source, @root_admin, entries, io)
+      publish!(source, Path.join(@root_admin, "intent"), compiled.intent, io)
 
-    publish!(source, Path.join(@root_admin, "source-retirement"), compiled.retirement, io)
+      Enum.each(compiled.ledgers, fn ledger ->
+        admin_directories!(source, ledger.directory, entries, io)
+        publish!(source, Path.join(ledger.directory, "intent"), ledger.intent, io)
+        publish!(source, Path.join(ledger.directory, "source-retired"), ledger.retired, io)
+      end)
+
+      publish!(source, Path.join(@root_admin, "source-retirement"), compiled.retirement, io)
+    else
+      lost_source!(source, source_observation, io)
+    end
+
     publish!(destination, Path.join(@root_admin, "source-retirement"), compiled.retirement, io)
 
     phase(io, "destination_generations")
@@ -123,7 +145,10 @@ defmodule LoopexComposition.Restore.Workflow do
     Enum.each(compiled.ledgers, fn ledger ->
       admin_directories!(destination, ledger.directory, entries, io)
       publish!(destination, Path.join(ledger.directory, "intent"), ledger.intent, io)
-      publish!(destination, Path.join(ledger.directory, "source-retired"), ledger.retired, io)
+
+      if available,
+        do: publish!(destination, Path.join(ledger.directory, "source-retired"), ledger.retired, io)
+
       path = Path.join([destination, ledger.relative, "generation"])
 
       value!(
@@ -134,6 +159,7 @@ defmodule LoopexComposition.Restore.Workflow do
       )
     end)
 
+    if not available, do: lost_source!(source, source_observation, io)
     workspace!(plan, value!(io.({:placement, plan["workspace"]["root"]})))
     ensure!(value!(io.({:placement, destination})) == destination_placement, "source_changed")
     activation = value!(io.({:manifest, destination, max_total}))
@@ -145,6 +171,7 @@ defmodule LoopexComposition.Restore.Workflow do
       publish!(destination, Path.join(ledger.directory, "committed"), ledger.committed, io)
     end)
 
+    if not available, do: lost_source!(source, source_observation, io)
     publish!(destination, Path.join(@root_admin, "committed"), compiled.committed, io)
     final = value!(io.({:manifest, destination, max_total}))
     ensure!(final == compiled.final, "inventory_mismatch")
@@ -174,14 +201,27 @@ defmodule LoopexComposition.Restore.Workflow do
     {:ok, %{restore_result: result, release_claims: release}}
   end
 
+  # Concept: host exclusion and the original captured placement survive source loss.
+  # Technical depth: copied native generation bindings are audited against the
+  # plan, while repeated native absence checks must retain the same ancestor
+  # identities. Neither a backup inode nor a fabricated tombstone replaces the
+  # lost source's captured identity.
+  defp lost_source!(source, observation, io),
+    do: ensure!(value!(io.({:lost_source_absent, source})) == observation, "source_changed")
+
   defp claims!(plan, io) do
     {:ok, digest} = RestoreCodec.plan_digest(plan)
     nonce = random_hex()
 
-    roots = [
-      {plan["source_state_root"], "source"},
-      {plan["destination_state_root"], "destination"}
-    ]
+    roots =
+      if plan["source_status"] == "available" do
+        [
+          {plan["source_state_root"], "source"},
+          {plan["destination_state_root"], "destination"}
+        ]
+      else
+        [{plan["destination_state_root"], "destination"}]
+      end
 
     roots
     |> Enum.sort()
@@ -291,13 +331,15 @@ defmodule LoopexComposition.Restore.Workflow do
           )
 
         retired =
-          encode!(
-            :ledger_retired,
-            proof(plan, "loopex_current_restore_ledger_retired_v1", intent_hash)
-            |> Map.merge(Map.delete(binding_fields, "destination_ledger_binding"))
-            |> Map.merge(shared)
-            |> Map.put("ledger_intent_sha256", hash(ledger_intent))
-          )
+          if plan["source_status"] == "available" do
+            encode!(
+              :ledger_retired,
+              proof(plan, "loopex_current_restore_ledger_retired_v1", intent_hash)
+              |> Map.merge(Map.delete(binding_fields, "destination_ledger_binding"))
+              |> Map.merge(shared)
+              |> Map.put("ledger_intent_sha256", hash(ledger_intent))
+            )
+          end
 
         entry = Enum.find(entries, &(&1["path"] == Path.join(relative, "generation")))
 
@@ -318,14 +360,21 @@ defmodule LoopexComposition.Restore.Workflow do
         :source_retirement,
         proof(plan, "loopex_current_restore_source_retirement_v1", intent_hash)
         |> Map.merge(%{
-          "disposition" => "source_retired",
+          "disposition" =>
+            if(plan["source_status"] == "available",
+              do: "source_retired",
+              else: "lost_source_host_excluded"
+            ),
           "source_state_binding" => source_binding,
           "destination_state_binding" => destination_binding,
           "host_evidence_sha256" => plan["host_attestation"]["evidence_sha256"],
           "ledger_retirements" =>
             Enum.map(
               ledgers,
-              &%{"relative_root" => &1.relative, "record_sha256" => hash(&1.retired)}
+              &%{
+                "relative_root" => &1.relative,
+                "record_sha256" => if(&1.retired, do: hash(&1.retired), else: nil)
+              }
             )
         })
       )
@@ -358,7 +407,14 @@ defmodule LoopexComposition.Restore.Workflow do
          [{"baseline", baseline}, {"intent", intent}, {"source-retirement", retirement}]}
         | Enum.map(
             ledgers,
-            &{&1.directory, [{"intent", &1.intent}, {"source-retired", &1.retired}]}
+            fn ledger ->
+              records = [{"intent", ledger.intent}]
+              records =
+                if ledger.retired,
+                  do: records ++ [{"source-retired", ledger.retired}],
+                  else: records
+              {ledger.directory, records}
+            end
           )
       ])
 
