@@ -11,6 +11,10 @@ defmodule Loopex.Runtime.OwnerGroupRetirementTest do
     witness(:selected_window)
   end
 
+  test "ordinary retirement records actual native membership progress under the retained window" do
+    witness(:live_window)
+  end
+
   test "startup actor DOWN without a selected window stays unproved without a new query allowance" do
     witness(:no_window)
   end
@@ -54,7 +58,7 @@ defmodule Loopex.Runtime.OwnerGroupRetirementTest do
       send(guard, {:retain_resource, resource})
       assert_receive {:resource_retained, ^guard}, left(cutoff)
 
-      if mode == :selected_window do
+      if mode in [:selected_window, :live_window] do
         {:ok, %{executor_observe_ms: observation}} = Executor.cancellation_bounds(1)
         started = System.monotonic_time(:millisecond)
         window = %{cooperative_deadline: started + 1, observation_deadline: started + observation}
@@ -63,39 +67,59 @@ defmodule Loopex.Runtime.OwnerGroupRetirementTest do
         end, cutoff)
       end
 
-      %{providers: %{^reference => retained}} = :sys.get_state(group, left(cutoff))
+      %{monitor: group_coordinator_monitor, providers: %{^reference => retained}} =
+        :sys.get_state(group, left(cutoff))
       expected_down = MapSet.new([
         {retained.guard_monitor, guard}, {retained.worker_monitor, worker},
         {retained.resource_monitor, resource}
       ])
       assert Enum.sort(retained.original_members) == Enum.sort([guard, worker, resource])
-      if mode == :selected_window, do: :ok = :sys.suspend(workers, left(cutoff))
+      if mode == :selected_window do
+        :ok = :sys.suspend(group, left(cutoff))
+        :ok = :sys.suspend(workers, left(cutoff))
+      end
       assert :erlang.trace(group, true, [:receive, :send, {:tracer, self()}]) == 1
       Process.put(key, %{Process.get(key) | traced: true})
       for pid <- [guard, worker, resource], do: send(pid, :finish)
       join(key, guard, guard_monitor, :normal, cutoff)
       join(key, worker, worker_monitor, :normal, cutoff)
       join(key, resource, resource_monitor, :normal, cutoff)
+      native_budget = if mode == :selected_window do
+        # Both owners are held before genuine completion. Native EXIT insertion
+        # is observed before Group can reduce DOWN and issue its membership query.
+        remaining = await_native_exits(workers, [guard, worker, resource], cutoff, 64)
+        :ok = :sys.resume(group, left(cutoff))
+        remaining
+      end
       {rows, action} = await_action(group, workers, expected_down, [], cutoff)
       assert original_downs(rows, group) == expected_down
 
-      # Only the positive fixture's suspended native queue is observed, without
-      # consuming it. Keep three exact EXIT identities and one Group query;
-      # unexpected shape/population refuses. The no-window control stays live.
-      if mode == :selected_window do
+      if mode in [:selected_window, :live_window] do
         assert Enum.all?([group, workers], &Process.alive?/1)
-        messages = await_native_queue(workers, group, [guard, worker, resource], action,
-          cutoff, 64)
         {:query, request_id} = action
-        assert {:'$gen_call', {group, [:alias | request_id]}, :which_children} in messages
+        if mode == :selected_window do
+          messages = await_native_queue(workers, group, [guard, worker, resource], action,
+            cutoff, native_budget)
+          assert List.last(messages) ==
+            {:'$gen_call', {group, [:alias | request_id]}, :which_children}
+        end
         stopper = spawn(fn ->
           result = GenServer.stop(group, :normal, left(cutoff))
           send(parent, {:group_stopped, self(), result})
         end)
         stopper_monitor = retain(key, stopper)
-        :ok = :sys.resume(workers, left(cutoff))
-        rows = await_empty_then_stop(group, workers, request_id, rows, cutoff)
-        assert normal_exit_reply_before_bulk?(rows, group, workers, request_id)
+        if mode == :selected_window, do: :ok = :sys.resume(workers, left(cutoff))
+        actors = [guard, worker, resource]
+        rows = await_empty_then_stop(group, workers, actors, coordinator,
+          group_coordinator_monitor, stopper, rows, cutoff)
+        assert normal_exit_reply_before_bulk?(rows, group, workers)
+        observations = membership_observations(rows, group, workers)
+        assert List.last(observations).members == []
+        # The live schedule is not retried to obtain a nonempty result. Every
+        # actually observed intermediate result must precede genuine absence;
+        # zero intermediate results leaves that branch's coverage unproved.
+        assert Enum.all?(Enum.drop(observations, -1), &(&1.members != []))
+        if mode == :selected_window, do: assert length(observations) == 1
         assert_receive {:group_stopped, ^stopper, :ok}, left(cutoff)
         join(key, stopper, stopper_monitor, :normal, cutoff)
         join(key, group, group_monitor, :normal, cutoff)
@@ -110,6 +134,26 @@ defmodule Loopex.Runtime.OwnerGroupRetirementTest do
       join(key, coordinator, coordinator_monitor, :shutdown, cutoff)
     after
       cleanup(key, cutoff)
+    end
+  end
+
+  defp await_native_exits(workers, actors, cutoff, observations) do
+    assert observations > 0
+    assert System.monotonic_time(:millisecond) < cutoff
+    {:message_queue_len, count} = Process.info(workers, :message_queue_len)
+    assert count <= 3
+    {:messages, messages} = Process.info(workers, :messages)
+    assert length(messages) <= 3
+    assert Enum.all?(messages, fn
+      {:EXIT, pid, :normal} -> pid in actors
+      _unexpected -> false
+    end)
+    if length(messages) == 3 do
+      assert MapSet.new(for {:EXIT, pid, :normal} <- messages, do: pid) == MapSet.new(actors)
+      observations - 1
+    else
+      :erlang.yield()
+      await_native_exits(workers, actors, cutoff, observations - 1)
     end
   end
 
@@ -205,6 +249,16 @@ defmodule Loopex.Runtime.OwnerGroupRetirementTest do
         record_trace()
         {rows ++ [row], {:stop, stop_reference}}
 
+      {:trace, ^group, :receive, {:system, {caller, tag}, :resume}} = row ->
+        record_trace()
+        assert caller == self() and native_request_tag?(tag)
+        await_action(group, workers, expected, rows ++ [row], cutoff)
+
+      {:trace, ^group, :send, {tag, :ok}, target} = row ->
+        record_trace()
+        assert resume_reply?(rows, group, tag, target)
+        await_action(group, workers, expected, rows ++ [row], cutoff)
+
       {:trace, ^group, _kind, _term} ->
         flunk("unexpected Group receive trace shape in the fixed actor witness")
       {:trace, ^group, :send, _term, _target} ->
@@ -214,34 +268,101 @@ defmodule Loopex.Runtime.OwnerGroupRetirementTest do
     end
   end
 
-  defp await_empty_then_stop(group, workers, request_id, rows, cutoff) do
+  defp await_empty_then_stop(group, workers, actors, coordinator, coordinator_monitor,
+         stopper, rows, cutoff) do
     assert length(rows) < @trace_cap
     receive do
-      {:trace, ^group, :receive, {[:alias | ^request_id], []}} = row ->
+      {:trace, ^group, :receive, {[:alias | request_id], members}} = row when is_list(members) ->
         record_trace()
-        await_empty_then_stop(group, workers, request_id, rows ++ [row], cutoff)
+        queries = membership_queries(rows, group, workers)
+        assert request_id in queries
+        refute Enum.any?(membership_observations(rows, group, workers),
+          &(&1.request_id == request_id))
+        assert Enum.all?(members, fn
+          {:undefined, pid, :worker, [Task.Supervised]} -> pid in actors
+          _unexpected -> false
+        end)
+        assert length(members) <= 3
+        assert length(Enum.uniq_by(members, &elem(&1, 1))) == length(members)
+        await_empty_then_stop(group, workers, actors, coordinator, coordinator_monitor,
+          stopper, rows ++ [row], cutoff)
+
+      {:trace, ^group, :send,
+       {:'$gen_call', {^group, [:alias | request_id]}, :which_children}, ^workers} = row ->
+        record_trace()
+        refute request_id in membership_queries(rows, group, workers)
+        assert List.last(membership_observations(rows, group, workers)).members != []
+        await_empty_then_stop(group, workers, actors, coordinator, coordinator_monitor,
+          stopper, rows ++ [row], cutoff)
+
       {:trace, ^group, :send,
        {:system, {^group, _stop}, {:terminate, :shutdown}}, ^workers} = row ->
         record_trace()
+        assert List.last(membership_observations(rows, group, workers)).members == []
         rows ++ [row]
-      {:trace, ^group, :receive, {:system, {_stopper, _reference}, {:terminate, :normal}}} = row ->
+
+      {:trace, ^group, :receive,
+       {:system, {^stopper, tag}, {:terminate, :normal}}} = row ->
         record_trace()
-        await_empty_then_stop(group, workers, request_id, rows ++ [row], cutoff)
-      {:trace, ^group, :send, {:EXIT, ^group, :shutdown}, _coordinator} = row ->
+        assert native_request_tag?(tag)
+        await_empty_then_stop(group, workers, actors, coordinator, coordinator_monitor,
+          stopper, rows ++ [row], cutoff)
+
+      {:trace, ^group, :send, {:EXIT, ^group, :shutdown}, ^coordinator} = row ->
         record_trace()
-        await_empty_then_stop(group, workers, request_id, rows ++ [row], cutoff)
+        await_empty_then_stop(group, workers, actors, coordinator, coordinator_monitor,
+          stopper, rows ++ [row], cutoff)
+
+      {:trace, ^group, :receive,
+       {:DOWN, ^coordinator_monitor, :process, ^coordinator, :shutdown}} = row ->
+        record_trace()
+        await_empty_then_stop(group, workers, actors, coordinator, coordinator_monitor,
+          stopper, rows ++ [row], cutoff)
+
+      {:trace, ^group, _kind, _term} ->
+        flunk("unexpected native progress receive trace shape")
+      {:trace, ^group, :send, _term, _target} ->
+        flunk("unexpected native progress send trace shape")
     after
       left(cutoff) -> flunk("positive membership fence did not precede native bulk stop")
     end
+  end
+
+  defp membership_queries(rows, group, workers), do: for
+    {:trace, ^group, :send,
+     {:'$gen_call', {^group, [:alias | request_id]}, :which_children}, ^workers} <- rows,
+    do: request_id
+
+  defp membership_observations(rows, group, workers) do
+    queries = membership_queries(rows, group, workers)
+    for {:trace, ^group, :receive, {[:alias | request_id], members}} <- rows,
+      request_id in queries and is_list(members),
+      do: %{request_id: request_id, members: members}
+  end
+
+  defp native_request_tag?(tag) when is_reference(tag), do: true
+  defp native_request_tag?([:alias | reference]), do: is_reference(reference)
+  defp native_request_tag?(_tag), do: false
+
+  defp resume_reply?(rows, group, tag, target) do
+    parent = self()
+    Enum.any?(rows, fn
+      {:trace, ^group, :receive, {:system, {^parent, ^tag}, :resume}} ->
+        target == parent or tag == [:alias | target]
+      _row -> false
+    end)
   end
 
   defp original_downs(rows, group), do: MapSet.new(for
     {:trace, ^group, :receive, {:DOWN, monitor, :process, pid, :normal}} <- rows,
     do: {monitor, pid})
 
-  defp normal_exit_reply_before_bulk?(rows, group, workers, request_id) do
-    reply = Enum.find_index(rows, &match?({:trace, ^group, :receive,
-      {[:alias | ^request_id], []}}, &1))
+  defp normal_exit_reply_before_bulk?(rows, group, workers) do
+    queries = membership_queries(rows, group, workers)
+    reply = Enum.find_index(rows, fn
+      {:trace, ^group, :receive, {[:alias | request_id], []}} -> request_id in queries
+      _row -> false
+    end)
     stop = Enum.find_index(rows, &match?({:trace, ^group, :send,
       {:system, {^group, _}, {:terminate, :shutdown}}, ^workers}, &1))
     is_integer(reply) and is_integer(stop) and reply < stop

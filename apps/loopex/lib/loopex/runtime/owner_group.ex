@@ -181,7 +181,7 @@ defmodule Loopex.Runtime.OwnerGroup do
     if Enum.any?(completed, fn {_reference, provider} -> is_nil(provider.cleanup) end) do
       {:stop, :provider_cleanup_unproved, %{state | providers: providers}}
     else
-      providers = retire_supervised_members(providers, state.workers)
+      providers = retire_supervised_members(providers, state.workers, :await)
       if Enum.any?(providers, fn {_reference, provider} -> provider_complete?(provider) end),
         do: {:stop, :provider_cleanup_unproved, %{state | providers: providers}},
         else: {:noreply, %{state | providers: providers}}
@@ -312,7 +312,7 @@ defmodule Loopex.Runtime.OwnerGroup do
   # Technical depth: only the original retained PIDs are checked; no child start
   # payloads are inspected. Every query spends the same observation remainder,
   # avoiding a fresh late-monitor race when bulk termination begins.
-  defp retire_supervised_members(providers, workers) do
+  defp retire_supervised_members(providers, workers, progress \\ :once) do
     completed = Enum.filter(providers, fn {_reference, provider} ->
       provider_complete?(provider) and not is_nil(provider.cleanup)
     end)
@@ -332,11 +332,23 @@ defmodule Loopex.Runtime.OwnerGroup do
           if System.monotonic_time(:millisecond) >= deadline do
             providers
           else
-            Enum.reduce(completed, providers, fn {reference, provider}, retained ->
+            retained = Enum.reduce(completed, providers, fn {reference, provider}, retained ->
               if Enum.any?(provider.original_members, &(&1 in members)),
                 do: retained,
                 else: Map.delete(retained, reference)
             end)
+            if progress == :await and Enum.any?(retained, fn {_reference, provider} ->
+              provider_complete?(provider)
+            end) do
+              # Concept: a live native supervisor may still be reducing genuine EXITs.
+              # Technical depth: a successful intermediate census spends only the
+              # selected observation remainder; fault, nil window and expiry do
+              # not obtain another allowance or a positive retirement result.
+              :erlang.yield()
+              retire_supervised_members(retained, workers, :await)
+            else
+              retained
+            end
           end
         catch
           :exit, _ -> providers
