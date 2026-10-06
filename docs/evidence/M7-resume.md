@@ -27,6 +27,57 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current proof, execution and source ownership
 
+Latest state after the maintainer's repeated 1,000-ms diagnostic approval:
+that approval confirms only the already recorded diagnostic setup cutoff,
+whose complete twenty-case file passed on both pairs. It changes no restore,
+consumer or runner allowance. The original causal handle 68739 is collected
+and its grant ended; there is no active verification VM.
+
+Independent collected-causal audit is complete. Root read the full report and
+rehashed eight sealed artifacts and 192 inputs in
+`M7/final-observation-causal-collected-independent-audit-20261005-v1`.
+Report `b7c65827c06a2e45321721db3b4f392b540057ac2017691127344cd4c71500e5`,
+inventory `57c6bd946e94d47d071ca44222846cde5dd22508ad03f2f13fe7467296bb2aeb`.
+Original command/pipeline failure and original UNAVAILABLE classifier remain
+unchanged. The separate disabled correction is frozen in
+`M7/final-observation-causal-consumer-20261005-v1`, report
+`841d9082d2c6a515aca743664155088a2532f2d13a288634c19c35efa72bfce6`,
+final inventory `a18bc31c9fe1892cda55ce5056818c346684894a995677d3940b66856b65cdbe`.
+Only its exact assertion/loop stack predicate changes; private-task agent owns
+independent read-only review. It has not been evaluated and no new judgment
+exists. Current-index agent prepares a disabled paired proof for frozen fdfe,
+requiring existing formatter evidence and a still-unset separate causal judgment.
+No VM, retry or source switch is granted by preparation.
+
+Lost-source first-transition source `3b94ba8d97f1eda7fadadda0239e016d5ebf25b3`
+is the documentation-only child of `365a0d28`, itself a direct fdfe child.
+Root verified 26 writer artifacts, 43 actual and 86 Git kind/mode records,
+full-index patches, the entire reconstructed old-nine workflow file and the
+unchanged complete IO test. Initial root patch comparison assumed abbreviated
+Git indexes; the actual capture uses full indexes. The initial verifier and
+corrected result are retained, with no VM or product failure inferred.
+Separate 0444 copy `M7/restore-lost-source-first-source-3b94-20261005-v2`
+preserves historical 0644 inventory bytes. Its retention map is
+`6609147bbf5f121067d963d8e84e0ff01d2c7f0afecd5c7d06156a5a878b2d2e`.
+Independent source review has one blocker, R1, and remains source-only.
+Root read and rehashed its seven artifacts and 72 inputs in
+`M7/restore-lost-source-first-independent-review-3b94-20261005-v1`, report
+`17bd956d0ba8d7eb1a6bd1005b2ea200767a22447e9d5c74d1293c0ee2589924`,
+inventory `724417699b62f4794c36f560c8bd436ea0d9953003708a44566f1fe5a2cbe48a`.
+The second native endpoint absence lacks a final check of its original
+ancestor identities. Persistent parent removal at the final pre-root-commit
+read can supply missing-parent ENOENT and admit root completion. CLI agent owns
+only a new child repair and real final-read control in the same isolated
+four-path checkout. Preserve frozen 3b94, original IO lifetime and cutoff
+mechanics, nine original and seventeen added cases. No formatter/compiler/test,
+registry, rejoin or push grant exists for this source unit.
+
+One new open T15 subtask records R1. T01–T19 originals remain
+78 done / 95 todo / 6 retired; added subtasks are 298 done / 27 todo.
+Including T00, originals remain 78 / 101 / 7 and added subtasks 302 / 28.
+T15 added is 16 / 11. No outcome or prerequisite closes from source review.
+Older entries below retain their historical stage and ownership states.
+
 CURRENT COMBINED RESULT: original outer handle 8713 is terminal exit 1 and
 fully collected. The tested formatter child is
 `0e5af3cc587b2d2409a3efd213cc38b0def86070`, isolated and frozen in
