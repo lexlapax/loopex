@@ -31,6 +31,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
   alias Loopex.Runtime.Control
   alias Loopex.Runtime.ExecutorStream
   alias Loopex.Runtime.ProviderLifetime
+  alias Loopex.Runtime.OwnerGroup
   alias Loopex.Runtime.ResourceContext
   alias Loopex.Runtime.SessionState
   alias Loopex.Runtime.StreamRelay
@@ -409,6 +410,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
        artifact_store: Keyword.get(options, :artifact_store),
        workers: Keyword.fetch!(options, :workers),
        owner_workers: Keyword.fetch!(options, :owner_workers),
+       owner_group: Keyword.fetch!(options, :owner_group),
        model: Keyword.fetch!(options, :model),
        maintenance_model: Keyword.get(options, :maintenance_model),
        maintenance_instructions: Keyword.get(options, :maintenance_instructions),
@@ -2891,7 +2893,8 @@ defmodule Loopex.Runtime.SessionCoordinator do
           command.changes,
           definitions,
           grace,
-          state.owner_workers
+          state.owner_workers,
+          state.owner_group
         )
       end)
 
@@ -3037,7 +3040,8 @@ defmodule Loopex.Runtime.SessionCoordinator do
          changes,
          definitions,
          grace,
-         owner_workers
+         owner_workers,
+         owner_group
        ) do
     Process.flag(:trap_exit, true)
     owner_monitor = Process.monitor(owner)
@@ -3046,6 +3050,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
     send(owner, {:configuration_preparation_started, self(), deadline})
     context = %{deadline_monotonic_ms: deadline, cleanup_grace_ms: grace}
     reference = make_ref()
+    Process.put(:loopex_provider_cleanup_owner, {owner_group, reference})
     key = {:loopex_configuration_preparation_children, reference}
     Process.put(key, %{})
     cleanup_key = {:loopex_configuration_preparation_cleanup, reference}
@@ -3059,15 +3064,19 @@ defmodule Loopex.Runtime.SessionCoordinator do
             Task.Supervisor.start_child(
               owner_workers,
               fn ->
-                guard_provider_call(caretaker, reference, grace, owner_workers)
+                guard_provider_call(caretaker, reference, grace, owner_workers, owner_group)
               end,
               shutdown: :brutal_kill
             )
 
           retain_configuration_child(key, guard)
+          Process.put(:loopex_provider_cleanup_guard, guard)
+          :ok = OwnerGroup.retain_provider(owner_group, guard, reference, grace)
 
           worker =
             Task.Supervisor.async_nolink(owner_workers, fn ->
+              Process.put(:loopex_provider_cleanup_owner, {owner_group, reference})
+              Process.put(:loopex_provider_cleanup_guard, guard)
               call_provider(
                 guard,
                 reference,
@@ -3081,6 +3090,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
             end)
 
           retain_configuration_child(key, worker.pid)
+          :ok = OwnerGroup.bind_provider(owner_group, reference, worker.pid)
           send(guard, {:loopex_provider_guard_bind, reference, caretaker, worker.pid})
 
           await_configuration_preparation(
@@ -3297,11 +3307,13 @@ defmodule Loopex.Runtime.SessionCoordinator do
         cleanup
 
       cleanup ->
+        cleanup = share_provider_cleanup(cleanup)
+        Process.put(key, cleanup)
         cleanup
     end
   end
 
-  defp request_configuration_cleanup(caretaker, reference, grace) do
+  defp request_configuration_cleanup(caretaker, reference, _grace) do
     request = make_ref()
     monitor = Process.monitor(caretaker)
     send(caretaker, {:configuration_preparation_cleanup, reference, self(), request})
@@ -3312,7 +3324,11 @@ defmodule Loopex.Runtime.SessionCoordinator do
         cleanup
 
       {:DOWN, ^monitor, :process, ^caretaker, _reason} ->
-        local_provider_cleanup_window(grace)
+        case Process.get(:loopex_provider_cleanup_owner) do
+          {group, ^reference} ->
+            share_provider_cleanup_for(group, reference, nil)
+          nil -> exit(:provider_cleanup_unproved)
+        end
     end
   end
 
@@ -6050,14 +6066,19 @@ defmodule Loopex.Runtime.SessionCoordinator do
     }
 
     owner_workers = state.owner_workers
+    owner_group = state.owner_group
 
     {:ok, guard} =
       Task.Supervisor.start_child(owner_workers, fn ->
-        guard_provider_call(coordinator, provider_reference, cleanup_grace_ms, owner_workers)
+        guard_provider_call(coordinator, provider_reference, cleanup_grace_ms, owner_workers, owner_group)
       end)
+
+    :ok = OwnerGroup.retain_provider(owner_group, guard, provider_reference, cleanup_grace_ms)
 
     task =
       Task.Supervisor.async_nolink(state.owner_workers, fn ->
+        Process.put(:loopex_provider_cleanup_owner, {owner_group, provider_reference})
+        Process.put(:loopex_provider_cleanup_guard, guard)
         receive do
           {:loopex_provider_permit, ^permit_reference, ^binding} ->
             complete_provider_attempt(
@@ -6074,6 +6095,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
         end
       end)
 
+    :ok = OwnerGroup.bind_provider(owner_group, provider_reference, task.pid)
     send(guard, {:loopex_provider_guard_bind, provider_reference, coordinator, task.pid})
 
     authority = %{
@@ -6098,6 +6120,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
         {:model, run_id, task.pid,
          %{
            guard: guard,
+           owner_group: owner_group,
            reference: provider_reference,
            cleanup_grace_ms: cleanup_grace_ms
          }}
@@ -6230,6 +6253,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
   end
 
   defp await_provider_guard(guard, guard_monitor, reference, retained, cleanup_grace_ms) do
+    Process.put(:loopex_provider_cleanup_retained, retained)
     receive do
       {:loopex_provider_callback_retained, ^reference, ^guard, callback}
       when is_pid(callback) and is_nil(retained.callback) ->
@@ -6353,8 +6377,10 @@ defmodule Loopex.Runtime.SessionCoordinator do
     end
   end
 
-  defp guard_provider_call(coordinator, reference, cleanup_grace_ms, owner_workers) do
+  defp guard_provider_call(coordinator, reference, cleanup_grace_ms, owner_workers, owner_group) do
     Process.flag(:trap_exit, true)
+    Process.put(:loopex_provider_cleanup_owner, {owner_group, reference})
+    Process.put(:loopex_provider_cleanup_guard, self())
     coordinator_monitor = Process.monitor(coordinator)
 
     receive do
@@ -6370,6 +6396,9 @@ defmodule Loopex.Runtime.SessionCoordinator do
           cleanup_grace_ms,
           owner_workers
         )
+
+      {:loopex_provider_tree_stop, ^reference, stop, ^owner_group, _cleanup}
+      when is_reference(stop) -> acknowledge_provider_stop(owner_group, stop)
 
       {:DOWN, ^coordinator_monitor, :process, ^coordinator, _reason} ->
         :ok
@@ -6388,6 +6417,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
          cleanup_grace_ms,
          owner_workers
        ) do
+    {owner_group, ^reference} = Process.get(:loopex_provider_cleanup_owner)
     receive do
       {:loopex_provider_guard_start, ^reference, ^owner, module, request, options, progress,
        identities} ->
@@ -6396,6 +6426,8 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
         {callback, callback_monitor} =
           start_model_callback(module, owner_workers, fn ->
+            Process.put(:loopex_provider_cleanup_owner, {owner_group, reference})
+            Process.put(:loopex_provider_cleanup_guard, guard)
             receive do
               {:loopex_provider_callback_start, ^reference, ^guard} ->
                 result =
@@ -6435,8 +6467,10 @@ defmodule Loopex.Runtime.SessionCoordinator do
         acknowledge_provider_stop(owner, stop)
 
       {:loopex_provider_tree_stop, ^reference, stop, ^coordinator, _cleanup}
-      when is_reference(stop) ->
-        acknowledge_provider_stop(coordinator, stop)
+      when is_reference(stop) -> acknowledge_provider_stop(coordinator, stop)
+
+      {:loopex_provider_tree_stop, ^reference, stop, ^owner_group, _cleanup}
+      when is_reference(stop) -> acknowledge_provider_stop(owner_group, stop)
 
       {:DOWN, ^owner_monitor, :process, ^owner, _reason} ->
         :ok
@@ -6626,6 +6660,8 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
     case Process.get(key) do
       nil ->
+        {group, ^reference} = Process.get(:loopex_provider_cleanup_owner)
+        :ok = OwnerGroup.retain_resource(group, reference, resource)
         monitor = Process.monitor(resource)
 
         Process.put(key, %{
@@ -6665,6 +6701,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
          reference,
          cleanup_grace_ms
        ) do
+    {owner_group, ^reference} = Process.get(:loopex_provider_cleanup_owner)
     receive do
       {:loopex_provider_callback_result, ^reference, ^callback, result} ->
         await_provider_callback_exit(
@@ -6751,6 +6788,11 @@ defmodule Loopex.Runtime.SessionCoordinator do
           cleanup
         )
 
+      {:loopex_provider_tree_stop, ^reference, stop, ^owner_group, cleanup}
+      when is_reference(stop) ->
+        stop_registered_provider_callback(owner_group, reference, callback, callback_monitor, stop,
+          share_provider_cleanup(cleanup))
+
       {:DOWN, ^coordinator_monitor, :process, ^coordinator, _reason} ->
         stop_unrequested_provider_callback_tree(
           reference,
@@ -6780,6 +6822,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
          result,
          cleanup_grace_ms
        ) do
+    {owner_group, ^reference} = Process.get(:loopex_provider_cleanup_owner)
     receive do
       {:EXIT, ^callback, _reason} ->
         await_provider_callback_exit(
@@ -6838,6 +6881,11 @@ defmodule Loopex.Runtime.SessionCoordinator do
           stop,
           cleanup
         )
+
+      {:loopex_provider_tree_stop, ^reference, stop, ^owner_group, cleanup}
+      when is_reference(stop) ->
+        stop_registered_provider_callback(owner_group, reference, callback, callback_monitor, stop,
+          share_provider_cleanup(cleanup))
 
       {:DOWN, ^coordinator_monitor, :process, ^coordinator, _reason} ->
         stop_unrequested_provider_callback_tree(
@@ -6935,10 +6983,47 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
     started = System.monotonic_time(:millisecond)
 
-    %{
+    share_provider_cleanup(%{
       cooperative_deadline: started + cleanup_grace_ms,
       observation_deadline: started + observation_ms
-    }
+    })
+  end
+
+  # Concept: shared cleanup never renews an invocation's absolute allowance.
+  # Technical depth: sample at the original trigger before any Group mailbox
+  # wait. Its retained first/earlier window also gates orderly subtree removal;
+  # caretaker caching and actual callback/resource custody remain unchanged.
+  defp share_provider_cleanup(sampled) do
+    case Process.get(:loopex_provider_cleanup_owner) do
+      nil -> sampled
+      {group, reference} -> share_provider_cleanup_for(group, reference, sampled)
+    end
+  end
+
+  defp share_provider_cleanup_for(group, reference, sampled) do
+    reply = try do
+      OwnerGroup.provider_cleanup(group, reference, sampled)
+    catch
+      :exit, :provider_cleanup_unproved -> {:error, :provider_cleanup_unproved}
+    end
+    case reply do
+      {:ok, cleanup} -> cleanup
+      _ -> force_provider_without_window(reference)
+    end
+  end
+
+  # Concept: loss of the window custodian remains uncertain cleanup.
+  # Technical depth: force only the existing exact retained handles; do not
+  # select a replacement allowance or acknowledge termination without joins.
+  defp force_provider_without_window(reference) do
+    guard = Process.get(:loopex_provider_cleanup_guard)
+    targets = if is_pid(guard), do: provider_guard_force_targets(guard, reference), else: []
+    retained = Process.get(:loopex_provider_cleanup_retained, %{callback: nil, resource: nil})
+    fallback = for key <- [:callback, :resource], handle = Map.get(retained, key),
+      is_map(handle), do: handle.pid
+    for pid <- Enum.uniq(targets ++ fallback), do: Process.exit(pid, :kill)
+    if is_pid(guard) and guard != self(), do: Process.exit(guard, :kill)
+    exit(:provider_cleanup_unproved)
   end
 
   defp stop_provider_callback(callback, callback_monitor, cleanup) do
@@ -7092,11 +7177,16 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
   defp stop_provider_tree(%{
          guard: guard,
+         owner_group: group,
          reference: reference,
          cleanup_grace_ms: cleanup_grace_ms
        })
        when is_pid(guard) and is_reference(reference) and is_integer(cleanup_grace_ms) do
-    stop_provider_guard(guard, reference, self(), cleanup_grace_ms)
+    sampled = provider_cleanup_window(cleanup_grace_ms)
+    case OwnerGroup.provider_cleanup(group, reference, sampled) do
+      {:ok, cleanup} -> stop_provider_guard_in_window(guard, reference, self(), cleanup)
+      _ -> {:error, :provider_cleanup_unproved}
+    end
   end
 
   defp stop_provider_guard(guard, reference, requester, cleanup_grace_ms),
@@ -7187,6 +7277,16 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
       _unconfirmed ->
         exit(:provider_cleanup_unproved)
+    end
+  end
+
+  @doc false
+  def force_owned_provider(guard, reference, cleanup) do
+    monitor = Process.monitor(guard)
+    try do
+      force_unproved_provider_guard_stop(guard, monitor, reference, cleanup)
+    after
+      Process.demonitor(monitor, [:flush])
     end
   end
 

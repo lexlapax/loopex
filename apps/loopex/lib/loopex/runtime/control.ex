@@ -2706,6 +2706,7 @@ defmodule Loopex.Runtime.Control do
           prior_tx_id: prior_tx_id,
           workers: workers,
           owner_workers: owner_workers,
+          owner_group: owner_group,
           model: state.model,
           maintenance_model: state.maintenance_model,
           maintenance_instructions: state.maintenance_instructions,
