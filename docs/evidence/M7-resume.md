@@ -27,6 +27,40 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current proof, execution and source ownership
 
+LATEST COLLECTION, 2026-10-06: root original86524 is fully collected
+PASS_FORMAT_PREPARATION_ONLY after134.888s/12 stages. The sole VM is FREE;
+clean frozen final source8c9e18f3808e627ff603d7a4a9686def92295c00 is the sole
+owned-test AST-equal formatter child of diagnostic6d. Root verified73 retained
+artifacts,134 actual/Git source rows and12 original EOF/wait/PID-group joins.
+Collection `M7/retirement-unexpected-format-original-collection-20261006-v1.json`
+is `07c1fce59902b773e537cca0ef470320b6c1d3f1de947d1ee9f1ae40cd18a696`, report
+`06052775cf26b75abb83489ecfebfb056b0f0baa120eae3621aeb264a7ef447c`, inventory
+`c2d6952adb21b1d226a8e6ffb8bd96901b581f141f6d723b46eb09a90ca97863`, registry
+`23766fd579d9678c95fe16028f7ba6f577b269e0598c07eaf6e3a0da97ef8a3a` has448 unique keys.
+Collector10015 fully collected exit0; retained script digest
+`ae3a99adbab246cce68187387379e60eca4619f713dc64babbaa6a97ce6dc1d0`.
+One collector generator expected incorrectly spaced text and aborted before
+writing; its subsequent invocation found no file. This metadata-only failure
+is retained at `/private/tmp/m7-retirement-format-collector-authoring-failure-20261006-v1.json`;
+the corrected collector verified the unchanged original run. No VM repeat.
+Private-task now prepares a DISABLED diagnostic-only runner: current/floor each
+toolchain, Node, warning-free test compilation and exact3-case retirement suite,
+first failure stops successors. Fresh448-key seed, no mutation/formatter or
+prior successful-lane replay. This focused diagnosis leaves every later full
+five-Core/floor/integration obligation and intermediate branch OPEN. Actual
+unknown send cause remains UNAVAILABLE until retained new diagnostic output.
+No worker VM grant exists. Never repoll86524 or repeat its source/pair/stage keys.
+
+CURRENT UNIT2 SOURCE, 2026-10-06: independent retained-construction writer
+reports clean bfcbb6a12aaa879a7ba643c38361adf24ded5542, sole parent3d79, exactly
+Workflow and new restore_retained_construction_test.exs. Fresh canonical builder
+keeps its original private receipt template; retained result omits receipt.
+Exact whole-parent/source compile inverse is reported;10 pure codec vector cases
+are authored but UNEXECUTED. Worker seals only source/patch/input/preservation
+packet next. Root has not reviewed or admitted this child. No public facade,
+claim handoff, publication, prefix/release proof, parser/formatter/VM/test or
+blocked restore-gate change. All T01–T19 counts remain unchanged.
+
 ROOT VM RUNNING, 2026-10-06: original86524 is the sole root verification VM
 handle for diagnostic-test formatter only. Initial frozen source is
 6d5f0fb51694b25457de73b3b82be75c91c2ca92, one-file child of e2. Source report
