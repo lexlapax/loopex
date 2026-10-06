@@ -27,6 +27,45 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current proof, execution and source ownership
 
+ROOT VM OCCUPIED by original63288, bounded protocol/cleanup native verification
+at clean `a0b2ea1e1875bfa44957b5e3e97a7005a09ace70`, worktree
+`/private/tmp/loopex-m7-protocol-cleanup-native`. Enabled packet
+`M7/protocol-cleanup-native-focused-runtime-runner-20261006-v2`, config
+SHA-256 `620bec01db344c52953411eafbe393a96610bf3022bc7987a974e74fb75e789e`,
+root review `4b4bc4251bbecee9b6d0b13a4b7ecbc024723d84884cb4ad526e0263f39641d7`.
+Output `M7/m7-protocol-cleanup-native-focused-runtime-v2`; registry seeded
+with the complete674-key union. Fourteen prospective stages select78 tests
+per pair, including three independent Node cases. No terminal result yet.
+Collect original63288 before another VM grant. Independent admission report
+`8dbedfaf8ed7a3b9231be92853106292cbc2b7c390728d9178990bb0feb0d21b` and
+inventory `3fc9e3c38e953dfcb84c80624392912acd4de8228e409b7d1d3d16b526df5234`
+were read and all nine artifacts rehashed. Root's external-reference mode-key
+assumption failed before enable or execution; references omit modes, while
+artifact/source inventories retain their modes. Corrected metadata admission
+preserves regular-file, byte and hash checks. No product stage was retried.
+
+Original47584 is fully collected PASS_FORMAT_PREPARATION_ONLY53.806s,
+11 stages,71 artifacts,53 actual/Git rows and all11 original process joins.
+Authorization `fe742eeadd7dc3f8d50e83d6357ba150785e4f45` produced sole formatter
+child `3e77431d004b2220ebdb79720fc8beeafd355755`. All three whole-file AST
+comparisons and both format checks pass. Collection
+`M7/retained-source-retirement-format-original-collection-20261006-v4.json`
+SHA-256 `8dcedf525ffc4025d228bb5f7863d892cfbe9c180f2cb064f4a3c5e4eb3fc364`;
+registry674 SHA-256
+`bf8d83d73bfb07eb414402efcdf0f30994f9684dcd359a818acc06668cc35ef0`.
+Never repoll47584. Its runtime99/pair remains unexecuted; a separate source-only
+agent prepares disabled v4. Generation payload oracle candidate
+`de01dcb9f2c03561d56d5cf6b5ead993a9b48dbc` is committed but unverified.
+
+Parallel source work now prepares retirement runtime v4, corrects Proposed0056
+at its owning Core command-digest prerequisite, and audits the missing accepted
+ADR0046 authored-bounds/absolute-cutoff implementation. Independent0056 audit
+report `b8781b12cfd706658dae7a7b2d196845c490b3854bd90aceeec4037dd1210d70`
+blocks recommending frozen cf82825e's exact bytes. No acceptance or implementation
+is inferred. ADR0053 remains the sole already-asked maintainer decision.
+No checklist item closes here; older execution paragraphs below are historical.
+
+
 ROOT VM OCCUPIED by original47584, retirement-payload formatting at
 `fe742eeadd7dc3f8d50e83d6357ba150785e4f45`, branch
 `codex/m7-retirement-payload-projection`. Enabled

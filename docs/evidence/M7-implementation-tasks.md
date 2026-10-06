@@ -31,6 +31,16 @@ they do not mean the original task is complete. This follows the maintainer's
 
 ## Latest bounded progress, 2026-10-06
 
+Protocol/cleanup native verification is running as original63288 at composed
+`a0b2ea1e`. Retirement payload formatting47584 passed both toolchains and is
+fully collected; runtime99/pair remains pending. Parallel agents prepare that
+runtime packet, correct the Proposed0056 digest prerequisite, and audit the
+accepted0046 Core bounds gap. No original or added proof closes here.
+T01–T19 originals78done/95todo/6retired; added299done/39todo. IncludingT00,
+originals78/101/7 and added303/40. The restart checkpoint holds exact identities;
+older progress below remains historical.
+
+
 Root collected original34176 as PASS_FOCUSED_CLEANUP_NOTIFICATION_ONLY,
 511.8 seconds and22 stages at clean `f9ac9c82`. Both supported toolchains pass
 all43 selected tests, including the unchanged60-second preparation case.
