@@ -78,6 +78,57 @@ Including T00, originals remain 78 / 101 / 7 and added subtasks 302 / 28.
 T15 added is 16 / 11. No outcome or prerequisite closes from source review.
 Older entries below retain their historical stage and ownership states.
 
+SEPARATE CAUSAL CONSUMPTION COMPLETE: independent disabled-consumer review found
+no blocker. Root read its full report and verified five sealed artifacts and
+229 inputs. Review `M7/final-observation-causal-consumer-independent-review-20261005-v1`,
+report `bce7c7c3935aad2fb078f918c5317d79e85dd2fb9b0649ccf2e308c49e76d172`,
+inventory `da4ef07b3b833354a097baa89502c9f431b63e61a5ae457a2e687dbe43b11d78`.
+Root also verified 22 disabled artifacts, 77 external references and 132 actual
+Git source records. Separate enabled sibling
+`M7/final-observation-causal-consumer-20261005-v2` preserves the complete disabled
+packet; all 49 active/historical artifacts are verified. Enabled config
+`69fc3c7f21e153ffdf67fc5e67fd68cfa68478a256b8e92836aac64f3b6e86bd`, root inventory
+`4c1326730d5a860c8fea992a67fed39b0990e3cfaddd83ea6a88c970ec5f1b22`.
+One non-VM original-evidence consumption completed in 4.583545 seconds,
+original PID 62800 waited exit 0; root tool handle 28830 is collected exit 0.
+Never repeat this consumption. New immutable direct-sibling judgment
+`M7/final-observation-causal-separate-judgment-20261005-v1.json`, digest
+`b5354dddccfcd3a7f7c215e7d29d3c5ec54cf671a79e6df930efc5480cf56299`, reports
+PASS_CAUSAL_RED only for the original old-order counterexample. Original
+pipeline/test failure and original classifier UNAVAILABLE remain exact.
+Original collection/log are retained at
+`M7/final-observation-causal-consumption-original-20261005-v1.json` and `.log`;
+raw log digest `2c9eaca2c2547d9c2545e929d600c7fb8e2dc929202c3d2fbb4115a70dac4f69`.
+Root independently validated the judgment, original report/inventory/status,
+unchanged ten-key registry and all ten original PIDs/groups absent. Root audit
+`M7/final-observation-causal-consumption-root-audit-20261005-v1` retains seven
+files, map `be6c31d268beb42a68b5798ca9b56748e07c651785813fbcb704fbb833926883`.
+The non-VM consumption grant ended. Corrected runtime behavior remains unproved;
+current-index agent's separately disabled fdfe paired runner now pins the actual
+new judgment and original consumption record. No VM grant is active.
+
+R1 REPAIR SOURCE REVIEWED: clean
+`db584914d346bbeb52db5c15ff43b7dfb178f281`, direct child of frozen 3b94, adds the
+final original ancestor check after the second native endpoint absence, plus
+one actual tenth-read parent-removal control. Original IO lifetime/cutoff blocks,
+complete IO test and all 26 prior workflow cases remain exact. Proposed workflow
+27 and ordinary two-file 133 / 3 long excluded are source-derived, unexecuted.
+Root read the full two-path patch and verified 19 artifacts, 43 actual and
+86 Git kind/mode records, three external references and exact reconstruction.
+Separate immutable copy `M7/restore-lost-source-r1-db584914-source-20261005-v2`
+preserves the writer's historical 0644 inventory and root audit, 22 files, map
+`149812ccce43fb4ec1cdedc0b60728f8aca30ae6f2815e48e8871d9feb14db42`.
+Independent review resolves R1 in source and finds no further blocker in its
+narrow scope. Root read and rehashed five artifacts and 66 inputs in
+`M7/restore-lost-source-r1-independent-review-db584914-20261005-v1`, report
+`5e2164aa20c81fce657299762ffcff70865bc2035f6b3052716a3fb6b39a0375`, inventory
+`85b0fa871429ebd235d177cf62e42ec5d92419e265b3e05c6a1f5bac6a5ee98d`.
+CLI's source ownership is released; it now owns only a separately disabled
+lost-source formatting-preparation proposal. Private-task agent is stopped and
+available for independent runner review. No source rejoin/export or runtime
+proof is granted by these source reviews. R1's checklist row remains open until
+both supported pairs execute its real control with unchanged bounds.
+
 CURRENT COMBINED RESULT: original outer handle 8713 is terminal exit 1 and
 fully collected. The tested formatter child is
 `0e5af3cc587b2d2409a3efd213cc38b0def86070`, isolated and frozen in
