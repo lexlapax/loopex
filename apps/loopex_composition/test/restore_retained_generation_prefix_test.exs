@@ -892,7 +892,10 @@ defmodule LoopexComposition.RestoreRetainedGenerationPrefixTest do
             Path.join(candidate["relative_root"], "generation.restore-" <> ordinal <> ".tmp")
 
           generation =
-            Enum.find(entries, &(&1["path"] == Path.join(candidate["relative_root"], "generation")))
+            Enum.find(
+              entries,
+              &(&1["path"] == Path.join(candidate["relative_root"], "generation"))
+            )
 
           if is_map(generation) and generation["kind"] == "regular" and
                Path.dirname(relative) == entry["path"] and
