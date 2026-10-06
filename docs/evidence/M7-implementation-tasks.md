@@ -29,58 +29,49 @@ grouped by T00–T19. Empty added sections mean no added subtasks are recorded;
 they do not mean the original task is complete. This follows the maintainer's
 2026-10-01 update to the active implementation goal.
 
-## Current source review and receipt extraction, 2026-10-05
+## Current restore source and verification, 2026-10-05
 
-Ledger source correction `bbf5265c` has passed root and independent source
-review. Its one-shot verification is terminal FAIL_OR_UNAVAILABLE at clean
-formatter child `6baa7364`: current IO80/2 and Ledger23/0 pass; Composition
-644/651 passed with seven configuration failures,3 excluded and zero skips.
-Original handle2090 exit1 is collected and all22 PIDs/groups are absent. Local,
-long and floor lanes did not run. No retry or integration occurred. Root verified
-93 sealed artifacts,106 actual/Git/kind/mode sources and22 unique attempts.
-The Ledger row remains open while the unchanged integration failures are diagnosed.
-Receipt `f6e731bd` passed final independent/root source review, including its
-unknown-atom/no-creation witness under the unchanged1,000ms observer cutoff.
-Root verified the disabled modern runner and retained a separate v3 grant after
-the Ledger slot returned. One current/floor sequence expects32 focused,35 adjacent
-and298 ordinary Local with2 excluded,zero skips. Receipt now owns sole VM under
-original handle8112; current toolchain/Node and formatter AST checks passed,
-allowed formatter child `fdd6c0fa`. Suite/terminal evidence remains pending.
-Both isolated branches preserve original source/evidence.
+Original combined handle 8713 is terminal exit 1 and fully collected at frozen
+formatter child `0e5af3cc`. All eleven current-pair lanes passed with zero skips,
+including Composition 665/3 and Local 302/2. The floor dev compile passed, then
+floor format-check failed on one captured binding's wrapping. Floor suites did
+not run; the 1,203.037-second attempt remains FAIL_OR_UNAVAILABLE. Root verified
+164 sealed artifacts, 43 original stages/unique registry keys, 124 final actual
+Git/mode inputs, full tree projection and every original PID/group absent.
+The old registry and all failure evidence stay unchanged; no retry is granted.
 
-Root verified the next artifact physical inventory; selected-use capture can
-reuse the existing owner and reference-bound facade. Source-only implementation
-owns restore IO/test in a new isolated worktree; no VM is granted. Root corrected
-the too-early `6baa7364` base through dependency rejoin `5f7f9b08`, preserving
-all four Ledger paths and the two Artifact paths' exact tested10006 bytes.
-One new added T15 row tracks it. Object/complete namespace/history remain separate.
-Receipt ordinary returned296/298 passed with two real-path fixture failures,
-2 excluded,zero skips; original8112 exit1 is collected, evidence sealed and slot
-returned. Root verified91 terminal artifacts,32 actual/Git/kind/mode sources,
-22 original PIDs/groups absent and exact formatter child `fdd6c0fa`.
-Its32 focused/35 adjacent pass; no floor ran. Artifact capture source-only
-`b5ce08de` passed root and independent source review, with no runtime proof.
-Fixture-only `d754e78b` passed root source review. Both complete source packets
-and original failure evidence are retained. Root prepared clean isolated
-combined candidate `015341ef`, exactly eight paths equal reviewed source bytes.
-Root reviewed the sealed disabled runner, verifying173 artifacts,124 actual/Git
-source inputs,17 external references and eleven unchanged lifecycle functions.
-Independent review found no source blocker. Root finalized separate enabled v2
-and granted one exclusive sequential current/floor verification, original
-handle8713, new output `M7/m7-restore-join-v1`; exact config
-`db3c100932dc368a87983e9c794a974070060a304e9265e4eeea040224a607e9`.
-No old candidate retry or primary source rejoin is granted. A separate
-source-only object audit owns IO/test in isolated
-`codex/m7-artifact-object-physical-capture` at015341ef. It reuses streaming
-hashing and preserves current locator/digest reader relations; no new cap or
-complete-history claim is introduced.
-A source-only T16
-repair now owns only the failed Model integration startup options and the two
-ReadOnly physical cases' workspace setup. Existing1,000 ceiling, actual Unix
-socket/FIFO and exact8MiB/first-over assertions remain required.
-T01–T19 originals78 done/95 todo/6 retired; added299 done/24 todo.
-Including T00 originals78/101/7, added303/25. T15 added17/8; T16 added53/6.
-These are current facts; the following paragraphs retain historical checkpoints.
+Selected-object source `8c9c4f92` passed root and independent source review.
+Twelve new IO cases preserve all 96 previous cases and original owner/bounds;
+complete history, namespace and activation remain separate. Immutable packet
+copies preserve the original 0644 inventory bytes and record new 0444 modes.
+Root merged that source with the formatter child through `83994da3`, then
+committed `fb23ac0d` in isolated `codex/m7-object-format-integration`.
+Its only corrective change renames the captured `open` binding and its two uses
+to `open_records`, preserving IO calls and limits. Both formatter checks and
+runtime verification of these new bytes remain pending.
+
+Current-index agent prepared a new disabled runner whose two formatter checks
+precede compilation and suites. Root and independent runner review and execution
+grant remain pending. Expected IO 106/2, Composition 677/3 and long 2/106 include
+twelve new object cases; these are expectations, not results. No VM runs.
+CLI agent implements the first integrated available-source restore workflow in
+isolated `codex/m7-current-restore-workflow`, using existing open bounded T15
+work. The required full audit, source retirement, destination generation/root
+commit and guarded real reopen are being written, not verified. Lost-source,
+repeated restore, fault/cleanup and helper-ledger proofs remain required.
+Root retained the source gap inventory and ordinary-guard authority review.
+The guard preserves existing synchronous ownership and the original claim
+deadline; administrative restore and public lookup retain explicit owned IO.
+No new startup timeout or public contract is inferred.
+
+The maintainer's repeated "approve 1000 ms" confirms the recorded diagnostic
+setup-only cutoff. No other bound or pending ADR is accepted by that reply.
+[The restart record](M7-resume.md#technical-depth) retains exact source, output,
+review, mode and SHA-256 pointers. No checkbox changes from source-only review
+or current-only passes. T01–T19 originals are 78 done / 95 todo / 6 retired;
+added subtasks are 299 done / 24 todo. Including T00, originals are
+78 / 101 / 7 and added subtasks are 303 / 25. T15 added is 17 / 8;
+T16 added is 53 / 6. The following paragraphs retain historical checkpoints.
 
 Artifact source/evidence is pushed at `87be37e7`; its clean merged worktree and
 local/remote topic branches are removed. No verification VM runs.

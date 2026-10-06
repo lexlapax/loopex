@@ -27,60 +27,108 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current proof, execution and source ownership
 
-CURRENT COMBINED RUNNER REVIEW: clean pushed015341ef remains frozen in
-`/private/tmp/loopex-m7-current-restore-integration`. Disabled sibling
-`M7/current-restore-integration-runner-20261005-v1` pins exactly eight reviewed
-paths, ordered two-parent initial graph and single-parent formatter-child rule.
-Root reviewed the full changed run/AST/config/schema and verified173 listed
-artifacts plus inventory,124 actual/Git/kind/mode source inputs,17 external
-references and eleven byte-identical shared functions. Run
-`125f68c2421d65674794829a40e1954f0b62b84a9062aa395f91eb514a268dfd`, disabled config
-`80748e4120cd565a39250293e13f1f1bc08577af86a8054ce7e95de5e6394f78`, final inventory
-`9638e94ec6e882841f62fa33e79c0456d4d3df530968a649d6e0739740fc79b9`.
-Independent review found no source blocker, report
-`3e834a2e83d445046ac03a40d6238c7684238b90fa9ae17d53d46c70f1837ac0`. Root verified
-its three artifacts plus inventory and finalized separate enabled v2, retaining
-181 artifacts plus finalization inventory. Config
-`db3c100932dc368a87983e9c794a974070060a304e9265e4eeea040224a607e9`, finalization
-`f78acd3c0cd0e21ac184793e53db42219bdafb8d83223e8f3d21510d8a930f2f`. Root audited
-the two consumed22-key registries unchanged and12 prior terminal records with
-no combined015 attempt, then seeded new canonical
-`M7/current-restore-stage-attempt-registry.json` at
-`1a5f5f5aa0ba2c8e25a6d0994e96d5911cd7194ee78b447a194f0321f46bdbf0`; never reset.
-Root grants current_index_cleanup one exclusive sequential current/floor run.
-Original outer handle8713 is live, polled only by that agent; output
-`M7/m7-restore-join-v1`. No second VM, repair/retry, source rejoin or broader
-full-fast/provider/release lane is granted. Stop and retain first failure and
-return slot only after original handle collection and exact group joins.
-Expected per pair: IO94/2, Model28/0, Composition
-adjacent21/0, Receipt32/0, Ledger23/0, ReadOnly22/0, Local adjacent21/0,
-Artifact29/0, Composition665/3, Local302/2 and owned IO long2/94; zero skips.
-These are source expectations, not results.
-Formatter whole-file non-line AST checks passed for all eight paths. Exact
-permitted single-parent formatter child is
-`0e5af3cc587b2d2409a3efd213cc38b0def86070`; complete patch is retained in the
-live output. Current dev compilation passed in47.673 seconds; formatter and
-first four source gates have command/evidence0. Test compilation, named suites
-and floor results remain pending; the original outer handle8713 still belongs
-to current_index_cleanup. These stage results close no task.
+CURRENT COMBINED RESULT: original outer handle 8713 is terminal exit 1 and
+fully collected. The tested formatter child is
+`0e5af3cc587b2d2409a3efd213cc38b0def86070`, isolated and frozen in
+`/private/tmp/loopex-m7-current-restore-integration`. All eleven current-pair
+lanes passed with zero skips: IO 94/2, Model 28/0, Composition adjacent 21/0,
+Receipt 32/0, Ledger 23/0, ReadOnly 22/0, Local adjacent 21/0, Artifact 29/0,
+Composition 665/3, Local 302/2 and owned IO long 2/94. Pipeline duration was
+1,203.037 seconds. Floor dev compilation passed, then floor format-check exited
+1 in 0.356 seconds because it wraps one captured-open binding differently.
+No floor tests or subsequent gates ran. This complete attempt remains
+FAIL_OR_UNAVAILABLE; no row closes from the current-only passes.
 
-CURRENT OBJECT SOURCE WORK: root read the complete selected-object inventory
-and schema, verified four artifacts plus inventory, nine actual/Git/mode
-sources and four external inputs. Immutable sibling
-`M7/artifact-object-audit-inventory-015341ef-20261005-v1` retains exact five files
-and records original0644/retained0444 modes; retention map
-`7b0106ea1077b3c606596ee760bc9433623404e48c65aa47708ff34df3bbf59c`. Report
-`b36d662f3ca433c859446c5a600e0877ca11e59d7a892712dec7ff7d1e0866ab` distinguishes
-Local direct fetch from stat: direct fetch selects by lowerhex locator and
-verifies requested digest/size without equating locator to digest. Reuse the
-existing owned streaming hash and original total/global/work/cleanup limits;
-preserve writer-only64MiB cap, orphan/staging bytes and current reader domain.
-Root created isolated `/private/tmp/loopex-m7-artifact-object-physical-capture`,
-branch `codex/m7-artifact-object-physical-capture`, base015341ef. CLI agent owns
-only restore IO/test for source-only implementation and retained packet; no
-VM/toolchain/formatter/compiler/tests/runner/network/push or complete-history
-claim. One new T15 row is open. The following older run grants are historical;
-both original failed handles remain collected and may never be retried.
+Sibling `M7/m7-restore-join-v1` retains terminal report
+`3066aefbf07d1ab72773d7d99a88f3ac6cf91a7bf811da6d0ad33ba122f04c5a`, inventory
+`910b871fd850ca026bb07fcc76f5708361e98351cb8a00b639116d4b231292d7` and floor
+formatter raw output
+`83ba0d63827679fdd8caeb1480bf3ef0c27e44596743827a6640a262d512cb02`. Root read the
+complete formatter patch and independently verified 164 sealed artifacts,
+43 original raw/started/terminal stages, 124 final actual/Git/kind/mode source
+records, the full Git-tree projection and all original PIDs/groups absent.
+The canonical `M7/current-restore-stage-attempt-registry.json` has 43 unique
+consumed keys and digest
+`b7039ce5dd84287a5e1e8f218bebf547c57e00beb4cfb6add398b4adcbcc27d0`; never reset.
+The root audit is retained in
+`M7/current-restore-join-root-audit-20261005-v1`, retention map
+`8bbf591df1b10d80246cec4a32d2ecaf0a44a21e99308be409f6c548ceb3c264`.
+Original handle 8713 must never be polled or retried. Its execution grant ended;
+no verification VM runs.
+
+CURRENT OBJECT SOURCE: clean
+`8c9c4f924bdd7131a2fc2cce09b2c6bb85d083e5` in
+`/private/tmp/loopex-m7-artifact-object-physical-capture` adds the private selected
+object audit and twelve cases. Root and independent source review found no
+blocker; root verified eleven writer artifacts, thirteen Git inputs, five prior
+references, four independent artifacts, sixteen independent Git inputs and
+seventeen external references. All 96 previous IO cases remain unchanged.
+It reuses the original guardian and streaming hash, preserving locator/digest
+reader relations, uint64 reference sizes, original total/work/cleanup limits
+and orphan/staging bytes. The actual 64 MiB + 1 reader fixture is source only,
+not proof that the writer accepts that size or that its cutoff passes.
+Object hashing does not prove complete history, namespace or activation.
+
+Immutable sibling `M7/artifact-object-physical-source-20261005-v2` preserves all
+12 original packet bytes and the original inventory's historical 0644 modes;
+its separate retention map records the new 0444 copies, digest
+`2dd3226767e35e8b1b71ea56a4b9398bd53148ad3a317a421f5cfbbacf489534`. Writer report
+`9a2b267a574bf7592f2b9af5638d4bc93eb17b75410df49635f1037540d891e4` and independent
+report `89dbc2c2d569f3b6bc6d26f0db96949dd80ef0355cd7ffd6887237f75093f2c0` remain
+source evidence. One added T15 row stays open.
+
+CURRENT CORRECTION CANDIDATE: root merged reviewed object source into the frozen
+formatter child through `83994da3bd2e4d64e708405048a924a8bae17e07`, then committed
+`fb23ac0d75cdaa92ec2862c499b28b9bfa63e24a` in
+`/private/tmp/loopex-m7-object-format-integration`, branch
+`codex/m7-object-format-integration`. The correction only renames `open` to
+`open_records` at the captured binding and its two uses. IO calls, data, order
+and limits remain unchanged. Neither formatter nor a suite has run on this
+new candidate. Its full delta from `3030f46a` is still the eight owned paths.
+Private agent reviews this source read-only. Current-index agent prepared a
+separate disabled runner; both formatter checks precede compilation, gates and
+suites. Sibling `M7/object-restore-integration-runner-20261005-v1`: run
+`1deaff39e380179b21595c987f12bcf2dcc5ea5185334957d1b9c10e19804474`, disabled config
+`512ee8618ff653365ec2947ce1feed33284001e75d9acd6573944bf930fd171d`, final inventory
+`a0c3917b7a4989c181f88b24fbb36901419dd50663a685f928bb641fc1dbc73e`. Root review,
+independent runner review and an execution grant remain pending. New output
+`M7/m7-object-restore-join-v1` and new object registry are absent. Proposed IO
+106/2, Composition 677/3 and long 2/106 populations include twelve new object
+cases; other lane populations stay unchanged. No retry of old source is allowed.
+
+CURRENT RESTORE WORKFLOW: CLI agent owns source-only implementation in isolated
+`/private/tmp/loopex-m7-current-restore-workflow`, branch
+`codex/m7-current-restore-workflow`, base `8c9c4f92`. One deliverable is the first
+integrated available-source ordinal-1 path: complete current audit, copy to an
+empty root, source retirement, fresh private Local generation, root commit last,
+claim release and guarded actual reopen, all under the original administrative
+owner and allowances. Private Workflow/Audit modules and narrow existing
+Composition/Resource/Local guard paths are owned; core, wire contracts, docs and
+other worktrees are excluded. Source is still being written, not frozen or
+runtime verified. Lost-source, repeated restores, full fault matrix and unfinished
+helper-ledger contracts remain required. The existing bounded T15 row stays open.
+
+Root verified the complete gap inventory's three artifacts and thirty pinned
+Git records. Sibling
+`M7/current-restore-orchestration-gap-inventory-015341ef-20261005-v1`, report
+`5c5d3f6d56191db370d75046ff7609f566dc58679b48c17f68b1c542bafb160b`, retention map
+`48ed3d8e9bb1854b194f42ae07476e0ed88982e1ff5e0cb091e5ece18491f532`, records
+full-history dependency closure and the Resource import executor identity seam.
+The importer must retain its checked original identity through complete current
+restore lineage, rather than derive another identity from the destination path.
+
+Root accepted the narrow ordinary-guard interpretation as implementation detail
+and verified its nine exact Git inputs. Ordinary startup/revalidation keeps its
+existing synchronous caller ownership and explicit record/lineage limits; it
+adds no elapsed-time or cancellation promise, administrative worker, invented
+lookup budget or refreshed claim deadline. Public lookup and restore retain
+explicit limits and owned administrative IO. Sibling
+`M7/restore-ordinary-guard-authority-20261005-v1`, report
+`3f56805d49f9a59ac8bed9b540fbe83645f188d11fe94a7ad61f2cde6a679d57`, retention map
+`a10f50a3c13f6bba7967cc7a2c4fc849821c67e365f20f5161289fad01115589`, specifies
+required negative, physical replacement and unchanged-deadline proofs. The older
+convenience reader is not claimed to prove a race-safe raw allocation ceiling.
+The following execution records are historical; their grants have ended.
 
 CURRENT EXECUTION: Ledger enumeration handle2090 is terminal exit1 and fully
 collected. The original current Composition command exited2 with644/651 passed,
