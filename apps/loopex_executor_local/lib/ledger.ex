@@ -916,7 +916,7 @@ defmodule Loopex.Executor.Local.Ledger do
         snapshot_members(entries)
       ]
 
-      bound_snapshot_size(:erlang.external_size(observation, [:deterministic]) + 69, entries)
+      bound_snapshot_size(byte_size(:erlang.term_to_binary(observation, [:deterministic])) + 69, entries)
     else
       {:error, _} = error -> error
       _ -> {:error, {:ledger_unavailable, :malformed_open_entry}}
