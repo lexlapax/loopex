@@ -1280,6 +1280,23 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
     File.rm_rf!(envelope_fixture.ledger)
     refute File.exists?(envelope_fixture.ledger)
 
+    # This hostile alternate map appends an existing key and a manually encoded
+    # SMALL_ATOM_UTF8_EXT value. The name stays binary throughout construction.
+    # Late field/canonical refusal cannot prove that :safe prevented interning.
+    atom_name =
+      "loopex_receipt_uninterned_" <> Integer.to_string(System.unique_integer([:positive]))
+
+    assert byte_size(atom_name) <= 255
+    assert_raise ArgumentError, fn -> :erlang.binary_to_existing_atom(atom_name, :utf8) end
+    <<131, 116, pair_count::unsigned-32, published_pairs::binary>> = published_bytes
+    <<131, output_key::binary>> = :erlang.term_to_binary(:output, [:deterministic])
+
+    unknown_atom_bytes =
+      <<131, 116, pair_count + 1::unsigned-32, published_pairs::binary, output_key::binary,
+        119, byte_size(atom_name), atom_name::binary>>
+
+    assert byte_size(unknown_atom_bytes) <= 65_536
+
     # The exact cap vector edits real-writer output; it is a decoder control,
     # not a claim that the executor published that rewritten receipt itself.
     assert_receipt_decode_calls([
@@ -1287,9 +1304,12 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
       {exact_bytes, {:ok, %{envelope_receipt | output: exact_output}}, 1},
       {compressed_bytes, {:error, :invalid_retained_receipt}, 0},
       {oversized_bytes, {:error, :invalid_retained_receipt}, 0},
+      {unknown_atom_bytes, {:error, :invalid_retained_receipt}, 1},
       {:erlang.term_to_binary([envelope_receipt], [:deterministic]),
        {:error, :invalid_retained_receipt}, 0}
     ])
+
+    assert_raise ArgumentError, fn -> :erlang.binary_to_existing_atom(atom_name, :utf8) end
   end
 
   test "captured receipts decode after original authorities join and the root is removed" do
