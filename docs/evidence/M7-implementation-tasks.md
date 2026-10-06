@@ -31,20 +31,22 @@ they do not mean the original task is complete. This follows the maintainer's
 
 ## Latest bounded progress, 2026-10-06
 
-Clean58fb33ba full fast check77114 is failed and fully collected after1293.977s,
-exit130 following root's native phase-trap termination of the observed92
-Composition failures. The wrapper's complete output, partial Composition
-output and all11 captured process/group joins are retained. Ordinary provider
-cleanup notices reached the exhaustive coordinator dispatcher without a
-handler. Confined correction1bd9d59f and two actual-runtime/Store regressions
-are source-only, under independent review; both-pair and new integrated proof
-remain open. Original67819 retirement formatting failed floor wrapping after
-51.979s; all11 stages/joins are collected and an isolated assertion rewrite is
-in progress. Source-only generation1a8cc8d9 and live projection1e173979 are
-frozen for review. No new original item or added proof closes here. Current
-T01–T19 originals78done/95todo/6retired; added299done/37todo. IncludingT00,
-original78/101/7 and added303/38. Exact references are in the
-[restart checkpoint](M7-resume.md); older progress below remains historical.
+Root collected original34176 as PASS_FOCUSED_CLEANUP_NOTIFICATION_ONLY,
+511.8 seconds and22 stages at clean `f9ac9c82`. Both supported toolchains pass
+all43 selected tests, including the unchanged60-second preparation case.
+All96 retained artifacts,145 actual Git/source inputs and22 original process
+joins are verified. The two-path correction rejoins m7 with literal source
+bytes. The previous full fast check remains failed; a new integration candidate
+still needs its full check. The broad cleanup subtask stays open until then.
+
+Parallel source work continues on retained generation-prefix recovery and the
+helper-ledger recipe proposal. Protocol assembly `038401b7` passed independent
+source review; its formatter and runtime proofs remain pending. Retirement
+assertion correction `f2b422bc` and its v2 verification packets remain unexecuted.
+ADR0053 is the sole pending maintainer question. No original checklist item or
+added proof closes here. T01–T19 originals78done/95todo/6retired; added299done/
+39todo. IncludingT00, originals78/101/7 and added303/40. Exact references are in
+the [restart checkpoint](M7-resume.md); older progress below remains historical.
 
 T15 retained canonical construction on frozen `f5e26af3` passed all ten pure
 tests on both supported toolchains. Original74464 is fully collected after
@@ -13506,6 +13508,8 @@ in the [restart record](M7-resume.md#technical-depth).
 
 - [x] Hand off retained restore claims by changing only the original live nonce after positive prior-authority termination; preserve exact intent/candidates, directory/owner custody, mixed-nonce partial failure and original IO cutoffs. Prove34 actual writer/native cases plus pending17/construction10/publication16 on both toolchains at ed550 and rejoin the literal source; this grants no receipt, release or complete continuation.
 - [ ] Continue the same retained restore IO worker through checked available/lost source retirement and destination retirement-evidence publication, preserving original transaction/candidate bytes and claim fences. Prove actual native faults and joined cleanup before candidate activation, receipt or release work.
+- [ ] Install only the original retained destination generations after checked source retirement in the same IO worker; require exact full activation-manifest equality, original ordinal temporary names and claim/physical fences, and prove the native publication and failure cases on both supported toolchains. Committed proofs, receipt, release and public restore remain separate.
+- [ ] Resume exact original/candidate generation prefixes and complete ordinal staging after positively joined prior authority; audit the genuine complete backup and the full current physical transformation before nonce handoff. Prove real multi-ledger interruption/restart, available/lost source, corruption/refusal and original joins on both pairs without changing transaction, candidates, epochs or history authority.
 
 - [ ] Recheck the captured source ancestor type/device/inode identities after the second native absence observation, including the final pre-root-commit phase. Prove actual persistent parent removal at the held final read refuses completion while preserving original cutoffs, post-intent fencing, retained destination claim and all prior case bodies on both supported pairs.
 - [ ] Preserve positively acquired restore claims through pre-intent IO failures and release them with the original joined terminal owner/cutoffs when neither state root changed; retain partial/unproved or foreign claims and truthful remaining-claim accounting. Prove actual second-claim failure, known first-claim removal and partial-publication fencing on both supported pairs without changing the six existing workflow cases or bounds.

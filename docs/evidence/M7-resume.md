@@ -27,6 +27,39 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current proof, execution and source ownership
 
+ROOT VM FREE after original34176 fully collected, exit0,511.8 seconds,
+PASS_FOCUSED_CLEANUP_NOTIFICATION_ONLY at
+`f9ac9c82818c5de8e70a1f32a068e8dd0f1768f3`. Current and floor each pass43
+selected cases over22 total stages, zero skips. The two preparation selections
+cover all19 cases with the unchanged long cutoff. Root verified96 retained
+artifacts,145 actual/Git inputs and all22 original EOF/wait/PID/group joins.
+Never repoll34176 or repeat its keys. Collection
+`M7/cleanup-notification-focused-runtime-original-collection-20261006-v1.json`
+SHA-256 `2bf0acb413503132d77798582f2ebbac65106c1371cb3fa82904ff5d9f841e25`;
+terminal report `671a044db31ca283c24a5f113e058814549d88d0f937e983b51a64bd8d6add1b`,
+inventory `175d44627edaace12c4ce96a825dcb480fb352bbfeea3f2b2d6a6d99c3ffc651`.
+Latest full registry635 keys, SHA-256
+`60c4e740fcd38ff2990b26125d3782cb356d41a7b907b3f62e0ee5d25bda5085`.
+The verified two-path source rejoins m7 through `d4a9b637`; both files equal
+f9ac9c82. This focused proof does not replace the failed full integration check.
+
+Three parallel source lanes continue: private retained generation-prefix
+implementation in `/private/tmp/loopex-m7-retained-generation-prefix`, proposed
+ADR0056 pair in `/private/tmp/loopex-m7-helper-ledger-recipe-proposal`, and static
+retirement v2 admission audit. No worker owns execution. Protocol assembly
+`038401b76cbcff0f2546697354287d9210b64c3d` passes independent source review,
+report `84c87a18e20b1d0a45dbf34d475964abea6ea79c657b0402520a904b758fdafd`,
+inventory `194f00b088f12e07c580dca5c263ef0c0ac44ddebb97adc5b66999f5fbfbee6e`.
+Formatting/runtime/activation remain unproved. Retirement v2 packets preserve
+original67819 failure and97 selected cases per pair; actual new formatting
+proof is required. Seed any next attempt from the complete635-key union.
+ADR0053 remains the sole pending question;0054/0055 and draft0056 stay Proposed.
+T01–T19 originals78done/95todo/6retired, added299done/39todo. IncludingT00,
+original78/101/7 and added303/40. The two new T15 tasks cover generation install
+and exact-prefix recovery; neither closes from source review.
+
+The execution entries below are historical, superseded by this checkpoint.
+
 ROOT VM OCCUPIED by original34176, frozen cleanup-notification runtime at
 `f9ac9c82818c5de8e70a1f32a068e8dd0f1768f3`. Enabled packet
 `M7/cleanup-notification-focused-runtime-runner-20261006-v1`, config SHA-256
