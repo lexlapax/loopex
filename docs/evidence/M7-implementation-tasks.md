@@ -1,5 +1,26 @@
 # M7 Implementation Tasks
 
+Current integration original73241 is collected FAIL at `5eb38e39`: 4,669
+executed, 4,663 passed and six Core failures, with55 declared exclusions,
+zero skipped/invalid, all eleven application completion markers and both
+original joins. Ten application suites passed; this is not a full-check PASS.
+The six failures identify four stale Core fixtures after the accepted authored
+bounds and tagged executor-result changes. Their independently reviewed source
+at isolated `84586238` passed all107 affected cases on each supported toolchain
+in137.253 seconds. Original55315 is terminal and collected: eight original
+stages joined,42 artifacts verified, zero excluded/skipped/invalid cases.
+The four tested files are integrated literally; the bounded added T16 fixture
+row closes. The new integration candidate still needs its full check.
+Original54086 passed106/107 current cases before a stale exact refusal-field
+oracle failed; its floor lane did not run. The corrected child keeps closed
+field sets and requires revision2 for prompt/follow-up while steer retains its
+unchanged shape. The failed output remains retained.
+Original T01–T19:80 done/93 todo/6 retired; added325 done/30 todo.
+No original row closes from this focused verification.
+The separate workspace restoration case is saved in isolated `a3f63411` and
+awaits paired execution. Exact outputs and continuation pins are retained in
+the [restart checkpoint](M7-resume.md#technical-depth).
+
 Complete physical restore original75764 passed all148 cases on each supported
 toolchain at `11e7f674`, in560.494 seconds. All ten original stages are joined
 and47 artifacts verified. Six added T15 rows and the T16 copied-permissions row
@@ -13587,6 +13608,8 @@ the still-open real-provider, live protocol, persistent-fault or closure lanes.
 
 ### Added implementation subtasks
 
+- [ ] Complete the accepted terminal model-question payload codec and independent standalone schemas/vectors for answered text, answered choice, declined, expired and cancelled outcomes; prove actual Core producer conformance, exact identities/quantities/choice relations and malformed-field/byte-bound refusal on both toolchains without transport or generation activation.
+
 - [x] Pin exact runtime public model-question event fields, including conditional choice identity and expiry, in an explicitly unserved standalone payload schema on both supported toolchains.
 
 - [x] Remove pre-1.0 model-question response/settlement v1 replay and effect-index readers, reject those exact retired kinds, and retain current v2 answer/expiry/cancellation recovery on both supported toolchains.
@@ -13927,6 +13950,8 @@ in the restart checkpoint. Broader restore/decoder/public/helper rows stay open.
 ### Added implementation subtasks
 
 - [ ] Repair ordinary provider cleanup notices reaching the SessionCoordinator dispatcher after the cleanup integration; retain failed58fb33ba full-check evidence, prove actual Local Store completion through the same live owner and distinct caretaker delivery, preserve existing cleanup windows and native joins, and verify both supported pairs plus a new full integration candidate.
+
+- [x] Correct the six Core fixture failures from original73241 to the accepted current authored-bounds grammar and tagged executor result; preserve malformed refusal without admission, valid expired maintenance fencing, both exact future-terminal overflow oracles, authored prompt-record overflow and queued receipt ordering. Retain both failed integration and floor-formatting outputs; prove all107 affected cases on both supported toolchains before literal integration. The original full integration and milestone acceptance rows remain separate.
 
 - [x] Correct the existing AgentLoop malformed-receipt fixture to observe the current tagged executor result envelope while preserving the original operation reference, progress prerequisite, cleanup reserve, deadlines and exact joins; retain original44773's failed231-case selection and prove the complete corrected native selection on both supported toolchains before literal integration.
 - [x] Correct ordinary foreground/daemon progress projection to the accepted ADR 0023 identity and quantity encodings before live routing; prove actual complete native records, per-kind nullability, maximum values, malformed/private refusal and unchanged positive queue/frame pressure on both toolchains. Keep ADR 0054 codec, current generation gates and actual writer-pressure proof separate.

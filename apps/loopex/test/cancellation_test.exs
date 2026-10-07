@@ -629,7 +629,7 @@ defmodule Loopex.CancellationTest do
     send(executor_worker, :answer)
 
     receipt_result? = fn
-      {_reference, {:ok, %{tool_call_id: "c1"}}} -> true
+      {_reference, {:loopex_executor_result, {:ok, %{tool_call_id: "c1"}}}} -> true
       _message -> false
     end
 

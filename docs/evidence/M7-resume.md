@@ -27,6 +27,104 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+Latest checkpoint, 2026-10-07: full-fast original73241 is TERMINAL1 and
+collected FAIL at clean primary `5eb38e39c91c5a227b181f59472fc3703d449093`.
+All eleven application logs and completion markers are retained:4,669 executed,
+4,663 passed, six Core failures,55 declared exclusions, zero skipped/invalid.
+Both original stages have EOF/wait/group-absence/stdout-close evidence;44
+artifacts verified,2,077.334 seconds. Collection
+`M7/corrected-full-fast-20261007-v3/original-collection.json`, SHA-256
+`d64b7f16e4e138e96f82615e36754442ce2cb57c7c9c2e5025a6728955da7240`;
+terminal `df660148532cb4ebbf551542f30397ba4dfb6fe84f3839f5be8e53ae44debdad`;
+application index `59947fd24b742dcd6ea4311debfbfd081958562e2ef44b0f93424c543e1473e0`.
+Never repoll73241 or rerun unchanged5eb. Conditional original T06/T10/T12
+closures still require a complete passing integration candidate.
+
+The six failures are stale Core fixture expectations, not established production
+defects. Independent review preserves the original guarantees: invalid authored
+bounds refuse before admission; valid expired bounds remain maintenance-fenced;
+inherited large bounds reach both exact future-terminal overflow oracles while
+separate authored controls prove prompt-record overflow; the receipt predicate
+observes the current tagged executor result. All original waits, actors, cleanup
+and durable/no-dispatch assertions remain. Four-file raw source is committed at
+isolated `a65e8dc7e1d1abc02080877f53cf0c6df99ed6e9` in
+`m7-configured-fence-fixture`. Original formatter41820 is collected FAIL only on
+the floor's tuple layout,5.164 seconds, six joins/37 verified artifacts.
+Collection `M7/core-fixtures-format-20261007-v1/original-collection.json`,
+SHA-256 `7951d1ffd68fef1d3793150dd19cd6a9588ccd7c9234019d3aeea9627dc69dc2`;
+terminal `58bc87f6dfb333d899848186c2fd0703aab85aa5afc0260bf1a2d135d223999f`.
+The clean child `b29bcb02d8d724d9d45a69ef8a07c581e3cd2afd` changes only the
+two consistent local-variable occurrences needed for the observed formatting
+conflict. Original107-case paired verification remains pending. Never repoll41820.
+
+Formatter97509 is collected PASS on that child,5.368 seconds, six original
+joins/37 verified artifacts. Its current formatter moved the assertion's tuple
+layout; the AST check proved semantic equivalence and both formatters accepted
+the output. Its final source is deliberately recorded as dirty, so those records
+cannot be reused as clean-child metadata. Collection
+`M7/core-fixtures-format-20261007-v2/original-collection.json`, SHA-256
+`32ae62da5b4aaaac5b014e8762e9b828514c0a318049fcaa7047ea2874fcbb68`;
+terminal `efd245d9f9764d01680c5ee7632282bb6f70a853ad43709b3afab1f91edd3d7f`.
+Root committed the exact verified output as clean
+`c063daae77992179c46e0a37c5539fd653065406`, a direct child of b29bcb02.
+The next proof must bind that clean child and run fresh toolchain/version and
+formatting checks before complete107-case tests on each pair. No child test
+execution is claimed yet. Latest consumed registry1276 at
+`M7/core-fixtures-format-20261007-v2/stage-attempt-registry.json`, SHA-256
+`7b10f61cb47029c6321fc06b50fe3648a0fa89db493c3ebc0ac016bdcc9a1860`.
+Never repoll97509; preserve its changed-byte provenance instead of relabeling it.
+
+Focused original54086 is collected FAIL at c063daae: current106/107 cases,
+zero exclusions/skips/invalid; floor did not run. Four original stages joined,
+24 artifacts verified,66.459 seconds. Collection
+`M7/core-fixtures-admission-20261007-v1/original-collection.json`, SHA-256
+`8278944169c0ed2678963a3eb59665a2f73eafe5a31adf2403c62cefa1fc9997`;
+terminal `78f6330e4156938e8223942a48c161c013e9b1fb18daa5e3050f4b9d15dd731d`.
+The single failure reached both original future-overflow controls and exposed
+the same fixture's stale exact refusal-field list. Current prompt/follow-up
+refusals require exactly ten fields with revision2; steer requires exactly nine.
+The test now checks those fixed types and closed fields, including the additional
+authored overflow controls. All digest, duplicate/conflict, dimension, candidate,
+measured-byte, no-dispatch and deadline assertions remain. New clean source
+`84586238522772c7783ffc213b1ac5a5680c1734` is a direct child of c063daae.
+Never repoll54086 or retry its unchanged source. Latest consumed registry1280
+at `M7/core-fixtures-admission-20261007-v1/stage-attempt-registry.json`, SHA-256
+`be8825f743d647c2870ba980b4eb712c9227037984b338a38fe86aea8701a851`.
+
+Complete Core fixture original55315 is terminal0 and collected PASS at clean
+`84586238522772c7783ffc213b1ac5a5680c1734`. All107 cases passed on each
+supported pair, zero excluded/skipped/invalid, in137.253 seconds. Eight original
+stages joined and42 artifacts were verified. Collection
+`M7/core-fixtures-admission-20261007-v2/original-collection.json`, SHA-256
+`6ae1648720f24931d1bde34331924a503d741ab0ef5d569db11ec5670f345df5`;
+terminal `bcccc554e83ec9541ae56b0321031160b5abce7df35bb0057389dc150619ddbc`.
+The four tested files are integrated literally and the bounded T16 fixture row
+closes. Latest consumed registry1288 at
+`M7/core-fixtures-admission-20261007-v2/stage-attempt-registry.json`, SHA-256
+`a724d950a7b011c6a532eb91c411ab0b3f9f4492e869e1d56e8202fa037b3d6f`.
+Never repoll55315. Prior failures remain retained. No full integration PASS is
+claimed; conditional original T06/T10/T12 rows remain open.
+
+Parallel source-only T09 terminal payload implementation owns isolated
+`m7-question-terminal-payload` at base5eb, reusing accepted ADR0045 fields and
+existing standalone schemas. It cannot change terminal members, bounds or
+lifecycle, and cannot activate transports/generations. Actual Core producer
+conformance and independent Node vectors remain required. One added row tracks
+this concrete gap; T01–T19 added325 done/30 todo, originals unchanged80/93/6.
+
+One added T16 row closes for these corrections: T01–T19 original80 done/93 todo/
+6 retired; added325 done/30 todo. Workspace proof source is separately saved at
+clean isolated `a3f634117ac8ca8eaf22c4476a8bb21d60b2deb7` in
+`m7-workspace-restore`. Its single workflow file is independently reviewed and
+contains41 cases; no execution PASS is claimed. Original T15 item8 remains open.
+The immutable source preparation references are
+`M7/full-fast-workspace-preparation-20261007-v1/inventory.json`, SHA-256
+`1e5e48ed54b3db67fdb3744c880ba01c351a4018458e9163e5e9af72a9379768`, and
+`M7/workspace-format-preparation-20261007-v1/inventory.json`, SHA-256
+`46ddd296fdc9b82e8c499877dac10f404a3b1cf026443ebc322e9cf22b36ec49`.
+Core correction verification precedes this workspace unit. ADR0055 remains the
+sole asked pending approval;0056/0057/0058 remain Proposed and unactivated.
+
 Ordinary progress original14873 is collected PASS at
 `424e1da4ad13c0e4bc5362b51dc5031b1b515155`: all52 cases per supported pair,
 34 AppServer and18 Daemon, zero exclusions/skips/invalid,124.671 seconds.

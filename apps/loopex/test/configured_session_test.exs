@@ -98,12 +98,29 @@ defmodule Loopex.ConfiguredSessionTest do
       await_command_observation(attachment, "compact", {:committed, :admitted, :accepted, nil})
       assert {:accepted, "compact"} = Loopex.command(attachment, command)
 
+      malformed = %{
+        type: :prompt,
+        command_id: "malformed-fenced",
+        content: "never dispatch",
+        bounds: %{max_turns: 0, deadline_ms: -1, token_budget: 0}
+      }
+
+      assert {:error, :invalid_command} = Loopex.command(attachment, malformed)
+
+      refute Enum.any?(
+               Fixture.records(fixture, session),
+               &(&1.payload["command_id"] == malformed.command_id)
+             )
+
+      # Concept: valid input stays fenced while recovered compact admission is pending.
+      # Technical depth: an expired authored ceiling would refuse as deadline_elapsed
+      # if ordinary admission sampled a clock before the clock-free maintenance fence.
       assert {:error, :maintenance_active} =
                Loopex.command(attachment, %{
                  type: :prompt,
                  command_id: "fenced",
                  content: "never dispatch",
-                 bounds: %{max_turns: 0, deadline_ms: -1, token_budget: 0}
+                 bounds: %{max_turns: 1, deadline_ms: 1, token_budget: 1, deadline_at_ms: 1}
                })
 
       assert {:accepted, "compact-abort"} =

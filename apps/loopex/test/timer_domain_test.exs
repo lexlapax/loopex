@@ -357,14 +357,19 @@ defmodule Loopex.TimerDomainTest do
   test "a deadline outside the unsigned 64-bit domain is refused before it is committed" do
     fixture = start_runtime(script: [%{text: "never runs"}])
     {_session_id, attachment} = attached(fixture)
+    sessions_before = M1RuntimeTestStore.inspect_state(fixture.store).sessions
 
-    assert {:error, :invalid_declared_bounds} =
+    assert {:error, :invalid_command} =
              Loopex.command(attachment, %{
                type: :prompt,
                command_id: "p1",
                content: "do the work",
                bounds: %{max_turns: 8, token_budget: 1_000, deadline_ms: @uint64_max + 1}
              })
+
+    assert M1RuntimeTestStore.inspect_state(fixture.store).sessions == sessions_before
+    assert AgentLoopTestModel.dispatched(fixture.model) == []
+    assert TestExecutor.jobs(fixture.executor) == []
 
     assert {:ok, %{max_turns: 8, token_budget: 1_000, deadline_ms: @uint64_max}} =
              Loopex.Bounds.declare(%{

@@ -583,20 +583,30 @@ defmodule Loopex.ContextAdmissionTest do
   end
 
   test "command admission preflights every durable candidate and refuses an unrepresentable future terminal before work" do
-    fixture = start_fixture(context_token_budget: 8_192, script: [%{text: "held", hold: true}])
-    {session_id, attachment} = create_attached_session(fixture)
-
-    # One copy of this integer fits the command record; the two exact bound
-    # observations in its future terminal do not. The refusal must therefore be
-    # about the first future durable candidate, not content or configuration.
+    # Concept: future-terminal refusal remains independently reachable.
+    # Technical depth: inherit the large limit so only its effective value enters
+    # the prompt record. Authoring it also retains a second copy for command
+    # identity, which correctly refuses the prompt before future preflight.
     large_but_admissible_command_value = 1 <<< 320_000
+
+    fixture =
+      start_fixture(
+        context_token_budget: 8_192,
+        script: [%{text: "held", hold: true}],
+        bounds: %{
+          max_turns: large_but_admissible_command_value,
+          token_budget: 1_000,
+          deadline_ms: 60_000
+        }
+      )
+
+    {session_id, attachment} = create_attached_session(fixture)
 
     max_turns_command = %{
       type: :prompt,
       command_id: "future-terminal-too-large",
       content: "do not dispatch",
       bounds: %{
-        max_turns: large_but_admissible_command_value,
         token_budget: 1_000,
         deadline_ms: 60_000
       }
@@ -619,7 +629,8 @@ defmodule Loopex.ContextAdmissionTest do
              Loopex.command(attachment, %{
                type: :prompt,
                command_id: "admitted-after-refusal",
-               content: "hold an active run"
+               content: "hold an active run",
+               bounds: %{max_turns: 8, token_budget: 1_000, deadline_ms: 60_000}
              })
 
     assert_receive {:context_model_holding, model_worker}, 5_000
@@ -691,7 +702,13 @@ defmodule Loopex.ContextAdmissionTest do
 
     assert refusal.payload["dimension"] == "future_bound_record_bytes"
     assert refusal.payload["candidate"] == "max_turns_private_terminal"
-    assert Enum.all?(refusals, &(Enum.sort(Map.keys(&1.payload)) == command_refusal_keys()))
+
+    for {retained, type} <- Enum.zip(refusals, ["prompt", "steer", "follow_up"]) do
+      assert retained.payload["command_type"] == type
+      assert Enum.sort(Map.keys(retained.payload)) == command_refusal_keys(type)
+      if type != "steer", do: assert(retained.payload["command_revision"] == 2)
+    end
+
     refute Enum.any?(refusals, &Map.has_key?(&1.payload, "content"))
 
     refute Enum.any?(events(fixture, session_id), fn event ->
@@ -704,7 +721,17 @@ defmodule Loopex.ContextAdmissionTest do
 
     send(model_worker, :release)
 
-    token_fixture = start_fixture(context_token_budget: 8_192, script: [%{text: "unreachable"}])
+    token_fixture =
+      start_fixture(
+        context_token_budget: 8_192,
+        script: [%{text: "unreachable"}],
+        bounds: %{
+          max_turns: 8,
+          token_budget: large_but_admissible_command_value,
+          deadline_ms: 60_000
+        }
+      )
+
     {_token_session, token_attachment} = create_attached_session(token_fixture)
 
     assert {:error, token_refusal} =
@@ -714,7 +741,6 @@ defmodule Loopex.ContextAdmissionTest do
                content: "do not dispatch",
                bounds: %{
                  max_turns: 8,
-                 token_budget: large_but_admissible_command_value,
                  deadline_ms: 60_000
                }
              })
@@ -726,6 +752,60 @@ defmodule Loopex.ContextAdmissionTest do
 
     assert token_observed > @record_limit
     assert Loopex.ContextAdmissionTestModel.requests(token_fixture.model) == []
+
+    authored_fixture =
+      start_fixture(context_token_budget: 8_192, script: [%{text: "unreachable"}])
+
+    {authored_session, authored_attachment} = create_attached_session(authored_fixture)
+
+    for field <- [:max_turns, :token_budget] do
+      assert {:error,
+              {:command_admission_too_large, "command_record_bytes", "prompt_record", bytes,
+               @record_limit}} =
+               Loopex.command(authored_attachment, %{
+                 type: :prompt,
+                 command_id: "authored-#{field}-too-large",
+                 content: "do not dispatch",
+                 bounds:
+                   Map.put(
+                     %{max_turns: 8, token_budget: 1_000, deadline_ms: 60_000},
+                     field,
+                     large_but_admissible_command_value
+                   )
+               })
+
+      assert bytes > @record_limit
+      assert Loopex.ContextAdmissionTestModel.requests(authored_fixture.model) == []
+    end
+
+    authored_refusals =
+      Enum.filter(
+        records(authored_fixture, authored_session),
+        &kind?(&1, "command_admission_refused_v1")
+      )
+
+    assert length(authored_refusals) == 2
+
+    assert Enum.all?(authored_refusals, fn refusal ->
+             Enum.sort(Map.keys(refusal.payload)) == command_refusal_keys("prompt") and
+               refusal.payload["command_type"] == "prompt" and
+               refusal.payload["command_revision"] == 2
+           end)
+
+    assert Enum.all?(authored_refusals, fn refusal ->
+             refusal.payload["dimension"] == "command_record_bytes" and
+               refusal.payload["candidate"] == "prompt_record"
+           end)
+
+    assert {:ok, %{active_run_id: nil}} =
+             Loopex.session_status(authored_fixture.runtime, authored_session)
+
+    refute Enum.any?(events(authored_fixture, authored_session), fn event ->
+             event["command_id"] in [
+               "authored-max_turns-too-large",
+               "authored-token_budget-too-large"
+             ]
+           end)
 
     deadline_fixture = start_fixture(context_token_budget: 8_192, script: [%{text: "done"}])
     {deadline_session, deadline_attachment} = create_attached_session(deadline_fixture)
@@ -3055,7 +3135,8 @@ defmodule Loopex.ContextAdmissionTest do
         },
         policy: Loopex.ContextAdmissionTestPolicy,
         policy_identity: %{"id" => "loopex.test.policy", "revision" => "1"},
-        bounds: %{max_turns: 8, token_budget: 1_000, deadline_ms: 60_000},
+        bounds:
+          Keyword.get(options, :bounds, %{max_turns: 8, token_budget: 1_000, deadline_ms: 60_000}),
         project_manifest: Keyword.get(options, :project_manifest),
         project_decision: Keyword.get(options, :project_decision),
         resource_manifest: Keyword.get(options, :resource_manifest),
@@ -3207,7 +3288,10 @@ defmodule Loopex.ContextAdmissionTest do
     assert Map.get(snapshot, :active_run_phase) == phase
   end
 
-  defp command_refusal_keys do
+  defp command_refusal_keys(type) when type in ["prompt", "follow_up"],
+    do: Enum.sort(["command_revision" | command_refusal_keys("steer")])
+
+  defp command_refusal_keys("steer") do
     Enum.sort([
       :kind,
       "command_id",
