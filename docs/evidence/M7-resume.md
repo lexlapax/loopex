@@ -66,17 +66,28 @@ Both supported formatters then passed. Corrected candidate
 Bounds SHA-256 `4edc96ae9ceef6a1958d8369d5475463c7b8ba5a40b8582e023ffa31828d3e7b`.
 Its full148/pair proof is queued, with no PASS or task closure yet.
 
-Configure Mapping original85178 is now running at clean isolated candidate
-`dbef6d296fb5b3bf573432a82f788e6df86ad448`, output
-`M7/configure-mapping-admission-20261006-v1`. The independent source and wrapper
-reviews cleared corrected safe correlation and all46 cases. Root formatting
-completed in0.311 seconds. Formatted source hashes:
+Configure Mapping original85178 is collected PASS at
+`dbef6d296fb5b3bf573432a82f788e6df86ad448`: all46 cases on each supported pair,
+no exclusions/skips/invalid cases,92.703 seconds overall. Collection
+`M7/configure-mapping-admission-20261006-v1/original-collection.json`, SHA-256
+`761724899ea74195fb86d229554390baee5e489f31b76b77e558396e5066180f`,
+binds41 artifacts and eight original joins. Terminal SHA-256
+`84b92c1d5bcf30b726fb82e5d3ceb2529f8c7dc0bde72d8b386de0a35206e47a`;
+registry1035 keys, SHA-256
+`8f3ad39af64782474b4aba9d85e8a18ddb61232b4c20e5cff7dfe48367bea92f`.
+Never repoll85178. All three formatted source files are literally integrated:
 mapping `002102989a8f81e1dfcb059ae6edc816a5c475793ed4e1acbfb8a684e2ca0e4e`,
 configure tests `589bcaac97b6bdfc7e7de20b265dc6eedd4ac72eef342c9c3cc9bbce7a56bf33`,
 session mapping `6420b8b9c27e7e2a21e677f356e99a3238d82fd458278e479d4f72ce562d9f8d`.
-The immutable wrapper is retained at `M7/m7-configure-mapping-admission-20261006-v1.py`.
-Collect original85178 once before the next VM, formatter or integration. Seed
-its collected terminal registry for the queued corrected native candidate.
+The bounded added T05 Mapping row closes. Full negotiated generations, daemon
+configure, remote creation and the original T05 outcomes remain open.
+
+Root's next native CLI call mistakenly supplied a placeholder registry digest.
+Its pre-admission guard rejected before creating the output directory, registry
+mutation, engine import or VM. This is a metadata error, not a native test
+attempt or PASS. Resume with the exact1035-key registry/digest above.
+`M7/native-authored-bounds-20261006-v5` remains absent and available for the
+first actual admission at corrected sourcea01f4b4c. No product VM is active.
 
 Queued recovery exposed a production gap: terminal commitment promotes the
 follow-up but previously sent no advance_work. Only confirmed current-owner
@@ -112,8 +123,8 @@ its complete selection is configure14/session15/initialization17. Original40906 
  ADR0054 is the sole asked, unanswered
 question; the restore aggregate cutoff decision remains queued after it.
 
-Original T01–T19 remains80 done/93 todo/6 retired. Added is303 done/42 todo
-after adding the bounded accepted configure Mapping implementation row.
+Original T01–T19 remains80 done/93 todo/6 retired. Added is304 done/41 todo
+after completing the bounded accepted configure Mapping implementation row.
 No native bound row, remote configure row or milestone outcome closes here.
 
 Native originals1604 and67222 are terminal and collected FAIL. First1604 failed

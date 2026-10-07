@@ -43,7 +43,8 @@ defmodule Loopex.AppServer.Mapping do
     "artifact.close_transfer",
     "session.resume",
     "session.admit_resources",
-    "session.activate_skill"
+    "session.activate_skill",
+    "session.configure"
   ]
 
   # Concept: current configure decoding prepares authored input without serving a route.
@@ -308,6 +309,35 @@ defmodule Loopex.AppServer.Mapping do
 
   def call(%{"method" => "session.abort"} = request, context) do
     admit(request, context, :abort, [])
+  end
+
+  # Concept: authored configure input uses the ordinary mutation admission path.
+  # Technical depth: current negotiation still excludes this method. An admitted
+  # caller supplies no prepared host facts; Core resolves the captured changes
+  # after its own authority, duplicate and settledness checks, and joins cleanup
+  # before the existing admission/refusal/unknown renderer returns a reply.
+  # Decode refusals correlate only with an admitted ASCII request identity.
+  def call(%{"method" => "session.configure"} = request, context) do
+    with :ok <- attached(context),
+         {:ok, prepared} <- prepare_configuration_request(request) do
+      admit(request, context, :configure, [], changes: prepared.changes)
+    else
+      {:error, :invalid_request} ->
+        request_id =
+          case Map.get(request, "request_id") do
+            id when is_binary(id) and byte_size(id) in 1..64 ->
+              if Regex.match?(~r/\A[A-Za-z0-9._~-]+\z/, id), do: id, else: nil
+
+            _ ->
+              nil
+          end
+
+        safe_request = Map.put(request, "request_id", request_id)
+        {:error, error(safe_request, "invalid_request", :invalid_field)}
+
+      {:error, refusal} ->
+        {:error, refusal}
+    end
   end
 
   def call(_request, _context), do: :unsupported

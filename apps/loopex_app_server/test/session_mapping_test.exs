@@ -60,8 +60,22 @@ defmodule Loopex.AppServer.SessionMappingTest do
                Loopex.AppServer.Mapping.capture_configuration_changes(invalid)
     end
 
-    refute Loopex.AppServer.Mapping.implemented?("session.configure")
-    assert :unsupported = Loopex.AppServer.Mapping.call(%{"method" => "session.configure"}, %{})
+    assert Loopex.AppServer.Mapping.implemented?("session.configure")
+
+    assert {:ok, _initialized, connection} =
+             Connection.initialize(Connection.new(), %{
+               "request_id" => "configure-generation",
+               "generations" => [LoopexProtocol.Session.generation()],
+               "capabilities" => []
+             })
+
+    assert {:error, refusal, ^connection} =
+             Connection.dispatch(connection, %{
+               "method" => "session.configure",
+               "request_id" => "configure"
+             })
+
+    assert refusal["code"] == "unsupported_method"
   end
 
   test "a session created over the wire is the session the facade would have created" do

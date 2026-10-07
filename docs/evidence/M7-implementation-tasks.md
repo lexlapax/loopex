@@ -1,20 +1,14 @@
 # M7 Implementation Tasks
 
-The reboot resume collected configure original17193 PASS: all22 cases passed
-on each supported pair, in89.185 seconds overall. The exact configure-ingress
-source is integrated from `15280560c380433425e0a677daef83f1f0558155`.
-This proves actual mapping-to-native admission, replay identity, privacy and
-negative authority cases; served configure and full generation activation stay
-open. Native original72635 then passed146/148 current cases, fixing all six earlier
-failures; floor was unrun. Queued recovery observation and successful maintenance
-construction remain under causal investigation within the same unit, preserving
-all existing bounds and148 cases. Original40906 then passed current148, but
-floor formatting stopped the paired proof. The common layout correction is
-committed at a01f4b4c; its paired proof follows active configure original85178
-at dbef6d29, requiring all46 cases per pair. Neither implementation row closes yet.
-ADR0054 remains the sole asked pending decision. Original T01–T19 remains
-80 done/93 todo/6 retired; added303 done/42 todo. Exact original collection,
-source and registry identities are in the [restart checkpoint](M7-resume.md#technical-depth).
+The restart checkpoint integrates accepted foreground configure Mapping from
+`dbef6d296fb5b3bf573432a82f788e6df86ad448`. Original85178 passed all46 cases on
+each supported pair in92.703 seconds, with original joins and output retained.
+The bounded added T05 Mapping row is complete; current negotiated connections
+still refuse configure until complete generation activation. Original T01–T19
+remains80 done/93 todo/6 retired; added304 done/41 todo. Native bounds are saved
+as a reviewed implementation candidate, with complete paired proof still pending.
+Exact candidates, results and restart order are in the
+[restart checkpoint](M7-resume.md#technical-depth).
 
 The entries below record earlier revisions and failed attempts.
 
@@ -13249,7 +13243,7 @@ or check was relaxed.
 
 - [ ] Finish accepted ADR0052 native answer provenance, exact policy cursor/replay relations and shared Elixir/Node payload projection in both transports; prove focused current/floor and independent vectors after rejoin, complete negotiated manifests and real answered-command workflows.
 - [ ] Pin and implement the exact configure request and versioned remote creation-option grammars through governed decisions; preserve authored aliases, central preparation, host-only bindings, current command replay and both transport authority gates.
-- [ ] Implement accepted foreground configure Mapping admission through the existing attachment and native command owners; prove complete mapping/initialization files, safe malformed correlation, authored retry identity, all three Store uncertainty phases and joined preparation on both supported pairs. Preserve the current Connection generation refusal until complete manifest activation.
+- [x] Implement accepted foreground configure Mapping admission through the existing attachment and native command owners; prove complete mapping/initialization files, safe malformed correlation, authored retry identity, all three Store uncertainty phases and joined preparation on both supported pairs. Preserve the current Connection generation refusal until complete manifest activation.
 - [x] Prove the accepted standalone configure `changes` grammar, exact schema and371 literal vectors through shared Elixir and independent Node codecs plus both transport preparation wrappers on both supported pairs. Keep live configure routing, remote creation and whole-generation activation separate.
 - [ ] Pin and implement the closed transient compaction-progress payload and its actual owned emission/loss/succession behavior; exclude summaries and private captures and prove both transports/clients before complete generation activation.
 

@@ -6,6 +6,7 @@ defmodule Loopex.AppServer.ConfigureIngressTest do
   use ExUnit.Case, async: true
 
   alias Loopex.AppServer.Mapping, as: Adapter
+  alias Loopex.AppServer.Connection
   alias Loopex.AgentLoopFixture, as: Fixture
   alias LoopexProtocol.{Frame, Session.ConfigureRequest}
 
@@ -24,9 +25,12 @@ defmodule Loopex.AppServer.ConfigureIngressTest do
 
     @impl true
     def prepare_configuration(current, authored, definitions, _context, options) do
+      worker = self()
+
       canonical =
         Agent.get_and_update(Keyword.fetch!(options, :controller), fn state ->
-          {state.canonical, %{state | calls: state.calls + 1}}
+          {state.canonical,
+           Map.put(%{state | calls: state.calls + 1}, :preparation_worker, worker)}
         end)
 
       Loopex.ModelPreparationConformance.candidate(current, authored, definitions, canonical)
@@ -113,8 +117,311 @@ defmodule Loopex.AppServer.ConfigureIngressTest do
       assert Frame.decode(vector["json"], 2_097_152) == {:error, :duplicate_member}
     end
 
-    refute Adapter.implemented?("session.configure")
-    assert :unsupported = Adapter.call(%{"method" => "session.configure"}, %{})
+    assert Adapter.implemented?("session.configure")
+    refute "session.configure" in LoopexProtocol.Session.methods()
+
+    assert {:error, %{"code" => "not_attached"}} =
+             Adapter.call(%{"method" => "session.configure"}, %{})
+  end
+
+  test "configure mapping retains native parity while rendering only correlated admission" do
+    mapped = native_fixture()
+    native = native_fixture()
+    request = native_request()
+    context = %{runtime: mapped.runtime, attachment: mapped.attachment}
+    assert {:ok, prepared} = Adapter.prepare_configuration_request(request)
+    assert {:ok, reply} = Adapter.call(request, context)
+
+    assert reply == %{
+             "type" => "admission",
+             "method" => "session.configure",
+             "request_id" => "configure",
+             "command_id" => request["command_id"],
+             "status" => "accepted",
+             "reason" => nil
+           }
+
+    refute Process.alive?(Agent.get(mapped.controller, & &1.preparation_worker))
+
+    assert {:accepted, accepted_id} =
+             Loopex.command(native.attachment, %{
+               type: :configure,
+               command_id: prepared.command_id,
+               changes: prepared.changes
+             })
+
+    assert accepted_id == <<0, 255, 1, 128>>
+    assert [mapped_record] = configuration_records(mapped)
+    assert [native_record] = configuration_records(native)
+    assert mapped_record.payload == native_record.payload
+    assert [mapped_event] = Fixture.events(mapped, mapped.session)
+    assert [native_event] = Fixture.events(native, native.session)
+    assert Map.drop(mapped_event, [:event_id]) == Map.drop(native_event, [:event_id])
+    assert {:ok, status} = Loopex.session_status(mapped.runtime, mapped.session)
+    assert status.configuration == mapped_event["configuration"]
+    public = :erlang.term_to_binary({reply, status.configuration, mapped_event})
+
+    for private <- [
+          "INGRESS_PRIVATE_INSTRUCTIONS",
+          "INGRESS_HOST_OPTION",
+          "provider_mapping",
+          "model_capabilities"
+        ] do
+      refute public =~ private
+    end
+
+    assert Loopex.AgentLoopTestModel.dispatched(mapped.model) == []
+    assert Loopex.AgentLoopTestExecutor.jobs(mapped.executor) == []
+
+    before_records = Fixture.records(mapped, mapped.session)
+    before_events = Fixture.events(mapped, mapped.session)
+    Agent.update(mapped.controller, &%{&1 | canonical: "scripted:v2"})
+    retry = %{request | "request_id" => "retry"}
+    assert {:ok, retried} = Adapter.call(retry, context)
+    assert retried == %{reply | "request_id" => "retry"}
+    conflict = put_in(request, ["changes", "model"], "scripted:v1")
+    assert {:ok, refused} = Adapter.call(conflict, context)
+    assert refused == %{reply | "status" => "refused", "reason" => "idempotency_conflict"}
+    assert Fixture.records(mapped, mapped.session) == before_records
+    assert Fixture.events(mapped, mapped.session) == before_events
+    assert Agent.get(mapped.controller, & &1.calls) == 1
+  end
+
+  test "configure mapping preserves attachment and closed-input refusals before native work" do
+    fixture = native_fixture()
+    request = native_request()
+    context = %{runtime: fixture.runtime, attachment: fixture.attachment}
+    before_records = Fixture.records(fixture, fixture.session)
+
+    assert {:error, %{"code" => "not_attached"}} =
+             Adapter.call(request, %{runtime: fixture.runtime})
+
+    stale = %{context | attachment: %{fixture.attachment | incarnation_id: "stale-incarnation"}}
+    assert {:ok, stale_reply} = Adapter.call(request, stale)
+    assert stale_reply["status"] == "refused"
+    assert stale_reply["reason"] == "session_unavailable"
+    assert stale_reply["command_id"] == request["command_id"]
+
+    for invalid <- [
+          Map.put(request, "session_id", "unadmitted-session"),
+          put_in(request, ["changes", "instructions", "digest"], String.duplicate("a", 64)),
+          put_in(request, ["changes", "model_capabilities"], %{}),
+          put_in(request, ["changes", "max_tokens"], 512)
+        ] do
+      assert {:error, refusal} = Adapter.call(invalid, context)
+      assert refusal["type"] == "error"
+      assert refusal["code"] == "invalid_request"
+      assert refusal["request_id"] == request["request_id"]
+      refute Map.has_key?(refusal, "status")
+    end
+
+    for request_id <- [
+          "bad id",
+          "bad/id",
+          "12345678901234567890123456789012345678901234567890123456789012345",
+          17,
+          %{"private" => "INGRESS_REJECTED_ID_CANARY"},
+          nil,
+          <<255>>
+        ] do
+      assert {:error, refusal} = Adapter.call(%{request | "request_id" => request_id}, context)
+
+      assert refusal == %{
+               "type" => "error",
+               "code" => "invalid_request",
+               "message" => "a field is missing or not in its wire representation",
+               "request_id" => nil
+             }
+
+      refute :erlang.term_to_binary(refusal) =~ "INGRESS_REJECTED_ID_CANARY"
+    end
+
+    assert Fixture.records(fixture, fixture.session) == before_records
+    assert Fixture.events(fixture, fixture.session) == []
+    assert Agent.get(fixture.controller, & &1.calls) == 0
+  end
+
+  test "current connection negotiation refuses implemented configure before any callback or durable work" do
+    fixture = native_fixture()
+    request = native_request()
+    before_records = Fixture.records(fixture, fixture.session)
+    fresh = Connection.new(runtime: fixture.runtime)
+    assert {:error, early, ^fresh} = Connection.dispatch(fresh, request)
+    assert early["code"] == "not_initialized"
+
+    assert {:ok, initialized, connection} =
+             Connection.initialize(fresh, %{
+               "request_id" => "initialize",
+               "generations" => [LoopexProtocol.Session.generation()],
+               "capabilities" => []
+             })
+
+    assert initialized["selected_generation"] == "loopex.experimental/1"
+    assert initialized["exact_schema_sha256"] == LoopexProtocol.Session.schema_digest()
+    assert initialized["supported_methods"] == LoopexProtocol.Session.methods()
+    refute "session.configure" in initialized["supported_methods"]
+    attached = Connection.attach(connection, fixture.attachment)
+    assert {:error, refusal, ^attached} = Connection.dispatch(attached, request)
+    assert refusal["code"] == "unsupported_method"
+    assert refusal["request_id"] == request["request_id"]
+    refute Map.has_key?(refusal, "status")
+    assert Fixture.records(fixture, fixture.session) == before_records
+    assert Fixture.events(fixture, fixture.session) == []
+    assert Agent.get(fixture.controller, & &1.calls) == 0
+    assert Loopex.AgentLoopTestModel.dispatched(fixture.model) == []
+    assert Loopex.AgentLoopTestExecutor.jobs(fixture.executor) == []
+  end
+
+  test "configure mapping renders settledness refusal while the actual model run is active" do
+    fixture = native_fixture([%{hold: self(), text: "done", calls: []}])
+    request = native_request()
+    context = %{runtime: fixture.runtime, attachment: fixture.attachment}
+
+    assert {:accepted, "held-prompt"} =
+             Loopex.command(fixture.attachment, %{
+               type: :prompt,
+               command_id: "held-prompt",
+               content: "hold"
+             })
+
+    assert_receive {:holding, worker}, 1_000
+    monitor = Process.monitor(worker)
+    assert {:ok, reply} = Adapter.call(request, context)
+
+    assert reply == %{
+             "type" => "admission",
+             "method" => "session.configure",
+             "request_id" => request["request_id"],
+             "command_id" => request["command_id"],
+             "status" => "refused",
+             "reason" => "configuration_not_settled"
+           }
+
+    assert [refusal] = configuration_records(fixture)
+    assert refusal.payload["admission"] == "rejected_configuration_not_settled"
+    assert refusal.payload["configuration"] == nil
+    assert Agent.get(fixture.controller, & &1.calls) == 0
+    refute Enum.any?(Fixture.events(fixture, fixture.session), &(&1.kind == "session.configured"))
+    send(worker, :release)
+    assert_receive {:DOWN, ^monitor, :process, ^worker, _reason}, 5_000
+    cutoff = System.monotonic_time(:millisecond) + 5_000
+
+    terminal =
+      Enum.find(completed_events(fixture.attachment, cutoff), &(&1.kind == "run.finished"))
+
+    assert terminal["outcome"] == "completed"
+    assert {:ok, status} = Loopex.session_status(fixture.runtime, fixture.session)
+    assert status.configuration["configuration_version"] == 1
+  end
+
+  for phase <- [
+        :before_linearization,
+        :after_linearization_before_result,
+        :recovery_representation
+      ] do
+    @configuration_phase phase
+    test "configure mapping retains the original proposal through #{@configuration_phase} uncertainty" do
+      fixture = native_fixture()
+      request = native_request()
+      context = %{runtime: fixture.runtime, attachment: fixture.attachment}
+      kind = "session_configuration_admitted_v2"
+
+      assert :ok =
+               Loopex.M1RuntimeTestStore.hold_next_record_before_linearization(
+                 fixture.store,
+                 kind,
+                 self()
+               )
+
+      observer = self()
+
+      {caller, monitor} =
+        spawn_monitor(fn ->
+          send(observer, {:mapped_configure, self(), Adapter.call(request, context)})
+        end)
+
+      on_exit(fn ->
+        cleanup_monitor = Process.monitor(caller)
+        if Process.alive?(caller), do: Process.exit(caller, :kill)
+        assert_receive {:DOWN, ^cleanup_monitor, :process, ^caller, _reason}, 1_000
+      end)
+
+      assert_receive {:record_held_before_linearization, waiter, store, ^kind, transaction}, 5_000
+      waiter_monitor = Process.monitor(waiter)
+
+      on_exit(fn ->
+        cleanup_monitor = Process.monitor(waiter)
+        if Process.alive?(waiter), do: Process.exit(waiter, :kill)
+        assert_receive {:DOWN, ^cleanup_monitor, :process, ^waiter, _reason}, 1_000
+      end)
+
+      assert store == fixture.store
+      assert Agent.get(fixture.controller, & &1.calls) == 1
+      refute Process.alive?(Agent.get(fixture.controller, & &1.preparation_worker))
+      Agent.update(fixture.controller, &%{&1 | canonical: "scripted:v2"})
+
+      assert :ok =
+               Loopex.M1RuntimeTestStore.inject(
+                 store,
+                 {:session_journal_commit, @configuration_phase}
+               )
+
+      Loopex.M1RuntimeTestStore.release(waiter)
+      assert_receive {:DOWN, ^waiter_monitor, :process, ^waiter, :normal}, 1_000
+      assert_receive {:mapped_configure, ^caller, result}, 5_000
+      assert {:error, unknown} = result
+      assert_receive {:DOWN, ^monitor, :process, ^caller, :normal}, 1_000
+
+      assert unknown == %{
+               "type" => "error",
+               "code" => "admission_unknown",
+               "request_id" => request["request_id"],
+               "message" => "the outcome of this command is not yet known"
+             }
+
+      refute Map.has_key?(unknown, "status")
+      cutoff = System.monotonic_time(:millisecond) + 5_000
+      await_configuration_disposition(fixture.attachment, <<0, 255, 1, 128>>, cutoff)
+      assert {:ok, retry} = Adapter.call(%{request | "request_id" => "retry"}, context)
+      assert retry["status"] == "accepted"
+      assert retry["command_id"] == request["command_id"]
+      assert retry["request_id"] == "retry"
+      assert [retained] = configuration_records(fixture)
+      assert retained.payload == hd(transaction.records)
+      assert retained.payload["configuration"]["model"] == "scripted:v1"
+      assert [event] = Fixture.events(fixture, fixture.session)
+      assert event.kind == "session.configured"
+      assert event["configuration"]["model"] == "scripted:v1"
+      assert Agent.get(fixture.controller, & &1.calls) == 1
+
+      assert {:session_journal_commit, @configuration_phase} in Loopex.M1RuntimeTestStore.observed(
+               store
+             )
+
+      assert Loopex.AgentLoopTestModel.dispatched(fixture.model) == []
+      assert Loopex.AgentLoopTestExecutor.jobs(fixture.executor) == []
+      public = :erlang.term_to_binary({unknown, retry, event})
+
+      for private <- [
+            "INGRESS_PRIVATE_INSTRUCTIONS",
+            "INGRESS_HOST_OPTION",
+            "provider_mapping",
+            "model_capabilities"
+          ] do
+        refute public =~ private
+      end
+    end
+  end
+
+  defp await_configuration_disposition(attachment, command_id, cutoff) do
+    assert System.monotonic_time(:millisecond) < cutoff
+    actual = Loopex.command_disposition(attachment, command_id)
+    assert System.monotonic_time(:millisecond) <= cutoff, inspect(actual)
+
+    unless actual == {:ok, {:committed, :admitted, :accepted, nil}} do
+      Process.sleep(min(10, max(cutoff - System.monotonic_time(:millisecond), 0)))
+      await_configuration_disposition(attachment, command_id, cutoff)
+    end
   end
 
   # Concept: captured wire changes admit the same durable command as native input.
