@@ -540,10 +540,13 @@ question under
 [ADR 0024](../adr/0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept):
 the coordinator commits the question as durable session state, suspends the
 tool call without minting a grant or committing an effect intent, and calls the
-same host callback again once an answer commits. There is one callback and one
-arity, so a host returns `{:defer, request}` from the same `decide/1`, and a
-defer outside the admitted question family is `policy_unavailable` rather than
-a malformed interaction. This is what lets an operator answer a policy question
+same selected host callback again once an answer commits. A bare policy module
+uses `decide/1`; an explicit contextual policy reference uses its required
+`decide/2`, with no fallback. Both accept the same bounded allow, deny and defer
+results. The private callback context stays outside durable and public data;
+see [policy selection at startup](runtime-and-embedding.md#technical-embedding-options).
+A defer outside the admitted question family is `policy_unavailable` rather
+than a malformed interaction. This is what lets an operator answer a policy question
 from outside the runtime and after a restart.
 
 The lifecycle, the admitted question family and its bounds, the answer command,

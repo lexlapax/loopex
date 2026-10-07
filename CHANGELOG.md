@@ -22,7 +22,18 @@ courtesy — see [AGENTS.md](AGENTS.md) § Milestones and Checks and the
 
 ## [Unreleased]
 
-No changes since 0.3.0.
+Add native conversational `loopex chat` with an explicit configuration file,
+retained settings on resume, settled configuration changes, context compaction
+and durable model questions. The operator runbook describes
+[chat input and wait barriers](docs/operator/coding-sessions.md#operator-sessions-chat-input)
+and [configuration and compaction](docs/operator/coding-sessions.md#operator-sessions-chat-settings).
+Embedding hosts can provide a
+[one-shot question responder](docs/developer/runtime-and-embedding.md#technical-embedding-question-responder).
+
+M7 remains in progress. Helper execution, authored creation custody, complete
+progress delivery, coordinated remote generation serving and its remaining
+verification are unfinished. This entry records current source behavior, not a source release or
+milestone closure.
 
 ## [0.3.0] — 2026-09-29
 

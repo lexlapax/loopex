@@ -46,18 +46,23 @@ completed77976 or38906, and never rerun their unchanged selected sources.
 This closes only the selected physical receipt row: original 81/92/6,
 added 343 done / 23 todo. Complete history, authority and restore stay separate.
 
-Operator guidance is clean committed `d103ffd3ade86f639ecec49f7a741dcfab5aa5fe`,
-tree `f71bf2459786583f32ac0155235972c0987dd8e6`, in its existing isolated worktree.
-Six-file source and recipe reviews passed. Actual canonical documentation check
-is LIVE as original18190; collect that original handle before the next registry
-consumer. Output `M7/operator-guidance-docs-20261007-v1` under the external evidence
-root; wrapper `d9595aae0b025bcfa28c78428c50b9289b10c83df29fa91911396089b5d6d31a`.
-A preflight refusal at immutable-review mode occurred before any native stage or
-reservation. Exact unchanged review bytes were frozen 0444; refusal/correction
-record SHA-256 `47005ba83be1caea4d40fca7323b6f1125025786aac7ef3d199360662d2b23d2`.
-Do not claim a documentation PASS before original18190 finishes and is collected.
-Latest fully collected registry is receipt1567, SHA-256
-`3062eae64844318211e8fdcd7a2d1aa064d2a282abb0948d67e2bacef862d4dc`.
+Operator guidance is proved at clean isolated
+`d103ffd3ade86f639ecec49f7a741dcfab5aa5fe`, tree
+`f71bf2459786583f32ac0155235972c0987dd8e6`, and integrated literally into `m7`.
+Original18190 exited zero: all four canonical current-pair documentation steps,
+70.463-second check, 72.831-second wrapper, two original joins and 18 artifacts.
+Output `M7/operator-guidance-docs-20261007-v1` under the external evidence root.
+Collection SHA-256 `22d08e834cf9f34523a43c4d15d1544428975576b538ccd8cf58a637cd7b53d0`;
+terminal `4b99b9b5efde37b8e2cf3cc5a000a3bd2ebe0b67b8420eb53d85a12d75561818`;
+wrapper `d9595aae0b025bcfa28c78428c50b9289b10c83df29fa91911396089b5d6d31a`.
+The immutable-review-mode preflight refusal occurred before any native stage or
+reservation. Exact unchanged bytes were frozen 0444; refusal/correction record
+SHA-256 `47005ba83be1caea4d40fca7323b6f1125025786aac7ef3d199360662d2b23d2`.
+Never repoll completed18190 or rerun its unchanged documentation candidate.
+Latest fully collected registry is docs1569, SHA-256
+`c8a408eee40503c8164dddad5145aec2dd56372f683afe9208a4a63d1627b55a`.
+The bounded native-guide row closes: original 81 done / 92 todo / 6 retired,
+added 344 done / 22 todo. No example/provider execution or M7 closure is claimed.
 
 Reviewed V2 source/recipes have immutable external copies:
 `M7/receipt-and-operator-context-20261007-v2/retention.json`, SHA-256

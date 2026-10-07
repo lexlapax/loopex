@@ -33,7 +33,8 @@ Constraints:
 - The command is a peer surface over the embedded runtime. It owns no loop, no
   durable session truth and no authority decision; everything it does is also
   reachable through the embedded API.
-- `--policy` is required wherever tools can run. There is no default.
+- `run` and `resume` require `--policy` wherever tools can run. Chat requires
+  the explicit policy in its selected profile. There is no permissive default.
 - One `loopex` process, or one daemon, owns a state root at a time.
 - It is built from source and is experimental; see
   [compatibility surfaces](../developer/compatibility-surfaces.md#concept).
@@ -54,11 +55,43 @@ call. File-derived tracing settings may be inspected without starting tracing.
 Inspection shows paths and model identities, with credential-reference names
 and instruction contents withheld. A credential-free route remains valid for
 inspection and is identified as unavailable to chat. A successful inspection
-validates configuration; it does not create a retained helper binding or start
-the conversational command, whose M7 integration remains in progress.
+validates configuration; it does not create a retained helper binding or prove
+a runtime or provider workflow. Start the native conversational command with
+the selected file as described below. Helper execution and complete progress
+delivery remain unfinished.
 
 Technical depth:
 [Inspection commands, file example and report](#technical-sessions-configuration-inspection).
+
+<a id="operator-sessions-chat"></a>
+## Chat from an explicit profile
+
+Save the [profile example](#technical-sessions-configuration-inspection),
+create its workspace directory yourself, and set the provider environment
+variable it names. Then use the built launcher:
+
+```text
+loopex config validate --config profile.json --no-helpers
+loopex chat --config profile.json --no-helpers
+```
+
+The example's `refuse-all` policy allows no tool effects. Select a different
+existing host policy deliberately when the task needs them. Nonempty chat tool
+profiles include the model-question tool, but policy still decides whether a
+question may open. `--no-helpers` keeps this example on the implemented ordinary
+chat path; saved-role inspection does not prove live helper execution.
+
+Chat requires the file's authored `max_turns`, `deadline_ms` and `token_budget`,
+even if flags override them. It selects credentials through the file's explicit
+provider environment references, rather than the `run` command's single key
+variable. It attempts a redacted startup settings report with setting origins.
+The report withholds credential names and values and instruction contents;
+its loss is not a session outcome.
+
+Keep the configuration path explicit. A file edit supplies defaults for a new
+session; it does not silently reconfigure a retained session. Use
+[chat resume](#operator-sessions-chat-resume) for existing sessions and
+[settled settings](#operator-sessions-chat-settings) to change mutable values.
 
 <a id="operator-sessions-running"></a>
 ## Running a Task
@@ -140,6 +173,114 @@ an executor starts. A steer that arrives too late is not lost and is not turned
 into a follow-up: it commits as unapplied with a reason, and a steer is recorded
 as applied only where a committed request actually carried it. The terminal
 shows each steer's disposition as `  · steer <command>: <disposition>`.
+
+<a id="operator-sessions-chat-input"></a>
+## Chat input and wait barriers
+
+At a settled chat prompt, enter a nonempty line to start the next run. During
+active work, use an explicit action; another plain prompt refuses locally.
+
+| Input | Action |
+| --- | --- |
+| `/steer TEXT` | Offer steering to the active run under its existing admission rules |
+| `/follow-up TEXT` | Queue a later run |
+| `/status` | Read committed settings, bounds, pending question and configured/active summarizer |
+| `/wait` | Stop reading input until earlier admitted work settles, needs an answer or becomes uncertain |
+| `/answer ID --choice ID` | Submit one offered choice for the exact pending question |
+| `/answer ID --text JSON_STRING` | Submit nonempty text for a model text question |
+| `/decline ID` | Decline a model question explicitly |
+| `/configure JSON` | Request a complete validated settings update while settled |
+| `/compact` | Request bounded compaction while settled |
+| `/abort` | Abort active work and wait for its cleanup result |
+| `/quit`, EOF | Abort active foreground work, clean up and exit with the observed result |
+| `//TEXT` | Submit literal prompt text beginning `/TEXT` while settled |
+
+Copy the pending interaction ID and one offered choice ID from the displayed
+question. Policy questions accept choices only. A model text answer uses JSON
+quoting, for example `/answer ID --text "Keep the existing filename."`.
+Text must be valid UTF-8, nonempty and at most 8,192 bytes. Choice identities
+stay stable for that question. Copy chat's displayed encoded interaction and
+choice IDs unchanged; do not build an ID from a choice's position. Answer
+admission is not permission
+for a later tool effect. A policy answer can remain visible as answered while
+its policy reevaluation is still owed; do not send a second answer.
+
+For a static pipe with no question, terminate every line and place a wait
+barrier after each prompt:
+
+```bash
+printf '%s\n' 'Explain the proposed change.' '/wait' \
+  'List the remaining risks.' '/wait' '/quit' |
+  loopex chat --config profile.json --no-helpers
+```
+
+`/wait` can return at a pending question or at recovery/cleanup uncertainty.
+It never answers, retries or extends a deadline. A program that answers questions
+must use bidirectional pipes: read the actual question ID, send the response for
+that ID, then wait. A prewritten answer for an expected future question has no
+valid identity.
+
+Pipe output includes host observations prefixed `@loopex `, followed by JSON.
+An `input` record reports admission or refusal; `question` identifies the
+pending interaction; `wait` reports settled, question or uncertain state;
+`status` reads settings; `closing` reports exit and cleanup. These lines do not
+replace committed events or receipts. A previous successful run does not make
+exit successful after a later failure or unknown cleanup. Read the closing
+record and process exit together.
+
+Input accepts LF or CRLF terminators and at most 65,536 bytes before the
+terminator. Bare CR, NUL, invalid UTF-8 and an unterminated final fragment refuse.
+Input lines are not shell commands. Use the launcher for Ctrl-C; a second
+interrupt ends waiting with cleanup explicitly unknown.
+
+<a id="operator-sessions-chat-settings"></a>
+## Settled settings and compaction
+
+Wait for work to settle before changing settings. For example:
+
+```text
+/wait
+/configure {"reasoning":"none","max_tokens":1024}
+/status
+```
+
+The complete update must fit the selected model and context limits. Refusal
+leaves committed settings unchanged. The six mutable fields are `model`,
+`reasoning`, captured `instructions`, `max_tokens`, `context_token_budget` and
+`system_class_tokens`. Instruction updates use the exact
+[host instruction envelope](../adr/0042-host-composed-instructions-technical.md#technical-depth),
+not a filename or raw prompt string. Tool selection and cleanup grace require
+a new session; credentials and maintenance selection are not `/configure`
+fields.
+
+To enable compaction, add `"maintenance":{"model":"provider:model"}` to the
+profile using a supported model and configured provider route, or select it
+with `--compaction-model provider:model` when starting chat. There is no
+conversation-model fallback. Missing maintenance configuration leaves ordinary
+work available but refuses compaction. `/status` distinguishes the configured
+summarizer from an admitted active episode, which keeps its captured selection.
+
+When settled, enter `/compact` and then `/wait`. Chat displays its exact command
+maxima of four attempts, 60,000 ms and 32,768 tokens before admission. Explicit
+compaction creates no synthetic run. Read the committed compact completion and
+`maintenance.last_compact` in chat status; command admission alone is not a
+completion. An active run's automatic context preparation spends that run's
+remaining turn, token and deadline allowances instead.
+
+A useful committed checkpoint survives later failure. Checkpoints replace
+eligible context groups without changing original receipts or tool authority.
+If preparation cannot shrink or render the context, follow its named refusal:
+use settled compaction, change permitted settings, or start a new run with
+adequate bounds. The 1,024-token maintenance reply reserve must fit before a
+summary request can dispatch.
+
+Native compaction activity is a best-effort notice after a summary attempt
+receives permission. It has no percentage or closing notice. Foreground activity
+delivery remains unfinished, so silence says nothing about completion; durable
+status and completion events decide it.
+
+Technical depth:
+[Native configure, compact and completion reads](../developer/runtime-and-embedding.md#technical-embedding-configure-compaction).
 
 <a id="operator-sessions-stopping"></a>
 ## Stopping a Task, and What Stopping Promises
@@ -274,6 +415,34 @@ A tool the dead process had started is never run again to find out what it did.
 `resume` settles it from the receipt the executor kept: where one was retained
 the run continues with that result, and where none was the run ends
 `outcome_unknown` with a reconciliation reference.
+
+<a id="operator-sessions-chat-resume"></a>
+### Resume chat with retained settings
+
+```text
+loopex chat --config profile.json --resume SESSION --no-helpers
+```
+
+Use the same physical workspace directory that the chat session captured.
+An explicit `--workspace` cannot adopt an unbound session or a different
+physical directory. Keep configured provider routes for every admitted model,
+and the same policy identity and revision if a pending or answered policy
+question still needs reevaluation. Preparation refuses a mismatch and abandons
+the prepared owner before activation.
+
+File edits are new-session defaults. Resume uses retained ordinary model,
+reasoning, instructions, reply/context/system ceilings and immutable tool
+selection. Conflicting startup overrides refuse; change mutable settings with
+settled `/configure`. Omitted or matching cleanup grace preserves the retained
+value; changing it requires a new session. The helper-disabled example applies
+to a session created without helpers, not a way to remove a retained helper
+selection.
+
+New-run bounds come from the validated invocation; in-flight bounds remain
+committed. `--compaction-model` selects future episodes, including on resume,
+but cannot redirect an episode already admitted. The
+[prepared resume reference](../developer/runtime-and-embedding.md#technical-embedding-recovery)
+explains retained startup facts and activation fences.
 
 <a id="operator-sessions-project-trust"></a>
 ## Project Resources Are Your Decision
@@ -441,6 +610,7 @@ catalog file, allowance ledger, provider work or parent binding.
 ### Commands
 
 ```text
+loopex chat --config FILE [--resume SESSION] [--no-helpers]
 loopex run --policy <name> [--state-root DIR] [--workspace DIR]
            [--cleanup-grace-ms MS] [--context-token-budget TOKENS]
            [--skill NAME]... [--skill-resource NAME:LABEL]... "<prompt>"
@@ -465,6 +635,7 @@ flags, and any other flag is refused by name rather than ignored:
 
 | Subcommand | Flags |
 | --- | --- |
+| `chat` | `--config`, `--resume`, `--workspace`, `--state-root`, `--model`, `--reasoning`, `--compaction-model`, `--max-steps`, `--deadline-ms`, `--token-budget`, `--max-tokens`, `--context-token-budget`, `--system-class-tokens`, `--cleanup-grace-ms`, `--system-prompt-file`, `--append-system-prompt-file`, `--tools`, repeatable `--skill-dir`, `--policy`, `--output`, `--no-helpers`, `--trace`, `--no-trace`, `--trace-level`, repeatable `--trace-module`, `--trace-max-entry-bytes`, `--trace-max-entries-per-second`, `--trace-max-queue-entries` |
 | `run` | `--policy`, `--state-root`, `--workspace`, `--steer`, `--follow-up`, `--cleanup-grace-ms`, `--context-token-budget`, repeatable `--skill`, repeatable `--skill-resource` |
 | `sessions` | `--state-root` |
 | `resume` | `--policy`, `--state-root`, `--workspace`, `--cleanup-grace-ms`, `--context-token-budget` |

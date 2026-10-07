@@ -84,6 +84,15 @@ shorter instructions or explicitly raise the ceiling within the context budget.
 These startup settings apply across prompts; `ask/3` accepts only a timeout
 override. See the [exact option grammar and context-budget resolution](../developer/runtime-and-embedding.md#technical-embedding-ephemeral).
 
+For model questions, enable `questions: true` with a nonempty tool profile.
+A reusable session returns the pending question for the host to answer with its
+exact interaction ID and tagged text, offered choice or decline. A one-shot
+`run/2` can instead supply `question_responder`; without it, model questions are
+denied before an interaction opens. Read the
+[responder example and cleanup rules](../developer/runtime-and-embedding.md#technical-embedding-question-responder)
+before adding that host callback. Ordinary tools still consult host policy,
+and an answer grants no tool authority.
+
 <a id="operator-runtime-first-run"></a>
 ## Run the Working Loop
 

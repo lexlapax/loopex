@@ -6,10 +6,10 @@ including three long cases, with no exclusions, skips or invalid cases.
 The four original native stages joined in 224.109 seconds; their complete output,
 physical timeline witnesses and artifact digests are retained. Original77976's
 six formatter stages passed in 5.512 seconds without changing source bytes.
-The earlier formatter failure remains recorded. Operator guidance is committed
-at isolated `d103ffd3`; its canonical documentation check is running as
-original18190. No documentation PASS is claimed yet.
-Original T01–T19: 81 done / 92 todo / 6 retired; added 343 done / 23 todo.
+The earlier formatter failure remains recorded. Operator guidance is also proved at isolated `d103ffd3` and integrated with
+literal bytes. Original18190 passed all four canonical documentation steps,
+with both native handles joined and complete output retained in 72.831 seconds.
+Original T01–T19: 81 done / 92 todo / 6 retired; added 344 done / 22 todo.
 The current full fast check remains the separately tested `ff784916` result:
 4,822 passed, 60 designated exclusions and no skipped or invalid cases. It does
 not cover this later receipt change. Exact source, output references and digests
@@ -14229,7 +14229,7 @@ SHA-256 `2bf0acb413503132d77798582f2ebbac65106c1371cb3fa82904ff5d9f841e25`.
 - [ ] Investigate and repair the full 520ff308 integration failure in the sixty-three blocked quiesce fences sharing one cutoff with a settled sibling; retain the failed exact-candidate output, establish the cause through bounded runtime observability and actual process lifetimes, preserve the shared cutoff, sibling progress, fence accounting and cleanup assertions, and verify both supported pairs.
 - [ ] Repair the nine seed406612 CLI failures from the48ca full check by preparing the genuine provider-runtime lifecycle fixture through existing guarded startup; retain the first failure, preserve all startup/signal/resource/diagnostic/cleanup assertions, prove cold-first and mixed real fixtures on both pairs, then verify ordinary CLI in the next combined integration candidate.
 - [x] Run the combined chat-progress, command-bounds and native alias-preparation integration candidate's full current-pair fast check once from a clean committed checkout; retain exact SHA, complete output, measured duration and digest. Keep required floor closure, live wire joins and observed T16 task-shutdown diagnostics separate.
-- [ ] Document the implemented native chat, retained resume, settled configuration, compaction, durable question answers and one-shot responder workflows in existing operator/developer guides; add README navigation and a factual Unreleased entry. Verify exact examples, reciprocal links and documentation gates without claiming helper execution, new served wire generations, creation custody, foreground activity delivery or M7 closure.
+- [x] Document the implemented native chat, retained resume, settled configuration, compaction, durable question answers and one-shot responder workflows in existing operator/developer guides; add README navigation and a factual Unreleased entry. Verify exact examples, reciprocal links and documentation gates without claiming helper execution, new served wire generations, creation custody, foreground activity delivery or M7 closure.
 - [ ] Resolve the exact 0823aa50 full-check pre-fence runtime_unavailable under untraced combined load; retain failed output, establish its phase/cause and exact process lifetimes, preserve the original gate/fence/reap/cleanup/Store assertions, and verify a clean committed integration candidate without relabeling the failed run.
 - [x] Prove current quiesce startup-loss and pre-gate cutoff controls with captured original actors: retain the 63-reader/sibling shared cutoff, mixed announced/unannounced cancellation and exact joins, plus held child-resolution and immediate-forward controls under the unchanged initial gate/reap limits. Keep missing historical 520ff308/0823aa50 output and unknown old interleavings separate; current controls do not reconstruct the past.
 

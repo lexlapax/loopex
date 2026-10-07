@@ -164,6 +164,8 @@ Optional options:
 | --- | --- |
 | `:bounds` | `%{max_turns: 16, token_budget: 1_000_000, deadline_ms: 600_000}`; supplied keys override. |
 | `:sampling` | `%{"max_tokens" => 4_096}`. |
+| `:maintenance_model` | `nil`, or the closed resolved `model`, `reasoning`, `model_capabilities`, `provider_mapping` map under ADR 0043. It is independent of the ordinary model. |
+| `:maintenance_instructions` | `nil`, or exactly `%{"version" => version, "body" => body}` with version up to 64 bytes and nonempty UTF-8 body up to 2,048 bytes. Startup captures its exact rendering and digest. |
 | `:cleanup_grace_ms` | `Loopex.Executor.default_cleanup_grace_ms/0`, `5_000`; the committed cleanup period every job and terminal carries. |
 | `:session_creation_defaults` | `nil`, or the host's closed captured v3 template with exactly the string keys `initial_configuration`, `tool_selection`, `policy_defer_mode` and `runtime_configuration`. Startup validates the complete settings, selected model and exact registered tool generations before children start. |
 | `:progress_to` | A pid receiving `{:loopex_progress, item}`, or `{:session, pid}` receiving `{:loopex_progress, session_id, item}` so a host serving many sessions can route each item. |
@@ -292,7 +294,9 @@ remains available without runtime defaults. This follows the
 `command/2` accepts maps with `:type` and `:command_id`:
 `:prompt`, `:steer`, and `:follow_up` carry binary `:content`; `:abort` carries
 nothing else; `:interaction_answer`, `:admit_resources`, and `:activate_skill`
-are described below. `{:accepted, command_id}` means the command committed
+are described below. `:configure` carries the closed `:changes` map;
+`:compact` carries the exact `:bounds` map described below.
+`{:accepted, command_id}` means the command committed
 durably, not that the run has done anything; an abort's acceptance is an
 admission, and the run's ending arrives later as `run.finished`.
 
@@ -314,6 +318,84 @@ withheld until re-presentation settles it; the fence delays a read and never
 reorders or drops one. `attachment_status/1`, `progress/2`, and `diagnostic/2`
 are transient observations. None of those grants authority or substitutes for
 Store history.
+
+<a id="technical-embedding-configure-compaction"></a>
+### Configure settled sessions and compact context
+
+Concept: [Settled settings and compaction](../operator/coding-sessions.md#operator-sessions-chat-settings).
+
+Submit a nonempty closed update through the same serial command boundary:
+
+```elixir
+result = Loopex.command(attachment, %{
+  type: :configure,
+  command_id: "configure-1",
+  changes: %{"reasoning" => "none", "max_tokens" => 1_024}
+})
+```
+
+`changes` admits exactly the six optional mutable members `model`, `reasoning`,
+`instructions`, `max_tokens`, `context_token_budget`, `system_class_tokens`.
+At least one is required. Version, metadata, provider mapping, credentials,
+maintenance settings, tools and cleanup grace cannot be authored here. The
+owner admits a complete validated candidate atomically only while settled;
+refusal leaves the committed configuration unchanged.
+
+With a model selected, `command/2` uses its optional
+`Loopex.Model.prepare_configuration/5` callback under the owned 60-second
+preparation deadline and retained cleanup grace. A missing callback returns
+`configuration_not_prepared`. `command_with_configuration/3` supplies the
+separate host-prepared candidate instead; that facade performs no catalog or
+credential effects. Neither path gives its worker journal or publication
+authority.
+
+The command identity retains normalized authored input, including the original
+model alias. Captured configuration and its public projection use the resolved
+canonical model. Reusing an ID with changed spelling conflicts even if the
+alias resolves to the same model. Identical replay uses the retained disposition
+without repeating preparation. Observe `command_disposition/2` and resolve an
+unknown transaction through the existing retained identity before submitting
+new mutations. The complete rules are
+[ADR 0050](../adr/0050-host-configuration-preparation-technical.md#technical-alias-identity).
+
+An explicit compact command has exactly these three required bounds:
+
+```elixir
+result = Loopex.command(attachment, %{
+  type: :compact,
+  command_id: "compact-1",
+  bounds: %{"max_attempts" => 4, "deadline_ms" => 60_000, "token_budget" => 32_768}
+})
+```
+
+Allowed ranges are 1..4 attempts, 1..60,000 milliseconds and 1..32,768 tokens.
+The host must supply both maintenance startup options above; missing settings
+refuse compaction, and the ordinary model is never inherited. Episode admission
+requires the verified thinking-off mapping. Use the closed resolved model and
+instruction forms from
+[ADR 0043](../adr/0043-context-compaction-checkpoint-technical.md#technical-depth).
+
+A settled compact command owns its command identity and creates no run.
+Automatic preparation belongs to its actual run and spends that run's bounds.
+Public checkpoint owners distinguish `%{"kind" => "run", "id" => run_id}`
+from `%{"kind" => "compact", "id" => command_id}`. Later failure preserves
+already committed useful checkpoints and original effect receipts.
+
+To wait, read native `session_status/2` and consume committed events.
+`compact_pending` remains true throughout standalone admission, preparation and
+cleanup; an unresolved commitment refuses the status read rather than proving
+idle. `active_maintenance` describes an admitted episode and may be nil before
+preparation reaches it. The anchored snapshot's `last_compact` and
+`context.compaction_finished` event carry durable completion; reference chat
+projects that event into its `maintenance.last_compact`. An accepted command,
+empty attachment queue or absent activity notice is insufficient evidence.
+
+ADR 0054's native `context.compaction_progress` item is one transient notice
+at the positive provider-attempt permit. It has no closing record or percentage,
+and no durable outcome authority. Its foreground delivery and coordinated new
+wire serving remain unfinished; this native API example activates neither.
+The separate authored remote creation route and its transaction custody are
+also unfinished. Standalone creation-option validation does not supply them.
 
 <a id="technical-embedding-ephemeral"></a>
 ### Ephemeral Composition
@@ -524,6 +606,57 @@ host that needs separate-process credential custody or recovery uses the
 durable profile. [ADR 0039](../adr/0039-ephemeral-embedded-profile.md#concept)
 states the boundary in full.
 
+<a id="technical-embedding-question-responder"></a>
+### Respond to questions in a one-shot call
+
+Concept: [Ephemeral operation](../operator/runtime.md#operator-runtime-available).
+
+Only `Ephemeral.run/2` accepts `question_responder`. Enable questions and supply
+a host callback for the bounded pending DTO. This example uses the read-only
+policy defined in the runnable embedded example above:
+
+```elixir
+responder = fn
+  %{"kind" => "text"} -> {:text, "Limit the review to the parser."}
+  %{"kind" => "choice", "choices" => [%{"id" => id} | _]} -> {:choice, id}
+  _question -> :decline
+end
+
+result = LoopexComposition.Ephemeral.run("Ask which review scope to use.",
+  policy: MyHost.ReadOnly,
+  model: "ollama:llama3.2",
+  tools: :read_only,
+  questions: true,
+  question_responder: responder,
+  max_steps: 4,
+  deadline_ms: 60_000,
+  max_tokens: 1_024,
+  context_token_budget: 8_192,
+  system_class_tokens: 8_000,
+  timeout: 65_000,
+  cwd: File.cwd!()
+)
+```
+
+Return exactly `{:text, text}`, `{:choice, offered_id}` or `:decline`.
+The callback receives the interaction ID, prompt, kind, choices and absolute
+expiry, with no provider credential. It stays host-local and grants no later
+tool authority. One supervised responder worker at a time answers through the
+same serial `answer/3` admission. The caller captures one wait deadline across
+successive questions.
+
+Invalid replies or callback exceptions initiate abort and yield
+`responder_failed` only after worker and session cleanup are proved. Cleanup
+uncertainty takes precedence. Expiry and run bounds keep their committed
+outcome. A callback can be terminated mid-effect; its host effects have no
+rollback. Do not recursively create another call or session in it.
+
+`start_session/1` rejects the responder option; reusable sessions use
+`answer/3` themselves. `ask/3` cannot enable it per call. Supplying a responder
+with questions disabled refuses. Without a responder, the existing one-shot
+question denial described above still applies. See
+[ADR 0045](../adr/0045-model-originated-questions-technical.md#technical-depth).
+
 <a id="technical-embedding-composition"></a>
 ### Durable Reference Composition
 
@@ -723,8 +856,10 @@ follows from it:
    effective expiry, and the round.
 2. **Answer.** `Loopex.command/2` admits
    `%{type: :interaction_answer, command_id:, interaction_id:, choice_id:}` as
-   an ordinary durable command keyed by `(session_id, command_id)`. Admission
-   means the answer committed, never that the effect is allowed. An answer for a
+   an ordinary durable command keyed by `(session_id, command_id)`, and publishes
+   `interaction.answer_admitted`. The question remains visible as answered
+   while policy reevaluation is owed. Admission means the answer committed,
+   never that the effect is allowed. An answer for a
    question that is not open, a different question, or a choice never offered is
    refused with `interaction_absent`, `interaction_resolved`, or
    `invalid_interaction_answer`, and none of them reopens anything.
@@ -741,7 +876,11 @@ follows from it:
    absolute deadline, chosen once before the creating transaction. Expiry
    publishes `interaction.expired` and resolves the call as a denial; an abort
    publishes `interaction.cancelled`. These are competing transitions ordered at
-   the journal, and the first committed one wins.
+   the journal, and the first committed one wins. A terminal policy event binds
+   the original run, numbered turn and tool call, plus the actual admitted
+   answer command and selected choice when one exists. Denial, expiry or
+   cancellation after answer admission preserves that pair; an unanswered
+   terminal has no selected choice and a null answer-command identity.
 
 Another defer after an answer resolves the current question and opens a fresh
 one with the next round number. At most one interaction is open per session, and
@@ -766,7 +905,43 @@ was admitted, and never the `decision_ref`. Transport loss changes no
 interaction state, which is what lets a new server process present the same
 question. The contract is
 [ADR 0024](../adr/0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept),
-and the witnesses are in `apps/loopex/test/interaction_lifecycle_test.exs`.
+and its native public correlation amendment is
+[ADR 0052](../adr/0052-policy-interaction-public-events-technical.md#technical-depth).
+The witnesses are in `apps/loopex/test/interaction_lifecycle_test.exs`.
+
+Model questions have producer `model_tool` and a separate lifecycle. Enabling
+`loopex.ask` lets the model offer a bounded text or choice question only after
+host policy allows that tool call. Text answers are nonempty UTF-8 up to 8,192
+bytes; choice IDs are stable offered values `choice-1` through `choice-8`.
+Decline is an explicit response branch. Policy-defer questions remain
+choice-only. For the exact pending text interaction read at a committed cursor:
+
+```elixir
+result = Loopex.command(attachment, %{
+  type: :interaction_answer,
+  command_id: "answer-1",
+  interaction_id: question["interaction_id"],
+  answer: %{"text" => "Keep the existing filename."}
+})
+```
+
+The other tagged native response maps are `%{"choice_id" => offered_id}` and
+`%{"disposition" => "declined"}`. Supply only one response branch, for the
+pending producer and kind. Identical replay returns the retained disposition;
+conflicting identity reuse, a second independent answer and a late answer
+refuse without reopening a question.
+
+A model response commits its terminal interaction, original tool result and
+next run action together, releasing the open slot at that same event cursor.
+It requires no policy reevaluation, executor intent or executor receipt.
+Terminal history preserves the original turn/call and admitted response-command
+provenance. The answer never authorizes a later effect. Read
+[ADR 0045](../adr/0045-model-originated-questions-technical.md#technical-depth)
+for expiry, restart and terminal precedence, and use
+[chat answers](../operator/coding-sessions.md#operator-sessions-chat-input)
+or the [one-shot responder](#technical-embedding-question-responder) at the
+host boundary. These native events do not activate new foreground or daemon
+wire generations; their serving remains separate work.
 
 <a id="technical-embedding-transfers"></a>
 ### Bounded Artifact Transfers

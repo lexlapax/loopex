@@ -31,11 +31,15 @@ while the session lives; a session "brain" can coordinate local or remote
 [Canonical milestone status and plan records](docs/plans/)
 <!-- loopex:readme-status:end -->
 
-The accepted [M7 coding-agent proof](docs/plans/M7.md#concept) is ready for
-implementation: conversation continuity, host instructions, compaction,
-model/reasoning control, questions, conversational chat, bounded read-only
-helpers and operator validation. Its nine outcomes remain to be proved. M6 is
-the last closed product checkpoint; successors remain drafts.
+The accepted [M7 coding-agent proof](docs/plans/M7.md#concept) is in progress.
+Current source includes native [chat from an explicit profile](docs/operator/coding-sessions.md#operator-sessions-chat),
+[settled configuration and compaction](docs/operator/coding-sessions.md#operator-sessions-chat-settings),
+and [model-question responders for embedding](docs/developer/runtime-and-embedding.md#technical-embedding-question-responder).
+Helper execution, authored creation custody, complete progress delivery,
+coordinated wire generation serving and the remaining operator/provider proof
+are unfinished. These native paths do
+not close M7's nine outcomes. M6 is the last closed product checkpoint;
+successors remain drafts.
 
 ## What Loopex Provides
 
