@@ -1,5 +1,14 @@
 # M7 Implementation Tasks
 
+Separate-workspace restoration is now proved at clean isolated29132264:
+all41 workflow cases passed on each supported pair, zero exclusions/skips/
+invalid,537.540 seconds. Original23575 is terminal and collected with five new
+original joins and33 verified artifacts; three already joined current prerequisite
+records remain explicit references. The literal tested file is integrated.
+Original T15 item8 and the bounded Store/executor/workspace slice close;
+complete helper-aware restoration, physical special modes, operator attendance
+and full integration remain open. Exact retained references are in the resume record.
+
 Current integration original73241 is collected FAIL at `5eb38e39`: 4,669
 executed, 4,663 passed and six Core failures, with55 declared exclusions,
 zero skipped/invalid, all eleven application completion markers and both
@@ -15,7 +24,7 @@ Original54086 passed106/107 current cases before a stale exact refusal-field
 oracle failed; its floor lane did not run. The corrected child keeps closed
 field sets and requires revision2 for prompt/follow-up while steer retains its
 unchanged shape. The failed output remains retained.
-Original T01–T19:80 done/93 todo/6 retired; added325 done/31 todo.
+Original T01–T19:81 done/92 todo/6 retired; added326 done/31 todo.
 No original row closes from this focused verification.
 The corrected separate-workspace case at isolated29132264 passed its current
 one-case diagnostic in52.576 seconds;40 other cases were deliberately excluded
@@ -13330,6 +13339,7 @@ or check was relaxed.
 - [x] Implement accepted ADR 0053 daemon configure admission through existing lease-owner authority, serial tickets, succession capacity and cleanup; prove actual native admission, renewal/refusal behavior and unchanged negotiated-wire refusal on both supported toolchains. Keep Request/parser and served generations unchanged until coordinated activation.
 
 
+- [ ] Implement the accepted ADR0052 standalone ten-field policy request and nine-field terminal codecs, literal schemas/vectors and independent Node projection; prove closed scalar/answer-pair/privacy and complete-output bounds on both toolchains. Native terminal provenance, authenticated cursor transitions, transport integration and generation activation remain separate.
 - [ ] Finish accepted ADR0052 native answer provenance, exact policy cursor/replay relations and shared Elixir/Node payload projection in both transports; prove focused current/floor and independent vectors after rejoin, complete negotiated manifests and real answered-command workflows.
 - [ ] Pin and implement the exact configure request and versioned remote creation-option grammars through governed decisions; preserve authored aliases, central preparation, host-only bindings, current command replay and both transport authority gates.
 - [x] Implement accepted foreground configure Mapping admission through the existing attachment and native command owners; prove complete mapping/initialization files, safe malformed correlation, authored retry identity, all three Store uncertainty phases and joined preparation on both supported pairs. Preserve the current Connection generation refusal until complete manifest activation.
@@ -13843,7 +13853,7 @@ repeating completed provider work.
 - [-] Add the separate v0.3.0↔M7 proof.
 - [ ] Implement access-prevention and complete backup-restore instructions.
 - [ ] Restore into an empty root and compare complete manifests.
-- [ ] Restore workspace state separately from runtime state.
+- [x] Restore workspace state separately from runtime state.
 - [-] Join automated rollback artifacts to attended restore inspection without rerunning the case.
 
 Item 2 maps to `EndToEndRecoveryTest`'s actual effect/restart cases, exact receipt
@@ -13931,7 +13941,7 @@ in the restart checkpoint. Broader restore/decoder/public/helper rows stay open.
 
 - [ ] Establish special permission bits physically before current-format restore; prove exact preservation or refusal before successful activation under the accepted full `0o7777` mode domain on both supported toolchains. Keep this separate from the ordinary-mode workspace workflow and retain original owner, work and cleanup bounds.
 
-- [ ] Prove a bounded current-format physical Store/executor backup/restore slice with quiescent exact owner joins, complete unexcluded manifests, empty destination roots, separate workspace restoration and unknown-effect nonredispatch on both pairs. This does not close operator attendance or future helper/catalog/ledger coverage; isolated test preparation waits for the current full check before verification.
+- [x] Prove a bounded current-format physical Store/executor backup/restore slice with quiescent exact owner joins, complete unexcluded manifests, empty destination roots, separate workspace restoration and unknown-effect nonredispatch on both pairs. This does not close operator attendance or future helper/catalog/ledger coverage.
 
 - [x] Migrate current model adapters, fixtures, conformance callers and reply types to exact eleven-field v3 callbacks; remove the nine-field callback fallback and old two-argument canonical projection, preserving current ten-field replies, v3 settlement, raw-admission order, exact echoes, captured requirements and once-only accounting on both supported toolchains.
 

@@ -74,6 +74,166 @@ defmodule LoopexComposition.RestoreWorkflowTest do
     %{root: root}
   end
 
+  test "public runtime restore leaves workspace intact before a separate same-directory content restore",
+       context do
+    fixture = actual_cut(context.root, nil, :without_helpers)
+    assert File.lstat(Path.join(fixture.source, "delegation")) == {:error, :enoent}
+    assert File.lstat(Path.join(fixture.backup, "delegation")) == {:error, :enoent}
+    assert File.ls!(fixture.destination) == []
+    original_identity = placement(fixture.workspace)
+    assert {:ok, original_reference} = WorkspaceIdentity.reference(fixture.workspace)
+    assert original_reference == fixture.workspace_ref
+
+    File.chmod!(fixture.workspace, 0o750)
+    File.chmod!(Path.join(fixture.workspace, "source.txt"), 0o640)
+    File.write!(Path.join(fixture.workspace, ".hidden"), "")
+    File.chmod!(Path.join(fixture.workspace, ".hidden"), 0o600)
+    File.mkdir!(Path.join(fixture.workspace, "empty"))
+    # Concept: the content restore uses a physically confirmed ordinary directory mode.
+    # Technical depth: native lstat checks retain the full 0o7777 comparison domain.
+    File.chmod!(Path.join(fixture.workspace, "empty"), 0o750)
+    assert Bitwise.band(File.lstat!(Path.join(fixture.workspace, "empty")).mode, 0o7777) == 0o750
+    workspace_backup = Path.join(context.root, "workspace-backup")
+    assert {:ok, _} = RestoreFixtureCopy.copy(fixture.workspace, workspace_backup)
+    assert Bitwise.band(File.lstat!(Path.join(workspace_backup, "empty")).mode, 0o7777) == 0o750
+    workspace_baseline = manifest(fixture.workspace)
+    assert manifest(workspace_backup) == workspace_baseline
+    {:ok, baseline_entries} = RestoreCodec.manifest(workspace_baseline, @total)
+    baseline_index = Map.new(baseline_entries, &{&1["path"], &1})
+
+    assert Enum.sort(Map.keys(baseline_index)) ==
+             [
+               ".",
+               ".agents",
+               ".agents/skills",
+               ".agents/skills/first",
+               ".agents/skills/first/SKILL.md",
+               ".hidden",
+               "empty",
+               "source.txt",
+               "unknown-ready"
+             ]
+
+    assert baseline_index["."]["mode"] == 0o750
+    assert baseline_index["source.txt"]["mode"] == 0o640
+
+    assert baseline_index[".agents/skills/first/SKILL.md"]["sha256"] ==
+             "c1d5b14b2a6d2245cccf2f3a15b389ea996bd6505c83d78a73623e4eb4de3367"
+
+    assert baseline_index[".agents/skills/first/SKILL.md"]["size"] == 67
+    assert baseline_index["unknown-ready"]["sha256"] == hash("ready")
+    assert baseline_index[".hidden"]["kind"] == "regular"
+    assert baseline_index[".hidden"]["size"] == 0
+    assert baseline_index[".hidden"]["mode"] == 0o600
+    assert baseline_index["empty"]["kind"] == "directory"
+    assert baseline_index["empty"]["mode"] == 0o750
+
+    assert File.read!(Path.join(workspace_backup, "source.txt")) ==
+             :binary.copy("captured 猫\n", 4_096)
+
+    assert File.read!(Path.join(workspace_backup, ".agents/skills/first/SKILL.md")) ==
+             "---\nname: first\ndescription: Inspect retained files.\n---\nUse read.\n"
+
+    receipts = workspace_receipts(fixture)
+
+    assert Enum.sort(Enum.map(receipts, fn {_path, _bytes, receipt} -> receipt.outcome end)) ==
+             [:completed, :outcome_unknown]
+
+    receipt_payloads = workspace_receipt_payloads(fixture.store_bytes, fixture.session)
+    assert length(receipt_payloads) == 2
+
+    assert Enum.sort(Enum.map(receipt_payloads, & &1["receipt"]["outcome"])) ==
+             ["completed", "outcome_unknown"]
+
+    File.write!(Path.join(fixture.workspace, "source.txt"), "host changed captured content")
+    File.chmod!(Path.join(fixture.workspace, "source.txt"), 0o600)
+    File.write!(Path.join(fixture.workspace, "unknown-ready"), "host changed effect sentinel")
+    File.rm!(Path.join(fixture.workspace, ".hidden"))
+    File.rmdir!(Path.join(fixture.workspace, "empty"))
+    File.write!(Path.join(fixture.workspace, "post-cut-only"), <<0, 255, 1>>)
+    changed_workspace = manifest(fixture.workspace)
+    refute changed_workspace == workspace_baseline
+    assert placement(fixture.workspace) == original_identity
+    assert WorkspaceIdentity.reference(fixture.workspace) == {:ok, original_reference}
+
+    invocation = %{
+      "work_ms" => @work,
+      "cleanup_grace_ms" => @grace,
+      "max_total_file_bytes" => @total,
+      "prior_admin_authority" => "none",
+      "prior_admin_evidence_sha256" => nil
+    }
+
+    assert {:committed, receipt} = LoopexComposition.Restore.restore(fixture.plan, invocation)
+    assert receipt["tx_id"] == fixture.plan["tx_id"]
+    assert receipt["baseline_manifest_sha256"] == hash(fixture.baseline)
+    assert {:ok, _} = RestoreCodec.encode(:receipt, receipt)
+
+    assert {:committed, %{"receipt" => ^receipt, "view" => "current"}} =
+             LoopexComposition.Restore.lookup(fixture.destination, fixture.plan["tx_id"], %{
+               "work_ms" => @work,
+               "cleanup_grace_ms" => @grace
+             })
+
+    assert_complete_copy(fixture)
+    assert Enum.all?(claims(fixture.plan), &(File.lstat(&1) == {:error, :enoent}))
+    assert {:error, :source_retired} = RestoreGuard.state(fixture.source)
+    assert manifest(fixture.workspace) == changed_workspace
+    assert placement(fixture.workspace) == original_identity
+    assert WorkspaceIdentity.reference(fixture.workspace) == {:ok, original_reference}
+
+    first_history =
+      reopen_workspace_history(fixture, "workspace-before-content", receipts, receipt_payloads)
+
+    assert manifest(fixture.workspace) == changed_workspace
+
+    assert File.read!(Path.join(fixture.workspace, "unknown-ready")) ==
+             "host changed effect sentinel"
+
+    state_before_content_restore = manifest(fixture.destination)
+
+    # Concept: the host restores contents only after every native owner has joined.
+    # Technical depth: this disposable fixture replaces children, preserves the
+    # original directory inode, and compares both complete unexcluded manifests.
+    for name <- File.ls!(fixture.workspace) do
+      assert {:ok, _removed} = File.rm_rf(Path.join(fixture.workspace, name))
+    end
+
+    assert File.ls!(fixture.workspace) == []
+    assert placement(fixture.workspace) == original_identity
+
+    for name <- File.ls!(workspace_backup) do
+      assert {:ok, _} =
+               RestoreFixtureCopy.copy(
+                 Path.join(workspace_backup, name),
+                 Path.join(fixture.workspace, name)
+               )
+    end
+
+    File.chmod!(fixture.workspace, baseline_index["."]["mode"])
+    assert Bitwise.band(File.lstat!(Path.join(fixture.workspace, "empty")).mode, 0o7777) == 0o750
+    assert manifest(fixture.workspace) == workspace_baseline
+    assert manifest(workspace_backup) == workspace_baseline
+    assert placement(fixture.workspace) == original_identity
+    assert WorkspaceIdentity.reference(fixture.workspace) == {:ok, original_reference}
+    assert manifest(fixture.destination) == state_before_content_restore
+    assert File.lstat(Path.join(fixture.workspace, "post-cut-only")) == {:error, :enoent}
+    assert File.ls!(Path.join(fixture.workspace, "empty")) == []
+    assert File.read!(Path.join(fixture.workspace, "unknown-ready")) == "ready"
+
+    assert reopen_workspace_history(
+             fixture,
+             "workspace-after-content",
+             receipts,
+             receipt_payloads
+           ) == first_history
+
+    assert manifest(fixture.workspace) == workspace_baseline
+    assert placement(fixture.workspace) == original_identity
+    assert WorkspaceIdentity.reference(fixture.workspace) == {:ok, original_reference}
+    assert manifest(fixture.backup) == fixture.baseline
+  end
+
   test "one owned first transition preserves real histories and reopens both guarded compositions",
        context do
     fixture = actual_cut(context.root)
@@ -2083,7 +2243,8 @@ defmodule LoopexComposition.RestoreWorkflowTest do
     File.ln_s!(parent <> "-captured", parent)
   end
 
-  defp actual_cut(root, source_parent \\ nil) do
+  defp actual_cut(root, source_parent \\ nil, object_mode \\ :with_helpers) do
+    assert object_mode in [:with_helpers, :without_helpers]
     source = Path.join(source_parent || root, "source")
     backup = Path.join(root, "backup")
     destination = Path.join(root, "destination")
@@ -2285,16 +2446,23 @@ defmodule LoopexComposition.RestoreWorkflowTest do
     receipt_path =
       Path.join("receipts", hash(receipt_row.payload["receipt"]["job_id"]) <> ".receipt")
 
-    assert {:ok, placement} = Placement.acquire(source)
-    assert {:ok, object_owner} = RetainedObjects.open(source, @runtime, placement)
-    object_monitor = Process.monitor(object_owner)
-    {:ok, object} = GenesisCodec.encode(genesis)
-    {:ok, encoded} = Frame.encode(object)
-    object_bytes = encoded |> IO.iodata_to_binary() |> String.trim_trailing("\n")
-    assert {:ok, _digest} = RetainedObjects.install(object_owner, object_bytes)
-    assert :ok = GenServer.stop(object_owner, :normal, 1_000)
-    assert_receive {:DOWN, ^object_monitor, :process, ^object_owner, :normal}, 1_000
-    assert :ok = Placement.release(placement)
+    # Concept: public workspace recovery starts without optional helper state.
+    # Technical depth: the default forty cases retain their actual object writer;
+    # the explicit mode never creates that namespace or excludes captured bytes.
+    if object_mode == :with_helpers do
+      assert {:ok, placement} = Placement.acquire(source)
+      assert {:ok, object_owner} = RetainedObjects.open(source, @runtime, placement)
+      object_monitor = Process.monitor(object_owner)
+      {:ok, object} = GenesisCodec.encode(genesis)
+      {:ok, encoded} = Frame.encode(object)
+      object_bytes = encoded |> IO.iodata_to_binary() |> String.trim_trailing("\n")
+      assert {:ok, _digest} = RetainedObjects.install(object_owner, object_bytes)
+      assert :ok = GenServer.stop(object_owner, :normal, 1_000)
+      assert_receive {:DOWN, ^object_monitor, :process, ^object_owner, :normal}, 1_000
+      assert :ok = Placement.release(placement)
+    else
+      assert File.lstat(Path.join(source, "delegation")) == {:error, :enoent}
+    end
 
     assert {:ok, _} = RestoreFixtureCopy.copy(source, backup)
     assert manifest(source) == manifest(backup)
@@ -2330,7 +2498,7 @@ defmodule LoopexComposition.RestoreWorkflowTest do
     plan = refresh_plan(plan, baseline, backup)
     assert {:ok, _} = RestoreCodec.encode(:plan, plan)
 
-    %{
+    fixture = %{
       source: source,
       backup: backup,
       destination: destination,
@@ -2348,6 +2516,167 @@ defmodule LoopexComposition.RestoreWorkflowTest do
       commit: commit,
       import_identity: import_generation["executor_identity"]
     }
+
+    if object_mode == :without_helpers,
+      do: Map.put(fixture, :resource_manifest, resource_manifest),
+      else: fixture
+  end
+
+  defp workspace_receipts(fixture) do
+    paths =
+      fixture.backup
+      |> Path.join("receipts")
+      |> File.ls!()
+      |> Enum.filter(&String.ends_with?(&1, ".receipt"))
+      |> Enum.sort()
+
+    assert length(paths) == 2
+
+    for name <- paths do
+      relative = Path.join("receipts", name)
+      bytes = File.read!(Path.join(fixture.backup, relative))
+      assert {:ok, receipt} = Local.decode_receipt_bytes(bytes)
+      assert name == hash(receipt.job_id) <> ".receipt"
+      {relative, bytes, receipt}
+    end
+  end
+
+  defp workspace_receipt_payloads(bytes, session) do
+    assert {:ok, frames, :complete} = Log.decode_bytes(bytes)
+    assert {:ok, replayed} = State.replay(frames)
+
+    replayed.sessions[session].records
+    |> Enum.filter(&(&1.payload.kind == "executor_receipt_committed_v2"))
+    |> Enum.map(& &1.payload)
+  end
+
+  # Concept: both reopenings use ordinary physical guards and the real executor.
+  # Technical depth: retain native actor references for exact receipt/dispatch
+  # assertions, then positively join all owners before host content restoration.
+  defp reopen_workspace_history(fixture, command_id, receipts, receipt_payloads) do
+    assert {:ok, _} = RestoreGuard.state(fixture.destination)
+    assert {:ok, placement_owner} = Placement.acquire(fixture.destination)
+    on_exit(fn -> Placement.release(placement_owner) end)
+    assert {:ok, _} = RestoreGuard.state(fixture.destination)
+    assert WorkspaceIdentity.reference(fixture.workspace) == {:ok, fixture.workspace_ref}
+
+    assert {:ok, _prepared} =
+             Ledger.prepare(Path.join(fixture.destination, "receipts"), "executor-local", @grace)
+
+    assert {:ok, store} = Store.start_link(path: Path.join(fixture.destination, "store.log"))
+    store_owner = workspace_owner(store)
+    assert {:ok, port} = Loopex.Store.new(Store, store)
+
+    assert {:ok, transfers} =
+             Transfers.start_link(root: Path.join(fixture.destination, "artifacts"))
+
+    transfers_owner = workspace_owner(transfers)
+    assert {:ok, artifacts_handle} = Artifacts.open(Path.join(fixture.destination, "artifacts"))
+    artifacts = %{module: Artifacts, handle: Map.put(artifacts_handle, :transfers, transfers)}
+
+    assert {:ok, lease} =
+             WorkspaceLease.start_link(id: "workspace", path: fixture.workspace, fencing_token: 1)
+
+    lease_owner = workspace_owner(lease)
+
+    assert {:ok, executor} =
+             Local.start_link(
+               identity: "executor-local",
+               epoch: 1,
+               fencing_token: 1,
+               workspace_leases: %{"workspace" => lease},
+               ledger_root: Path.join(fixture.destination, "receipts"),
+               artifacts: artifacts,
+               cleanup_grace_ms: @grace
+             )
+
+    executor_owner = workspace_owner(executor)
+    assert {:ok, observer} = Agent.start_link(fn -> [] end)
+    observer_owner = workspace_owner(observer)
+
+    definitions =
+      Enum.filter(
+        CodingTools.definitions(),
+        &({&1["tool_id"], &1["tool_version"]} in [
+            {"loopex.read", "1.1.0"},
+            {"loopex.bash", "1.0.0"}
+          ])
+      )
+
+    assert {:ok, runtime} =
+             Loopex.start_link(
+               runtime_id: @runtime,
+               store: port,
+               resource_manifest: fixture.resource_manifest,
+               artifact_store: artifacts,
+               model: %{module: Model, model: "scripted:v1", options: [observer: observer]},
+               executor: %{
+                 module: Local,
+                 reference: executor,
+                 identity: "executor-local",
+                 epoch: 1,
+                 fencing_token: 1,
+                 workspace_ref: fixture.workspace_ref,
+                 workspace_lease: "workspace"
+               },
+               tools: definitions,
+               active_tools: Enum.map(definitions, & &1["tool_id"]),
+               policy: Policy,
+               policy_identity: @policy,
+               grant_decision: {:host_policy, :allow},
+               context_token_budget: 8_192
+             )
+
+    runtime_owner = workspace_owner(runtime.supervisor)
+
+    assert Loopex.resume_session(runtime, fixture.session, command_id: command_id) ==
+             {:ok, fixture.session}
+
+    assert {:ok, _attachment} = Loopex.attach(runtime, fixture.session, after_event_sequence: 0)
+    history = effect_rows(runtime, fixture.session, nil, [])
+    assert Enum.count(history, &(&1.kind == "intent")) == 2
+
+    assert Enum.count(history, &(&1.kind == "terminal" and &1.disposition == "receipt_committed")) ==
+             2
+
+    for {relative, bytes, expected} <- receipts do
+      assert File.read!(Path.join(fixture.destination, relative)) == bytes
+      assert Local.receipt(executor, expected.job_id) == {:ok, expected}
+    end
+
+    assert :ok = Loopex.stop(runtime)
+    workspace_join(runtime_owner)
+    assert Local.stats(executor).dispatches == %{}
+    assert Agent.get(observer, & &1) == []
+
+    for owner <- [executor_owner, lease_owner, transfers_owner, store_owner, observer_owner] do
+      assert :ok = GenServer.stop(elem(owner, 0), :normal, 1_000)
+      workspace_join(owner)
+    end
+
+    assert :ok = Placement.release(placement_owner)
+    restored_store = File.read!(Path.join(fixture.destination, "store.log"))
+    assert binary_part(restored_store, 0, byte_size(fixture.store_bytes)) == fixture.store_bytes
+    assert workspace_receipt_payloads(restored_store, fixture.session) == receipt_payloads
+    history
+  end
+
+  defp workspace_owner(actor) do
+    monitor = Process.monitor(actor)
+
+    on_exit(fn ->
+      if Process.alive?(actor) do
+        cleanup_monitor = Process.monitor(actor)
+        Process.exit(actor, :kill)
+        assert_receive {:DOWN, ^cleanup_monitor, :process, ^actor, _}, 1_000
+      end
+    end)
+
+    {actor, monitor}
+  end
+
+  defp workspace_join({actor, monitor}) do
+    assert_receive {:DOWN, ^monitor, :process, ^actor, :normal}, 1_000
   end
 
   defp refresh_plan(plan, baseline, backup) do

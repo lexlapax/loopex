@@ -269,6 +269,50 @@ V2 patch SHA-256 `094284a223abda11b4e875b0623d25fc112ce2d6e9c6b19563888b5a484d64
 V2 packet SHA-256 `ab93787074faeec78b77d74cc2f689cbc7e66943f2fa11ef18c605caa8abd964`.
 Paired formatting and complete70-case native proof remain unrun. No row closes.
 
+Complete restore runner V7 stopped during preflight before any native stage:
+original tool chunk1cee00 exited1 because an artifact-loop variable overwrote
+the seed digest before the copied-registry assertion. The partial output retained
+only its unchanged1314-key registry. Preflight record
+`M7/workspace-admission-20261007-v4/preflight-terminal.json`, SHA-256
+`0d8cd0e33569ee04bb0a1ec6e98a694bbbd82f2e88f9afb5f27e15761b0321a2`.
+V8 corrects exactly those two loop lines; independent focused review passed.
+The enabled runner SHA-256 is
+`0946fbc952a718e07c6f2a0bd3370dc5f71ae0613ab924d4358c834f7eab9ed9`.
+
+Original23575 is terminal0 and collected PASS_WORKSPACE_RESTORE_WORKFLOW at
+clean29132264. All41 cases passed per supported pair, zero excluded/skipped/
+invalid,537.540 seconds. Five new original stages joined;33 artifacts verified.
+Three positively joined current prerequisites from96684 remain explicit reused
+references, not fresh joins. Collection
+`M7/workspace-admission-20261007-v5/original-collection.json`, SHA-256
+`67e5aa5ab9dec28ee96026fb7039a43a2fc356a76e45a348be50201c43a2e180`;
+terminal `4c8c9aa3b7e78f462c12e9172e7c9c6776e568997f55eaa5589c53c7d0c7b77e`.
+Latest consumed registry1319 at that output's `stage-attempt-registry.json`,
+SHA-256 `62ca7ceda9dca86701e0b4bbd5078cd82140402444d065e643c36e478b23b67e`.
+Never repoll23575. Root integrated the literal tested workflow file; original T15
+item8 and the bounded current Store/executor/workspace restore row close.
+Complete helper-aware restoration, special-mode preservation, attendance and
+full integration remain open. Original81 done/92 todo/6 retired;
+added326 done/31 todo. Next is T09's49-case paired codec/producer/Node proof;
+its old1310 seed is stale and must bind this latest collected1319 successor.
+
+Physical special-mode source passed independent review and is saved as clean
+isolated `568c42f7290a771ba3baf7e8b512b0f6c3be3ab1` in reused
+`m7-restore-copy-fixtures`, direct child of29132264. Only IO test and workflow
+test change; source hashes respectively
+`b9cbb482cb2d5a1f21676bcd1a58827de939373c0393fbe960cbc005b5bf30a5`
+and `10d41890280ab8dcb40dc3e3a995eccceeb15e04b591971159f99b652f5948fe`.
+The former establishes physical1750/4750 before native manifests; the latter
+requires committed actual public restore and complete preservation, not a
+refusal-as-preservation substitute. Original41 workflow cases/helpers remain
+byte-identical; census109 IO/42 workflow. Paired formatting and tests are unrun.
+
+A source-only worker owns the accepted ADR0052 standalone policy codecs in
+reused `m7-configure-grammar` at9eeee7a9. Transports, native reducer/cursors and
+served generations remain outside that bounded unit. One added row tracks its
+concrete implementation/proof: original80 done/93 todo/6 retired;
+added325 done/32 todo. ADR0052 was accepted; no new approval is asked here.
+
 Core correction verification is complete. ADR0055 remains the
 sole asked pending approval;0056/0057/0058 remain Proposed and unactivated.
 
