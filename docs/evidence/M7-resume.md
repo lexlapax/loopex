@@ -27,6 +27,151 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+Current primary rejoin is the exact successful helper-storage source
+`c6eee6466f8342f4a67e3e7541392dbb340808ad`, tree
+`2baa85737f03ae123a720419998ead493fe45d7f`, direct child of73d71176.
+Original36158 is terminal and collected PASS,70 complete cases per supported
+pair, zero failures/exclusions/skips/invalid. Both actual versions, all four
+owned format checks and warning-free Composition compilation passed. Eight
+original stages joined and44 artifacts authenticate in110.103 seconds. Output
+`M7/helper-binding-log-scenario-proof-20261007-v1`; collection
+`21b537b7885bfeb8e62f46bfcde3a0f85813dabd8e315e83553d91165501a3e6`;
+terminal `d50a9f1033f04d07d005c372223a803dada2df8fbcf48f1e1445ca7593b0b019`;
+executed runner
+`6a6a3e8a710a9dd82f40a81b55c117538b22ace00f30eeb854f65c35ba911a0a`.
+Latest collected registry1697 is
+`ff0815ab4d52a162a431a287fe5c951b8210f4c21b0ecaccc2227057100ebb75`.
+Do not repoll36158 or repeat the unchanged scoped proof. Four files integrate
+literally; only the added physical-log T11 row closes. Originals remain87 done/
+86 todo/6 retired; added349 done/23 todo. Broader T11 remains open.
+
+Original19990 remains collected FAIL at73d71176:70 current cases passed but
+11 generated constant conditional warnings caused exit1. Four original joins,
+26 artifacts,59.831 seconds; floor unrun. Output
+`M7/helper-binding-log-test-warning-proof-20261007-v1`; collection
+`22503e8836ffb4479bddda480ab053c14d4e0fdb51bc679aa03c25de641f4b1d`;
+terminal `c1b7d495dd67cabb021760dfd1e22b785e62a922e5e99413f1f1e2236bbd9857`;
+test log `23712ee8b3118a2b1cea1be074c1a0a45e3b8c9784bd574639a7b4e23cd7e899`.
+Do not repoll19990 or retry unchanged73d. Ordinary parameterized helpers in
+c6 relocate the entire scenarios with exact reverse reconstruction; all70 cases,
+assertions/actions/actor joins and captured5000ms cleanup points are preserved.
+Source packet `fd785c744a6b9d8a36d06771eb596d8fa1d840938db1afdefbccd3a5efd6f86e`;
+source independent/root reviews442e3f24/cb0c5d14; recipe independent/root
+reviews9f1b35e9/a8594cfc. Exact1186 NUL digest is
+`d0d87e5e2fca357a7e7376562d08303957c20324fb769b7b11e876e385923bab`.
+The root literal rejoin scriptV2 checks collection/original36158/source and all
+four source hashes against untouched primary baselines before copying.
+
+Source/recipe/finalization context is permanently retained at
+`M7/helper-scenario-and-fixture-context-20261007-v1/retention.json`, SHA-256
+`82df17be54ad4610c8ada7ac7f17dc037cc8ee7a81a942b334200871f0bf2a63`
+(46 files). It also retains the six-file raw T13 source and reviewed full-fast
+runner/collector foundation; no future result is inferred. Earlier73d source/
+recipe context is retained at
+`M7/helper-test-warning-context-20261007-v1/retention.json`, SHA-256
+`8563308ddf5fd5b9a1425495c8914eab2f4b9d91f1ce81da66df87322d508efa`.
+
+T13 preparation source is now clean isolated
+`01a198e53cd3e0fc9ca40011e2d1a197fca6b05a`, tree
+`b758644a9b17accbc18d9059130e3b3eeca32778`, direct child ofad0bd295.
+Its attached worktree is
+`/Users/spuri/.codex/worktrees/m7-fixture-preparation/loopex`. Frozen source
+packet98a17a55, independent source reviewb4fae892 and root review836621a7
+bind exactly six CLI paths. Complete1187 NUL digest is
+`49681b0b02acc4aea7f5f7b2b7b1a245ee0ec90ca354282bf78372a66eaf2750`.
+Captured catalog return, fixed shared oracle recipe and internal preparation
+join migrate all current callers without a compatibility fallback. The expected
+complete29-case selection is7 catalog+8 real policy+14 new wrapper cases.
+Native formatting/compile/tests are unrun; the added T13 preparation and
+original T13.5 remain open. No provider/oracle campaign or dispatching script
+was executed. Reviews/raw facts/projection/disabled formatter and helper rejoin
+script are retained at
+`M7/fixture-raw-and-helper-rejoin-context-20261007-v1/retention.json`, SHA-256
+`9e615b080260df9c8b657ff016f2c220c9069db908e9bff68c5c3b9315738aa6`
+(16 files). The formatter blueprintd3a33db2 remains disabled; its latest-registry
+and execution-review facts must be bound to actual collected predecessor1697,
+then independently reviewed before one execution.
+
+Next canonical full-fast check follows this clean primary integration commit.
+Use the existing reviewed measurement/runner/rich-collector foundation with
+actual resulting HEAD/tree/direct parent, complete projection/source inventory
+and latest collected registry1697; do not copy historical full-fast totals.
+Foundation review239e0d38 is retained in82df17be. Run literal
+`bash scripts/check.sh` once from exact clean source and preserve original
+session through terminal/collection. Freeze primary source during that native
+run. Pending fixture formatter/proof can be reviewed in its isolated worktree;
+root remains sole native/Git/collector/registry/integration owner. Full floor,
+release, attended/provider, helper and attempts obligations stay separate.
+
+ADR0057 remains Proposed at exact candidate4007adf7; its persistent event-body
+recipe awaits the maintainer's one-at-a-time decision. Independent approved
+implementation continues. Do not infer acceptance from the active goal.
+
+The following source/result records are historical where their source,
+latest-registry wording or pending native facts are superseded above.
+
+Original helper proof56372 is terminal and collected FAIL at isolated
+`a5d923f9ef9c385a5e649b8c754eb36f7d940f64`. Current tool-version, four-file
+format checking and warning-free production compilation passed. All70 affected
+tests executed and passed with zero exclusions, skips or invalid cases, but the
+test stage exited1 under `--warnings-as-errors`: the test module has an unused
+Bitwise require and generated cases compare distinct literal atoms. Floor
+stages did not run. Four original stages joined and26 artifacts authenticate
+in58.536 seconds. Output `M7/helper-binding-log-warning-proof-20261007-v1`;
+collection `9da280d2fec0e3282ec30e4e026cdb450cf268daa62ff91c5e965f72f1614143`;
+terminal `c09ffaef2a7a0251ce694dea7172d8f8fa61490cd7f85f71b244ec40c23f0ead`;
+test log `c6298ded8d7b7889474dab7162a57fe0bd2b3e4e297548e22d1001a2537dc4f4`.
+Latest collected registry1685 is
+`7c562edfce84dec615f17ddbd8da5c50ccf279cf3ce5fad1301b83d0311346a7`.
+Do not repoll56372 or rerun unchangeda5. The narrow test-source correction
+must retain every generated case, assertion, actor join and captured cutoff;
+warning suppression or dropping warnings-as-errors is not authorized.
+The physical binding-log row remains open and counts remain unchanged.
+
+The exact test correction is independently reviewed and frozen at clean
+isolated `73d71176423bd05f9a34c812ddd136f8a065628d`, tree
+`76a6840caeab175315c16d1936f107b54e7c0302`, direct child of a5. It removes
+the unused test require and selects the same two Boolean branches during
+generation. Source packet
+`2a770512b5f91a95270d93cb5ef6ceaf7eb1c60732e9f2bf1843b17737ff8634`,
+independent review
+`60a2570b976d9763be87a8bc20b21aea2f7af629fe9acf39c452fd16b167b587`
+and root review
+`a6e8b1a5966732f71c54be37a238b6b60cc336b409bf4082adb79e0d501c731f`
+authenticate all six substitutions and the unchanged three other closure
+files. Corrected test hash is
+`b44a32c7c3f1e6cb27566fadf8996fd235c5e6221352198d342841392abdf9aa`;
+complete1186-record NUL hash is
+`9946736daae1541f96285073cdf4a334fa5b4b2286f1dbbdce93eb7bf7af8d54`.
+Both supported pairs must freshly check versions, all four files' formatting,
+warning-free compilation and all70 tests. Corrected native results are unknown.
+
+The exact a5 warning correction/source reviews and disabled blueprint are
+permanently retained at
+`M7/helper-warning-source-context-20261007-v1/retention.json`, SHA-256
+`73ae6197f98e7e5a8b2234dedd700f8309ed7389830311e805802f00f505b50c`.
+Final a5 proof preparation, root/independent recipe reviews, enabled runner and
+finalization are retained at
+`M7/helper-warning-final-proof-context-20261007-v1/retention.json`, SHA-256
+`6e4654b859b7bce4b29936734be7e6a47af3ab3ae5a70879c5ffe78cd39a775b`.
+These contexts preserve the actual failed proof; no paired PASS is inferred.
+
+The fixture preparation writer owns six CLI paths in attached isolated
+`/Users/spuri/.codex/worktrees/m7-fixture-preparation/loopex`, based on primary
+`ad0bd295`. The source-only owner-seam report
+`/private/tmp/m7-fixture-wrapper-owner-seams-20261007-v1.md`, SHA-256
+`5aacba229273fbf8b6bddc2bb88d3d958c871f7c6e6dbabe5cf4ec8bf52c88d4`,
+resolves the captured catalog-image identity and fixed runner recipe through
+existing internal owners. The writer may change FixtureManifest, M7Fixture,
+their two tests and a new internal preparation module/test only. No Chat,
+configuration grammar, dispatching script, attempts admission, public contract,
+provider/oracle execution or native check is authorized to that worker. Root
+owns source freeze, integration and native checking. A new added T13 row is
+open; latest T01–T19 counts are87 done/86 todo/6 retired, added348 done/24 todo.
+
+The following source/result records are historical where their source or
+latest-registry wording is superseded by the actual result above.
+
 Current corrected model source is clean isolated
 `763f342c5e2ba597db579f7ad4523fe188ee83ca`, tree
 `4d54b6c512c1d20b452b4ef7478e8d66f0b69eed`, direct child ofe7e32864.
@@ -76,7 +221,7 @@ executed wrapper is
 The original result is terminal and collected; earlier model failures remain
 retained. No unchanged rerun or broad M7/full-fast result is claimed.
 
-Physical helper source is clean isolated
+Physical helper previous neutral source is clean isolated
 `bfb10e1c5d811635af6daf5db0b97059ede2709b`, tree
 `d04ecaab4957ca84e6809e1ae5adaafcf690441e`, after formatter-output415f850b
 and raw905ed2a0. Original83780 failed only the floor formatter in5.225 seconds;
@@ -93,9 +238,39 @@ Neutral source packet isd56a8019eca200b6499d1de9b923993336ef488162ec050b60239045
 independent review is60debc7f00441bd67988a9e94caf9333874fde6f6588dddf8df9e945f9a7de37;
 root review is8b7f2d897fffe574f25e009ff668f68c5fc6787e10b8a557e24d260f4b549ea2.
 Complete1186-record projection is52f9e73201f68e3133f15265413def092f5f4beafa259944a47679f0e0a50457.
-Corrected physical formatting and complete70 cases per pair remain pending.
-Its disabled formatter preparation23eeed021bea8484b8602c8934df69ea1b305edb9107c0a74c459d1d120d05c7
-must rebind its1657 seed after the next actual collected proof.
+Original82503 passed all six neutral formatter stages in6.206 seconds,
+38 artifacts, with no byte change. Output
+`M7/helper-binding-log-neutral-format-20261007-v1`; collection
+`41aad8b4bb8a5eeddb15df2bc3fd0660e1b19d4614e23c70ea8b876fe380508e`;
+terminal `82bcc65139c6fc2a1361dbd42f175ee8773d1f937dd92a2f4c1db7bf6f461456`;
+executed wrapper `82d3b65a8343c337f8f9785ec7ff6e0caabbd3df3bf773327f4a4d016a9d563b`.
+The complete70 paired proof original93428 then failed current Composition
+warning-free compilation solely on unused `require Bitwise` in retained_objects.
+Actual current four-file format check passed; two original stages joined,
+20 artifacts authenticate in47.762 seconds. No tests or floor stages ran.
+Output `M7/helper-binding-log-neutral-proof-20261007-v1`; collection
+`0fe9f5a23ae21a13e30eba72ee56d1f89736d083a7ce8d76067b75f70bf087b9`;
+terminal `a4e7dbd96974ec7f93482e84acab2ff205c462539817f80c32af59d5f2ddea0c`;
+executed wrapper `3bb7c5f58ced2fdfe78189213de1d191720b0780bf72bb452c04e5dcbb24b0d7`.
+Latest actual registry1681 is
+`33deefb9a186d43427013a820c820602b542b7f227e66684e82e56dac30fa8de`.
+Do not repoll82503 or93428 or retry unchangedbfb. The unused declaration was
+removed alone and frozen as clean isolated
+`a5d923f9ef9c385a5e649b8c754eb36f7d940f64`, tree
+`3f621f29320c99b1e35287d3de19e1f4ae7aaf5f`, exact direct child of bfb. Current
+production hash is
+`51883dc69cfeee59e180ba204f43024f00f625e26c07a016715507e48b1820a2`;
+all other three closure hashes and every test/action/endpoint remain unchanged.
+Corrected complete1186-record NUL is
+`5c5c7c407253ce85e1ba7dbfd8f6fc0cdf402a30566b0e7dbbc2664a60160421`.
+Source packet `72ae4faecf433d3c63e5d5826a575134fa40f265dddd7407a866f9c8d2cee291`,
+independent review `4415a80754ddad478b6816c13a17b0af95570a84ed9ccd18164935f995d57138`
+and root source review
+`0fd40c7ea1cef79ced529cd373861180499de96f71e41c9229ea7c59bf40fc95`
+authenticate exact sole18-byte removal. All four qualified band function calls
+remain. Complete70 cases per pair remain pending. The next proof uses fresh actual tool-version, four-file format
+check, warning-free compile and complete tests on each pair; no earlier formatter
+is claimed to have formatted the corrected semantic source.
 
 The earlier physical wrapper exited1 before any native stage because a source
 hash loop overwrote the CLI registry digest. Exact failure descriptor
@@ -114,11 +289,18 @@ physical70 preparation files are retained in
 `M7/resume-and-neutral-proof-context-20261007-v1/retention.json`,
 SHA-25652917107b76399cdae63ef9f67499cccba2f935d91cefae9a7eab9e557a7bbf3.
 They were retained while original23611 was running and supply no future result.
+Another21 finalized physical formatter/proof preparation, source-scoped
+independent/root review, enabled wrapper/finalization and next-work/readiness
+files are permanently retained at
+`M7/helper-neutral-format-and-proof-context-20261007-v1/retention.json`,
+SHA-256 `3e3f9e6c58c7194ad45b59b91798d0ed478c597ef3ddc149f0e877d74d64adf9`.
+That context was retained while93428 was running; its later actual compilation
+failure is collected separately above. No future PASS is inferred.
 Original T01–T19 remains87 done/86 todo/6 retired;added348 done/23 todo after
 adding the bounded physical binding-log proof row and closing the tested model
 switching/restart row. Physical proof remains pending.
 ADR0057 remains the sole asked unanswered decision. The following records are
-historical where superseded by these source identities and registry1673.
+historical where superseded by these source identities and registry1681.
 
 Earlier failed model source is clean isolated `e7e32864f46e28a9161a548fe3ee6438723bd602`,
 tree `29a204b29e91c8c1e5a0238ea310464048beb4d8`, direct child of97ac2326.

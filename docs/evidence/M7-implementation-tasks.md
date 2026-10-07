@@ -1,39 +1,45 @@
 # M7 Implementation Tasks
 
-Native chat controls are reconciled against unchanged current integration and
-the fresh floor proof at `483301c0`. Original8827 passed all 170 cases with zero
-exclusions, skips or invalid cases. Whole-tree floor formatting and CLI
-warning-free compilation passed; four original processes joined and 23 artifacts
-were authenticated in 146.812 seconds. Six original rows close: T06.3/T06.6
-and T10.1/T10.2/T10.3/T10.9. Broader floor preservation and attended chat remain
-open. Original T01–T19: 87 done / 86 todo / 6 retired; added 348 done / 23 todo
-after proving the dormant selector, helper byte unit and parent-binding reducer
-and adding the bounded physical binding-log proof row. ADR0056's exact pair is
-now Accepted; helper execution and separate accounting/protection remain open.
-The canonical ledger/header/genesis-byte unit passed all61 cases on both pairs.
-Exact references are in the [resume record](M7-resume.md).
+The physical helper parent-binding log is implemented and proved at isolated
+`c6eee6466f8342f4a67e3e7541392dbb340808ad`. Original36158 passed all70 affected
+cases on each supported pair, with zero exclusions/skips/invalid. Both version
+and four-file formatting checks and warning-free Composition compilation passed.
+Eight original stages joined and44 artifacts authenticate in110.103 seconds.
+The four tested files integrate literally; only the added T11 physical-log row
+closes. Accounting, startup classification, mutation protection and helper
+activation remain open. Original T01–T19:87 done/86 todo/6 retired;
+added349 done/23 todo. Exact retained references are in the
+[resume record](M7-resume.md).
 
-Parent binding passed complete19 cases on each supported pair at isolated
-`2ba7d524`; original20669 joined six native stages and authenticated37 artifacts
-in90.030 seconds, with zero exclusions/skips/invalid. Its three files integrate
-literally. Original28075 remains FAIL18/19 and floor unrun; only the fixture
-reader's outer LF handling changed before this new-source proof. Physical
-append/custody, accounting and helper activation remain open. Exact source,
-review and native references are in the [resume record](M7-resume.md).
+Original19990 remains FAIL: all70 current cases passed, but eleven constant
+conditional warnings caused warnings-as-errors to exit1; floor was unrun.
+The new source moves the whole two fault scenarios into ordinary parameterized
+private helpers, preserving generated names/cut values, every assertion/action
+and captured cleanup cutoff. No warning suppression, omitted case or repeated
+unchanged attempt was used. Earlier56372/93428/83780 failures stay retained.
 
-Corrected model source `763f342c` passed complete Composition8 and NativeTransport14
-on both supported pairs, zero exclusions/skips/invalid. Original23611 joined ten
-native stages and authenticated50 artifacts in124.372 seconds. Its two tested
-files integrate literally and the added T08 real isolated switching/restart row
-closes. Original58275 remains FAIL7/8; one runtime placement ID now spans both
-physical incarnations without changing production recovery fences. The broader
-original failure/privacy/provider matrix remains open. Physical binding-log V2
-source review passed after correcting
-current-owner tail repair and paused-actor cleanup. Original83780 then passed
-current syntax/layout checks but failed the floor formatter. The equivalent
-shorter callback is independently reviewed and frozen at isolated `bfb10e1c`;
-new formatting and complete70-case paired checks remain pending. Exact references
-are in the [resume record](M7-resume.md). Counts remain unchanged.
+The trusted fixture preparation unit is independently reviewed and frozen at
+clean isolated `01a198e53cd3e0fc9ca40011e2d1a197fca6b05a`. Six CLI files reuse
+ordinary configuration, capture the exact decoded catalog bytes and derive the
+fixed pinned oracle runner. Fourteen new cases plus15 preserved cases require
+formatting, warning-free CLI compilation and29-case proofs on both toolchains;
+none of those new results exists yet. The added T13 preparation row remains
+open. Actual campaign admission and the dispatching wrapper remain separate.
+No provider attempt is started.
+
+The earlier model switching/restart unit remains integrated from `763f342c`:
+original23611 passed Composition8 plus NativeTransport14 on both pairs with ten
+joined stages in124.372 seconds. Broader original model/privacy/provider matrix
+and whole live compaction delivery remain open. Native chat rows were reconciled
+with original8827's complete170-case floor proof, as retained in the resume
+record. T01/T02/T09/T10 original checklists are complete; their separate added
+or milestone-level obligations remain where listed.
+
+ADR0057's exact Proposed pair at `4007adf7` awaits maintainer acceptance before
+the attempts event-body codec. The full current integration check must run once
+on the new clean primary commit after this literal rejoin; the historical
+`ff784916` result does not cover subsequent source additions. Full floor,
+release, attended, helper and campaign obligations remain open.
 
 The following earlier progress entries are historical where superseded above.
 
@@ -14003,7 +14009,7 @@ Hosted, attended and coordinated transport generation proofs remain separate.
 - [x] Install/read immutable validated retained-object bytes with actual content-addressed filesystem durability, exclusive host ownership, symlink/root guards and physical crash/fsync/uncertainty proof on both pairs; use the existing GenesisCodec as a concrete client without inventing ledger or catalog schemas.
 - [ ] Pin the complete private delegation ledger byte recipe and closed object/mutation field grammars under accepted ADR 0046 semantics before implementing append/recovery/transaction reduction; refuse incomplete or corrupt current frames without introducing a compatibility decoder.
 - [x] Implement the accepted private parent-binding captured-object validator and pure prepare-parent/bind-parent reducer; prove exact owning creation-history joins, independent digest/transaction literals, ordered replay, duplicate/conflict refusal and reserved binding completion credit on both pairs. Physical append, run accounting and helper execution remain separate.
-- [ ] Implement the accepted physical parent-binding log through the retained-object owner; prove exact prepare/bind append and owning creation-history joins, writer custody, uncertain append fencing, acquisition-scoped tail repair, original fault-actor cleanup and complete 70-case affected selection on both supported pairs. This bounded log does not activate helpers or complete run accounting, startup classification or mutation protection.
+- [x] Implement the accepted physical parent-binding log through the retained-object owner; prove exact prepare/bind append and owning creation-history joins, writer custody, uncertain append fencing, acquisition-scoped tail repair, original fault-actor cleanup and complete 70-case affected selection on both supported pairs. This bounded log does not activate helpers or complete run accounting, startup classification or mutation protection.
 - [x] Implement accepted ADR0056's private canonical JSON, closed binding/run headers and checksummed frames, plus production GenesisCodec byte entrypoints used by the actual retained-object install/reopen test; prove independent exact bytes, structural/size/corruption boundaries and complete affected files on both supported pairs. Physical append/recovery, transaction reduction, child accounting, mutation protection and helper execution remain separate.
 - [ ] Resolve exact retained child-accounting access and universal host mutation guards before exposing helpers through runtime-only clients; preserve host ownership, current serial session truth, retained maintenance charges and settled-child protection without copying private reducer accounting or adding an unapproved public read.
 
@@ -14079,6 +14085,8 @@ recorded successes do not establish present evidence availability or authorize
 repeating completed provider work.
 
 ### Added implementation subtasks
+
+- [ ] Join trusted fixture-wrapper preparation to the current ordinary configuration, captured catalog bytes and fixed oracle-runner recipe; prove exact manifest/workspace/oracle/runner pins, fully pinned alternate-command refusal and no preparation-time execution on both supported toolchains. Migrate current internal callers together; actual campaign admission, dispatching entrypoint and complete T13 workflow remain separate.
 
 - [x] Pin the retained four coding fixtures in a closed source catalog with literal prompts, bounds, digests/modes, allowed changes, objective results and required model actions; protect complete workspace and immutable oracle inventories around actual deterministic oracle runs on both toolchains.
 - [x] Freeze each fixture catalog entry to its exact changed/created path policy; reject well-formed edits that broaden or remove the retained task allowance, with failing-before and both-toolchain proofs.
