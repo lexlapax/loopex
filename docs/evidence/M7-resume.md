@@ -123,6 +123,21 @@ producer tests cover text, choice, decline and cancellation; retained expiry
 coverage is a pure constructor proof, not live publication. Paired formatting,
 compilation, complete producer files and pinned independent Node execution
 remain required. No T09 row closes from source review.
+T09 formatter original96019 is terminal0 and collected PASS,6.973 seconds,
+six original joins and37 verified artifacts. Three Elixir files changed only
+through formatting; their non-line AST checks passed and both formatters
+accepted the output. Four JSON/Node files stayed byte-identical. Collection
+`M7/question-terminal-format-20261007-v1/original-collection.json`, SHA-256
+`13197b07c6b44a098231a36e38f9309d45bddb95ca2cb5d35b9f94a0d55dc324`;
+terminal `5d7e3b67e58abaf3121daeb08178502e6ef29f5279bab212b8c2b235267ceeb1`.
+Root committed the exact formatted bytes as clean isolated
+`4e7baabf12a8aabbe3b35cae5b8a05bc46a92bed`, direct child of a68df6b0.
+Run fresh version, pinned Node, formatting, warning-free compilation and all25
+protocol/24 Core selected cases per pair, including all four Node consumers.
+Dirty formatter records remain provenance only. Never repoll96019.
+Latest registry1304 at
+`M7/question-terminal-format-20261007-v1/stage-attempt-registry.json`, SHA-256
+`8244efd3ddb9d92637d2bf206f6a8dbef7278a38b9dfd0b58afe2b16f924943d`.
 
 One added T16 row closes for these corrections: T01–T19 original80 done/93 todo/
 6 retired; added325 done/30 todo. Workspace proof source is separately saved at
@@ -148,6 +163,86 @@ clean child; dirty formatter records cannot supply clean-source metadata.
 Latest registry1294 at `M7/workspace-format-20261007-v1/stage-attempt-registry.json`,
 SHA-256 `276365c315649f926413d54babadee7a93094a3ac9093da797478713fe64bf90`.
 Never repoll99639. Workspace execution and original T15 item8 remain open.
+
+Workspace original76549 is terminal1 and collected FAIL at f14de6d9. Current
+40/41 cases passed, zero excluded/skipped/invalid, in273.496 seconds; floor
+did not run. Four original stages joined and24 artifacts were verified.
+Collection `M7/workspace-admission-20261007-v1/original-collection.json`, SHA-256
+`affbdab18a612c30640ae4107fb19d621c09d617c36619e988ab0ac4fdcc4032`;
+terminal `3740c4da168297ea8cdb032826a71c8e27740c9be567a4447574d64452342b1f`.
+The new test omitted the four skill paths installed by its existing real resource
+fixture from its expected workspace inventory. Independent review confirms the
+full nine-path correction, exact67-byte skill literal and independent SHA-256
+oracle preserve complete manifests and all joins, bounds and existing40 cases.
+Root committed those reviewed bytes as clean isolated
+`cf55cb2d0918b2c984b77af4e39f06e6969c732e`, direct child of f14de6d9.
+Fresh paired41-case verification remains required; no row closes. Never repoll76549.
+Its1298-key registry at `M7/workspace-admission-20261007-v1/stage-attempt-registry.json`
+has SHA-256 `8bedb93d3dad2b52bdaf2e88c0be03b12b743ac1bd18ab5ef4630d7d8f6417b3`.
+
+Workspace original10338 is terminal1 and collected FAIL before tests,2.048
+seconds, two original joins and19 verified artifacts. The current formatter
+required one blank line before the new multiline digest assertion. Collection
+`M7/workspace-admission-20261007-v2/original-collection.json`, SHA-256
+`767644fbcf892b0aeb8d1cbc0651762fc49f718b34b5d1ae41aa366796b08777`;
+terminal `343b691086bc77e0eb0130d81e127ac42277305daea9e2fbb1097500f846dde2`.
+Root applied that exact whitespace change and committed clean isolated
+`ef010c3597e17d358a37358e79844fd78cca7570`, direct child of cf55cb2d.
+Fresh paired41-case verification remains required. Never repoll10338.
+Latest registry1306 at `M7/workspace-admission-20261007-v2/stage-attempt-registry.json`,
+SHA-256 `fb6e302eae0288e3538da5cd82c2e22446d198da58396a1721edcf3a1327ff4d`.
+Sixteen source packets, disabled runners and AST helpers are retained immutably
+outside temporary storage under
+`M7/workspace-question-preparation-20261007-v1/inventory.json`, SHA-256
+`a0210d9e77bef0faf1156b780d6c799b5e2bb983fd73dc92bc53ffbdf1dc6b1d`.
+Those preparation copies claim no execution and preserve unset registry pins.
+
+Workspace original52536 is terminal1 and collected FAIL at ef010c35:
+40/41 current cases passed, zero excluded/skipped/invalid,271.945 seconds;
+floor did not run. Four original stages joined and26 artifacts were verified.
+Collection `M7/workspace-admission-20261007-v3/original-collection.json`, SHA-256
+`45eb82e0d147cfc9b81d43e184dcfee55fb2904623a8619894c0057ddc03d277`;
+terminal `901a8022a893d38e72212404d0ec518fae4a455a191c43baa2e6796e6fda2586`.
+Latest consumed registry1310 at
+`M7/workspace-admission-20261007-v3/stage-attempt-registry.json`, SHA-256
+`c5d0166ae6eda111e3e90a255a1a0f530658630f4aa37934d1f69b5338097381`.
+Never repoll52536 or retry unchanged ef010c35.
+
+The new case requested1750 through File.chmod! but never established it:
+immediate native lstat and independent physical stat on both toolchains
+observed0750 before copying. Isolated Python os.chmod on the same filesystem
+established1750. Diagnostic tool chunks2ff735(current,0.263347 seconds) and
+33d872(floor,0.249317 seconds) terminated0; they are library diagnostics, not
+workflow admission. The initial PATH preflight0966d8 terminated127 before a
+BEAM could start. No production mask or complete special-mode proof is claimed.
+
+Independent review accepted the new case's explicit ordinary0750 fixture with
+full four-digit physical checks immediately after setup, backup and restoration.
+All original40 cases, complete nine-path manifests, identity, no-dispatch checks,
+owners and bounds remain unchanged. Root committed exact reviewed source as
+clean isolated `2913226452741f48994716bd0d92745080f65370`, direct child of ef010c35;
+file SHA-256 `186726c2d38873e843dfe08914fae6ac3574a28d59d4a42fdacf46427f026dbc`.
+Run the new case diagnostically before complete41-case paired verification;
+selection exclusions are diagnostic only and cannot close a row. Original T15
+item8 remains open. A separate added T15 row now requires physically established
+special-bit preservation or honest refusal under ADR0051's unchanged0..4095
+mode domain: original80 done/93 todo/6 retired; added325 done/31 todo.
+
+Mode diagnosis source and the reviewed ordinary-mode proposal are retained at
+`M7/workspace-mode-diagnosis-preparation-20261007-v1/inventory.json`, SHA-256
+`422faea79766ab560ca72198b2798f640c8bc2076e096fb6d270baf423a6a885`.
+Its transcript summary explicitly claims no original process-join or workflow
+admission proof. The original native workflow failures remain separately retained.
+
+T16 concurrent held-work witness is frozen, untested, in the reused
+`m7-configured-fence-fixture` worktree at parent84586238. Only
+`apps/loopex/test/configured_session_test.exs` changes; SHA-256
+`2c066afed193d48134bb042d9eeca2578f055f3adac46128cfe4d55f879cf7ea`.
+Patch `/private/tmp/m7-configured-held-shutdown-source-20261007-v1.patch`, SHA-256
+`85e8c498f6c6251d6f15cc652031588bc7efe20ef1043c09bdad24423afddb1f`;
+packet `/private/tmp/m7-configured-held-shutdown-source-20261007-v1.json`, SHA-256
+`8a3bb0fc6fc0c75003d73db595b8acdc0688f682c5d6aaf4a50e7853f8fdf8ac`.
+Independent source review is running. No VM, tests or task closure claimed.
 
 Core correction verification is complete. ADR0055 remains the
 sole asked pending approval;0056/0057/0058 remain Proposed and unactivated.

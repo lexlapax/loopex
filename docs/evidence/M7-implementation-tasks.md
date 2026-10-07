@@ -15,10 +15,12 @@ Original54086 passed106/107 current cases before a stale exact refusal-field
 oracle failed; its floor lane did not run. The corrected child keeps closed
 field sets and requires revision2 for prompt/follow-up while steer retains its
 unchanged shape. The failed output remains retained.
-Original T01–T19:80 done/93 todo/6 retired; added325 done/30 todo.
+Original T01–T19:80 done/93 todo/6 retired; added325 done/31 todo.
 No original row closes from this focused verification.
-The separate workspace restoration case is saved in isolated `a3f63411` and
-awaits paired execution. Exact outputs and continuation pins are retained in
+The separate workspace restoration original76549 passed40/41 current cases;
+the new case omitted installed skill paths from its expected inventory. The
+reviewed correction is saved at clean isolated `cf55cb2d`, awaiting fresh paired
+verification. Exact failed outputs and continuation pins are retained in
 the [restart checkpoint](M7-resume.md#technical-depth).
 
 Complete physical restore original75764 passed all148 cases on each supported
@@ -13920,6 +13922,8 @@ in the restart checkpoint. Broader restore/decoder/public/helper rows stay open.
 
 
 
+- [ ] Establish special permission bits physically before current-format restore; prove exact preservation or refusal before successful activation under the accepted full `0o7777` mode domain on both supported toolchains. Keep this separate from the ordinary-mode workspace workflow and retain original owner, work and cleanup bounds.
+
 - [ ] Prove a bounded current-format physical Store/executor backup/restore slice with quiescent exact owner joins, complete unexcluded manifests, empty destination roots, separate workspace restoration and unknown-effect nonredispatch on both pairs. This does not close operator attendance or future helper/catalog/ledger coverage; isolated test preparation waits for the current full check before verification.
 
 - [x] Migrate current model adapters, fixtures, conformance callers and reply types to exact eleven-field v3 callbacks; remove the nine-field callback fallback and old two-argument canonical projection, preserving current ten-field replies, v3 settlement, raw-admission order, exact echoes, captured requirements and once-only accounting on both supported toolchains.
@@ -13950,6 +13954,15 @@ in the restart checkpoint. Broader restore/decoder/public/helper rows stay open.
 ### Added implementation subtasks
 
 - [ ] Repair ordinary provider cleanup notices reaching the SessionCoordinator dispatcher after the cleanup integration; retain failed58fb33ba full-check evidence, prove actual Local Store completion through the same live owner and distinct caretaker delivery, preserve existing cleanup windows and native joins, and verify both supported pairs plus a new full integration candidate.
+
+The production route correction and43 focused cases per pair are already proved
+at `f9ac9c82`, original34176,22 original joins,511.8 seconds. Read-only audit at
+primary6aaddddd confirms ordinary retainers remain excluded from unsolicited
+window messages and distinct caretakers still receive them. The direct two-case
+proof file is unchanged; full-fast5eb has no recurrence but failed other fixtures.
+This row awaits a complete passing integration candidate. Collection
+`M7/cleanup-notification-focused-runtime-original-collection-20261006-v1.json`,
+SHA-256 `2bf0acb413503132d77798582f2ebbac65106c1371cb3fa82904ff5d9f841e25`.
 
 - [x] Correct the six Core fixture failures from original73241 to the accepted current authored-bounds grammar and tagged executor result; preserve malformed refusal without admission, valid expired maintenance fencing, both exact future-terminal overflow oracles, authored prompt-record overflow and queued receipt ordering. Retain both failed integration and floor-formatting outputs; prove all107 affected cases on both supported toolchains before literal integration. The original full integration and milestone acceptance rows remain separate.
 
