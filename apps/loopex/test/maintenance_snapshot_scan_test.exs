@@ -101,11 +101,30 @@ defmodule Loopex.Runtime.MaintenanceSnapshotScanTest do
               "answer_choice_id" => <<255>>,
               "answer_command_id" => <<3, 255>>
             }),
-            row("interaction.resolved", %{"interaction_id" => <<1, 255>>})
+            row("interaction.resolved", %{
+              "interaction_id" => <<1, 255>>,
+              "run_id" => run_id,
+              "turn" => Integer.pow(10, 100),
+              "tool_call_id" => <<2, 255>>,
+              "resolution" => "allowed",
+              "answer_command_id" => <<3, 255>>,
+              "choice_id" => <<255>>
+            })
           ]
         else
           [row("interaction.answered", %{"interaction_id" => <<1, 255>>})]
         end
+
+      if producer == "policy_defer" do
+        assert {:ok, _} =
+                 LoopexProtocol.Session.PolicyEvent.encode_requested(Map.delete(requested, :kind))
+
+        assert {:ok, _} =
+                 LoopexProtocol.Session.PolicyEvent.encode_terminal(
+                   "interaction.resolved",
+                   Map.delete(List.last(endings), :kind)
+                 )
+      end
 
       events =
         stamp(
