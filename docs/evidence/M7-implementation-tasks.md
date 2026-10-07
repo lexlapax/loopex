@@ -1,5 +1,16 @@
 # M7 Implementation Tasks
 
+The complete current fast check at `ff784916` passed: 4,822 tests across all
+eleven applications, 60 designated exclusions and zero skipped or invalid cases.
+Original99939 is collected with both original native handles joined; the
+2087.871-second check and 2104.464-second wrapper output remain retained. The
+namespace audit and two bounded T16 integration rows now close. Earlier failures
+and broader cleanup diagnostics remain open according to their own obligations.
+Selected receipt capture and native operator guidance are new pending subtasks.
+Original T01–T19: 81 done / 92 todo / 6 retired; added 342 done / 24 todo.
+Exact source, reports, populations and digests are in the
+[resume record](M7-resume.md).
+
 The T15 captured-byte receipt decoder row is now reconciled with original13676:
 all32 receipt cases passed on both supported pairs at2826b30b,zero exclusions.
 Current tests and decoder/authority bodies are literal; the only later executor
@@ -14094,7 +14105,8 @@ Exact collection and outputs are retained in the restart checkpoint.
 - [x] Audit one selected current Local artifact object through the existing owned streaming hash, binding the locator-derived physical path to the reference digest/size, complete captured manifest and descriptor/ancestor identities under original total/work/cleanup bounds. Preserve current direct-fetch locator semantics, writer-only limits and all orphan/staging bytes; prove actual writer and physical refusal cases on both pairs. Complete object enumeration, history relations and restore activation remain separate.
 - [x] Capture one selected current artifact-use sidecar through the existing guardian-owned restore IO worker and real captured Local/Core describe facade; require exact reference-derived pathname, physical manifest membership, current raw ceiling, hash/mode/link/ancestor identity and close-before-semantics under original cutoffs. Prove actual writers and physical/semantic refusals on both pairs; object bytes, complete namespace/orphans and history/restore relations remain separate.
 - [x] Extract one private captured-byte Local receipt decoder shared with live reads; preserve the native current 28-field ETF schema, 65,536-byte cap, exact raw job binding, closed predicates and all claim/finality/job/recovery authority. Replace the injected decoder seam with actual bounded BIF proof and actual writer/hostile controls on both supported pairs; physical receipt capture and complete history audit remain separate.
-- [ ] Enumerate the complete current Local generation/marker/open namespace under one original restore IO guardian; require exact physical name membership, current marker-plane grammar, open cardinality/whole-byte bounds and source/job/digest relations. Preserve actual writer crash cuts and claim observations; complete receipts/Store/job/history/restore certification remains separate.
+- [x] Enumerate the complete current Local generation/marker/open namespace under one original restore IO guardian; require exact physical name membership, current marker-plane grammar, open cardinality/whole-byte bounds and source/job/digest relations. Preserve actual writer crash cuts and claim observations; complete receipts/Store/job/history/restore certification remains separate.
+- [ ] Capture one current receipt selected by the original opaque raw job through the existing restore IO worker; bind manifest membership, basename, 65,536-byte ceiling, actual descriptor/hash/mode/ancestor identity and close-before-decode under unchanged work and cleanup bounds. Prove the complete 120-case IO file on both supported pairs, including all three long cases; preserve original72212 formatter failure and require the corrected source's own positive format and execution evidence. Whole namespace, job authority, finality and restore certification remain separate.
 - [x] Extract the current Local artifact-use captured-byte decoder with the existing 131,072-byte ceiling, exact canonical bytes and filename digest; reuse the existing ArtifactStore facade through a private captured-bytes handle for closed reference-bound admission. Prove actual writers, deleted-source decoding, opaque identities, hostile bytes and existing semantic negatives on both pairs; physical capture, object bytes and complete history relations remain separate.
 - [x] Capture one canonical current Local generation, admission, refusal or open ledger file through the guardian-owned restore IO worker; bind exact descriptor, pathname, raw job identity, original source placement and role ceiling before decode; prove actual current writers, hostile physical captures and unchanged cleanup on both pairs. Complete ledger enumeration, receipt/Store/artifact relations and restore activation remain separate.
 - [x] Audit every declared current Store history through the existing owned IO worker, enforcing descriptor/path/hash identity, complete transaction replay and recovery of every session; prove actual retained unknown truth, faults and cleanup on both pairs without claiming scripted executors prove OS effects.
@@ -14166,14 +14178,18 @@ in the restart checkpoint. Broader restore/decoder/public/helper rows stay open.
 
 - [x] Preserve the initial retained provider result-worker graceful shutdown and its unchanged forced-retirement fallback; prove32 actual held configured owners with zero unexpected ordinary reports, exact608 actor joins, one actual trapping worker through the original10,000-ms window and captured1,000-ms grace, and the coordinator-specific no-window trace oracle. Verify all151 Core and2 Composition cases per supported pair, retain prior45793/38205 failures and private fault witnesses, and integrate literal tested files. Broader Task.Supervised/coordinator diagnostics and full integration remain separate.
 
-- [ ] Repair ordinary provider cleanup notices reaching the SessionCoordinator dispatcher after the cleanup integration; retain failed58fb33ba full-check evidence, prove actual Local Store completion through the same live owner and distinct caretaker delivery, preserve existing cleanup windows and native joins, and verify both supported pairs plus a new full integration candidate.
+- [x] Repair ordinary provider cleanup notices reaching the SessionCoordinator dispatcher after the cleanup integration; retain failed58fb33ba full-check evidence, prove actual Local Store completion through the same live owner and distinct caretaker delivery, preserve existing cleanup windows and native joins, and verify both supported pairs plus a new full integration candidate.
 
 The production route correction and43 focused cases per pair are already proved
 at `f9ac9c82`, original34176,22 original joins,511.8 seconds. Read-only audit at
 primary6aaddddd confirms ordinary retainers remain excluded from unsolicited
 window messages and distinct caretakers still receive them. The direct two-case
 proof file is unchanged; full-fast5eb has no recurrence but failed other fixtures.
-This row awaits a complete passing integration candidate. Collection
+Complete collected integration at ff784916 now passes all eleven applications;
+the preserved direct two-case proof and exact notification route authenticate,
+with no ordinary cleanup-notification dispatcher recurrence in the retained
+Core/Composition logs. This closes only this row. Broader shutdown diagnostics
+and provider_cleanup_unproved reports remain separate. Focused collection
 `M7/cleanup-notification-focused-runtime-original-collection-20261006-v1.json`,
 SHA-256 `2bf0acb413503132d77798582f2ebbac65106c1371cb3fa82904ff5d9f841e25`.
 
@@ -14208,7 +14224,8 @@ SHA-256 `2bf0acb413503132d77798582f2ebbac65106c1371cb3fa82904ff5d9f841e25`.
 
 - [ ] Investigate and repair the full 520ff308 integration failure in the sixty-three blocked quiesce fences sharing one cutoff with a settled sibling; retain the failed exact-candidate output, establish the cause through bounded runtime observability and actual process lifetimes, preserve the shared cutoff, sibling progress, fence accounting and cleanup assertions, and verify both supported pairs.
 - [ ] Repair the nine seed406612 CLI failures from the48ca full check by preparing the genuine provider-runtime lifecycle fixture through existing guarded startup; retain the first failure, preserve all startup/signal/resource/diagnostic/cleanup assertions, prove cold-first and mixed real fixtures on both pairs, then verify ordinary CLI in the next combined integration candidate.
-- [ ] Run the combined chat-progress, command-bounds and native alias-preparation integration candidate's full current-pair fast check once from a clean committed checkout; retain exact SHA, complete output, measured duration and digest. Keep required floor closure, live wire joins and observed T16 task-shutdown diagnostics separate.
+- [x] Run the combined chat-progress, command-bounds and native alias-preparation integration candidate's full current-pair fast check once from a clean committed checkout; retain exact SHA, complete output, measured duration and digest. Keep required floor closure, live wire joins and observed T16 task-shutdown diagnostics separate.
+- [ ] Document the implemented native chat, retained resume, settled configuration, compaction, durable question answers and one-shot responder workflows in existing operator/developer guides; add README navigation and a factual Unreleased entry. Verify exact examples, reciprocal links and documentation gates without claiming helper execution, new served wire generations, creation custody, foreground activity delivery or M7 closure.
 - [ ] Resolve the exact 0823aa50 full-check pre-fence runtime_unavailable under untraced combined load; retain failed output, establish its phase/cause and exact process lifetimes, preserve the original gate/fence/reap/cleanup/Store assertions, and verify a clean committed integration candidate without relabeling the failed run.
 - [x] Prove current quiesce startup-loss and pre-gate cutoff controls with captured original actors: retain the 63-reader/sibling shared cutoff, mixed announced/unannounced cancellation and exact joins, plus held child-resolution and immediate-forward controls under the unchanged initial gate/reap limits. Keep missing historical 520ff308/0823aa50 output and unknown old interleavings separate; current controls do not reconstruct the past.
 

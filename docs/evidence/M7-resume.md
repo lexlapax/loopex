@@ -27,6 +27,87 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+Current full integration is collected PASS at
+`ff7849165dee25fe0b30617caf337a5da8a2a830`, tree
+`e57f528e85b446b778dfca964757f394fb148041`. Original99939 exited0;
+the native full check took2087.871 seconds and the wrapper2104.464 seconds.
+All eleven applications passed4,822 tests, with60 designated fast exclusions
+and zero skipped/invalid cases. There is no floor full-check, release or closure
+claim. Output under the external evidence root is
+`M7/current-integration-full-fast-20261007-v2`; collection SHA-256
+`0fc31e7b35ae8ba8b547a4cb2283bd11bac576cae75f38c5cef26cee34c35324`,
+terminal `fb0c71a87fe2af92443679eb52877cb54ff21853952bceaad0fb7bd40a437acb`,
+complete native full log
+`6c6cbd2fa8f18abcb87c780319da568d3f7025cf5a9702d81928dcae89cf6836`.
+Both original native handles joined;44 structured artifacts, all eleven log
+populations and22 actual dev/test ebin inventories containing608 compiled files
+authenticate. Executed wrapper `d4cc377defb5825d274d3d8907757a49d414f641e69bf0b408971776bc3949f9`;
+rich collector `2e085f82b4a884cf5acfab8b4db7384a891e613e89f6069a72c29b7dc1a1babe`.
+Never repoll99939 or rerun unchangedff784916. The source checkout is unfrozen.
+
+Three existing added rows close: T15 namespace enumeration through the unchanged
+original66773/13676 evidence, T16 ordinary cleanup-notification routing through
+original34176's paired focused proof plus this complete integration, and T16's
+combined chat/bounds/alias current integration. Namespace audit SHA-256
+`ae3ce27bc45ad421edc082a57e3ec823e34085ffd09607bf1bdaec337633a180`;
+cleanup audit `44e0e72cf15791937f65c2969a23cfc582f2010ba20eb774a427940db7ad639e`.
+No ordinary cleanup-window dispatcher recurrence appears in the retained Core
+and Composition logs. Actual shutdown_error and provider_cleanup_unproved
+reports remain separate unresolved diagnostic facts; green tests do not assign
+their causes. Original81 done/92 todo/6 retired;added342 done/24 todo after
+adding the pending selected receipt and native operator-guidance units.
+
+Selected receipt capture is not proved. Isolated worktree
+`/Users/spuri/.codex/worktrees/m7-restore-receipt-capture/loopex` holds corrected
+rawcaf4cdb2959ec853cb7b3e683003a08b6f0a90cd, tree
+c53b7662565550356614b108b79cf3d30b27efbd, direct child82fc823bab17565b0b8b0397821a2899364303ff.
+Its source packet is `/private/tmp/m7-restore-receipt-capture-source-20261007-v2/source.json`,
+SHA-256 `e42163d79b10a6e6ae99393c92c6ef6985dae0491af530360a19162c0a6ee283`.
+Original72212 formatter exited1 after its own output failed immediate current
+format checking; floor and all tests were unrun. Its3.363-second failure,
+four original joins and25 artifacts are collected at
+`M7/selected-receipt-format-20261007-v1`, collection
+`0b6f20ddd84711e334bbeff70c6f02ba254ca570fe7e2e88061636b040977b92`,
+terminal `59a6fc904ba2eb16d320fd9c211c980f6258b5ad4858ee3503ae066a460a4db8`.
+The correction uses operation/result/assert for the one invalid-ID call,
+preserving production bytes, all111 original cases,120 total cases and three
+long cases. Review revised source/recipes, then format and prove that source
+with its own original handles; do not reuse negative metadata or add a timeout.
+The600,000-ms aggregate belongs to the separate64-restore workflow case.
+Latest fully collected registry1557 is the failed formatter successor,
+SHA-256 `27fcb3d76e6746d9da8c250e2bbf0b425f302af7a10338c09c380e6402e15c1b`;
+the1553 full successor is historical. Never repoll72212.
+
+The earlier alleged whole-history receipt admission defect is withdrawn:
+Workflow calls private execute/1 directly in the original admitted worker.
+The shared capture helper is audit_captured_record/7. Frozen original claims
+remain historical; no production repair or expanded standalone intake follows.
+Durable corrected reviews and raw source identity are under
+`M7/selected-receipt-review-correction-20261007-v1`, retention SHA-256
+`05a91890bc8ade8b89685c2e79f5884b8c703937153a822c2d04517b6cb484d3`;
+the initial source/context retention is
+`M7/selected-receipt-source-review-20261007-v1`, SHA-256
+`ab258e84c9451c01b68dc83ac9b03c236256d033b6bde0e356590d22caad0d45`.
+
+Parallel native operator guidance owns only six existing docs in
+`/Users/spuri/.codex/worktrees/m7-operator-guidance/loopex` fromff784916.
+Its source-only inventory SHA-256 is
+`7f1f721c53503c977a2459b168fc544a19541b7b6c0f33d5b105feb792d6cf2e`.
+Review exact native examples and documentation gates before rejoining. Helpers,
+new served wire generations, creation custody and foreground activity delivery
+remain unfinished. ADR0056 at2dba3e7a is the sole asked unanswered decision;
+0057–0060 remain Proposed. ADR0055 acceptance is already recorded. Continue
+the active goal; no milestone closure, main merge, tag or publication is granted.
+
+The complete post-check source/context bundle is retained outside temporary
+storage at `M7/post-full-check-context-20261007-v1` under the external evidence
+root. Its41-file retention index SHA-256 is
+`f077c4f5299afbcb4db32ef30c0893c19447fd92879fd6e8e9425677482aee83`.
+It contains the corrected receipt packet and raw Git projection, initial disabled
+recipes and actual failed formatter finalization, operator source packet and
+independent audits. Original temporary references inside those bytes remain
+historical; restore missing inputs by their exact retained digest before use.
+
 T15 captured-byte receipt decoder audit is complete by original13676's existing
 paired proof. Durable report under the external evidence root at
 `M7/receipt-decoder-evidence-audit-20261007-v1/report.md`,SHA-256
