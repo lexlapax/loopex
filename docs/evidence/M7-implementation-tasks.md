@@ -1,5 +1,16 @@
 # M7 Implementation Tasks
 
+T16's reviewed normal-shutdown correction and actual trapping-worker fallback
+witness are committed at isolated0267936f; paired formatting and153 cases per
+supported pair remain pending. Native policy provenance is reviewed and committed
+at isolated6c2af3dd; all29 paired native cases remain pending. Policy codec
+original63668 failed compilation before tests; its explicit range-step repair is
+committed at4b8bc89b, awaiting39-case paired proof. Special-mode formatting passed
+without changing source568c42f7; its diagnostic verifier failed before native
+execution and needs a specific retained-artifact mode correction. All failures
+remain retained. No row closes; original81 done/92 todo/6 retired, added327 done/
+30 todo. Exact source, failure and registry pins are in the [resume record](M7-resume.md).
+
 T09 terminal payload original15825 is collected PASS at isolated5f9851fc:
 all25 Protocol and24 Core cases passed on each supported pair, including four
 actual Node consumers, zero exclusions/skips/invalid. Fourteen original joins,

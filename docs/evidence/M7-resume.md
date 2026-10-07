@@ -27,6 +27,122 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+Latest collected executions after that source checkpoint: policy original5261
+is terminal1 and collected FAIL at4b8bc89b, current37/39, floor unrun,
+zero exclusions/skips/invalid,8.487 seconds, five original joins and27 artifacts.
+Collection `M7/policy-event-admission-20261007-v2/original-collection.json`,
+SHA-256 `1ef7c9db00528811fc15262eeb777080b66fcefb0260e580dfd936dea7535452`;
+terminal `6334a455a23f9f11177b1977d31cd7de99ae2010e980b01c824f2f7e9388f6b2`.
+Both failures reject the fixture's expected refusal of one valid denied history.
+The accepted schema, Elixir and independent Node agree it is valid. Correct only
+the duplicated negative's name/status to unsupported declined, preserving all237
+rows and12 positive/225 negative controls. Reviewed vector-only repair is committed
+at `5f882d694dd9f2a6f2c5216025a3217f38094948` in m7-configure-grammar,
+packet `/private/tmp/m7-policy-terminal-vector-repair-20261007-v1.json`,
+SHA-256 `d8ca61ab39e0a3779cd3e4882f90d4aa208cae2eba3f3237a9f6b61eb66ee71e`.
+Fresh complete39-case paired proof remains required. Never repoll5261 or rerun4b8.
+
+Special-mode diagnostic original9864 is terminal1 and collected FAIL,
+52.034 seconds, two original joins and19 artifacts. Physical-manifest case
+passed; public restore refused inventory_mismatch during baseline_copy. Current
+1/2 passed with149 declared line-selection exclusions, zero skipped/invalid;
+floor did not execute. Collection
+`M7/restore-special-mode-diagnostic-20261007-v2/original-collection.json`,
+SHA-256 `e5e0d715cf19b6151e82e6633f7380b6302d9af8b69501962ed617e55e49fe8f`;
+terminal `4da7b6ad8790b7dbc3b90a5e576c541b96c10e41930dfb0990b4e20f058b9978`.
+No mode-preserving restore is proved. Causal diagnosis must distinguish mode-set
+primitive behavior from later writes. Never repoll9864 or rerun unchanged568c42f7.
+
+Native policy formatter original21895 is terminal0 and collected PASS,
+5.754 seconds, six original joins and37 artifacts. Actual non-line AST
+comparison and both formatter checks passed for all three owned files.
+Collection `M7/policy-native-format-20261007-v1/original-collection.json`,
+SHA-256 `20787f5bd2ddfb46c84b97ff5d295cacc404e250978990d1386c3fa30296bea1`;
+terminal `0f44d8e7d272b51ebb8a8b0cace6ba33aba7b82c7c22e7bce7c04081950c42c6`.
+Literal formatted output is committed as clean child
+`d19d7ae042222a80185823b9cb9697aeb88e95e5` in the writer-exclusive temporary
+native policy worktree. Formatted-source packet
+`/private/tmp/m7-policy-native-formatted-source-20261007-v1.json`, SHA-256
+`729eadf0ea7a7ca4da7861262a6ec6acd5625d758d3d084d40bccb021df96fd3`.
+All29 native tests on both pairs remain unproved. Never repoll21895.
+Latest fully collected registry1385 is
+`M7/policy-native-format-20261007-v1/stage-attempt-registry.json`, SHA-256
+`d15c109249f4de61cf55beddaf77b64884cd9ac68931a0c59d830edbf23a4d6c`.
+No native VM remains live at this checkpoint. T16 formatter V1 remains disabled:
+independent review requires a bijection of original handles/results before
+positive artifact retention and temporary cleanup, including result-persistence
+failure. Repair its verifier in a fresh V2; preserve V1 and all original sources.
+Counts remain original81 done/92 todo/6 retired, added327 done/30 todo.
+
+Latest source checkpoint, 2026-10-07: primary `07ca6f322397860299571987eca9f65e44144583`
+is clean and pushed. Counts remain original81 done/92 todo/6 retired;
+added327 done/30 todo. No new row closes from source review.
+
+T16's independently reviewed three-file correction is committed in
+`/Users/spuri/.codex/worktrees/m7-configured-fence-fixture/loopex` at
+`0267936f882eea65a6d60450d6448877623c1a1a`, direct child of87be8289.
+Tree `a769f08fd6a631343eae8e6994f4dd4ea7ac0d2b`; complete Git projection
+SHA-256 `2a3a8f1605c915b556ee848fd23a8259572be98edef4c598ed6d2bae96448029`.
+Source packet `/private/tmp/m7-configured-normal-cleanup-source-20261007-v3.json`,
+SHA-256 `635e43abfa1a9dfcc0e1ece97dea7bfe2b9afc5ace0bf06527825060455983e1`;
+patch `14dc073eb99cef5825c43e38e33696f407708b8749dfa18c881161ba0a5f37db`.
+Only the initial retained result-worker signal changes from kill to shutdown.
+The original force-kill deadline, resource custody and final joins remain.
+The new fourth retirement case exercises an actual trapping retained worker
+through the real10,000-ms observation deadline with one captured1,000-ms join
+allowance. It proves the fallback mechanism, not an actual Logger fault path.
+Source review passed; paired formatting and151 Core plus2 Composition cases
+per supported pair, including long_bound, remain required. Original45793's
+failure is retained; the broader shutdown_error/noproc investigation stays open.
+
+Accepted ADR0052 native policy provenance and closed cursor relations passed
+independent source review. The three-file source is committed in
+`/private/tmp/loopex-m7-policy-native-20261007` at
+`6c2af3dd66167c24a9ff8b053ccedba00f96cce2`, child of7a1206e9.
+Packet `/private/tmp/m7-policy-native-source-20261007-v1/source.json`, SHA-256
+`a0a47202cb049ae81aab0b40639cd0a0183bf65fb3fe69e2d5faaa18d888726e`;
+patch `3481e9e49000156747ea51a08e685bc2084ccd7661d7dc58fd649d759590e774`.
+Formatting and the complete29 native cases on both pairs remain unproved.
+Wire and generation activation remain separate obligations.
+
+Policy codec original63668 is terminal1 and collected FAIL at cleanc7c63bcd:
+current warning-free compilation refused a variable range guard without an
+explicit step; no tests or floor lane executed. Four original joins,24 verified
+artifacts,5.684 seconds. Collection
+`M7/policy-event-admission-20261007-v1/original-collection.json`, SHA-256
+`e9205b8d046e418b4a43926b8421587801cb563ffab085a7fec0fe4a3fe9ea43`;
+terminal `c8e205f4b316790f2bac32bf4094bf736f1d252b2dc2be4ecc86257ab9c76e23`.
+Never repoll63668 or rerun unchangedc7c63bcd. The exact three-byte //1 repair
+is committed at clean `4b8bc89b397b4c4355aee0190c431d2152c0b546` in
+`m7-configure-grammar`; all424 vectors and the other seven files are unchanged.
+Packet `/private/tmp/m7-policy-event-guard-step-20261007-v1/source-v2.json`,
+SHA-256 `e1451f0f63994a2eebd590b62732eb823b59490b023b4d73aa7f369232cc7563`.
+The disabled complete39-case wrapper is
+`/private/tmp/m7-policy-event-admission-20261007-v2.py`, SHA-256
+`30f084632ae61142e0e295ab44a7ec9c483f341d6b642fec217a736b78376b02`.
+Latest fully collected registry1372 is
+`M7/policy-event-admission-20261007-v1/stage-attempt-registry.json`, SHA-256
+`6e462fa00764fbab0a4fb08ea8f9df5456f4fc58ae977248888369183548682d`.
+
+Special-mode formatter original23108 is terminal0 and collected PASS,4.753
+seconds, six original joins and38 verified artifacts. It changed zero bytes;
+clean568c42f7 remains the genuine source identity, with no invented child.
+Collection `M7/restore-special-mode-format-20261007-v1/original-collection.json`,
+SHA-256 `b3f440ea74ed65c0749e449817e31ca9c75fe5bcf79c8ccbaffe12e3de9a1262`;
+terminal `61d402211223497320a52aec3680a09758c96f7787bcdb946034a4b4a938e569`.
+Never repoll23108. The attempted diagnostic V1 verifier failed before engine
+import, output creation, native work or registry reservation: historical
+initial-git-tree.nul is0644, while its artifact loop incorrectly demanded0444.
+Its exact digest and independent Git projection match. Tool chunk5fa210,
+terminal1,0.360579 seconds, no session. Registry1372 is unchanged and the
+V1 diagnostic output directory does not exist. Correct only that verifier's
+specific retained-mode assumption in a fresh wrapper; preserve all historical
+bytes and modes. Neither the two-case diagnostic nor complete151-case paired
+restore proof has executed. No physical-mode preservation pass is claimed.
+
+The entries below retain earlier checkpoint identities. The newer source and
+registry pins above supersede their pending execution instructions.
+
 Latest proved unit: T09 original15825 is terminal0 and collected PASS at
 `5f9851fc22ab3f0a5bafe56950e39d5a73444cc3`,47.994 seconds, fourteen original
 joins and60 verified artifacts. All25 Protocol plus24 Core cases passed on
