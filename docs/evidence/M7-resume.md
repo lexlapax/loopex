@@ -42,11 +42,30 @@ The proof covers native mapping/admission parity, authored retry identity,
 privacy, authority refusals and actual run.finished completion. It does not
 activate served configuration or complete its broad T05 row. Never repoll17193.
 
-No product VM remains active. The native author owns corrections within the
-same ten files, including the existing EffectIntents retained-authored reader.
-Preserve the148-case population. After frozen-source independent review, root
-formats, commits and runs both complete five-file groups at the corrected bytes.
-Seed the1017-key collected registry above. ADR0054 is the sole asked, unanswered
+Native original72635 is running at clean isolated candidate
+`9fd9079b08bcb7dd1a429c372f48016e227cb08a`. The correction-only source review
+cleared the closed retained representation and post-commit Control capture,
+manifest SHA-256 `ca55be97fd244434a4ba3036a89048d733f584a9fc48c53545b02f0aa081883b`.
+Root formatting completed in0.540 seconds. The unchanged reviewed native runner
+requires all148 cases on each supported pair, seeded by the1017-key registry
+above. Output `M7/native-authored-bounds-20261006-v3`. Collect original72635
+once before another VM, formatting or integration; no PASS is yet claimed.
+
+Primary configure integration is `06496570bff59004d6cddfa2331eaa1456a146f3`,
+pushed to origin/m7. Exact tested source15280560 was retained before worktree
+reuse at `M7/configure-native-differential-20261006-v4/tested-source.tar`,
+SHA-256 `66656abbd0ef4f2e08107b0142905ac79e68f536ac86c2dc0aa4d24d69cfc25c`.
+Retention record SHA-256 `14ab1688814182693c6158564bc162d73cdfaf46c7ce126c89b0b9d12e34c99d`.
+This is source retention, not fresh-source or release execution.
+
+The configure author now owns exactly mapping.ex/configure_ingress_test.exs/
+session_mapping_test.exs in the reused clean protocol worktree from06496570.
+Implement the accepted Mapping branch and actual authority/replay/unknown tests,
+while preserving current Connection generation gating. Root owns review and
+execution; served configure/full generations and remote creation remain open.
+A separate source-only reconciliation checks whether T13 original fixture
+wrapper/oracle rows already have their promised complete proof.
+ ADR0054 is the sole asked, unanswered
 question; the restore aggregate cutoff decision remains queued after it.
 
 Original T01–T19 remains80 done/93 todo/6 retired. Added remains303 done/41 todo.
