@@ -48,11 +48,12 @@ run and derived-index records. New ledger/cache directories use 0700 and their
 files 0600; existing object and lease writers retain their current modes. No
 credential value or grant is retained.
 
-ADR 0046's accepted Core command revision must bind the original prompt text,
-authored bounds and absolute cutoff before helpers can prompt a child. Its
-owning normalized-command constructor remains unimplemented. This recipe uses
-only that owner's digest and retained admission; it supplies no host substitute
-or fallback to the current command identity, which omits authored bounds.
+Core now implements ADR 0046's omission-preserving authored-bound command
+revision 2, binding original prompt text, authored bounds and absolute cutoff
+before defaults are resolved. This recipe uses only the original owning digest
+and retained admission. A helper-facing owning command/digest boundary and its
+integration joins remain unimplemented and unproved; this recipe supplies no
+API/export, host substitute or superseded-v1 fallback.
 
 One serial adapter owner and the existing exclusive placement/writer lease own
 all mutations. An append is acknowledged only after file sync. Partial write or
@@ -125,8 +126,11 @@ A checksum proves retained bytes, not latestness, terminated owners or exclusion
 of other roots. Removing the adapter cannot erase unresolved helper obligations.
 
 This pair remains Proposed. Independent review and exact-byte maintainer
-acceptance precede dependent implementation. The separately pending request
-schema question and public accounting decision are unchanged.
+acceptance precede dependent implementation. Accepted
+[ADR 0053](0053-current-configure-request.md#concept) fixes the current configure
+`changes` request grammar; coordinated generation/client activation proofs
+remain separate. The public accounting decision and complete helper integration
+remain open.
 
 ## Governance Record
 
