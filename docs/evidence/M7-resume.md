@@ -27,6 +27,68 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+Latest primary checkpoint `8b664814` is pushed to origin/m7. Two earlier HTTPS
+pushes were rejected by GitHub with Internal Server Error; the authorized
+HTTP/1.1 push then succeeded without forcing or changing history.
+
+Wire V3 formatter original85103 passed at unchanged clean
+`7544c2ff7b6c8edbdde87219e3a44caef9ec5ebc`:8.555 seconds,six original joins,
+38 artifacts. Output `M7/creation-options-wire-format-20261007-v3`;
+collection SHA-256 `ef008e3ce05bf8bc1234f58e46cdcc150738859d7b73bb8af1d0f66043754129`;
+terminal `b67e8bda78671f2f491c9137347b1ef3c7b9753b0175d8dcac2906a715c33e05`.
+Its six native stages establish both formatter checks and non-line AST equality;
+no empty formatting child was created. The four positive clean-source metadata
+records were explicitly reused by the next native proof.
+
+Wire original93963 is terminal1 and collected FAIL at that source:current11/12,
+zero exclusions/skips/invalid;floor did not run. Its new fixture wrongly
+expected Frame.decode to admit1.0 as a float. The existing Frame contract and
+implementation refuse fractional/exponent numeric tokens before decoding.
+The native float-refusal loop already remains in the options test. Correct
+only the fixture's framed-token expectation and retain all12 cases,exact schema
+and vector bytes. Production is unchanged. Output
+`M7/creation-options-wire-proof-20261007-v3`,5.233 seconds,three original joins,
+22 artifacts. Collection SHA-256
+`20e8183784846e6d20bd043ad2ae01e932fd0b2b30df30c9523473a23cb5c7cc`;
+terminal `8699873708136cffba10d3d6b2265f3b2cb1978762ff6040d09c8528bffb33bf`;
+latest collected registry1523
+`ce6b82465f1c158820ed98b0e6884704c21a62bbd8726715c6b439f52dddd5e8`.
+Executed wrapper SHA-256
+`56afb112a44f2e733cd3859ebc43ec7f2dc19b2c58e935c13c02b7660cc1c023`.
+A root pin-preparation reversal guard first failed before writing or admitting
+any stage because unanchored FROZEN replacement also matched RAW_FROZEN.
+Whole-line literal substitutions corrected preparation; native failure93963 is
+independent of that preparation. No unchanged-source test retry is authorized
+as evidence. V4 repair/formatter/proof preparation is assigned to the existing
+foreground_progress_route worker with only the creation-options test and new
+/private/tmp artifacts owned. Root owns review,Git and native checks.
+
+ADR0060 original96513 is terminal0 and collected PASS at exact5ecf7008:
+74.031 seconds,two original joins,18 artifacts,all four canonical docs steps.
+Output `M7/adr0060-docs-20261007-v2`;collection SHA-256
+`1438c14298cb7f620dbc0dca6b05dde76451bd3e8912a1f4fa40ddd06c5952fc`;
+terminal `0f2e2aaaf3605e69509ebbe934a14ac9c81af9735302ea0d1c84cd937d90aee6`.
+Its exact proposed pair is integrated at8b664814. The two index conflicts were
+resolved solely by retaining both0059 and0060 rows; both reviewed pairs remain
+byte-identical. Neither proposal is accepted. ADR0056 remains the sole asked
+unanswered decision. Do not repoll any collected original handle above.
+
+No native VM is live at this checkpoint. Independent accepted ADR0054
+standalone compaction schema/vector/Node implementation is assigned to
+compaction_activity_unit in the attached isolated worktree
+`/Users/spuri/.codex/worktrees/m7-activity-vectors/loopex`,base8b664814.
+Only four new standalone schema/vector/Node files and existing
+compaction_progress_test.exs are owned. No serving manifests,live clients,
+transport or runtime changes are authorized by that unit. The source audit
+`/private/tmp/m7-activity-transport-next-slice-20261007-v1.md`, SHA-256
+`054a66b4e2e7430007d4e15c8ceab525f1effeeebb736de3ba75833416659042`,
+identifies the independent vector obligation and the still-Proposed0058
+live-delivery ownership dependency. Full-mode reviewer is independently reading
+the next accepted selected-artifact-object restore slice; no implementation
+or test PASS is inferred from either assignment.
+Counts remain original81 done/92 todo/6 retired,added334 done/28 todo.
+
+
 Core fixture focused verification is now complete and integrated literally from
 `cb380db4c8a0e4cf9c0edb51931e07a59c5db0fd`. Original71288 exited0:
 35/35 on each supported pair,zero exclusions/skips/invalid,26.927 seconds,

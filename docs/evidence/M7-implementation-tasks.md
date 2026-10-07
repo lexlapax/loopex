@@ -1,5 +1,15 @@
 # M7 Implementation Tasks
 
+Wire source7544c2ff passed both formatter checks,then original93963 failed11/12
+current cases because its framed-fraction fixture contradicted the existing
+Frame refusal contract. A narrow fixture correction is being prepared; no wire
+row closes or floor PASS is claimed. Proposed0059/0060 are independently reviewed,
+documentation-checked and integrated with acceptance pending. The compaction
+activity standalone schema/vector/Node unit proceeds independently under accepted
+0054. Original T01–T19 remains81 done/92 todo/6 retired,added334 done/28 todo.
+Actual failure and assignment pointers are in the [resume record](M7-resume.md).
+
+
 Both Core fixture repairs are proved and integrated literally fromcb380db4:
 all35 cases passed on each supported toolchain,zero exclusions/skips/invalid,
 26.927 seconds,eight original joins and43 artifacts. The original full-check
