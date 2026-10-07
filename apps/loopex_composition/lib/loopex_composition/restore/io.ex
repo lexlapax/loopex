@@ -28,7 +28,8 @@ defmodule LoopexComposition.Restore.IO do
   retained continuation reuses original candidates/intent and checked claim
   custody through source retirement and optional exact retained generation installation,
   and exact canonical destination proof prefixes. Private finalization uses the
-  original terminal claim-release owner before returning its checked receipt. Public
+  original terminal claim-release owner before returning its checked receipt. Private
+  post-commit cleanup also carries captured whole-directory absence through parent sync. Public
   restore and the remaining accepted variants are unfinished. Validated
   maps and recovered facts remain private; standalone audit operations grant no
   effect authority and do not activate a restored root. Host exclusion remains the caller's
@@ -569,7 +570,8 @@ defmodule LoopexComposition.Restore.IO do
              :restore_claim_released,
              :descriptor_stat,
              :manifest_stat,
-             :list
+             :list,
+             :retained_publication_recheck
            ])
 
   defp release_needed?(%{terminal_release: false, payload: {:ok, %{release_claims: [_ | _]}}}),
@@ -702,7 +704,8 @@ defmodule LoopexComposition.Restore.IO do
                      :restore_retained_claim_handoff,
                      :restore_retained_source_retirement,
                      :restore_retained_generation_install,
-                     :restore_retained_destination_finalization
+                     :restore_retained_destination_finalization,
+                     :restore_retained_claim_cleanup
                    ],
               operation
             ),
@@ -719,7 +722,8 @@ defmodule LoopexComposition.Restore.IO do
               :restore_retained_claim_handoff,
               :restore_retained_source_retirement,
               :restore_retained_generation_install,
-              :restore_retained_destination_finalization
+              :restore_retained_destination_finalization,
+              :restore_retained_claim_cleanup
             ] do
     %{
       "kind" => "loopex_current_restore_observation_v1",
@@ -728,7 +732,10 @@ defmodule LoopexComposition.Restore.IO do
       "phase" => "claim",
       "intent" => "may_exist",
       "cleanup" => "unconfirmed",
-      "claim" => "none",
+      # Concept: present absence cannot erase original claim-cleanup uncertainty.
+      # Technical depth: only this private original-tx path starts conservatively
+      # retained; actual owner accounting remains separate until terminal sync/joins.
+      "claim" => if(kind == :restore_retained_claim_cleanup, do: "retained", else: "none"),
       "reason" => "none"
     }
   end
@@ -953,6 +960,48 @@ defmodule LoopexComposition.Restore.IO do
       retained_publication_cap(:generation),
       nil
     )
+  end
+
+  defp execute({:restore_retained_claim_cleanup, plan, invocation} = operation) do
+    if not valid_operation?(operation), do: throw({:io_error, :invalid_io_request})
+    LoopexComposition.Restore.Workflow.retained_claim_cleanup(plan, invocation, &execute/1)
+  end
+
+  # Concept: post-commit cleanup captures actual owners or positive directory absence.
+  # Technical depth: the existing complete lookup reducer sees the actual claim;
+  # original bounded native captures and parent identities remain worker-private.
+  defp execute({:restore_cleanup_capture, root, plan, invocation}) do
+    if not valid_operation?({:restore_retained_claim_cleanup, plan, invocation}) or
+         root not in [plan["source_state_root"], plan["destination_state_root"]] or
+         (root == plan["source_state_root"] and plan["source_status"] != "available"),
+       do: throw({:io_error, :invalid_io_request})
+
+    lookup_operation(root, plan["tx_id"], nil, :cleanup)
+  end
+
+  defp execute({:restore_cleanup_admit, captures}) do
+    Enum.each(captures, fn capture ->
+      lookup_recheck(capture.root, capture.ancestors, capture.state)
+      obligation = capture.claim
+      retained_publication_ancestors!(obligation.release_ancestors)
+
+      if obligation.absent do
+        retained_publication_namespace!(obligation.release_ancestors, [
+          {obligation.directory, :absent}
+        ])
+      else
+        retained_claim_namespace!(obligation)
+        owner = retained_publication_file(Path.join(obligation.directory, "owner"), 2048, 0o600)
+
+        if owner == :absent or owner.bytes != obligation.owner,
+          do: throw({:io_error, :restore_claim_changed})
+
+        require_same_identity(obligation.owner_identity, owner.info)
+        primitive({:restore_claim_acquired, obligation}, fn -> :ok end)
+      end
+    end)
+
+    {:ok, Enum.map(captures, & &1.claim)}
   end
 
   # Concept: every retirement publication retains the original live claim custody.
@@ -1251,56 +1300,81 @@ defmodule LoopexComposition.Restore.IO do
 
   defp execute({:release_restore_claims, claims}) do
     Enum.each(claims, fn claim ->
-      owner = Path.join(claim.directory, "owner")
-      ancestors = manifest_ancestors(Path.dirname(claim.directory))
+      if Map.get(claim, :absent, false) do
+        # Concept: prior deletion needs a durable parent sync, never claim recreation.
+        # Technical depth: the original terminal worker checks native ENOENT and
+        # the captured ancestor vector before and after its exact descriptor sync.
+        retained_publication_namespace!(claim.release_ancestors, [{claim.directory, :absent}])
 
-      if directory_identity(manifest_stat(claim.directory)) != claim.directory_identity,
-        do: throw({:io_error, :restore_claim_changed})
-
-      names =
-        require_value(primitive(:list, fn -> :prim_file.list_dir_all(claim.directory) end))
-        |> Enum.map(&manifest_name/1)
-
-      if names != ["owner"],
-        do: throw({:io_error, :restore_claim_changed})
-
-      require_same_identity(claim.owner_identity, manifest_stat(owner))
-      descriptor = open(owner, [:raw, :binary, :read])
-
-      require_same_identity(
-        claim.owner_identity,
-        require_value(
-          primitive(:descriptor_stat, fn -> :prim_file.read_handle_info(descriptor) end)
+        retained_publication_directory_sync(
+          Path.dirname(claim.directory),
+          claim.release_ancestors
         )
-      )
 
-      bytes = read_chunks(descriptor, 2048, [])
+        retained_publication_namespace!(claim.release_ancestors, [{claim.directory, :absent}])
+        primitive({:restore_claim_released, claim.directory}, fn -> :ok end)
+      else
+        if Map.has_key?(claim, :release_ancestors),
+          do: retained_publication_ancestors!(claim.release_ancestors)
 
-      require_same_identity(
-        claim.owner_identity,
-        require_value(
-          primitive(:descriptor_stat, fn -> :prim_file.read_handle_info(descriptor) end)
-        )
-      )
+        owner = Path.join(claim.directory, "owner")
+        ancestors = manifest_ancestors(Path.dirname(claim.directory))
 
-      close(descriptor)
-      require_same_identity(claim.owner_identity, manifest_stat(owner))
-      if bytes != claim.owner, do: throw({:io_error, :restore_claim_changed})
-
-      Enum.each(ancestors, fn {path, identity} ->
-        if directory_identity(manifest_stat(path)) != identity,
+        if directory_identity(manifest_stat(claim.directory)) != claim.directory_identity,
           do: throw({:io_error, :restore_claim_changed})
-      end)
 
-      require_ok(primitive(:claim_delete, fn -> :prim_file.delete(owner) end))
-      directory_sync(claim.directory)
+        names =
+          require_value(primitive(:list, fn -> :prim_file.list_dir_all(claim.directory) end))
+          |> Enum.map(&manifest_name/1)
 
-      require_ok(
-        primitive(:claim_directory_delete, fn -> :prim_file.del_dir(claim.directory) end)
-      )
+        if names != ["owner"],
+          do: throw({:io_error, :restore_claim_changed})
 
-      directory_sync(Path.dirname(claim.directory))
-      primitive({:restore_claim_released, claim.directory}, fn -> :ok end)
+        require_same_identity(claim.owner_identity, manifest_stat(owner))
+        descriptor = open(owner, [:raw, :binary, :read])
+
+        require_same_identity(
+          claim.owner_identity,
+          require_value(
+            primitive(:descriptor_stat, fn -> :prim_file.read_handle_info(descriptor) end)
+          )
+        )
+
+        bytes = read_chunks(descriptor, 2048, [])
+
+        require_same_identity(
+          claim.owner_identity,
+          require_value(
+            primitive(:descriptor_stat, fn -> :prim_file.read_handle_info(descriptor) end)
+          )
+        )
+
+        close(descriptor)
+        require_same_identity(claim.owner_identity, manifest_stat(owner))
+        if bytes != claim.owner, do: throw({:io_error, :restore_claim_changed})
+
+        Enum.each(ancestors, fn {path, identity} ->
+          if directory_identity(manifest_stat(path)) != identity,
+            do: throw({:io_error, :restore_claim_changed})
+        end)
+
+        require_ok(primitive(:claim_delete, fn -> :prim_file.delete(owner) end))
+        directory_sync(claim.directory)
+
+        require_ok(
+          primitive(:claim_directory_delete, fn -> :prim_file.del_dir(claim.directory) end)
+        )
+
+        if Map.has_key?(claim, :release_ancestors),
+          do:
+            retained_publication_directory_sync(
+              Path.dirname(claim.directory),
+              claim.release_ancestors
+            ),
+          else: directory_sync(Path.dirname(claim.directory))
+
+        primitive({:restore_claim_released, claim.directory}, fn -> :ok end)
+      end
     end)
 
     {:ok, :released}
@@ -1788,7 +1862,7 @@ defmodule LoopexComposition.Restore.IO do
       {claim, state} = lookup_claim(root, claim_path, state)
       lookup_recheck(root, ancestors, state)
 
-      if not is_nil(plan) and not is_nil(claim) do
+      if (not is_nil(plan) or retain_claim == :cleanup) and not is_nil(claim) do
         {guardian, reference, _monitor} = Process.get(:restore_io_owner)
         send(guardian, {:retained_restore_claim, self(), reference})
       end
@@ -1836,33 +1910,69 @@ defmodule LoopexComposition.Restore.IO do
 
       if match?({:pending, _, _}, plan), do: lookup_recheck(root, ancestors, state)
 
-      if retain_claim and match?({:pending, _}, result) do
-        {:pending, retained} = result
-        owner_path = Path.join(claim_path, "owner")
+      cond do
+        retain_claim == :cleanup and not match?({:error, _}, result) ->
+          release_ancestors = retained_publication_ancestors(Path.dirname(claim_path))
+          lookup_recheck(root, ancestors, state)
 
-        custody = %{
-          directory: claim_path,
-          owner: Map.fetch!(state.files, Path.relative_to(owner_path, root)),
-          directory_identity: directory_identity(Map.fetch!(state.identities, claim_path)),
-          owner_identity: Map.fetch!(state.identities, owner_path)
-        }
+          custody =
+            if is_nil(claim) do
+              retained_publication_namespace!(release_ancestors, [{claim_path, :absent}])
+              %{directory: claim_path, absent: true, release_ancestors: release_ancestors}
+            else
+              owner_path = Path.join(claim_path, "owner")
 
-        claim_ancestors = retained_publication_ancestors(claim_path)
-        lookup_recheck(root, ancestors, state)
-        retained_claim_namespace!(custody)
+              captured = %{
+                directory: claim_path,
+                absent: false,
+                owner: Map.fetch!(state.files, Path.relative_to(owner_path, root)),
+                directory_identity: directory_identity(Map.fetch!(state.identities, claim_path)),
+                owner_identity: Map.fetch!(state.identities, owner_path),
+                release_ancestors: release_ancestors
+              }
 
-        {:ok,
-         {:pending,
-          %{
-            root: root,
-            retained: retained,
-            claim: custody,
-            state: state,
-            ancestors: ancestors,
-            claim_ancestors: claim_ancestors
-          }}}
-      else
-        {:ok, result}
+              retained_claim_namespace!(captured)
+              captured
+            end
+
+          {:ok,
+           %{
+             root: root,
+             result: result,
+             decoded_claim: claim,
+             claim: custody,
+             state: state,
+             ancestors: ancestors
+           }}
+
+        retain_claim == true and match?({:pending, _}, result) ->
+          {:pending, retained} = result
+          owner_path = Path.join(claim_path, "owner")
+
+          custody = %{
+            directory: claim_path,
+            owner: Map.fetch!(state.files, Path.relative_to(owner_path, root)),
+            directory_identity: directory_identity(Map.fetch!(state.identities, claim_path)),
+            owner_identity: Map.fetch!(state.identities, owner_path)
+          }
+
+          claim_ancestors = retained_publication_ancestors(claim_path)
+          lookup_recheck(root, ancestors, state)
+          retained_claim_namespace!(custody)
+
+          {:ok,
+           {:pending,
+            %{
+              root: root,
+              retained: retained,
+              claim: custody,
+              state: state,
+              ancestors: ancestors,
+              claim_ancestors: claim_ancestors
+            }}}
+
+        true ->
+          {:ok, result}
       end
     catch
       {:lookup_error, code} -> {:ok, lookup_refusal(tx_id, code)}
@@ -3089,6 +3199,9 @@ defmodule LoopexComposition.Restore.IO do
     do: valid_operation?({:restore_retained_claim_handoff, plan, invocation})
 
   defp valid_operation?({:restore_retained_destination_finalization, plan, invocation}),
+    do: valid_operation?({:restore_retained_claim_handoff, plan, invocation})
+
+  defp valid_operation?({:restore_retained_claim_cleanup, plan, invocation}),
     do: valid_operation?({:restore_retained_claim_handoff, plan, invocation})
 
   defp valid_operation?({:audit_restore_lineage, root, plan, manifest}),

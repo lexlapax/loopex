@@ -35,8 +35,8 @@ Twelve original stages joined and53 artifacts verified. Collection
 `3adde171e6a59da66f036a92325b6b635f02733297e1aedcb24120db86e0adda`;
 terminal `d5fc620ea507d38afcfcbf278be02f4cda472133ff68bff689eeba7b2befecdd`.
 All six tested files are integrated literally; the bounded T16 ordinary encoding
-row closes. Original T01–T19 remains80 done/93 todo/6 retired; added321 done/
-32 todo. Live routing/writer closure, generation activation and full-fast remain
+row closes. Original T01–T19 remains80 done/93 todo/6 retired; added322 done/
+31 todo. Live routing/writer closure, generation activation and full-fast remain
 open. Never repoll14873 or33078.
 
 Both remaining sparse-lookup generated cases preserve original claim custody
@@ -64,12 +64,20 @@ Latest consumed registry1206 at
 `M7/retained-finalization-lookup-admission-20261006-v2/stage-attempt-registry.json`,
 SHA-256 `e083ea7e6c9f6f8166c439e63d658e83a1904b366636ecf792602227fe9d7ae7`.
 The bounded private finalization and lookup-fixture rows close. Original
-T01–T19 remains80 done/93 todo/6 retired; added321 done/32 todo.
+T01–T19 remains80 done/93 todo/6 retired; added322 done/31 todo.
 
-Next, root verifies private mixed/all-absent original-transaction cleanup from
-clean isolated d5f893634e79e4c77abace2ed96f641f4306969f, a real source child of
-raw4b67, which is based on finalization f56d6fe1. Three owned paths are RestoreIO,
-Workflow and the new25-case partial-cleanup test; complete selection403 per pair.
+Private mixed/all-absent original-tx cleanup original28176 is collected PASS at
+clean isolated d5f893634e79e4c77abace2ed96f641f4306969f. All403 cases per supported
+pair passed with zero excluded/skipped/invalid in776.309 seconds, four original
+compile/test joins and34 verified artifacts. Four exact-source version/format
+records were reused from collected95738. Actual long-bound timely/late cleanup
+witnesses were retained and validated before temporary cleanup. The actual64
+restore case took160,506 ms current and158,458 ms floor. The three tested files
+are integrated literally; only the bounded T15 partial-cleanup row closes.
+Collection `M7/retained-partial-admission-20261006-v2/original-collection.json`,
+SHA-256 `2ea26c877887f48363ad868b78cfcadf9cad01e54cd031072c98cacf07f10d39`;
+terminal `95115104fef349d47226c96139a2c2a96dba08579f6cf0ad6b481ac08036e2ca`.
+Never repoll28176 or retry unchanged d5f89363.
 
 Formatter59508 failed only the floor formatter's long comprehension layout,
 after current formatter/non-line AST passed. It is collected FAIL,4.364 seconds,
@@ -88,20 +96,17 @@ and37 artifacts. Collection
 terminal `95a23f0bb9a191e7871f4baee72de4baf333aa545544923a8ed181a64a7a03ce`.
 Latest consumed registry1218 at that output's stage-attempt-registry.json,
 SHA-256 `76178579f0356479877b71c65bb5e1a07bfeabcfe600a95f94d6bb3dae309e68`.
-Never repoll95738. Complete403 original28176 is active at d5f89363 through
-independently reviewed same-source metadata reuse, not repeated version/formatter
-stages. Collect the original handle before another VM or editing that worktree. Prepared
-`/private/tmp/m7-retained-partial-admission-20261006-v2.py`, SHA-256
-`52bec5d68a83a4b66cb87c327f70b2fb3918b6aa9cdb3bbd74699721778dcb33`,
-is executing as original28176. The classical v1 lane is unexecuted and
-superseded for this source.
+Never repoll95738. Complete403 original28176 is terminal and collected above.
+Metadata-reuse wrapper `/private/tmp/m7-retained-partial-admission-20261006-v2.py`,
+SHA-256 `52bec5d68a83a4b66cb87c327f70b2fb3918b6aa9cdb3bbd74699721778dcb33`,
+is retained with that original collection. Classicalv1 remains unexecuted.
 Root owns every VM, collection and literal rejoin.
 Preparation packet `M7/partial-cleanup-preparation-20261006-v1/inventory.json`,
 SHA-256 `e90e123f8b2fa478b1e3d4ac66cf424627eb82edd393e3326d17e8edea87f2ed`,
 retains both formatter wrappers/helper, source patch and unexecuted classicalv1.
 The new metadata-reuse wrapper is not yet in that packet; its executed output
 must retain the exact wrapper at original collection. Public and helper restore
-remain separate and partial-cleanup's row stays open until complete paired proof.
+remain separate; bounded partial-cleanup is now proved and integrated.
 
 The public driver writer in m7-restore-public-resolution froze seven paths with
 64 new cases, then independent review found a positive-absence defect: new
@@ -115,8 +120,16 @@ review, with exact Concept SHA-256
 `292a45cec72a9011e1bb6eb48eebccdd24a325c11f43b083089f8008db781762`
 and Technical SHA-256
 `57fd78afae837af50c2cc51123083413a519b06f75cb656b101b6f36c6c39f12`.
-Documentation VM checks remain queued behind28176. Proposal source reasoning
-is not implementation proof. The specialized reviewer profile was unavailable
+Documentation original34154 is collected PASS at exact primary3c97b6a1,
+68.666 seconds, two original joins and16 artifacts. Collection
+`M7/adr0058-docs-20261006-v1/original-collection.json`, SHA-256
+`580ba2e82e25285f825df579f4f52f126c1d654b703292e4ef747230aec9469f`;
+terminal `eaa8c2e9f59f160d0bbbc6a225ec1f2aa3a82573bcbd0bfc20c257f7cee47a95`.
+This is the documentation-only repository command, not a suite. No VM is active.
+Latest consumed registry1224 at
+`M7/adr0058-docs-20261006-v1/stage-attempt-registry.json`, SHA-256
+`4c25f7d1a899d2efea7620f2e775c03a735e753845d04a5b5ac31816b3d43bc5`.
+Never repoll34154. Proposal source reasoning is not implementation proof. The specialized reviewer profile was unavailable
 under workspace-write; a separate ordinary read-only inspection made no writes
 or executions and verified the pair/patch/indices and material decisions.
 ADR0055 is the sole asked pending approval;0056/0057/0058 are queued.
@@ -128,7 +141,7 @@ pre-gate cutoff controls. Original50-ms initial gate,500-ms shared fence and
 logs and probes are unavailable, as their durable attempt registry records;
 recorded historical summaries are not reverified bytes and no current green
 successor identifies those old interleavings. Their historical rows stay open.
-Original T01–T19 remains80 done/93 todo/6 retired; added321 done/32 todo.
+Original T01–T19 remains80 done/93 todo/6 retired; added322 done/31 todo.
 
 The following paragraphs record earlier source revisions and their evidence.
 

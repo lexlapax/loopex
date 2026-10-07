@@ -16,7 +16,9 @@ defmodule LoopexComposition.Restore.Workflow do
   native records. A private continuation installs exact retained generation prefixes
   and validates the complete activation manifest. Private retained finalization admits
   exact canonical proof prefixes, commits the root last and delegates captured claims
-  to the original terminal release owner before returning the existing receipt. The IO callback never
+  to the original terminal release owner before returning the existing receipt. Private
+  post-commit cleanup requires the same complete proofs and carries captured intact
+  or absent claims into that terminal owner. The IO callback never
   starts another guardian or refreshes this invocation's work or cleanup allowance.
   """
 
@@ -348,25 +350,7 @@ defmodule LoopexComposition.Restore.Workflow do
 
     retained_generation_fences!(plan, invocation, retained, io)
     retained_finalization_manifest!(plan, invocation, retained, :complete, io)
-    {:ok, intent} = RestoreCodec.decode(:intent, retained.intent)
-    {:ok, committed} = RestoreCodec.decode(:committed, compiled.committed)
-
-    receipt = %{
-      "kind" => "loopex_current_restore_receipt_v1",
-      "tx_id" => intent["tx_id"],
-      "ordinal" => intent["ordinal"],
-      "plan_digest" => intent["plan_digest"],
-      "intent_sha256" => hash(retained.intent),
-      "committed_sha256" => hash(compiled.committed),
-      "source_retirement_sha256" => committed["source_retirement_sha256"],
-      "baseline_manifest_sha256" => committed["baseline_manifest_sha256"],
-      "activation_manifest_sha256" => committed["activation_manifest_sha256"],
-      "prior_lineage_sha256" => committed["prior_lineage_sha256"],
-      "destination_state_binding" => committed["destination_state_binding"],
-      "ledger_count" => length(intent["generations"])
-    }
-
-    encode!(:receipt, receipt)
+    receipt = retained_receipt!(retained)
     phase(io, "claim_release")
     # Keep the destination claim last; partial release never exposes that root
     # while this operation still has a captured source claim to release.
@@ -384,6 +368,181 @@ defmodule LoopexComposition.Restore.Workflow do
 
     {:stopped, _} ->
       {:ok, %{restore_result: {:commit_unknown, "inventory_unavailable"}, release_claims: []}}
+  end
+
+  # Concept: finish only claim cleanup for the same completely committed transaction.
+  # Technical depth: intact matching owners and wholly absent directories share
+  # exact native capture. Complete current proofs, backup and original authority
+  # precede terminal obligations; absent paths never allocate replacement claims.
+  @doc false
+  def retained_claim_cleanup(plan, invocation, io) do
+    ensure!(match?({:ok, _}, RestoreCodec.encode(:plan, plan)), "invalid_plan")
+    ensure!(match?({:ok, _}, RestoreCodec.encode(:invocation, invocation)), "invalid_plan")
+
+    ensure!(
+      invocation["prior_admin_authority"] in ["joined", "host_rebooted"] and
+        not is_nil(invocation["prior_admin_evidence_sha256"]),
+      "authority_unconfirmed"
+    )
+
+    ensure!(plan["prior_restore_count"] < 64, "inventory_limit_exceeded")
+    phase(io, "claim")
+    destination = plan["destination_state_root"]
+
+    roots =
+      if plan["source_status"] == "available",
+        do: [plan["source_state_root"], destination],
+        else: [destination]
+
+    source_observation =
+      if plan["source_status"] == "lost",
+        do: value!(io.({:lost_source_absent, plan["source_state_root"]})),
+        else: nil
+
+    captures =
+      Enum.map(Enum.sort(roots), fn root ->
+        case value!(io.({:restore_cleanup_capture, root, plan, invocation})) do
+          {:error, %{"code" => code}} -> throw({:restore_refusal, code})
+          capture -> capture
+        end
+      end)
+
+    destination_capture = Enum.find(captures, &(&1.root == destination))
+
+    case destination_capture.result do
+      {:committed, %{"view" => "current", "receipt" => receipt}} ->
+        ensure!(receipt["ordinal"] == plan["prior_restore_count"] + 1, "restore_conflict")
+
+      {:pending, %{"phase" => "claim_release", "ordinal" => ordinal}} ->
+        ensure!(ordinal == plan["prior_restore_count"] + 1, "restore_conflict")
+
+      _ ->
+        throw({:restore_refusal, "invalid_current_history"})
+    end
+
+    directory = root_admin(plan)
+    intent_bytes = Map.fetch!(destination_capture.state.files, Path.join(directory, "intent"))
+    baseline = Map.fetch!(destination_capture.state.files, Path.join(directory, "baseline"))
+    {:ok, intent} = RestoreCodec.decode(:intent, intent_bytes)
+
+    ensure!(
+      intent["plan"] == plan and intent["ordinal"] == plan["prior_restore_count"] + 1,
+      "restore_conflict"
+    )
+
+    {:ok, digest} = RestoreCodec.plan_digest(plan)
+
+    Enum.each(captures, fn capture ->
+      ensure!(
+        capture.state.files[Path.join(directory, "intent")] == intent_bytes,
+        "restore_conflict"
+      )
+
+      if capture.decoded_claim do
+        owner = capture.decoded_claim
+        role = if capture.root == destination, do: "destination", else: "source"
+
+        ensure!(
+          owner["tx_id"] == plan["tx_id"] and owner["plan_digest"] == digest and
+            owner["state_root"] == capture.root and owner["role"] == role,
+          "restore_conflict"
+        )
+      end
+    end)
+
+    prior_files =
+      Enum.reduce(intent["generations"], destination_capture.state.files, fn candidate, files ->
+        Map.put(
+          files,
+          Path.join(candidate["relative_root"], "generation"),
+          candidate["source_generation_bytes"]
+        )
+      end)
+
+    compiled =
+      case retained_construction(
+             plan,
+             baseline,
+             intent_bytes,
+             prior_files,
+             invocation["max_total_file_bytes"]
+           ) do
+        {:ok, compiled} -> compiled
+        {:error, code} -> throw({:restore_refusal, code})
+      end
+
+    retained = %{
+      intent: intent_bytes,
+      baseline: baseline,
+      compiled: compiled,
+      source_observation: source_observation
+    }
+
+    max_total = invocation["max_total_file_bytes"]
+    backup = value!(io.({:manifest, plan["backup_state_root"], max_total}))
+    ensure!(backup == baseline, "inventory_mismatch")
+    Audit.complete(plan, backup, max_total, io)
+
+    ensure!(
+      value!(io.({:manifest, plan["backup_state_root"], max_total})) == backup,
+      "inventory_mismatch"
+    )
+
+    retained_finalization_manifest!(plan, invocation, retained, :complete, io)
+
+    if source_observation,
+      do: lost_source!(plan["source_state_root"], source_observation, io),
+      else:
+        retained_retirement_complete!(plan, invocation, retained, plan["source_state_root"], io)
+
+    retained_retirement_placements!(plan, retained, destination, io)
+    workspace!(plan, value!(io.({:placement, plan["workspace"]["root"]})))
+    value!(io.({:restore_intent_facts, intent["ordinal"], "validated"}))
+    # Every expected directory, even if absent, is a terminal sync obligation.
+    claims = value!(io.({:restore_cleanup_admit, captures}))
+    receipt = retained_receipt!(retained)
+    phase(io, "claim_release")
+
+    {:ok,
+     %{
+       restore_result: {:committed, receipt},
+       release_claims: Enum.sort_by(claims, &(&1.directory == claim_directory(destination)))
+     }}
+  rescue
+    _error in [MatchError, KeyError, ArgumentError] ->
+      {:ok, %{restore_result: {:commit_unknown, "invalid_current_history"}, release_claims: []}}
+  catch
+    {:restore_refusal, code} ->
+      {:ok, %{restore_result: {:commit_unknown, code}, release_claims: []}}
+
+    {:io_error, _} ->
+      {:ok, %{restore_result: {:commit_unknown, "inventory_unavailable"}, release_claims: []}}
+
+    {:stopped, _} ->
+      {:ok, %{restore_result: {:commit_unknown, "inventory_unavailable"}, release_claims: []}}
+  end
+
+  defp retained_receipt!(retained) do
+    {:ok, intent} = RestoreCodec.decode(:intent, retained.intent)
+    {:ok, committed} = RestoreCodec.decode(:committed, retained.compiled.committed)
+
+    receipt = %{
+      "kind" => "loopex_current_restore_receipt_v1",
+      "tx_id" => intent["tx_id"],
+      "ordinal" => intent["ordinal"],
+      "plan_digest" => intent["plan_digest"],
+      "intent_sha256" => hash(retained.intent),
+      "committed_sha256" => hash(retained.compiled.committed),
+      "source_retirement_sha256" => committed["source_retirement_sha256"],
+      "baseline_manifest_sha256" => committed["baseline_manifest_sha256"],
+      "activation_manifest_sha256" => committed["activation_manifest_sha256"],
+      "prior_lineage_sha256" => committed["prior_lineage_sha256"],
+      "destination_state_binding" => committed["destination_state_binding"],
+      "ledger_count" => length(intent["generations"])
+    }
+
+    encode!(:receipt, receipt)
+    receipt
   end
 
   defp claim_directory(root) do

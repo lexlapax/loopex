@@ -4,7 +4,7 @@ Complete physical restore original75764 passed all148 cases on each supported
 toolchain at `11e7f674`, in560.494 seconds. All ten original stages are joined
 and47 artifacts verified. Six added T15 rows and the T16 copied-permissions row
 close against that group. Original T01–T19 remains80 done/93 todo/6 retired;
-added321 done/32 todo. Complete109-case restore IO proof passed both pairs;
+added322 done/31 todo. Complete109-case restore IO proof passed both pairs;
 served generation activation remains open. Dormant daemon configure admission, native
 activity, its tagged executor fixture and dormant wire codec/projections are
 proved on both pairs and integrated. Foreground production routing remains open.
@@ -26,6 +26,14 @@ witnesses and all64 physical restores passed on both pairs. The four tested file
 are integrated literally. The bounded T15 private finalization and T16 lookup
 fixture rows close; public original-transaction resolution, partial cleanup and
 helper audit remain separate. Both earlier failures remain retained.
+
+Private partial/all-absent claim cleanup original28176 passed all403 cases on
+each supported pair in776.309 seconds, zero excluded/skipped/invalid. Four
+original stages joined and34 artifacts were verified, including actual long-bound
+cleanup witnesses before temporary removal. The three tested files at isolated
+d5f89363 are integrated literally; the bounded added T15 cleanup row closes.
+Public restore resolution and helper semantics remain separate. Original
+T01–T19 remains80 done/93 todo/6 retired; added322 done/31 todo.
 
 The entries below record earlier revisions and failed attempts.
 
@@ -13816,7 +13824,7 @@ Exact collection and outputs are retained in the restart checkpoint.
 - [x] Install only the original retained destination generations after checked source retirement in the same IO worker; require exact full activation-manifest equality, original ordinal temporary names and claim/physical fences, and prove the native publication and failure cases on both supported toolchains. Committed proofs, receipt, release and public restore remain separate.
 - [x] Resume exact original/candidate generation prefixes and complete ordinal staging after positively joined prior authority; audit the genuine complete backup and the full current physical transformation before nonce handoff. Prove real multi-ledger interruption/restart, available/lost source, corruption/refusal and original joins on both pairs without changing transaction, candidates, epochs or history authority.
 - [x] Complete private retained destination finalization using exact original proof prefixes, canonical per-ledger commits and root commit last; validate the full final manifest, join the original captured-claim release and derive the existing receipt without new transaction/candidates/epochs or renewed work/cleanup bounds. Prove real multi-ledger available/lost-source interruption/refusal/release cuts before joining; complete public facade and helper audit remain separate.
-- [ ] Complete private post-commit original-transaction claim cleanup for intact matching owners mixed with wholly absent claim directories, including explicit all-absent sync obligations. Require complete current canonical proofs, independent prior-authority termination/exclusion, captured native absence/ancestor/parent sync rechecks, the original terminal worker/cutoffs and exact joins before the existing receipt. Keep incomplete payload intake, historical receipt reads and ownerless stranded recovery distinct; prove real partial-delete/sync/actor-loss/refusal cuts without recreating missing claims or changing retained payload bytes.
+- [x] Complete private post-commit original-transaction claim cleanup for intact matching owners mixed with wholly absent claim directories, including explicit all-absent sync obligations. Require complete current canonical proofs, independent prior-authority termination/exclusion, captured native absence/ancestor/parent sync rechecks, the original terminal worker/cutoffs and exact joins before the existing receipt. Keep incomplete payload intake, historical receipt reads and ownerless stranded recovery distinct; prove real partial-delete/sync/actor-loss/refusal cuts without recreating missing claims or changing retained payload bytes.
 
 - [x] Recheck the captured source ancestor type/device/inode identities after the second native absence observation, including the final pre-root-commit phase. Prove actual persistent parent removal at the held final read refuses completion while preserving original cutoffs, post-intent fencing, retained destination claim and all prior case bodies on both supported pairs.
 - [x] Preserve positively acquired restore claims through pre-intent IO failures and release them with the original joined terminal owner/cutoffs when neither state root changed; retain partial/unproved or foreign claims and truthful remaining-claim accounting. Prove actual second-claim failure, known first-claim removal and partial-publication fencing on both supported pairs without changing the six existing workflow cases or bounds.
