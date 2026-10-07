@@ -1,5 +1,19 @@
 # M7 Implementation Tasks
 
+T09 terminal payload original15825 is collected PASS at isolated5f9851fc:
+all25 Protocol and24 Core cases passed on each supported pair, including four
+actual Node consumers, zero exclusions/skips/invalid. Fourteen original joins,
+60 artifacts,47.994 seconds; the seven literal tested files are integrated.
+The bounded terminal codec/schema/vector/producer row closes. Expiry's producer
+shape is proved through the actual Core proposal constructor; this does not
+claim a new live expiry-publication witness or coordinated generation activation.
+Original counts remain81 done/92 todo/6 retired; added327 done/30 todo.
+T16 original45793 is collected FAIL, current69/70, floor unrun; its ordinary
+shutdown witness retained608 actor joins but rejected32 immediate intentional
+result-worker kills as unexpected reports. The recorded5000 is a shutdown
+specification, not elapsed time. Causal review and an accurate contract oracle
+remain required. No T16 row closes.
+
 T09 terminal verification original44160 is collected FAIL at isolated4e7baabf:
 all25 Protocol cases passed, but Core passed23/24; floor did not run. The new
 live abort exposed a codec/schema oracle that incorrectly required null command
@@ -13641,7 +13655,7 @@ the still-open real-provider, live protocol, persistent-fault or closure lanes.
 
 ### Added implementation subtasks
 
-- [ ] Complete the accepted terminal model-question payload codec and independent standalone schemas/vectors for answered text, answered choice, declined, expired and cancelled outcomes; prove actual Core producer conformance, exact identities/quantities/choice relations and malformed-field/byte-bound refusal on both toolchains without transport or generation activation.
+- [x] Complete the accepted terminal model-question payload codec and independent standalone schemas/vectors for answered text, answered choice, declined, expired and cancelled outcomes; prove actual Core producer conformance, exact identities/quantities/choice relations and malformed-field/byte-bound refusal on both toolchains without transport or generation activation.
 
 - [x] Pin exact runtime public model-question event fields, including conditional choice identity and expiry, in an explicitly unserved standalone payload schema on both supported toolchains.
 

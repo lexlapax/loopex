@@ -1,0 +1,171 @@
+{
+  "format": "loopex.experimental.payload-contract/1",
+  "contract": "model_question_terminal",
+  "authority": "docs/adr/0045-model-originated-questions-technical.md; existing model-question-events.v1.json",
+  "integration": "M7 coordinated foreground /3 and daemon /4; not independently served",
+  "envelope": "kind, event_id and event_sequence remain outside data",
+  "closed": true,
+  "required": [
+    "interaction_id",
+    "run_id",
+    "turn",
+    "tool_call_id",
+    "status",
+    "prompt",
+    "choices",
+    "expires_at",
+    "producer",
+    "interaction_kind",
+    "answer",
+    "command_digest",
+    "command_id",
+    "disposition",
+    "settlement_sequence"
+  ],
+  "choice_only_additional_field": "choice_id",
+  "kind_by_disposition": {
+    "answered": "interaction.answered",
+    "declined": "interaction.declined",
+    "expired": "interaction.expired",
+    "cancelled": "interaction.cancelled"
+  },
+  "producer": "model_tool",
+  "interaction_kind": [
+    "text",
+    "choice"
+  ],
+  "status_equals_disposition": true,
+  "fields": {
+    "interaction_id": {
+      "encoding": "canonical_unpadded_base64url",
+      "minimum_original_bytes": 1,
+      "maximum_original_bytes": 65536
+    },
+    "run_id": {
+      "encoding": "canonical_unpadded_base64url",
+      "minimum_original_bytes": 1,
+      "maximum_original_bytes": 65536
+    },
+    "tool_call_id": {
+      "encoding": "canonical_unpadded_base64url",
+      "minimum_original_bytes": 1,
+      "maximum_original_bytes": 65536
+    },
+    "command_id": {
+      "encoding": "canonical_unpadded_base64url",
+      "minimum_original_bytes": 1,
+      "maximum_original_bytes": 65536,
+      "null_on": [
+        "expired"
+      ],
+      "nullable_on": [
+        "cancelled"
+      ]
+    },
+    "turn": {
+      "encoding": "canonical_decimal_string",
+      "domain": "arbitrary_positive_integer"
+    },
+    "expires_at": {
+      "encoding": "canonical_decimal_string",
+      "minimum": "0",
+      "maximum": "18446744073709551615"
+    },
+    "settlement_sequence": {
+      "encoding": "canonical_decimal_string",
+      "minimum": "1",
+      "maximum": "18446744073709551615"
+    },
+    "command_digest": {
+      "encoding": "lowercase_hex",
+      "bytes": 64,
+      "null_on": [
+        "expired"
+      ],
+      "nullable_on": [
+        "cancelled"
+      ]
+    },
+    "prompt": {
+      "encoding": "utf8",
+      "minimum_bytes": 1,
+      "maximum_bytes": 2048
+    },
+    "choices": {
+      "kind": "array",
+      "minimum_length": 0,
+      "maximum_length": 8,
+      "id_by_original_position": "choice-1 through choice-8",
+      "unique_labels": true,
+      "member": {
+        "closed": true,
+        "required": [
+          "id",
+          "label"
+        ],
+        "id": {
+          "encoding": "canonical_unpadded_base64url",
+          "minimum_original_bytes": 1,
+          "maximum_original_bytes": 64
+        },
+        "label": {
+          "encoding": "utf8",
+          "minimum_bytes": 1,
+          "maximum_bytes": 256
+        }
+      }
+    },
+    "choice_id": {
+      "encoding": "canonical_unpadded_base64url",
+      "minimum_original_bytes": 1,
+      "maximum_original_bytes": 64
+    }
+  },
+  "variants": {
+    "answered_text": {
+      "status": "answered",
+      "interaction_kind": "text",
+      "answer_required": [
+        "text"
+      ],
+      "answer_text_bytes": [
+        1,
+        8192
+      ],
+      "command_captures": "required"
+    },
+    "answered_choice": {
+      "status": "answered",
+      "interaction_kind": "choice",
+      "answer_required": [
+        "choice_id",
+        "label"
+      ],
+      "choice_id": "required at top level and answer; both equal an offered identity",
+      "label": "exact offered label",
+      "command_captures": "required"
+    },
+    "declined": {
+      "status": "declined",
+      "answer": {
+        "disposition": "declined"
+      },
+      "command_captures": "required"
+    },
+    "expired": {
+      "status": "expired",
+      "null_fields": [
+        "answer",
+        "command_id",
+        "command_digest"
+      ]
+    },
+    "cancelled": {
+      "status": "cancelled",
+      "null_fields": [
+        "answer"
+      ],
+      "command_captures": "both_null_or_both_valid"
+    }
+  }
+}

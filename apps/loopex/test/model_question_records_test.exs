@@ -318,6 +318,123 @@ defmodule Loopex.ModelQuestionRecordsTest do
     end
   end
 
+  test "live abort cancellation preserves terminal payload evidence and joins its fixture" do
+    fixture =
+      Fixture.start(
+        tools: [ToolDefinition.question_definition()],
+        script: [
+          %{
+            text: "question",
+            calls: [%{id: "ask-1", name: "ask", arguments: %{"question" => "Explain"}}]
+          },
+          %{text: "must not dispatch", calls: []}
+        ]
+      )
+
+    owned =
+      Enum.map(
+        [fixture.runtime.supervisor, fixture.model, fixture.executor, fixture.store],
+        &{&1, Process.monitor(&1)}
+      )
+
+    on_exit(fn ->
+      Fixture.stop(fixture)
+
+      for pid <- [fixture.model, fixture.executor] do
+        try do
+          GenServer.stop(pid, :normal, 1_000)
+        catch
+          :exit, _ -> :ok
+        end
+      end
+    end)
+
+    assert {:ok, session} =
+             Runtime.create_session_with_genesis(
+               fixture.runtime,
+               "create",
+               %{},
+               Loopex.ConfiguredGenesisFixture.genesis(fixture.definitions)
+             )
+
+    assert {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
+
+    assert {:accepted, "prompt"} =
+             Loopex.command(attachment, %{
+               type: :prompt,
+               command_id: "prompt",
+               content: "implement"
+             })
+
+    requested = await_event(attachment, "interaction.requested")
+    abort_command = %{type: :abort, command_id: "abort"}
+    assert {:accepted, "abort"} = Loopex.command(attachment, abort_command)
+    terminal = await_event(attachment, "interaction.cancelled")
+    assert_terminal_codec(terminal)
+    finished = await_event(attachment, "run.finished")
+    assert finished["outcome"] == "cancelled"
+    assert terminal["interaction_id"] == requested["interaction_id"]
+    records = Fixture.records(fixture, session)
+    events = Fixture.events(fixture, session)
+
+    assert [abort_row] =
+             Enum.filter(records, &(&1.payload.kind == "model_question_abort_admitted_v2"))
+
+    abort = abort_row.payload
+
+    expected_digest =
+      :crypto.hash(
+        :sha256,
+        :erlang.term_to_binary(["loopex_command_v1", abort_command], [:deterministic])
+      )
+      |> Base.encode16(case: :lower)
+
+    assert abort["command_type"] == "abort"
+    assert abort["admission"] == "accepted"
+    assert abort["command_id"] == abort_command.command_id
+    assert abort["command_digest"] == expected_digest
+    assert abort["run_id"] == requested["run_id"]
+    assert terminal["run_id"] == abort["run_id"]
+    assert terminal["command_id"] == "abort"
+    assert terminal["command_digest"] == abort["command_digest"]
+    assert terminal["answer"] == nil
+    assert terminal["settlement_sequence"] == abort_row.journal_version
+
+    assert {:ok, recovered} = SessionState.recover(session, records, events)
+    assert recovered.interactions[terminal["interaction_id"]].command_id == "abort"
+
+    assert recovered.interactions[terminal["interaction_id"]].command_digest ==
+             abort["command_digest"]
+
+    assert recovered.interactions[terminal["interaction_id"]].status == "cancelled"
+
+    assert recovered.interactions[terminal["interaction_id"]].settlement_sequence ==
+             terminal["settlement_sequence"]
+
+    assert recovered.open_interaction == nil
+    assert recovered.active_run_id == nil
+    assert :ok = Loopex.stop(fixture.runtime)
+    [{runtime, runtime_monitor} | adapters] = owned
+    assert_receive {:DOWN, ^runtime_monitor, :process, ^runtime, :normal}, 1_000
+    model_calls = Loopex.AgentLoopTestModel.dispatched(fixture.model)
+    executor_jobs = Agent.get(fixture.executor, & &1.jobs)
+
+    for {pid, monitor} <- adapters do
+      assert :ok = GenServer.stop(pid, :normal, 1_000)
+      assert_receive {:DOWN, ^monitor, :process, ^pid, :normal}, 1_000
+    end
+
+    assert length(model_calls) == 1
+    assert executor_jobs == []
+  end
+
+  defp assert_terminal_codec(event) do
+    data = Map.drop(event, [:kind, :event_id, :event_sequence])
+    assert {:ok, wire} = LoopexProtocol.Session.ModelQuestionEvent.encode_terminal(data)
+    assert {:ok, ^data} = LoopexProtocol.Session.ModelQuestionEvent.decode_terminal(wire)
+    assert event.kind == @event_schema["terminal"]["kind_by_disposition"][data["disposition"]]
+  end
+
   defp assert_model_question_event(event, vector, pending, status) do
     fields =
       if status == "answered" and Map.has_key?(vector["answer"], "choice_id"),
@@ -351,11 +468,12 @@ defmodule Loopex.ModelQuestionRecordsTest do
       disposition ->
         assert event.kind == @event_schema["terminal"]["kind_by_disposition"][disposition]
         assert event["disposition"] == disposition
+        assert_terminal_codec(event)
 
         assert is_integer(event["settlement_sequence"]) and
                  event["settlement_sequence"] > 0
 
-        if disposition in ["expired", "cancelled"] do
+        if disposition == "expired" do
           assert event["command_id"] == nil
           assert event["command_digest"] == nil
           assert event["answer"] == nil

@@ -27,6 +27,52 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+Latest proved unit: T09 original15825 is terminal0 and collected PASS at
+`5f9851fc22ab3f0a5bafe56950e39d5a73444cc3`,47.994 seconds, fourteen original
+joins and60 verified artifacts. All25 Protocol plus24 Core cases passed on
+each supported pair, including four actual Node consumers, requested141 and
+terminal377 vectors, zero exclusions/skips/invalid. Collection
+`M7/question-terminal-admission-20261007-v2/original-collection.json`, SHA-256
+`6e8d43b104406f55ff75731c71a12b6302012b05a918ec985f664f212e3c3552`;
+terminal `2e7461f332bd0e7044417c03e66182522106410c61f0a22d460e0a5c1427c544`.
+The seven literal tested files are integrated. The bounded T09 terminal codec
+row closes; original81 done/92 todo/6 retired, added327 done/30 todo. Pure
+expiry uses the actual proposal constructor; live expiry publication and whole
+generation activation are not newly claimed. Never repoll15825.
+Latest fully collected registry1356 is
+`M7/question-terminal-admission-20261007-v2/stage-attempt-registry.json`, SHA-256
+`35d6ff8fcd50b55c346a2a8797546c9bf6583a4a6dc9a1257f34e0a8110c9aad`.
+No native VM or push is live at this checkpoint.
+
+T16 original45793 is terminal1 and collected FAIL at clean87be8289:
+current69/70, zero exclusions/skips/invalid, floor unrun;81.798 seconds, four
+original joins and29 artifacts. Collection
+`M7/configured-held-shutdown-admission-20261007-v1/original-collection.json`, SHA-256
+`dcbd497399c1bfe77815db1827893f3838cd9a6dd0e621865e1a81b3c1dee559`;
+terminal `89f6d9219dc496eee2b0ba346b930ae5415319abcca56fce53c94a1acdee395c`.
+Retained ordinary witness joins all608 actors. Its32 scoped reports are
+private-supervisor/result-worker child_terminated/killed; timestamps span one
+millisecond. OwnerGroup explicitly kills the result worker before guard cleanup.
+The5000 report field is only the task shutdown specification, not a five-second
+elapsed cleanup. The new zero-all-reports oracle rejected these intentional
+actions. Causal/normative review remains required before a correction; no
+deadline, existing custody/order or real-path proof may be weakened. Never
+repoll45793 or repeat unchanged87be.
+
+Accepted ADR0052 native terminal provenance and strict cursor relations are in
+source-only implementation in writer-exclusive
+`/private/tmp/loopex-m7-policy-native-20261007`, base7a1206e9. Owned paths are
+SessionState and the policy-answer/interaction-lifecycle tests. Its approval is
+already recorded in ADR0052; transport/generation work remains separate.
+Policy codec formatter is frozen disabled at
+`/private/tmp/m7-policy-event-format-20261007-v1.py`, SHA-256
+`9a5ac0e8fdf9f2ec808486b912980d555e14d0659772030346ce5f54e5185aa0`;
+root reviewed its mechanical diff and guards; final latest registry pins remain
+unset. Special-mode formatter's independently reviewed two-line hash-shadow
+repair is frozen disabled at `/private/tmp/m7-restore-special-mode-format-20261007-v2.py`,
+SHA-256 `9c0affb1d49274d0188d063e5dc33100bda062eb9851c8af1fbd2c602ffc1e9b`.
+Both require root admission of the latest collected successor before execution.
+
 Latest continuation, 2026-10-07: primary checkpointf691892f is clean and pushed.
 Original44160 is terminal1 and collected FAIL at isolated
 `4e7baabf12a8aabbe3b35cae5b8a05bc46a92bed`: current Protocol25/25 including
