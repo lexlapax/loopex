@@ -1,5 +1,14 @@
 # M7 Implementation Tasks
 
+Revised Proposed ADR0056 is reviewed, documentation-checked and retained as
+historical candidate `2dba3e7a2d574a7a07d5b77b35064da94ff17317` in this branch.
+Original30193 passed all four canonical documentation steps,70.231 seconds,
+two original joins and18 verified artifacts. The refresh corrects stale Core
+revision1 descriptions to revision2; helper-facing joins/accounting remain open.
+Maintainer acceptance of the exact pair is next; no ledger implementation or
+checklist completion is inferred. Counts remain original81 done/92 todo/
+6 retired; added333 done/28 todo. Exact pointers are in the resume record.
+
 T05's pure creation-options capture/reconstruction unit is integrated literally
 from `94e380059c27b190fbf9f9629363d0014a3fbb7d`. Original24428 passed all58
 selected Core cases on each supported pair, zero exclusions/skips/invalid,

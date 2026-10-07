@@ -27,6 +27,44 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+Latest reviewed decision candidate: Proposed ADR0056 factual refresh at exact
+historical `2dba3e7a2d574a7a07d5b77b35064da94ff17317` is now an ancestor of m7.
+Concept SHA-256 `4fb1b01845e836fa65374e1d9d2ff28303af52930d8d9d1c0a0cf6f03303035d`;
+Technical `1a6611055a708f35a91db8a5bda7452136eaec385283beffef0ca3e1e0529e77`.
+Only stale factual prerequisites change; canonical private ledger framing,
+closed schemas, credit, caps, stop-only recovery and complete current-format
+restore obligations are unchanged. No acceptance or dependent implementation
+is inferred. Source packet
+`/private/tmp/m7-adr0056-factual-refresh-20261007-v1.json`, SHA-256
+`39a75c5ceed28d1f79c1f278fc28f63fafaca1ec02a0db17a0b6993c8a097d7d`;
+root independent source review
+`/private/tmp/m7-adr0056-factual-refresh-root-review-20261007-v1.json`, SHA-256
+`b34c72d3a92e1b965b407349b1b834b0cda74e608f834b36f99fb0e09418c55e`.
+Original30193 is terminal0 and collected PASS: canonical current-pair
+`bash scripts/check.sh --docs`, all four steps,70.231 seconds, two original
+joins and18 verified artifacts. Output:
+`/Users/spuri/projects/lexlapax/loopex-evidence/M7/adr0056-factual-refresh-docs-20261007-v1`.
+Collection SHA-256 `c5194c69527898cf0eecd0e2c5995b14f9e643b2bfdd6895b3a5f3d4de8d8356`;
+terminal `01828799e58ed646a8e6b3f7d6194ce6220455c5adb27a3c08f35f8fc2f0c635`.
+Latest collected registry1490 at that output has SHA-256
+`6023bfde40a200a9dc9603eaae91d4aa9a77a9869cbf4a4beacdec4d743390d5`.
+Executed wrapper `/private/tmp/m7-adr0056-factual-refresh-docs-20261007-v1-enabled.py`,
+SHA-256 `c136bb19c63df289ed9c90ebc04ad7dc50c5a4c525ab544bea8113efcd49100a`;
+root enablement packet SHA-256
+`4f759ec4e7f104e084e72f8cc24e5875ce6399d2815a6a17d30dfc7ba5c6a31b`.
+Never repoll collected30193 or rerun its unchanged candidate.
+No VM is live at this checkpoint. Counts original81 done/92 todo/6 retired;
+added333 done/28 todo. The next full fast candidate is this primary child,
+including literal pure CreationOptions and the reviewed Proposed pair. Do not
+execute the earlier disabled5bac measurement. Re-measure final primary SHA,
+parent, complete NUL projection/source counts and latest1490 registry with
+`/private/tmp/m7-next-full-fast-finalization-20261007-v1.recipe-v3.py`, SHA-256
+`3f07e08888ae52523369a8260a7270690b0d0cf11812aacade2f7e4c80a70512`.
+Root independently reviews/enables the finalized native runner; exactly one
+canonical `bash scripts/check.sh`, original output/joins and all11 application
+markers must be retained. No integration/full-check PASS is claimed yet.
+
+
 ADR0055 is now accepted by the maintainer's explicit option1 reply on
 2026-10-07, binding exact Proposed candidate `f1f0fb3a07e35d6a3712ce4054f70c9bd4adc91e`.
 The [acceptance disposition](../developer/agent-context-map.md#disposition-m7-remote-creation-options-2026-10-07)
