@@ -517,9 +517,12 @@ exact file, not its path: a log removed or replaced underneath a live session is
 a write whose outcome cannot be stated, so the store stops rather than answering
 from a new, empty log at the same name. One log grows to at most 256 MiB; past
 that it accepts no further append and does not reopen, so a long-lived state
-root is one to retire rather than prune by hand. A partial copy, a restored
-snapshot or an edited log is a history Loopex cannot prove, and it refuses
-rather than pretends.
+root is one to retire rather than prune by hand. A partial copy, an edited log
+or an ordinary copied or moved root does not establish recoverable authority.
+An eligible latest complete backup can be restored only through the host's
+[offline current-format restore procedure](runtime.md#operator-runtime-backup-restore),
+with every owner stopped, all copies excluded and the same physical workspace.
+The `loopex` command provides no backup or restore shortcut.
 
 `loopex cancel` names the session and the class of the problem rather than the
 runtime term behind it:

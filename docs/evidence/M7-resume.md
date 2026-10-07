@@ -209,9 +209,12 @@ current retained cleanup requirements. Its V2 packet and patch are
 `/private/tmp/m7-backup-runbook-source-20261007-v2.json` and `.patch`, SHA-256
 `717137d8b58ea35ca5f17a0a654b4fd8c0c5f7be5c19def2fe26d1d2f9facfff` and
 `32ad38affc65c6d7bcb7663e8145b6623f85c4214a84d84dcb08cb1a7e7fcdd2`.
-Its four owned operator pages await literal rejoin and the actual integrated
-repository check. Original T15 items6–8 and helper-aware/native/attended proof
-remain open; source review does not substitute for execution. Separate workspace
+Its four reviewed operator pages are integrated literally and await the actual
+integrated repository check. Guidance covers complete excluded backup access,
+all-plane inventory, exact retained plans/outcomes and separate workspace recovery;
+it qualifies committed duplicates against current retained cleanup and explicitly
+refuses unsupported helper state. Original T15 items6–8 and helper-aware/native/
+attended proof remain open; source review does not substitute for execution. Separate workspace
 proof discovery is read-only. Full-fast wrapper preparation is source-only and
 still refused until actual candidate, complete inventories and registry pins.
 

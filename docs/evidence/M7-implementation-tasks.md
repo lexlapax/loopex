@@ -58,6 +58,14 @@ one bounded added T16 row closes. Historical failure attribution and production
 long-bound release evidence remain separate. Original T01–T19:80 done/93 todo/
 6 retired; added323 done/30 todo.
 
+Four current operator pages now carry the independently reviewed backup/restore
+instructions, including host exclusion, complete inventories, exact plan/outcome
+handling and separate workspace restoration. Committed-duplicate guidance retains
+current prior-authority cleanup requirements. The draft's exact reviewed bytes
+are integrated; the canonical full integration check is pending. Original T15
+items6–8 remain open, including complete helper-state and real separate-workspace
+proof. No task count changes for this documentation integration.
+
 The entries below record earlier revisions and failed attempts.
 
 Original92272 at `ff36e0c1` is collected FAIL after181.799 seconds. Construction13

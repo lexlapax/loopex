@@ -21,6 +21,7 @@ What you can do here:
 - start, stop and resume a runtime and its sessions in a fixed order;
 - recover after a process or machine crash and reconcile an in-flight effect
   from the executor's receipt ledger;
+- make a complete offline backup and restore an eligible current-format root;
 - read the runtime's refusals as the stop conditions they are.
 
 Only one run can be active per session. Loopex does not provide network session
@@ -223,6 +224,204 @@ fencing token all match the journaled intent. Stale, unsolicited, incomplete or
 mismatched evidence is refused, and a field the answer omits counts as a
 mismatch. [Crash, and what recovery proves](how-a-run-works-technical.md#technical-run-recovery)
 states the full match.
+
+<a id="operator-runtime-backup-restore"></a>
+## Offline backup and restore
+
+Use this procedure to recover the latest complete, idle backup of a durable
+state root into a fresh root on the same machine. Keep the original workspace
+directory at its recorded physical identity. State restore preserves session
+history and effect uncertainty; it does not undo a tool's filesystem or other
+external effects. Ephemeral sessions have no durable state to restore.
+
+The host embeds `LoopexComposition.Restore.restore/2` and `lookup/3`. There is no
+backup or restore CLI command. The host owns backup creation, complete inventory,
+plan construction and retained exclusion evidence. The accepted
+[physical restore decision](../adr/0051-current-format-physical-restore.md#concept-adr-0051-placement)
+and [closed input schemas](../adr/0051-current-format-physical-restore-technical.md#technical-adr-0051-boundary)
+define this administrative operation.
+
+This implementation refuses a state root containing any `delegation/` namespace,
+including helper locks or temporary files, because its complete helper-ledger
+audit is not implemented. Do not omit those entries to make a backup eligible.
+That refusal leaves helper-aware restore coverage open; copying opaque helper
+state does not prove it recoverable. Another machine, an older snapshot, an
+older format, or a lost or recreated workspace is outside this procedure.
+
+<a id="operator-runtime-backup-capture"></a>
+### Capture a complete idle backup
+
+1. Stop admitting commands and prevent every client, daemon, embedded host and
+   direct executor from accessing the state root or workspace. Stop and
+   positively join the Runtime, Store, Local executor, guards, workspace lease,
+   worker groups, child managers and placement owners. Include any earlier
+   restore administrator and its file resources. A runtime stop or a caller's
+   death alone does not prove all these owners ended. If termination cannot be
+   proved, keep the roots excluded; the accepted host-reboot assertion must
+   cover the previous authority before proceeding.
+2. Record the latest idle cut, the source root's path/device/inode placement,
+   each Local ledger's placement and generation digest, the original physical
+   workspace reference, and the complete prior restore lineage. Exclude all
+   other copies and retain evidence that no activity occurred after this cut.
+   Retain the capture and host evidence outside all participating roots. A hash
+   proves bytes, not latestness or the end of competing authority.
+3. Enumerate the whole state root without exclusions. Include the root itself,
+   hidden files, empty directories, every session and runtime-control record,
+   artifacts, receipts, markers, open/effect claims, private recovery and
+   continuation records, resource catalogs, host ledgers, and all earlier
+   restore metadata. Include staging or orphan entries; a complete audit must
+   accept them rather than silently discard them. Record each path, kind, mode,
+   exact regular-file length and SHA-256 in the
+   [canonical manifest](../adr/0051-current-format-physical-restore-technical.md#technical-adr-0051-placement).
+   Its uncompressed deterministic ETF representation includes every bytewise
+   sorted, unique entry, with `"."` for the root. Retain those exact bytes and
+   their digest.
+4. Make an independent offline copy into a separate backup root while access
+   remains excluded. Preserve all directory and file modes, including the root.
+   Prove copied-file sync and close, bottom-up directory sync, and termination
+   of the copy's owned work. Compare the backup's complete canonical manifest
+   to the captured source manifest. Refuse links, special files and imported
+   regular files whose link
+   count is not one. Do not repair a torn backup, prune a log or discard a
+   malformed record. Mode and byte equality do not cover ownership, ACLs or
+   extended attributes; the host must protect private state separately.
+
+Keep the backup excluded from ordinary startup. An ordinary copy or move does
+not establish a fresh Local generation or authorize that physical placement.
+The backup is an input to the offline transition, not a second active root.
+
+If workspace contents may also need recovery, capture a separate host-managed
+content backup under the same access exclusion. Keep its evidence separate from
+the state-root manifest and record the original workspace directory identity.
+The restore operation does not capture or restore workspace contents for you.
+
+<a id="operator-runtime-backup-plan"></a>
+### Prepare and run the restore
+
+1. Reestablish exclusion and positive termination before restore, even if the
+   backup was taken earlier. Use the retained latest cut only if no post-cut
+   activity occurred. Choose an independent empty destination directory. Source,
+   backup, destination and workspace paths must be distinct, pairwise nonnested,
+   and checked through their existing ancestors without symlinks.
+2. Select the source branch honestly. For `"available"`, the original source
+   must still match its captured physical placement and complete cut. Restore
+   retires it before installing destination generations; retirement is one-way.
+   For `"lost"`, prove the original endpoint absent. Permission denial or a
+   failed probe is not absence. Retain the original captured placement and the
+   host's latestness, exclusion and termination attestation; restore does not
+   fabricate a tombstone at a missing source.
+3. Construct the closed string-key plan from the complete capture. Supply one
+   64-character lowercase hexadecimal `tx_id`, source status and placement,
+   backup and destination paths, manifest digest and cut identity, complete
+   runtime/Store/ledger descriptors, prior lineage count and digest, original
+   workspace reference and host attestation. Descriptor lists cover the whole
+   current state, not a selected subset. The attestation asserts `latest_cut`,
+   `no_post_cut_activity`, `all_other_copies_excluded` and
+   `host_ledgers_validated`, with `old_authority_termination` equal to `"joined"`
+   or `"host_rebooted"` and an evidence digest. Use the
+   [exact plan and digest recipes](../adr/0051-current-format-physical-restore-technical.md#technical-adr-0051-boundary)
+   and [lineage records](../adr/0051-current-format-physical-restore-technical.md#technical-adr-0051-lineage).
+   Loopex checks the retained state; it does not establish these host assertions
+   from filesystem hashes.
+4. Supply an invocation with explicit positive `work_ms` and `cleanup_grace_ms`,
+   a `max_total_file_bytes` cap, and prior administrative authority evidence.
+   Set `"prior_admin_authority"` to `"none"` and
+   `"prior_admin_evidence_sha256"` to nil only when no prior held or stranded
+   administrative claim exists. An original-transaction continuation requires
+   `"joined"` or `"host_rebooted"` and a nonnull evidence digest covering every
+   previous administrator and file resource. Retain the exact plan and
+   invocation with the backup evidence.
+5. Call `LoopexComposition.Restore.restore(plan, invocation)` from the offline
+   host and inspect the result below. Keep all participating roots excluded
+   until completion and administrative cleanup are proved. Restore audits the
+   complete current Store, Local receipt/open history, artifact relations and
+   supported host ledgers before authority changes. It never dispatches an
+   effect to settle an unknown result.
+
+The bounds apply to complete encoded objects, not just their constituent rows:
+
+| Input or retained object | Limit |
+| --- | --- |
+| Complete manifest | 4 MiB, 65,536 entries; all regular bytes within `max_total_file_bytes` |
+| Plan, compiled intent, each nonmanifest root or ledger record | 65,536 bytes each |
+| Invocation, claim, receipt, observation, refusal, lookup refusal | 2,048 bytes each |
+| Lookup limits | 512 bytes |
+| Runtime IDs, Store descriptors, ledger descriptors | 256, 1,024, 128 items respectively; sorted and unique |
+| Paths and executor IDs | 8,192 UTF-8 bytes each; runtime IDs at most 256 bytes |
+| Completed restore lineage | 64 transitions; transition 65 refuses before mutation, with no pruning |
+
+Existing per-format limits also apply, including the Store's 256 MiB log and
+4 MiB frame, Local's 2,048-byte generation, 65,536-byte receipt/metadata records,
+and 1,024-entry, 4 MiB open index. Work and grace are positive uint64 milliseconds
+with checked arithmetic; there is no new default. One captured work cutoff
+bounds payload work. The first stop reason, including normal payload completion,
+captures one cleanup cutoff with a window of `max(10000, cleanup_grace_ms + 2000)`
+milliseconds. Descriptor closure, exact worker joins and terminal claim release
+share that cutoff. See the
+[ownership and cutoff contract](../adr/0051-current-format-physical-restore-technical.md#technical-adr-0051-lifetime).
+
+<a id="operator-runtime-backup-outcomes"></a>
+### Resolve the result before opening the root
+
+| Restore result | Operator action |
+| --- | --- |
+| `{:committed, receipt}` | Retain the receipt and complete proofs. It confirms synced completion and joined administrative claim release, but returns no live authority. Start the destination through ordinary guarded startup only after the host's exclusion and cleanup obligations are satisfied. Keep the backup excluded and the old source retired. |
+| `{:not_committed, refusal}` | Read `code`, `phase` and `claim`. This is a joined refusal before possible intent publication. A retained claim or partially staged destination still needs the original administrative resolution; do not overwrite it or silently reuse it. An incomplete baseline requires explicit disposable-root cleanup under the accepted contract. |
+| `{:cleanup_unconfirmed, observation}` | Intent absence was positively proved, but administrative or file cleanup was not. Keep exclusion and prove every previous resource terminated, or supply the accepted covering reboot evidence, before any continuation. |
+| `{:commit_unknown, observation}` | Intent or its temporary publication may persist, or a validated transition is unfinished. Keep the original transaction, plan, claims and candidate bytes. Preserve exclusion and resolve that identity after prior authority ends. Never invent a replacement transaction or epoch. |
+
+For bounded read-only inspection, call
+`LoopexComposition.Restore.lookup(destination_state_root, tx_id, limits)` with
+`%{"work_ms" => work_ms, "cleanup_grace_ms" => cleanup_grace_ms}`. A committed
+answer contains the retained receipt and `"view"` equal to `"current"` or
+`"historical"`. Current completion requires matching physical proofs and no
+unfinished higher transition or administrative claim. A historical receipt
+proves retained completion; it grants no authority over an old placement.
+Pending, absent and error answers do not activate, reclaim, sync or continue a
+transaction. An absent answer describes this read only. It cannot clear an
+earlier `commit_unknown`, lost administrative evidence or unproved cleanup.
+
+A root commit record alone is insufficient while a claim remains. Visible
+claim deletion is also insufficient if its release or previous file resources
+were not joined. Re-present the original plan and `tx_id` after positively
+terminating prior authority. A continuation may change invocation limits, but
+must reuse the retained cut, attestation and candidate generations, and cannot
+extend any retained effect deadline. A fully cleaned committed duplicate with
+`"prior_admin_authority"` equal to `"none"`, or a historical completion,
+validates retained completion without minting a new generation or reading the
+old source or backup. A current transaction submitted with `"joined"` or
+`"host_rebooted"` continues retained cleanup and still requires the complete
+retained backup and original source-retirement or lost-source checks. Do not
+substitute `"none"` to bypass required prior-authority evidence. Loss of sole
+intent or claim evidence after uncertainty needs a further reviewed recovery
+decision. See the
+[exact outcomes and lookup rules](../adr/0051-current-format-physical-restore-technical.md#technical-adr-0051-outcomes).
+
+<a id="operator-runtime-backup-verify"></a>
+### Verify state and workspace separately
+
+Compare the complete source or retained capture, backup and staged destination
+manifests before transformation. They must match exactly without exclusions.
+The completed destination differs from that baseline only by the exact numbered
+administrative records and named Local generation replacements authorized by the
+[ordered transition](../adr/0051-current-format-physical-restore-technical.md#technical-adr-0051-transition).
+Verify the receipt's baseline, activation, retirement, lineage and committed
+proof digests against those records. Check the complete final manifest against
+the permitted additions and replacements; every other entry, byte and mode stays
+unchanged, including earlier restore provenance. Do not demand raw equality with
+the pretransition backup after these authorized changes, or exclude arbitrary
+metadata to obtain equality. Retain the complete manifests and receipt outside
+the roots.
+
+State restore leaves workspace contents and external effects intact. If workspace
+contents must also be recovered, the host restores them separately inside the
+original workspace directory while access remains excluded. Keep that directory's
+physical identity; removing and recreating it is outside this profile. Restoring
+file contents does not establish an effect receipt or erase an unknown outcome.
+After opening the committed destination, follow
+[crash recovery](runtime.md#operator-runtime-recovery) for pending effects and
+use exact retained receipt reconciliation. Never blindly redispatch an unknown
+effect. Confirmed restore cleanup also does not prove external-effect cleanup.
 
 <a id="operator-runtime-failures"></a>
 ## Reading Failures

@@ -259,38 +259,34 @@ version cannot read is still probed through the process identifier it names, and
 only an absent process makes it reclaimable. The refusals and their text are in
 [`loopex cancel` is narrow](coding-sessions.md#operator-sessions-cancel).
 
-### Rollback boundaries
+<a id="technical-run-current-restore"></a>
+### Current-format recovery boundaries
 
-Some records are forward format boundaries: an older build refuses a history
-containing them rather than misreading it. Before any rollback, stop every owner
-of the state root and take a complete backup of it; no in-place downgrade is
-provided.
+Before 1.0, Loopex maintains only the current contract. Older-root migration,
+older-reader compatibility and cross-version rollback are not supported recovery
+procedures. Historical guarantees remain recorded in the
+[milestone records](../plans/README.md); they do not authorize an older binary
+to open current state.
 
-- **Provider accounting.** Current builds settle every model attempt with
-  `model_attempt_settled_v2`, including an attempt a version-1 writer opened,
-  without redispatching it. A validated answer omitted because its complete
-  record exceeds Store limits keeps its known usage; an unreadable raw answer
-  consumes the estimated remaining allowance. A version-1 prefix stays readable
-  except `unreadable_model_answer` with reported accounting, which fails as
-  `ambiguous_legacy_provider_accounting`, and a version-1 settlement after a
-  version-2 one is invalid history. An older reader refuses version 2 before its
-  owner becomes ready, though fenced ownership administration may already have
-  committed. Rollback is therefore possible only for histories containing no
-  version-2 settlement. See
-  [ADR 0021](../adr/0021-compacted-provider-accounting-provenance-technical.md#technical-adr-0021-consequences).
-- **Project resources.** Histories from before resources replay unchanged. A
-  build from before resource support refuses a history containing `resource_command_v1` or
-  `model_request_committed_resources_v1` before dispatch. Rolling back requires
-  the matching older build and a complete state-root backup taken in the old
-  format; removing installed skills does not convert a resource-bearing root.
-- **M6 tools under 0.2.** A pending call to an M6-only read-only tool that was
-  not dispatched becomes `unknown_tool` under 0.2 and the run continues. A
-  dispatched call follows receipt reconciliation; 0.2 does not run it again.
-- **User skills under 0.2.** Offline resume reloads an already admitted user
-  skill from its retained digest. The 0.2 daemon cannot match that skill in
-  its project-only discovery and withholds all skill context for the session.
-  Neither the 0.2 CLI nor its daemon can newly discover and activate an
-  external user skill.
+A complete latest idle backup may enter a fresh root only through the
+[offline physical restore procedure](runtime.md#operator-runtime-backup-restore).
+The host positively terminates all previous owners, excludes competing roots,
+retains complete unexcluded manifests and preserves the original workspace's
+physical identity. Available source retirement is one-way; lost-source recovery
+requires positive absence and the accepted host attestation. Ordinary copied or
+moved roots still refuse activation. Any `delegation/` namespace remains fenced
+until complete helper-ledger restore audit is implemented; dropping it from a
+backup is not a supported remedy.
+
+Restore preserves original effect tuples, receipts, markers and private recovery
+state. Unknown effects stay fenced and are never redispatched because a backup
+was restored. Administrative uncertainty is resolved under its original
+transaction after prior file and worker authority ends. Neither a historical
+receipt nor a lookup reporting absence grants permission to reactivate an old
+root or replace an unknown transaction. Do not remove lineage, undo retirement
+or prune a root to make another build accept it. The
+[accepted current-format contract](../adr/0051-current-format-physical-restore.md#concept-adr-0051-compatibility)
+fixes these limits.
 
 <a id="technical-run-daemon"></a>
 ## What Changes Under a Daemon
