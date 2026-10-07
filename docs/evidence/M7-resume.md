@@ -27,6 +27,45 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+Core fixture focused verification is now complete and integrated literally from
+`cb380db4c8a0e4cf9c0edb51931e07a59c5db0fd`. Original71288 exited0:
+35/35 on each supported pair,zero exclusions/skips/invalid,26.927 seconds,
+eight original joins and43 verified artifacts. Output
+`/Users/spuri/projects/lexlapax/loopex-evidence/M7/core-integration-repair-proof-20261007-v2`;
+collection SHA-256 `5f7dde75450b99591ccef4f8748388e66b5c2dad03582ec25309311df8bda387`;
+terminal `db275bd2d6952df67e348a86bc7cb1c634411ae7b3382d22cf54c2e665efa1f5`;
+latest collected registry1512 `397d01a1e9b8a92bb0ec937093b54b1b38ccaae6c33806f687ebdb9235605457`.
+Snapshot test hash `fe69896d4acfec154d7325a5e2083be9db2b6d944cf3969c410dfcb8913b9ed7`;
+admission test `0290fdc3775d21906cb8a1d91d6c80534944f8f54c30f9e7298846b426d2f73b`.
+The original full79551 remains FAIL. Added bounded repair row closes:
+original81 done/92 todo/6 retired,added334 done/28 todo.
+
+ADR0059 original33235 is now terminal0 and collected PASS,70.858 seconds,
+two original joins,18 artifacts,all four canonical documentation steps.
+Output `M7/adr0059-docs-20261007-v3` under the external evidence root;
+collection SHA-256 `7af6e6f5dd86ece6713553279916e4c805ea36f81238ee5a85500d15e8fb60fb`;
+terminal `554225ec00960e67b78a1c4d6494cd46395f073b37b287bf6973faa0b8ee3ed2`.
+Exact proposed paira550ae33 is integrated without acceptance. ADR0056 remains
+the sole asked unanswered question. Proposed0060 documentation original96513
+is running from exact5ecf7008 in its isolated worktree; output
+`M7/adr0060-docs-20261007-v2`. Executed wrapper SHA-256
+`7d740f8ca24a047f2f65a450794bc51e4a7cd911199f9d0f7612ee54b4d66649`.
+Collect actual original96513 before any later registry consumer. No0060PASS
+or acceptance is claimed yet.
+
+Wire V3 source repair packet
+`/private/tmp/m7-creation-options-wire-source-20261007-v3/source.json`, SHA-256
+`3e28a83dceabb19b976395e8a76b5ffb99b503827a7600c81985b298cf41abe8`,
+preserves all six schema/vector/Node bytes and prior formatter edits. Only
+creation_options_test.exs now binds the identical argument list before System.cmd.
+Root source review is `/private/tmp/m7-creation-options-wire-root-review-20261007-v3.json`.
+Reviewed disabled V3 formatter SHA-256
+`ceb1f94aade36198fe6d2f9da8badda7f1c478f88678acb63db3fc49c7566431`.
+Root still must bind the actual raw commit and latest collected registry before
+execution, then run paired complete12 proof including both Node consumers.
+Original90814 remains the failed predecessor,never repeated unchanged.
+
+
 #### Latest integration and focused verification checkpoint
 
 The exact full current-pair fast check at primary

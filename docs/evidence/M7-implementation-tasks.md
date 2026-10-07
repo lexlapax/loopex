@@ -1,5 +1,13 @@
 # M7 Implementation Tasks
 
+Both Core fixture repairs are proved and integrated literally fromcb380db4:
+all35 cases passed on each supported toolchain,zero exclusions/skips/invalid,
+26.927 seconds,eight original joins and43 artifacts. The original full-check
+failure remains retained. One added bounded repair row closes; original T01–T19
+remains81 done/92 todo/6 retired,added334 done/28 todo. Full integration remains
+open. Exact proof references are in the [resume record](M7-resume.md).
+
+
 The latest exact current-pair full fast check at32b06b9a is collected FAIL:
 4,711/4,713 passed,two Core fixture failures,58 accepted exclusions and zero
 skipped/invalid cases. Original79551 is retained and must not be rerun unchanged.
@@ -14096,6 +14104,8 @@ in the restart checkpoint. Broader restore/decoder/public/helper rows stay open.
 - [ ] Independently review integration changes and fix confirmed defects without weakening checks.
 
 ### Added implementation subtasks
+
+- [x] Repair the two Core fixtures exposed by exact32b06b9a full integration: retain the current policy ending owner/answer tuple and consume/select actual model invocation lineage while preserving the original wall sample and59,000-ms lower bound. Prove both complete files,35 cases on each supported pair atcb380db4, zero exclusions/skips/invalid, exact joins and unchanged runtime cutoffs; retain original79551 failure. This bounded repair does not close full integration.
 
 - [x] Preserve the initial retained provider result-worker graceful shutdown and its unchanged forced-retirement fallback; prove32 actual held configured owners with zero unexpected ordinary reports, exact608 actor joins, one actual trapping worker through the original10,000-ms window and captured1,000-ms grace, and the coordinator-specific no-window trace oracle. Verify all151 Core and2 Composition cases per supported pair, retain prior45793/38205 failures and private fault witnesses, and integrate literal tested files. Broader Task.Supervised/coordinator diagnostics and full integration remain separate.
 
