@@ -206,30 +206,37 @@ defmodule LoopexProtocol.Session.CompactionProgressTest do
     assert schema["contract"] == "compaction_progress"
     assert schema["revision"] == 1
     assert schema["activation"] == "standalone_payload_not_independently_served"
+
     assert schema["required"] ==
              ~w(kind episode_id owner stream_domain_id progress_sequence base_event_sequence)
+
     assert schema["additional_members"] == "refuse"
     assert schema["kind"] == "context.compaction_progress"
     assert schema["owner"] == "checkpoint_owner/1"
+
     assert schema["episode_id"] == %{
              "encoding" => "canonical_unpadded_base64url_of_original_opaque_bytes",
              "original_min_bytes" => 1,
              "original_max_bytes" => 65_536
            }
+
     assert schema["stream_domain_id"] == %{
              "encoding" => "canonical_unpadded_base64url_of_original_opaque_bytes",
              "original_bytes" => 32,
              "original_grammar" => "[0-9a-f]{32}"
            }
+
     assert schema["progress_sequence"] == %{
              "encoding" => "canonical_decimal_string",
              "constant" => "0"
            }
+
     assert schema["base_event_sequence"] == %{
              "encoding" => "canonical_decimal_string",
              "minimum" => "0",
              "maximum" => "18446744073709551615"
            }
+
     assert schema["delivery"] == "single_best_effort_observation_per_positively_permitted_attempt"
     assert schema["closure"] == "none"
   end
@@ -273,8 +280,10 @@ defmodule LoopexProtocol.Session.CompactionProgressTest do
       assert byte_size(frame) <= LoopexProtocol.Frame.output_record_bytes()
       assert :binary.last(frame) == ?\n
       payload = binary_part(frame, 0, byte_size(frame) - 1)
+
       assert {:ok, ^record} =
                LoopexProtocol.Frame.decode(payload, LoopexProtocol.Frame.output_record_bytes())
+
       assert {:ok, ^value} = CompactionProgress.decode_wire(record["progress"])
 
       for overflow <- [
@@ -290,14 +299,18 @@ defmodule LoopexProtocol.Session.CompactionProgressTest do
   test "independent Node consumes every activity literal and byte descriptor boundary" do
     node = System.find_executable("node") || flunk("Node is required for activity conformance")
     root = Path.expand("../../..", __DIR__)
+
     argv = [
       Path.join(root, "clients/node/compaction-progress-vectors.mjs"),
       contract_path("vectors/compaction-progress.v1.json"),
       contract_path("schema/compaction-progress.v1.json")
     ]
+
     {output, status} = System.cmd(node, argv, stderr_to_stdout: true)
     assert status == 0, output
-    assert {:ok, %{"contract" => "compaction_progress", "checked" => 185, "boundary_checks" => 51}} =
+
+    assert {:ok,
+            %{"contract" => "compaction_progress", "checked" => 185, "boundary_checks" => 51}} =
              LoopexProtocol.Frame.decode(String.trim_trailing(output, "\n"), 65_536)
   end
 
