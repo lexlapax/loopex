@@ -28,9 +28,30 @@ physical restore implementation; it does not waive any full-history proof.
 ### Current work and restart order
 
 Pending isolated units on 2026-10-06 remain unproved and unintegrated. Root owns
-all original VMs, collection, Git and rejoin. Daemon proof original11182 is
-running from the clean isolated source below; collect that original handle
-before starting another VM. No passing outcome is claimed yet.
+all original VMs, collection, Git and rejoin. Native proof original75162 is
+running from clean isolated `976995c127dafa2d922ec9df2bad97d7e3ac0c4f` after
+formatter51021 proved the actual AgentLoop layout change. Collect that original
+handle before starting another VM. No passing native outcome is claimed yet.
+
+Daemon original11182 is collected FAIL: all66 current cases passed, then the
+warning-free gate refused a generated constant-comparison assertion; floor did
+not run. Collection
+`M7/daemon-configure-recovery-admission-20261006-v2/original-collection.json`
+SHA-256 `34241c7601a73d7d4024b9b8610f6855faf18b3f22b3dbe261bb43b868127ac2`;
+terminal `b9ae6f5d5434d480fa0f414b39119046843010fdb21a18c8ba53d2d142d7d43a`.
+Two original stages are joined and18 artifacts verified in89.186 seconds.
+The unknown-only observer's ordinary-if correction is pending independent
+review and commit. No PASS or closed daemon row follows from this failure.
+
+Native formatter51021 is collected PASS in6.439 seconds, six original stages
+joined and37 artifacts verified. Collection
+`M7/compaction-native-format-20261006-v2/original-collection.json` SHA-256
+`d937793da2c37abd0d94cd38f02e7fe9b3ef235596bfc50cd7a8e8b5742f8640`;
+terminal `a2c22caa86097e6cd1196cb75fc1a3ed66dbc2cf347e787a6085b4140e9499d8`.
+Reviewed corrected runner preparations and exact helpers are retained at
+`M7/corrected-unit-runners-20261006-v2/inventory.json`, SHA-256
+`8b36857a4a2f639ef4c6ca3898bf18d660ea145ac4038698e7451cea54951613`.
+Preparation is not execution evidence.
 
 - Daemon configure source is clean `94d41cb4f7b03aacc1d0e32929b67524d637f447`
   in m7-protocol-manifests. Original81936 failed one observer assertion at its
@@ -75,9 +96,10 @@ before starting another VM. No passing outcome is claimed yet.
   integration remain pending. Public continuation, partial/absent claims and
   helper audit remain separate.
 
-Latest consumed registry is1110 keys at
-`M7/daemon-configure-recovery-format-20261006-v1/stage-attempt-registry.json`,
-SHA-256 `9fc0761b2f9a10312d9739b4988c3b97a0edbaff8447861979603f3ba2eb4b6c`.
+Latest collected registry is1118 keys at
+`M7/compaction-native-format-20261006-v2/stage-attempt-registry.json`,
+SHA-256 `1da2494aa27b4fe63739903d826403050a541f2b256207eee62949eeacfb3b63`.
+The active75162 run owns its successor registry until collection.
 Original44773,12545,81936 and97674 are terminal and collected; never repoll or
 retry their unchanged source stages. ADR0055 remains the sole asked pending
 decision. None of the pending units closes its checklist row yet.
@@ -101,7 +123,8 @@ The complete physical manifest and reopened private codec/owned IO prerequisite
 added T15 rows close. The separate prior paired29-case codec proof at8885e0db
 remains applicable because its production/test bytes match234df849;109 is the
 IO-file population. Original T01–T19 remains80 done/93 todo/6 retired;
-added314 done/34 todo. No other restore/public/decoder/helper row closes.
+added314 done/35 todo after the separate AgentLoop fixture repair row was added.
+No other restore/public/decoder/helper row closes.
 
 Native compaction formatter original59893 is collected PASS at authored
 `578ae5842b9db212b2a475e33f215055e8b227fc`,6.181 seconds, six original stages
