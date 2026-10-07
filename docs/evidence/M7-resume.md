@@ -27,6 +27,66 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+Latest bounded completion, 2026-10-07: T05 standalone policy request/terminal
+codec, schemas, vectors and independent Node projection are integrated literally
+from clean isolated `2f86a77050eb025c794895f4624ec799891cf1ef`.
+Original36467 is terminal0 and collected PASS at
+`M7/policy-event-admission-20261007-v4`; all39 complete Protocol cases passed
+on each supported pair, including two actual Node consumers per pair and424
+vectors, zero exclusions/skips/invalid. Ten original joins,50 verified artifacts,
+17.174 seconds. Collection SHA-256
+`57f3c9c9fd4d8eeb3547f0371fbd6be5d510deae2cceadfa235b84a1d6562b74`;
+terminal `155e56d84bc4aa87a27244550c5e8a71f0a70f2b4bae7750d7c88442c065b674`.
+Latest collected registry1414 has SHA-256
+`c08fca9e1bcfdf4e31c4d6b4d10edb585faef29955265ec1470c0902236eee56`.
+Never repoll36467. Earlier63668,5261 and65974 failures stay immutable. The65974
+current37/39 failure exposed two stale fixed vector digests; the exact two
+64-byte digest substitutions are retained in
+`/private/tmp/m7-policy-terminal-digest-pins-20261007-v2.json`, SHA-256
+`2c130959e9979880ce5bdb60ccaa6a3e7e24648ed6c2a3558b7483d3baaf5468`.
+Counts: original81 done/92 todo/6 retired; added328 done/29 todo. Only T05's
+standalone codec row closes. Whole transport/generation work stays open.
+
+T16 full-selection original38205 is collected FAIL at isolated2dab7f5c,
+current150/151 Core, zero exclusions/skips/invalid; Composition and floor unrun.
+117.636 seconds, four original joins and97 verified artifacts including private
+witnesses. Collection `M7/configured-normal-cleanup-admission-20261007-v1/original-collection.json`,
+SHA-256 `7b861c04ef066e4c546398c698c02c9d87cd6c5bcbbff87066051f075b3a0bdc`;
+terminal `5c07589b01f230e096efcb5c815cbcf9c85e8f783e1d47e65819a15802349e51`.
+The remaining retirement oracle omitted the exact coordinator shutdown DOWN;
+all provider actors had already joined normal. The narrow captured-monitor/PID
+correction is committed as raw75702e43, packet
+`/private/tmp/m7-owner-retirement-shutdown-oracle-20261007-v1.json`, SHA-256
+`e16ca94565c8b928d0af57e714824d470efa16a3e8f69652d20e02fbf9e56b03`.
+Original provider-normal oracles, no-window refusal and all deadlines remain.
+Incremental formatter original86891 is collected PASS:4.512 seconds, six original
+joins and37 artifacts, one-file non-line AST preservation and both formatter
+checks. Output `M7/owner-retirement-coordinator-format-20261007-v2`, collection
+SHA-256 `246c7285bdff54b9b7f3be54d38948d62d0d323efb89c07fbb7c3ae5fb56e474`;
+terminal `2bbe5c390c1e81fb57f75a4a7a7a60bd159e3e240f48f3acb811df6d09d0d406`.
+Literal formatter child `1f1a5f6967867c3c26ef3d7f0f3eb56112f0273d` is clean;
+tree `7f48df3e26201dea8ca16b72ed894d6d611af847`, Git projection SHA-256
+`13caf110fc27c0c3185959e566099844c4b721540b2da558aff3a58925c516c0`.
+Formatted packet `/private/tmp/m7-owner-retirement-coordinator-formatted-source-20261007-v1.json`,
+SHA-256 `b36c5be5c27bc9a8fe11bcd1b42a323dadec32fa727c2fbf2f5a65c0e97966e4`.
+Complete153-case paired proof remains required. Never repoll38205 or86891.
+
+Native policy original65277 is collected FAIL at isolatedd19d7ae0:
+current27/29, zero exclusions/skips/invalid; floor unrun.37.084 seconds, four
+original joins and24 artifacts. Collection
+`M7/policy-native-admission-20261007-v1/original-collection.json`, SHA-256
+`404009c683d4b2349f400354ea331cee9b0c7622a08c3beb382ec9b12ec8abd3`;
+terminal `a2fd575d2fda150815e32a2af01b74a0d0119dff67cf0b033b1f230f8498e4a8`.
+One fixture omitted explicit resume after its temporary owner stopped with
+commit_unknown. The other exposed genuine reconsultation after committed denial.
+A four-file repair is frozen in
+`/private/tmp/m7-policy-native-failure-repair-20261007-v1/source.json`, SHA-256
+`138e303007c2f4979b26cc4df74413a03718ccd12fa4cd5f046a37dbdce02cc9`, awaiting
+independent review, raw source commit, paired formatting and complete30-case
+proof. Exact retained denied/expired queued calls may finish; retained allowed
+terminals grant no fresh authority. New actual700-ms expiry owner-loss proof
+keeps all original joins and completion cutoffs. Never repoll65277.
+
 Latest collected executions after that source checkpoint: policy original5261
 is terminal1 and collected FAIL at4b8bc89b, current37/39, floor unrun,
 zero exclusions/skips/invalid,8.487 seconds, five original joins and27 artifacts.

@@ -1,5 +1,15 @@
 # M7 Implementation Tasks
 
+T05's standalone policy codec unit is proved at isolated2f86a770: all39 cases
+passed on each supported toolchain, including two independent Node cases per
+pair and424 literal vectors. Original36467 is terminal0 and collected PASS:
+17.174 seconds, ten original joins and50 verified artifacts, zero exclusions,
+skips or invalid cases. The eight literal tested files are integrated; only the
+bounded standalone codec row closes. Native recovery, authenticated cursor
+relations, transport integration and generation activation remain separate.
+Original T01–T19 remains81 done/92 todo/6 retired; added328 done/29 todo.
+Exact retained references and the pending T16 correction are in the [resume record](M7-resume.md).
+
 T16's reviewed normal-shutdown correction and actual trapping-worker fallback
 witness are committed at isolated0267936f; paired formatting and153 cases per
 supported pair remain pending. Native policy provenance is reviewed and committed
@@ -13378,7 +13388,7 @@ or check was relaxed.
 - [x] Implement accepted ADR 0053 daemon configure admission through existing lease-owner authority, serial tickets, succession capacity and cleanup; prove actual native admission, renewal/refusal behavior and unchanged negotiated-wire refusal on both supported toolchains. Keep Request/parser and served generations unchanged until coordinated activation.
 
 
-- [ ] Implement the accepted ADR0052 standalone ten-field policy request and nine-field terminal codecs, literal schemas/vectors and independent Node projection; prove closed scalar/answer-pair/privacy and complete-output bounds on both toolchains. Native terminal provenance, authenticated cursor transitions, transport integration and generation activation remain separate.
+- [x] Implement the accepted ADR0052 standalone ten-field policy request and nine-field terminal codecs, literal schemas/vectors and independent Node projection; prove closed scalar/answer-pair/privacy and complete-output bounds on both toolchains. Native terminal provenance, authenticated cursor transitions, transport integration and generation activation remain separate.
 - [ ] Finish accepted ADR0052 native answer provenance, exact policy cursor/replay relations and shared Elixir/Node payload projection in both transports; prove focused current/floor and independent vectors after rejoin, complete negotiated manifests and real answered-command workflows.
 - [ ] Pin and implement the exact configure request and versioned remote creation-option grammars through governed decisions; preserve authored aliases, central preparation, host-only bindings, current command replay and both transport authority gates.
 - [x] Implement accepted foreground configure Mapping admission through the existing attachment and native command owners; prove complete mapping/initialization files, safe malformed correlation, authored retry identity, all three Store uncertainty phases and joined preparation on both supported pairs. Preserve the current Connection generation refusal until complete manifest activation.

@@ -1,0 +1,104 @@
+{
+  "format": "loopex.experimental.payload-contract/1",
+  "contract": "policy_terminal",
+  "authority": "Accepted ADR0052",
+  "event_kinds": [
+    "interaction.resolved",
+    "interaction.expired",
+    "interaction.cancelled"
+  ],
+  "closed": true,
+  "required": [
+    "interaction_id",
+    "run_id",
+    "turn",
+    "tool_call_id",
+    "producer",
+    "interaction_kind",
+    "status",
+    "answer_choice_id",
+    "answer_command_id"
+  ],
+  "native_required": [
+    "interaction_id",
+    "run_id",
+    "turn",
+    "tool_call_id",
+    "resolution",
+    "answer_command_id"
+  ],
+  "producer": "policy_defer",
+  "interaction_kind": "choice",
+  "fields": {
+    "interaction_id": {
+      "encoding": "canonical_unpadded_base64url",
+      "minimum_original_bytes": 1,
+      "maximum_original_bytes": 65536
+    },
+    "run_id": {
+      "encoding": "canonical_unpadded_base64url",
+      "minimum_original_bytes": 1,
+      "maximum_original_bytes": 65536
+    },
+    "turn": {
+      "encoding": "canonical_decimal_string",
+      "domain": "arbitrary_positive_integer"
+    },
+    "tool_call_id": {
+      "encoding": "canonical_unpadded_base64url",
+      "minimum_original_bytes": 1,
+      "maximum_original_bytes": 65536
+    },
+    "answer_choice_id": {
+      "encoding": "canonical_unpadded_base64url",
+      "minimum_original_bytes": 1,
+      "maximum_original_bytes": 64,
+      "nullable_when": "expired or cancelled only; paired with answer_command_id"
+    },
+    "answer_command_id": {
+      "encoding": "canonical_unpadded_base64url",
+      "minimum_original_bytes": 1,
+      "maximum_original_bytes": 65536,
+      "nullable_when": "expired or cancelled only; paired with answer_choice_id"
+    }
+  },
+  "variants": {
+    "allowed": {
+      "event_kind": "interaction.resolved",
+      "native_resolution": "allowed",
+      "status": "answered",
+      "answer_pair": "both_nonnull"
+    },
+    "denied": {
+      "event_kind": "interaction.resolved",
+      "native_resolution": "denied",
+      "status": "denied",
+      "answer_pair": "both_nonnull"
+    },
+    "expired": {
+      "event_kind": "interaction.expired",
+      "native_resolution": "expired",
+      "status": "expired",
+      "answer_pair": "both_null_or_both_nonnull"
+    },
+    "cancelled": {
+      "event_kind": "interaction.cancelled",
+      "native_resolution": "cancelled",
+      "status": "cancelled",
+      "answer_pair": "both_null_or_both_nonnull"
+    }
+  },
+  "native_conditional": {
+    "choice_id": "Present iff answer_command_id is nonnull; absent iff null",
+    "reason": {
+      "encoding": "opaque_binary",
+      "minimum_bytes": 0,
+      "maximum_bytes": 65536,
+      "wire_projection": "omitted; native decoding cannot reconstruct it"
+    }
+  },
+  "authority_granted": false,
+  "contextual_binding": "Owning reducer verifies actual run/turn/call and prior offered/admitted answer; codec grants no authority",
+  "output_record_bytes_including_newline": 2097152,
+  "enclosing_bounds": "Complete event envelope and negotiated Frame bounds remain required before delivery; standalone payload is not a served generation"
+}

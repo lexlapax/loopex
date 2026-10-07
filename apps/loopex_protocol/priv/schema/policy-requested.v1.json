@@ -1,0 +1,88 @@
+{
+  "format": "loopex.experimental.payload-contract/1",
+  "contract": "policy_requested",
+  "authority": "Accepted ADR0052",
+  "event_kind": "interaction.requested",
+  "closed": true,
+  "required": [
+    "interaction_id",
+    "run_id",
+    "turn",
+    "tool_call_id",
+    "producer",
+    "interaction_kind",
+    "status",
+    "prompt",
+    "choices",
+    "expires_at"
+  ],
+  "native_required": [
+    "interaction_id",
+    "run_id",
+    "turn",
+    "tool_call_id",
+    "prompt",
+    "choices",
+    "expires_at"
+  ],
+  "producer": "policy_defer",
+  "interaction_kind": "choice",
+  "status": "pending",
+  "fields": {
+    "interaction_id": {
+      "encoding": "canonical_unpadded_base64url",
+      "minimum_original_bytes": 1,
+      "maximum_original_bytes": 65536
+    },
+    "run_id": {
+      "encoding": "canonical_unpadded_base64url",
+      "minimum_original_bytes": 1,
+      "maximum_original_bytes": 65536
+    },
+    "turn": {
+      "encoding": "canonical_decimal_string",
+      "domain": "arbitrary_positive_integer"
+    },
+    "tool_call_id": {
+      "encoding": "canonical_unpadded_base64url",
+      "minimum_original_bytes": 1,
+      "maximum_original_bytes": 65536
+    },
+    "prompt": {
+      "encoding": "utf8",
+      "minimum_bytes": 1,
+      "maximum_bytes": 2048
+    },
+    "choices": {
+      "kind": "array",
+      "minimum_length": 1,
+      "maximum_length": 8,
+      "member": {
+        "closed": true,
+        "required": [
+          "id",
+          "label"
+        ],
+        "id": {
+          "encoding": "canonical_unpadded_base64url",
+          "minimum_original_bytes": 1,
+          "maximum_original_bytes": 64
+        },
+        "label": {
+          "encoding": "utf8",
+          "minimum_bytes": 1,
+          "maximum_bytes": 256
+        }
+      },
+      "unique_by": "id"
+    },
+    "expires_at": {
+      "encoding": "canonical_decimal_string",
+      "minimum": "0",
+      "maximum": "18446744073709551615"
+    }
+  },
+  "authority_granted": false,
+  "output_record_bytes_including_newline": 2097152,
+  "enclosing_bounds": "Complete event envelope and negotiated Frame bounds remain required before delivery; standalone payload is not a served generation"
+}
