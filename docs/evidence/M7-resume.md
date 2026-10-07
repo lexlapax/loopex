@@ -27,6 +27,66 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+Latest model source is clean isolated `97ac232692929841660ebc71388ab7726550d6f5`,
+tree `7b14c936fbe0a4022e3bf3fd5ccc8268c4696891`, direct formatted child of
+startup-corrected raw `4a6b8550578384cbf74aa3f2af2549767667afba` and base46b57a2b.
+The actual Local executor, workspace lease and host allowance are now present;
+original startup/resource cleanup is retained before assertion failure.
+Startup correction source packet
+`c05674056151e99aa1b0bf99c4e4a0a52719c4d289f2695541ca45bee859a140` and
+root source review `31c42a1bde5b2c8f815fe9ce093085e76d50b7402ab5397af4417cc3436b2ff9`
+remain source-only evidence. Complete1179-record formatted projection is
+`02201ea65f4a84b2b2a08bde58fa541e6133fe82b5596f416608ae87ea2305ed`.
+The two closure hashes are test
+`83abef7e06c00a4c38f1bf30fc12dd998c313da392a4f2648fe8bc4be7044bae` and
+unchanged fixture `da8a8ae652b3fc73dcde5c3bdd7df423ccf1b0c8277e1e0ad8ef3f713dadc37d`.
+
+Original43657 correction formatter passed six stages in5.578 seconds;
+38 artifacts authenticate and both non-line syntax trees remain equal.
+Output `M7/native-model-switch-correction-format-20261007-v1`; collection
+`1fd62e8b21833f74b29db1b3cb210315f897c8c827ee7962eb21ef8dd6e833d1`;
+terminal `807b2d179f5fd3e9988ac13882ad823a28fa21537e22fb0222bf511a133de6cc`;
+executed wrapper `7815af004e78b3daed88c158f3a3a8d4937697e3420abcb9073b4eeef41dc283`.
+The fresh paired proof original3648 then failed in65.604 seconds.
+Current formatting and warning-free Composition compilation passed; complete
+current tests executed8 with7 passing and1 failed,zero exclusions/skips/invalid.
+Startup succeeds, but the native-entry namespace gate is not reached within
+the original10,000-ms work cutoff. ReqLLM and floor stages are unrun.
+Three original stages joined and23 artifacts authenticate. Output
+`M7/native-model-switch-correction-proof-20261007-v1`; collection
+`30bf94afab63b3d04096af848a9bcff65ff0e8b363cbef2af32adc7e5458d18d`;
+terminal `58137bc0bfbc32ca8c9c4509e0a103cd13572b9319c3c2d37458ff83a7948604`;
+executed wrapper `5eeb7c4659a5071d9af1492c112c60449288fddf5966f345555d88c7e5d717fd`;
+root recipe review `6a14e0cf923a30cfc1d6f26841aca3bd068e7d1bbb2eb1936903a138f755b85d`.
+Latest collected registry is1642,SHA-256
+`c7e885a6c63c51cdc9a6efbc8cce70037b8ba3030338e7b494aea804d3259e63`.
+Do not repoll43657 or3648 or retry unchanged source. A bounded read-only
+diagnosis is active; no native process remains running and no T08 row closes.
+
+Physical helper binding-log V1 source packet
+`f36eab1ef125fb9334bd595898edaf7e0bb66ca02fae984c5c7e7e20ab0d62e6`
+and full patch `46d3146901274fd835437e06bd90099f1ac9f5d088e5df999a7cb890ab4de311`
+are frozen source-only. Its independent review
+`2361ab3e453a5b60757d2238a7cc70d3ab912134b6c7a93e23a1afae8759d8c3`
+is BLOCKED_SOURCE_ONLY. A lifetime recovery Boolean permits the successor to
+repair its own later incomplete append; seven paused writer/repair death cases
+also lack bounded failure cleanup of their original actors and callers before
+root deletion. The same four-path writer is correcting both in its isolated
+worktree. The frozen V1 selection is69 per pair,33new plus19parent plus17objects;
+no formatter, compiler or test has run. Corrected source needs fresh review.
+Original T01–T19 remains87 done/86 todo/6 retired;added347 done/23 todo.
+ADR0057 is still Proposed; the maintainer requested its pending question again.
+The exact4007adf7 pair and both current digests are unchanged; no acceptance
+is inferred from presenting the options. Other work continues independently.
+
+All56 model correction/source/review/formatter/proof preparation and physical
+helper V1 blocked-review files are permanently retained in
+`M7/model-correction-and-helper-review-context-20261007-v1/retention.json`,
+SHA-256 `13087d1655e3cf64b4ca7638e95abc3a846fb5de21858feef97242bb1e5ff739`.
+That bundle records preparation only; original3648's failure is separately
+collected above. The following source and execution history retains earlier
+identities; earlier registry pointers are superseded by current1642 above.
+
 Primary parent-binding integration is committed and pushed at `f067b49e`.
 The earlier selector integration carries four exact files from isolated
 `520e3adb1ab70c2abfd09883428a335f8b2adff9`, tree

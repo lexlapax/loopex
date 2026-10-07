@@ -20,6 +20,15 @@ reader's outer LF handling changed before this new-source proof. Physical
 append/custody, accounting and helper activation remain open. Exact source,
 review and native references are in the [resume record](M7-resume.md).
 
+Corrected model source `97ac2326` passed both formatter checks, then original3648
+failed the current complete Composition selection7/8. Runtime startup succeeds;
+the real native-entry gate was not reached within the unchanged10,000-ms work
+cutoff. ReqLLM and floor stages remain unrun. The failed result is collected,
+not retried or counted as task completion. Independent physical binding-log
+review found current-owner tail recovery and paused-actor failure cleanup
+defects; corrections are in progress in its isolated worktree. Exact references
+are in the [resume record](M7-resume.md). Counts remain unchanged.
+
 The following earlier progress entries are historical where superseded above.
 
 Selected receipt capture is proved at `caf4cdb2` and integrated with literal
