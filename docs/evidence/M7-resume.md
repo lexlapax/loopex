@@ -27,7 +27,7 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
-Primary base is clean/pushed `56a8428c` before this helper-unit integration. That commit integrates four exact selector files from isolated
+Primary base is clean/pushed `50e9de9b` before the next parent/model units. That commit integrates four exact selector files from isolated
 `520e3adb1ab70c2abfd09883428a335f8b2adff9`, tree
 `029fbdac4d9d602f08e384116c371f8f20366641`. Original19781 passed33/33 on
 both supported toolchains, with five actual Node consumers per pair, zero
@@ -125,12 +125,83 @@ logs/actor attribution. Live interaction contract
 requires complete coordinated /3-/4 migration; native creation custody still
 depends on Proposed0059. Another partial serving generation is not authorized.
 
-Two source-only writers are active. Parent-binding owns three new module/test/
-fixture paths in `/Users/spuri/.codex/worktrees/m7-helper-parent-binding/loopex`,
-base ddab68d8. Native model switching owns one new Composition test in
-`/Users/spuri/.codex/worktrees/m7-native-model-switch/loopex`, base f2e77904.
-Contracts and closure limits are retained in the latest16-file context bundle.
+Parent-binding raw source is frozen at `adb13e31227307dc451659c152ad7235f997b303`,
+tree `124d97d5db7b64d9a30b4024a6bdbcd613c57b11`, direct child of ddab68d8,
+in `/Users/spuri/.codex/worktrees/m7-helper-parent-binding/loopex`. Corrected V3
+packet SHA-256 `0fc100cb7f244d37b6ef8ffda6aca9de8e849e54cc72a88bd4fbd277db3f8d8e`;
+independent source-only PASS review
+`dcdace3299456767be228c74ef674c243ab99f2ad69a96bbe388ebc0698d1b2a`.
+Its three new paths were absent at the base; complete 1,180-record NUL Git
+projection is `16405419e1a49a75fbfd513da775e30885d646df909300169a991868b8449017`.
+Original54006 formatter passed six stages in7.326 seconds, with38 artifacts
+verified and both non-line syntax trees unchanged. The clean formatted direct
+child is `3e092d10d123e068a589506d96f9cb8ad83c6d66`, tree
+`b5880479727b27c4f05d3d1d4e1a0f64afee6067`; complete projection
+`4a511f80c08ce0090c653aedec4330d29a305c93ced3b4c8418c566cc6b3870d`.
+Output `M7/helper-parent-binding-format-20261007-v1`; collection
+`3300c60ab9fcbe4d5961c05e414679021752304285fe946f747a91ae8a846219`;
+terminal `43e4c63e430a51fac742eb6c0af6197913144ed1b446be662ce352f31fa8804c`;
+executed wrapper `69e9019712af1f93e3cf097dca1eff8944f1eb1f7d4d57d1def4b4d4d0780abd`.
+Original28075 then passed current compilation but failed one fixture reader:
+18/19 passed, one trailing_bytes failure; floor did not run. It is retained as
+FAIL,49.970 seconds,three original joins,22 artifacts. Output
+`M7/helper-parent-binding-proof-20261007-v1`; collection
+`3043181f156aeabf24f0c2fa1426e38fbdcf1344ec664293f3eaf525050ba3d7`;
+terminal `50981bffbf989dbb3d515257fda3e9684e478cfd29cc52edc2ae77004047d4aa`.
+The only correction trims the fixture file's trailing LF, matching current
+GenesisCodec fixture readers; production strict decoding and all literal vectors
+stay unchanged. Corrected source is `2ba7d524352d39949b2f310ad0d6c4b236e7518f`,
+tree `729929ad0580accf980060b937b8a1045b521adb`, direct child of3e092;
+projection `c2a5566b5fea87d03879d4710cf3fb15a10035febf0735c8e83f99296f895f73`.
+Correction packet `121ea40dee396515b3836395699b67a3c841ebad589538306fc411c09af37be9`
+and independent correction review
+`827d051d6672570ea29e32156d99dd9418b3d8d7e584d1af8652c3828e784bd3`
+join that exact source. Corrected recipe review
+`9792b63b4e236c1fdbf80189ca333b73871ad41a526f31b8fcfc6a0af3d2ee44`
+passed source-only before admission. Original20669 now passed19/19 on both pairs,
+zero failures/exclusions/skips/invalid, in90.030 seconds. Six original native
+stages joined;37 artifacts authenticated. Output
+`M7/helper-parent-binding-proof-20261007-v2`; collection
+`3fc434653856a1b300351eae6140551e9e58f9742f53e07f3656133383f8f629`;
+terminal `883e6c939ba3e6ce95c231e9e33e4617b9b74c6343cab770320954dfaec0ee5b`;
+executed wrapper `9cc07a71b59ad99a7ce2695262def5d3a471105f84f0d0442a17f48b5797024b`.
+All three new paths integrate literally. Only the added parent-binding row closes. V1's metadata typo and private normalizer call remain
+retained; V3 uses the existing public normalizer. Physical ledger custody,
+append/recovery, child accounting and helper activation remain open.
+
+Native model-switch raw test is frozen at `0567264c3eec40ba59b2deb8989515a58eebc311`,
+tree `7d9eb5da64d4773ff9f8f9c9175fd695055ae2e7`, direct child of f2e77904,
+in `/Users/spuri/.codex/worktrees/m7-native-model-switch/loopex`. Independent
+source review `05a2cdbebaa00633895e53929614a9d410777e75e58fec916d881c72584d2f72`
+is BLOCKED_SOURCE_ONLY: unwrap the Store constructor result, monitor the original
+accepted HTTP handlers/sockets before IO, and add independent literal context
+and system ceilings. Corrected two-file V2 source is frozen at
+`de7b9e870fd1d932b6fd3ee832331097d5b68dec`, tree
+`edc3e4b8ef7274cc6e9281b7cbc378c7a9b4d425`, direct child of0567264c;
+complete1179 projection `04fae0473a1839a73379ef03f894a8e62b4197dc2d0c866a537eebd6b049cd8b`.
+V2 source packet `3a4f8ffb80e4bcc49381c5503d64ede622ea17b96e8862c7b90e9e77737980b7`
+and independent PASS_SOURCE_ONLY review
+`b277b731a6c679d9923fa90d143d6a43f2e3a5022c1d191090074f93b8c24f58`
+resolve all V1 findings. No native test has run. The author owns only the new
+Composition test and narrow test-only ProviderIsolationFixture custody seam.
+Existing fixture limits stay fixed. The initial disabled formatter recipe is
+historical preparation and must be revised after the corrected source is frozen.
+
+Both source packets, reviews, raw projections and model formatter preparation
+are permanently retained in
+`M7/parent-and-model-source-context-20261007-v1/retention.json`, SHA-256
+`cf1f499368c4cb4ffbdbed91dde81f3f773e218b5d2424b96913beb39bd61870`,33files.
 Root owns every VM, formatter, compilation, test, source freeze and integration.
+Latest native registry is1624 from fully collected original20669, at its corrected
+proof output; SHA-256 `cb8b4234887123c8595494d2929708d98161e6aa6560f7264628e10c468fba51`.
+Do not repoll54006,28075 or20669 or admit a later native with an earlier registry.
+Parent formatter/proof/failure/correction preparations, reviews and projections,
+and model V2 sources/reviews/disabled formatter are permanently retained in
+`M7/parent-correction-and-model-v2-context-20261007-v1/retention.json`, SHA-256
+`3d9b1af1ac3f0854e3c3e5ef8949075dfecc69c4e4e81ce0c5e5e72c2d353fea`,55files.
+That bundle was captured while20669 ran; its native outcome is retained separately
+above. The dormant byte unit and parent-binding unit have no activation claim.
+Original T01–T19 stays87 done/86 todo/6 retired; added347 done/23 todo.
 
 The following previous checkpoint is historical where superseded above.
 
