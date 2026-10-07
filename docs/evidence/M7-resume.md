@@ -108,12 +108,66 @@ The new metadata-reuse wrapper is not yet in that packet; its executed output
 must retain the exact wrapper at original collection. Public and helper restore
 remain separate; bounded partial-cleanup is now proved and integrated.
 
-The public driver writer in m7-restore-public-resolution froze seven paths with
-64 new cases, then independent review found a positive-absence defect: new
-invocation type alone could preserve absence before retained intent was read.
-The writer is correcting a private guardian absence-proved flag and adding
-actual public actor-loss tests before/after absence proof and before intent
-write. No public receipt or complete-resolution proof is claimed yet.
+Public restore source is saved in isolated m7-restore-public-resolution at
+`981eba27328e31dcd04e183e60c5c3292067f24c`, based on tested d5f89363.
+Independent source and rebase reviews passed. The guardian starts without
+absence proof; native checks of both original intent names and a completed ACK
+establish it, and intent permission clears it. All64 actual public cases remain;
+five deterministic actor-loss cases use a trusted private entrypoint sharing the
+same validated facade and closed outcome projection with the existing native
+IO gate. This internal test choice preserves ADR0051's real IO, actor, deadline,
+descriptor and join obligations, without claiming those five calls entered /2.
+
+Formatter original15390 is collected FAIL at f586ac24: all seven non-line AST
+comparisons passed, then one conditional failed formatter idempotence. Four
+original joins and24 artifacts were verified,3.439 seconds. Collection
+`M7/public-restore-format-20261007-v1/original-collection.json`, SHA-256
+`b05d5b79008c7ba66b522c14a57a560fed4a5f6bf569eb0bdb7b6350933610c8`;
+terminal `126118c866b20830644a1f1b6356bbcfaf14f68bf982278d712f707bdf5246fd`.
+The reviewed real child preserves all formatter bytes and replaces only that
+conditional with equivalent explicit cases. Never repoll15390 or retry f586.
+
+Formatter original48794 is collected PASS at unchanged clean981eba27,5.305
+seconds, six original joins and37 artifacts. Collection
+`M7/public-restore-format-20261007-v2/original-collection.json`, SHA-256
+`69415aa23b12aa9ff9fc3e72790dc817401f4547b9a0c039956b2bd93a1c856d`;
+terminal `960d33ad8507af0d0b0566dd091b83f727886e8e6d84442e82d17b5f9709bb03`.
+Complete proof original89004 is running on frozen981eba27; root alone owns its
+original handle and collection. It selects all472 composition cases, including
+all109 IO cases and all three actual long-bound witnesses, plus14 executor
+codec cases on each pair. Current execution has observed three unchanged
+partial-cleanup fixture failures, four generation-temporary recovery failures,
+and an unused alias warning. The original complete stage remains running;
+read-only diagnostics are separate from its frozen source. No test PASS or
+public-row closure is claimed yet. Preparation packet
+`M7/public-quiesce-preparation-20261007-v1/inventory.json`, SHA-256
+`0f916d836e20aeaa953f587e9c4eeced3b2dae8a3366b8db781b47520a5007ce`,
+retains13 exact reviewed source/patch/wrapper/helper copies outside temporary
+storage. Wrapper `/private/tmp/m7-public-admission-20261007-v1.py`, SHA-256
+`016f772b76d111915b034da64d19d4675f26c1d9f04b4f7298642e4b955dcad9`,
+reuses four exact-source collected48794 metadata records and retains real
+witnesses before temporary cleanup. Do not mutate its seven owned paths or
+launch another VM before original89004 is terminal and collected.
+
+Quiesce V2 source review passed after fixes for original live monitors, immediate
+ready delivery and waiter custody before work with joined failure cleanup.
+Formatter original52710 is collected PASS at e281353c,3.833 seconds, six joins
+and37 artifacts; its AST-preserving formatting child is saved at
+`341029a2e6138c9d4211f41a8219f596ce106286` in m7-quiesce-controls.
+Collection `M7/quiesce-controls-format-20261007-v1/original-collection.json`,
+SHA-256 `222d83dd2b506a99250dcf2d2e48e5cb7f465899a179f583cd13382169a971c5`;
+terminal `3c9b2baa223fe8b02b35c278d5fbe795a00774679e87f70d9cbc4656e7b4207c`.
+No quiesce tests ran yet. Latest consumed registry before89004 is1240 in that
+output, SHA-256 `180797007c202b67a376bde592ab00e6bc0734530d8911c31e540bf054e00722`.
+Never repoll48794 or52710. Any next VM consumes89004's collected successor.
+
+The unexecuted full-fast wrapper remains stale. Its next concrete candidate must
+refresh the complete BASE-to-candidate non-Markdown and documentation inventories,
+actual parent/direct-child scope, and retained source/version evidence. Use a
+fresh private MIX_BUILD_ROOT with MIX_BUILD_PATH absent for dev/test separation;
+the old wrapper recorded private paths without setting either variable. Preserve
+the generic once-only stage key, original joins and all eleven native application
+logs, and reject unrecognized populations. No full-fast result is supplied here.
 
 Proposed ADR0058 is integrated with its two index rows after independent source
 review, with exact Concept SHA-256

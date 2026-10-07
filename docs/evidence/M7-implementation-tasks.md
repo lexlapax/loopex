@@ -35,6 +35,16 @@ d5f89363 are integrated literally; the bounded added T15 cleanup row closes.
 Public restore resolution and helper semantics remain separate. Original
 T01–T19 remains80 done/93 todo/6 retired; added322 done/31 todo.
 
+Public restore source and deterministic shared-facade/native-IO loss fixtures
+are independently reviewed and saved at isolated981eba27. Paired formatting/AST
+original48794 passed; first formatter15390 remains a collected failure with its
+actual source correction. Complete original89004 is running all472 composition
+cases and14 executor codec cases on each supported pair. No public restore row
+closes before terminal collection and literal rejoin. Quiesce controls are saved
+at formatter child341029a2; source review and paired formatting passed, tests
+remain unrun. Exact handles, hashes and continuation order are in the restart
+checkpoint. Original T01–T19 remains80 done/93 todo/6 retired; added322 done/31 todo.
+
 The entries below record earlier revisions and failed attempts.
 
 Original92272 at `ff36e0c1` is collected FAIL after181.799 seconds. Construction13
