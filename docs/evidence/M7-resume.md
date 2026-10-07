@@ -28,9 +28,20 @@ physical restore implementation; it does not waive any full-history proof.
 ### Current work and restart order
 
 Pending isolated units on 2026-10-06 remain unproved and unintegrated. Root owns
-all original VMs, collection, Git and rejoin. Private finalization formatter
-original72667 is running from clean isolatedf0427a86. Collect that original
-handle before starting another VM. No finalization execution result is claimed.
+all original VMs, collection, Git and rejoin. Daemon original43854 is running
+from clean isolated07d5df34 with the reviewed warning-corrected observer and
+exact reused version/format records. Collect that original handle before
+starting another VM. No passing daemon outcome is claimed yet.
+
+Private finalization formatter72667 is collected FAIL in2.729 seconds. Four
+original stages joined,24 artifacts verified; non-line AST comparison passed
+for all three files, then check-formatted refused one non-idempotent multiline
+test-call layout. Collection
+`M7/retained-finalization-format-20261006-v2/original-collection.json`, SHA-256
+`5442af62c66a578f14cc94e1e8f6e3a6d7ebfc825b98658ea62f2d28a61788ae`;
+terminal `5fafc0695bc0305cfdb4ade4fcbfc46e0dde922fc90ad22e62ae2f9de9d577bf`.
+The exact suggested whitespace-only correction is frozen for independent
+review and a real source child; no finalization row closes. Never repoll72667.
 
 Wire original47177 is collected PASS at
 `9aac155f7db77c0468f8dbf1b20657a96be8f805`: complete12 Protocol,14 AppServer
@@ -41,7 +52,8 @@ Sixteen original stages are joined and65 artifacts verified. Collection
 terminal `14788903a60de0a1e87b18e942bd3c69e53559c5ca9f5e19ff6d5ee75299349d`.
 All eight source files are copied literally into primary and independently
 reviewed. The bounded T07 closed codec/projection row closes. Added T01–T19
-now317 done/32 todo; originals remain80 done/93 todo/6 retired. Foreground live
+now317 done/33 todo after adding the explicit real-transport activity subtask;
+originals remain80 done/93 todo/6 retired. Foreground live
 routing, current generations, independent clients and full fast remain open.
 Never repoll47177 or20886.
 
@@ -141,7 +153,10 @@ SHA-256 `01afa6d1bd74ea5ce5c32e24f3ab8bca8d7aef2269019054dc0394ad7623d1a1`.
 Latest collected registry is1154 keys at
 `M7/daemon-configure-warning-format-20261006-v1/stage-attempt-registry.json`,
 SHA-256 `fbee14bac143d165f5e558fadca92f38aaee384e88321fded61df89b00b6ba03`.
-Active72667 owns its successor registry until collection. Never repoll72050.
+Latest collected registry is1158 keys at
+`M7/retained-finalization-format-20261006-v2/stage-attempt-registry.json`,
+SHA-256 `bf54aa1be5152b815f9e9dd11ae054663a39355227ef5fbd6ce52e038ad8560c`.
+Active43854 owns its successor registry until collection. Never repoll72050.
 Original44773,12545,81936 and97674 are terminal and collected; never repoll or
 retry their unchanged source stages. ADR0055 remains the sole asked pending
 decision. None of the pending units closes its checklist row yet.
