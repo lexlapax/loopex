@@ -66,7 +66,7 @@ a decision adds a new record rather than rewriting the old one.
 | 0054 | Compaction activity progress | Accepted | [Decision](0054-compaction-activity-progress.md#concept) | [Technical depth](0054-compaction-activity-progress-technical.md#technical-depth) |
 | 0055 | Remote session creation options | Accepted | [Decision](0055-remote-session-creation-options.md#concept) | [Technical depth](0055-remote-session-creation-options-technical.md#technical-depth) |
 | 0056 | Host helper ledger byte recipe | Accepted | [Decision](0056-host-helper-ledger-recipe.md#concept) | [Technical depth](0056-host-helper-ledger-recipe-technical.md#technical-depth) |
-| 0057 | Attempts event bodies | Proposed | [Decision](0057-attempts-event-bodies.md#concept) | [Technical depth](0057-attempts-event-bodies-technical.md#technical-depth) |
+| 0057 | Attempts event bodies | Accepted | [Decision](0057-attempts-event-bodies.md#concept) | [Technical depth](0057-attempts-event-bodies-technical.md#technical-depth) |
 | 0058 | Bounded progress delivery | Proposed | [Decision](0058-bounded-progress-delivery.md#concept) | [Technical depth](0058-bounded-progress-delivery-technical.md#technical-depth) |
 | 0059 | Responsive creation transactions and durable custody | Proposed | [Decision](0059-responsive-creation-transactions.md#concept) | [Technical depth](0059-responsive-creation-transactions-technical.md#technical-depth) |
 | 0060 | Restore full-mode helper | Proposed | [Decision](0060-restore-full-mode-helper.md#concept) | [Technical depth](0060-restore-full-mode-helper-technical.md#technical-depth) |

@@ -7006,3 +7006,23 @@ writer fencing, stop-only recovery, fsync-before-acknowledgement and uncertain
 reservations. Whole-child-run accounting and universal mutation protection remain
 separate prerequisites; this acceptance alone does not activate helpers. Other
 Proposed ADRs, required proofs, milestone closure and publication remain separate.
+
+<a id="disposition-m7-attempts-event-bodies-2026-10-07"></a>
+### M7 attempts event bodies accepted, 2026-10-07
+
+The maintainer replied "Approved 1. One shared format" to the exact
+[ADR 0057](../adr/0057-attempts-event-bodies.md#concept) pair at candidate
+`4007adf7e9450b2cdcfc5edcbcf2c6b9fa454366`.
+Historical Proposed Concept SHA-256 is
+`9e009d2cd2b634818a22dae46424867faa38b55ec7ac7f1a5606d15ba6b603e8`;
+Technical SHA-256 is
+`045e3b1003c0d5829e4d0df095f3a61178fd92b01353ba9db2f9fe224adb9359`.
+Within the pair only Status and the empty Acceptance row change.
+
+Implement the one closed current six-variant private body codec, reusing the
+existing canonical framing and duplicate-aware JSON boundaries. Explicit
+missing evidence consumes the original attempt and supplies neither PASS nor
+unchanged retry authority. Ordered replay, writer ownership, physical durability,
+handoff recovery and runner admission remain separate required implementation
+and proof. This acceptance supplies no test result, original T14 completion,
+other Proposed ADR acceptance, milestone closure or publication authority.
