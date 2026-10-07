@@ -27,12 +27,55 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
-Corrected finalization original92340 is active at clean
-`c36ea4c16d9edb8495e486d0dae4b80ae979edac`, through reviewed runner
-SHA-256 `88ff1d0d58996aac5d9733c7a3714a88ff7336bdee51bfb32b9569732932aaad`.
-Current compilation passed; the complete378-case current stage is running.
-Root must collect this original handle before another VM or source edit in that
-worktree. Floor remains pending; no finalization success is claimed.
+Ordinary progress original14873 is collected PASS at
+`424e1da4ad13c0e4bc5362b51dc5031b1b515155`: all52 cases per supported pair,
+34 AppServer and18 Daemon, zero exclusions/skips/invalid,124.671 seconds.
+Twelve original stages joined and53 artifacts verified. Collection
+`M7/ordinary-progress-admission-20261006-v1/original-collection.json`, SHA-256
+`3adde171e6a59da66f036a92325b6b635f02733297e1aedcb24120db86e0adda`;
+terminal `d5fc620ea507d38afcfcbf278be02f4cda472133ff68bff689eeba7b2befecdd`.
+All six tested files are integrated literally; the bounded T16 ordinary encoding
+row closes. Original T01–T19 remains80 done/93 todo/6 retired; added319 done/
+33 todo. Live routing/writer closure, generation activation and full-fast remain
+open. Never repoll14873 or33078.
+
+Both remaining sparse-lookup generated cases preserve original claim custody
+at isolated `f56d6fe1d55d0480a57156cefd8a85ecdf2cc13f`. Source review confirms
+all paused-owner rewrite defects in the38-case lookup file are covered, preserving
+all original intent/generation/placement/refusal/manifest controls and joins.
+Formatter16114 is collected PASS at this same clean source with no byte changes,
+4.545 seconds, six original joins and37 artifacts. Collection
+`M7/retained-finalization-lookup-format-20261006-v2/original-collection.json`,
+SHA-256 `dbc21631830e2ab84e5735aa91495c066186a2e2ea7bf5806dd774a191bd67dc`;
+terminal `4f7acc35593ee3acdda30d8fc671eab5655818598ada5e60e3e1e25e7ec3aa07`.
+Never repoll16114.
+
+Complete finalization original36566 is active at f56d6fe1 through reviewed
+mechanics with exact metadata-only wrapper adaptation, SHA-256
+`2a8a8e6673439dd85b738dda0748129d5386f97a57f273159f2796b227d8d65e`.
+It reuses exact collected16114 metadata and runs all378 cases per pair,
+including all three actual IO long-bound witnesses. Collect the original handle
+before another VM or any edit to that worktree. No finalization success is
+claimed. Seed registry1202 at
+`M7/ordinary-progress-admission-20261006-v1/stage-attempt-registry.json`, SHA-256
+`3b4fd01e1f748f9648678933510257dead50b199169dd4c43bebeb754b38d014`;
+original36566 owns its successor until collection.
+
+Corrected finalization original92340 is collected FAIL at clean
+`c36ea4c16d9edb8495e486d0dae4b80ae979edac`, in373.902 seconds.
+All378 current cases executed;377 passed, one hostile sparse-intent lookup case
+failed, and floor did not run. The earlier corrected lookup test595 passed.
+Both original stages joined and20 artifacts verified. Collection
+`M7/retained-finalization-lookup-admission-20261006-v1/original-collection.json`,
+SHA-256 `0d80fb37e8ca6f52fefac38e1ba71888b4dc0a128df2891e2bee903fc4fdb6ac`;
+terminal `af264e55ad6275ad51975364f5d2475a24b0555757efaca1c202eb7b6e29e343`.
+The actual64 case completed in163,610 ms. Remaining lookup owner rewrites are
+under source review; no finalization success is claimed. Never repoll92340 or
+retry its unchanged source. Consumed registry1178 SHA-256
+`fcb0348f51ad7c7409afea29a5e9bdf26f92492e9173f866b5270ac2adcf89e5`.
+
+Ordinary progress formatter33078 and complete paired proof14873 are terminal
+and collected PASS, as recorded above. No live routing or activation claim follows.
 
 Formatter61807 is collected PASS on the same clean source, in4.572 seconds,
 six original joins and37 verified artifacts, with no byte changes. Collection
@@ -41,7 +84,7 @@ SHA-256 `29fe64a5f56e2e4511af12be002a3ad949dab5a691adfdc8636d3af67195c56f`;
 terminal `b37d6e5b2232da08caa137172e7b4a4d885f38d997782bba8bf061512bdf7511`.
 Consumed registry1176 SHA-256
 `2886e6c38e6a00f331a150328082327fab88d68b28ffc5b113c70f6ece42b68b`.
-Original92340 owns its successor until collection. Never repoll61807.
+Original92340 is terminal and collected. Never repoll61807.
 
 Ordinary progress is independently reviewed and committed at isolated
 `299ad1d2d1dfaf4002993725f9ae1669415fc16d`. Its six-path formatting proof and
@@ -76,7 +119,7 @@ through rename and verifies the owner's full identity before releasing the
 pause. It changes only lookup test595, preserving all 38 cases, assertions,
 bounds and original joins. Formatting is proved; the complete paired378 proof remains
 pending. The isolated finalization worktree now owns four paths: RestoreIO,
-Workflow, the new32-case test and this existing lookup test. Original92340 is the sole active VM.
+Workflow, the new32-case test and this existing lookup test. Original36566 is the sole active VM.
 
 Ordinary progress encoding source is frozen in m7-progress-wire-encoding,
 based on `a868e5ef28d693d2c630bf6edeecf1bb5391a7b0`. Six owned paths are

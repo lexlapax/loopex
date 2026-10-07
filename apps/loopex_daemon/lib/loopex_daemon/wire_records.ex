@@ -18,6 +18,66 @@ defmodule LoopexDaemon.WireRecords do
 
   alias LoopexProtocol.Wire
 
+  @ordinary_progress_fields %{
+    text_delta: [
+      :kind,
+      :turn_id,
+      :stream_domain_id,
+      :model_sequence,
+      :base_event_sequence,
+      :content_index,
+      :text
+    ],
+    reasoning_delta: [
+      :kind,
+      :turn_id,
+      :stream_domain_id,
+      :model_sequence,
+      :base_event_sequence,
+      :content_index,
+      :text
+    ],
+    tool_call_delta: [
+      :kind,
+      :turn_id,
+      :stream_domain_id,
+      :model_sequence,
+      :base_event_sequence,
+      :call_index,
+      :tool_call_id,
+      :name,
+      :arguments_fragment
+    ],
+    tool_progress: [
+      :kind,
+      :turn_id,
+      :stream_domain_id,
+      :tool_call_id,
+      :progress_sequence,
+      :base_event_sequence,
+      :stream,
+      :byte_offset,
+      :chunk
+    ],
+    model_stream_closed: [
+      :kind,
+      :turn_id,
+      :stream_domain_id,
+      :base_event_sequence,
+      :disposition,
+      :delta_count
+    ],
+    tool_stream_closed: [
+      :kind,
+      :turn_id,
+      :stream_domain_id,
+      :tool_call_id,
+      :base_event_sequence,
+      :disposition,
+      :progress_count
+    ]
+  }
+
   @succession_messages %{
     "admission_unknown" => "Admission outcome unknown; retry with the same command ID.",
     "attachment_conflict" => "another attachment holds this session",
@@ -244,7 +304,8 @@ defmodule LoopexDaemon.WireRecords do
 
   Compaction activity uses its closed codec and refuses malformed items with
   `:error`, allowing the connection's existing transient drop path. Other
-  progress keeps its current domain and base projection. Frame and queue
+  progress uses ADR 0011's closed shapes and ADR 0023's identity and quantity
+  encodings, with whole-item refusal for malformed values. Frame and queue
   ceilings remain enforced by the connection.
   """
   @spec progress(binary(), map()) :: map() | :error
@@ -256,19 +317,7 @@ defmodule LoopexDaemon.WireRecords do
       when is_binary(session_id),
       do: compaction_progress(session_id, item)
 
-  def progress(session_id, item) when is_binary(session_id) and is_map(item) do
-    %{
-      "type" => "progress",
-      "session_id" => Wire.encode_identity(session_id),
-      "progress" =>
-        item
-        |> Map.drop([:stream_domain_id, :base_event_sequence])
-        |> Map.merge(%{
-          "stream_domain_id" => optional_identity(Map.get(item, :stream_domain_id)),
-          "base_event_sequence" => optional_sequence(Map.get(item, :base_event_sequence))
-        })
-    }
-  end
+  def progress(session_id, item), do: ordinary_progress_record(session_id, item)
 
   @doc """
   ## Concept
@@ -331,11 +380,126 @@ defmodule LoopexDaemon.WireRecords do
     end
   end
 
+  # Concept: ordinary progress carries exactly its kind's public fields.
+  # Technical depth: ADR 0011 supplies native shapes and payload ceilings;
+  # ADR 0023 encodes opaque identities, full-range quantities and raw chunks.
+  # Refuse the whole item before a private or malformed value reaches a writer.
+  defp ordinary_progress_record(session_id, item) do
+    with true <- is_binary(session_id) and byte_size(session_id) in 1..256,
+         {:ok, progress} <- ordinary_progress(item) do
+      %{
+        "type" => "progress",
+        "session_id" => Wire.encode_identity(session_id),
+        "progress" => progress
+      }
+    else
+      _invalid -> :error
+    end
+  end
+
+  defp ordinary_progress(item) when is_map(item) and not is_struct(item) do
+    kind = Map.get(item, :kind)
+    fields = Map.get(@ordinary_progress_fields, kind)
+
+    if is_list(fields) and Enum.sort(Map.keys(item)) == Enum.sort(fields) do
+      encoded =
+        Enum.reduce_while(item, {:ok, %{}}, fn {field, value}, {:ok, progress} ->
+          case progress_member(kind, field, value) do
+            {:ok, encoded} ->
+              key = if field == :chunk, do: "chunk_b64", else: Atom.to_string(field)
+              {:cont, {:ok, Map.put(progress, key, encoded)}}
+
+            :error ->
+              {:halt, :error}
+          end
+        end)
+
+      if match?({:ok, _progress}, encoded) and model_payload_bounded?(item),
+        do: encoded,
+        else: :error
+    else
+      :error
+    end
+  end
+
+  defp ordinary_progress(_item), do: :error
+
+  defp progress_member(kind, :kind, kind), do: {:ok, Atom.to_string(kind)}
+
+  defp progress_member(:tool_call_delta, :tool_call_id, nil), do: {:ok, nil}
+
+  defp progress_member(_kind, field, value)
+       when field in [:turn_id, :tool_call_id] and is_binary(value) and
+              byte_size(value) in 1..65_536,
+       do: {:ok, Wire.encode_identity(value)}
+
+  defp progress_member(_kind, :stream_domain_id, value)
+       when is_binary(value) and byte_size(value) == 32 do
+    if Enum.all?(:binary.bin_to_list(value), &(&1 in ?0..?9 or &1 in ?a..?f)),
+      do: {:ok, Wire.encode_identity(value)},
+      else: :error
+  end
+
+  defp progress_member(_kind, field, value)
+       when field in [
+              :model_sequence,
+              :progress_sequence,
+              :base_event_sequence,
+              :byte_offset,
+              :delta_count,
+              :progress_count
+            ] and
+              is_integer(value) and value >= 0 and value <= 18_446_744_073_709_551_615,
+       do: {:ok, Wire.encode_u64(value)}
+
+  defp progress_member(_kind, field, value)
+       when field in [:content_index, :call_index] and is_integer(value) and
+              value >= 0 and value <= 9_007_199_254_740_991,
+       do: {:ok, value}
+
+  defp progress_member(:tool_call_delta, field, nil)
+       when field in [:name, :arguments_fragment],
+       do: {:ok, nil}
+
+  defp progress_member(_kind, field, value)
+       when field in [:text, :name, :arguments_fragment] and is_binary(value) and
+              byte_size(value) <= 65_536 do
+    if Loopex.ProgressPayload.terminal_safe?(value), do: {:ok, value}, else: :error
+  end
+
+  defp progress_member(:tool_progress, :stream, value)
+       when value in ["stdout", "stderr", "progress"],
+       do: {:ok, value}
+
+  defp progress_member(:tool_progress, :chunk, value)
+       when is_binary(value) and byte_size(value) <= 65_536 do
+    if Loopex.ProgressPayload.terminal_safe?(value),
+      do: {:ok, Wire.encode_bytes(value)},
+      else: :error
+  end
+
+  defp progress_member(kind, :disposition, value)
+       when kind in [:model_stream_closed, :tool_stream_closed] and
+              value in [:complete, :abandoned],
+       do: {:ok, Atom.to_string(value)}
+
+  defp progress_member(_kind, _field, _value), do: :error
+
+  defp model_payload_bounded?(%{kind: kind} = item)
+       when kind in [:text_delta, :reasoning_delta, :tool_call_delta] do
+    item
+    |> Map.take([:content_index, :call_index, :text, :tool_call_id, :name, :arguments_fragment])
+    |> Enum.reduce(0, fn {_field, value}, total ->
+      total +
+        if is_binary(value), do: byte_size(value), else: byte_size(:erlang.term_to_binary(value))
+    end)
+    |> Kernel.<=(65_536)
+  end
+
+  defp model_payload_bounded?(_item), do: true
+
   defp optional_identity(nil), do: nil
   defp optional_identity(value) when is_binary(value), do: Wire.encode_identity(value)
-
-  defp optional_sequence(nil), do: nil
-  defp optional_sequence(value) when is_integer(value), do: Wire.encode_u64(value)
 
   defp optional_word(nil), do: nil
   defp optional_word(value) when is_atom(value), do: Atom.to_string(value)

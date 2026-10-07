@@ -494,10 +494,32 @@ defmodule Loopex.AppServer.SessionMappingTest do
 
     flooded_progress =
       Enum.reduce(1..64, queue, fn index, queue ->
-        Delivery.progress(queue, %{"seq" => index, "bytes" => String.duplicate("p", 32_768)})
+        Delivery.progress(queue, %{
+          kind: :text_delta,
+          turn_id: "turn",
+          stream_domain_id: "0123456789abcdef0123456789abcdef",
+          model_sequence: index - 1,
+          base_event_sequence: 0,
+          content_index: 0,
+          text: String.duplicate("p", 32_768)
+        })
       end)
 
     refute Delivery.detached?(flooded_progress)
+
+    {progress_records, _drained_progress} = Delivery.take(flooded_progress)
+    assert length(progress_records) > 0
+    assert length(progress_records) < 32
+    assert Enum.all?(progress_records, &(byte_size(&1["progress"]["text"]) == 32_768))
+
+    progress_sizes =
+      Enum.map(progress_records, fn record ->
+        assert {:ok, encoded} = LoopexProtocol.Frame.encode(record)
+        IO.iodata_length(encoded)
+      end)
+
+    assert Enum.sum(progress_sizes) <= 524_288
+    assert Enum.sum(progress_sizes) + List.last(progress_sizes) > 524_288
 
     flooded_events =
       Enum.reduce(1..128, queue, fn index, queue ->

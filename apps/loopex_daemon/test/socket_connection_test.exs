@@ -200,9 +200,12 @@ defmodule LoopexDaemon.SocketConnectionTest do
     end
 
     ordinary = %{
-      kind: "text_delta",
+      kind: :text_delta,
+      turn_id: "turn",
       text: "ordinary-barrier",
-      stream_domain_id: "ordinary-domain",
+      stream_domain_id: "0123456789abcdef0123456789abcdef",
+      model_sequence: 0,
+      content_index: 0,
       base_event_sequence: cursor
     }
 
@@ -233,7 +236,15 @@ defmodule LoopexDaemon.SocketConnectionTest do
 
     queued =
       Enum.reduce(1..33, state, fn index, state ->
-        item = %{kind: "text_delta", text: "item-#{index}"}
+        item = %{
+          kind: :text_delta,
+          turn_id: "turn",
+          text: "item-#{index}",
+          stream_domain_id: "0123456789abcdef0123456789abcdef",
+          model_sequence: index - 1,
+          base_event_sequence: 0,
+          content_index: 0
+        }
 
         assert {:noreply, next} =
                  LoopexDaemon.SocketConnection.handle_info(
@@ -256,24 +267,86 @@ defmodule LoopexDaemon.SocketConnectionTest do
 
     assert first_record["progress"]["text"] == "item-2"
 
-    large = %{kind: "text_delta", text: String.duplicate("x", 300_000)}
+    large = %{
+      kind: :text_delta,
+      turn_id: "turn",
+      text: String.duplicate("x", 300_000),
+      stream_domain_id: "0123456789abcdef0123456789abcdef",
+      model_sequence: 0,
+      base_event_sequence: 0,
+      content_index: 0
+    }
+
+    for _ <- 1..2 do
+      assert {:noreply, ^state} =
+               LoopexDaemon.SocketConnection.handle_info(
+                 {:daemon_progress, "session", large},
+                 state
+               )
+    end
+
+    # Concept: valid byte pressure still drops progress without detaching.
+    # Technical depth: each encoded identity and chunk fits its native ceiling;
+    # two complete records exceed the existing 512 KiB transient byte budget.
+    bytes = :binary.copy(<<255>>, 65_536)
+
+    byte_pressure = %{
+      kind: :tool_progress,
+      turn_id: bytes,
+      tool_call_id: bytes,
+      stream_domain_id: "0123456789abcdef0123456789abcdef",
+      progress_sequence: 0,
+      base_event_sequence: 0,
+      stream: "stdout",
+      byte_offset: 0,
+      chunk: String.duplicate("x", 65_536)
+    }
 
     assert {:noreply, one} =
              LoopexDaemon.SocketConnection.handle_info(
-               {:daemon_progress, "session", large},
+               {:daemon_progress, "session", byte_pressure},
                state
              )
 
+    assert :queue.len(one.progress) == 1
+    assert one.progress_bytes > 262_144
+    [first_encoded] = :queue.to_list(one.progress)
+    assert byte_size(first_encoded) == one.progress_bytes
+    assert byte_size(first_encoded) <= LoopexProtocol.Frame.output_record_bytes()
+
+    assert {:ok, first_byte_record} =
+             LoopexProtocol.Frame.decode(
+               String.trim_trailing(first_encoded, "\n"),
+               LoopexProtocol.Frame.output_record_bytes()
+             )
+
+    assert first_byte_record["progress"]["progress_sequence"] == "0"
+
+    assert {:ok, ^bytes} =
+             LoopexProtocol.Wire.identity(first_byte_record["progress"]["tool_call_id"])
+
     assert {:noreply, trimmed} =
-             LoopexDaemon.SocketConnection.handle_info({:daemon_progress, "session", large}, one)
+             LoopexDaemon.SocketConnection.handle_info(
+               {:daemon_progress, "session",
+                %{byte_pressure | progress_sequence: 1, byte_offset: 65_536}},
+               one
+             )
 
     assert :queue.len(trimmed.progress) == 1
     assert trimmed.progress_bytes <= 524_288
+    [encoded] = :queue.to_list(trimmed.progress)
 
-    oversized = %{
-      kind: "text_delta",
-      text: String.duplicate("x", LoopexProtocol.Frame.output_record_bytes())
-    }
+    assert {:ok, record} =
+             LoopexProtocol.Frame.decode(
+               String.trim_trailing(encoded, "\n"),
+               LoopexProtocol.Frame.output_record_bytes()
+             )
+
+    assert {:ok, ^bytes} = LoopexProtocol.Wire.identity(record["progress"]["turn_id"])
+    assert record["progress"]["progress_sequence"] == "1"
+    assert record["progress"]["byte_offset"] == "65536"
+
+    oversized = %{large | text: String.duplicate("x", LoopexProtocol.Frame.output_record_bytes())}
 
     assert {:noreply, ^state} =
              LoopexDaemon.SocketConnection.handle_info(

@@ -189,6 +189,348 @@ defmodule LoopexDaemon.WireRecordsTest do
              LoopexProtocol.Session.CompactionProgress.decode_wire(record["progress"])
   end
 
+  test "ordinary progress encodes all six native kinds with exact identities and u64 edges" do
+    for quantity <- [0, 18_446_744_073_709_551_615],
+        {item, expected} <- ordinary_cases(quantity) do
+      assert_ordinary_record(item, expected)
+    end
+  end
+
+  test "tool call progress preserves every permitted nullable combination" do
+    for id <- [nil, <<0, 255, 128>>], name <- [nil, "tool"], fragment <- [nil, "{}"] do
+      item = %{
+        text_item("unused", 0, 0)
+        | kind: :tool_call_delta
+      }
+
+      item =
+        item
+        |> Map.drop([:content_index, :text])
+        |> Map.merge(%{
+          call_index: 0,
+          tool_call_id: id,
+          name: name,
+          arguments_fragment: fragment
+        })
+
+      expected = %{
+        "kind" => "tool_call_delta",
+        "turn_id" => "AP-A",
+        "stream_domain_id" => "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "model_sequence" => "0",
+        "base_event_sequence" => "0",
+        "call_index" => 0,
+        "tool_call_id" => if(is_nil(id), do: nil, else: "AP-A"),
+        "name" => name,
+        "arguments_fragment" => fragment
+      }
+
+      assert_ordinary_record(item, expected)
+    end
+  end
+
+  test "ordinary progress refuses private fields and malformed native members whole" do
+    for {item, _expected} <- ordinary_cases(0) do
+      for invalid <- [
+            Map.put(item, :credential, "PRIVATE_PROGRESS_CANARY"),
+            Map.put(item, :permit, fn -> :private end),
+            Map.put(item, :owner_pid, self()),
+            Map.put(item, :monitor, make_ref()),
+            Map.put(item, :__struct__, __MODULE__),
+            Map.put(item, :turn_id, nil),
+            Map.put(item, :turn_id, ""),
+            Map.put(item, :turn_id, :binary.copy(<<255>>, 65_537)),
+            Map.put(item, :stream_domain_id, String.duplicate("A", 32)),
+            Map.put(item, :stream_domain_id, String.duplicate("a", 31)),
+            Map.put(item, :kind, Atom.to_string(item.kind)),
+            Map.new(item, fn {key, value} -> {Atom.to_string(key), value} end)
+          ] do
+        assert_ordinary_refusal(invalid)
+      end
+
+      for field <- Map.keys(item), do: assert_ordinary_refusal(Map.delete(item, field))
+
+      if Map.has_key?(item, :tool_call_id) do
+        for value <- ["", :binary.copy(<<255>>, 65_537), fn -> :private end] do
+          assert_ordinary_refusal(Map.put(item, :tool_call_id, value))
+        end
+
+        if item.kind != :tool_call_delta,
+          do: assert_ordinary_refusal(Map.put(item, :tool_call_id, nil))
+      end
+
+      for field <- [
+            :model_sequence,
+            :progress_sequence,
+            :base_event_sequence,
+            :byte_offset,
+            :delta_count,
+            :progress_count
+          ],
+          Map.has_key?(item, field),
+          invalid <- [nil, -1, 18_446_744_073_709_551_616, "0", 0.0] do
+        assert_ordinary_refusal(Map.put(item, field, invalid))
+      end
+
+      for field <- [:content_index, :call_index],
+          Map.has_key?(item, field),
+          invalid <- [nil, -1, 9_007_199_254_740_992, 0.0] do
+        assert_ordinary_refusal(Map.put(item, field, invalid))
+      end
+
+      for field <- [:text, :name, :arguments_fragment, :chunk],
+          Map.has_key?(item, field),
+          invalid <- [<<255>>, "\e[31mprivate", fn -> :private end] do
+        assert_ordinary_refusal(Map.put(item, field, invalid))
+      end
+    end
+
+    for invalid <- [nil, [], fn -> :private end, %{kind: :unknown}] do
+      assert_ordinary_refusal(invalid)
+    end
+
+    [{tool, _}] =
+      Enum.filter(ordinary_cases(0), fn {item, _} ->
+        item.kind == :tool_progress and item.stream == "stdout"
+      end)
+
+    for invalid <- [
+          Map.put(tool, :stream, "other"),
+          Map.put(tool, :tool_call_id, nil),
+          Map.put(tool, :tool_call_id, ""),
+          Map.put(tool, :chunk, nil)
+        ] do
+      assert_ordinary_refusal(invalid)
+    end
+
+    for {item, _} <- ordinary_cases(0),
+        Map.has_key?(item, :disposition),
+        invalid <- [nil, "complete", :other] do
+      assert_ordinary_refusal(Map.put(item, :disposition, invalid))
+    end
+  end
+
+  test "ordinary payload ceilings include model indices and all tool call fragments" do
+    text = String.duplicate("x", 65_536 - byte_size(:erlang.term_to_binary(0)))
+    item = text_item(text, 0, 0)
+
+    expected = %{
+      "kind" => "text_delta",
+      "turn_id" => "AP-A",
+      "stream_domain_id" => "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+      "model_sequence" => "0",
+      "base_event_sequence" => "0",
+      "content_index" => 0,
+      "text" => text
+    }
+
+    assert_ordinary_record(item, expected)
+    assert_ordinary_record(%{item | text: ""}, Map.put(expected, "text", ""))
+    assert_ordinary_refusal(Map.put(item, :text, text <> "x"))
+
+    [{call, _}] =
+      Enum.filter(ordinary_cases(0), fn {item, _} -> item.kind == :tool_call_delta end)
+
+    assert_ordinary_refusal(%{
+      call
+      | tool_call_id: String.duplicate("i", 32_768),
+        name: String.duplicate("n", 32_768),
+        arguments_fragment: ""
+    })
+
+    [{tool, expected}] =
+      Enum.filter(ordinary_cases(0), fn {item, _} ->
+        item.kind == :tool_progress and item.stream == "stdout"
+      end)
+
+    chunk = String.duplicate("x", 65_536)
+
+    assert_ordinary_record(
+      %{tool | chunk: chunk},
+      Map.put(expected, "chunk_b64", Base.url_encode64(chunk, padding: false))
+    )
+
+    assert_ordinary_record(%{tool | chunk: ""}, Map.put(expected, "chunk_b64", ""))
+    assert_ordinary_refusal(%{tool | chunk: chunk <> "x"})
+  end
+
+  test "maximum opaque ordinary identities retain bytes and obey existing encoded limits" do
+    bytes = :binary.copy(<<255>>, 65_536)
+
+    [{tool, expected}] =
+      Enum.filter(ordinary_cases(0), fn {item, _} ->
+        item.kind == :tool_progress and item.stream == "stdout"
+      end)
+
+    item = %{tool | turn_id: bytes, tool_call_id: bytes}
+
+    expected =
+      Map.merge(expected, %{
+        "turn_id" => Base.url_encode64(bytes, padding: false),
+        "tool_call_id" => Base.url_encode64(bytes, padding: false)
+      })
+
+    record = assert_ordinary_record(item, expected)
+    assert {:ok, ^bytes} = LoopexProtocol.Wire.identity(record["progress"]["turn_id"])
+    assert {:ok, ^bytes} = LoopexProtocol.Wire.identity(record["progress"]["tool_call_id"])
+
+    for {closure, wire} <- ordinary_cases(0), Map.has_key?(closure, :disposition) do
+      closure = Map.put(closure, :turn_id, bytes)
+      wire = Map.put(wire, "turn_id", Base.url_encode64(bytes, padding: false))
+
+      {closure, wire} =
+        if Map.has_key?(closure, :tool_call_id) do
+          {Map.put(closure, :tool_call_id, bytes),
+           Map.put(wire, "tool_call_id", Base.url_encode64(bytes, padding: false))}
+        else
+          {closure, wire}
+        end
+
+      assert_ordinary_record(closure, wire)
+    end
+
+    assert_ordinary_refusal(%{item | turn_id: bytes <> <<255>>})
+    assert_ordinary_refusal(%{item | tool_call_id: bytes <> <<255>>})
+    assert {:ok, encoded} = Frame.encode(record)
+    assert IO.iodata_length(encoded) < Frame.output_record_bytes()
+    session = :binary.copy(<<255>>, 256)
+    session_record = WireRecords.progress(session, tool)
+    assert {:ok, ^session} = LoopexProtocol.Wire.session_identity(session_record["session_id"])
+    assert :error = WireRecords.progress(:binary.copy(<<255>>, 257), tool)
+  end
+
+  defp text_item(text, sequence, base) do
+    %{
+      kind: :text_delta,
+      turn_id: <<0, 255, 128>>,
+      stream_domain_id: "0123456789abcdef0123456789abcdef",
+      model_sequence: sequence,
+      base_event_sequence: base,
+      content_index: 0,
+      text: text
+    }
+  end
+
+  defp ordinary_cases(quantity) do
+    anchor = %{
+      turn_id: <<0, 255, 128>>,
+      stream_domain_id: "0123456789abcdef0123456789abcdef",
+      base_event_sequence: quantity
+    }
+
+    wire_anchor = %{
+      "turn_id" => "AP-A",
+      "stream_domain_id" => "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+      "base_event_sequence" => Integer.to_string(quantity)
+    }
+
+    models =
+      for kind <- [:text_delta, :reasoning_delta] do
+        item =
+          Map.merge(anchor, %{
+            kind: kind,
+            model_sequence: quantity,
+            content_index: 9_007_199_254_740_991,
+            text: "summary\tline\n"
+          })
+
+        expected =
+          Map.merge(wire_anchor, %{
+            "kind" => Atom.to_string(kind),
+            "model_sequence" => Integer.to_string(quantity),
+            "content_index" => 9_007_199_254_740_991,
+            "text" => "summary\tline\n"
+          })
+
+        {item, expected}
+      end
+
+    call = {
+      Map.merge(anchor, %{
+        kind: :tool_call_delta,
+        model_sequence: quantity,
+        call_index: 9_007_199_254_740_991,
+        tool_call_id: <<0, 255, 128>>,
+        name: "tool",
+        arguments_fragment: "{}"
+      }),
+      Map.merge(wire_anchor, %{
+        "kind" => "tool_call_delta",
+        "model_sequence" => Integer.to_string(quantity),
+        "call_index" => 9_007_199_254_740_991,
+        "tool_call_id" => "AP-A",
+        "name" => "tool",
+        "arguments_fragment" => "{}"
+      })
+    }
+
+    tools =
+      for stream <- ["stdout", "stderr", "progress"] do
+        item =
+          Map.merge(anchor, %{
+            kind: :tool_progress,
+            tool_call_id: <<255, 0, 128>>,
+            progress_sequence: quantity,
+            byte_offset: quantity,
+            stream: stream,
+            chunk: "chunk\t\n"
+          })
+
+        expected =
+          Map.merge(wire_anchor, %{
+            "kind" => "tool_progress",
+            "tool_call_id" => "_wCA",
+            "progress_sequence" => Integer.to_string(quantity),
+            "byte_offset" => Integer.to_string(quantity),
+            "stream" => stream,
+            "chunk_b64" => "Y2h1bmsJCg"
+          })
+
+        {item, expected}
+      end
+
+    closures =
+      for disposition <- [:complete, :abandoned],
+          kind <- [:model_stream_closed, :tool_stream_closed] do
+        item = Map.merge(anchor, %{kind: kind, disposition: disposition})
+
+        expected =
+          Map.merge(wire_anchor, %{
+            "kind" => Atom.to_string(kind),
+            "disposition" => Atom.to_string(disposition)
+          })
+
+        if kind == :model_stream_closed do
+          {Map.put(item, :delta_count, quantity),
+           Map.put(expected, "delta_count", Integer.to_string(quantity))}
+        else
+          {Map.merge(item, %{tool_call_id: <<255, 0, 128>>, progress_count: quantity}),
+           Map.merge(expected, %{
+             "tool_call_id" => "_wCA",
+             "progress_count" => Integer.to_string(quantity)
+           })}
+        end
+      end
+
+    models ++ [call] ++ tools ++ closures
+  end
+
+  defp assert_ordinary_record(item, expected) do
+    record = WireRecords.progress(<<255, 0>>, item)
+    assert record == %{"type" => "progress", "session_id" => "_wA", "progress" => expected}
+    assert {:ok, encoded} = Frame.encode(record)
+
+    assert {:ok, ^record} =
+             Frame.decode(
+               IO.iodata_to_binary(encoded) |> String.trim_trailing("\n"),
+               Frame.output_record_bytes()
+             )
+
+    record
+  end
+
+  defp assert_ordinary_refusal(item), do: assert(:error == WireRecords.progress("session", item))
+
   defp compaction_item(kind, base) do
     %{
       kind: "context.compaction_progress",
