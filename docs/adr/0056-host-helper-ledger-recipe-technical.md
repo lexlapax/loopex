@@ -16,7 +16,9 @@ fixes immutable role/delegation selections. [ADR 0051](0051-current-format-physi
 requires semantic validation of every shipped host ledger. This proposal fills
 the byte recipe; it does not replace those decisions.
 
-Source inspection at `37bd508536165aa960e6651c7f8612a00b445c7a` finds:
+Source inspection at `37bd508536165aa960e6651c7f8612a00b445c7a` establishes the
+existing boundaries below; the Core command prerequisite is refreshed at
+`e3a64c18f4e9fcebcc33e6fb1be9b03232f160ae`:
 
 - `apps/loopex_composition/lib/loopex_composition/delegation/retained_objects.ex`
   owns UTF-8 object bytes, SHA-256 addressing, 1 MiB admission, physical identity,
@@ -30,10 +32,12 @@ Source inspection at `37bd508536165aa960e6651c7f8612a00b445c7a` finds:
 - `SessionState.accounting/2` retains total charge and its last source;
   `ProviderAttempt` validates per-attempt reported/estimated evidence. Neither
   supplies an approved complete retained run-accounting read.
-- `SessionState` currently normalizes a prompt to type, command ID and content.
-  Its `loopex_command_v1` digest omits authored bounds. ADR 0046's accepted
-  normalized-command revision and owning constructor remain unimplemented
-  prerequisites to helper prompting and `child_prompted` admission.
+- `SessionState.prepare_command/2` and `propose/3` now use the same
+  omission-preserving authored-bound normalization before defaults. Prompt and
+  follow-up digests use `loopex_command_v2`; accepted admission retains
+  `command_revision` 2 and exact `authored_bounds`. Normalization/digest helpers
+  remain private. No helper-facing owning command/digest API/export or complete
+  helper integration join is implemented or proved by this recipe.
 - `Restore.Audit` checks current stores, Local ledgers, artifacts and resource
   objects. Hash/UTF-8 validation of delegation objects does not yet prove their
   helper grammar or allowance relations.
@@ -314,7 +318,7 @@ original attempt. Hashing a row never validates a grant or predecessor joins.
 | `reserve` | `operation_identity, source_intent, job, role:role_name, task_digest:H, child_creation_sha256:H, create_command_id:B, prompt_command_id:B, absolute_cutoff_ms:1..(2^53−1), reserved_tokens:P, closing_credit_bytes:N` | First operation reserves min(child token threshold, aggregate available), increments count once, occupies this parent's cross-run slot before child creation. Before stop, later original attempts of that same operation must match all logical fields and append only their new job/source binding and receipt credit; no new tokens/count/child. |
 | `recover_uncreated` | `operation_identity, source_intent, create_command_id:B, prompt_command_id:B, reservation_state:"unknown", reason:"adapter_recovery", child_session_id:null, child_run_id:null, reported_child_usage:0, count_charge:1, closing_credit_bytes:N` | Exact ADR 0046 missing-reservation mutation after complete intent coverage, positively ended old producer/sent calls and conclusive original-create absence. The referenced intent supplies its original job/attempt. Count charged once, tokens zero, already stopped; no reserve/create/prompt later. Excess stays unresolved, not clamped. |
 | `child_created` | `operation_identity, child_session_id:B, child_creation_sha256:H, configuration_digest:H, tool_selection_sha256:H, policy_defer_mode:"refuse"` | Live validated owner only, known original create result; compare configuration digest by its existing owner recipe and tool selection digest by Core Canonical. Record before prompt. Recovered missing result uses exact historical lookup, never calls create. After stop no new creation/activation. |
-| `child_prompted` | `operation_identity, child_session_id:B, child_run_id:B, prompt_command_id:B, prompt_digest:H` | Original live prompt has a known committed admission. Its digest comes only from ADR 0046's required owning Core command revision, binding exact prompt text and authored bounds/absolute cutoff. The unimplemented constructor is a prerequisite below. Recovery never re-presents missing prompt. |
+| `child_prompted` | `operation_identity, child_session_id:B, child_run_id:B, prompt_command_id:B, prompt_digest:H` | Original live prompt has a known committed admission. Its digest comes only from ADR 0046's owning Core command revision 2, binding exact prompt text and authored bounds/absolute cutoff. The helper-facing owner join and its proof remain prerequisites below. Recovery never re-presents missing prompt. |
 | `stop` | `operation_identity, job, stop_tx_id:H, reason:"cancel"|"cutoff"|"adapter_recovery"` | job is one retained original attempt; stop_tx_id equals containing tx_id. First stop wins. No later create/prompt/activation. Known terminal already won remains its original fact; stop cannot turn it into cancelled. |
 | `settle` | `operation_identity, terminal:terminal, accounting:accounting, charge_tokens:N, refund_tokens:N` | Write once only from conclusive terminal and actual cleanup/producer joins, or conclusive recover-uncreated no-child. Validate charges below. Parent unknown outcome stays unknown even after later child settlement. |
 | `bind_receipt` | `operation_identity, job, receipt_sha256:H` | One complete exact attempt receipt per retained original job. Receipt object already durable, matches original tuple and settled/conclusive evidence; identical returns original, different refuses. Never synthesizes a current attempt or query route. |
@@ -324,13 +328,19 @@ original attempt. Hashing a row never validates a grant or predecessor joins.
 That revision binds the original command ID, exact prompt text and authored
 partial bounds, including `deadline_at_ms`, before defaults or clocks are
 resolved. Use its owning constructor and retained admission record; do not
-hash a host reconstruction or copy Core's private command schema. Its exact
-revised byte recipe and constructor remain Core implementation prerequisites.
-The current `loopex_command_v1` digest cannot supply this proof because its
-normalized prompt omits authored bounds. Helper prompting and `child_prompted`
-admission remain closed until the owning revision is implemented and proved;
-no current-v1 fallback is admitted. Recovery validates retained facts and never
-reissues the prompt.
+hash a host reconstruction or copy Core's private command schema. Current Core
+implements this revision: `SessionState.prepare_command/2` and `propose/3` use
+the same normalization before defaults, `command_digest` hashes deterministic
+ETF `["loopex_command_v2", normalized_command]`, and accepted prompt/follow-up
+records retain `command_revision` 2 plus omission-preserving `authored_bounds`.
+The normalization/digest functions remain private; this recipe supplies no
+helper-facing owning API or digest export. Joining the original owning digest
+and retained admission through actual helper prompting remains unimplemented
+and unproved. Generic Core revision proof does not prove that integration or
+authorize a host substitute. Helper prompting and `child_prompted` admission
+remain closed until those owner joins and the other helper prerequisites are
+proved; no superseded-v1 fallback is admitted. Recovery validates retained facts
+and never reissues the prompt.
 
 Reserve's `task_digest` is Core Canonical.digest of the exact validated task
 arguments {role, description, prompt}, validated by the existing fixed Tool
@@ -602,6 +612,11 @@ recipes remain unchanged. Factor pure owning validators where needed rather
 than teaching composition a second Core schema. This proposal does not itself
 register task, enable routing, expose a public read, alter grants or activate
 restored authority.
+
+[ADR 0053](0053-current-configure-request-technical.md#technical-adr-0053-decision)
+already fixes the closed configure `changes` request grammar. Its coordinated
+generation/client activation proofs remain separate; that acceptance supplies
+no helper-facing command/digest boundary or whole-child-run accounting read.
 
 Once helper records ship, ADR 0051's offline audit must enumerate their complete
 physical namespace under its original IO owner/cutoffs, validate exact framing
