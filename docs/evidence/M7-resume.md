@@ -54,9 +54,27 @@ terminal `9a7c1956a29eda2666adea135d620568fe0151586aaa434a6f08ae348cf69010`;
 executed wrapper `b1266c04b8b69b7daeba9fc73b44872bb1436dd98c494fe1e357c49b61b7039f`;
 root formatter review
 `e9e3a67ccd4910969dc8e4834b81cb7415cd4407c5b791acbd1adcceb542d2c3`.
-Latest collected registry is1663,SHA-256
-`1daf245693496b72cbf2e0b1643671555e37e4c6e60aa3750160c75c0c27b441`.
-Do not repoll70524. Complete paired8+14 model tests remain pending.
+The fresh paired proof original23611 passed complete8 Composition and14
+NativeTransport cases on each supported pair, zero exclusions/skips/invalid,
+in124.372 seconds. Ten original stages joined and50 artifacts authenticate.
+Both formatting checks and warning-free app compilation passed. The actual
+A-to-B-to-A request/history/configuration/privacy and physical-reopen assertions
+passed. Its two tested files integrate literally into primary; only the added
+T08 switching/restart row closes. The original complete matrix and hosted
+provider demonstrations remain open. Output
+`M7/native-model-switch-resume-proof-20261007-v1`; collection
+`57e321383f9a6122cac3b15d5ae25c869f13185abbb22a0582671df15e1a92b9`;
+terminal `1e2708acb0b403172532a6fa4bfae8a5e5140eaa3698418ed59a6c1c26adb82e`.
+Latest collected registry is1673,SHA-256
+`1af2e40f181ea146d3929074ee9ff1123f1f69c52b7cf7dc62e35816b980474d`.
+Do not repoll70524 or23611. Its prepared packet is
+`55538cd858206cd7cef0e4203216599b0a4419b3def5c669826dbecb6b64c5be`;
+root recipe review is
+`e3d933cd4a444c7f49b6c8c91aa9190865fa0eb7d9c4021f1508783a3631c259`;
+executed wrapper is
+`849f1e7b478d39da22fccd5239c8f4182c96ebf2574534fec7c2b780613c67d3`.
+The original result is terminal and collected; earlier model failures remain
+retained. No unchanged rerun or broad M7/full-fast result is claimed.
 
 Physical helper source is clean isolated
 `bfb10e1c5d811635af6daf5db0b97059ede2709b`, tree
@@ -91,10 +109,16 @@ wrapper failure/correction/review/raw projection/next formatter files are
 permanently retained in
 `M7/model-resume-and-helper-format-context-20261007-v1/retention.json`,
 SHA-25657bb4dd5b519c09276ca556728b0387d63c4769d4c6771c96c1911594898b34d.
-Original T01–T19 remains87 done/86 todo/6 retired;added347 done/24 todo after
-adding the bounded physical binding-log proof row. No new row closes.
+Another13 paired model preparation/review/enablement and disabled neutral
+physical70 preparation files are retained in
+`M7/resume-and-neutral-proof-context-20261007-v1/retention.json`,
+SHA-25652917107b76399cdae63ef9f67499cccba2f935d91cefae9a7eab9e557a7bbf3.
+They were retained while original23611 was running and supply no future result.
+Original T01–T19 remains87 done/86 todo/6 retired;added348 done/23 todo after
+adding the bounded physical binding-log proof row and closing the tested model
+switching/restart row. Physical proof remains pending.
 ADR0057 remains the sole asked unanswered decision. The following records are
-historical where superseded by these source identities and registry1663.
+historical where superseded by these source identities and registry1673.
 
 Earlier failed model source is clean isolated `e7e32864f46e28a9161a548fe3ee6438723bd602`,
 tree `29a204b29e91c8c1e5a0238ea310464048beb4d8`, direct child of97ac2326.

@@ -150,6 +150,13 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
 
     {:ok, {_address, port}} = :inet.sockname(listener)
     expected = Keyword.get(options, :credential, @default_credential)
+    http_custody = Keyword.get(options, :http_custody)
+
+    case http_custody do
+      nil -> :ok
+      {observer, nonce} when is_pid(observer) and is_reference(nonce) -> :ok
+      _ -> raise ArgumentError, "Invalid private HTTP fixture custody"
+    end
 
     {:ok, custody_pid} = CredentialCustody.start_link(credential: expected)
     {:ok, custody} = CredentialCustody.reference(custody_pid)
@@ -190,7 +197,8 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
           transport_events,
           mode,
           expected,
-          responses
+          responses,
+          http_custody
         )
       end)
 
@@ -204,6 +212,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
       probe_events: probe_events,
       listener: listener,
       acceptor: acceptor,
+      http_custody: http_custody,
       mode: mode,
       credential: expected,
       custody_pid: custody_pid,
@@ -1257,7 +1266,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
     end
   end
 
-  defp accept_loop(listener, events, transport_events, mode, expected, responses) do
+  defp accept_loop(listener, events, transport_events, mode, expected, responses, http_custody) do
     case :gen_tcp.accept(listener) do
       {:ok, socket} ->
         Agent.update(transport_events, &[:connected | &1])
@@ -1279,13 +1288,68 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
           end)
 
         :ok = :gen_tcp.controlling_process(socket, handler)
+        :ok = retain_http_fixture(http_custody, handler, socket)
         send(handler, {:socket, socket})
-        accept_loop(listener, events, transport_events, mode, expected, remaining_responses)
+
+        accept_loop(
+          listener,
+          events,
+          transport_events,
+          mode,
+          expected,
+          remaining_responses,
+          http_custody
+        )
 
       # A listener closed at teardown while this accept waits answers
       # `:closed` or, depending on the moment, `:einval`; both end the loop.
       {:error, reason} when reason in [:closed, :einval] ->
         :ok
+    end
+  end
+
+  # Concept: a trusted fixture observer can join each original accepted socket
+  # and handler, rather than infer their retirement from the listener's exit.
+  # Technical depth: the opt-in gate consumes a bound sent before prompt admission.
+  # Ownership transfers before notification, but no handler IO starts before the
+  # exact identity ACK. All waits spend that run's original absolute work endpoint.
+  defp retain_http_fixture(nil, _handler, _socket), do: :ok
+
+  defp retain_http_fixture({observer, nonce}, handler, socket) do
+    receive do
+      {:fixture_http_bound, ^observer, ^nonce, request, work_cutoff, cleanup_cutoff}
+      when is_reference(request) and is_integer(work_cutoff) and is_integer(cleanup_cutoff) ->
+        assert work_cutoff < cleanup_cutoff
+        assert System.monotonic_time(:millisecond) < work_cutoff
+        monitor = Process.monitor(observer)
+
+        send(
+          observer,
+          {:fixture_http_owned, self(), nonce, request, handler, socket, work_cutoff,
+           cleanup_cutoff}
+        )
+
+        receive do
+          {:fixture_http_release, ^observer, ^nonce, ^request, ^handler, ^socket} ->
+            Process.demonitor(monitor, [:flush])
+            assert System.monotonic_time(:millisecond) < work_cutoff
+            :ok
+
+          {:DOWN, ^monitor, :process, ^observer, _reason} ->
+            :gen_tcp.close(socket)
+            Process.exit(handler, :kill)
+            exit(:fixture_http_custody_unproved)
+        after
+          max(work_cutoff - System.monotonic_time(:millisecond), 0) ->
+            :gen_tcp.close(socket)
+            Process.exit(handler, :kill)
+            exit(:fixture_http_custody_unproved)
+        end
+    after
+      0 ->
+        :gen_tcp.close(socket)
+        Process.exit(handler, :kill)
+        exit(:fixture_http_bound_missing)
     end
   end
 

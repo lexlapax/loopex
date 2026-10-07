@@ -6,7 +6,7 @@ exclusions, skips or invalid cases. Whole-tree floor formatting and CLI
 warning-free compilation passed; four original processes joined and 23 artifacts
 were authenticated in 146.812 seconds. Six original rows close: T06.3/T06.6
 and T10.1/T10.2/T10.3/T10.9. Broader floor preservation and attended chat remain
-open. Original T01–T19: 87 done / 86 todo / 6 retired; added 347 done / 24 todo
+open. Original T01–T19: 87 done / 86 todo / 6 retired; added 348 done / 23 todo
 after proving the dormant selector, helper byte unit and parent-binding reducer
 and adding the bounded physical binding-log proof row. ADR0056's exact pair is
 now Accepted; helper execution and separate accounting/protection remain open.
@@ -21,12 +21,14 @@ reader's outer LF handling changed before this new-source proof. Physical
 append/custody, accounting and helper activation remain open. Exact source,
 review and native references are in the [resume record](M7-resume.md).
 
-Corrected model source `763f342c` passed all six formatter stages without byte
-changes. Both independent diagnoses identified the fixture's changing runtime
-placement ID; the correction preserves one ID across the actual physical
-reopen. Original58275 remains FAIL7/8 after two native A-to-B requests and an
-`owner_recovery_failed` resume result. Fresh complete paired model tests remain
-pending. Physical binding-log V2 source review passed after correcting
+Corrected model source `763f342c` passed complete Composition8 and NativeTransport14
+on both supported pairs, zero exclusions/skips/invalid. Original23611 joined ten
+native stages and authenticated50 artifacts in124.372 seconds. Its two tested
+files integrate literally and the added T08 real isolated switching/restart row
+closes. Original58275 remains FAIL7/8; one runtime placement ID now spans both
+physical incarnations without changing production recovery fences. The broader
+original failure/privacy/provider matrix remains open. Physical binding-log V2
+source review passed after correcting
 current-owner tail repair and paused-actor cleanup. Original83780 then passed
 current syntax/layout checks but failed the floor formatter. The equivalent
 shorter callback is independently reviewed and frozen at isolated `bfb10e1c`;
@@ -13836,7 +13838,7 @@ the still-open real-provider, live protocol, persistent-fault or closure lanes.
 
 ### Added implementation subtasks
 
-- [ ] Join the real isolated local model adapter, public prepared configuration and physical Local Store through A-to-B-to-A switching with restart; prove independent outgoing requests, retained configuration/history, obsolete private-state refusal and exact custody retirement on both pairs. The complete original failure/privacy matrix and hosted provider demonstrations remain separate.
+- [x] Join the real isolated local model adapter, public prepared configuration and physical Local Store through A-to-B-to-A switching with restart; prove independent outgoing requests, retained configuration/history, obsolete private-state refusal and exact custody retirement on both pairs. The complete original failure/privacy matrix and hosted provider demonstrations remain separate.
 
 
 - [x] Implement the accepted trusted pre-transport Model cancellation gate with unchanged same-process forwarding, second distinct staged-request selection, exact host release and loss/deadline refusal; prove real Core committed-tool/abort/callback-cleanup order, truthful conservative accounting and unchanged later prompts on both supported pairs. Script/counted paid-provider integration remains separate.
