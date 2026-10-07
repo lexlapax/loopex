@@ -6,13 +6,16 @@ defmodule Loopex.StreamDomain do
   names the single attempt that produced it, so a consumer can tell a gap from a
   quiet provider and can tell a retry from a fault.
 
-  There are two kinds, and both belong to an *attempt* rather than to a turn:
-  one per model attempt and one per executor operation attempt. A retry opens a
+  Model, executor and compaction domains belong to an *attempt* rather than to
+  a turn: one per model attempt and one per executor operation attempt. A retry opens a
   new domain, so several domains under one turn are the ordinary shape of a
-  retried turn rather than a defect.
+  retried turn rather than a defect. Compaction identifies a maintenance summary
+  attempt and carries one activity observation, with no closing item, under
+  ADR 0054. It never carries summary content.
 
-  While its process-local owner can state the disposition truthfully, a domain
-  is owed exactly one content-free closing item, an abandoned domain included.
+  For model and executor domains, while the process-local owner can state the
+  disposition truthfully, a domain is owed exactly one content-free closing
+  item, an abandoned domain included.
   Abrupt owner death and recognized executor owner loss without a retained
   terminal fact instead end the transient plane without inventing a closure; a
   successor never reuses or closes that domain. Closure is an emission
@@ -33,6 +36,9 @@ defmodule Loopex.StreamDomain do
   SHA-256 of the canonically encoded domain tuple:
 
       {"loopex.stream_domain.v1", domain_kind, session_id, operation_id, attempt}
+
+  The new compaction domain uses binary `"compaction"` in that tuple; ordinary
+  model and executor tuples retain their existing atom kind bytes.
 
   `attempt` is the integer itself, never a rendering of it. The canonical
   encoding is length-aware and therefore injective over arbitrary binary
@@ -55,7 +61,7 @@ defmodule Loopex.StreamDomain do
   alias LoopexProtocol.Canonical
 
   @domain_version "loopex.stream_domain.v1"
-  @kinds [:model, :executor]
+  @kinds [:model, :executor, :compaction]
   @dispositions [:complete, :abandoned]
 
   @typedoc """
@@ -78,9 +84,10 @@ defmodule Loopex.StreamDomain do
 
   ## Technical depth
 
-  `:model` for a provider call, `:executor` for one tool operation attempt.
+  `:model` for an ordinary provider call, `:executor` for one tool operation
+  attempt, and `:compaction` for one maintenance summary attempt.
   """
-  @type kind :: :model | :executor
+  @type kind :: :model | :executor | :compaction
 
   @typedoc """
   ## Concept
@@ -137,7 +144,9 @@ defmodule Loopex.StreamDomain do
   def derive(kind, session_id, operation_id, attempt)
       when kind in @kinds and is_binary(session_id) and is_binary(operation_id) and
              is_integer(attempt) and attempt >= 0 do
-    {@domain_version, kind, session_id, operation_id, attempt}
+    domain_kind = if kind == :compaction, do: "compaction", else: kind
+
+    {@domain_version, domain_kind, session_id, operation_id, attempt}
     |> Canonical.encode()
     |> then(&:crypto.hash(:sha256, &1))
     |> binary_part(0, 16)

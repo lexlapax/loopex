@@ -27,6 +27,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
   alias Loopex.Bounds
   alias Loopex.Conversation
+  alias Loopex.CompactionProgress
   alias Loopex.Interaction
   alias Loopex.Runtime.Control
   alias Loopex.Runtime.ExecutorStream
@@ -466,6 +467,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
        # cleanups and new work in the same places `pending_cleanup` does.
        executor_reserves: %{},
        streams: %{},
+       compaction_relay: nil,
        deadline_timers: %{},
        # Concept: elapsed live-owner work cannot be regained by a wall rollback.
        # Technical depth: retain paired allowances for the active and queued
@@ -6401,6 +6403,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
     case Control.provider_dispatch(state.control, binding, authority) do
       {:ok, :dispatched} ->
+        state = project_compaction_activity(state, work)
         {:noreply, arm_deadline(state, run_id)}
 
       {:error, :superseded_owner} ->
@@ -8172,6 +8175,63 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # derivation of the same run and turn. A separately derived identity produces
   # a different domain for the same attempt, and a consumer then cannot bind a
   # delta to the settlement that produced it.
+  # Concept: one permitted maintenance attempt exposes activity, never content.
+  # Technical depth: the only caller follows Control's positive permit reply.
+  # Binding and owner come from the committed episode, and current-owner
+  # admission remains serialized with succession. One owner-scoped relay has
+  # constant state across retries and further summaries; it never closes a domain.
+  defp project_compaction_activity(state, %{maintenance_binding: binding}) do
+    episode = state.durable.maintenance_episodes[binding["episode_id"]]
+
+    owner =
+      case episode.kind do
+        "maintenance_episode_admitted_v1" ->
+          %{"kind" => "run", "id" => episode["run_id"]}
+
+        "standalone_maintenance_episode_admitted_v1" ->
+          %{"kind" => "compact", "id" => episode["command_id"]}
+      end
+
+    domain =
+      StreamDomain.derive(
+        :compaction,
+        state.session_id,
+        binding["operation_id"],
+        binding["attempt"]
+      )
+
+    {:ok, item} =
+      CompactionProgress.new(
+        binding["episode_id"],
+        owner,
+        domain,
+        state.durable.event_sequence
+      )
+
+    case compaction_activity_relay(state) do
+      {:ok, relay, next} ->
+        _admitted =
+          Control.project_progress(next.control, next.session_id, next.owner, relay, item)
+
+        next
+
+      {:error, _reason} ->
+        state
+    end
+  end
+
+  defp project_compaction_activity(state, _ordinary_work), do: state
+
+  defp compaction_activity_relay(%{compaction_relay: relay} = state) when is_pid(relay),
+    do: {:ok, relay, state}
+
+  defp compaction_activity_relay(state) do
+    case StreamRelay.open_activity(state.workers, progress_sink(state)) do
+      {:ok, relay} -> {:ok, relay, %{state | compaction_relay: relay}}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
   # Concept: raw summary deltas stay private to maintenance.
   # Technical depth: a summary creates no ordinary turn stream or closure.
   # Publication waits for its validated checkpoint; the transient compaction

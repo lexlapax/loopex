@@ -39,6 +39,7 @@ defmodule Loopex.Runtime.Control do
   alias Loopex.Runtime.SessionConfiguration
   alias Loopex.Runtime.Instructions
   alias Loopex.Runtime.StreamRelay
+  alias Loopex.CompactionProgress
   alias Loopex.Runtime.Supervisor, as: RuntimeSupervisor
   alias Loopex.Owner
   alias Loopex.Store
@@ -241,7 +242,10 @@ defmodule Loopex.Runtime.Control do
   # other.
   @doc false
   @spec project_progress(pid(), binary(), SessionCoordinator.owner(), StreamRelay.t(), term()) ::
-          :ok | {:error, :superseded_owner} | {:error, :runtime_unavailable}
+          :ok
+          | {:error, :superseded_owner}
+          | {:error, :runtime_unavailable}
+          | {:error, :invalid_compaction_progress}
   def project_progress(control, session_id, owner, relay, item) when is_pid(relay) do
     try do
       GenServer.call(
@@ -812,13 +816,12 @@ defmodule Loopex.Runtime.Control do
   end
 
   def handle_call({:project_progress, session_id, owner, relay, item}, _from, state) do
-    case current_owner_post_commit_fence(state, session_id, owner) do
-      :ok ->
-        :ok = StreamRelay.emit(relay, item)
-        {:reply, :ok, state}
-
-      {:error, :superseded_owner} = error ->
-        {:reply, error, state}
+    with :ok <- current_owner_post_commit_fence(state, session_id, owner),
+         :ok <- validate_compaction_progress(item) do
+      :ok = StreamRelay.emit(relay, item)
+      {:reply, :ok, state}
+    else
+      {:error, _reason} = error -> {:reply, error, state}
     end
   end
 
@@ -4060,4 +4063,13 @@ defmodule Loopex.Runtime.Control do
   defp validate_optional_cursor(nil), do: :ok
   defp validate_optional_cursor(value) when is_integer(value) and value >= 0, do: :ok
   defp validate_optional_cursor(_value), do: :error
+
+  defp validate_compaction_progress(%{kind: "context.compaction_progress"} = item) do
+    case CompactionProgress.project(item) do
+      {:ok, _projected} -> :ok
+      :error -> {:error, :invalid_compaction_progress}
+    end
+  end
+
+  defp validate_compaction_progress(_ordinary_item), do: :ok
 end

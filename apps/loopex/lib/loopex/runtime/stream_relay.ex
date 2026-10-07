@@ -2,12 +2,14 @@ defmodule Loopex.Runtime.StreamRelay do
   @moduledoc """
   ## Concept
 
-  The one process that puts a stream domain's items on the progress plane,
-  including the closing item that ends it.
+  One process puts an ordinary stream domain's items on the progress plane,
+  including the closing item that ends it. Compaction activity uses one relay
+  for its session owner and carries a single observation in each attempt domain.
 
   ## Technical depth
 
-  ADR 0011 gives every stream domain one gapless zero-based sequence and makes
+  ADR 0011 gives ordinary model and executor domains one gapless zero-based
+  sequence and makes
   any closure the last item of its domain. ADR 0014 narrows the universal
   producer-liveness promise: abrupt owner death and recognized executor owner
   loss without a retained terminal fact end the transient plane without a
@@ -56,9 +58,15 @@ defmodule Loopex.Runtime.StreamRelay do
   by the link terminates the relay without waiting for its mailbox, which is what
   makes owner death end ahead of queued transient work.
 
+  ADR 0054 compaction activity has no closure or count. Its owner-scoped relay
+  retains only the sink and owner lifetime, checks each closed item, and ends
+  without draining activity whose owner is already known dead.
+
   A relay never takes its owner down with it. Its own body is wrapped so that
   anything it raises ends it normally rather than propagating into the session.
   """
+
+  alias Loopex.CompactionProgress
 
   @typedoc """
   ## Concept
@@ -183,6 +191,63 @@ defmodule Loopex.Runtime.StreamRelay do
 
       {:error, reason} ->
         {:error, reason}
+    end
+  end
+
+  @doc false
+  @spec open_activity(Supervisor.supervisor(), pid() | {pid(), binary()} | nil) ::
+          {:ok, t()} | {:error, term()}
+  def open_activity(supervisor, sink) do
+    owner = self()
+    ready = make_ref()
+
+    case Task.Supervisor.start_child(supervisor, fn ->
+           try do
+             Process.link(owner)
+             send(owner, {ready, self()})
+             owner_monitor = Process.monitor(owner)
+             activity_relay(sink, owner, owner_monitor)
+           catch
+             _kind, _reason -> :ok
+           end
+         end) do
+      {:ok, relay} ->
+        reference = Process.monitor(relay)
+
+        receive do
+          {^ready, ^relay} ->
+            Process.demonitor(reference, [:flush])
+            {:ok, relay}
+
+          {:DOWN, ^reference, :process, ^relay, reason} ->
+            {:error, {:relay_start_failed, reason}}
+        end
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  # Concept: one owner carries activity without retaining an attempt history.
+  # Technical depth: each item is sequence zero in its own domain. The link
+  # kills abnormal-owner backlog; the monitor joins normal owner exit. Before
+  # an emission, liveness also prevents draining queued work behind a normal
+  # owner's DOWN. The check and send are separate actions, not atomic with death.
+  # No closure, count, callback or per-attempt actor is allocated.
+  defp activity_relay(sink, owner, owner_monitor) do
+    receive do
+      {:emit, item} ->
+        if Process.alive?(owner) do
+          case CompactionProgress.project(item) do
+            {:ok, projected} -> deliver(sink, projected)
+            :error -> :ok
+          end
+
+          activity_relay(sink, owner, owner_monitor)
+        end
+
+      {:DOWN, ^owner_monitor, :process, _owner, _reason} ->
+        :ok
     end
   end
 

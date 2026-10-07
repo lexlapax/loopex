@@ -7282,8 +7282,12 @@ defmodule Loopex.AgentLoopTest do
       assert :erlang.resume_process(worker)
 
       assert await_process_message(coordinator, fn
-               {^executor_reference, {:ok, %{job_id: ^job_id, progress_count: -1}}} -> true
-               _other -> false
+               {^executor_reference,
+                {:loopex_executor_result, {:ok, %{job_id: ^job_id, progress_count: -1}}}} ->
+                 true
+
+               _other ->
+                 false
              end),
              "the malformed receipt never reached its cleanup adopter's mailbox"
     after

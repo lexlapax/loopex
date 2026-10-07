@@ -28,10 +28,23 @@ physical restore implementation; it does not waive any full-history proof.
 ### Current work and restart order
 
 Pending isolated units on 2026-10-06 remain unproved and unintegrated. Root owns
-all original VMs, collection, Git and rejoin. Native proof original75162 is
-running from clean isolated `976995c127dafa2d922ec9df2bad97d7e3ac0c4f` after
-formatter51021 proved the actual AgentLoop layout change. Collect that original
-handle before starting another VM. No passing native outcome is claimed yet.
+all original VMs, collection, Git and rejoin. Wire proof original47177 is
+running from clean isolated `9aac155f7db77c0468f8dbf1b20657a96be8f805` after
+formatter20886 proved the actual socket fixture layout change. Collect that
+original handle before starting another VM. No passing wire outcome is claimed.
+
+Native original75162 is collected PASS at
+`976995c127dafa2d922ec9df2bad97d7e3ac0c4f`. Both supported pairs pass all231
+cases with zero exclusions/skips/invalid, in140.427 seconds overall. All eight
+original stages are joined and41 artifacts verified. Collection
+`M7/compaction-native-admission-20261006-v2/original-collection.json`, SHA-256
+`ce90473719a2a63068f69f3cad134cdf9362da4fe2614b62e5bda64b5cbd334f`;
+terminal `0309678ae82ed063bbe95125ca0f20ae35049e2a1f083df9bc3553891d472369`.
+All nine tested files are copied literally into primary, preserving the existing
+primary base bytes before replacement. The bounded T07 native activity and T16
+tagged executor fixture rows close; original T01–T19 remains80 done/93 todo/
+6 retired, added316 done/33 todo. Full fast, wire serving and release remain open.
+Never repoll75162 or51021.
 
 Daemon original11182 is collected FAIL: all66 current cases passed, then the
 warning-free gate refused a generated constant-comparison assertion; floor did
@@ -65,8 +78,9 @@ Preparation is not execution evidence.
   terminal `4aa286bc123e537e52c1fc1eb53bd91671c394cc43ac525d93edbc5f89b4356d`.
   Reuse its exact clean-source version and formatting metadata; run only four
   new compile/test stages for the complete66-case selection on both pairs.
-- Native compaction source is clean `644469c3285e24ffb5c73e9e3d3ddda191eaf4d1`
-  in m7-compaction-activity. Original44773 failed four of231 current cases;
+- Native compaction's authored correction was
+  `644469c3285e24ffb5c73e9e3d3ddda191eaf4d1` in m7-compaction-activity.
+  Original44773 failed four of231 current cases at the earlier source;
   floor did not run. Collection
   `M7/compaction-native-admission-20261006-v1/original-collection.json`
   SHA-256 `e6fc5695fd288bcc5dc83d68c403724e147a12a537bcc4b43dc930ad75f4a45f`
@@ -75,8 +89,10 @@ Preparation is not execution evidence.
   AgentLoop test's exact current executor reply envelope. Reviewed v2 formatter
   SHA-256 `24238588103d8e30f5b73162887627a04fe6c039418a6a881ff2a26af876d7b8`
   and AST helper `13ce594408faa51da6efe0a3cfcd6bdb74f6387c8240a50082414c020e0e29dc`
-  are prepared, not executed. Run the complete231-case proof on both pairs only
-  after actual formatting outcome and source admission are recorded.
+  were executed and collected as51021. The resulting clean layout child976995
+  passed the complete231-case proof on both pairs as original75162, recorded
+  above. All nine source files are integrated literally; do not repeat either
+  collected run.
 - Wire compaction source is clean `3266368e38800ae458ebfeff4149fb4a4e416110`
   in m7-compaction-wire. Original12545 passed38 of39 current cases; floor did
   not run. Collection
@@ -96,10 +112,14 @@ Preparation is not execution evidence.
   integration remain pending. Public continuation, partial/absent claims and
   helper audit remain separate.
 
-Latest collected registry is1118 keys at
-`M7/compaction-native-format-20261006-v2/stage-attempt-registry.json`,
-SHA-256 `1da2494aa27b4fe63739903d826403050a541f2b256207eee62949eeacfb3b63`.
-The active75162 run owns its successor registry until collection.
+Wire formatter20886 is collected PASS in5.665 seconds, six original stages
+joined and37 artifacts verified. Collection
+`M7/compaction-wire-format-20261006-v2/original-collection.json`, SHA-256
+`b11bde0b40cc0b8c1b259a846337c6d0b5d0a48346016049e28a5085ce29dfbe`.
+Latest collected registry is1132 keys at
+`M7/compaction-wire-format-20261006-v2/stage-attempt-registry.json`,
+SHA-256 `8015b86fdee2a9849424d9208de717f5271f111805213224c731e8925d49349f`.
+The active47177 run owns its successor registry until collection.
 Original44773,12545,81936 and97674 are terminal and collected; never repoll or
 retry their unchanged source stages. ADR0055 remains the sole asked pending
 decision. None of the pending units closes its checklist row yet.
