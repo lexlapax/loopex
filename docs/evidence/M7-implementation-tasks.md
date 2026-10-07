@@ -1,5 +1,14 @@
 # M7 Implementation Tasks
 
+The selected T15 artifact-use sidecar row is reconciled with existing proof.
+Its14 cases and65 internal scenarios were in original66773's unchanged111-case
+IO file and175/175 paired selection. Current IO/test/Local/Core/Canonical bytes
+match the tested Git projection; actual writer boundaries, physical and semantic
+refusals, explicit close and original cutoffs remain proved. No native rerun or
+complete restore claim is made. Original T01–T19:81 done/92 todo/6 retired;
+added337 done/26 todo. Exact report and proof pointers are in the
+[resume record](M7-resume.md).
+
 The standalone creation-options wire unit is now proved and integrated literally
 from0babe891. Original76438 passed all12 cases on each supported pair,including
 both independent Node consumers,zero exclusions/skips/invalid,9.523 seconds,
@@ -14063,7 +14072,7 @@ Exact collection and outputs are retained in the restart checkpoint.
 - [x] Recheck the captured source ancestor type/device/inode identities after the second native absence observation, including the final pre-root-commit phase. Prove actual persistent parent removal at the held final read refuses completion while preserving original cutoffs, post-intent fencing, retained destination claim and all prior case bodies on both supported pairs.
 - [x] Preserve positively acquired restore claims through pre-intent IO failures and release them with the original joined terminal owner/cutoffs when neither state root changed; retain partial/unproved or foreign claims and truthful remaining-claim accounting. Prove actual second-claim failure, known first-claim removal and partial-publication fencing on both supported pairs without changing the six existing workflow cases or bounds.
 - [x] Audit one selected current Local artifact object through the existing owned streaming hash, binding the locator-derived physical path to the reference digest/size, complete captured manifest and descriptor/ancestor identities under original total/work/cleanup bounds. Preserve current direct-fetch locator semantics, writer-only limits and all orphan/staging bytes; prove actual writer and physical refusal cases on both pairs. Complete object enumeration, history relations and restore activation remain separate.
-- [ ] Capture one selected current artifact-use sidecar through the existing guardian-owned restore IO worker and real captured Local/Core describe facade; require exact reference-derived pathname, physical manifest membership, current raw ceiling, hash/mode/link/ancestor identity and close-before-semantics under original cutoffs. Prove actual writers and physical/semantic refusals on both pairs; object bytes, complete namespace/orphans and history/restore relations remain separate.
+- [x] Capture one selected current artifact-use sidecar through the existing guardian-owned restore IO worker and real captured Local/Core describe facade; require exact reference-derived pathname, physical manifest membership, current raw ceiling, hash/mode/link/ancestor identity and close-before-semantics under original cutoffs. Prove actual writers and physical/semantic refusals on both pairs; object bytes, complete namespace/orphans and history/restore relations remain separate.
 - [ ] Extract one private captured-byte Local receipt decoder shared with live reads; preserve the native current 28-field ETF schema, 65,536-byte cap, exact raw job binding, closed predicates and all claim/finality/job/recovery authority. Replace the injected decoder seam with actual bounded BIF proof and actual writer/hostile controls on both supported pairs; physical receipt capture and complete history audit remain separate.
 - [ ] Enumerate the complete current Local generation/marker/open namespace under one original restore IO guardian; require exact physical name membership, current marker-plane grammar, open cardinality/whole-byte bounds and source/job/digest relations. Preserve actual writer crash cuts and claim observations; complete receipts/Store/job/history/restore certification remains separate.
 - [x] Extract the current Local artifact-use captured-byte decoder with the existing 131,072-byte ceiling, exact canonical bytes and filename digest; reuse the existing ArtifactStore facade through a private captured-bytes handle for closed reference-bound admission. Prove actual writers, deleted-source decoding, opaque identities, hostile bytes and existing semantic negatives on both pairs; physical capture, object bytes and complete history relations remain separate.

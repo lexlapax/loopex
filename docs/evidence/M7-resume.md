@@ -27,6 +27,34 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+T15 selected artifact-use sidecar audit is complete by existing paired evidence.
+Report `/private/tmp/m7-restore-sidecar-evidence-audit-20261007-v1.md`,SHA-256
+`82e58a7ac3137a3084223f9cecf30e34210525807ee2bcd97d6f0634ced3655d`.
+Original66773 at768b2191 already passed175/175 on both pairs,including all14
+sidecar cases. Current relevant literal blobs match its retained projection;
+all49 terminal and22 native artifacts and original joins authenticate. Its
+collection/terminal references remain those recorded below. Only this bounded
+row closes; original81 done/92 todo/6 retired,added337 done/26 todo.
+
+Compaction activity source review passed. Independent report
+`/private/tmp/m7-activity-vectors-independent-review-20261007-v1.md`,SHA-256
+`73320c650779afe8fe021b50d95eb98486c6dbdcb8b5462e10aace646e73970c`.
+Root authenticated all five literal paths, prior test/before snapshot and four
+prior absences, and committed clean raw5c0eff6c08729d57f4a55ef47b30771628e975cc
+as direct child8b6648140d9f9899517dc6843dbdfa3b09e4505d in isolated activity WT.
+Treeff8c8bf478e59793ce569468cf1d7243e1d21790; NUL projection SHA-256
+`81e35a54a6f9d6e054818e805a56a95e5e6ddb22ec3533fc174a68c162e16821`.
+Root source-only review `/private/tmp/m7-activity-vectors-root-review-20261007-v1.json`,
+SHA-256 `fdabf52ee92f674003a789ac13c1e23d97a1377b0a5dca4b69474425ba65a0da`.
+Formatter/proof preparation remains disabled; no native admission or new PASS.
+Foreground worker owns temporary wrappers/helper; root owns enable/collection.
+The selected receipt decoder and original-checklist reconciliation are separate
+read-only audits. Latest fully collected registry remains1535 below.
+The four clean landed Core repair,0059,0060 and wire worktrees are now archived
+recoverably through the app; their commits remain reachable in primary history,
+with no ignored non-build files to preserve. The activity worktree stays active.
+ADR0055 approval is already recorded as Accepted;0056 remains asked unanswered.
+
 Wire creation unit is now proved and integrated literally from
 `0babe891b1689d4021f32071dfce086a5dcefe58`. Original76438 exited0:
 12/12 on each supported pair,including both Node22.14.0 consumers,zero
