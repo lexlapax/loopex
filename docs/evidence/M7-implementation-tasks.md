@@ -6,7 +6,7 @@ exclusions, skips or invalid cases. Whole-tree floor formatting and CLI
 warning-free compilation passed; four original processes joined and 23 artifacts
 were authenticated in 146.812 seconds. Six original rows close: T06.3/T06.6
 and T10.1/T10.2/T10.3/T10.9. Broader floor preservation and attended chat remain
-open. Original T01–T19: 87 done / 86 todo / 6 retired; added 345 done / 23 todo
+open. Original T01–T19: 87 done / 86 todo / 6 retired; added 345 done / 25 todo
 after proving the dormant interaction selector and recording the helper byte unit. ADR0056's exact pair is
 now Accepted; helper execution and separate accounting/protection remain open.
 The isolated canonical ledger/header/genesis-byte unit is running.
@@ -13815,6 +13815,9 @@ the still-open real-provider, live protocol, persistent-fault or closure lanes.
 
 ### Added implementation subtasks
 
+- [ ] Join the real isolated local model adapter, public prepared configuration and physical Local Store through A-to-B-to-A switching with restart; prove independent outgoing requests, retained configuration/history, obsolete private-state refusal and exact custody retirement on both pairs. The complete original failure/privacy matrix and hosted provider demonstrations remain separate.
+
+
 - [x] Implement the accepted trusted pre-transport Model cancellation gate with unchanged same-process forwarding, second distinct staged-request selection, exact host release and loss/deadline refusal; prove real Core committed-tool/abort/callback-cleanup order, truthful conservative accounting and unchanged later prompts on both supported pairs. Script/counted paid-provider integration remains separate.
 
 - [x] Prepare closed whole-candidate mutable updates with bounded inputs, monotonic versions and retained explicit/derived budget origins.
@@ -13976,6 +13979,7 @@ Hosted, attended and coordinated transport generation proofs remain separate.
 
 - [x] Install/read immutable validated retained-object bytes with actual content-addressed filesystem durability, exclusive host ownership, symlink/root guards and physical crash/fsync/uncertainty proof on both pairs; use the existing GenesisCodec as a concrete client without inventing ledger or catalog schemas.
 - [ ] Pin the complete private delegation ledger byte recipe and closed object/mutation field grammars under accepted ADR 0046 semantics before implementing append/recovery/transaction reduction; refuse incomplete or corrupt current frames without introducing a compatibility decoder.
+- [ ] Implement the accepted private parent-binding captured-object validator and pure prepare-parent/bind-parent reducer; prove exact owning creation-history joins, independent digest/transaction literals, ordered replay, duplicate/conflict refusal and reserved binding completion credit on both pairs. Physical append, run accounting and helper execution remain separate.
 - [ ] Implement accepted ADR0056's private canonical JSON, closed binding/run headers and checksummed frames, plus production GenesisCodec byte entrypoints used by the actual retained-object install/reopen test; prove independent exact bytes, structural/size/corruption boundaries and complete affected files on both supported pairs. Physical append/recovery, transaction reduction, child accounting, mutation protection and helper execution remain separate.
 - [ ] Resolve exact retained child-accounting access and universal host mutation guards before exposing helpers through runtime-only clients; preserve host ownership, current serial session truth, retained maintenance charges and settled-child protection without copying private reducer accounting or adding an unapproved public read.
 

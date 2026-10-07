@@ -27,8 +27,8 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
-Primary base is `3499f7a70db14e8c3568782dc58aead66f348810`. The current
-working tree integrates four exact selector files from isolated
+Primary is clean/pushed `f2e779040b4627a809139537dfcf04ac08fe0bb4` before
+this failure-state update. That commit integrates four exact selector files from isolated
 `520e3adb1ab70c2abfd09883428a335f8b2adff9`, tree
 `029fbdac4d9d602f08e384116c371f8f20366641`. Original19781 passed33/33 on
 both supported toolchains, with five actual Node consumers per pair, zero
@@ -62,7 +62,24 @@ only GenesisCodec and ledger test layout changed, all five non-line ASTs match.
 Output `M7/helper-ledger-byte-format-20261007-v1`; collection
 `bfc96293e50c6871ddc6e4f9acfb37f72d06e9d04eb63939ddeb6639eab8280c`;
 terminal `bd4b77d1f137c387c2f466a66af481c80dc20b679cf0c16b88bc888246fc4b1b`.
-Complete61-case paired proof is being prepared; no helper native-test PASS yet.
+Original92434 failed current warning-free compilation at the new LedgerCodec
+payload bitstring length. No tests ran and floor did not start. One original
+stage joined;16 artifacts verified;45.844 seconds. Output
+`M7/helper-ledger-byte-proof-20261007-v1`; collection
+`f501a24f655440fb1407d33f3d347b82e4ba46e95b0a980e5921af746de6c889`;
+terminal `db1fba054acee27885d3b47af3fd38f9f5c4b39bbbd107414b309a5103ac4c7d`.
+Latest collected registry1603 is at that output, SHA-256
+`b806e58673132ebf7ae47736103e3d0ce3fb4a62219918a6fa35474ad5b4cd0e`.
+The reviewed single-line explicit-size pin is frozen at
+`ddab68d8ad3ff112bdb9ac2da8389d795d3a4ac8`, tree
+`c7eb355fb510f0f969b6501ad5d2c449a946435e`, direct child of c9e830c3.
+LedgerCodec corrected SHA-256
+`8b816936bdc986173b3ead27970bfa95d612530f30de21002d36520e0407e931`.
+Corrected disabled six-stage recipe is being prepared: fresh owned-format check,
+Composition compile and complete61 selection per pair; no helper PASS yet.
+Failure preparation, exact correction and both next-unit audits are retained
+under `M7/helper-byte-failure-and-next-unit-context-20261007-v1/retention.json`,
+SHA-256 `8f974ca9bad22154110de13076e7abc036a1cb767ee76fffc3a06e3ff34fefd7`,16files.
 No physical ledger/reducer/accounting/mutation protection/helper activation claim.
 
 Current selector correction and helper byte source/review/formatter context is
@@ -80,7 +97,7 @@ SHA-256 `0f440a2205aed9997b27872b280469d6e5f5f52d951dd84d4af1bd2d7560dda3`,
 53files. The helper unit owns six codec/test/fixture paths in
 `/Users/spuri/.codex/worktrees/m7-helper-recipe-refresh/loopex`, frozen at c9e830c3. Contract report SHA-256
 `2960eb837f61863dfb94546909f1fdbb8c85430d9245b19df808161ec0cb1355`.
-The selector completion makes the live tally345 done/23 todo; original remains
+The selector completion makes the live tally345 done/25 todo; original remains
 87 done/86 todo/6 retired. Helpers, physical append/recovery and accounting
 are not activated by this byte-codec unit. ADR0057 remains the sole asked
 unanswered decision. The two historical quiesce causal rows stay open.
@@ -95,6 +112,13 @@ logs/actor attribution. Live interaction contract
 `5dbef5bcb07f3da7dbb879db8950be735d34254502fd0e61ba623e47379d5ed4`
 requires complete coordinated /3-/4 migration; native creation custody still
 depends on Proposed0059. Another partial serving generation is not authorized.
+
+Two source-only writers are active. Parent-binding owns three new module/test/
+fixture paths in `/Users/spuri/.codex/worktrees/m7-helper-parent-binding/loopex`,
+base ddab68d8. Native model switching owns one new Composition test in
+`/Users/spuri/.codex/worktrees/m7-native-model-switch/loopex`, base f2e77904.
+Contracts and closure limits are retained in the latest16-file context bundle.
+Root owns every VM, formatter, compilation, test, source freeze and integration.
 
 The following previous checkpoint is historical where superseded above.
 
