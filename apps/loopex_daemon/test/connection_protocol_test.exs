@@ -123,6 +123,34 @@ defmodule LoopexDaemon.ConnectionProtocolTest do
     end
   end
 
+  test "native configure tickets stay dormant under current generation negotiation" do
+    protocol = ConnectionProtocol.new()
+
+    request = %{
+      "method" => "session.configure",
+      "request_id" => "configure",
+      "command_id" => "Y29uZmlndXJl",
+      "writer_epoch" => "ZXBvY2g",
+      "changes" => %{"max_tokens" => "512"}
+    }
+
+    assert {:error, before, ^protocol, :none} = ConnectionProtocol.handle(protocol, request)
+    assert before["code"] == "not_initialized"
+
+    assert {:ok, reply, initialized, :initialized} =
+             ConnectionProtocol.handle(protocol, initialize())
+
+    refute "session.configure" in reply["supported_methods"]
+    refute "session.configure" in V2.methods()
+
+    assert {:error, refusal, ^initialized, :none} =
+             ConnectionProtocol.handle(initialized, request)
+
+    assert refusal["code"] == "unsupported_method"
+    assert refusal["request_id"] == "configure"
+    refute Map.has_key?(refusal, "status")
+  end
+
   defp initialize(request_id \\ "r1", generations \\ [V2.generation()]) do
     %{
       "method" => "initialize",

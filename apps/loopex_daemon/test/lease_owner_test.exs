@@ -1,3 +1,7 @@
+Code.require_file("../../loopex/test/support/m1_runtime_helper.exs", __DIR__)
+Code.require_file("../../loopex/test/support/agent_loop_helper.exs", __DIR__)
+Code.require_file("../../loopex/test/support/model_preparation_conformance.exs", __DIR__)
+
 defmodule LoopexDaemon.LeaseOwnerTest do
   use ExUnit.Case, async: true
 
@@ -5,6 +9,404 @@ defmodule LoopexDaemon.LeaseOwnerTest do
 
   alias LoopexDaemon.{AdmissionRelay, ConnectionRegistry, LeaseOwner, WireRecords}
   alias LoopexProtocol.Wire
+
+  defmodule ConfigureModel do
+    @moduledoc false
+    @behaviour Loopex.Model
+
+    @impl true
+    def complete(_request, _options, _progress), do: {:error, :unexpected_model_call}
+
+    @impl true
+    def prepare_configuration(current, authored, definitions, _context, options) do
+      send(Keyword.fetch!(options, :observer), {:configure_preparation, self(), authored})
+
+      receive do
+        :continue_configuration ->
+          case Keyword.fetch!(options, :preparation) do
+            :accepted ->
+              Loopex.ModelPreparationConformance.candidate(
+                current,
+                authored,
+                definitions,
+                "scripted:v1"
+              )
+
+            :refused ->
+              {:error, :configuration_not_prepared}
+          end
+      end
+    end
+  end
+
+  for refusal <- [:missing_attachment, :wrong_epoch, :wrong_incarnation, :other_holder, :expired] do
+    @configure_authority_refusal refusal
+    test "configure #{@configure_authority_refusal} refuses before the native callback" do
+      native = configure_native_fixture()
+      term = if @configure_authority_refusal == :expired, do: 60, else: 30_000
+      fixture = start_fixture(session_id: native.session, lease_term_ms: term)
+      {holder, holder_incarnation, writer_epoch} = grant_first(fixture, term)
+      configure_connection_cleanup(holder)
+      original_configuration = configure_status(native)
+      original_records = Loopex.AgentLoopFixture.records(native, native.session)
+
+      if @configure_authority_refusal != :missing_attachment do
+        assert :ok = attach(fixture, holder, holder_incarnation, "configure-attachment")
+      end
+
+      {connection, connection_incarnation} =
+        if @configure_authority_refusal == :other_holder do
+          other_incarnation = incarnation()
+          {start_connection(fixture.relay, other_incarnation), other_incarnation}
+        else
+          {holder, holder_incarnation}
+        end
+
+      if @configure_authority_refusal == :other_holder do
+        configure_connection_cleanup(connection)
+        assert :ok = attach(fixture, connection, connection_incarnation, "other-attachment")
+      end
+
+      expiry =
+        if @configure_authority_refusal == :expired do
+          assert_receive {:lease_expiry_proposed, expiry_ref, _, _, _, ^holder,
+                          ^holder_incarnation, ^writer_epoch},
+                         500
+
+          expiry_ref
+        end
+
+      origin = {connection_incarnation, 1, 1}
+      worker = start_ticket_worker(connection)
+      worker_monitor = Process.monitor(worker)
+
+      assert {:ok, ^origin} =
+               open_mutation(fixture, connection, origin, :session_configure, worker)
+
+      epoch =
+        if @configure_authority_refusal == :wrong_epoch, do: incarnation(), else: writer_epoch
+
+      supplied_incarnation =
+        if @configure_authority_refusal == :wrong_incarnation,
+          do: incarnation(),
+          else: connection_incarnation
+
+      descriptor_result =
+        invoke(connection, fn ->
+          lease_mutate(
+            fixture.owner,
+            origin,
+            :session_configure,
+            "configure-refused",
+            supplied_incarnation,
+            epoch,
+            worker,
+            configure_native_task(native, "configure-refused", "must-not-admit", 512)
+          )
+        end)
+
+      if @configure_authority_refusal == :wrong_incarnation do
+        assert descriptor_result == {:error, :invalid_operation}
+        assert %{in_flight: 0} = LeaseOwner.status(fixture.owner)
+        stop_connection(connection, fixture.relay, connection_incarnation)
+        assert_receive {:DOWN, ^worker_monitor, :process, ^worker, worker_reason}, 500
+        assert worker_reason in [:normal, :killed]
+        refute_received {:connection_message, ^connection, {:relay_ticket_result, ^origin, _}}
+      else
+        assert descriptor_result == {:ok, :admitted}
+        refused = WireRecords.control_error("configure-refused", "control_not_held")
+
+        assert_receive {:connection_message, ^connection,
+                        {:relay_ticket_result, ^origin, ^refused}},
+                       500
+
+        assert_receive {:DOWN, ^worker_monitor, :process, ^worker, :killed}, 500
+        eventually(fn -> LeaseOwner.status(fixture.owner).in_flight == 0 end)
+      end
+
+      refute_receive {:configure_preparation, _, _}, 40
+      refute_received {:native_configure_result, "must-not-admit", _}
+      assert configure_status(native) == original_configuration
+      assert Loopex.AgentLoopFixture.records(native, native.session) == original_records
+      if expiry, do: assert(:ok = resolve(fixture, :expiry, expiry))
+
+      if connection != holder,
+        do: stop_connection(connection, fixture.relay, connection_incarnation)
+
+      if @configure_authority_refusal != :wrong_incarnation,
+        do: stop_connection(holder, fixture.relay, holder_incarnation)
+
+      assert %{tickets: 0} = AdmissionRelay.status(fixture.relay)
+    end
+  end
+
+  for disposition <- [:accepted, :refused, :admission_unknown] do
+    @configure_disposition disposition
+    test "actual configure #{@configure_disposition} selects the established lease renewal" do
+      preparation = if @configure_disposition == :refused, do: :refused, else: :accepted
+      native = configure_native_fixture(preparation)
+      fixture = start_fixture(session_id: native.session)
+      {holder, holder_incarnation, writer_epoch} = grant_first(fixture)
+      configure_connection_cleanup(holder)
+      assert :ok = attach(fixture, holder, holder_incarnation, "configure-attachment")
+      original_deadline = :sys.get_state(fixture.owner).lease.deadline
+      original_configuration = configure_status(native)
+      eventually(fn -> now_ms() + 30_000 > original_deadline end)
+      origin = {holder_incarnation, 1, 1}
+      worker = start_ticket_worker(holder)
+      worker_monitor = Process.monitor(worker)
+      assert {:ok, ^origin} = open_mutation(fixture, holder, origin, :session_configure, worker)
+
+      if @configure_disposition == :admission_unknown do
+        assert :ok =
+                 Loopex.M1RuntimeTestStore.inject(
+                   native.store,
+                   {:session_journal_commit, :after_linearization_before_result}
+                 )
+      end
+
+      assert {:ok, :admitted} =
+               invoke(holder, fn ->
+                 lease_mutate(
+                   fixture.owner,
+                   origin,
+                   :session_configure,
+                   "configure-result",
+                   holder_incarnation,
+                   writer_epoch,
+                   worker,
+                   configure_native_task(native, "configure-result", "configure-command", 512)
+                 )
+               end)
+
+      assert_receive {:configure_preparation, callback, %{"max_tokens" => 512}}, 5_000
+      callback_monitor = Process.monitor(callback)
+      candidate = :sys.get_state(fixture.owner).in_flight[origin].candidate_deadline
+      assert is_integer(candidate) and candidate > original_deadline
+      send(callback, :continue_configuration)
+      assert_receive {:native_configure_result, "configure-command", native_result}, 5_000
+
+      expected =
+        case @configure_disposition do
+          :accepted ->
+            assert {:routed, _route, {:accepted, "configure-command"}} = native_result
+
+            WireRecords.admission(
+              "configure-result",
+              "session.configure",
+              "configure-command",
+              :accepted
+            )
+
+          :refused ->
+            assert {:routed, _route, {:error, :configuration_not_prepared}} = native_result
+
+            WireRecords.admission(
+              "configure-result",
+              "session.configure",
+              "configure-command",
+              {:refused, "configuration_not_prepared"}
+            )
+
+          :admission_unknown ->
+            assert {:routed, _route, {:error, :commit_unknown}} = native_result
+            WireRecords.succession_error("configure-result", "admission_unknown")
+        end
+
+      assert_receive {:DOWN, ^callback_monitor, :process, ^callback, :normal}, 1_000
+
+      assert_receive {:connection_message, ^holder, {:relay_ticket_result, ^origin, ^expected}},
+                     5_000
+
+      assert_receive {:DOWN, ^worker_monitor, :process, ^worker, :killed}, 500
+      eventually(fn -> LeaseOwner.status(fixture.owner).in_flight == 0 end)
+      retained_deadline = :sys.get_state(fixture.owner).lease.deadline
+
+      if @configure_disposition == :refused do
+        assert retained_deadline == original_deadline
+        assert configure_status(native) == original_configuration
+      else
+        assert retained_deadline == candidate
+
+        # Concept: an unknown admission withholds definitive status until recovery.
+        # Technical depth: only this expected refusal keeps the existing bounded
+        # observer waiting; success still requires a real committed configuration.
+        eventually(fn ->
+          case Loopex.session_status(native.runtime, native.session) do
+            {:ok, status} ->
+              status.configuration["max_tokens"] == 512
+
+            {:error, :session_unavailable} ->
+              if @configure_disposition == :admission_unknown do
+                false
+              else
+                flunk("unexpected configure status: {:error, :session_unavailable}")
+              end
+
+            unexpected ->
+              flunk("unexpected configure status: #{inspect(unexpected)}")
+          end
+        end)
+      end
+
+      assert [record] = configure_records(native)
+      assert record.payload["command_id"] == "configure-command"
+      assert record.payload["changes"] == %{"max_tokens" => 512}
+
+      assert record.payload["admission"] ==
+               if(@configure_disposition == :refused,
+                 do: "rejected_configuration_not_prepared",
+                 else: "accepted"
+               )
+
+      stop_connection(holder, fixture.relay, holder_incarnation)
+      assert %{tickets: 0} = AdmissionRelay.status(fixture.relay)
+    end
+  end
+
+  test "configure descriptors serialize actual native configuration and join before the next callback" do
+    native = configure_native_fixture()
+    fixture = start_fixture(session_id: native.session)
+    {holder, holder_incarnation, writer_epoch} = grant_first(fixture)
+    configure_connection_cleanup(holder)
+    assert :ok = attach(fixture, holder, holder_incarnation, "configure-attachment")
+    first = {holder_incarnation, 1, 1}
+    second = {holder_incarnation, 2, 1}
+    first_worker = start_ticket_worker(holder)
+    second_worker = start_ticket_worker(holder)
+    first_monitor = Process.monitor(first_worker)
+    second_monitor = Process.monitor(second_worker)
+
+    for {origin, worker} <- [{first, first_worker}, {second, second_worker}] do
+      assert {:ok, ^origin} = open_mutation(fixture, holder, origin, :session_configure, worker)
+    end
+
+    assert {:ok, :admitted} =
+             invoke(holder, fn ->
+               lease_mutate(
+                 fixture.owner,
+                 first,
+                 :session_configure,
+                 "configure-first",
+                 holder_incarnation,
+                 writer_epoch,
+                 first_worker,
+                 configure_native_task(native, "configure-first", "first-command", 512)
+               )
+             end)
+
+    assert_receive {:configure_preparation, first_callback, %{"max_tokens" => 512}}, 5_000
+    callback_monitor = Process.monitor(first_callback)
+    second_invoke = make_ref()
+
+    send(
+      holder,
+      {:invoke, self(), second_invoke,
+       fn ->
+         lease_mutate(
+           fixture.owner,
+           second,
+           :session_configure,
+           "configure-second",
+           holder_incarnation,
+           writer_epoch,
+           second_worker,
+           configure_native_task(native, "configure-second", "second-command", 768)
+         )
+       end}
+    )
+
+    eventually(fn -> LeaseOwner.status(fixture.owner).queued_operations == 1 end)
+    refute_receive {:configure_preparation, _, %{"max_tokens" => 768}}, 40
+    assert configure_records(native) == []
+    send(first_callback, :continue_configuration)
+    assert_receive {:DOWN, ^callback_monitor, :process, ^first_callback, :normal}, 1_000
+    assert_receive {:configure_preparation, second_callback, %{"max_tokens" => 768}}, 5_000
+    second_callback_monitor = Process.monitor(second_callback)
+    refute Process.alive?(first_worker)
+    assert_receive {:DOWN, ^first_monitor, :process, ^first_worker, :killed}, 500
+    assert_receive {:invoked, ^second_invoke, {:ok, :admitted}}, 500
+    assert configure_status(native)["max_tokens"] == 512
+    assert [first_record] = configure_records(native)
+    assert first_record.payload["command_id"] == "first-command"
+    send(second_callback, :continue_configuration)
+    assert_receive {:DOWN, ^second_callback_monitor, :process, ^second_callback, :normal}, 1_000
+
+    for {origin, request_id, command_id} <- [
+          {first, "configure-first", "first-command"},
+          {second, "configure-second", "second-command"}
+        ] do
+      expected = WireRecords.admission(request_id, "session.configure", command_id, :accepted)
+
+      assert_receive {:native_configure_result, ^command_id,
+                      {:routed, _, {:accepted, ^command_id}}},
+                     5_000
+
+      assert_receive {:connection_message, ^holder, {:relay_ticket_result, ^origin, ^expected}},
+                     5_000
+    end
+
+    assert_receive {:DOWN, ^second_monitor, :process, ^second_worker, :killed}, 500
+    eventually(fn -> LeaseOwner.status(fixture.owner).in_flight == 0 end)
+
+    assert Enum.map(configure_records(native), & &1.payload["command_id"]) ==
+             ["first-command", "second-command"]
+
+    assert configure_status(native)["max_tokens"] == 768
+    stop_connection(holder, fixture.relay, holder_incarnation)
+    assert %{tickets: 0} = AdmissionRelay.status(fixture.relay)
+  end
+
+  test "lease owner loss reaps a pending configure worker before any native work" do
+    native = configure_native_fixture()
+    fixture = start_fixture(session_id: native.session, unmanaged_owner: true)
+    {holder, holder_incarnation, _writer_epoch} = grant_first(fixture)
+    configure_connection_cleanup(holder)
+    assert :ok = attach(fixture, holder, holder_incarnation, "configure-attachment")
+    origin = {holder_incarnation, 1, 1}
+    worker = start_ticket_worker(holder)
+    worker_monitor = Process.monitor(worker)
+    assert {:ok, ^origin} = open_mutation(fixture, holder, origin, :session_configure, worker)
+    owner = fixture.owner
+    owner_monitor = Process.monitor(owner)
+    Process.unlink(owner)
+    Process.exit(owner, :kill)
+    assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :killed}, 500
+    assert_receive {:DOWN, ^worker_monitor, :process, ^worker, :killed}, 500
+
+    assert_receive {:relay_owner_lost, relay, session_id, ^owner, owner_incarnation, [^origin]},
+                   500
+
+    assert relay == fixture.relay
+    assert session_id == native.session
+    assert owner_incarnation == fixture.owner_incarnation
+    assert_receive {:relay_owner_loss_ready, ^relay, ^owner, ^owner_incarnation}, 500
+    classification = make_ref()
+
+    assert :ok =
+             AdmissionRelay.classify_owner_loss(
+               relay,
+               classification,
+               fixture.daemon_incarnation,
+               session_id,
+               owner,
+               owner_incarnation,
+               holder_incarnation
+             )
+
+    assert_receive {:relay_owner_loss_classified_ack, ^relay, ^classification, ^session_id,
+                    ^owner, ^owner_incarnation},
+                   500
+
+    refute_receive {:connection_message, ^holder,
+                    {:relay_ticket_cancelled, ^origin, :control_owner_lost}},
+                   40
+
+    refute_receive {:configure_preparation, _, _}, 40
+    assert configure_records(native) == []
+    eventually(fn -> AdmissionRelay.status(relay).tickets == 0 end)
+    stop_connection(holder, relay, holder_incarnation)
+  end
 
   test "a first acquisition stays provisional until daemon settlement" do
     fixture = start_fixture()
@@ -2900,6 +3302,120 @@ defmodule LoopexDaemon.LeaseOwnerTest do
         owner,
         {:resume, origin, request_id, command_id, incarnation, epoch, worker, task}
       )
+
+  # Concept: these descriptors reach the actual native daemon route; only their
+  # already-classified wire reply is constructed by this fixture.
+  # Technical depth: the callback is held by a message so the owner queue and
+  # candidate renewal can be observed before durable configuration admission.
+  defp configure_native_task(native, request_id, command_id, max_tokens) do
+    fn ->
+      result =
+        Loopex.Runtime.command_for_daemon(native.attachment, %{
+          type: :configure,
+          command_id: command_id,
+          changes: %{"max_tokens" => max_tokens}
+        })
+
+      send(native.observer, {:native_configure_result, command_id, result})
+
+      case result do
+        {:routed, _route, {:accepted, ^command_id}} ->
+          {:accepted,
+           WireRecords.admission(request_id, "session.configure", command_id, :accepted)}
+
+        {:routed, _route, {:error, :configuration_not_prepared}} ->
+          {:refused,
+           WireRecords.admission(
+             request_id,
+             "session.configure",
+             command_id,
+             {:refused, "configuration_not_prepared"}
+           )}
+
+        {:routed, _route, {:error, :commit_unknown}} ->
+          {:admission_unknown, WireRecords.succession_error(request_id, "admission_unknown")}
+      end
+    end
+  end
+
+  defp configure_native_fixture(preparation \\ :accepted) do
+    observer = self()
+    {store, handle} = Loopex.M1RuntimeTestStore.start_store(label: "daemon-configure")
+    executor = Loopex.AgentLoopTestExecutor.start()
+
+    on_exit(fn ->
+      for actor <- [executor, store] do
+        monitor = Process.monitor(actor)
+        if Process.alive?(actor), do: GenServer.stop(actor, :normal, 1_000)
+        assert_receive {:DOWN, ^monitor, :process, ^actor, _reason}, 1_000
+      end
+    end)
+
+    assert {:ok, runtime} =
+             Loopex.start_link(
+               runtime_id: "daemon-configure",
+               context_token_budget: 8_192,
+               store: handle,
+               session_creation_defaults: Loopex.AgentLoopFixture.creation_defaults([]),
+               model: %{
+                 module: ConfigureModel,
+                 model: "scripted:v1",
+                 options: [observer: observer, preparation: preparation, max_tokens: 256]
+               },
+               executor: %{
+                 module: Loopex.AgentLoopTestExecutor,
+                 reference: executor,
+                 identity: "agent-loop-executor",
+                 epoch: 1,
+                 fencing_token: 1,
+                 workspace_ref: "workspace-ref",
+                 workspace_lease: "workspace-lease"
+               },
+               tools: [],
+               active_tools: [],
+               policy: Loopex.AgentLoopTestPolicy,
+               policy_identity: %{"id" => "test", "revision" => "1"},
+               grant_decision: {:host_policy, :allow},
+               cleanup_grace_ms: 5_000
+             )
+
+    on_exit(fn ->
+      monitor = Process.monitor(runtime.supervisor)
+      if Process.alive?(runtime.supervisor), do: Loopex.stop(runtime)
+      assert_receive {:DOWN, ^monitor, :process, _supervisor, _reason}, 5_000
+    end)
+
+    assert {:ok, session} = Loopex.create_session(runtime, %{}, command_id: "create-configure")
+    assert {:ok, attachment} = Loopex.attach(runtime, session, after_event_sequence: 0)
+
+    %{
+      runtime: runtime,
+      store: store,
+      session: session,
+      attachment: attachment,
+      observer: observer
+    }
+  end
+
+  defp configure_records(native) do
+    Enum.filter(
+      Loopex.AgentLoopFixture.records(native, native.session),
+      &(&1.payload.kind == "session_configuration_admitted_v2")
+    )
+  end
+
+  defp configure_status(native) do
+    assert {:ok, status} = Loopex.session_status(native.runtime, native.session)
+    status.configuration
+  end
+
+  defp configure_connection_cleanup(connection) do
+    on_exit(fn ->
+      monitor = Process.monitor(connection)
+      if Process.alive?(connection), do: Process.exit(connection, :kill)
+      assert_receive {:DOWN, ^monitor, :process, ^connection, _reason}, 1_000
+    end)
+  end
 
   defp start_fixture(options \\ []) do
     daemon_incarnation = incarnation()

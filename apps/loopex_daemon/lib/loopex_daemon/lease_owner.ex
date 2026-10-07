@@ -67,6 +67,7 @@ defmodule LoopexDaemon.LeaseOwner do
   @relay_request_ms 5_000
 
   @direct_mutation_classes [
+    :session_configure,
     :session_prompt,
     :session_steer,
     :session_follow_up,

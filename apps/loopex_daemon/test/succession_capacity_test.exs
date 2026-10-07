@@ -7,7 +7,7 @@ defmodule LoopexDaemon.SuccessionCapacityTest do
   test "the reserve is derived from every maximal legal succession record" do
     measurement = SuccessionCapacity.measure()
 
-    assert length(measurement.reply_candidates) == 37
+    assert length(measurement.reply_candidates) == 42
     assert Enum.uniq_by(measurement.reply_candidates, & &1.id) == measurement.reply_candidates
 
     assert measurement.reply_bytes ==
@@ -42,6 +42,16 @@ defmodule LoopexDaemon.SuccessionCapacityTest do
               "d41ec746e328a37d0fafabfa6995cfd4a9842a01d25dcad4aa266c571e0b39d5"},
              {"session.resume/refused/runtime_command_conflict", 540,
               "5d49e3b2fd389d8caf9e75ee0eaaae691bf67ff51bb21c1a7175c09faf2f3370"},
+             {"session.configure/accepted", 87_562,
+              "317c80557be52f141b9caf08d16291ab17ba5afefdbba75172356a1693110da5"},
+             {"session.configure/refused/configuration_not_settled", 87_584,
+              "8a2dbef7188fad6c8e1f8ff412c00b126227148f8d9ba66f0da730998412686f"},
+             {"session.configure/refused/configuration_not_prepared", 87_585,
+              "82dc2ae9cdf9e63df6e58d2b57c660a2d4cd756c762f92736fe1a70971e6a2da"},
+             {"session.configure/refused/invalid_session_configuration", 87_588,
+              "88c5ed73e3299810473de62be7b481bb32fc6c636134c4b48d48c2b15c5f1b68"},
+             {"session.configure/refused/compaction_required", 87_578,
+              "8a3e0212e0ed56068578829794fd336a58da9f2af10bac7af4e95cc80576eaa1"},
              {"session.prompt/accepted", 87_559,
               "f589d1f351517237e21dadc1ad891257e7e4e19ccdd9e49edd508c0f2eba0f5e"},
              {"session.prompt/refused/run_active", 87_566,

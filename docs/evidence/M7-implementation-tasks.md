@@ -4,8 +4,8 @@ Complete physical restore original75764 passed all148 cases on each supported
 toolchain at `11e7f674`, in560.494 seconds. All ten original stages are joined
 and47 artifacts verified. Six added T15 rows and the T16 copied-permissions row
 close against that group. Original T01–T19 remains80 done/93 todo/6 retired;
-added317 done/33 todo. Complete109-case restore IO proof passed both pairs; daemon
-admission correction and served generation activation remain open. Native
+added318 done/32 todo. Complete109-case restore IO proof passed both pairs;
+served generation activation remains open. Dormant daemon configure admission, native
 activity, its tagged executor fixture and dormant wire codec/projections are
 proved on both pairs and integrated. Foreground production routing remains open.
 ADR0055 is the sole asked pending decision. Exact proof references and continuation
@@ -13242,7 +13242,7 @@ or check was relaxed.
 
 ### Added implementation subtasks
 
-- [ ] Implement accepted ADR 0053 daemon configure admission through existing lease-owner authority, serial tickets, succession capacity and cleanup; prove actual native admission, renewal/refusal behavior and unchanged negotiated-wire refusal on both supported toolchains. Keep Request/parser and served generations unchanged until coordinated activation.
+- [x] Implement accepted ADR 0053 daemon configure admission through existing lease-owner authority, serial tickets, succession capacity and cleanup; prove actual native admission, renewal/refusal behavior and unchanged negotiated-wire refusal on both supported toolchains. Keep Request/parser and served generations unchanged until coordinated activation.
 
 
 - [ ] Finish accepted ADR0052 native answer provenance, exact policy cursor/replay relations and shared Elixir/Node payload projection in both transports; prove focused current/floor and independent vectors after rejoin, complete negotiated manifests and real answered-command workflows.

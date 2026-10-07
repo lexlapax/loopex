@@ -12,9 +12,10 @@ defmodule LoopexDaemon.SuccessionCapacity do
   The maximal request identity uses ADR 0023's 64-byte request alphabet. Input
   mutations use the 65,536-byte raw command-identity limit; resume and resource
   mutations use their tighter 256-byte raw limits. The candidate set contains
-  accepted admission and every closed durable refusal for all eight
-  lease-authorized mutation methods, plus the four succession error forms. Each
-  candidate is encoded by `LoopexProtocol.Frame`; the largest complete frame is
+  accepted admission and every closed durable refusal for all nine
+  lease-authorized mutation methods, including dormant configure, plus the four
+  succession error forms. This inventory does not activate a wire generation.
+  Each candidate is encoded by `LoopexProtocol.Frame`; the largest complete frame is
   the serial reply slot and its sum with the maximal detached frame is the
   delivery reserve.
   """
@@ -30,6 +31,13 @@ defmodule LoopexDaemon.SuccessionCapacity do
 
   @mutation_specs [
     {"session.resume", @bounded_command_id, ["runtime_command_conflict"]},
+    {"session.configure", @input_command_id,
+     [
+       "configuration_not_settled",
+       "configuration_not_prepared",
+       "invalid_session_configuration",
+       "compaction_required"
+     ]},
     {"session.prompt", @input_command_id, ["run_active"]},
     {"session.steer", @input_command_id, ["run_mismatch", "steer_pending", "no_active_run"]},
     {"session.follow_up", @input_command_id, ["follow_up_pending", "no_active_run"]},

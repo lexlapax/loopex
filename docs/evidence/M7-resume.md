@@ -28,10 +28,32 @@ physical restore implementation; it does not waive any full-history proof.
 ### Current work and restart order
 
 Pending isolated units on 2026-10-06 remain unproved and unintegrated. Root owns
-all original VMs, collection, Git and rejoin. Daemon original43854 is running
-from clean isolated07d5df34 with the reviewed warning-corrected observer and
-exact reused version/format records. Collect that original handle before
-starting another VM. No passing daemon outcome is claimed yet.
+all original VMs, collection, Git and rejoin. No VM is active at this checkpoint.
+The private finalization complete proof is being adapted to reuse the exact
+collected version/format metadata before its four new stages; do not rerun those
+metadata stages at unchanged6b4fa5aa.
+
+Daemon original43854 is collected PASS at
+`07d5df345bb52323cf2a0a08d92bd53d4677daf0`: all66 cases per supported pair,
+including existing long T9, zero exclusions/skips/invalid,169.928 seconds.
+Four new original stages are joined and30 artifacts verified; four version/
+format records reuse exact collected72050 source and references. Collection
+`M7/daemon-configure-warning-admission-20261006-v1/original-collection.json`,
+SHA-256 `ec2304cde4e9c9e7bbd768e35f37931635b750f00dee446b016c9ea1e47fab72`;
+terminal `0b7320b49088f085a17af8adea84201ba7628e1e8ccdb881b1e0acac5f5a1796`.
+All six files are integrated literally and independently reviewed. The bounded
+T05 daemon admission row closes; T01–T19 added318 done/32 todo, originals
+80 done/93 todo/6 retired. Public configure serving remains unactivated.
+Never repoll43854.
+
+Private finalization formatter87212 is collected PASS at real layout child
+`6b4fa5aa5ad5f3dfbcb8e5cadfd919c19a3e1578`,4.311 seconds, six original joins
+and37 artifacts verified. Both formatters and exact ordered AST comparison pass;
+no bytes changed. Collection
+`M7/retained-finalization-format-20261006-v3/original-collection.json`, SHA-256
+`f697089b4e01f2c1f4c27f86ecbd2fdea37e7fac5707429861f8bed199337f22`;
+terminal `176130b1833bdff9abaabb215b32c9ddcebcd034667b4ddf8c023fb2e052b827`.
+All378 cases per pair remain pending. Never repoll87212.
 
 Private finalization formatter72667 is collected FAIL in2.729 seconds. Four
 original stages joined,24 artifacts verified; non-line AST comparison passed
@@ -90,8 +112,9 @@ Reviewed corrected runner preparations and exact helpers are retained at
 `8b36857a4a2f639ef4c6ca3898bf18d660ea145ac4038698e7451cea54951613`.
 Preparation is not execution evidence.
 
-- Daemon configure source is clean `94d41cb4f7b03aacc1d0e32929b67524d637f447`
-  in m7-protocol-manifests. Original81936 failed one observer assertion at its
+- Daemon configure's earlier observer correction was
+  `94d41cb4f7b03aacc1d0e32929b67524d637f447` in m7-protocol-manifests.
+  Original81936 failed one observer assertion at its
   earlier source; collection `M7/daemon-configure-admission-20261006-v2/original-collection.json`
   SHA-256 `38da9f2c102cc36b084babdaefa2180bee1e91a367586e873d07ca06a72fa1d7`
   preserves the failure. The corrected observer tolerates only fenced admission
@@ -100,8 +123,9 @@ Preparation is not execution evidence.
   `M7/daemon-configure-recovery-format-20261006-v1/original-collection.json`
   SHA-256 `1d2d927c2b6fa7447557301276b20782caa18186ecd9f84d8154bd902e163340`;
   terminal `4aa286bc123e537e52c1fc1eb53bd91671c394cc43ac525d93edbc5f89b4356d`.
-  Reuse its exact clean-source version and formatting metadata; run only four
-  new compile/test stages for the complete66-case selection on both pairs.
+  Later warning-only correction07d5df34 and its formatter72050 precede the
+  collected complete66-case paired PASS43854 above. All six final source files
+  are integrated literally; do not repeat any collected run.
 - Native compaction's authored correction was
   `644469c3285e24ffb5c73e9e3d3ddda191eaf4d1` in m7-compaction-activity.
   Original44773 failed four of231 current cases at the earlier source;
@@ -134,7 +158,8 @@ Preparation is not execution evidence.
   on234df849. Exactly Workflow, RestoreIO and the new32-case test are owned.
   Rebased operative code preserves expiry-first admission and physical history
   checks. Required complete selection is378 cases per pair across12 files,
-  including all three IO long-bound cases. Formatting, execution and literal
+  including all three IO long-bound cases. Formatting is proved at layout
+  child6b4fa5aa; complete execution and literal
   integration remain pending. Public continuation, partial/absent claims and
   helper audit remain separate.
 
@@ -156,7 +181,10 @@ SHA-256 `fbee14bac143d165f5e558fadca92f38aaee384e88321fded61df89b00b6ba03`.
 Latest collected registry is1158 keys at
 `M7/retained-finalization-format-20261006-v2/stage-attempt-registry.json`,
 SHA-256 `bf54aa1be5152b815f9e9dd11ae054663a39355227ef5fbd6ce52e038ad8560c`.
-Active43854 owns its successor registry until collection. Never repoll72050.
+Latest collected registry is1168 keys at
+`M7/retained-finalization-format-20261006-v3/stage-attempt-registry.json`,
+SHA-256 `be1aaeee5fe8716c8c04a1eca250f75c3a6cbc118c66ed10b8852589c2814b16`.
+No active successor registry exists yet. Never repoll72050.
 Original44773,12545,81936 and97674 are terminal and collected; never repoll or
 retry their unchanged source stages. ADR0055 remains the sole asked pending
 decision. None of the pending units closes its checklist row yet.
