@@ -1,5 +1,18 @@
 # M7 Implementation Tasks
 
+The latest exact current-pair full fast check at32b06b9a is collected FAIL:
+4,711/4,713 passed,two Core fixture failures,58 accepted exclusions and zero
+skipped/invalid cases. Original79551 is retained and must not be rerun unchanged.
+Both fixture repairs are source-reviewed and committed at isolated9cf1d1ec;
+formatting and both complete35-case populations remain pending. The wire codec
+formatter original90814 failed layout checking before tests. Its revised source
+and12-case paired proof remain pending. Proposed ADR0059/0060 passed independent
+source review;0059's documentation check is running,0060's is queued. ADR0056
+remains the sole asked unanswered approval. No row closes; original T01–T19
+remains81 done/92 todo/6 retired,added333 done/28 todo. Exact source, failure,
+review and original-handle pointers are in the [resume record](M7-resume.md).
+
+
 Revised Proposed ADR0056 is reviewed, documentation-checked and retained as
 historical candidate `2dba3e7a2d574a7a07d5b77b35064da94ff17317` in this branch.
 Original30193 passed all four canonical documentation steps,70.231 seconds,

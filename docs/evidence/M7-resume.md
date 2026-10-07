@@ -27,6 +27,108 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+#### Latest integration and focused verification checkpoint
+
+The exact full current-pair fast check at primary
+`32b06b9aedcbaa2bd088546da3fba95ff40be32d` is terminal and collected FAIL.
+Original79551 exited1 after2101.289 wrapper seconds; the native full stage
+ran2086.072 seconds. All eleven applications finished:4,713 executed,
+4,711 passed,2 failed,58 accepted exclusions,zero skipped or invalid.
+Both failures belong to Core; the other ten applications passed. This is
+failure evidence, not a closure result. Do not repoll79551 or rerun these bytes.
+
+Output is
+`/Users/spuri/projects/lexlapax/loopex-evidence/M7/current-integration-full-fast-20261007-v1`.
+Its immutable collection SHA-256 is
+`e30ed71085a878a8d4e38661ae69063f8ca83d511999a358ae67144d7c27a896`;
+terminal `7cd87ebdd6e156de71eaa8cd3fc8305d13ce95240e7ec6118497a5347c8e3b21`;
+registry1492 `d28e492a02ef0a3ea4a3ab785a027f487558627ed5ff9bcc3e3e12098e19c8d2`.
+All45 structured artifact records and both original joins authenticate. Root
+also rehashed606 build files across22 actual dev/test application ebin paths.
+The generic flat-artifact collector failed before writing collection files;
+this was a collector schema mismatch, not an artifact checksum failure.
+The source-reviewed one-original-only corrected collector is
+`/private/tmp/m7-original79551-full-collect-20261007-v3.py`, SHA-256
+`ea53fe23b273d65350b20263e4ee390c137885ea7d6bfae159035ec9aa6c3101`.
+Independent review SHA-256
+`cfaa026287fa8b919f07a24960775df77b9c8fe29af67e60578264fcac85ba8e`.
+It executed once and retained the original failure without rerunning tests.
+
+The two Core fixture repairs are committed in the isolated
+`/Users/spuri/.codex/worktrees/m7-core-integration-repair/loopex` at
+`9cf1d1ec0e5ac4827229e9a94026c0b1510a1165`, direct child of32b06b9a.
+Only maintenance_snapshot_scan_test.exs and context_admission_test.exs change.
+The policy ending now carries its exact current owner and admitted answer
+identity. The admission fixture consumes its held-worker invocation and selects
+the fresh deadline prompt, then checks the exact retained run/deadline/digest.
+The original wall sample and unchanged59,000-ms lower-bound assertion remain.
+V1's proposed replacement of that bound with equality alone was rejected in
+source review before native execution. V2 corrects it. Source packet
+`/private/tmp/m7-core-integration-repair-source-20261007-v2.json`, SHA-256
+`877de3bd532e5eaf0cb655d292faa3e79270d29efec01012e361264b46295b98`;
+root source review SHA-256
+`77af361a17e653c12f5d1ec0e87e4e8fb78a67b4274f454c39f93ec527894bef`.
+Both complete files retain35 cases,9 snapshot and26 admission. Formatting,
+paired native proof and literal integration remain pending.
+
+Wire creation codec raw candidate0d4b456f is source-reviewed, with398 creation
+vectors and381 configure vectors, including189 omission/tool-state combinations
+and two independent Node consumers. It is not served or proved yet. Original
+formatter90814 failed its current check-formatted stage after its formatter
+and non-line AST stages passed. It is terminal1 and collected after5.062
+seconds,four original joins and25 flat artifacts. Output
+`/Users/spuri/projects/lexlapax/loopex-evidence/M7/creation-options-wire-format-20261007-v2`;
+collection SHA-256
+`395954a87c856f038b394f3fdc9b68bf819752bc0ae1d7087abd21cc067e85b9`;
+terminal `83076e5a8ae882cc1a2b46997962e0fb3ee7203640a5dec575998fce7d71df08`;
+latest collected registry1496
+`daef592d65b2dd51096aceaef651a51b427f7d491597fdc595ef82bb56410729`.
+The Node test's long inline System.cmd argument list needs a small layout
+repair; preserve all three original formatter changes and all vector bytes.
+No tests or Node execution occurred in this failed formatter.
+
+Proposed ADR0059 V3 is independently source-reviewed PASS at isolated
+`a550ae337be6d94cea5dfcf9aa07a44ec0a571f7`. Its pair hashes are Concept
+`c584d2843c01e3401d2f9e21b5fcd7a8423d956c81d1230e8b5b6e6d371a7715`
+and Technical
+`18edd4692a6a57ddfd05d56be5f02e024dc9c68bc0ba6aa6fd0226647732f1d6`.
+Source packet SHA-256
+`ff729d96b874ca967849eb8d218f905ab6dae82be7182c50417b771c8a18e421`;
+independent exact-pair review
+`470777502e7389cc51f9528159030c5bf41b62a654fbf42fcd29a707d42d6ba5`.
+The reviewed proposed contract uses Store-owned creation custody with a
+successor barrier, one retained complete candidate, bounded recovery and exact
+cancellation identity. It does not grant implementation authority.
+Original33235 is currently running its two-stage canonical documentation
+check in the isolated worktree. Executed runner
+`/private/tmp/m7-adr0059-docs-20261007-v3.enabled.py`, SHA-256
+`9ddb8c7e40d2484ff83f7a3a51d5797f973c23c89ee5a73ddc61bf8cd5399c31`;
+output `M7/adr0059-docs-20261007-v3` under the external evidence root.
+Collect the original handle after its actual terminal exit before another
+registry consumer starts. No documentation PASS is claimed yet.
+
+Proposed ADR0060 V2 is independently source-reviewed PASS at isolated
+`5ecf70082e3def71667b42dbcc22d57b34ea1acd`, child of raw5f44c4bd.
+Concept hash `26700890c7e808be3c750d6d145b2b11d58b761658e259baf641cb1249403820`;
+Technical `374c0b571eaaf6919eb3044ccef39abab30c4083732186c56593ec45c34328a7`.
+Independent V2 review SHA-256
+`6bc14fdf010803313f1d17407a2e5f5a1d8df368ae19115fd3c1a7e96230d065`.
+The single V1 correction states that only the originally captured carrier/guard
+may remain in the signalable group after exact child/wrapper joins. Complete
+07777 file/directory mode, fixed executable custody and original work/cleanup
+proofs remain proposal scope. No native helper implementation is authorized.
+Disabled reviewed docs runner
+`/private/tmp/m7-adr0060-docs-finalized-20261007.disabled.py`, SHA-256
+`d01e72f02b4f80edfc73047c12f9901334858ca336b2d498e310ddef48cef61b`.
+Bind the actual latest collected predecessor facts before enabling once.
+
+ADR0056 remains the sole asked unanswered decision. ADR0059/0060 are not
+accepted and have not been asked. Continue already authorized codec/fixture
+work, retain pending decisions one at a time, and integrate only literally
+proved source. No checklist row closes at this checkpoint. Counts remain
+original81 done/92 todo/6 retired; added333 done/28 todo.
+
+
 Latest reviewed decision candidate: Proposed ADR0056 factual refresh at exact
 historical `2dba3e7a2d574a7a07d5b77b35064da94ff17317` is now an ancestor of m7.
 Concept SHA-256 `4fb1b01845e836fa65374e1d9d2ff28303af52930d8d9d1c0a0cf6f03303035d`;
