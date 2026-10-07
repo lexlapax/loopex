@@ -175,6 +175,35 @@ notifications to a completed task and does not resume its work; root corrected
 that mistake again for the configure terminal-name fix. Agent status remains a
 cache; committed candidates and retained original results remain the resume truth.
 
+### Next accepted daemon implementation unit
+
+The source-only daemon audit atdbef6d29 found a bounded dormant configure unit
+in admission_relay.ex, lease_owner.ex and succession_capacity.ex under
+apps/loopex_daemon/lib/loopex_daemon. Reuse existing ticket classes, holder/
+incarnation/writer-epoch/expiry guards, serial mutation, joined settlement and
+renewal. Add capacity candidates from accepted command-ID/refusal domains.
+Tests belong in lease_owner_test.exs, succession_capacity_test.exs and
+connection_protocol_test.exs; retain the existing five configure ingress cases.
+Use actual Runtime.command_for_daemon for native admission parity, not a
+manufactured accepted reply. Pin exact case counts/refusal vectors before
+implementation and run complete affected files on both supported pairs.
+
+Keep Request.parse, Request.@operations, its exact V2 inventory assertion and
+SocketConnection wire routing unchanged. ConnectionProtocol has no independent
+V2.methods gate after negotiation; adding configure to Request.@operations
+would expose it under the unchanged /2 contract. Full parser/socket activation
+must rejoin complete generations after the pending contract decisions. Stop if
+a new reply/schema, altered capacity/deadline or test-only serving API is needed.
+This map authorizes no new contract and closes no original T05 row.
+
+At the restart stop all product originals are collected. Source-only configure
+and daemon reviewers completed; native author work was frozen and is saved in
+Git. Its client status remained pending_init after interruption requests, so
+no liveness claim is inferred from that cache. An explicit stop message and two
+interruptions were issued; both managed candidate worktrees were rechecked clean
+at their exact pins. Do not restart agents from old task queues; use the committed
+resume order and source identities above.
+
 ### Historical execution records
 
 The entries below describe their named revisions. Current ownership, execution
