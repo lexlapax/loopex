@@ -6,8 +6,9 @@ exclusions, skips or invalid cases. Whole-tree floor formatting and CLI
 warning-free compilation passed; four original processes joined and 23 artifacts
 were authenticated in 146.812 seconds. Six original rows close: T06.3/T06.6
 and T10.1/T10.2/T10.3/T10.9. Broader floor preservation and attended chat remain
-open. Original T01–T19: 87 done / 86 todo / 6 retired; added 347 done / 23 todo
-after proving the dormant selector, helper byte unit and parent-binding reducer. ADR0056's exact pair is
+open. Original T01–T19: 87 done / 86 todo / 6 retired; added 347 done / 24 todo
+after proving the dormant selector, helper byte unit and parent-binding reducer
+and adding the bounded physical binding-log proof row. ADR0056's exact pair is
 now Accepted; helper execution and separate accounting/protection remain open.
 The canonical ledger/header/genesis-byte unit passed all61 cases on both pairs.
 Exact references are in the [resume record](M7-resume.md).
@@ -20,15 +21,16 @@ reader's outer LF handling changed before this new-source proof. Physical
 append/custody, accounting and helper activation remain open. Exact source,
 review and native references are in the [resume record](M7-resume.md).
 
-Model source `e7e32864` passed all six formatter stages without byte changes,
-then original58275 failed the current complete Composition selection7/8.
-The witness completed two native A-to-B requests, then physical Store reopen
-and session resume returned `owner_recovery_failed`. ReqLLM and floor stages
-remain unrun. The original failure is collected; separate source-only diagnoses
-trace recovery and witness setup before any correction. Independent physical
-binding-log V2 review passed after correcting current-owner tail recovery and
-paused-actor failure cleanup. Its four paths are frozen at isolated `905ed2a0`;
-formatter and complete70-case paired checks remain pending. Exact references
+Corrected model source `763f342c` passed all six formatter stages without byte
+changes. Both independent diagnoses identified the fixture's changing runtime
+placement ID; the correction preserves one ID across the actual physical
+reopen. Original58275 remains FAIL7/8 after two native A-to-B requests and an
+`owner_recovery_failed` resume result. Fresh complete paired model tests remain
+pending. Physical binding-log V2 source review passed after correcting
+current-owner tail repair and paused-actor cleanup. Original83780 then passed
+current syntax/layout checks but failed the floor formatter. The equivalent
+shorter callback is independently reviewed and frozen at isolated `bfb10e1c`;
+new formatting and complete70-case paired checks remain pending. Exact references
 are in the [resume record](M7-resume.md). Counts remain unchanged.
 
 The following earlier progress entries are historical where superseded above.
@@ -13999,6 +14001,7 @@ Hosted, attended and coordinated transport generation proofs remain separate.
 - [x] Install/read immutable validated retained-object bytes with actual content-addressed filesystem durability, exclusive host ownership, symlink/root guards and physical crash/fsync/uncertainty proof on both pairs; use the existing GenesisCodec as a concrete client without inventing ledger or catalog schemas.
 - [ ] Pin the complete private delegation ledger byte recipe and closed object/mutation field grammars under accepted ADR 0046 semantics before implementing append/recovery/transaction reduction; refuse incomplete or corrupt current frames without introducing a compatibility decoder.
 - [x] Implement the accepted private parent-binding captured-object validator and pure prepare-parent/bind-parent reducer; prove exact owning creation-history joins, independent digest/transaction literals, ordered replay, duplicate/conflict refusal and reserved binding completion credit on both pairs. Physical append, run accounting and helper execution remain separate.
+- [ ] Implement the accepted physical parent-binding log through the retained-object owner; prove exact prepare/bind append and owning creation-history joins, writer custody, uncertain append fencing, acquisition-scoped tail repair, original fault-actor cleanup and complete 70-case affected selection on both supported pairs. This bounded log does not activate helpers or complete run accounting, startup classification or mutation protection.
 - [x] Implement accepted ADR0056's private canonical JSON, closed binding/run headers and checksummed frames, plus production GenesisCodec byte entrypoints used by the actual retained-object install/reopen test; prove independent exact bytes, structural/size/corruption boundaries and complete affected files on both supported pairs. Physical append/recovery, transaction reduction, child accounting, mutation protection and helper execution remain separate.
 - [ ] Resolve exact retained child-accounting access and universal host mutation guards before exposing helpers through runtime-only clients; preserve host ownership, current serial session truth, retained maintenance charges and settled-child protection without copying private reducer accounting or adding an unapproved public read.
 

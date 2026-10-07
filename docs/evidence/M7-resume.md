@@ -27,7 +27,76 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
-Latest model source is clean isolated `e7e32864f46e28a9161a548fe3ee6438723bd602`,
+Current corrected model source is clean isolated
+`763f342c5e2ba597db579f7ad4523fe188ee83ca`, tree
+`4d54b6c512c1d20b452b4ef7478e8d66f0b69eed`, direct child ofe7e32864.
+One captured runtime placement ID now spans the two actual runtime starts and
+one physical Store reopen. The creating Store rejects a different runtime ID;
+both independent source diagnoses identify that fixture defect. The actual
+58275 log exposes only the public `owner_recovery_failed`, so the inner refusal
+is source-derived evidence. Production placement/recovery fences are unchanged.
+Source packet `b8ba58cabbe8088033296129b8e91579bac6609c21ad06f8317d8352f8761509`,
+independent review
+`52edd082ff570ebb2cfc65eff7e8911ef4db70c0201fe9b42f9259374e663c70`
+and root review
+`5d492cd87a5f10fa1ecc939c966c35d1000ba7078dc1463be0c56a636ef0744d`
+authenticate only the ID plumbing. Corrected test hash is
+`2730830d008a91bae7504018ea48c7555cc8e8947fb1c1a586ba93d0d8e8f10f`;
+fixture remainsda8a8ae6. Complete1179-record projection is
+`db3e9bc039dcc9146eda18c8994764cf2f7ae38d6abd4f85f04cbf3e0ab324f0`.
+All transport/history/privacy assertions, original actors and deadlines remain.
+
+Original70524 passed all six model-resume formatter stages in5.415 seconds,
+38 artifacts, with no source-byte change. Raw763f is also formatted source.
+Output `M7/native-model-switch-resume-format-20261007-v1`; collection
+`1d6b38d1fe3b6edadc544cf4210d0d98e59a98b2e6004c1a181cd2867ae598e5`;
+terminal `9a7c1956a29eda2666adea135d620568fe0151586aaa434a6f08ae348cf69010`;
+executed wrapper `b1266c04b8b69b7daeba9fc73b44872bb1436dd98c494fe1e357c49b61b7039f`;
+root formatter review
+`e9e3a67ccd4910969dc8e4834b81cb7415cd4407c5b791acbd1adcceb542d2c3`.
+Latest collected registry is1663,SHA-256
+`1daf245693496b72cbf2e0b1643671555e37e4c6e60aa3750160c75c0c27b441`.
+Do not repoll70524. Complete paired8+14 model tests remain pending.
+
+Physical helper source is clean isolated
+`bfb10e1c5d811635af6daf5db0b97059ede2709b`, tree
+`d04ecaab4957ca84e6809e1ae5adaafcf690441e`, after formatter-output415f850b
+and raw905ed2a0. Original83780 failed only the floor formatter in5.225 seconds;
+six original stages joined,38 artifacts authenticate, current non-line AST
+passed all four paths and current format check passed. Output
+`M7/helper-binding-log-format-20261007-v2`; collection
+`9cdc927b9ebb6e2e18cd333f1e9a26d03234d83d77771ed52ecc0209f9d5d1a5`;
+terminal `ca4b2a273ffbb88c31c6584e1926b404917241d7d4575e9bbfbbd75600da45e1`;
+executed wrapper `3102fd7a5448defe003083de8dcf0b2edad307b1a530fd87a37708a63325a659`.
+Historical registry1657 isab9b60b65759e2bacaa6c9bc975d5bd055f962d8c7c6b127a317f0998d087e3b.
+The same lazy condition now assigns its Boolean result before a short if;
+atomic-call count, physical actions, assertions and all bounds remain unchanged.
+Neutral source packet isd56a8019eca200b6499d1de9b923993336ef488162ec050b602390452a2a882c;
+independent review is60debc7f00441bd67988a9e94caf9333874fde6f6588dddf8df9e945f9a7de37;
+root review is8b7f2d897fffe574f25e009ff668f68c5fc6787e10b8a557e24d260f4b549ea2.
+Complete1186-record projection is52f9e73201f68e3133f15265413def092f5f4beafa259944a47679f0e0a50457.
+Corrected physical formatting and complete70 cases per pair remain pending.
+Its disabled formatter preparation23eeed021bea8484b8602c8934df69ea1b305edb9107c0a74c459d1d120d05c7
+must rebind its1657 seed after the next actual collected proof.
+
+The earlier physical wrapper exited1 before any native stage because a source
+hash loop overwrote the CLI registry digest. Exact failure descriptor
+`M7/helper-binding-log-format-20261007-v1/pre-native-preflight-failure.json`,
+SHA-256b2740aa38f033f464e63bf515a3b40b0a3fdd5d2abb69034d9187003a6907a6a,
+retains zero stages/results/reservations and no native collection. The wrapper
+variable was corrected before original83780; the existing failed output stays.
+
+All59 model resume diagnosis/source/review/raw projection/formatter and physical
+wrapper failure/correction/review/raw projection/next formatter files are
+permanently retained in
+`M7/model-resume-and-helper-format-context-20261007-v1/retention.json`,
+SHA-25657bb4dd5b519c09276ca556728b0387d63c4769d4c6771c96c1911594898b34d.
+Original T01–T19 remains87 done/86 todo/6 retired;added347 done/24 todo after
+adding the bounded physical binding-log proof row. No new row closes.
+ADR0057 remains the sole asked unanswered decision. The following records are
+historical where superseded by these source identities and registry1663.
+
+Earlier failed model source is clean isolated `e7e32864f46e28a9161a548fe3ee6438723bd602`,
 tree `29a204b29e91c8c1e5a0238ea310464048beb4d8`, direct child of97ac2326.
 The owned test hash is
 `05000abb78cbf977b9c579e82aad801326c9958a155d389bd0499247ebe7aa11`;
