@@ -27,6 +27,69 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+Primary now includes accepted ADR0057 at `a67dc97e` and the exact Composition
+support-file discovery correction at `12e391fd`. The maintainer approved one
+shared event-body format at Proposed candidate `4007adf7`; do not ask again.
+ADR0058 at `3c97b6a1` is the sole asked pending decision; no answer is inferred.
+
+Original14854 completed `bash scripts/check.sh` on clean `10628204052246b85ab936519a84efc84f1ba213`,
+tree `20bc7a6bb6343ef61836b8653e275508ef736eb4`, in2132.392 seconds.
+It is collected FAIL_OR_UNAVAILABLE, command exit1: all4830 test cases passed
+with61 designated exclusions, but Composition reported an unmatched support
+fixture under warnings-as-errors. All11 application logs,22 compiled ebin
+inventories and614 build files authenticate; two original stages joined and45
+artifacts authenticate. No unchanged retry is permitted. Retained output:
+`M7/current-integration-after-binding-full-fast-20261007-v1`; collection
+`6ad39575e2cb04a2b45cd097fd2b1ff210bf87238b8f4d3bc152414d460a4b1f`,
+terminal `2abf5f7e330a72a3b5fb47e199d34f2a86ad7f50793ece58166c4ec584f99ab0`.
+Latest collected registry1699 is
+`195d5c07b238333e3ff7a3ed3cbd415c960b5c5554818f89bee0f0157cdca639`.
+The fixture discovery correction preserves all cases and requires a new
+changed-source full check. Do not repoll14854.
+
+T13 original formatter80490 is collected PASS at raw `01a198e5` in5.893 seconds:
+six original joins,38 artifacts, all six non-line AST acknowledgements and both
+supported format checks. Output `M7/fixture-preparation-format-20261007-v1`;
+collection `6c000e49c5ddf2d5842c3b7add6aa57412478cf971fdb0a1bc8238dbd51ad20b`,
+terminal `bfd7eadf93d4fc8b85392dc3087b8d7a4f80391370fe40f81d9c9096ad2f569c`.
+Latest collected registry1705 is
+`efe8ecad2e745090c033c18856f85b9c83353b69ad89bef9ca0281787057f629`.
+The actual format-only child is `f3f6fb985d59e6d9ad825518fe8f85aca7a80a25`,
+tree `c118c9802aa803e2eed936cbcf4abece26d3d2e4`; complete1187 NUL projection
+`8a5c2d02e9f7562c62a3ee615b85ba89b4bdac3dca4ad416d90d7f33076af793`.
+Paired29 proof V3 consumes this exact positive flat formatter with the0644
+registry exception. Its factual binding passed independent reviewc6b2309d;
+root enabled the gate only, producing runnerab1e6474. Original27420 is LIVE
+at this checkpoint, running the complete29-case proof on both supported pairs.
+Retain and observe that same original to terminal, collect once, and integrate
+only literal proved source. No row closes and no provider campaign is authorized.
+The exact runner, factual reviews, original-session receipt and formatted
+projection are retained as21 files at
+`M7/fixture-formatter-and-paired-proof-execution-context-20261007-v1/retention.json`,
+SHA-256 `a5d90968837bc5b009cd07b8cbea5646ad7a9ff0be742427b51d001e6500771e`.
+
+Accepted attempts codec source `36e97968` is saved in
+`/Users/spuri/.codex/worktrees/m7-attempt-body-codec/loopex`, with the full body
+source and duplicate-key baseline repair independently reviewed. Complete54
+cases on each pair remain required. T04 resumed preparation cleanup source
+`a79b4fd5` is saved in its attached isolated worktree; two new cases plus36
+existing workflow/resume cases remain unrun. Neither source review closes a row.
+Original T01–T19 totals remain87 done/86 todo/6 retired; added349 done/23 todo.
+
+Approved decision and corrected T13 V2 source context is retained at
+`M7/fixture-v2-and-approved-attempts-context-20261007-v1/retention.json`, SHA-256
+`94f4db54ccfcb403a7ab9d0b5024a1f8efd78cdad1c10b79c4e21dbfe15c6320`.
+Current full-run execution context is retained at
+`M7/current-integration-after-binding-execution-context-20261007-v1/retention.json`,
+SHA-256 `5cb60b2531d2d6ab7afcdcbc0650a781da2a7ea19bf4e3a1d5d4c3eba6468490`.
+Codec V1/V2 source, cleanup source, native blueprints, corrected T13 V3 proof
+and warning fix with reviews are retained as52 files at
+`M7/accepted-codec-cleanup-and-full-failure-context-20261007-v1/retention.json`,
+SHA-256 `c76b127cc1c51ac8922ab7a787c1ea71771e7ac942179d18abab33e650dc8f23`.
+These records preserve source preparation; they supply no future native result.
+
+The following checkpoint is historical where superseded above.
+
 Current primary rejoin is the exact successful helper-storage source
 `c6eee6466f8342f4a67e3e7541392dbb340808ad`, tree
 `2baa85737f03ae123a720419998ead493fe45d7f`, direct child of73d71176.

@@ -22,9 +22,10 @@ The trusted fixture preparation unit is independently reviewed and frozen at
 clean isolated `01a198e53cd3e0fc9ca40011e2d1a197fca6b05a`. Six CLI files reuse
 ordinary configuration, capture the exact decoded catalog bytes and derive the
 fixed pinned oracle runner. Fourteen new cases plus15 preserved cases require
-formatting, warning-free CLI compilation and29-case proofs on both toolchains;
-none of those new results exists yet. The added T13 preparation row remains
-open. Actual campaign admission and the dispatching wrapper remain separate.
+warning-free CLI compilation and29-case proofs on both toolchains. Original
+formatter80490 passed both format checks and all six AST checks in5.893 seconds;
+the actual format-only child is `f3f6fb98`. Compilation and tests remain unrun.
+The added T13 preparation row remains open. Actual campaign admission and the dispatching wrapper remain separate.
 No provider attempt is started.
 
 The earlier model switching/restart unit remains integrated from `763f342c`:
@@ -35,10 +36,18 @@ with original8827's complete170-case floor proof, as retained in the resume
 record. T01/T02/T09/T10 original checklists are complete; their separate added
 or milestone-level obligations remain where listed.
 
-ADR0057's exact Proposed pair at `4007adf7` awaits maintainer acceptance before
-the attempts event-body codec. The full current integration check must run once
-on the new clean primary commit after this literal rejoin; the historical
-`ff784916` result does not cover subsequent source additions. Full floor,
+ADR0057's exact pair at `4007adf7` is accepted by the maintainer's
+"Approved 1. One shared format" decision, integrated at `a67dc97e`. The closed
+event-body codec is saved and independently reviewed at isolated `36e97968`;
+its formatting and complete54-case paired proof remain unrun. The added T14
+body row stays open. ADR0058 is the sole asked pending decision.
+
+Original14854 completed the full current check at `10628204` in2132.392 seconds.
+All4830 cases passed with61 designated exclusions, but the command failed on
+an unmatched Composition support fixture. The original two processes joined
+and45 artifacts were collected; the result remains FAIL. Exact discovery
+classification is corrected at `12e391fd` without changing any test. A new
+changed-source integration check must prove the correction. Full floor,
 release, attended, helper and campaign obligations remain open.
 
 The following earlier progress entries are historical where superseded above.
@@ -14112,7 +14121,7 @@ repeating completed provider work.
 
 ### Added implementation subtasks
 
-- [ ] Pin and implement the closed current attempts-event body union, including missing-evidence consumption, retained case identity, writer/handoff/head relations and causal authorization; prove exact independent vectors and all positive/negative body variants on both supported toolchains before ordered replay, physical writer ownership or runner activation. ADR0057 is Proposed; its independent source/vector review is not acceptance.
+- [ ] Pin and implement the closed current attempts-event body union, including missing-evidence consumption, retained case identity, writer/handoff/head relations and causal authorization; prove exact independent vectors and all positive/negative body variants on both supported toolchains before ordered replay, physical writer ownership or runner activation. ADR0057 is accepted at `a67dc97e`; source-only codec `36e97968` still requires its complete paired native proof.
 
 - [x] Inventory all 74 numbered V1–V13 steps and 155 descriptive subcases against exact accepted plan spans and current supporting tests; retain source identities, existing evidence and every missing executable owner/oracle pin. This is read-only planning evidence, not an accepted execution manifest or provider execution.
 
