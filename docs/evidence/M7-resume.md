@@ -27,6 +27,43 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+ADR0055 is now accepted by the maintainer's explicit option1 reply on
+2026-10-07, binding exact Proposed candidate `f1f0fb3a07e35d6a3712ce4054f70c9bd4adc91e`.
+The [acceptance disposition](../developer/agent-context-map.md#disposition-m7-remote-creation-options-2026-10-07)
+records both historical digests. Native initial-creation implementation may
+proceed; transport generation activation and its complete proofs remain owed.
+This resolves the earlier asked0055 question. ADR0056/0057/0058 remain Proposed;
+the directory-mode helper remains a separate unaccepted dependency/ownership
+proposal. No other approval is inferred.
+
+T15 actual formatter11792 is terminal0, collectedPASS5.082 seconds, six original
+joins and39 artifacts. Its literal clean child is
+`38881d933cd9355e8ee72909dd94d13450f30f5e`; formatted packetV2 is
+`/private/tmp/m7-restore-regular-mode-formatted-source-20261007-v2.json`, SHA-256
+`318587fdad921da8f7463a4c1c4a966adcb9fdea7b800135db1f1038cf03c1d5`.
+V1's old raw Git blob metadata was caught and corrected before test admission;
+current source hashes did not change. Formatter collection SHA-256
+`c630251d99f03cb0804af4c8261bc76423b451b01b2626f0b714d7265e366509`;
+terminal `c45b0b1380d8dede96a0a83efd2987490d8626c45399a379c59ba02b87bfc208`.
+Latest collected registry1454 is
+`/Users/spuri/projects/lexlapax/loopex-evidence/M7/restore-regular-mode-format-20261007-v1/stage-attempt-registry.json`,
+SHA-256 `9efafe53c0a2508415e0246e39089479ac8e40e3c4355898ab32c2069833869f`.
+The independently reviewed complete175 paired proof original67579 is now
+terminal1 and collected FAIL: current174/175, floor unrun, zero exclusions/skips/
+invalid,130.965 seconds, four original joins and29 flat artifacts. Root also
+verified all11 native/timeline artifacts referenced by the retention manifest.
+The new copy test incorrectly calls a private operation without standalone IO
+admission; it fails with invalid_io_request before copying. Keep every original
+bound and correct the test through a real supported path before a fresh source
+admission; no copy/publication or directory preservation PASS is claimed.
+Output `M7/restore-regular-mode-admission-20261007-v1`, collection SHA-256
+`a0649d164c756161fd2979e7b02f57940f3a1c3d1cbc9214ec3f8e75002f7e96`;
+terminal `a21a0e15c8513e2e4ebbe8c86d24a3b412915c2202c4b4e95266ae446be19752`.
+Latest collected registry1458 at that output has SHA-256
+`c8dc8639c1ee343c8f6808190612bb02316c494460edc7019132b663693e4be6`.
+Never repoll67579 or retry unchanged failed38881 source. Formatter alone closes
+no task; counts remain original81 done/92 todo/6 retired; added331 done/28 todo.
+
 Latest checklist audit: close only T09's added "Pin pending/response decoder
 vectors and public question event schemas." Current artifact hashes and relevant
 SessionState decoder ranges join the already collected exact source

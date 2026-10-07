@@ -3,7 +3,7 @@
 
 Technical depth: [Remote session creation options](0055-remote-session-creation-options-technical.md#technical-depth).
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-06
 - **Decision owner:** Maintainer
 - **Amends:** ADR 0044's remote creation and fresh-selection boundary, ADR 0049's immutable host selection projection, and ADR 0050's preparation invocation/lifetime scope. Existing v3 genesis, Store transaction identity and host authority remain.
@@ -158,4 +158,4 @@ This proposal authorizes no closure, release or implementation before acceptance
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | — | — | — |
+| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-m7-remote-creation-options-2026-10-07) | candidate `f1f0fb3a07e35d6a3712ce4054f70c9bd4adc91e`; concept `sha256:d9f57b77ab4e0f190eda82b5b2eaf6baa343b409523f1a615d4d2b079c9a8663`; technical `sha256:2a4d1d81c44aff2e7770f04eadf5aa5a4c1a9e4a6bf70163eb99bc7e30055346` |

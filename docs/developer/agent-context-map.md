@@ -6961,3 +6961,27 @@ production contract, required case or cleanup proof changes. The
 [active plan progress](../plans/M7-technical.md#technical-depth) records what this
 test now proves. Earlier failed candidates remain failed; complete current/floor
 restore proof is required before full-check admission. Approval is not evidence.
+
+<a id="disposition-m7-remote-creation-options-2026-10-07"></a>
+### M7 remote session creation options accepted, 2026-10-07
+
+The maintainer replied "Approve option a" and explicitly selected option1,
+"Approve ADR 0055", for the exact [Concept](../adr/0055-remote-session-creation-options.md#concept)
+and [Technical depth](../adr/0055-remote-session-creation-options-technical.md#technical-depth)
+pair at candidate `f1f0fb3a07e35d6a3712ce4054f70c9bd4adc91e`.
+Historical Proposed Concept SHA-256 is
+`d9f57b77ab4e0f190eda82b5b2eaf6baa343b409523f1a615d4d2b079c9a8663`;
+Technical SHA-256 is
+`2a4d1d81c44aff2e7770f04eadf5aa5a4c1a9e4a6bf70163eb99bc7e30055346`.
+Within the pair only Status and the empty Acceptance row change.
+
+Implement the closed version1 remote options, atomic initial settings and
+host-captured tool subset, authored alias/retry identity, existing preparation
+callback's initial-creation use and pure version1 rebase. Runtime Control owns
+one creation preparation under its captured60,000-ms work cutoff and original
+cleanup grace; overlap, caller loss and commit uncertainty retain their exact
+specified dispositions. Host policy, routes, credentials and tool authority
+remain host-owned. This amends ADR0044 remote creation, ADR0049 immutable
+selection and ADR0050 preparation scope. Coordinated generation activation,
+required proof and other Proposed ADRs remain separate. No test result,
+milestone closure, merge, release or publication follows from acceptance.
