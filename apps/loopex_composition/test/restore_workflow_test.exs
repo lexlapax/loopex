@@ -1263,6 +1263,10 @@ defmodule LoopexComposition.RestoreWorkflowTest do
     destination_manifest
   end
 
+  # Concept: the complete 64-restore fixture has its own aggregate allowance.
+  # Technical depth: the maintainer approved 600,000 ms on 2026-10-06. Each
+  # restore keeps its original work, grace, cleanup and exact-join bounds.
+  @tag timeout: 600_000
   test "64 actual one-ledger restores retain every ordinal and refuse 65 without physical IO",
        context do
     observed_start = System.monotonic_time(:millisecond)

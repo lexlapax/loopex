@@ -56,15 +56,98 @@ Add only the dormant native admission unit, with actual authority/order/renewal/
 cleanup and negotiated-wire refusal proofs. Its separate T05 added row is open.
 
 ADR0054's exact pair is accepted by the maintainer; compaction implementation
-may proceed. The next individually asked decision is the64-restores aggregate
-cutoff: proposed600,000ms aggregate only, retaining every10,000ms per-restore
+may proceed. The maintainer also approved the64-restores aggregate
+cutoff:600,000ms aggregate only, retaining every10,000ms per-restore
 work limit,1,000ms fixture grace, cleanup deadline, join and64/65 integrity proof.
-It is unanswered. Full restore and full fast proof remain blocked by the unchanged
-known-red60,000ms case; never silently raise its limit or retry unchanged source.
+The maintainer approved this exact aggregate-only change. It is recorded in the
+active plan and test before execution. Full restore and full fast proof remain
+unproved; retain earlier failures and do not repeat their unchanged candidates.
 
 The goal is active. Original T01–T19:80 done/93 todo/6 retired;
-added305 done/41 todo. No main merge, milestone closure, tag, publication or
+added305 done/43 todo. No main merge, milestone closure, tag, publication or
 paid campaign is authorized. Earlier entries below describe their named revisions.
+
+
+Acceptance documentation original22877 is collected PASS at primary
+`830a89b798bf890a9dbbf50d08b28b62bd0c4ac3`, pushed to origin/m7. The complete
+current `bash scripts/check.sh --docs` took70.455 seconds overall, with one
+original stage joined and13 artifacts verified. Collection
+`M7/compaction-acceptance-docs-20261006-v1/original-collection.json` SHA-256
+`7268647aab2469ed4ff2703faa31c6233a05a313833c43b7451a3199ab24f1ad`;
+registry1044 SHA-256 `6144feecb8e52b96341a64ec4442f51af6cb2982ff5181ed63d69160127849fb`.
+Never repoll22877. This documentation check is not a full fast proof.
+
+Compaction native source work owns StreamDomain, the new closed native codec,
+coordinator/Control and bounded StreamRelay activity mode in managed
+m7-compaction-activity. Independent wire source work owns the closed Protocol
+codec, Delivery/WireRecords, the daemon progress handler and affected tests in
+managed m7-compaction-wire. Both start from830a89b7, use non-overlapping paths
+and run no VMs or Git mutations. Root owns all execution and rejoin. Current
+foreground Stdio has no actual progress routing; direct Delivery projection
+proof cannot close that gap. Current daemon progress routing must drop this
+new family until coordinated generation activation.
+
+Daemon formatter original11249 is collected PASS,5.241 seconds, six joined
+stages and37 artifacts verified. Independent authored backups and non-line AST
+comparison prove only layout changed; both toolchains admit identical bytes.
+Collection `M7/daemon-configure-format-20261006-v1/original-collection.json`
+SHA-256 `cf12fd0c987556b016295e8b913afd239dea66efc312dd5a3af1a6a5053613d2`;
+registry1050 SHA-256 `7e55c1392e6c97055bc8c78f1de9c469e89d275b92efe53a985075d1dffb5d46`.
+Never repoll11249. Root committed isolated daemon candidate
+`3be4ddafdf7bf1b7668bdbb5a7bfda557e52a40d`; original15205 is collected FAIL:
+current56/66 passed, all ten new cases failed at startup invalid_runtime_options,
+89.879 seconds overall; floor unrun. Collection
+`M7/daemon-configure-admission-20261006-v1/original-collection.json` SHA-256
+`22c5b261e0706325be18b532f8a0b04a2e9004b15a317b552fa78b1dc36af770`;
+registry1054 SHA-256 `84d3359cba487e5d33d07635826da64cce58323bc64238533469b280601de9af`.
+Never repoll15205. The fixture omitted required executor and policy authority;
+root committed the causal fixture-only correction at isolated6e633865. All ten
+oracles and original work/cleanup bounds remain unchanged. No daemon row closes yet.
+
+
+Corrected-fixture formatter original86109 is collected PASS at exact clean
+`6e63386575d51912614cba946e47ef5edad9505d`,5.089 seconds, six joined stages and37
+artifacts. No bytes changed, and current/floor formatting/AST all pass.
+Collection `M7/daemon-configure-startup-format-20261006-v2/original-collection.json`
+SHA-256 `b6da762101022fcd94b9df3556d0c54690f49bfe6da89071b904a05716dd2399`;
+registry1060 SHA-256 `19a69a32a4928a22bae258cabf26b7746315e57d89f461094ddd5936cb806c20`.
+Never repoll86109. A prior formatting admission at original terminal chunk49834d
+refused a duplicate same-source tool-version stage before any VM,0.598 seconds;
+its registry stayed1054. Retained collection
+`M7/daemon-configure-startup-format-20261006-v1/original-collection.json` SHA-256
+`85b6b8360dddca37e0493eed17fc21ec2beaca09eeece5c73e7653856928ddb3`.
+This is metadata refusal, not a second failed product run. The new paired daemon
+wrapper reuses the exact clean-source collected tool-version/format records
+through pinned terminal artifact hashes and separately runs compile/full66 cases;
+reused metadata never counts as new original stages. No empty commit or renamed
+version stage is used to bypass once-only admission.
+
+Corrected daemon admission original81936 is collected FAIL at `6e633865`,
+89.377 seconds overall. Current executed all66 cases with65 passed and one
+failed; floor did not run. The uncertainty case attempted a definitive session
+status while recovery returned session_unavailable. Its causal correction is
+pending; no daemon row closes. All two original stages are joined and18 artifacts
+verified. Collection `M7/daemon-configure-admission-20261006-v2/original-collection.json`
+SHA-256 `38da9f2c102cc36b084babdaefa2180bee1e91a367586e873d07ca06a72fa1d7`;
+terminal `880ac3584e619ba64db0329bd969fb37e10e8246dd423b22099fb122dd709550`;
+registry1062 SHA-256 `f68c929b8e99b23f6fc789d90b6459409137dd740f408c9439182253cecf1778`.
+Never repoll81936 or repeat that unchanged failed candidate. Root owns the next
+VM after collection; the restore aggregate approval is independent of this failure.
+
+Reviewed compaction source is saved in isolated managed worktree commits:
+native `578ae5842b9db212b2a475e33f215055e8b227fc`, eight paths and25 new cases;
+wire `399d9dc50570ae3307f1bce8c2e831d8426458b9`, eight paths and39 complete cases.
+Root queues complete native231 cases including ordinary streaming/provider/bounds
+regressions, and full wire39 cases, on both pairs after owned common formatting.
+Neither source is integrated or claimed passing. Native review accidentally
+wrote one static temporary declaration inventory; no repository write/VM occurred,
+and no OS-isolated independent closure review is claimed.
+
+The sole asked pending decision is now ADR0055 remote initial configuration,
+instructions and immutable tool selection, exact Proposed pair at
+`f1f0fb3a07e35d6a3712ce4054f70c9bd4adc91e`. ADR0056 helper ledger and0057 attempts
+bodies remain queued. Restore aggregate approval changes only its named fixture;
+all per-restore deadlines,64/65 proofs and full current/floor group remain required.
 
 
 Configure original17193 is collected PASS at isolated candidate

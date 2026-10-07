@@ -6947,3 +6947,17 @@ domain and single-observation closure rule. No successor replay or synthetic
 closure is permitted. Coordinated generation
 activation and its required proofs remain separate. Acceptance supplies no
 test result, milestone closure or publication authority.
+
+<a id="disposition-m7-restore-aggregate-cutoff-2026-10-06"></a>
+### M7 actual restore fixture aggregate cutoff approved, 2026-10-06
+
+The maintainer approved 600,000 ms for the complete 64-actual-restores test's
+aggregate ExUnit cutoff. This replaces its implicit 60,000-ms aggregate limit
+and permits up to ten minutes for the complete fixture. Preserve every restore's
+10,000-ms work limit, 1,000-ms fixture grace, original derived cleanup deadlines,
+exact process joins, independent backups, modes, epochs and integrity checks.
+Transition 65 still refuses before claims, opens or mutation. No other timeout,
+production contract, required case or cleanup proof changes. The
+[active plan progress](../plans/M7-technical.md#technical-depth) records what this
+test now proves. Earlier failed candidates remain failed; complete current/floor
+restore proof is required before full-check admission. Approval is not evidence.

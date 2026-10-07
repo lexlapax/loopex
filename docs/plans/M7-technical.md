@@ -2084,3 +2084,13 @@ former false acknowledgement; the retained owner still cancels and joins its
 worker. The final complete quiesce selection passes 31 active cases on each
 supported pair. Exact outputs and the final three-file source patch are retained
 in the task record; combined full integration remains the next step.
+
+On 2026-10-06 the maintainer approved a 600,000-ms aggregate ExUnit cutoff only
+for the complete 64-actual-restores fixture, replacing its implicit 60,000-ms
+cutoff because the serial physical fixture reached only restore 42 before that
+implicit limit. The fixture’s required proof now uses a ten-minute aggregate bound rather
+than a one-minute bound. Every restore retains its 10,000-ms work limit, 1,000-ms fixture
+grace, original derived cleanup deadlines, exact process joins and integrity
+checks; transition 65 still refuses before physical IO. The full current/floor
+restore proof remains required. The [disposition](../developer/agent-context-map.md#disposition-m7-restore-aggregate-cutoff-2026-10-06)
+records this maintainer override; approval supplies no passing evidence.

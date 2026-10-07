@@ -4,10 +4,10 @@ Native authored bounds are complete in the bounded added T11 row. Original88112
 passed all148 cases on each supported toolchain at `a01f4b4c`, in197.265 seconds,
 with all eight original stages joined and41 artifacts verified. All ten source
 files match the integrated primary bytes. Original T01–T19 remains80 done/93
-todo/6 retired; added305 done/41 todo after adding the separate daemon configure
-admission unit. Daemon source work is running; served generation activation
-remains open. ADR0054 is accepted; the restore aggregate cutoff question is
-pending. Exact proof references and continuation order are in the
+todo/6 retired; added305 done/43 todo after adding the separate daemon configure
+admission unit and two bounded compaction units. Daemon admission proof failed65/66 on current; its causal correction is running. Served generation activation
+remains open. ADR0054 and the restore aggregate-only cutoff are approved; ADR0055 is the
+sole asked pending decision. Exact proof references and continuation order are in the
 [restart checkpoint](M7-resume.md#technical-depth).
 
 The entries below record earlier revisions and failed attempts.
@@ -13379,6 +13379,10 @@ the still-open real-provider, live protocol, persistent-fault or closure lanes.
 
 ### Added implementation subtasks
 
+- [ ] Implement accepted ADR 0054 native compaction activity: exact closed six-member item, committed actual owner/episode, compaction attempt domain and one positive-permit emission through serialized current-owner bounded routing. Prove automatic/standalone producers, loss/uncertainty/duplicate/privacy cuts and joined constant-state relay lifetimes on both pairs; no closure or successor replay.
+- [ ] Implement accepted ADR 0054 closed wire codec and identical foreground/daemon projections with canonical identities/quantities, privacy refusal and existing frame/queue limits. Keep current served generations from emitting the unactivated family; complete transport progress integration, independent clients and generation activation remain separate.
+
+
 - [x] Complete the real Local Store maintenance crash matrix for automatic and standalone ownership at preparation, staging, settlement, checkpoint and publication across before-linearization, after-linearization-before-result and exact recovery re-presentation; prove precise durable cuts, atomic outbox, raw prefixes, conservative ambiguous spending/no redispatch, safe summary continuation, stale-writer recovery, exact results and process joins on both toolchains.
 
 - [x] Repair run-owned maintenance cleanup confirmation for inherited unsettled provider attempts using their authenticated owner epoch and retained termination evidence, without changing result keys, persistence fields, parent outcome or usage; pin owner-loss/abort/deadline uncertainty, retain confirmed completed-reply/source cleanup and reject forged claims under strict replay on both toolchains.
@@ -13774,7 +13778,7 @@ in the [restart record](M7-resume.md#technical-depth).
 ### Added implementation subtasks
 
 - [ ] Implement accepted ADR 0051 successive current-format restore: capture and validate the complete retained prior lineage through the existing owned IO guardian, append ordinal n+1, preserve historical bytes/modes/role bindings and sparse ledger histories, and refuse transition 65 before mutation. Prove actual A→B→C with available/lost-source combinations, historical placements and malformed higher-head controls on both pairs.
-- [ ] Prove the accepted lineage-count boundary with 64 actual successive restores of one real empty Local ledger, exact joined owners, complete independent backups, preserved administrative bytes/modes and distinct epochs; derive the 65th plan from that actual cut and refuse before claims, opens or mutation under the unchanged fixture bounds.
+- [ ] Prove the accepted lineage-count boundary with 64 actual successive restores of one real empty Local ledger, exact joined owners, complete independent backups, preserved administrative bytes/modes and distinct epochs; derive the 65th plan from that actual cut and refuse before claims, opens or mutation under the approved 600,000-ms aggregate cutoff and unchanged per-restore work/grace/cleanup bounds.
 - [ ] Isolate complete historical administrative projection by omitting a prior source-retired manifest member from an actual later baseline while keeping the physical fact and fully rebinding all dependent canonical records and hashes; require a subsequent transition to refuse before destination mutation with exact joined cleanup.
 - [ ] Implement accepted ADR 0051 bounded read-only public lookup with exact current, historical, pending, absent and error outcomes; preserve retained claims and incomplete higher-head truth, perform no reclaim/continuation/activation, and prove physical faults, caps and original cleanup bounds on both pairs.
 - [ ] Implement accepted ADR 0051 public restore outcomes and original-transaction resolution: validate matching retained canonical intent/candidates and authority termination, re-sync equal stages, finish only remaining stages, and return the same validated receipt for committed duplicates without new generations or source activation. Prove each phase fault and uncertainty path on both pairs before exposing the complete public contract.
