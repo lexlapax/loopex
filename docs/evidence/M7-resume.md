@@ -132,34 +132,53 @@ seconds, six original joins and37 artifacts. Collection
 `M7/public-restore-format-20261007-v2/original-collection.json`, SHA-256
 `69415aa23b12aa9ff9fc3e72790dc817401f4547b9a0c039956b2bd93a1c856d`;
 terminal `960d33ad8507af0d0b0566dd091b83f727886e8e6d84442e82d17b5f9709bb03`.
-Complete proof original89004 is running on frozen981eba27; root alone owns its
-original handle and collection. It selects all472 composition cases, including
-all109 IO cases and all three actual long-bound witnesses, plus14 executor
-codec cases on each pair. Current execution has observed three unchanged
-partial-cleanup fixture failures, four generation-temporary recovery failures,
-and an unused alias warning. The original complete stage remains running;
-read-only diagnostics are separate from its frozen source. No test PASS or
-public-row closure is claimed yet. Preparation packet
-`M7/public-quiesce-preparation-20261007-v1/inventory.json`, SHA-256
-`0f916d836e20aeaa953f587e9c4eeced3b2dae8a3366b8db781b47520a5007ce`,
-retains13 exact reviewed source/patch/wrapper/helper copies outside temporary
-storage. Wrapper `/private/tmp/m7-public-admission-20261007-v1.py`, SHA-256
-`016f772b76d111915b034da64d19d4675f26c1d9f04b4f7298642e4b955dcad9`,
-reuses four exact-source collected48794 metadata records and retains real
-witnesses before temporary cleanup. Do not mutate its seven owned paths or
-launch another VM before original89004 is terminal and collected.
+Complete proof original89004 is collected FAIL at981eba27: all472 current
+composition cases executed,465 passed and7 failed, zero excluded/skipped/invalid.
+Two original compile/test stages joined and20 artifacts were verified,421.008
+seconds. All three actual IO long-bound witnesses and the real64-restore case
+completed; floor and Codec stages did not run after the first failure. Collection
+`M7/public-restore-admission-20261007-v1/original-collection.json`, SHA-256
+`7f2d1fcd3e7b9661ecffd51087b655564fc95b4d427941185e898b0ea1be9de0`;
+terminal `b2d06349e753d92cf23475574d12c5d0e08ba5d78a66724445cea44ad3c85351`.
+Never repoll89004 or retry unchanged981eba27. Wrapperv1 is retained with its
+original collection; its failure cannot become a later PASS.
 
-Quiesce V2 source review passed after fixes for original live monitors, immediate
-ready delivery and waiter custody before work with joined failure cleanup.
-Formatter original52710 is collected PASS at e281353c,3.833 seconds, six joins
-and37 artifacts; its AST-preserving formatting child is saved at
-`341029a2e6138c9d4211f41a8219f596ce106286` in m7-quiesce-controls.
-Collection `M7/quiesce-controls-format-20261007-v1/original-collection.json`,
-SHA-256 `222d83dd2b506a99250dcf2d2e48e5cb7f465899a179f583cd13382169a971c5`;
-terminal `3c9b2baa223fe8b02b35c278d5fbe795a00774679e87f70d9cbc4656e7b4207c`.
-No quiesce tests ran yet. Latest consumed registry before89004 is1240 in that
-output, SHA-256 `180797007c202b67a376bde592ab00e6bc0734530d8911c31e540bf054e00722`.
-Never repoll48794 or52710. Any next VM consumes89004's collected successor.
+The reviewed real source child is
+`f96a7d52a58f52f5450457f4f7efd1d7c8b2d434` in m7-restore-public-resolution.
+Fresh restore now publishes/syncs/readbacks every ledger's canonical destination
+records before any generation temporary or replacement, as ADR0051 requires;
+strict retained admission and all four failing public temporary fixtures remain
+unchanged. Three stale partial-cleanup fixtures now bind the actual joined absent
+and intact claim roles with native/canonical owner checks. Their original25-case
+census, refusal, payload, no-release, cutoff and join assertions remain. Removed
+one unused migrated caller alias. Eight source/fixture paths now differ from
+base d5f89363; formatting and complete472+14 paired proof remain unrun on this
+child. No public-row closure or public restore PASS is claimed.
+
+Preparation packet `M7/public-quiesce-preparation-20261007-v1/inventory.json`,
+SHA-256 `0f916d836e20aeaa953f587e9c4eeced3b2dae8a3366b8db781b47520a5007ce`,
+retains13 reviewed source/patch/wrapper/helper copies before that correction.
+The correction packet/patch are `/private/tmp/m7-public-generation-order-correction-20261007-v1.json`
+and its `.patch`, SHA-256 `14499d8f93ee7871bb78ca0c8fea1a069730ab521acdec13f27b2094ead08df1`
+and `68c41984cace99d12cf7d40eaddbbe15a1a46361bf9cb815b038b9b2a1b6913c`.
+
+Quiesce V2 source review passed after original live-monitor, immediate-ready
+and pre-work waiter-custody corrections. Formatter52710 is collected PASS,
+3.833 seconds, six joins and37 artifacts, at e281353c. Its AST-preserving child
+341029a2 passed original97856:34 fast cases per pair, four unchanged production
+long-bound exclusions, zero skipped/invalid/failed cases,33.716 seconds, eight
+original joins and41 artifacts. Collection
+`M7/quiesce-controls-fast-admission-20261007-v1/original-collection.json`, SHA-256
+`cf449e36062f66d7fde9c556e0fdfdb3bb59b963347bb87b4b29eef53e72bd51`;
+terminal `48fc1a555fcf3a9604a749d13a037cf35a045626802f4b5f204b1eea4a1c2dc9`.
+The single tested file is integrated literally; only the bounded current-control
+row closes. Historical520ff308/0823aa50 attribution and production-duration
+release obligations remain open. Never repoll52710 or97856.
+
+No VM is active. Latest consumed registry1250 is in the quiesce fast output,
+SHA-256 `b4294cd33fad03441f3237c3633f3dac465ad31453d39b90e16161ab9e777c0c`.
+Root owns every new VM, original collection and literal rejoin. Current T01–T19
+original80 done/93 todo/6 retired; added323 done/30 todo.
 
 The unexecuted full-fast wrapper remains stale. Its next concrete candidate must
 refresh the complete BASE-to-candidate non-Markdown and documentation inventories,
@@ -1668,11 +1687,12 @@ waive any outcome or required lane.
 
 ### Checklist
 
-Original T01–T19:78 done /95 todo /6 retired. Added:300 done /39 todo.
-Including T00: originals78/101/7; added304/40. Run
+Original T01–T19:80 done /93 todo /6 retired. Added:323 done /30 todo.
+Including T00: originals80/99/7; added327/31. Run
 `python3 scripts/m7-task-status.py` for the grouped tally; do not infer closure
-from partial implementation. The last completed added row is T15 retained source
-retirement. Original tasks and added implementation rows remain distinct.
+from partial implementation. The last completed added row is T16 current
+quiesce startup-loss and pre-gate controls. Original tasks and added
+implementation rows remain distinct.
 
 Remaining major work includes composed Core/transport proofs, complete served
 wire generations, helper execution/accounting/ledger, attempts ownership/events,

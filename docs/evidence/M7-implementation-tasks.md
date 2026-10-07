@@ -45,6 +45,14 @@ at formatter child341029a2; source review and paired formatting passed, tests
 remain unrun. Exact handles, hashes and continuation order are in the restart
 checkpoint. Original T01–T19 remains80 done/93 todo/6 retired; added322 done/31 todo.
 
+Current quiesce controls original97856 passed all34 fast cases per supported
+pair in33.716 seconds, with four unchanged production long-bound exclusions,
+zero skipped/invalid/failed cases, eight exact original joins and41 verified
+artifacts. The single tested fixture file at341029a2 is integrated literally;
+one bounded added T16 row closes. Historical failure attribution and production
+long-bound release evidence remain separate. Original T01–T19:80 done/93 todo/
+6 retired; added323 done/30 todo.
+
 The entries below record earlier revisions and failed attempts.
 
 Original92272 at `ff36e0c1` is collected FAIL after181.799 seconds. Construction13
@@ -13938,7 +13946,7 @@ in the restart checkpoint. Broader restore/decoder/public/helper rows stay open.
 - [ ] Repair the nine seed406612 CLI failures from the48ca full check by preparing the genuine provider-runtime lifecycle fixture through existing guarded startup; retain the first failure, preserve all startup/signal/resource/diagnostic/cleanup assertions, prove cold-first and mixed real fixtures on both pairs, then verify ordinary CLI in the next combined integration candidate.
 - [ ] Run the combined chat-progress, command-bounds and native alias-preparation integration candidate's full current-pair fast check once from a clean committed checkout; retain exact SHA, complete output, measured duration and digest. Keep required floor closure, live wire joins and observed T16 task-shutdown diagnostics separate.
 - [ ] Resolve the exact 0823aa50 full-check pre-fence runtime_unavailable under untraced combined load; retain failed output, establish its phase/cause and exact process lifetimes, preserve the original gate/fence/reap/cleanup/Store assertions, and verify a clean committed integration candidate without relabeling the failed run.
-- [ ] Prove current quiesce startup-loss and pre-gate cutoff controls with captured original actors: retain the 63-reader/sibling shared cutoff, mixed announced/unannounced cancellation and exact joins, plus held child-resolution and immediate-forward controls under the unchanged initial gate/reap limits. Keep missing historical 520ff308/0823aa50 output and unknown old interleavings separate; current controls do not reconstruct the past.
+- [x] Prove current quiesce startup-loss and pre-gate cutoff controls with captured original actors: retain the 63-reader/sibling shared cutoff, mixed announced/unannounced cancellation and exact joins, plus held child-resolution and immediate-forward controls under the unchanged initial gate/reap limits. Keep missing historical 520ff308/0823aa50 output and unknown old interleavings separate; current controls do not reconstruct the past.
 
 
 - [x] Verify the combined caller-monitor cleanup and maintenance reply-reserve amendment from one clean committed integration candidate; retain exact SHA, full fast-check output and selected Node release workflow, preserve failed evidence and keep the separate concurrent owner-stop diagnostic open.

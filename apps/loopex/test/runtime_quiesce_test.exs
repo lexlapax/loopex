@@ -1100,6 +1100,128 @@ defmodule Loopex.RuntimeQuiesceTest do
     assert :sys.get_state(control).quiesce_fences == %{}
   end
 
+  # Concept: startup-notice loss shares the real population fence deadline.
+  # Technical depth: retain one row per actual operation before forwarding or
+  # withholding its startup. Control still authorizes announced workers and
+  # supplies every cancellation acknowledgement after its original worker DOWN.
+  test "mixed announced and unannounced blocked fences retain the shared cutoff and sibling" do
+    fixture = fixture("quiesce-mixed-fence-starts")
+
+    session_ids =
+      Enum.map(1..64, &create_session(fixture.runtime, "create-mixed-fence-#{&1}"))
+      |> Enum.sort()
+
+    {blocked_ids, [sibling_id]} = Enum.split(session_ids, 63)
+    {held_ids, announced_ids} = Enum.split(blocked_ids, 31)
+    waiter_custodian = start_fence_waiter_custodian(fixture, length(announced_ids))
+
+    :ok =
+      M1RuntimeTestStore.delay_ownership_heads(fixture.store_pid, blocked_ids, waiter_custodian)
+
+    bounds =
+      fast_bounds(%{
+        admission_ms: 4_000,
+        initial_gate_ms: 2_000,
+        worker_reap_ms: 500,
+        status_census_ms: 2_000,
+        status_work_ms: 1_000,
+        coordinator_termination_ms: 4_000,
+        termination_projection_ms: 2_000,
+        fence_budget_ms: 500,
+        fence_reap_ms: 100
+      })
+
+    observations = :ets.new(:mixed_fence_observations, [:ordered_set, :public])
+    :ets.insert(observations, {:count, 0})
+    operations = :ets.new(:mixed_fence_operations, [:set, :public])
+
+    projection =
+      start_fence_projection(
+        fixture,
+        observations,
+        {:selected, MapSet.new(held_ids), operations},
+        bounds.fence_reap_ms
+      )
+
+    before = M1RuntimeTestStore.inspect_state(fixture.store_pid).sessions
+    started_at = System.monotonic_time(:millisecond)
+
+    task =
+      Task.async(fn ->
+        Quiesce.run(projection.root, fixture.runtime.token, bounds)
+      end)
+
+    captured =
+      Map.new(session_ids, fn expected_id ->
+        assert_receive {:selected_fence_start, ^expected_id, worker, operation, announced}, 5_000
+        {expected_id, %{worker: worker, operation: operation, announced: announced}}
+      end)
+
+    delayed = receive_ownership_head_delays(announced_ids)
+    waiters = Enum.map(delayed, fn {_session, row} -> row.waiter end)
+
+    assert {:ok, result} = Task.await(task, 10_000)
+    elapsed_ms = System.monotonic_time(:millisecond) - started_at
+
+    assert result.settled == [sibling_id]
+    assert result.unsettled == blocked_ids
+    assert result.absent == []
+    assert result.fences[sibling_id] == :committed
+    assert result.fence_budget_ms == 500
+    assert elapsed_ms >= bounds.fence_budget_ms - bounds.fence_reap_ms
+    assert elapsed_ms < 10_000
+    assert :ets.info(operations, :size) == 64
+    operation_rows = :ets.tab2list(operations)
+    assert [_shared_deadline] = operation_rows |> Enum.map(&elem(&1, 4)) |> Enum.uniq()
+    assert [phase_owner] = operation_rows |> Enum.map(&elem(&1, 3)) |> Enum.uniq()
+
+    workers = Enum.map(blocked_ids, &captured[&1].worker)
+    assert length(Enum.uniq(workers)) == 63
+    :ok = await_pids_down([phase_owner, captured[sibling_id].worker | workers], 1_000)
+    assert Enum.all?(workers, &(not Process.alive?(&1)))
+    after_sessions = M1RuntimeTestStore.inspect_state(fixture.store_pid).sessions
+
+    Enum.each(blocked_ids, fn session_id ->
+      row = captured[session_id]
+      assert row.announced == session_id in announced_ids
+      assert result.fences[session_id] == {:unknown, :no_head}
+
+      assert [{operation, ^session_id, worker, owner, deadline, announced, cancelled_at}] =
+               :ets.lookup(operations, row.operation)
+
+      assert operation == row.operation and worker == row.worker
+      assert is_pid(owner) and announced == row.announced
+      assert is_integer(cancelled_at) and cancelled_at < deadline + bounds.fence_reap_ms
+
+      previous = before[session_id]
+      current = after_sessions[session_id]
+      [abort] = Enum.drop(current.records, length(previous.records))
+      assert abort.payload["command_type"] == "abort"
+
+      assert current == %{
+               previous
+               | journal_version: previous.journal_version + 1,
+                 records: previous.records ++ [abort]
+             }
+    end)
+
+    previous = before[sibling_id]
+    current = after_sessions[sibling_id]
+    assert current.owner_epoch == previous.owner_epoch + 1
+    assert current.journal_version == previous.journal_version + 2
+    assert [abort, fence] = Enum.drop(current.records, length(previous.records))
+    assert abort.payload["command_type"] == "abort"
+    assert fence.payload[:kind] == "owner_advanced"
+    control = :sys.get_state(projection.control)
+    assert control.quiesce_fences == %{}
+    assert control.quiesce_fence_monitors == %{}
+
+    stop_fence_projection(projection)
+    assert {:ok, joined_waiters} = join_fence_waiters(fixture, waiter_custodian)
+    assert Enum.sort(joined_waiters) == Enum.sort(waiters)
+    assert Enum.all?(waiters, &(not Process.alive?(&1)))
+  end
+
   @tag :long_bound
   @tag timeout: 145_000
   test "production fence cutoff reaps sixty-three blocked paths and permits one sibling" do
@@ -1350,51 +1472,18 @@ defmodule Loopex.RuntimeQuiesceTest do
     test "Control confirms #{@fence_start_mode} cleanup without a delivered fence startup notice" do
       fixture = fixture("quiesce-late-fence-start-#{@fence_start_mode}")
       session = create_session(fixture.runtime, "create-late-fence")
-      {:ok, %{control: control}} = Runtime.children(fixture.runtime)
-      observer = self()
       mode = @fence_start_mode
       bounds = fast_bounds(%{fence_budget_ms: 500, fence_reap_ms: 100})
       observations = :ets.new(:fence_start_observations, [:ordered_set, :public])
       :ets.insert(observations, {:count, 0})
-
-      relay =
-        spawn_link(fn ->
-          Process.flag(:trap_exit, true)
-          send(observer, {:fence_relay_ready, self()})
-          hold_fence_start(control, observer, observations, %{}, mode, bounds.fence_reap_ms)
-        end)
-
-      children = Supervisor.which_children(fixture.runtime.supervisor)
-
-      children =
-        Enum.map(children, fn
-          {id, ^control, type, modules} -> {id, relay, type, modules}
-          entry -> entry
-        end)
-
-      root =
-        spawn_link(fn ->
-          send(observer, {:fence_projection_ready, self()})
-          quiesce_projection_root(children, observations)
-        end)
-
-      on_exit(fn ->
-        for pid <- [relay, root], Process.alive?(pid) do
-          monitor = Process.monitor(pid)
-          Process.exit(pid, :kill)
-          assert_receive {:DOWN, ^monitor, :process, ^pid, :killed}, 5_000
-        end
-      end)
 
       # Concept: the measured fence witness starts with its fixture transports ready.
       # Technical depth: readiness is observed before Quiesce captures its
       # existing 50-ms initial gate. It does not prove that resolution and gate
       # installation finish inside that deadline. The 500-ms fence and 100-ms
       # reap cutoffs remain unchanged.
-      assert_receive {:fence_relay_ready, ^relay}, 5_000
-      assert_receive {:fence_projection_ready, ^root}, 5_000
-      assert Supervisor.which_children(root) == children
-      assert {:error, :no_trace_session} = Control.trace_status(relay, fixture.runtime.token)
+      projection = start_fence_projection(fixture, observations, mode, bounds.fence_reap_ms)
+      %{control: control, relay: relay, root: root} = projection
       started_at = System.monotonic_time(:millisecond)
 
       try do
@@ -1473,11 +1562,7 @@ defmodule Loopex.RuntimeQuiesceTest do
         assert M1RuntimeTestStore.inspect_state(fixture.store_pid).sessions[session] == before
         assert :sys.get_state(control).quiesce_fences == %{}
 
-        for pid <- [relay, root] do
-          monitor = Process.monitor(pid)
-          send(pid, :stop)
-          assert_receive {:DOWN, ^monitor, :process, ^pid, :normal}, 1_000
-        end
+        stop_fence_projection(projection)
       rescue
         error in ExUnit.AssertionError ->
           record = fence_start_observations(observations)
@@ -1488,6 +1573,88 @@ defmodule Loopex.RuntimeQuiesceTest do
 
           reraise %{error | message: message}, __STACKTRACE__
       end
+    end
+  end
+
+  for delivery <- [:past_cutoff, :ready] do
+    @child_resolution_delivery delivery
+    test "the original child-resolution actors join with #{@child_resolution_delivery} delivery" do
+      fixture = fixture("quiesce-child-resolution-#{@child_resolution_delivery}")
+      session = create_session(fixture.runtime, "create-child-resolution")
+      bounds = fast_bounds(%{fence_budget_ms: 500, fence_reap_ms: 100})
+      observations = :ets.new(:child_resolution_observations, [:ordered_set, :public])
+      :ets.insert(observations, {:count, 0})
+      projection = start_fence_projection(fixture, observations, :forward_start, 100)
+      root = projection.root
+      send(root, {:capture_child_resolution, self(), @child_resolution_delivery})
+      assert_receive {:child_resolution_capture_ready, ^root}, 1_000
+      before = M1RuntimeTestStore.inspect_state(fixture.store_pid)
+      started_at = System.monotonic_time(:millisecond)
+
+      task =
+        Task.async(fn ->
+          Quiesce.run(root, fixture.runtime.token, bounds)
+        end)
+
+      assert_receive {:child_resolution_captured, ^root, worker, worker_monitor, phase_owner,
+                      phase_monitor, captured_at},
+                     5_000
+
+      assert is_pid(worker) and is_pid(phase_owner) and worker != phase_owner
+      assert captured_at >= started_at
+
+      if @child_resolution_delivery == :past_cutoff do
+        assert_receive {:child_resolution_down, ^root, ^worker_monitor, ^worker, :killed}, 5_000
+        assert {:error, :runtime_unavailable} = Task.await(task, 5_000)
+
+        assert_receive {:child_resolution_down, ^root, ^phase_monitor, ^phase_owner, :shutdown},
+                       1_000
+
+        assert System.monotonic_time(:millisecond) - started_at >= bounds.initial_gate_ms
+
+        # Concept: an expired resolution never installs the runtime gate.
+        # Technical depth: release the original reply only after both original
+        # actors join. The unchanged 50-ms gate killed the actual linked worker;
+        # forwarding its late reply cannot create a fence or mutate the Store.
+        send(root, {:release_child_resolution, worker})
+        assert Supervisor.which_children(root) != []
+        assert :sys.get_state(projection.control).quiescing == nil
+        assert :sys.get_state(projection.control).quiesce_fences == %{}
+        assert M1RuntimeTestStore.inspect_state(fixture.store_pid) == before
+      else
+        assert_receive {:child_resolution_down, ^root, ^worker_monitor, ^worker,
+                        {:loopex_quiesce_worker_result, _operation, "phase", {:ok, children}}},
+                       5_000
+
+        assert children.control == projection.relay
+        assert {:ok, result} = Task.await(task, 5_000)
+
+        assert_receive {:child_resolution_down, ^root, ^phase_monitor, ^phase_owner, :shutdown},
+                       1_000
+
+        assert result.settled == [session]
+        assert result.unsettled == []
+        assert result.fences == %{session => :committed}
+        assert result.fence_budget_ms == 500
+        current = M1RuntimeTestStore.inspect_state(fixture.store_pid).sessions[session]
+        previous = before.sessions[session]
+        assert current.owner_epoch == previous.owner_epoch + 1
+        assert current.journal_version == previous.journal_version + 2
+        assert [abort, fence] = Enum.drop(current.records, length(previous.records))
+        assert abort.payload["command_type"] == "abort"
+        assert fence.payload[:kind] == "owner_advanced"
+        assert :sys.get_state(projection.control).quiesce_fences == %{}
+      end
+
+      refute Process.alive?(worker)
+      refute Process.alive?(phase_owner)
+      %{events: events, dropped: 0} = fence_start_observations(observations)
+
+      assert Enum.count(events, &match?({_, _, :root, :which_children_received, ^worker}, &1)) ==
+               1
+
+      assert Enum.count(events, &match?({_, _, :root, :which_children_replied, ^worker}, &1)) == 1
+      stop_fence_projection(projection)
     end
   end
 
@@ -1602,7 +1769,32 @@ defmodule Loopex.RuntimeQuiesceTest do
       {:loopex_quiesce_fence_started, operation, session, pid} ->
         observe_fence_start(observations, :relay, :fence_started, {operation, session, pid})
         fence = %{owners[operation] | worker: pid}
-        send(observer, {:held_fence_start, session, pid, operation, fence.deadline})
+
+        case mode do
+          {:selected, held_sessions, operations} ->
+            announced = not MapSet.member?(held_sessions, session)
+
+            :ets.insert(operations, {
+              operation,
+              session,
+              pid,
+              fence.owner,
+              fence.deadline,
+              announced,
+              nil
+            })
+
+            send(observer, {:selected_fence_start, session, pid, operation, announced})
+
+            if announced,
+              do: send(fence.owner, {:loopex_quiesce_fence_started, operation, session, pid})
+
+          :forward_start ->
+            send(fence.owner, {:loopex_quiesce_fence_started, operation, session, pid})
+
+          _held ->
+            send(observer, {:held_fence_start, session, pid, operation, fence.deadline})
+        end
 
         hold_fence_start(
           control,
@@ -1612,6 +1804,21 @@ defmodule Loopex.RuntimeQuiesceTest do
           mode,
           reap_ms
         )
+
+      {:authorize_quiesce_fence, token, drain, operation, owner, deadline} ->
+        if match?(%{owner: ^owner}, owners[operation]) do
+          :ok =
+            Control.authorize_quiesce_fence(
+              control,
+              token,
+              drain,
+              operation,
+              self(),
+              deadline
+            )
+        end
+
+        hold_fence_start(control, observer, observations, owners, mode, reap_ms)
 
       {:cancel_quiesce_fence, token, drain, operation, owner} ->
         observe_fence_start(observations, :relay, :fence_cancel_requested, {operation, owner})
@@ -1634,6 +1841,8 @@ defmodule Loopex.RuntimeQuiesceTest do
       message
       when is_tuple(message) and
              elem(message, 0) in [
+               :loopex_quiesce_fence_head,
+               :loopex_quiesce_fence_result,
                :loopex_quiesce_fence_failed,
                :loopex_quiesce_fence_cancelled,
                :loopex_quiesce_fence_closed,
@@ -1645,6 +1854,18 @@ defmodule Loopex.RuntimeQuiesceTest do
                   :loopex_quiesce_fence_closed
                 ]) ->
         observe_fence_start(observations, :relay, :fence_notice, message)
+
+        case {mode, message} do
+          {{:selected, _held_sessions, operations}, {:loopex_quiesce_fence_cancelled, operation}} ->
+            :ets.update_element(operations, operation, {
+              7,
+              System.monotonic_time(:millisecond)
+            })
+
+          _other ->
+            :ok
+        end
+
         if fence = owners[elem(message, 1)], do: send(fence.owner, message)
         hold_fence_start(control, observer, observations, owners, mode, reap_ms)
 
@@ -1705,16 +1926,220 @@ defmodule Loopex.RuntimeQuiesceTest do
     end
   end
 
-  defp quiesce_projection_root(children, observations) do
+  # Concept: observe the original resolution actors without delaying ready delivery.
+  # Technical depth: the root owns both monitors before replying or holding the
+  # request. It forwards their exact DOWN evidence while a held reply waits, so
+  # the observer never installs a monitor after the unchanged gate has expired.
+  defp quiesce_projection_root(children, observations, capture \\ nil, monitors \\ %{}) do
     receive do
       {:"$gen_call", from, :which_children} ->
         observe_fence_start(observations, :root, :which_children_received, elem(from, 0))
+
+        monitors =
+          case capture do
+            {observer, delivery} ->
+              worker = elem(from, 0)
+              {:links, [phase_owner]} = Process.info(worker, :links)
+              worker_monitor = Process.monitor(worker)
+              phase_monitor = Process.monitor(phase_owner)
+
+              monitors =
+                monitors
+                |> Map.put(worker_monitor, {worker, observer})
+                |> Map.put(phase_monitor, {phase_owner, observer})
+
+              send(
+                observer,
+                {:child_resolution_captured, self(), worker, worker_monitor, phase_owner,
+                 phase_monitor, System.monotonic_time(:millisecond)}
+              )
+
+              if delivery == :past_cutoff,
+                do:
+                  await_child_resolution_release(
+                    worker,
+                    monitors,
+                    System.monotonic_time(:millisecond) + 5_000
+                  ),
+                else: monitors
+
+            nil ->
+              monitors
+          end
+
         GenServer.reply(from, children)
         observe_fence_start(observations, :root, :which_children_replied, elem(from, 0))
-        quiesce_projection_root(children, observations)
+        quiesce_projection_root(children, observations, nil, monitors)
+
+      {:capture_child_resolution, observer, delivery} ->
+        send(observer, {:child_resolution_capture_ready, self()})
+        quiesce_projection_root(children, observations, {observer, delivery}, monitors)
+
+      {:DOWN, monitor, :process, pid, reason} ->
+        monitors = forward_child_resolution_down(monitors, monitor, pid, reason)
+        quiesce_projection_root(children, observations, capture, monitors)
 
       :stop ->
         :ok
+    end
+  end
+
+  defp await_child_resolution_release(worker, monitors, deadline) do
+    receive do
+      {:release_child_resolution, ^worker} ->
+        monitors
+
+      {:DOWN, monitor, :process, pid, reason} ->
+        monitors = forward_child_resolution_down(monitors, monitor, pid, reason)
+        await_child_resolution_release(worker, monitors, deadline)
+
+      :stop ->
+        exit(:normal)
+    after
+      max(deadline - System.monotonic_time(:millisecond), 0) ->
+        exit(:resolution_fixture_timeout)
+    end
+  end
+
+  defp forward_child_resolution_down(monitors, monitor, pid, reason) do
+    {{^pid, observer}, remaining} = Map.pop(monitors, monitor)
+    send(observer, {:child_resolution_down, self(), monitor, pid, reason})
+    remaining
+  end
+
+  # Concept: every actual delayed Store waiter has custody before measured work.
+  # Technical depth: the Store sends each original waiter to this bounded
+  # custodian, which monitors it before forwarding the notice. Cleanup stops and
+  # joins the runtime and Store producers first; the Store's DOWN orders all its
+  # earlier notices before the custodian kills and joins every retained waiter.
+  defp start_fence_waiter_custodian(fixture, limit) do
+    observer = self()
+
+    custodian =
+      spawn(fn ->
+        store_monitor = Process.monitor(fixture.store_pid)
+        send(observer, {:fence_waiter_custodian_ready, self()})
+        fence_waiter_custodian(observer, store_monitor, limit, %{}, [], false, nil)
+      end)
+
+    on_exit(fn ->
+      assert {:ok, _waiters} = join_fence_waiters(fixture, custodian, true)
+    end)
+
+    assert_receive {:fence_waiter_custodian_ready, ^custodian}, 1_000
+    custodian
+  end
+
+  defp fence_waiter_custodian(observer, store_monitor, limit, pending, waiters, true, from)
+       when not is_nil(from) do
+    {caller, stop?} = from
+    Enum.each(pending, fn {_monitor, waiter} -> Process.exit(waiter, :kill) end)
+    :ok = await_monitors_down(pending, System.monotonic_time(:millisecond) + 1_000)
+    GenServer.reply(caller, {:ok, waiters})
+
+    unless stop?,
+      do: fence_waiter_custodian(observer, store_monitor, limit, %{}, waiters, true, nil)
+  end
+
+  defp fence_waiter_custodian(observer, store_monitor, limit, pending, waiters, store_down, from) do
+    receive do
+      {:ownership_head_delayed, waiter, _caller, _store, _session} = notice ->
+        true = length(waiters) < limit
+        monitor = Process.monitor(waiter)
+        send(observer, notice)
+
+        fence_waiter_custodian(
+          observer,
+          store_monitor,
+          limit,
+          Map.put(pending, monitor, waiter),
+          [waiter | waiters],
+          store_down,
+          from
+        )
+
+      {:DOWN, ^store_monitor, :process, _store, _reason} ->
+        fence_waiter_custodian(observer, store_monitor, limit, pending, waiters, true, from)
+
+      {:DOWN, monitor, :process, waiter, _reason} ->
+        {^waiter, pending} = Map.pop(pending, monitor)
+        fence_waiter_custodian(observer, store_monitor, limit, pending, waiters, store_down, from)
+
+      {:"$gen_call", caller, {:join_waiters, stop?}} ->
+        fence_waiter_custodian(
+          observer,
+          store_monitor,
+          limit,
+          pending,
+          waiters,
+          store_down,
+          {caller, stop?}
+        )
+    end
+  end
+
+  defp join_fence_waiters(fixture, custodian, stop? \\ false) do
+    producers = [fixture.runtime.supervisor, fixture.store_pid]
+    monitors = Map.new(producers, &{Process.monitor(&1), &1})
+    if Runtime.alive?(fixture.runtime), do: Loopex.stop(fixture.runtime)
+    if Process.alive?(fixture.store_pid), do: GenServer.stop(fixture.store_pid)
+    :ok = await_monitors_down(monitors, System.monotonic_time(:millisecond) + 1_000)
+
+    monitor = Process.monitor(custodian)
+    result = GenServer.call(custodian, {:join_waiters, stop?}, 5_000)
+
+    if stop? do
+      assert_receive {:DOWN, ^monitor, :process, ^custodian, :normal}, 1_000
+    else
+      Process.demonitor(monitor, [:flush])
+    end
+
+    result
+  end
+
+  defp start_fence_projection(fixture, observations, mode, reap_ms) do
+    {:ok, %{control: control}} = Runtime.children(fixture.runtime)
+    observer = self()
+
+    relay =
+      spawn_link(fn ->
+        Process.flag(:trap_exit, true)
+        send(observer, {:fence_relay_ready, self()})
+        hold_fence_start(control, observer, observations, %{}, mode, reap_ms)
+      end)
+
+    children =
+      Enum.map(Supervisor.which_children(fixture.runtime.supervisor), fn
+        {id, ^control, type, modules} -> {id, relay, type, modules}
+        entry -> entry
+      end)
+
+    root =
+      spawn_link(fn ->
+        send(observer, {:fence_projection_ready, self()})
+        quiesce_projection_root(children, observations)
+      end)
+
+    on_exit(fn ->
+      for pid <- [relay, root], Process.alive?(pid) do
+        monitor = Process.monitor(pid)
+        Process.exit(pid, :kill)
+        assert_receive {:DOWN, ^monitor, :process, ^pid, :killed}, 5_000
+      end
+    end)
+
+    assert_receive {:fence_relay_ready, ^relay}, 5_000
+    assert_receive {:fence_projection_ready, ^root}, 5_000
+    assert Supervisor.which_children(root) == children
+    assert {:error, :no_trace_session} = Control.trace_status(relay, fixture.runtime.token)
+    %{root: root, relay: relay, control: control}
+  end
+
+  defp stop_fence_projection(projection) do
+    for pid <- [projection.relay, projection.root] do
+      monitor = Process.monitor(pid)
+      send(pid, :stop)
+      assert_receive {:DOWN, ^monitor, :process, ^pid, :normal}, 1_000
     end
   end
 
