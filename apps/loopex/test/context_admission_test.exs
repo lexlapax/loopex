@@ -842,7 +842,10 @@ defmodule Loopex.ContextAdmissionTest do
     # lower bound and retained command/staging identity are both verified.
     assert admitted.payload["command_id"] == "deadline-shape"
     assert admitted.payload["deadline_ms"] == 60_000
-    assert admitted.payload["run_id"] == SessionState.command_run_id(deadline_session, "deadline-shape")
+
+    assert admitted.payload["run_id"] ==
+             SessionState.command_run_id(deadline_session, "deadline-shape")
+
     assert staged.payload["run_id"] == admitted.payload["run_id"]
     assert request.deadline == staged.payload["request"]["deadline"]
     assert request.staged_request_digest == staged.payload["staged_request_digest"]
