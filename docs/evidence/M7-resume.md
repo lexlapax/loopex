@@ -28,10 +28,22 @@ physical restore implementation; it does not waive any full-history proof.
 ### Current work and restart order
 
 Pending isolated units on 2026-10-06 remain unproved and unintegrated. Root owns
-all original VMs, collection, Git and rejoin. Wire proof original47177 is
-running from clean isolated `9aac155f7db77c0468f8dbf1b20657a96be8f805` after
-formatter20886 proved the actual socket fixture layout change. Collect that
-original handle before starting another VM. No passing wire outcome is claimed.
+all original VMs, collection, Git and rejoin. Private finalization formatter
+original72667 is running from clean isolatedf0427a86. Collect that original
+handle before starting another VM. No finalization execution result is claimed.
+
+Wire original47177 is collected PASS at
+`9aac155f7db77c0468f8dbf1b20657a96be8f805`: complete12 Protocol,14 AppServer
+and13 Daemon cases per pair, zero exclusions/skips/invalid,125.385 seconds.
+Sixteen original stages are joined and65 artifacts verified. Collection
+`M7/compaction-wire-admission-20261006-v2/original-collection.json`, SHA-256
+`384a8b297156dafc902b2d36e60de30dbb1d8976ee0a9f9aefd0f7c7ff04a913`;
+terminal `14788903a60de0a1e87b18e942bd3c69e53559c5ca9f5e19ff6d5ee75299349d`.
+All eight source files are copied literally into primary and independently
+reviewed. The bounded T07 closed codec/projection row closes. Added T01–T19
+now317 done/32 todo; originals remain80 done/93 todo/6 retired. Foreground live
+routing, current generations, independent clients and full fast remain open.
+Never repoll47177 or20886.
 
 Native original75162 is collected PASS at
 `976995c127dafa2d922ec9df2bad97d7e3ac0c4f`. Both supported pairs pass all231
@@ -93,15 +105,17 @@ Preparation is not execution evidence.
   passed the complete231-case proof on both pairs as original75162, recorded
   above. All nine source files are integrated literally; do not repeat either
   collected run.
-- Wire compaction source is clean `3266368e38800ae458ebfeff4149fb4a4e416110`
-  in m7-compaction-wire. Original12545 passed38 of39 current cases; floor did
+- Wire compaction's authored residency correction was
+  `3266368e38800ae458ebfeff4149fb4a4e416110` in m7-compaction-wire.
+  Original12545 passed38 of39 current cases at the earlier source; floor did
   not run. Collection
   `M7/compaction-wire-admission-20261006-v1/original-collection.json`
   SHA-256 `51bb7cfc11d43ec307be8bc86ef24713d2932b9abecef733417ee727785eac8d`
   preserves the failure. The independently reviewed test now establishes daemon
   residency through negotiated public session.create before attach. All39 cases,
-  authority, frame, cursor, queue and cleanup assertions remain. Formatting and
-  corrected paired proof remain pending; foreground live routing and generation
+  authority, frame, cursor, queue and cleanup assertions remain. Formatter20886
+  and corrected paired proof47177 are collected PASS and their final9aac155f
+  source is integrated literally. Foreground live routing and generation
   activation are separate.
 - Private retained finalization is reviewed and clean at
   `f0427a865a1668c0fe9dac55a38e5b9218f84cc4` in m7-retained-finalization, based
@@ -119,7 +133,15 @@ joined and37 artifacts verified. Collection
 Latest collected registry is1132 keys at
 `M7/compaction-wire-format-20261006-v2/stage-attempt-registry.json`,
 SHA-256 `8015b86fdee2a9849424d9208de717f5271f111805213224c731e8925d49349f`.
-The active47177 run owns its successor registry until collection.
+Daemon warning formatter72050 is collected PASS in5.153 seconds, six original
+stages joined and37 artifacts verified; source07d5df34 remains clean with no
+formatting changes. Collection
+`M7/daemon-configure-warning-format-20261006-v1/original-collection.json`,
+SHA-256 `01afa6d1bd74ea5ce5c32e24f3ab8bca8d7aef2269019054dc0394ad7623d1a1`.
+Latest collected registry is1154 keys at
+`M7/daemon-configure-warning-format-20261006-v1/stage-attempt-registry.json`,
+SHA-256 `fbee14bac143d165f5e558fadca92f38aaee384e88321fded61df89b00b6ba03`.
+Active72667 owns its successor registry until collection. Never repoll72050.
 Original44773,12545,81936 and97674 are terminal and collected; never repoll or
 retry their unchanged source stages. ADR0055 remains the sole asked pending
 decision. None of the pending units closes its checklist row yet.

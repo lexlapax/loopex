@@ -211,6 +211,117 @@ defmodule Loopex.AppServer.DeliveryTest do
     assert second == []
   end
 
+  test "compaction activity uses the exact closed envelope for both owners without advancing history" do
+    for kind <- ["run", "compact"], base <- [0, 18_446_744_073_709_551_615] do
+      item = compaction_item(kind, base)
+
+      {[record], drained} =
+        Delivery.new(<<255, 0>>, base) |> Delivery.progress(item) |> Delivery.take()
+
+      assert record == compaction_record(kind, base)
+      assert Delivery.cursor(drained) == base
+
+      assert {:ok, ^item} =
+               LoopexProtocol.Session.CompactionProgress.decode_wire(record["progress"])
+
+      assert {:ok, _} = LoopexProtocol.Frame.encode(record)
+    end
+  end
+
+  test "malformed compaction activity drops whole before private values can reach encoding" do
+    item = compaction_item("run", 0)
+    queue = Delivery.new("session", 0)
+
+    for invalid <- [
+          Map.put(item, :summary, "PRIVATE_CANARY"),
+          Map.put(item, :permit, fn -> :private end),
+          Map.delete(item, :episode_id),
+          Map.put(item, :owner, %{"kind" => "run", "id" => nil}),
+          Map.put(item, :stream_domain_id, String.duplicate("A", 32)),
+          Map.put(item, :episode_id, :binary.copy(<<255>>, 65_537)),
+          Map.put(item, :base_event_sequence, 18_446_744_073_709_551_616),
+          Map.put(item, :__struct__, __MODULE__),
+          %{"kind" => "context.compaction_progress", "summary" => fn -> :private end}
+        ] do
+      assert Delivery.progress(queue, invalid) == queue
+    end
+  end
+
+  test "compaction records obey the unchanged transient record ceiling and durable priority" do
+    item = compaction_item("compact", 7)
+
+    queue =
+      Enum.reduce(1..33, Delivery.new(<<255, 0>>, 7), fn _, queue ->
+        Delivery.progress(queue, item)
+      end)
+
+    refute Delivery.detached?(queue)
+    assert Delivery.cursor(queue) == 7
+    {records, _} = Delivery.take(queue)
+    assert length(records) == 32
+    assert Enum.all?(records, &(&1 == compaction_record("compact", 7)))
+
+    event = %{kind: "run.progressed", event_id: "event", event_sequence: 8}
+    {[durable | activity], drained} = queue |> Delivery.event(event) |> Delivery.take()
+    assert durable["type"] == "event"
+    assert length(activity) == 32
+    assert Delivery.cursor(drained) == 8
+  end
+
+  test "maximum valid identities spend the unchanged progress byte budget independently" do
+    bytes = :binary.copy(<<255>>, 65_536)
+
+    item = %{
+      compaction_item("run", 0)
+      | episode_id: bytes,
+        owner: %{"kind" => "run", "id" => bytes}
+    }
+
+    queue =
+      Enum.reduce(1..3, Delivery.new("session", 0), fn _, queue ->
+        Delivery.progress(queue, item)
+      end)
+
+    refute Delivery.detached?(queue)
+    {records, _} = Delivery.take(queue)
+    assert length(records) == 2
+
+    sizes =
+      Enum.map(records, fn record ->
+        assert {:ok, encoded} = LoopexProtocol.Frame.encode(record)
+        IO.iodata_length(encoded)
+      end)
+
+    assert Enum.sum(sizes) <= 524_288
+    assert Enum.sum(sizes) + hd(sizes) > 524_288
+  end
+
+  defp compaction_item(kind, base) do
+    %{
+      kind: "context.compaction_progress",
+      episode_id: <<0, 255, 10>>,
+      owner: %{"kind" => kind, "id" => <<255, 0, 128>>},
+      stream_domain_id: "0123456789abcdef0123456789abcdef",
+      progress_sequence: 0,
+      base_event_sequence: base
+    }
+  end
+
+  defp compaction_record(kind, base) do
+    %{
+      "type" => "progress",
+      "session_id" => "_wA",
+      "progress" => %{
+        "kind" => "context.compaction_progress",
+        "episode_id" => "AP8K",
+        "owner" => %{"kind" => kind, "id" => "_wCA"},
+        "stream_domain_id" => "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence" => "0",
+        "base_event_sequence" => Integer.to_string(base)
+      }
+    }
+  end
+
   # Concept: events a real run actually committed.
   #
   # Technical depth: taken from the Store rather than written here, so the

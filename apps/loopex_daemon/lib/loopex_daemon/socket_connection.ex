@@ -243,18 +243,30 @@ defmodule LoopexDaemon.SocketConnection do
   # Technical depth: at most 32 records and 512 KiB of encoded progress wait,
   # ADR 0023's transient bound. The queue is written only when this
   # connection's durable output is empty.
+  # Concept: the accepted compaction codec remains unserved until its complete
+  # current generation is activated.
+  # Technical depth: reject this family before serialization under the current
+  # negotiated contract, including alternate-key or malformed native items.
+  def handle_info({:daemon_progress, _session_id, %{kind: "context.compaction_progress"}}, state),
+    do: {:noreply, state}
+
+  def handle_info(
+        {:daemon_progress, _session_id, %{"kind" => "context.compaction_progress"}},
+        state
+      ),
+      do: {:noreply, state}
+
   def handle_info(
         {:daemon_progress, session_id, item},
         %{attachment: %{session_id: session_id}} = state
       ) do
-    case Frame.encode(WireRecords.progress(session_id, item)) do
-      {:ok, encoded} ->
-        state
-        |> queue_progress(IO.iodata_to_binary(encoded))
-        |> flush_progress()
-
-      _unencodable ->
-        {:noreply, state}
+    with record when is_map(record) <- WireRecords.progress(session_id, item),
+         {:ok, encoded} <- Frame.encode(record) do
+      state
+      |> queue_progress(IO.iodata_to_binary(encoded))
+      |> flush_progress()
+    else
+      _unencodable -> {:noreply, state}
     end
   end
 

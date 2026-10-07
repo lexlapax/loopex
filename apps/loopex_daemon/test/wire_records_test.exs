@@ -122,4 +122,81 @@ defmodule LoopexDaemon.WireRecordsTest do
       end
     end
   end
+
+  test "compaction activity matches the closed foreground envelope for both owners and u64 edges" do
+    for kind <- ["run", "compact"], base <- [0, 18_446_744_073_709_551_615] do
+      item = compaction_item(kind, base)
+      record = WireRecords.progress(<<255, 0>>, item)
+
+      assert record == %{
+               "type" => "progress",
+               "session_id" => "_wA",
+               "progress" => %{
+                 "kind" => "context.compaction_progress",
+                 "episode_id" => "AP8K",
+                 "owner" => %{"kind" => kind, "id" => "_wCA"},
+                 "stream_domain_id" => "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+                 "progress_sequence" => "0",
+                 "base_event_sequence" => Integer.to_string(base)
+               }
+             }
+
+      assert {:ok, ^item} =
+               LoopexProtocol.Session.CompactionProgress.decode_wire(record["progress"])
+
+      assert {:ok, encoded} = Frame.encode(record)
+
+      assert {:ok, ^record} =
+               Frame.decode(
+                 IO.iodata_to_binary(encoded) |> String.trim_trailing("\n"),
+                 Frame.output_record_bytes()
+               )
+    end
+  end
+
+  test "malformed and oversized compaction items refuse whole without serializing private values" do
+    item = compaction_item("run", 0)
+
+    for invalid <- [
+          Map.put(item, :summary, "PRIVATE_CANARY"),
+          Map.put(item, :permit, fn -> :private end),
+          Map.delete(item, :episode_id),
+          Map.put(item, :owner, %{"kind" => "run", "id" => nil}),
+          Map.put(item, :stream_domain_id, String.duplicate("A", 32)),
+          Map.put(item, :episode_id, :binary.copy(<<255>>, 65_537)),
+          Map.put(item, :base_event_sequence, 18_446_744_073_709_551_616),
+          Map.put(item, :__struct__, __MODULE__),
+          %{"kind" => "context.compaction_progress", "summary" => fn -> :private end}
+        ] do
+      assert :error = WireRecords.progress("session", invalid)
+    end
+  end
+
+  test "maximum valid compaction identities fit the existing individual frame ceiling" do
+    bytes = :binary.copy(<<255>>, 65_536)
+
+    item = %{
+      compaction_item("compact", 0)
+      | episode_id: bytes,
+        owner: %{"kind" => "compact", "id" => bytes}
+    }
+
+    record = WireRecords.progress("session", item)
+    assert {:ok, encoded} = Frame.encode(record)
+    assert IO.iodata_length(encoded) < Frame.output_record_bytes()
+
+    assert {:ok, ^item} =
+             LoopexProtocol.Session.CompactionProgress.decode_wire(record["progress"])
+  end
+
+  defp compaction_item(kind, base) do
+    %{
+      kind: "context.compaction_progress",
+      episode_id: <<0, 255, 10>>,
+      owner: %{"kind" => kind, "id" => <<255, 0, 128>>},
+      stream_domain_id: "0123456789abcdef0123456789abcdef",
+      progress_sequence: 0,
+      base_event_sequence: base
+    }
+  end
 end

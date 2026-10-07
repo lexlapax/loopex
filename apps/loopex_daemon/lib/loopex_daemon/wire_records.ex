@@ -242,10 +242,20 @@ defmodule LoopexDaemon.WireRecords do
 
   ## Technical depth
 
-  The item's stream domain and base sequence are encoded as a wire identity
-  and quantity; every other member is carried as the core projected it.
+  Compaction activity uses its closed codec and refuses malformed items with
+  `:error`, allowing the connection's existing transient drop path. Other
+  progress keeps its current domain and base projection. Frame and queue
+  ceilings remain enforced by the connection.
   """
-  @spec progress(binary(), map()) :: map()
+  @spec progress(binary(), map()) :: map() | :error
+  def progress(session_id, %{kind: "context.compaction_progress"} = item)
+      when is_binary(session_id),
+      do: compaction_progress(session_id, item)
+
+  def progress(session_id, %{"kind" => "context.compaction_progress"} = item)
+      when is_binary(session_id),
+      do: compaction_progress(session_id, item)
+
   def progress(session_id, item) when is_binary(session_id) and is_map(item) do
     %{
       "type" => "progress",
@@ -305,6 +315,20 @@ defmodule LoopexDaemon.WireRecords do
         "data" => data
       }
     }
+  end
+
+  defp compaction_progress(session_id, item) do
+    case LoopexProtocol.Session.CompactionProgress.encode_wire(item) do
+      {:ok, progress} ->
+        %{
+          "type" => "progress",
+          "session_id" => Wire.encode_identity(session_id),
+          "progress" => progress
+        }
+
+      :error ->
+        :error
+    end
   end
 
   defp optional_identity(nil), do: nil

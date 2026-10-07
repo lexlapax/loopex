@@ -15,7 +15,7 @@ defmodule LoopexDaemon.SocketConnectionTest do
     {:ok, session_id} =
       Loopex.create_session(runtime, %{"purpose" => "stalled-registry"}, command_id: "create-1")
 
-    %{session_id: session_id, daemon: start_daemon(runtime)}
+    %{session_id: session_id, runtime: runtime, daemon: start_daemon(runtime)}
   end
 
   # Concept: a connection never waits on the registry inside a handler, so a
@@ -135,6 +135,151 @@ defmodule LoopexDaemon.SocketConnectionTest do
       :erlang.trace(owner, false, [:receive])
       :sys.resume(registry)
     end
+  end
+
+  test "the current negotiated socket drops compaction activity while ordinary progress still arrives",
+       %{daemon: daemon, runtime: runtime} do
+    client = initialized_client(daemon)
+    [connection] = initialized_connections(daemon)
+
+    # Concept: an attachment observes a session activated in this daemon lifetime.
+    # Technical depth: native facade creation in setup does not establish daemon
+    # residency; this existing public create request does so before attachment.
+    :ok =
+      send_frame(client, %{
+        "method" => "session.create",
+        "request_id" => "create-progress",
+        "command_id" => Wire.encode_identity("create-progress"),
+        "session_options" => %{"purpose" => "current-progress-gate"}
+      })
+
+    assert [
+             %{
+               "type" => "admission",
+               "request_id" => "create-progress",
+               "method" => "session.create",
+               "status" => "accepted",
+               "session_id" => encoded_session
+             }
+           ] = receive_records(client, 1)
+
+    assert {:ok, session_id} = Wire.identity(encoded_session)
+
+    assert %{active_sessions: 1, activations_used: 1} =
+             LoopexDaemon.ConnectionRegistry.status(daemon.registry)
+
+    assert {:ok, %{event_sequence: cursor}} = Loopex.session_status(runtime, session_id)
+
+    :ok =
+      send_frame(client, %{
+        "method" => "session.attach",
+        "request_id" => "attach-progress",
+        "session_id" => Wire.encode_identity(session_id),
+        "after_event_sequence" => Wire.encode_u64(cursor)
+      })
+
+    assert [%{"type" => "snapshot"}] = receive_records(client, 1)
+
+    activity = %{
+      kind: "context.compaction_progress",
+      episode_id: <<0, 255>>,
+      owner: %{"kind" => "compact", "id" => <<255, 0>>},
+      stream_domain_id: "0123456789abcdef0123456789abcdef",
+      progress_sequence: 0,
+      base_event_sequence: cursor
+    }
+
+    for item <- [
+          activity,
+          Map.put(activity, :summary, "PRIVATE_CANARY"),
+          Map.put(activity, :permit, fn -> :private end),
+          Map.put(activity, :episode_id, :binary.copy(<<255>>, 65_537)),
+          %{"kind" => "context.compaction_progress", "summary" => fn -> :private end}
+        ] do
+      send(connection, {:daemon_progress, session_id, item})
+    end
+
+    ordinary = %{
+      kind: "text_delta",
+      text: "ordinary-barrier",
+      stream_domain_id: "ordinary-domain",
+      base_event_sequence: cursor
+    }
+
+    # Concept: the observed ordinary item proves the prior same-sender items
+    # crossed the actual handler, without interpreting a quiet interval.
+    # Technical depth: all injected messages share this sender's FIFO ordering;
+    # any leaked activity would be the first returned progress record.
+    send(connection, {:daemon_progress, session_id, ordinary})
+    assert [%{"type" => "progress", "progress" => progress}] = receive_records(client, 1)
+    assert progress["kind"] == "text_delta"
+    assert progress["text"] == "ordinary-barrier"
+    assert progress["base_event_sequence"] == Integer.to_string(cursor)
+    assert Process.alive?(connection)
+    state = :sys.get_state(connection)
+    assert state.attachment.session_id == session_id
+    assert {:ok, %{event_sequence: ^cursor}} = Loopex.session_status(runtime, session_id)
+  end
+
+  test "current ordinary daemon progress retains record byte and frame drop bounds" do
+    state = %{
+      attachment: %{session_id: "session"},
+      progress: :queue.new(),
+      progress_bytes: 0,
+      output_claim: :busy,
+      output_cursors: :queue.new(),
+      enqueues_pending: 1
+    }
+
+    queued =
+      Enum.reduce(1..33, state, fn index, state ->
+        item = %{kind: "text_delta", text: "item-#{index}"}
+
+        assert {:noreply, next} =
+                 LoopexDaemon.SocketConnection.handle_info(
+                   {:daemon_progress, "session", item},
+                   state
+                 )
+
+        next
+      end)
+
+    assert :queue.len(queued.progress) == 32
+    assert queued.progress_bytes <= 524_288
+    [first | _] = :queue.to_list(queued.progress)
+
+    assert {:ok, first_record} =
+             LoopexProtocol.Frame.decode(
+               String.trim_trailing(first, "\n"),
+               LoopexProtocol.Frame.output_record_bytes()
+             )
+
+    assert first_record["progress"]["text"] == "item-2"
+
+    large = %{kind: "text_delta", text: String.duplicate("x", 300_000)}
+
+    assert {:noreply, one} =
+             LoopexDaemon.SocketConnection.handle_info(
+               {:daemon_progress, "session", large},
+               state
+             )
+
+    assert {:noreply, trimmed} =
+             LoopexDaemon.SocketConnection.handle_info({:daemon_progress, "session", large}, one)
+
+    assert :queue.len(trimmed.progress) == 1
+    assert trimmed.progress_bytes <= 524_288
+
+    oversized = %{
+      kind: "text_delta",
+      text: String.duplicate("x", LoopexProtocol.Frame.output_record_bytes())
+    }
+
+    assert {:noreply, ^state} =
+             LoopexDaemon.SocketConnection.handle_info(
+               {:daemon_progress, "session", oversized},
+               state
+             )
   end
 
   defp initialized_connections(daemon) do

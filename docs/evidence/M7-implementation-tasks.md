@@ -4,9 +4,10 @@ Complete physical restore original75764 passed all148 cases on each supported
 toolchain at `11e7f674`, in560.494 seconds. All ten original stages are joined
 and47 artifacts verified. Six added T15 rows and the T16 copied-permissions row
 close against that group. Original T01–T19 remains80 done/93 todo/6 retired;
-added316 done/33 todo. Complete109-case restore IO proof passed both pairs; daemon admission
-correction, wire compaction and served generation activation remain open. Native
-activity and its tagged executor fixture are proved on both pairs and integrated.
+added317 done/32 todo. Complete109-case restore IO proof passed both pairs; daemon
+admission correction and served generation activation remain open. Native
+activity, its tagged executor fixture and dormant wire codec/projections are
+proved on both pairs and integrated. Foreground production routing remains open.
 ADR0055 is the sole asked pending decision. Exact proof references and continuation
 order are in the [restart checkpoint](M7-resume.md#technical-depth).
 
@@ -13380,7 +13381,7 @@ the still-open real-provider, live protocol, persistent-fault or closure lanes.
 ### Added implementation subtasks
 
 - [x] Implement accepted ADR 0054 native compaction activity: exact closed six-member item, committed actual owner/episode, compaction attempt domain and one positive-permit emission through serialized current-owner bounded routing. Prove automatic/standalone producers, loss/uncertainty/duplicate/privacy cuts and joined constant-state relay lifetimes on both pairs; no closure or successor replay.
-- [ ] Implement accepted ADR 0054 closed wire codec and identical foreground/daemon projections with canonical identities/quantities, privacy refusal and existing frame/queue limits. Keep current served generations from emitting the unactivated family; complete transport progress integration, independent clients and generation activation remain separate.
+- [x] Implement accepted ADR 0054 closed wire codec and identical foreground/daemon projections with canonical identities/quantities, privacy refusal and existing frame/queue limits. Keep current served generations from emitting the unactivated family; complete transport progress integration, independent clients and generation activation remain separate.
 
 
 - [x] Complete the real Local Store maintenance crash matrix for automatic and standalone ownership at preparation, staging, settlement, checkpoint and publication across before-linearization, after-linearization-before-result and exact recovery re-presentation; prove precise durable cuts, atomic outbox, raw prefixes, conservative ambiguous spending/no redispatch, safe summary continuation, stale-writer recovery, exact results and process joins on both toolchains.

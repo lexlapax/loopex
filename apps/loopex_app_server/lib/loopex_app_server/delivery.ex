@@ -97,11 +97,15 @@ defmodule Loopex.AppServer.Delivery do
   def progress(%__MODULE__{detached: true} = queue, _item), do: queue
 
   def progress(%__MODULE__{} = queue, item) do
-    record = progress_record(queue.session_id, item)
+    case progress_record(queue.session_id, item) do
+      :error ->
+        queue
 
-    case offer(queue.progress, record, @progress_records, @progress_bytes) do
-      {:ok, progress} -> %{queue | progress: progress}
-      :full -> queue
+      record ->
+        case offer(queue.progress, record, @progress_records, @progress_bytes) do
+          {:ok, progress} -> %{queue | progress: progress}
+          :full -> queue
+        end
     end
   end
 
@@ -234,6 +238,15 @@ defmodule Loopex.AppServer.Delivery do
   # group deltas, never a capability over the attempt that produced them. The
   # base event sequence places the stream against durable history without
   # advancing it.
+  # Concept: maintenance activity crosses only its closed public projection.
+  # Technical depth: malformed members drop before generic serialization; the
+  # existing offer still applies the unchanged transient record and byte limits.
+  defp progress_record(session_id, %{kind: "context.compaction_progress"} = item),
+    do: compaction_progress_record(session_id, item)
+
+  defp progress_record(session_id, %{"kind" => "context.compaction_progress"} = item),
+    do: compaction_progress_record(session_id, item)
+
   defp progress_record(session_id, item) do
     %{
       "type" => "progress",
@@ -246,6 +259,20 @@ defmodule Loopex.AppServer.Delivery do
           "base_event_sequence" => optional_sequence(Map.get(item, :base_event_sequence))
         })
     }
+  end
+
+  defp compaction_progress_record(session_id, item) do
+    case LoopexProtocol.Session.CompactionProgress.encode_wire(item) do
+      {:ok, progress} ->
+        %{
+          "type" => "progress",
+          "session_id" => Wire.encode_identity(session_id),
+          "progress" => progress
+        }
+
+      :error ->
+        :error
+    end
   end
 
   defp optional_identity(nil), do: nil

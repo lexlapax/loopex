@@ -1,0 +1,219 @@
+defmodule LoopexProtocol.Session.CompactionProgressTest do
+  use ExUnit.Case, async: true
+
+  alias LoopexProtocol.Session.CompactionProgress
+  alias LoopexProtocol.Wire
+
+  @max 18_446_744_073_709_551_615
+
+  test "both actual owner kinds and opaque identities encode to the exact six wire members" do
+    for kind <- ["run", "compact"], base <- [0, @max] do
+      native = native(kind, base)
+      assert {:ok, wire} = CompactionProgress.encode_wire(native)
+
+      assert wire == %{
+               "kind" => "context.compaction_progress",
+               "episode_id" => "AP8K",
+               "owner" => %{"kind" => kind, "id" => "_wCA"},
+               "stream_domain_id" => "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+               "progress_sequence" => "0",
+               "base_event_sequence" => Integer.to_string(base)
+             }
+
+      assert {:ok, ^native} = CompactionProgress.decode_wire(wire)
+    end
+  end
+
+  test "original byte ceilings admit one and 65536 bytes for each identity" do
+    for size <- [1, 65_536] do
+      bytes = :binary.copy(<<255>>, size)
+      native = %{native() | episode_id: bytes, owner: %{"kind" => "run", "id" => bytes}}
+      assert {:ok, wire} = CompactionProgress.encode_wire(native)
+      assert {:ok, ^native} = CompactionProgress.decode_wire(wire)
+    end
+  end
+
+  test "empty and oversized episode and owner identities refuse in either direction" do
+    for bytes <- ["", :binary.copy(<<255>>, 65_537)] do
+      for invalid <- [
+            %{native() | episode_id: bytes},
+            %{native() | owner: %{"kind" => "run", "id" => bytes}}
+          ] do
+        assert :error = CompactionProgress.encode_wire(invalid)
+      end
+
+      wire = wire()
+
+      assert :error =
+               CompactionProgress.decode_wire(
+                 Map.put(wire, "episode_id", Wire.encode_identity(bytes))
+               )
+
+      assert :error =
+               CompactionProgress.decode_wire(
+                 Map.put(wire, "owner", %{"kind" => "run", "id" => Wire.encode_identity(bytes)})
+               )
+    end
+  end
+
+  test "each native required member rejects omission null and alternate keys" do
+    native = native()
+
+    for key <- Map.keys(native) do
+      assert :error = CompactionProgress.encode_wire(Map.delete(native, key))
+      assert :error = CompactionProgress.encode_wire(Map.put(native, key, nil))
+
+      alternate =
+        native |> Map.delete(key) |> Map.put(Atom.to_string(key), Map.fetch!(native, key))
+
+      assert :error = CompactionProgress.encode_wire(alternate)
+    end
+  end
+
+  test "each wire required member rejects omission null and alternate keys" do
+    wire = wire()
+
+    for key <- Map.keys(wire) do
+      assert :error = CompactionProgress.decode_wire(Map.delete(wire, key))
+      assert :error = CompactionProgress.decode_wire(Map.put(wire, key, nil))
+
+      alternate =
+        wire |> Map.delete(key) |> Map.put(String.to_existing_atom(key), Map.fetch!(wire, key))
+
+      assert :error = CompactionProgress.decode_wire(alternate)
+    end
+  end
+
+  test "plain maps exclude structs extra keys and private captures" do
+    for key <- [:summary, :phase, :attempt, :credentials, :permit, :digest, :owner_epoch] do
+      assert :error = CompactionProgress.encode_wire(Map.put(native(), key, "PRIVATE_CANARY"))
+
+      assert :error =
+               CompactionProgress.decode_wire(
+                 Map.put(wire(), Atom.to_string(key), "PRIVATE_CANARY")
+               )
+    end
+
+    assert :error = CompactionProgress.encode_wire(Map.put(native(), :__struct__, __MODULE__))
+    assert :error = CompactionProgress.decode_wire(Map.put(wire(), :__struct__, __MODULE__))
+    assert :error = CompactionProgress.encode_wire([])
+    assert :error = CompactionProgress.decode_wire([])
+  end
+
+  test "the owner remains a plain closed string keyed actual run or compact identity" do
+    for owner <- [
+          %{"kind" => "other", "id" => "id"},
+          %{kind: "run", id: "id"},
+          %{"kind" => "run", "id" => "id", "run_id" => "private"},
+          %{"kind" => "run"},
+          %{"kind" => "run", "id" => nil},
+          %{"kind" => "run", "id" => "id", :__struct__ => __MODULE__}
+        ] do
+      assert :error = CompactionProgress.encode_wire(%{native() | owner: owner})
+      assert :error = CompactionProgress.decode_wire(Map.put(wire(), "owner", owner))
+    end
+  end
+
+  test "domain requires exactly 32 lowercase hexadecimal native bytes" do
+    for domain <- [
+          "",
+          String.duplicate("a", 31),
+          String.duplicate("a", 33),
+          String.duplicate("A", 32),
+          String.duplicate("g", 32),
+          :binary.copy(<<255>>, 32),
+          nil
+        ] do
+      assert :error = CompactionProgress.encode_wire(%{native() | stream_domain_id: domain})
+
+      if is_binary(domain) do
+        assert :error =
+                 CompactionProgress.decode_wire(
+                   Map.put(wire(), "stream_domain_id", Wire.encode_identity(domain))
+                 )
+      end
+    end
+  end
+
+  test "base admits only unsigned native integers and canonical u64 wire decimals" do
+    for base <- [-1, @max + 1, 0.0, "0", false] do
+      assert :error = CompactionProgress.encode_wire(%{native() | base_event_sequence: base})
+    end
+
+    for base <- [-1, 0, @max, "-1", "+0", "00", " 0", "0 ", "18446744073709551616", "0.0", "1e0"] do
+      assert :error = CompactionProgress.decode_wire(Map.put(wire(), "base_event_sequence", base))
+    end
+  end
+
+  test "sequence is exactly zero in its selected native or wire representation" do
+    for sequence <- [1, -1, 0.0, "0", false] do
+      assert :error = CompactionProgress.encode_wire(%{native() | progress_sequence: sequence})
+    end
+
+    for sequence <- [0, 0.0, "00", "+0", "1", "-1", "0 "] do
+      assert :error =
+               CompactionProgress.decode_wire(Map.put(wire(), "progress_sequence", sequence))
+    end
+  end
+
+  test "each identity refuses padding noncanonical pad bits and other encodings" do
+    for episode <- ["AP8K=", "AP8K\n", "AP8+", 7],
+        owner <- ["_wCA=", "_wCA\n", "/wCA", nil] do
+      assert :error = CompactionProgress.decode_wire(Map.put(wire(), "episode_id", episode))
+
+      assert :error =
+               CompactionProgress.decode_wire(
+                 Map.put(wire(), "owner", %{"kind" => "run", "id" => owner})
+               )
+    end
+
+    one = Map.put(wire(), "episode_id", "_x")
+    assert :error = CompactionProgress.decode_wire(one)
+
+    assert :error =
+             CompactionProgress.decode_wire(
+               Map.put(wire(), "owner", %{"kind" => "run", "id" => "_x"})
+             )
+
+    domain = wire()["stream_domain_id"]
+
+    assert :error =
+             CompactionProgress.decode_wire(Map.put(wire(), "stream_domain_id", domain <> "="))
+
+    prefix = binary_part(domain, 0, byte_size(domain) - 1)
+
+    assert :error =
+             CompactionProgress.decode_wire(Map.put(wire(), "stream_domain_id", prefix <> "x"))
+  end
+
+  test "other kind values and any extra spelling refuse rather than select a generic codec" do
+    for kind <- ["context.compaction_progress_closed", "text_delta", :compaction, "", nil] do
+      assert :error = CompactionProgress.encode_wire(%{native() | kind: kind})
+      assert :error = CompactionProgress.decode_wire(Map.put(wire(), "kind", kind))
+    end
+
+    assert :error =
+             CompactionProgress.encode_wire(
+               Map.put(native(), "kind", "context.compaction_progress")
+             )
+
+    assert :error =
+             CompactionProgress.decode_wire(Map.put(wire(), :kind, "context.compaction_progress"))
+  end
+
+  defp native(kind \\ "run", base \\ 0) do
+    %{
+      kind: "context.compaction_progress",
+      episode_id: <<0, 255, 10>>,
+      owner: %{"kind" => kind, "id" => <<255, 0, 128>>},
+      stream_domain_id: "0123456789abcdef0123456789abcdef",
+      progress_sequence: 0,
+      base_event_sequence: base
+    }
+  end
+
+  defp wire do
+    {:ok, wire} = CompactionProgress.encode_wire(native())
+    wire
+  end
+end
