@@ -111,6 +111,18 @@ existing standalone schemas. It cannot change terminal members, bounds or
 lifecycle, and cannot activate transports/generations. Actual Core producer
 conformance and independent Node vectors remain required. One added row tracks
 this concrete gap; T01–T19 added325 done/30 todo, originals unchanged80/93/6.
+Independent source review passed for all seven packet paths. Root froze those
+literal bytes as clean isolated
+`a68df6b07176c9c4c98aad861776cdaba1d0e2d5`, direct child of5eb38e39.
+Source packet `/private/tmp/m7-question-terminal-payload-source-20261007-v1.json`,
+SHA-256 `ab504ec91f6f212999fd4008a66acb89e08b649384157605a35d23da90a621fa`;
+complete patch SHA-256
+`7d5f892f0227ba7a8544bcfb4154a7c3588d6d8a4405ba136d836c27056c8dbc`.
+It carries349 terminal vectors and preserves the141 requested vectors. Actual
+producer tests cover text, choice, decline and cancellation; retained expiry
+coverage is a pure constructor proof, not live publication. Paired formatting,
+compilation, complete producer files and pinned independent Node execution
+remain required. No T09 row closes from source review.
 
 One added T16 row closes for these corrections: T01–T19 original80 done/93 todo/
 6 retired; added325 done/30 todo. Workspace proof source is separately saved at
@@ -122,7 +134,22 @@ The immutable source preparation references are
 `1e5e48ed54b3db67fdb3744c880ba01c351a4018458e9163e5e9af72a9379768`, and
 `M7/workspace-format-preparation-20261007-v1/inventory.json`, SHA-256
 `46ddd296fdc9b82e8c499877dac10f404a3b1cf026443ebc322e9cf22b36ec49`.
-Core correction verification precedes this workspace unit. ADR0055 remains the
+Workspace formatter original99639 is terminal0 and collected PASS,4.542 seconds,
+six original joins and37 verified artifacts. Its final source was dirty only
+from formatting; the non-line AST proof passed and both toolchains accepted
+the output. Collection
+`M7/workspace-format-20261007-v1/original-collection.json`, SHA-256
+`c18064e427055b71b60651f7627e0fad7aa4d676735d252ccfce4e1359c6f739`;
+terminal `7d4edd0ae5acbf0fdd0abe4f80bd9578de56a39665708cbe2d6d2b5bcb6dc2b3`.
+Root committed the exact output as clean isolated
+`f14de6d9d1796a1ba0eb26e2975cb1eb3f2b9e3d`, direct child of a3f63411.
+Run fresh version/format/compile and all41 workflow cases per pair at that
+clean child; dirty formatter records cannot supply clean-source metadata.
+Latest registry1294 at `M7/workspace-format-20261007-v1/stage-attempt-registry.json`,
+SHA-256 `276365c315649f926413d54babadee7a93094a3ac9093da797478713fe64bf90`.
+Never repoll99639. Workspace execution and original T15 item8 remain open.
+
+Core correction verification is complete. ADR0055 remains the
 sole asked pending approval;0056/0057/0058 remain Proposed and unactivated.
 
 Ordinary progress original14873 is collected PASS at
