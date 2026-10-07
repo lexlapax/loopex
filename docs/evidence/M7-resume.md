@@ -27,6 +27,36 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+Corrected finalization original92340 is active at clean
+`c36ea4c16d9edb8495e486d0dae4b80ae979edac`, through reviewed runner
+SHA-256 `88ff1d0d58996aac5d9733c7a3714a88ff7336bdee51bfb32b9569732932aaad`.
+Current compilation passed; the complete378-case current stage is running.
+Root must collect this original handle before another VM or source edit in that
+worktree. Floor remains pending; no finalization success is claimed.
+
+Formatter61807 is collected PASS on the same clean source, in4.572 seconds,
+six original joins and37 verified artifacts, with no byte changes. Collection
+`M7/retained-finalization-lookup-format-20261006-v1/original-collection.json`,
+SHA-256 `29fe64a5f56e2e4511af12be002a3ad949dab5a691adfdc8636d3af67195c56f`;
+terminal `b37d6e5b2232da08caa137172e7b4a4d885f38d997782bba8bf061512bdf7511`.
+Consumed registry1176 SHA-256
+`2886e6c38e6a00f331a150328082327fab88d68b28ffc5b113c70f6ece42b68b`.
+Original92340 owns its successor until collection. Never repoll61807.
+
+Ordinary progress is independently reviewed and committed at isolated
+`299ad1d2d1dfaf4002993725f9ae1669415fc16d`. Its six-path formatting proof and
+complete52-case paired proof are queued behind92340. Prepared runners, helpers
+and both reviewed patches are retained immutably at
+`M7/corrected-progress-and-lookup-preparation-20261006-v1/inventory.json`,
+SHA-256 `54f0c94db1c6838d376f86114c825931745afe9fcd06df25a547d39570d4efa1`.
+Preparation is not execution evidence.
+
+An independent writer owns only RestoreIO, Workflow and a new partial-cleanup
+test in m7-retained-partial-cleanup, based on c36ea4c1. It implements the accepted
+private mixed/all-absent claim cleanup subset without touching the source under
+test. Root owns Git, all VMs and rejoin. Foreground live routing is being planned
+separately; real writer-pressure and EOF/process closure remain required.
+
 Private finalization original21368 is collected FAIL at clean
 `6b4fa5aa5ad5f3dfbcb8e5cadfd919c19a3e1578`, in 369.464 seconds.
 All 378 current cases executed with zero exclusions, skips or invalid cases;
@@ -44,15 +74,15 @@ refused the changed identity. Independently reviewed correction
 `c36ea4c16d9edb8495e486d0dae4b80ae979edac` preserves the original claim directory
 through rename and verifies the owner's full identity before releasing the
 pause. It changes only lookup test595, preserving all 38 cases, assertions,
-bounds and original joins. Formatting and the complete paired378 proof remain
+bounds and original joins. Formatting is proved; the complete paired378 proof remains
 pending. The isolated finalization worktree now owns four paths: RestoreIO,
-Workflow, the new32-case test and this existing lookup test. No VM is active.
+Workflow, the new32-case test and this existing lookup test. Original92340 is the sole active VM.
 
 Ordinary progress encoding source is frozen in m7-progress-wire-encoding,
 based on `a868e5ef28d693d2c630bf6edeecf1bb5391a7b0`. Six owned paths are
 Delivery, WireRecords, their tests, SessionMapping's positive pressure fixture
 and SocketConnection's positive ordinary-record fixtures. Complete selection is
-34 AppServer and18 Daemon cases per pair. Source review, formatting and execution
+34 AppServer and18 Daemon cases per pair. Source review is complete; formatting and execution
 remain pending. No schema, public API, persistence, compaction gate, live routing
 or generation activation changes. The separate added T16 rows remain open;
 T01–T19 added318 done/34 todo. Original rows remain80 done/93 todo/6 retired.
