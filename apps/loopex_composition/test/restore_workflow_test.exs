@@ -1102,8 +1102,8 @@ defmodule LoopexComposition.RestoreWorkflowTest do
   defp assert_second_source_disposition(fixture, :lost),
     do: assert(File.lstat(fixture.source) == {:error, :enoent})
 
-  defp restore_joined(fixture) do
-    owned = launch(fixture.plan)
+  defp restore_joined(fixture, boundary_observation \\ nil) do
+    owned = Map.put(launch(fixture.plan), :boundary_observation, boundary_observation)
     {result, events} = finish(owned)
 
     assert {:joined, {:ok, %{restore_result: {:committed, receipt}, release_claims: []}},
@@ -1204,7 +1204,8 @@ defmodule LoopexComposition.RestoreWorkflowTest do
 
   defp assert_successive_copy(fixture) do
     {:ok, baseline} = RestoreCodec.manifest(fixture.baseline, @total)
-    {:ok, restored} = RestoreCodec.manifest(manifest(fixture.destination), @total)
+    destination_manifest = manifest(fixture.destination)
+    {:ok, restored} = RestoreCodec.manifest(destination_manifest, @total)
     index = Map.new(restored, &{&1["path"], &1})
 
     generation_paths =
@@ -1259,10 +1260,12 @@ defmodule LoopexComposition.RestoreWorkflowTest do
     end
 
     assert manifest(fixture.backup) == fixture.baseline
+    destination_manifest
   end
 
   test "64 actual one-ledger restores retain every ordinal and refuse 65 without physical IO",
        context do
+    observed_start = System.monotonic_time(:millisecond)
     first = empty_ledger_cut(context.root)
     original = generation(Path.join(first.source, "l/generation"))
 
@@ -1271,11 +1274,15 @@ defmodule LoopexComposition.RestoreWorkflowTest do
                                                                                    {fixture,
                                                                                     epochs,
                                                                                     backups} ->
-        receipt = restore_joined(fixture)
+        receipt = restore_joined(fixture, %{ordinal: ordinal, started_at: observed_start})
         assert receipt["ordinal"] == ordinal
         assert receipt["ledger_count"] == 1
-        assert_successive_copy(fixture)
-        assert_current_record_caps(fixture)
+        # Concept: copy and cap assertions share one unchanged physical observation.
+        # Technical depth: no mutation separates these checks. Keep every native
+        # record read and the final backup rechecks without scanning this same
+        # destination twice per ordinal.
+        destination_manifest = assert_successive_copy(fixture)
+        assert_current_record_caps(fixture, destination_manifest)
         assert :ok = RestoreGuard.ledger(Path.join(fixture.destination, "l"))
         current = generation(Path.join(fixture.destination, "l/generation"))
         refute MapSet.member?(epochs, current["executor_epoch"])
@@ -1476,7 +1483,7 @@ defmodule LoopexComposition.RestoreWorkflowTest do
 
   defp lineage_ordinal(value), do: value |> Integer.to_string() |> String.pad_leading(8, "0")
 
-  defp assert_current_record_caps(fixture) do
+  defp assert_current_record_caps(fixture, destination_manifest) do
     ordinal = lineage_ordinal(fixture.plan["prior_restore_count"] + 1)
     root = Path.join([".loopex-restore", "lineage", ordinal])
     baseline = File.read!(Path.join([fixture.destination, root, "baseline"]))
@@ -1503,7 +1510,7 @@ defmodule LoopexComposition.RestoreWorkflowTest do
             type
           )
 
-    assert {:ok, _} = RestoreCodec.manifest(manifest(fixture.destination), @total)
+    assert {:ok, _} = RestoreCodec.manifest(destination_manifest, @total)
   end
 
   # Concept: the hostile cut changes one historical manifest entry, not a digest.
@@ -2473,6 +2480,10 @@ defmodule LoopexComposition.RestoreWorkflowTest do
         if owned.pause == :source_absence, do: send(guardian, {:proceed, reference, id})
         finish(owned, [event | events])
 
+      {:restore_io, ^guardian, _worker, ^reference,
+       {:issued, _id, {:restore_phase, phase}} = event} ->
+        finish(observe_restore_boundary(owned, phase), [event | events])
+
       {:restore_io, ^guardian, _worker, ^reference, event} ->
         finish(owned, [event | events])
 
@@ -2486,6 +2497,30 @@ defmodule LoopexComposition.RestoreWorkflowTest do
         flunk("original restore work/cleanup cutoff reached")
     end
   end
+
+  # Concept: the long proof retains progress from the existing owned IO probe.
+  # Technical depth: these are fixture observation times, not worker timestamps
+  # or durable facts. Only the eight existing fresh phases can produce a row,
+  # once per ordinal: at most 512 rows, without paths or payloads. Every original
+  # event still reaches finish/2 and all monitors and cutoffs remain unchanged.
+  defp observe_restore_boundary(
+         %{boundary_observation: %{ordinal: ordinal, started_at: started_at} = observation} =
+           owned,
+         phase
+       )
+       when phase in ~w(claim inventory baseline_copy destination_intent source_retirement destination_generations destination_proofs claim_release) do
+    seen = Map.get(observation, :seen, [])
+
+    if phase in seen do
+      owned
+    else
+      elapsed = System.monotonic_time(:millisecond) - started_at
+      IO.puts("restore_boundary ordinal=#{ordinal} phase=#{phase} observer_elapsed_ms=#{elapsed}")
+      %{owned | boundary_observation: Map.put(observation, :seen, [phase | seen])}
+    end
+  end
+
+  defp observe_restore_boundary(owned, _phase), do: owned
 
   defp exact_joins(owned) do
     actors =
