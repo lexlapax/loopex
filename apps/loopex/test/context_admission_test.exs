@@ -634,6 +634,7 @@ defmodule Loopex.ContextAdmissionTest do
              })
 
     assert_receive {:context_model_holding, model_worker}, 5_000
+    assert_received {:context_model_invoked, ^model_worker, _held_request}
     assert ^max_turns_refusal = Loopex.command(attachment, max_turns_command)
 
     assert {:error, :idempotency_conflict} =
@@ -820,11 +821,35 @@ defmodule Loopex.ContextAdmissionTest do
                bounds: %{max_turns: 8, token_budget: 1_000, deadline_ms: 60_000}
              })
 
-    assert_receive {:context_model_invoked, _worker, request}, 5_000
+    assert_receive {:context_model_invoked, _worker,
+                    %{
+                      messages: [
+                        %{"role" => "system"},
+                        %{"role" => "user", "content" => "stage a deadline"}
+                      ]
+                    } = request},
+                   5_000
+
     assert request.deadline >= before_staging + 59_000
 
     deadline_records = records(deadline_fixture, deadline_session)
-    assert Enum.any?(deadline_records, &kind?(&1, "prompt_admitted_v3"))
+    [admitted] = Enum.filter(deadline_records, &kind?(&1, "prompt_admitted_v3"))
+    [staged] = Enum.filter(deadline_records, &kind?(&1, "model_request_committed_v2"))
+
+    # Concept: the provider receives this prompt's exact committed deadline.
+    # Technical depth: the receive selects this fresh session's exact lineage,
+    # excluding earlier held-run and follow-up notices. Its unchanged duration
+    # lower bound and retained command/staging identity are both verified.
+    assert admitted.payload["command_id"] == "deadline-shape"
+    assert admitted.payload["deadline_ms"] == 60_000
+
+    assert admitted.payload["run_id"] ==
+             SessionState.command_run_id(deadline_session, "deadline-shape")
+
+    assert staged.payload["run_id"] == admitted.payload["run_id"]
+    assert request.deadline == staged.payload["request"]["deadline"]
+    assert request.staged_request_digest == staged.payload["staged_request_digest"]
+    assert request.deadline > 0 and request.deadline <= @uint64_max
   end
 
   test "deadline staging checks clock domain and absolute uint64 addition before dispatch and replays one exact pair" do
