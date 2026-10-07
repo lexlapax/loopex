@@ -70,28 +70,74 @@ Collection `M7/mode-configure-boundaries-20261006-v1/original-collection.json`,
 SHA-256 `17f5ca08d90adcfb9958a6ff10e9c202c7cd8a0ea98a3b66fa987215218b40e0`,
 binds42 artifacts, ten original joins and956 consumed keys. Never repoll58622.
 
-LIVE root original59352 executes only unrun independent stages at frozen
-isolated bab921b2 in `/Users/spuri/.codex/worktrees/m7-restore-copy-fixtures/loopex`:
+Original59352 is collected PASS after1593.73 seconds at isolated bab921b2:
 current provider/packaging62, drain1 with nine subcases and CLI44 including Node;
 floor configure15 and the same provider/drain/CLI selection. Total229 native
-cases and18 drain subcases. Its persistent runner
-`M7/m7-independent-unrun-20261006-v1.py`, SHA-256
-`5e6af11baeb1eeb2bb845f076613479ec0ac06fba049266805d0bf8c191a6385`,
-seeds the complete956-key registry and copies only public registry metadata and
-22 exact lock-checksummed archives into private Hex roots. Fresh short private
-TMPDIR roots retain exact ownership and are removed only after original joins.
-Output `M7/independent-unrun-boundaries-20261006-v1` is incomplete until original
-terminal collection. No current configure or failed restore stage is retried.
+cases and18 drain subcases. Floor CLI44 completed in510.956 seconds. Collection
+`M7/independent-unrun-boundaries-20261006-v1/original-collection.json`, SHA-256
+`05667f5a29036eb193acc2d03eb207699ca80d9b4ef0b2a7de516bb327edee67`,
+binds74 artifacts,18 original joins and974 unique admissions. Registry SHA-256
+`271f2dc74277ac4f09bfaf38a87427daeb15fdfae70c1dbd1cbf16f662689c0f`.
+Never repoll59352 or signal its former PIDs. The standalone T05 configure leaf
+is complete from current15 in58622 and floor15 here; broader live routing stays
+open.
 
-Next: collect59352 once; independently review and prove any captured-history
-optimization through complete affected files with all original cutoffs; resolve
-the64-transition failure causally; run corrected whole current fast once with
-ordinary022, short private TMPDIR, public offline Hex cache, four application
-VMs maximum and provider alone as CI. Then close eligible T06/T10 and T12.9
-rows only from complete passing proof. ADR0054 remains the sole asked pending
-question;0055 and0056 remain queued proposals. No milestone closure, main merge,
-tag, release, publication or paid campaign is authorized. Original T01–T19:
-80 done/93 todo/6 retired; added302 done/41 todo.
+Captured-byte digest/child indexing is reviewed and committed at
+`10f9930cbf3c4ac73b74d9785bedd9b94ddf8552`. It changes only RestoreGuard and
+retained-construction tests; physical reads and all cutoffs remain. Original78633
+is collected FAIL_OR_UNAVAILABLE after175.555 seconds. Current construction13
+passed, workflow133/134 passed, and the64-restores test again timed out at60,000ms.
+Floor was unrun. The native stack is in File.lstat through physical
+RestoreGuard.ledger/state/complete_transition/verify_historical_entry, not the
+captured-byte digest path. Collection
+`M7/indexed-captured-history-20261006-v1/original-collection.json`, SHA-256
+`6e2b05f6ac30fd5d437a5240ea1f4ee8ec4eb5aaf3aedaaa859145b525dc7d8d`,
+binds26 artifacts, five original joins and979 admissions; registry SHA-256
+`d3754d010c1f30fb8048a3f29ab9a3ec4962006ad492ed875287bd29ac3c3bf0`.
+Never repoll78633. No unchanged retry or increased cutoff is authorized.
+
+Independent review supports a narrower physical correction: retain each exact
+baseline-versus-reconstructed-history comparison and directory checks at their
+existing positions, then reread every protected file once before successful
+ordinary guard return. Captured lookup and its pending-prefix checks remain
+unchanged. This preserves static refusal precedence without an atomic snapshot
+claim. Add an actual corrupt-older-record/higher-incomplete-head regression and
+prove complete affected files on both pairs under the original limits.
+
+The reviewed optional `LOOPEX_CHECK_RETAIN_LOGS` check fix is integrated with this
+checkpoint. It exclusively creates an absolute0700 evidence directory before
+VMs and preserves successful, failed or partial interrupted application logs.
+Bash syntax and relative/existing-target refusal checks passed; independent
+review found no blocker. Original88662 retained complete check stdout and partial
+interruption snapshots; successful application raw logs were deleted by the old
+script and are unavailable. Its failed check remains historical, not closure
+proof. The disabled revised whole-check wrapper
+`M7/m7-corrected-full-fast-retained-20261006-v1.py`, SHA-256
+`7ecdbcdf5c3618367d0860a6d0a347dd0af9e965be26f9352914aef1608edcdc`,
+requires native logs/done markers for all11 applications, joins, hashes and exact
+populations before PASS. Its source guard must be revised and independently
+reviewed after the physical correction; it currently pins this three-path direct
+child of10f. Full current fast remains due, with ordinary022, fresh short TMPDIR,
+public locked offline Hex cache, Composition/provider alone and four other VMs
+maximum. It must not run against the known failing64-restores implementation.
+
+Native authored bounds are source-only in managed
+`/Users/spuri/.codex/worktrees/m7-native-authored-bounds/loopex`, based on10f.
+The worker owns Bounds, SessionState, SessionCoordinator, Control, EffectIntents
+and focused native/admission/provider/reconciliation tests. ADR0046 governs exact
+omission identity before clock/defaults, retained dispositions, independent
+follow-up ceilings and the live monotonic action fence. Existing retained-bound
+observations avoid claiming a fabricated wall-clock sample. No wire/manifests or
+helper ledger activation belongs to that unit. Root owns all VMs, integration,
+verification and Git. Unverified source remains separate from primary.
+
+Next: finish the physical correction and paired proof; update the remaining
+eligible leaves only from complete evidence; run corrected whole current fast
+once on the clean candidate, then close eligible T06/T10 and T12.9 rows. ADR0054
+remains the sole asked pending question;0055 and0056 are queued proposals. No
+milestone closure, main merge, tag, release, publication or paid campaign is
+authorized. Original T01–T19:80 done/93 todo/6 retired;
+added303 done/40 todo.
 
 The named results below remain evidence of their specific revisions.
 

@@ -37,6 +37,21 @@ case "$mode" in
   *) echo 'check: usage: check.sh [--docs|--select]' >&2; exit 2 ;;
 esac
 
+# Concept: optional retention keeps complete application output as evidence.
+# Technical depth: exclusively create a fresh absolute directory before test VMs;
+# interrupted logs remain partial evidence and do not establish PASS.
+retained_logs=${LOOPEX_CHECK_RETAIN_LOGS:-}
+if [ -n "$retained_logs" ]; then
+  case "$retained_logs" in
+    /*) ;;
+    *) echo 'check: LOOPEX_CHECK_RETAIN_LOGS must be an absolute fresh directory' >&2; exit 2 ;;
+  esac
+  if ! mkdir -m 700 "$retained_logs"; then
+    echo 'check: cannot exclusively create LOOPEX_CHECK_RETAIN_LOGS' >&2
+    exit 2
+  fi
+fi
+
 started=$SECONDS
 step() {
   local name=$1 step_started=$SECONDS
@@ -77,13 +92,23 @@ kill_tree() {
   kill -TERM "$1" 2>/dev/null || true
 }
 
+cleanup_suite_logs() {
+  if [ -z "$retained_logs" ]; then
+    rm -rf "$LOOPEX_CHECK_LOGS"
+  fi
+}
+
 suite() {
   local cores jobs logs status=0 app
   cores=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)
   jobs=${LOOPEX_CHECK_JOBS:-$((cores / 2))}
   [ "$jobs" -ge 1 ] || jobs=1
   if [ -z "${LOOPEX_CHECK_JOBS:-}" ] && [ "$jobs" -gt 4 ]; then jobs=4; fi
-  logs=$(mktemp -d "${TMPDIR:-/tmp}/loopex-check.XXXXXX")
+  if [ -n "$retained_logs" ]; then
+    logs=$retained_logs
+  else
+    logs=$(mktemp -d "${TMPDIR:-/tmp}/loopex-check.XXXXXX")
+  fi
   export LOOPEX_CHECK_LOGS=$logs
 
   # Heaviest first, measured at M4 closure, then any other application.
@@ -122,7 +147,7 @@ suite() {
   if [ "${#shared[@]}" -gt 0 ]; then
     phase "$jobs" "${shared[@]}" || status=$?
   fi
-  rm -rf "$logs"
+  cleanup_suite_logs
   return "$status"
 }
 
@@ -153,7 +178,7 @@ phase() {
   pid=$!
   heartbeat "$pid" "$@" &
   pulse=$!
-  trap 'trap - INT TERM; kill_tree "$pulse"; kill_tree "$pid"; wait "$pid" 2>/dev/null || true; rm -rf "$LOOPEX_CHECK_LOGS"; printf "check: interrupted\n"; exit 130' INT TERM
+  trap 'trap - INT TERM; kill_tree "$pulse"; kill_tree "$pid"; wait "$pid" 2>/dev/null || true; cleanup_suite_logs; printf "check: interrupted\n"; exit 130' INT TERM
   wait "$pid" || status=$?
   trap - INT TERM
   # The heartbeat and the sleep it is blocked in both go, or the sleep would

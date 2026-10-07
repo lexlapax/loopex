@@ -1,18 +1,24 @@
 # M7 Implementation Tasks
 
-Reviewed configure grammar and fixture corrections are integrated at `bab921b2`.
-Paired chat/provider proof is collected PASS. The full integration check remains
-FAIL: overlong temporary paths, absent public offline Hex cache and mode-copy
-assumptions prevented valid fixture setup. Corrected restore133/134 passed;
-the64 actual successive restores case hit its unchanged60,000-ms test cutoff,
-which also failed before the new helper. A source worker examines redundant
-immutable captured-history work. Independent unrun provider, packaging, drain,
-CLI and floor configure stages continue in root original59352. No failed test
-is retried unchanged, no cutoff is increased, and no original row closes yet.
-The [restart checkpoint](M7-resume.md#technical-depth) retains exact source,
-original terminal collections and the next verification order. Original T01–T19:
-80 done/93 todo/6 retired; added302 done/41 todo. Older entries below describe
-their named revisions.
+The standalone configure grammar subtask is complete: current and floor each
+passed all15 codec/Node/transport preparation cases. Live configure, remote
+creation and full generation activation remain open. Original59352 is collected
+PASS with229 native cases,18 drain subcases and18 process joins. Its final floor
+CLI44 group passed in510.956 seconds.
+
+Captured-history indexing is integrated at `10f9930c`. Original78633 is collected
+FAIL after175.555 seconds: current construction13 passed; workflow133/134
+passed, and the64-restores case again exceeded60,000ms. Floor was unrun. The
+stack points to repeated physical historical reads through ordinary
+RestoreGuard.ledger. A source-only correction preserves historical directory
+checks and exact per-transition projection equality, then verifies all protected
+files before success. No deadline or assertion is weakened. The next full check
+will retain all11 application raw logs outside the repository. Native authored
+prompt/follow-up bounds proceed in a separate managed worktree.
+
+The [restart checkpoint](M7-resume.md#technical-depth) records exact identities
+and verification order. Original T01–T19:80 done/93 todo/6 retired;
+added303 done/40 todo. Older entries below describe their named revisions.
 
 Original T06.2 and T06.4 are complete. The literally integrated built-command
 witness passed all ten selected ordinary cases on both supported toolchains:
@@ -13199,7 +13205,7 @@ or check was relaxed.
 
 - [ ] Finish accepted ADR0052 native answer provenance, exact policy cursor/replay relations and shared Elixir/Node payload projection in both transports; prove focused current/floor and independent vectors after rejoin, complete negotiated manifests and real answered-command workflows.
 - [ ] Pin and implement the exact configure request and versioned remote creation-option grammars through governed decisions; preserve authored aliases, central preparation, host-only bindings, current command replay and both transport authority gates.
-- [ ] Prove the accepted standalone configure `changes` grammar, exact schema and371 literal vectors through shared Elixir and independent Node codecs plus both transport preparation wrappers on both supported pairs. Keep live configure routing, remote creation and whole-generation activation separate.
+- [x] Prove the accepted standalone configure `changes` grammar, exact schema and371 literal vectors through shared Elixir and independent Node codecs plus both transport preparation wrappers on both supported pairs. Keep live configure routing, remote creation and whole-generation activation separate.
 - [ ] Pin and implement the closed transient compaction-progress payload and its actual owned emission/loss/succession behavior; exclude summaries and private captures and prove both transports/clients before complete generation activation.
 
 - [x] Prepare the exact proposed ADR0052 policy public-event pair from current native/accepted sources, retain root review and complete once-only docs gate at ec9e8fbe with bound Proposed digests; required maintainer acceptance, native/event implementation, complete /3-/4 manifests and live clients remain open.
