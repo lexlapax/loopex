@@ -70,8 +70,8 @@ defmodule LoopexProtocol.CreationOptionsTest do
              vector["name"]
     end
 
-    assert {:ok, %{"version" => 1.0} = fractional} = Frame.decode(~s({"version":1.0}), 128)
-    assert CreationOptions.decode_wire(fractional) == :error
+    assert Frame.decode(~s({"version":1.0}), 128) == {:error, :number_not_an_integer}
+    assert Frame.decode(~s({"version":1e0}), 128) == {:error, :number_not_an_integer}
     bytes = ~s({"version":1,"tools":[]})
     assert {:ok, options} = Frame.decode(bytes, byte_size(bytes))
     assert {:ok, _} = CreationOptions.decode_wire(options)
