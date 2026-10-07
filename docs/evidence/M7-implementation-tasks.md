@@ -1,5 +1,19 @@
 # M7 Implementation Tasks
 
+T09 terminal verification original44160 is collected FAIL at isolated4e7baabf:
+all25 Protocol cases passed, but Core passed23/24; floor did not run. The new
+live abort exposed a codec/schema oracle that incorrectly required null command
+captures for cancellation. Current production correctly retains the admitted
+abort ID and digest. The seven-file correction passed independent review and is
+committed at isolated6210f87d; fresh formatting and49-case paired proof remain.
+T16's concurrent held-shutdown formatter original78676 is collected PASS,
+4.626 seconds, six original joins and37 artifacts; non-line AST equivalence and
+both native formatter checks passed. Its literal clean child is87be8289; all70
+affected cases per pair remain unproved. Accepted ADR0052's eight-file policy
+codec unit passed source review and is committed at isolatedede90f58; formatting
+and39-case paired proof remain. Counts remain original81 done/92 todo/6 retired,
+added326 done/31 todo. Exact references are in the resume record.
+
 Separate-workspace restoration is now proved at clean isolated29132264:
 all41 workflow cases passed on each supported pair, zero exclusions/skips/
 invalid,537.540 seconds. Original23575 is terminal and collected with five new

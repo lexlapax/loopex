@@ -27,6 +27,54 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+Latest continuation, 2026-10-07: primary checkpointf691892f is clean and pushed.
+Original44160 is terminal1 and collected FAIL at isolated
+`4e7baabf12a8aabbe3b35cae5b8a05bc46a92bed`: current Protocol25/25 including
+four actual Node consumers, Core23/24, zero exclusions/skips/invalid; floor
+unrun. Seven original joins,33 artifacts,24.520 seconds. Collection
+`M7/question-terminal-admission-20261007-v1/original-collection.json`, SHA-256
+`b04854077487e2360ddd91f95d74532cef791628441876433c22f4dbbb81b5b4`;
+terminal `b9a4ea87e9f4c3f9400138b5d181887218a55ae792e5af883a51b4bf7f31a71a`.
+Never repoll44160 or rerun unchanged4e7. The live abort failure is a new
+codec/schema/test oracle mismatch: current native production correctly retains
+the admitted abort ID and digest. Ordinary cancellation permits two null
+captures; abort cancellation permits the actual valid ID/digest pair; expiry
+retains its strict null captures. The reviewed seven-file repair is committed at
+`6210f87d77142d685523ca3ac6c6e0cd7b5d545d` in `m7-question-terminal-payload`.
+Its frozen packet `/private/tmp/m7-question-terminal-abort-captures-20261007-v1/source.json`
+has SHA-256 `f966761da5aafbedd18e11a5ada365aeac12daf5ac20391c91ed61015529fdb0`;
+patch `97ac3fff81b633ee2b21cbf7ce54630df333e1b985474b0392ed40ae66a48159`.
+Requested141 vector bytes are unchanged; terminal vectors377 retain all349
+prior cases and add28. Fresh formatting and all49 cases per pair remain required.
+
+T16 formatter original78676 is terminal0 and collected PASS,4.626 seconds,
+six original joins and37 artifacts. Current formatting, non-line AST comparison
+and both native formatter checks passed. Collection
+`M7/configured-held-shutdown-format-20261007-v1/original-collection.json`, SHA-256
+`64947187a195c296b3486d052f591e77ec2cae8051f97bcf974ae716b7d214d9`;
+terminal `6e30f91958b9feeefd379020c15d545caca3dd409c3403f1424e4df063c0d770`.
+Literal formatter output is committed as clean child
+`87be828975d7ed2b3c84e3e48b003ca88609974a` of e666baca in
+`m7-configured-fence-fixture`; file SHA-256
+`d9f7c2fa0a45daaab6d62c9f1d6c695a80925cad125ec5c5b14df0dca22af995`.
+All70 affected Core cases on each pair remain required. Never repoll78676.
+Latest fully collected registry1332 is
+`M7/configured-held-shutdown-format-20261007-v1/stage-attempt-registry.json`, SHA-256
+`95c194c24ba3a31f1bebf460918c665a66725ce4b2a059a46f1b5c242471253e`.
+Consume that successor before another native stage; no native handle is live.
+
+Accepted ADR0052's eight new policy-codec/schema/vector/Node files passed
+independent source review and are committed at isolated
+`ede90f58121e7e558196dd2e7c9be7738e1c66d2` in `m7-configure-grammar`.
+Packet `/private/tmp/m7-policy-event-source-20261007-v1.json`, SHA-256
+`bb42ed6e4d69bafffa54c2a3e26568ce96f076080b959af7e31d848e8b1a0042`;
+patch `d74551de86a61ac7d197b866e2ca177204d3ed97cb90952cdd8d44fcb33e4e72`.
+424 literal vectors and nine new cases are authored; no executed proof is
+claimed. Formatting and complete39-case paired verification remain required.
+Native policy terminal provenance, transports and coordinated generations
+remain separate open work. No row closes from these source/formatter steps.
+Tallies remain original81 done/92 todo/6 retired; added326 done/31 todo.
+
 Latest checkpoint, 2026-10-07: full-fast original73241 is TERMINAL1 and
 collected FAIL at clean primary `5eb38e39c91c5a227b181f59472fc3703d449093`.
 All eleven application logs and completion markers are retained:4,669 executed,
