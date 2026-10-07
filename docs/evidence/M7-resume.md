@@ -27,6 +27,57 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+Wire creation unit is now proved and integrated literally from
+`0babe891b1689d4021f32071dfce086a5dcefe58`. Original76438 exited0:
+12/12 on each supported pair,including both Node22.14.0 consumers,zero
+exclusions/skips/invalid,9.523 seconds,six fresh original joins and38 artifacts.
+Output `M7/creation-options-wire-proof-20261007-v4` under the external evidence root;
+collection SHA-256 `79587b0344cbeb79007f1e95c6e14c37a6aa2c4ab5f4a69f008b7f3ee1a4587a`;
+terminal `464f8d4d8696ecf7ac40bfbff55b671e4a20d4bc8c2105f7abf33a7875744468`;
+latest collected registry1535 `54e564a8f0a491a565c60661a8bbe34463b436334ec198d38eee746b00326c59`.
+Executed wrapper SHA-256
+`7f7e60569ae4fd7b6a291c6811f412d7e88e840e74a2480d67063991d25d4bbb`.
+Formatter original82049 separately passed8.691 seconds,six joins,39 artifacts
+at unchanged clean0babe891;output `M7/creation-options-wire-format-20261007-v4`;
+collection SHA-256 `e6182e6f3d1e0b988149056fe13e388f53d82391bb06614d5afafcfc92c166c0`;
+terminal `2d690dcf6df9b08098517c5c0d6a480701ae612989d8f7b5e40ea8ffde80ffae`.
+Exactly four positive clean-source version/check records are reused explicitly;
+no original test record is reused or retagged. V4 source packet SHA-256
+`eff85186d212cefcccd51ac4731757f090ca008446084581e18d4317dc1e7aa4`;
+root review `/private/tmp/m7-creation-options-wire-root-review-20261007-v4.json`,
+SHA-256 `69e5da78dee2c49a8ad4d7715e66f72b24f2e55741df3236049a6a6161b502a8`.
+Only the nine literal tested codec/schema/vector/Node files join. The current
+shared ConfigureRequest Node guards reject whole-string newline ambiguity.
+Raw lexical tokens and duplicates remain governed by Frame; native Control,
+Store custody,transport ingress and coordinated generation activation remain
+unproved by this standalone unit. Original90814 and93963 remain FAIL.
+
+T15's selected artifact-object row is complete by independent audit of existing
+paired evidence. Report `/private/tmp/m7-restore-object-next-slice-20261007-v1.md`,
+SHA-256 `ce917748ee1b40f4ddf3e73f2471b2d03c0431409db816676b941f1cbf7ec534`,
+checks every original66773 retained artifact/native receipt and the current
+IO/test/Local adapter/facade literal Git blobs against its NUL projection.
+Its12 object tests,41 internal scenarios,already ran inside the complete111-case
+IO file and175/175 paired population. All original guardian/descriptor/close,
+work/cleanup bounds and alternate locator/read-cap semantics remain. No new
+implementation or native rerun is needed. Complete enumeration/history/helper,
+full07777 modes and restore activation remain separate.
+Original81 done/92 todo/6 retired;added336 done/27 todo.
+
+Compaction activity unit source is frozen in isolatedm7-activity-vectors,
+base8b664814. Packet
+`/private/tmp/m7-activity-vectors-source-20261007-v1/source.json`,SHA-256
+`ca4540a0fa25cf25087d2d633853aa6621b05d85a6ee23f7c372f25140d134fd`.
+It preserves12 existing activity cases and adds4;paired selection is20 including
+CheckpointOwner4 and two actual Node consumers. The new185 literal vectors and
+51 direct Node boundary controls are source-only claims pending independent
+review,root raw commit,formatting and paired proof. Only five schema/vector/Node
+test paths are owned; serving/live routing remains outside the unit. No native
+VM is live after collected76438. Continue the active goal;do not pause or mark
+M7 complete. ADR0056 remains the sole asked unanswered decision;0059/0060 remain
+reviewed and documentation-checked proposals without acceptance.
+
+
 Latest primary checkpoint `8b664814` is pushed to origin/m7. Two earlier HTTPS
 pushes were rejected by GitHub with Internal Server Error; the authorized
 HTTP/1.1 push then succeeded without forcing or changing history.

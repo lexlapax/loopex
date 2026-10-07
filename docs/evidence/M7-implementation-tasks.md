@@ -1,5 +1,21 @@
 # M7 Implementation Tasks
 
+The standalone creation-options wire unit is now proved and integrated literally
+from0babe891. Original76438 passed all12 cases on each supported pair,including
+both independent Node consumers,zero exclusions/skips/invalid,9.523 seconds,
+six original joins and38 artifacts. Four positive clean-source formatter
+metadata records remain explicit separate prerequisites. One added bounded
+codec row closes; native creation custody,transport admission and coordinated
+serving remain open.
+
+The selected T15 artifact-object row closes through independent source/evidence
+reconciliation. Its unchanged12 tests were already included in original66773's
+complete175/175 paired proof; current IO/test/Local adapter/facade bytes match the
+retained Git projection. No test rerun or complete restore PASS is claimed.
+Original T01–T19 remains81 done/92 todo/6 retired;added336 done/27 todo.
+Exact references are in the [resume record](M7-resume.md).
+
+
 Wire source7544c2ff passed both formatter checks,then original93963 failed11/12
 current cases because its framed-fraction fixture contradicted the existing
 Frame refusal contract. A narrow fixture correction is being prepared; no wire
@@ -13475,6 +13491,8 @@ or check was relaxed.
 
 ### Added implementation subtasks
 
+- [x] Implement the standalone authored remote creation-options codec/schema and independent Node vectors under accepted ADR0055, preserving optional versus empty configuration/tool selection, strict opaque/integer/quantity domains, all398 creation and381 configure vectors and shared exact-string regressions. Prove complete12 cases including both Node consumers on each supported pair at0babe891, zero exclusions/skips/invalid, before literal integration; retain original90814 formatter and93963 fixture failures. Native custody/transport admission and served generation activation remain separate.
+
 - [x] Implement accepted ADR0055's pure closed creation-options normalization, captured-default tool selection, prepared initial-genesis construction and no-resolver reconstruction through existing configuration/instruction/genesis validators. Preserve omission, exact authored aliases/tool order/raw instruction sections and inclusive complete-genesis byte bounds; prove all58 complete affected Core cases on both supported pairs. Native Control/Store custody, callback replay, transport admission and generation activation remain separate.
 
 - [x] Implement accepted ADR0052 native terminal turn and answer-command provenance with strict closed cursor/replay relations; reconstruct existing retained refusal reasons and finish only exact queued denied/expired calls after owner loss without reconsulting policy or granting retained allow authority. Prove all30 answer/lifecycle cases on both supported pairs, including real700-ms expiry owner loss and all three Store uncertainty phases; retain original65277 failure and integrate literal tested files. Transport projection, complete manifests and generation activation remain open.
@@ -14044,7 +14062,7 @@ Exact collection and outputs are retained in the restart checkpoint.
 
 - [x] Recheck the captured source ancestor type/device/inode identities after the second native absence observation, including the final pre-root-commit phase. Prove actual persistent parent removal at the held final read refuses completion while preserving original cutoffs, post-intent fencing, retained destination claim and all prior case bodies on both supported pairs.
 - [x] Preserve positively acquired restore claims through pre-intent IO failures and release them with the original joined terminal owner/cutoffs when neither state root changed; retain partial/unproved or foreign claims and truthful remaining-claim accounting. Prove actual second-claim failure, known first-claim removal and partial-publication fencing on both supported pairs without changing the six existing workflow cases or bounds.
-- [ ] Audit one selected current Local artifact object through the existing owned streaming hash, binding the locator-derived physical path to the reference digest/size, complete captured manifest and descriptor/ancestor identities under original total/work/cleanup bounds. Preserve current direct-fetch locator semantics, writer-only limits and all orphan/staging bytes; prove actual writer and physical refusal cases on both pairs. Complete object enumeration, history relations and restore activation remain separate.
+- [x] Audit one selected current Local artifact object through the existing owned streaming hash, binding the locator-derived physical path to the reference digest/size, complete captured manifest and descriptor/ancestor identities under original total/work/cleanup bounds. Preserve current direct-fetch locator semantics, writer-only limits and all orphan/staging bytes; prove actual writer and physical refusal cases on both pairs. Complete object enumeration, history relations and restore activation remain separate.
 - [ ] Capture one selected current artifact-use sidecar through the existing guardian-owned restore IO worker and real captured Local/Core describe facade; require exact reference-derived pathname, physical manifest membership, current raw ceiling, hash/mode/link/ancestor identity and close-before-semantics under original cutoffs. Prove actual writers and physical/semantic refusals on both pairs; object bytes, complete namespace/orphans and history/restore relations remain separate.
 - [ ] Extract one private captured-byte Local receipt decoder shared with live reads; preserve the native current 28-field ETF schema, 65,536-byte cap, exact raw job binding, closed predicates and all claim/finality/job/recovery authority. Replace the injected decoder seam with actual bounded BIF proof and actual writer/hostile controls on both supported pairs; physical receipt capture and complete history audit remain separate.
 - [ ] Enumerate the complete current Local generation/marker/open namespace under one original restore IO guardian; require exact physical name membership, current marker-plane grammar, open cardinality/whole-byte bounds and source/job/digest relations. Preserve actual writer crash cuts and claim observations; complete receipts/Store/job/history/restore certification remains separate.
