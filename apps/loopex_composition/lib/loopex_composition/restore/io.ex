@@ -20,7 +20,8 @@ defmodule LoopexComposition.Restore.IO do
   durable record publication, complete declared-Store semantic auditing and one
   canonical retained Resource or Local ledger record audit, and complete Local
   generation/marker/open-plane enumeration and selected reference-bound artifact
-  use capture and one locator-selected streaming object audit to composition only.
+  use capture, one locator-selected streaming object audit, and raw-job-selected
+  current Local receipt capture to composition only.
   A private transition worker validates retained prior lineage and sequences
   available-source retirement or lost-source host-exclusion evidence, exact
   copy/publication and terminal
@@ -1911,6 +1912,37 @@ defmodule LoopexComposition.Restore.IO do
     end
   end
 
+  defp execute({:audit_selected_receipt, root, job_id, manifest}) do
+    # Concept: selected current receipt bytes remain private evidence, never a grant.
+    # Technical depth: the original opaque job fixes the current raw-job digest
+    # basename and existing receipt ceiling. Decode exact current bytes only after
+    # descriptor close; complete job/ledger/history/authority relations stay separate.
+    with {:ok, entries} <-
+           primitive(:receipt_manifest, fn -> RestoreCodec.manifest(manifest, @max_uint64) end) do
+      relative = Path.join("receipts", RestoreCodec.digest_bytes(job_id) <> ".receipt")
+      index = Map.new(entries, &{&1["path"], &1})
+
+      audit_captured_record(
+        root,
+        relative,
+        index,
+        Loopex.Store.max_item_bytes(),
+        :receipt_digest,
+        :receipt_decode,
+        fn bytes ->
+          with {:ok, receipt} <- Loopex.Executor.Local.decode_receipt_bytes(bytes),
+               true <- receipt.job_id == job_id do
+            {:ok, receipt}
+          else
+            _ -> {:error, :history_invalid}
+          end
+        end
+      )
+    else
+      _ -> {:error, :history_invalid}
+    end
+  end
+
   defp execute({:audit_artifact_object, root, reference, manifest, max_total}) do
     # Concept: one selected object's bytes bind its existing reference triple.
     # Technical depth: Local fetch selects by locator and verifies requested
@@ -2595,7 +2627,7 @@ defmodule LoopexComposition.Restore.IO do
     end)
   end
 
-  # Concept: Resource, ledger and artifact-use audits share one owned physical capture.
+  # Concept: Resource, ledger, artifact-use and receipt audits share owned physical capture.
   # Technical depth: exact inventory membership and role size precede open;
   # decoding follows explicit close, then file and ancestor identities are checked.
   defp audit_captured_record(root, relative, index, ceiling, digest_kind, decode_kind, decode) do
@@ -3455,6 +3487,11 @@ defmodule LoopexComposition.Restore.IO do
     do:
       valid_path?(root) and is_map(reference) and is_binary(manifest) and
         byte_size(manifest) <= @max_manifest
+
+  defp valid_operation?({:audit_selected_receipt, root, job_id, manifest}),
+    do:
+      valid_path?(root) and is_binary(job_id) and byte_size(job_id) in 1..8192 and
+        is_binary(manifest) and byte_size(manifest) <= @max_manifest
 
   defp valid_operation?({:audit_artifact_object, root, reference, manifest, max_total}),
     do:

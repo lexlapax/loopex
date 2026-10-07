@@ -1466,6 +1466,266 @@ defmodule LoopexComposition.RestoreIOTest do
     end
   end
 
+  test "selected receipt capture preserves actual Local writer bytes after source loss",
+       context do
+    for job_id <- [<<255, 0, 128>> <> "capture", :binary.copy(<<255>>, 8_192)] do
+      fixture = receipt_fixture(context.root, job_id)
+      owned = launch(receipt_operation(fixture), :receipt_decode)
+      assert {{:joined, {:ok, receipt}, evidence}, events} = drive(owned)
+      assert receipt == fixture.receipt and receipt.job_id == job_id
+      assert evidence.opens == 1 and evidence.closes == 1
+      assert evidence.work_cutoff == owned.work_cutoff
+      kinds = issued_kinds(events)
+      assert index(kinds, :close) < index(kinds, :receipt_decode)
+      assert Enum.count(kinds, &(&1 == :receipt_decode)) == 1
+      assert File.read!(fixture.path) == fixture.bytes
+      refute File.exists?(fixture.original)
+      joined(owned)
+    end
+  end
+
+  test "selected receipt requires exact current manifest membership and bounded raw identity",
+       context do
+    fixture = receipt_fixture(context.root)
+    {:audit_selected_receipt, root, job_id, manifest} = receipt_operation(fixture)
+
+    for invalid <- [nil, "", :binary.copy("x", 8_193)] do
+      operation = {:audit_selected_receipt, root, invalid, manifest}
+      result = RestoreIO.run(operation, limits(1_000, 100), probe: self())
+      assert {:error, :invalid_io_request} = result
+    end
+
+    refute_receive {:restore_io, _, _, _, _}, 0
+    [domain, entries] = :erlang.binary_to_term(manifest, [:safe])
+    relative = Path.relative_to(fixture.path, root)
+
+    for changed <- [
+          Enum.reject(entries, &(&1["path"] == relative)),
+          Enum.map(entries, fn entry ->
+            if entry["path"] == "receipts",
+              do: %{entry | "mode" => Bitwise.bxor(entry["mode"], 0o100)},
+              else: entry
+          end)
+        ] do
+      operation =
+        {:audit_selected_receipt, root, job_id,
+         :erlang.term_to_binary([domain, changed], [:deterministic])}
+
+      owned = launch(operation, :receipt_manifest)
+      assert {{:joined, {:error, :io_error}, %{opens: 0, closes: 0}}, events} = drive(owned)
+      refute :receipt_decode in issued_kinds(events)
+      joined(owned)
+    end
+
+    owned = launch({:audit_selected_receipt, root, job_id, <<131>>}, :receipt_manifest)
+    assert {{:joined, {:error, :history_invalid}, %{opens: 0, closes: 0}}, _} = drive(owned)
+    joined(owned)
+  end
+
+  test "selected receipt filename binds the exact raw job without authority inference", context do
+    fixture = receipt_fixture(context.root, <<255, 0>> <> "original")
+    wrong = fixture.job_id <> <<0>>
+    path = receipt_path(fixture.root, wrong)
+    File.cp!(fixture.path, path)
+    selected = %{fixture | job_id: wrong, path: path}
+    owned = launch(receipt_operation(selected), :receipt_decode)
+    assert {{:joined, {:error, :history_invalid}, %{opens: 1, closes: 1}}, _} = drive(owned)
+    assert File.read!(path) == fixture.bytes
+    joined(owned)
+  end
+
+  test "selected receipt exact cap is a decoder control and over-cap refuses before open",
+       context do
+    fixture = receipt_fixture(context.root)
+    assert Loopex.Store.max_item_bytes() == 65_536
+
+    control = %{
+      fixture.receipt
+      | tool_id: "loopex.demo.write",
+        tool_version: "1.0.0",
+        child_environment_names: ["PATH"],
+        artifacts: [],
+        output: <<>>
+    }
+
+    width = 65_536 - byte_size(:erlang.term_to_binary(control, [:deterministic]))
+    receipt = %{control | output: :binary.copy("x", width)}
+    bytes = :erlang.term_to_binary(receipt, [:deterministic])
+    assert byte_size(bytes) == 65_536
+    assert {:ok, ^receipt} = Loopex.Executor.Local.decode_receipt_bytes(bytes)
+    # Concept: rewritten demonstration receipt is a physical decoder control.
+    # Technical depth: the executor did not publish this changed tool/output. Both
+    # capture and manifest use its actual bytes; no selected filename grants finality.
+    File.write!(fixture.path, bytes)
+    owned = launch(receipt_operation(fixture), :receipt_decode)
+    assert {{:joined, {:ok, ^receipt}, %{opens: 1, closes: 1}}, _} = drive(owned)
+    joined(owned)
+    File.write!(fixture.path, bytes <> <<0>>)
+    owned = launch(receipt_operation(fixture), :receipt_manifest)
+    assert {{:joined, {:error, :io_error}, %{opens: 0, closes: 0}}, events} = drive(owned)
+    refute :read in issued_kinds(events)
+    refute :receipt_decode in issued_kinds(events)
+    assert File.stat!(fixture.path).size == 65_537
+    joined(owned)
+  end
+
+  test "selected receipt size mode content and manifest hash guard actual raw bytes", context do
+    fixture = receipt_fixture(context.root)
+    mode = Bitwise.band(File.lstat!(fixture.path).mode, 0o7777)
+
+    for change <- [:size, :mode, :content, :digest] do
+      File.write!(fixture.path, fixture.bytes)
+      File.chmod!(fixture.path, mode)
+      operation = receipt_operation(fixture)
+
+      altered =
+        case change do
+          :size ->
+            File.write!(fixture.path, fixture.bytes <> <<0>>)
+            operation
+
+          :mode ->
+            File.chmod!(fixture.path, Bitwise.bxor(mode, 0o100))
+            operation
+
+          :content ->
+            File.write!(fixture.path, :binary.copy(<<0>>, byte_size(fixture.bytes)))
+            operation
+
+          :digest ->
+            {:audit_selected_receipt, root, job_id, manifest} = operation
+            [domain, entries] = :erlang.binary_to_term(manifest, [:safe])
+            relative = Path.relative_to(fixture.path, root)
+
+            changed =
+              Enum.map(entries, fn entry ->
+                if entry["path"] == relative,
+                  do: %{entry | "sha256" => String.duplicate("0", 64)},
+                  else: entry
+              end)
+
+            {:audit_selected_receipt, root, job_id,
+             :erlang.term_to_binary([domain, changed], [:deterministic])}
+        end
+
+      owned = launch(altered, :receipt_manifest)
+      assert {{:joined, {:error, :io_error}, evidence}, events} = drive(owned)
+      assert evidence.opens == evidence.closes
+      refute :receipt_decode in issued_kinds(events)
+      joined(owned)
+    end
+  end
+
+  test "selected receipt hardlinks symlinks FIFO and symlink parents refuse before open",
+       context do
+    fixture = receipt_fixture(context.root)
+    operation = receipt_operation(fixture)
+    path = fixture.path
+    other = Path.join(fixture.root, "other")
+    File.ln!(path, other)
+    owned = launch(operation, :receipt_manifest)
+    assert {{:joined, {:error, :io_error}, %{opens: 0, closes: 0}}, _} = drive(owned)
+    joined(owned)
+    File.rm!(other)
+    File.rename!(path, other)
+    File.ln_s!(other, path)
+    owned = launch(operation, :receipt_manifest)
+    assert {{:joined, {:error, :io_error}, %{opens: 0, closes: 0}}, _} = drive(owned)
+    joined(owned)
+    File.rm!(path)
+    assert {_, 0} = System.cmd("mkfifo", [path])
+    owned = launch(operation, :receipt_manifest)
+    assert {{:joined, {:error, :io_error}, %{opens: 0, closes: 0}}, _} = drive(owned)
+    joined(owned)
+    File.rm!(path)
+    File.rename!(other, path)
+    File.rename!(Path.dirname(path), Path.dirname(path) <> "-moved")
+    File.ln_s!(Path.dirname(path) <> "-moved", Path.dirname(path))
+    owned = launch(operation, :receipt_manifest)
+    assert {{:joined, {:error, :io_error}, %{opens: 0, closes: 0}}, _} = drive(owned)
+    joined(owned)
+  end
+
+  test "selected receipt descriptor and post-decode rechecks refuse replacements", context do
+    for change <- [:descriptor, :file, :parent, :external_ancestor] do
+      fixture = receipt_fixture(context.root)
+      pause = if change == :descriptor, do: :descriptor_stat, else: :receipt_decode
+      owned = launch(receipt_operation(fixture), pause)
+      {id, _} = paused_operation(owned, pause)
+
+      case change do
+        :parent ->
+          directory = Path.dirname(fixture.path)
+          File.rename!(directory, directory <> "-moved")
+          File.mkdir!(directory)
+
+          File.rename!(
+            Path.join(directory <> "-moved", Path.basename(fixture.path)),
+            fixture.path
+          )
+
+        :external_ancestor ->
+          parent = Path.dirname(fixture.root)
+          moved = parent <> "-moved-#{System.unique_integer([:positive])}"
+          File.rename!(parent, moved)
+          File.mkdir!(parent)
+          File.rename!(Path.join(moved, Path.basename(fixture.root)), fixture.root)
+          on_exit(fn -> File.rm_rf!(moved) end)
+
+        _ ->
+          replacement = fixture.path <> ".replacement"
+          File.write!(replacement, fixture.bytes)
+          File.chmod!(replacement, Bitwise.band(File.lstat!(fixture.path).mode, 0o7777))
+          File.rename!(replacement, fixture.path)
+      end
+
+      send(owned.guardian, {:proceed, owned.reference, id})
+      assert {{:joined, {:error, :io_error}, %{opens: 1, closes: 1}}, events} = drive(owned)
+      if change == :descriptor, do: refute(:receipt_decode in issued_kinds(events))
+      joined(owned)
+    end
+  end
+
+  test "selected physical receipt equality still refuses canonical and semantic corruption",
+       context do
+    fixture = receipt_fixture(context.root)
+    malformed = %{fixture.receipt | cleanup_confirmation: :unconfirmed, outcome: :completed}
+
+    # These representative rewritten controls exercise the capture-to-decoder
+    # boundary; the complete current receipt grammar remains Local's own suite.
+    for bytes <- [
+          :erlang.term_to_binary(fixture.receipt, [:deterministic, :compressed]),
+          fixture.bytes <> <<0>>,
+          <<131>>,
+          :erlang.term_to_binary(malformed, [:deterministic])
+        ] do
+      File.write!(fixture.path, bytes)
+      owned = launch(receipt_operation(fixture), :receipt_decode)
+
+      assert {{:joined, {:error, :history_invalid}, %{opens: 1, closes: 1}}, events} =
+               drive(owned)
+
+      assert :receipt_decode in issued_kinds(events)
+      assert File.read!(fixture.path) == bytes
+      joined(owned)
+    end
+  end
+
+  test "selected receipt semantics spend only the original work and cleanup cutoffs", context do
+    fixture = receipt_fixture(context.root)
+    owned = launch(receipt_operation(fixture), :receipt_decode, 500)
+    paused_operation(owned, :receipt_decode)
+    assert {{:joined, {:error, :deadline}, evidence}, events} = drive(owned, false)
+    assert evidence.opens == 1 and evidence.closes == 1
+    assert evidence.work_cutoff == owned.work_cutoff
+
+    assert {:stopping, :deadline, stop, cleanup} =
+             Enum.find(events, &match?({:stopping, :deadline, _, _}, &1))
+
+    assert cleanup == stop + 10_000 and evidence.cleanup_cutoff == cleanup
+    joined(owned)
+  end
+
   test "artifact use capture preserves actual writer bytes after original root deletion",
        context do
     for bytes <- [<<>>, "retained text", <<0, 255, 128>>] do
@@ -3316,6 +3576,137 @@ defmodule LoopexComposition.RestoreIOTest do
       "media_type" => "application/octet-stream",
       "role" => "tool_output"
     }
+  end
+
+  # Concept: actual Local publication supplies the receipt's complete current bytes.
+  # Technical depth: the physical capture is independent of Local after both original
+  # authorities join under one cutoff and the writer root is removed. Rewritten
+  # boundary controls are labelled separately; no copied ledger grants live authority.
+  defp receipt_fixture(root, job_id \\ <<255, 0, 128>> <> "selected-receipt") do
+    root = physical_root(root)
+    unique = System.unique_integer([:positive])
+    parent = Path.join(root, "receipt-capture-#{unique}")
+    original = Path.join(parent, "original")
+    backup = Path.join(parent, "backup")
+    workspace = Path.join(root, "receipt-workspace-#{unique}")
+    ledger = Path.join(original, "receipts")
+    File.mkdir_p!(workspace)
+    identity = "receipt-capture"
+    epoch = 3
+    fence = 19
+    lease_id = "receipt-capture-#{unique}"
+
+    {:ok, lease} =
+      Loopex.Executor.Local.WorkspaceLease.start_link(
+        id: lease_id,
+        path: workspace,
+        fencing_token: fence
+      )
+
+    {:ok, local} =
+      Loopex.Executor.Local.start_link(
+        identity: identity,
+        epoch: epoch,
+        fencing_token: fence,
+        workspace_leases: %{lease_id => lease},
+        ledger_root: ledger,
+        cleanup_grace_ms: 100
+      )
+
+    actors = [{local, Process.monitor(local)}, {lease, Process.monitor(lease)}]
+
+    on_exit(fn ->
+      for {actor, _original} <- actors, Process.alive?(actor) do
+        monitor = Process.monitor(actor)
+        Process.unlink(actor)
+        Process.exit(actor, :kill)
+        assert_receive {:DOWN, ^monitor, :process, ^actor, _}, 1_000
+      end
+    end)
+
+    definition =
+      Enum.find(
+        Loopex.Executor.Local.CodingTools.definitions(),
+        &(&1["tool_id"] == "loopex.write")
+      )
+
+    assert {:ok, request} =
+             Loopex.Executor.job(%{
+               protocol_version: 1,
+               job_id: job_id,
+               operation_id: "receipt-operation",
+               attempt: 1,
+               session_id: "receipt-session",
+               run_id: "receipt-run",
+               turn_id: "receipt-turn",
+               tool_call_id: "receipt-call",
+               origin_session_epoch: 1,
+               origin_executor_epoch: epoch,
+               executor_identity: identity,
+               required_capabilities: [definition["effect_class"]],
+               tool_id: "loopex.write",
+               tool_version: definition["tool_version"],
+               effect_class: definition["effect_class"],
+               validated_arguments: %{"path" => "written.txt", "content" => "captured"},
+               workspace_ref: "receipt-workspace",
+               workspace_lease: lease_id,
+               run_deadline: System.system_time(:millisecond) + 60_000,
+               resource_budgets: %{"max_output_bytes" => 65_536},
+               idempotency_class: definition["idempotency_class"],
+               fencing_token: fence,
+               artifact_policy: %{"retain" => true},
+               output_policy: %{"capture" => true},
+               cleanup_grace_ms: 100
+             })
+
+    assert {:ok, grant} =
+             Loopex.Executor.issue_grant({:host_policy, :allow}, request, request.run_deadline)
+
+    assert {:ok, receipt} = Loopex.Executor.Local.execute(local, request, grant, [], nil)
+    assert receipt.outcome == :completed and receipt.cleanup_confirmation == :confirmed
+    assert receipt.job_id == job_id
+    assert File.read!(Path.join(workspace, "written.txt")) == "captured"
+    assert {:ok, ^receipt} = Loopex.Executor.Local.receipt(local, job_id)
+    original_path = receipt_path(original, job_id)
+    bytes = File.read!(original_path)
+    assert bytes == :erlang.term_to_binary(receipt, [:deterministic])
+    cutoff = System.monotonic_time(:millisecond) + 5_000
+
+    for {actor, monitor} <- actors do
+      remaining = max(cutoff - System.monotonic_time(:millisecond), 0)
+      assert remaining > 0
+      assert :ok = GenServer.stop(actor, :normal, remaining)
+
+      assert_receive {:DOWN, ^monitor, :process, ^actor, :normal},
+                     max(cutoff - System.monotonic_time(:millisecond), 0)
+    end
+
+    assert System.monotonic_time(:millisecond) < cutoff
+    File.cp_r!(original, backup)
+    File.rm_rf!(original)
+    refute File.exists?(original)
+    path = receipt_path(backup, job_id)
+    assert File.read!(path) == bytes
+    assert {:ok, ^receipt} = Loopex.Executor.Local.decode_receipt_bytes(bytes)
+
+    %{
+      root: backup,
+      original: original,
+      path: path,
+      bytes: bytes,
+      receipt: receipt,
+      job_id: job_id
+    }
+  end
+
+  defp receipt_path(root, job_id),
+    do: Path.join([root, "receipts", hash(job_id) <> ".receipt"])
+
+  defp receipt_operation(fixture) do
+    assert {:joined, {:ok, manifest}, _} =
+             RestoreIO.run({:manifest, fixture.root, 1_048_576}, limits(1_000, 100))
+
+    {:audit_selected_receipt, fixture.root, fixture.job_id, manifest}
   end
 
   defp artifact_fixture(root, bytes \\ "captured object", metadata \\ [artifact_metadata()]) do

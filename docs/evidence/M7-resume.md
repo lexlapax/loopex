@@ -27,6 +27,49 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+Selected receipt source is now proved at isolated
+`caf4cdb2959ec853cb7b3e683003a08b6f0a90cd` and integrated literally into `m7`.
+Original38906 exited zero: 120/120 on each supported pair, all three long cases,
+zero exclusions/skips/invalid, four original stages joined, 36 structured
+artifacts and both physical observation timelines retained in 224.109 seconds.
+Output: `/Users/spuri/projects/lexlapax/loopex-evidence/M7/selected-receipt-proof-20261007-v2`.
+Collection SHA-256 `0cc009114f30e42cc5afbc6c72bec83ea8046b1bab860b9f1566f193cb564e74`;
+terminal `17ecc762b382248a34885a05b43eb2ab1680a379d259c6598373595ae0fee8dd`;
+executed runner `a704f9116e9405758404dcc8de2ab2e3c171a5b99583d954a214611e5dc1ab05`.
+Original77976 formatter passed six stages in 5.512 seconds, leaving the same clean
+raw source. Collection `e2e1197d8f3446206208ee9423b6babbf4eed6b7c61694039041d3575eb3b472`;
+terminal `5f6f96317ee1e6b1ed1367b4cb53ce3233f6a17d08a1e5592d6505975b68c748`.
+Four original positive version/check records authenticate separately; the proof
+has only four fresh compile/test stages. No empty formatter child was created.
+Original72212's negative formatter evidence stays historical. Never repoll
+completed77976 or38906, and never rerun their unchanged selected sources.
+This closes only the selected physical receipt row: original 81/92/6,
+added 343 done / 23 todo. Complete history, authority and restore stay separate.
+
+Operator guidance is clean committed `d103ffd3ade86f639ecec49f7a741dcfab5aa5fe`,
+tree `f71bf2459786583f32ac0155235972c0987dd8e6`, in its existing isolated worktree.
+Six-file source and recipe reviews passed. Actual canonical documentation check
+is LIVE as original18190; collect that original handle before the next registry
+consumer. Output `M7/operator-guidance-docs-20261007-v1` under the external evidence
+root; wrapper `d9595aae0b025bcfa28c78428c50b9289b10c83df29fa91911396089b5d6d31a`.
+A preflight refusal at immutable-review mode occurred before any native stage or
+reservation. Exact unchanged review bytes were frozen 0444; refusal/correction
+record SHA-256 `47005ba83be1caea4d40fca7323b6f1125025786aac7ef3d199360662d2b23d2`.
+Do not claim a documentation PASS before original18190 finishes and is collected.
+Latest fully collected registry is receipt1567, SHA-256
+`3062eae64844318211e8fdcd7a2d1aa064d2a282abb0948d67e2bacef862d4dc`.
+
+Reviewed V2 source/recipes have immutable external copies:
+`M7/receipt-and-operator-context-20261007-v2/retention.json`, SHA-256
+`f0dda6f266e00f200b37929ca429f1e5bf9238ffc036c2b7d3eb2813c2964d5f`,
+23 files. Later binding/docs/diagnostic reviews require another immutable bundle.
+The seven exact full-check shutdown reports remain unassigned to original tests;
+report SHA-256 `29a7e19abce510807945addd588854ba5ee07206641cd053bbc286ac41ea33c1`.
+No suppression, harmlessness or historical replay is inferred. ADR0056 remains
+the sole asked unanswered decision. ADR0055 is Accepted;0057–0060 are Proposed.
+
+The following earlier checkpoints remain historical where superseded above.
+
 Current full integration is collected PASS at
 `ff7849165dee25fe0b30617caf337a5da8a2a830`, tree
 `e57f528e85b446b778dfca964757f394fb148041`. Original99939 exited0;

@@ -1,15 +1,19 @@
 # M7 Implementation Tasks
 
-The complete current fast check at `ff784916` passed: 4,822 tests across all
-eleven applications, 60 designated exclusions and zero skipped or invalid cases.
-Original99939 is collected with both original native handles joined; the
-2087.871-second check and 2104.464-second wrapper output remain retained. The
-namespace audit and two bounded T16 integration rows now close. Earlier failures
-and broader cleanup diagnostics remain open according to their own obligations.
-Selected receipt capture and native operator guidance are new pending subtasks.
-Original T01–T19: 81 done / 92 todo / 6 retired; added 342 done / 24 todo.
-Exact source, reports, populations and digests are in the
-[resume record](M7-resume.md).
+Selected receipt capture is proved at `caf4cdb2` and integrated with literal
+source bytes. Original38906 passed all 120 IO cases on each supported pair,
+including three long cases, with no exclusions, skips or invalid cases.
+The four original native stages joined in 224.109 seconds; their complete output,
+physical timeline witnesses and artifact digests are retained. Original77976's
+six formatter stages passed in 5.512 seconds without changing source bytes.
+The earlier formatter failure remains recorded. Operator guidance is committed
+at isolated `d103ffd3`; its canonical documentation check is running as
+original18190. No documentation PASS is claimed yet.
+Original T01–T19: 81 done / 92 todo / 6 retired; added 343 done / 23 todo.
+The current full fast check remains the separately tested `ff784916` result:
+4,822 passed, 60 designated exclusions and no skipped or invalid cases. It does
+not cover this later receipt change. Exact source, output references and digests
+are in the [resume record](M7-resume.md).
 
 The T15 captured-byte receipt decoder row is now reconciled with original13676:
 all32 receipt cases passed on both supported pairs at2826b30b,zero exclusions.
@@ -14106,7 +14110,7 @@ Exact collection and outputs are retained in the restart checkpoint.
 - [x] Capture one selected current artifact-use sidecar through the existing guardian-owned restore IO worker and real captured Local/Core describe facade; require exact reference-derived pathname, physical manifest membership, current raw ceiling, hash/mode/link/ancestor identity and close-before-semantics under original cutoffs. Prove actual writers and physical/semantic refusals on both pairs; object bytes, complete namespace/orphans and history/restore relations remain separate.
 - [x] Extract one private captured-byte Local receipt decoder shared with live reads; preserve the native current 28-field ETF schema, 65,536-byte cap, exact raw job binding, closed predicates and all claim/finality/job/recovery authority. Replace the injected decoder seam with actual bounded BIF proof and actual writer/hostile controls on both supported pairs; physical receipt capture and complete history audit remain separate.
 - [x] Enumerate the complete current Local generation/marker/open namespace under one original restore IO guardian; require exact physical name membership, current marker-plane grammar, open cardinality/whole-byte bounds and source/job/digest relations. Preserve actual writer crash cuts and claim observations; complete receipts/Store/job/history/restore certification remains separate.
-- [ ] Capture one current receipt selected by the original opaque raw job through the existing restore IO worker; bind manifest membership, basename, 65,536-byte ceiling, actual descriptor/hash/mode/ancestor identity and close-before-decode under unchanged work and cleanup bounds. Prove the complete 120-case IO file on both supported pairs, including all three long cases; preserve original72212 formatter failure and require the corrected source's own positive format and execution evidence. Whole namespace, job authority, finality and restore certification remain separate.
+- [x] Capture one current receipt selected by the original opaque raw job through the existing restore IO worker; bind manifest membership, basename, 65,536-byte ceiling, actual descriptor/hash/mode/ancestor identity and close-before-decode under unchanged work and cleanup bounds. Prove the complete 120-case IO file on both supported pairs, including all three long cases; preserve original72212 formatter failure and require the corrected source's own positive format and execution evidence. Whole namespace, job authority, finality and restore certification remain separate.
 - [x] Extract the current Local artifact-use captured-byte decoder with the existing 131,072-byte ceiling, exact canonical bytes and filename digest; reuse the existing ArtifactStore facade through a private captured-bytes handle for closed reference-bound admission. Prove actual writers, deleted-source decoding, opaque identities, hostile bytes and existing semantic negatives on both pairs; physical capture, object bytes and complete history relations remain separate.
 - [x] Capture one canonical current Local generation, admission, refusal or open ledger file through the guardian-owned restore IO worker; bind exact descriptor, pathname, raw job identity, original source placement and role ceiling before decode; prove actual current writers, hostile physical captures and unchanged cleanup on both pairs. Complete ledger enumeration, receipt/Store/artifact relations and restore activation remain separate.
 - [x] Audit every declared current Store history through the existing owned IO worker, enforcing descriptor/path/hash identity, complete transaction replay and recovery of every session; prove actual retained unknown truth, faults and cleanup on both pairs without claiming scripted executors prove OS effects.
