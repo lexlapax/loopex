@@ -27,6 +27,29 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+Latest checklist audit: close only T09's added "Pin pending/response decoder
+vectors and public question event schemas." Current artifact hashes and relevant
+SessionState decoder ranges join the already collected exact source
+`5f9851fc22ab3f0a5bafe56950e39d5a73444cc3`. Original15825 proved25 Protocol
+and24 Core cases on each supported pair, including four Node consumers per pair,
+zero exclusions/skips/invalid,47.994 seconds, fourteen original joins and60
+verified artifacts. Retained output:
+`/Users/spuri/projects/lexlapax/loopex-evidence/M7/question-terminal-admission-20261007-v2`.
+Collection SHA-256 `6e8d43b104406f55ff75731c71a12b6302012b05a918ec985f664f212e3c3552`;
+terminal SHA-256 `2e7461f332bd0e7044417c03e66182522106410c61f0a22d460e0a5c1427c544`.
+Independent read-only audit packet:
+`/private/tmp/m7-t09-pending-response-schema-audit-20261007-v1.json`, SHA-256
+`1fa525e82a102f52ca327fbea7999c1796ce9a7d099631dce8e411fcba8f82ba`.
+Root verified the current artifact hashes, all eight retained native result/log
+hashes and the original collection before disposition. Requested141,
+terminal377, open114 and snapshot50 vectors remain in that proof. Private
+requested/settled and admitted-response decoder ranges match tested source;
+other policy branches have changed and are not claimed whole-file identical.
+No additional test execution, answer Node proof, live expiry-publication proof,
+transport serving or coordinated generation activation is claimed. The separate
+T09 answer-schema/decoder generation and authorized-mutation join stays open.
+Counts now original81 done/92 todo/6 retired; added331 done/28 todo.
+
 Latest completion: T05 native policy provenance/recovery is integrated literally
 from clean isolated `1399e84781c34902f08a3ea95de27b9e20fbbf4c` (SessionState,
 SessionCoordinator, answer admission and lifecycle test files). Original47825 is

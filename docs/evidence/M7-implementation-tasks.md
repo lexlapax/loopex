@@ -1,5 +1,14 @@
 # M7 Implementation Tasks
 
+T09's pending/response decoder-vector and public-event-schema subtask is now
+closed after a source/evidence audit. The current artifacts and relevant decoder
+ranges match the actual collected15825 proof:25 Protocol and24 Core cases on
+each supported pair, including four Node consumers per pair, zero exclusions,
+skips or invalid cases. No new test run is claimed. The separate coordinated
+answer-schema/decoder, transport and generation join remains open. Original
+T01–T19 remains81 done/92 todo/6 retired; added331 done/28 todo. Exact retained
+proof and audit references are in the [resume record](M7-resume.md).
+
 T05's bounded native policy provenance/recovery unit is proved at isolated1399e847:
 all30 cases passed on each supported toolchain, including denial/expiry owner
 loss and all three unknown-commit phases. Original47825 is terminal0 and collected
@@ -13713,7 +13722,7 @@ the still-open real-provider, live protocol, persistent-fault or closure lanes.
 - [x] Prove commit-unknown re-presentation retains exact pending and response bytes.
 - [x] Prove local-store process restart retains the pending question and final answer.
 - [x] Pin independent pending/response identity and digest preimages and reject all missing, extra, substituted and consistently rehashed malformed records through real-owner replay on both supported pairs.
-- [ ] Pin pending/response decoder vectors and public question event schemas.
+- [x] Pin pending/response decoder vectors and public question event schemas.
 - [x] Pin the shared closed answer schema/union and independent Elixir/Node payload vectors.
 - [ ] Join that answer schema and decoder to the complete M7 /3-/4 contracts and both authorized mutation paths.
 
