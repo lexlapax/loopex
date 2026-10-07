@@ -1,5 +1,14 @@
 # M7 Implementation Tasks
 
+T16's bounded ordinary-shutdown correction is proved at isolated1f1a5f69:
+all151 Core and2 Composition cases passed on each supported pair, including
+actual long-bound cleanup and forced retirement. Original86533 is terminal0
+and collected PASS,313.724 seconds, twelve original joins and201 verified
+artifacts, zero exclusions/skips/invalid. The three literal tested files are
+integrated. Its new bounded subtask closes; the broader historical task-shutdown
+investigation and full integration remain open. Original81 done/92 todo/6 retired;
+added329 done/29 todo. Exact retained references are in the [resume record](M7-resume.md).
+
 T05's standalone policy codec unit is proved at isolated2f86a770: all39 cases
 passed on each supported toolchain, including two independent Node cases per
 pair and424 literal vectors. Original36467 is terminal0 and collected PASS:
@@ -14018,6 +14027,8 @@ in the restart checkpoint. Broader restore/decoder/public/helper rows stay open.
 - [ ] Independently review integration changes and fix confirmed defects without weakening checks.
 
 ### Added implementation subtasks
+
+- [x] Preserve the initial retained provider result-worker graceful shutdown and its unchanged forced-retirement fallback; prove32 actual held configured owners with zero unexpected ordinary reports, exact608 actor joins, one actual trapping worker through the original10,000-ms window and captured1,000-ms grace, and the coordinator-specific no-window trace oracle. Verify all151 Core and2 Composition cases per supported pair, retain prior45793/38205 failures and private fault witnesses, and integrate literal tested files. Broader Task.Supervised/coordinator diagnostics and full integration remain separate.
 
 - [ ] Repair ordinary provider cleanup notices reaching the SessionCoordinator dispatcher after the cleanup integration; retain failed58fb33ba full-check evidence, prove actual Local Store completion through the same live owner and distinct caretaker delivery, preserve existing cleanup windows and native joins, and verify both supported pairs plus a new full integration candidate.
 

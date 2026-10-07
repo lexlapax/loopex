@@ -20,6 +20,200 @@ defmodule Loopex.Runtime.OwnerGroupRetirementTest do
     witness(:no_window)
   end
 
+  # Concept: a trapping result worker cannot evade the owner's cleanup barrier.
+  # Technical depth: this is a native private Group mechanism witness, not a
+  # Logger-fault injection or a claim about a live Model adapter. The real
+  # 10-second observation window expires; one captured 1-second fixture allowance
+  # joins its original actors. Existing retirement cases retain their own bounds.
+  test "owner cleanup force kills a retained result worker that traps its initial shutdown" do
+    work_cutoff = System.monotonic_time(:millisecond) + 1_000
+    key = make_ref()
+
+    Process.put(key, %{
+      actors: [],
+      joined: MapSet.new(),
+      traced: false,
+      liveness_pattern: false,
+      cutoff: work_cutoff,
+      session: nil
+    })
+
+    Process.put(@trace_key, 0)
+    parent = self()
+    coordinator = spawn(fn -> coordinator_loop(parent) end)
+    coordinator_monitor = retain(key, coordinator)
+
+    try do
+      {:ok, group} = GenServer.start(OwnerGroup, [], timeout: left(work_cutoff))
+      group_monitor = retain(key, group)
+      {:ok, workers} = GenServer.call(group, :workers, left(work_cutoff))
+      workers_monitor = retain(key, workers)
+      :ok = GenServer.call(group, {:attach, coordinator}, left(work_cutoff))
+      reference = make_ref()
+      bound = {:monotonic, work_cutoff}
+
+      resource = start_actor(workers, fn -> actor(parent, :resource) end, work_cutoff)
+      resource_monitor = retain(key, resource)
+      worker = start_actor(workers, fn -> trapping_result_worker(parent) end, work_cutoff)
+      worker_monitor = retain(key, worker)
+
+      guard =
+        start_actor(
+          workers,
+          fn -> fallback_guard(parent, group, reference, bound) end,
+          work_cutoff
+        )
+
+      guard_monitor = retain(key, guard)
+
+      for {role, pid} <- [resource: resource, worker: worker, guard: guard] do
+        assert_receive {:ready, ^role, ^pid}, left(work_cutoff)
+      end
+
+      :ok =
+        invoke(
+          coordinator,
+          fn -> OwnerGroup.retain_provider(group, guard, reference, 1, bound) end,
+          work_cutoff
+        )
+
+      :ok =
+        invoke(
+          coordinator,
+          fn -> OwnerGroup.bind_provider(group, reference, worker, bound) end,
+          work_cutoff
+        )
+
+      send(guard, {:retain_resource, resource})
+      assert_receive {:resource_retained, ^guard}, left(work_cutoff)
+
+      %{providers: %{^reference => retained}} = :sys.get_state(group, left(work_cutoff))
+      assert retained.retainer == coordinator and retained.caretaker == nil
+
+      assert retained.guard == guard and retained.worker == worker and
+               retained.resource == resource
+
+      assert Enum.sort(retained.original_members) == Enum.sort([guard, worker, resource])
+      assert is_reference(retained.guard_monitor) and is_reference(retained.worker_monitor)
+      assert is_reference(retained.resource_monitor)
+      assert {:trap_exit, true} = Process.info(worker, :trap_exit)
+
+      members =
+        GenServer.call(workers, :which_children, left(work_cutoff))
+        |> Enum.map(fn {_id, pid, _type, _modules} -> pid end)
+
+      assert Enum.sort(members) == Enum.sort([guard, worker, resource])
+
+      session = :trace.session_create(:loopex_owner_group_fallback, self(), [])
+      Process.put(key, %{Process.get(key) | session: session})
+
+      assert :trace.function(
+               session,
+               {:erlang, :exit, 2},
+               for(
+                 {target, reason} <- [
+                   {worker, :shutdown},
+                   {worker, :kill},
+                   {guard, :kill},
+                   {resource, :kill}
+                 ],
+                 do: {[target, reason], [], [{:message, {:const, {target, reason}}}]}
+               ),
+               []
+             ) > 0
+
+      assert :trace.process(session, group, true, [:call, :arity, :procs, :monotonic_timestamp]) ==
+               1
+
+      assert :trace.process(session, workers, true, [:procs, :monotonic_timestamp]) == 1
+
+      {:ok, %{executor_observe_ms: observation}} = Executor.cancellation_bounds(1)
+      assert observation == 10_000
+      selected_at = System.monotonic_time(:millisecond)
+
+      window = %{
+        cooperative_deadline: selected_at + 1,
+        observation_deadline: selected_at + observation
+      }
+
+      cleanup_cutoff = window.observation_deadline + 1_000
+      Process.put(key, %{Process.get(key) | cutoff: cleanup_cutoff})
+
+      {:ok, ^window} =
+        invoke(
+          coordinator,
+          fn -> OwnerGroup.provider_cleanup(group, reference, window) end,
+          work_cutoff
+        )
+
+      assert %{providers: %{^reference => %{cleanup: ^window}}} =
+               :sys.get_state(group, left(work_cutoff))
+
+      stopper =
+        spawn(fn ->
+          receive do
+            :stop_group ->
+              result = GenServer.stop(group, :normal, left(cleanup_cutoff))
+              send(parent, {:group_stopped, self(), result})
+          end
+        end)
+
+      stopper_monitor = retain(key, stopper)
+      send(stopper, :stop_group)
+
+      assert_receive {:trapping_worker_shutdown, ^worker, ^group, received_at},
+                     left(cleanup_cutoff)
+
+      assert received_at < window.observation_deadline
+      assert System.monotonic_time(:millisecond) < window.observation_deadline
+      assert Process.alive?(worker) and Process.alive?(guard) and Process.alive?(resource)
+
+      assert_receive {:fallback_guard_stop, ^guard, ^group, ^reference, ^window},
+                     left(cleanup_cutoff)
+
+      join(key, worker, worker_monitor, :killed, cleanup_cutoff)
+      join(key, guard, guard_monitor, :killed, cleanup_cutoff)
+      join(key, resource, resource_monitor, :killed, cleanup_cutoff)
+      join(key, workers, workers_monitor, :shutdown, cleanup_cutoff)
+      join(key, coordinator, coordinator_monitor, :shutdown, cleanup_cutoff)
+      join(key, group, group_monitor, :normal, cleanup_cutoff)
+      assert_receive {:group_stopped, ^stopper, :ok}, left(cleanup_cutoff)
+      join(key, stopper, stopper_monitor, :normal, cleanup_cutoff)
+
+      fence = :trace.delivered(session, :all)
+
+      rows =
+        fallback_trace_rows(fence, group, workers, [guard, worker, resource], [], cleanup_cutoff)
+
+      shutdown = fallback_signal_at(rows, worker, :shutdown)
+      worker_kill = fallback_signal_at(rows, worker, :kill)
+      guard_kill = fallback_signal_at(rows, guard, :kill)
+      resource_kill = fallback_signal_at(rows, resource, :kill)
+
+      assert System.convert_time_unit(shutdown, :native, :millisecond) <
+               window.observation_deadline
+
+      assert System.convert_time_unit(worker_kill, :native, :millisecond) >=
+               window.observation_deadline
+
+      assert shutdown < worker_kill and guard_kill <= worker_kill and resource_kill <= worker_kill
+
+      assert [{:native_exit, ^workers, :shutdown, workers_at}] =
+               Enum.filter(rows, &match?({:native_exit, ^workers, _, _}, &1))
+
+      assert [{:native_exit, ^group, :normal, group_at}] =
+               Enum.filter(rows, &match?({:native_exit, ^group, _, _}, &1))
+
+      assert worker_kill <= workers_at and workers_at <= group_at
+      assert Process.info(workers) == nil and Process.info(group) == nil
+      for actor <- [guard, worker, resource], do: assert(Process.info(actor) == nil)
+    after
+      state = Process.get(key)
+      if state.session, do: :trace.session_destroy(state.session)
+      cleanup(key, state.cutoff)
+    end
+  end
+
   # Concept: these are real supervised actors and original monitor signals.
   # Technical depth: this private Group mechanism witness holds native EXIT
   # reduction. It does not substitute fixture actors for provider cleanup proof.
@@ -137,7 +331,17 @@ defmodule Loopex.Runtime.OwnerGroupRetirementTest do
           remaining
         end
 
-      {rows, action} = await_action(group, workers, coordinator, expected_down, [], cutoff)
+      {rows, action} =
+        await_action(
+          group,
+          workers,
+          coordinator,
+          group_coordinator_monitor,
+          expected_down,
+          [],
+          cutoff
+        )
+
       assert original_downs(rows, group) == expected_down
 
       if mode in [:selected_window, :live_window] do
@@ -269,6 +473,98 @@ defmodule Loopex.Runtime.OwnerGroupRetirementTest do
     end
   end
 
+  defp trapping_result_worker(parent) do
+    Process.flag(:trap_exit, true)
+    send(parent, {:ready, :worker, self()})
+
+    receive do
+      {:EXIT, sender, :shutdown} ->
+        send(
+          parent,
+          {:trapping_worker_shutdown, self(), sender, System.monotonic_time(:millisecond)}
+        )
+
+        receive do: (:never -> :ok)
+    end
+  end
+
+  defp fallback_guard(parent, group, reference, bound) do
+    send(parent, {:ready, :guard, self()})
+
+    receive do
+      {:retain_resource, resource} ->
+        :ok = OwnerGroup.retain_resource(group, reference, resource, bound)
+        # Native force cleanup reads this actual private guard custody record.
+        Process.put({{Loopex.Runtime.SessionCoordinator, :provider_resource}, reference}, %{
+          pid: resource
+        })
+
+        send(parent, {:resource_retained, self()})
+    end
+
+    receive do
+      {:loopex_provider_tree_stop, ^reference, _stop, ^group, window} ->
+        send(parent, {:fallback_guard_stop, self(), group, reference, window})
+        receive do: (:never -> :ok)
+    end
+  end
+
+  defp fallback_trace_rows(
+         fence,
+         group,
+         workers,
+         [guard, worker, resource] = targets,
+         rows,
+         cutoff
+       ) do
+    assert length(rows) < @trace_cap
+
+    receive do
+      {:trace_delivered, :all, ^fence} ->
+        rows
+
+      {:trace_ts, ^group, :call, {:erlang, :exit, 2}, {target, reason}, at}
+      when target in [guard, worker, resource] and reason in [:shutdown, :kill] ->
+        record_trace()
+
+        fallback_trace_rows(
+          fence,
+          group,
+          workers,
+          targets,
+          rows ++ [{:signal, target, reason, at}],
+          cutoff
+        )
+
+      {:trace_ts, actor, :exit, reason, at} when actor == group or actor == workers ->
+        record_trace()
+
+        fallback_trace_rows(
+          fence,
+          group,
+          workers,
+          targets,
+          rows ++ [{:native_exit, actor, reason, at}],
+          cutoff
+        )
+
+      {:trace_ts, actor, kind, peer, _at}
+      when actor in [group, workers] and
+             kind in [:link, :unlink, :getting_linked, :getting_unlinked] and is_pid(peer) ->
+        record_trace()
+        fallback_trace_rows(fence, group, workers, targets, rows, cutoff)
+    after
+      left(cutoff) -> flunk("original fallback trace delivery remains unproved")
+    end
+  end
+
+  defp fallback_signal_at(rows, target, reason) do
+    assert [{:signal, ^target, ^reason, at}] =
+             Enum.filter(rows, &match?({:signal, ^target, ^reason, _}, &1))
+
+    at
+  end
+
   defp start_actor(workers, fun, cutoff) do
     # The installed current/floor start_child/3 writers use this exact native
     # Task.Supervisor request. A timed fixture call preserves the same child
@@ -323,28 +619,56 @@ defmodule Loopex.Runtime.OwnerGroupRetirementTest do
     end
   end
 
-  defp await_action(group, workers, coordinator, expected, rows, cutoff) do
+  defp await_action(group, workers, coordinator, coordinator_monitor, expected, rows, cutoff) do
     assert length(rows) < @trace_cap
 
     receive do
       {:trace, ^group, :call, {:erts_internal, :is_process_alive, [target, reference]}} = row
       when is_reference(reference) and target in [coordinator, workers] ->
         rows = retain_liveness_row(rows, group, coordinator, workers, row)
-        await_action(group, workers, coordinator, expected, rows, cutoff)
+        await_action(group, workers, coordinator, coordinator_monitor, expected, rows, cutoff)
 
       {:trace, ^group, :return_from, {:erts_internal, :is_process_alive, 2}, :ok} = row ->
         rows = retain_liveness_row(rows, group, coordinator, workers, row)
-        await_action(group, workers, coordinator, expected, rows, cutoff)
+        await_action(group, workers, coordinator, coordinator_monitor, expected, rows, cutoff)
 
       {:trace, ^group, :receive, {reference, result}} = row
       when is_reference(reference) and is_boolean(result) ->
         rows = retain_liveness_row(rows, group, coordinator, workers, row)
-        await_action(group, workers, coordinator, expected, rows, cutoff)
+        await_action(group, workers, coordinator, coordinator_monitor, expected, rows, cutoff)
 
       {:trace, ^group, :receive, {:DOWN, monitor, :process, pid, :normal}} = row ->
         record_trace()
         assert MapSet.member?(expected, {monitor, pid})
-        await_action(group, workers, coordinator, expected, rows ++ [row], cutoff)
+
+        await_action(
+          group,
+          workers,
+          coordinator,
+          coordinator_monitor,
+          expected,
+          rows ++ [row],
+          cutoff
+        )
+
+      # Concept: unproved startup cleanup still stops its actual coordinator.
+      # Technical depth: provider actors already joined normally. Admit only the
+      # Group's captured coordinator monitor and shutdown reason, once; this row
+      # neither proves provider cleanup nor selects a membership-query window.
+      {:trace, ^group, :receive, {:DOWN, ^coordinator_monitor, :process, ^coordinator, :shutdown}} =
+          row ->
+        record_trace()
+        refute row in rows
+
+        await_action(
+          group,
+          workers,
+          coordinator,
+          coordinator_monitor,
+          expected,
+          rows ++ [row],
+          cutoff
+        )
 
       {:trace, ^group, :send, {:"$gen_call", {^group, [:alias | request_id]}, :which_children},
        ^workers} = row ->
@@ -359,12 +683,30 @@ defmodule Loopex.Runtime.OwnerGroupRetirementTest do
       {:trace, ^group, :receive, {:system, {caller, tag}, :resume}} = row ->
         record_trace()
         assert caller == self() and native_request_tag?(tag)
-        await_action(group, workers, coordinator, expected, rows ++ [row], cutoff)
+
+        await_action(
+          group,
+          workers,
+          coordinator,
+          coordinator_monitor,
+          expected,
+          rows ++ [row],
+          cutoff
+        )
 
       {:trace, ^group, :send, {tag, :ok}, target} = row ->
         record_trace()
         assert resume_reply?(rows, group, tag, target)
-        await_action(group, workers, coordinator, expected, rows ++ [row], cutoff)
+
+        await_action(
+          group,
+          workers,
+          coordinator,
+          coordinator_monitor,
+          expected,
+          rows ++ [row],
+          cutoff
+        )
 
       {:trace, ^group, _kind, _term} = row ->
         unexpected_trace("unexpected Group receive trace shape in the fixed actor witness", row)

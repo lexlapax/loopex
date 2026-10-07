@@ -1509,6 +1509,442 @@ defmodule Loopex.ConfiguredSessionTest do
     refute log =~ "shutdown_error", log
   end
 
+  # Concept: normal concurrent host exit must join held work without a shutdown error.
+  # Technical depth: this ordinary 32-host schedule is separate from the deliberate
+  # configuration-startup fault witness. All targets and monitors are captured
+  # before release; the one 1,000-ms cutoff does not include fixture acquisition.
+  test "concurrent normal host exits join held native actors and scope supervisor reports" do
+    observer = self()
+    nonce = make_ref()
+    key = {__MODULE__, :held_shutdown, nonce}
+    acquisition_cutoff = System.monotonic_time(:millisecond) + 5_000
+
+    Process.put(key, %{
+      actors: %{},
+      joined: %{},
+      cutoff: nil,
+      complete: false,
+      reports: [],
+      raw_log: nil
+    })
+
+    {:ok, started} = Application.ensure_all_started(:logger)
+    filters = :logger.get_primary_config().filters
+    filter = :loopex_configured_held_shutdown_witness
+
+    try do
+      creators =
+        for index <- 1..32 do
+          {creator, monitor} =
+            spawn_monitor(fn ->
+              receive do
+                {:acquire_held_shutdown, ^nonce} -> :ok
+              end
+
+              fixture = Fixture.start(script: [%{text: "held", calls: [], hold: observer}])
+              send(observer, {:held_shutdown_fixture, nonce, self(), index, fixture})
+
+              receive do
+                {:dispatch_held_shutdown, ^nonce} -> :ok
+              end
+
+              {:ok, session} =
+                Runtime.create_session_with_genesis(
+                  fixture.runtime,
+                  "held-shutdown",
+                  %{},
+                  genesis(fixture.definitions)
+                )
+
+              {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
+
+              {:accepted, "held-prompt"} =
+                Loopex.command(attachment, %{
+                  type: :prompt,
+                  command_id: "held-prompt",
+                  content: "hold"
+                })
+
+              send(observer, {:held_shutdown_running, nonce, self(), index, session})
+
+              receive do
+                {:normal_held_shutdown, ^nonce} -> :ok
+              end
+            end)
+
+          configured_shutdown_track(key, creator, monitor, "creator", index)
+          send(creator, {:acquire_held_shutdown, nonce})
+          {index, creator}
+        end
+
+      fixtures =
+        for {index, creator} <- creators do
+          assert_receive {:held_shutdown_fixture, ^nonce, ^creator, ^index, fixture}, 5_000
+          configured_shutdown_monitor(key, fixture.runtime.supervisor, "root", index)
+
+          for {role, pid} <- [
+                {"model", fixture.model},
+                {"executor", fixture.executor},
+                {"store", fixture.store}
+              ],
+              do: configured_shutdown_monitor(key, pid, role, index)
+
+          children = Supervisor.which_children(fixture.runtime.supervisor)
+          assert length(children) == 7
+
+          for {_id, pid, _type, _modules} <- children,
+              do: configured_shutdown_monitor(key, pid, "runtime_child", index)
+
+          {index, creator, fixture}
+        end
+
+      for {_index, creator, _fixture} <- fixtures,
+          do: send(creator, {:dispatch_held_shutdown, nonce})
+
+      sessions =
+        for {index, creator, _fixture} <- fixtures do
+          assert_receive {:held_shutdown_running, ^nonce, ^creator, ^index, session}, 5_000
+          {index, session}
+        end
+
+      callbacks =
+        for _ <- 1..32 do
+          assert_receive {:holding, callback}, 5_000
+          configured_shutdown_monitor(key, callback, "callback", nil)
+          callback
+        end
+
+      assert length(Enum.uniq(callbacks)) == 32
+
+      supervisors =
+        Enum.flat_map(fixtures, fn {index, _creator, fixture} ->
+          callback = Agent.get(fixture.model, & &1.previous_worker)
+          assert callback in callbacks and Process.alive?(callback)
+          configured_shutdown_monitor(key, callback, "callback", index)
+          {:ok, children} = Runtime.children(fixture.runtime)
+          [{_, coordinator, :worker, _}] = DynamicSupervisor.which_children(children.sessions)
+          [{_, group, :worker, _}] = Supervisor.which_children(children.owner_groups)
+          {:ok, private_workers} = Loopex.Runtime.OwnerGroup.workers(group)
+          configured_shutdown_monitor(key, coordinator, "coordinator", index)
+          configured_shutdown_monitor(key, group, "owner_group", index)
+          configured_shutdown_monitor(key, private_workers, "private_supervisor", index)
+
+          private_children = Supervisor.which_children(private_workers)
+          assert length(private_children) == 2
+          private_pids = Enum.map(private_children, fn {_, pid, :worker, _} -> pid end)
+
+          for pid <- private_pids,
+              do: configured_shutdown_monitor(key, pid, "private_task", index)
+
+          # Concept: the shutdown target is the retained runtime result worker.
+          # Technical depth: the Group's original provider identities distinguish
+          # that nontrapping worker from its trapping guard and host callback.
+          %{workers: ^private_workers, coordinator: ^coordinator, providers: providers} =
+            :sys.get_state(group, configured_shutdown_left(acquisition_cutoff))
+
+          [provider] = Map.values(providers)
+          assert provider.retainer == coordinator
+          assert provider.caretaker == nil and provider.resource == nil
+          assert provider.guard != provider.worker
+          assert Enum.sort(private_pids) == Enum.sort([provider.guard, provider.worker])
+          assert Enum.sort(provider.original_members) == Enum.sort(private_pids)
+          assert is_reference(provider.worker_monitor) and is_reference(provider.guard_monitor)
+          assert {:trap_exit, false} = Process.info(provider.worker, :trap_exit)
+          assert {:trap_exit, true} = Process.info(provider.guard, :trap_exit)
+          assert {:monitored_by, worker_monitors} = Process.info(provider.worker, :monitored_by)
+          assert group in worker_monitors
+          configured_shutdown_monitor(key, provider.worker, "provider_worker", index)
+
+          assert {:links, links} = Process.info(callback, :links)
+          assert provider.guard in links
+          refute provider.worker in links
+
+          runtime_tasks = Supervisor.which_children(children.workers)
+          assert length(runtime_tasks) == 1
+
+          for {_, pid, :worker, _} <- runtime_tasks,
+              do: configured_shutdown_monitor(key, pid, "runtime_task", index)
+
+          {^index, session} = List.keyfind(sessions, index, 0)
+          refute Enum.any?(Fixture.events(fixture, session), &(&1.kind == "run.finished"))
+
+          [
+            fixture.runtime.supervisor,
+            children.workers,
+            children.owner_groups,
+            children.sessions,
+            private_workers
+          ]
+        end)
+
+      assert length(Enum.uniq(supervisors)) == 32 * 5
+      assert map_size(Process.get(key).actors) == 32 * 19
+
+      enabled =
+        Enum.map(filters, fn
+          {:logger_translator, {callback, configuration}} ->
+            {:logger_translator, {callback, %{configuration | sasl: true}}}
+
+          entry ->
+            entry
+        end)
+
+      :ok = :logger.set_primary_config(:filters, enabled)
+
+      :ok =
+        :logger.add_primary_filter(filter, {
+          &__MODULE__.observe_configured_shutdown_report/2,
+          {observer, nonce, MapSet.new(supervisors)}
+        })
+
+      # CaptureLog joins its logging delivery before report collection; every
+      # original event still reaches the ordinary Logger path unchanged.
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          cutoff = System.monotonic_time(:millisecond) + 1_000
+          Process.put(key, %{Process.get(key) | cutoff: cutoff})
+
+          for {_index, creator, _fixture} <- fixtures,
+              do: send(creator, {:normal_held_shutdown, nonce})
+
+          native =
+            Enum.reject(Process.get(key).actors, fn {_pid, actor} ->
+              actor.role in ["model", "executor", "store"]
+            end)
+
+          for {pid, actor} <- native, do: configured_shutdown_join(key, pid, actor, cutoff)
+
+          for {_index, _creator, fixture} <- fixtures do
+            assert length(Agent.get(fixture.model, & &1.seen, configured_shutdown_left(cutoff))) ==
+                     1
+
+            assert Agent.get(fixture.executor, & &1.jobs, configured_shutdown_left(cutoff)) == []
+
+            for pid <- [fixture.model, fixture.executor, fixture.store] do
+              assert :ok = GenServer.stop(pid, :normal, configured_shutdown_left(cutoff))
+              configured_shutdown_join(key, pid, Map.fetch!(Process.get(key).actors, pid), cutoff)
+            end
+          end
+
+          assert System.monotonic_time(:millisecond) <= cutoff
+        end)
+
+      reports = configured_shutdown_reports(nonce, map_size(Process.get(key).actors) * 2, [])
+      Process.put(key, %{Process.get(key) | reports: reports, raw_log: log})
+
+      for report <- reports do
+        assert report.emitter == report.supervisor
+        assert Map.has_key?(Process.get(key).actors, report.child)
+      end
+
+      refute Enum.any?(reports, fn report ->
+               report.context == "shutdown_error" or
+                 report.reason in ["noproc", "shutdown:noproc"]
+             end),
+             inspect(reports)
+
+      assert reports == [], inspect(reports)
+      refute log =~ "shutdown_error", log
+      assert map_size(Process.get(key).joined) == map_size(Process.get(key).actors)
+      Process.put(key, %{Process.get(key) | complete: true})
+    after
+      state = Process.get(key)
+
+      if not state.complete do
+        # Failed evidence remains failed. Disposal spends the original cutoff
+        # when one exists, never an extra successful-cleanup allowance.
+        for {pid, _actor} <- state.actors,
+            not Map.has_key?(state.joined, pid),
+            do: Process.exit(pid, :kill)
+
+        configured_shutdown_disposal(key, state.cutoff || acquisition_cutoff)
+      end
+
+      :logger.remove_primary_filter(filter)
+      :ok = :logger.set_primary_config(:filters, filters)
+      state = Process.get(key)
+      late = configured_shutdown_reports(nonce, map_size(state.actors) * 2, [])
+
+      configured_shutdown_retain(%{
+        state
+        | complete: state.complete and late == [],
+          reports: state.reports ++ late
+      })
+
+      Process.delete(key)
+      Enum.each(Enum.reverse(started), &Application.stop/1)
+
+      if state.complete,
+        do: assert(late == [], "native report arrived after completed collection")
+    end
+  end
+
+  defp configured_shutdown_monitor(key, pid, role, index) do
+    assert is_pid(pid)
+
+    case Process.get(key).actors do
+      %{^pid => actor} ->
+        Process.put(
+          key,
+          put_in(Process.get(key), [:actors, pid], %{actor | role: role, index: index})
+        )
+
+      _ ->
+        configured_shutdown_track(key, pid, Process.monitor(pid), role, index)
+    end
+  end
+
+  defp configured_shutdown_track(key, pid, monitor, role, index),
+    do:
+      Process.put(
+        key,
+        put_in(Process.get(key), [:actors, pid], %{monitor: monitor, role: role, index: index})
+      )
+
+  defp configured_shutdown_left(cutoff) do
+    remaining = cutoff - System.monotonic_time(:millisecond)
+    assert remaining > 0, "original held-shutdown cutoff elapsed"
+    remaining
+  end
+
+  defp configured_shutdown_join(key, pid, actor, cutoff) do
+    monitor = actor.monitor
+    assert_receive {:DOWN, ^monitor, :process, ^pid, reason}, configured_shutdown_left(cutoff)
+    Process.put(key, put_in(Process.get(key), [:joined, pid], configured_shutdown_reason(reason)))
+
+    case actor.role do
+      role when role in ["creator", "root", "model", "executor", "store"] ->
+        assert reason == :normal
+
+      "owner_group" ->
+        assert reason in [:normal, :shutdown]
+
+      "provider_worker" ->
+        assert reason == :shutdown
+
+      role when role in ["private_task", "runtime_task", "callback"] ->
+        assert reason in [:normal, :shutdown, :killed]
+
+      _ ->
+        assert reason == :shutdown
+    end
+  end
+
+  defp configured_shutdown_disposal(key, cutoff) do
+    for {pid, actor} <- Process.get(key).actors, not Map.has_key?(Process.get(key).joined, pid) do
+      monitor = actor.monitor
+
+      receive do
+        {:DOWN, ^monitor, :process, ^pid, reason} ->
+          Process.put(
+            key,
+            put_in(Process.get(key), [:joined, pid], configured_shutdown_reason(reason))
+          )
+      after
+        max(cutoff - System.monotonic_time(:millisecond), 0) -> :unjoined
+      end
+    end
+  end
+
+  # Concept: retain only native lifetime and supervisor-report metadata.
+  # Technical depth: this primary observer never suppresses or reformats Logger
+  # events and excludes offender MFA, requests, options and formatted states.
+  @doc false
+  def observe_configured_shutdown_report(
+        %{msg: {:report, %{report: report}}} = event,
+        {observer, nonce, supervisors}
+      )
+      when is_list(report) do
+    supervisor =
+      case Keyword.get(report, :supervisor) do
+        {pid, _} when is_pid(pid) -> pid
+        pid when is_pid(pid) -> pid
+        _ -> nil
+      end
+
+    context = Keyword.get(report, :errorContext)
+    offender = Keyword.get(report, :offender, [])
+
+    if MapSet.member?(supervisors, supervisor) and context in [:shutdown_error, :child_terminated] and
+         is_list(offender) do
+      send(
+        observer,
+        {:configured_shutdown_report, nonce,
+         %{
+           emitter: self(),
+           supervisor: supervisor,
+           child: Keyword.get(offender, :pid),
+           context: Atom.to_string(context),
+           reason: configured_shutdown_reason(Keyword.get(report, :reason)),
+           shutdown: configured_shutdown_reason(Keyword.get(offender, :shutdown))
+         }}
+      )
+    end
+
+    event
+  end
+
+  def observe_configured_shutdown_report(event, _configuration), do: event
+
+  defp configured_shutdown_reports(nonce, remaining, reports) do
+    receive do
+      {:configured_shutdown_report, ^nonce, report} ->
+        assert remaining > 0, "native supervisor report inventory exceeded"
+        configured_shutdown_reports(nonce, remaining - 1, [report | reports])
+    after
+      0 -> Enum.reverse(reports)
+    end
+  end
+
+  defp configured_shutdown_reason({:shutdown, :noproc}), do: "shutdown:noproc"
+
+  defp configured_shutdown_reason(value)
+       when value in [:normal, :shutdown, :killed, :noproc, :infinity, :brutal_kill],
+       do: Atom.to_string(value)
+
+  defp configured_shutdown_reason(value) when is_integer(value), do: Integer.to_string(value)
+  defp configured_shutdown_reason(_value), do: "other"
+
+  defp configured_shutdown_retain(state) do
+    case System.get_env("LOOPEX_RUNTIME_STARTUP_EVIDENCE_DIR") do
+      nil ->
+        :ok
+
+      directory ->
+        expanded = Path.expand(directory)
+        assert String.starts_with?(expanded, Path.expand(System.tmp_dir!()) <> "/")
+
+        evidence = %{
+          "complete" => state.complete,
+          "cutoff" => state.cutoff,
+          "raw_log" => state.raw_log,
+          "actors" =>
+            Enum.map(state.actors, fn {pid, actor} ->
+              %{
+                "pid" => inspect(pid),
+                "monitor" => inspect(actor.monitor),
+                "role" => actor.role,
+                "fixture" => actor.index,
+                "down_reason" => Map.get(state.joined, pid)
+              }
+            end),
+          "reports" =>
+            Enum.map(state.reports, fn report ->
+              %{
+                "emitter" => inspect(report.emitter),
+                "supervisor" => inspect(report.supervisor),
+                "child" => inspect(report.child),
+                "context" => report.context,
+                "reason" => report.reason,
+                "shutdown" => report.shutdown
+              }
+            end)
+        }
+
+        File.write!(Path.join(expanded, "configured-held-shutdown.json"), JSON.encode!(evidence))
+    end
+  end
+
   test "active status preserves committed arbitrary bounds and its exact staged cutoff" do
     fixture =
       start(

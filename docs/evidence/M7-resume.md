@@ -27,6 +27,68 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+Latest bounded completion: T16 normal-shutdown correction at clean isolated
+`1f1a5f6967867c3c26ef3d7f0f3eb56112f0273d` is integrated literally (OwnerGroup,
+configured-session witness and retirement witness). Original86533 is terminal0
+and collected PASS:151 Core plus2 Composition cases on each supported pair,
+zero excluded/skipped/invalid,313.724 seconds, twelve actual original joins and
+201 artifacts including complete retained private fault witnesses. Output
+`M7/configured-normal-cleanup-admission-20261007-v5`, collection SHA-256
+`ca8c88f44fac42bd23a2f8b656bdde275732afc40b334ca78b167a2a912220cb`;
+terminal `f06c32920f71be15efe7fd0fbe897a6f3f9f49d390f85542e5de5caeac268cc5`.
+Latest collected registry1434 SHA-256
+`55224e399926ecb59484260df37ed7d9f6d654cb2688e94251e11ee022a4860a`.
+Never repoll86533. Prior45793/38205 failures remain unchanged. Only a new bounded
+T16 subtask closes; broader historical diagnostics, full integration and all
+original acceptance obligations remain open. Counts original81 done/92 todo/
+6 retired; added329 done/29 todo.
+
+T15 native mode probe original15682 is terminal0 and collected complete
+observations, not conformance:191 rows per pair, two original joins,26 artifacts,
+2.797 seconds. Output `M7/restore-native-mode-probe-20261007-v1`, collection
+SHA-256 `cd95916b5e1f40d0694f956d099e36040a780283d010d55affedfeca8d1000cc`;
+terminal `5ba35154bfceaf75b54c44be92391f5eed7ce013acfc2c561a940e01b5ea8bd3`.
+All three setters establish regular04750, subsequent payload writes clear it
+to0750, and applying04750 after writing survives sync/close. All three native
+directory01750 setters yield0750 immediately. Ordinary native0700/0750,
+physical identities, actual payloads and descriptors remain proved controls.
+No whole special-mode restore PASS. Placement report
+`/private/tmp/m7-restore-native-mode-placement-review-20261007-v1.md`, SHA-256
+`90d51bd044901ef82c4ff0b0b201b5f19b89257b0209e30d625063283a414c81`.
+Existing Local helper lacks accepted restore custody/dependency semantics; a new
+administrative helper needs a concrete governed decision. A bounded regular-file
+reapply-after-write repair is in source preparation, preserving initial modes
+and all existing bounds. Existing sticky-directory workflow case stays unchanged.
+Never repoll15682 or reinterpret original9864 as mode preservation.
+
+Native policy repair passed source review and is committed raw
+`62c48a0bf17c5e2be9a58915bee1d4c1aae5c175`, parentd19d7ae0, tree
+`03419c103cf0359cda2af93b5a02296c0a439011`, Git projection SHA-256
+`515cd95708ddd1c4adbd33c5a04c349bc1915dc2b803d6579c264850453cdc2f`.
+Independent review packet
+`/private/tmp/m7-policy-native-failure-repair-independent-review-20261007-v1.json`,
+SHA-256 `8efc5d9048e623612974e6194bfb89ab7c21ad3ba558a47d5c76c88d1e6fc2d5`.
+Incremental formatter V1 was never admitted: review caught a historical digest
+loop shadowing the live seed digest. Root's exact two-line V2 repair passed
+independent review, packet
+`/private/tmp/m7-policy-native-refusal-format-independent-review-20261007-v2.json`,
+SHA-256 `19749a7cf81e7270b0fc25f127ac2c380e39200bd9d1aabbad268a5a869e007d`.
+Original27259 is collected PASS:6.203 seconds, six actual original joins and
+39 artifacts. All four actual non-line AST comparisons and both formatter checks
+passed. Output `M7/policy-native-refusal-format-20261007-v2`, collection SHA-256
+`41b8055e756b2cfff756a06bd98e07487875a5f56b708969b6e0fe8184c8d3f4`;
+terminal `ba9fccc438006337ddd3fe42397f1f278454adec78aad3297e98bcba07e8e54c`.
+Literal clean formatter child `1399e84781c34902f08a3ea95de27b9e20fbbf4c`, tree
+`9adc653d8b9a3eb85c4b73f2c166857db14fa889`, Git projection SHA-256
+`5182a54322c9421e45eb3e211a7fa171576f01e7c48077cfa1b8fca55cbe04fe`.
+Formatted-source packet
+`/private/tmp/m7-policy-native-refusal-formatted-source-20261007-v1.json`, SHA-256
+`b152fc6b584219c3bb4f7a9d9eb02dca725508395b71eeb74eb1c861c5dc4dc6`.
+Latest collected1440 registry SHA-256
+`0a4c05be13e624a5138e6f583f3f526dae03de6ee28b884b3c7753f1e44f0038`.
+Complete30 native tests per supported pair remain unproved; no native policy,
+transport or generation row closes. Preserve original65277 FAIL. Never repoll27259.
+
 Latest bounded completion, 2026-10-07: T05 standalone policy request/terminal
 codec, schemas, vectors and independent Node projection are integrated literally
 from clean isolated `2f86a77050eb025c794895f4624ec799891cf1ef`.
