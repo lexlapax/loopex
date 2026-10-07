@@ -286,14 +286,25 @@ defmodule LoopexComposition.RestoreIOTest do
     root = physical_root(context.root)
     File.chmod!(root, 0o750)
     File.mkdir!(Path.join(root, "empty"))
-    File.chmod!(Path.join(root, "empty"), 0o1750)
     File.mkdir_p!(Path.join(root, ".loopex-restore/0001"))
     File.write!(Path.join(root, ".loopex-restore/0001/intent"), "prior immutable bytes")
     File.write!(Path.join(root, ".hidden"), "")
     File.chmod!(Path.join(root, ".hidden"), 0o640)
     content = :binary.copy(<<1, 2, 3, 4>>, 40_000)
     File.write!(Path.join(root, "stream"), content)
-    File.chmod!(Path.join(root, "stream"), 0o4750)
+
+    # Concept: the manifest proves physically established special permission bits.
+    # Technical depth: the joined Python setter precedes independent native lstat checks.
+    assert {"", 0} =
+             System.cmd("python3", [
+               "-c",
+               "import os,sys; os.chmod(sys.argv[1],0o1750); os.chmod(sys.argv[2],0o4750)",
+               Path.join(root, "empty"),
+               Path.join(root, "stream")
+             ])
+
+    assert Bitwise.band(File.lstat!(Path.join(root, "empty")).mode, 0o7777) == 0o1750
+    assert Bitwise.band(File.lstat!(Path.join(root, "stream")).mode, 0o7777) == 0o4750
 
     paths = [
       ".",
@@ -309,11 +320,220 @@ defmodule LoopexComposition.RestoreIOTest do
     owned = launch({:manifest, root, byte_size(content) + 21}, :list)
     assert {{:joined, {:ok, bytes}, evidence}, events} = drive(owned)
     assert bytes == expected
+    assert {:ok, entries} = RestoreCodec.manifest(bytes, byte_size(content) + 21)
+    index = Map.new(entries, &{&1["path"], &1})
+    assert index["empty"]["mode"] == 0o1750
+    assert index["stream"]["mode"] == 0o4750
     assert evidence.opens == 3
     assert evidence.closes == 3
     assert Enum.count(issued_kinds(events), &(&1 == :hash_read)) >= 6
     assert File.read!(Path.join(root, "stream")) == content
     joined(owned)
+  end
+
+  test "real streamed copy preserves the physically established full regular-file mode and complete manifest",
+       context do
+    root = physical_root(context.root)
+    source = Path.join(root, "mode-source")
+    backup = Path.join(root, "mode-backup")
+    destination = Path.join(root, "mode-destination")
+    workspace = Path.join(root, "mode-workspace")
+
+    for path <- [source, backup, destination, workspace] do
+      File.mkdir!(path)
+      File.chmod!(path, 0o700)
+    end
+
+    content = :binary.copy(<<1, 2, 3, 4>>, 40_000)
+
+    for path <- [source, backup] do
+      file = Path.join(path, "stream")
+      File.write!(file, content)
+
+      assert {"", 0} =
+               System.cmd("python3", [
+                 "-c",
+                 "import os,sys; os.chmod(sys.argv[1],0o4750)",
+                 file
+               ])
+
+      assert Bitwise.band(File.lstat!(file).mode, 0o7777) == 0o4750
+    end
+
+    source_file = Path.join(source, "stream")
+    backup_file = Path.join(backup, "stream")
+    destination_file = Path.join(destination, "stream")
+    source_inode = File.lstat!(source_file).inode
+    backup_inode = File.lstat!(backup_file).inode
+    baseline = expected_manifest(backup, [".", "stream"])
+    assert expected_manifest(source, [".", "stream"]) == baseline
+    assert {:ok, entries} = RestoreCodec.manifest(baseline, byte_size(content))
+    assert Enum.find(entries, &(&1["path"] == "stream"))["mode"] == 0o4750
+    {:ok, lineage} = RestoreCodec.lineage_digest([])
+
+    placement = fn path ->
+      stat = File.lstat!(path)
+      %{"expanded_root" => path, "major_device" => stat.major_device, "inode" => stat.inode}
+    end
+
+    observed_workspace = placement.(workspace)
+
+    workspace_ref =
+      LoopexComposition.WorkspaceIdentity.from_verified_root(
+        workspace,
+        {observed_workspace["major_device"], observed_workspace["inode"]}
+      )
+
+    plan = %{
+      "version" => 1,
+      "tx_id" => hash("regular-mode-original-restore"),
+      "source_state_root" => source,
+      "source_state_placement" => placement.(source),
+      "source_status" => "available",
+      "backup_state_root" => backup,
+      "destination_state_root" => destination,
+      "manifest_sha256" => hash(baseline),
+      "cut_id" => hash("joined-regular-mode-cut"),
+      "prior_restore_count" => 0,
+      "prior_lineage_sha256" => lineage,
+      "runtime_ids" => [],
+      "stores" => [],
+      "ledgers" => [],
+      "workspace" => %{"root" => workspace, "workspace_ref" => workspace_ref},
+      "host_attestation" => %{
+        "latest_cut" => true,
+        "no_post_cut_activity" => true,
+        "all_other_copies_excluded" => true,
+        "old_authority_termination" => "joined",
+        "host_ledgers_validated" => true,
+        "evidence_sha256" => hash("native-fixture-writers-returned")
+      }
+    }
+
+    invocation = %{
+      "work_ms" => 1_000,
+      "cleanup_grace_ms" => 100,
+      "max_total_file_bytes" => 1_048_576,
+      "prior_admin_authority" => "none",
+      "prior_admin_evidence_sha256" => nil
+    }
+
+    assert {:ok, _} = RestoreCodec.encode(:plan, plan)
+    assert {:ok, _} = RestoreCodec.encode(:invocation, invocation)
+    assert File.ls!(destination) == []
+
+    # Concept: exercise copy only through the admitted original restore owner.
+    # Technical depth: an existing manifest-stat gate holds the first destination
+    # administrative allocation after its phase marker, preserving the complete
+    # copied baseline for observation under the same captured work cutoff.
+    owned = launch({:restore_first, plan, invocation}, :manifest_stat)
+    fixture = %{destination: destination, baseline: baseline, content: content}
+
+    {result, events, release} =
+      drive_mode_restore(owned, fixture, owned.work_cutoff + 10_000)
+
+    assert {:joined, {:ok, %{restore_result: {:committed, receipt}, release_claims: []}},
+            evidence} = result
+
+    assert evidence.opens == evidence.closes and evidence.opens > 0
+    assert evidence.work_cutoff == owned.work_cutoff
+    assert evidence.stop == :complete
+    assert receipt["tx_id"] == plan["tx_id"]
+    assert receipt["baseline_manifest_sha256"] == hash(baseline)
+    assert receipt["ledger_count"] == 0
+    assert {:ok, _} = RestoreCodec.encode(:receipt, receipt)
+    joined(owned)
+
+    assert %{worker: release_worker, monitor: release_monitor, cleanup_cutoff: release_cutoff} =
+             release
+
+    assert evidence.cleanup_cutoff == release_cutoff
+    assert_receive {:DOWN, ^release_monitor, :process, ^release_worker, :normal}, 1_000
+
+    payload_events = for {worker, event} <- events, worker == owned.worker, do: event
+
+    copy_events =
+      payload_events
+      |> Enum.drop_while(&(not match?({:issued, _, {:restore_phase, "baseline_copy"}}, &1)))
+      |> tl()
+      |> Enum.take_while(&(not match?({:issued, _, {:restore_phase, "destination_intent"}}, &1)))
+
+    kinds = issued_kinds(copy_events)
+
+    assert [initial_mode, final_mode, directory_mode] =
+             for({:mode, at} <- Enum.with_index(kinds), do: at)
+
+    writes = for {:write, at} <- Enum.with_index(kinds), do: at
+    assert length(writes) >= 3
+    assert initial_mode < hd(writes)
+    assert List.last(writes) < final_mode
+    assert final_mode < index(kinds, :file_sync)
+    assert index(kinds, :file_sync) < directory_mode
+    closes = for {:close, at} <- Enum.with_index(kinds), do: at
+    assert length(closes) >= 3
+    copied = Enum.take(kinds, Enum.at(closes, 2) + 1)
+    assert Enum.count(copied, &(&1 == :open)) == 3
+    assert Enum.count(copied, &(&1 == :close)) == 3
+    assert File.read!(destination_file) == content
+    assert Bitwise.band(File.lstat!(destination_file).mode, 0o7777) == 0o4750
+    assert File.lstat!(source_file).inode == source_inode
+    assert File.lstat!(backup_file).inode == backup_inode
+
+    for file <- [source_file, backup_file] do
+      assert Bitwise.band(File.lstat!(file).mode, 0o7777) == 0o4750
+      assert File.read!(file) == content
+      refute File.lstat!(destination_file).inode == File.lstat!(file).inode
+    end
+
+    assert expected_manifest(backup, [".", "stream"]) == baseline
+
+    for state_root <- [source, destination] do
+      {:ok, digest} = RestoreCodec.claim_digest(state_root)
+      assert File.lstat(Path.join(root, ".loopex-restore-claim-" <> digest)) == {:error, :enoent}
+    end
+  end
+
+  test "both regular-file publication paths reapply the full mode after the final payload write",
+       context do
+    root = physical_root(context.root)
+    original = "retained original bytes"
+    candidate = :binary.copy("candidate-", 100)
+
+    for kind <- [:publish, :restore_publish] do
+      path = Path.join(root, Atom.to_string(kind))
+      File.write!(path, original)
+
+      assert {"", 0} =
+               System.cmd("python3", [
+                 "-c",
+                 "import os,sys; os.chmod(sys.argv[1],0o4750)",
+                 path
+               ])
+
+      assert Bitwise.band(File.lstat!(path).mode, 0o7777) == 0o4750
+
+      operation =
+        case kind do
+          :publish -> {:publish, path, path <> ".tmp", candidate, 0o4750, original}
+          :restore_publish -> {:restore_publish, :generation, path, candidate, 0o4750, original}
+        end
+
+      owned = launch(operation, :mode)
+      assert {{:joined, {:ok, digest}, %{opens: opens, closes: opens}}, events} = drive(owned)
+      joined(owned)
+      assert digest == hash(candidate)
+      kinds = issued_kinds(events)
+      assert [initial_mode, final_mode] = for({:mode, at} <- Enum.with_index(kinds), do: at)
+      writes = for {:write, at} <- Enum.with_index(kinds), do: at
+      assert initial_mode < hd(writes)
+      assert List.last(writes) < final_mode
+      assert final_mode < index(kinds, :file_sync)
+      assert index(kinds, :file_sync) < index(kinds, :rename)
+      assert File.read!(path) == candidate
+      assert Bitwise.band(File.lstat!(path).mode, 0o7777) == 0o4750
+      assert opens > 0
+      refute File.exists?(path <> ".tmp")
+    end
   end
 
   test "manifest accepts zero total for an empty root and refuses a smaller regular-byte cap",
@@ -3659,6 +3879,95 @@ defmodule LoopexComposition.RestoreIOTest do
       pause: pause
     }
     |> Map.put(:work_cutoff, work_cutoff)
+  end
+
+  # Concept: observe the complete copied baseline before administrative allocation.
+  # Technical depth: all observations and proceeds are tied to the installed
+  # guardian/reference and original payload or captured terminal worker. A single
+  # original caller cutoff bounds this gate; no second IO owner or renewed work.
+  defp drive_mode_restore(
+         owned,
+         fixture,
+         cutoff,
+         events \\ [],
+         phase \\ nil,
+         copied \\ false,
+         release \\ nil
+       ) do
+    guardian = owned.guardian
+    reference = owned.reference
+    tag = owned.tag
+
+    receive do
+      {:restore_io, ^guardian, worker, ^reference, event} ->
+        release =
+          case event do
+            {:terminal_release_installed, cleanup_cutoff} ->
+              assert is_nil(release) and worker != owned.worker
+              assert Process.alive?(worker)
+              monitor = Process.monitor(worker)
+
+              on_exit(fn ->
+                cleanup_monitor = Process.monitor(worker)
+                Process.exit(worker, :kill)
+                assert_receive {:DOWN, ^cleanup_monitor, :process, ^worker, _}, 1_000
+              end)
+
+              %{worker: worker, monitor: monitor, cleanup_cutoff: cleanup_cutoff}
+
+            _ ->
+              release
+          end
+
+        assert worker == owned.worker or (release && worker == release.worker)
+
+        phase =
+          case event do
+            {:issued, _, {:restore_phase, selected}} -> selected
+            _ -> phase
+          end
+
+        copied =
+          case event do
+            {:issued, id, :manifest_stat} ->
+              if worker == owned.worker and phase == "destination_intent" and not copied do
+                assert System.monotonic_time(:millisecond) < owned.work_cutoff
+                assert File.ls!(fixture.destination) == ["stream"]
+                assert expected_manifest(fixture.destination, [".", "stream"]) == fixture.baseline
+
+                assert {:ok, _} =
+                         RestoreCodec.manifest(fixture.baseline, byte_size(fixture.content))
+
+                file = Path.join(fixture.destination, "stream")
+                assert File.read!(file) == fixture.content
+                assert Bitwise.band(File.lstat!(file).mode, 0o7777) == 0o4750
+                assert System.monotonic_time(:millisecond) < owned.work_cutoff
+              end
+
+              send(guardian, {:proceed, reference, id})
+              copied or (worker == owned.worker and phase == "destination_intent")
+
+            _ ->
+              copied
+          end
+
+        drive_mode_restore(
+          owned,
+          fixture,
+          cutoff,
+          [{worker, event} | events],
+          phase,
+          copied,
+          release
+        )
+
+      {^tag, result} ->
+        assert copied and not is_nil(release)
+        {result, Enum.reverse(events), release}
+    after
+      max(cutoff - System.monotonic_time(:millisecond), 0) ->
+        flunk("original restore did not finish within its captured work/cleanup cutoff")
+    end
   end
 
   defp drive(owned, proceed \\ true, events \\ []) do

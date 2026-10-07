@@ -1,5 +1,17 @@
 # M7 Implementation Tasks
 
+T15's bounded regular-file final-mode repair is proved and integrated literally
+from `768b2191b0bc9a9b02b70d3c78f97b579320cfaf`. Original66773 passed all175
+selected cases on each supported pair, including all three long-bound cases,
+zero exclusions/skips/invalid;247.849 seconds, eight original joins and49 flat
+artifacts. Root verified all22 native/timeline retention entries. The actual
+streamed restore copy and both publication paths preserve physically established
+`0o4750` after payload writes, with original work/cleanup bounds and actor joins.
+The broader full-mode obligation, sticky files/directories, complete restore,
+operator attendance and full integration remain open. Original T01–T19 remains
+81 done/92 todo/6 retired; added332 done/28 todo. Exact proof and source pointers
+are in the [resume record](M7-resume.md).
+
 T09's pending/response decoder-vector and public-event-schema subtask is now
 closed after a source/evidence audit. The current artifacts and relevant decoder
 ranges match the actual collected15825 proof:25 Protocol and24 Core cases on
@@ -14017,6 +14029,8 @@ tests are not claimed as part of109. Exact current outputs and collection are
 in the restart checkpoint. Broader restore/decoder/public/helper rows stay open.
 
 
+
+- [x] Reapply the imported regular-file mode after the last payload write and before sync/close in streamed copy and both publication paths. Physically establish `0o4750`, prove actual supported restore admission, complete pre-administration copied manifests, original actor/descriptor joins and unchanged cutoffs, and run all111 IO,16 publication,23 install and25 prefix cases including3 long-bound on both pairs at768b2191. This bounded file-mode repair does not establish sticky-file/directory preservation or close the full `0o7777` obligation.
 
 - [ ] Establish special permission bits physically before current-format restore; prove exact preservation or refusal before successful activation under the accepted full `0o7777` mode domain on both supported toolchains. Keep this separate from the ordinary-mode workspace workflow and retain original owner, work and cleanup bounds.
 

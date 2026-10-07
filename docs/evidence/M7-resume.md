@@ -36,33 +36,75 @@ This resolves the earlier asked0055 question. ADR0056/0057/0058 remain Proposed;
 the directory-mode helper remains a separate unaccepted dependency/ownership
 proposal. No other approval is inferred.
 
-T15 actual formatter11792 is terminal0, collectedPASS5.082 seconds, six original
-joins and39 artifacts. Its literal clean child is
-`38881d933cd9355e8ee72909dd94d13450f30f5e`; formatted packetV2 is
-`/private/tmp/m7-restore-regular-mode-formatted-source-20261007-v2.json`, SHA-256
-`318587fdad921da8f7463a4c1c4a966adcb9fdea7b800135db1f1038cf03c1d5`.
-V1's old raw Git blob metadata was caught and corrected before test admission;
-current source hashes did not change. Formatter collection SHA-256
-`c630251d99f03cb0804af4c8261bc76423b451b01b2626f0b714d7265e366509`;
-terminal `c45b0b1380d8dede96a0a83efd2987490d8626c45399a379c59ba02b87bfc208`.
-Latest collected registry1454 is
-`/Users/spuri/projects/lexlapax/loopex-evidence/M7/restore-regular-mode-format-20261007-v1/stage-attempt-registry.json`,
-SHA-256 `9efafe53c0a2508415e0246e39089479ac8e40e3c4355898ab32c2069833869f`.
-The independently reviewed complete175 paired proof original67579 is now
-terminal1 and collected FAIL: current174/175, floor unrun, zero exclusions/skips/
-invalid,130.965 seconds, four original joins and29 flat artifacts. Root also
-verified all11 native/timeline artifacts referenced by the retention manifest.
-The new copy test incorrectly calls a private operation without standalone IO
-admission; it fails with invalid_io_request before copying. Keep every original
-bound and correct the test through a real supported path before a fresh source
-admission; no copy/publication or directory preservation PASS is claimed.
-Output `M7/restore-regular-mode-admission-20261007-v1`, collection SHA-256
-`a0649d164c756161fd2979e7b02f57940f3a1c3d1cbc9214ec3f8e75002f7e96`;
-terminal `a21a0e15c8513e2e4ebbe8c86d24a3b412915c2202c4b4e95266ae446be19752`.
-Latest collected registry1458 at that output has SHA-256
-`c8dc8639c1ee343c8f6808190612bb02316c494460edc7019132b663693e4be6`.
-Never repoll67579 or retry unchanged failed38881 source. Formatter alone closes
-no task; counts remain original81 done/92 todo/6 retired; added331 done/28 todo.
+T15 bounded regular-file final-mode repair is now integrated literally from
+`768b2191b0bc9a9b02b70d3c78f97b579320cfaf`. Only Restore.IO production and its
+complete111-case test file join; isolated workflow changes are not integrated.
+Production SHA-256 `27fbf6cc0194151b3ed66837792e8aa8df5306e1606a39ac0240352c2ac190ef`;
+test `79cadb082d2785f9181163c3ea7e6af663ff78f77df2fa194973fdcb6083c0b7`.
+The repair reapplies mode after last payload write and before sync/close. Its
+actual supported `restore_first` copy, complete pre-administration manifest and
+both publication paths preserve physically established04750 under original
+work, cleanup and exact actor/descriptor joins. Sticky files/directories, the
+full07777 mode obligation, complete restore and full integration remain open.
+
+Original66773 is terminal0 and collected PASS:175/175 on each supported pair,
+including all three long-bound cases, zero exclusions/skips/invalid,247.849
+seconds, eight original joins and49 flat artifacts. Root verified all22
+native/timeline artifacts referenced by the fsynced retention manifest; both
+actual timely/late observation reports are retained. Output:
+`/Users/spuri/projects/lexlapax/loopex-evidence/M7/restore-copy-admission-proof-20261007-v1`.
+Collection SHA-256 `9a58b2a97a1b6f5696b483878ea42667dbbe2170b1b18a201560ea18d371abf1`;
+terminal `fb825b2d4ba3aa40a31e9902aa0b03b4add58a1488385f66c38809890cc19c0d`.
+Latest collected registry1478 at that output has SHA-256
+`ec5a76f6a7d92227a84b254e958a730202b063c8096125e764ca559653e52e4c`.
+Executed wrapper `/private/tmp/m7-restore-copy-admission-proof-20261007-v1-enabled.py`,
+SHA-256 `139929c5db95e1307f303bee6b15a4ddfc5300efd28622e493f9172e2dc7c5cf`;
+root enablement packet SHA-256
+`c751aeacd084429a5d29e4839fd0a76a6d6dad20e3c3ae8f3e9c587fe9731be9`.
+Formatter original19287 separately passed4.899 seconds/six joins; its literal
+child768b2191 and formatted packet
+`/private/tmp/m7-restore-copy-admission-formatted-source-20261007-v1.json`, SHA-256
+`385b25f1af922f1883c91a051f73e447ecbf082574bbf83a8bd17c542686456a`,
+bind current Git blobs. Original67579 remains FAIL174/175, floor unrun, at38881:
+its private copy operation was not standalone-admitted. It is superseded by a
+real supported fixture correction, never retagged or rerun unchanged. Its
+retained output `M7/restore-regular-mode-admission-20261007-v1`, collection
+`a0649d164c756161fd2979e7b02f57940f3a1c3d1cbc9214ec3f8e75002f7e96`
+and terminal `a21a0e15c8513e2e4ebbe8c86d24a3b412915c2202c4b4e95266ae446be19752`
+remain historical. Source correction packet
+`/private/tmp/m7-restore-copy-admission-repair-20261007-v2/source.json`, SHA-256
+`e0638b79e2a402feb3d74022514b260cd2cbbfdedde732e71f3f7dada702a7fb`;
+independent source review
+`/private/tmp/m7-restore-copy-admission-repair-independent-review-20261007-v1.md`,
+SHA-256 `b4a4542fcd7ef742ffcc424431f38d8fb25747302a2793365eeb8cc005136f08`.
+Never repoll collected66773/19287/67579/11792 or rerun their unchanged sources.
+Counts remain original81 done/92 todo/6 retired; added332 done/28 todo.
+
+ADR0055's pure CreationOptions unit is independently source-reviewed and raw
+committed in `/Users/spuri/.codex/worktrees/m7-authored-creation/loopex`.
+Original15320 formatter failed only floor layout, collected6joins38artifacts,
+4.591 seconds; output `M7/creation-options-format-20261007-v1`, collection
+`101a937457c8122dfa4b65fd2ec078e9355755bba05e61789b60235f106ec0fc`;
+terminal `ad930bc468fee82a7eb97ddd18c96cf5d7df0963e10deb64753122132cb4ea4c`.
+Current formatter bytes were saved literally at977117c4; the identical-predicate
+explicit do/else/end repair is committed at
+`94e380059c27b190fbf9f9629363d0014a3fbb7d`, production SHA-256
+`d0d6a60eea088f4b41ac88ec749f3d1e5d14ccf86ba89d7996ee1aa7ae959252`.
+The formatted22-case test is unchanged SHA-256
+`37fd6866c2d18b8eaa2050cd9238247d5822192569f83e9f8d6cd0997ea7df79`.
+Fresh formatter/compile/paired pure tests remain pending. No Store/Control/
+transport/generation proof is inferred from this pure unit.
+
+Proposed ADR0059 responsive transaction-carrier V2 is uncommitted in isolated
+`/Users/spuri/.codex/worktrees/m7-creation-transactions/loopex`, packet
+`/private/tmp/m7-creation-transactions-source-20261007-v2.json`, SHA-256
+`49476d2279cf0371976ba7bea27ff49f1a66fa6f40a63c0b362c77dfd7e2e62f`.
+Independent follow-up found a concrete restart-retention gap: Control.init makes
+an empty OwnerLane, and the restart resource capture has no original permitted
+creation proposal/fence. Do not ask acceptance using the earlier bounded
+readiness PASS, or implement the carrier, until that exact owner-loss branch has
+a reviewable retention/exclusion mechanism. Local serialized read ordering is
+not claimed broken. No0059 acceptance or other proposal approval is inferred.
 
 Latest checklist audit: close only T09's added "Pin pending/response decoder
 vectors and public question event schemas." Current artifact hashes and relevant

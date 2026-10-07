@@ -1609,6 +1609,16 @@ defmodule LoopexComposition.Restore.IO do
     )
 
     digest = copy_chunks(input, output, entry["size"], :crypto.hash_init(:sha256))
+
+    # Concept: copied bytes retain the source's complete final permission mode.
+    # Technical depth: payload writes can clear special bits set at creation;
+    # reapply the exact imported mode after the final write, before sync/close.
+    require_ok(
+      primitive(:mode, fn ->
+        :prim_file.write_file_info(destination, file_info(mode: entry["mode"]))
+      end)
+    )
+
     require_ok(primitive(:file_sync, fn -> :prim_file.sync(output) end))
     close(output)
 
@@ -1956,6 +1966,7 @@ defmodule LoopexComposition.Restore.IO do
         info = file_info(mode: mode)
         require_ok(primitive(:mode, fn -> :prim_file.write_file_info(temp, info) end))
         write(descriptor, bytes)
+        require_ok(primitive(:mode, fn -> :prim_file.write_file_info(temp, info) end))
         require_ok(primitive(:file_sync, fn -> :prim_file.sync(descriptor) end))
         close(descriptor)
         require_ok(primitive(:rename, fn -> :prim_file.rename(temp, path) end))
@@ -3091,6 +3102,13 @@ defmodule LoopexComposition.Restore.IO do
 
     retained_publication_descriptor!(descriptor, temp, configured)
     write(descriptor, bytes)
+    written = manifest_stat(temp)
+    retained_publication_descriptor!(descriptor, temp, written)
+
+    require_ok(
+      primitive(:mode, fn -> :prim_file.write_file_info(temp, file_info(mode: mode)) end)
+    )
+
     info = manifest_stat(temp)
     require_audit_file(info, %{"size" => byte_size(bytes), "mode" => mode})
     retained_publication_descriptor!(descriptor, temp, info)
