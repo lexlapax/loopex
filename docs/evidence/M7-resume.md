@@ -27,6 +27,47 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+Complete restore IO original5569 is collected PASS at
+`234df84910de392650a487b6d6df48f2b55f8c98`, pushed to origin/m7. Both pairs pass
+all109 cases, including all three long-bound cases, with zero exclusions/skips/
+invalid cases, in226.839 seconds overall. All eight original stages are joined
+and45 artifacts verified. Collection
+`M7/complete-restore-io-20261006-v1/original-collection.json` SHA-256
+`1ee4e858553e7b395a5eec47afd7de2b5f1058443f5d227b545b84d0db4025fc`;
+terminal `f0bf0026c8bed14f24b9b42f7eff1729bb1b4d9f5e0da5cce7b2115808a54a4d`;
+registry1080 SHA-256 `a639236c971d69a723bb53b28ce9c2f4fd38d398f0c69682789259b65e7ad7c0`.
+Runner retained as root-runner.py SHA-256
+`0b2c41859d7f692bd487aacc7efb865b1c447129d96fd598f78373a8f3c875db`.
+Both current/floor-long reports retain actual timely and late bytes with
+CORRECTED_TIMELINES_RECORDED. Timely joins; late observation refuses as
+worker_unjoined under the original captured cutoffs. Never repoll5569.
+
+The complete physical manifest and reopened private codec/owned IO prerequisite
+added T15 rows close. The separate prior paired29-case codec proof at8885e0db
+remains applicable because its production/test bytes match234df849;109 is the
+IO-file population. Original T01–T19 remains80 done/93 todo/6 retired;
+added314 done/34 todo. No other restore/public/decoder/helper row closes.
+
+Native compaction formatter original59893 is collected PASS at authored
+`578ae5842b9db212b2a475e33f215055e8b227fc`,6.181 seconds, six original stages
+joined and37 artifacts verified. Independent exact backups and non-line AST
+comparison pass; both supported formatters admit the resulting bytes. Root
+saved the real four-path layout change at isolated
+`c2720ce16e1daf498813266e72e53d61519a6fad` before the full231-case paired proof.
+Collection `M7/compaction-native-format-20261006-v1/original-collection.json`
+SHA-256 `976c427353ff4b12ed25a3ece2ea2e6b4dec0371e01e1b910c7993841694ec3e`;
+registry1086 SHA-256 `6feb5c8a63793e6f11dc1b949682bd5d0246052475d3ada74426cc010eac0bd7`.
+Never repoll59893. No compaction execution outcome is claimed yet.
+
+Private retained finalization source work now runs in managed
+m7-retained-finalization from234df849, owning only Workflow, RestoreIO and the
+new32-case finalization test file. Rebase the already reviewed saved b83725bd /
+762c97fb operative delta, preserving expiry-first admission and current physical
+history checks. Complete retained claims only; partial/absent claims, public
+facade activation and helper audit remain separate. Root owns all VMs and Git.
+
+Earlier completed physical proof and saved records follow.
+
 Complete physical restore original75764 is collected PASS at primary
 `11e7f6740afce534b26b79c1835a9fe30a5a3ac1`, pushed to origin/m7. Current and floor
 each pass13 construction and135 workflow cases, with zero exclusions, skips or

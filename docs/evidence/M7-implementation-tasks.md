@@ -4,7 +4,7 @@ Complete physical restore original75764 passed all148 cases on each supported
 toolchain at `11e7f674`, in560.494 seconds. All ten original stages are joined
 and47 artifacts verified. Six added T15 rows and the T16 copied-permissions row
 close against that group. Original T01–T19 remains80 done/93 todo/6 retired;
-added312 done/36 todo. Complete109-case restore IO proof, daemon admission
+added314 done/34 todo. Complete109-case restore IO proof passed both pairs; daemon admission
 correction, native/wire compaction and served generation activation remain open.
 ADR0055 is the sole asked pending decision. Exact proof references and continuation
 order are in the [restart checkpoint](M7-resume.md#technical-depth).
@@ -13817,15 +13817,26 @@ Exact collection and outputs are retained in the restart checkpoint.
 
 - [x] Enforce the current Store writer's deterministic uncompressed whole-payload ETF format before offline restore auditing reuses its decoder. Reproduce checksummed compressed over-ceiling, trailing-byte and reversed-map acceptance, refuse all three without changing written bytes or repairing input, and prove complete Store conformance on both supported toolchains.
 
-- [ ] Produce the accepted complete physical manifest through the existing single owned restore IO worker: stream exact file hashes, preserve all paths/modes/empty directories and prior metadata, enforce all count/byte caps while accumulating, reject links/special/unsafe entries and prove actual faults and cleanup on both supported toolchains. Full history audit and restore orchestration remain separate.
+- [x] Produce the accepted complete physical manifest through the existing single owned restore IO worker: stream exact file hashes, preserve all paths/modes/empty directories and prior metadata, enforce all count/byte caps while accumulating, reject links/special/unsafe entries and prove actual faults and cleanup on both supported toolchains. Full history audit and restore orchestration remain separate.
 
 
-- [ ] Implement and independently review the accepted ADR 0051 private restore codec and owned raw IO prerequisite; prove closed exact bytes, captured cleanup bounds and actual descriptor/guardian faults on both toolchains. Preserve required current-format audit, claims, guards, lineage and activation as subsequent work.
+- [x] Implement and independently review the accepted ADR 0051 private restore codec and owned raw IO prerequisite; prove closed exact bytes, captured cleanup bounds and actual descriptor/guardian faults on both toolchains. Preserve required current-format audit, claims, guards, lineage and activation as subsequent work.
 
 Reopened on 2026-10-05: source review establishes that clean admission precedes
 final cleanup expiry after an already-entered receive consumes a late normal
 DOWN. Earlier passing proof remains historical; enforcement and a real paired
 long-bound observation witness are required before this row closes again.
+
+Closed again on 2026-10-06 after original5569 passed all109 IO cases on each
+supported pair at `234df849`, including all three long-bound cases and retained
+actual timely/late observation records. All eight original stages are joined,
+45 artifacts verified and original cutoffs unchanged. The manifest producer row
+also closes against the complete streaming/path/mode/cap and physical/process
+fault cases. Codec completion separately reuses the prior paired29-case proof
+at `8885e0db`; its production/test files are byte-identical at234df849, and codec
+tests are not claimed as part of109. Exact current outputs and collection are
+in the restart checkpoint. Broader restore/decoder/public/helper rows stay open.
+
 
 
 - [ ] Prove a bounded current-format physical Store/executor backup/restore slice with quiescent exact owner joins, complete unexcluded manifests, empty destination roots, separate workspace restoration and unknown-effect nonredispatch on both pairs. This does not close operator attendance or future helper/catalog/ledger coverage; isolated test preparation waits for the current full check before verification.
