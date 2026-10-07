@@ -1,0 +1,104 @@
+{
+  "format": "loopex.experimental.payload-schema/1",
+  "contract": "creation_options",
+  "closed": true,
+  "required": [
+    "version"
+  ],
+  "optional": [
+    "configuration",
+    "tools"
+  ],
+  "version": {
+    "type": "json_integer",
+    "exact": 1
+  },
+  "configuration": {
+    "closed": true,
+    "members_min": 1,
+    "members": [
+      "model",
+      "reasoning",
+      "instructions",
+      "max_tokens",
+      "context_token_budget",
+      "system_class_tokens"
+    ],
+    "model": {
+      "encoding": "utf8",
+      "bytes_min": 1,
+      "authored_bytes_preserved": true,
+      "model_name_ceiling": null
+    },
+    "reasoning": [
+      "default",
+      "none",
+      "low",
+      "medium",
+      "high"
+    ],
+    "quantities": {
+      "members": [
+        "max_tokens",
+        "context_token_budget",
+        "system_class_tokens"
+      ],
+      "encoding": "canonical_positive_decimal_string",
+      "minimum": "1",
+      "maximum": "18446744073709551615"
+    },
+    "instructions": {
+      "closed": true,
+      "required": [
+        "version",
+        "base",
+        "environment",
+        "appendix"
+      ],
+      "version": {
+        "encoding": "ascii",
+        "bytes_min": 1,
+        "bytes_max": 64,
+        "pattern": "[A-Za-z0-9][A-Za-z0-9._-]{0,63}"
+      },
+      "base": {
+        "encoding": "utf8",
+        "bytes_min": 1,
+        "bytes_max": 32768
+      },
+      "environment": {
+        "encoding": "utf8",
+        "bytes_min": 0,
+        "bytes_max": 4096
+      },
+      "appendix": {
+        "encoding": "utf8",
+        "bytes_min": 0,
+        "bytes_max": 16384
+      }
+    }
+  },
+  "tools": {
+    "type": "ordered_array",
+    "items_min": 0,
+    "items_max": 1024,
+    "unique": true,
+    "name": {
+      "encoding": "ascii",
+      "bytes_min": 1,
+      "bytes_max": 64,
+      "pattern": "[a-z][a-z0-9_]{0,63}"
+    },
+    "omitted": "host_captured_defaults",
+    "explicit_empty": "no_tools",
+    "selection": "later_exact_host_captured_default_subset"
+  },
+  "defaults": "none_in_decoder",
+  "admission": [
+    "existing duplicate-aware Frame before map conversion",
+    "existing transport total limits",
+    "host selection and raw instruction capture",
+    "central complete candidate and genesis validation"
+  ],
+  "generation_activation": false
+}

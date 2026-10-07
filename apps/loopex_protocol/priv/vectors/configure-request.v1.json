@@ -7817,6 +7817,241 @@
       "transport": "foreground",
       "input": true,
       "error": true
+    },
+    {
+      "name": "foreground-instructions-version-trailing-newline",
+      "transport": "foreground",
+      "input": {
+        "request_id": "cfg_1.~",
+        "method": "session.configure",
+        "command_id": "AP8BgA",
+        "changes": {
+          "model": " alias/model ",
+          "reasoning": "high",
+          "instructions": {
+            "version": "v\n",
+            "base": " Exact café 🌱 ",
+            "environment": "",
+            "appendix": "\nKeep these bytes.\n"
+          },
+          "max_tokens": "9007199254740993",
+          "context_token_budget": "18446744073709551615",
+          "system_class_tokens": "1"
+        }
+      },
+      "error": true
+    },
+    {
+      "name": "daemon-instructions-version-trailing-newline",
+      "transport": "daemon",
+      "input": {
+        "request_id": "cfg_1.~",
+        "method": "session.configure",
+        "command_id": "AP8BgA",
+        "changes": {
+          "model": " alias/model ",
+          "reasoning": "high",
+          "instructions": {
+            "version": "v\n",
+            "base": " Exact café 🌱 ",
+            "environment": "",
+            "appendix": "\nKeep these bytes.\n"
+          },
+          "max_tokens": "9007199254740993",
+          "context_token_budget": "18446744073709551615",
+          "system_class_tokens": "1"
+        },
+        "writer_epoch": "_wAq"
+      },
+      "error": true
+    },
+    {
+      "name": "foreground-max_tokens-trailing-newline",
+      "transport": "foreground",
+      "input": {
+        "request_id": "cfg_1.~",
+        "method": "session.configure",
+        "command_id": "AP8BgA",
+        "changes": {
+          "model": " alias/model ",
+          "reasoning": "high",
+          "instructions": {
+            "version": "cfg-1",
+            "base": " Exact café 🌱 ",
+            "environment": "",
+            "appendix": "\nKeep these bytes.\n"
+          },
+          "max_tokens": "1\n",
+          "context_token_budget": "18446744073709551615",
+          "system_class_tokens": "1"
+        }
+      },
+      "error": true
+    },
+    {
+      "name": "foreground-context_token_budget-trailing-newline",
+      "transport": "foreground",
+      "input": {
+        "request_id": "cfg_1.~",
+        "method": "session.configure",
+        "command_id": "AP8BgA",
+        "changes": {
+          "model": " alias/model ",
+          "reasoning": "high",
+          "instructions": {
+            "version": "cfg-1",
+            "base": " Exact café 🌱 ",
+            "environment": "",
+            "appendix": "\nKeep these bytes.\n"
+          },
+          "max_tokens": "9007199254740993",
+          "context_token_budget": "1\n",
+          "system_class_tokens": "1"
+        }
+      },
+      "error": true
+    },
+    {
+      "name": "foreground-system_class_tokens-trailing-newline",
+      "transport": "foreground",
+      "input": {
+        "request_id": "cfg_1.~",
+        "method": "session.configure",
+        "command_id": "AP8BgA",
+        "changes": {
+          "model": " alias/model ",
+          "reasoning": "high",
+          "instructions": {
+            "version": "cfg-1",
+            "base": " Exact café 🌱 ",
+            "environment": "",
+            "appendix": "\nKeep these bytes.\n"
+          },
+          "max_tokens": "9007199254740993",
+          "context_token_budget": "18446744073709551615",
+          "system_class_tokens": "1\n"
+        }
+      },
+      "error": true
+    },
+    {
+      "name": "foreground-request-id-trailing-newline",
+      "transport": "foreground",
+      "input": {
+        "request_id": "r\n",
+        "method": "session.configure",
+        "command_id": "AP8BgA",
+        "changes": {
+          "model": " alias/model ",
+          "reasoning": "high",
+          "instructions": {
+            "version": "cfg-1",
+            "base": " Exact café 🌱 ",
+            "environment": "",
+            "appendix": "\nKeep these bytes.\n"
+          },
+          "max_tokens": "9007199254740993",
+          "context_token_budget": "18446744073709551615",
+          "system_class_tokens": "1"
+        }
+      },
+      "error": true
+    },
+    {
+      "name": "daemon-max_tokens-trailing-newline",
+      "transport": "daemon",
+      "input": {
+        "request_id": "cfg_1.~",
+        "method": "session.configure",
+        "command_id": "AP8BgA",
+        "changes": {
+          "model": " alias/model ",
+          "reasoning": "high",
+          "instructions": {
+            "version": "cfg-1",
+            "base": " Exact café 🌱 ",
+            "environment": "",
+            "appendix": "\nKeep these bytes.\n"
+          },
+          "max_tokens": "1\n",
+          "context_token_budget": "18446744073709551615",
+          "system_class_tokens": "1"
+        },
+        "writer_epoch": "_wAq"
+      },
+      "error": true
+    },
+    {
+      "name": "daemon-context_token_budget-trailing-newline",
+      "transport": "daemon",
+      "input": {
+        "request_id": "cfg_1.~",
+        "method": "session.configure",
+        "command_id": "AP8BgA",
+        "changes": {
+          "model": " alias/model ",
+          "reasoning": "high",
+          "instructions": {
+            "version": "cfg-1",
+            "base": " Exact café 🌱 ",
+            "environment": "",
+            "appendix": "\nKeep these bytes.\n"
+          },
+          "max_tokens": "9007199254740993",
+          "context_token_budget": "1\n",
+          "system_class_tokens": "1"
+        },
+        "writer_epoch": "_wAq"
+      },
+      "error": true
+    },
+    {
+      "name": "daemon-system_class_tokens-trailing-newline",
+      "transport": "daemon",
+      "input": {
+        "request_id": "cfg_1.~",
+        "method": "session.configure",
+        "command_id": "AP8BgA",
+        "changes": {
+          "model": " alias/model ",
+          "reasoning": "high",
+          "instructions": {
+            "version": "cfg-1",
+            "base": " Exact café 🌱 ",
+            "environment": "",
+            "appendix": "\nKeep these bytes.\n"
+          },
+          "max_tokens": "9007199254740993",
+          "context_token_budget": "18446744073709551615",
+          "system_class_tokens": "1\n"
+        },
+        "writer_epoch": "_wAq"
+      },
+      "error": true
+    },
+    {
+      "name": "daemon-request-id-trailing-newline",
+      "transport": "daemon",
+      "input": {
+        "request_id": "r\n",
+        "method": "session.configure",
+        "command_id": "AP8BgA",
+        "changes": {
+          "model": " alias/model ",
+          "reasoning": "high",
+          "instructions": {
+            "version": "cfg-1",
+            "base": " Exact café 🌱 ",
+            "environment": "",
+            "appendix": "\nKeep these bytes.\n"
+          },
+          "max_tokens": "9007199254740993",
+          "context_token_budget": "18446744073709551615",
+          "system_class_tokens": "1"
+        },
+        "writer_epoch": "_wAq"
+      },
+      "error": true
     }
   ],
   "frame_cases": [

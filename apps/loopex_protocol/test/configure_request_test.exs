@@ -5,7 +5,7 @@ defmodule LoopexProtocol.ConfigureRequestTest do
 
   test "literal configure vectors cover both exact envelopes and every nonempty update subset" do
     fixture = read("vectors/configure-request.v1.json")
-    assert length(fixture["cases"]) == 371
+    assert length(fixture["cases"]) == 381
 
     for vector <- fixture["cases"] do
       transport = transport(vector["transport"])
@@ -68,6 +68,7 @@ defmodule LoopexProtocol.ConfigureRequestTest do
     end
 
     assert ConfigureRequest.decode_changes(%{"model" => <<255>>}) == :error
+    assert ConfigureRequest.decode_changes(%{"instructions" => %{raw | "version" => "v\n"}}) == :error
     assert ConfigureRequest.decode_wire(request, :other) == :error
     assert ConfigureRequest.decode_wire(request, "foreground") == :error
   end
@@ -85,7 +86,7 @@ defmodule LoopexProtocol.ConfigureRequestTest do
 
     for {file, digest} <- [
           {"vectors/configure-request.v1.json",
-           "a4e3dc52c099f8466bf9af9dfc3e3fbb0db1af208af859ad64842230dfdfaf0a"},
+           "fff66292cb2904ccb6fc4260de370a969e9bfc0eda478b6f0c726ecffed944fe"},
           {"schema/configure-request.v1.json",
            "970400e653364af023918ceb960a499d6f6b1654646de5fc10330953e56a0ef4"}
         ] do
@@ -107,7 +108,7 @@ defmodule LoopexProtocol.ConfigureRequestTest do
 
     {output, status} = System.cmd(node, argv, stderr_to_stdout: true)
     assert status == 0, output
-    assert output =~ "\"vectors\":371"
+    assert output =~ "\"vectors\":381"
     assert output =~ "\"subset_cases\":126"
   end
 
