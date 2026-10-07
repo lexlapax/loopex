@@ -27,6 +27,50 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+Fixture correction `ff36e0c16e760f86c785f2d100a3034917858406` reuses the same
+unchanged destination manifest for copy/cap assertions and consumes the existing
+IO probe for bounded progress. Original92272 is fully collected FAIL_OR_UNAVAILABLE
+after181.799 seconds: current construction13 passed and workflow134/135 passed;
+the64-restores case hit its unchanged60,000ms whole-test cutoff. Floor and full
+fast were unrun. Collection
+`M7/observed-restore-boundaries-20261006-v1/original-collection.json`, SHA-256
+`4771612dfd756c3244a56395298a1d4cdd34894f5675f45203212f5d355806c6`,
+binds26 artifacts and five original joins. Latest registry989 keys, SHA-256
+`82b4753bc2e928cc4e1654d1c0671b47ce98387e172b6c0460a908b260d8c009`.
+Never repoll92272 or signal its former PIDs.
+
+The331 retained probe rows show all eight phases for ordinals1–41 and the first
+three for42; its baseline-copy observation was59,500ms. Ordinal41's observed
+claim-to-release interval was2,578ms. These are fixture observations, not worker
+timestamps or a complete64/65 proof. Independent analysis
+`M7/restore-aggregate-observations-20261006-v1.json`, SHA-256
+`98beab4232ab09b98f08445a5f6685547644a0195215242e949f965d8dc102a1`,
+binds the complete original log. Independent authority review confirms60,000ms
+is ExUnit's implicit aggregate fixture limit; ADR0051 specifies caller-selected
+per-invocation limits and actual64/65 coverage. No deadline is changed. The next
+timing decision is queued after the currently asked0054 decision: explicitly
+approve a600,000ms whole-fixture limit while retaining every10,000ms work limit,
+1,000ms grace, original derived cleanup window, join and manifest assertion; or
+retain60,000ms as an explicit aggregate performance requirement. This proposed
+limit is not a prediction or proof. The maintainer override must be recorded
+before dependent edits or verification; old failures remain failures.
+
+The native bounds author is now actively correcting the three review findings.
+Earlier messages to its completed task had queued without starting a turn;
+root corrected that dispatch error with followup_task. A private nil-by-default
+worker fixture gate may be installed through test-only sys state replacement
+for deterministic executor/artifact entry proofs, without a public configuration
+key or changed port. Root still owns all execution and integration.
+
+ADR0057's Proposed event-body pair is prepared and independently reviewed,
+including explicit missing-evidence consumption and no-PASS consequences in
+both views. Independent duplicate-aware canonical/hash checks passed all eleven
+synthetic vectors: `M7/0057-independent-vectors-20261006-v1.json`, SHA-256
+`cc719419496218e04434bfe61a2995665235b523357f5dbc4d47ac44cd6e4e1e`.
+These are schema examples, not legal replay or actual evidence. No acceptance
+or event-codec implementation follows. The old packet remains unavailable.
+Original T01–T19 remains80 done/93 todo/6 retired; added303 done/41 todo.
+
 After the maintainer reboot, primary `m7` resumed from clean0b21156e. Reviewed
 physical correction `d2b2298ca94779859a31870ccdf9222c77b0aef9` changes only
 RestoreGuard and the workflow test. Formatting preserved both authored file

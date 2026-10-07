@@ -1,5 +1,16 @@
 # M7 Implementation Tasks
 
+Original92272 at `ff36e0c1` is collected FAIL after181.799 seconds. Construction13
+and workflow134/135 passed; the64-restores case reached ordinal42 baseline-copy
+at59,500ms and hit ExUnit's unchanged60,000ms aggregate cutoff. The retained probe
+and independent authority review distinguish that fixture limit from each
+restore's work/cleanup limits. A concrete aggregate-bound decision is queued;
+no timing change, floor PASS or full-check admission is inferred. Native bounds
+corrections are active. Proposed ADR0057 and its eleven independently checked
+synthetic vectors are saved for later maintainer review. Original T01–T19:
+80 done/93 todo/6 retired; added303 done/41 todo. Exact evidence references are
+in the [restart checkpoint](M7-resume.md#technical-depth).
+
 The reboot resume is saved on `m7`. Physical history correction `d2b2298c`
 preserves directory checks and exact lineage comparisons and verifies every
 protected entry before successful admission. Original51209 is collected FAIL
@@ -13686,6 +13697,8 @@ candidate integration and focused floor proofs are retained there; items 9 and
 - [ ] Test truncation, forks, duplicate writers, interrupted handoff, resume, abandonment, redaction and every verdict route.
 
 ### Added implementation subtasks
+
+- [ ] Pin and implement the closed current attempts-event body union, including missing-evidence consumption, retained case identity, writer/handoff/head relations and causal authorization; prove exact independent vectors and all positive/negative body variants on both supported toolchains before ordered replay, physical writer ownership or runner activation. ADR0057 is Proposed; its independent source/vector review is not acceptance.
 
 - [x] Inventory all 74 numbered V1–V13 steps and 155 descriptive subcases against exact accepted plan spans and current supporting tests; retain source identities, existing evidence and every missing executable owner/oracle pin. This is read-only planning evidence, not an accepted execution manifest or provider execution.
 
