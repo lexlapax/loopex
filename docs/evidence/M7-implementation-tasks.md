@@ -5,10 +5,15 @@ on each supported pair, in89.185 seconds overall. The exact configure-ingress
 source is integrated from `15280560c380433425e0a677daef83f1f0558155`.
 This proves actual mapping-to-native admission, replay identity, privacy and
 negative authority cases; served configure and full generation activation stay
-open. Native original67222 failed six of148 current cases; its replay and fixture
-corrections proceed in the same ten-file unit before a new paired attempt.
+open. Native original72635 then passed146/148 current cases, fixing all six earlier
+failures; floor was unrun. Queued recovery observation and successful maintenance
+construction remain under causal investigation within the same unit, preserving
+all existing bounds and148 cases. Original40906 then passed current148, but
+floor formatting stopped the paired proof. The common layout correction is
+committed at a01f4b4c; its paired proof follows active configure original85178
+at dbef6d29, requiring all46 cases per pair. Neither implementation row closes yet.
 ADR0054 remains the sole asked pending decision. Original T01–T19 remains
-80 done/93 todo/6 retired; added303 done/41 todo. Exact original collection,
+80 done/93 todo/6 retired; added303 done/42 todo. Exact original collection,
 source and registry identities are in the [restart checkpoint](M7-resume.md#technical-depth).
 
 The entries below record earlier revisions and failed attempts.
@@ -13244,6 +13249,7 @@ or check was relaxed.
 
 - [ ] Finish accepted ADR0052 native answer provenance, exact policy cursor/replay relations and shared Elixir/Node payload projection in both transports; prove focused current/floor and independent vectors after rejoin, complete negotiated manifests and real answered-command workflows.
 - [ ] Pin and implement the exact configure request and versioned remote creation-option grammars through governed decisions; preserve authored aliases, central preparation, host-only bindings, current command replay and both transport authority gates.
+- [ ] Implement accepted foreground configure Mapping admission through the existing attachment and native command owners; prove complete mapping/initialization files, safe malformed correlation, authored retry identity, all three Store uncertainty phases and joined preparation on both supported pairs. Preserve the current Connection generation refusal until complete manifest activation.
 - [x] Prove the accepted standalone configure `changes` grammar, exact schema and371 literal vectors through shared Elixir and independent Node codecs plus both transport preparation wrappers on both supported pairs. Keep live configure routing, remote creation and whole-generation activation separate.
 - [ ] Pin and implement the closed transient compaction-progress payload and its actual owned emission/loss/succession behavior; exclude summaries and private captures and prove both transports/clients before complete generation activation.
 
@@ -13684,6 +13690,14 @@ candidate integration and focused floor proofs are retained there; items 9 and
 - [ ] Make every V1–V13 instruction runnable, with one owner and evidence slot per step/subcase.
 - [ ] Complete the specified human-attended steps with a named operator.
 - [ ] Collect previous executions without adding extra model attempts.
+
+A source audit after the reboot confirms original wrapper/oracle rows remain
+open. Policy/chat seams and actual repair, feature and long fixture proofs are
+implemented, but the accepted scripts/m7-fixture-chat.exs wrapper and campaign
+admission are absent. The review fixture still lacks its required actual helper
+flow. Three historical temporary inventory paths are unavailable; their old
+recorded successes do not establish present evidence availability or authorize
+repeating completed provider work.
 
 ### Added implementation subtasks
 

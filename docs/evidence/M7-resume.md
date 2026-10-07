@@ -42,14 +42,51 @@ The proof covers native mapping/admission parity, authored retry identity,
 privacy, authority refusals and actual run.finished completion. It does not
 activate served configuration or complete its broad T05 row. Never repoll17193.
 
-Native original72635 is running at clean isolated candidate
-`9fd9079b08bcb7dd1a429c372f48016e227cb08a`. The correction-only source review
-cleared the closed retained representation and post-commit Control capture,
-manifest SHA-256 `ca55be97fd244434a4ba3036a89048d733f584a9fc48c53545b02f0aa081883b`.
-Root formatting completed in0.540 seconds. The unchanged reviewed native runner
-requires all148 cases on each supported pair, seeded by the1017-key registry
-above. Output `M7/native-authored-bounds-20261006-v3`. Collect original72635
-once before another VM, formatting or integration; no PASS is yet claimed.
+Native original72635 is terminal and collected FAIL at isolated candidate
+`9fd9079b08bcb7dd1a429c372f48016e227cb08a`. Current146/148 passed, including
+all six previously failed cases, after106.261 seconds overall; floor was unrun.
+Collection `M7/native-authored-bounds-20261006-v3/original-collection.json`,
+SHA-256 `331e9fc91835e86d518466fae7d26873b8b0348e14119b90952bf7de743bb75a`,
+binds23 artifacts and four original joins. Terminal SHA-256
+`7d986fc11037ab6fb7ee4df5fcd5e445424c26d766b849efe90a2d791c4ebba0`;
+registry1021 keys, SHA-256
+`523575917ba6c3ba60afea33e36908e01461ae225a37b07ddff45318c9dc01c3`.
+Never repoll72635. Original40906 is also terminal and collected FAIL at
+`a3f78d18ad20eaef99de9d4c4177f719ea82d2df`: current148 passed, floor stopped
+at its formatter before compilation/tests,99.412 seconds overall. Collection
+`M7/native-authored-bounds-20261006-v4/original-collection.json`, SHA-256
+`7728c4f4d6d6ed0e5dccdeea72c38cb3f8b68580c0052c470bc5253a9bbd596b`,
+binds36 artifacts and six original joins; registry1027 keys, SHA-256
+`e138413b6d40e7546b547fbbe527c26f9a9f283756ce81057f2b380829e7470f`.
+Never repoll40906. The only layout mismatch was Bounds.authored's long with
+expression. Root extracted its unchanged pure Map.keys expression into a local
+binding; independent source review cleared the same evaluation/validation.
+Both supported formatters then passed. Corrected candidate
+`a01f4b4cf7476fc91bf6305be00a173619e4eb96` is clean in the native worktree,
+Bounds SHA-256 `4edc96ae9ceef6a1958d8369d5475463c7b8ba5a40b8582e023ffa31828d3e7b`.
+Its full148/pair proof is queued, with no PASS or task closure yet.
+
+Configure Mapping original85178 is now running at clean isolated candidate
+`dbef6d296fb5b3bf573432a82f788e6df86ad448`, output
+`M7/configure-mapping-admission-20261006-v1`. The independent source and wrapper
+reviews cleared corrected safe correlation and all46 cases. Root formatting
+completed in0.311 seconds. Formatted source hashes:
+mapping `002102989a8f81e1dfcb059ae6edc816a5c475793ed4e1acbfb8a684e2ca0e4e`,
+configure tests `589bcaac97b6bdfc7e7de20b265dc6eedd4ac72eef342c9c3cc9bbce7a56bf33`,
+session mapping `6420b8b9c27e7e2a21e677f356e99a3238d82fd458278e479d4f72ce562d9f8d`.
+The immutable wrapper is retained at `M7/m7-configure-mapping-admission-20261006-v1.py`.
+Collect original85178 once before the next VM, formatter or integration. Seed
+its collected terminal registry for the queued corrected native candidate.
+
+Queued recovery exposed a production gap: terminal commitment promotes the
+follow-up but previously sent no advance_work. Only confirmed current-owner
+commitment now wakes a different promoted active run; failed, unknown and
+superseded commitment cannot reach that wake. The original queued test is
+unchanged. The old4,000-byte maintenance history fit ordinary context and gave
+zero eligible units;30,000 bytes now require actual contraction. The test still
+requires a successful Task proposal and exact normal join before the original
+cutoff, plus one eligible/covered/excerpted unit. Existing native/provider cases
+in the complete148 selection prove ordinary successful follow-up progression.
 
 Primary configure integration is `06496570bff59004d6cddfa2331eaa1456a146f3`,
 pushed to origin/m7. Exact tested source15280560 was retained before worktree
@@ -63,12 +100,20 @@ session_mapping_test.exs in the reused clean protocol worktree from06496570.
 Implement the accepted Mapping branch and actual authority/replay/unknown tests,
 while preserving current Connection generation gating. Root owns review and
 execution; served configure/full generations and remote creation remain open.
-A separate source-only reconciliation checks whether T13 original fixture
-wrapper/oracle rows already have their promised complete proof.
+The source-only T13 audit confirms wrapper/oracle originals remain open: the
+trusted scripts/m7-fixture-chat.exs and campaign admission are absent, and the
+review fixture lacks its actual helper flow. Three old temporary inventories
+are unavailable; no old paid execution is repeated. The configure source review
+found malformed request_id echoed in decode refusal. Its author is correcting
+only that correlation with literal negatives, preserving46 cases. The reviewed
+new paired wrapper is `/private/tmp/m7-configure-mapping-admission-20261006-v1.py`,
+SHA-256 `df45a15cc3b97467c6f9ac19f648d996edd0fb29910b52d383b93ce5be8f872b`;
+its complete selection is configure14/session15/initialization17. Original40906 is collected; configure admission now uses its1027-key registry.
  ADR0054 is the sole asked, unanswered
 question; the restore aggregate cutoff decision remains queued after it.
 
-Original T01–T19 remains80 done/93 todo/6 retired. Added remains303 done/41 todo.
+Original T01–T19 remains80 done/93 todo/6 retired. Added is303 done/42 todo
+after adding the bounded accepted configure Mapping implementation row.
 No native bound row, remote configure row or milestone outcome closes here.
 
 Native originals1604 and67222 are terminal and collected FAIL. First1604 failed
@@ -94,6 +139,12 @@ Dispatch author correction turns with followup_task. send_message only delivers
 notifications to a completed task and does not resume its work; root corrected
 that mistake again for the configure terminal-name fix. Agent status remains a
 cache; committed candidates and retained original results remain the resume truth.
+
+### Historical execution records
+
+The entries below describe their named revisions. Current ownership, execution
+and pending decisions are stated above; older running/admission statements do
+not identify live work.
 
 Historical admission, superseded by the collected1604 and67222 results above:
 Native original1604 was running at clean isolated candidate
