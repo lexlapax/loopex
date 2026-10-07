@@ -67,12 +67,42 @@ The bounded private finalization and lookup-fixture rows close. Original
 T01–T19 remains80 done/93 todo/6 retired; added321 done/31 todo.
 
 Next, root verifies private mixed/all-absent original-transaction cleanup from
-clean isolated4b67c675700309fcb6f11d699a7874bfa5ba20d0, a real child of f56d6fe1.
-It owns RestoreIO, Workflow and the new25-case partial-cleanup test; its complete
-selection is403 cases per pair. Prepared formatter
-`/private/tmp/m7-retained-partial-format-20261006-v1.py`, SHA-256
-`3f233c2e80e07bfd7ffae2f7e0ac6491ade87c75ca5d1a834a1b904f85a14e57`,
-is not yet executed. Root owns every VM, collection and literal rejoin.
+clean isolated d5f893634e79e4c77abace2ed96f641f4306969f, a real source child of
+raw4b67, which is based on finalization f56d6fe1. Three owned paths are RestoreIO,
+Workflow and the new25-case partial-cleanup test; complete selection403 per pair.
+
+Formatter59508 failed only the floor formatter's long comprehension layout,
+after current formatter/non-line AST passed. It is collected FAIL,4.364 seconds,
+six original joins and37 artifacts. Collection
+`M7/retained-partial-format-20261006-v1/original-collection.json`, SHA-256
+`c7371d845f2f708fc49f161a0e15f1a119545ed100527421fda375c066f64097`;
+terminal `c3b08a2ac9b093212af0bbf763e5d1cbe845a61903aa2041cb729ce8deea2b4d`.
+The independently reviewed real child retains actual formatter changes and
+shortens only one ignored `_worker` binding to `_`, with all assertions, case
+counts, cutoffs and joins unchanged. Never repoll59508 or retry raw4b67.
+
+Formatter95738 is collected PASS on unchanged d5f89363,4.309 seconds, six joins
+and37 artifacts. Collection
+`M7/retained-partial-format-20261006-v2/original-collection.json`, SHA-256
+`f475f1f574a76b7e3519376dc9201778cc2016a1a2e4bf3bf9d92ae70da88ba9`;
+terminal `95a23f0bb9a191e7871f4baee72de4baf333aa545544923a8ed181a64a7a03ce`.
+Latest consumed registry1218 at that output's stage-attempt-registry.json,
+SHA-256 `76178579f0356479877b71c65bb5e1a07bfeabcfe600a95f94d6bb3dae309e68`.
+Never repoll95738. Complete403 original28176 is active at d5f89363 through
+independently reviewed same-source metadata reuse, not repeated version/formatter
+stages. Collect the original handle before another VM or editing that worktree. Prepared
+`/private/tmp/m7-retained-partial-admission-20261006-v2.py`, SHA-256
+`52bec5d68a83a4b66cb87c327f70b2fb3918b6aa9cdb3bbd74699721778dcb33`,
+is executing as original28176. The classical v1 lane is unexecuted and
+superseded for this source.
+Root owns every VM, collection and literal rejoin.
+Preparation packet `M7/partial-cleanup-preparation-20261006-v1/inventory.json`,
+SHA-256 `e90e123f8b2fa478b1e3d4ac66cf424627eb82edd393e3326d17e8edea87f2ed`,
+retains both formatter wrappers/helper, source patch and unexecuted classicalv1.
+The new metadata-reuse wrapper is not yet in that packet; its executed output
+must retain the exact wrapper at original collection. Public and helper restore
+remain separate and partial-cleanup's row stays open until complete paired proof.
+
 A separate source-only writer develops the accepted public original-tx driver
 in m7-restore-public-resolution. Proposed ADR0058 progress admission/writer
 ownership is being drafted in m7-progress-admission-proposal; it authorizes no
