@@ -27,6 +27,61 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+Pending isolated units on 2026-10-06 remain unproved and unintegrated. Root owns
+all original VMs, collection, Git and rejoin. Daemon proof original11182 is
+running from the clean isolated source below; collect that original handle
+before starting another VM. No passing outcome is claimed yet.
+
+- Daemon configure source is clean `94d41cb4f7b03aacc1d0e32929b67524d637f447`
+  in m7-protocol-manifests. Original81936 failed one observer assertion at its
+  earlier source; collection `M7/daemon-configure-admission-20261006-v2/original-collection.json`
+  SHA-256 `38da9f2c102cc36b084babdaefa2180bee1e91a367586e873d07ca06a72fa1d7`
+  preserves the failure. The corrected observer tolerates only fenced admission
+  uncertainty under its original bound. Formatter97674 is collected PASS,
+  changes no bytes and leaves this source clean. Collection
+  `M7/daemon-configure-recovery-format-20261006-v1/original-collection.json`
+  SHA-256 `1d2d927c2b6fa7447557301276b20782caa18186ecd9f84d8154bd902e163340`;
+  terminal `4aa286bc123e537e52c1fc1eb53bd91671c394cc43ac525d93edbc5f89b4356d`.
+  Reuse its exact clean-source version and formatting metadata; run only four
+  new compile/test stages for the complete66-case selection on both pairs.
+- Native compaction source is clean `644469c3285e24ffb5c73e9e3d3ddda191eaf4d1`
+  in m7-compaction-activity. Original44773 failed four of231 current cases;
+  floor did not run. Collection
+  `M7/compaction-native-admission-20261006-v1/original-collection.json`
+  SHA-256 `e6fc5695fd288bcc5dc83d68c403724e147a12a537bcc4b43dc930ad75f4a45f`
+  preserves all failures. Independently reviewed fixture corrections preserve
+  every case, assertion and deadline. Nine owned files now include the existing
+  AgentLoop test's exact current executor reply envelope. Reviewed v2 formatter
+  SHA-256 `24238588103d8e30f5b73162887627a04fe6c039418a6a881ff2a26af876d7b8`
+  and AST helper `13ce594408faa51da6efe0a3cfcd6bdb74f6387c8240a50082414c020e0e29dc`
+  are prepared, not executed. Run the complete231-case proof on both pairs only
+  after actual formatting outcome and source admission are recorded.
+- Wire compaction source is clean `3266368e38800ae458ebfeff4149fb4a4e416110`
+  in m7-compaction-wire. Original12545 passed38 of39 current cases; floor did
+  not run. Collection
+  `M7/compaction-wire-admission-20261006-v1/original-collection.json`
+  SHA-256 `51bb7cfc11d43ec307be8bc86ef24713d2932b9abecef733417ee727785eac8d`
+  preserves the failure. The independently reviewed test now establishes daemon
+  residency through negotiated public session.create before attach. All39 cases,
+  authority, frame, cursor, queue and cleanup assertions remain. Formatting and
+  corrected paired proof remain pending; foreground live routing and generation
+  activation are separate.
+- Private retained finalization is reviewed and clean at
+  `f0427a865a1668c0fe9dac55a38e5b9218f84cc4` in m7-retained-finalization, based
+  on234df849. Exactly Workflow, RestoreIO and the new32-case test are owned.
+  Rebased operative code preserves expiry-first admission and physical history
+  checks. Required complete selection is378 cases per pair across12 files,
+  including all three IO long-bound cases. Formatting, execution and literal
+  integration remain pending. Public continuation, partial/absent claims and
+  helper audit remain separate.
+
+Latest consumed registry is1110 keys at
+`M7/daemon-configure-recovery-format-20261006-v1/stage-attempt-registry.json`,
+SHA-256 `9fc0761b2f9a10312d9739b4988c3b97a0edbaff8447861979603f3ba2eb4b6c`.
+Original44773,12545,81936 and97674 are terminal and collected; never repoll or
+retry their unchanged source stages. ADR0055 remains the sole asked pending
+decision. None of the pending units closes its checklist row yet.
+
 Complete restore IO original5569 is collected PASS at
 `234df84910de392650a487b6d6df48f2b55f8c98`, pushed to origin/m7. Both pairs pass
 all109 cases, including all three long-bound cases, with zero exclusions/skips/

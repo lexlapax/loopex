@@ -4,7 +4,7 @@ Complete physical restore original75764 passed all148 cases on each supported
 toolchain at `11e7f674`, in560.494 seconds. All ten original stages are joined
 and47 artifacts verified. Six added T15 rows and the T16 copied-permissions row
 close against that group. Original T01–T19 remains80 done/93 todo/6 retired;
-added314 done/34 todo. Complete109-case restore IO proof passed both pairs; daemon admission
+added314 done/35 todo. Complete109-case restore IO proof passed both pairs; daemon admission
 correction, native/wire compaction and served generation activation remain open.
 ADR0055 is the sole asked pending decision. Exact proof references and continuation
 order are in the [restart checkpoint](M7-resume.md#technical-depth).
@@ -13869,6 +13869,8 @@ in the restart checkpoint. Broader restore/decoder/public/helper rows stay open.
 ### Added implementation subtasks
 
 - [ ] Repair ordinary provider cleanup notices reaching the SessionCoordinator dispatcher after the cleanup integration; retain failed58fb33ba full-check evidence, prove actual Local Store completion through the same live owner and distinct caretaker delivery, preserve existing cleanup windows and native joins, and verify both supported pairs plus a new full integration candidate.
+
+- [ ] Correct the existing AgentLoop malformed-receipt fixture to observe the current tagged executor result envelope while preserving the original operation reference, progress prerequisite, cleanup reserve, deadlines and exact joins; retain original44773's failed231-case selection and prove the complete corrected native selection on both supported toolchains before literal integration.
 
 - [ ] Repair the inherited long-temporary-path fixture failures exposed by Ledger6baa and receiptfdd6 ordinary checks: supply bounded explicit instructions only to seven failed model startup cases while preserving the 1,000-token ceiling and give only the actual Unix socket/exact8MiB cases fresh short temporary workspaces. Preserve real HTTP/effects/questions/cleanup, actual special files, all exact path-byte/first-over assertions and original deadlines; prove focused, adjacent and complete affected application populations on both supported pairs with both original failed runs retained.
 - [x] Preserve captured restore fixture permissions under ordinary022 through exact copied modes and baseline-bound generation payload normalization; retain wrong-mode, wrong-byte and wrong-ordinal controls, all134 affected cases, actual64-transition witness and original actor/deadline proofs on both supported pairs. Retain the original full-check and focused failures; broader temporary-path repairs remain separate.
