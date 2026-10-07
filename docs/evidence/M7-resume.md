@@ -27,21 +27,36 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
-Pending isolated units on 2026-10-06 remain unproved and unintegrated. Root owns
-all original VMs, collection, Git and rejoin. Private finalization original21368
-is running from clean6b4fa5aa through reviewed v3 runner, SHA-256
-`584c8fccbdf3d95d10263e500053f8baef1a818e54459a9d661860372b89682e`.
-It reuses exact collected version/format metadata before four new stages, with
-all378 cases per pair and actual timely/late IO witnesses. Collect the original
-handle before another VM. No execution result is claimed yet.
+Private finalization original21368 is collected FAIL at clean
+`6b4fa5aa5ad5f3dfbcb8e5cadfd919c19a3e1578`, in 369.464 seconds.
+All 378 current cases executed with zero exclusions, skips or invalid cases;
+377 passed and the historical-lookup fixture failed. Floor did not run.
+Both original stages joined and 20 artifacts verified. Collection
+`M7/retained-finalization-admission-20261006-v3/original-collection.json`,
+SHA-256 `cde2092da401ee6a7d2c37a421772f1b9d7c85e34dec17b44c41d899b4ad1392`;
+terminal `cd0ad3a499bee62af24886b6a19b187a23e8f306e655d00eb43524ea3902e205`.
+The current 64-transition case completed in 159,504 ms, but does not make the
+whole selection pass. Never repoll21368 or retry its unchanged source.
 
-Independent foreground source audit found ordinary projections still exposing
-native turn identities and quantities under ADR 0023's wire contract. The
-bounded correction owns only Delivery/WireRecords and their two tests in
-m7-progress-wire-encoding, based on cleanprimarya868e5ef. Root owns all VMs and
-Git. It changes no schema, public API, persistence, compaction gate, live routing
-or generation activation. That separate added T16 row remains open; T01–T19
-added318 done/33 todo. Real foreground writer-pressure proof remains required.
+The failed lookup fixture rewrote the paused writer's captured claim owner,
+changing its mtime/ctime even after restoring its bytes. Cleanup correctly
+refused the changed identity. Independently reviewed correction
+`c36ea4c16d9edb8495e486d0dae4b80ae979edac` preserves the original claim directory
+through rename and verifies the owner's full identity before releasing the
+pause. It changes only lookup test595, preserving all 38 cases, assertions,
+bounds and original joins. Formatting and the complete paired378 proof remain
+pending. The isolated finalization worktree now owns four paths: RestoreIO,
+Workflow, the new32-case test and this existing lookup test. No VM is active.
+
+Ordinary progress encoding source is frozen in m7-progress-wire-encoding,
+based on `a868e5ef28d693d2c630bf6edeecf1bb5391a7b0`. Six owned paths are
+Delivery, WireRecords, their tests, SessionMapping's positive pressure fixture
+and SocketConnection's positive ordinary-record fixtures. Complete selection is
+34 AppServer and18 Daemon cases per pair. Source review, formatting and execution
+remain pending. No schema, public API, persistence, compaction gate, live routing
+or generation activation changes. The separate added T16 rows remain open;
+T01–T19 added318 done/34 todo. Original rows remain80 done/93 todo/6 retired.
+Real foreground writer-pressure proof remains required.
 
 Daemon original43854 is collected PASS at
 `07d5df345bb52323cf2a0a08d92bd53d4677daf0`: all66 cases per supported pair,
@@ -194,7 +209,10 @@ SHA-256 `bf54aa1be5152b815f9e9dd11ae054663a39355227ef5fbd6ce52e038ad8560c`.
 Latest collected registry is1168 keys at
 `M7/retained-finalization-format-20261006-v3/stage-attempt-registry.json`,
 SHA-256 `be1aaeee5fe8716c8c04a1eca250f75c3a6cbc118c66ed10b8852589c2814b16`.
-Active21368 owns its successor registry until collection. Never repoll72050.
+Latest collected registry is1170 keys at
+`M7/retained-finalization-admission-20261006-v3/stage-attempt-registry.json`,
+SHA-256 `c3a4b1307e72af220d3d52c81e96fb07bdbf3163e477a99efbed9a5d3d6f2fef`.
+Never repoll21368 or72050.
 Original44773,12545,81936 and97674 are terminal and collected; never repoll or
 retry their unchanged source stages. ADR0055 remains the sole asked pending
 decision. None of the pending units closes its checklist row yet.
