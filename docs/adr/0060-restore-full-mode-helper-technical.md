@@ -176,7 +176,7 @@ it empty. The three snapshots are:
 | Cut | Required observation |
 | --- | --- |
 | Before mutation | Exact captured gated child/wrapper/guard/carrier parent and group relationships. No unknown mutation-group member; child has not been permitted. |
-| After child/wrapper waits, before release | Actual original child/wrapper wait evidence plus complete table showing no remaining mutation actor; guard remains the signal anchor. |
+| After child/wrapper waits, before release | Actual original child/wrapper wait evidence plus complete table showing both absent; the captured guard remains the signal anchor, with only originally captured carrier/guard group membership permitted. |
 | After original carrier/Port wait and close | Original carrier/guard/wrapper/child PIDs absent and original mutation group empty, with complete observer joins. |
 
 Do not infer identity from a generic PID match or infer absence from a signal,
