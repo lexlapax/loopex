@@ -27,7 +27,8 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
-Primary base is clean/pushed `50e9de9b` before the next parent/model units. That commit integrates four exact selector files from isolated
+Primary parent-binding integration is committed and pushed at `f067b49e`.
+The earlier selector integration carries four exact files from isolated
 `520e3adb1ab70c2abfd09883428a335f8b2adff9`, tree
 `029fbdac4d9d602f08e384116c371f8f20366641`. Original19781 passed33/33 on
 both supported toolchains, with five actual Node consumers per pair, zero
@@ -202,6 +203,49 @@ and model V2 sources/reviews/disabled formatter are permanently retained in
 That bundle was captured while20669 ran; its native outcome is retained separately
 above. The dormant byte unit and parent-binding unit have no activation claim.
 Original T01–T19 stays87 done/86 todo/6 retired; added347 done/23 todo.
+
+Model formatter original22704 passed in5.199 seconds, with six joined stages,
+38 authenticated artifacts and both syntax trees equal apart from line metadata.
+Output `M7/native-model-switch-format-20261007-v3`; collection
+`4c686bdc803b20d9c35efab1c0df3a993a519595190483b0f772503f2dbd774d`;
+terminal `0c9cec0944b82191dec0b050b13061cd3a9f53b586458a7513ce185f7b3fb0c6`;
+executed wrapper `b5fab3dd28581dac3917ba35657e9471e09a61db42b4ef9a393f9d0c95dbdb45`.
+Clean formatted child is `46b57a2bf743794f179cc1af5e6241e8b99cdbea`, tree
+`f669e2de35780f624a37203e83d03ccc3c7cbfb8`; complete1179-record projection
+`d03a0f520a37cb9da5f7ca1a40f6ac56f64ab68a64cc59794d7a004b63131471`.
+Original50056 failed from that source in55.991 seconds. Current compilation and
+formatting passed; current Composition executed8 with7 passing/1 failed, zero
+exclusions/skips/invalid. The new test omitted the executor and host authority
+required by runtime loop admission, so startup returned invalid_runtime_options
+before its first model request. ReqLLM and floor stages were unrun. Three original
+stages joined and23 artifacts authenticate; no task completion is claimed. Output is
+`M7/native-model-switch-proof-20261007-v3`; wrapper
+`10b5111174510ca0d143c1cbd528472d6350843de76cfa53c1c7b1494b0ba358`;
+root recipe review `7ac23169992add325d02df30351afa29824a89c908cce42660a4096e32da4ffe`.
+Collection `99a880f0d2307c3955eff724b790cc4920b4357a5cb66b9dc8ea6a52ff22f206`;
+terminal `31be0bf1e59b1093e4c4ebf1db9ee1e4c8ef4abab6655faaaa6f9f59c66ed802`.
+Latest collected registry is1633 from50056, SHA-256
+`2b977839aebbe70d5a27ded4e9fc039aa5f5ec52c08f210e6add59c56d031f01`.
+Never repoll22704 or50056. The source-only correction must preserve the real
+isolated transport and use the actual reference executor in the fixture workspace;
+empty tools and all original bounds stay unchanged. New source requires fresh proof.
+All26 preparation/review/finalization/projection files are retained in
+`M7/model-switch-native-context-20261007-v1/retention.json`, SHA-256
+`eadbfe7e061f8b69b4ae629faf4f0bea25dd2e75c358d0d4220ee0028425ea68`.
+That bundle retains preparation only; the native output supplies its own result.
+
+The next physical binding-log writer owns four Composition paths in isolated
+`/Users/spuri/.codex/worktrees/m7-helper-binding-log/loopex`, based on
+`f067b49e`. Its source-only contract is permanently retained in
+`M7/helper-binding-physical-context-20261007-v1/retention.json`, SHA-256
+`0dfe0c082f305e50bf7be065cea467e2f6ac8a01b9e446387bba6bfbf3b9562d`.
+The contract file has SHA-256
+`3e0fb6e500327b7a10a6aa61f19ebdf2686fb62f962ab18e2bc11b859ef24679`.
+It extends the existing RetainedObjects owner with actual bounded append,
+original-transaction uncertainty resolution and strict final-tail recovery.
+Its historical pending-parent-proof note remains historical; original20669
+above supplies the now-complete dependency proof. No physical binding proof
+or helper activation is claimed yet. Root owns all native execution and rejoin.
 
 The following previous checkpoint is historical where superseded above.
 
