@@ -5,7 +5,7 @@ defmodule LoopexComposition.DelegationGenesisCodecTest do
 
   alias Loopex.Runtime.SessionGenesis
   alias Loopex.Store
-  alias LoopexComposition.Delegation.GenesisCodec
+  alias LoopexComposition.Delegation.{GenesisCodec, LedgerCodec}
   alias LoopexComposition.DelegationGenesisFixture, as: Fixture
   alias LoopexProtocol.Canonical
   alias LoopexProtocol.Frame
@@ -24,11 +24,10 @@ defmodule LoopexComposition.DelegationGenesisCodecTest do
     assert object["sha256"] == Canonical.digest_bytes(bytes)
     assert {:ok, ^genesis} = GenesisCodec.decode(object)
 
-    assert {:ok, json} = Frame.encode(object)
-    assert String.valid?(IO.iodata_to_binary(json))
-
-    assert {:ok, ^object} =
-             Frame.decode(json |> IO.iodata_to_binary() |> String.trim_trailing("\n"), 1_048_576)
+    assert {:ok, json} = GenesisCodec.encode_json(genesis)
+    assert String.valid?(json)
+    assert {:ok, ^object} = LedgerCodec.decode_json(json, :object)
+    assert {:ok, ^genesis} = GenesisCodec.decode_json(json)
 
     assert genesis["options"]["opaque_id"] == <<255, 0, 128, 254>>
     assert genesis["options"]["opaque_digest"] == <<0, 255>>
@@ -42,6 +41,7 @@ defmodule LoopexComposition.DelegationGenesisCodecTest do
       json = File.read!(Path.join(@fixtures, "genesis-#{pair}-v1.json"))
       assert {:ok, object} = Frame.decode(String.trim_trailing(json, "\n"), 1_048_576)
       assert {:ok, ^genesis} = GenesisCodec.decode(object)
+      assert {:ok, ^genesis} = GenesisCodec.decode_json(String.trim_trailing(json, "\n"))
       assert {:ok, ^expected_transaction} = Store.create_session("runtime", "create", genesis)
       assert object["sha256"] == Canonical.digest_bytes(Base.decode64!(object["bytes"]))
     end
@@ -53,6 +53,8 @@ defmodule LoopexComposition.DelegationGenesisCodecTest do
     assert {:ok, current} = GenesisCodec.encode(genesis)
     refute retained == Base.decode64!(current["bytes"])
     assert {:ok, ^genesis} = GenesisCodec.decode(object(retained))
+    assert {:ok, json} = LedgerCodec.encode_json(object(retained), :object)
+    assert {:ok, ^genesis} = GenesisCodec.decode_json(json)
   end
 
   test "closed object members and their declared encodings refuse mixed representations" do
@@ -188,9 +190,10 @@ defmodule LoopexComposition.DelegationGenesisCodecTest do
       if size <= 65_536 do
         assert {:ok, encoded} = GenesisCodec.encode(genesis)
         assert {:ok, ^genesis} = GenesisCodec.decode(encoded)
-        assert {:ok, json} = Frame.encode(encoded)
-        assert IO.iodata_length(json) > 65_536
-        assert IO.iodata_length(json) < 1_048_576
+        assert {:ok, json} = GenesisCodec.encode_json(genesis)
+        assert byte_size(json) > 65_536
+        assert byte_size(json) < 1_048_576
+        assert {:ok, ^genesis} = GenesisCodec.decode_json(json)
       else
         assert GenesisCodec.encode(genesis) == {:error, :invalid_retained_genesis}
 
@@ -210,6 +213,24 @@ defmodule LoopexComposition.DelegationGenesisCodecTest do
     assert byte_size(:erlang.term_to_binary(caller)) < 65_537
     assert SessionGenesis.normalize(caller) == {:error, :session_configuration_too_large}
     assert GenesisCodec.encode(caller) == {:error, :invalid_retained_genesis}
+  end
+
+  test "canonical JSON refuses alternate bytes and closed-envelope violations" do
+    genesis = Fixture.genesis()
+    assert {:ok, bytes} = GenesisCodec.encode_json(genesis)
+    assert {:ok, object} = LedgerCodec.decode_json(bytes, :object)
+
+    for altered <- [bytes <> "\n", " " <> bytes, bytes <> " ", <<239, 187, 191>> <> bytes] do
+      assert GenesisCodec.decode_json(altered) == {:error, :invalid_retained_genesis}
+    end
+
+    for changed <- [Map.put(object, "extra", true), Map.delete(object, "bytes")] do
+      assert {:ok, altered} = LedgerCodec.encode_json(changed, :object)
+      assert GenesisCodec.decode_json(altered) == {:error, :invalid_retained_genesis}
+    end
+
+    assert GenesisCodec.decode_json(nil) == {:error, :invalid_retained_genesis}
+    assert GenesisCodec.encode_json(nil) == {:error, :invalid_retained_genesis}
   end
 
   defp object(bytes) do

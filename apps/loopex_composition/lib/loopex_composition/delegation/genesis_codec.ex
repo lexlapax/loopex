@@ -18,6 +18,7 @@ defmodule LoopexComposition.Delegation.GenesisCodec do
   """
 
   alias Loopex.Runtime.SessionGenesis
+  alias LoopexComposition.Delegation.LedgerCodec
 
   @encoding "loopex.ledger.plain_etf.v1.base64"
   @max_payload_bytes 65_536
@@ -81,6 +82,48 @@ defmodule LoopexComposition.Delegation.GenesisCodec do
   end
 
   def decode(_object), do: {:error, :invalid_retained_genesis}
+
+  @doc """
+  ## Concept
+
+  Encode the exact retained genesis object as canonical private JSON bytes.
+
+  ## Technical depth
+
+  Reuse the current genesis owner and accepted ADR 0056 byte recipe. The
+  complete object ceiling includes Base64 expansion; no wire LF is retained.
+  """
+  @spec encode_json(term()) :: {:ok, binary()} | {:error, :invalid_retained_genesis}
+  def encode_json(genesis) do
+    with {:ok, object} <- encode(genesis),
+         {:ok, bytes} <- LedgerCodec.encode_json(object, :object) do
+      {:ok, bytes}
+    else
+      _invalid -> {:error, :invalid_retained_genesis}
+    end
+  end
+
+  @doc """
+  ## Concept
+
+  Read canonical object bytes and recover their owning validated genesis.
+
+  ## Technical depth
+
+  Private JSON admission preserves duplicates and exact canonical bytes before
+  the closed ETF envelope is validated. Hashes cover original ETF, including
+  another supported OTP writer's encoding; no reader re-encoding is required.
+  """
+  @spec decode_json(term()) ::
+          {:ok, SessionGenesis.genesis()} | {:error, :invalid_retained_genesis}
+  def decode_json(bytes) do
+    with {:ok, object} <- LedgerCodec.decode_json(bytes, :object),
+         {:ok, genesis} <- decode(object) do
+      {:ok, genesis}
+    else
+      _invalid -> {:error, :invalid_retained_genesis}
+    end
+  end
 
   # Concept: retained bytes cannot expand through compression or intern atoms.
   # Technical depth: ETF compression is an outer tag. Reject it before decoding;

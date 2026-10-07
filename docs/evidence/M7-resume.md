@@ -27,8 +27,7 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
-Primary is clean/pushed `f2e779040b4627a809139537dfcf04ac08fe0bb4` before
-this failure-state update. That commit integrates four exact selector files from isolated
+Primary base is clean/pushed `56a8428c` before this helper-unit integration. That commit integrates four exact selector files from isolated
 `520e3adb1ab70c2abfd09883428a335f8b2adff9`, tree
 `029fbdac4d9d602f08e384116c371f8f20366641`. Original19781 passed33/33 on
 both supported toolchains, with five actual Node consumers per pair, zero
@@ -38,7 +37,7 @@ wrapper11.518 seconds. Output
 `5214447d2b52667253fbceb612bffee8d503d2ec0046174646512a65e329d33e`;
 terminal `358b23af35a92563d7db934693e3768a0dbafcab5173c2ff41299d2c2f0cfaf5`;
 executed wrapper `6c4eed6f3339ee1e1b5f38a40f20106006152e104f5816856cdfa48f867b27e5`.
-Latest collected registry1602 is at that output, SHA-256
+Historical registry1602 is at that selector output, SHA-256
 `b584fe7ed9cf40f3f5041e5e5f0898ef3856c154b646648393b9e7f75d167d14`.
 Only the added pure selector row closes; serving and generations remain open.
 Original43180 remains FAIL31/33, floor unrun, at isolated d96e6785. Its two
@@ -68,15 +67,28 @@ stage joined;16 artifacts verified;45.844 seconds. Output
 `M7/helper-ledger-byte-proof-20261007-v1`; collection
 `f501a24f655440fb1407d33f3d347b82e4ba46e95b0a980e5921af746de6c889`;
 terminal `db1fba054acee27885d3b47af3fd38f9f5c4b39bbbd107414b309a5103ac4c7d`.
-Latest collected registry1603 is at that output, SHA-256
+Historical registry1603 is at that failed output, SHA-256
 `b806e58673132ebf7ae47736103e3d0ce3fb4a62219918a6fa35474ad5b4cd0e`.
 The reviewed single-line explicit-size pin is frozen at
 `ddab68d8ad3ff112bdb9ac2da8389d795d3a4ac8`, tree
 `c7eb355fb510f0f969b6501ad5d2c449a946435e`, direct child of c9e830c3.
 LedgerCodec corrected SHA-256
 `8b816936bdc986173b3ead27970bfa95d612530f30de21002d36520e0407e931`.
-Corrected disabled six-stage recipe is being prepared: fresh owned-format check,
-Composition compile and complete61 selection per pair; no helper PASS yet.
+Both pins are frozen at `b3780861a489fb1795bf7517fa0a1af1d5763b17`, tree
+`bcbfb42b95f4165804420db9207febbbb03753a7`, direct child of ddab68d8.
+Original42635 then passed61/61 per supported pair, zero exclusions/skips/invalid.
+Six original stages joined;37 artifacts verified;93.336 seconds. Fresh two-file
+format checks, Composition compilation and complete affected tests passed.
+Output `M7/helper-ledger-pins-proof-20261007-v1`; collection
+`8486c249ed4d79c3289aa3a09976b53ba0cf6af71d8931790b600d10e1718e3d`;
+terminal `d68d0e969145e0973fbab2a238a87311a11b5f76bf3fc33b5f93b0b1ecad81b1`;
+executed wrapper `bda91b736e1c0f1783a1a7e909f4cbc550d8054e11180b58b2d0ea96f56b626a`.
+All six files integrate literally. Only the added helper byte row closes.
+Latest collected registry1609 is at that output, SHA-256
+`20374af94412f6898c155cdece771a795ba0ba3f0cd232d52a23d84135c77a5c`.
+Corrected proof preparation and preventive test pin are retained in
+`M7/helper-pins-proof-context-20261007-v1/retention.json`, SHA-256
+`236ae1331c189a5352635fb5293275963c702ecadf454371f8d72f7becbe6118`,15files.
 Failure preparation, exact correction and both next-unit audits are retained
 under `M7/helper-byte-failure-and-next-unit-context-20261007-v1/retention.json`,
 SHA-256 `8f974ca9bad22154110de13076e7abc036a1cb767ee76fffc3a06e3ff34fefd7`,16files.
@@ -97,7 +109,7 @@ SHA-256 `0f440a2205aed9997b27872b280469d6e5f5f52d951dd84d4af1bd2d7560dda3`,
 53files. The helper unit owns six codec/test/fixture paths in
 `/Users/spuri/.codex/worktrees/m7-helper-recipe-refresh/loopex`, frozen at c9e830c3. Contract report SHA-256
 `2960eb837f61863dfb94546909f1fdbb8c85430d9245b19df808161ec0cb1355`.
-The selector completion makes the live tally345 done/25 todo; original remains
+The selector completion makes the live tally346 done/24 todo; original remains
 87 done/86 todo/6 retired. Helpers, physical append/recovery and accounting
 are not activated by this byte-codec unit. ADR0057 remains the sole asked
 unanswered decision. The two historical quiesce causal rows stay open.

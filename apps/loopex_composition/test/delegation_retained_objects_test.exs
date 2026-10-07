@@ -5,7 +5,6 @@ defmodule LoopexComposition.DelegationRetainedObjectsTest do
 
   alias LoopexComposition.Delegation.{GenesisCodec, RetainedObjects}
   alias LoopexComposition.{DelegationGenesisFixture, Placement}
-  alias LoopexProtocol.Frame
 
   setup do
     root =
@@ -24,9 +23,7 @@ defmodule LoopexComposition.DelegationRetainedObjectsTest do
 
   test "an actual current genesis object installs, repeats exactly and reopens", context do
     genesis = DelegationGenesisFixture.genesis()
-    {:ok, object} = GenesisCodec.encode(genesis)
-    {:ok, encoded} = Frame.encode(object)
-    bytes = encoded |> IO.iodata_to_binary() |> String.trim_trailing("\n")
+    {:ok, bytes} = GenesisCodec.encode_json(genesis)
     owner = open(context)
     assert {:ok, digest} = RetainedObjects.install(owner, bytes)
     path = Path.join(context.directory, digest)
@@ -37,8 +34,7 @@ defmodule LoopexComposition.DelegationRetainedObjectsTest do
     GenServer.stop(owner)
     reopened = open(context)
     assert {:ok, recovered} = RetainedObjects.read(reopened, digest)
-    assert {:ok, decoded} = Frame.decode(recovered, 1_048_576)
-    assert {:ok, ^genesis} = GenesisCodec.decode(decoded)
+    assert {:ok, ^genesis} = GenesisCodec.decode_json(recovered)
   end
 
   test "a corrupt complete object is never replaced under its claimed digest", context do

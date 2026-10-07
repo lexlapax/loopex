@@ -6,10 +6,10 @@ exclusions, skips or invalid cases. Whole-tree floor formatting and CLI
 warning-free compilation passed; four original processes joined and 23 artifacts
 were authenticated in 146.812 seconds. Six original rows close: T06.3/T06.6
 and T10.1/T10.2/T10.3/T10.9. Broader floor preservation and attended chat remain
-open. Original T01–T19: 87 done / 86 todo / 6 retired; added 345 done / 25 todo
+open. Original T01–T19: 87 done / 86 todo / 6 retired; added 346 done / 24 todo
 after proving the dormant interaction selector and recording the helper byte unit. ADR0056's exact pair is
 now Accepted; helper execution and separate accounting/protection remain open.
-The isolated canonical ledger/header/genesis-byte unit is running.
+The canonical ledger/header/genesis-byte unit passed all61 cases on both pairs.
 Exact references are in the [resume record](M7-resume.md).
 
 The following earlier progress entries are historical where superseded above.
@@ -13980,7 +13980,7 @@ Hosted, attended and coordinated transport generation proofs remain separate.
 - [x] Install/read immutable validated retained-object bytes with actual content-addressed filesystem durability, exclusive host ownership, symlink/root guards and physical crash/fsync/uncertainty proof on both pairs; use the existing GenesisCodec as a concrete client without inventing ledger or catalog schemas.
 - [ ] Pin the complete private delegation ledger byte recipe and closed object/mutation field grammars under accepted ADR 0046 semantics before implementing append/recovery/transaction reduction; refuse incomplete or corrupt current frames without introducing a compatibility decoder.
 - [ ] Implement the accepted private parent-binding captured-object validator and pure prepare-parent/bind-parent reducer; prove exact owning creation-history joins, independent digest/transaction literals, ordered replay, duplicate/conflict refusal and reserved binding completion credit on both pairs. Physical append, run accounting and helper execution remain separate.
-- [ ] Implement accepted ADR0056's private canonical JSON, closed binding/run headers and checksummed frames, plus production GenesisCodec byte entrypoints used by the actual retained-object install/reopen test; prove independent exact bytes, structural/size/corruption boundaries and complete affected files on both supported pairs. Physical append/recovery, transaction reduction, child accounting, mutation protection and helper execution remain separate.
+- [x] Implement accepted ADR0056's private canonical JSON, closed binding/run headers and checksummed frames, plus production GenesisCodec byte entrypoints used by the actual retained-object install/reopen test; prove independent exact bytes, structural/size/corruption boundaries and complete affected files on both supported pairs. Physical append/recovery, transaction reduction, child accounting, mutation protection and helper execution remain separate.
 - [ ] Resolve exact retained child-accounting access and universal host mutation guards before exposing helpers through runtime-only clients; preserve host ownership, current serial session truth, retained maintenance charges and settled-child protection without copying private reducer accounting or adding an unapproved public read.
 
 - [x] Implement ADR 0046's bounded current-genesis private object codec shared by parent and child retention; prove exact plain ETF/base64/hash representation, owning schema validation, unsafe/compressed/trailing refusal, no input atom creation, encoded-size limits and actual current/floor cross-reading without re-encoding equality.
@@ -14412,3 +14412,5 @@ before a provider demonstration.
 | Upgrade and rollback | M7 compatibility contract | Exact retained M6 artifact/root fixtures; retain old rollback pair and add distinct M7 pair | rollback lane/scripts; Store recovery; operator instructions | Pending |
 
 Selector preparation unit completed on 2026-10-07 at isolated `520e3adb1ab70c2abfd09883428a335f8b2adff9`. Original19781 passed33/33 on each supported pair, zero exclusions/skips/invalid, five Node consumers per pair. Six original stages joined;38 artifacts verified;11.518 seconds. Output `M7/interaction-event-selector-collision-proof-20261007-v1`; collection SHA-256 `5214447d2b52667253fbceb612bffee8d503d2ec0046174646512a65e329d33e`; terminal `358b23af35a92563d7db934693e3768a0dbafcab5173c2ff41299d2c2f0cfaf5`. Original43180 remains a retained failure; the sole overlapping fixture expectation was corrected without production/vector changes. Serving activation and coordinated current generations remain pending.
+
+Helper byte unit completed on 2026-10-07 at isolated `b3780861a489fb1795bf7517fa0a1af1d5763b17`. Original42635 passed61/61 per supported pair, zero exclusions/skips/invalid; six original stages joined,37 artifacts verified,93.336 seconds. Output `M7/helper-ledger-pins-proof-20261007-v1`; collection SHA-256 `8486c249ed4d79c3289aa3a09976b53ba0cf6af71d8931790b600d10e1718e3d`; terminal `d68d0e969145e0973fbab2a238a87311a11b5f76bf3fc33b5f93b0b1ecad81b1`. The actual92434 compilation failure remains retained. Production size and preventive test offset pins are the only semantic changes after the independently reviewed/formatted source. Physical ledger, complete object/mutation grammar, accounting, protection and helper execution remain open.
