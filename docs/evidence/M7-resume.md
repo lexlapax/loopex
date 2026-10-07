@@ -27,6 +27,38 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+Accepted0057's body codec is proved and literally integrated from isolated
+`99dd199bdda7a319d144519d2252989ddf1e5519`. Original96348 is TERMINAL0 and
+collected PASS_ATTEMPT_BODY_CODEC_PROOF:54 cases on each supported pair,
+zero failures/exclusions/skips/invalid, both format checks and warning-free CLI
+compilation. Eight original processes joined and43 artifacts authenticate in
+99.826 seconds. Output `M7/attempt-body-codec-proof-20261007-v1`; collection
+`ba4be11e81b1e9df0237665673b0a8b266c81a10c4c8ac728ff6505f705c9db7`,
+terminal `e7326afb682c20a52fe8f6c3afd7914d205cbd6671e642ce1a4080be97d51f77`.
+Latest collected registry1727 is
+`e0ebba0a20986bd793793144c715d76f81b999c163723e9156fed2697ef3f6bb`.
+Do not repoll96348 or repeat the unchanged proof. Only the added T14 body row
+closes. Original T14 ordered/case/evidence/physical-writer outcomes stay open.
+
+New ordered ownership source is frozen in the isolated
+`/Users/spuri/.codex/worktrees/m7-attempt-ownership-replay/loopex`, baseline36e97968,
+packet85daab43. It preserves54 existing cases and adds20 ownership cases,
+requiring complete74-case native proof after independent source review.
+It grants no case-state, quiescence, evidence, authority or dispatch admission.
+T04 resumed preparation cleanup sourcea79 and38-case blueprints are reviewed;
+its one-file formatter factual binding consumes actual codec96348 and is
+independently under review, execution disabled. Both new proof rows are tracked.
+T01–T19 totals are87 done/86 todo/6 retired; added351 done/23 todo.
+
+Codec execution and cleanup source-only context is retained as41 files at
+`M7/codec-proof-and-cleanup-blueprints-context-20261007-v1/retention.json`,
+SHA-256 `d5cef0ca2f9118f6a6e50736065151486de1805a541dac9da4dc790de85bb9a7`.
+Its original96348 LIVE receipt is historical; the terminal collection above
+supersedes that state. ADR0058 remains the sole asked pending decision.
+A new changed-source full integration check remains required.
+
+The immediately following checkpoint is historical where superseded above.
+
 T13 preparation is now proved and literally integrated from isolated
 `f3f6fb985d59e6d9ad825518fe8f85aca7a80a25`. Original27420 is TERMINAL0 and
 collected PASS_FIXTURE_PREPARATION_PROOF: all29 cases on each supported pair,

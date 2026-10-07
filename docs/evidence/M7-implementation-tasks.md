@@ -8,7 +8,7 @@ Eight original stages joined and44 artifacts authenticate in110.103 seconds.
 The four tested files integrate literally; only the added T11 physical-log row
 closes. Accounting, startup classification, mutation protection and helper
 activation remain open. Original T01–T19:87 done/86 todo/6 retired;
-added350 done/22 todo. Exact retained references are in the
+added351 done/23 todo. Exact retained references are in the
 [resume record](M7-resume.md).
 
 Original19990 remains FAIL: all70 current cases passed, but eleven constant
@@ -40,9 +40,12 @@ or milestone-level obligations remain where listed.
 
 ADR0057's exact pair at `4007adf7` is accepted by the maintainer's
 "Approved 1. One shared format" decision, integrated at `a67dc97e`. The closed
-event-body codec is saved and independently reviewed at isolated `36e97968`;
-its formatting and complete54-case paired proof remain unrun. The added T14
-body row stays open. ADR0058 is the sole asked pending decision.
+event-body codec is proved at isolated `99dd199b`. Original96348 passed all54
+complete cases on each supported pair with no exclusions/skips/invalid, both
+format checks and warning-free CLI compilation. Eight original processes joined
+and43 artifacts authenticate in99.826 seconds. The two tested files integrate
+literally and the added T14 body row closes. New ordered-ownership and resumed
+startup cleanup proof rows remain open. ADR0058 is the sole asked pending decision.
 
 Original14854 completed the full current check at `10628204` in2132.392 seconds.
 All4830 cases passed with61 designated exclusions, but the command failed on
@@ -13530,6 +13533,8 @@ or check was relaxed.
 
 ### Added implementation subtasks
 
+- [ ] Prove resumed prepared-startup abandonment after callback refusal, raise, throw and exit, and truthful uncertainty when the activation guard dies before acknowledgement; preserve exact committed records, unread input, zero model/job dispatch, native activation paths and all owned process joins on both supported pairs.
+
 - [x] Prepare durable ask's complete current v3 genesis before placement and credential custody, retain canonical model/instructions/derived capacity and exact selected tools through the public create facade, keep concrete adapter imports in composition, and prove real Local Store create/reopen/resume, capture refusal, tool profiles, resource and cleanup cases on both supported pairs. Retain failed complete CLI outputs and their focused repairs; other host creation paths and Core v2 removal remain open.
 
 - [x] Prepare complete current ephemeral genesis before owner activation, join the accepted instructions/reasoning/system-ceiling options and derived context origins, share reference instruction capture with chat/inspection, and forward exact genesis through the private facade actor with one retained selected-tool inventory. Prove exact repeated HTTP staging, route privacy, admission negatives, question/call-owner lifetime and cleanup through the complete composition suite and affected CLI cases on both supported pairs without changing production limits or test time bounds. Other host creation paths and Core v2 removal remain open.
@@ -14123,7 +14128,8 @@ repeating completed provider work.
 
 ### Added implementation subtasks
 
-- [ ] Pin and implement the closed current attempts-event body union, including missing-evidence consumption, retained case identity, writer/handoff/head relations and causal authorization; prove exact independent vectors and all positive/negative body variants on both supported toolchains before ordered replay, physical writer ownership or runner activation. ADR0057 is accepted at `a67dc97e`; source-only codec `36e97968` still requires its complete paired native proof.
+- [x] Pin and implement the closed current attempts-event body union, including missing-evidence consumption, retained case identity, writer/handoff/head relations and causal authorization; prove exact independent vectors and all positive/negative body variants on both supported toolchains before ordered replay, physical writer ownership or runner activation. ADR0057 is accepted at `a67dc97e`; codec `99dd199b` passed all54 cases on both supported pairs in original96348; its two tested files integrate literally.
+- [ ] Validate ordered attempts ownership with the existing frame and accepted body codecs; prove genesis/designation, optional succession placement, original relinquishment-to-acceptance joins, exact owner tuples and epochs, pending handoff, reused identities and unresolved tails on both supported pairs. Keep this ownership projection distinct from case-state replay, evidence, quiescence, authority and physical dispatch.
 
 - [x] Inventory all 74 numbered V1–V13 steps and 155 descriptive subcases against exact accepted plan spans and current supporting tests; retain source identities, existing evidence and every missing executable owner/oracle pin. This is read-only planning evidence, not an accepted execution manifest or provider execution.
 
