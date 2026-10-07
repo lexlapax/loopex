@@ -27,6 +27,77 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+Primary base is `3499f7a70db14e8c3568782dc58aead66f348810`. The current
+working tree integrates four exact selector files from isolated
+`520e3adb1ab70c2abfd09883428a335f8b2adff9`, tree
+`029fbdac4d9d602f08e384116c371f8f20366641`. Original19781 passed33/33 on
+both supported toolchains, with five actual Node consumers per pair, zero
+exclusions/skips/invalid. Six original stages joined;38 artifacts verified;
+wrapper11.518 seconds. Output
+`M7/interaction-event-selector-collision-proof-20261007-v1`; collection
+`5214447d2b52667253fbceb612bffee8d503d2ec0046174646512a65e329d33e`;
+terminal `358b23af35a92563d7db934693e3768a0dbafcab5173c2ff41299d2c2f0cfaf5`;
+executed wrapper `6c4eed6f3339ee1e1b5f38a40f20106006152e104f5816856cdfa48f867b27e5`.
+Latest collected registry1602 is at that output, SHA-256
+`b584fe7ed9cf40f3f5041e5e5f0898ef3856c154b646648393b9e7f75d167d14`.
+Only the added pure selector row closes; serving and generations remain open.
+Original43180 remains FAIL31/33, floor unrun, at isolated d96e6785. Its two
+failures arose from the same inherited terminal-only negative fixture, which
+is valid admission data under accepted ADR0052. Two consumer expectations were
+corrected; production and all1002 literal vectors were unchanged. Collection
+`909ff8b3dd640940c6afa94b8973113e90cd3c5bfaec5fb725adc5a7394af5a9`;
+terminal `31d607a63c0f9f9826f8e5a6fe3a2c76db961d80da7ba8db6752f7b2ddb958b3`.
+The corrected formatter17428 passed six original stages in6.095 seconds,
+including non-line AST equality; isolated clean child520e3adb follows rawa7c0ebd6.
+Collection `c9c40100e11c7d4f3629c285266057723d6429a58b317e8b785233e017e218c9`;
+terminal `c259ceb146832b506f31a2b57e551a94a1f0256e310f556ddb64f5889ed30789`.
+The earlier original99317 formatter and original43180 proof are historical;
+no unchanged retry or proof relabeling occurred.
+
+Helper source-only review passed. Six paths are frozen in its isolated worktree
+at `c9e830c3bca9d35cf0989eef93aeca7288cb268e`, tree
+`bd0d8dee6ad116a77e485e23af2cd2462628fb38`, parent raw3291542b/base3499f7a7.
+Original74534 formatter passed six original stages in6.030 seconds,38 artifacts;
+only GenesisCodec and ledger test layout changed, all five non-line ASTs match.
+Output `M7/helper-ledger-byte-format-20261007-v1`; collection
+`bfc96293e50c6871ddc6e4f9acfb37f72d06e9d04eb63939ddeb6639eab8280c`;
+terminal `bd4b77d1f137c387c2f466a66af481c80dc20b679cf0c16b88bc888246fc4b1b`.
+Complete61-case paired proof is being prepared; no helper native-test PASS yet.
+No physical ledger/reducer/accounting/mutation protection/helper activation claim.
+
+Current selector correction and helper byte source/review/formatter context is
+permanently retained in
+`M7/selector-collision-and-helper-byte-context-20261007-v1/retention.json`,
+SHA-256 `5692547cc729377d68f96b3c8e5911e1acefc73f1ac53ef76a0de35b8d6e1776`,53files.
+Root helper formatter enablement V1 failed an inert assertion before import,
+native admission, output or registry mutation. V2 corrected only root's mistaken
+assumption that source-review pins were unbound; exact reverse-byte proof passed.
+
+All governance preparation, selector raw source, independent source review,
+formatter drafts/finalization and helper first-unit contract are permanently
+retained in `M7/selector-and-governance-context-20261007-v1/retention.json`,
+SHA-256 `0f440a2205aed9997b27872b280469d6e5f5f52d951dd84d4af1bd2d7560dda3`,
+53files. The helper unit owns six codec/test/fixture paths in
+`/Users/spuri/.codex/worktrees/m7-helper-recipe-refresh/loopex`, frozen at c9e830c3. Contract report SHA-256
+`2960eb837f61863dfb94546909f1fdbb8c85430d9245b19df808161ec0cb1355`.
+The selector completion makes the live tally345 done/23 todo; original remains
+87 done/86 todo/6 retired. Helpers, physical append/recovery and accounting
+are not activated by this byte-codec unit. ADR0057 remains the sole asked
+unanswered decision. The two historical quiesce causal rows stay open.
+
+Failed-proof recipe/finalization, source-syntax refusal and both next-unit
+reviews are retained in
+`M7/selector-proof-and-next-unit-context-20261007-v1/retention.json`, SHA-256
+`4aa2f4468da3346961f2556c463d0547683c227ae2eb99a936c0953192d888f2`,14files.
+Quiesce review `bdb89afc343093e6d5c7ba86482fbf066ad04ef046289ee967d8e9889a86d2b0`
+authenticates current34-case paired proof but does not recover missing original
+logs/actor attribution. Live interaction contract
+`5dbef5bcb07f3da7dbb879db8950be735d34254502fd0e61ba623e47379d5ed4`
+requires complete coordinated /3-/4 migration; native creation custody still
+depends on Proposed0059. Another partial serving generation is not authorized.
+
+The following previous checkpoint is historical where superseded above.
+
 Latest completed proof is native chat floor selection at clean
 `483301c0100df4c76f6a7ca9079b6c6f82a90946`, tree
 `f4a87a3f94cccd6afa39f6f38933d23ef95adf56`. Original8827 exited0 and passed

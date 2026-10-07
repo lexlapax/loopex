@@ -125,8 +125,8 @@ reference and history relation without activating actors or repairing the backup
 A checksum proves retained bytes, not latestness, terminated owners or exclusion
 of other roots. Removing the adapter cannot erase unresolved helper obligations.
 
-This pair remains Proposed. Independent review and exact-byte maintainer
-acceptance precede dependent implementation. Accepted
+The maintainer accepted this exact pair after independent review. Dependent
+implementation follows this current contract. Accepted
 [ADR 0053](0053-current-configure-request.md#concept) fixes the current configure
 `changes` request grammar; coordinated generation/client activation proofs
 remain separate. The public accounting decision and complete helper integration

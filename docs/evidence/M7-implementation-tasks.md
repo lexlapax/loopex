@@ -6,9 +6,10 @@ exclusions, skips or invalid cases. Whole-tree floor formatting and CLI
 warning-free compilation passed; four original processes joined and 23 artifacts
 were authenticated in 146.812 seconds. Six original rows close: T06.3/T06.6
 and T10.1/T10.2/T10.3/T10.9. Broader floor preservation and attended chat remain
-open. Original T01–T19: 87 done / 86 todo / 6 retired; added 344 done / 23 todo
-after recording the dormant interaction selector unit. ADR0056's exact pair is
+open. Original T01–T19: 87 done / 86 todo / 6 retired; added 345 done / 23 todo
+after proving the dormant interaction selector and recording the helper byte unit. ADR0056's exact pair is
 now Accepted; helper execution and separate accounting/protection remain open.
+The isolated canonical ledger/header/genesis-byte unit is running.
 Exact references are in the [resume record](M7-resume.md).
 
 The following earlier progress entries are historical where superseded above.
@@ -13546,7 +13547,7 @@ or check was relaxed.
 
 ### Added implementation subtasks
 
-- [ ] Compose the accepted model and policy interaction codecs through one pure kind/producer-aware Elixir selector and an independent Node selector; prove requested, terminal and answer-admitted branch correlation, shared expiry/cancel kinds, exact opaque/quantity domains and malformed/private/cross-kind refusal on both pairs. Keep this four-file preparation unit dormant until coordinated transport/client generation activation.
+- [x] Compose the accepted model and policy interaction codecs through one pure kind/producer-aware Elixir selector and an independent Node selector; prove requested, terminal and answer-admitted branch correlation, shared expiry/cancel kinds, exact opaque/quantity domains and malformed/private/cross-kind refusal on both pairs. Keep this four-file preparation unit dormant until coordinated transport/client generation activation.
 
 
 - [x] Implement the standalone authored remote creation-options codec/schema and independent Node vectors under accepted ADR0055, preserving optional versus empty configuration/tool selection, strict opaque/integer/quantity domains, all398 creation and381 configure vectors and shared exact-string regressions. Prove complete12 cases including both Node consumers on each supported pair at0babe891, zero exclusions/skips/invalid, before literal integration; retain original90814 formatter and93963 fixture failures. Native custody/transport admission and served generation activation remain separate.
@@ -13975,6 +13976,7 @@ Hosted, attended and coordinated transport generation proofs remain separate.
 
 - [x] Install/read immutable validated retained-object bytes with actual content-addressed filesystem durability, exclusive host ownership, symlink/root guards and physical crash/fsync/uncertainty proof on both pairs; use the existing GenesisCodec as a concrete client without inventing ledger or catalog schemas.
 - [ ] Pin the complete private delegation ledger byte recipe and closed object/mutation field grammars under accepted ADR 0046 semantics before implementing append/recovery/transaction reduction; refuse incomplete or corrupt current frames without introducing a compatibility decoder.
+- [ ] Implement accepted ADR0056's private canonical JSON, closed binding/run headers and checksummed frames, plus production GenesisCodec byte entrypoints used by the actual retained-object install/reopen test; prove independent exact bytes, structural/size/corruption boundaries and complete affected files on both supported pairs. Physical append/recovery, transaction reduction, child accounting, mutation protection and helper execution remain separate.
 - [ ] Resolve exact retained child-accounting access and universal host mutation guards before exposing helpers through runtime-only clients; preserve host ownership, current serial session truth, retained maintenance charges and settled-child protection without copying private reducer accounting or adding an unapproved public read.
 
 - [x] Implement ADR 0046's bounded current-genesis private object codec shared by parent and child retention; prove exact plain ETF/base64/hash representation, owning schema validation, unsafe/compressed/trailing refusal, no input atom creation, encoded-size limits and actual current/floor cross-reading without re-encoding equality.
@@ -14404,3 +14406,5 @@ before a provider demonstration.
 | Ephemeral entry points | ADRs 0042–0045/0048/0049 | Combined closed startup options; one-call responder consumed locally; joined termination | Ephemeral.Options/Preflight/Bootstrap/SessionOwner; facade | Joined question callback, provider bindings and trace implemented; full option forwarding and attended/provider closure evidence pending |
 | Execution evidence | M7 technical acceptance contract | Fixed fixture/operator manifest; Pending scaffold; hash-chained single-writer attempts and fsync barriers | mix loopex.m7_evidence; release runner; PTY driver; evidence files | Pending |
 | Upgrade and rollback | M7 compatibility contract | Exact retained M6 artifact/root fixtures; retain old rollback pair and add distinct M7 pair | rollback lane/scripts; Store recovery; operator instructions | Pending |
+
+Selector preparation unit completed on 2026-10-07 at isolated `520e3adb1ab70c2abfd09883428a335f8b2adff9`. Original19781 passed33/33 on each supported pair, zero exclusions/skips/invalid, five Node consumers per pair. Six original stages joined;38 artifacts verified;11.518 seconds. Output `M7/interaction-event-selector-collision-proof-20261007-v1`; collection SHA-256 `5214447d2b52667253fbceb612bffee8d503d2ec0046174646512a65e329d33e`; terminal `358b23af35a92563d7db934693e3768a0dbafcab5173c2ff41299d2c2f0cfaf5`. Original43180 remains a retained failure; the sole overlapping fixture expectation was corrected without production/vector changes. Serving activation and coordinated current generations remain pending.
