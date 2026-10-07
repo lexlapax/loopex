@@ -27,7 +27,87 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
-Latest model source is clean isolated `97ac232692929841660ebc71388ab7726550d6f5`,
+Latest model source is clean isolated `e7e32864f46e28a9161a548fe3ee6438723bd602`,
+tree `29a204b29e91c8c1e5a0238ea310464048beb4d8`, direct child of97ac2326.
+The owned test hash is
+`05000abb78cbf977b9c579e82aad801326c9958a155d389bd0499247ebe7aa11`;
+shared fixture remainsda8a8ae6. Source packet
+`94226eb75706825f1954b55037c94a10e7d86ec108bb98557e12721869e7cfb1`,
+diagnosis `d23d9007ebe22728590e6ff617329c5ca94a2fc32af0cfb1dec3cb3b24394a09`
+and root source review
+`452cc322a898467f0083869ddaf16ad488b4aaadb494cc4d93cce8b0083d0e55`
+bind a fresh actual tracing capability for each reopened runtime. Only that
+nested adapter option changes; the handle binds to the exact runtime before
+its first prompt. Original runtime joins precede capability retirement within
+the existing cleanup cutoff; all transport/history/privacy assertions remain.
+The earlier fixture supplied Direct capability, which the managed provider
+Starter explicitly refuses before launching the native entry. That source
+trace explains the mismatch; original3648's log did not capture the refusal.
+
+Original75656 passed all six tracing formatter stages in5.460 seconds,
+38 artifacts; both non-line syntax trees match and no source byte changed.
+Clean e7e32864 is therefore also the formatted source. Output
+`M7/native-model-switch-tracing-format-20261007-v1`; collection
+`af59baee5ca65c7a1373a87a851c827ecc4df3177d4ed471e1bbf8472d48f679`;
+terminal `4a2d0b114ecdd846b9d009a10d9c6fa7e218b98792b6f7018f017fd1d909bf93`;
+executed wrapper `f2c169442cef63069a5c970d7ab9c215e19b4b738472d1aeb0398fe3bc9ea392`;
+root formatter review
+`d07ef4cb37a2a2917f1ace1db83c5fa6c17b5d83c6360916e15015572095f41e`.
+The fresh paired proof, original58275, failed in59.682 seconds. Current
+formatting and warning-free Composition compilation passed. Complete current
+Composition tests executed8 with7 passing and1 failed,zero exclusions/skips/
+invalid. The witness completed its first two native A-to-B requests, then
+`resume_session/3` returned `{:error, :owner_recovery_failed}` after physical
+Store reopening. ReqLLM and floor stages are unrun. Three original stages
+joined and23 artifacts authenticate. Output
+`M7/native-model-switch-tracing-proof-20261007-v1`; collection
+`ea68ded004218d1406f6b94a3ceebe79ea616fb3c9740efdcd1b900c4f7fc4fe`;
+terminal `4829e293a5119cadd62afcae9bd61feb66e533d4f40179b14c644bbf8dd852dd`;
+executed wrapper `aaff76b26164d96ebb11abdab674d96f1990333445e7e8edfa1db28e382df3ab`;
+root recipe review
+`1bf99727f99b4bfefde660b7afa99f9189a57c75be7c078af17eb6d552f9f852`.
+Latest collected registry is1651,SHA-256
+`26960afe5329b466551bb176a457cf895b6e20cbac030046775057722a106147`.
+Do not repoll75656 or58275 or retry unchanged source. Separate source-only
+diagnoses trace production recovery and witness restart setup. The original
+physical restart obligation and all test bounds remain unchanged; no T08 row
+closes.
+
+Physical helper V2 independent source review passed,c24d5065c923e03b2a4e7ce1d468f79f4d622b90cd3576fc6e64349ea696b7ce.
+Frozen source packet isefbcfb85163c697b020261d62baa0190dbccb1468616c2a40551bac4b67ae9fc.
+Its four paths are clean committed at
+`905ed2a0f9787b28995ef46fdba14a1275d57884`, tree
+`900c438bdf3e11dbe197e5225608762f3795d868`, direct child off067b49e.
+Complete1186-record raw projection is
+`bf535c6fb0327fda4929839b950fb43f549a7cab6017208cf7c6900c8f6ba6f5`.
+Acquisition-scoped recovery permission is consumed on positive lookup; an
+incomplete current-owner append fence refuses repair. Seven paused actor-loss
+cases retain original caller/owner joins under their existing endpoint before
+fixture deletion. The complete static selection is70 per pair,34physical plus
+19parent plus17objects; no physical native check ran yet. Disabled formatter
+preparation `f9729f7acb6ec4492a20400ccb3cbb8493c4a96d5fd392643f985c7e2a5052e2`
+must rebind its prior1642 seed to original58275's collected1651 registry before
+root review/enablement. Paired70 recipe preparation
+`6e4c816cb404a137f3931154b40a9ec783e8daeebf82f18580b7f397618a857e`
+remains disabled with future source/formatter/registry facts unset.
+
+All38 tracing correction/diagnosis/review/raw projection/formatter and physical
+V2 source/review/raw projection/formatter preparation files are permanently
+retained in `M7/tracing-source-and-physical-binding-context-20261007-v1/retention.json`,
+SHA-256 `3ec29ff091c268580911685e7d28fd2d0f910b576dac34f1b7b761093857a060`.
+Another13 model tracing-proof preparation/review/finalization and disabled
+physical paired-proof files are permanently retained in
+`M7/tracing-proof-and-helper-proof-context-20261007-v1/retention.json`,
+SHA-256 `fdd6bb7f061374f475a4812bc7b23828dbc594195c152ca2a5eafc38b3e4d9c5`.
+Those files were captured while original58275 was running; its actual failed
+result is separately collected above. These records prove no future physical
+test; original failures remain retained. Neither bounded source unit is
+integrated into primary yet, and no checklist row closes. ADR0057 remains the
+sole asked unanswered decision; presenting its options again is no acceptance.
+The following records are historical where superseded by this latest source
+and registry1651.
+
+Earlier failed model source is clean isolated `97ac232692929841660ebc71388ab7726550d6f5`,
 tree `7b14c936fbe0a4022e3bf3fd5ccc8268c4696891`, direct formatted child of
 startup-corrected raw `4a6b8550578384cbf74aa3f2af2549767667afba` and base46b57a2b.
 The actual Local executor, workspace lease and host allowance are now present;

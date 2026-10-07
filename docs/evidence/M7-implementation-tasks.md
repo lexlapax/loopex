@@ -20,13 +20,15 @@ reader's outer LF handling changed before this new-source proof. Physical
 append/custody, accounting and helper activation remain open. Exact source,
 review and native references are in the [resume record](M7-resume.md).
 
-Corrected model source `97ac2326` passed both formatter checks, then original3648
-failed the current complete Composition selection7/8. Runtime startup succeeds;
-the real native-entry gate was not reached within the unchanged10,000-ms work
-cutoff. ReqLLM and floor stages remain unrun. The failed result is collected,
-not retried or counted as task completion. Independent physical binding-log
-review found current-owner tail recovery and paused-actor failure cleanup
-defects; corrections are in progress in its isolated worktree. Exact references
+Model source `e7e32864` passed all six formatter stages without byte changes,
+then original58275 failed the current complete Composition selection7/8.
+The witness completed two native A-to-B requests, then physical Store reopen
+and session resume returned `owner_recovery_failed`. ReqLLM and floor stages
+remain unrun. The original failure is collected; separate source-only diagnoses
+trace recovery and witness setup before any correction. Independent physical
+binding-log V2 review passed after correcting current-owner tail recovery and
+paused-actor failure cleanup. Its four paths are frozen at isolated `905ed2a0`;
+formatter and complete70-case paired checks remain pending. Exact references
 are in the [resume record](M7-resume.md). Counts remain unchanged.
 
 The following earlier progress entries are historical where superseded above.
