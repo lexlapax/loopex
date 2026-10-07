@@ -432,6 +432,22 @@ defmodule Loopex.Runtime.SessionState do
 
   def propose(_state, _command, _resolved), do: {:error, :invalid_command}
 
+  # Concept: duplicate identity is decided before defaults or a clock are read.
+  # Technical depth: the serial owner uses this same closed normalization as the
+  # proposal and replay paths. Fresh commands carry no resolved host values here.
+  @doc false
+  def prepare_command(state, command) do
+    with {:ok, normalized} <- normalize_command(command),
+         {:ok, digest} <- command_digest(normalized) do
+      case Map.fetch(state.commands, normalized.command_id) do
+        {:ok, %{digest: ^digest, result: result}} -> {:replayed, result}
+        {:ok, %{digest: ^digest, reply: reply}} -> {:replayed, reply}
+        {:ok, _} -> {:error, :idempotency_conflict}
+        :error -> {:new, normalized}
+      end
+    end
+  end
+
   # Concept: host resolution follows the original authored command disposition.
   # Technical depth: the pure ordinary proposal performs normalization, digest,
   # duplicate lookup and settledness first. Only a fresh not-prepared configure
@@ -1082,7 +1098,7 @@ defmodule Loopex.Runtime.SessionState do
                    identity,
                    source,
                    now,
-                   state.deadlines[run_id]
+                   retained_run_deadline(state, run_id)
                  ) do
             internal_proposal(state, identity["episode_id"] <> ":reserve", record)
           end
@@ -2111,8 +2127,8 @@ defmodule Loopex.Runtime.SessionState do
       not is_integer(now) or now < episode["admitted_at"] or now > @uint64_max ->
         {:error, :context_projection_invalid}
 
-      is_integer(state.deadlines[episode["run_id"]]) and
-          now >= state.deadlines[episode["run_id"]] ->
+      is_integer(retained_run_deadline(state, episode["run_id"])) and
+          now >= retained_run_deadline(state, episode["run_id"]) ->
         {:error, :run_deadline_reached}
 
       episode["attempts"] == 0 and now >= episode["preparation_deadline"] ->
@@ -2131,12 +2147,17 @@ defmodule Loopex.Runtime.SessionState do
        do: {:ok, episode["deadline"]}
 
   defp maintenance_request_deadline(state, episode, now) do
-    case state.deadlines[episode["run_id"]] do
+    case Map.get(state.deadlines, episode["run_id"]) do
       nil ->
         duration = episode["bounds"]["deadline_ms"]
 
         if now <= @uint64_max - duration,
-          do: {:ok, now + duration},
+          do:
+            {:ok,
+             min(
+               now + duration,
+               retained_run_deadline(state, episode["run_id"]) || now + duration
+             )},
           else: {:error, :maintenance_deadline_unrepresentable}
 
       deadline ->
@@ -2689,8 +2710,8 @@ defmodule Loopex.Runtime.SessionState do
     if episode["trigger"] in ~w(ordinary_limit thinking_headroom) and is_nil(state.aborting) and
          episode["run_id"] == state.active_run_id and is_integer(now) and
          now >= episode["request_staged_at"] and now <= @uint64_max and
-         is_integer(state.deadlines[episode["run_id"]]) and
-         now < state.deadlines[episode["run_id"]],
+         is_integer(retained_run_deadline(state, episode["run_id"])) and
+         now < retained_run_deadline(state, episode["run_id"]),
        do: :ok,
        else: pending_checkpoint_refusal(state, now)
   end
@@ -2735,7 +2756,7 @@ defmodule Loopex.Runtime.SessionState do
       elements: Enum.flat_map(units, & &1.elements),
       steer: episode["ordinary_steer"],
       resources: state.run_resources[episode["run_id"]],
-      deadline: state.deadlines[episode["run_id"]],
+      deadline: retained_run_deadline(state, episode["run_id"]),
       excerpt_allowance: 0
     }
 
@@ -2932,14 +2953,14 @@ defmodule Loopex.Runtime.SessionState do
          true <- is_nil(state.aborting),
          true <-
            is_integer(now) and now >= state.checkpoints[id]["committed_at"] and now <= @uint64_max,
-         true <- now < state.deadlines[episode["run_id"]],
+         true <- now < retained_run_deadline(state, episode["run_id"]),
          :ok <- pending_checkpoint_capacity(state, episode),
          staging = %{
            run_id: episode["run_id"],
            elements: lineage_elements(state, episode["run_id"]),
            steer: episode["ordinary_steer"],
            resources: state.run_resources[episode["run_id"]],
-           deadline: state.deadlines[episode["run_id"]],
+           deadline: retained_run_deadline(state, episode["run_id"]),
            excerpt_allowance: 0
          },
          project = %{
@@ -3207,8 +3228,8 @@ defmodule Loopex.Runtime.SessionState do
       not is_integer(now) or now < 0 or now > @uint64_max ->
         {:error, :clock_out_of_domain}
 
-      is_map(episode) and is_integer(state.deadlines[episode["run_id"]]) and
-          now >= state.deadlines[episode["run_id"]] ->
+      is_map(episode) and is_integer(retained_run_deadline(state, episode["run_id"])) and
+          now >= retained_run_deadline(state, episode["run_id"]) ->
         {:error, :run_deadline_reached}
 
       true ->
@@ -3475,7 +3496,8 @@ defmodule Loopex.Runtime.SessionState do
       not is_integer(now) or now < 0 or now > @uint64_max - 60_000 ->
         {:error, :maintenance_deadline_unrepresentable}
 
-      is_integer(state.deadlines[run_id]) and state.deadlines[run_id] <= now ->
+      is_integer(retained_run_deadline(state, run_id)) and
+          retained_run_deadline(state, run_id) <= now ->
         {:error, :run_deadline_reached}
 
       true ->
@@ -3487,7 +3509,7 @@ defmodule Loopex.Runtime.SessionState do
     state.bounds[run_id]
     |> Map.take([:max_turns, :token_budget, :deadline_ms])
     |> encode_plain()
-    |> Map.merge(%{"max_attempts" => 4, "run_deadline" => state.deadlines[run_id]})
+    |> Map.merge(%{"max_attempts" => 4, "run_deadline" => retained_run_deadline(state, run_id)})
   end
 
   @doc false
@@ -4345,7 +4367,7 @@ defmodule Loopex.Runtime.SessionState do
       when is_binary(run_id) and is_integer(observed) do
     with %{stage: "model_attempt_open", request: request} = work <-
            Map.get(state.pending_work, run_id),
-         deadline when is_integer(deadline) <- Map.get(state.deadlines, run_id),
+         deadline when is_integer(deadline) <- retained_run_deadline(state, run_id),
          true <- observed >= deadline do
       record = %{
         "run_id" => run_id,
@@ -4887,8 +4909,8 @@ defmodule Loopex.Runtime.SessionState do
 
     run_terminal_record(state, run_id, attempt_terminal(termination, result), %{
       bound: termination == "deadline" && "deadline",
-      observed: termination == "deadline" && Map.get(state.deadlines, run_id),
-      declared_limit: termination == "deadline" && Map.get(state.deadlines, run_id),
+      observed: termination == "deadline" && retained_run_deadline(state, run_id),
+      declared_limit: termination == "deadline" && retained_run_deadline(state, run_id),
       reason: terminal_reason(result)
     })
   end
@@ -5178,6 +5200,14 @@ defmodule Loopex.Runtime.SessionState do
     do: %{kind: "terminal", run_id: run_id, tool_call_id: tool_call_id, disposition: disposition}
 
   defp closed_history_map?(map, required, optional \\ []) do
+    required =
+      if is_map(map) and not is_struct(map) and map["command_type"] in ["prompt", "follow_up"],
+        do:
+          required ++
+            ["command_revision"] ++
+            if(map["admission"] == "accepted", do: ["authored_bounds"], else: []),
+        else: required
+
     is_map(map) and not is_struct(map) and Enum.all?(required, &Map.has_key?(map, &1)) and
       Map.keys(map) -- (required ++ optional) == []
   end
@@ -5365,7 +5395,7 @@ defmodule Loopex.Runtime.SessionState do
         "interaction_request_digest" => Interaction.digest(request),
         "created_at" => created_at,
         "expires_at" =>
-          Interaction.effective_expiry(created_at, 600_000, state.deadlines[run_id]),
+          Interaction.effective_expiry(created_at, 600_000, retained_run_deadline(state, run_id)),
         kind: "model_question_requested_v1"
       }
 
@@ -5476,6 +5506,34 @@ defmodule Loopex.Runtime.SessionState do
   # Concept: explicit maintenance cannot queue unrelated session mutation.
   # Technical depth: duplicate lookup precedes these clauses. Pending command
   # admission already owns the slot before an episode has a captured clock.
+  # Concept: a fresh expired input records a refusal, never a run admission.
+  # Technical depth: proposal identity and duplicate lookup already succeeded.
+  # Retain the original sampled clock in this one immutable transaction; unknown
+  # resolution and replay do not sample it again.
+  defp propose_new(
+         state,
+         %{type: type, bounds: %{deadline_at_ms: ceiling}, resolved_bounds: %{admitted_at: now}} =
+           command,
+         digest
+       )
+       when type in [:prompt, :follow_up] and is_integer(now) and now >= ceiling do
+    record =
+      retain_authored_bounds(
+        %{
+          "command_id" => command.command_id,
+          "command_digest" => digest,
+          "command_type" => Atom.to_string(type),
+          "admission" => "rejected_deadline_elapsed",
+          "admitted_at" => now,
+          "deadline_at_ms" => ceiling,
+          kind: "command_admitted"
+        },
+        command
+      )
+
+    build_proposal(state, command.command_id, record, [], {:error, :deadline_elapsed})
+  end
+
   defp propose_new(%{pending_compact: pending} = state, %{type: :abort} = command, digest)
        when is_map(pending) do
     record = %{
@@ -5593,7 +5651,7 @@ defmodule Loopex.Runtime.SessionState do
   end
 
   defp propose_new(%__MODULE__{active_run_id: nil} = state, %{type: :prompt} = command, digest) do
-    run_id = stable_id("run", state.session_id, command.command_id)
+    run_id = command_run_id(state.session_id, command.command_id)
     reply = {:accepted, command.command_id}
 
     record = %{
@@ -5627,7 +5685,7 @@ defmodule Loopex.Runtime.SessionState do
       kind: "command_admitted"
     }
 
-    build_proposal(state, command.command_id, record, [], reply)
+    build_proposal(state, command.command_id, retain_authored_bounds(record, command), [], reply)
   end
 
   # Concept: a steer joins a run that is actually running.
@@ -5913,7 +5971,13 @@ defmodule Loopex.Runtime.SessionState do
       kind: "command_admitted"
     }
 
-    build_proposal(state, command.command_id, record, [], {:error, reason})
+    build_proposal(
+      state,
+      command.command_id,
+      retain_authored_bounds(record, command),
+      [],
+      {:error, reason}
+    )
   end
 
   defp queued_steer(state, run_id) do
@@ -5954,6 +6018,8 @@ defmodule Loopex.Runtime.SessionState do
   end
 
   defp admitted_proposal(state, command, digest, type, record, events, reply, candidates \\ nil) do
+    record = retain_authored_bounds(record, command)
+
     run_id =
       if type == "compact" or record.kind == "compact_abort_admitted_v1",
         do: nil,
@@ -5972,7 +6038,7 @@ defmodule Loopex.Runtime.SessionState do
   end
 
   defp promoted_run_id(state, command),
-    do: stable_id("run", state.session_id, command.command_id)
+    do: command_run_id(state.session_id, command.command_id)
 
   defp proposal(tx_id, record, events, next, reply) do
     %{tx_id: tx_id, records: [record], events: events, next: next, reply: reply}
@@ -6239,6 +6305,7 @@ defmodule Loopex.Runtime.SessionState do
          {:ok, command_type} <- record_binary(record, "command_type"),
          {:ok, admission} <- record_binary(record, "admission"),
          false <- Map.has_key?(state.commands, command_id),
+         :ok <- validate_authored_bounds_record(record),
          true <- admissible_pending_compact_command?(state, record),
          {:ok, record_source} <- original_record_source(record, state.journal_version + 1),
          {:ok, reply, active_run_id, pending_work, expected_events, patch} <-
@@ -6322,7 +6389,7 @@ defmodule Loopex.Runtime.SessionState do
 
   defp admissible_command_kind?("prompt_admitted_v3", record),
     do:
-      map_size(record) == 12 and record["command_type"] == "prompt" and
+      map_size(record) == 14 and record["command_type"] == "prompt" and
         record["admission"] == "accepted"
 
   # Technical depth: `observed` must be a positive integer strictly above the
@@ -6589,9 +6656,16 @@ defmodule Loopex.Runtime.SessionState do
          command_id
        )
        when is_binary(active) do
-    with {:ok, content} <- record_binary(record, "content") do
+    with {:ok, content} <- record_binary(record, "content"),
+         {:ok, authored} <- decode_retained_authored_bounds(record["authored_bounds"], :follow_up) do
       {:ok, {:accepted, command_id}, active, state.pending_work, state.expected_events,
-       %{follow_up: %{command_id: command_id, content: content}}}
+       %{
+         follow_up: %{
+           command_id: command_id,
+           content: content,
+           authored_bounds: authored
+         }
+       }}
     end
   end
 
@@ -6712,6 +6786,28 @@ defmodule Loopex.Runtime.SessionState do
   # rather than being refused. The mapping is closed over the tokens `refusal/6`
   # writes for these two command types; any other token is invalid history and
   # takes the ordinary typed refusal, creating no atom on either path.
+  defp command_effect(state, record, type, "rejected_deadline_elapsed", _command_id)
+       when type in ["prompt", "follow_up"] do
+    with ceiling <- record["deadline_at_ms"],
+         {:ok, _} <- Bounds.authored(%{deadline_at_ms: ceiling}, :follow_up),
+         now when is_integer(now) and now >= ceiling <- record["admitted_at"],
+         true <-
+           closed_history_map?(record, [
+             :kind,
+             "command_id",
+             "command_digest",
+             "command_type",
+             "admission",
+             "admitted_at",
+             "deadline_at_ms"
+           ]) do
+      {:ok, {:error, :deadline_elapsed}, state.active_run_id, state.pending_work,
+       state.expected_events, %{}}
+    else
+      _ -> {:error, :invalid_expired_command_refusal}
+    end
+  end
+
   defp command_effect(state, _record, type, "rejected_" <> reason, _command_id)
        when type in ["steer", "follow_up", "interaction_answer"] do
     case rejected_command_reason(reason) do
@@ -7387,8 +7483,8 @@ defmodule Loopex.Runtime.SessionState do
       terminal["accounting_source"] == source and
       case terminal["bound"] do
         "deadline" ->
-          is_integer(declared.deadline) and terminal["declared_limit"] == declared.deadline and
-            observed >= declared.deadline
+          deadline = retained_run_deadline(state, run_id)
+          is_integer(deadline) and terminal["declared_limit"] == deadline and observed >= deadline
 
         "token_budget" ->
           terminal["declared_limit"] == declared.token_budget and observed == charged.tokens and
@@ -8128,7 +8224,7 @@ defmodule Loopex.Runtime.SessionState do
          %{stage: "model_attempt_open", request: request} = work <-
            Map.get(state.pending_work, run_id),
          true <- attempt_identity_matches?(record, run_id, work, request),
-         true <- record["deadline"] == Map.get(state.deadlines, run_id),
+         true <- record["deadline"] == retained_run_deadline(state, run_id),
          nil <- Map.get(work, :model_termination) do
       {:ok, put_pending(state, run_id, Map.put(work, :model_termination, "deadline")), []}
     else
@@ -8288,7 +8384,7 @@ defmodule Loopex.Runtime.SessionState do
              record,
              identity,
              source,
-             state.deadlines[run_id]
+             retained_run_deadline(state, run_id)
            ) do
       {:ok,
        %{
@@ -8682,7 +8778,7 @@ defmodule Loopex.Runtime.SessionState do
          true <- record["expires_at"] > created and record["expires_at"] <= @uint64_max,
          true <-
            record["expires_at"] ==
-             Interaction.effective_expiry(created, 600_000, state.deadlines[run_id]) do
+             Interaction.effective_expiry(created, 600_000, retained_run_deadline(state, run_id)) do
       interaction = %{
         producer: "model_tool",
         interaction_id: record["interaction_id"],
@@ -9227,8 +9323,14 @@ defmodule Loopex.Runtime.SessionState do
   end
 
   defp promote_follow_up(%{follow_up: follow_up} = state, run_id) do
-    promoted = stable_id("run", state.session_id, follow_up.command_id)
-    declared = Map.get(state.bounds, run_id)
+    promoted = command_run_id(state.session_id, follow_up.command_id)
+    declared = Map.get(state.bounds, run_id) |> Map.delete(:deadline_at_ms)
+
+    declared =
+      case follow_up.authored_bounds do
+        %{deadline_at_ms: ceiling} -> Map.put(declared, :deadline_at_ms, ceiling)
+        _ -> declared
+      end
 
     work = %{
       type: "model",
@@ -9818,12 +9920,42 @@ defmodule Loopex.Runtime.SessionState do
   defp admitted_run_configuration(_state, _record, _budget),
     do: {:error, :invalid_run_configuration}
 
+  # Concept: an authored ceiling fences preparation before a request exists.
+  # Technical depth: the first staged request still starts the relative duration;
+  # its immutable effective deadline supersedes this admission ceiling. Reading
+  # it does not stage work, consult a clock, or change command disposition.
+  defp retained_run_deadline(state, run_id) do
+    Map.get(state.deadlines, run_id) || get_in(state.bounds, [run_id, :deadline_at_ms])
+  end
+
+  defp staged_run_deadline_agrees?(state, run_id, deadline) do
+    ceiling = get_in(state.bounds, [run_id, :deadline_at_ms])
+    staged = Map.get(state.deadlines, run_id)
+
+    is_integer(deadline) and (is_nil(ceiling) or deadline <= ceiling) and
+      (is_nil(staged) or deadline == staged)
+  end
+
   defp record_bounds(record) do
-    Bounds.declare(%{
-      max_turns: Map.get(record, "max_turns"),
-      token_budget: Map.get(record, "token_budget"),
-      deadline_ms: Map.get(record, "deadline_ms")
-    })
+    with {:ok, declared} <-
+           Bounds.declare(%{
+             max_turns: record["max_turns"],
+             token_budget: record["token_budget"],
+             deadline_ms: record["deadline_ms"]
+           }),
+         {:ok, authored} <- decode_retained_authored_bounds(record["authored_bounds"], :prompt),
+         true <-
+           Enum.all?(authored || %{}, fn
+             {:deadline_at_ms, _} -> true
+             {key, value} -> Map.get(declared, key) == value
+           end) do
+      case authored do
+        %{deadline_at_ms: ceiling} -> {:ok, Map.put(declared, :deadline_at_ms, ceiling)}
+        _ -> {:ok, declared}
+      end
+    else
+      _ -> {:error, :invalid_declared_bounds}
+    end
   end
 
   # Concept: the tool a call named, where the runtime knows it.
@@ -11426,7 +11558,11 @@ defmodule Loopex.Runtime.SessionState do
 
         :prompt ->
           with {:ok, content} <- fetch_binary(command, :content) do
-            {:ok, %{type: :prompt, command_id: command_id, content: content}}
+            normalize_authored_bounds(command, %{
+              type: :prompt,
+              command_id: command_id,
+              content: content
+            })
           else
             _other -> {:error, :invalid_command}
           end
@@ -11464,7 +11600,8 @@ defmodule Loopex.Runtime.SessionState do
         # different one, is refused rather than retargeted. Guessing here would
         # put an operator's words into a run they did not mean.
         :steer ->
-          with {:ok, run_id} <- fetch_binary(command, :run_id),
+          with :error <- fetch(command, :bounds),
+               {:ok, run_id} <- fetch_binary(command, :run_id),
                {:ok, content} <- fetch_binary(command, :content) do
             {:ok, %{type: :steer, command_id: command_id, run_id: run_id, content: content}}
           else
@@ -11473,11 +11610,133 @@ defmodule Loopex.Runtime.SessionState do
 
         :follow_up ->
           with {:ok, content} <- fetch_binary(command, :content) do
-            {:ok, %{type: :follow_up, command_id: command_id, content: content}}
+            normalize_authored_bounds(command, %{
+              type: :follow_up,
+              command_id: command_id,
+              content: content
+            })
           else
             _other -> {:error, :invalid_command}
           end
       end
+    end
+  end
+
+  defp normalize_authored_bounds(original, normalized) do
+    fields = [:type, :command_id, :content, :bounds]
+    keys = Enum.flat_map(fields, &[&1, Atom.to_string(&1)])
+
+    if Enum.all?(Map.keys(original), &(&1 in keys)) and
+         Enum.all?(fields, fn field ->
+           not (Map.has_key?(original, field) and Map.has_key?(original, Atom.to_string(field)))
+         end) do
+      case fetch(original, :bounds) do
+        :error ->
+          {:ok, normalized}
+
+        {:ok, value} ->
+          with {:ok, bounds} <- Bounds.authored(value, normalized.type),
+               do: {:ok, Map.put(normalized, :bounds, bounds)}
+      end
+    else
+      {:error, :invalid_command}
+    end
+  end
+
+  # Concept: accepted identity retains the author's exact selected keys.
+  # Technical depth: nil means omitted; an authored empty map stays empty.
+  # The current retained representation has only fixed string keys, matching
+  # Store plain data; replay reconstructs native atoms before identity checks.
+  # Refusals retain revision and digest only: arbitrary positive quantities may
+  # exceed the compact refusal ceiling. An expired refusal separately retains
+  # its bounded absolute ceiling and original admission sample.
+  defp retain_authored_bounds(record, %{type: type} = command)
+       when type in [:prompt, :follow_up] do
+    record = Map.put(record, "command_revision", 2)
+
+    if record["admission"] == "accepted",
+      do: Map.put(record, "authored_bounds", retained_authored_bounds(Map.get(command, :bounds))),
+      else: record
+  end
+
+  defp retain_authored_bounds(record, _), do: record
+
+  defp validate_authored_bounds_record(%{"command_type" => type} = record)
+       when type in ["prompt", "follow_up"] do
+    kind = if type == "prompt", do: :prompt, else: :follow_up
+
+    with true <- record["command_revision"] == 2 do
+      if record["admission"] == "accepted" do
+        with true <- Map.has_key?(record, "authored_bounds"),
+             :ok <- validate_retained_authored_bounds(record["authored_bounds"], kind),
+             true <- retained_command_digest?(record, kind) do
+          :ok
+        else
+          _ -> {:error, :invalid_authored_command_bounds}
+        end
+      else
+        if Map.has_key?(record, "authored_bounds"),
+          do: {:error, :invalid_authored_command_bounds},
+          else: :ok
+      end
+    else
+      _ -> {:error, :invalid_authored_command_bounds}
+    end
+  end
+
+  defp validate_authored_bounds_record(_), do: :ok
+
+  defp retained_authored_bounds(nil), do: nil
+
+  defp retained_authored_bounds(bounds) do
+    fields = %{
+      max_turns: "max_turns",
+      token_budget: "token_budget",
+      deadline_ms: "deadline_ms",
+      deadline_at_ms: "deadline_at_ms"
+    }
+
+    Map.new(bounds, fn {key, value} -> {Map.fetch!(fields, key), value} end)
+  end
+
+  defp validate_retained_authored_bounds(value, kind) do
+    case decode_retained_authored_bounds(value, kind) do
+      {:ok, _} -> :ok
+      _ -> :error
+    end
+  end
+
+  # Concept: current journals use one plain representation, with no atom-key fallback.
+  # Technical depth: only these four literal keys become already-defined atoms.
+  # Native command aliases belong at admission; stored quantities keep their
+  # validated integer domains, and omission remains distinct from an empty map.
+  defp decode_retained_authored_bounds(nil, _kind), do: {:ok, nil}
+
+  defp decode_retained_authored_bounds(value, kind) when is_map(value) and not is_struct(value) do
+    fields = %{
+      "max_turns" => :max_turns,
+      "token_budget" => :token_budget,
+      "deadline_ms" => :deadline_ms,
+      "deadline_at_ms" => :deadline_at_ms
+    }
+
+    if Enum.all?(Map.keys(value), &is_map_key(fields, &1)) do
+      native = Map.new(value, fn {key, quantity} -> {Map.fetch!(fields, key), quantity} end)
+      Bounds.authored(native, kind)
+    else
+      :error
+    end
+  end
+
+  defp decode_retained_authored_bounds(_, _), do: :error
+
+  defp retained_command_digest?(record, kind) do
+    with {:ok, bounds} <- decode_retained_authored_bounds(record["authored_bounds"], kind) do
+      command = %{type: kind, command_id: record["command_id"], content: record["content"]}
+      command = if is_nil(bounds), do: command, else: Map.put(command, :bounds, bounds)
+      command_digest(command) == {:ok, record["command_digest"]}
+    else
+      _ -> false
     end
   end
 
@@ -11598,7 +11857,7 @@ defmodule Loopex.Runtime.SessionState do
         is_binary(record["command_digest"]) and
         Regex.match?(~r/\A[0-9a-f]{64}\z/, record["command_digest"])
 
-    identity? and
+    identity? and validate_authored_bounds_record(record) == :ok and
       case Map.get(record, :kind) do
         "command_admitted" when admission == "accepted" and type in ["steer", "follow_up"] ->
           command = %{
@@ -11609,10 +11868,32 @@ defmodule Loopex.Runtime.SessionState do
 
           command = if type == "steer", do: Map.put(command, :run_id, run_id), else: command
 
-          closed_history_map?(record, base ++ ["run_id", "content"]) and
+          command =
+            if type == "follow_up" do
+              {:ok, authored} =
+                decode_retained_authored_bounds(record["authored_bounds"], :follow_up)
+
+              if is_nil(authored), do: command, else: Map.put(command, :bounds, authored)
+            else
+              command
+            end
+
+          validate_authored_bounds_record(record) == :ok and
+            closed_history_map?(record, base ++ ["run_id", "content"]) and
             is_binary(run_id) and record["run_id"] == run_id and
             is_binary(record["content"]) and record["content"] != "" and
             command_digest(command) == {:ok, record["command_digest"]}
+
+        "command_admitted" when admission == "rejected_deadline_elapsed" ->
+          validate_authored_bounds_record(record) == :ok and
+            closed_history_map?(record, base ++ ["admitted_at", "deadline_at_ms"]) and
+            type in ["prompt", "follow_up"] and
+            match?(
+              {:ok, _},
+              Bounds.authored(%{deadline_at_ms: record["deadline_at_ms"]}, :follow_up)
+            ) and
+            is_integer(record["admitted_at"]) and
+            record["admitted_at"] >= record["deadline_at_ms"]
 
         "command_admitted" ->
           (closed_history_map?(record, base) and
@@ -11671,9 +11952,20 @@ defmodule Loopex.Runtime.SessionState do
   def provider_attempt_tail_record?(_record, _run_id, _session_id), do: false
 
   defp command_digest(command) do
-    bytes = :erlang.term_to_binary(["loopex_command_v1", command], [:deterministic])
+    revision =
+      if command[:type] in [:prompt, :follow_up],
+        do: "loopex_command_v2",
+        else: "loopex_command_v1"
+
+    bytes = :erlang.term_to_binary([revision, command], [:deterministic])
     {:ok, :crypto.hash(:sha256, bytes) |> Base.encode16(case: :lower)}
   end
+
+  # Concept: a queued command and its promoted run share one retained identity.
+  # Technical depth: the coordinator's transient allowance uses the reducer's
+  # existing run derivation, never its distinct runtime-operation ID scheme.
+  @doc false
+  def command_run_id(session_id, command_id), do: stable_id("run", session_id, command_id)
 
   defp stable_id(namespace, session_id, command_id) do
     bytes = :erlang.term_to_binary([namespace, session_id, command_id], [:deterministic])
@@ -11739,6 +12031,7 @@ defmodule Loopex.Runtime.SessionState do
              true <- record["configuration_version"] == configuration["configuration_version"],
              true <- request.canonicalization_version == "loopex.model_request.v2",
              true <- request.model == configuration["model"],
+             true <- staged_run_deadline_agrees?(state, run_id, request.deadline),
              true <- request.sampling == SessionConfiguration.sampling(configuration),
              true <- request.tools == state.tool_selection["definitions"],
              {:ok, text} <- Instructions.render(configuration["instructions"]),
@@ -12607,7 +12900,7 @@ defmodule Loopex.Runtime.SessionState do
          %{stage: stage} = work <- Map.get(state.pending_work, run_id),
          true <- stage in ["model_pending", "turn_settled"],
          %{} = configuration <- run_configuration(state, run_id) do
-      deadline = Map.get(state.deadlines, run_id)
+      deadline = retained_run_deadline(state, run_id)
 
       cond do
         is_integer(deadline) and deadline <= episode["preparation_deadline"] and now >= deadline ->
@@ -13382,7 +13675,7 @@ defmodule Loopex.Runtime.SessionState do
     }
 
     reply = {:error, {:command_admission_too_large, dimension, candidate, observed, 65_536}}
-    build_proposal(state, command.command_id, record, [], reply)
+    build_proposal(state, command.command_id, retain_authored_bounds(record, command), [], reply)
   end
 
   defp retain_tool_result_source(state, result, record, bytes, job) do

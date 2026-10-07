@@ -24,6 +24,26 @@ defmodule Loopex.BoundsTest do
     )
   end
 
+  test "authored bounds share exact positive quantity and absolute ceiling domains" do
+    huge = Integer.pow(2, 200)
+
+    assert {:ok, %{max_turns: ^huge, token_budget: ^huge}} =
+             Bounds.authored(%{"max_turns" => huge, "token_budget" => huge}, :prompt)
+
+    assert {:ok,
+            %{deadline_ms: 18_446_744_073_709_551_615, deadline_at_ms: 9_007_199_254_740_991}} =
+             Bounds.authored(
+               %{deadline_ms: 18_446_744_073_709_551_615, deadline_at_ms: 9_007_199_254_740_991},
+               :prompt
+             )
+
+    assert {:ok, %{}} = Bounds.authored(%{}, :follow_up)
+    assert {:error, :invalid_command} = Bounds.authored(%{deadline_ms: 1}, :follow_up)
+
+    assert {:error, :invalid_command} =
+             Bounds.authored(%{"deadline_ms" => 1, deadline_ms: 1}, :prompt)
+  end
+
   test "a malformed declaration is refused rather than quietly completed" do
     # `declare/1` never substitutes for a bound it was given. The runtime supplies
     # defaults for a host that said nothing; this is what happens to a host that

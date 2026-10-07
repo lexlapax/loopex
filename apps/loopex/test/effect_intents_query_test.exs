@@ -312,6 +312,55 @@ defmodule Loopex.EffectIntentsQueryTest do
     refute_receive {:forbidden_store_call, _}, 0
   end
 
+  test "current authored admission metadata and exact preimages fence neutral history", context do
+    %{runtime: runtime, session: session, reference: reference} = context
+    authored_fixture = Fixture.start(script: [%{text: "done", calls: []}])
+    on_exit(fn -> Fixture.stop(authored_fixture) end)
+
+    {^session, attachment, {:accepted, "prompt-1"}} =
+      Fixture.run(authored_fixture, "implement", %{max_turns: 3})
+
+    await_finished(attachment, System.monotonic_time(:millisecond) + 5_000)
+    records = Fixture.records(authored_fixture, session)
+    events = Fixture.events(authored_fixture, session)
+    install_history(reference, records)
+    [admission] = Enum.filter(records, &(&1.payload.kind == "prompt_admitted_v3"))
+    authored = admission.payload["authored_bounds"]
+    assert authored["max_turns"] == 3
+    assert Enum.all?(Map.keys(authored), &is_binary/1)
+
+    native = %{
+      max_turns: authored["max_turns"],
+      token_budget: authored["token_budget"],
+      deadline_ms: authored["deadline_ms"]
+    }
+
+    assert :complete = scan_result(runtime, session)
+    assert {:ok, _} = SessionState.recover(session, records, events)
+
+    for change <- [
+          &Map.delete(&1, "command_revision"),
+          &Map.delete(&1, "authored_bounds"),
+          &Map.put(&1, "command_revision", 1),
+          &Map.put(&1, "authored_bounds", native),
+          &Map.put(&1, "authored_bounds", Map.put(authored, :max_turns, 3)),
+          &Map.put(&1, "authored_bounds", Map.put(authored, "deadline_at_ms", 0)),
+          &Map.put(&1, "authored_bounds", Map.put(authored, "unknown", 1)),
+          &Map.put(&1, "authored_bounds", Map.put(authored, "deadline_ms", nil)),
+          &Map.put(&1, "authored_bounds", Map.put(authored, "max_turns", 4)),
+          &Map.put(&1, "authored_bounds", %{}),
+          &Map.put(&1, "content", "different authored input")
+        ] do
+      changed = change_payload(records, "prompt_admitted_v3", change)
+      install_history(reference, changed)
+      assert {:error, :invalid_history} = scan_result(runtime, session)
+      assert {:error, _} = SessionState.recover(session, changed, events)
+    end
+
+    install_history(reference, records)
+    assert :complete = scan_result(runtime, session)
+  end
+
   test "ordinary coverage requires current captured admission and request shapes", context do
     %{runtime: runtime, session: session, reference: reference, records: records} = context
     events = Fixture.events(context.fixture, session)

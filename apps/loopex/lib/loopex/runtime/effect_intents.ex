@@ -366,7 +366,9 @@ defmodule Loopex.Runtime.EffectIntents do
           end
       end
 
-    if valid, do: {:ok, nil}, else: {:error, :invalid_history}
+    if valid and authored_command_current?(payload),
+      do: {:ok, nil},
+      else: {:error, :invalid_history}
   end
 
   defp command_shape?(payload) do
@@ -377,6 +379,9 @@ defmodule Loopex.Runtime.EffectIntents do
 
         {"accepted", "abort"} ->
           ~w(run_id)
+
+        {"rejected_deadline_elapsed", type} when type in ~w(prompt follow_up) ->
+          ~w(admitted_at deadline_at_ms)
 
         {"rejected_maintenance_active", type}
         when type in ~w(prompt steer follow_up configure compact interaction_answer) ->
@@ -393,6 +398,81 @@ defmodule Loopex.Runtime.EffectIntents do
     is_list(extras) and closed?(payload, [:kind | @command_keys ++ extras]) and
       identifier?(payload["command_id"]) and digest?(payload["command_digest"])
   end
+
+  # Concept: current private coverage preserves the exact authored declaration.
+  # Technical depth: this reader admits no defaults or clock-dependent verdict.
+  # Revision two binds omission independently from an empty object; accepted
+  # rows reconstruct that exact preimage. Full session replay still proves all
+  # state-dependent transitions and joins the public history.
+  defp authored_command_current?(%{"command_type" => type} = payload)
+       when type in ~w(prompt follow_up) do
+    kind = if type == "prompt", do: :prompt, else: :follow_up
+    parsed = decode_retained_authored_bounds(payload["authored_bounds"], kind)
+    grammar = match?({:ok, _}, parsed)
+
+    current =
+      payload["command_revision"] == 2 and
+        if(payload["admission"] == "accepted",
+          do: Map.has_key?(payload, "authored_bounds") and grammar,
+          else: not Map.has_key?(payload, "authored_bounds")
+        )
+
+    cond do
+      not current ->
+        false
+
+      payload["admission"] == "accepted" ->
+        {:ok, bounds} = parsed
+        command = %{type: kind, command_id: payload["command_id"], content: payload["content"]}
+        command = if is_nil(bounds), do: command, else: Map.put(command, :bounds, bounds)
+        bytes = :erlang.term_to_binary(["loopex_command_v2", command], [:deterministic])
+        expected = :crypto.hash(:sha256, bytes) |> Base.encode16(case: :lower)
+
+        payload["command_digest"] == expected and
+          (kind != :prompt or
+             Enum.all?(bounds || %{}, fn
+               {:deadline_at_ms, _} -> true
+               {field, value} -> payload[Atom.to_string(field)] == value
+             end))
+
+      payload["admission"] == "rejected_deadline_elapsed" ->
+        match?(
+          {:ok, _},
+          Bounds.authored(%{deadline_at_ms: payload["deadline_at_ms"]}, :follow_up)
+        ) and
+          is_integer(payload["admitted_at"]) and
+          payload["admitted_at"] >= payload["deadline_at_ms"]
+
+      true ->
+        true
+    end
+  end
+
+  defp authored_command_current?(_), do: true
+
+  # Concept: neutral coverage reads the same single plain journal representation.
+  # Technical depth: reject native atom aliases before reconstructing the exact
+  # command preimage using only these literal already-defined fields. Policy
+  # answers retain their independent identity and do not use this projection.
+  defp decode_retained_authored_bounds(nil, _kind), do: {:ok, nil}
+
+  defp decode_retained_authored_bounds(value, kind) when is_map(value) and not is_struct(value) do
+    fields = %{
+      "max_turns" => :max_turns,
+      "token_budget" => :token_budget,
+      "deadline_ms" => :deadline_ms,
+      "deadline_at_ms" => :deadline_at_ms
+    }
+
+    if Enum.all?(Map.keys(value), &is_map_key(fields, &1)) do
+      native = Map.new(value, fn {key, quantity} -> {Map.fetch!(fields, key), quantity} end)
+      Bounds.authored(native, kind)
+    else
+      :error
+    end
+  end
+
+  defp decode_retained_authored_bounds(_, _), do: :error
 
   # Concept: an admitted policy answer advances private coverage without
   # granting a tool decision or projecting an executor effect.
@@ -746,10 +826,18 @@ defmodule Loopex.Runtime.EffectIntents do
     end
   end
 
-  defp closed?(map, required, optional \\ []),
-    do:
-      is_map(map) and not is_struct(map) and Enum.all?(required, &Map.has_key?(map, &1)) and
-        Map.keys(map) -- (required ++ optional) == []
+  defp closed?(map, required, optional \\ []) do
+    required =
+      if is_map(map) and not is_struct(map) and map["command_type"] in ~w(prompt follow_up),
+        do:
+          required ++
+            ~w(command_revision) ++
+            if(map["admission"] == "accepted", do: ~w(authored_bounds), else: []),
+        else: required
+
+    is_map(map) and not is_struct(map) and Enum.all?(required, &Map.has_key?(map, &1)) and
+      Map.keys(map) -- (required ++ optional) == []
+  end
 
   defp identifier?(value), do: is_binary(value) and byte_size(value) in 1..256
 

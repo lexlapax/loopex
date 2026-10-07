@@ -27,6 +27,30 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+The maintainer requested a restart pause on2026-10-06. Configure Mapping is
+integrated and verified. All ten native authored-bounds files are also saved
+literally froma01f4b4c in this checkpoint, as implementation awaiting complete
+paired verification. Current148 passed ata3f78d18; its floor stopped at formatting.
+The reviewed common-layout correction passed both formatters, but corrected
+floor compilation/tests remain unrun. Keep the T11 native row open. Do not
+start provider, full fast, restore, closure or release campaigns on resume.
+
+First resume action: run the unchanged retained native wrapper
+`M7/m7-native-authored-bounds-20261006-v1.py` at the clean isolateda01f4b4c
+candidate with configure's collected1035-key registry and exact digest below,
+using fresh `M7/native-authored-bounds-20261006-v5`. Require both complete148
+populations, collect its original handle once, then update the T11 row only on
+PASS and exact source equality. The primary already contains the ten same bytes.
+Next integration verification remains blocked by the unchanged64-restores case,
+whose aggregate cutoff decision is queued after unanswered ADR0054. Preserve
+all previous failures and never substitute retry success for their outcomes.
+
+No active product VM remains. No main merge, closure, publication or paid
+campaign is authorized. Original T01–T19:80 done/93 todo/6 retired;
+added304 done/41 todo. The goal is paused solely at the maintainer's restart
+request; resume it when instructed.
+
+
 Configure original17193 is collected PASS at isolated candidate
 `15280560c380433425e0a677daef83f1f0558155`. Current and floor each passed all22
 cases, with no exclusions, skips or invalid cases, in89.185 seconds overall.

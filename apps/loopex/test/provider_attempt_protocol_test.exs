@@ -1978,6 +1978,50 @@ defmodule Loopex.ProviderAttemptProtocolTest do
            }
   end
 
+  # Concept: a retained wall ceiling cannot restore spent live-owner allowance.
+  # Technical depth: take an actual queued current-owner dispatch and its real
+  # worker, then drive Control's admission reducer with an already exhausted
+  # native monotonic cutoff while UTC is still inside the retained deadline.
+  # This refuses before durable-binding IO or a permit; afterward the untouched
+  # original serialized request proves the ordinary dispatch and cleanup path.
+  test "Control refuses an exhausted monotonic allowance even while the wall ceiling holds" do
+    fixture =
+      start(
+        script: [%{text: "ordinary original request", calls: [], hold: self()}],
+        bounds_deadline_ms: 10_000
+      )
+
+    attempt = queue_provider_permit_request(fixture, "paired allowance")
+    {:provider_dispatch, binding, authority} = attempt.control_request
+    cutoff = System.monotonic_time(:millisecond)
+    stale = Map.put(authority, :monotonic_deadline, cutoff)
+    current = attempt.control_state_before_suspend
+    assert current.sessions[attempt.session_id].journal_version == authority.journal_version
+
+    try do
+      assert System.system_time(:millisecond) < authority.deadline
+
+      assert {:reply, {:error, :deadline_elapsed}, ^current} =
+               Loopex.Runtime.Control.handle_call(
+                 {:provider_dispatch, binding, stale},
+                 {attempt.coordinator, make_ref()},
+                 current
+               )
+
+      refute Map.has_key?(current.spent_attempts, binding)
+      assert AgentLoopTestModel.dispatched(fixture.model) == []
+    after
+      resume_process(attempt.control)
+    end
+
+    assert_receive {:holding, worker}, 5_000
+    reference = Process.monitor(worker)
+    send(worker, :release)
+    assert await_event(attempt.attachment, "run.finished")["outcome"] == "completed"
+    assert_receive {:DOWN, ^reference, :process, ^worker, _}, 5_000
+    assert length(AgentLoopTestModel.dispatched(fixture.model)) == 1
+  end
+
   # Concept: the deadline instant itself is outside provider authority at the
   # actual Control send boundary, not merely in the shared Bounds helper.
   #
@@ -2102,6 +2146,71 @@ defmodule Loopex.ProviderAttemptProtocolTest do
              "source" => "estimated",
              "basis" => "remaining_allowance"
            }
+  end
+
+  test "a permitted provider receiver delayed past its paired allowance invokes no adapter while UTC remains open" do
+    fixture =
+      start(
+        script: [%{text: "must not enter"}, %{text: "must not retry"}],
+        bounds_deadline_ms: 60_000,
+        bounds_token_budget: 103
+      )
+
+    attempt =
+      queue_provider_permit_request(fixture, "spend the original paired allowance",
+        paired_remainder_ms: 1_000
+      )
+
+    deadline = committed_deadline!(attempt.request_record)
+    {:provider_dispatch, _binding, authority} = attempt.control_request
+    cutoff = authority.monotonic_deadline
+    assert is_integer(cutoff)
+    suspend_process(attempt.coordinator)
+    suspend_process(attempt.worker)
+    monitor = Process.monitor(attempt.worker)
+
+    try do
+      assert System.monotonic_time(:millisecond) < cutoff,
+             "setup consumed the paired allowance before Control sent its permit"
+
+      assert System.system_time(:millisecond) < deadline
+      resume_process(attempt.control)
+      _ = await_control_permit(attempt.control, attempt.worker, attempt.binding)
+      wait_past_monotonic_cutoff(cutoff)
+      assert System.system_time(:millisecond) < deadline
+      resume_process(attempt.worker)
+      assert_receive {:DOWN, ^monitor, :process, _, :normal}, 5_000
+      assert AgentLoopTestModel.dispatched(fixture.model) == []
+      resume_process(attempt.coordinator)
+      finished = await_event(attempt.attachment, "run.finished")
+      assert finished["outcome"] == "bound_reached"
+      assert finished["bound"] == "deadline"
+      assert finished["observed"] == deadline
+      records = Fixture.records(fixture, attempt.session_id)
+      assert [settlement] = records_of_kind(records, "model_attempt_settled_v3")
+      assert settlement["transport"] == "dispatched_or_unknown"
+      assert settlement["termination"] == "deadline"
+      assert settlement["next"] == "terminal"
+
+      assert settlement["accounting"] == %{
+               "source" => "estimated",
+               "basis" => "remaining_allowance"
+             }
+
+      assert length(records_of_kind(records, "model_attempt_opened_v1")) == 1
+    after
+      resume_process(attempt.worker)
+      resume_process(attempt.control)
+      resume_process(attempt.coordinator)
+      Process.demonitor(monitor, [:flush])
+    end
+  end
+
+  defp wait_past_monotonic_cutoff(cutoff) do
+    if System.monotonic_time(:millisecond) < cutoff do
+      Process.sleep(5)
+      wait_past_monotonic_cutoff(cutoff)
+    end
   end
 
   test "only exact pre-canary not_dispatched proof opens one retry whose accounting and stream domain stay bound to its attempt" do
@@ -4245,7 +4354,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     end
   end
 
-  defp queue_provider_permit_request(fixture, content) do
+  defp queue_provider_permit_request(fixture, content, options \\ []) do
     {:ok, %{control: control}} = Runtime.children(fixture.runtime)
     :erlang.trace(control, true, [:send, :receive])
 
@@ -4256,7 +4365,11 @@ defmodule Loopex.ProviderAttemptProtocolTest do
         self()
       )
 
-    {session_id, attachment, {:accepted, "prompt-1"}} = Fixture.run(fixture, content)
+    {session_id, attachment, {:accepted, "prompt-1"}} =
+      case Keyword.get(options, :paired_remainder_ms) do
+        nil -> Fixture.run(fixture, content)
+        remainder -> queue_run_with_paired_allowance(fixture, content, remainder)
+      end
 
     assert_receive {:record_held_before_linearization, waiter, _store, "model_attempt_opened_v1",
                     transaction},
@@ -4271,16 +4384,20 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     binding = Map.put(attempt_identity(opened), "session_id", session_id)
     coordinator = coordinator_of(fixture.runtime)
     group = control_entry(control, session_id).owner_group
+    # Read while the native process can still handle system messages. The held
+    # Store transaction keeps this attempt from dispatching before suspension.
+    control_state_before_suspend = :sys.get_state(control)
 
     suspend_process(control)
     M1RuntimeTestStore.release(waiter)
 
-    {control_message, control_request, worker} =
+    {control_message, control_request, worker, control_state_before_suspend} =
       advance_to_queued_provider_request(
         fixture.runtime,
         control,
         coordinator,
-        binding
+        binding,
+        control_state_before_suspend
       )
 
     assert coherent_attempt_binding!(control_request, binding) == binding
@@ -4297,12 +4414,42 @@ defmodule Loopex.ProviderAttemptProtocolTest do
       binding: binding,
       coordinator: coordinator,
       control: control,
+      control_state_before_suspend: control_state_before_suspend,
       owner_group: group,
       control_message: control_message,
       control_request: control_request,
       worker: worker,
       permit_reference: permit_reference
     }
+  end
+
+  # Concept: receiver delay can spend a live allowance while UTC remains open.
+  # Technical depth: pause scheduling before actual admission, install only an
+  # earlier private monotonic cutoff, then restore the original model. The real
+  # coordinator stages the request, opens the attempt and captures that cutoff
+  # before the unchanged Store/Control/worker fixture takes over.
+  defp queue_run_with_paired_allowance(fixture, content, remainder) do
+    {:ok, session} =
+      Loopex.create_session(fixture.runtime, %{"tenant" => "t"}, command_id: "create-1")
+
+    {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
+    coordinator = coordinator_of(fixture.runtime)
+    model = :sys.get_state(coordinator).model
+    :sys.replace_state(coordinator, &%{&1 | model: nil})
+    reply = Loopex.command(attachment, %{type: :prompt, command_id: "prompt-1", content: content})
+
+    :sys.replace_state(coordinator, fn state ->
+      %{
+        state
+        | model: model,
+          deadline_allowances: %{
+            state.durable.active_run_id => System.monotonic_time(:millisecond) + remainder
+          }
+      }
+    end)
+
+    send(coordinator, :advance_work)
+    {session, attachment, reply}
   end
 
   defp assert_retirement_read_failure_retains(mode) do
@@ -4457,6 +4604,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
          control,
          coordinator,
          binding,
+         snapshot,
          attempts \\ 20
        )
 
@@ -4465,6 +4613,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
          _control,
          _coordinator,
          _binding,
+         _snapshot,
          0
        ),
        do: flunk("Control never queued the exact provider-permit request")
@@ -4474,6 +4623,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
          control,
          coordinator,
          binding,
+         snapshot,
          attempts
        ) do
     # Concept: releasing Control to drain one message also releases any
@@ -4483,8 +4633,8 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     # whole mailbox makes the drain window provably empty of permit requests
     # rather than merely usually empty.
     case queued_provider_request(runtime, control, binding) do
-      {:ok, found} ->
-        found
+      {:ok, {message, request, worker}} ->
+        {message, request, worker, snapshot}
 
       :error ->
         # A queued call must exist before the coordinator is frozen, or the
@@ -4493,12 +4643,12 @@ defmodule Loopex.ProviderAttemptProtocolTest do
         suspend_process(coordinator)
 
         case queued_provider_request(runtime, control, binding) do
-          {:ok, found} ->
+          {:ok, {message, request, worker}} ->
             resume_process(coordinator)
-            found
+            {message, request, worker, snapshot}
 
           :error ->
-            drain_one_control_call(control)
+            snapshot = drain_one_control_call(control)
             resume_process(coordinator)
 
             advance_to_queued_provider_request(
@@ -4506,6 +4656,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
               control,
               coordinator,
               binding,
+              snapshot,
               attempts - 1
             )
         end
@@ -4529,8 +4680,13 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     control_message = await_queued_control_call(control)
     resume_process(control)
     await_control_call_consumed(control, control_message)
+    # Concept: capture current authority without releasing a queued provider permit.
+    # Technical depth: the caller has frozen the coordinator and scanned the
+    # mailbox. This system read finishes after the drained post_commit updates
+    # Control, then the same native suspension closes the permit gate again.
+    snapshot = :sys.get_state(control)
     suspend_process(control)
-    :ok
+    snapshot
   end
 
   defp provider_worker_in_request(runtime, request, binding) do

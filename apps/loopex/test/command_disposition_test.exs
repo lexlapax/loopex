@@ -222,6 +222,48 @@ defmodule Loopex.CommandDispositionTest do
     end)
   end
 
+  # Concept: uncertain commitment never resamples an authored admission clock.
+  # Technical depth: the real Store resolution holds the exact original bytes
+  # across the authored cutoff. Adoption retains accepted disposition and ends
+  # the unstaged run through ordinary cleanup without opening a provider attempt.
+  test "an uncertain admitted ceiling expires before staging without changing its disposition" do
+    {fixture, session, attachment} = fixture(script: [%{text: "must not dispatch"}])
+
+    command =
+      Map.put(prompt("ceiling-unknown"), :bounds, %{
+        deadline_at_ms: System.system_time(:millisecond) + 1_000
+      })
+
+    arm(fixture, "ceiling-unknown", :after_commit)
+    assert {:error, :commit_unknown} = Loopex.command(attachment, command)
+    assert_receive {:resolution_held, resolver, original}, 5_000
+    monitor = Process.monitor(resolver)
+    [admission] = Enum.filter(original.records, &(&1["command_id"] == "ceiling-unknown"))
+    assert admission["admission"] == "accepted"
+    assert admission["authored_bounds"] == %{"deadline_at_ms" => command.bounds.deadline_at_ms}
+    remaining = max(command.bounds.deadline_at_ms - System.system_time(:millisecond), 0)
+    Process.sleep(remaining)
+    send(resolver, :release)
+    terminal = finish(attachment)
+    assert_receive {:DOWN, ^monitor, :process, ^resolver, _}, 5_000
+    assert terminal["outcome"] == "bound_reached"
+    assert terminal["bound"] == "deadline"
+    assert terminal["declared_limit"] == command.bounds.deadline_at_ms
+    assert AgentLoopTestModel.dispatched(fixture.model) == []
+    assert Enum.all?(calls(fixture), &(&1.transaction == original))
+    assert {:accepted, "ceiling-unknown"} = Loopex.command(attachment, command)
+
+    assert {:ok, recovered} =
+             SessionState.recover(
+               session,
+               Fixture.records(fixture, session),
+               Fixture.events(fixture, session)
+             )
+
+    assert {:replayed, {:accepted, "ceiling-unknown"}} =
+             SessionState.propose(recovered, command, %{})
+  end
+
   test "observations retain committed admission and refusal through replay without Store calls" do
     {fixture, session, attachment} = fixture(script: [%{text: "done"}])
 

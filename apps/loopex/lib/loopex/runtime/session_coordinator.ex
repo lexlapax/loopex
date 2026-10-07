@@ -49,6 +49,8 @@ defmodule Loopex.Runtime.SessionCoordinator do
   @page_size 1_024
   @provider_result_tag :loopex_provider_result
   @provider_deadline_tag :loopex_provider_deadline_elapsed
+  @executor_result_tag :loopex_executor_result
+  @executor_deadline_tag :loopex_executor_before_dispatch_deadline
   @provider_callback_key {__MODULE__, :provider_callback}
   @provider_pending_resource_key {__MODULE__, :provider_pending_resource}
   @provider_resource_key {__MODULE__, :provider_resource}
@@ -465,6 +467,10 @@ defmodule Loopex.Runtime.SessionCoordinator do
        executor_reserves: %{},
        streams: %{},
        deadline_timers: %{},
+       # Concept: elapsed live-owner work cannot be regained by a wall rollback.
+       # Technical depth: retain paired allowances for the active and queued
+       # run; recovery derives its own remainder from each durable wall ceiling.
+       deadline_allowances: %{},
        compact_timer: nil,
        policy_timers: %{},
        # The expiry timer of each open interaction. A question that nobody
@@ -1326,11 +1332,11 @@ defmodule Loopex.Runtime.SessionCoordinator do
   defp handle_owner_info({:artifact_preparation_deadline, reference, run_id}, state) do
     case state.in_flight[reference] do
       {:artifact_preparation, ^run_id, _pid, metadata} ->
-        if System.system_time(:millisecond) < metadata.deadline do
+        if native_callback_open?(metadata.deadline, metadata.monotonic_deadline) do
           timer =
             arm_slice(
               {:artifact_preparation_deadline, reference, run_id},
-              metadata.deadline - System.system_time(:millisecond)
+              native_callback_remaining(metadata.deadline, metadata.monotonic_deadline)
             )
 
           {:noreply,
@@ -1342,10 +1348,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
         else
           state = cancel_artifact_preparation(state, run_id)
 
-          if metadata.origin == "run",
-            do: finish_at_deadline(state, run_id),
-            else:
-              retain_artifact_preparation_failure(state, run_id, :artifact_preparation_deadline)
+          artifact_preparation_expired(state, run_id, metadata)
         end
 
       _ ->
@@ -1654,7 +1657,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
       {{:artifact_preparation, run_id, _pid, metadata}, remaining} ->
         Process.cancel_timer(metadata.timer)
         result = if reason == :normal, do: Map.get(metadata, :result), else: nil
-        finish_artifact_preparation(%{state | in_flight: remaining}, run_id, result)
+        finish_artifact_preparation(%{state | in_flight: remaining}, run_id, result, metadata)
 
       {_work, remaining} ->
         {:stop, {:worker_failed, reason}, %{state | in_flight: remaining}}
@@ -2259,7 +2262,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
       # recovered owner arms this one again against the expiry the creation
       # committed rather than against a fresh duration. An instant already past
       # fires at once, which is the same answer the old owner would have given.
-      ready = rearm_recovered_interaction(ready)
+      ready = ready |> capture_recovered_deadline_allowances() |> rearm_recovered_interaction()
 
       GenServer.cast(state.control, {:owner_ready, self(), state.owner, durable})
       send(self(), :advance_work)
@@ -2777,12 +2780,21 @@ defmodule Loopex.Runtime.SessionCoordinator do
          is_map(state.durable.pending_compact) do
       commit_command_proposal(state, SessionState.propose(state.durable, command))
     else
-      {state, resolved} = resolve_command(state, command)
+      case SessionState.prepare_command(state.durable, command) do
+        {:replayed, reply} ->
+          {:reply, reply, state}
 
-      with {:ok, _declared} <- declared_bounds(resolved) do
-        propose_command(state, command, resolved)
-      else
-        {:error, reason} -> {:reply, {:error, reason}, state}
+        {:error, reason} ->
+          {:reply, {:error, reason}, state}
+
+        {:new, normalized} ->
+          {state, resolved} = resolve_command(state, normalized)
+
+          with {:ok, _declared} <- declared_bounds(resolved) do
+            propose_command(state, normalized, resolved)
+          else
+            {:error, reason} -> {:reply, {:error, reason}, state}
+          end
       end
     end
   end
@@ -3459,8 +3471,24 @@ defmodule Loopex.Runtime.SessionCoordinator do
     do: Bounds.declare(Map.take(resolved, [:max_turns, :token_budget, :deadline_ms]))
 
   defp propose_command(state, command, resolved) do
-    resolved = Map.put(resolved, :admitted_at, System.system_time(:millisecond))
-    commit_command_proposal(state, SessionState.propose(state.durable, command, resolved))
+    wall = System.system_time(:millisecond)
+    monotonic = System.monotonic_time(:millisecond)
+    resolved = Map.put(resolved, :admitted_at, wall)
+    result = SessionState.propose(state.durable, command, resolved)
+
+    state =
+      case {result, command} do
+        {{:ok, %{reply: {:accepted, _}}},
+         %{type: type, command_id: id, bounds: %{deadline_at_ms: ceiling}}}
+        when type in [:prompt, :follow_up] ->
+          key = SessionState.command_run_id(state.session_id, id)
+          retain_deadline_allowance(state, key, monotonic + max(ceiling - wall, 0))
+
+        _ ->
+          state
+      end
+
+    commit_command_proposal(state, result)
   end
 
   defp commit_command_proposal(state, result) do
@@ -3735,7 +3763,12 @@ defmodule Loopex.Runtime.SessionCoordinator do
              receipt
            ) do
       send(self(), :advance_work)
-      {:reply, proposal.reply, %{state | durable: next}}
+      state = %{state | durable: next}
+
+      state =
+        if is_binary(next.active_run_id), do: arm_deadline(state, next.active_run_id), else: state
+
+      {:reply, proposal.reply, state}
     else
       {:error, :superseded_owner} ->
         {:reply, {:error, {:superseded_after_commit, proposal.reply}}, superseded_owner(state)}
@@ -4614,10 +4647,8 @@ defmodule Loopex.Runtime.SessionCoordinator do
   end
 
   defp checkpoint_clock_check(state, run) do
-    deadline = committed_deadline(state, run)
-
     fn ->
-      if System.system_time(:millisecond) < deadline,
+      if not deadline_reached?(state, run),
         do: :ok,
         else: {:error, :run_deadline_reached}
     end
@@ -4697,7 +4728,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
     else
       durable = state.durable
       episode = durable.maintenance_episodes[durable.active_maintenance]
-      run_deadline = durable.deadlines[work.run_id]
+      run_deadline = committed_deadline(state, work.run_id)
 
       {deadline, origin} =
         cond do
@@ -4713,21 +4744,30 @@ defmodule Loopex.Runtime.SessionCoordinator do
         end
 
       check = fn ->
-        if System.system_time(:millisecond) < deadline,
+        if System.system_time(:millisecond) < deadline and not deadline_reached?(state, key),
           do: :ok,
           else:
             {:error,
-             if(origin == :run, do: :run_deadline_reached, else: :compaction_preparation_deadline)}
+             if(origin == :run or (origin != :compact and deadline_reached?(state, key)),
+               do: :run_deadline_reached,
+               else: :compaction_preparation_deadline
+             )}
       end
+
+      gate = if is_binary(key), do: Map.get(state, :native_callback_gate)
 
       task =
         Task.Supervisor.async_nolink(state.owner_workers, fn ->
           try do
-            SessionState.propose_selected_maintenance_request(
-              durable,
-              System.system_time(:millisecond),
-              check
-            )
+            result =
+              SessionState.propose_selected_maintenance_request(
+                durable,
+                System.system_time(:millisecond),
+                check
+              )
+
+            wait_for_native_callback_gate(gate, :maintenance_preparation)
+            result
           rescue
             _ -> {:error, :context_projection_invalid}
           catch
@@ -4799,6 +4839,14 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
       state.durable.active_run_id != run_id ->
         {:noreply, state}
+
+      # Concept: queued preparation cannot commit after its owning run expires.
+      # Technical depth: join proves the producer ended, not that its earlier
+      # selection still has time to stage. Check the current paired run fence
+      # before adopting any success or refusal proposal; existing provider facts
+      # and charges remain on their independent settlement paths.
+      deadline_reached?(state, run_id) ->
+        finish_at_deadline(state, run_id)
 
       System.system_time(:millisecond) >= metadata.deadline ->
         finish_maintenance_preparation_cutoff(state, run_id, metadata)
@@ -4999,8 +5047,16 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # and adapter error details never enter records, events or diagnostics.
   defp start_artifact_preparation(state, run_id, source, episode) do
     now = System.system_time(:millisecond)
+    monotonic = System.monotonic_time(:millisecond)
+    deadline = episode["deadline_ms"]
+    derived = monotonic + max(deadline - now, 0)
+    cutoff = min(derived, Map.get(state.deadline_allowances, run_id, derived))
+    gate = Map.get(state, :native_callback_gate)
 
     cond do
+      deadline_reached?(state, run_id) ->
+        finish_at_deadline(state, run_id)
+
       now >= episode["deadline_ms"] and episode["deadline_origin"] == "run" ->
         finish_at_deadline(state, run_id)
 
@@ -5021,9 +5077,15 @@ defmodule Loopex.Runtime.SessionCoordinator do
                       "media_type" => "text/plain"
                     })
 
-                  case Loopex.ArtifactStore.put(store, source.content, metadata) do
-                    {:ok, reference} -> {:ok, reference}
-                    _ -> {:error, :artifact_preparation_failed}
+                  wait_for_native_callback_gate(gate, :artifact_preparation)
+
+                  if native_callback_open?(deadline, cutoff) do
+                    case Loopex.ArtifactStore.put(store, source.content, metadata) do
+                      {:ok, reference} -> {:ok, reference}
+                      _ -> {:error, :artifact_preparation_failed}
+                    end
+                  else
+                    {:error, :artifact_preparation_failed}
                   end
 
                 _ ->
@@ -5037,12 +5099,13 @@ defmodule Loopex.Runtime.SessionCoordinator do
           end)
 
         metadata = %{
-          deadline: episode["deadline_ms"],
+          deadline: deadline,
+          monotonic_deadline: cutoff,
           origin: episode["deadline_origin"],
           timer:
             arm_slice(
               {:artifact_preparation_deadline, task.ref, run_id},
-              episode["deadline_ms"] - now
+              native_callback_remaining(deadline, cutoff)
             )
         }
 
@@ -5051,7 +5114,27 @@ defmodule Loopex.Runtime.SessionCoordinator do
     end
   end
 
-  defp finish_artifact_preparation(state, run_id, {:ok, reference}) do
+  # Concept: a worker's original allowance cannot override a tighter live run.
+  # Technical depth: later command admission may reduce the current run cutoff
+  # while retention is in flight. Result adoption checks both captures before
+  # any preparation fact; a queued success cannot outrun the tightened timer.
+  defp finish_artifact_preparation(state, run_id, {:ok, reference}, metadata) do
+    if not deadline_reached?(state, run_id) and
+         native_callback_open?(metadata.deadline, metadata.monotonic_deadline) do
+      adopt_prepared_reference(state, run_id, reference)
+    else
+      artifact_preparation_expired(state, run_id, metadata)
+    end
+  end
+
+  defp finish_artifact_preparation(state, run_id, _failed, metadata) do
+    if not deadline_reached?(state, run_id) and
+         native_callback_open?(metadata.deadline, metadata.monotonic_deadline),
+       do: retain_artifact_preparation_failure(state, run_id, :artifact_preparation_failed),
+       else: artifact_preparation_expired(state, run_id, metadata)
+  end
+
+  defp adopt_prepared_reference(state, run_id, reference) do
     now = System.system_time(:millisecond)
 
     case SessionState.propose_prepared_reference(state.durable, run_id, reference, now) do
@@ -5074,8 +5157,23 @@ defmodule Loopex.Runtime.SessionCoordinator do
     end
   end
 
-  defp finish_artifact_preparation(state, run_id, _failed),
-    do: retain_artifact_preparation_failure(state, run_id, :artifact_preparation_failed)
+  # Concept: preparation failure records keep their actual UTC observations.
+  # Technical depth: a run allowance uses the existing retained-bound witness.
+  # An independently expired preparation allowance during wall rollback is a
+  # generic preparation failure; its deadline-specific schema requires actual
+  # UTC at or beyond that deadline and must never receive an invented sample.
+  defp artifact_preparation_expired(state, run_id, metadata) do
+    if metadata.origin == "run" or deadline_reached?(state, run_id) do
+      finish_at_deadline(state, run_id)
+    else
+      cause =
+        if System.system_time(:millisecond) >= metadata.deadline,
+          do: :artifact_preparation_deadline,
+          else: :artifact_preparation_failed
+
+      retain_artifact_preparation_failure(state, run_id, cause)
+    end
+  end
 
   defp retain_artifact_preparation_failure(state, run_id, cause) do
     now = System.system_time(:millisecond)
@@ -5114,6 +5212,12 @@ defmodule Loopex.Runtime.SessionCoordinator do
   end
 
   defp stage_prepared_model_request(state, work) do
+    if deadline_reached?(state, work.run_id),
+      do: finish_at_deadline(state, work.run_id),
+      else: stage_live_model_request(state, work)
+  end
+
+  defp stage_live_model_request(state, work) do
     run_id = work.run_id
     {declared, _charged} = SessionState.accounting(state.durable, run_id)
     elements = SessionState.lineage_elements(state.durable, run_id)
@@ -5133,18 +5237,44 @@ defmodule Loopex.Runtime.SessionCoordinator do
       resources: Map.get(state.durable.run_resources, run_id)
     }
 
+    wall = System.system_time(:millisecond)
+    monotonic = System.monotonic_time(:millisecond)
+
     result =
-      with {:ok, deadline} <- run_deadline(declared),
+      with {:ok, deadline} <- run_deadline(declared, wall),
            staging = Map.put(staging, :deadline, deadline),
            {:ok, max_tokens} <- declared_max_tokens(state, run_id),
            staging = Map.put(staging, :max_tokens, max_tokens),
            :ok <- SessionState.preflight_run_history(state.durable, run_id) do
-        {:candidate, staging, stage_candidate(state, staging)}
+        captured = retain_deadline_allowance(state, run_id, monotonic + max(deadline - wall, 0))
+        {:candidate, staging, stage_candidate(state, staging), captured}
+      end
+
+    # Concept: construction cannot stage or start maintenance past a retained bound.
+    # Technical depth: required resources and excerpts may spend the allowance
+    # after its paired capture. Check after construction for every candidate
+    # disposition. Only an already-retained staged or authored absolute cutoff
+    # can supply this terminal witness; omitted first-relative bounds keep their
+    # existing staging/refusal semantics.
+    result =
+      case result do
+        {:candidate, _staging, _candidate, captured} = candidate ->
+          wait_for_native_callback_gate(Map.get(state, :native_callback_gate), :ordinary_staging)
+
+          if deadline_reached?(captured, run_id),
+            do: {:retained_staging_deadline, captured},
+            else: candidate
+
+        other ->
+          other
       end
 
     case result do
-      {:candidate, _staging, {:ok, proposal}} ->
-        with {:ok, next} <- commit_internal(state, proposal) do
+      {:retained_staging_deadline, captured} ->
+        finish_at_deadline(captured, run_id)
+
+      {:candidate, _staging, {:ok, proposal}, captured} ->
+        with {:ok, next} <- commit_internal(captured, proposal) do
           send(self(), :advance_work)
           {:noreply, adopt_run(next, run_id)}
         else
@@ -5159,7 +5289,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
       # nothing. The run is over: a retained terminal is final and the same run
       # never re-enters staging, so changing context, configuration, or policy
       # requires a newly admitted run.
-      {:candidate, staging, {:refused, refusal}} ->
+      {:candidate, staging, {:refused, refusal}, _uncommitted_capture} ->
         maybe_admit_automatic_maintenance(state, work, staging, refusal)
 
       {:deadline_unrepresentable, category} ->
@@ -5173,7 +5303,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
            ] ->
         commit_context_preparation_failure(state, run_id, cause)
 
-      {:candidate, _staging, {:error, cause}}
+      {:candidate, _staging, {:error, cause}, _uncommitted_capture}
       when cause in [
              :canonical_history_rendering_unsupported,
              :context_projection_invalid,
@@ -5184,7 +5314,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
       {:error, reason} ->
         {:stop, {:model_request_failed, reason}, state}
 
-      {:candidate, _staging, {:error, reason}} ->
+      {:candidate, _staging, {:error, reason}, _uncommitted_capture} ->
         {:stop, {:model_request_failed, reason}, state}
     end
   end
@@ -5601,7 +5731,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
     case decision do
       :continue ->
-        prepare_model_request(state, work)
+        before_deadline(state, work, &prepare_model_request/2)
 
       :completed ->
         commit_terminal(state, run_id, "completed", %{})
@@ -5624,9 +5754,8 @@ defmodule Loopex.Runtime.SessionCoordinator do
   defp reconciliation_ref(state, run_id),
     do: stable_id("reconciliation", state.session_id, run_id)
 
-  # Technical depth: a run can only reach its deadline bound after it staged a
-  # request, and staging is what commits the absolute instant, so the declared
-  # value is always the committed one here rather than a fresh checked addition.
+  # Technical depth: use the staged instant or the earlier admission ceiling;
+  # neither ending recomputes a relative duration from a later clock.
   defp declared_limit(declared, :deadline), do: committed_deadline(declared)
   defp declared_limit(declared, bound), do: Map.fetch!(declared, bound)
 
@@ -5705,6 +5834,13 @@ defmodule Loopex.Runtime.SessionCoordinator do
       # it has finished.
       next = %{next | adopted: MapSet.delete(next.adopted, run_id)}
       notify_quiesce_terminal(next, run_id)
+      # Concept: a terminal's promoted follow-up progresses independently.
+      # Technical depth: only the known committed terminal and current-owner
+      # acknowledgement above authorize this wake. The serial scheduler checks
+      # the new run's retained bounds before any work; failed or uncertain commits
+      # send nothing, and repeated wake messages grant no dispatch authority.
+      promoted = next.durable.active_run_id
+      if is_binary(promoted) and promoted != run_id, do: send(self(), :advance_work)
       {:noreply, next}
     else
       {:error, reason} -> {:stop, {:run_terminal_failed, reason}, state}
@@ -5738,28 +5874,16 @@ defmodule Loopex.Runtime.SessionCoordinator do
     end
   end
 
-  # Concept: the output allowance every request declares.
-  #
-  # Technical depth: read from the runtime's declared sampling configuration, or
-  # from the run's retained configuration. There is no fallback
-  # invented here: if neither declares a bound the request is refused rather than
-  # truncated at dispatch by a number no record names.
-  # Concept: the run's absolute deadline, fixed by its first turn.
-  #
-  # Technical depth: once committed history carries one, that value is used
-  # unchanged for every later turn. Only turn one converts the declared duration
-  # into an instant, which is why a recovering owner resumes the deadline the run
-  # actually had rather than granting it the downtime it slept through.
-  # Concept: the instant this run was actually bound by, once staging committed
-  # one.
-  #
-  # Technical depth: a run only reaches its deadline bound after a request was
-  # staged, and staging is what converts the declared duration into an absolute
-  # instant, so every reader after that point uses the committed value rather
-  # than performing a fresh checked addition against its own clock.
+  # Concept: use the earliest retained run deadline without starting a new clock.
+  # Technical depth: an authored admission ceiling already fences preparation.
+  # First staging can tighten it with the relative duration; afterward the
+  # exact staged instant is used unchanged through dispatch and recovery.
   defp committed_deadline(%{deadline: deadline}) when is_integer(deadline), do: deadline
+  defp committed_deadline(%{deadline_at_ms: deadline}) when is_integer(deadline), do: deadline
 
-  defp run_deadline(%{deadline: deadline}) when is_integer(deadline), do: {:ok, deadline}
+  defp run_deadline(declared), do: run_deadline(declared, System.system_time(:millisecond))
+
+  defp run_deadline(%{deadline: deadline}, _now) when is_integer(deadline), do: {:ok, deadline}
 
   # Concept: an absolute deadline is arithmetic that has to be checked, not
   # assumed.
@@ -5769,9 +5893,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # to stay inside that domain. Arithmetic never wraps, and a failure of either
   # is a compact durable fact rather than a giant instant staged into a request
   # or a provider call made against a deadline nothing can represent.
-  defp run_deadline(%{deadline_ms: deadline_ms}) do
-    now = System.system_time(:millisecond)
-
+  defp run_deadline(%{deadline_ms: deadline_ms} = declared, now) do
     cond do
       not (is_integer(now) and now >= 0 and now <= @uint64_max) ->
         {:deadline_unrepresentable, "clock_out_of_domain"}
@@ -5780,7 +5902,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
         {:deadline_unrepresentable, "deadline_addition_overflow"}
 
       true ->
-        {:ok, now + deadline_ms}
+        {:ok, min(now + deadline_ms, Map.get(declared, :deadline_at_ms, now + deadline_ms))}
     end
   end
 
@@ -5852,6 +5974,8 @@ defmodule Loopex.Runtime.SessionCoordinator do
   end
 
   defp before_run_deadline(state, work, dispatch) do
+    state = arm_deadline(state, work.run_id)
+
     if deadline_reached?(state, work.run_id) do
       finish_at_deadline(state, work.run_id)
     else
@@ -5875,17 +5999,24 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
   defp committed_deadline(state, run_id) do
     case SessionState.accounting(state.durable, run_id) do
-      {%{deadline: deadline}, _charged} -> deadline
-      _undeclared -> nil
+      {declared, _charged} when is_map(declared) ->
+        Map.get(declared, :deadline) || Map.get(declared, :deadline_at_ms)
+
+      _undeclared ->
+        nil
     end
   end
 
-  # A run has no deadline instant until its first request commits one, so a run
-  # that has staged nothing cannot have expired.
+  # Concept: an admitted ceiling can expire before the first request exists.
+  # Technical depth: omission leaves the ordinary relative staging rule intact;
+  # an authored ceiling and a retained staged deadline both fence preparation.
   defp deadline_reached?(state, run_id) do
     case committed_deadline(state, run_id) do
-      deadline when is_integer(deadline) -> System.system_time(:millisecond) >= deadline
-      _undeclared -> false
+      deadline when is_integer(deadline) ->
+        System.system_time(:millisecond) >= deadline or monotonic_deadline_reached?(state, run_id)
+
+      _undeclared ->
+        false
     end
   end
 
@@ -5907,17 +6038,119 @@ defmodule Loopex.Runtime.SessionCoordinator do
       )
 
   defp arm_deadline(state, run_id) do
-    state = disarm_deadline(state, run_id)
+    state = state |> disarm_deadline(run_id) |> capture_deadline_allowance(run_id)
 
     case committed_deadline(state, run_id) do
       deadline when is_integer(deadline) ->
-        remaining = deadline - System.system_time(:millisecond)
+        remaining =
+          min(
+            deadline - System.system_time(:millisecond),
+            deadline_allowance(state, run_id) - System.monotonic_time(:millisecond)
+          )
+
         timer = arm_slice({:run_deadline, run_id, deadline}, remaining)
         %{state | deadline_timers: Map.put(state.deadline_timers, run_id, timer)}
 
       _undeclared ->
         state
     end
+  end
+
+  # Concept: incidental rearming keeps the allowance workers already captured.
+  # Technical depth: default capture initializes an absent run key only. A new
+  # wall sample during an unrelated command must not shorten a cutoff already
+  # held by a permit or worker. Admission and recovery establish absolute
+  # ceilings; staging explicitly calls retain_deadline_allowance when its chosen
+  # effective request deadline may tighten the live bound. No rearm renews it.
+  defp capture_deadline_allowance(state, run_id) do
+    case Map.get(state.deadline_allowances, run_id) do
+      cutoff when is_integer(cutoff) ->
+        state
+
+      _absent ->
+        case committed_deadline(state, run_id) do
+          deadline when is_integer(deadline) ->
+            wall = System.system_time(:millisecond)
+            monotonic = System.monotonic_time(:millisecond)
+            retain_deadline_allowance(state, run_id, monotonic + max(deadline - wall, 0))
+
+          _undeclared ->
+            state
+        end
+    end
+  end
+
+  # Concept: a queued follow-up keeps the live allowance captured at admission.
+  # Technical depth: at most one active and one queued run survive pruning.
+  # An uncertain admission retains its original proposed keys until resolution;
+  # capture precedes Store work, while no dispatch can spend that tentative key.
+  defp retain_deadline_allowance(state, run_id, derived) do
+    pending_keys =
+      case state.unknown_admission do
+        %{proposal: %{next: durable}} -> deadline_allowance_keys(state, durable)
+        _ -> []
+      end
+
+    keys = deadline_allowance_keys(state, state.durable) ++ pending_keys
+    previous = Map.get(state.deadline_allowances, run_id, derived)
+    allowances = Map.take(state.deadline_allowances, keys)
+    %{state | deadline_allowances: Map.put(allowances, run_id, min(previous, derived))}
+  end
+
+  defp deadline_allowance_keys(state, durable) do
+    queued =
+      case durable.follow_up do
+        %{command_id: id} -> [SessionState.command_run_id(state.session_id, id)]
+        nil -> []
+      end
+
+    [durable.active_run_id | queued]
+  end
+
+  # Concept: recovered work spends its allowance while activation or promotion waits.
+  # Technical depth: capture both retained ceilings at owner installation using
+  # one paired sample. Prepared activation and queued promotion may only tighten
+  # these keys later; neither derives a fresh allowance after a wall rollback.
+  defp capture_recovered_deadline_allowances(state) do
+    wall = System.system_time(:millisecond)
+    monotonic = System.monotonic_time(:millisecond)
+    active = state.durable.active_run_id
+
+    queued =
+      case state.durable.follow_up do
+        %{command_id: id, authored_bounds: bounds} when is_map(bounds) ->
+          [{SessionState.command_run_id(state.session_id, id), Map.get(bounds, :deadline_at_ms)}]
+
+        _ ->
+          []
+      end
+
+    Enum.reduce([{active, committed_deadline(state, active)} | queued], state, fn
+      {run_id, deadline}, captured when is_binary(run_id) and is_integer(deadline) ->
+        retain_deadline_allowance(captured, run_id, monotonic + max(deadline - wall, 0))
+
+      _, captured ->
+        captured
+    end)
+  end
+
+  defp deadline_allowance(state, run_id), do: Map.fetch!(state.deadline_allowances, run_id)
+
+  defp monotonic_deadline_reached?(state, run_id) do
+    case Map.get(state.deadline_allowances, run_id) do
+      cutoff when is_integer(cutoff) -> System.monotonic_time(:millisecond) >= cutoff
+      nil -> false
+    end
+  end
+
+  # Concept: an exhausted allowance witnesses the retained boundary, not UTC now.
+  # Technical depth: ordinary deadline settlement already reports the exact
+  # retained deadline as observed. When the paired monotonic fence wins during
+  # rollback, reuse that bound witness; never relabel it as an actual wall sample.
+  defp deadline_observation(state, run_id) do
+    if monotonic_deadline_reached?(state, run_id),
+      do: committed_deadline(state, run_id),
+      else: System.system_time(:millisecond)
   end
 
   # Concept: a wait derived from an admitted duration is spent in slices, never
@@ -5964,7 +6197,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
     detail = %{
       bound: "deadline",
-      observed: System.system_time(:millisecond),
+      observed: deadline_observation(state, run_id),
       declared_limit: committed_deadline(declared),
       accounting_source: charged.source && Atom.to_string(charged.source)
     }
@@ -6054,8 +6287,10 @@ defmodule Loopex.Runtime.SessionCoordinator do
     request = work.request
     module = state.model.module
     options = state.model.options
+    state = capture_deadline_allowance(state, run_id)
     deadline = committed_deadline(state, run_id)
-    work_bound = {:system, deadline}
+    monotonic_deadline = deadline_allowance(state, run_id)
+    work_bound = {:monotonic, monotonic_deadline}
     cleanup_grace_ms = state.durable.cleanup_grace_ms
     {stream, progress} = model_progress_fun(state, work)
     coordinator = self()
@@ -6119,6 +6354,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
               options,
               progress,
               deadline,
+              monotonic_deadline,
               cleanup_grace_ms,
               identities
             )
@@ -6136,7 +6372,8 @@ defmodule Loopex.Runtime.SessionCoordinator do
       permit_reference: permit_reference,
       journal_version: state.durable.journal_version,
       attempt_open_version: work.attempt_open_version,
-      deadline: deadline
+      deadline: deadline,
+      monotonic_deadline: monotonic_deadline
     }
 
     state =
@@ -6212,15 +6449,21 @@ defmodule Loopex.Runtime.SessionCoordinator do
          options,
          progress,
          deadline,
+         monotonic_deadline,
          cleanup_grace_ms,
          identities
        )
-       when is_integer(deadline) and is_integer(cleanup_grace_ms) do
+       when is_integer(deadline) and is_integer(monotonic_deadline) and
+              is_integer(cleanup_grace_ms) do
     observed = System.system_time(:millisecond)
+    elapsed = System.monotonic_time(:millisecond) >= monotonic_deadline
 
-    if Bounds.deadline_reached?(observed, deadline) do
+    if Bounds.deadline_reached?(observed, deadline) or elapsed do
       _ = stop_provider_guard(guard, provider_reference, self(), cleanup_grace_ms)
-      {@provider_deadline_tag, deadline, observed}
+      # Concept: the live allowance can witness its bound during wall rollback.
+      # Technical depth: keep an exact retained-bound observation, as ordinary
+      # deadline settlement does; this is not a fabricated current UTC sample.
+      {@provider_deadline_tag, deadline, if(elapsed, do: deadline, else: observed)}
     else
       {@provider_result_tag,
        call_provider(
@@ -6637,13 +6880,44 @@ defmodule Loopex.Runtime.SessionCoordinator do
       fn ->
         invoke_model_span(module, identities, fn ->
           try do
-            invoke_model_callback(module, request, options, progress)
+            # Concept: delayed guard or telemetry work cannot extend admission.
+            # Technical depth: the callback inherits the original private work
+            # bound. Sample immediately before native port entry; an expired
+            # permitted attempt remains conservatively dispatched-or-unknown.
+            if provider_callback_bound_open?(module, request) do
+              invoke_model_callback(module, request, options, progress)
+            else
+              {:error, :provider_call_failed}
+            end
           catch
             _kind, _reason -> {:error, :provider_call_failed}
           end
         end)
       end
     )
+  end
+
+  defp provider_callback_bound_open?(module, request) do
+    allowance_open =
+      case Process.get(:loopex_provider_work_bound) do
+        {:monotonic, cutoff} when is_integer(cutoff) ->
+          System.monotonic_time(:millisecond) < cutoff
+
+        {:system, cutoff} when is_integer(cutoff) ->
+          System.system_time(:millisecond) < cutoff
+
+        _ ->
+          false
+      end
+
+    case module do
+      {:configuration_preparation, _, _, _} ->
+        allowance_open
+
+      _ ->
+        allowance_open and is_map(request) and is_integer(request.deadline) and
+          System.system_time(:millisecond) < request.deadline
+    end
   end
 
   defp invoke_model_span(
@@ -7853,7 +8127,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # session's unavailability and forbids inventing the settlement, accounting,
   # conversation, or terminal that would have followed it.
   defp admit_model_deadline(state, run_id),
-    do: admit_model_deadline(state, run_id, System.system_time(:millisecond))
+    do: admit_model_deadline(state, run_id, deadline_observation(state, run_id))
 
   defp admit_model_deadline(state, run_id, observed) do
     proposal =
@@ -8316,7 +8590,6 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
   defp prepare_effect(state, work) do
     [call | _rest] = work.pending_calls
-    {declared, _charged} = SessionState.accounting(state.durable, work.run_id)
 
     # Concept: a call is dispatched only while the run's deadline is still ahead.
     #
@@ -8331,7 +8604,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
       in_flight?(state, :policy, work.run_id) ->
         {:noreply, state}
 
-      System.system_time(:millisecond) >= committed_deadline(declared) ->
+      deadline_reached?(state, work.run_id) ->
         commit_tool_terminal(
           state,
           work,
@@ -9100,12 +9373,32 @@ defmodule Loopex.Runtime.SessionCoordinator do
     end
   end
 
-  defp retain_execute_result(state, run_id, {:ok, receipt}) when is_map(receipt) do
+  defp retain_execute_result(state, run_id, {:answered, {@executor_result_tag, {:ok, receipt}}})
+       when is_map(receipt),
+       do: retain_execute_result(state, run_id, {@executor_result_tag, {:ok, receipt}})
+
+  defp retain_execute_result(
+         state,
+         run_id,
+         {:answered, {@executor_deadline_tag, _, _, _, _} = witness}
+       ),
+       do: retain_execute_result(state, run_id, witness)
+
+  defp retain_execute_result(state, run_id, {@executor_result_tag, {:ok, receipt}})
+       when is_map(receipt) do
     case retain_executor_fact(state, run_id, receipt) do
       {:ok, next} -> {next, :cleaned}
       {:invalid, next, _reason} -> {next, :unconfirmed}
       {:error, next, _reason} -> {next, :unconfirmed}
       {:superseded, next} -> {next, :unconfirmed}
+    end
+  end
+
+  defp retain_execute_result(state, run_id, {@executor_deadline_tag, _, _, _, _} = witness) do
+    case retain_executor_predispatch_deadline(state, run_id, witness) do
+      {:ok, next} -> {next, :cleaned}
+      {:superseded, next} -> {next, :unconfirmed}
+      {:error, _} -> {close_current_tool_stream(state, run_id, :abandoned), :unconfirmed}
     end
   end
 
@@ -9741,70 +10034,131 @@ defmodule Loopex.Runtime.SessionCoordinator do
     end
   end
 
+  # Concept: the actual native callback entry spends the captured allowance.
+  # Technical depth: final fences use immutable paired cutoffs after worker and
+  # instrumentation delay. The private, absent-by-default observer gate models
+  # entry or queued-adoption delay in actor fixtures; only sys-state installation
+  # can supply it. Its handle stays in live process state or a worker closure,
+  # never in boundary data.
+  defp native_callback_open?(deadline, cutoff),
+    do:
+      System.system_time(:millisecond) < deadline and
+        System.monotonic_time(:millisecond) < cutoff
+
+  defp native_callback_remaining(deadline, cutoff),
+    do:
+      min(
+        deadline - System.system_time(:millisecond),
+        cutoff - System.monotonic_time(:millisecond)
+      )
+
+  defp wait_for_native_callback_gate(nil, _kind), do: :ok
+
+  defp wait_for_native_callback_gate(observer, kind) when is_pid(observer) do
+    reference = make_ref()
+    monitor = Process.monitor(observer)
+    send(observer, {:native_callback_waiting, kind, self(), reference})
+
+    receive do
+      {:native_callback_release, ^reference} ->
+        Process.demonitor(monitor, [:flush])
+        :ok
+
+      {:DOWN, ^monitor, :process, ^observer, _reason} ->
+        exit(:native_callback_gate_unavailable)
+    end
+  end
+
+  defp wait_for_native_callback_gate(_invalid, _kind),
+    do: exit(:native_callback_gate_invalid)
+
   defp start_executor_work(state, work) do
-    if in_flight?(state, :executor, work.run_id) do
-      {:noreply, state}
-    else
-      executor = state.executor
-      coordinator = self()
-      run_id = work.run_id
+    cond do
+      in_flight?(state, :executor, work.run_id) ->
+        {:noreply, state}
 
-      publish = fn relay, item ->
-        case Control.project_progress(
-               state.control,
-               state.session_id,
-               state.owner,
-               relay,
-               item
-             ) do
-          {:error, :superseded_owner} = error ->
-            # The callback runs in the executor worker, so Control's refusal
-            # must be reflected back into the coordinator that owns the relay.
-            # It ends only the transient executor plane; the effectful worker
-            # stays alive to produce the receipt reconciliation still needs.
-            send(coordinator, {:executor_progress_owner_lost, run_id, relay})
-            error
+      deadline_reached?(state, work.run_id) ->
+        finish_at_deadline(state, work.run_id)
 
-          other ->
-            other
+      true ->
+        executor = state.executor
+        coordinator = self()
+        run_id = work.run_id
+        deadline = committed_deadline(state, run_id)
+        cutoff = deadline_allowance(state, run_id)
+        gate = Map.get(state, :native_callback_gate)
+
+        publish = fn relay, item ->
+          case Control.project_progress(
+                 state.control,
+                 state.session_id,
+                 state.owner,
+                 relay,
+                 item
+               ) do
+            {:error, :superseded_owner} = error ->
+              # The callback runs in the executor worker, so Control's refusal
+              # must be reflected back into the coordinator that owns the relay.
+              # It ends only the transient executor plane; the effectful worker
+              # stays alive to produce the receipt reconciliation still needs.
+              send(coordinator, {:executor_progress_owner_lost, run_id, relay})
+              error
+
+            other ->
+              other
+          end
         end
-      end
 
-      {:ok, stream, progress} =
-        ExecutorStream.open(
-          state.workers,
-          progress_sink(state),
-          work.job,
-          state.durable.event_sequence,
-          publish
-        )
+        {:ok, stream, progress} =
+          ExecutorStream.open(
+            state.workers,
+            progress_sink(state),
+            work.job,
+            state.durable.event_sequence,
+            publish
+          )
 
-      # Concept: the executor call is instrumented where it is made, in the
-      # worker that makes it.
-      #
-      # Technical depth: the job already names every identity this span carries,
-      # so nothing is threaded here; the validated arguments, the grant and the
-      # receipt stay out of the metadata.
-      job = work.job
+        # Concept: the executor call is instrumented where it is made, in the
+        # worker that makes it.
+        #
+        # Technical depth: the job already names every identity this span carries,
+        # so nothing is threaded here; the validated arguments, the grant and the
+        # receipt stay out of the metadata.
+        job = work.job
 
-      identities = %{
-        session_id: Map.get(job, :session_id),
-        run_id: Map.get(job, :run_id),
-        tool_call_id: Map.get(job, :tool_call_id),
-        tool_id: Map.get(job, :tool_id),
-        operation_id: Map.get(job, :operation_id),
-        attempt: Map.get(job, :attempt)
-      }
+        identities = %{
+          session_id: Map.get(job, :session_id),
+          run_id: Map.get(job, :run_id),
+          tool_call_id: Map.get(job, :tool_call_id),
+          tool_id: Map.get(job, :tool_id),
+          operation_id: Map.get(job, :operation_id),
+          attempt: Map.get(job, :attempt)
+        }
 
-      task =
-        Task.Supervisor.async_nolink(state.workers, fn ->
-          Instrumentation.span([:executor, :execute], identities, fn ->
-            executor.module.execute(executor.reference, job, work.grant, [], progress)
+        task =
+          Task.Supervisor.async_nolink(state.workers, fn ->
+            Instrumentation.span(
+              [:executor, :execute],
+              identities,
+              fn ->
+                wait_for_native_callback_gate(gate, :executor)
+
+                if native_callback_open?(deadline, cutoff) do
+                  {@executor_result_tag,
+                   executor.module.execute(executor.reference, job, work.grant, [], progress)}
+                else
+                  {@executor_deadline_tag, job.operation_id, job.attempt, deadline, cutoff}
+                end
+              end,
+              fn
+                {@executor_result_tag, result} -> Instrumentation.outcome(result)
+                _ -> :error
+              end
+            )
           end)
-        end)
 
-      state = %{state | streams: Map.put(state.streams, {:executor, work.run_id}, stream)}
-      {:noreply, put_in_flight(state, task.ref, {:executor, work.run_id, task.pid})}
+        state = %{state | streams: Map.put(state.streams, {:executor, work.run_id}, stream)}
+        {:noreply, put_in_flight(state, task.ref, {:executor, work.run_id, task.pid})}
     end
   end
 
@@ -9981,7 +10335,27 @@ defmodule Loopex.Runtime.SessionCoordinator do
   defp accept_model_result(state, run_id, _unwrapped),
     do: settle_model_attempt(state, run_id, :dispatched_or_unknown)
 
-  defp accept_executor_result(state, run_id, {:ok, receipt}) when is_map(receipt) do
+  defp accept_executor_result(state, run_id, {@executor_result_tag, result}),
+    do: accept_executor_reply(state, run_id, result)
+
+  defp accept_executor_result(state, run_id, {@executor_deadline_tag, _, _, _, _} = witness) do
+    case retain_executor_predispatch_deadline(state, run_id, witness) do
+      {:ok, next} ->
+        send(self(), :advance_work)
+        {:noreply, next}
+
+      {:superseded, next} ->
+        continue_after_owner_loss(next)
+
+      {:error, reason} ->
+        {:stop, {:executor_deadline_failed, reason}, state}
+    end
+  end
+
+  defp accept_executor_result(state, run_id, _unwrapped),
+    do: accept_executor_reply(state, run_id, {:error, :executor_result_unproved})
+
+  defp accept_executor_reply(state, run_id, {:ok, receipt}) when is_map(receipt) do
     case state.fault_to do
       pid when is_pid(pid) ->
         reference = make_ref()
@@ -10015,7 +10389,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # Neither branch decides the run. The unproven branch commits the call's own
   # terminal fact and `advance_run/2` remains the single place a run ends,
   # which is why one unknown effect ends the run whatever else was true of it.
-  defp accept_executor_result(state, run_id, result) do
+  defp accept_executor_reply(state, run_id, result) do
     state = close_current_tool_stream(state, run_id, :abandoned)
 
     if state.superseded do
@@ -10122,7 +10496,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
   end
 
   defp late_result_outcome(:model, {@provider_result_tag, {:ok, _reply}}), do: "reply"
-  defp late_result_outcome(:executor, {:ok, _receipt}), do: "reply"
+  defp late_result_outcome(:executor, {@executor_result_tag, {:ok, _receipt}}), do: "reply"
   defp late_result_outcome(_kind, _result), do: "error"
 
   defp emit_diagnostic(%{diagnostics_to: sink}, item) when is_pid(sink) do
@@ -10185,6 +10559,45 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # different: no receipt committed under that transaction, so this plane has
   # no standing to state a disposition; it discards the relay and leaves the
   # successor to reconcile the already-dispatched effect.
+  # Concept: a delayed worker that never entered the executor proves cancellation.
+  # Technical depth: only the runtime wrapper owns this witness, while adapter
+  # results occupy a separate wrapper. Bind it to the current journaled job and
+  # retained cutoff before committing the existing cancelled tool terminal.
+  # Cleanup reserves use the same fact, preserving unknown-effect fencing for
+  # every result without this pre-entry proof.
+  defp retain_executor_predispatch_deadline(%{superseded: true} = state, _run_id, _witness),
+    do: {:superseded, state}
+
+  defp retain_executor_predispatch_deadline(
+         state,
+         run_id,
+         {@executor_deadline_tag, operation, attempt, deadline, cutoff}
+       ) do
+    with %{job: job, pending_calls: [call | _]} <- state.durable.pending_work[run_id],
+         true <- job.operation_id == operation and job.attempt == attempt,
+         true <- committed_deadline(state, run_id) == deadline,
+         true <- Map.get(state.deadline_allowances, run_id) == cutoff,
+         false <- native_callback_open?(deadline, cutoff),
+         {:ok, proposal} <-
+           SessionState.propose_tool_result(
+             state.durable,
+             run_id,
+             call.tool_call_id,
+             :cancelled,
+             "the run deadline passed before dispatch"
+           ) do
+      state = close_current_tool_stream(state, run_id, :abandoned)
+
+      case retain_terminal_operation_fact(state, proposal) do
+        {:ok, next} -> {:ok, next}
+        {:retained, next} -> {:superseded, next}
+        {:error, reason} -> {:error, reason}
+      end
+    else
+      _ -> {:error, :invalid_predispatch_deadline}
+    end
+  end
+
   defp retain_executor_fact(state, run_id, receipt) do
     case put_executor_fact(state, run_id, receipt) do
       {:ok, next} ->

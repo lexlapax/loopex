@@ -49,6 +49,35 @@ defmodule Loopex.Bounds do
   """
 
   @bounds [:max_turns, :token_budget, :deadline]
+
+  # Concept: authored declarations preserve omission and contain no host defaults.
+  # Technical depth: the existing accepted command-bounds codec pins the closed
+  # domains; this private native projection accepts only the fixed key vocabulary.
+  @doc false
+  def authored(value, kind) when is_map(value) and not is_struct(value) do
+    fields = %{
+      max_turns: "max_turns",
+      token_budget: "token_budget",
+      deadline_ms: "deadline_ms",
+      deadline_at_ms: "deadline_at_ms"
+    }
+
+    keys = Map.keys(value)
+
+    with true <- Enum.all?(keys, &(is_map_key(fields, &1) or &1 in Map.values(fields))),
+         wire <- Map.new(value, fn {key, item} -> {Map.get(fields, key, key), item} end),
+         true <- map_size(wire) == map_size(value),
+         {:ok, _} <- LoopexProtocol.Session.CommandBounds.encode_wire(wire, kind) do
+      {:ok,
+       Map.new(wire, fn {key, item} ->
+         {Enum.find_value(fields, fn {atom, text} -> if text == key, do: atom end), item}
+       end)}
+    else
+      _ -> {:error, :invalid_command}
+    end
+  end
+
+  def authored(_, _), do: {:error, :invalid_command}
   @sources [:reported, :estimated]
 
   @typedoc """
@@ -58,7 +87,9 @@ defmodule Loopex.Bounds do
 
   ## Technical depth
 
-  Every member is required. A runtime supplies a configured default for each, and
+  The three ordinary members are required. An authored absolute ceiling is
+  optional and limits preparation before first staging. A runtime supplies a
+  configured default for each ordinary member, and
   a host that explicitly declares a malformed one is refused at start rather than
   quietly given the default: the defaults serve a host that said nothing, never
   one that said something wrong.
@@ -66,7 +97,8 @@ defmodule Loopex.Bounds do
   @type declared :: %{
           required(:max_turns) => pos_integer(),
           required(:token_budget) => pos_integer(),
-          required(:deadline_ms) => pos_integer()
+          required(:deadline_ms) => pos_integer(),
+          optional(:deadline_at_ms) => pos_integer()
         }
 
   @typedoc """

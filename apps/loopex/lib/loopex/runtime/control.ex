@@ -3639,22 +3639,37 @@ defmodule Loopex.Runtime.Control do
 
   defp provider_worker_ready(_authority), do: {:error, :provider_worker_unavailable}
 
-  defp provider_before_deadline(%{deadline: deadline}, wall_clock)
+  defp provider_before_deadline(%{deadline: deadline} = authority, wall_clock)
        when is_integer(deadline) and is_function(wall_clock, 0) do
-    if wall_clock.() < deadline,
+    if wall_clock.() < deadline and provider_monotonic_before_deadline?(authority),
       do: :ok,
       else: {:error, :deadline_elapsed}
   end
 
   defp provider_before_deadline(_authority, _wall_clock), do: {:error, :deadline_elapsed}
 
+  # Concept: the serial owner cannot regain live work through wall rollback.
+  # Technical depth: a supplied paired allowance is transient owner authority,
+  # not a replacement for the committed wall deadline. Both fences must hold;
+  # callers without a paired allowance still prove the ordinary wall boundary.
+  defp provider_monotonic_before_deadline?(%{monotonic_deadline: cutoff}) when is_integer(cutoff),
+    do: System.monotonic_time(:millisecond) < cutoff
+
+  defp provider_monotonic_before_deadline?(%{monotonic_deadline: _}), do: false
+  defp provider_monotonic_before_deadline?(_), do: true
+
   # Technical depth: callers allocate the message and the state they will
   # publish before entering this helper. Its only successful-path actions are
   # the final clock sample, comparison, and direct send; the receiver-side fence
   # covers the irreducible scheduler boundary between that sample and the send.
-  defp send_provider_permit_before_deadline(worker, permit, %{deadline: deadline}, wall_clock)
+  defp send_provider_permit_before_deadline(
+         worker,
+         permit,
+         %{deadline: deadline} = authority,
+         wall_clock
+       )
        when is_pid(worker) and is_integer(deadline) and is_function(wall_clock, 0) do
-    if wall_clock.() < deadline do
+    if wall_clock.() < deadline and provider_monotonic_before_deadline?(authority) do
       send(worker, permit)
       :ok
     else
