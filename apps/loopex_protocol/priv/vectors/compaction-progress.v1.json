@@ -1,0 +1,2862 @@
+{
+  "format": "loopex.experimental.payload-vectors/1",
+  "contract": "compaction_progress",
+  "cases": [
+    {
+      "name": "run-zero-opaque",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "decoded": {
+        "kind": "context.compaction_progress",
+        "episode_id": {
+          "opaque_hex": "00ff0a"
+        },
+        "owner": {
+          "kind": "run",
+          "id": {
+            "opaque_hex": "ff0080"
+          }
+        },
+        "stream_domain_id": {
+          "opaque_hex": "3031323334353637383961626364656630313233343536373839616263646566"
+        },
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      }
+    },
+    {
+      "name": "run-one-opaque",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "1"
+      },
+      "decoded": {
+        "kind": "context.compaction_progress",
+        "episode_id": {
+          "opaque_hex": "00ff0a"
+        },
+        "owner": {
+          "kind": "run",
+          "id": {
+            "opaque_hex": "ff0080"
+          }
+        },
+        "stream_domain_id": {
+          "opaque_hex": "3031323334353637383961626364656630313233343536373839616263646566"
+        },
+        "progress_sequence": "0",
+        "base_event_sequence": "1"
+      }
+    },
+    {
+      "name": "run-u64-max-opaque",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "18446744073709551615"
+      },
+      "decoded": {
+        "kind": "context.compaction_progress",
+        "episode_id": {
+          "opaque_hex": "00ff0a"
+        },
+        "owner": {
+          "kind": "run",
+          "id": {
+            "opaque_hex": "ff0080"
+          }
+        },
+        "stream_domain_id": {
+          "opaque_hex": "3031323334353637383961626364656630313233343536373839616263646566"
+        },
+        "progress_sequence": "0",
+        "base_event_sequence": "18446744073709551615"
+      }
+    },
+    {
+      "name": "run-single-byte-identities",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AA",
+        "owner": {
+          "kind": "run",
+          "id": "_w"
+        },
+        "stream_domain_id": "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "decoded": {
+        "kind": "context.compaction_progress",
+        "episode_id": {
+          "opaque_hex": "00"
+        },
+        "owner": {
+          "kind": "run",
+          "id": {
+            "opaque_hex": "ff"
+          }
+        },
+        "stream_domain_id": {
+          "opaque_hex": "3030303030303030303030303030303030303030303030303030303030303030"
+        },
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      }
+    },
+    {
+      "name": "run-utf8-original-bytes",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "8J-Zgg",
+        "owner": {
+          "kind": "run",
+          "id": "zrs"
+        },
+        "stream_domain_id": "ZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "decoded": {
+        "kind": "context.compaction_progress",
+        "episode_id": {
+          "opaque_hex": "f09f9982"
+        },
+        "owner": {
+          "kind": "run",
+          "id": {
+            "opaque_hex": "cebb"
+          }
+        },
+        "stream_domain_id": {
+          "opaque_hex": "6666666666666666666666666666666666666666666666666666666666666666"
+        },
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      }
+    },
+    {
+      "name": "compact-zero-opaque",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "compact",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "decoded": {
+        "kind": "context.compaction_progress",
+        "episode_id": {
+          "opaque_hex": "00ff0a"
+        },
+        "owner": {
+          "kind": "compact",
+          "id": {
+            "opaque_hex": "ff0080"
+          }
+        },
+        "stream_domain_id": {
+          "opaque_hex": "3031323334353637383961626364656630313233343536373839616263646566"
+        },
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      }
+    },
+    {
+      "name": "compact-one-opaque",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "compact",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "1"
+      },
+      "decoded": {
+        "kind": "context.compaction_progress",
+        "episode_id": {
+          "opaque_hex": "00ff0a"
+        },
+        "owner": {
+          "kind": "compact",
+          "id": {
+            "opaque_hex": "ff0080"
+          }
+        },
+        "stream_domain_id": {
+          "opaque_hex": "3031323334353637383961626364656630313233343536373839616263646566"
+        },
+        "progress_sequence": "0",
+        "base_event_sequence": "1"
+      }
+    },
+    {
+      "name": "compact-u64-max-opaque",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "compact",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "18446744073709551615"
+      },
+      "decoded": {
+        "kind": "context.compaction_progress",
+        "episode_id": {
+          "opaque_hex": "00ff0a"
+        },
+        "owner": {
+          "kind": "compact",
+          "id": {
+            "opaque_hex": "ff0080"
+          }
+        },
+        "stream_domain_id": {
+          "opaque_hex": "3031323334353637383961626364656630313233343536373839616263646566"
+        },
+        "progress_sequence": "0",
+        "base_event_sequence": "18446744073709551615"
+      }
+    },
+    {
+      "name": "compact-single-byte-identities",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AA",
+        "owner": {
+          "kind": "compact",
+          "id": "_w"
+        },
+        "stream_domain_id": "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "decoded": {
+        "kind": "context.compaction_progress",
+        "episode_id": {
+          "opaque_hex": "00"
+        },
+        "owner": {
+          "kind": "compact",
+          "id": {
+            "opaque_hex": "ff"
+          }
+        },
+        "stream_domain_id": {
+          "opaque_hex": "3030303030303030303030303030303030303030303030303030303030303030"
+        },
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      }
+    },
+    {
+      "name": "compact-utf8-original-bytes",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "8J-Zgg",
+        "owner": {
+          "kind": "compact",
+          "id": "zrs"
+        },
+        "stream_domain_id": "ZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "decoded": {
+        "kind": "context.compaction_progress",
+        "episode_id": {
+          "opaque_hex": "f09f9982"
+        },
+        "owner": {
+          "kind": "compact",
+          "id": {
+            "opaque_hex": "cebb"
+          }
+        },
+        "stream_domain_id": {
+          "opaque_hex": "6666666666666666666666666666666666666666666666666666666666666666"
+        },
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      }
+    },
+    {
+      "name": "payload-wrong-shape-0",
+      "input": null,
+      "error": "refuse"
+    },
+    {
+      "name": "payload-wrong-shape-1",
+      "input": [],
+      "error": "refuse"
+    },
+    {
+      "name": "payload-wrong-shape-2",
+      "input": {},
+      "error": "refuse"
+    },
+    {
+      "name": "payload-wrong-shape-3",
+      "input": "payload",
+      "error": "refuse"
+    },
+    {
+      "name": "payload-wrong-shape-4",
+      "input": 0,
+      "error": "refuse"
+    },
+    {
+      "name": "payload-wrong-shape-5",
+      "input": false,
+      "error": "refuse"
+    },
+    {
+      "name": "missing-kind",
+      "input": {
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "null-kind",
+      "input": {
+        "kind": null,
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "wrong-type-kind-0",
+      "input": {
+        "kind": false,
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "wrong-type-kind-1",
+      "input": {
+        "kind": 0,
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "wrong-type-kind-2",
+      "input": {
+        "kind": 1,
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "wrong-type-kind-3",
+      "input": {
+        "kind": [],
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "wrong-type-kind-4",
+      "input": {
+        "kind": {},
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "missing-episode_id",
+      "input": {
+        "kind": "context.compaction_progress",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "null-episode_id",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": null,
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "wrong-type-episode_id-0",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": false,
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "wrong-type-episode_id-1",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": 0,
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "wrong-type-episode_id-2",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": 1,
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "wrong-type-episode_id-3",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": [],
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "wrong-type-episode_id-4",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": {},
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "missing-owner",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "null-owner",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": null,
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "wrong-type-owner-0",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": false,
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "wrong-type-owner-1",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": 0,
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "wrong-type-owner-2",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": 1,
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "wrong-type-owner-3",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": [],
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "wrong-type-owner-4",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {},
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "missing-stream_domain_id",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "null-stream_domain_id",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": null,
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "wrong-type-stream_domain_id-0",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": false,
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "wrong-type-stream_domain_id-1",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": 0,
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "wrong-type-stream_domain_id-2",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": 1,
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "wrong-type-stream_domain_id-3",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": [],
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "wrong-type-stream_domain_id-4",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": {},
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "missing-progress_sequence",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "null-progress_sequence",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": null,
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "wrong-type-progress_sequence-0",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": false,
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "wrong-type-progress_sequence-1",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": 0,
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "wrong-type-progress_sequence-2",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": 1,
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "wrong-type-progress_sequence-3",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": [],
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "wrong-type-progress_sequence-4",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": {},
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "missing-base_event_sequence",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "null-base_event_sequence",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": null
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "wrong-type-base_event_sequence-0",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": false
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "wrong-type-base_event_sequence-1",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": 0
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "wrong-type-base_event_sequence-2",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": 1
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "wrong-type-base_event_sequence-3",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "wrong-type-base_event_sequence-4",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": {}
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "private-or-extra-summary",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0",
+        "summary": "PRIVATE_CANARY"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "private-or-extra-input",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0",
+        "input": "PRIVATE_CANARY"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "private-or-extra-phase",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0",
+        "phase": "PRIVATE_CANARY"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "private-or-extra-source_ranges",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0",
+        "source_ranges": "PRIVATE_CANARY"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "private-or-extra-digest",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0",
+        "digest": "PRIVATE_CANARY"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "private-or-extra-usage",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0",
+        "usage": "PRIVATE_CANARY"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "private-or-extra-provider_identity",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0",
+        "provider_identity": "PRIVATE_CANARY"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "private-or-extra-provider_mapping",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0",
+        "provider_mapping": "PRIVATE_CANARY"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "private-or-extra-instructions",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0",
+        "instructions": "PRIVATE_CANARY"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "private-or-extra-credentials",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0",
+        "credentials": "PRIVATE_CANARY"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "private-or-extra-permit",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0",
+        "permit": "PRIVATE_CANARY"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "private-or-extra-owner_epoch",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0",
+        "owner_epoch": "PRIVATE_CANARY"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "private-or-extra-executor_epoch",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0",
+        "executor_epoch": "PRIVATE_CANARY"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "private-or-extra-attempt",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0",
+        "attempt": "PRIVATE_CANARY"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "private-or-extra-clock",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0",
+        "clock": "PRIVATE_CANARY"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "private-or-extra-recovery",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0",
+        "recovery": "PRIVATE_CANARY"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "private-or-extra-disposition",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0",
+        "disposition": "PRIVATE_CANARY"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "private-or-extra-progress_count",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0",
+        "progress_count": "PRIVATE_CANARY"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "private-or-extra-run_id",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0",
+        "run_id": "PRIVATE_CANARY"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "private-or-extra-session_id",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0",
+        "session_id": "PRIVATE_CANARY"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "private-or-extra-__struct__",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0",
+        "__struct__": "PRIVATE_CANARY"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "private-or-extra-__proto__",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0",
+        "__proto__": "PRIVATE_CANARY"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "wrong-kind-0",
+      "input": {
+        "kind": "",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "wrong-kind-1",
+      "input": {
+        "kind": "text_delta",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "wrong-kind-2",
+      "input": {
+        "kind": "context.compaction_progress_closed",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "wrong-kind-3",
+      "input": {
+        "kind": "context.compacted",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "wrong-kind-4",
+      "input": {
+        "kind": "compaction",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "wrong-kind-5",
+      "input": {
+        "kind": "CONTEXT.COMPACTION_PROGRESS",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "nonzero-or-noncanonical-sequence-0",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "nonzero-or-noncanonical-sequence-1",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "00",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "nonzero-or-noncanonical-sequence-2",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "+0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "nonzero-or-noncanonical-sequence-3",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "-0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "nonzero-or-noncanonical-sequence-4",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "1",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "nonzero-or-noncanonical-sequence-5",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "-1",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "nonzero-or-noncanonical-sequence-6",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0.0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "nonzero-or-noncanonical-sequence-7",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": " 0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "nonzero-or-noncanonical-sequence-8",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0 ",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "nonzero-or-noncanonical-sequence-9",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "1e0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "nonzero-or-noncanonical-sequence-10",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "\uff10",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "nonzero-or-noncanonical-sequence-11",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0\n",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "noncanonical-or-overflow-base-0",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": ""
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "noncanonical-or-overflow-base-1",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "-1"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "noncanonical-or-overflow-base-2",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "+0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "noncanonical-or-overflow-base-3",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "00"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "noncanonical-or-overflow-base-4",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "01"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "noncanonical-or-overflow-base-5",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": " 0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "noncanonical-or-overflow-base-6",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0 "
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "noncanonical-or-overflow-base-7",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0.0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "noncanonical-or-overflow-base-8",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "1e0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "noncanonical-or-overflow-base-9",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "18446744073709551616"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "noncanonical-or-overflow-base-10",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "999999999999999999999"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "noncanonical-or-overflow-base-11",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "\uff10"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "noncanonical-or-overflow-base-12",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0\n"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "invalid-identity-episode_id-0",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "invalid-identity-episode_id-1",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "_w=",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "invalid-identity-episode_id-2",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "_x",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "invalid-identity-episode_id-3",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "_y",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "invalid-identity-episode_id-4",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "/w",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "invalid-identity-episode_id-5",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "+w",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "invalid-identity-episode_id-6",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K=",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "invalid-identity-episode_id-7",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K\n",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "invalid-identity-episode_id-8",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K ",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "invalid-identity-episode_id-9",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K\u0000",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "invalid-identity-episode_id-10",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "\u03bb",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "invalid-identity-episode_id-11",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "\ud83d\ude42",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "invalid-identity-episode_id-12",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "a",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "invalid-identity-owner.id-0",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": ""
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "invalid-identity-owner.id-1",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_w="
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "invalid-identity-owner.id-2",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_x"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "invalid-identity-owner.id-3",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_y"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "invalid-identity-owner.id-4",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "/w"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "invalid-identity-owner.id-5",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "+w"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "invalid-identity-owner.id-6",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "AP8K="
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "invalid-identity-owner.id-7",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "AP8K\n"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "invalid-identity-owner.id-8",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "AP8K "
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "invalid-identity-owner.id-9",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "AP8K\u0000"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "invalid-identity-owner.id-10",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "\u03bb"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "invalid-identity-owner.id-11",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "\ud83d\ude42"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "invalid-identity-owner.id-12",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "a"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "invalid-owner-0",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": null,
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "invalid-owner-1",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": [],
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "invalid-owner-2",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {},
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "invalid-owner-3",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": "run",
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "invalid-owner-4",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": 0,
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "invalid-owner-5",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": false,
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "invalid-owner-6",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "invalid-owner-7",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "invalid-owner-8",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": null
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "invalid-owner-9",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": 0
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "invalid-owner-10",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": false
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "invalid-owner-11",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": []
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "invalid-owner-12",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": {}
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "invalid-owner-13",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": null,
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "invalid-owner-14",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": 0,
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "invalid-owner-15",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": false,
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "invalid-owner-16",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": [],
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "invalid-owner-17",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": {},
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "wrong-owner-kind-0",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "wrong-owner-kind-1",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "RUN",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "wrong-owner-kind-2",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "command",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "wrong-owner-kind-3",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "model_tool",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "wrong-owner-kind-4",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "policy_defer",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "wrong-owner-kind-5",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "other",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "owner-private-or-extra-run_id",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA",
+          "run_id": "PRIVATE_CANARY"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "owner-private-or-extra-command_id",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA",
+          "command_id": "PRIVATE_CANARY"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "owner-private-or-extra-owner_epoch",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA",
+          "owner_epoch": "PRIVATE_CANARY"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "owner-private-or-extra-permit",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA",
+          "permit": "PRIVATE_CANARY"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "owner-private-or-extra-__struct__",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA",
+          "__struct__": "PRIVATE_CANARY"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "owner-private-or-extra-__proto__",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA",
+          "__proto__": "PRIVATE_CANARY"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "invalid-domain-bytes-0",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "invalid-domain-bytes-1",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYQ",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "invalid-domain-bytes-2",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFh",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "invalid-domain-bytes-3",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUE",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "invalid-domain-bytes-4",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "Z2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2c",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "invalid-domain-bytes-5",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "__________________________________________8",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "invalid-domain-bytes-6",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eE",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "invalid-domain-bytes-7",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMAo",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "invalid-domain-bytes-8",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMAA",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "invalid-domain-wire-0",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "0123456789abcdef0123456789abcdef",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "invalid-domain-wire-1",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "invalid-domain-wire-2",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWx",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "invalid-domain-wire-3",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY\n",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "invalid-domain-wire-4",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZW",
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "invalid-domain-wire-5",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": 0,
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "invalid-domain-wire-6",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": false,
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "invalid-domain-wire-7",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": [],
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "invalid-domain-wire-8",
+      "input": {
+        "kind": "context.compaction_progress",
+        "episode_id": "AP8K",
+        "owner": {
+          "kind": "run",
+          "id": "_wCA"
+        },
+        "stream_domain_id": {},
+        "progress_sequence": "0",
+        "base_event_sequence": "0"
+      },
+      "error": "refuse"
+    }
+  ]
+}

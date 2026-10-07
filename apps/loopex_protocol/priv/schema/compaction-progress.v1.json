@@ -1,0 +1,40 @@
+{
+  "contract": "compaction_progress",
+  "revision": 1,
+  "activation": "standalone_payload_not_independently_served",
+  "required": [
+    "kind",
+    "episode_id",
+    "owner",
+    "stream_domain_id",
+    "progress_sequence",
+    "base_event_sequence"
+  ],
+  "additional_members": "refuse",
+  "kind": "context.compaction_progress",
+  "episode_id": {
+    "encoding": "canonical_unpadded_base64url_of_original_opaque_bytes",
+    "original_min_bytes": 1,
+    "original_max_bytes": 65536
+  },
+  "owner": "checkpoint_owner/1",
+  "stream_domain_id": {
+    "encoding": "canonical_unpadded_base64url_of_original_opaque_bytes",
+    "original_bytes": 32,
+    "original_grammar": "[0-9a-f]{32}"
+  },
+  "progress_sequence": {
+    "encoding": "canonical_decimal_string",
+    "constant": "0"
+  },
+  "base_event_sequence": {
+    "encoding": "canonical_decimal_string",
+    "minimum": "0",
+    "maximum": "18446744073709551615"
+  },
+  "envelope": "type=progress and session_id remain outside the activity payload",
+  "delivery": "single_best_effort_observation_per_positively_permitted_attempt",
+  "closure": "none",
+  "authority": "none; original coordinator and current-owner admission authenticate the binding",
+  "framing": "existing enclosing Frame limits, including output newline, remain unchanged"
+}
