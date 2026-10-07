@@ -29,8 +29,8 @@ defmodule LoopexComposition.Restore.IO do
   custody through source retirement and optional exact retained generation installation,
   and exact canonical destination proof prefixes. Private finalization uses the
   original terminal claim-release owner before returning its checked receipt. Private
-  post-commit cleanup also carries captured whole-directory absence through parent sync. Public
-  restore and the remaining accepted variants are unfinished. Validated
+  post-commit cleanup also carries captured whole-directory absence through parent sync.
+  The public original-transaction driver carries these stages in one invocation. Validated
   maps and recovered facts remain private; standalone audit operations grant no
   effect authority and do not activate a restored root. Host exclusion remains the caller's
   obligation. The caller must first validate the captured manifest against the
@@ -87,54 +87,57 @@ defmodule LoopexComposition.Restore.IO do
         monitor,
         reference,
         admitted + limits.work_ms + limits.cleanup_window_ms,
-        initial_restore_observation(operation)
+        initial_restore_observation(operation),
+        false
       )
     else
       _ -> {:error, :invalid_io_request}
     end
   end
 
-  defp wait(guardian, monitor, reference, cutoff, observation) do
+  defp wait(guardian, monitor, reference, cutoff, observation, absence_proved) do
     receive do
-      {:restore_progress, ^reference, ^guardian, progress} when not is_nil(observation) ->
+      {:restore_progress, ^reference, ^guardian, progress, proved}
+      when not is_nil(observation) and is_boolean(proved) ->
         if match?({:ok, _}, RestoreCodec.encode(:observation, progress)) and
-             progress["tx_id"] == observation["tx_id"] do
-          wait(guardian, monitor, reference, cutoff, progress)
+             progress["tx_id"] == observation["tx_id"] and
+             (not proved or progress["intent"] == "absent") do
+          wait(guardian, monitor, reference, cutoff, progress, proved)
         else
           Process.exit(guardian, :kill)
           Process.demonitor(monitor, [:flush])
-          unconfirmed_restore(:history_invalid, observation)
+          unconfirmed_restore(:history_invalid, observation, false)
         end
 
       {^reference, ^guardian, result} ->
-        await_guardian_down(guardian, monitor, result, cutoff, observation)
+        await_guardian_down(guardian, monitor, result, cutoff, observation, absence_proved)
 
       {:DOWN, ^monitor, :process, ^guardian, _reason} ->
-        unconfirmed_restore(:guardian_lost, observation)
+        unconfirmed_restore(:guardian_lost, observation, absence_proved)
     after
       wait_chunk(cutoff) ->
         if remaining(cutoff) > 0 do
-          wait(guardian, monitor, reference, cutoff, observation)
+          wait(guardian, monitor, reference, cutoff, observation, absence_proved)
         else
           Process.exit(guardian, :kill)
           Process.demonitor(monitor, [:flush])
-          unconfirmed_restore(:guardian_unjoined, observation)
+          unconfirmed_restore(:guardian_unjoined, observation, absence_proved)
         end
     end
   end
 
-  defp await_guardian_down(guardian, monitor, result, cutoff, observation) do
+  defp await_guardian_down(guardian, monitor, result, cutoff, observation, absence_proved) do
     receive do
       {:DOWN, ^monitor, :process, ^guardian, :normal} ->
         result
 
       {:DOWN, ^monitor, :process, ^guardian, _reason} ->
-        unconfirmed_restore(:guardian_lost, observation)
+        unconfirmed_restore(:guardian_lost, observation, absence_proved)
     after
       wait_chunk(cutoff) ->
         if remaining(cutoff) > 0,
-          do: await_guardian_down(guardian, monitor, result, cutoff, observation),
-          else: unconfirmed_restore(:guardian_unjoined, observation)
+          do: await_guardian_down(guardian, monitor, result, cutoff, observation, absence_proved),
+          else: unconfirmed_restore(:guardian_unjoined, observation, absence_proved)
     end
   end
 
@@ -422,6 +425,27 @@ defmodule LoopexComposition.Restore.IO do
   defp acknowledge(state, {:close, token}, :closed),
     do: %{state | open: MapSet.delete(state.open, token), closes: state.closes + 1}
 
+  # Concept: public noncommit requires a completed native absence proof.
+  # Technical depth: the private callback acknowledges only after rechecking the
+  # exact captured roots and both original intent names. Merely issuing this
+  # callback cannot clear uncertainty or survive a later intent permission.
+  defp acknowledge(
+         %{restore: %{public: true}} = state,
+         {:restore_absence_proved, prior_claim},
+         :completed
+       )
+       when is_boolean(prior_claim),
+       do: %{
+         state
+         | restore: %{
+             state.restore
+             | absence_proved: true,
+               intent: false,
+               intent_status: "absent",
+               prior_claim: prior_claim
+           }
+       }
+
   defp acknowledge(state, {:restore_claim_create, claim}, observation) do
     status =
       case observation do
@@ -537,7 +561,11 @@ defmodule LoopexComposition.Restore.IO do
     result =
       case result do
         {:unconfirmed, reason} ->
-          unconfirmed_restore(reason, restore_observation(state, "unconfirmed"))
+          unconfirmed_restore(
+            reason,
+            restore_observation(state, "unconfirmed"),
+            state.restore && state.restore.absence_proved
+          )
 
         _ ->
           result
@@ -623,12 +651,41 @@ defmodule LoopexComposition.Restore.IO do
     do: %{state | restore: %{state.restore | phase: phase}}
 
   defp observe_restore_issue(state, {:intent_may_persist, phase}),
-    do: %{state | restore: %{state.restore | phase: phase, intent: true}}
+    do: %{
+      state
+      | restore: %{
+          state.restore
+          | phase: phase,
+            intent: true,
+            intent_status: "may_exist",
+            absence_proved: false
+        }
+    }
 
   defp observe_restore_issue(state, {:restore_intent_facts, ordinal, intent}),
     do: %{
       state
-      | restore: %{state.restore | ordinal: ordinal, intent: true, intent_status: intent}
+      | restore: %{
+          state.restore
+          | ordinal: ordinal,
+            intent: true,
+            intent_status: intent,
+            absence_proved: false
+        }
+    }
+
+  defp observe_restore_issue(state, {:restore_receipt_facts, receipt}),
+    do: %{
+      state
+      | restore: %{
+          state.restore
+          | ordinal: receipt["ordinal"],
+            phase: "complete",
+            intent: true,
+            intent_status: "validated",
+            prior_claim: false,
+            absence_proved: false
+        }
     }
 
   defp observe_restore_issue(state, {:restore_observation_facts, observation}),
@@ -638,8 +695,16 @@ defmodule LoopexComposition.Restore.IO do
           state.restore
           | ordinal: observation["ordinal"],
             phase: observation["phase"],
-            intent: true,
-            intent_status: observation["intent"],
+            intent:
+              observation["intent"] != "absent" or
+                (state.restore.public and not state.restore.absence_proved),
+            intent_status:
+              if(
+                observation["intent"] == "absent" and state.restore.public and
+                  not state.restore.absence_proved,
+                do: "may_exist",
+                else: observation["intent"]
+              ),
             prior_claim: true
         }
     }
@@ -681,6 +746,8 @@ defmodule LoopexComposition.Restore.IO do
 
       observation ->
         %{
+          public: match?({:restore_driver, _, _}, operation),
+          absence_proved: false,
           tx_id: observation["tx_id"],
           ordinal: nil,
           phase: "claim",
@@ -697,18 +764,19 @@ defmodule LoopexComposition.Restore.IO do
               operation
             ),
           intent:
-            match?(
-              {kind, _, _}
-              when kind in [
-                     :restore_pending_intake,
-                     :restore_retained_claim_handoff,
-                     :restore_retained_source_retirement,
-                     :restore_retained_generation_install,
-                     :restore_retained_destination_finalization,
-                     :restore_retained_claim_cleanup
-                   ],
-              operation
-            ),
+            match?({:restore_driver, _, _}, operation) or
+              match?(
+                {kind, _, _}
+                when kind in [
+                       :restore_pending_intake,
+                       :restore_retained_claim_handoff,
+                       :restore_retained_source_retirement,
+                       :restore_retained_generation_install,
+                       :restore_retained_destination_finalization,
+                       :restore_retained_claim_cleanup
+                     ],
+                operation
+              ),
           intent_status: observation["intent"],
           prior_claim: observation["claim"] == "retained"
         }
@@ -718,6 +786,7 @@ defmodule LoopexComposition.Restore.IO do
   defp initial_restore_observation({kind, plan, _invocation})
        when kind in [
               :restore_first,
+              :restore_driver,
               :restore_pending_intake,
               :restore_retained_claim_handoff,
               :restore_retained_source_retirement,
@@ -735,7 +804,12 @@ defmodule LoopexComposition.Restore.IO do
       # Concept: present absence cannot erase original claim-cleanup uncertainty.
       # Technical depth: only this private original-tx path starts conservatively
       # retained; actual owner accounting remains separate until terminal sync/joins.
-      "claim" => if(kind == :restore_retained_claim_cleanup, do: "retained", else: "none"),
+      "claim" =>
+        case kind do
+          :restore_retained_claim_cleanup -> "retained"
+          :restore_driver -> "retained"
+          _ -> "none"
+        end,
       "reason" => "none"
     }
   end
@@ -754,7 +828,12 @@ defmodule LoopexComposition.Restore.IO do
       previous = if state.restore_progress, do: elem(state.restore_progress, 1), else: nil
 
       if observation != previous,
-        do: send(state.caller, {:restore_progress, state.reference, self(), observation})
+        do:
+          send(
+            state.caller,
+            {:restore_progress, state.reference, self(), observation,
+             state.restore.absence_proved}
+          )
 
       %{state | restore_progress: {identity, observation}}
     end
@@ -766,7 +845,11 @@ defmodule LoopexComposition.Restore.IO do
     restore = state.restore
     retained = restore.prior_claim or Enum.any?(restore.claims, &(&1.status != :foreign))
     intent = if restore.intent, do: restore.intent_status, else: "absent"
-    intent = if cleanup == "unconfirmed" and intent == "absent", do: "may_exist", else: intent
+
+    intent =
+      if cleanup == "unconfirmed" and intent == "absent" and not restore.absence_proved,
+        do: "may_exist",
+        else: intent
 
     observation = %{
       "kind" => "loopex_current_restore_observation_v1",
@@ -783,16 +866,16 @@ defmodule LoopexComposition.Restore.IO do
     observation
   end
 
-  defp unconfirmed_restore(reason, nil), do: {:unconfirmed, reason}
+  defp unconfirmed_restore(reason, nil, _absence_proved), do: {:unconfirmed, reason}
 
-  defp unconfirmed_restore(reason, observation) do
+  defp unconfirmed_restore(reason, observation, absence_proved) do
     observation =
       observation
       |> Map.put("cleanup", "unconfirmed")
       |> Map.put("reason", restore_reason(reason))
 
     observation =
-      if observation["intent"] == "absent",
+      if observation["intent"] == "absent" and not absence_proved,
         do: Map.put(observation, "intent", "may_exist"),
         else: observation
 
@@ -896,6 +979,74 @@ defmodule LoopexComposition.Restore.IO do
 
   defp execute({:restore_classification, root, plan}),
     do: lookup_operation(root, plan["tx_id"], plan)
+
+  defp execute({:restore_driver, plan, invocation}),
+    do: LoopexComposition.Restore.Workflow.restore(plan, invocation, &execute/1)
+
+  # Concept: routing uses one native administrative capture per participating root.
+  # Technical depth: lookup stays read-only. Both pure classifications consume
+  # its exact files and actual owner; no later route substitutes a fresh capture.
+  defp execute({:restore_driver_capture, root, plan, invocation}) do
+    if not valid_operation?({:restore_driver, plan, invocation}) or
+         root not in [plan["source_state_root"], plan["destination_state_root"]] or
+         (root == plan["source_state_root"] and plan["source_status"] != "available"),
+       do: throw({:io_error, :invalid_io_request})
+
+    case lookup_operation(root, plan["tx_id"], nil, :cleanup) do
+      {:ok, %{state: state, decoded_claim: claim} = capture} ->
+        classification =
+          primitive(:restore_classification_decode, fn ->
+            RestoreGuard.classify_captured(
+              root,
+              plan,
+              state.index,
+              state.files,
+              state.placements,
+              claim
+            )
+          end)
+
+        pending_admission =
+          primitive(:restore_pending_decode, fn ->
+            RestoreGuard.pending_captured(
+              root,
+              plan,
+              invocation,
+              state.index,
+              state.files,
+              state.placements,
+              claim
+            )
+          end)
+
+        retained =
+          case pending_admission do
+            {:pending, value} -> value
+            _ -> nil
+          end
+
+        case capture.result do
+          {:pending, observation} -> execute({:restore_observation_facts, observation})
+          _ -> :ok
+        end
+
+        claim_ancestors =
+          if claim, do: retained_publication_ancestors(capture.claim.directory), else: nil
+
+        lookup_recheck(root, capture.ancestors, state)
+
+        {:ok,
+         Map.merge(capture, %{
+           classification: classification,
+           retained: retained,
+           pending_admission: pending_admission,
+           claim_ancestors: claim_ancestors
+         })}
+
+      other ->
+        other
+    end
+  end
 
   defp execute({:restore_first, plan, invocation}),
     do: LoopexComposition.Restore.Workflow.execute(plan, invocation, &execute/1)
@@ -1170,6 +1321,50 @@ defmodule LoopexComposition.Restore.IO do
   defp execute({:restore_intent_facts, ordinal, intent}) do
     primitive({:restore_intent_facts, ordinal, intent}, fn -> :ok end)
     {:ok, :retained}
+  end
+
+  # Concept: physical absence is positive evidence tied to the captured original roots.
+  # Technical depth: every original native capture is rechecked; both the canonical
+  # intent and its temporary must return ENOENT. No replacement or repair follows.
+  defp execute({:restore_absence_prove, captures, plan}) do
+    roots =
+      if plan["source_status"] == "available",
+        do: [plan["source_state_root"], plan["destination_state_root"]],
+        else: [plan["destination_state_root"]]
+
+    if Enum.sort(Enum.map(captures, & &1.root)) != Enum.sort(roots),
+      do: throw({:io_error, :invalid_io_request})
+
+    ordinal = String.pad_leading(Integer.to_string(plan["prior_restore_count"] + 1), 8, "0")
+
+    Enum.each(captures, fn capture ->
+      lookup_recheck(capture.root, capture.ancestors, capture.state)
+
+      Enum.each(["intent", "intent.tmp"], fn name ->
+        path = Path.join([capture.root, ".loopex-restore", "lineage", ordinal, name])
+
+        if primitive(:restore_absence_stat, fn -> :prim_file.read_link_info(path) end) !=
+             {:error, :enoent},
+           do: throw({:io_error, :restore_intent_not_absent})
+      end)
+
+      lookup_recheck(capture.root, capture.ancestors, capture.state)
+    end)
+
+    primitive(
+      {:restore_absence_proved, Enum.any?(captures, &(not is_nil(&1.decoded_claim)))},
+      fn -> :ok end
+    )
+
+    {:ok, :proved}
+  end
+
+  defp execute({:restore_receipt_facts, receipt}) do
+    if not match?({:ok, _}, RestoreCodec.encode(:receipt, receipt)),
+      do: throw({:io_error, :invalid_io_request})
+
+    primitive({:restore_receipt_facts, receipt}, fn -> :ok end)
+    {:ok, :checked}
   end
 
   defp execute({:restore_observation_facts, observation}) do
@@ -3174,6 +3369,11 @@ defmodule LoopexComposition.Restore.IO do
 
   defp valid_operation?({:restore_lookup, root, tx_id}),
     do: valid_path?(root) and is_binary(tx_id) and Regex.match?(~r/\A[0-9a-f]{64}\z/, tx_id)
+
+  defp valid_operation?({:restore_driver, plan, invocation}),
+    do:
+      match?({:ok, _}, RestoreCodec.encode(:plan, plan)) and
+        match?({:ok, _}, RestoreCodec.encode(:invocation, invocation))
 
   defp valid_operation?({:restore_first, plan, invocation}),
     do:

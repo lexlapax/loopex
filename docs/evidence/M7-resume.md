@@ -151,9 +151,31 @@ strict retained admission and all four failing public temporary fixtures remain
 unchanged. Three stale partial-cleanup fixtures now bind the actual joined absent
 and intact claim roles with native/canonical owner checks. Their original25-case
 census, refusal, payload, no-release, cutoff and join assertions remain. Removed
-one unused migrated caller alias. Eight source/fixture paths now differ from
-base d5f89363; formatting and complete472+14 paired proof remain unrun on this
-child. No public-row closure or public restore PASS is claimed.
+one unused migrated caller alias. Eight source/fixture paths differ from base d5f89363.
+Formatter original79961 passed on this unchanged clean child,5.533 seconds,
+six original joins and37 artifacts. Collection
+`M7/public-restore-format-20261007-v3/original-collection.json`, SHA-256
+`20d33bb73de89a21f3dcfacf884c0ee2aa773b6e8782c080b5a6d42493480d23`;
+terminal `97b6357960de3ac1fd35631db8b1434c59911207349c60c903d3ca0c8a36dca7`.
+Never repoll79961.
+
+Complete public resolution original67087 is terminal and collected PASS at
+unchanged f96a7d52:472 composition cases and14 executor Codec cases passed on
+each supported pair, zero excluded/skipped/invalid,844.162 seconds. Six original
+compile/test stages joined and40 artifacts were verified; four exact-source
+version/format results were reused from collected79961. Actual timely/late IO
+witnesses and the real64-restore case passed on both pairs; final claim-release
+observations were162,000 ms current and173,190 ms floor. These are observer
+elapsed times, not a new per-restore allowance. Collection
+`M7/public-restore-admission-20261007-v2/original-collection.json`, SHA-256
+`79398427e63c015509d27ae85e95c56dd5501e09873b31e099943aaa83924f40`;
+terminal `6210df9a07d41d7db40dd5b2a8d59d4bdf8ea9df030a009d3e46b16096a0f578`.
+Wrapperv2 SHA-256 `d924c873cb2d9326c1a293a9711727dba3d55aabe8be9b166f80d9c3de5f2e7f`
+is retained with the original collection. All eight tested files are integrated
+literally; only the bounded added public-resolution row closes. Never repoll67087
+or retry unchanged f96a7d52. Original T15 item7 stays open because the complete
+helper-ledger plane remains refused. Accepted ADR0051 Concept's proof obligation
+and M7 Technical's all-plane backup requirement preserve that boundary.
 
 Preparation packet `M7/public-quiesce-preparation-20261007-v1/inventory.json`,
 SHA-256 `0f916d836e20aeaa953f587e9c4eeced3b2dae8a3366b8db781b47520a5007ce`,
@@ -175,10 +197,23 @@ The single tested file is integrated literally; only the bounded current-control
 row closes. Historical520ff308/0823aa50 attribution and production-duration
 release obligations remain open. Never repoll52710 or97856.
 
-No VM is active. Latest consumed registry1250 is in the quiesce fast output,
-SHA-256 `b4294cd33fad03441f3237c3633f3dac465ad31453d39b90e16161ab9e777c0c`.
+No VM is active. Latest consumed registry1262 is in
+`M7/public-restore-admission-20261007-v2/stage-attempt-registry.json`, SHA-256
+`195a766914b44bf04922a433d84a90166acab2c6434ac355f721537eaf05f1c9`.
 Root owns every new VM, original collection and literal rejoin. Current T01–T19
-original80 done/93 todo/6 retired; added323 done/30 todo.
+original80 done/93 todo/6 retired; added324 done/29 todo.
+
+The four-file backup/restore runbook draft in m7-backup-runbook at base65e0a09c
+passed independent source review after qualifying committed duplicate versus
+current retained cleanup requirements. Its V2 packet and patch are
+`/private/tmp/m7-backup-runbook-source-20261007-v2.json` and `.patch`, SHA-256
+`717137d8b58ea35ca5f17a0a654b4fd8c0c5f7be5c19def2fe26d1d2f9facfff` and
+`32ad38affc65c6d7bcb7663e8145b6623f85c4214a84d84dcb08cb1a7e7fcdd2`.
+Its four owned operator pages await literal rejoin and the actual integrated
+repository check. Original T15 items6–8 and helper-aware/native/attended proof
+remain open; source review does not substitute for execution. Separate workspace
+proof discovery is read-only. Full-fast wrapper preparation is source-only and
+still refused until actual candidate, complete inventories and registry pins.
 
 The unexecuted full-fast wrapper remains stale. Its next concrete candidate must
 refresh the complete BASE-to-candidate non-Markdown and documentation inventories,

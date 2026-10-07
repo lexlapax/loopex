@@ -8,9 +8,8 @@ defmodule LoopexComposition.Restore.Workflow do
 
   ## Technical depth
 
-  This development path sequences existing physical audits, streaming copy and
-  canonical ADR 0051 publication inside one Restore.IO worker. It has no public
-  restore entry point. It classifies exact committed duplicates before fresh
+  The host restore entrypoint sequences physical audits, streaming copy and
+  canonical ADR 0051 publication inside one Restore.IO worker. It classifies exact committed duplicates before fresh
   work and validates and appends complete prior lineage. Original-tx
   continuation through source retirement reuses retained claim custody and exact
   native records. A private continuation installs exact retained generation prefixes
@@ -197,7 +196,7 @@ defmodule LoopexComposition.Restore.Workflow do
   # Concept: continue the original transaction only through checked source retirement.
   # Technical depth: handoff, equal-stage sync and retirement stay in the same IO
   # worker and original permits/cutoffs. No candidate, receipt or release follows.
-  # Installed-candidate/committed cuts remain explicitly unfinished development.
+  # Installed-candidate/proof cuts belong to the following private stage.
   @doc false
   def retained_source_retirement(plan, invocation, io) do
     retained = retained_retire!(plan, invocation, io)
@@ -233,28 +232,7 @@ defmodule LoopexComposition.Restore.Workflow do
   @doc false
   def retained_generation_install(plan, invocation, io) do
     retained = retained_retire!(plan, invocation, io, :generations)
-    destination = plan["destination_state_root"]
-    phase(io, "destination_generations")
-
-    Enum.each(retained.compiled.ledgers, fn ledger ->
-      value!(io.({:restore_generation_step, ledger.relative}))
-      retained_generation_fences!(plan, invocation, retained, io)
-      path = Path.join([destination, ledger.relative, "generation"])
-
-      value!(
-        io.(
-          {:restore_generation_install, path, ledger.candidate, ledger.mode, ledger.original,
-           plan["prior_restore_count"] + 1}
-        )
-      )
-
-      retained_generation_fences!(plan, invocation, retained, io)
-    end)
-
-    retained_generation_fences!(plan, invocation, retained, io)
-    activation = value!(io.({:manifest, destination, invocation["max_total_file_bytes"]}))
-    ensure!(activation == retained.compiled.activation, "inventory_mismatch")
-    retained_generation_fences!(plan, invocation, retained, io)
+    activation = retained_generations_from!(retained, plan, invocation, io)
 
     {:ok,
      %{
@@ -278,6 +256,33 @@ defmodule LoopexComposition.Restore.Workflow do
 
     {:stopped, _} ->
       {:error, "inventory_unavailable"}
+  end
+
+  defp retained_generations_from!(retained, plan, invocation, io) do
+    destination = plan["destination_state_root"]
+    phase(io, "destination_generations")
+
+    Enum.each(retained.compiled.ledgers, fn ledger ->
+      value!(io.({:restore_generation_step, ledger.relative}))
+      retained_generation_fences!(plan, invocation, retained, io)
+      path = Path.join([destination, ledger.relative, "generation"])
+
+      value!(
+        io.(
+          {:restore_generation_install, path, ledger.candidate, ledger.mode, ledger.original,
+           plan["prior_restore_count"] + 1}
+        )
+      )
+
+      retained_generation_fences!(plan, invocation, retained, io)
+    end)
+
+    retained_generation_fences!(plan, invocation, retained, io)
+    activation = value!(io.({:manifest, destination, invocation["max_total_file_bytes"]}))
+    ensure!(activation == retained.compiled.activation, "inventory_mismatch")
+    retained_generation_fences!(plan, invocation, retained, io)
+
+    activation
   end
 
   # Concept: complete the original installed transaction before returning its receipt.
@@ -305,6 +310,22 @@ defmodule LoopexComposition.Restore.Workflow do
     end
 
     retained = retained_handoff!(plan, invocation, io, :finalization)
+    retained_finalize_from!(retained, plan, invocation, io)
+  catch
+    {:restore_duplicate, receipt} ->
+      {:ok, %{restore_result: {:committed, receipt}, release_claims: []}}
+
+    {:restore_refusal, code} ->
+      {:ok, %{restore_result: {:commit_unknown, code}, release_claims: []}}
+
+    {:io_error, _} ->
+      {:ok, %{restore_result: {:commit_unknown, "inventory_unavailable"}, release_claims: []}}
+
+    {:stopped, _} ->
+      {:ok, %{restore_result: {:commit_unknown, "inventory_unavailable"}, release_claims: []}}
+  end
+
+  defp retained_finalize_from!(retained, plan, invocation, io) do
     compiled = retained.compiled
     destination = plan["destination_state_root"]
     {:ok, entries} = RestoreCodec.manifest(retained.baseline, invocation["max_total_file_bytes"])
@@ -356,18 +377,6 @@ defmodule LoopexComposition.Restore.Workflow do
     # while this operation still has a captured source claim to release.
     claims = Enum.sort_by(retained.claims, &(&1.directory == claim_directory(destination)))
     {:ok, %{restore_result: {:committed, receipt}, release_claims: claims}}
-  catch
-    {:restore_duplicate, receipt} ->
-      {:ok, %{restore_result: {:committed, receipt}, release_claims: []}}
-
-    {:restore_refusal, code} ->
-      {:ok, %{restore_result: {:commit_unknown, code}, release_claims: []}}
-
-    {:io_error, _} ->
-      {:ok, %{restore_result: {:commit_unknown, "inventory_unavailable"}, release_claims: []}}
-
-    {:stopped, _} ->
-      {:ok, %{restore_result: {:commit_unknown, "inventory_unavailable"}, release_claims: []}}
   end
 
   # Concept: finish only claim cleanup for the same completely committed transaction.
@@ -375,7 +384,10 @@ defmodule LoopexComposition.Restore.Workflow do
   # exact native capture. Complete current proofs, backup and original authority
   # precede terminal obligations; absent paths never allocate replacement claims.
   @doc false
-  def retained_claim_cleanup(plan, invocation, io) do
+  def retained_claim_cleanup(plan, invocation, io),
+    do: retained_cleanup_from!(plan, invocation, io, nil)
+
+  defp retained_cleanup_from!(plan, invocation, io, captured) do
     ensure!(match?({:ok, _}, RestoreCodec.encode(:plan, plan)), "invalid_plan")
     ensure!(match?({:ok, _}, RestoreCodec.encode(:invocation, invocation)), "invalid_plan")
 
@@ -400,12 +412,13 @@ defmodule LoopexComposition.Restore.Workflow do
         else: nil
 
     captures =
-      Enum.map(Enum.sort(roots), fn root ->
-        case value!(io.({:restore_cleanup_capture, root, plan, invocation})) do
-          {:error, %{"code" => code}} -> throw({:restore_refusal, code})
-          capture -> capture
-        end
-      end)
+      captured ||
+        Enum.map(Enum.sort(roots), fn root ->
+          case value!(io.({:restore_cleanup_capture, root, plan, invocation})) do
+            {:error, %{"code" => code}} -> throw({:restore_refusal, code})
+            capture -> capture
+          end
+        end)
 
     destination_capture = Enum.find(captures, &(&1.root == destination))
 
@@ -564,7 +577,15 @@ defmodule LoopexComposition.Restore.Workflow do
   end
 
   defp retained_retire!(plan, invocation, io, admission \\ true) do
-    retained = retained_handoff!(plan, invocation, io, admission)
+    retained_retire_from!(
+      retained_handoff!(plan, invocation, io, admission),
+      plan,
+      invocation,
+      io
+    )
+  end
+
+  defp retained_retire_from!(retained, plan, invocation, io) do
     compiled = retained.compiled
     {:ok, entries} = RestoreCodec.manifest(retained.baseline, invocation["max_total_file_bytes"])
     root_admin = root_admin(plan)
@@ -704,7 +725,7 @@ defmodule LoopexComposition.Restore.Workflow do
     retained
   end
 
-  defp retained_handoff!(plan, invocation, io, retirement) do
+  defp retained_handoff!(plan, invocation, io, retirement, captured \\ nil) do
     ensure!(match?({:ok, _}, RestoreCodec.encode(:plan, plan)), "invalid_plan")
     ensure!(match?({:ok, _}, RestoreCodec.encode(:invocation, invocation)), "invalid_plan")
 
@@ -713,25 +734,27 @@ defmodule LoopexComposition.Restore.Workflow do
       "authority_unconfirmed"
     )
 
+    roots = restore_roots(plan)
+
     retained =
-      case pending_intake(plan, invocation, io) do
-        {:ok, retained} -> retained
-        {:error, code} -> throw({:restore_refusal, code})
+      if captured do
+        Enum.find(captured, &(&1.root == plan["destination_state_root"])).retained
+      else
+        case pending_intake(plan, invocation, io) do
+          {:ok, value} -> value
+          {:error, code} -> throw({:restore_refusal, code})
+        end
       end
 
     ensure!(is_binary(retained.intent), "invalid_current_history")
-
-    roots =
-      if plan["source_status"] == "available",
-        do: [plan["source_state_root"], plan["destination_state_root"]],
-        else: [plan["destination_state_root"]]
 
     source_observation =
       if plan["source_status"] == "lost",
         do: value!(io.({:lost_source_absent, plan["source_state_root"]})),
         else: nil
 
-    captures = Enum.map(Enum.sort(roots), &claim_capture!(&1, plan, invocation, io))
+    captures = captured || Enum.map(Enum.sort(roots), &claim_capture!(&1, plan, invocation, io))
+
     destination = Enum.find(captures, &(&1.root == plan["destination_state_root"]))
     ensure!(destination.retained.intent == retained.intent, "restore_conflict")
     ensure!(destination.retained.baseline == retained.baseline, "restore_conflict")
@@ -1321,8 +1344,237 @@ defmodule LoopexComposition.Restore.Workflow do
     end
   end
 
+  # Concept: one administrator completes only the admitted original transaction.
+  # Technical depth: native custody capture precedes handoff. Carried state enters
+  # retirement, generation installation and root-last finalization without
+  # another intake, guardian or work allowance.
   @doc false
-  def execute(plan, invocation, io) do
+  def restore(plan, invocation, io) do
+    Process.put(:restore_workflow_claims, [])
+    Process.put(:restore_workflow_changed, false)
+    Process.put(:restore_workflow_intent, true)
+    phase(io, "claim")
+    ensure!(plan["prior_restore_count"] < 64, "inventory_limit_exceeded")
+    destination = driver_capture!(plan["destination_state_root"], plan, invocation, io)
+
+    case destination.classification do
+      {:committed, receipt} ->
+        if invocation["prior_admin_authority"] == "none" or
+             match?({:committed, %{"view" => "historical"}}, destination.result) do
+          value!(io.({:restore_receipt_facts, receipt}))
+          {:ok, %{restore_result: {:committed, receipt}, release_claims: []}}
+        else
+          captures = driver_captures!(destination, plan, invocation, io)
+          retained_cleanup_from!(plan, invocation, io, captures)
+        end
+
+      :fresh ->
+        ensure!(invocation["prior_admin_authority"] == "none", "restore_conflict")
+        captures = driver_captures!(destination, plan, invocation, io)
+        ensure!(Enum.all?(captures, &(&1.classification == :fresh)), "restore_conflict")
+        value!(io.({:restore_absence_prove, captures, plan}))
+        Process.put(:restore_workflow_intent, false)
+        execute_first(plan, invocation, io, true, nil)
+
+      _ ->
+        if is_nil(destination.retained) do
+          case destination.pending_admission do
+            {:error, :authority_unconfirmed} ->
+              throw({:restore_refusal, "authority_unconfirmed"})
+
+            {:error, %{"code" => code}} ->
+              throw({:restore_refusal, driver_refusal(code)})
+
+            _ ->
+              throw({:restore_refusal, "invalid_current_history"})
+          end
+        end
+
+        ensure!(
+          invocation["prior_admin_authority"] in ["joined", "host_rebooted"],
+          "authority_unconfirmed"
+        )
+
+        captures = driver_captures!(destination, plan, invocation, io)
+
+        case destination.retained do
+          %{intent: nil, observation: observation} ->
+            ensure!(
+              Enum.all?(captures, &match?(%{retained: %{intent: nil}}, &1)),
+              "restore_conflict"
+            )
+
+            value!(io.({:restore_absence_prove, captures, plan}))
+            value!(io.({:restore_observation_facts, Map.put(observation, "intent", "absent")}))
+            Process.put(:restore_workflow_intent, false)
+            staged_original!(plan, invocation, captures, io)
+
+          %{intent: intent, observation: %{"phase" => "claim_release"}} when is_binary(intent) ->
+            retained_cleanup_from!(plan, invocation, io, captures)
+
+          %{intent: intent, observation: observation} when is_binary(intent) ->
+            Process.put(:restore_workflow_intent, true)
+
+            driver_supported_baseline!(
+              destination.retained.baseline,
+              invocation["max_total_file_bytes"]
+            )
+
+            mode =
+              if observation["phase"] == "destination_proofs",
+                do: :finalization,
+                else: :generations
+
+            retained = retained_handoff!(plan, invocation, io, mode, captures)
+
+            retained =
+              if mode == :finalization,
+                do: retained,
+                else: retained_retire_from!(retained, plan, invocation, io)
+
+            if mode != :finalization,
+              do: retained_generations_from!(retained, plan, invocation, io)
+
+            retained_finalize_from!(retained, plan, invocation, io)
+
+          _ ->
+            throw({:restore_refusal, "invalid_current_history"})
+        end
+    end
+  rescue
+    _error in [MatchError, KeyError, ArgumentError] -> refusal("invalid_current_history")
+  catch
+    {:restore_refusal, code} -> refusal(code)
+    {:io_error, _} -> refusal("inventory_unavailable")
+    {:lookup_error, _} -> refusal("inventory_unavailable")
+    {:stopped, _} -> refusal("inventory_unavailable")
+  end
+
+  defp driver_capture!(root, plan, invocation, io) do
+    case value!(io.({:restore_driver_capture, root, plan, invocation})) do
+      %{classification: _, result: _} = capture ->
+        case capture.result do
+          {:committed, %{"receipt" => receipt}} ->
+            value!(io.({:restore_intent_facts, receipt["ordinal"], "validated"}))
+            Process.put(:restore_workflow_intent, true)
+
+          _ ->
+            :ok
+        end
+
+        Enum.each(capture.state.files, fn {path, bytes} ->
+          if Path.basename(path) == "baseline",
+            do: driver_supported_baseline!(bytes, invocation["max_total_file_bytes"])
+        end)
+
+        capture
+
+      {:error, %{"code" => code}} ->
+        throw({:restore_refusal, driver_refusal(code)})
+
+      _ ->
+        throw({:restore_refusal, "inventory_unavailable"})
+    end
+  end
+
+  # Concept: unsupported helper state cannot receive a physical restore receipt.
+  # Technical depth: any delegation namespace, including locks and temporaries,
+  # stays fenced until the separately governed semantic audit is implemented.
+  defp driver_supported_baseline!(bytes, max_total) do
+    {:ok, entries} = RestoreCodec.manifest(bytes, max_total)
+
+    ensure!(
+      not Enum.any?(entries, fn entry ->
+        case Path.split(entry["path"]) do
+          ["delegation" | _] -> true
+          _ -> false
+        end
+      end),
+      "invalid_current_history"
+    )
+  end
+
+  defp driver_refusal("restore_history_invalid"), do: "invalid_current_history"
+  defp driver_refusal("physical_destination_changed"), do: "source_changed"
+  defp driver_refusal("administrative_path_unavailable"), do: "inventory_unavailable"
+  defp driver_refusal(code), do: code
+
+  defp driver_captures!(destination, plan, invocation, io) do
+    Enum.map(Enum.sort(restore_roots(plan)), fn root ->
+      if root == destination.root,
+        do: destination,
+        else: driver_capture!(root, plan, invocation, io)
+    end)
+  end
+
+  defp restore_roots(plan),
+    do:
+      if(plan["source_status"] == "available",
+        do: [plan["source_state_root"], plan["destination_state_root"]],
+        else: [plan["destination_state_root"]]
+      )
+
+  # Concept: an unchanged complete staging cut may make its first intent.
+  # Technical depth: every owner, original directory and full baseline is audited
+  # before nonce handoff. Native capture proves no intent or temp. Partial staging
+  # never reaches allocation or normal fresh-root publication.
+  defp staged_original!(plan, invocation, captures, io) do
+    max_total = invocation["max_total_file_bytes"]
+    baseline = value!(io.({:manifest, plan["backup_state_root"], max_total}))
+    ensure!(hash(baseline) == plan["manifest_sha256"], "inventory_mismatch")
+    driver_supported_baseline!(baseline, max_total)
+    Audit.complete(plan, baseline, max_total, io)
+
+    Enum.each(captures, fn capture ->
+      ensure!(match?(%{intent: nil}, capture.retained), "restore_conflict")
+      ensure!(value!(io.({:manifest, capture.root, max_total})) == baseline, "inventory_mismatch")
+      Audit.complete(Map.put(plan, "backup_state_root", capture.root), baseline, max_total, io)
+
+      if capture.root == plan["source_state_root"],
+        do:
+          ensure!(
+            value!(io.({:placement, capture.root})) == plan["source_state_placement"],
+            "source_changed"
+          )
+    end)
+
+    ensure!(
+      value!(io.({:manifest, plan["backup_state_root"], max_total})) == baseline,
+      "inventory_mismatch"
+    )
+
+    workspace!(plan, value!(io.({:placement, plan["workspace"]["root"]})))
+
+    source_observation =
+      if plan["source_status"] == "lost",
+        do: value!(io.({:lost_source_absent, plan["source_state_root"]})),
+        else: nil
+
+    nonce = handoff_nonce(captures)
+
+    claims =
+      Enum.map(captures, fn capture ->
+        if source_observation, do: lost_source!(plan["source_state_root"], source_observation, io)
+        value!(io.({:restore_claim_handoff, capture, plan, invocation, nonce}))
+      end)
+
+    destination = Enum.find(captures, &(&1.root == plan["destination_state_root"]))
+
+    value!(
+      io.(
+        {:restore_observation_facts,
+         Map.put(destination.retained.observation, "intent", "absent")}
+      )
+    )
+
+    Process.put(:restore_workflow_intent, false)
+    execute_first(plan, invocation, io, true, claims)
+  end
+
+  @doc false
+  def execute(plan, invocation, io), do: execute_first(plan, invocation, io, false, nil)
+
+  defp execute_first(plan, invocation, io, admitted, staged) do
     Process.put(:restore_workflow_claims, [])
     Process.put(:restore_workflow_changed, false)
     Process.put(:restore_workflow_intent, false)
@@ -1332,13 +1584,21 @@ defmodule LoopexComposition.Restore.Workflow do
     # Technical depth: the existing metadata-only phase remains observable before
     # this admission gate; every claim and physical IO operation follows the gate.
     ensure!(plan["prior_restore_count"] < 64, "inventory_limit_exceeded")
-    classify!(plan["destination_state_root"], plan, io)
 
-    if plan["source_status"] == "available",
-      do: classify!(plan["source_state_root"], plan, io)
+    unless admitted do
+      classify!(plan["destination_state_root"], plan, io)
 
-    claims = claims!(plan, io)
-    Process.put(:restore_workflow_claims, claims)
+      if plan["source_status"] == "available",
+        do: classify!(plan["source_state_root"], plan, io)
+    end
+
+    claims = if staged, do: staged, else: claims!(plan, io)
+
+    Process.put(
+      :restore_workflow_claims,
+      Enum.sort_by(claims, &(&1.directory == claim_directory(plan["destination_state_root"])))
+    )
+
     phase(io, "inventory")
     source = plan["source_state_root"]
     backup = plan["backup_state_root"]
@@ -1359,9 +1619,13 @@ defmodule LoopexComposition.Restore.Workflow do
     value!(io.({:placement, backup}))
     workspace = value!(io.({:placement, plan["workspace"]["root"]}))
     workspace!(plan, workspace)
-    ensure!(value!(io.({:directory_names, destination})) == [], "destination_not_empty")
+
+    if is_nil(staged),
+      do: ensure!(value!(io.({:directory_names, destination})) == [], "destination_not_empty")
+
     baseline = value!(io.({:manifest, backup, max_total}))
     ensure!(hash(baseline) == plan["manifest_sha256"], "inventory_mismatch")
+    if admitted, do: driver_supported_baseline!(baseline, max_total)
 
     if available,
       do: ensure!(value!(io.({:manifest, source, max_total})) == baseline, "inventory_mismatch")
@@ -1382,24 +1646,28 @@ defmodule LoopexComposition.Restore.Workflow do
     phase(io, "baseline_copy")
     Process.put(:restore_workflow_changed, true)
 
-    Enum.each(entries, fn entry ->
-      relative = entry["path"]
-      path = if relative == ".", do: destination, else: Path.join(destination, relative)
+    if is_nil(staged) do
+      Enum.each(entries, fn entry ->
+        relative = entry["path"]
+        path = if relative == ".", do: destination, else: Path.join(destination, relative)
 
-      if entry["kind"] == "directory" do
-        if relative != ".", do: value!(io.({:make_directory, path, 0o700}))
-      else
-        value!(io.({:copy_file, Path.join(backup, relative), path, entry}))
-      end
-    end)
+        if entry["kind"] == "directory" do
+          if relative != ".", do: value!(io.({:make_directory, path, 0o700}))
+        else
+          value!(io.({:copy_file, Path.join(backup, relative), path, entry}))
+        end
+      end)
 
-    entries
-    |> Enum.filter(&(&1["kind"] == "directory"))
-    |> Enum.sort_by(&byte_size(&1["path"]), :desc)
-    |> Enum.each(fn entry ->
-      path = if entry["path"] == ".", do: destination, else: Path.join(destination, entry["path"])
-      value!(io.({:set_directory_mode, path, entry["mode"]}))
-    end)
+      entries
+      |> Enum.filter(&(&1["kind"] == "directory"))
+      |> Enum.sort_by(&byte_size(&1["path"]), :desc)
+      |> Enum.each(fn entry ->
+        path =
+          if entry["path"] == ".", do: destination, else: Path.join(destination, entry["path"])
+
+        value!(io.({:set_directory_mode, path, entry["mode"]}))
+      end)
+    end
 
     ensure!(value!(io.({:manifest, destination, max_total})) == baseline, "inventory_mismatch")
 
@@ -1469,7 +1737,12 @@ defmodule LoopexComposition.Restore.Workflow do
       if available,
         do:
           publish!(destination, Path.join(ledger.directory, "source-retired"), ledger.retired, io)
+    end)
 
+    # Concept: every destination ledger retains retirement evidence before any candidate.
+    # Technical depth: separate publication loops make every native generation-temp
+    # cut satisfy retained admission's complete all-ledger retirement requirement.
+    Enum.each(compiled.ledgers, fn ledger ->
       path = Path.join([destination, ledger.relative, "generation"])
 
       value!(
@@ -1497,7 +1770,12 @@ defmodule LoopexComposition.Restore.Workflow do
     final = value!(io.({:manifest, destination, max_total}))
     ensure!(final == compiled.final, "inventory_mismatch")
     phase(io, "claim_release")
-    {:ok, %{restore_result: {:committed, compiled.receipt}, release_claims: claims}}
+
+    {:ok,
+     %{
+       restore_result: {:committed, compiled.receipt},
+       release_claims: Enum.sort_by(claims, &(&1.directory == claim_directory(destination)))
+     }}
   catch
     {:restore_duplicate, receipt} ->
       {:ok, %{restore_result: {:committed, receipt}, release_claims: []}}
@@ -1515,7 +1793,7 @@ defmodule LoopexComposition.Restore.Workflow do
   # Concept: classify retained completion before fresh claims or allocation.
   # Technical depth: administrative capture and reduction remain in this one
   # worker. Duplicates never inspect the old source/backup or allocate epochs;
-  # pending continuation remains a separate unfinished implementation unit.
+  # original-transaction continuation belongs to the serial driver above.
   defp classify!(root, plan, io) do
     case value!(io.({:restore_classification, root, plan})) do
       :fresh ->

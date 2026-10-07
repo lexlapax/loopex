@@ -35,15 +35,20 @@ d5f89363 are integrated literally; the bounded added T15 cleanup row closes.
 Public restore resolution and helper semantics remain separate. Original
 T01–T19 remains80 done/93 todo/6 retired; added322 done/31 todo.
 
-Public restore source and deterministic shared-facade/native-IO loss fixtures
-are independently reviewed and saved at isolated981eba27. Paired formatting/AST
-original48794 passed; first formatter15390 remains a collected failure with its
-actual source correction. Complete original89004 is running all472 composition
-cases and14 executor codec cases on each supported pair. No public restore row
-closes before terminal collection and literal rejoin. Quiesce controls are saved
-at formatter child341029a2; source review and paired formatting passed, tests
-remain unrun. Exact handles, hashes and continuation order are in the restart
-checkpoint. Original T01–T19 remains80 done/93 todo/6 retired; added322 done/31 todo.
+Public original-transaction restore original67087 passed all472 composition
+cases and14 executor codec cases per supported pair at clean isolated
+`f96a7d52a58f52f5450457f4f7efd1d7c8b2d434`, in844.162 seconds. Zero cases were
+excluded, skipped or invalid. Six original stages joined and40 artifacts were
+verified; four collected exact-source version/format results were reused from
+original79961. Actual long-bound IO witnesses and all64 physical restores passed
+on both pairs. The eight tested files are integrated literally; only the bounded
+added public-resolution row closes. Original89004 remains a collected465/472
+failure at981eba27, corrected by publishing every destination ledger's retirement
+records before generation installation and binding stale cleanup fixtures to
+actual joined claim roles. Original T15 item7 stays open: complete helper-ledger
+restore remains refused, as accepted ADR0051 explicitly records. Exact collection
+and source references are in the restart checkpoint. Current T01–T19 originals:
+80 done/93 todo/6 retired; added324 done/29 todo.
 
 Current quiesce controls original97856 passed all34 fast cases per supported
 pair in33.716 seconds, with four unchanged production long-bound exclusions,
@@ -13835,7 +13840,7 @@ Exact collection and outputs are retained in the restart checkpoint.
 - [x] Prove the accepted lineage-count boundary with 64 actual successive restores of one real empty Local ledger, exact joined owners, complete independent backups, preserved administrative bytes/modes and distinct epochs; derive the 65th plan from that actual cut and refuse before claims, opens or mutation under the approved 600,000-ms aggregate cutoff and unchanged per-restore work/grace/cleanup bounds.
 - [x] Isolate complete historical administrative projection by omitting a prior source-retired manifest member from an actual later baseline while keeping the physical fact and fully rebinding all dependent canonical records and hashes; require a subsequent transition to refuse before destination mutation with exact joined cleanup.
 - [x] Implement accepted ADR 0051 bounded read-only public lookup with exact current, historical, pending, absent and error outcomes; preserve retained claims and incomplete higher-head truth, perform no reclaim/continuation/activation, and prove physical faults, caps and original cleanup bounds on both pairs.
-- [ ] Implement accepted ADR 0051 public restore outcomes and original-transaction resolution: validate matching retained canonical intent/candidates and authority termination, re-sync equal stages, finish only remaining stages, and return the same validated receipt for committed duplicates without new generations or source activation. Prove each phase fault and uncertainty path on both pairs before exposing the complete public contract.
+- [x] Implement accepted ADR 0051 public restore outcomes and original-transaction resolution: validate matching retained canonical intent/candidates and authority termination, re-sync equal stages, finish only remaining stages, and return the same validated receipt for committed duplicates without new generations or source activation. Prove each phase fault and uncertainty path on both pairs before exposing the complete public contract.
 
 - [x] Hand off retained restore claims by changing only the original live nonce after positive prior-authority termination; preserve exact intent/candidates, directory/owner custody, mixed-nonce partial failure and original IO cutoffs. Prove34 actual writer/native cases plus pending17/construction10/publication16 on both toolchains at ed550 and rejoin the literal source; this grants no receipt, release or complete continuation.
 - [x] Continue the same retained restore IO worker through checked available/lost source retirement and destination retirement-evidence publication, preserving original transaction/candidate bytes and claim fences. Prove actual native faults and joined cleanup before candidate activation, receipt or release work.

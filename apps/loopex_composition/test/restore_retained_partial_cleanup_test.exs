@@ -380,20 +380,41 @@ defmodule LoopexComposition.RestoreRetainedPartialCleanupTest do
     end)
   end
 
+  # Concept: fault placement follows the original joined release, not path ordering.
+  # Technical depth: exactly one native absence and one canonical intact owner
+  # identify the targets after strand_release has joined every original actor.
+  defp joined_partial_claims(cut) do
+    [absent] = absent_claims(cut)
+    [{intact, {bytes, info}}] = Map.to_list(present_owners(cut))
+    assert {:error, :enoent} = File.lstat(claim_path(absent))
+    assert File.lstat!(claim_path(intact)).type == :directory
+    assert info.type == :regular and info.links == 1
+    assert Bitwise.band(info.mode, 0o7777) == 0o600
+    {:ok, owner} = RestoreCodec.decode(:claim, bytes)
+    assert {:ok, ^bytes} = RestoreCodec.encode(:claim, owner)
+    {:ok, digest} = RestoreCodec.plan_digest(cut.plan)
+    assert owner["tx_id"] == cut.plan["tx_id"] and owner["plan_digest"] == digest
+    assert owner["state_root"] == intact
+    assert owner["role"] == if(intact == cut.source, do: "source", else: "destination")
+    {absent, intact, owner}
+  end
+
   defp install_fault(cut, fault) do
     case fault do
       :empty_claim ->
-        File.mkdir!(claim_path(cut.destination))
-        File.chmod!(claim_path(cut.destination), 0o700)
+        {absent, _intact, _owner} = joined_partial_claims(cut)
+        File.mkdir!(claim_path(absent))
+        File.chmod!(claim_path(absent), 0o700)
 
       :ownerless_claim ->
-        File.rm!(Path.join(claim_path(cut.source), "owner"))
+        {_absent, intact, _owner} = joined_partial_claims(cut)
+        File.rm!(Path.join(claim_path(intact), "owner"))
 
       :wrong_owner ->
-        path = Path.join(claim_path(cut.source), "owner")
-        {:ok, owner} = RestoreCodec.decode(:claim, File.read!(path))
-        {:ok, bytes} = RestoreCodec.encode(:claim, %{owner | "role" => "destination"})
-        File.write!(path, bytes)
+        {_absent, intact, owner} = joined_partial_claims(cut)
+        opposite = if owner["role"] == "source", do: "destination", else: "source"
+        {:ok, bytes} = RestoreCodec.encode(:claim, %{owner | "role" => opposite})
+        File.write!(Path.join(claim_path(intact), "owner"), bytes)
 
       :missing_ledger_proof ->
         File.rm!(proof_path(cut, 1))

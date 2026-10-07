@@ -8,7 +8,7 @@ defmodule LoopexComposition.RestoreWorkflowTest do
   alias Loopex.Executor.Local.{CodingTools, Ledger, RestoreCodec, RestoreGuard, WorkspaceLease}
   alias Loopex.Store.Local, as: Store
   alias Loopex.Store.Local.{Artifacts, Log, State, Transfers}
-  alias LoopexComposition.{Placement, ResourcePacks, Restore, WorkspaceIdentity}
+  alias LoopexComposition.{Placement, ResourcePacks, WorkspaceIdentity}
   alias LoopexComposition.RestoreFixtureCopy
   alias LoopexComposition.Restore.IO, as: RestoreIO
   alias LoopexComposition.Delegation.{GenesisCodec, RetainedObjects}
@@ -934,12 +934,22 @@ defmodule LoopexComposition.RestoreWorkflowTest do
     for field <-
           ~w(latest_cut no_post_cut_activity all_other_copies_excluded host_ledgers_validated) do
       plan = put_in(fixture.plan, ["host_attestation", field], false)
-      assert {:error, :invalid_restore_input} = Restore.first(plan, invocation)
+
+      assert {:error, :invalid_io_request} =
+               RestoreIO.run(
+                 {:restore_first, plan, invocation},
+                 Map.take(invocation, ["work_ms", "cleanup_grace_ms"])
+               )
     end
 
     for {field, value} <- [{"old_authority_termination", "unconfirmed"}, {"evidence_sha256", nil}] do
       plan = put_in(fixture.plan, ["host_attestation", field], value)
-      assert {:error, :invalid_restore_input} = Restore.first(plan, invocation)
+
+      assert {:error, :invalid_io_request} =
+               RestoreIO.run(
+                 {:restore_first, plan, invocation},
+                 Map.take(invocation, ["work_ms", "cleanup_grace_ms"])
+               )
     end
 
     assert File.ls!(fixture.destination) == []
@@ -2424,7 +2434,13 @@ defmodule LoopexComposition.RestoreWorkflowTest do
       spawn_monitor(fn ->
         send(
           parent,
-          {tag, Restore.first(plan, invocation, probe: parent, pause_at: pause)}
+          {tag,
+           RestoreIO.run(
+             {:restore_first, plan, invocation},
+             Map.take(invocation, ["work_ms", "cleanup_grace_ms"]),
+             probe: parent,
+             pause_at: pause
+           )}
         )
       end)
 

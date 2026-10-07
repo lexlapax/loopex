@@ -4,7 +4,7 @@ defmodule LoopexComposition.RestoreResolutionTest do
   use ExUnit.Case, async: false
 
   alias Loopex.Executor.Local.{Ledger, RestoreCodec}
-  alias LoopexComposition.{Restore, WorkspaceIdentity}
+  alias LoopexComposition.WorkspaceIdentity
   alias LoopexComposition.RestoreFixtureCopy
   alias LoopexComposition.Restore.IO, as: RestoreIO
 
@@ -141,7 +141,9 @@ defmodule LoopexComposition.RestoreResolutionTest do
         send(
           parent,
           {:restore_result, self(),
-           Restore.first(fixture.plan, invoke,
+           RestoreIO.run(
+             {:restore_first, fixture.plan, invoke},
+             Map.take(invoke, ["work_ms", "cleanup_grace_ms"]),
              probe: parent,
              pause_at: :restore_classification_decode
            )}
@@ -310,7 +312,7 @@ defmodule LoopexComposition.RestoreResolutionTest do
   defp execute_cut(cut) do
     assert {:joined, {:ok, %{restore_result: {:committed, receipt}, release_claims: []}},
             evidence} =
-             Restore.first(cut.plan, invocation())
+             RestoreIO.run({:restore_first, cut.plan, invocation()}, @limits)
 
     assert evidence.opens == evidence.closes and evidence.claim_count == 0
     Map.put(cut, :receipt, receipt)
@@ -376,7 +378,10 @@ defmodule LoopexComposition.RestoreResolutionTest do
         send(
           parent,
           {:restore_result, self(),
-           Restore.first(cut.plan, invocation(), probe: parent, pause_at: :restore_phase)}
+           RestoreIO.run({:restore_first, cut.plan, invocation()}, @limits,
+             probe: parent,
+             pause_at: :restore_phase
+           )}
         )
       end)
 

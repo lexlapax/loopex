@@ -1011,7 +1011,7 @@ defmodule LoopexComposition.RestoreLookupTest do
   defp execute_cut(cut) do
     assert {:joined, {:ok, %{restore_result: {:committed, receipt}, release_claims: []}},
             evidence} =
-             Restore.first(cut.plan, invocation())
+             RestoreIO.run({:restore_first, cut.plan, invocation()}, @limits)
 
     assert evidence.opens == evidence.closes and evidence.claim_count == 0
     Map.put(cut, :receipt, receipt)
@@ -1085,7 +1085,10 @@ defmodule LoopexComposition.RestoreLookupTest do
         send(
           parent,
           {:restore_result, self(),
-           Restore.first(cut.plan, invocation(), probe: parent, pause_at: :restore_phase)}
+           RestoreIO.run({:restore_first, cut.plan, invocation()}, @limits,
+             probe: parent,
+             pause_at: :restore_phase
+           )}
         )
       end)
 
@@ -1183,7 +1186,10 @@ defmodule LoopexComposition.RestoreLookupTest do
         send(
           parent,
           {:restore_result, self(),
-           Restore.first(cut.plan, invocation(), probe: parent, pause_at: pause)}
+           RestoreIO.run({:restore_first, cut.plan, invocation()}, @limits,
+             probe: parent,
+             pause_at: pause
+           )}
         )
       end)
 
