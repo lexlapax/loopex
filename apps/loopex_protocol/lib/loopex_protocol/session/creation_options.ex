@@ -52,7 +52,9 @@ defmodule LoopexProtocol.Session.CreationOptions do
 
   defp configuration(options) do
     case Map.fetch(options, "configuration") do
-      :error -> {:ok, options}
+      :error ->
+        {:ok, options}
+
       {:ok, supplied} ->
         case ConfigureRequest.decode_changes(supplied) do
           {:ok, changes} -> {:ok, Map.put(options, "configuration", changes)}

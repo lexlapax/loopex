@@ -92,7 +92,11 @@ defmodule LoopexProtocol.CreationOptionsTest do
     end
 
     assert CreationOptions.decode_wire(%{"version" => 1, "configuration" => %URI{}}) == :error
-    assert CreationOptions.decode_wire(%{"version" => 1, "configuration" => %{"model" => <<255>>}}) == :error
+
+    assert CreationOptions.decode_wire(%{
+             "version" => 1,
+             "configuration" => %{"model" => <<255>>}
+           }) == :error
 
     for section <- ~w(base environment appendix) do
       raw = %{"version" => "v", "base" => "a", "environment" => "", "appendix" => ""}
@@ -107,15 +111,23 @@ defmodule LoopexProtocol.CreationOptionsTest do
 
   test "tool count and byte boundaries are exact without selecting a host definition" do
     names = Enum.map(0..1_023, &("tool_" <> Integer.to_string(&1)))
+
     assert CreationOptions.decode_wire(%{"version" => 1, "tools" => names}) ==
              {:ok, %{"version" => 1, "tools" => names}}
 
     assert CreationOptions.decode_wire(%{"version" => 1, "tools" => names ++ ["extra"]}) == :error
     assert CreationOptions.decode_wire(%{"version" => 1, "tools" => ["read", "read"]}) == :error
-    assert CreationOptions.decode_wire(%{"version" => 1, "tools" => [String.duplicate("a", 64)]}) != :error
-    assert CreationOptions.decode_wire(%{"version" => 1, "tools" => [String.duplicate("a", 65)]}) == :error
+
+    assert CreationOptions.decode_wire(%{"version" => 1, "tools" => [String.duplicate("a", 64)]}) !=
+             :error
+
+    assert CreationOptions.decode_wire(%{"version" => 1, "tools" => [String.duplicate("a", 65)]}) ==
+             :error
+
     assert CreationOptions.decode_wire(%{"version" => 1, "tools" => ["read\n"]}) == :error
-    assert CreationOptions.decode_wire(%{"version" => 1, "tools" => ["unknown_host_name"]}) != :error
+
+    assert CreationOptions.decode_wire(%{"version" => 1, "tools" => ["unknown_host_name"]}) !=
+             :error
   end
 
   test "schema and literal vectors pin authored domains without generation activation" do
@@ -124,9 +136,13 @@ defmodule LoopexProtocol.CreationOptionsTest do
     assert schema["required"] == ["version"]
     assert schema["optional"] == ~w(configuration tools)
     assert schema["tools"]["items_max"] == 1_024
+
     assert schema["configuration"]["members"] ==
              ~w(model reasoning instructions max_tokens context_token_budget system_class_tokens)
-    assert schema["configuration"]["instructions"]["required"] == ~w(version base environment appendix)
+
+    assert schema["configuration"]["instructions"]["required"] ==
+             ~w(version base environment appendix)
+
     assert schema["defaults"] == "none_in_decoder"
     assert schema["generation_activation"] == false
 
@@ -136,7 +152,8 @@ defmodule LoopexProtocol.CreationOptionsTest do
           {"schema/creation-options.v1.json",
            "017ccd7949985f9ae07aa6dce90e2139ed086040b157dde75fcf396cff64b876"}
         ] do
-      assert :crypto.hash(:sha256, File.read!(path(relative))) |> Base.encode16(case: :lower) == digest
+      assert :crypto.hash(:sha256, File.read!(path(relative))) |> Base.encode16(case: :lower) ==
+               digest
     end
   end
 
@@ -146,8 +163,13 @@ defmodule LoopexProtocol.CreationOptionsTest do
     root = Path.expand("../../..", __DIR__)
     runner = Path.join(root, "clients/node/creation-options-vectors.mjs")
 
-    {output, status} =
-      System.cmd(node, [runner, path("vectors/creation-options.v1.json"), path("schema/creation-options.v1.json")], stderr_to_stdout: true)
+    arguments = [
+      runner,
+      path("vectors/creation-options.v1.json"),
+      path("schema/creation-options.v1.json")
+    ]
+
+    {output, status} = System.cmd(node, arguments, stderr_to_stdout: true)
 
     assert status == 0, output
     assert output =~ "\"vectors\":398"
@@ -160,8 +182,11 @@ defmodule LoopexProtocol.CreationOptionsTest do
     do: Map.new(value, fn {member, item} -> {member, retained(item, member)} end)
 
   defp retained(value, _key) when is_list(value), do: Enum.map(value, &retained/1)
-  defp retained(value, key) when is_integer(value) and key in ~w(max_tokens context_token_budget system_class_tokens),
-    do: Integer.to_string(value)
+
+  defp retained(value, key)
+       when is_integer(value) and key in ~w(max_tokens context_token_budget system_class_tokens),
+       do: Integer.to_string(value)
+
   defp retained(value, _key), do: value
   defp read(relative), do: JSON.decode!(File.read!(path(relative)))
   defp path(relative), do: Path.join(:code.priv_dir(:loopex_protocol), relative)

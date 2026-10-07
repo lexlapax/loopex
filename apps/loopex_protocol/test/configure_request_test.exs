@@ -68,7 +68,10 @@ defmodule LoopexProtocol.ConfigureRequestTest do
     end
 
     assert ConfigureRequest.decode_changes(%{"model" => <<255>>}) == :error
-    assert ConfigureRequest.decode_changes(%{"instructions" => %{raw | "version" => "v\n"}}) == :error
+
+    assert ConfigureRequest.decode_changes(%{"instructions" => %{raw | "version" => "v\n"}}) ==
+             :error
+
     assert ConfigureRequest.decode_wire(request, :other) == :error
     assert ConfigureRequest.decode_wire(request, "foreground") == :error
   end
