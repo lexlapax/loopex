@@ -244,6 +244,31 @@ packet `/private/tmp/m7-configured-held-shutdown-source-20261007-v1.json`, SHA-2
 `8a3bb0fc6fc0c75003d73db595b8acdc0688f682c5d6aaf4a50e7853f8fdf8ac`.
 Independent source review is running. No VM, tests or task closure claimed.
 
+Workspace diagnostic original96684 is terminal0 and collected PASS at clean
+29132264: one selected new case passed,40 deliberately excluded by diagnostic
+line selection, zero skipped/invalid,52.576 seconds. Four original stages joined,
+26 artifacts verified. Collection
+`M7/workspace-new-case-diagnostic-20261007-v1/original-collection.json`, SHA-256
+`6e26db3aef58e472e089d8c77a7fa5edfd6027259362ce9ae3991cebac714687`;
+terminal `834148d78217bc637b4d23b3bf28860343cb04be85bf8bb12bea8f3197d7b873`.
+Latest consumed registry1314 at that output's `stage-attempt-registry.json`,
+SHA-256 `40ceac4a61f6655c8d5f372ef9fbf8b1cbce0e1c82566efa5cf8816c3f9dab04`.
+Never repoll96684. No row closes from diagnostic selection. Next is complete41
+workflow cases on each supported pair; reuse positively joined current version,
+format and compile records instead of consuming those exact keys again. The
+complete current test stage and all four floor stages remain fresh obligations.
+T09's prepared1310 seed is stale and must be updated before any execution.
+
+T16 V1 source review refused the incomplete zero-report oracle. V2 now retains
+the captured raw log, requires no scoped reports, rejects raw shutdown_error and
+retains late-report refusal before marking complete. Independent rereview passed;
+root froze exact source as clean isolated
+`e666baca7073ecf6eb1db22591836e8537bbc3f3`, direct child of84586238.
+Source SHA-256 `3f149e954d29a87e78a97ac6ee556046b93a002032961e55c870ba110c02611a`;
+V2 patch SHA-256 `094284a223abda11b4e875b0623d25fc112ce2d6e9c6b19563888b5a484d647d`;
+V2 packet SHA-256 `ab93787074faeec78b77d74cc2f689cbc7e66943f2fa11ef18c605caa8abd964`.
+Paired formatting and complete70-case native proof remain unrun. No row closes.
+
 Core correction verification is complete. ADR0055 remains the
 sole asked pending approval;0056/0057/0058 remain Proposed and unactivated.
 

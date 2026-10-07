@@ -17,6 +17,13 @@ field sets and requires revision2 for prompt/follow-up while steer retains its
 unchanged shape. The failed output remains retained.
 Original T01–T19:80 done/93 todo/6 retired; added325 done/31 todo.
 No original row closes from this focused verification.
+The corrected separate-workspace case at isolated29132264 passed its current
+one-case diagnostic in52.576 seconds;40 other cases were deliberately excluded
+by line selection. Complete41-case paired verification is next and required
+before original T15 item8 closes. The added special-mode physical proof remains
+separate. T16's held-work witness passed source rereview at isolatede666baca;
+paired formatting and70-case verification remain pending. Exact continuation
+pins and collected outputs are in [the resume record](M7-resume.md).
 The separate workspace restoration original76549 passed40/41 current cases;
 the new case omitted installed skill paths from its expected inventory. The
 reviewed correction is saved at clean isolated `cf55cb2d`, awaiting fresh paired
