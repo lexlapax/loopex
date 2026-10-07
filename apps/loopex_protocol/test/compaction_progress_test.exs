@@ -201,6 +201,123 @@ defmodule LoopexProtocol.Session.CompactionProgressTest do
              CompactionProgress.decode_wire(Map.put(wire(), :kind, "context.compaction_progress"))
   end
 
+  test "standalone activity schema pins the six closed fields without generation activation" do
+    schema = read_contract("schema/compaction-progress.v1.json")
+    assert schema["contract"] == "compaction_progress"
+    assert schema["revision"] == 1
+    assert schema["activation"] == "standalone_payload_not_independently_served"
+    assert schema["required"] ==
+             ~w(kind episode_id owner stream_domain_id progress_sequence base_event_sequence)
+    assert schema["additional_members"] == "refuse"
+    assert schema["kind"] == "context.compaction_progress"
+    assert schema["owner"] == "checkpoint_owner/1"
+    assert schema["episode_id"] == %{
+             "encoding" => "canonical_unpadded_base64url_of_original_opaque_bytes",
+             "original_min_bytes" => 1,
+             "original_max_bytes" => 65_536
+           }
+    assert schema["stream_domain_id"] == %{
+             "encoding" => "canonical_unpadded_base64url_of_original_opaque_bytes",
+             "original_bytes" => 32,
+             "original_grammar" => "[0-9a-f]{32}"
+           }
+    assert schema["progress_sequence"] == %{
+             "encoding" => "canonical_decimal_string",
+             "constant" => "0"
+           }
+    assert schema["base_event_sequence"] == %{
+             "encoding" => "canonical_decimal_string",
+             "minimum" => "0",
+             "maximum" => "18446744073709551615"
+           }
+    assert schema["delivery"] == "single_best_effort_observation_per_positively_permitted_attempt"
+    assert schema["closure"] == "none"
+  end
+
+  test "all literal activity vectors preserve exact bytes or refuse the complete hostile shape" do
+    fixture = read_contract("vectors/compaction-progress.v1.json")
+    assert fixture["format"] == "loopex.experimental.payload-vectors/1"
+    assert fixture["contract"] == "compaction_progress"
+    assert length(fixture["cases"]) == 185
+    assert Enum.count(fixture["cases"], &Map.has_key?(&1, "decoded")) == 10
+
+    for vector <- fixture["cases"] do
+      if vector["error"] do
+        assert CompactionProgress.decode_wire(vector["input"]) == :error, vector["name"]
+      else
+        assert {:ok, native} = CompactionProgress.decode_wire(vector["input"]), vector["name"]
+        assert retained_activity(native) == vector["decoded"], vector["name"]
+        assert CompactionProgress.encode_wire(native) == {:ok, vector["input"]}, vector["name"]
+      end
+    end
+  end
+
+  test "retained literal identities and full opaque byte boundaries fit complete progress frames" do
+    for {relative, digest} <- [
+          {"schema/compaction-progress.v1.json",
+           "9180e6bb1ba51a85c0806dd5761033bb9a16b53fde964d6e58d758d2d155617e"},
+          {"vectors/compaction-progress.v1.json",
+           "abba85710b11506ab9696f29245a639eebe3450576738dd59cfc43e725bc72e6"}
+        ] do
+      assert :crypto.hash(:sha256, File.read!(contract_path(relative)))
+             |> Base.encode16(case: :lower) == digest
+    end
+
+    for kind <- ["run", "compact"], size <- [1, 65_536] do
+      bytes = :binary.copy(<<255>>, size)
+      value = %{native(kind, @max) | episode_id: bytes, owner: %{"kind" => kind, "id" => bytes}}
+      assert {:ok, encoded} = CompactionProgress.encode_wire(value)
+      record = %{"type" => "progress", "session_id" => "AA", "progress" => encoded}
+      assert {:ok, frame} = LoopexProtocol.Frame.encode(record)
+      frame = IO.iodata_to_binary(frame)
+      assert byte_size(frame) <= LoopexProtocol.Frame.output_record_bytes()
+      assert :binary.last(frame) == ?\n
+      payload = binary_part(frame, 0, byte_size(frame) - 1)
+      assert {:ok, ^record} =
+               LoopexProtocol.Frame.decode(payload, LoopexProtocol.Frame.output_record_bytes())
+      assert {:ok, ^value} = CompactionProgress.decode_wire(record["progress"])
+
+      for overflow <- [
+            %{value | episode_id: :binary.copy(<<255>>, 65_537)},
+            %{value | owner: %{"kind" => kind, "id" => :binary.copy(<<255>>, 65_537)}}
+          ] do
+        assert CompactionProgress.encode_wire(overflow) == :error
+      end
+    end
+  end
+
+  @tag :node_client
+  test "independent Node consumes every activity literal and byte descriptor boundary" do
+    node = System.find_executable("node") || flunk("Node is required for activity conformance")
+    root = Path.expand("../../..", __DIR__)
+    argv = [
+      Path.join(root, "clients/node/compaction-progress-vectors.mjs"),
+      contract_path("vectors/compaction-progress.v1.json"),
+      contract_path("schema/compaction-progress.v1.json")
+    ]
+    {output, status} = System.cmd(node, argv, stderr_to_stdout: true)
+    assert status == 0, output
+    assert {:ok, %{"contract" => "compaction_progress", "checked" => 185, "boundary_checks" => 51}} =
+             LoopexProtocol.Frame.decode(String.trim_trailing(output, "\n"), 65_536)
+  end
+
+  defp retained_activity(value) do
+    %{
+      "kind" => value.kind,
+      "episode_id" => %{"opaque_hex" => Base.encode16(value.episode_id, case: :lower)},
+      "owner" => %{
+        "kind" => value.owner["kind"],
+        "id" => %{"opaque_hex" => Base.encode16(value.owner["id"], case: :lower)}
+      },
+      "stream_domain_id" => %{"opaque_hex" => Base.encode16(value.stream_domain_id, case: :lower)},
+      "progress_sequence" => Integer.to_string(value.progress_sequence),
+      "base_event_sequence" => Integer.to_string(value.base_event_sequence)
+    }
+  end
+
+  defp contract_path(relative), do: Path.join([:code.priv_dir(:loopex_protocol), relative])
+  defp read_contract(relative), do: relative |> contract_path() |> File.read!() |> JSON.decode!()
+
   defp native(kind \\ "run", base \\ 0) do
     %{
       kind: "context.compaction_progress",
