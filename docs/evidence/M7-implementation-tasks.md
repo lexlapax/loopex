@@ -1,5 +1,14 @@
 # M7 Implementation Tasks
 
+The T15 captured-byte receipt decoder row is now reconciled with original13676:
+all32 receipt cases passed on both supported pairs at2826b30b,zero exclusions.
+Current tests and decoder/authority bodies are literal; the only later executor
+change exposes the unchanged job matcher with documentation. The earlier8112
+failure stays retained; physical receipt capture and full history remain open.
+Original T01–T19:81 done/92 todo/6 retired;added339 done/25 todo.
+Exact authenticated source/evidence references are in the
+[resume record](M7-resume.md).
+
 The accepted standalone compaction activity schema/vector/client unit is now
 proved and integrated literally fromc483dfd3. Original36733 passed20/20 per
 supported pair,including both actual Node22.14.0 consumers,zero exclusions/skips/
@@ -14084,7 +14093,7 @@ Exact collection and outputs are retained in the restart checkpoint.
 - [x] Preserve positively acquired restore claims through pre-intent IO failures and release them with the original joined terminal owner/cutoffs when neither state root changed; retain partial/unproved or foreign claims and truthful remaining-claim accounting. Prove actual second-claim failure, known first-claim removal and partial-publication fencing on both supported pairs without changing the six existing workflow cases or bounds.
 - [x] Audit one selected current Local artifact object through the existing owned streaming hash, binding the locator-derived physical path to the reference digest/size, complete captured manifest and descriptor/ancestor identities under original total/work/cleanup bounds. Preserve current direct-fetch locator semantics, writer-only limits and all orphan/staging bytes; prove actual writer and physical refusal cases on both pairs. Complete object enumeration, history relations and restore activation remain separate.
 - [x] Capture one selected current artifact-use sidecar through the existing guardian-owned restore IO worker and real captured Local/Core describe facade; require exact reference-derived pathname, physical manifest membership, current raw ceiling, hash/mode/link/ancestor identity and close-before-semantics under original cutoffs. Prove actual writers and physical/semantic refusals on both pairs; object bytes, complete namespace/orphans and history/restore relations remain separate.
-- [ ] Extract one private captured-byte Local receipt decoder shared with live reads; preserve the native current 28-field ETF schema, 65,536-byte cap, exact raw job binding, closed predicates and all claim/finality/job/recovery authority. Replace the injected decoder seam with actual bounded BIF proof and actual writer/hostile controls on both supported pairs; physical receipt capture and complete history audit remain separate.
+- [x] Extract one private captured-byte Local receipt decoder shared with live reads; preserve the native current 28-field ETF schema, 65,536-byte cap, exact raw job binding, closed predicates and all claim/finality/job/recovery authority. Replace the injected decoder seam with actual bounded BIF proof and actual writer/hostile controls on both supported pairs; physical receipt capture and complete history audit remain separate.
 - [ ] Enumerate the complete current Local generation/marker/open namespace under one original restore IO guardian; require exact physical name membership, current marker-plane grammar, open cardinality/whole-byte bounds and source/job/digest relations. Preserve actual writer crash cuts and claim observations; complete receipts/Store/job/history/restore certification remains separate.
 - [x] Extract the current Local artifact-use captured-byte decoder with the existing 131,072-byte ceiling, exact canonical bytes and filename digest; reuse the existing ArtifactStore facade through a private captured-bytes handle for closed reference-bound admission. Prove actual writers, deleted-source decoding, opaque identities, hostile bytes and existing semantic negatives on both pairs; physical capture, object bytes and complete history relations remain separate.
 - [x] Capture one canonical current Local generation, admission, refusal or open ledger file through the guardian-owned restore IO worker; bind exact descriptor, pathname, raw job identity, original source placement and role ceiling before decode; prove actual current writers, hostile physical captures and unchanged cleanup on both pairs. Complete ledger enumeration, receipt/Store/artifact relations and restore activation remain separate.

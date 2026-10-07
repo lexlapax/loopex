@@ -27,6 +27,27 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+T15 captured-byte receipt decoder audit is complete by original13676's existing
+paired proof. Durable report under the external evidence root at
+`M7/receipt-decoder-evidence-audit-20261007-v1/report.md`,SHA-256
+`bd70a7caf9b11cb288c5dcb88ec6436fe975fbb7bc9f666f42520a54e5269a7f`.
+Original13676 at2826b30bfc583ff943cdbe63c99041950d1c907f passed all32 receipt
+cases on each supported pair,zero exclusions/skips/invalid;24.040/21.477 seconds.
+Output`M7/m7-object-call-join-v1`;terminal-report SHA-256
+`da42f26dad2ad258432582a37e1fd5b647d2e9410fafecdfdb060fbc3d5535b0`;
+terminal-inventory `7a67dce68d4475d36750adea3853fe41c91b2be05a2d24360171082cc7be0795`.
+All245 structured artifacts and70 original handle/result identities authenticate.
+Current test bytes and pure decoder/live-read/closed-predicate/authority bodies
+match the tested snapshot; exact full-file reconstruction removes only the later
+four-line comment/doc and defp-to-def job-matcher exposure,whose body is unchanged.
+No full-current-Local conformance is inferred; physical receipt capture,history
+and complete restore remain open. Earlier8112 stays FAIL with floor unrun.
+One existing bounded added row closes;original81 done/92 todo/6 retired,
+added339 done/25 todo. No native rerun;latest registry remains1551 below.
+Latest primary5567d7cb is pushed;new current full integration candidate
+preparation follows the final administrative checklist checkpoint. M7 remains
+In progress;no closure,release or paid campaign is claimed or authorized.
+
 Accepted ADR0054 standalone activity schema/vector/client unit is proved and
 integrated literally fromc483dfd35f8b7faa8054520f4123b5536df625bb.
 Its one-path literal formatter child has treefc49bf3bec0c961fdba5ab779b68c17b8f4eedf9;
