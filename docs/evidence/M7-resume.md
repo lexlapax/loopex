@@ -27,6 +27,139 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+Configure original17193 is collected PASS at isolated candidate
+`15280560c380433425e0a677daef83f1f0558155`. Current and floor each passed all22
+cases, with no exclusions, skips or invalid cases, in89.185 seconds overall.
+The unchanged runner's original eight process stages are joined and all41
+artifacts verified. Collection
+`M7/configure-native-differential-20261006-v4/original-collection.json`, SHA-256
+`37675ce249905f096a344893d84b3b9c84a2877a02d00aaaea91254217558099`,
+binds terminal `fd8d4df5ff1da686918a521ef6b7738afd482b4f0a3f8e83f5d54dee596dfa4e`
+and1017-key registry `2ccb824b47976288081d145d8802681dfb7abd2feffe0e1e9d871f80ed56e483`.
+The one changed configure-ingress file is literally integrated; its SHA-256 is
+`da9ebade735c1959d7a099e05aafd95c4971f966bd9ec77bc652a9968b928ad2`.
+The proof covers native mapping/admission parity, authored retry identity,
+privacy, authority refusals and actual run.finished completion. It does not
+activate served configuration or complete its broad T05 row. Never repoll17193.
+
+No product VM remains active. The native author owns corrections within the
+same ten files, including the existing EffectIntents retained-authored reader.
+Preserve the148-case population. After frozen-source independent review, root
+formats, commits and runs both complete five-file groups at the corrected bytes.
+Seed the1017-key collected registry above. ADR0054 is the sole asked, unanswered
+question; the restore aggregate cutoff decision remains queued after it.
+
+Original T01–T19 remains80 done/93 todo/6 retired. Added remains303 done/41 todo.
+No native bound row, remote configure row or milestone outcome closes here.
+
+Native originals1604 and67222 are terminal and collected FAIL. First1604 failed
+warning-free compilation on an unused pure accounting binding; root removed only
+that line at `686c2e9dc7e77032607147b527bd7ccbf3dde9cc`. Collection
+`M7/native-authored-bounds-20261006-v1/original-collection.json`, SHA-256
+`eb6a83eda3708272d3aaccb809f82901d396827f8a9496ec6e71733a5545093c`.
+Second67222 compiled and ran the complete current group:142/148 passed after
+100.1 seconds, floor unrun. Collection
+`M7/native-authored-bounds-20261006-v2/original-collection.json`, SHA-256
+`6ba511b6090b068bf35d83b979766c4fd47441d15df72a07eb77bdb3a7fb3ffa`,
+binds23 artifacts and four original joins. Registry1009 keys, SHA-256
+`52d77c818500ef6cccd3f08f1244b0d785a1655f5acdc1b6568eed5e32595241`.
+Never repoll1604 or67222. Four failures expose actual authored-bounds replay:
+Store serialization produces string keys while recovery expects native atom
+keys. The author will align the explicit current writer/closed decoder, native
+digest reconstruction and queued capture/promotion without compatibility or
+dynamic atoms. Two fixture failures are a native-suspended Control state read
+and an atom-versus-string persisted-map assertion. These are corrected together
+inside the same ten-path unit. No native task closes and no bound increases.
+
+Dispatch author correction turns with followup_task. send_message only delivers
+notifications to a completed task and does not resume its work; root corrected
+that mistake again for the configure terminal-name fix. Agent status remains a
+cache; committed candidates and retained original results remain the resume truth.
+
+Historical admission, superseded by the collected1604 and67222 results above:
+Native original1604 was running at clean isolated candidate
+`f5134b154817c4cca2accef8d861f97011c6ffc8`, direct child ofe3c3a8b9;
+the complete diff from10f9930c is confined to the same ten owned files.
+The final grouped source review cleared148 cases (native23/bounds10/
+disposition16/provider70/intents29). Root formatting passed in0.458 seconds;
+final coordinator SHA-256
+`23f1d18dc8ddd7e68aa2c043340fefc81012dc83755eb47000b1b081131688ab`,
+native test SHA-256
+`6ef3b2f27640e28244b8325d47ade8586698f2656912157cb734c4862663499b`.
+Runner `M7/m7-native-authored-bounds-20261006-v1.py`, SHA-256
+`0c50b9b8ef526807a2516f2e28dab0c31d85cf2b8b54b399394d028227e56d3d`,
+requires both complete five-file populations and seeds the collected1002-key
+registry below. Collect the original once before any new VM or integration.
+No native test PASS or task closure follows from source review/formatting.
+
+After the latest reboot, original79098 was collected once: the documentation-only
+gate passed at `4007adf7e9450b2cdcfc5edcbcf2c6b9fa454366` in68.392 seconds.
+Collection `M7/proposed-attempts-docs-20261006-v1/original-collection.json`,
+SHA-256 `ae4385053eaf69d87918263d06af39284879d9480b64d4b622ec66ed4f1fb25c`,
+binds13 artifacts and its original process join. Registry990 keys, SHA-256
+`dfcef94372365f8a521a422bf36db522a3afdca3621ed203c515a666be428584`.
+Primary4007 was pushed to origin/m7; original push56358 completed exit0.
+Never repoll either completed original. No application or floor proof follows
+from this documentation result. The native author has corrected the review
+findings and added six actor tests; its complete five-file population is143,
+pending frozen-source review and root-owned execution. ADR0054 remains awaiting
+the maintainer's answer; the reboot question was presented again for continuity.
+
+Native source candidate `e3c3a8b93d6c8c84218db53b141f97943079ee48` was
+rejected before test admission: artifact result adoption also needs the current
+run fence, and incidental timer rearm must preserve an established allowance
+already captured by workers. The source author corrected both in the same
+two owned files; explicit staging still tightens the effective deadline.
+The complete five-file population is now145, pending final review, formatting,
+commit and paired execution. No failed runtime result or PASS is inferred from
+these source reviews.
+
+Original31664 is collected FAIL for the configure mapping-to-native prerequisite
+at isolated candidate `3d2326573724c6d251b7ea0f53fd535c25e556f3`. Its complete
+changed file7 and adjacent mapping file15 require22 cases on each pair.
+Runner `M7/m7-configure-native-differential-20261006-v1.py`, SHA-256
+`46e64c59905afba4a082a1bd1a4568aaf40a2ae043e5706e201737d96f48061c`,
+uses the collected990-key registry and original join/cleanup rules. Current20/22
+passed; both added cases failed at runtime startup with invalid_context_token_budget,
+so their admission oracles were not reached. Floor was unrun. Collection
+`M7/configure-native-differential-20261006-v1/original-collection.json`, SHA-256
+`8fef29903d5e4f7406f569cf0332717cdf806d9cc4e12ac31f4eeb94bb04eaf5`,
+binds23 artifacts, four original joins and994 registry keys (SHA-256
+`a383d301addc1d48dcdd3a1d74d2af39d38effe505003df8dd5ebfb7ed47fbad`).
+Never repoll31664. The source author is correcting the fixture. Serving remains unsupported;
+this proof cannot close negotiated-generation or real-provider obligations.
+The snapshot draft was already integrated and its clean, cache-free worktree
+was archived; the protocol worktree is reused for this independent unit.
+
+Original16048 is also collected FAIL after48.207 seconds at configure fixture
+correction `7bccbfd957c8e1fd2283d7a7a348dda37bce99c7`: current21/22 passed;
+the positive native parity/replay case passed, but the new negative case
+incorrectly treated Model worker DOWN as committed run completion and consumed
+an immediately empty event queue. Floor was unrun. Collection
+`M7/configure-native-differential-20261006-v2/original-collection.json`, SHA-256
+`4f93ddd8c598059c307fe83b219f5ff8164c29f871de27de107430eb71ee9bff`,
+binds23 artifacts, four original joins and998 registry keys (SHA-256
+`d20ce5c0cdf315966726cf480109e55291a7d39f30f2a1a038b6daa848cab8bc`).
+Never repoll16048. Add one captured bounded observation of the actual serial
+owner's completion to this new case; preserve existing product and join limits.
+Native source review now groups two remaining staging-adoption fences: the
+run-owned maintenance worker result and ordinary candidate construction under
+an already-retained absolute ceiling. The author is correcting both together;
+provider result/usage evidence remains retained. The native unit has not run.
+
+Original94186 is collected FAIL at configure observer candidate
+`f87da612753d374e6b417c4a2fc5dcac9f4e8f0b` after54.314 seconds: current21/22
+passed, floor unrun. Collection
+`M7/configure-native-differential-20261006-v3/original-collection.json`, SHA-256
+`72598376083261c5281ae8cad9b29e9c13eeec193f6b615d8fdc7702b97fe5e4`,
+binds23 artifacts, four original joins and1002 registry keys (SHA-256
+`08253fcdc6e505fb9d187bdbc7a2def5d3eb3c60fb236a4870d377e2689b0d0c`).
+Never repoll94186. Root then found the new test's wrong terminal name:
+the actual contract is run.finished with outcome completed, not run.completed.
+The author is correcting that oracle and preserving the captured5000-ms reader
+observation and all existing joins. Earlier observation-only diagnosis was
+incomplete; both the asynchronous commit and actual event contract matter.
+
 Fixture correction `ff36e0c16e760f86c785f2d100a3034917858406` reuses the same
 unchanged destination manifest for copy/cap assertions and consumes the existing
 IO probe for bounded progress. Original92272 is fully collected FAIL_OR_UNAVAILABLE

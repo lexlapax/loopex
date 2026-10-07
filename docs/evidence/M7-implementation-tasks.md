@@ -1,5 +1,18 @@
 # M7 Implementation Tasks
 
+The reboot resume collected configure original17193 PASS: all22 cases passed
+on each supported pair, in89.185 seconds overall. The exact configure-ingress
+source is integrated from `15280560c380433425e0a677daef83f1f0558155`.
+This proves actual mapping-to-native admission, replay identity, privacy and
+negative authority cases; served configure and full generation activation stay
+open. Native original67222 failed six of148 current cases; its replay and fixture
+corrections proceed in the same ten-file unit before a new paired attempt.
+ADR0054 remains the sole asked pending decision. Original T01–T19 remains
+80 done/93 todo/6 retired; added303 done/41 todo. Exact original collection,
+source and registry identities are in the [restart checkpoint](M7-resume.md#technical-depth).
+
+The entries below record earlier revisions and failed attempts.
+
 Original92272 at `ff36e0c1` is collected FAIL after181.799 seconds. Construction13
 and workflow134/135 passed; the64-restores case reached ordinal42 baseline-copy
 at59,500ms and hit ExUnit's unchanged60,000ms aggregate cutoff. The retained probe

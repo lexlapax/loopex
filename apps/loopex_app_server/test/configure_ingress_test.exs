@@ -1,8 +1,37 @@
+Code.require_file("../../loopex/test/support/m1_runtime_helper.exs", __DIR__)
+Code.require_file("../../loopex/test/support/agent_loop_helper.exs", __DIR__)
+Code.require_file("../../loopex/test/support/model_preparation_conformance.exs", __DIR__)
+
 defmodule Loopex.AppServer.ConfigureIngressTest do
   use ExUnit.Case, async: true
 
   alias Loopex.AppServer.Mapping, as: Adapter
+  alias Loopex.AgentLoopFixture, as: Fixture
   alias LoopexProtocol.{Frame, Session.ConfigureRequest}
+
+  defmodule Preparing do
+    @moduledoc false
+    @behaviour Loopex.Model
+
+    @impl true
+    def complete(request, options, progress) do
+      Loopex.AgentLoopTestModel.complete(
+        request,
+        Keyword.take(options, [:script, :max_tokens]),
+        progress
+      )
+    end
+
+    @impl true
+    def prepare_configuration(current, authored, definitions, _context, options) do
+      canonical =
+        Agent.get_and_update(Keyword.fetch!(options, :controller), fn state ->
+          {state.canonical, %{state | calls: state.calls + 1}}
+        end)
+
+      Loopex.ModelPreparationConformance.candidate(current, authored, definitions, canonical)
+    end
+  end
 
   test "all admitted literal foreground requests preserve exact native authored values and capture instructions" do
     for vector <- vectors()["cases"],
@@ -86,6 +115,307 @@ defmodule Loopex.AppServer.ConfigureIngressTest do
 
     refute Adapter.implemented?("session.configure")
     assert :unsupported = Adapter.call(%{"method" => "session.configure"}, %{})
+  end
+
+  # Concept: captured wire changes admit the same durable command as native input.
+  # Technical depth: these cases cross the real serial owner and optional Model
+  # preparation boundary. They do not negotiate or serve the dormant wire method.
+  test "captured foreground changes match native durability and public output without repeating preparation" do
+    captured = native_fixture()
+    native = native_fixture()
+    request = native_request()
+    assert {:ok, prepared} = Adapter.prepare_configuration_request(request)
+    command = %{type: :configure, command_id: prepared.command_id, changes: prepared.changes}
+
+    assert {:ok, instructions} =
+             Loopex.Runtime.Instructions.capture(request["changes"]["instructions"])
+
+    authored = %{
+      "model" => " alias/model ",
+      "reasoning" => "default",
+      "instructions" => instructions,
+      "max_tokens" => 512,
+      "context_token_budget" => 6_000,
+      "system_class_tokens" => 5_000
+    }
+
+    direct = %{type: :configure, command_id: <<0, 255, 1, 128>>, changes: authored}
+    assert command == direct
+    assert {:accepted, accepted_id} = Loopex.command(captured.attachment, command)
+    assert accepted_id == <<0, 255, 1, 128>>
+    assert {:accepted, ^accepted_id} = Loopex.command(native.attachment, direct)
+
+    assert [retained] = configuration_records(captured)
+    assert [native_retained] = configuration_records(native)
+    assert retained.payload == native_retained.payload
+    assert retained.payload["command_id"] == accepted_id
+
+    assert retained.payload["changes"] ==
+             %{authored | "instructions" => Map.take(instructions, ~w(version digest))}
+
+    assert retained.payload["configuration"]["model"] == "scripted:v1"
+    assert retained.payload["configuration"]["instructions"] == instructions
+
+    assert [event] = Fixture.events(captured, captured.session)
+    assert [native_event] = Fixture.events(native, native.session)
+    assert Map.drop(event, [:event_id]) == Map.drop(native_event, [:event_id])
+    assert event.kind == "session.configured"
+    assert event["command_id"] == accepted_id
+
+    assert event["configuration"]["instructions"] ==
+             Map.take(instructions, ~w(version digest))
+
+    assert {:ok, status} = Loopex.session_status(captured.runtime, captured.session)
+    assert {:ok, native_status} = Loopex.session_status(native.runtime, native.session)
+    assert status.configuration == native_status.configuration
+    assert status.configuration == event["configuration"]
+
+    public =
+      :erlang.term_to_binary({status.configuration, Fixture.events(captured, captured.session)})
+
+    for private <- [
+          "INGRESS_PRIVATE_INSTRUCTIONS",
+          "INGRESS_HOST_OPTION",
+          "provider_mapping",
+          "model_capabilities"
+        ] do
+      refute public =~ private
+    end
+
+    assert Loopex.AgentLoopTestModel.dispatched(captured.model) == []
+    assert Loopex.AgentLoopTestExecutor.jobs(captured.executor) == []
+    assert Agent.get(captured.controller, & &1.calls) == 1
+
+    before_records = Fixture.records(captured, captured.session)
+    before_events = Fixture.events(captured, captured.session)
+    Agent.update(captured.controller, &%{&1 | canonical: "scripted:v2"})
+
+    assert {:ok, retry} =
+             Adapter.prepare_configuration_request(%{request | "request_id" => "retry"})
+
+    assert {:accepted, ^accepted_id} =
+             Loopex.command(captured.attachment, %{
+               type: :configure,
+               command_id: retry.command_id,
+               changes: retry.changes
+             })
+
+    assert Fixture.records(captured, captured.session) == before_records
+    assert Fixture.events(captured, captured.session) == before_events
+    assert Agent.get(captured.controller, & &1.calls) == 1
+
+    conflict = put_in(request, ["changes", "model"], "scripted:v1")
+    assert {:ok, conflict} = Adapter.prepare_configuration_request(conflict)
+
+    assert {:error, :idempotency_conflict} =
+             Loopex.command(captured.attachment, %{
+               type: :configure,
+               command_id: conflict.command_id,
+               changes: conflict.changes
+             })
+
+    assert Fixture.records(captured, captured.session) == before_records
+    assert Fixture.events(captured, captured.session) == before_events
+    assert Agent.get(captured.controller, & &1.calls) == 1
+  end
+
+  test "captured foreground changes cannot bypass attachment authority or active-run exclusion" do
+    fixture = native_fixture([%{hold: self(), text: "done", calls: []}])
+    assert {:ok, prepared} = Adapter.prepare_configuration_request(native_request())
+    command = %{type: :configure, command_id: prepared.command_id, changes: prepared.changes}
+    before_records = Fixture.records(fixture, fixture.session)
+    assert {:error, :attachment_required} = Loopex.command(nil, command)
+    stale = %{fixture.attachment | incarnation_id: "stale-incarnation"}
+    assert {:error, :session_unavailable} = Loopex.command(stale, command)
+    assert Fixture.records(fixture, fixture.session) == before_records
+    assert Agent.get(fixture.controller, & &1.calls) == 0
+
+    assert {:accepted, "held-prompt"} =
+             Loopex.command(fixture.attachment, %{
+               type: :prompt,
+               command_id: "held-prompt",
+               content: "hold"
+             })
+
+    assert_receive {:holding, worker}, 1_000
+    monitor = Process.monitor(worker)
+    assert {:error, :configuration_not_settled} = Loopex.command(fixture.attachment, command)
+    assert [refusal] = configuration_records(fixture)
+    assert refusal.payload["command_id"] == command.command_id
+    assert refusal.payload["changes"] == command.changes
+    assert refusal.payload["admission"] == "rejected_configuration_not_settled"
+    assert refusal.payload["configuration"] == nil
+    assert Agent.get(fixture.controller, & &1.calls) == 0
+    refute Enum.any?(Fixture.events(fixture, fixture.session), &(&1.kind == "session.configured"))
+    send(worker, :release)
+    assert_receive {:DOWN, ^monitor, :process, ^worker, _reason}, 5_000
+
+    completion_cutoff = System.monotonic_time(:millisecond) + 5_000
+    events = completed_events(fixture.attachment, completion_cutoff)
+
+    assert Enum.any?(events, &(&1.kind == "run.finished"))
+    terminal = Enum.find(events, &(&1.kind == "run.finished"))
+    assert terminal["outcome"] == "completed"
+
+    assert {:ok, status} = Loopex.session_status(fixture.runtime, fixture.session)
+    assert status.configuration["configuration_version"] == 1
+    assert status.configuration["model"] == "scripted:v1"
+  end
+
+  # Concept: worker cleanup precedes the serial owner's committed completion.
+  # Technical depth: next_event can wait inside the runtime, so a monitored
+  # reader spends one captured observer cutoff across reads, empty polls and its
+  # normal join. Failure cleanup kills and joins that reader without a new read.
+  defp completed_events(attachment, cutoff) do
+    observer = self()
+
+    {reader, monitor} =
+      spawn_monitor(fn ->
+        send(
+          observer,
+          {:configure_completion, self(), poll_completed_events(attachment, cutoff, [])}
+        )
+      end)
+
+    on_exit(fn ->
+      cleanup_monitor = Process.monitor(reader)
+      if Process.alive?(reader), do: Process.exit(reader, :kill)
+      assert_receive {:DOWN, ^cleanup_monitor, :process, ^reader, _reason}, 1_000
+    end)
+
+    events =
+      receive do
+        {:configure_completion, ^reader, {:ok, events}} -> events
+        {:configure_completion, ^reader, {:error, reason}} -> flunk(inspect(reason))
+        {:DOWN, ^monitor, :process, ^reader, reason} -> flunk(inspect(reason))
+      after
+        max(cutoff - System.monotonic_time(:millisecond), 0) ->
+          flunk("committed run.finished was not observed before the fixture cutoff")
+      end
+
+    assert_receive {:DOWN, ^monitor, :process, ^reader, :normal},
+                   max(cutoff - System.monotonic_time(:millisecond), 0)
+
+    assert System.monotonic_time(:millisecond) <= cutoff
+    events
+  end
+
+  defp poll_completed_events(attachment, cutoff, events) do
+    if System.monotonic_time(:millisecond) >= cutoff do
+      {:error, :completion_observation_cutoff}
+    else
+      case Loopex.next_event(attachment) do
+        {:ok, %{kind: "run.finished"} = event} ->
+          if System.monotonic_time(:millisecond) <= cutoff,
+            do: {:ok, Enum.reverse([event | events])},
+            else: {:error, :completion_observation_cutoff}
+
+        {:ok, event} ->
+          poll_completed_events(attachment, cutoff, [event | events])
+
+        {:error, :empty} ->
+          Process.sleep(min(10, max(cutoff - System.monotonic_time(:millisecond), 0)))
+          poll_completed_events(attachment, cutoff, events)
+
+        other ->
+          {:error, {:completion_observation_failed, other}}
+      end
+    end
+  end
+
+  defp native_request do
+    %{
+      "method" => "session.configure",
+      "request_id" => "configure",
+      "command_id" => LoopexProtocol.Wire.encode_identity(<<0, 255, 1, 128>>),
+      "changes" => %{
+        "model" => " alias/model ",
+        "reasoning" => "default",
+        "instructions" => %{
+          "version" => "wire.v1",
+          "base" => "INGRESS_PRIVATE_INSTRUCTIONS 猫\n",
+          "environment" => "captured environment",
+          "appendix" => "exact tail"
+        },
+        "max_tokens" => "512",
+        "context_token_budget" => "6000",
+        "system_class_tokens" => "5000"
+      }
+    }
+  end
+
+  defp native_fixture(script \\ []) do
+    {:ok, controller} = Agent.start_link(fn -> %{calls: 0, canonical: "scripted:v1"} end)
+    model = Loopex.AgentLoopTestModel.start(script)
+    executor = Loopex.AgentLoopTestExecutor.start()
+    {store, handle} = Loopex.M1RuntimeTestStore.start_store(label: "configure-ingress")
+
+    on_exit(fn ->
+      for actor <- [controller, model, executor, store] do
+        monitor = Process.monitor(actor)
+        if Process.alive?(actor), do: GenServer.stop(actor, :normal, 1_000)
+        assert_receive {:DOWN, ^monitor, :process, ^actor, _reason}, 1_000
+      end
+    end)
+
+    {:ok, runtime} =
+      Loopex.start_link(
+        runtime_id: "configure-ingress",
+        context_token_budget: 8_192,
+        store: handle,
+        session_creation_defaults: Fixture.creation_defaults([]),
+        cleanup_grace_ms: 5_000,
+        model: %{
+          module: Preparing,
+          model: "scripted:v1",
+          options: [
+            controller: controller,
+            script: model,
+            max_tokens: 256,
+            private_canary: "INGRESS_HOST_OPTION"
+          ]
+        },
+        executor: %{
+          module: Loopex.AgentLoopTestExecutor,
+          reference: executor,
+          identity: "agent-loop-executor",
+          epoch: 1,
+          fencing_token: 1,
+          workspace_ref: "workspace-ref",
+          workspace_lease: "workspace-lease"
+        },
+        tools: [],
+        active_tools: [],
+        policy: Loopex.AgentLoopTestPolicy,
+        policy_identity: %{"id" => "test", "revision" => "1"},
+        grant_decision: {:host_policy, :allow}
+      )
+
+    on_exit(fn ->
+      runtime_monitor = Process.monitor(runtime.supervisor)
+      if Process.alive?(runtime.supervisor), do: Loopex.stop(runtime)
+      assert_receive {:DOWN, ^runtime_monitor, :process, _supervisor, _reason}, 5_000
+    end)
+
+    assert {:ok, session} = Loopex.create_session(runtime, %{}, command_id: "create")
+    assert {:ok, attachment} = Loopex.attach(runtime, session, after_event_sequence: 0)
+
+    %{
+      runtime: runtime,
+      controller: controller,
+      model: model,
+      executor: executor,
+      store: store,
+      session: session,
+      attachment: attachment
+    }
+  end
+
+  defp configuration_records(fixture) do
+    Enum.filter(
+      Fixture.records(fixture, fixture.session),
+      &(&1.payload.kind == "session_configuration_admitted_v2")
+    )
   end
 
   defp request do
