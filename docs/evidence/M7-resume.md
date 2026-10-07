@@ -27,6 +27,30 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+T13 preparation is now proved and literally integrated from isolated
+`f3f6fb985d59e6d9ad825518fe8f85aca7a80a25`. Original27420 is TERMINAL0 and
+collected PASS_FIXTURE_PREPARATION_PROOF: all29 cases on each supported pair,
+zero failures/exclusions/skips/invalid, warning-free CLI compilation and both
+format checks. Eight original stages joined and43 artifacts authenticate in
+150.527 seconds. Output `M7/fixture-preparation-proof-20261007-v1`; collection
+`68968f04d9a06d0e8696f70b22deb68271272c5b531adf1320c9a4db8fbe86de`,
+terminal `e97fb645523db701cf16f3ec93bbfee12b6209b68a9636826e6ac1d75fab4bdd`.
+Latest collected registry1713 is
+`459acb800b42269c5d0aaf1c7b8e37e88ba3961a328eef84d8d3750b19957deb`.
+Do not repoll27420 or repeat the unchanged proof. Only the added T13 preparation
+row closes; original trusted wrapper/campaign/oracle/operator rows stay open.
+T01–T19 totals are87 done/86 todo/6 retired; added350 done/22 todo.
+
+Next actual native unit is the accepted0057 attempts-body codec at isolated
+`36e97968`. Its two-file formatter consumes the positive T13 paired29 collection;
+its complete54-case paired proof is still required. T04 cleanup source and
+38-case blueprints are independently reviewed, source-only and remain unrun.
+A new integrated full check after these scoped units must prove the support-file
+warning correction and complete current source. ADR0058 remains the sole asked
+pending approval. No row closes from blueprint review.
+
+The immediately following checkpoint is historical where superseded above.
+
 Primary now includes accepted ADR0057 at `a67dc97e` and the exact Composition
 support-file discovery correction at `12e391fd`. The maintainer approved one
 shared event-body format at Proposed candidate `4007adf7`; do not ask again.

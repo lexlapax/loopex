@@ -17,16 +17,19 @@ defmodule Mix.Tasks.Loopex.M7Evidence.FixtureManifest do
   """
 
   alias LoopexCli.ConfigJson
+  alias LoopexProtocol.Canonical
   @names ~w(repair feature review long)
   @entry_keys ~w(workspace initial_files initial_directories allowed_changed_paths allowed_created_paths oracle invocation run_bounds prompts objective_results required_model_actions)
 
   @doc false
   def load(root) do
-    with {:ok, bytes} <- read(Path.join(root, "manifest.json")),
+    path = Path.expand("manifest.json", root)
+
+    with {:ok, bytes} <- read(path),
          {:ok, catalog} <- ConfigJson.decode(bytes),
          true <- valid_catalog?(catalog),
          :ok <- verify_sources(catalog, root) do
-      {:ok, catalog}
+      {:ok, %{catalog: catalog, bytes: bytes, digest: Canonical.digest_bytes(bytes), path: path}}
     else
       _ -> {:error, :fixture_manifest_unavailable}
     end

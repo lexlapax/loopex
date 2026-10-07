@@ -35,35 +35,20 @@ defmodule LoopexCli.M7FixturePolicyTest do
     File.mkdir_p!(trusted)
     File.cp_r!(Path.join(@fixtures, "repair/workspace"), workspace)
     on_exit(fn -> File.rm_rf!(root) end)
-    {:ok, catalog} = FixtureManifest.load(@fixtures)
+    {:ok, %{catalog: catalog, digest: digest}} = FixtureManifest.load(@fixtures)
     oracle = Path.join(trusted, "oracle.exs")
     File.cp!(Path.join(@fixtures, "repair/oracle.exs"), oracle)
 
     assert Canonical.digest_bytes(File.read!(oracle)) ==
              catalog["fixtures"]["repair"]["oracle"]["sha256"]
 
-    {:ok, elixir} =
-      WorkspaceIdentity.resolve_path(
-        Path.expand("../../bin/elixir", List.to_string(:code.lib_dir(:elixir)))
-      )
-
-    path =
-      Path.dirname(elixir) <>
-        ":" <> Path.join(List.to_string(:code.root_dir()), "bin") <> ":/usr/bin:/bin"
-
     runner = Path.join(trusted, "run.sh")
-
-    File.write!(
-      runner,
-      "#!/bin/sh\nset -eu\ntest -z \"${M7_FIXTURE_HOST_SENTINEL:-}\"\nexec /usr/bin/env -i PATH=" <>
-        shell_quote(path) <>
-        " M7_WORKSPACE=" <>
-        shell_quote(workspace) <> " " <> shell_quote(elixir) <> " " <> shell_quote(oracle) <> "\n"
-    )
+    {:ok, recipe} = Policy.oracle_runner("m7.repair", workspace, oracle, %{})
+    File.write!(runner, recipe.bytes)
+    elixir = recipe.elixir
 
     argv = ["/bin/sh", runner]
     pins = Map.new(["/bin/sh", runner, oracle, elixir], &{&1, pin(&1)})
-    digest = Canonical.digest_bytes(File.read!(Path.join(@fixtures, "manifest.json")))
     {:ok, capture} = Policy.prepare("m7.repair", digest, workspace, argv, pins)
 
     profile = %{
@@ -319,7 +304,7 @@ defmodule LoopexCli.M7FixturePolicyTest do
     assert code == 0
     assert_suite(independent, Path.join(f.root, "trusted/independent.log"))
     assert Policy.check(f.capture) == :ok
-    {:ok, catalog} = FixtureManifest.load(@fixtures)
+    {:ok, %{catalog: catalog}} = FixtureManifest.load(@fixtures)
     assert FixtureManifest.verify_workspace(catalog["fixtures"]["repair"], f.workspace) == :ok
   end
 
@@ -331,21 +316,18 @@ defmodule LoopexCli.M7FixturePolicyTest do
       File.rm_rf!(f.workspace)
       File.cp_r!(Path.join(@fixtures, "feature/workspace"), f.workspace)
       File.cp!(Path.join(@fixtures, "feature/oracle.exs"), f.oracle)
-      runner = File.read!(f.runner)
 
-      File.write!(
-        f.runner,
-        String.replace(
-          runner,
-          " M7_WORKSPACE=",
-          " M7_NIL_DEFAULT=#{@feature_default} M7_WORKSPACE="
-        )
-      )
+      {:ok, recipe} =
+        Policy.oracle_runner("m7.feature", f.workspace, f.oracle, %{
+          "M7_NIL_DEFAULT" => @feature_default
+        })
+
+      File.write!(f.runner, recipe.bytes)
 
       pins = Map.new(Map.keys(f.pins), &{&1, pin(&1)})
       {:ok, capture} = Policy.prepare("m7.feature", f.digest, f.workspace, f.argv, pins)
       f = %{f | capture: capture, pins: pins}
-      {:ok, catalog} = FixtureManifest.load(@fixtures)
+      {:ok, %{catalog: catalog}} = FixtureManifest.load(@fixtures)
       spec = catalog["fixtures"]["feature"]
       assert Canonical.digest_bytes(File.read!(f.oracle)) == spec["oracle"]["sha256"]
       [%{"arguments" => question}] = spec["required_model_actions"]
@@ -480,7 +462,7 @@ defmodule LoopexCli.M7FixturePolicyTest do
     pins = Map.new(Map.keys(f.pins), &{&1, pin(&1)})
     {:ok, capture} = Policy.prepare("m7.long", f.digest, f.workspace, f.argv, pins)
     f = %{f | capture: capture, pins: pins}
-    {:ok, catalog} = FixtureManifest.load(@fixtures)
+    {:ok, %{catalog: catalog}} = FixtureManifest.load(@fixtures)
     spec = catalog["fixtures"]["long"]
     assert Canonical.digest_bytes(File.read!(f.oracle)) == spec["oracle"]["sha256"]
     [facts, explain, recall, outputs] = spec["prompts"]
@@ -851,6 +833,4 @@ defmodule LoopexCli.M7FixturePolicyTest do
         do: Process.register(original, :erl_signal_server)
     end)
   end
-
-  defp shell_quote(value), do: "'" <> String.replace(value, "'", "'\\''") <> "'"
 end

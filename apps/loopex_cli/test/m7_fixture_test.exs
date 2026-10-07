@@ -90,7 +90,12 @@ defmodule LoopexCli.M7FixtureTest do
   end
 
   test "the source catalog pins every seed, oracle, action and permitted change" do
-    assert {:ok, catalog} = FixtureManifest.load(@fixtures)
+    assert {:ok, %{catalog: catalog, bytes: bytes, digest: digest, path: path}} =
+             FixtureManifest.load(@fixtures)
+
+    assert catalog == JSON.decode!(bytes)
+    assert bytes == File.read!(path)
+    assert digest == LoopexProtocol.Canonical.digest_bytes(bytes)
     assert Enum.sort(Map.keys(catalog["fixtures"])) == ~w(feature long repair review)
     assert catalog["external"] == %{"status" => "pending_maintainer_selection"}
     assert catalog["execution_manifest"]["status"] == "pending"
@@ -161,7 +166,7 @@ defmodule LoopexCli.M7FixtureTest do
 
   test "complete workspace inventories reject check edits, additions, mode changes and symlinks",
        %{root: root} do
-    assert {:ok, catalog} = FixtureManifest.load(@fixtures)
+    assert {:ok, %{catalog: catalog}} = FixtureManifest.load(@fixtures)
     workspace = copy_fixture(root, "review")
     entry = catalog["fixtures"]["review"]
     assert :ok = FixtureManifest.verify_workspace(entry, workspace)
@@ -199,7 +204,7 @@ defmodule LoopexCli.M7FixtureTest do
   end
 
   defp oracle(name, workspace, env \\ []) do
-    {:ok, catalog} = FixtureManifest.load(@fixtures)
+    {:ok, %{catalog: catalog}} = FixtureManifest.load(@fixtures)
     entry = catalog["fixtures"][name]
     assert :ok = FixtureManifest.verify_workspace(entry, workspace)
     assert :ok = FixtureManifest.verify_oracle(entry, @fixtures)

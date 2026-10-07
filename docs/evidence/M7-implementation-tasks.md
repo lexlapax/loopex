@@ -8,7 +8,7 @@ Eight original stages joined and44 artifacts authenticate in110.103 seconds.
 The four tested files integrate literally; only the added T11 physical-log row
 closes. Accounting, startup classification, mutation protection and helper
 activation remain open. Original T01–T19:87 done/86 todo/6 retired;
-added349 done/23 todo. Exact retained references are in the
+added350 done/22 todo. Exact retained references are in the
 [resume record](M7-resume.md).
 
 Original19990 remains FAIL: all70 current cases passed, but eleven constant
@@ -22,10 +22,12 @@ The trusted fixture preparation unit is independently reviewed and frozen at
 clean isolated `01a198e53cd3e0fc9ca40011e2d1a197fca6b05a`. Six CLI files reuse
 ordinary configuration, capture the exact decoded catalog bytes and derive the
 fixed pinned oracle runner. Fourteen new cases plus15 preserved cases require
-warning-free CLI compilation and29-case proofs on both toolchains. Original
-formatter80490 passed both format checks and all six AST checks in5.893 seconds;
-the actual format-only child is `f3f6fb98`. Compilation and tests remain unrun.
-The added T13 preparation row remains open. Actual campaign admission and the dispatching wrapper remain separate.
+and exact paired native proofs. Original formatter80490 passed both format
+checks and all six AST checks in5.893 seconds. Original27420 subsequently passed
+warning-free CLI compilation and all29 complete cases on each supported pair
+at format-only child `f3f6fb98`, with no exclusions/skips/invalid. Eight original
+processes joined and43 artifacts authenticate in150.527 seconds. Six tested files
+integrate literally and the added T13 preparation row closes. Actual campaign admission and the dispatching wrapper remain separate.
 No provider attempt is started.
 
 The earlier model switching/restart unit remains integrated from `763f342c`:
@@ -14095,7 +14097,7 @@ repeating completed provider work.
 
 ### Added implementation subtasks
 
-- [ ] Join trusted fixture-wrapper preparation to the current ordinary configuration, captured catalog bytes and fixed oracle-runner recipe; prove exact manifest/workspace/oracle/runner pins, fully pinned alternate-command refusal and no preparation-time execution on both supported toolchains. Migrate current internal callers together; actual campaign admission, dispatching entrypoint and complete T13 workflow remain separate.
+- [x] Join trusted fixture-wrapper preparation to the current ordinary configuration, captured catalog bytes and fixed oracle-runner recipe; prove exact manifest/workspace/oracle/runner pins, fully pinned alternate-command refusal and no preparation-time execution on both supported toolchains. Migrate current internal callers together; actual campaign admission, dispatching entrypoint and complete T13 workflow remain separate.
 
 - [x] Pin the retained four coding fixtures in a closed source catalog with literal prompts, bounds, digests/modes, allowed changes, objective results and required model actions; protect complete workspace and immutable oracle inventories around actual deterministic oracle runs on both toolchains.
 - [x] Freeze each fixture catalog entry to its exact changed/created path policy; reject well-formed edits that broaden or remove the retained task allowance, with failing-before and both-toolchain proofs.
