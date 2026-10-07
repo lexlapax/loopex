@@ -1,5 +1,20 @@
 # M7 Implementation Tasks
 
+The reboot resume is saved on `m7`. Physical history correction `d2b2298c`
+preserves directory checks and exact lineage comparisons and verifies every
+protected entry before successful admission. Original51209 is collected FAIL
+after182.605 seconds: construction13 passed; workflow134/135 passed, including
+the new corruption-precedence regression. The64-restores case still exceeded
+60,000ms, now waiting for the restore worker. Floor and full check were unrun.
+No row closes from this result and no cutoff changes. Collection and registry
+identities are in the [restart checkpoint](M7-resume.md#technical-depth).
+
+Native authored bounds remain separate pending fixes for immediate recovery
+allowance capture, executor worker entry and artifact preparation/result fences.
+ADR0054 is still the sole asked decision. The T14 event-body proposal is being
+prepared; its earlier digest alone cannot authorize its persistent grammar.
+Original T01–T19:80 done/93 todo/6 retired; added303 done/40 todo.
+
 The standalone configure grammar subtask is complete: current and floor each
 passed all15 codec/Node/transport preparation cases. Live configure, remote
 creation and full generation activation remain open. Original59352 is collected

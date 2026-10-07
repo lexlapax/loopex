@@ -27,6 +27,38 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+After the maintainer reboot, primary `m7` resumed from clean0b21156e. Reviewed
+physical correction `d2b2298ca94779859a31870ccdf9222c77b0aef9` changes only
+RestoreGuard and the workflow test. Formatting preserved both authored file
+hashes. Original51209 is fully collected FAIL_OR_UNAVAILABLE after182.605 seconds:
+current construction13 passed; workflow134/135 passed, including the new older
+regular-corruption/higher-incomplete-head regression. The64-restores case still
+exceeded its unchanged60,000ms cutoff, with the test waiting in finish/2 for the
+restore worker. Floor was unrun. Collection
+`M7/physical-history-boundaries-20261006-v1/original-collection.json`, SHA-256
+`ce3517ed63383acdec343dc2462bb2d07a26a1747aa66dc997214ca564d47ff8`,
+binds26 artifacts and five original joins. The latest registry has984 keys,
+SHA-256 `8024979777222a6bc2de2ddbc277bb7fd1a71f54288faa09dc72bba8cbeed243`.
+Never repoll51209 or signal its former PIDs. Diagnose the remaining owned
+restore cost before any new attempt; do not increase cutoffs or rerun unchanged
+failed bytes. The independently reviewed full-check v2 wrapper,
+`M7/m7-corrected-full-fast-retained-20261006-v2.py`, SHA-256
+`0b811219759daa9225794aede9b05d28cc5cd420c4a855b14fbd30ee5c952d79`,
+was never executed because its paired restore prerequisite failed. Its source
+guard must be revised for a corrected candidate.
+
+Native authored bounds source review found three blockers: recovery must
+immediately capture both active and queued remaining allowances; executor
+workers need a final paired entry fence; artifact preparation must check the
+paired cutoff before its callback and before admitting success. The author
+owns the same separate ten files and is correcting these with meaningful
+receiver/recovery proofs. No native test or integration follows source review.
+ADR0054 remains the sole asked pending decision. A Proposed0057 attempts-event
+body pair is being prepared in the reused clean attempts worktree, now based
+on d2b2298c. The older packet bytes have not been located; its retained digest
+and eleven historical vector checks are not acceptance. No dependent event
+codec, writer or runner activation is authorized before grammar acceptance.
+
 M7 continues on primary branch `m7`. Reviewed configure grammar, mode-faithful
 restore copies and bounded private socket fixtures are integrated at
 `bab921b250ee6f7b3d88d5184c3f9d964434d90e`. Its four source commits are
