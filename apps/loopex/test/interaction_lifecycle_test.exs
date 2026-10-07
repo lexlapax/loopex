@@ -262,6 +262,11 @@ defmodule Loopex.InteractionLifecycleTest do
     # denied rather than left standing.
     expired = await_event(fixture, session_id, "interaction.expired", 4_000)
     assert expired["interaction_id"] == requested["interaction_id"]
+    assert expired["run_id"] == requested["run_id"]
+    assert expired["turn"] == requested["turn"]
+    assert expired["tool_call_id"] == requested["tool_call_id"]
+    assert Map.has_key?(expired, "answer_command_id")
+    assert expired["answer_command_id"] == nil
     refute Map.has_key?(expired, "choice_id")
 
     finished = await_event(fixture, session_id, "run.finished", 4_000)
@@ -733,6 +738,17 @@ defmodule Loopex.InteractionLifecycleTest do
         end)
 
       assert terminal["resolution"] == "cancelled"
+
+      assert Map.drop(terminal, [:kind, :event_id, :event_sequence]) == %{
+               "interaction_id" => old["interaction_id"],
+               "run_id" => old["run_id"],
+               "turn" => old["turn"],
+               "tool_call_id" => old["tool_call_id"],
+               "resolution" => "cancelled",
+               "answer_command_id" => command,
+               "choice_id" => "allow"
+             }
+
       assert terminal["choice_id"] == "allow"
       assert terminal.event_sequence == admitted.event_sequence + 1
       assert replacement.event_sequence == terminal.event_sequence + 1
@@ -767,6 +783,22 @@ defmodule Loopex.InteractionLifecycleTest do
     assert {:ok, recovered} = Loopex.Runtime.SessionState.recover(session_id, records, events)
     assert recovered.interactions[first["interaction_id"]].status == "cancelled"
     assert recovered.interactions[second["interaction_id"]].status == "cancelled"
+
+    configuration =
+      Loopex.Runtime.SessionConfiguration.public_view(
+        hd(records).payload["initial_configuration"]
+      )
+
+    for cursor <- 0..length(events) do
+      assert {:ok, expected} =
+               Loopex.Runtime.SessionState.snapshot(session_id, cursor, events, configuration)
+
+      assert {:ok, historical} =
+               Loopex.attach(fixture.runtime, session_id, after_event_sequence: cursor)
+
+      assert Loopex.snapshot(historical).open_interaction == expected.open_interaction
+    end
+
     assert Loopex.AgentLoopTestExecutor.jobs(fixture.executor) == []
   end
 
@@ -890,7 +922,8 @@ defmodule Loopex.InteractionLifecycleTest do
              })
 
     # The host is mid-decision when this owner is replaced.
-    assert_receive {:resumed, _first_evaluation}, 4_000
+    assert_receive {:resumed, first_evaluation}, 4_000
+    first_monitor = Process.monitor(first_evaluation)
 
     assert {:ok, ^session_id} =
              Loopex.resume_session(fixture.runtime, session_id, command_id: "successor")
@@ -898,12 +931,20 @@ defmodule Loopex.InteractionLifecycleTest do
     # The successor finds the answer on disk and asks the host again rather than
     # assuming what the first evaluation would have said. Nothing was dispatched
     # in between.
+    assert_receive {:DOWN, ^first_monitor, :process, ^first_evaluation, _}, 8_000
     assert_receive {:resumed, second_evaluation}, 8_000
+    second_monitor = Process.monitor(second_evaluation)
     assert Enum.all?(Fixture.events(fixture, session_id), &(&1.kind != "tool.started"))
     send(second_evaluation, :release)
+    assert_receive {:DOWN, ^second_monitor, :process, ^second_evaluation, _}, 8_000
 
     resolved = await_event(fixture, session_id, "interaction.resolved", 8_000)
     assert resolved["resolution"] == "allowed"
+    assert resolved["turn"] == requested["turn"]
+    assert resolved["run_id"] == requested["run_id"]
+    assert resolved["tool_call_id"] == requested["tool_call_id"]
+    assert resolved["answer_command_id"] == "answer-1"
+    assert resolved["choice_id"] == "allow"
 
     tool_finished = await_event(fixture, session_id, "tool.finished", 8_000)
     assert tool_finished["outcome"] == "completed"
@@ -919,6 +960,8 @@ defmodule Loopex.InteractionLifecycleTest do
     started = Enum.find(events, &(&1.kind == "tool.started"))
     resolution = Enum.find(events, &(&1.kind == "interaction.resolved"))
     assert started.event_sequence > resolution.event_sequence
+    records = Fixture.records(fixture, session_id)
+    assert {:ok, _} = Loopex.Runtime.SessionState.recover(session_id, records, events)
   end
 
   test "expiry abort deadline and restart races resolve by journal order and recovery resumes only retained pending state" do
@@ -1057,6 +1100,13 @@ defmodule Loopex.InteractionLifecycleTest do
 
     cancelled = await_event(fixture, session_id, "interaction.cancelled", 4_000)
     assert cancelled["interaction_id"] == requested["interaction_id"]
+    assert cancelled["run_id"] == requested["run_id"]
+    assert cancelled["turn"] == requested["turn"]
+    assert cancelled["tool_call_id"] == requested["tool_call_id"]
+    assert Map.has_key?(cancelled, "answer_command_id")
+    assert cancelled["answer_command_id"] == nil
+    refute Map.has_key?(cancelled, "choice_id")
+    refute Map.has_key?(cancelled, "reason")
 
     assert {:error, :interaction_resolved} =
              Loopex.command(attachment, %{

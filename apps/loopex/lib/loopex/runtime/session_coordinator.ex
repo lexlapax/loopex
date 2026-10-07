@@ -8709,12 +8709,49 @@ defmodule Loopex.Runtime.SessionCoordinator do
   defp intent_category(_result), do: :other
 
   defp dispatch_effect(state, work, call) do
-    with {:ok, definition} <- resolve_active_tool(state, call.name),
-         {:ok, _resolved} <- validate_tool_arguments(state, definition, call.arguments) do
-      start_policy_consultation(state, work, call, definition)
-    else
-      {:error, reason} ->
-        commit_tool_failure(state, work, call, reason)
+    case retained_policy_refusal(state, work, call) do
+      {:denied, reason} ->
+        commit_tool_terminal(state, work, call, :denied, reason)
+
+      nil ->
+        with {:ok, definition} <- resolve_active_tool(state, call.name),
+             {:ok, _resolved} <- validate_tool_arguments(state, definition, call.arguments) do
+          start_policy_consultation(state, work, call, definition)
+        else
+          {:error, reason} ->
+            commit_tool_failure(state, work, call, reason)
+        end
+    end
+  end
+
+  # Concept: a committed denial or expiry ends its own suspended tool decision.
+  # Technical depth: owner loss may separate interaction closure from the next
+  # tool-result transaction. Match the latest retained policy round to the exact
+  # queued run, turn and call; finish that refusal without another consultation.
+  # An allowed terminal supplies no fresh grant or dispatch authority here.
+  defp retained_policy_refusal(state, work, call) do
+    latest =
+      state.durable.interactions
+      |> Map.values()
+      |> Enum.filter(fn interaction ->
+        Map.get(interaction, :producer) != "model_tool" and
+          interaction.run_id == work.run_id and interaction.turn == work.turn_number and
+          interaction.tool_call_id == call.tool_call_id
+      end)
+      |> Enum.max_by(& &1.round, fn -> nil end)
+
+    case latest do
+      %{status: status} = interaction when status in ["denied", "expired"] ->
+        reason =
+          case Map.get(interaction, :resolution_reason) do
+            reason when is_binary(reason) -> reason
+            _absent -> if status == "expired", do: "interaction_expired", else: "policy_denied"
+          end
+
+        {:denied, reason}
+
+      _not_a_refusal ->
+        nil
     end
   end
 

@@ -27,6 +27,47 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+Latest completion: T05 native policy provenance/recovery is integrated literally
+from clean isolated `1399e84781c34902f08a3ea95de27b9e20fbbf4c` (SessionState,
+SessionCoordinator, answer admission and lifecycle test files). Original47825 is
+terminal0 and collected PASS: all30 native cases on each supported pair, zero
+excluded/skipped/invalid,43.903 seconds, eight original joins and45 artifacts.
+Output `M7/policy-native-admission-20261007-v4`, collection SHA-256
+`f0bbc613b7a843b14d78e33785fc3563fd3d69d68d5d6146f143bf5783053ba9`;
+terminal `71bd0e403c20743cd6dd1c1d8e21ae61510bec11edbce516268ec79fdf3f7bd0`.
+Latest collected1448 registry SHA-256
+`528954a64bce1f16c50fd085a38dfbfee575de9c31682376bcd4f1d0004efb80`.
+Actual unknown-commit before/after/recovery-representation phases, original
+owner joins, committed denial and real700-ms expiry owner loss passed. Retained
+allow supplies no fresh authority. No transport/generation/full integration
+claim. Original65277 failure stays immutable. Never repoll47825. No native VM
+is live at this checkpoint. Counts original81 done/92 todo/6 retired; added330
+done/29 todo. Only the new bounded native T05 row closes.
+
+Next work is T15 regular-file mode preservation. Reviewed source is committed
+raw `d6bcb6f7b446179420d175811f6af08b218740c7`, parent568c42f7, tree
+`b6931ae87fd5665dee6e7f0861e5ce488338c521`, Git projection SHA-256
+`411975f4f491ff592c3d85e5f929d0b2fa14f97008bb6b0655b74de8cef1ecf9`
+in `/Users/spuri/.codex/worktrees/m7-restore-copy-fixtures/loopex`.
+Source packet `/private/tmp/m7-restore-regular-mode-source-20261007-v1/source.json`,
+SHA-256 `de2da4bc3f847985c6abe44d354ff3efbf63fe349374895d0ef822b2141f5d70`;
+patch `53352f5b0864403a98a09c6c5a428b26bf14ec603963075bf245762f15071d4d`.
+Independent review packet
+`/private/tmp/m7-restore-regular-mode-independent-review-20261007-v1.json`, SHA-256
+`ff1d3fae0c966549d1e3782624f4dd0f73ee6aea7c014ecf70cd8a898b606141`.
+Two owned paths: restore/io.ex hash
+`27fbf6cc0194151b3ed66837792e8aa8df5306e1606a39ac0240352c2ac190ef`,
+restore_io_test.exs hash
+`5352c27cf53cae159698283e49e8df555ef690b7772c1a7cbcaa5c7b9c73abb6`.
+Keep initial permissions; reapply full07777 after final writes before sync/close
+at all three copy/publication sites. Original109 cases/helpers and all cutoffs
+remain unchanged; two new physical cases establish actual04750, multichunk copy,
+whole manifest equality and both current publication paths. Required next checks:
+paired formatter/non-line AST; all111 IO cases including original3 long_bound,
+retained publication16, generation install23 and generation prefix25 per pair.
+Existing unowned sticky-directory workflow stays byte-identical and unresolved.
+No T15 row closes from source review; no new directory helper is approved.
+
 Latest bounded completion: T16 normal-shutdown correction at clean isolated
 `1f1a5f6967867c3c26ef3d7f0f3eb56112f0273d` is integrated literally (OwnerGroup,
 configured-session witness and retirement witness). Original86533 is terminal0

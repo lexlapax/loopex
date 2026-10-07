@@ -8743,7 +8743,13 @@ defmodule Loopex.Runtime.SessionState do
          true <- interaction.status in ["pending", "answered"],
          true <- state.open_interaction == interaction_id,
          true <- resolvable?(interaction, resolution) do
-      resolved = %{interaction | status: resolution_status(resolution)}
+      # Concept: a closed refusal still owes the suspended call its terminal fact.
+      # Technical depth: reconstruct the owning record's optional reason for a
+      # successor between interaction closure and tool-result commitment.
+      resolved =
+        interaction
+        |> Map.put(:status, resolution_status(resolution))
+        |> Map.put(:resolution_reason, Map.get(record, "reason"))
 
       {:ok,
        %{
@@ -9175,20 +9181,27 @@ defmodule Loopex.Runtime.SessionState do
   # Technical depth: expiry and cancellation are distinct kinds rather than a
   # field of one, because a reader that filters on kind must be able to tell an
   # unanswered question that ran out of time from one an abort closed. A
-  # resolution carries the choice only where an answer was admitted, and never
-  # carries the host's private reference.
+  # resolution retains the owning turn and admitted answer command, including
+  # when expiry or cancellation closes an answered question. An abort or timer
+  # never supplies answer provenance, and the host's private reference stays
+  # outside this public fact.
   defp interaction_resolved_event(session_id, interaction, resolution, record) do
     %{
       "interaction_id" => interaction.interaction_id,
       "run_id" => interaction.run_id,
+      "turn" => interaction.turn,
       "tool_call_id" => interaction.tool_call_id,
       "resolution" => resolution,
+      "answer_command_id" => Map.get(interaction, :command_id),
       event_id:
         stable_id("event-interaction-" <> resolution, session_id, interaction.interaction_id),
       kind: interaction_event_kind(resolution)
     }
     |> then(
-      &if(interaction.choice_id, do: Map.put(&1, "choice_id", interaction.choice_id), else: &1)
+      &if(Map.get(interaction, :command_id),
+        do: Map.put(&1, "choice_id", interaction.choice_id),
+        else: &1
+      )
     )
     |> then(fn event ->
       case Map.get(record, "reason") do
@@ -10742,9 +10755,18 @@ defmodule Loopex.Runtime.SessionState do
         if(event["producer"] == "model_tool", do: event["interaction_kind"], else: "choice")
     }
 
-    case LoopexProtocol.Session.OpenInteraction.encode_wire(projected) do
-      {:ok, _} -> {:ok, projected}
-      :error -> {:error, :invalid_public_interaction}
+    payload = Map.drop(event, [:kind, :event_id, :event_sequence])
+
+    with true <-
+           event["producer"] == "model_tool" or
+             closed_history_map?(
+               payload,
+               ~w(interaction_id run_id turn tool_call_id prompt choices expires_at)
+             ),
+         {:ok, _} <- LoopexProtocol.Session.OpenInteraction.encode_wire(projected) do
+      {:ok, projected}
+    else
+      _ -> {:error, :invalid_public_interaction}
     end
   end
 
@@ -10771,6 +10793,52 @@ defmodule Loopex.Runtime.SessionState do
   defp advance_open_interaction(_open, %{kind: kind})
        when kind in ["interaction.requested", "interaction.answer_admitted"],
        do: {:error, :invalid_public_interaction_transition}
+
+  # Concept: a policy terminal closes the exact open question and its retained answer.
+  # Technical depth: the cursor authenticates all four owning fields and the
+  # answer pair before closing the slot. Pending expiry or cancellation carries
+  # no answer; an answered terminal preserves its admitted command and choice.
+  defp advance_open_interaction(
+         %{"producer" => "policy_defer", "kind" => "choice"} = open,
+         %{kind: kind} = event
+       )
+       when kind in [
+              "interaction.resolved",
+              "interaction.expired",
+              "interaction.cancelled",
+              "interaction.answered",
+              "interaction.declined"
+            ] do
+    payload = Map.drop(event, [:kind, :event_id, :event_sequence])
+    command_id = payload["answer_command_id"]
+    required = ~w(interaction_id run_id turn tool_call_id resolution answer_command_id)
+    required = if is_nil(command_id), do: required, else: required ++ ["choice_id"]
+    resolution = payload["resolution"]
+
+    answer_matches? =
+      case open["status"] do
+        "pending" ->
+          resolution in ["expired", "cancelled"] and is_nil(command_id)
+
+        "answered" ->
+          command_id == open["answer_command_id"] and
+            payload["choice_id"] == open["answer_choice_id"]
+      end
+
+    with true <- closed_history_map?(payload, required, ["reason"]),
+         true <-
+           not Map.has_key?(payload, "reason") or
+             (is_binary(payload["reason"]) and byte_size(payload["reason"]) <= 65_536),
+         true <-
+           Enum.all?(~w(interaction_id run_id turn tool_call_id), &(payload[&1] == open[&1])),
+         true <- resolution in ["allowed", "denied", "expired", "cancelled"],
+         true <- kind == interaction_event_kind(resolution),
+         true <- answer_matches? do
+      {:ok, nil}
+    else
+      _ -> {:error, :invalid_public_interaction_transition}
+    end
+  end
 
   defp advance_open_interaction(%{"interaction_id" => id}, %{kind: kind} = event)
        when kind in [

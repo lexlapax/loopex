@@ -1,5 +1,15 @@
 # M7 Implementation Tasks
 
+T05's bounded native policy provenance/recovery unit is proved at isolated1399e847:
+all30 cases passed on each supported toolchain, including denial/expiry owner
+loss and all three unknown-commit phases. Original47825 is terminal0 and collected
+PASS,43.903 seconds, eight original joins and45 verified artifacts, zero
+exclusions/skips/invalid. The four literal tested files are integrated. Its new
+bounded native subtask closes; transport projections, manifests and generation
+activation remain separate. Original81 done/92 todo/6 retired; added330 done/
+29 todo. T15 regular-file mode repair is reviewed and committed in its isolated
+worktree, awaiting paired proof; directory special modes remain unresolved.
+
 T16's bounded ordinary-shutdown correction is proved at isolated1f1a5f69:
 all151 Core and2 Composition cases passed on each supported pair, including
 actual long-bound cleanup and forced retirement. Original86533 is terminal0
@@ -13393,6 +13403,8 @@ or check was relaxed.
 - [ ] Run the required independent-client workflows.
 
 ### Added implementation subtasks
+
+- [x] Implement accepted ADR0052 native terminal turn and answer-command provenance with strict closed cursor/replay relations; reconstruct existing retained refusal reasons and finish only exact queued denied/expired calls after owner loss without reconsulting policy or granting retained allow authority. Prove all30 answer/lifecycle cases on both supported pairs, including real700-ms expiry owner loss and all three Store uncertainty phases; retain original65277 failure and integrate literal tested files. Transport projection, complete manifests and generation activation remain open.
 
 - [x] Implement accepted ADR 0053 daemon configure admission through existing lease-owner authority, serial tickets, succession capacity and cleanup; prove actual native admission, renewal/refusal behavior and unchanged negotiated-wire refusal on both supported toolchains. Keep Request/parser and served generations unchanged until coordinated activation.
 
