@@ -27,28 +27,44 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
-The maintainer requested a restart pause on2026-10-06. Configure Mapping is
-integrated and verified. All ten native authored-bounds files are also saved
-literally froma01f4b4c in this checkpoint, as implementation awaiting complete
-paired verification. Current148 passed ata3f78d18; its floor stopped at formatting.
-The reviewed common-layout correction passed both formatters, but corrected
-floor compilation/tests remain unrun. Keep the T11 native row open. Do not
-start provider, full fast, restore, closure or release campaigns on resume.
+The maintainer resumed M7 on2026-10-06. Native original88112 is collected PASS
+at `a01f4b4cf7476fc91bf6305be00a173619e4eb96`: all148 cases on each supported
+pair, no exclusions/skips/invalid cases,197.265 seconds overall. All eight
+original process stages are joined and41 artifacts verified. Collection
+`M7/native-authored-bounds-20261006-v5/original-collection.json`, SHA-256
+`031293120a639c653c408c19ac60be615d6a8de916cc95d20460de1d930fd521`, binds terminal
+`65f1af06ad96ac63f898c969d9652bb48562bf6ff917dd3def812ee5ba366cf7` and1043-key
+registry `97f12ca04b4c0d7d198809eb6fd7c9e31eecf1a56bfb9d296b80e7b28af43a64`.
+Never repoll88112. All ten primary source files match the tested candidate.
+The bounded T11 native row closes; public wire activation remains open.
 
-First resume action: run the unchanged retained native wrapper
-`M7/m7-native-authored-bounds-20261006-v1.py` at the clean isolateda01f4b4c
-candidate with configure's collected1035-key registry and exact digest below,
-using fresh `M7/native-authored-bounds-20261006-v5`. Require both complete148
-populations, collect its original handle once, then update the T11 row only on
-PASS and exact source equality. The primary already contains the ten same bytes.
-Next integration verification remains blocked by the unchanged64-restores case,
-whose aggregate cutoff decision is queued after unanswered ADR0054. Preserve
-all previous failures and never substitute retry success for their outcomes.
+The prior temporary formatter/collector metadata was lost after reboot. Root
+reconstructed the collector at `/private/tmp/m7-original-collect-20261006-v2.py`
+and retained its exact bytes as root-collector.py in the proof directory,
+SHA-256 `b4671fa36c5f8a6b9e3d703fe4f11d53c7325d93fd7735ced033145f22a6a9c4`.
+The unchanged proof wrapper admitted the exact source and registry; its fresh
+current/floor formatter stages passed before their full compilation/tests.
+No missing temporary record is presented as available evidence.
 
-No active product VM remains. No main merge, closure, publication or paid
-campaign is authorized. Original T01–T19:80 done/93 todo/6 retired;
-added304 done/41 todo. The goal is paused solely at the maintainer's restart
-request; resume it when instructed.
+Daemon configure source work runs in the managed protocol worktree from
+`f71caca9db5210bd98c2fa0d7b6f6d0318525d41`, owning exactly AdmissionRelay,
+LeaseOwner, SuccessionCapacity and their lease/capacity/connection test files.
+The author cannot run VMs, formatters, tests or Git. Root owns source review,
+paired verification and literal integration. Preserve Request.parse and existing
+negotiated generations: ConnectionProtocol has no separate dispatch method gate.
+Add only the dormant native admission unit, with actual authority/order/renewal/
+cleanup and negotiated-wire refusal proofs. Its separate T05 added row is open.
+
+ADR0054's exact pair is accepted by the maintainer; compaction implementation
+may proceed. The next individually asked decision is the64-restores aggregate
+cutoff: proposed600,000ms aggregate only, retaining every10,000ms per-restore
+work limit,1,000ms fixture grace, cleanup deadline, join and64/65 integrity proof.
+It is unanswered. Full restore and full fast proof remain blocked by the unchanged
+known-red60,000ms case; never silently raise its limit or retry unchanged source.
+
+The goal is active. Original T01–T19:80 done/93 todo/6 retired;
+added305 done/41 todo. No main merge, milestone closure, tag, publication or
+paid campaign is authorized. Earlier entries below describe their named revisions.
 
 
 Configure original17193 is collected PASS at isolated candidate

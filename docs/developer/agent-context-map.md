@@ -6926,3 +6926,24 @@ clients, preserving central preparation, authored alias identity, authority,
 exact quantities and current replay. Complete generation activation and its
 required proof remain separate. This accepts no other queued proposal and
 supplies no test result, milestone closure or publication authority.
+
+<a id="disposition-m7-compaction-activity-2026-10-06"></a>
+### M7 compaction activity progress accepted, 2026-10-06
+
+The maintainer replied "Approved compaction" and selected the single activity
+notice for the exact [ADR 0054](../adr/0054-compaction-activity-progress.md#concept)
+pair at candidate `3c33a2ca875f94c0b41ea7ca92900d4c9084e90a`.
+Historical Proposed Concept SHA-256 is
+`c7628948485d90b660b7e19609862267a2a1c675e51dd828739ed227e226fe74`;
+Technical SHA-256 is
+`a75fa09ba62fa465373f5761ba3b4a74652b3674834b837bbc48106b709d5e8e`.
+Within the pair only Status and the empty Acceptance row change.
+
+Implement one closed six-member observation after a positive summary permit
+result, with the actual committed episode/owner and compaction attempt domain.
+Keep provider deltas discarded and durable records authoritative. This amends
+ADR 0043's transient compaction projection and only ADR 0011's compaction
+domain and single-observation closure rule. No successor replay or synthetic
+closure is permitted. Coordinated generation
+activation and its required proofs remain separate. Acceptance supplies no
+test result, milestone closure or publication authority.

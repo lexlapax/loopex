@@ -1,13 +1,13 @@
 # M7 Implementation Tasks
 
-The restart checkpoint integrates accepted foreground configure Mapping from
-`dbef6d296fb5b3bf573432a82f788e6df86ad448`. Original85178 passed all46 cases on
-each supported pair in92.703 seconds, with original joins and output retained.
-The bounded added T05 Mapping row is complete; current negotiated connections
-still refuse configure until complete generation activation. Original T01–T19
-remains80 done/93 todo/6 retired; added304 done/41 todo. Native bounds are saved
-as a reviewed implementation candidate, with complete paired proof still pending.
-Exact candidates, results and restart order are in the
+Native authored bounds are complete in the bounded added T11 row. Original88112
+passed all148 cases on each supported toolchain at `a01f4b4c`, in197.265 seconds,
+with all eight original stages joined and41 artifacts verified. All ten source
+files match the integrated primary bytes. Original T01–T19 remains80 done/93
+todo/6 retired; added305 done/41 todo after adding the separate daemon configure
+admission unit. Daemon source work is running; served generation activation
+remains open. ADR0054 is accepted; the restore aggregate cutoff question is
+pending. Exact proof references and continuation order are in the
 [restart checkpoint](M7-resume.md#technical-depth).
 
 The entries below record earlier revisions and failed attempts.
@@ -13241,6 +13241,9 @@ or check was relaxed.
 
 ### Added implementation subtasks
 
+- [ ] Implement accepted ADR 0053 daemon configure admission through existing lease-owner authority, serial tickets, succession capacity and cleanup; prove actual native admission, renewal/refusal behavior and unchanged negotiated-wire refusal on both supported toolchains. Keep Request/parser and served generations unchanged until coordinated activation.
+
+
 - [ ] Finish accepted ADR0052 native answer provenance, exact policy cursor/replay relations and shared Elixir/Node payload projection in both transports; prove focused current/floor and independent vectors after rejoin, complete negotiated manifests and real answered-command workflows.
 - [ ] Pin and implement the exact configure request and versioned remote creation-option grammars through governed decisions; preserve authored aliases, central preparation, host-only bindings, current command replay and both transport authority gates.
 - [x] Implement accepted foreground configure Mapping admission through the existing attachment and native command owners; prove complete mapping/initialization files, safe malformed correlation, authored retry identity, all three Store uncertainty phases and joined preparation on both supported pairs. Preserve the current Connection generation refusal until complete manifest activation.
@@ -13616,7 +13619,13 @@ the still-open real-provider, live protocol, persistent-fault or closure lanes.
 
 ### Added implementation subtasks
 
-- [ ] Implement accepted ADR 0046 generic authored prompt bounds and follow-up absolute ceilings in Core: bind omission-preserving current command identity before defaults/clock, retain exact accepted/refused admission through uncertainty and replay, enforce earlier relative/absolute cutoff across preparation, staging, dispatch and recovery with one monotonic live-owner allowance, and prove no parent-ceiling inheritance or pre-stage dispatch after expiry. Keep native and wire activation proofs separate.
+- [x] Implement accepted ADR 0046 generic authored prompt bounds and follow-up absolute ceilings in Core: bind omission-preserving current command identity before defaults/clock, retain exact accepted/refused admission through uncertainty and replay, enforce earlier relative/absolute cutoff across preparation, staging, dispatch and recovery with one monotonic live-owner allowance, and prove no parent-ceiling inheritance or pre-stage dispatch after expiry. Keep native and wire activation proofs separate.
+  Both complete148-case populations pass at `a01f4b4c`; original88112 is terminal
+  and collected. Collection `M7/native-authored-bounds-20261006-v5/original-collection.json`
+  has SHA-256 `031293120a639c653c408c19ac60be615d6a8de916cc95d20460de1d930fd521`.
+  The ten integrated files match this exact tested source. Wire activation and
+  broader helper outcomes remain open.
+
 
 - [x] Install/read immutable validated retained-object bytes with actual content-addressed filesystem durability, exclusive host ownership, symlink/root guards and physical crash/fsync/uncertainty proof on both pairs; use the existing GenesisCodec as a concrete client without inventing ledger or catalog schemas.
 - [ ] Pin the complete private delegation ledger byte recipe and closed object/mutation field grammars under accepted ADR 0046 semantics before implementing append/recovery/transaction reduction; refuse incomplete or corrupt current frames without introducing a compatibility decoder.
