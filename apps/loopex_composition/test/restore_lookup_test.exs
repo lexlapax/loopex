@@ -603,21 +603,38 @@ defmodule LoopexComposition.RestoreLookupTest do
       bytes = File.read!(owner)
       {:ok, claim} = RestoreCodec.decode(:claim, bytes)
       {:ok, hostile} = RestoreCodec.encode(:claim, %{claim | "role" => "destination"})
+      # Concept: hostile lookup data preserves the paused writer's original claim custody.
+      # Technical depth: rewriting its owner changes captured mtime/ctime even when bytes return.
+      retained = claim_path(fixture.destination) <> ".retained"
+      identity = claim_owner_identity(owner)
+      File.rename!(claim_path(fixture.destination), retained)
+      File.mkdir!(claim_path(fixture.destination))
+      File.chmod!(claim_path(fixture.destination), 0o700)
       File.write!(owner, hostile)
+      File.chmod!(owner, 0o600)
 
       try do
         assert {:error, %{"code" => "restore_conflict", "cleanup" => "joined"}} =
                  Restore.lookup(fixture.destination, fixture.plan["tx_id"], @limits)
 
         assert File.read!(owner) == hostile
-        File.write!(owner, bytes)
+        File.rm_rf!(claim_path(fixture.destination))
+        File.rename!(retained, claim_path(fixture.destination))
+        assert File.read!(owner) == bytes
+        assert claim_owner_identity(owner) == identity
 
         assert {:committed, %{"receipt" => receipt, "view" => "historical"}} =
                  Restore.lookup(fixture.destination, fixture.plan["tx_id"], @limits)
 
         assert receipt == fixture.receipt
       after
-        File.write!(owner, bytes)
+        if File.exists?(retained) do
+          File.rm_rf!(claim_path(fixture.destination))
+          File.rename!(retained, claim_path(fixture.destination))
+        end
+
+        assert File.read!(owner) == bytes
+        assert claim_owner_identity(owner) == identity
         send(owned.guardian, {:proceed, owned.reference, id})
 
         try do
@@ -721,8 +738,14 @@ defmodule LoopexComposition.RestoreLookupTest do
         claim_bytes = File.read!(owner)
         {:ok, claim} = RestoreCodec.decode(:claim, claim_bytes)
         {:ok, hostile_claim} = RestoreCodec.encode(:claim, %{claim | "plan_digest" => digest})
+        retained = claim_path(fixture.destination) <> ".retained"
+        identity = claim_owner_identity(owner)
+        File.rename!(claim_path(fixture.destination), retained)
+        File.mkdir!(claim_path(fixture.destination))
+        File.chmod!(claim_path(fixture.destination), 0o700)
         File.write!(temp, hostile_intent)
         File.write!(owner, hostile_claim)
+        File.chmod!(owner, 0o600)
         ledger = Path.join(fixture.destination, "sparse")
         generation = File.read!(Path.join(ledger, "generation"))
 
@@ -756,7 +779,10 @@ defmodule LoopexComposition.RestoreLookupTest do
           end
 
           File.write!(temp, intent_bytes)
-          File.write!(owner, claim_bytes)
+          File.rm_rf!(claim_path(fixture.destination))
+          File.rename!(retained, claim_path(fixture.destination))
+          assert File.read!(owner) == claim_bytes
+          assert claim_owner_identity(owner) == identity
           send(owned.guardian, {:proceed, owned.reference, id})
 
           try do

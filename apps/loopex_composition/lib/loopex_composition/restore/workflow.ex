@@ -14,8 +14,9 @@ defmodule LoopexComposition.Restore.Workflow do
   work and validates and appends complete prior lineage. Original-tx
   continuation through source retirement reuses retained claim custody and exact
   native records. A private continuation installs exact retained generation prefixes
-  and validates the complete activation manifest. Committed receipts, claim release and
-  later proof-prefix continuation remain implementation work. The IO callback never
+  and validates the complete activation manifest. Private retained finalization admits
+  exact canonical proof prefixes, commits the root last and delegates captured claims
+  to the original terminal release owner before returning the existing receipt. The IO callback never
   starts another guardian or refreshes this invocation's work or cleanup allowance.
   """
 
@@ -277,6 +278,119 @@ defmodule LoopexComposition.Restore.Workflow do
       {:error, "inventory_unavailable"}
   end
 
+  # Concept: complete the original installed transaction before returning its receipt.
+  # Technical depth: full native admission precedes nonce handoff. Every proof is
+  # the retained canonical byte string, equal stages re-sync, and the root is the
+  # last payload publication. Only the original guardian may release captured
+  # claims after payload DOWN under its already selected terminal cutoff.
+  @doc false
+  def retained_destination_finalization(plan, invocation, io) do
+    case value!(io.({:restore_classification, plan["destination_state_root"], plan})) do
+      {:committed, receipt} ->
+        throw({:restore_duplicate, receipt})
+
+      {:error, %{"code" => "restore_conflict"}} ->
+        :ok
+
+      {:error, %{"code" => "restore_history_invalid"}} ->
+        throw({:restore_refusal, "invalid_current_history"})
+
+      {:error, %{"code" => code}} ->
+        throw({:restore_refusal, code})
+
+      _ ->
+        throw({:restore_refusal, "invalid_current_history"})
+    end
+
+    retained = retained_handoff!(plan, invocation, io, :finalization)
+    compiled = retained.compiled
+    destination = plan["destination_state_root"]
+    {:ok, entries} = RestoreCodec.manifest(retained.baseline, invocation["max_total_file_bytes"])
+    phase(io, "destination_proofs")
+
+    Enum.each(compiled.ledgers, fn ledger ->
+      retained_generation_fences!(plan, invocation, retained, io)
+      retained_finalization_manifest!(plan, invocation, retained, :prefix, io)
+
+      retained_retirement_publish!(
+        retained,
+        plan,
+        destination,
+        ledger.directory,
+        "committed",
+        :record,
+        ledger.committed,
+        entries,
+        io
+      )
+
+      retained_finalization_manifest!(plan, invocation, retained, :prefix, io)
+    end)
+
+    retained_generation_fences!(plan, invocation, retained, io)
+    retained_finalization_manifest!(plan, invocation, retained, :ledgers, io)
+    # The existing absence primitive binds both ENOENT observations to the same
+    # captured ancestor vector immediately before final root publication.
+    if retained.source_observation,
+      do: lost_source!(plan["source_state_root"], retained.source_observation, io)
+
+    retained_retirement_publish!(
+      retained,
+      plan,
+      destination,
+      root_admin(plan),
+      "committed",
+      :record,
+      compiled.committed,
+      entries,
+      io
+    )
+
+    retained_generation_fences!(plan, invocation, retained, io)
+    retained_finalization_manifest!(plan, invocation, retained, :complete, io)
+    {:ok, intent} = RestoreCodec.decode(:intent, retained.intent)
+    {:ok, committed} = RestoreCodec.decode(:committed, compiled.committed)
+
+    receipt = %{
+      "kind" => "loopex_current_restore_receipt_v1",
+      "tx_id" => intent["tx_id"],
+      "ordinal" => intent["ordinal"],
+      "plan_digest" => intent["plan_digest"],
+      "intent_sha256" => hash(retained.intent),
+      "committed_sha256" => hash(compiled.committed),
+      "source_retirement_sha256" => committed["source_retirement_sha256"],
+      "baseline_manifest_sha256" => committed["baseline_manifest_sha256"],
+      "activation_manifest_sha256" => committed["activation_manifest_sha256"],
+      "prior_lineage_sha256" => committed["prior_lineage_sha256"],
+      "destination_state_binding" => committed["destination_state_binding"],
+      "ledger_count" => length(intent["generations"])
+    }
+
+    encode!(:receipt, receipt)
+    phase(io, "claim_release")
+    # Keep the destination claim last; partial release never exposes that root
+    # while this operation still has a captured source claim to release.
+    claims = Enum.sort_by(retained.claims, &(&1.directory == claim_directory(destination)))
+    {:ok, %{restore_result: {:committed, receipt}, release_claims: claims}}
+  catch
+    {:restore_duplicate, receipt} ->
+      {:ok, %{restore_result: {:committed, receipt}, release_claims: []}}
+
+    {:restore_refusal, code} ->
+      {:ok, %{restore_result: {:commit_unknown, code}, release_claims: []}}
+
+    {:io_error, _} ->
+      {:ok, %{restore_result: {:commit_unknown, "inventory_unavailable"}, release_claims: []}}
+
+    {:stopped, _} ->
+      {:ok, %{restore_result: {:commit_unknown, "inventory_unavailable"}, release_claims: []}}
+  end
+
+  defp claim_directory(root) do
+    {:ok, digest} = RestoreCodec.claim_digest(root)
+    Path.join(Path.dirname(root), ".loopex-restore-claim-" <> digest)
+  end
+
   defp retained_generation_fences!(plan, invocation, retained, io) do
     retained_retirement_custody!(retained, plan, io)
 
@@ -496,6 +610,10 @@ defmodule LoopexComposition.Restore.Workflow do
 
     generation_prefix =
       case retirement do
+        :finalization ->
+          retained_finalization_admit!(plan, invocation, retained, compiled, captures, io)
+          false
+
         :generations ->
           retained_generation_admit!(plan, invocation, retained, compiled, captures, io)
 
@@ -528,6 +646,102 @@ defmodule LoopexComposition.Restore.Workflow do
       source_observation: source_observation,
       generation_prefix: generation_prefix
     }
+  end
+
+  # Concept: proof-prefix continuation requires the complete installed activation.
+  # Technical depth: audit the actual backup with all shipped validators, bind
+  # every current generation and canonical proof byte/mode, and require complete
+  # source retirement before nonce replacement. A root proof (including its temp)
+  # is admitted only over all final per-ledger proofs; no torn or foreign file is
+  # normalized into this original transaction.
+  defp retained_finalization_admit!(plan, invocation, retained, compiled, captures, io) do
+    destination = Enum.find(captures, &(&1.root == plan["destination_state_root"]))
+
+    ensure!(
+      destination.retained.observation["phase"] in ["destination_proofs", "claim_release"],
+      "invalid_current_history"
+    )
+
+    max_total = invocation["max_total_file_bytes"]
+    backup = value!(io.({:manifest, plan["backup_state_root"], max_total}))
+    ensure!(backup == retained.baseline, "inventory_mismatch")
+    Audit.complete(plan, backup, max_total, io)
+
+    ensure!(
+      value!(io.({:manifest, plan["backup_state_root"], max_total})) == backup,
+      "inventory_mismatch"
+    )
+
+    projected = Map.put(retained, :compiled, compiled)
+    retained_finalization_manifest!(plan, invocation, projected, :prefix, io)
+
+    Enum.each(captures, fn capture ->
+      retained_retirement_placements!(plan, projected, capture.root, io)
+    end)
+
+    if plan["source_status"] == "available" do
+      retained_retirement_complete!(plan, invocation, projected, plan["source_state_root"], io)
+    else
+      value!(io.({:lost_source_absent, plan["source_state_root"]}))
+    end
+
+    workspace!(plan, value!(io.({:placement, plan["workspace"]["root"]})))
+  end
+
+  # Concept: the activation image remains exact beneath only original committed proofs.
+  # Technical depth: all baseline/retirement/generation entries are required and
+  # unchanged; only exact canonical final or sibling temp proof entries may be
+  # additional. Before root publication all ledger finals must exist and every
+  # temp must be gone. Complete comparison covers the entire unexcluded root.
+  defp retained_finalization_manifest!(plan, invocation, retained, stage, io) do
+    compiled = retained.compiled
+    max_total = invocation["max_total_file_bytes"]
+    {:ok, activation} = RestoreCodec.manifest(compiled.activation, max_total)
+    original = Map.new(activation, &{&1["path"], &1})
+
+    ledger_proofs =
+      Enum.map(compiled.ledgers, &{Path.join(&1.directory, "committed"), &1.committed})
+
+    root_proof = {Path.join(root_admin(plan), "committed"), compiled.committed}
+    records = ledger_proofs ++ [root_proof]
+
+    allowed =
+      add_records(
+        original,
+        Enum.map(records, fn {path, bytes} ->
+          {Path.dirname(path),
+           [{Path.basename(path), bytes}, {Path.basename(path) <> ".tmp", bytes}]}
+        end)
+      )
+
+    actual = value!(io.({:manifest, plan["destination_state_root"], max_total}))
+    {:ok, entries} = RestoreCodec.manifest(actual, max_total)
+    index = Map.new(entries, &{&1["path"], &1})
+
+    Enum.each(original, fn {path, entry} ->
+      ensure!(index[path] == entry, "inventory_mismatch")
+    end)
+
+    Enum.each(index, fn {path, entry} -> ensure!(allowed[path] == entry, "inventory_mismatch") end)
+
+    {root_path, _} = root_proof
+
+    if stage in [:ledgers, :complete] or Map.has_key?(index, root_path) or
+         Map.has_key?(index, root_path <> ".tmp") do
+      Enum.each(ledger_proofs, fn {path, _} ->
+        ensure!(index[path] == allowed[path], "inventory_mismatch")
+        ensure!(not Map.has_key?(index, path <> ".tmp"), "inventory_mismatch")
+      end)
+    end
+
+    if stage == :complete, do: ensure!(actual == compiled.final, "inventory_mismatch")
+
+    ensure!(
+      value!(io.({:manifest, plan["destination_state_root"], max_total})) == actual,
+      "inventory_mismatch"
+    )
+
+    actual
   end
 
   # Concept: continuation audits real baseline bytes and the current exact transformation.

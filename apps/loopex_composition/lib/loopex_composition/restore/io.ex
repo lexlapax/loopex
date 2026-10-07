@@ -27,8 +27,9 @@ defmodule LoopexComposition.Restore.IO do
   claim release without replacing the original guardian or deadlines. A private
   retained continuation reuses original candidates/intent and checked claim
   custody through source retirement and optional exact retained generation installation,
-  without committed proofs, receipts or release. Public
-  restore/lookup and the remaining accepted variants are unfinished. Validated
+  and exact canonical destination proof prefixes. Private finalization uses the
+  original terminal claim-release owner before returning its checked receipt. Public
+  restore and the remaining accepted variants are unfinished. Validated
   maps and recovered facts remain private; standalone audit operations grant no
   effect authority and do not activate a restored root. Host exclusion remains the caller's
   obligation. The caller must first validate the captured manifest against the
@@ -310,7 +311,19 @@ defmodule LoopexComposition.Restore.IO do
           else: guard(stop(state, :history_invalid, now()))
 
       {:payload, ^worker, ^reference, result} ->
+        released = state.terminal_release and result == {:ok, :released}
         result = if state.terminal_release, do: release_payload(state, result), else: result
+        # Concept: retained claim uncertainty clears only after complete owned release.
+        # Technical depth: each exact captured claim must already be acknowledged
+        # removed; the terminal worker's successful payload alone cannot erase a
+        # remaining or uncertain claim. Final descriptor/DOWN observation still gates return.
+        state =
+          if released and state.restore.claims == [] do
+            %{state | restore: %{state.restore | prior_claim: false}}
+          else
+            state
+          end
+
         state = %{state | payload: result}
         guard(stop(state, if(match?({:ok, _}, result), do: :complete, else: :io_error), now()))
 
@@ -688,7 +701,8 @@ defmodule LoopexComposition.Restore.IO do
                      :restore_pending_intake,
                      :restore_retained_claim_handoff,
                      :restore_retained_source_retirement,
-                     :restore_retained_generation_install
+                     :restore_retained_generation_install,
+                     :restore_retained_destination_finalization
                    ],
               operation
             ),
@@ -704,7 +718,8 @@ defmodule LoopexComposition.Restore.IO do
               :restore_pending_intake,
               :restore_retained_claim_handoff,
               :restore_retained_source_retirement,
-              :restore_retained_generation_install
+              :restore_retained_generation_install,
+              :restore_retained_destination_finalization
             ] do
     %{
       "kind" => "loopex_current_restore_observation_v1",
@@ -899,6 +914,16 @@ defmodule LoopexComposition.Restore.IO do
     LoopexComposition.Restore.Workflow.retained_generation_install(plan, invocation, &execute/1)
   end
 
+  defp execute({:restore_retained_destination_finalization, plan, invocation} = operation) do
+    if not valid_operation?(operation), do: throw({:io_error, :invalid_io_request})
+
+    LoopexComposition.Restore.Workflow.retained_destination_finalization(
+      plan,
+      invocation,
+      &execute/1
+    )
+  end
+
   defp execute({:restore_generation_step, relative}) do
     if not is_binary(relative) or byte_size(relative) not in 1..8192,
       do: throw({:io_error, :invalid_io_request})
@@ -1010,7 +1035,8 @@ defmodule LoopexComposition.Restore.IO do
 
   defp execute({:restore_retirement_step, side, name}) do
     if side not in ["source", "destination"] or
-         name not in ["baseline", "intent", "source-retired", "source-retirement"],
+         (name not in ["baseline", "intent", "source-retired", "source-retirement"] and
+            {side, name} != {"destination", "committed"}),
        do: throw({:io_error, :invalid_io_request})
 
     primitive({:restore_retirement_step, side, name}, fn -> :ok end)
@@ -3060,6 +3086,9 @@ defmodule LoopexComposition.Restore.IO do
     do: valid_operation?({:restore_retained_claim_handoff, plan, invocation})
 
   defp valid_operation?({:restore_retained_generation_install, plan, invocation}),
+    do: valid_operation?({:restore_retained_claim_handoff, plan, invocation})
+
+  defp valid_operation?({:restore_retained_destination_finalization, plan, invocation}),
     do: valid_operation?({:restore_retained_claim_handoff, plan, invocation})
 
   defp valid_operation?({:audit_restore_lineage, root, plan, manifest}),

@@ -35,8 +35,8 @@ Twelve original stages joined and53 artifacts verified. Collection
 `3adde171e6a59da66f036a92325b6b635f02733297e1aedcb24120db86e0adda`;
 terminal `d5fc620ea507d38afcfcbf278be02f4cda472133ff68bff689eeba7b2befecdd`.
 All six tested files are integrated literally; the bounded T16 ordinary encoding
-row closes. Original T01–T19 remains80 done/93 todo/6 retired; added319 done/
-33 todo. Live routing/writer closure, generation activation and full-fast remain
+row closes. Original T01–T19 remains80 done/93 todo/6 retired; added321 done/
+31 todo. Live routing/writer closure, generation activation and full-fast remain
 open. Never repoll14873 or33078.
 
 Both remaining sparse-lookup generated cases preserve original claim custody
@@ -50,16 +50,35 @@ SHA-256 `dbc21631830e2ab84e5735aa91495c066186a2e2ea7bf5806dd774a191bd67dc`;
 terminal `4f7acc35593ee3acdda30d8fc671eab5655818598ada5e60e3e1e25e7ec3aa07`.
 Never repoll16114.
 
-Complete finalization original36566 is active at f56d6fe1 through reviewed
-mechanics with exact metadata-only wrapper adaptation, SHA-256
-`2a8a8e6673439dd85b738dda0748129d5386f97a57f273159f2796b227d8d65e`.
-It reuses exact collected16114 metadata and runs all378 cases per pair,
-including all three actual IO long-bound witnesses. Collect the original handle
-before another VM or any edit to that worktree. No finalization success is
-claimed. Seed registry1202 at
-`M7/ordinary-progress-admission-20261006-v1/stage-attempt-registry.json`, SHA-256
-`3b4fd01e1f748f9648678933510257dead50b199169dd4c43bebeb754b38d014`;
-original36566 owns its successor until collection.
+Complete finalization original36566 is collected PASS at f56d6fe1. All378
+cases per pair passed with zero exclusions/skips/invalid, including all three
+actual IO long-bound witnesses, in744.437 seconds. Four original compile/test
+stages joined and34 artifacts were verified; four exact-source version/format
+records were reused from collected16114. Current64-restore case172,244 ms,
+floor160,363 ms. The four tested source files are integrated literally.
+Collection `M7/retained-finalization-lookup-admission-20261006-v2/original-collection.json`,
+SHA-256 `572f6e01d9fbf5930db757891bbed81ec25be80d3f6c83f8bec79b4488dbc797`;
+terminal `1715cd0dc9f9ad3d91252af87bf3e241abe6f2a16b754122b22c7b4dc05803f7`.
+No VM is active. Never repoll36566 or retry its unchanged source.
+Latest consumed registry1206 at
+`M7/retained-finalization-lookup-admission-20261006-v2/stage-attempt-registry.json`,
+SHA-256 `e083ea7e6c9f6f8166c439e63d658e83a1904b366636ecf792602227fe9d7ae7`.
+The bounded private finalization and lookup-fixture rows close. Original
+T01–T19 remains80 done/93 todo/6 retired; added321 done/31 todo.
+
+Next, root verifies private mixed/all-absent original-transaction cleanup from
+clean isolated4b67c675700309fcb6f11d699a7874bfa5ba20d0, a real child of f56d6fe1.
+It owns RestoreIO, Workflow and the new25-case partial-cleanup test; its complete
+selection is403 cases per pair. Prepared formatter
+`/private/tmp/m7-retained-partial-format-20261006-v1.py`, SHA-256
+`3f233c2e80e07bfd7ffae2f7e0ac6491ade87c75ca5d1a834a1b904f85a14e57`,
+is not yet executed. Root owns every VM, collection and literal rejoin.
+A separate source-only writer develops the accepted public original-tx driver
+in m7-restore-public-resolution. Proposed ADR0058 progress admission/writer
+ownership is being drafted in m7-progress-admission-proposal; it authorizes no
+implementation. ADR0055 is the sole asked pending approval;0056/0057 remain queued.
+
+The following paragraphs record earlier source revisions and their evidence.
 
 Corrected finalization original92340 is collected FAIL at clean
 `c36ea4c16d9edb8495e486d0dae4b80ae979edac`, in373.902 seconds.

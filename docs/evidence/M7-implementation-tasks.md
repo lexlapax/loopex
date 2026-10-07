@@ -4,7 +4,7 @@ Complete physical restore original75764 passed all148 cases on each supported
 toolchain at `11e7f674`, in560.494 seconds. All ten original stages are joined
 and47 artifacts verified. Six added T15 rows and the T16 copied-permissions row
 close against that group. Original T01–T19 remains80 done/93 todo/6 retired;
-added319 done/33 todo. Complete109-case restore IO proof passed both pairs;
+added321 done/31 todo. Complete109-case restore IO proof passed both pairs;
 served generation activation remains open. Dormant daemon configure admission, native
 activity, its tagged executor fixture and dormant wire codec/projections are
 proved on both pairs and integrated. Foreground production routing remains open.
@@ -18,11 +18,14 @@ literally; the bounded T16 encoding row closes. Live routing, actual blocked
 writer proof and generation activation remain open. Exact references are in the
 restart checkpoint.
 
-Private finalization's complete current selection executed378 cases:377 passed,
-one historical-lookup fixture failed; floor remains unrun. Its original21368
-failure is collected. The independently reviewed fixture correction preserves
-captured owner metadata through directory substitution, retaining the original
-38-case population, bounds and joins. The corrected lookup remains pending complete paired proof; its row stays open.
+Private finalization original36566 passed all378 cases on each supported pair
+at isolated f56d6fe1 in744.437 seconds, with zero exclusions, skips or invalid
+cases. Four original stages joined and34 artifacts were verified; exact-source
+formatting/version metadata was reused from collected16114. Actual long-bound
+witnesses and all64 physical restores passed on both pairs. The four tested files
+are integrated literally. The bounded T15 private finalization and T16 lookup
+fixture rows close; public original-transaction resolution, partial cleanup and
+helper audit remain separate. Both earlier failures remain retained.
 
 The entries below record earlier revisions and failed attempts.
 
@@ -13812,7 +13815,7 @@ Exact collection and outputs are retained in the restart checkpoint.
 - [x] Continue the same retained restore IO worker through checked available/lost source retirement and destination retirement-evidence publication, preserving original transaction/candidate bytes and claim fences. Prove actual native faults and joined cleanup before candidate activation, receipt or release work.
 - [x] Install only the original retained destination generations after checked source retirement in the same IO worker; require exact full activation-manifest equality, original ordinal temporary names and claim/physical fences, and prove the native publication and failure cases on both supported toolchains. Committed proofs, receipt, release and public restore remain separate.
 - [x] Resume exact original/candidate generation prefixes and complete ordinal staging after positively joined prior authority; audit the genuine complete backup and the full current physical transformation before nonce handoff. Prove real multi-ledger interruption/restart, available/lost source, corruption/refusal and original joins on both pairs without changing transaction, candidates, epochs or history authority.
-- [ ] Complete private retained destination finalization using exact original proof prefixes, canonical per-ledger commits and root commit last; validate the full final manifest, join the original captured-claim release and derive the existing receipt without new transaction/candidates/epochs or renewed work/cleanup bounds. Prove real multi-ledger available/lost-source interruption/refusal/release cuts before joining; complete public facade and helper audit remain separate.
+- [x] Complete private retained destination finalization using exact original proof prefixes, canonical per-ledger commits and root commit last; validate the full final manifest, join the original captured-claim release and derive the existing receipt without new transaction/candidates/epochs or renewed work/cleanup bounds. Prove real multi-ledger available/lost-source interruption/refusal/release cuts before joining; complete public facade and helper audit remain separate.
 - [ ] Complete private post-commit original-transaction claim cleanup for intact matching owners mixed with wholly absent claim directories, including explicit all-absent sync obligations. Require complete current canonical proofs, independent prior-authority termination/exclusion, captured native absence/ancestor/parent sync rechecks, the original terminal worker/cutoffs and exact joins before the existing receipt. Keep incomplete payload intake, historical receipt reads and ownerless stranded recovery distinct; prove real partial-delete/sync/actor-loss/refusal cuts without recreating missing claims or changing retained payload bytes.
 
 - [x] Recheck the captured source ancestor type/device/inode identities after the second native absence observation, including the final pre-root-commit phase. Prove actual persistent parent removal at the held final read refuses completion while preserving original cutoffs, post-intent fencing, retained destination claim and all prior case bodies on both supported pairs.
@@ -13888,7 +13891,7 @@ in the restart checkpoint. Broader restore/decoder/public/helper rows stay open.
 
 - [x] Correct the existing AgentLoop malformed-receipt fixture to observe the current tagged executor result envelope while preserving the original operation reference, progress prerequisite, cleanup reserve, deadlines and exact joins; retain original44773's failed231-case selection and prove the complete corrected native selection on both supported toolchains before literal integration.
 - [x] Correct ordinary foreground/daemon progress projection to the accepted ADR 0023 identity and quantity encodings before live routing; prove actual complete native records, per-kind nullability, maximum values, malformed/private refusal and unchanged positive queue/frame pressure on both toolchains. Keep ADR 0054 codec, current generation gates and actual writer-pressure proof separate.
-- [ ] Preserve the historical-lookup fixture's paused writer claim identity through hostile directory substitution instead of in-place owner rewrites; verify original bytes/inode/mode/mtime/ctime before releasing the pause, retain all 38 lookup cases and original bounds/joins, and prove the complete 378-case finalization selection on both supported pairs with original21368's failure retained.
+- [x] Preserve the historical-lookup fixture's paused writer claim identity through hostile directory substitution instead of in-place owner rewrites; verify original bytes/inode/mode/mtime/ctime before releasing the pause, retain all 38 lookup cases and original bounds/joins, and prove the complete 378-case finalization selection on both supported pairs with original21368's failure retained.
 
 - [ ] Repair the inherited long-temporary-path fixture failures exposed by Ledger6baa and receiptfdd6 ordinary checks: supply bounded explicit instructions only to seven failed model startup cases while preserving the 1,000-token ceiling and give only the actual Unix socket/exact8MiB cases fresh short temporary workspaces. Preserve real HTTP/effects/questions/cleanup, actual special files, all exact path-byte/first-over assertions and original deadlines; prove focused, adjacent and complete affected application populations on both supported pairs with both original failed runs retained.
 - [x] Preserve captured restore fixture permissions under ordinary022 through exact copied modes and baseline-bound generation payload normalization; retain wrong-mode, wrong-byte and wrong-ordinal controls, all134 affected cases, actual64-transition witness and original actor/deadline proofs on both supported pairs. Retain the original full-check and focused failures; broader temporary-path repairs remain separate.
