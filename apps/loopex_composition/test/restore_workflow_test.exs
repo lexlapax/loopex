@@ -1330,6 +1330,37 @@ defmodule LoopexComposition.RestoreWorkflowTest do
     assert manifest(next.backup) == next.baseline
   end
 
+  test "older physical regular corruption refuses before a higher incomplete head", context do
+    first = actual_cut(context.root)
+    restore_joined(first)
+    second = next_cut(first, context.root)
+    restore_joined(second)
+    assert {:ok, _} = RestoreGuard.state(second.destination)
+
+    head = Path.join(second.destination, ".loopex-restore/lineage/00000002/committed")
+    head_bytes = File.read!(head)
+    File.rm!(head)
+    assert {:error, :restore_incomplete} = RestoreGuard.state(second.destination)
+
+    earlier = Path.join(second.destination, ".loopex-restore/lineage/00000001/source-retirement")
+    original = File.read!(earlier)
+    assert Bitwise.band(File.lstat!(earlier).mode, 0o7777) == 0o600
+    File.chmod!(earlier, 0o644)
+    assert {:error, :history_invalid} = RestoreGuard.state(second.destination)
+    File.chmod!(earlier, 0o600)
+    assert {:error, :restore_incomplete} = RestoreGuard.state(second.destination)
+
+    <<first_byte, rest::binary>> = original
+    File.write!(earlier, <<Bitwise.bxor(first_byte, 1), rest::binary>>)
+    assert {:error, :history_invalid} = RestoreGuard.state(second.destination)
+    File.write!(earlier, original)
+    assert {:error, :restore_incomplete} = RestoreGuard.state(second.destination)
+
+    File.write!(head, head_bytes)
+    File.chmod!(head, 0o600)
+    assert {:ok, _} = RestoreGuard.state(second.destination)
+  end
+
   test "a fully rebound historical omission cannot make an incomplete baseline authoritative",
        context do
     first = actual_cut(context.root)

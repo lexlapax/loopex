@@ -1163,6 +1163,11 @@ defmodule Loopex.Executor.Local.RestoreGuard do
     # Highest transition governs this physical root; older destination placements
     # are captured history and never compared to today's directory identity.
     ensure!(result.latest["destination_state_placement"] == placement)
+
+    unless is_tuple(root) do
+      Enum.each(result.lineage, &verify_historical_entry!(root, &1))
+    end
+
     if is_tuple(root), do: result, else: %{candidates: result.candidates, latest: result.latest}
   end
 
@@ -1186,7 +1191,19 @@ defmodule Loopex.Executor.Local.RestoreGuard do
     # whatever subset the next baseline happens to list. Ordinary runtime files
     # may evolve and are excluded only from this lineage comparison.
     ensure!(lineage == previous.lineage)
-    Enum.each(lineage, fn entry -> verify_historical_entry!(root, entry) end)
+
+    # Concept: physical history binds earlier observed records without repeated reads.
+    # Technical depth: each earlier regular file passed its kind, link, mode, cap,
+    # identity, size and byte checks while reconstructing the equal prior projection;
+    # a final full physical sweep rechecks every protected entry before success.
+    # Introduced directory modes are synthesized, so retain their checks here and
+    # in their original order. Immutable captured inputs retain the full sweep.
+    Enum.each(lineage, fn entry ->
+      if is_tuple(root) or entry["kind"] != "regular" do
+        verify_historical_entry!(root, entry)
+      end
+    end)
+
     retired_bytes = read!(history_path(directory, "source-retirement"), @record_cap)
     {:ok, retired} = RestoreCodec.decode(:source_retirement, retired_bytes)
     common!(retired, intent, intent_hash)
