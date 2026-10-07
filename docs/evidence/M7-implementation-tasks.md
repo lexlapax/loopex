@@ -1,14 +1,13 @@
 # M7 Implementation Tasks
 
-Native authored bounds are complete in the bounded added T11 row. Original88112
-passed all148 cases on each supported toolchain at `a01f4b4c`, in197.265 seconds,
-with all eight original stages joined and41 artifacts verified. All ten source
-files match the integrated primary bytes. Original T01–T19 remains80 done/93
-todo/6 retired; added305 done/43 todo after adding the separate daemon configure
-admission unit and two bounded compaction units. Daemon admission proof failed65/66 on current; its causal correction is running. Served generation activation
-remains open. ADR0054 and the restore aggregate-only cutoff are approved; ADR0055 is the
-sole asked pending decision. Exact proof references and continuation order are in the
-[restart checkpoint](M7-resume.md#technical-depth).
+Complete physical restore original75764 passed all148 cases on each supported
+toolchain at `11e7f674`, in560.494 seconds. All ten original stages are joined
+and47 artifacts verified. Six added T15 rows and the T16 copied-permissions row
+close against that group. Original T01–T19 remains80 done/93 todo/6 retired;
+added312 done/36 todo. Complete109-case restore IO proof, daemon admission
+correction, native/wire compaction and served generation activation remain open.
+ADR0055 is the sole asked pending decision. Exact proof references and continuation
+order are in the [restart checkpoint](M7-resume.md#technical-depth).
 
 The entries below record earlier revisions and failed attempts.
 
@@ -13775,12 +13774,22 @@ Original handle 28778 is fully collected; failure pins and current ownership are
 in the [restart record](M7-resume.md#technical-depth).
 
 
+Complete paired physical restore proof at `11e7f674` closes only the six named
+added rows below. It selects13 captured-construction and135 workflow cases on
+each pair, including all four available/lost-source A→B→C combinations, sparse
+history, malformed higher heads, fully rebound physical omission, read-only
+lookup, final ancestor removal and pre-intent claim release. The actual64/65 case
+uses only the approved aggregate cutoff. Public original-transaction continuation,
+retained finalization/partial claim cleanup, the full owned IO and long-bound
+proofs, helper audit, native OS campaign and operator attendance remain open.
+Exact collection and outputs are retained in the restart checkpoint.
+
 ### Added implementation subtasks
 
-- [ ] Implement accepted ADR 0051 successive current-format restore: capture and validate the complete retained prior lineage through the existing owned IO guardian, append ordinal n+1, preserve historical bytes/modes/role bindings and sparse ledger histories, and refuse transition 65 before mutation. Prove actual A→B→C with available/lost-source combinations, historical placements and malformed higher-head controls on both pairs.
-- [ ] Prove the accepted lineage-count boundary with 64 actual successive restores of one real empty Local ledger, exact joined owners, complete independent backups, preserved administrative bytes/modes and distinct epochs; derive the 65th plan from that actual cut and refuse before claims, opens or mutation under the approved 600,000-ms aggregate cutoff and unchanged per-restore work/grace/cleanup bounds.
-- [ ] Isolate complete historical administrative projection by omitting a prior source-retired manifest member from an actual later baseline while keeping the physical fact and fully rebinding all dependent canonical records and hashes; require a subsequent transition to refuse before destination mutation with exact joined cleanup.
-- [ ] Implement accepted ADR 0051 bounded read-only public lookup with exact current, historical, pending, absent and error outcomes; preserve retained claims and incomplete higher-head truth, perform no reclaim/continuation/activation, and prove physical faults, caps and original cleanup bounds on both pairs.
+- [x] Implement accepted ADR 0051 successive current-format restore: capture and validate the complete retained prior lineage through the existing owned IO guardian, append ordinal n+1, preserve historical bytes/modes/role bindings and sparse ledger histories, and refuse transition 65 before mutation. Prove actual A→B→C with available/lost-source combinations, historical placements and malformed higher-head controls on both pairs.
+- [x] Prove the accepted lineage-count boundary with 64 actual successive restores of one real empty Local ledger, exact joined owners, complete independent backups, preserved administrative bytes/modes and distinct epochs; derive the 65th plan from that actual cut and refuse before claims, opens or mutation under the approved 600,000-ms aggregate cutoff and unchanged per-restore work/grace/cleanup bounds.
+- [x] Isolate complete historical administrative projection by omitting a prior source-retired manifest member from an actual later baseline while keeping the physical fact and fully rebinding all dependent canonical records and hashes; require a subsequent transition to refuse before destination mutation with exact joined cleanup.
+- [x] Implement accepted ADR 0051 bounded read-only public lookup with exact current, historical, pending, absent and error outcomes; preserve retained claims and incomplete higher-head truth, perform no reclaim/continuation/activation, and prove physical faults, caps and original cleanup bounds on both pairs.
 - [ ] Implement accepted ADR 0051 public restore outcomes and original-transaction resolution: validate matching retained canonical intent/candidates and authority termination, re-sync equal stages, finish only remaining stages, and return the same validated receipt for committed duplicates without new generations or source activation. Prove each phase fault and uncertainty path on both pairs before exposing the complete public contract.
 
 - [x] Hand off retained restore claims by changing only the original live nonce after positive prior-authority termination; preserve exact intent/candidates, directory/owner custody, mixed-nonce partial failure and original IO cutoffs. Prove34 actual writer/native cases plus pending17/construction10/publication16 on both toolchains at ed550 and rejoin the literal source; this grants no receipt, release or complete continuation.
@@ -13790,8 +13799,8 @@ in the [restart record](M7-resume.md#technical-depth).
 - [ ] Complete private retained destination finalization using exact original proof prefixes, canonical per-ledger commits and root commit last; validate the full final manifest, join the original captured-claim release and derive the existing receipt without new transaction/candidates/epochs or renewed work/cleanup bounds. Prove real multi-ledger available/lost-source interruption/refusal/release cuts before joining; complete public facade and helper audit remain separate.
 - [ ] Complete private post-commit original-transaction claim cleanup for intact matching owners mixed with wholly absent claim directories, including explicit all-absent sync obligations. Require complete current canonical proofs, independent prior-authority termination/exclusion, captured native absence/ancestor/parent sync rechecks, the original terminal worker/cutoffs and exact joins before the existing receipt. Keep incomplete payload intake, historical receipt reads and ownerless stranded recovery distinct; prove real partial-delete/sync/actor-loss/refusal cuts without recreating missing claims or changing retained payload bytes.
 
-- [ ] Recheck the captured source ancestor type/device/inode identities after the second native absence observation, including the final pre-root-commit phase. Prove actual persistent parent removal at the held final read refuses completion while preserving original cutoffs, post-intent fencing, retained destination claim and all prior case bodies on both supported pairs.
-- [ ] Preserve positively acquired restore claims through pre-intent IO failures and release them with the original joined terminal owner/cutoffs when neither state root changed; retain partial/unproved or foreign claims and truthful remaining-claim accounting. Prove actual second-claim failure, known first-claim removal and partial-publication fencing on both supported pairs without changing the six existing workflow cases or bounds.
+- [x] Recheck the captured source ancestor type/device/inode identities after the second native absence observation, including the final pre-root-commit phase. Prove actual persistent parent removal at the held final read refuses completion while preserving original cutoffs, post-intent fencing, retained destination claim and all prior case bodies on both supported pairs.
+- [x] Preserve positively acquired restore claims through pre-intent IO failures and release them with the original joined terminal owner/cutoffs when neither state root changed; retain partial/unproved or foreign claims and truthful remaining-claim accounting. Prove actual second-claim failure, known first-claim removal and partial-publication fencing on both supported pairs without changing the six existing workflow cases or bounds.
 - [ ] Audit one selected current Local artifact object through the existing owned streaming hash, binding the locator-derived physical path to the reference digest/size, complete captured manifest and descriptor/ancestor identities under original total/work/cleanup bounds. Preserve current direct-fetch locator semantics, writer-only limits and all orphan/staging bytes; prove actual writer and physical refusal cases on both pairs. Complete object enumeration, history relations and restore activation remain separate.
 - [ ] Capture one selected current artifact-use sidecar through the existing guardian-owned restore IO worker and real captured Local/Core describe facade; require exact reference-derived pathname, physical manifest membership, current raw ceiling, hash/mode/link/ancestor identity and close-before-semantics under original cutoffs. Prove actual writers and physical/semantic refusals on both pairs; object bytes, complete namespace/orphans and history/restore relations remain separate.
 - [ ] Extract one private captured-byte Local receipt decoder shared with live reads; preserve the native current 28-field ETF schema, 65,536-byte cap, exact raw job binding, closed predicates and all claim/finality/job/recovery authority. Replace the injected decoder seam with actual bounded BIF proof and actual writer/hostile controls on both supported pairs; physical receipt capture and complete history audit remain separate.
@@ -13851,7 +13860,7 @@ long-bound observation witness are required before this row closes again.
 - [ ] Repair ordinary provider cleanup notices reaching the SessionCoordinator dispatcher after the cleanup integration; retain failed58fb33ba full-check evidence, prove actual Local Store completion through the same live owner and distinct caretaker delivery, preserve existing cleanup windows and native joins, and verify both supported pairs plus a new full integration candidate.
 
 - [ ] Repair the inherited long-temporary-path fixture failures exposed by Ledger6baa and receiptfdd6 ordinary checks: supply bounded explicit instructions only to seven failed model startup cases while preserving the 1,000-token ceiling and give only the actual Unix socket/exact8MiB cases fresh short temporary workspaces. Preserve real HTTP/effects/questions/cleanup, actual special files, all exact path-byte/first-over assertions and original deadlines; prove focused, adjacent and complete affected application populations on both supported pairs with both original failed runs retained.
-- [ ] Preserve captured restore fixture permissions under ordinary022 through exact copied modes and baseline-bound generation payload normalization; retain wrong-mode, wrong-byte and wrong-ordinal controls, all134 affected cases, actual64-transition witness and original actor/deadline proofs on both supported pairs. Retain the original full-check and focused failures; broader temporary-path repairs remain separate.
+- [x] Preserve captured restore fixture permissions under ordinary022 through exact copied modes and baseline-bound generation payload normalization; retain wrong-mode, wrong-byte and wrong-ordinal controls, all134 affected cases, actual64-transition witness and original actor/deadline proofs on both supported pairs. Retain the original full-check and focused failures; broader temporary-path repairs remain separate.
 - [x] Repair the e327e46c incomplete foreground revision-3 snapshot and superseded policy-answer admission fixture; prove all ten captured fields, exact historical cursor parity after live advancement, actual answer-admission order and the complete AppServer population on both supported pairs without changing generation activation or implementing unaccepted ADR0052.
 
 - [x] Include composition's actual owned restore IO long-bound cases in the existing release long_bound group and prove the real selected composition lane. Preserve nonzero executed-case judgment, credential exclusion, all deadlines and prior required lanes; focused worker runs do not substitute for runner selection.

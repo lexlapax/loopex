@@ -27,6 +27,41 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+Complete physical restore original75764 is collected PASS at primary
+`11e7f6740afce534b26b79c1835a9fe30a5a3ac1`, pushed to origin/m7. Current and floor
+each pass13 construction and135 workflow cases, with zero exclusions, skips or
+invalid cases. The complete run took560.494 seconds, with ten original stages
+joined and47 artifacts verified. Collection
+`M7/approved-restore-aggregate-20261006-v1/original-collection.json` SHA-256
+`2f25e1e8b1293856baa15f4c710d69a01725e6a5e986c0384699ab94b0af9b83`;
+terminal `af152678c68a52dff83c3427b47c34e2807e09c13b73c3688103e4f7c25981e2`;
+registry1072 SHA-256 `4105636a28bb6a189bc75522e4733f5b3268425a6166a983ba7af2294b160f86`.
+Runner retained as root-runner.py SHA-256
+`17d0e2e016d2eb33c57120bd0319176296ae8f7c2836dfae299332e1ef2d0a70`.
+Never repoll75764. Actual restore64 claim release was observed at160,921 ms on
+current and158,639 ms on floor, within the approved600,000-ms aggregate bound;
+the following actual65 refusal and every integrity/backup/epoch/join assertion pass.
+
+Six bounded added T15 rows close: successive restore, actual64/65, fully rebound
+historical omission, read-only lookup, final ancestor recheck and pre-intent
+acquired-claim release. The T16 copied-permissions row also closes. Original
+T01–T19 stays80 done/93 todo/6 retired; added312 done/36 todo. Complete109-case
+owned IO proof including all three long-bound cases is next; existing expiry-first
+guard enforcement is present, so no new fix is inferred. Full fast proof, broader
+restore continuation/finalization, helper audit, public generation activation and
+closure remain open. ADR0055 remains the sole asked pending decision.
+
+Reviewed runner preparations are saved outside the repository at
+`M7/pending-unit-runners-20261006-v1`, inventory SHA-256
+`39347c6aad2f585dc8fd86b4d0fb2e48ec34dbe04f7d28b2262bdaa670f97160`.
+They are preparations, with no execution outcome. Native/wire source stays
+saved at578ae584/399d9dc5; daemon recovery observer correction is saved at
+`94d41cb4f7b03aacc1d0e32929b67524d637f447`. Its strict unknown-only wait preserves
+the original polling budget and requires actual committed configuration before
+success. Root owns all future formatting, test execution, collection and rejoin.
+
+Earlier records below describe their named revisions and retained results.
+
 The maintainer resumed M7 on2026-10-06. Native original88112 is collected PASS
 at `a01f4b4cf7476fc91bf6305be00a173619e4eb96`: all148 cases on each supported
 pair, no exclusions/skips/invalid cases,197.265 seconds overall. All eight
