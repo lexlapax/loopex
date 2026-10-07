@@ -109,6 +109,7 @@ pairing, link, review, code-documentation, and enforcement contracts.
 | 0055 — remote session creation options | [Decision](adr/0055-remote-session-creation-options.md#concept) | [Technical depth](adr/0055-remote-session-creation-options-technical.md#technical-depth) |
 | 0056 — host helper ledger byte recipe | [Decision](adr/0056-host-helper-ledger-recipe.md#concept) | [Technical depth](adr/0056-host-helper-ledger-recipe-technical.md#technical-depth) |
 | 0057 — attempts event bodies | [Decision](adr/0057-attempts-event-bodies.md#concept) | [Technical depth](adr/0057-attempts-event-bodies-technical.md#technical-depth) |
+| 0058 — bounded progress delivery | [Decision](adr/0058-bounded-progress-delivery.md#concept) | [Technical depth](adr/0058-bounded-progress-delivery-technical.md#technical-depth) |
 
 An ADR pair is one decision. Its status and governance record live in the
 Concept file and bind both files when accepted.

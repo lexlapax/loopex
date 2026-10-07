@@ -67,6 +67,7 @@ a decision adds a new record rather than rewriting the old one.
 | 0055 | Remote session creation options | Proposed | [Decision](0055-remote-session-creation-options.md#concept) | [Technical depth](0055-remote-session-creation-options-technical.md#technical-depth) |
 | 0056 | Host helper ledger byte recipe | Proposed | [Decision](0056-host-helper-ledger-recipe.md#concept) | [Technical depth](0056-host-helper-ledger-recipe-technical.md#technical-depth) |
 | 0057 | Attempts event bodies | Proposed | [Decision](0057-attempts-event-bodies.md#concept) | [Technical depth](0057-attempts-event-bodies-technical.md#technical-depth) |
+| 0058 | Bounded progress delivery | Proposed | [Decision](0058-bounded-progress-delivery.md#concept) | [Technical depth](0058-bounded-progress-delivery-technical.md#technical-depth) |
 
 0001 and 0002 were the prerequisites that unblocked the first milestone
 candidate; the [plans register](../plans/README.md) records current status.

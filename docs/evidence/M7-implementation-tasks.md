@@ -4,7 +4,7 @@ Complete physical restore original75764 passed all148 cases on each supported
 toolchain at `11e7f674`, in560.494 seconds. All ten original stages are joined
 and47 artifacts verified. Six added T15 rows and the T16 copied-permissions row
 close against that group. Original T01–T19 remains80 done/93 todo/6 retired;
-added321 done/31 todo. Complete109-case restore IO proof passed both pairs;
+added321 done/32 todo. Complete109-case restore IO proof passed both pairs;
 served generation activation remains open. Dormant daemon configure admission, native
 activity, its tagged executor fixture and dormant wire codec/projections are
 proved on both pairs and integrated. Foreground production routing remains open.
@@ -13920,6 +13920,8 @@ in the restart checkpoint. Broader restore/decoder/public/helper rows stay open.
 - [ ] Repair the nine seed406612 CLI failures from the48ca full check by preparing the genuine provider-runtime lifecycle fixture through existing guarded startup; retain the first failure, preserve all startup/signal/resource/diagnostic/cleanup assertions, prove cold-first and mixed real fixtures on both pairs, then verify ordinary CLI in the next combined integration candidate.
 - [ ] Run the combined chat-progress, command-bounds and native alias-preparation integration candidate's full current-pair fast check once from a clean committed checkout; retain exact SHA, complete output, measured duration and digest. Keep required floor closure, live wire joins and observed T16 task-shutdown diagnostics separate.
 - [ ] Resolve the exact 0823aa50 full-check pre-fence runtime_unavailable under untraced combined load; retain failed output, establish its phase/cause and exact process lifetimes, preserve the original gate/fence/reap/cleanup/Store assertions, and verify a clean committed integration candidate without relabeling the failed run.
+- [ ] Prove current quiesce startup-loss and pre-gate cutoff controls with captured original actors: retain the 63-reader/sibling shared cutoff, mixed announced/unannounced cancellation and exact joins, plus held child-resolution and immediate-forward controls under the unchanged initial gate/reap limits. Keep missing historical 520ff308/0823aa50 output and unknown old interleavings separate; current controls do not reconstruct the past.
+
 
 - [x] Verify the combined caller-monitor cleanup and maintenance reply-reserve amendment from one clean committed integration candidate; retain exact SHA, full fast-check output and selected Node release workflow, preserve failed evidence and keep the separate concurrent owner-stop diagnostic open.
 

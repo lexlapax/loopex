@@ -36,7 +36,7 @@ Twelve original stages joined and53 artifacts verified. Collection
 terminal `d5fc620ea507d38afcfcbf278be02f4cda472133ff68bff689eeba7b2befecdd`.
 All six tested files are integrated literally; the bounded T16 ordinary encoding
 row closes. Original T01–T19 remains80 done/93 todo/6 retired; added321 done/
-31 todo. Live routing/writer closure, generation activation and full-fast remain
+32 todo. Live routing/writer closure, generation activation and full-fast remain
 open. Never repoll14873 or33078.
 
 Both remaining sparse-lookup generated cases preserve original claim custody
@@ -64,7 +64,7 @@ Latest consumed registry1206 at
 `M7/retained-finalization-lookup-admission-20261006-v2/stage-attempt-registry.json`,
 SHA-256 `e083ea7e6c9f6f8166c439e63d658e83a1904b366636ecf792602227fe9d7ae7`.
 The bounded private finalization and lookup-fixture rows close. Original
-T01–T19 remains80 done/93 todo/6 retired; added321 done/31 todo.
+T01–T19 remains80 done/93 todo/6 retired; added321 done/32 todo.
 
 Next, root verifies private mixed/all-absent original-transaction cleanup from
 clean isolated d5f893634e79e4c77abace2ed96f641f4306969f, a real source child of
@@ -103,10 +103,32 @@ The new metadata-reuse wrapper is not yet in that packet; its executed output
 must retain the exact wrapper at original collection. Public and helper restore
 remain separate and partial-cleanup's row stays open until complete paired proof.
 
-A separate source-only writer develops the accepted public original-tx driver
-in m7-restore-public-resolution. Proposed ADR0058 progress admission/writer
-ownership is being drafted in m7-progress-admission-proposal; it authorizes no
-implementation. ADR0055 is the sole asked pending approval;0056/0057 remain queued.
+The public driver writer in m7-restore-public-resolution froze seven paths with
+64 new cases, then independent review found a positive-absence defect: new
+invocation type alone could preserve absence before retained intent was read.
+The writer is correcting a private guardian absence-proved flag and adding
+actual public actor-loss tests before/after absence proof and before intent
+write. No public receipt or complete-resolution proof is claimed yet.
+
+Proposed ADR0058 is integrated with its two index rows after independent source
+review, with exact Concept SHA-256
+`292a45cec72a9011e1bb6eb48eebccdd24a325c11f43b083089f8008db781762`
+and Technical SHA-256
+`57fd78afae837af50c2cc51123083413a519b06f75cb656b101b6f36c6c39f12`.
+Documentation VM checks remain queued behind28176. Proposal source reasoning
+is not implementation proof. The specialized reviewer profile was unavailable
+under workspace-write; a separate ordinary read-only inspection made no writes
+or executions and verified the pair/patch/indices and material decisions.
+ADR0055 is the sole asked pending approval;0056/0057/0058 are queued.
+
+A source-only writer owns runtime_quiesce_test.exs in isolated
+m7-quiesce-controls at38ed22c6, adding the smallest current startup-loss and
+pre-gate cutoff controls. Original50-ms initial gate,500-ms shared fence and
+100-ms reap limits remain unchanged. Historical520ff308/0823aa50 raw temporary
+logs and probes are unavailable, as their durable attempt registry records;
+recorded historical summaries are not reverified bytes and no current green
+successor identifies those old interleavings. Their historical rows stay open.
+Original T01–T19 remains80 done/93 todo/6 retired; added321 done/32 todo.
 
 The following paragraphs record earlier source revisions and their evidence.
 
