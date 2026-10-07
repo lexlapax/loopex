@@ -28,10 +28,20 @@ physical restore implementation; it does not waive any full-history proof.
 ### Current work and restart order
 
 Pending isolated units on 2026-10-06 remain unproved and unintegrated. Root owns
-all original VMs, collection, Git and rejoin. No VM is active at this checkpoint.
-The private finalization complete proof is being adapted to reuse the exact
-collected version/format metadata before its four new stages; do not rerun those
-metadata stages at unchanged6b4fa5aa.
+all original VMs, collection, Git and rejoin. Private finalization original21368
+is running from clean6b4fa5aa through reviewed v3 runner, SHA-256
+`584c8fccbdf3d95d10263e500053f8baef1a818e54459a9d661860372b89682e`.
+It reuses exact collected version/format metadata before four new stages, with
+all378 cases per pair and actual timely/late IO witnesses. Collect the original
+handle before another VM. No execution result is claimed yet.
+
+Independent foreground source audit found ordinary projections still exposing
+native turn identities and quantities under ADR 0023's wire contract. The
+bounded correction owns only Delivery/WireRecords and their two tests in
+m7-progress-wire-encoding, based on cleanprimarya868e5ef. Root owns all VMs and
+Git. It changes no schema, public API, persistence, compaction gate, live routing
+or generation activation. That separate added T16 row remains open; T01–T19
+added318 done/33 todo. Real foreground writer-pressure proof remains required.
 
 Daemon original43854 is collected PASS at
 `07d5df345bb52323cf2a0a08d92bd53d4677daf0`: all66 cases per supported pair,
@@ -184,7 +194,7 @@ SHA-256 `bf54aa1be5152b815f9e9dd11ae054663a39355227ef5fbd6ce52e038ad8560c`.
 Latest collected registry is1168 keys at
 `M7/retained-finalization-format-20261006-v3/stage-attempt-registry.json`,
 SHA-256 `be1aaeee5fe8716c8c04a1eca250f75c3a6cbc118c66ed10b8852589c2814b16`.
-No active successor registry exists yet. Never repoll72050.
+Active21368 owns its successor registry until collection. Never repoll72050.
 Original44773,12545,81936 and97674 are terminal and collected; never repoll or
 retry their unchanged source stages. ADR0055 remains the sole asked pending
 decision. None of the pending units closes its checklist row yet.
