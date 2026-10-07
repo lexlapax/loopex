@@ -80,20 +80,52 @@ SHA-256 `b4a4542fcd7ef742ffcc424431f38d8fb25747302a2793365eeb8cc005136f08`.
 Never repoll collected66773/19287/67579/11792 or rerun their unchanged sources.
 Counts remain original81 done/92 todo/6 retired; added332 done/28 todo.
 
-ADR0055's pure CreationOptions unit is independently source-reviewed and raw
-committed in `/Users/spuri/.codex/worktrees/m7-authored-creation/loopex`.
-Original15320 formatter failed only floor layout, collected6joins38artifacts,
+ADR0055's pure CreationOptions unit is now integrated literally from clean
+isolated `94e380059c27b190fbf9f9629363d0014a3fbb7d`. Production SHA-256
+`d0d6a60eea088f4b41ac88ec749f3d1e5d14ccf86ba89d7996ee1aa7ae959252`;
+22-case test `37fd6866c2d18b8eaa2050cd9238247d5822192569f83e9f8d6cd0997ea7df79`.
+Only these two new files join. The pure unit reuses existing bounded
+configuration, instruction, genesis and Store admission validators; replay
+reconstructs exact retained sections and authored identity without a resolver.
+No native Control/Store transaction, callback count, transport/generation or
+full integration proof is inferred.
+
+Original24428 is terminal0 and collected PASS: all58 selected Core cases on
+each supported pair, zero exclusions/skips/invalid,18.696 seconds, four new
+original joins and32 verified artifacts. Output:
+`/Users/spuri/projects/lexlapax/loopex-evidence/M7/creation-options-proof-20261007-v1`.
+Collection SHA-256 `894447ecaefb2c7247113918c0cfa881f4c0bcbc7f964543197e1656938439bf`;
+terminal `95b8c66fe4f6aa1a9675467b8effcecfddfa49a6530018fbfb75f01269ed1945`.
+Latest collected registry1488 at that output has SHA-256
+`5373c0dd2a30309ee8f10f0010e9be7ce5782d6c8b22363292b27cfc91dadccb`.
+Executed wrapper `/private/tmp/m7-creation-options-proof-20261007-v1-enabled.py`,
+SHA-256 `99d2a0270e7cb16c10120c3c75f19e74f1cae19a0c54629930f54b1cf83b744c`;
+root enablement packet `/private/tmp/m7-creation-options-proof-root-enablement-20261007-v1.json`,
+SHA-256 `93c73c8bf7362bc3e52693ce7fce341039c411bac098237a38bf99dd7c849645`.
+Current/floor warning-free Core compilation and complete22+20+8+8 tests are
+fresh stages. Four positive unchanged-source tool-version/check-formatted
+records reuse actual92864 evidence explicitly; its six original joins are not
+retagged as fresh. Original92864 formatter PASS4.777 seconds/39artifacts,
+output `M7/creation-options-format-20261007-v3`, collection
+`e24e9fd68203eee74ef1cc84b923244b8738f5015e9a0d450fc01b8be65cd5c9`,
+terminal `164257571127303ab8fb32be76b6c7cf985c7cff390158fcf95b0ebdba1780aa`.
+It leaves source94 clean and unchanged, so no empty formatting child is made.
+
+Original15320 formatter remains FAIL for floor layout,6joins38artifacts,
 4.591 seconds; output `M7/creation-options-format-20261007-v1`, collection
 `101a937457c8122dfa4b65fd2ec078e9355755bba05e61789b60235f106ec0fc`;
 terminal `ad930bc468fee82a7eb97ddd18c96cf5d7df0963e10deb64753122132cb4ea4c`.
-Current formatter bytes were saved literally at977117c4; the identical-predicate
-explicit do/else/end repair is committed at
-`94e380059c27b190fbf9f9629363d0014a3fbb7d`, production SHA-256
-`d0d6a60eea088f4b41ac88ec749f3d1e5d14ccf86ba89d7996ee1aa7ae959252`.
-The formatted22-case test is unchanged SHA-256
-`37fd6866c2d18b8eaa2050cd9238247d5822192569f83e9f8d6cd0997ea7df79`.
-Fresh formatter/compile/paired pure tests remain pending. No Store/Control/
-transport/generation proof is inferred from this pure unit.
+Current formatter bytes were saved literally at977117c4; the exact-predicate
+explicit do/else/end correction is child94. Source packet
+`/private/tmp/m7-creation-options-layout-repair-20261007-v1.json`, SHA-256
+`cd1438373d188874e028bf1645f09dc936f3e5dde1948ea7d95929f8dda676a9`;
+independent raw source review
+`/private/tmp/m7-creation-options-independent-review-20261007-v1.json`, SHA-256
+`d53415fe159182cd02bf513701e1648c6b1679f29c25fc03a4a3241fa27bb2df`.
+Native formatter checks/AST equivalence and root's literal syntax review join
+that raw review to final tested bytes. Never repoll collected24428/92864/15320.
+No native VM is live at this checkpoint. Only the new bounded T05 pure unit
+closes: original81 done/92 todo/6 retired; added333 done/28 todo.
 
 Proposed ADR0059 responsive transaction-carrier V2 is uncommitted in isolated
 `/Users/spuri/.codex/worktrees/m7-creation-transactions/loopex`, packet
@@ -105,6 +137,29 @@ creation proposal/fence. Do not ask acceptance using the earlier bounded
 readiness PASS, or implement the carrier, until that exact owner-loss branch has
 a reviewable retention/exclusion mechanism. Local serialized read ordering is
 not claimed broken. No0059 acceptance or other proposal approval is inferred.
+
+The superseding restart review is retained at
+`/private/tmp/m7-creation-transactions-independent-review-20261007-v2.restart-supplement.json`,
+SHA-256 `3701bf940a94fcf3628d77f2f3e727390e2fcd3a7079f38e051add4c16bd4815`.
+Concrete options are retained in
+`/private/tmp/m7-creation-custody-decision-20261007-v1.json`, SHA-256
+`84ea07ad95a1b010f7f41a55670c0ec9827301f242f68862d89b7623ff85cc82`;
+readable companion SHA-256
+`567b19e7cab1957853479b18cf7b200d65f45a0341d7b77cc71a68cea70df203`.
+Recommended Store custody needs both a durable exact candidate and a generation
+CAS barrier; reservation identity alone cannot close the first lost-call gap.
+Independent design review and an exact revised Proposed pair remain required
+before asking acceptance. No dependent production implementation is authorized.
+
+ADR0056 readiness audit found stale factual prerequisites in the unchanged
+historical Proposed pair. Current Core already normalizes authored bounds and
+retains revision2 command identity; helper-facing ownership/API, exact whole-run
+accounting and integration remain owed. Audit:
+`/private/tmp/m7-adr0056-readiness-20261007-v1.md`, SHA-256
+`2f696d216be18f419f2dfba0e758468c6bc0fe562f3de5a881b9825a081caf77`.
+A source-only factual pair refresh is assigned in separate managed worktree
+`/Users/spuri/.codex/worktrees/m7-helper-recipe-refresh/loopex`. It remains
+Proposed and awaits root review, documentation checks and exact-byte acceptance.
 
 Latest checklist audit: close only T09's added "Pin pending/response decoder
 vectors and public question event schemas." Current artifact hashes and relevant

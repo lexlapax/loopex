@@ -1,5 +1,15 @@
 # M7 Implementation Tasks
 
+T05's pure creation-options capture/reconstruction unit is integrated literally
+from `94e380059c27b190fbf9f9629363d0014a3fbb7d`. Original24428 passed all58
+selected Core cases on each supported pair, zero exclusions/skips/invalid,
+18.696 seconds, four new original joins and32 verified artifacts. The four
+positive formatter prerequisites remain separate retained references. Only this
+new bounded added subtask closes; responsive native creation, Store recovery,
+transport grammar and coordinated generation activation remain open.
+Original T01–T19 remains81 done/92 todo/6 retired; added333 done/28 todo.
+Exact source and proof pointers are in the [resume record](M7-resume.md).
+
 T15's bounded regular-file final-mode repair is proved and integrated literally
 from `768b2191b0bc9a9b02b70d3c78f97b579320cfaf`. Original66773 passed all175
 selected cases on each supported pair, including all three long-bound cases,
@@ -13424,6 +13434,8 @@ or check was relaxed.
 - [ ] Run the required independent-client workflows.
 
 ### Added implementation subtasks
+
+- [x] Implement accepted ADR0055's pure closed creation-options normalization, captured-default tool selection, prepared initial-genesis construction and no-resolver reconstruction through existing configuration/instruction/genesis validators. Preserve omission, exact authored aliases/tool order/raw instruction sections and inclusive complete-genesis byte bounds; prove all58 complete affected Core cases on both supported pairs. Native Control/Store custody, callback replay, transport admission and generation activation remain separate.
 
 - [x] Implement accepted ADR0052 native terminal turn and answer-command provenance with strict closed cursor/replay relations; reconstruct existing retained refusal reasons and finish only exact queued denied/expired calls after owner loss without reconsulting policy or granting retained allow authority. Prove all30 answer/lifecycle cases on both supported pairs, including real700-ms expiry owner loss and all three Store uncertainty phases; retain original65277 failure and integrate literal tested files. Transport projection, complete manifests and generation activation remain open.
 
