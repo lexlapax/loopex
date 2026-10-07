@@ -1,5 +1,18 @@
 # M7 Implementation Tasks
 
+Native chat controls are reconciled against unchanged current integration and
+the fresh floor proof at `483301c0`. Original8827 passed all 170 cases with zero
+exclusions, skips or invalid cases. Whole-tree floor formatting and CLI
+warning-free compilation passed; four original processes joined and 23 artifacts
+were authenticated in 146.812 seconds. Six original rows close: T06.3/T06.6
+and T10.1/T10.2/T10.3/T10.9. Broader floor preservation and attended chat remain
+open. Original T01–T19: 87 done / 86 todo / 6 retired; added 344 done / 23 todo
+after recording the dormant interaction selector unit. ADR0056's exact pair is
+now Accepted; helper execution and separate accounting/protection remain open.
+Exact references are in the [resume record](M7-resume.md).
+
+The following earlier progress entries are historical where superseded above.
+
 Selected receipt capture is proved at `caf4cdb2` and integrated with literal
 source bytes. Original38906 passed all 120 IO cases on each supported pair,
 including three long cases, with no exclusions, skips or invalid cases.
@@ -13533,6 +13546,9 @@ or check was relaxed.
 
 ### Added implementation subtasks
 
+- [ ] Compose the accepted model and policy interaction codecs through one pure kind/producer-aware Elixir selector and an independent Node selector; prove requested, terminal and answer-admitted branch correlation, shared expiry/cancel kinds, exact opaque/quantity domains and malformed/private/cross-kind refusal on both pairs. Keep this four-file preparation unit dormant until coordinated transport/client generation activation.
+
+
 - [x] Implement the standalone authored remote creation-options codec/schema and independent Node vectors under accepted ADR0055, preserving optional versus empty configuration/tool selection, strict opaque/integer/quantity domains, all398 creation and381 configure vectors and shared exact-string regressions. Prove complete12 cases including both Node consumers on each supported pair at0babe891, zero exclusions/skips/invalid, before literal integration; retain original90814 formatter and93963 fixture failures. Native custody/transport admission and served generation activation remain separate.
 
 - [x] Implement accepted ADR0055's pure closed creation-options normalization, captured-default tool selection, prepared initial-genesis construction and no-resolver reconstruction through existing configuration/instruction/genesis validators. Preserve omission, exact authored aliases/tool order/raw instruction sections and inclusive complete-genesis byte bounds; prove all58 complete affected Core cases on both supported pairs. Native Control/Store custody, callback replay, transport admission and generation activation remain separate.
@@ -13610,11 +13626,22 @@ or check was relaxed.
 
 - [x] Add loopex chat through the existing session/runtime facade.
 - [x] Join explicit configuration, continuity and instructions.
-- [ ] Support prompts, status, wait, abort, bounded output and truthful shutdown.
+- [x] Support prompts, status, wait, abort, bounded output and truthful shutdown.
 - [x] Prove two prompts and restart through the built command.
 - [ ] Preserve existing ask, durable-run and embedded workflows.
-- [ ] Test startup refusal, admission failure, output and cleanup.
+- [x] Test startup refusal, admission failure, output and cleanup.
 - [ ] Later retain the required attended multi-prompt proof.
+
+### Original item evidence — 2026-10-07
+
+Original8827 at `483301c0100df4c76f6a7ca9079b6c6f82a90946` passed the complete
+13-file floor chat selection: 170/170, zero failures/exclusions/skips/invalid,
+original cutoffs and physical process/OS joins unchanged. Four native stages,
+whole-tree formatter and CLI compilation passed in 146.812 seconds. Current
+original99939 is reused only at literal unchanged Core/CLI/Protocol bytes.
+The bounded source audits and exact collected artifacts are retained in the
+[resume record](M7-resume.md). This closes T06.3 and T06.6; broader floor preservation
+and attended T06.7 remain open.
 
 ### Added implementation subtasks
 
@@ -13856,16 +13883,27 @@ the still-open real-provider, live protocol, persistent-fault or closure lanes.
 
 ### Original checklist
 
-- [ ] Implement steer, follow-up, answers, decline, wait, interrupt, configure, compact and exit commands.
-- [ ] Implement the exact pipe grammar and closed control records.
-- [ ] Enforce record limits, bounded input admission, the 256-KiB output queue and control-drain deadline.
+- [x] Implement steer, follow-up, answers, decline, wait, interrupt, configure, compact and exit commands.
+- [x] Implement the exact pipe grammar and closed control records.
+- [x] Enforce record limits, bounded input admission, the 256-KiB output queue and control-drain deadline.
 - [x] Implement the unknown-admission resolver using the original transaction identity and proposal.
 - [x] Preserve input ordering while admission is uncertain; do not submit duplicate commands or fenced aborts.
 - [x] Make EOF, incomplete fragments, earlier failures and uncertain cleanup produce the specified outcomes.
 - [x] Implement tracing through flags and files, including enable/disable and owner cleanup.
 - [x] Add the independently draining diagnostic consumer with drop and unconfirmed-delivery accounting.
-- [ ] Test PTYs, fragmented pipes, actual question IDs, barriers, slow readers, EOF and signals.
+- [x] Test PTYs, fragmented pipes, actual question IDs, barriers, slow readers, EOF and signals.
 - [x] Test tracing isolation, redaction, stalled stderr and ask’s JSON output separation.
+
+### Original item evidence — 2026-10-07
+
+Original8827 at `483301c0100df4c76f6a7ca9079b6c6f82a90946` passed the complete
+13-file floor chat selection: 170/170, zero failures/exclusions/skips/invalid,
+original cutoffs and physical process/OS joins unchanged. Four native stages,
+whole-tree formatter and CLI compilation passed in 146.812 seconds. Current
+original99939 is reused only at literal unchanged Core/CLI/Protocol bytes.
+The bounded source audits and exact collected artifacts are retained in the
+[resume record](M7-resume.md). This closes T10.1, T10.2, T10.3 and T10.9.
+Hosted, attended and coordinated transport generation proofs remain separate.
 
 ### Added implementation subtasks
 

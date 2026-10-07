@@ -27,6 +27,71 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+Latest completed proof is native chat floor selection at clean
+`483301c0100df4c76f6a7ca9079b6c6f82a90946`, tree
+`f4a87a3f94cccd6afa39f6f38933d23ef95adf56`. Original8827 exited0 and passed
+170/170, zero failures/exclusions/skips/invalid. All four original stages joined:
+version, whole-tree formatting, warning-free CLI compilation, complete13-file
+chat selection. Native tests took104.649 seconds; wrapper146.812 seconds.
+Output `M7/chat-controls-floor-20261007-v1` under the external evidence root;
+collection SHA-256 `0624dfda8afc656a4a0c7de32405b3cd19ea2a1154e5efc6391176795af8be73`;
+terminal `ba5391fbe33688ab3e1ccfafd53c6a1333f1e146909ac4b9a0dd904bb7afa1be`;
+executed wrapper `e4b68e9702d76955b4090dc9c6d3377cb77da590d0e097920a04ee70b96a7acf`.
+All23 structured artifacts authenticate. Latest fully collected registry1573:
+`96ec2ddebb042de9a819c56699860f2d7f54d2030a28ce8629f2eda938417b51`.
+Never repoll8827 or rerun unchanged chat selection. Original33985's sandbox
+refusal happened at evidence-directory creation before any native admission or
+registry reservation; the approved escalation started original8827. Refusal
+record `0e5ec63457302a305d91c90013196f631ff4f688328d792f7f508de02294c357`.
+
+Current original99939 is reused at literal unchanged Core/CLI/Protocol bytes,
+not relabeled to the later whole-tree head. Six original rows close:
+T06.3/T06.6 and T10.1/T10.2/T10.3/T10.9. Original T01–T19 now87 done/86 todo/
+6 retired; added344 done/23 todo after adding the pending dormant interaction
+selector unit. T06.5 broader floor preservation and T06.7 attended proof stay
+open. No complete floor fast check, provider, release or closure claim follows.
+
+Exact audits, unadmitted V1 and corrected V2 recipes and original finalization
+are retained in `M7/chat-controls-completion-context-20261007-v1/retention.json`,
+SHA-256 `3358dadc2719fc9a02c50fdf61fe3a470f9b54d2fdf1ffd23dedea370c7e791a`,23files.
+Later receipt/operator/diagnostic context is retained in
+`M7/receipt-and-operator-completion-context-20261007-v2/retention.json`, SHA-256
+`905f6faf9f97a8972a0e0b6a90a8f7f23cabe21e7c1cc4d6efab3eec6a9b05b9`,7files.
+Both completed receipt and operator worktrees are archived with recoverable Git
+snapshots; do not execute their absent checkout paths.
+
+The maintainer accepted exact ADR0056 at historical2dba3e7a; its administrative
+transition and digest-bound disposition are recorded. Helpers remain disabled
+until separate accounting and mutation-protection decisions and real proofs.
+ADR0055 is Accepted;0057–0060 remain Proposed. ADR0057 at4007adf7 is the
+sole asked unanswered decision after the0056 reply. Ask material decisions one
+at a time.
+
+One source-only writer is implementing the accepted dormant interaction selector
+in `/Users/spuri/.codex/worktrees/m7-interaction-event-selector/loopex`, base483.
+Owned four new paths are Protocol Session.InteractionEvent, its test file and
+Node interaction-event.mjs/interaction-event-vectors.mjs. No served transport,
+manifest or live client activation is authorized by this preparation unit.
+Root owns native admission, source commit and integration. Administrative
+review and both next-unit audits are retained in
+`M7/chat-ledger-governance-context-20261007-v1/retention.json`, SHA-256
+`b56bd242d868b8d8fbc48dc0f609577cf3e4f9fdb776011f7e151c115851ac78`,3files.
+The review authenticates exact acceptance, six rows and both earlier bundles;
+review SHA `3f3d3de66a7f8eb9062f7e478b2ef3a9dc97e259a4f6c6561a376f7b7deb3db6`.
+Its patch predates the routine0057-question/retention-pointer updates here.
+Creation history audit SHA
+`691732e8aa7abc0c34b40bdc03ec61c811b1c382371dade45b0c46a228bc2877`:
+read-only inspection may proceed, but responsive Store carrier and durable
+custody depend on Proposed0059. Remaining-task audit5546b08a is an earlier
+snapshot; its81/92 census and pending0056 statements are historical.
+The dormant selector raw source is now saved at isolated
+`252a089fbf0f68a33e3a191a6edab63f87a0d9bb`, tree
+`8bd21ccb1765ecc090ca8f9bf73cc2c96e4b3b7d`. No native proof ran yet.
+Formatting/proof preparation remains source-only; primary source is unfrozen.
+
+The following earlier checkpoints remain historical where superseded above.
+
+
 Selected receipt source is now proved at isolated
 `caf4cdb2959ec853cb7b3e683003a08b6f0a90cd` and integrated literally into `m7`.
 Original38906 exited zero: 120/120 on each supported pair, all three long cases,

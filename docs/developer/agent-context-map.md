@@ -6985,3 +6985,24 @@ remain host-owned. This amends ADR0044 remote creation, ADR0049 immutable
 selection and ADR0050 preparation scope. Coordinated generation activation,
 required proof and other Proposed ADRs remain separate. No test result,
 milestone closure, merge, release or publication follows from acceptance.
+
+<a id="disposition-m7-helper-ledger-recipe-2026-10-07"></a>
+### M7 host helper ledger recipe accepted, 2026-10-07
+
+The maintainer explicitly selected option1, "Approve the exact ADR 0056 pair",
+for the [Concept](../adr/0056-host-helper-ledger-recipe.md#concept) and
+[Technical depth](../adr/0056-host-helper-ledger-recipe-technical.md#technical-depth)
+at candidate `2dba3e7a2d574a7a07d5b77b35064da94ff17317`.
+Historical Proposed Concept SHA-256 is
+`4fb1b01845e836fa65374e1d9d2ff28303af52930d8d9d1c0a0cf6f03303035d`;
+Technical SHA-256 is
+`1a6611055a708f35a91db8a5bda7452136eaec385283beffef0ca3e1e0529e77`.
+Within the pair only Status and the empty Acceptance row change.
+
+Implement the current closed canonical JSON/checksummed-frame host recipe and
+conservative maximum-frame completion credit within ADR0046's existing caps.
+The byte ceiling may refuse new work earlier. Preserve exact transaction replay,
+writer fencing, stop-only recovery, fsync-before-acknowledgement and uncertain
+reservations. Whole-child-run accounting and universal mutation protection remain
+separate prerequisites; this acceptance alone does not activate helpers. Other
+Proposed ADRs, required proofs, milestone closure and publication remain separate.
