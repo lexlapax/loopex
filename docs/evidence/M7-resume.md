@@ -27,6 +27,57 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+Accepted ADR0054 standalone activity schema/vector/client unit is proved and
+integrated literally fromc483dfd35f8b7faa8054520f4123b5536df625bb.
+Its one-path literal formatter child has treefc49bf3bec0c961fdba5ab779b68c17b8f4eedf9;
+NUL projection SHA-256
+`4cf095fb600424de2f5132aded61fe7779041f7ee4a32dd0769f0d67dc2259cc`;
+formatted test SHA-256
+`46ca850203744d253da24abebee4b45066045d98ea8a63a682e264f442ab8684`.
+The other four paths match the frozen packet literally. Original48334 exited0:
+6.599 seconds,six original joins,38 artifacts,positive non-line AST and both
+formatters. Output `M7/activity-vectors-format-20261007-v1` under the external
+evidence root;collection SHA-256
+`a15de1feb9397f7204b23fd0d6a915383fb6fd11a08dc5af3e077c2c9605f658`;
+terminal `d978324053087e694a63a41cb56a20c2226c9d09546b605178930d943aac54d8`.
+Original36733 exited0 with20/20 on both supported pairs,including both actual
+Node22.14.0 consumers,zero exclusions/skips/invalid,11.042 seconds,ten fresh
+original joins and49 artifacts. No earlier version/check result is reused or
+retagged onto the child. Output `M7/activity-vectors-proof-20261007-v1`;
+collection SHA-256 `20c05581b45d202eed86854bd4918ae6889c2ad9baac28cb8c9ada4748eab65c`;
+terminal `9e5d1d9f20bd5363a96c30be563b332956aca7cabbd04533f29e4c1383475ac6`;
+executed wrapper `4eb0a5f2bf25b490986ae6eebbc84874186d45a81600502a0a57cd6c8e4a9d20`.
+Latest fully collected registry1551 SHA-256
+`5bb0ff430cd69a3b8edf5467c3e231c929edee282c2c26e6e8903f786817449b`.
+All five integrated paths match the exact tested child. One bounded T07 added
+row closes; original81 done/92 todo/6 retired,added338 done/26 todo.
+Live progress routing, coordinated generations and original compaction outcome
+remain separate. No native VM remains live; do not repoll48334/36733.
+
+Literal source/review artifacts are retained outside temporary storage at
+`M7/activity-vectors-review-20261007-v1` under the external evidence root.
+Its27-file `retention.json` SHA-256 is
+`4831f40c963be5708de76d459f80278ae308d64e37bb667ab2a3010cb6128696`.
+This includes the exact source packet/before/after/patches,independent/root
+reviews,disabled drafts/helper/enable pins and completed object/sidecar audits.
+Original paths inside those historical bytes remain unchanged; the retained
+copies can restore missing temporary inputs by exact digest if later needed.
+
+Original-row reconciliation found zero safe additional completions. Report
+`m7-original-task-reconciliation-20261007-v1.md` in that retained review directory,
+SHA-256 `b2c40f66d4755bee13a7bf8afe1393db7530c2b1eb7965bcf21c8958d27c2f5a`.
+T10 supporting temporary inventories are absent,so proof recovery is a read-only
+assignment. Its suggested trusted wrapper next step was corrected by actual
+campaign admission inspection: ADR0057 remains Proposed; existing frame/head
+helpers grant no dispatch authority and no fsynced started-slot owner exists.
+Blocker retained at`m7-fixture-wrapper-blocker-20261007-v1/report.md` in that
+review directory,SHA-256
+`28292103635b6ea248dd39505057c72fa6e797faf70990b17af087c66aa71e58`.
+No wrapper source was written in isolatedm7-fixture-wrapper,no provider or test
+ran,and T13 stays open. Foreground worker investigates T16 cleanup diagnostics
+read-only; independent reviewer audits exact receipt decoder evidence.
+Only ADR0056 is asked unanswered; other Proposed decisions stay queued.
+
 T15 selected artifact-use sidecar audit is complete by existing paired evidence.
 Report `/private/tmp/m7-restore-sidecar-evidence-audit-20261007-v1.md`,SHA-256
 `82e58a7ac3137a3084223f9cecf30e34210525807ee2bcd97d6f0634ced3655d`.

@@ -1,5 +1,14 @@
 # M7 Implementation Tasks
 
+The accepted standalone compaction activity schema/vector/client unit is now
+proved and integrated literally fromc483dfd3. Original36733 passed20/20 per
+supported pair,including both actual Node22.14.0 consumers,zero exclusions/skips/
+invalid,11.042 seconds,ten original joins and49 artifacts. Original48334 passed
+both formatter checks and non-line AST before the one-path literal format child.
+Original T01–T19 remains81 done/92 todo/6 retired;added338 done/26 todo.
+Live transport routing and coordinated generation activation remain open.
+Exact source/review/native references are in the [resume record](M7-resume.md).
+
 The selected T15 artifact-use sidecar row is reconciled with existing proof.
 Its14 cases and65 internal scenarios were in original66773's unchanged111-case
 IO file and175/175 paired selection. Current IO/test/Local/Core/Canonical bytes
@@ -13644,6 +13653,8 @@ the still-open real-provider, live protocol, persistent-fault or closure lanes.
 | 11, open complete preservation proof | Live automatic/standalone owner succession retains raw facts, checkpoints, usage, deadlines and result identity. [Physical Local Store restart](../../apps/loopex_composition/test/maintenance_store_restart_test.exs) now proves exact log/raw prefixes, checkpoint/configuration/usage/deadline replay, standalone result identity and continued summary projection with no redispatch. Complete current live-surface preservation still needs its integrated proof; real-provider long conversation remains an M7 closure obligation. |
 
 ### Added implementation subtasks
+
+- [x] Deliver accepted ADR 0054 standalone closed activity schema,185 literal vectors and independent Node decoder with51 byte/descriptor controls; retain both owners and exact opaque/uint64/frame boundaries, preserve12 prior activity tests, and prove all20 activity/owner cases including both actual Node consumers on both supported toolchains. This does not activate foreground/daemon generations or close live transport delivery.
 
 - [x] Implement accepted ADR 0054 native compaction activity: exact closed six-member item, committed actual owner/episode, compaction attempt domain and one positive-permit emission through serialized current-owner bounded routing. Prove automatic/standalone producers, loss/uncertainty/duplicate/privacy cuts and joined constant-state relay lifetimes on both pairs; no closure or successor replay.
 - [x] Implement accepted ADR 0054 closed wire codec and identical foreground/daemon projections with canonical identities/quantities, privacy refusal and existing frame/queue limits. Keep current served generations from emitting the unactivated family; complete transport progress integration, independent clients and generation activation remain separate.
