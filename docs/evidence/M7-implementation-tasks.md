@@ -1,5 +1,19 @@
 # M7 Implementation Tasks
 
+Latest original65202 failed whole410 test compilation after current formatting
+and Core compilation passed. Three process joins,21 artifacts and2078 registry
+rows are retained. Original67212 separately never spawned its command because
+of an omitted cwd; zero-join unavailable evidence remains. Wildcard/import
+repairs are saved; actual startup-readiness fixture and current provenance/3
+forwarding repair are assigned. No complete410 population or floor PASS exists.
+
+Authored V2/raw8cf703f5 is frozen for independent review,97 conditional cases
+including the same three long-bound cases. Foreground FIFO/raw03e87fe7 is frozen
+with110 conditional cases across eight complete files; current dependency rejoin,
+independent review and native proof remain. Finite-CAS exhausted-prefix proof
+remains open. No task closes; exact sources, complete failures and149-file
+external context retention are in the [resume record](M7-resume.md).
+
 Current continuation on 2026-10-08: ADR0061 is accepted at `d7c23f3d`;
 ADR0063's exact Proposed pair `16c251ad` remains the only asked pending decision.
 T01–T19 originals88 done/85 todo/6 retired; added363 done/23 todo, unchanged.

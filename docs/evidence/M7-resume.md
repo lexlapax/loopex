@@ -27,6 +27,78 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+### Latest continuation after original65202
+
+Primary checkpoint4d078d59 was pushed. M7 remains active; original and added
+counts are unchanged. No native handle is live. Latest producer is original65202,
+2078 registry rows. ADR0063 remains the only pending asked decision.
+
+Warning repair is source-saved at isolated146c5dfee8ede974991524e1d3ba81441e28a5b7.
+Packet66ebb44e preserves unique `{relay,gate}` routes, original32-slot bounds,
+open predicate and gate CAS. Original67212 could not spawn formatting because
+root omitted cwd and the copied engine's bound default named a removed temporary
+directory. Zero native processes started; that unavailable admission remains
+retained, never reclassified as passing. Exact zero-join collector4ff3ef05
+records original67212 in1.751seconds/13 artifacts/2075 rows. Collection
+`64fceba4524233a2275612fd392e60bd49763801f8e323c30fd9cf3fe9defa9d`,
+terminal `cb9052ca6f480fe705e72ca7f7dc173e2a02e58a995c54c2a3847b4f3d30353f`,
+registry `4ef58e507e7674887bfe26b251913b11ef0b6985d17fd369ba22b60f15c6c16a`.
+The corrected runner supplied explicit actual cwd to every invocation and kept
+the unspent compilation/test keys plus a distinct corrected formatter admission.
+No target source or proof allowance changed for this pre-exec correction.
+
+Original65202 is terminal FAIL, collected once: current check-formatted and
+warning-free Core compilation passed, then whole410 test compilation failed on
+ProgressTestConsumer.drain/1 import versus local AgentLoop.drain/1. Preceding
+actual SessionLifecycle/Embedded first creates returned store_unavailable.
+No complete registration/execution census or floor result exists.13.124seconds,
+three original process joins/21 artifacts/2078 rows. Output root
+`/Users/spuri/projects/lexlapax/loopex-evidence/M7/progress-ingress-v3-proof-20261008-v3`.
+Collection `13d7fa4c4888b289cbf1fbd67db9a3fb980f76df59924fe4dee602901d31eeb8`,
+terminal `0522ea66845c53d510fbd4c7c77d8d8f2729b34d90eaa766325def84e071c660`,
+registry `53b693eedc8565d085581f95ebd1e4f099d310758674b89b07e4e1775892c4b6`.
+Root fixed wildcard `_` AST preservation, macro-only imports and unused imports
+in six helper/test paths, packetc1a3a91b. No case bodies/cutoffs changed.
+Independent helper review is assigned toattempt_case_replay. Triageeec03166
+confirms the source-reachable separate startup readiness race; exact failed-call
+phase attribution remains unavailable. ProviderAttempt's two wrappers separately
+still forward superseded provenance/2 instead of current/3.
+cleanup_binding_audit owns the bounded shared private fixture readiness and
+current wrapper repair in ingress WT. Existing held-startup cases remain intact;
+no public0063 status/wait, repeated creation, production fallback or bound increase.
+The next clean measured candidate must preserve all410 cases and both long-bound
+cases before paired proof. No unchanged failed bytes may be retried.
+
+Authored V2 is frozen c334b01d, report33e12a65, manifestf8415d0f, saved by root
+at8cf703f52b2e9a257d7768a54d0435d834442d2b in its own worktree. Six current
+owned path hashes/supports and status are verified. It retains the atomic first
+resource table through callback/single-owner loss and the exact Control minimum.
+Five added cases make97 conditional cases across five whole files, including
+three unchanged long-bound cases; original71 and approved capture fixture remain.
+t15_original_closure_map independently reviews this exact frozen unit. Current
+Core rejoin and paired proof remain unrun; no source review is native completion.
+
+Foreground FIFO/Frame/current Snapshot3 Node source is frozenf0fc5c5b,
+reportc3de1678, full patch492bc576 and censused6ac107. Root verified all61 sealed
+assets and actual17 owned path hashes/status, then saved raw isolated
+03e87fe707e35db39f1bc2cf4346b592b3504aa2. Seven complete existing files preserve
+89 original cases; eight complete selected files total110 conditional cases,
+including21 additions. Proved physical writer14 stays untouched. Current creation,
+private fixture readiness and ingress-credit rejoin precede independent native
+qualification. No serving-generation activation or public startup wait is included.
+
+Read-only finite-CAS design33945477 confirms current APIs can witness but cannot
+deterministically force all32 actual lookup/replace losses. The existing actual
+contention case does not falsely claim exhaustion when its claim succeeds.
+Normal/full Control and relay exhausted-prefix proof remains open. No flaky
+required churn case, fake result, synthetic arena state, production hook or
+weaker acceptance claim is authorized by that design.
+
+Immutable external retention
+`/Users/spuri/projects/lexlapax/loopex-evidence/M7/progress-source-context-20261008-v3/retention.json`,
+SHA-256 `566ba240a880d03b73ec9b00d88a66085aa7319fe947f5090cf80f57b4068f12`,
+saves149 source/review/runner-correction assets without changing older retentions.
+
 ### Current continuation on 2026-10-08
 
 M7 remains active on `m7`. T01–T19 originals88 done/85 todo/6 retired and
