@@ -27,6 +27,82 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+### Current four-file fixture repair and failed complete AppServer run
+
+Original71798 is terminal FAIL_OR_UNAVAILABLE and collected once at e5 source.
+Current project compilation passed; the complete AppServer selection executed
+94 cases: 64 passed, 30 failed, zero excluded/skipped/invalid. Protocol18 and all
+floor stages were unrun. Duration 651.167 seconds, four original joins,
+24 artifacts and 2,209 registry rows. Output
+`M7/foreground-dead-clause-proof-20261008-v3`; collection
+`778bc6d08880086a0ad57d8bec259b947e7df6f05fb36352deac2183bdedc920`,
+terminal `01fc93f849931702fd0fea1926b65d4727cba9c718c8ac276934a4b8c139dc7f`,
+registry `0f81ff143f31be02393e2cde7a53e95132addcafa88143ac7c2c2ace4261a8fb`.
+Do not repoll, recollect or repeat that unchanged failed candidate.
+
+Root saved the coordinated four-file fixture repair at clean isolated
+`9b0b148f53233ef6de634018efd8b6d7318694ff`, sole parent e5, tree
+`b46296caa09bea9c5fa331774381ed87c69f93cc`. It retains nine actual startup
+PID observations in a parent-owned fixture ETS table, adds the actual executor
+dependency to four child launch lists, groups unchanged command clauses,
+corrects five nullable-handle Boolean conditions, reads setup FIFO bytes through
+the exact LF boundary, and observes actual joined-baseline readiness before
+positive progress offers. All original actor joins, case headers and deadlines
+remain; other13 foreground and Core32 source bytes are unchanged. The raw FIFO
+read can still block without a byte, and existing cleanup can mask a body error.
+No stronger acquisition guarantee or native fix success is claimed.
+
+Frozen packet `/private/tmp/m7-foreground-actual-fixture-repair-source-20261008-v1/source.json`,
+SHA-256 `9a60b9c7905c4721eb46ea0e2af84ffe10a15cea31747aec9713ed780313d823`;
+patch `7f1c251f5fc7143f24bc758cc4b1dc671a4e7d08d6d8f2441dda44007ded9dbe`.
+Independent source audit
+`d6da0116955e475e0666c95a1f8f572b64b01a085060a5b354e30f10f0ded5e9`
+qualifies these deltas only; it is not milestone/release review. An attempted
+formal release-review role stopped before inspection because its required
+read-only sandbox profile was unavailable; no formal review credit is claimed.
+
+Original73407 passed paired formatting of raw9b in 11.023 seconds, ten joins,
+48 artifacts and 2,219 registry rows. All fifteen raw/post AST checks passed on
+each pair and final17 maps agree. Collection
+`b90404104784c1e820c5d0f562ac79e2d927f7d0cefa1a9a45d66def3b1dc9ae`,
+terminal `1a1bb5c65403d96afcb8c9a47c9ad8ff08b9ee513bd37e10e49f2e45682475ca`,
+registry `59bb8f42c947315d8c768a5099a63b8ec6ec00e14ff01fcff71a8f193ee00574`.
+Root saved the measured one-file formatting child
+`4492dad4a99f9ce28473c108fa46144c986bb35e`, sole parent9b. Do not recollect73407.
+Actual V5 preparation
+`/private/tmp/m7-foreground-actual-fixture-format-preparation-20261008-v5`:
+capture `2994ce5bec08b55af091a5263f8225cf69c6fc422804146cbd115f5566037962`,
+runner `e71616efafa6fabd1e0ca6178146df375acfccd3e489a89e237a0d395ca662ce`.
+Root read the independent source audit, entire builder and exact carrier
+reversal before admission; no independent admission-review credit is claimed.
+
+Original29729 is the current live whole112 handle at clean4492. Poll that same
+handle to actual terminal and collect once; never restart on an observation
+timeout. Actual proof preparation
+`/private/tmp/m7-foreground-actual-fixture-proof-preparation-20261008-v4`:
+capture `195d7ec22b942404befa291f3bea59bde93f8e306813b856b118a0dcde1cb21e`,
+runner `31edcb31b1f780d3e50ffd4b7f234010fec2e411b69ce5f87120f8482201185e`;
+output `M7/foreground-actual-fixture-proof-20261008-v4`. The actual complete
+73407 registry seeds the unchanged94+18 selection including all four Node
+cases, separate application VMs and both toolchain pairs. Outcome remains
+unknown. Root admission record
+`e8ca7ff1cdcbfeedb7af5db6ece38fcf2cdd746cac6366516bdbe20a3be106ba`.
+Source, diagnoses, recipes and maps are retained as134 immutable assets at
+`/Users/spuri/projects/lexlapax/loopex-evidence/M7/foreground-compile-and-restore-context-20261008-v1/retention.json`,
+SHA-256 `141767afc20a3d532f362d22ecc7d13149487c9e9ec301b654f848f08965c919`.
+Native outputs remain separate original collections.
+
+The earlier e5 primary join map is historical and cannot integrate repaired4492
+bytes. Refresh it after a positive complete112 result. Then restore3 from fd1b and whole175, remaining
+protocol/helper integration and T17. ADR0063 remains the sole asked pending
+decision. No added or original checkbox closes: originals88/85/6,
+additions364/24. M7 remains in progress.
+
+### Historical dead-clause formatter and superseded next-run recipe
+
+The current checkpoint above supersedes source, registry and execution order
+below. All earlier failures and positive prerequisites remain retained.
+
 ### Current dead-clause formatter PASS and next 112-case proof
 
 Original44295 is terminal PASS_FOREGROUND_FIFO_FORMAT and collected once at

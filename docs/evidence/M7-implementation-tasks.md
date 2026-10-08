@@ -1,5 +1,16 @@
 # M7 Implementation Tasks
 
+Current checkpoint: original71798 passed project compilation but failed the
+complete94 AppServer cases:64 passed/30 failed, zero exclusions/skips/invalid.
+Protocol18 and floor were unrun. Four coordinated fixture corrections are
+source-qualified at isolated9b0b148f; original73407 passed paired formatting.
+The formatting-only child4492dad4 is now under the unchanged complete112
+selection in original29729. No test result is inferred yet. After a positive
+result, integrate the exact17 foreground files, then restore175. Counts remain
+originals88/85/6 and additions364/24.
+See the [current resume record](M7-resume.md) for actual run/source identities;
+the paragraphs below retain previous checkpoints.
+
 Latest checkpoint: whole112 original79276 failed compilation at source089
 before selected tests ran. Source `e5ce3b67` removes the unreachable closing
 clause; original44295 passed paired formatting and syntax-preservation checks
