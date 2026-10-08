@@ -14,7 +14,9 @@ defmodule LoopexCli.Daemon do
   over its environment variable, an empty flag never falls back, and a missing
   or invalid mandatory input maps to its own exit class. The provider
   credential is read once from `LOOPEX_PROVIDER_API_KEY` and deleted from the
-  environment before composition. The root `AGENTS.md` decision is taken
+  environment before composition when bindings are omitted. Explicit named
+  bindings are validated before effects and passed unchanged to the daemon
+  custody owner; their captured exclusions reach project discovery. The root `AGENTS.md` decision is taken
   before the sentinel installs its signal route, and the policy registry is
   exactly the reference CLI's `allow-all` and `shell-allowlist`. The resolved
   inputs go to `LoopexDaemon.Sentinel`, whose status is returned. Diagnostics
@@ -22,7 +24,7 @@ defmodule LoopexCli.Daemon do
   input value, path or credential is printed.
   """
 
-  alias LoopexComposition.{ProjectResources, ResourcePacks}
+  alias LoopexComposition.{DurableOptions, ProjectResources, ProviderBindings, ResourcePacks}
   alias LoopexDaemon.{Command, ExitStatus, Paths, Sentinel}
 
   @credential_variable "LOOPEX_PROVIDER_API_KEY"
@@ -55,26 +57,28 @@ defmodule LoopexCli.Daemon do
 
   ## Technical depth
 
-  `options` exists for tests: `:env` replaces environment reads, `:output`
-  replaces standard output for the readiness line, and `:install_signals` and
+  Programmatic `:provider_bindings` and its `:model` and `:maintenance_model`
+  selections pass through to daemon composition without adding command flags.
+  `:env` replaces environment reads, `:output` replaces standard output for the
+  readiness line, and `:install_signals` and
   `:notify` pass through to the sentinel. Parser refusals are status `1`.
   """
   @spec run([binary()], keyword()) :: non_neg_integer()
   def run(arguments, options \\ []) when is_list(arguments) do
-    # The credential leaves the environment before any input is checked or any
-    # child can start, whichever form this is.
-    credential = credential(options)
+    with {:ok, options} <- provider_options(options) do
+      case Command.parse(arguments) do
+        {:ok, {:start, flags}} ->
+          start(flags, options)
 
-    case Command.parse(arguments) do
-      {:ok, {:start, flags}} ->
-        start(flags, Keyword.put(options, :resolved_credential, credential))
+        {:ok, {:prepare_index, flags}} ->
+          prepare_index(flags, options)
 
-      {:ok, {:prepare_index, flags}} ->
-        prepare_index(flags, options)
-
-      {:error, :invalid_daemon_arguments} ->
-        diagnostic(usage())
-        ExitStatus.parser_refusal()
+        {:error, :invalid_daemon_arguments} ->
+          diagnostic(usage())
+          ExitStatus.parser_refusal()
+      end
+    else
+      {:error, class} -> refused_start(class)
     end
   end
 
@@ -87,9 +91,11 @@ defmodule LoopexCli.Daemon do
          {:ok, launch} <- provider_launch(flags, env),
          {:ok, policy} <- policy(flags, env),
          {:ok, grace} <- cleanup_grace(flags),
-         {:ok, credential} <- Keyword.fetch!(options, :resolved_credential),
-         {:ok, skills} <- resource_manifest(workspace, paths.state_root) do
-      discovered = ProjectResources.discover(workspace)
+         {:ok, provider} <- Keyword.fetch!(options, :resolved_provider_options),
+         :ok <- provider_defaults(provider, workspace),
+         exclusions = Keyword.fetch!(options, :excluded_env_names),
+         {:ok, skills} <- resource_manifest(workspace, paths.state_root, exclusions) do
+      discovered = ProjectResources.discover(workspace, excluded_env_names: exclusions)
 
       service_options =
         [
@@ -98,11 +104,10 @@ defmodule LoopexCli.Daemon do
           workspace: workspace,
           policy: policy,
           provider_launch: launch,
-          credential: credential,
           project_manifest: ProjectResources.runtime_manifest(discovered),
           project_decision: ProjectResources.decide(discovered, workspace),
           resource_manifest: skills
-        ] ++ grace
+        ] ++ grace ++ provider
 
       Sentinel.run(
         service_options,
@@ -110,9 +115,7 @@ defmodule LoopexCli.Daemon do
       )
     else
       {:error, class} ->
-        diagnostic("loopex daemon refused to start: #{class}")
-        {:ok, status} = ExitStatus.fetch(class)
-        status
+        refused_start(class)
     end
   end
 
@@ -220,6 +223,59 @@ defmodule LoopexCli.Daemon do
     end
   end
 
+  # Concept: named routes refuse before any environment or discovery effect.
+  # Technical depth: the shared validators admit the complete map and selected
+  # routes; Service alone resolves values and owns their custody lifetime.
+  defp provider_options(options) do
+    case Keyword.fetch(options, :provider_bindings) do
+      {:ok, bindings} ->
+        with false <- Keyword.has_key?(options, :credential),
+             {:ok, validated} <- ProviderBindings.validate(bindings),
+             {:ok, _resolved} <- DurableOptions.resolve(options) do
+          provider = Keyword.take(options, [:provider_bindings, :model, :maintenance_model])
+
+          {:ok,
+           options
+           |> Keyword.put(:resolved_provider_options, {:ok, provider})
+           |> Keyword.put(:excluded_env_names, validated.excluded_env_names)}
+        else
+          _ -> {:error, :credential_plane_start_failed}
+        end
+
+      :error ->
+        resolved =
+          case credential(options) do
+            {:ok, value} -> {:ok, [credential: value]}
+            {:error, _} = error -> error
+          end
+
+        {:ok,
+         options
+         |> Keyword.put(:resolved_provider_options, resolved)
+         |> Keyword.put(:excluded_env_names, [@credential_variable])}
+    end
+  end
+
+  # Concept: complete named session settings are admitted before resource launch.
+  # Technical depth: composition's existing capture owns model capabilities and
+  # instruction budgets; the daemon retains its own final creation capture.
+  defp provider_defaults(provider, workspace) do
+    if Keyword.has_key?(provider, :provider_bindings) do
+      case DurableOptions.capture_defaults(Keyword.put(provider, :workspace, workspace)) do
+        {:ok, _defaults} -> :ok
+        {:error, _} -> {:error, :composition_start_failed}
+      end
+    else
+      :ok
+    end
+  end
+
+  defp refused_start(class) do
+    diagnostic("loopex daemon refused to start: #{class}")
+    {:ok, status} = ExitStatus.fetch(class)
+    status
+  end
+
   # Concept: the credential is consumed once into the daemon's custody and
   # never remains in this process's environment.
   defp credential(options) do
@@ -236,10 +292,14 @@ defmodule LoopexCli.Daemon do
       else: {:error, :provider_credential_required}
   end
 
-  defp resource_manifest(workspace, root) do
+  defp resource_manifest(workspace, root, exclusions) do
     with {:ok, workspace_ref} <- ProjectResources.workspace_reference(workspace),
          {:ok, manifest} <-
-           ResourcePacks.discover(workspace, workspace_ref: workspace_ref, state_root: root) do
+           ResourcePacks.discover(workspace,
+             workspace_ref: workspace_ref,
+             state_root: root,
+             excluded_env_names: exclusions
+           ) do
       {:ok, manifest}
     else
       _unusable -> {:error, :project_skills_unusable}

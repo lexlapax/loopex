@@ -21,6 +21,237 @@ defmodule LoopexCli.DaemonCommandTest do
     }
   end
 
+  # Concept: programmatic named routes use the command's real composition and
+  # keep every credential slot out of project discovery's first Git image.
+  # Technical depth: synthetic canaries remain ambient until Service's shared
+  # loader opens custody. The Git wrapper refuses any inherited slot; route
+  # lookup, runtime settings and monitored shutdown prove the complete handoff.
+  test "named command bindings reach both routes and exclude project Git before custody", context do
+    names = seed_named_credentials()
+    System.delete_env("LOOPEX_PROVIDER_API_KEY")
+    File.write!(Path.join(context.workspace, "AGENTS.md"), "project instructions")
+    bin = Path.join(context.root, "bin")
+    File.mkdir!(bin)
+    marker = Path.join(context.root, "git-first-image")
+    git = Path.join(bin, "git")
+    checks = Enum.map_join(names, "\n", &"[ \"${#{&1}+x}\" != x ] || exit 42")
+
+    File.write!(git, "#!/bin/sh\n#{checks}\nprintf invoked > \"#{marker}\"\nprintf command-revision\n")
+    File.chmod!(git, 0o700)
+    prior_path = System.get_env("PATH")
+    System.put_env("PATH", bin <> ":" <> (prior_path || "/usr/bin:/bin"))
+
+    on_exit(fn ->
+      if prior_path, do: System.put_env("PATH", prior_path), else: System.delete_env("PATH")
+    end)
+
+    trace =
+      command_trace_calls([
+        {LoopexComposition.ResourcePacks, :discover, 2},
+        {LoopexComposition.ProjectResources, :discover, 2},
+        {LoopexComposition.CredentialPlane, :load_bindings, 2}
+      ])
+
+    {:ok, output} = StringIO.open("")
+    test = self()
+    bindings = named_bindings()
+    model = "openai:test"
+    maintenance = "anthropic:claude-haiku-4-5"
+
+    daemon =
+      Task.async(fn ->
+        LoopexCli.Daemon.run(command_arguments(context),
+          provider_bindings: bindings,
+          model: model,
+          maintenance_model: maintenance,
+          output: output,
+          install_signals: false,
+          notify: test
+        )
+      end)
+
+    assert_receive {:loopex_daemon_sentinel, sentinel, owner_ref, owner}, 5_000
+
+    on_exit(fn ->
+      if Process.alive?(owner), do: send(sentinel, {:daemon_signal, owner_ref, :sigterm})
+    end)
+
+    command_ready(output, System.monotonic_time(:millisecond) + 10_000)
+    {"", ready} = StringIO.contents(output)
+    assert %{"record" => "daemon_ready", "root" => root} = JSON.decode!(ready)
+    assert root == context.state_root
+    state = :sys.get_state(owner)
+    assert state.options[:provider_bindings] == bindings
+    assert state.excluded_env_names == names
+    assert Enum.all?(names, &(System.get_env(&1) == nil))
+    assert File.read!(marker) == "invoked"
+    assert state.options[:project_manifest].workspace.revision == "command-revision"
+    assert_receive {:trace, _, :call, {LoopexComposition.ResourcePacks, :discover, [workspace, pack_options]}}
+    assert workspace == context.workspace
+    assert pack_options[:excluded_env_names] == names
+    assert_receive {:trace, _, :call, {LoopexComposition.ProjectResources, :discover, [^workspace, project_options]}}
+    assert project_options[:excluded_env_names] == names
+    assert_receive {:trace, _, :call, {LoopexComposition.CredentialPlane, :load_bindings, [^bindings, _starter]}}
+
+    {:ok, children} = Loopex.Runtime.children(state.edges.runtime)
+    control = :sys.get_state(children.control)
+    assert control.model.model == model
+    assert control.maintenance_model["model"] == "anthropic:claude-haiku-4-5-20251001"
+    assert control.maintenance_model["reasoning"] == "none"
+    config = Map.new(Keyword.fetch!(control.model.options, :adapter_options))
+    assert config.excluded_env_names == names
+
+    custodies = for {{:custody, _}, pid} <- state.pids, do: pid
+    assert length(custodies) == 2
+
+    for {route, value} <- [
+          {"openai:test", "command-first-canary"},
+          {"anthropic:test", "command-second-canary"}
+        ] do
+      assert {:ok, selected} = Loopex.LLM.ReqLLM.ProviderConfiguration.select_route(config, route)
+      assert {:ok, custody} =
+               Loopex.LLM.ReqLLM.CredentialRegistry.route(
+                 selected.credential_registry,
+                 selected.credential_token
+               )
+      assert custody in custodies
+      assert {:ok, %{credential: ^value}} = Loopex.LLM.ReqLLM.CredentialCustody.resolve(custody)
+    end
+
+    owned = Enum.uniq([sentinel, owner | Map.values(state.pids)])
+    assert Enum.all?(owned, &Process.alive?/1)
+    monitors = Enum.map(owned, &{&1, Process.monitor(&1)})
+    send(sentinel, {:daemon_signal, owner_ref, :sigterm})
+    assert Task.await(daemon, 60_000) == 0
+
+    for {pid, monitor} <- monitors do
+      assert_receive {:DOWN, ^monitor, :process, ^pid, _}, 5_000
+      refute Process.alive?(pid)
+    end
+
+    :trace.session_destroy(trace)
+  end
+
+  # Concept: a refused named command preserves all ambient credential slots and
+  # creates no discovery, placement, custody, Store or daemon socket effects.
+  test "named command conflicts and invalid routes refuse before effects", context do
+    names = seed_named_credentials()
+    previous = Map.new(names ++ ["HOME"], &{&1, System.get_env(&1)})
+    test = self()
+
+    trace =
+      command_trace_calls([
+        {LoopexComposition.ResourcePacks, :discover, 2},
+        {LoopexComposition.ProjectResources, :discover, 2},
+        {LoopexComposition.Placement, :acquire, 1},
+        {LoopexComposition.CredentialPlane, :load_bindings, 2},
+        {Loopex.Store.Local, :start_link, 1},
+        {LoopexDaemon.Service, :start, 1}
+      ])
+
+    base = [provider_bindings: named_bindings(), model: "openai:test"]
+    cases = [
+      Keyword.put(base, :credential, "conflicting-command-canary"),
+      Keyword.put(base, :provider_bindings, %{
+        "openai" => %{"credential" => %{"env" => "HOME"}}
+      }),
+      Keyword.put(base, :model, "openrouter:unbound"),
+      Keyword.put(base, :maintenance_model, "openrouter:unbound")
+    ]
+    {:ok, expected} = ExitStatus.fetch(:credential_plane_start_failed)
+
+    for candidate <- cases do
+      {:ok, output} = StringIO.open("")
+
+      assert LoopexCli.Daemon.run(command_arguments(context),
+               candidate ++
+                 [
+                   env: fn name -> send(test, {:unexpected_command_env, name}); nil end,
+                   output: output,
+                   install_signals: false,
+                   notify: test
+                 ]
+             ) == expected
+
+      assert StringIO.contents(output) == {"", ""}
+      assert Map.new(Map.keys(previous), &{&1, System.get_env(&1)}) == previous
+      refute File.exists?(context.state_root)
+      refute_received {:unexpected_command_env, _}
+      refute_received {:loopex_daemon_sentinel, _, _, _}
+    end
+
+    # The command and all refusal helpers have returned. Drain the command
+    # caller's trace messages before asserting that no owned effect began.
+    caller = self()
+    delivered = :trace.delivered(trace, caller)
+    assert_receive {:trace_delivered, ^caller, ^delivered}, 1_000
+    refute_received {:trace, _, :call, _}
+    :trace.session_destroy(trace)
+  end
+
+  defp named_bindings do
+    %{
+      "openai" => %{"credential" => %{"env" => "M7_COMMAND_A"}},
+      "anthropic" => %{"credential" => %{"env" => "M7_COMMAND_B"}}
+    }
+  end
+
+  defp seed_named_credentials do
+    names = ~w(LOOPEX_PROVIDER_API_KEY M7_COMMAND_A M7_COMMAND_B)
+    previous = Map.new(names, &{&1, System.get_env(&1)})
+
+    on_exit(fn ->
+      for {name, value} <- previous do
+        if value, do: System.put_env(name, value), else: System.delete_env(name)
+      end
+    end)
+
+    System.put_env("LOOPEX_PROVIDER_API_KEY", "unused-command-canary")
+    System.put_env("M7_COMMAND_A", "command-first-canary")
+    System.put_env("M7_COMMAND_B", "command-second-canary")
+    names
+  end
+
+  defp command_arguments(context) do
+    [
+      "--state-root", context.state_root,
+      "--workspace", context.workspace,
+      "--provider-launch", context.launch,
+      "--policy", "allow-all"
+    ]
+  end
+
+  defp command_ready(output, deadline) do
+    case StringIO.contents(output) do
+      {"", line} when byte_size(line) > 0 -> :ok
+      _ ->
+        assert System.monotonic_time(:millisecond) < deadline, "daemon never announced readiness"
+        Process.sleep(5)
+        command_ready(output, deadline)
+    end
+  end
+
+  defp command_trace_calls(functions) do
+    trace = :trace.session_create(:m7_daemon_command_bindings, self(), [])
+
+    for {module, _, _} = function <- functions do
+      Code.ensure_loaded!(module)
+      assert :trace.function(trace, function, true, [:local]) == 1
+    end
+
+    assert :trace.process(trace, self(), true, [:call, :set_on_spawn]) == 1
+
+    on_exit(fn ->
+      try do
+        :trace.session_destroy(trace)
+      catch
+        :error, :badarg -> :ok
+      end
+    end)
+
+    trace
+  end
+
   test "grammar refusals are status one and touch nothing", %{state_root: state_root} do
     for arguments <- [
           ["--unknown", "x"],
