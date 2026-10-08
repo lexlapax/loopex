@@ -50,12 +50,24 @@ defmodule LoopexComposition.Restore.Audit do
       |> Map.values()
       |> Enum.flat_map(fn facts ->
         Map.keys(facts.store.runtime_commands) ++
-          Enum.map(facts.store.sessions, fn {_id, s} -> s.runtime_id end)
+          Enum.map(facts.store.sessions, fn {_id, s} -> s.runtime_id end) ++
+          Map.keys(facts.store.creation_heads) ++
+          Enum.map(Map.keys(facts.store.creation_capsules), fn {runtime, _command} -> runtime end) ++
+          Enum.map(Map.keys(facts.store.creation_resolutions), fn {runtime, _type, _tx} -> runtime end)
       end)
       |> Enum.uniq()
       |> Enum.sort()
 
     ensure!(runtimes == plan["runtime_ids"])
+
+    # Concept: pending and cancelled candidates retain the same physical workspace.
+    # Technical depth: current strict Store replay supplies complete capsules;
+    # their genesis is not a session and cannot acquire authority from this join.
+    Enum.each(stores, fn {_path, facts} ->
+      Enum.each(facts.store.creation_capsules, fn {_key, capsule} ->
+        genesis_workspace!(capsule.genesis, plan["workspace"]["workspace_ref"])
+      end)
+    end)
 
     ledgers =
       Map.new(plan["ledgers"], fn declaration ->
@@ -215,14 +227,18 @@ defmodule LoopexComposition.Restore.Audit do
           history
 
         "session_genesis_v3" ->
-          retained_workspace = record["options"]["workspace_ref"]
-          ensure!(is_nil(retained_workspace) or retained_workspace == workspace)
+          genesis_workspace!(record, workspace)
           history
 
         _ ->
           history
       end
     end).references
+  end
+
+  defp genesis_workspace!(genesis, workspace) do
+    retained = genesis["options"]["workspace_ref"]
+    ensure!(is_nil(retained) or retained == workspace)
   end
 
   defp ledger_for!(plan, ledgers, identity) do

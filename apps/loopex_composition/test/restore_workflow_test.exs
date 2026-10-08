@@ -925,6 +925,63 @@ defmodule LoopexComposition.RestoreWorkflowTest do
         do: assert_receive({:DOWN, ^monitor, :process, ^actor, :normal}, 1_000)
   end
 
+  for {first_status, second_status} <- [{:available, :available}, {:lost, :lost}] do
+    test "physical custody #{first_status}/#{second_status} restore retains all five namespaces and exact finals", context do
+      first = context.root |> custody_cut() |> with_source_status(unquote(first_status))
+      assert restore_joined(first)["ordinal"] == 1
+      assert_successive_copy(first)
+      assert_custody_history(first)
+      second = next_cut(first, context.root, []) |> with_source_status(unquote(second_status))
+      assert restore_joined(second)["ordinal"] == 2
+      assert_successive_copy(second)
+      assert_custody_history(second)
+      assert manifest(first.backup) == first.baseline
+      assert_second_source_disposition(first, unquote(first_status))
+      assert_second_source_disposition(second, unquote(second_status))
+    end
+  end
+
+  for missing <- ["custody-head", "custody-refusal", "custody-active", "custody-created", "custody-cancelled"] do
+    test "physical restore refuses omitted #{missing} runtime before intent", context do
+      fixture = custody_cut(context.root)
+      plan = Map.update!(fixture.plan, "runtime_ids", &List.delete(&1, unquote(missing)))
+      assert_custody_refusal(fixture, plan)
+    end
+  end
+
+  test "physical restore refuses an extra runtime namespace before intent", context do
+    fixture = custody_cut(context.root)
+    plan = Map.update!(fixture.plan, "runtime_ids", &(Enum.sort(["foreign-runtime" | &1])))
+    assert_custody_refusal(fixture, plan)
+  end
+
+  for runtime <- ["custody-active", "custody-cancelled"] do
+    test "physical restore checks the retained #{runtime} candidate workspace without a session", context do
+      fixture = custody_cut(context.root, {:workspace_mismatch, unquote(runtime)})
+      assert_custody_refusal(fixture, fixture.plan)
+    end
+  end
+
+  for damage <- [:missing_claim, :missing_reservation, :altered_candidate] do
+    test "physical current custody #{damage} refuses a complete checked log before intent", context do
+      fixture = custody_cut(context.root)
+      {:ok, frames, :complete} = Log.decode_bytes(fixture.store_bytes)
+      frames = damage_custody_frames(frames, unquote(damage))
+      bytes = Enum.map_join(frames, fn frame ->
+        {:ok, bytes} = Log.encode(frame)
+        bytes
+      end)
+      assert {:ok, _, :complete} = Log.decode_bytes(bytes)
+      assert {:error, _} = State.replay(frames)
+      for root <- [fixture.source, fixture.backup], do: File.write!(Path.join(root, "store.log"), bytes)
+      baseline = manifest(fixture.backup)
+      assert manifest(fixture.source) == baseline
+      fixture = %{fixture | baseline: baseline, store_bytes: bytes,
+        plan: refresh_plan(fixture.plan, baseline, fixture.backup)}
+      assert_custody_refusal(fixture, fixture.plan)
+    end
+  end
+
   test "lost first transition preserves the captured binding and joins guarded real reopen",
        context do
     fixture = context.root |> actual_cut() |> lose_source()
@@ -2537,6 +2594,159 @@ defmodule LoopexComposition.RestoreWorkflowTest do
   defp replace_source_ancestor(parent, :symlink) do
     File.rename!(parent, parent <> "-captured")
     File.ln_s!(parent <> "-captured", parent)
+  end
+
+  # Concept: custody is physically copied only after the actual Local writer joins.
+  # Technical depth: five distinct runtimes isolate heads, refused scopes, active
+  # candidates and both terminal outcomes. There is no Control or model fallback.
+  defp custody_cut(root, mode \\ :valid) do
+    source = Path.join(root, "custody-source")
+    backup = Path.join(root, "custody-backup")
+    destination = Path.join(root, "custody-destination")
+    workspace = Path.join(root, "custody-workspace")
+    for path <- [source, destination, workspace], do: File.mkdir!(path)
+    {:ok, workspace_ref} = WorkspaceIdentity.reference(workspace)
+    other = Path.join(root, "other-custody-workspace")
+    File.mkdir!(other)
+    {:ok, other_ref} = WorkspaceIdentity.reference(other)
+    path = Path.join(source, "store.log")
+
+    bindings = with_custody_store(path, fn port ->
+      selection = String.duplicate("e", 64)
+      {:ok, claim} = Loopex.Store.claim_creation_domain("custody-head", 0, selection)
+      assert {:committed, _, _} = Loopex.Store.transact(port, claim)
+      {:ok, refusal} = Loopex.Store.claim_creation_domain("custody-refusal", 1, selection)
+      assert {:not_committed, :stale_creation_generation} = Loopex.Store.transact(port, refusal)
+
+      commands = Enum.reduce([{"custody-active", :reserved}, {"custody-created", :created},
+        {"custody-cancelled", :not_committed}], %{}, fn {runtime, outcome}, commands ->
+        captured_workspace = if mode == {:workspace_mismatch, runtime}, do: other_ref, else: workspace_ref
+        genesis = Loopex.ConfiguredGenesisFixture.genesis([])
+        genesis = %{genesis | "options" => %{"workspace_ref" => captured_workspace}}
+        {:ok, claim} = Loopex.Store.claim_creation_domain(runtime, 0, selection)
+        assert {:committed, _, claimed} = Loopex.Store.transact(port, claim)
+        {:ok, reserve} = Loopex.Store.reserve_creation(runtime, "original-command",
+          claimed.owner_generation, claimed.owner_selection, claimed.domain_version, genesis)
+        assert {:committed, _, reserved} = Loopex.Store.transact(port, reserve)
+        {:ok, final} = Loopex.Store.create_session(runtime, "original-command", reserve.genesis)
+        terminal = case outcome do
+          :reserved -> nil
+          :created ->
+            assert {:committed, _, receipt} = Loopex.Store.transact(port, final)
+            {:committed, final.tx_id, receipt}
+          :not_committed ->
+            {:ok, close} = Loopex.Store.close_creation_reservation(runtime, "original-command",
+              reserved.owner_generation, reserved.owner_selection, reserved.domain_version,
+              reserve.tx_id, reserved.reservation_domain_version, final)
+            assert {:committed, _, _} = Loopex.Store.transact(port, close)
+            assert {:not_committed, :creation_cancelled} = Loopex.Store.transact(port, final)
+            {:not_committed, :creation_cancelled}
+        end
+        {:ok, retained} = Loopex.Store.creation_recovery(port, %{runtime_id: runtime, command_id: "original-command"})
+        assert retained.command.state == outcome
+        Map.put(commands, runtime, %{final: final, terminal: terminal, retained: retained})
+      end)
+      %{commands: commands, refusal: refusal}
+    end)
+
+    bytes = File.read!(path)
+    {:ok, frames, :complete} = Log.decode_bytes(bytes)
+    {:ok, state} = State.replay(frames)
+    assert map_size(state.sessions) == 1
+    assert {:ok, _} = RestoreFixtureCopy.copy(source, backup)
+    baseline = manifest(backup)
+    assert manifest(source) == baseline
+    {:ok, lineage} = RestoreCodec.lineage_digest([])
+    runtimes = Enum.sort(["custody-head", "custody-refusal" | Map.keys(bindings.commands)])
+    plan = %{"version" => 1, "tx_id" => hash("custody-restore"),
+      "source_state_root" => source, "source_state_placement" => placement(source),
+      "source_status" => "available", "backup_state_root" => backup,
+      "destination_state_root" => destination, "manifest_sha256" => hash(baseline),
+      "cut_id" => hash("joined-custody-cut"), "prior_restore_count" => 0,
+      "prior_lineage_sha256" => lineage, "runtime_ids" => runtimes,
+      "stores" => [%{"relative_path" => "store.log", "sha256" => hash(bytes)}], "ledgers" => [],
+      "workspace" => %{"root" => workspace, "workspace_ref" => workspace_ref},
+      "host_attestation" => %{"latest_cut" => true, "no_post_cut_activity" => true,
+        "all_other_copies_excluded" => true, "old_authority_termination" => "joined",
+        "host_ledgers_validated" => true, "evidence_sha256" => hash("actual-custody-writer-DOWN")}}
+    assert {:ok, _} = RestoreCodec.encode(:plan, plan)
+    %{source: source, backup: backup, destination: destination, workspace: workspace,
+      workspace_ref: workspace_ref, baseline: baseline, plan: plan, store_bytes: bytes,
+      custody: bindings, custody_state: state}
+  end
+
+  defp with_custody_store(path, fun) do
+    {:ok, actor} = Store.start_link(path: path)
+    monitor = Process.monitor(actor)
+    try do
+      {:ok, port} = Loopex.Store.new(Store, actor)
+      fun.(port)
+    after
+      try do
+        if Process.alive?(actor), do: assert(:ok == GenServer.stop(actor, :normal, @grace))
+      after
+        assert_receive {:DOWN, ^monitor, :process, ^actor, _}, @grace
+      end
+    end
+  end
+
+  defp assert_custody_history(fixture) do
+    path = Path.join(fixture.destination, "store.log")
+    assert File.read!(path) == fixture.store_bytes
+    {:ok, frames, :complete} = Log.decode_bytes(File.read!(path))
+    assert {:ok, state} = State.replay(frames)
+    assert state == fixture.custody_state
+    with_custody_store(path, fn port ->
+      assert {:ok, %{head: %{owner_generation: 1, active_command_id: nil}, command: nil}} =
+        Loopex.Store.creation_recovery(port, %{runtime_id: "custody-head", command_id: nil})
+      assert {:not_committed, :stale_creation_generation} = Loopex.Store.transact(port, fixture.custody.refusal)
+      for {runtime, expected} <- fixture.custody.commands do
+        assert Loopex.Store.creation_recovery(port, %{runtime_id: runtime, command_id: "original-command"}) ==
+          {:ok, expected.retained}
+        assert expected.retained.command.genesis == expected.final.genesis
+        if expected.terminal do
+          assert Loopex.Store.transact(port, expected.final) == expected.terminal
+        else
+          assert expected.retained.head.active_command_id == "original-command"
+          assert expected.retained.command.final_resolution == nil
+        end
+      end
+    end)
+    assert File.read!(path) == fixture.store_bytes
+  end
+
+  defp assert_custody_refusal(fixture, plan) do
+    owned = launch(plan)
+    {result, _events} = finish(owned)
+    assert {:joined, {:ok, %{restore_result: {:not_committed, "invalid_current_history"}, release_claims: []}}, evidence} = result
+    assert evidence.restore.intent == false and evidence.claim_count == 0
+    assert evidence.opens == evidence.closes
+    assert File.ls!(fixture.destination) == []
+    assert manifest(fixture.source) == fixture.baseline
+    assert manifest(fixture.backup) == fixture.baseline
+    assert Enum.all?(claims(plan), &(File.lstat(&1) == {:error, :enoent}))
+    exact_joins(owned)
+  end
+
+  defp damage_custody_frames(frames, :missing_claim) do
+    Enum.reject(frames, fn frame -> frame.transaction.type == :claim_creation_domain and
+      frame.transaction.runtime_id == "custody-active" end)
+  end
+
+  defp damage_custody_frames(frames, :missing_reservation) do
+    Enum.reject(frames, fn frame -> frame.transaction.type == :reserve_creation and
+      frame.transaction.runtime_id == "custody-cancelled" end)
+  end
+
+  defp damage_custody_frames(frames, :altered_candidate) do
+    Enum.map(frames, fn frame ->
+      if frame.transaction.type == :reserve_creation and frame.transaction.runtime_id == "custody-active" do
+        changed = put_in(frame.transaction.genesis, ["options", "workspace_ref"], "altered-candidate")
+        %{frame | transaction: %{frame.transaction | genesis: changed}}
+      else
+        frame
+      end
+    end)
   end
 
   defp actual_cut(root, source_parent \\ nil, object_mode \\ :with_helpers) do

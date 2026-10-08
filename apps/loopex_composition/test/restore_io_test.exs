@@ -1110,6 +1110,39 @@ defmodule LoopexComposition.RestoreIOTest do
     joined(owned)
   end
 
+  test "physical Store audit retains custody-only and closed namespaces without sessions for pending work", context do
+    fixture = store_fixture(context.root, 0)
+    selection = String.duplicate("d", 64)
+    {:ok, claim} = Store.claim_creation_domain("pending-only", 0, selection)
+    fixture = append_transaction(fixture, claim)
+    {:ok, reserve} = Store.reserve_creation("pending-only", "pending", 1, selection, 0,
+      ConfiguredGenesisFixture.genesis([]))
+    fixture = append_transaction(fixture, reserve)
+    {:ok, refused} = Store.claim_creation_domain("refusal-only", 1, selection)
+    assert {:new, state, frame, {:not_committed, :stale_creation_generation}} =
+      State.prepare(fixture.state, refused)
+
+    frames = fixture.frames ++ [frame]
+    bytes = fixture.bytes <> encoded_frame(frame)
+    File.write!(fixture.path, bytes)
+    fixture = %{fixture | state: state, frames: frames, bytes: bytes}
+    fixture = append_created_fixture(fixture, "created", "created")
+    owned = launch(store_operation(fixture), :store_replay)
+    assert {{:joined, {:ok, facts}, evidence}, events} = drive(owned)
+    assert facts.store == fixture.state
+    assert map_size(facts.sessions) == 1
+    assert facts.store.creation_heads["pending-only"].active_command_id == "pending"
+    assert facts.store.creation_capsules[{"pending-only", "pending"}].state == :reserved
+    refute Map.has_key?(facts.store.runtime_commands, "pending-only")
+    refute Map.has_key?(facts.store.creation_heads, "refusal-only")
+    assert facts.store.creation_resolutions[{"refusal-only", :claim_creation_domain, refused.tx_id}].resolution ==
+      %{status: :not_committed, reason: :stale_creation_generation}
+    assert evidence.opens == 1 and evidence.closes == 1
+    assert Enum.count(issued_kinds(events), &(&1 == :session_recover)) == 1
+    assert File.read!(fixture.path) == fixture.bytes
+    joined(owned)
+  end
+
   test "an existing empty Store file audits as an empty complete history", context do
     fixture = store_fixture(context.root, 1)
     File.write!(fixture.path, <<>>)
@@ -3628,6 +3661,15 @@ defmodule LoopexComposition.RestoreIOTest do
     end
   end
 
+  defp store_fixture(root, 0) do
+    root = physical_root(root)
+    directory = Path.join(root, "store")
+    File.mkdir!(directory)
+    path = Path.join(directory, "history.log")
+    File.write!(path, <<>>)
+    %{root: root, path: path, state: State.new(), frames: [], bytes: <<>>, ids: []}
+  end
+
   defp store_fixture(root, count) do
     root = physical_root(root)
     directory = Path.join(root, "store")
@@ -3663,6 +3705,26 @@ defmodule LoopexComposition.RestoreIOTest do
       assert map_size(fixture.state.sessions) == number
       fixture
     end)
+  end
+
+  # Concept: every fixture session has current-format custody before final creation.
+  # Technical depth: pure reducers produce the exact frames written by the physical
+  # audit fixture; this is not a live Control dispatch or activation proof.
+  defp fixture_creation_transactions(state, runtime, command) do
+    {:ok, %{head: head}} = State.creation_recovery(state, %{runtime_id: runtime, command_id: nil})
+    selection = String.duplicate("c", 64)
+    {:ok, claim} = Store.claim_creation_domain(runtime, head.owner_generation, selection)
+    {:new, claimed, _frame, {:committed, _, receipt}} = State.prepare(state, claim)
+    {:ok, reserve} = Store.reserve_creation(runtime, command, receipt.owner_generation,
+      receipt.owner_selection, receipt.domain_version, ConfiguredGenesisFixture.genesis([]))
+    {:new, _reserved, _frame, {:committed, _, _}} = State.prepare(claimed, reserve)
+    {:ok, final} = Store.create_session(runtime, command, reserve.genesis)
+    [claim, reserve, final]
+  end
+
+  defp append_created_fixture(fixture, runtime, command) do
+    fixture_creation_transactions(fixture.state, runtime, command)
+    |> Enum.reduce(fixture, &append_transaction(&2, &1))
   end
 
   defp append_transaction(fixture, transaction) do
