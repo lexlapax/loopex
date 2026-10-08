@@ -27,6 +27,137 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+### Latest Core/authored rejoin and paired formatter qualification
+
+Primaryd66c20da was pushed. M7 remains active; T01–T19 originals88 done/85 todo/6
+retired and additions363 done/23 todo are unchanged. No row closes for source
+review or formatting. ADR0063 exact Proposed pair16c251ad remains the sole asked
+pending decision; dependent public startup-status/host-wait work stays unimplemented.
+
+The reviewed bounded private readiness/provenance fixture V2 is saved at
+`dff134a71c95cd4d79c30512cb33434d8987142c`, with packet4d0b98fe, report020904c9,
+census8bdb9ff1 and independent86e2e946/postjoin76630386 reviews. The helper observes
+existing private Control readiness within one captured1,000ms allowance and registers
+cleanup before waiting. Held-startup/early-refusal cases, original deadlines and
+current provenance/3 forwarding remain. No public startup API or repeated creation.
+
+Authored V2 is independently source-qualified by863fdac5 and boundary followupf791af5c.
+Public ProviderLifetime.register/2 already guards original PID/reference before its
+retained closure; no duplicate guard or further decision is needed. Current single
+first-admitted-resource custody, adapter-owned explicit refusals, original71 cases
+and three long-bound cases remain. Its five added cases make97 conditional cases.
+
+Root rejoined authored8cf703f5 above fixture dff134a7 without conflicts at
+`e649b633e39c805afce6e0de0d35062021738be3`; auditaf15d9e4/patchb2c32e91 retain both
+parents and shared exact delta. Combined selection17 whole files has485 expected
+cases: ingress410 plus authored97, counting shared creation22 only once. All five
+original long-bound cases are included. Forced actual32-loss prefix and host/encoder
+custody proofs remain separate open obligations.
+
+Original1319 formatter failed after all30 original-raw/post-format AST comparisons
+passed; two carrier closure endings were not formatter-idempotent. The exact failure
+is retained,9.250seconds/five actual process joins/27 artifacts/2083 registry keys:
+`/Users/spuri/projects/lexlapax/loopex-evidence/M7/core-authored-format-20261008-v1`.
+Collection `efb054fac72318ffe47ad99156388169ae003b1e5d130fab5989ce5be5d9ef3a`,
+terminal `e199d34e33386c5054ac88edda515fea3c5fba946d85c501e477144163b004ab`,
+registry `fd4a09316bf5c508fdbf2a1a37446feb68daf98f3235f43fe03a898427de092f`.
+
+Root applied the exact two whitespace hunks from that check output and saved
+`816ab97da13a3b65038027509b0ae141c81ac562`. Independent diagnosis0d533eea reconstructs
+the entire failed carrier exactly when reversing only those two layout changes.
+Original76554 then passed both supported toolchain format/AST checks on source816:
+17.856seconds/10 actual process joins/48 artifacts/2093 successor registry keys.
+All30 final hashes match across pairs and the source is clean. Output:
+`/Users/spuri/projects/lexlapax/loopex-evidence/M7/core-authored-format-20261008-v2`.
+Collection `0626dd0b64d5d2df09044ebb05b960776ab3ff12f3e050bec0bcc5b824c889b6`,
+terminal `7afacb2d0b8ac810ab2d0ca010d45ddcffde3cf8e5ef6cb4d9590e9b885dfa3e`,
+registry `7615a7519b8a2c3c24c82ee860ebde268a631586b8e7c12e8d02ac275b5c55bb`.
+This is formatter evidence only, not test or milestone completion.
+
+Original97399 is now terminal FAIL, collected once: current formatting passed;
+Core warning-free compilation failed on undefined GenServer.enter_loop/3. Tests and
+floor did not run.9.335seconds/two actual process joins/18 artifacts/2095 registry:
+`/Users/spuri/projects/lexlapax/loopex-evidence/M7/core-authored-proof-20261008-v1`.
+Collection `b6b8ce47876cd86524da72b629bc905c5406c930f0e0801b67b654a25ced5027`,
+terminal `5c5150570449c71a64a5017bf5f5c480a999ba9abbd2ea6717dfc4b8ce896f85`,
+registry `7f84211bae0c763b6de6899348902a0710a3fb2196f68e39cace3a5b3d82c9d1`.
+Root corrected exactly that call to OTP :gen_server.enter_loop/3 and saved
+`25973c8e5866db6589164694e9285201ef9fe2fb`. The original Task.Supervisor bootstrap,
+closure, actors, state, options and deadlines are unchanged. Repair packet is
+`/private/tmp/m7-authored-preparation-group-enter-loop-repair-20261008-v1/source.json`.
+
+Original36358 is terminal FAIL and collected once. Current formatting and
+warning-free Core compilation passed; the complete current selection executed485
+cases,449 passed and36 failed, with zero exclusions/skips/invalid. All five original
+long-bound cases ran. Floor did not run after the failed current stage.
+Producer289.931seconds, three actual process joins,21 artifacts and2098 registry keys.
+Output `/Users/spuri/projects/lexlapax/loopex-evidence/M7/core-authored-proof-20261008-v2`.
+Collection `3b517d11ba9911530e8a7851858ae916d87c51927edb46ed18cf95966c1df6ca`,
+terminal `3e93cad92ef01e56d6a38d6e8e71c04fb11092f04d6722791cf1432233c1aedd`,
+registry `52db12de42aba1be28d40ada1e36487af9e2d0c0733010f577613659d3e83f1c`.
+No native handle is live. Do not poll, recollect or retry these unchanged bytes.
+The successor preparation must seed this actual terminal2098 registry.
+
+All36 failures are source-triaged in
+`/private/tmp/m7-core-authored-proof-failure-triage-20261008-v1.md`, SHA-256
+`37d5f9ce6036f8c872e6610c5dddda0a2dfbb0c8c378551bdb861db2e47de346`.
+They cover reused runtime-bound sinks, one approved conflict-result expectation,
+nine missing real Store fault drivers,26 incompletely composed authored fixtures,
+a duplicate trace cleanup, unsupported ExUnit callback use in spawned callers,
+two hostile-prefix tests at the superseded admission boundary and one missed
+actual-relay monitor. The original run remains failed.
+
+Root saved six raw fixture repairs in ingress worktree
+`/Users/spuri/.codex/worktrees/m7-progress-runtime-credit/loopex` at
+`aa3a0d6dca3b4406fec2ab5e322f355708e2a42c`, parent25973c8e. Independent review
+`/private/tmp/m7-core-authored-fixture-repairs-independent-review-20261008-v1.md`,
+SHA-256 `da5e30437dab0eb752439122816bc82e7666f9f0e9d72fa04734f9c247c1d8b4`,
+qualifies the authored26 composition and four other integration deltas. It blocks
+the constructor cleanup: failed startup must also stop original model/executor
+actors when the caller catches the error. No native or formatting proof for aa3.
+
+cleanup_binding_audit owns only AgentLoopHelper and an optional distinct fixture
+cleanup regression file in `/private/tmp/m7-fixture-constructor-20261008-v1`.
+Use immediate original actor monitors and one captured existing1,000ms fixture
+grace; preserve borrowed Store ownership and the original failure. Root alone
+owns Git, native execution, registries and rejoin.
+
+attempt_case_replay has frozen real claim/reserve/cancellation-close drivers for
+all nine missing phase obligations, preserving all14 original literal cases.
+Packet `/private/tmp/m7-session-lifecycle-fault-drivers-source-20261008-v1/source.json`,
+SHA-256 `cb6e00302b28e50c3cd21d99e91d16d0a0a01ff676ac379e1ddd24e5a976b78c`.
+Only SessionLifecycleTest is dirty in its authored-creation worktree at aa3;
+t15_original_closure_map independently reviews this packet next. No native proof.
+
+The hostile-prefix migration map is frozen at
+`/private/tmp/m7-hostile-prefix-test-migration-map-20261008-v1.md`, SHA-256
+`d0d96660d4997d842236bdb4964c3954b623d7199165899c384224f707e558b3`.
+Root owns its AgentLoopTest implementation. Preserve all private/negative/70k
+actual executor stimuli in separate preflight-prefix runs; retain exact admitted
+stream/offset/control refusals and consumed sequence gaps. One added actual
+65,536-byte credit-tail case changes that file's conditional census110 to111.
+Forced actual32-CAS-loss proof remains open; this byte-credit case does not replace it.
+
+ForegroundV2 is frozen source-only with112 conditional cases, original110 plus
+two actual cleanup regressions. Packet
+`/private/tmp/m7-foreground-joined-fifo-source-20261008-v2/source.json`, SHA-256
+`2249256c1c1b87a7eba0f2542398212a7f567d9131dfc14e92d8067437d0b632`.
+It addresses late cutoff success, immediate acquisition/exception cleanup and
+pending write credit. Three paths remain dirty in its separate foreground
+worktree at03e87fe7. Independent V2 review, source save/rejoin and native proof
+remain. Its standalone AgentLoopFixture caller must receive the constructor
+repair. No public gate, persistent state, renewed allowance or ADR0063 work.
+
+Immutable latest source/review/preparation retention240 files:
+`/Users/spuri/projects/lexlapax/loopex-evidence/M7/progress-source-context-20261008-v4/retention.json`,
+SHA-256 `c8275871a1d6ac07b52c86080176e56bda5a922e94dea58a8a597938cbd27dbc`.
+It preserves older fixture V1/V2, source reviews, rejoin, formatting repair and both
+formatter preparations, proof recipe and blocked foreground review. Earlier failures
+and retentions remain immutable. Next after Core/authored proof: foreground repair
+and qualification, current-format restore175, protocol/client/helper integration,
+then exact integration/closure matrix and maintainer closure. No fullfast/floor/
+release/closure is newly claimed here.
+
 ### Latest continuation after original65202
 
 Primary checkpoint4d078d59 was pushed. M7 remains active; original and added

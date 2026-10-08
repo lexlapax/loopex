@@ -1,5 +1,25 @@
 # M7 Implementation Tasks
 
+The combined Core/authored run at25973c8e is terminal FAIL and collected once:
+485 cases ran,449 passed and36 failed; all five long-bound cases ran, with zero
+exclusions/skips/invalid. Current formatting and warning-free compilation passed;
+floor did not run. No native handle is live. The complete failure triage remains
+retained; original36358 is never relabeled as passing.
+
+Six raw fixture repairs are saved ataa3a0d6d. Independent source review qualifies
+five deltas and blocks failed-constructor cleanup until original model/executor
+actors are retired. That bounded repair runs in its own worktree. Nine real Store
+fault-driver obligations are source-frozen and under independent review. Root next
+implements the accepted hostile-prefix test migration and one actual credit-tail
+case. All original dangerous stimuli and existing deadlines remain required.
+
+ForegroundV2 is source-frozen with112 conditional cases, including two actual
+cleanup regressions. Independent review, dependency rejoin and native proof remain.
+Restore175 and protocol/client/helper integration follow. ADR0063 remains the sole
+asked pending decision. Original T01–T19 totals88 done/85 todo/6 retired and added
+363 done/23 todo are unchanged; no row closes for source repair or review. Exact
+sources, failures and ownership are in the [resume record](M7-resume.md).
+
 Latest original65202 failed whole410 test compilation after current formatting
 and Core compilation passed. Three process joins,21 artifacts and2078 registry
 rows are retained. Original67212 separately never spawned its command because
