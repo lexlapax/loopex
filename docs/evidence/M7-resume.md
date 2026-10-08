@@ -29,6 +29,16 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Reboot continuation on 2026-10-07
 
+ADR 0059 is accepted against exact candidate
+`a550ae337be6d94cea5dfcf9aa07a44ec0a571f7`; its
+[disposition](../developer/agent-context-map.md#disposition-m7-responsive-creation-transactions-2026-10-07)
+binds both historical Proposed digests. Responsive creation implementation is
+authorized. A read-only source map is sizing the first Store/Control unit;
+native implementation and proofs remain open. The separate ProgressSink V6
+verification recipe and interaction-stop V2 cleanup repair continue. This
+acceptance closes no original or added implementation row. Counts remain
+88/85/6 original and 356/22 added for T01–T19.
+
 Checkpoint `e50e8ddf` is pushed. Original formatter `24045` is terminal and
 collected FAIL at the floor formatting check. All six original processes joined;
 38 artifacts authenticate; elapsed 12.439 seconds. Collection SHA-256

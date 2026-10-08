@@ -3,7 +3,7 @@
 
 Technical depth: [Responsive creation transaction mechanics](0059-responsive-creation-transactions-technical.md#technical-depth).
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-07
 - **Decision owner:** Maintainer
 - **Amends:** [ADR 0055](0055-remote-session-creation-options.md#concept)'s worker Store-write prohibition and creation recovery mechanics, and [ADR 0006](0006-store-transaction-and-owner-epoch.md#concept)'s runtime-control transaction catalogue, only as specified here. Preserve ADR 0055's creation grammar, captured configuration, one-slot admission and live cleanup bounds, and [ADR 0008](0008-owner-succession-recovery-and-runtime-placement.md#concept)'s host-exclusive placement boundary.
@@ -233,4 +233,4 @@ authorize these new contracts.
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | — | — | — |
+| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-m7-responsive-creation-transactions-2026-10-07) | candidate `a550ae337be6d94cea5dfcf9aa07a44ec0a571f7`; concept `sha256:c584d2843c01e3401d2f9e21b5fcd7a8423d956c81d1230e8b5b6e6d371a7715`; technical `sha256:18edd4692a6a57ddfd05d56be5f02e024dc9c68bc0ba6aa6fd0226647732f1d6` |

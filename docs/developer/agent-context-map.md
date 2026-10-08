@@ -7049,3 +7049,27 @@ superseded PID delivery. Required native custody, real output, platform,
 independent-client and coordinated integration proofs remain owed. This
 acceptance supplies no test result, other ADR acceptance, milestone closure,
 merge, activation or publication authority.
+
+<a id="disposition-m7-responsive-creation-transactions-2026-10-07"></a>
+### M7 responsive creation transactions accepted, 2026-10-07
+
+The maintainer selected "Approve exact ADR 0059 pair", accepting the
+[Concept](../adr/0059-responsive-creation-transactions.md#concept) and
+[Technical depth](../adr/0059-responsive-creation-transactions-technical.md#technical-depth)
+at candidate `a550ae337be6d94cea5dfcf9aa07a44ec0a571f7`.
+Historical Proposed Concept SHA-256 is
+`c584d2843c01e3401d2f9e21b5fcd7a8423d956c81d1230e8b5b6e6d371a7715`;
+Technical SHA-256 is
+`18edd4692a6a57ddfd05d56be5f02e024dc9c68bc0ba6aa6fd0226647732f1d6`.
+Both files were unchanged at acceptance. Within the pair only Status and the
+empty Acceptance row change.
+
+Implement the owned mechanical creation carrier, Store-owned generation and
+complete candidate custody, exact terminal cancellation and bounded successor
+recovery. Preserve the original work and cleanup bounds. Occupied
+Store-dependent reads return their specified unavailable results; stop/status
+and existing ready routes remain responsive. Preparation workers never write
+Store, and recovered creation never activates a session. This amends only the
+named ADR 0006 and ADR 0055 clauses. Native, wire, independent-client, fault,
+restart and complete current-format restore proofs remain required. Other
+proposals, milestone closure, merge and publication remain separate decisions.

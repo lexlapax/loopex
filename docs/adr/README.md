@@ -15,7 +15,7 @@ a decision adds a new record rather than rewriting the old one.
 | 0003 | Extension contract boundary and distribution constraints | Accepted | [Decision](0003-extension-contract-boundary.md#concept) | [Technical depth](0003-extension-contract-boundary-technical.md#technical-depth) |
 | 0004 | Plan amendment and supersession | Proposed (parked) | [Decision](0004-plan-amendment-supersession.md#concept) | [Technical depth](0004-plan-amendment-supersession-technical.md#technical-depth) |
 | 0005 | Milestone supersession | Proposed (parked) | [Decision](0005-milestone-supersession.md#concept) | [Technical depth](0005-milestone-supersession-technical.md#technical-depth) |
-| 0006 | Store transaction contract and owner epoch | Accepted | [Decision](0006-store-transaction-and-owner-epoch.md#concept) | [Technical depth](0006-store-transaction-and-owner-epoch-technical.md#technical-depth) |
+| 0006 | Store transaction contract and owner epoch | Accepted (creation-domain transaction catalogue and durable custody amended by 0059) | [Decision](0006-store-transaction-and-owner-epoch.md#concept) | [Technical depth](0006-store-transaction-and-owner-epoch-technical.md#technical-depth) |
 | 0007 | Local executor grant, job, and receipt | Accepted | [Decision](0007-local-executor-grant-job-receipt.md#concept) | [Technical depth](0007-local-executor-grant-job-receipt-technical.md#technical-depth) |
 | 0008 | Owner succession recovery and runtime placement | Accepted (M7 read-only recovery queries and exact-genesis creation extended by 0046) | [Decision](0008-owner-succession-recovery-and-runtime-placement.md#concept) | [Technical depth](0008-owner-succession-recovery-and-runtime-placement-technical.md#technical-depth) |
 | 0009 | Tool, executor, and grant contracts | Accepted (partially superseded by 0012, 0015, and 0016; M7 artifact arguments, interaction dispatch and tool selection amended by 0041, 0045 and 0046) | [Decision](0009-tool-executor-and-grant-contracts.md#concept) | [Technical depth](0009-tool-executor-and-grant-contracts-technical.md#technical-depth) |
@@ -64,11 +64,11 @@ a decision adds a new record rather than rewriting the old one.
 | 0052 | Policy interaction public events | Accepted | [Decision](0052-policy-interaction-public-events.md#concept) | [Technical depth](0052-policy-interaction-public-events-technical.md#technical-depth) |
 | 0053 | Current configure request | Accepted | [Decision](0053-current-configure-request.md#concept) | [Technical depth](0053-current-configure-request-technical.md#technical-depth) |
 | 0054 | Compaction activity progress | Accepted | [Decision](0054-compaction-activity-progress.md#concept) | [Technical depth](0054-compaction-activity-progress-technical.md#technical-depth) |
-| 0055 | Remote session creation options | Accepted | [Decision](0055-remote-session-creation-options.md#concept) | [Technical depth](0055-remote-session-creation-options-technical.md#technical-depth) |
+| 0055 | Remote session creation options | Accepted (creation carrier, recovery and eligibility amended by 0059) | [Decision](0055-remote-session-creation-options.md#concept) | [Technical depth](0055-remote-session-creation-options-technical.md#technical-depth) |
 | 0056 | Host helper ledger byte recipe | Accepted | [Decision](0056-host-helper-ledger-recipe.md#concept) | [Technical depth](0056-host-helper-ledger-recipe-technical.md#technical-depth) |
 | 0057 | Attempts event bodies | Accepted | [Decision](0057-attempts-event-bodies.md#concept) | [Technical depth](0057-attempts-event-bodies-technical.md#technical-depth) |
 | 0058 | Bounded progress delivery | Accepted | [Decision](0058-bounded-progress-delivery.md#concept) | [Technical depth](0058-bounded-progress-delivery-technical.md#technical-depth) |
-| 0059 | Responsive creation transactions and durable custody | Proposed | [Decision](0059-responsive-creation-transactions.md#concept) | [Technical depth](0059-responsive-creation-transactions-technical.md#technical-depth) |
+| 0059 | Responsive creation transactions and durable custody | Accepted | [Decision](0059-responsive-creation-transactions.md#concept) | [Technical depth](0059-responsive-creation-transactions-technical.md#technical-depth) |
 | 0060 | Restore full-mode helper | Proposed | [Decision](0060-restore-full-mode-helper.md#concept) | [Technical depth](0060-restore-full-mode-helper-technical.md#technical-depth) |
 
 0001 and 0002 were the prerequisites that unblocked the first milestone
