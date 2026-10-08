@@ -422,14 +422,17 @@ defmodule Loopex.CreationStartupStatusTest do
       assert {:ok, initial} = Runtime.creation_startup_status(runtime)
       {:ok, %{control: control}} = Runtime.children(runtime)
 
-      assert :ok = case(operation) do
-        :stop ->
-          Control.stop_creation(control, runtime.token)
+      result =
+        case operation do
+          :stop ->
+            Control.stop_creation(control, runtime.token)
 
-        :quiesce ->
-          assert {:ok, []} = Control.begin_quiesce(control, runtime.token, "drain", 1_000)
-          :ok
-      end
+          :quiesce ->
+            assert {:ok, []} = Control.begin_quiesce(control, runtime.token, "drain", 1_000)
+            :ok
+        end
+
+      assert :ok = result
 
       assert_snapshot(elem(Runtime.creation_startup_status(runtime), 1), :unavailable, initial)
       Fixture.release(waiter)
@@ -479,7 +482,7 @@ defmodule Loopex.CreationStartupStatusTest do
 
   @tag :long_bound
   @tag timeout: 75_000
-  test "queued status and late original joins cannot prove startup after its real cutoff" do
+  test "queued status and late adoption of original join facts cannot prove startup after its real cutoff" do
     {pid, store} = fixture()
     seed_reservation(store)
     :ok = Fixture.hold_next_creation_recovery(pid, self())
