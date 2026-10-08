@@ -29,6 +29,42 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Reboot continuation on 2026-10-07
 
+Latest completed checklist unit: public stop while an answered interaction holds
+its actual policy task. Whole21 passed per pair at isolated
+`0551250a77fc2fec8f5662676afc456fda349bf2`, original63622,37.305seconds,
+zero failures/exclusions/skips/invalid and warning-free compilation. One added
+T16 row closes; T01–T19 are88/85/6 original and358/24/0 added. Including T00:
+original88/91/7, added362/25/0. Exact tested file is integrated. Complete output
+`M7/interaction-stop-proof-20261007-v1`, collection
+`b9ecf91f52046e568e4cc980855e3089328aff1d733c666e9cb1c6392d928d0d`, terminal
+`4a2808325fa55cb7c6e229dfff529ac4bf90565ad4b71877ba48e489765f9775`, eight
+joins/42artifacts,1893-row registry
+`20c19c6100de7134d1f6ff3140a91077debf7f927d235d7cc6e5597097fc9cb9`.
+Native5077 formatting passed both pairs; its sole AST-equivalent child retains
+all20 old cases and the added public-stop case. The approved captured1,000-ms
+fixture grace, exact actor joins, no-dispatch and durable-fact oracles remain.
+Broad historical diagnostic attribution remains open.
+
+Resume assets, recipe and qualified adapter V2 packet are retained under
+`M7/interaction-stop-completed-context-20261007-v1/retention.json`, SHA-256
+`8f5153d331dda4bb4e85d12cc462e41c43694362e6861be28708fa49065930d6`,58 files.
+Adapter collision repairb12af9fd is root-qualified source-only; tested Core and
+six adapter paths are saved in isolated rawb1051c43 before formatting/native48.
+Do not use the superseded Core support snapshot. No adapter activation or
+complete physical restore PASS is claimed. Root must capture the actual latest
+1893-row producer before granting the next native run.
+
+Codec packet028e170e is frozen with six dormant files,14 tests and102 vectors;
+complete qualification includes the normally excluded node_client test.
+t15_original_closure_map now maps custody-only runtime roots in the physical
+restore audit. cleanup_binding_audit adds two actual ProgressSink owner/producer
+cuts in its exclusive managed worktree, preserving26 old cases and all bounds;
+forced32-CAS exhaustion remains unproved. Control author continues native
+state-machine and current test Store migration. No asked approval is pending.
+All current native tool handles are terminal and collected. Full current
+integration baseline remainsd1132591; no closure/release authorization exists.
+
+
 Completed-library resume assets are retained under
 `M7/progress-sink-completed-library-context-20261007-v1/retention.json`, SHA-256
 `8ea07af03d25392e4d4a2f221f6acf8c0d4f67b231d0d6e83fc48d789c10d7d9`,21 files.

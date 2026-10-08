@@ -3,7 +3,7 @@
 Current continuation: ADR0061 is accepted at `d7c23f3d`; no asked approval
 is pending. The Core Store creation boundary passed all32 cases on both
 supported pairs and is integrated. T01–T19 remain88 original done/85 todo/6
-retired; added357 done/25 todo. Atomic adapters are under independent review;
+retired; added358 done/24 todo. Atomic adapters are under independent review;
 Control/carrier and the cancellation codec are being implemented in separate
 worktrees. ProgressSink whole26 original13329 passed both pairs at5b8ab5ac; the bounded
 library is integrated, while its broader T07 race/integration row stays open.
@@ -14448,7 +14448,21 @@ in the restart checkpoint. Broader restore/decoder/public/helper rows stay open.
 
 ### Added implementation subtasks
 
-- [ ] Prove ordinary public runtime stop while an answered interaction's real policy re-evaluation task is held; capture exact coordinator/private-worker/supervisor lifetimes and attribute actual shutdown reports under one captured approved fixture-grace cutoff. Preserve existing whole-file interaction proofs, run both supported pairs and retain no-dispatch/no-invented-durable-fact oracles. This narrow unit does not close broad historical diagnostic attribution.
+- [x] Prove ordinary public runtime stop while an answered interaction's real policy re-evaluation task is held; capture exact coordinator/private-worker/supervisor lifetimes and attribute actual shutdown reports under one captured approved fixture-grace cutoff. Preserve existing whole-file interaction proofs, run both supported pairs and retain no-dispatch/no-invented-durable-fact oracles. This narrow unit does not close broad historical diagnostic attribution.
+
+  Evidence: exact isolated `0551250a77fc2fec8f5662676afc456fda349bf2`,
+  original63622,21 passed per pair, zero failures/exclusions/skips/invalid,
+  warning-free compilation,37.305seconds. Complete output:
+  `/Users/spuri/projects/lexlapax/loopex-evidence/M7/interaction-stop-proof-20261007-v1`;
+  collection SHA-256 `b9ecf91f52046e568e4cc980855e3089328aff1d733c666e9cb1c6392d928d0d`,
+  terminal `4a2808325fa55cb7c6e229dfff529ac4bf90565ad4b71877ba48e489765f9775`.
+  Eight original joins/42 artifacts;1893-row registry
+  `20c19c6100de7134d1f6ff3140a91077debf7f927d235d7cc6e5597097fc9cb9`.
+  Original5077 paired formatting passed; exact non-line syntax trees preserved.
+  The original actor/monitor/trace attribution and single captured1,000-ms grace
+  remain. This closes only the named public-stop case, not broad historical
+  diagnostics or universal report silence.
+
 
 
 - [x] Repair the two Core fixtures exposed by exact32b06b9a full integration: retain the current policy ending owner/answer tuple and consume/select actual model invocation lineage while preserving the original wall sample and59,000-ms lower bound. Prove both complete files,35 cases on each supported pair atcb380db4, zero exclusions/skips/invalid, exact joins and unchanged runtime cutoffs; retain original79551 failure. This bounded repair does not close full integration.

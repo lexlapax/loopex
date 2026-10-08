@@ -1119,6 +1119,670 @@ defmodule Loopex.InteractionLifecycleTest do
     assert Enum.all?(Fixture.events(fixture, session_id), &(&1.kind != "tool.started"))
   end
 
+  defmodule StopWitnessPolicy do
+    @moduledoc false
+    @behaviour Loopex.Policy
+
+    @impl Loopex.Policy
+    def decide(_request), do: {:deny, :policy_unavailable}
+
+    @impl Loopex.Policy
+    def decide(request, {observer, nonce}) do
+      case Map.get(request, :interaction_response) do
+        nil ->
+          {:defer, Loopex.InteractionLifecycleTest.DeferringPolicy.question()}
+
+        %{answer: %{choice_id: "allow"}} ->
+          send(observer, {:interaction_stop_held, nonce, self()})
+
+          receive do
+            {:interaction_stop_monitor_installed, ^nonce, monitor} ->
+              true = observer in elem(Process.info(self(), :monitored_by), 1)
+              send(observer, {:interaction_stop_monitor_confirmed, nonce, self(), monitor})
+          end
+
+          # Concept: this callback never grants authority through a fixture timeout.
+          # Technical depth: it remains in the real policy task until public stop;
+          # the runtime's unchanged policy timeout still owns late evaluation.
+          receive do
+            {:interaction_stop_unexpected_release, ^nonce} ->
+              exit(:interaction_stop_fixture_released)
+          end
+      end
+    end
+  end
+
+  test "public runtime stop joins an answered interaction's held policy and attributes original shutdown reports" do
+    observer = self()
+    nonce = make_ref()
+    fixture = loop_fixture(%{module: StopWitnessPolicy, context: {observer, nonce}})
+    {session_id, attachment} = loop_session(fixture)
+
+    assert {:accepted, "p1"} =
+             Loopex.command(attachment, %{type: :prompt, command_id: "p1", content: "do it"})
+
+    requested = await_event(fixture, session_id, "interaction.requested")
+    answer(attachment, "stop-answer", requested)
+    assert_receive {:interaction_stop_held, ^nonce, policy}, 4_000
+    policy_monitor = Process.monitor(policy)
+    send(policy, {:interaction_stop_monitor_installed, nonce, policy_monitor})
+
+    assert_receive {:interaction_stop_monitor_confirmed, ^nonce, ^policy, ^policy_monitor}, 1_000
+    assert {:ok, children} = Loopex.Runtime.children(fixture.runtime)
+    control = :sys.get_state(children.control, 1_000)
+    %{coordinator: coordinator, owner_group: group} = Map.fetch!(control.sessions, session_id)
+    %{workers: private_workers, providers: providers} = :sys.get_state(group, 1_000)
+    assert {:ok, ^private_workers} = Loopex.Runtime.OwnerGroup.workers(group)
+
+    assert {:undefined, policy, :worker, [Task.Supervised]} in Supervisor.which_children(
+             private_workers
+           )
+
+    # Completed model actors can remain in a retirement record, but none may
+    # remain live during this distinctly policy-only stopping interval.
+    for {_reference, provider} <- providers,
+        pid <- provider.original_members,
+        do: refute(Process.alive?(pid))
+
+    tasks = Task.Supervisor.children(private_workers)
+    assert policy in tasks
+
+    actors =
+      Map.new(children, fn {role, pid} -> {pid, Atom.to_string(role)} end)
+      |> Map.merge(Map.new(tasks, &{&1, "private_task"}))
+      |> Map.merge(%{
+        fixture.runtime.supervisor => "runtime",
+        coordinator => "coordinator",
+        group => "owner_group",
+        private_workers => "private_supervisor",
+        policy => "policy"
+      })
+
+    monitors =
+      Map.new(actors, fn {pid, role} ->
+        reference = if pid == policy, do: policy_monitor, else: Process.monitor(pid)
+        assert Process.alive?(pid)
+        assert self() in elem(Process.info(pid, :monitored_by), 1)
+        {reference, {pid, role}}
+      end)
+
+    records_before = Fixture.records(fixture, session_id)
+
+    assert Enum.any?(
+             records_before,
+             &(&1.payload.kind == "policy_interaction_answer_admitted_v1")
+           )
+
+    refute Enum.any?(records_before, &(&1.payload.kind == "effect_intent_committed_v2"))
+    assert Loopex.AgentLoopTestExecutor.jobs(fixture.executor) == []
+    refute Enum.any?(Fixture.events(fixture, session_id), &(&1.kind == "tool.started"))
+    interaction_stop_observe(fixture, session_id, actors, monitors, records_before, nonce)
+  end
+
+  # Concept: ordinary stop evidence names the actual pre-captured actor census.
+  # Technical depth: the primary filter preserves the event and copies only
+  # fixed supervisor metadata. One cutoff spans stop, original joins and trace
+  # delivery; no Logger drain allowance or blanket quiet assertion is added.
+  defp interaction_stop_observe(fixture, session_id, actors, monitors, records_before, nonce) do
+    observer = self()
+    {:ok, logger_started} = Application.ensure_all_started(:logger)
+
+    try do
+      filters = :logger.get_primary_config().filters
+      filter = :loopex_interaction_stop_witness
+      key = {__MODULE__, :interaction_stop_evidence, nonce}
+      cutoff = System.monotonic_time(:millisecond) + 1_000
+
+      Process.put(key, %{
+        joins: [],
+        reports: [],
+        trace: [],
+        result: nil,
+        complete: false,
+        collector_joined: false,
+        actors: actors
+      })
+
+      try do
+        {collector, collector_monitor} =
+          spawn_monitor(fn -> interaction_stop_collect(observer, actors, [], %{}, nil, 0) end)
+
+        try do
+          Process.put(key, %{
+            Process.get(key)
+            | actors: Map.put(actors, collector, "trace_collector")
+          })
+
+          session = :trace.session_create(:loopex_interaction_stop_witness, collector, [])
+          Process.put({key, :session}, session)
+
+          enabled =
+            Keyword.update!(filters, :logger_translator, fn {callback, configuration} ->
+              {callback, %{configuration | sasl: true}}
+            end)
+
+          :ok = :logger.set_primary_config(:filters, enabled)
+
+          :ok =
+            :logger.add_primary_filter(filter, {&interaction_stop_report/2, {observer, actors}})
+
+          Process.put({key, :filter_added}, true)
+          pids = Map.keys(actors)
+
+          receive_patterns =
+            for pid <- pids,
+                reason <- [:normal, :shutdown, :noproc, :killed, {:shutdown, :noproc}],
+                shape <- [:exit, :down] do
+              message =
+                if shape == :exit,
+                  do: {:EXIT, pid, reason},
+                  else: {:DOWN, :_, :process, pid, reason}
+
+              {[:_, :_, message], [], []}
+            end
+
+          :trace.recv(session, receive_patterns, [])
+
+          for {mfa, arguments} <- [
+                {{:erlang, :monitor, 2}, fn pid -> [:process, pid] end},
+                {{DynamicSupervisor, :monitor_child, 1}, fn pid -> [pid] end}
+              ] do
+            assert :trace.function(
+                     session,
+                     mfa,
+                     for(
+                       pid <- pids,
+                       do: {arguments.(pid), [], [{:message, {:const, pid}}, {:return_trace}]}
+                     ),
+                     if(elem(mfa, 0) == DynamicSupervisor, do: [:local], else: [])
+                   ) > 0
+          end
+
+          assert :trace.function(
+                   session,
+                   {:erlang, :exit, 2},
+                   for(
+                     pid <- pids,
+                     reason <- [:normal, :shutdown, :kill],
+                     do: {[pid, reason], [], [{:message, {:const, {pid, reason}}}]}
+                   ),
+                   []
+                 ) > 0
+
+          for pid <- pids do
+            assert :trace.process(session, pid, true, [
+                     :call,
+                     :arity,
+                     :procs,
+                     :receive,
+                     :monotonic_timestamp
+                   ]) == 1
+          end
+
+          {stopper, stopper_monitor} =
+            spawn_monitor(fn ->
+              receive do
+                {:interaction_stop_begin, ^nonce} ->
+                  result = Loopex.stop(fixture.runtime)
+                  send(observer, {:interaction_stop_returned, nonce, self(), result})
+              end
+            end)
+
+          Process.put({key, :stopper}, {stopper, stopper_monitor})
+
+          Process.put(key, %{
+            Process.get(key)
+            | actors: Map.put(Process.get(key).actors, stopper, "stop_caller")
+          })
+
+          send(stopper, {:interaction_stop_begin, nonce})
+
+          interaction_stop_join(
+            Map.put(monitors, stopper_monitor, {stopper, "stop_caller"}),
+            collector,
+            collector_monitor,
+            session,
+            nonce,
+            cutoff,
+            key,
+            false
+          )
+
+          evidence = Process.get(key)
+          interaction_stop_retain(evidence, cutoff)
+          assert evidence.result == :ok
+          assert evidence.complete
+          assert System.monotonic_time(:millisecond) <= cutoff
+          assert Fixture.records(fixture, session_id) == records_before
+          assert Loopex.AgentLoopTestExecutor.jobs(fixture.executor) == []
+
+          for row <- evidence.joins do
+            assert row["reason"] in ["normal", "shutdown"]
+          end
+
+          for report <- evidence.reports do
+            assert report["logger_producer"] == report["supervisor"]
+            assert Enum.any?(evidence.joins, &(&1["pid"] == report["supervisor"]))
+            original = Enum.find(evidence.joins, &(&1["pid"] == report["pid"]))
+            assert original != nil
+
+            exited =
+              Enum.find(
+                evidence.trace,
+                &(&1["event"] == "actor_exit" and &1["pid"] == report["pid"])
+              )
+
+            assert exited != nil and exited["reason"] == original["reason"]
+
+            if report["reason"] == "noproc" do
+              installed =
+                Enum.find(
+                  evidence.trace,
+                  &(&1["event"] == "monitor_installed" and
+                      &1["pid"] == report["pid"] and &1["actor"] == report["supervisor"])
+                )
+
+              assert installed != nil and exited["at_ns"] <= installed["at_ns"]
+
+              assert Enum.any?(
+                       evidence.trace,
+                       &(&1["event"] == "supervisor_down" and
+                           &1["actor"] == report["supervisor"] and &1["pid"] == report["pid"] and
+                           &1["monitor"] == installed["monitor"] and &1["reason"] == "noproc")
+                     )
+            else
+              assert report["reason"] == original["reason"]
+            end
+          end
+        after
+          interaction_stop_cleanup([
+            fn -> interaction_stop_retain(Process.get(key), cutoff) end,
+            fn ->
+              case Process.get({key, :session}) do
+                nil -> :ok
+                session -> :trace.session_destroy(session)
+              end
+            end,
+            fn ->
+              if Process.get({key, :filter_added}), do: :logger.remove_primary_filter(filter)
+            end,
+            fn -> :ok = :logger.set_primary_config(:filters, filters) end,
+            fn ->
+              unless Process.get(key).collector_joined do
+                if Process.alive?(collector), do: Process.exit(collector, :kill)
+
+                assert_receive {:DOWN, ^collector_monitor, :process, ^collector, _},
+                               interaction_stop_left(cutoff)
+              end
+            end,
+            fn ->
+              case Process.get({key, :stopper}) do
+                {stopper, monitor} ->
+                  joined =
+                    Enum.any?(Process.get(key).joins, fn row ->
+                      row["pid"] == interaction_stop_identity(stopper) and
+                        row["monitor"] == interaction_stop_identity(monitor)
+                    end)
+
+                  unless joined do
+                    if Process.alive?(stopper), do: Process.exit(stopper, :kill)
+
+                    assert_receive {:DOWN, ^monitor, :process, ^stopper, _},
+                                   interaction_stop_left(cutoff)
+                  end
+
+                nil ->
+                  :ok
+              end
+            end
+          ])
+        end
+      after
+        Process.delete({key, :session})
+        Process.delete({key, :filter_added})
+        Process.delete({key, :stopper})
+        Process.delete(key)
+      end
+    after
+      interaction_stop_cleanup(
+        Enum.map(Enum.reverse(logger_started), fn application ->
+          fn -> Application.stop(application) end
+        end)
+      )
+    end
+  end
+
+  # Concept: evidence-write failures cannot leave this witness's actors running.
+  # Technical depth: attempt every cleanup action, then re-raise the first failure
+  # with its original kind, reason and stack. Outer after clauses independently
+  # own process keys and the Logger applications started by this witness.
+  defp interaction_stop_cleanup(actions) do
+    failure =
+      Enum.reduce(actions, nil, fn action, first_failure ->
+        try do
+          action.()
+          first_failure
+        catch
+          kind, reason -> first_failure || {kind, reason, __STACKTRACE__}
+        end
+      end)
+
+    case failure do
+      nil -> :ok
+      {kind, reason, stacktrace} -> :erlang.raise(kind, reason, stacktrace)
+    end
+  end
+
+  defp interaction_stop_join(
+         monitors,
+         collector,
+         collector_monitor,
+         session,
+         nonce,
+         cutoff,
+         key,
+         finishing
+       ) do
+    finishing =
+      if map_size(monitors) == 0 and not finishing do
+        send(collector, {:interaction_stop_finish, self(), session})
+        true
+      else
+        finishing
+      end
+
+    receive do
+      {:DOWN, reference, :process, pid, reason} when is_map_key(monitors, reference) ->
+        {^pid, role} = Map.fetch!(monitors, reference)
+
+        row = %{
+          "pid" => interaction_stop_identity(pid),
+          "role" => role,
+          "monitor" => interaction_stop_identity(reference),
+          "reason" => interaction_stop_reason(reason)
+        }
+
+        interaction_stop_update(key, :joins, row)
+
+        interaction_stop_join(
+          Map.delete(monitors, reference),
+          collector,
+          collector_monitor,
+          session,
+          nonce,
+          cutoff,
+          key,
+          finishing
+        )
+
+      {:interaction_stop_returned, ^nonce, _stopper, result} ->
+        Process.put(key, %{Process.get(key) | result: result})
+
+        interaction_stop_join(
+          monitors,
+          collector,
+          collector_monitor,
+          session,
+          nonce,
+          cutoff,
+          key,
+          finishing
+        )
+
+      {:interaction_stop_trace_row, ^collector, row} ->
+        interaction_stop_update(key, :trace, row)
+
+        interaction_stop_join(
+          monitors,
+          collector,
+          collector_monitor,
+          session,
+          nonce,
+          cutoff,
+          key,
+          finishing
+        )
+
+      {:interaction_stop_supervisor_report, row} ->
+        interaction_stop_update(key, :reports, row)
+
+        interaction_stop_join(
+          monitors,
+          collector,
+          collector_monitor,
+          session,
+          nonce,
+          cutoff,
+          key,
+          finishing
+        )
+
+      {:interaction_stop_trace_complete, ^collector, records} when finishing ->
+        assert Process.get(key).trace == records
+
+        assert_receive {:DOWN, ^collector_monitor, :process, ^collector, :normal},
+                       interaction_stop_left(cutoff)
+
+        row = %{
+          "pid" => interaction_stop_identity(collector),
+          "role" => "trace_collector",
+          "monitor" => interaction_stop_identity(collector_monitor),
+          "reason" => "normal"
+        }
+
+        interaction_stop_update(key, :joins, row)
+        Process.put(key, %{Process.get(key) | complete: true, collector_joined: true})
+
+      {:DOWN, ^collector_monitor, :process, ^collector, reason} ->
+        Process.put(key, %{Process.get(key) | collector_joined: true})
+        flunk("interaction stop collector failed: " <> interaction_stop_reason(reason))
+    after
+      interaction_stop_left(cutoff) ->
+        flunk("interaction stop original actors or trace did not join")
+    end
+  end
+
+  defp interaction_stop_update(key, field, row) do
+    evidence = Process.get(key)
+    Process.put(key, Map.update!(evidence, field, &(&1 ++ [row])))
+  end
+
+  # Concept: fixed trace metadata attributes a report without capturing policy data.
+  # Technical depth: only pre-captured pids, monitors, fixed exit reasons and
+  # monotonic timestamps are retained. Other process metadata is discarded and
+  # still counts toward the same finite collector cap.
+  defp interaction_stop_collect(observer, actors, records, targets, fence, count)
+       when count < 2_048 do
+    receive do
+      {:trace_ts, actor, :call, {:erlang, :exit, 2}, {child, reason}, at}
+      when is_map_key(actors, actor) and is_map_key(actors, child) and
+             reason in [:normal, :shutdown, :kill] ->
+        row = %{
+          "event" => "exit_signal_sent",
+          "actor" => interaction_stop_identity(actor),
+          "pid" => interaction_stop_identity(child),
+          "reason" => Atom.to_string(reason),
+          "at_ns" => interaction_stop_time(at)
+        }
+
+        send(observer, {:interaction_stop_trace_row, self(), row})
+        interaction_stop_collect(observer, actors, records ++ [row], targets, fence, count + 1)
+
+      {:trace_ts, actor, :call, {_module, _function, _arity} = mfa, child, at}
+      when is_map_key(actors, actor) and is_map_key(actors, child) ->
+        row = %{
+          "event" => "monitor_call",
+          "actor" => interaction_stop_identity(actor),
+          "pid" => interaction_stop_identity(child),
+          "at_ns" => interaction_stop_time(at)
+        }
+
+        send(observer, {:interaction_stop_trace_row, self(), row})
+
+        interaction_stop_collect(
+          observer,
+          actors,
+          records ++ [row],
+          Map.put(targets, {actor, mfa}, child),
+          fence,
+          count + 1
+        )
+
+      {:trace_ts, actor, :return_from, {:erlang, :monitor, 2} = mfa, reference, at}
+      when is_map_key(actors, actor) and is_reference(reference) ->
+        row = %{
+          "event" => "monitor_installed",
+          "actor" => interaction_stop_identity(actor),
+          "pid" => interaction_stop_identity(Map.fetch!(targets, {actor, mfa})),
+          "monitor" => interaction_stop_identity(reference),
+          "at_ns" => interaction_stop_time(at)
+        }
+
+        send(observer, {:interaction_stop_trace_row, self(), row})
+        interaction_stop_collect(observer, actors, records ++ [row], targets, fence, count + 1)
+
+      {:trace_ts, actor, :receive, {:DOWN, monitor, :process, child, reason}, at}
+      when is_map_key(actors, actor) and is_map_key(actors, child) ->
+        row = %{
+          "event" => "supervisor_down",
+          "actor" => interaction_stop_identity(actor),
+          "pid" => interaction_stop_identity(child),
+          "monitor" => interaction_stop_identity(monitor),
+          "reason" => interaction_stop_reason(reason),
+          "at_ns" => interaction_stop_time(at)
+        }
+
+        send(observer, {:interaction_stop_trace_row, self(), row})
+        interaction_stop_collect(observer, actors, records ++ [row], targets, fence, count + 1)
+
+      {:trace_ts, actor, :receive, {:EXIT, child, reason}, at}
+      when is_map_key(actors, actor) and is_map_key(actors, child) ->
+        row = %{
+          "event" => "supervisor_exit",
+          "actor" => interaction_stop_identity(actor),
+          "pid" => interaction_stop_identity(child),
+          "reason" => interaction_stop_reason(reason),
+          "at_ns" => interaction_stop_time(at)
+        }
+
+        send(observer, {:interaction_stop_trace_row, self(), row})
+        interaction_stop_collect(observer, actors, records ++ [row], targets, fence, count + 1)
+
+      {:trace_ts, pid, :exit, reason, at} when is_map_key(actors, pid) ->
+        row = %{
+          "event" => "actor_exit",
+          "pid" => interaction_stop_identity(pid),
+          "reason" => interaction_stop_reason(reason),
+          "at_ns" => interaction_stop_time(at)
+        }
+
+        send(observer, {:interaction_stop_trace_row, self(), row})
+        interaction_stop_collect(observer, actors, records ++ [row], targets, fence, count + 1)
+
+      {:interaction_stop_finish, ^observer, session} when fence == nil ->
+        interaction_stop_collect(
+          observer,
+          actors,
+          records,
+          targets,
+          :trace.delivered(session, :all),
+          count
+        )
+
+      {:trace_delivered, :all, reference} when reference == fence ->
+        send(observer, {:interaction_stop_trace_complete, self(), records})
+
+      _other ->
+        interaction_stop_collect(observer, actors, records, targets, fence, count + 1)
+    end
+  end
+
+  defp interaction_stop_collect(_observer, _actors, _records, _targets, _fence, _count),
+    do: exit(:interaction_stop_trace_limit)
+
+  defp interaction_stop_report(%{msg: {:report, %{report: report}}} = event, {observer, actors})
+       when is_list(report) do
+    offender = Keyword.get(report, :offender, [])
+
+    supervisor =
+      case Keyword.get(report, :supervisor) do
+        {pid, _} when is_pid(pid) -> pid
+        pid when is_pid(pid) -> pid
+        _ -> nil
+      end
+
+    context = Keyword.get(report, :errorContext)
+
+    if is_map_key(actors, supervisor) and is_list(offender) and
+         context in [:shutdown_error, :child_terminated] do
+      pid = Keyword.get(offender, :pid)
+
+      if is_pid(pid) do
+        row = %{
+          "logger_producer" => interaction_stop_identity(self()),
+          "supervisor" => interaction_stop_identity(supervisor),
+          "pid" => interaction_stop_identity(pid),
+          "context" => Atom.to_string(context),
+          "reason" => interaction_stop_reason(Keyword.get(report, :reason)),
+          "shutdown" => interaction_stop_shutdown(Keyword.get(offender, :shutdown))
+        }
+
+        send(observer, {:interaction_stop_supervisor_report, row})
+      end
+    end
+
+    event
+  end
+
+  defp interaction_stop_report(event, _configuration), do: event
+  defp interaction_stop_left(nil), do: 0
+  defp interaction_stop_left(cutoff), do: max(cutoff - System.monotonic_time(:millisecond), 0)
+  defp interaction_stop_time(at), do: System.convert_time_unit(at, :native, :nanosecond)
+
+  defp interaction_stop_identity(pid) when is_pid(pid),
+    do: List.to_string(:erlang.pid_to_list(pid))
+
+  defp interaction_stop_identity(ref) when is_reference(ref),
+    do: List.to_string(:erlang.ref_to_list(ref))
+
+  defp interaction_stop_reason({:shutdown, :noproc}), do: "shutdown:noproc"
+
+  defp interaction_stop_reason(reason) when reason in [:normal, :shutdown, :noproc, :killed],
+    do: Atom.to_string(reason)
+
+  defp interaction_stop_reason(_reason), do: "other"
+  defp interaction_stop_shutdown(:brutal_kill), do: "brutal_kill"
+
+  defp interaction_stop_shutdown(shutdown) when is_integer(shutdown) and shutdown >= 0,
+    do: shutdown
+
+  defp interaction_stop_shutdown(_shutdown), do: "other"
+
+  defp interaction_stop_retain(evidence, cutoff) do
+    case System.get_env("LOOPEX_PRIVATE_TASK_SHUTDOWN_EVIDENCE_DIR") do
+      nil ->
+        :ok
+
+      directory ->
+        expanded = Path.expand(directory)
+        assert String.starts_with?(expanded, Path.expand(System.tmp_dir!()) <> "/")
+
+        data = %{
+          "scope" => "Ordinary public stop of held answered policy; exact actor evidence only",
+          "complete_original_joins_and_trace" => evidence.complete,
+          "stop_result" => if(evidence.result == :ok, do: "ok", else: "unproved"),
+          "observation_cutoff_monotonic_ms" => cutoff,
+          "actors" =>
+            Map.new(evidence.actors, fn {pid, role} -> {interaction_stop_identity(pid), role} end),
+          "original_downs" => evidence.joins,
+          "supervisor_reports" => evidence.reports,
+          "trace" => evidence.trace
+        }
+
+        File.write!(Path.join(expanded, "interaction-public-stop.json"), JSON.encode!(data))
+    end
+  end
+
   defp loop_fixture(policy) do
     fixture =
       Fixture.start(
