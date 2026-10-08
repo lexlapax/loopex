@@ -160,6 +160,21 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
     assert length(connections) == 3
     service_await(fn -> service_progress_settled?(state, connections) end, history_cutoff)
 
+    # Concept: completed durable history can still have transient bytes unread
+    # by the peer. Compaction's observations start after those bytes are drained.
+    # Technical depth: with native and output custody settled, a FIFO status
+    # response follows every already-emitted history record on this same socket.
+    # Each round trip spends the original history cutoff.
+    for {client, request_id} <- [{controller, "history-drained"}, {observer, "history-observed"}] do
+      :ok = send_frame(client, %{"method" => "daemon.status", "request_id" => request_id})
+
+      history_tail =
+        service_records_until(client, &(&1["request_id"] == request_id), history_cutoff)
+
+      assert List.last(history_tail)["type"] == "result"
+      refute Enum.any?(history_tail, &service_activity?/1)
+    end
+
     :ok = :sys.suspend(daemon.owner)
     compact_cutoff = System.monotonic_time(:millisecond) + 60_000
 
@@ -268,7 +283,9 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
 
     records = admission_records ++ List.flatten(activity_records ++ completions)
     progress = Enum.filter(records, &(&1["type"] == "progress"))
-    assert length(progress) == 2
+    assert length(progress) == 2,
+           inspect(Enum.map(progress, &Map.take(&1["progress"], ["kind", "base_event_sequence"])))
+
     assert Enum.all?(progress, &service_activity?/1)
 
     for canary <- [
