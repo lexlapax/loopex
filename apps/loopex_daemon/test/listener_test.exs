@@ -185,7 +185,7 @@ defmodule LoopexDaemon.ListenerTest do
     assert :ok = Listener.begin_accept(fixture.listener, fixture.startup_ref)
     client = connect(fixture.path)
 
-    assert :ok = send_frame(client, initialize("r1", ["loopex.experimental/1"]))
+    assert :ok = send_frame(client, initialize("r1", ["loopex.experimental/3"]))
     [unsupported] = receive_records(client, 1)
     assert unsupported["code"] == "unsupported_generation"
 

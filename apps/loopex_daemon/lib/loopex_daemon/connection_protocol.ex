@@ -2,17 +2,17 @@ defmodule LoopexDaemon.ConnectionProtocol do
   @moduledoc """
   ## Concept
 
-  One daemon connection negotiates generation two exactly once before any
+  One daemon connection negotiates the current daemon generation exactly once before any
   daemon or session method can run. Invalid input reveals no method inventory
   and reaches no runtime work.
 
   ## Technical depth
 
-  This pure state machine reuses generation two's contract metadata while
+  This pure state machine reuses the current daemon generation's contract metadata while
   retaining ADR 0023's request-identity, generation-list and capability-list
   validation. A well-formed unsupported offer spends the negotiation attempt;
   a malformed request does not. After negotiation, `LoopexDaemon.Request`
-  enforces and decodes every named method's exact generation-two request shape;
+  enforces and decodes every named method's exact current daemon request shape;
   a valid request is returned to the connection as plain decoded data for
   serving, and nothing here performs a host or runtime effect.
   """
@@ -106,7 +106,7 @@ defmodule LoopexDaemon.ConnectionProtocol do
         {:error,
          error(
            "invalid_request",
-           "request does not match the generation-two contract",
+           "request does not match the current daemon contract",
            request_id
          ), protocol, :none}
     end
