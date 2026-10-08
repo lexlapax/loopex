@@ -22,9 +22,9 @@ its last `Closed` row identifies the last closed product baseline.
 | --- | --- |
 | Integrated phase | Closed milestone product baseline |
 | Last closed product checkpoint | `M6` — 2026-09-29 |
-| Blockers | None; `M7` is in progress against its accepted plan pair |
+| Blockers | None; `M7` is in progress against its accepted plan pair; `M7` waits on ADR 0065 before the outcomes that depend on it |
 | Authorized work | Implementation inside the accepted `M7` plan pair, landing on `main` in small reviewed changes |
-| Next maintainer decision | None until `M7` is ready for independent review |
+| Next maintainer decision | Record disposition [ADR 0065](../adr/0065-private-attempts-io-prerequisite.md#concept) now; afterward, none until `M7` is ready for independent review |
 | Next transition | Ensure that `docs/evidence/M7-closure-runs.md` is indexed as a scaffold, map every outcome to evidence in the plan, then make the tested implementation commit by moving `M7` to In review; run the closure matrix and independent review from that exact SHA |
 | Validation | `bash scripts/check-bootstrap.sh` |
 <!-- loopex:current-status:end -->
@@ -35,7 +35,9 @@ The maintainer accepted M7, ADRs 0041–0049, the
 `2986150b878151524ecdd9bac5a9779e69e196b4` on 2026-09-30. The
 [acceptance disposition](../developer/agent-context-map.md#disposition-m7-acceptance-2026-09-30)
 binds every historical pair's digests and records the integration instruction.
-All prerequisites are accepted and implementation may begin. M7's outcome rows
+The founding prerequisites are accepted and implementation may begin. The later
+Proposed ADR 0065 prerequisite blocks only its dependent physical attempts
+writer work, as the current capsule and active plan record. M7's outcome rows
 remain Open; implementation began with the cross-run conversation regression.
 No partially accepted subset authorizes dependent implementation.
 

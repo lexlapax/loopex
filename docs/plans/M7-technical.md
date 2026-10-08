@@ -42,6 +42,12 @@ implementation authority:
 | [ADR 0049](../adr/0049-explicit-host-configuration.md#concept) | Outcomes 6 and 7 explicit configuration, roles and command grammar |
 | [ADR 0051](../adr/0051-current-format-physical-restore.md#concept) | Accepted prerequisite for the fresh physical-root current-format restore outcome; implementation must satisfy its [exact contracts and proof](../adr/0051-current-format-physical-restore-technical.md#technical-depth) |
 
+Implementation prerequisite discovered on 2026-10-08: Proposed
+[ADR 0065](../adr/0065-private-attempts-io-prerequisite.md#concept) must be
+dispositioned before the private physical attempts writer and its dependent
+checks are implemented. This records the missing portable file-lock
+prerequisite; unrelated accepted M7 work continues.
+
 Accepted decisions that constrain the work:
 
 | Decision | Constraint on M7 |
