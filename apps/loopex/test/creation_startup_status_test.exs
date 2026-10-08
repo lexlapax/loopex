@@ -550,6 +550,152 @@ defmodule Loopex.CreationStartupStatusTest do
     assert Fixture.inspect_state(pid).sessions == %{}
   end
 
+  # Concept: physical normal retirement after cutoff cannot establish startup readiness.
+  # Technical depth: only the actual final-read guardian is suspended across the
+  # original work instant. Control retains its real cleanup; the genuine Store
+  # reply and all three original normal DOWN signals occur after that instant.
+  @tag :long_bound
+  @tag timeout: 75_000
+  test "original startup actors physically join normally after cutoff without becoming ready" do
+    {pid, store} = fixture()
+    seed_reservation(store)
+
+    :ok =
+      Fixture.hold_next_transition_before_linearization(
+        pid,
+        :runtime_control_close_creation_reservation,
+        self()
+      )
+
+    runtime = runtime(store)
+
+    assert_receive {:record_held_before_linearization, close_waiter, ^pid,
+                    :runtime_control_close_creation_reservation, _close},
+                   1_000
+
+    on_exit(fn -> Fixture.release(close_waiter) end)
+    {:ok, %{control: control, sessions: sessions, workers: workers}} = Runtime.children(runtime)
+    close_entry = :sys.get_state(control).creation
+    assert close_entry.phase == :close
+    close_joins = monitor_startup_action(close_entry.action)
+    close_waiter_monitor = Process.monitor(close_waiter)
+    assert {:ok, original} = Runtime.creation_startup_status(runtime)
+    assert original.state == :starting
+    assert close_entry.cutoff == original.startup_deadline_ms
+    :ok = Fixture.hold_next_creation_recovery(pid, self())
+    Fixture.release(close_waiter)
+    assert_receive {:DOWN, ^close_waiter_monitor, :process, ^close_waiter, :normal}, 1_000
+    assert_startup_action_joins(close_joins)
+
+    assert_receive {:creation_read_held, read_waiter, reader, %{command_id: nil}}, 1_000
+    on_exit(fn -> Fixture.release(read_waiter) end)
+    original_control = :sys.get_state(control)
+    entry = original_control.creation
+    assert entry.phase == :post_terminal
+    assert entry.action.worker == reader
+    assert entry.cutoff == original.startup_deadline_ms
+    assert entry.invocation == original_control.creation_startup.invocation
+    assert entry.cleanup == nil and not entry.stopped
+    assert {:ok, snapshot} = Runtime.creation_startup_status(runtime)
+    assert_snapshot(snapshot, :starting, original)
+    guardian = entry.action.pid
+    group = entry.action.group
+    worker = entry.action.worker
+    invocation = entry.invocation
+    permit = entry.action.permit
+    incarnation = original_control.creation_incarnation
+    original_joins = monitor_startup_action(entry.action)
+    read_waiter_monitor = Process.monitor(read_waiter)
+    before_store = Fixture.inspect_state(pid)
+    1 = :erlang.trace(control, true, [:receive])
+    on_exit(fn -> if Process.alive?(control), do: :erlang.trace(control, false, [:receive]) end)
+
+    wait_until(original.startup_deadline_ms - 500)
+    assert System.monotonic_time(:millisecond) < original.startup_deadline_ms
+    :erlang.suspend_process(guardian)
+
+    on_exit(fn ->
+      try do
+        if Process.alive?(guardian), do: :erlang.resume_process(guardian)
+      catch
+        :error, :badarg -> :ok
+      end
+
+      Fixture.release(read_waiter)
+    end)
+
+    wait_until(original.startup_deadline_ms + 1)
+
+    for {actor, monitor} <- original_joins do
+      assert Process.alive?(actor)
+      refute_received {:DOWN, ^monitor, :process, ^actor, _}
+    end
+
+    assert System.monotonic_time(:millisecond) > original.startup_deadline_ms
+    assert Process.alive?(control)
+    assert {:ok, snapshot} = Runtime.creation_startup_status(runtime)
+    assert_snapshot(snapshot, :unavailable, original)
+    await(fn -> :sys.get_state(control).creation.stopped end)
+    stopped = :sys.get_state(control).creation
+    assert stopped.invocation == invocation and stopped.cutoff == entry.cutoff
+    assert stopped.action == entry.action
+    cleanup = stopped.cleanup
+    assert original_control.cleanup_grace_ms == 5_000
+    assert cleanup.observe - cleanup.cooperative == 5_000
+    assert System.monotonic_time(:millisecond) < cleanup.cooperative
+    {:messages, held_messages} = Process.info(guardian, :messages)
+
+    assert Enum.any?(held_messages, fn
+             {:creation_retire, ^control, ^incarnation, ^invocation, ^permit, ^cleanup} -> true
+             _ -> false
+           end)
+
+    Fixture.release(read_waiter)
+    assert_receive {:DOWN, ^read_waiter_monitor, :process, ^read_waiter, :normal}, 1_000
+    {^worker, worker_monitor} = List.keyfind(original_joins, worker, 0)
+    assert_receive {:DOWN, ^worker_monitor, :process, ^worker, :normal}, 1_000
+    assert System.monotonic_time(:millisecond) > original.startup_deadline_ms
+    assert Process.alive?(guardian) and Process.alive?(group)
+    {:messages, held_messages} = Process.info(guardian, :messages)
+
+    assert Enum.any?(held_messages, fn
+             {:creation_outcome, ^worker, ^permit, {:ok, %{command: nil, head: head}}} ->
+               head == entry.head and is_nil(head.active_command_id)
+
+             _ -> false
+           end)
+
+    :erlang.resume_process(guardian)
+
+    for {actor, monitor} <- original_joins, actor != worker do
+      assert_receive {:DOWN, ^monitor, :process, ^actor, :normal}, 1_000
+      assert System.monotonic_time(:millisecond) > original.startup_deadline_ms
+      assert System.monotonic_time(:millisecond) < cleanup.observe
+    end
+
+    assert_receive {:trace, ^control, :receive,
+                    {:creation_carrier_joined, ^incarnation, ^invocation, ^permit, ^guardian,
+                     ^group, ^worker, {:ok, %{command: nil}}}},
+                   1_000
+
+    await(fn -> :sys.get_state(control).creation == nil end)
+    final_control = :sys.get_state(control)
+    assert final_control.creation_status == :unavailable
+    assert final_control.creation_incarnation == incarnation
+    assert final_control.creation_startup.invocation == invocation
+    assert {:ok, %{control: ^control}} = Runtime.children(runtime)
+    assert {:ok, snapshot} = Runtime.creation_startup_status(runtime)
+    assert_snapshot(snapshot, :unavailable, original)
+    assert {:error, :store_unavailable} = Runtime.create_session(runtime, "late-normal", %{})
+    after_store = Fixture.inspect_state(pid)
+    assert after_store.creation_calls == before_store.creation_calls
+    assert after_store.creation_queries == before_store.creation_queries
+    assert after_store.sessions == %{}
+    assert Task.Supervisor.children(workers) == []
+    assert DynamicSupervisor.which_children(sessions) == []
+    :erlang.trace(control, false, [:receive])
+  end
+
   # Concept: positive readiness follows independently observed original actors.
   # Technical depth: capture exact identities before releasing the held callback;
   # consume only their own monitors before accepting the ready snapshot.
