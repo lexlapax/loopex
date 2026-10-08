@@ -330,7 +330,8 @@ defmodule Loopex.ProgressSinkTest do
 
     assert_receive {:close_result, ^reference, {:error, :cleanup_unproved}, ^started, finished},
                    6_000
-    assert finished - started in 5_000..6_000
+
+    assert (finished - started) in 5_000..6_000
     assert Process.alive?(guardian)
     assert state(sink) == put_elem(before, 3, :closed)
 
@@ -384,13 +385,14 @@ defmodule Loopex.ProgressSinkTest do
 
     assert :ok = :sys.resume(guardian)
     assert_receive {:after_close_reply, ^gate, ^guardian, replied}, 1_000
-    assert replied - started in 2_000..3_000
+    assert (replied - started) in 2_000..3_000
     assert Process.alive?(guardian)
     assert elem(state(sink), 3) == :closed
 
     assert_receive {:close_result, ^reference, {:error, :cleanup_unproved}, ^started, finished},
                    6_000
-    assert finished - started in 5_000..6_000
+
+    assert (finished - started) in 5_000..6_000
     assert finished - replied < 4_000
     assert Process.alive?(guardian)
     refute_receive {:DOWN, ^monitor, :process, ^guardian, _reason}, 0
