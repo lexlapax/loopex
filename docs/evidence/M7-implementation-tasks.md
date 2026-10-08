@@ -1,14 +1,16 @@
 # M7 Implementation Tasks
 
 Current continuation: ADR0061 is accepted at `d7c23f3d`; no asked approval
-is pending. The Core Store creation boundary passed all32 cases on both
-supported pairs and is integrated. T01–T19 remain88 original done/85 todo/6
-retired; added358 done/24 todo. Atomic adapters are under independent review;
-Control/carrier and the cancellation codec are being implemented in separate
-worktrees. ProgressSink whole26 original13329 passed both pairs at5b8ab5ac; the bounded
-library is integrated, while its broader T07 race/integration row stays open.
-Original37920 and earlier failures remain retained. The [resume record](M7-resume.md) retains exact source, run and review
-references. Earlier status entries below are historical where superseded.
+is pending. Core Store32, atomic adapters48, dormant cancellation codec14 and
+physical ProgressSink28 have complete paired focused proof and are integrated.
+T01–T19 remain88 original done/85 todo/6 retired; added361 done/24 todo.
+Native creation Control has one independently identified cleanup cutoff blocker
+under repair. Credited Core ingress and the foreground output writer are assigned
+in separate worktrees; custody restore is source-qualified pending current
+boundary/readiness joins and complete175 native cases. Private T14 continuation
+whole128 is running after qualified paired formatting. No broad row closes from
+source review. Exact identities and earlier failures remain in the
+[resume record](M7-resume.md). Earlier status entries below are historical.
 
 ADR0059 is accepted and pushed at `3212b0ed`. The first Core Store contract
 unit is assigned in its own worktree; durable adapters, Control/carrier

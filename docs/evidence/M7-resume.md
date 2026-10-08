@@ -29,6 +29,55 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Reboot continuation on 2026-10-07
 
+Current parallel work: ControlV2 independent review is blocked by one accepted
+cleanup invariant. A late original outcome can clear its complete fence and
+reopen admission after the captured observation cutoff. Sealed report
+`59e0d94a9d24e5f61e9ba6f0b00455ca725efa50e458b98c7862cf10bc06ef6c` reviews
+packet3f0a3448; both are source-only. t15_original_closure_map repairs only
+Control and creation_custody_lifecycle_test in m7-creation-control. Retain a
+sticky unproved disposition, guard before OwnerLane.observe and guard central
+release against the actual captured deadline, including queued timer ordering.
+Two actual late-read/late-close cases use the original 10,000-ms cleanup with
+exact original actor joins; all20 prior cases and bounds remain unchanged.
+Root independently reviews the repair and joins matching tested Core/adapters
+before native. No new ownership/schema/allowance or decision is selected.
+
+attempt_case_replay owns credited private Core ingress in isolated
+m7-progress-runtime-credit, staged baselinee97f8a09 fromdf138b22 plus frozen
+ControlV2. Reserve one existing32-slot/524,288-byte credit before the first
+payload transfer; preserve Control's serial identity verdict and bounded
+phase custody. Accepted0058/current-only rules authorize generic facade
+retirement. Preserve frozen creation regions for the later reviewed repair.
+cleanup_binding_audit owns only the new AppServer output_writer, fixed proxy
+and focused tests in m7-foreground-output-writer, base df138b22. One fresh proxy
+per frame retains exact WRITTEN/CONTINUE/wait/JOINED and actual live leader,
+port and process-group retirement before credit release. Existing5,000-ms
+write/cleanup and2MiB limits remain. Both writers are source-only; no native or
+integration completion is claimed. Root alone owns Git/native/registry/rejoin.
+
+Restore's three-file packeta0a7d4f is independently source-qualified by
+review68b02e0d, conditional on current Core/adapter rejoin before execution.
+Complete source arithmetic is175 cases including three long_bound cases and
+the unchanged64-restore/600,000-ms aggregate. Source review closes no row.
+Current AgentLoopFixture/startup readiness joins are still needed.
+
+Retained context `M7/parallel-continuation-context-20261007-v1/retention.json`,
+SHA-256 `ce9a65eba64e31aab57f645c2fef6c8240b3a622f01376ade462557ce2275528`,51files,
+preserves ControlV2/blocked review, qualified restore review, continuation
+verification recipes and matching AST helper. Actual formatter19910 remains
+FAIL at the wrong owned-path AST helper,2.196seconds,three joins/22 artifacts/
+1956 registry rows; output `M7/attempt-continuation-format-20261007-v1`, collection
+`2e61701a4b7bfb0396fcfd89ec1e4e4b1f6d726d240fbac4c1a74084ea1107bf`.
+Its real formatted child8008e065 is proved equivalent to reviewed raw70a12beb
+by matching CLI helper51ce1bdd on both pairs. Formatter46874 PASS6.224seconds,
+ten joins/51 artifacts/1966rows; output `M7/attempt-continuation-format-20261007-v2`,
+collectionc75b4419. Native whole128 proof original17391 is running from
+`/private/tmp/m7-attempt-continuation-focused-preparation-v2/proof.enabled.py`,
+runner4ce07b26, output `M7/attempt-continuation-proof-20261007-v1`. Collect its
+original handle once after terminal, never repeat executed stages. No native
+creation/restore/progress caller/writer run is active concurrently. No asked
+approval is pending; T01–T19 originals88/85/6 and added361/24/0 remain.
+
 Latest completed unit: physical ProgressSink owner/producer custody, whole28 per
 pair at isolated `03a03b21b02badfd539f0c31ff9fa2819d70b5f3`. Original26848 PASS
 in19.937seconds, eight joins/42 artifacts,1953 rows. Complete output
