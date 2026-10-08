@@ -29,6 +29,98 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Reboot continuation on 2026-10-07
 
+Original60564 is TERMINAL0 and collected PASS_CORRECTED_FULL_FAST_CHECK at
+`d1132591200c78bdc1f3b8dc9b052cd21474e0e8`, tree6b248f61. The current-pair
+canonical check passed all eleven applications:4,924 passed,61 designated
+exclusions,zero failures/skips/invalid. The check took2,102.132 seconds;
+the complete runner took2,121.176 seconds. Two original processes joined,
+44 rich artifacts authenticate, and22 dev/test ebin inventories contain618
+verified compiled files. Do not repoll60564, recollect it or rerun this candidate.
+Original14854 remains FAIL at its historical source; this is a new-source pass.
+Floor full integration, release/platform/attended checks and M7 closure remain
+open. No product milestone or original T16 row closes from this current check.
+
+Output `M7/current-integration-after-case-replay-full-fast-20261007-v1` has
+collection SHA-256
+`c73f591668ca5d73a2c258f613734ff4d499456027d5110ca4c8d6723460bf2b`,
+terminal `83b3864653d79233f14015b57f8fae1cfea2e78f1dee73ae16736fb934e245a6`,
+and latest1781 registry
+`f81bae5240f14ac70f68243cbc1bd8908a03cbb7296cc6ed19af2ec58e82b83d`.
+All1779 predecessor tuples survive unchanged. Root collector3a3b17da is the
+gate-only enabled ten-field binding6dc51587 of unchanged95366319; independent
+factual review17a8aac7 passed. BinderV1 failed before any collector/native or
+artifact/registry write because its raw substring gate check counted quoted
+occurrences. V2 checks the single assignment and preserves the complete reverse.
+The corrected failure receipt records three actual occurrences and supersedes
+the earlier mistaken two-count explanation; no failed attempt is relabeled.
+Eight binding/review/helper receipts are retained at
+`M7/collected-full-current-context-20261007-v1/retention.json`, SHA-256
+`6293b031468b86b61c7d115428c77bfd12de9cddad53a0c56b188b90ab6aa45e`.
+
+ProgressSink A V2 source is independently reviewed and committed raw
+`6e0aad7d7a96afa36dbb0a0ebb78d8e309c43140`, treecdee6a7d, sole base583f84ec,
+in `/Users/spuri/.codex/worktrees/m7-progress-sink/loopex`. Only new Core
+progress_sink.ex and progress_sink_test.exs are owned. Complete26 selection
+preserves23 original declarations and adds3; raw source packet78d4aa49,
+independent source review601d6a9a and root8472bdd2 permit narrow paired native
+verification, not complete ADR0058 or sink-row closure. V2 repairs the reviewed
+late release-marker ABA write, arbitrary-key preflight work and concurrent
+post-DOWN accounting observation. Forced32 actual CAS exhaustion, production
+custody cuts, runtime/caller/host writer integration and real output cleanup
+remain explicit qualifications. Native parsing/formatting/compilation/tests
+remain UNRUN; the added T07 sink row stays open.
+
+Raw sink identities/reviews are four immutable files at
+`M7/progress-sink-raw-reviewed-context-20261007-v1/retention.json`, SHA-256
+`394642e5383963da81db7d010ecd66e4dc60c4ebaa76fb1a4dbb2de99f2b32fc`.
+The partial V2 native blueprint retains an unconditional pre-native stop,
+false gates and future facts None. Its16-file context is
+`M7/progress-sink-native-v2-partial-context-20261007-v1/retention.json`, SHA-256
+`970c690beec8a1bfb83554f074def78eed3613609bd00d0919b531de38555312`.
+Independent partial reviewcf852079 is retained with the continuation V1 context
+below. A new V3 rich-authentication source adaptation is in progress; do not
+enable the V2 draft by binding literals or gates. Authenticate the actual
+collected60564 rich shape and latest registry, independently review the semantic
+delta and root factual bindings, then execute/collect the six-stage formatter
+once. Measure its actual clean formatted child separately from raw-plus-dirt
+cuts before binding the eight-stage whole26 current/floor proof.
+
+T14 continuation128 source is independently reviewed and committed raw
+`70a12beb6c28a8c24f33f5ca91b901ba275bf80a`, tree62493355, sole base6a261667,
+in `/Users/spuri/.codex/worktrees/m7-attempt-case-replay/loopex`. Own only
+attempt_events.ex and m7_attempt_events_test.exs. Packet8b245337 and independent
+review5d839770 preserve all99 original cases and add29. Root0e5b9431 permits
+narrow paired verification only. This private single-lane plan retains original
+records, grants no evidence/dispatch authority, and leaves unresolved physical,
+full-matrix/grouped-subcase and referenced-authority decisions untouched.
+Original T14 remains open. Its new added continuation row is recorded open;
+T01–T19 originals remain88 done/85 todo/6 retired; added354 done/23 todo.
+
+The continuation source/reviews/raw projection are18 immutable files at
+`M7/continuation-raw-reviewed-context-20261007-v1/retention.json`, SHA-256
+`5c21841169f6d31343f37768e7598db812a6babb2c4c45ae46009507e1c9ca58`.
+Disabled V1 native preparation7f8c37cd was source-blocked, before execution,
+by a wrong ROOT and stale Complete99 scope. V2dae27210 corrects ROOT only;
+independent060262f2 proves that also repairs all18 source-support path/mode
+branches without a new mapping mechanism. V1/V2 remain partial with hardstops,
+false gates and future latest-producer authentication absent. V1 context14
+files is `M7/continuation-native-v1-partial-context-20261007-v1/retention.json`,
+SHA-256 `2795ee5da3ff112e9d9147a74a004b847c5de0de22a56718ac1a6fcffffbda0f`;
+V2 context17 files is
+`M7/continuation-native-v2-partial-context-20261007-v1/retention.json`, SHA-256
+`b48aedc886af64b4aa5eb0304106a2126cbe191756a6844e98556bd42b75722d`.
+Correct stale scope in a new immutable revision and authenticate the actual
+latest collected registry after60564 and any intervening sink originals. Never
+seed old1779 alone. Native128 remains UNRUN and its row may close only after
+its own complete paired proof and literal integration.
+
+Generic-progress authority trace37caa29b remains an unasked public disposition;
+no arbitrary-map facade is removed or narrowed here. ADR0059 remains the sole
+asked pending decision at exact unchanged candidatea550ae33. Work proceeds
+within accepted0058/0057 while dependent0059 creation work remains paused.
+Root owns every native run, registry, collector, Git integration and push.
+Earlier entries below are historical where superseded.
+
 Case replay original32645 is TERMINAL0 and collected
 PASS_ATTEMPT_CASE_REPLAY_PROOF at isolated `6a261667` in107.513 seconds.
 Both supported pairs executed99 complete cases, zero failures/exclusions/skips/

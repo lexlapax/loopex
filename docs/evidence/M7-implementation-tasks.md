@@ -1,5 +1,19 @@
 # M7 Implementation Tasks
 
+The full current-pair check at `d1132591` is collected PASS: all eleven
+applications,4,924 passed,61 designated exclusions,zero failures/skips/invalid,
+2,102.132 seconds for the check and2,121.176 seconds for the complete runner.
+Original60564 is terminal and must not be rerun or recollected. Original14854
+remains failed at its historical source. Floor/release/closure work stays open.
+Exact output hashes and independently reviewed collector bindings are in the
+[resume record](M7-resume.md).
+
+ProgressSink26 and T14 continuation128 are independently source-reviewed and
+saved at isolated raw6e0aad7d and70a12beb. Native proofs remain UNRUN, and no
+row closes from source review. The new added T14 continuation row below is open.
+Original T01–T19 counts remain88 done/85 todo/6 retired; added354 done/23 todo.
+Earlier entries below are historical where superseded.
+
 Consumed case replay is integrated literally from tested `6a261667`.
 Original32645 passed all99 cases on each supported pair in107.513 seconds,
 with eight original joins and43 authenticated artifacts. Only its added T14
@@ -14200,6 +14214,8 @@ repeating completed provider work.
 - [x] Pin and implement the closed current attempts-event body union, including missing-evidence consumption, retained case identity, writer/handoff/head relations and causal authorization; prove exact independent vectors and all positive/negative body variants on both supported toolchains before ordered replay, physical writer ownership or runner activation. ADR0057 is accepted at `a67dc97e`; codec `99dd199b` passed all54 cases on both supported pairs in original96348; its two tested files integrate literally.
 - [x] Validate ordered attempts ownership with the existing frame and accepted body codecs; prove genesis/designation, optional succession placement, original relinquishment-to-acceptance joins, exact owner tuples and epochs, pending handoff, reused identities and unresolved tails on both supported pairs. Keep this ownership projection distinct from case-state replay, evidence, quiescence, authority and physical dispatch.
 - [x] Project the accepted consumed case-history core through original started, completed, reviewed and authorized-candidate records; preserve immutable execution identities, original mechanical facts and whole record history, propagate exact ownership/framing/anchor errors and retain unapproved same-state or reference choices explicitly unresolved. Prove complete original plus new cases on both supported pairs; no manifest, evidence, authority or physical dispatch claim.
+
+- [ ] Implement and prove the accepted private single-lane continuation plan and negative-consumption barriers through the greatest retained head and complete consumed histories. Retain all99 original cases, add29, preserve every original record, reuse only eligible recorded work and propose only a recorded not-dispatched suffix; keep missing/grouped/full-matrix or referenced-authority histories unresolved without granting dispatch or evidence authority. Complete paired128 proof and literal integration are required; original T14 remains open.
 
 - [x] Inventory all 74 numbered V1–V13 steps and 155 descriptive subcases against exact accepted plan spans and current supporting tests; retain source identities, existing evidence and every missing executable owner/oracle pin. This is read-only planning evidence, not an accepted execution manifest or provider execution.
 
