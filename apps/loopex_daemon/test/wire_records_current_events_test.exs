@@ -50,7 +50,11 @@ defmodule LoopexDaemon.WireRecordsCurrentEventsTest do
 
       optional =
         if kind in ~w(interaction.resolved interaction.expired interaction.cancelled) and
-             not Map.has_key?(native, "producer"), do: ~w(reason choice_id), else: []
+             not Map.has_key?(native, "producer") do
+          ~w(reason choice_id)
+        else
+          []
+        end
 
       for field <- Map.keys(native) -- optional do
         assert :error = WireRecords.event("session", event(kind, Map.delete(native, field), 8)),
