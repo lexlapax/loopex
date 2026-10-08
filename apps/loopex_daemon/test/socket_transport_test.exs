@@ -1444,13 +1444,7 @@ defmodule LoopexDaemon.SocketTransportTest do
 
     assert [%{"request_id" => "read", "type" => "error"}] = receive_records(client, 1)
 
-    reference =
-      Wire.encode_reference(%{
-        digest: String.duplicate("a", 64),
-        size: 9,
-        locator: "no-such-artifact",
-        use_locator: "use:" <> String.duplicate("a", 64)
-      })
+    reference = "use:" <> String.duplicate("a", 64)
 
     open = %{
       "method" => "artifact.open_transfer",

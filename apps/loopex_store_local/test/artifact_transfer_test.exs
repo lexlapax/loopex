@@ -293,16 +293,20 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
   test "a transfer belongs to the attachment that opened it and is released with it" do
     %{handle: handle, reference: reference, bytes: bytes} = stored("bytes for one attachment")
     %{runtime: runtime, session_id: session_id} = session(handle)
+    reference = bound_reference(handle, reference, session_id)
 
     {:ok, first} = Loopex.attach(runtime, session_id, after_event_sequence: 0)
 
-    request = %{object: object(reference), use_locator: reference.use_locator, start: 0}
+    request = %{use_locator: reference.use_locator, start: 0}
     assert {:ok, transfer} = Loopex.open_artifact_transfer(first, request)
     assert transfer.total_size == byte_size(bytes)
     assert transfer.object_digest == reference.digest
+    assert transfer.object_reference == object(reference)
+    assert transfer.use_reference == reference
+    refute inspect(transfer) =~ "PRIVATE_USE_PROVENANCE"
+    refute Map.has_key?(transfer, :metadata)
 
-    # The open response carries no placement of its own: a caller learns the
-    # window and the digests, not where the bytes live.
+    # Public object/use locators cross; private storage placement does not.
     refute Map.has_key?(transfer, :object)
     refute Map.has_key?(transfer, :path)
 
@@ -337,7 +341,8 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
   test "a holder's death releases all of that holder's transfers and only them" do
     %{handle: handle, reference: reference} = stored("bytes for two holders")
     %{runtime: runtime, session_id: session_id} = session(handle)
-    request = %{object: object(reference), use_locator: reference.use_locator, start: 0}
+    reference = bound_reference(handle, reference, session_id)
+    request = %{use_locator: reference.use_locator, start: 0}
     doomed = spawn(fn -> Process.sleep(:infinity) end)
     survivor = spawn(fn -> Process.sleep(:infinity) end)
     on_exit(fn -> Process.exit(survivor, :kill) end)
@@ -360,6 +365,98 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
     eventually(fn -> length(Transfers.live(handle.transfers)) == 1 end)
     [{^survivor, attachment, transfer}] = Enum.filter(attachments, &(elem(&1, 0) == survivor))
     assert {:ok, _chunk} = Loopex.read_artifact_chunk(attachment, transfer.transfer_ref, 4)
+  end
+
+  defmodule DescribedStore do
+    @moduledoc false
+    @behaviour Loopex.ArtifactStore
+
+    alias Loopex.Store.Local.Artifacts
+
+    def put(handle, bytes, use), do: Artifacts.put(handle.local, bytes, use)
+    def fetch(handle, object), do: Artifacts.fetch(handle.local, object)
+    def stat(handle, locator), do: Artifacts.stat(handle.local, locator)
+    def describe(handle, locator) do
+      send(handle.observer, {:described, locator})
+      if Map.has_key?(handle, :use), do: {:ok, handle.use},
+        else: Artifacts.describe(handle.local, locator)
+    end
+    def open_transfer(handle, object, locator, window) do
+      send(handle.observer, {:opened_bytes, locator})
+      with {:ok, transfer} <- Artifacts.open_transfer(handle.local, object, locator, window) do
+        {:ok, Map.put(transfer, :private_capture, "PRIVATE_STORE_CAPTURE")}
+      end
+    end
+    def read_transfer(handle, transfer, length), do: Artifacts.read_transfer(handle.local, transfer, length)
+    def close_transfer(handle, transfer), do: Artifacts.close_transfer(handle.local, transfer)
+  end
+
+  test "literal use resolution checks the exact session before opening bytes" do
+    %{handle: handle, reference: original} = stored("bound bytes")
+    probe = %{local: handle, observer: self()}
+    %{runtime: runtime, session_id: session_id} = session(probe, DescribedStore)
+    reference = bound_reference(handle, original, session_id)
+    {:ok, attachment} = Loopex.attach(runtime, session_id, after_event_sequence: 0)
+    request = %{use_locator: reference.use_locator, start: 0}
+
+    for invalid <- [Map.put(request, :object, object(reference)), Map.put(request, :start, -1),
+      Map.put(request, :length, nil), Map.delete(request, :start),
+      Map.put(request, :use_locator, "use:" <> String.duplicate("A", 64))] do
+      assert {:error, :invalid_artifact_request} = Loopex.open_artifact_transfer(attachment, invalid)
+      refute_receive {:described, _}, 20
+      refute_receive {:opened_bytes, _}, 20
+    end
+
+    {:ok, other_session} = Loopex.create_session(runtime, %{}, command_id: "other-create")
+    {:ok, other} = Loopex.attach(runtime, other_session, after_event_sequence: 0)
+    assert {:error, :artifact_use_mismatch} = Loopex.open_artifact_transfer(other, request)
+    assert_receive {:described, locator}
+    assert locator == reference.use_locator
+    assert_receive {:described, ^locator}
+    refute_receive {:opened_bytes, _}, 20
+    assert [] = Transfers.live(handle.transfers)
+
+    assert {:ok, transfer} = Loopex.open_artifact_transfer(attachment, request)
+    assert_receive {:described, ^locator}
+    assert_receive {:described, ^locator}
+    assert_receive {:opened_bytes, ^locator}
+    assert transfer.object_reference == object(reference)
+    assert transfer.use_reference == reference
+    refute inspect(transfer) =~ "PRIVATE_USE_PROVENANCE"
+    refute inspect(transfer) =~ "PRIVATE_STORE_CAPTURE"
+    assert :ok = Loopex.close_artifact_transfer(attachment, transfer.transfer_ref)
+
+    {:ok, _replacement} = Loopex.Runtime.attach_for_holder(runtime, session_id, self(),
+      request_id: "replace", after_event_sequence: 0, replace_attachment_id: attachment.attachment_id)
+    assert {:error, :stale_attachment} = Loopex.open_artifact_transfer(attachment, request)
+    refute_receive {:described, _}, 20
+    refute_receive {:opened_bytes, _}, 20
+  end
+
+  test "malformed and oversized descriptions refuse whole before any transfer opens" do
+    %{handle: handle, reference: original} = stored("checked use")
+    %{session_id: bound_session} = session(handle)
+    reference = bound_reference(handle, original, bound_session)
+    {:ok, use} = Artifacts.describe(handle, reference.use_locator)
+    huge = :binary.copy("p", ArtifactStore.max_use_bytes() + 1)
+    invalid = [nil, Map.put(use, :private, "PRIVATE_USE_PROVENANCE"),
+      Map.put(use, :metadata, %{use.metadata | "run_id" => self()}),
+      put_in(use.metadata["run_id"], huge),
+      put_in(use.metadata["attempt"], :binary.decode_unsigned(:binary.copy(<<255>>, 131_073))),
+      put_in(use.metadata["run_id"], "different capture"),
+      Map.put(use, :canonicalization_version, "future")]
+    for captured <- invalid do
+      probe = %{local: handle, observer: self(), use: captured}
+      %{runtime: runtime, session_id: session_id} = session(probe, DescribedStore)
+      {:ok, attachment} = Loopex.attach(runtime, session_id, after_event_sequence: 0)
+      assert {:error, :artifact_use_mismatch} = Loopex.open_artifact_transfer(attachment,
+        %{use_locator: reference.use_locator, start: 0})
+      assert_receive {:described, _}
+      # Some malformed captures reach the existing facade's second describe.
+      receive do {:described, _} -> :ok after 0 -> :ok end
+      refute_receive {:opened_bytes, _}, 20
+      assert [] = Transfers.live(handle.transfers)
+    end
   end
 
   defp eventually(predicate, attempts \\ 200) do
@@ -405,7 +502,6 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
 
     assert {:error, :artifact_transfer_unsupported} =
              Loopex.open_artifact_transfer(attachment, %{
-               object: object(reference),
                use_locator: reference.use_locator,
                start: 0
              })
@@ -414,9 +510,10 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
   test "one attachment may hold only its share of the live transfers" do
     %{handle: handle, reference: reference} = stored("bytes for two at a time")
     %{runtime: runtime, session_id: session_id} = session(handle)
+    reference = bound_reference(handle, reference, session_id)
     {:ok, attachment} = Loopex.attach(runtime, session_id, after_event_sequence: 0)
 
-    request = %{object: object(reference), use_locator: reference.use_locator, start: 0}
+    request = %{use_locator: reference.use_locator, start: 0}
     limits = ArtifactStore.transfer_limits()
 
     opened =
@@ -440,7 +537,6 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
 
     assert {:error, :artifact_transfer_unsupported} =
              Loopex.open_artifact_transfer(attachment, %{
-               object: object(reference),
                use_locator: reference.use_locator,
                start: 0
              })
@@ -489,9 +585,10 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
   test "the attachment owned open read close API refuses another attachment session or runtime and discloses no path" do
     %{handle: handle, reference: reference} = stored("bytes for one attachment")
     %{runtime: runtime, session_id: session_id} = session(handle)
+    reference = bound_reference(handle, reference, session_id)
 
     {:ok, holder} = Loopex.attach(runtime, session_id, after_event_sequence: 0)
-    request = %{object: object(reference), use_locator: reference.use_locator, start: 0}
+    request = %{use_locator: reference.use_locator, start: 0}
 
     assert {:ok, transfer} = Loopex.open_artifact_transfer(holder, request)
 
@@ -614,8 +711,9 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
 
     %{handle: handle, reference: reference} = stored("shared object")
     %{runtime: runtime, session_id: session_id} = session(handle)
+    reference = bound_reference(handle, reference, session_id)
     {:ok, attachment} = Loopex.attach(runtime, session_id, after_event_sequence: 0)
-    request = %{object: object(reference), use_locator: reference.use_locator, start: 0}
+    request = %{use_locator: reference.use_locator, start: 0}
 
     held =
       for _index <- 1..limits.per_attachment do
@@ -722,7 +820,7 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
     %{runtime: runtime, session_id: session_id} = session(handle, LegacyStore)
     {:ok, attachment} = Loopex.attach(runtime, session_id, after_event_sequence: 0)
 
-    request = %{object: object(reference), use_locator: reference.use_locator, start: 0}
+    request = %{use_locator: reference.use_locator, start: 0}
 
     # The refusal names the missing capability. A fallback that quietly fetched
     # the whole object would defeat the bound the family exists for.
@@ -941,6 +1039,16 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
     end)
 
     %{runtime: runtime, session_id: session_id}
+  end
+
+  defp bound_reference(handle, reference, session_id) do
+    {:ok, bytes} = Artifacts.fetch(handle, object(reference))
+    {:ok, reference} = ArtifactStore.put(%{module: Artifacts, handle: handle}, bytes, %{
+      "media_type" => "text/plain", "role" => "tool_output", "session_id" => session_id,
+      "run_id" => <<255, 0>>, "operation_id" => "operation",
+      "tool_call_id" => "PRIVATE_USE_PROVENANCE", "attempt" => 1
+    })
+    reference
   end
 
   defp stored(bytes, handle \\ nil) do

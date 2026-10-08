@@ -778,16 +778,24 @@ defmodule Loopex.ArtifactStore do
   end
 
   defp validate_described_use(use, reference) do
-    if well_shaped_use?(use) and
+    if well_shaped_use?(use) and scalar_lower_bound(use.metadata) <= @max_use_bytes and
          use.canonicalization_version == reference.use_canonicalization_version and
          use.object_digest == reference.digest and use.object_size == reference.size and
          use.object_locator == reference.locator and use.media_type == reference.media_type and
          use.role == reference.role and
-         Canonical.digest([@use_tag, use]) == reference.use_digest do
+         bounded_use_digest?(use, reference.use_digest) do
       {:ok, use}
     else
       {:error, :artifact_use_mismatch}
     end
+  end
+
+  # Concept: described uses obey the same byte ceiling as newly retained uses.
+  # Technical depth: scalar preflight bounds the allocation; the complete
+  # canonical encoding then checks overhead and supplies the exact digest.
+  defp bounded_use_digest?(use, digest) do
+    encoded = Canonical.encode([@use_tag, use])
+    byte_size(encoded) <= @max_use_bytes and Canonical.digest_bytes(encoded) == digest
   end
 
   # Concept: a record read back from storage is checked before it is encoded.
@@ -797,7 +805,7 @@ defmodule Loopex.ArtifactStore do
   # the shape first turns an adapter returning a pid or a struct into a typed
   # refusal rather than an exception inside whatever was resolving provenance.
   defp well_shaped_use?(use) when is_map(use) and not is_struct(use) do
-    Enum.sort(Map.keys(use)) == [
+    map_size(use) == 7 and Enum.sort(Map.keys(use)) == [
       :canonicalization_version,
       :media_type,
       :metadata,
@@ -809,7 +817,7 @@ defmodule Loopex.ArtifactStore do
       is_binary(use.canonicalization_version) and valid_digest?(use.object_digest) and
       valid_size?(use.object_size) and valid_locator?(use.object_locator) and
       valid_media_type?(use.media_type) and use.role in @roles and
-      is_map(use.metadata) and not is_struct(use.metadata) and
+      is_map(use.metadata) and not is_struct(use.metadata) and map_size(use.metadata) == 5 and
       Enum.sort(Map.keys(use.metadata)) == @use_labels and valid_use_labels?(use.metadata)
   end
 

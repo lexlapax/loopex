@@ -313,7 +313,7 @@ defmodule Loopex.AppServer.ForegroundOutputLifecycleTest do
       Harness.send_frame(fixture, %{
         "method" => "artifact.open_transfer",
         "request_id" => "open",
-        "use_ref" => Wire.encode_reference(fixture.reference),
+        "use_ref" => fixture.reference.use_locator,
         "start_offset" => "0"
       })
 

@@ -473,7 +473,7 @@ defmodule LoopexDaemon.WireRecords do
 
   defp event_member("reason", nil), do: {:ok, nil}
   defp event_member("reason", value) do
-    if is_binary(value) and byte_size(value) in 1..131_072 and String.valid?(value),
+    if is_binary(value) and byte_size(value) in 0..131_072 and String.valid?(value),
       do: {:ok, value}, else: :error
   end
 
@@ -730,10 +730,19 @@ defmodule LoopexDaemon.WireRecords do
 
   def transfer_refused(request_id, _reason), do: request_error(request_id, "internal_failure")
 
+  defp transfer_reference(reference) do
+    Map.new(reference, fn
+      {:size, size} -> {"size", Wire.encode_u64(size)}
+      {key, value} -> {Atom.to_string(key), value}
+    end)
+  end
+
   @doc false
   @spec transfer_opened(map()) :: map()
   def transfer_opened(transfer) when is_map(transfer) do
     %{
+      "object_reference" => transfer_reference(Map.fetch!(transfer, :object_reference)),
+      "use_reference" => transfer_reference(Map.fetch!(transfer, :use_reference)),
       "transfer_ref" => Wire.encode_identity(Map.fetch!(transfer, :transfer_ref)),
       "total_size" => Wire.encode_u64(Map.fetch!(transfer, :total_size)),
       "window_start" => Wire.encode_u64(Map.fetch!(transfer, :window_start)),

@@ -382,8 +382,9 @@ defmodule Loopex.Runtime.EventDispatcher do
            fetch_attachment(state, token, session_id, attachment_id, incarnation_id),
          {:ok, store} <- artifact_store(state),
          :ok <- transfer_headroom(attachment, state),
-         {:ok, object} <- transfer_object(request),
-         {:ok, use_locator} <- transfer_use(request),
+         {:ok, use_locator, window} <- transfer_request(request),
+         {:ok, reference} <- transfer_reference(store, use_locator, attachment.session_id),
+         object = Map.take(reference, [:digest, :size, :locator]),
          {:ok, transfer} <-
            Instrumentation.span(
              [:artifact, :open_transfer],
@@ -398,7 +399,7 @@ defmodule Loopex.Runtime.EventDispatcher do
                  store.handle,
                  object,
                  use_locator,
-                 transfer_window(request)
+                 window
                )
              end
            ) do
@@ -413,7 +414,13 @@ defmodule Loopex.Runtime.EventDispatcher do
             )
       }
 
-      {:reply, {:ok, Map.delete(transfer, :object)}, put_attachment(state, next)}
+      public =
+        transfer
+        |> Map.take([:transfer_ref, :total_size, :window_start, :window_length, :object_digest])
+        |> Map.put(:object_reference, object)
+        |> Map.put(:use_reference, reference)
+
+      {:reply, {:ok, public}, put_attachment(state, next)}
     else
       {:error, reason} -> {:reply, {:error, reason}, state}
     end
@@ -1589,31 +1596,78 @@ defmodule Loopex.Runtime.EventDispatcher do
       else: {:error, :transfer_limit_reached}
   end
 
-  # Concept: a caller names an object and the use that describes it, and
-  # nothing else crosses this boundary.
+  # Concept: an attached reader names an immutable use belonging to its session.
   #
-  # Technical depth: the request is bounded plain data. No path, no adapter
-  # handle and no private provenance appears in it or in what comes back: the
-  # open response drops the object record the store resolved, because a caller
-  # already holds the compact reference it named.
-  defp transfer_object(%{object: %{digest: digest, size: size, locator: locator}})
-       when is_binary(digest) and is_integer(size) and size >= 0 and is_binary(locator),
-       do: {:ok, %{digest: digest, size: size, locator: locator}}
-
-  defp transfer_object(_request), do: {:error, :invalid_artifact_request}
-
-  defp transfer_use(%{use_locator: "use:" <> _digest = use_locator}), do: {:ok, use_locator}
-  defp transfer_use(_request), do: {:error, :invalid_artifact_request}
-
-  defp transfer_window(request) do
-    %{start: Map.get(request, :start, 0)}
-    |> then(fn window ->
-      case Map.get(request, :length) do
-        nil -> window
-        length -> Map.put(window, :length, length)
-      end
-    end)
+  # Technical depth: resolve the object inside the runtime, using the existing
+  # describe facade to check the complete canonical use. The first bounded
+  # description supplies only a candidate reference; the second validates it.
+  # No private provenance escapes and no object bytes open before session binding.
+  defp transfer_request(request) when is_map(request) and not is_struct(request) do
+    with true <- map_size(request) in [2, 3],
+         true <- Enum.all?(Map.keys(request), &(&1 in [:use_locator, :start, :length])),
+         "use:" <> digest = locator <- Map.get(request, :use_locator),
+         true <- byte_size(digest) == 64,
+         true <- Enum.all?(:binary.bin_to_list(digest), &(&1 in ?0..?9 or &1 in ?a..?f)),
+         start when is_integer(start) and start in 0..18_446_744_073_709_551_615 <-
+           Map.get(request, :start),
+         true <- not Map.has_key?(request, :length) or
+                   (is_integer(request.length) and request.length in 0..18_446_744_073_709_551_615) do
+      {:ok, locator, Map.take(request, [:start, :length])}
+    else
+      _invalid -> {:error, :invalid_artifact_request}
+    end
   end
+
+  defp transfer_request(_request), do: {:error, :invalid_artifact_request}
+
+  defp transfer_reference(store, "use:" <> digest = locator, session_id) do
+    with {:ok, use} <- store.module.describe(store.handle, locator),
+         true <- bounded_transfer_use?(use),
+         reference = %{
+           digest: use.object_digest,
+           size: use.object_size,
+           locator: use.object_locator,
+           media_type: use.media_type,
+           role: use.role,
+           use_canonicalization_version: use.canonicalization_version,
+           use_digest: digest,
+           use_locator: locator
+         },
+         {:ok, checked} <- ArtifactStore.describe(store, reference),
+         true <- checked.metadata["session_id"] == session_id do
+      {:ok, reference}
+    else
+      {:error, _reason} -> {:error, :artifact_use_mismatch}
+      _invalid -> {:error, :artifact_use_mismatch}
+    end
+  end
+
+  # Concept: trusted Store descriptions remain bounded plain data at this edge.
+  # Technical depth: reject unknown members and oversized scalars before the
+  # canonical validator can allocate them. Public reference validation checks
+  # the remaining fixed fields; metadata never becomes a public reference.
+  defp bounded_transfer_use?(use) when is_map(use) and not is_struct(use) do
+    map_size(use) == 7 and
+      Enum.all?(Map.keys(use), &(&1 in [:canonicalization_version, :object_digest,
+        :object_size, :object_locator, :media_type, :role, :metadata])) and
+      bounded_transfer_labels?(Map.get(use, :metadata))
+  end
+
+  defp bounded_transfer_use?(_use), do: false
+
+  defp bounded_transfer_labels?(labels) when is_map(labels) and not is_struct(labels) do
+    names = ["session_id", "run_id", "operation_id", "tool_call_id"]
+
+    map_size(labels) == 5 and
+      Enum.all?(Map.keys(labels), &(&1 in ["attempt" | names])) and
+      Enum.all?(names, &(is_binary(labels[&1]) and labels[&1] != "")) and
+      is_integer(labels["attempt"]) and labels["attempt"] > 0 and
+      Enum.reduce(names, :erlang.external_size(labels["attempt"]), fn name, size ->
+        size + byte_size(labels[name])
+      end) <= ArtifactStore.max_use_bytes()
+  end
+
+  defp bounded_transfer_labels?(_labels), do: false
 
   defp dispatcher_registration_worker(root, token, dispatcher, incarnation) do
     result =

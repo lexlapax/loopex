@@ -83,6 +83,18 @@ defmodule LoopexDaemon.WireRecordsCurrentEventsTest do
     end
   end
 
+  test "steer reason retains null empty UTF-8 and the exact inherited byte ceiling" do
+    native = %{"command_id" => "command", "run_id" => "run",
+      "disposition" => "unapplied", "reason" => nil}
+    for reason <- [nil, "", "é", String.duplicate("a", 131_072)] do
+      record = WireRecords.event("session", event("steer.resolved", Map.put(native, "reason", reason), 1))
+      assert record["event"]["data"]["reason"] == reason
+    end
+    for reason <- [<<255>>, String.duplicate("a", 131_073), 1] do
+      assert :error = WireRecords.event("session", event("steer.resolved", Map.put(native, "reason", reason), 1))
+    end
+  end
+
   defp ordinary_payloads do
     id = <<0, 255, 10>>
     ids = %{"run_id" => id, "turn_id" => id, "tool_call_id" => id, "operation_id" => id, "tool_id" => "example.write"}

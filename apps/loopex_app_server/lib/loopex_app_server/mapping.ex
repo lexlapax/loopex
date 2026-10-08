@@ -443,27 +443,27 @@ defmodule Loopex.AppServer.Mapping do
 
   # Concept: the window a client asked to read, in the facade's own terms.
   #
-  # Technical depth: the object and use identities are the compact reference the
-  # client already holds, decoded here and never re-derived. A window length is
+  # Technical depth: the literal use locator resolves inside the runtime. A window length is
   # optional because an absent one means the rest of the object, which is
   # different from a length of zero and must stay different.
   defp transfer_window(request) do
-    with {:ok, reference} <- field(request, "use_ref", &Wire.reference/1),
+    with {:ok, use_locator} <- field(request, "use_ref", &use_locator/1),
          {:ok, start_offset} <- required_u64(request, "start_offset"),
          {:ok, length} <- optional_u64_field(request, "window_length") do
       open = %{
-        object: %{
-          digest: reference.digest,
-          size: reference.size,
-          locator: reference.locator
-        },
-        use_locator: reference.use_locator,
+        use_locator: use_locator,
         start: start_offset
       }
 
       {:ok, if(length, do: Map.put(open, :length, length), else: open)}
     end
   end
+
+  defp use_locator("use:" <> digest = locator) do
+    with {:ok, _digest} <- Wire.digest(digest), do: {:ok, locator}
+  end
+
+  defp use_locator(_locator), do: :error
 
   defp required_u64(request, name) do
     case Wire.u64(Map.get(request, name)) do
@@ -491,8 +491,17 @@ defmodule Loopex.AppServer.Mapping do
   # crosses. The transfer reference is opaque and belongs to the attachment that
   # opened it; the window bounds and the object digest are what let a client
   # verify the bytes it later receives.
+  defp transfer_reference(reference) do
+    Map.new(reference, fn
+      {:size, size} -> {"size", Wire.encode_u64(size)}
+      {key, value} -> {Atom.to_string(key), value}
+    end)
+  end
+
   defp opened(transfer) do
     %{
+      "object_reference" => transfer_reference(Map.fetch!(transfer, :object_reference)),
+      "use_reference" => transfer_reference(Map.fetch!(transfer, :use_reference)),
       "transfer_ref" => Wire.encode_identity(Map.fetch!(transfer, :transfer_ref)),
       "total_size" => Wire.encode_u64(Map.fetch!(transfer, :total_size)),
       "window_start" => Wire.encode_u64(Map.fetch!(transfer, :window_start)),

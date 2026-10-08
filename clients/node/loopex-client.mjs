@@ -257,22 +257,4 @@ export const wire = {
   decodeU64(value) {
     return BigInt(value);
   },
-
-  reference(compact) {
-    const members = {
-      digest: compact.digest,
-      locator: compact.locator,
-      size: String(compact.size),
-      use_locator: compact.use_locator,
-    };
-
-    return Buffer.from(JSON.stringify(sorted(members)), "utf8").toString("base64url");
-  },
 };
-
-// The server encodes object members in sorted order and compares bytes, so a
-// client building an opaque value has to sort too.
-function sorted(object) {
-  return Object.fromEntries(Object.keys(object).sort().map((key) => [key, object[key]]));
-}
-

@@ -362,8 +362,6 @@ defmodule Loopex.AppServer.ForegroundOutputFixture do
     artifacts = Loopex.AppServer.WorkflowArtifacts
     {:ok, artifact} = artifacts.start()
     try do
-    {:ok, reference} = artifacts.put(artifact, :binary.copy("a", 1_048_576),
-      %{media_type: "text/plain", role: "tool_output", metadata: %{}})
     {:ok, sink} = Loopex.ProgressSink.open()
     try do
     fixture = Fixture.start(script: [%{text: "done", calls: []}],
@@ -371,6 +369,11 @@ defmodule Loopex.AppServer.ForegroundOutputFixture do
     try do
       await_ready(fixture.runtime, now_ms() + 1_000)
       {:ok, session} = Loopex.create_session(fixture.runtime, %{}, command_id: "bootstrap")
+      {:ok, reference} = Loopex.ArtifactStore.put(%{module: artifacts, handle: artifact},
+        :binary.copy("a", 1_048_576), %{
+          "media_type" => "text/plain", "role" => "tool_output", "session_id" => session,
+          "run_id" => "fixture-run", "operation_id" => "fixture-operation",
+          "tool_call_id" => "fixture-call", "attempt" => 1})
       send(observer, {:fixture_ready, self(), fixture, sink, session, reference, artifact})
       result =
         try do

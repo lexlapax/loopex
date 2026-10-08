@@ -88,12 +88,7 @@ defmodule LoopexDaemon.RequestTest do
     assert parsed["session.activate_skill"].fields.supporting_labels == []
 
     assert parsed["artifact.open_transfer"].fields == %{
-             reference: %{
-               digest: @digest,
-               size: 9,
-               locator: "artifact",
-               use_locator: "use:" <> @digest
-             },
+             use_locator: "use:" <> @digest,
              start_offset: 0,
              window_length: nil
            }
@@ -572,19 +567,28 @@ defmodule LoopexDaemon.RequestTest do
     }
   end
 
+  test "artifact open admits the literal only and preserves authored windows" do
+    valid = request("artifact.open_transfer", %{"use_ref" => "use:" <> @digest,
+      "start_offset" => "0", "window_length" => "0"})
+    assert {:ok, parsed} = Request.parse(valid)
+    assert parsed.fields == %{use_locator: "use:" <> @digest, start_offset: 0, window_length: 0}
+    old_envelope = Wire.encode_bytes(JSON.encode!(%{"digest" => @digest,
+      "size" => "9", "locator" => "artifact", "use_locator" => "use:" <> @digest}))
+    for locator <- [old_envelope, "use:", "use:" <> String.upcase(@digest),
+      "use:" <> String.duplicate("g", 64), "use:" <> @digest <> "a", nil, 7] do
+      assert {:error, :invalid_request} = Request.parse(Map.put(valid, "use_ref", locator))
+    end
+    for offset <- [nil, 0, "00", "-1", "18446744073709551616"] do
+      assert {:error, :invalid_request} = Request.parse(Map.put(valid, "start_offset", offset))
+    end
+  end
+
   defp request(method, fields),
     do: Map.merge(%{"method" => method, "request_id" => "request-1"}, fields)
 
   defp identity(bytes), do: Wire.encode_identity(bytes)
 
-  defp artifact_reference do
-    Wire.encode_reference(%{
-      digest: @digest,
-      size: 9,
-      locator: "artifact",
-      use_locator: "use:" <> @digest
-    })
-  end
+  defp artifact_reference, do: "use:" <> @digest
 
   defp nested_maps(0), do: "leaf"
   defp nested_maps(depth), do: %{"next" => nested_maps(depth - 1)}

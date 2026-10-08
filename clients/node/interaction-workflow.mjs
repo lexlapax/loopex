@@ -26,6 +26,7 @@
 //
 // Usage: LOOPEX_WORKSPACE_REF=<ref> node interaction-workflow.mjs <elixir> <path>...
 
+import { createHash } from "node:crypto";
 import { Connection, wire } from "./loopex-client.mjs";
 
 const [elixir, ...paths] = process.argv.slice(2);
@@ -237,11 +238,19 @@ async function run(connection) {
 
   if (artifact) {
     const opened = await connection.request("artifact.open_transfer", {
-      use_ref: wire.reference(artifact),
+      use_ref: artifact.use_locator,
       start_offset: wire.u64(0),
     });
 
     if (opened.type === "result") {
+      const use = opened.result.use_reference;
+      assert(Object.keys(use).length === Object.keys(artifact).length &&
+        Object.entries(artifact).every(([key, value]) => use[key] === value),
+        "the transfer did not resolve the exact published use reference");
+      const object = opened.result.object_reference;
+      assert(Object.keys(object).length === 3 && object.digest === artifact.digest && object.size === artifact.size &&
+        object.locator === artifact.locator, "the transfer resolved a different object");
+      assert(opened.result.object_digest === artifact.digest, "the transfer named a different digest");
       summary.transfer_opened = true;
       summary.total_size = opened.result.total_size;
 
@@ -251,7 +260,10 @@ async function run(connection) {
       });
 
       if (chunk.type === "result" && !chunk.result.eof) {
-        summary.chunk_bytes = wire.decodeBytes(chunk.result.bytes_b64).length;
+        const bytes = wire.decodeBytes(chunk.result.bytes_b64);
+        assert(createHash("sha256").update(bytes).digest("hex") === chunk.result.chunk_digest,
+          "the artifact chunk digest did not cover its exact bytes");
+        summary.chunk_bytes = bytes.length;
         summary.chunk_has_digest = typeof chunk.result.chunk_digest === "string";
       }
 

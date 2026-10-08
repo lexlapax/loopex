@@ -2838,12 +2838,10 @@ defmodule LoopexDaemon.SocketConnection do
 
   defp transfer_fun(attachment, %Request{operation: :artifact_open_transfer} = request) do
     %{request_id: request_id, method: method, fields: fields} = request
-    reference = fields.reference
 
     open =
       %{
-        object: %{digest: reference.digest, size: reference.size, locator: reference.locator},
-        use_locator: reference.use_locator,
+        use_locator: fields.use_locator,
         start: fields.start_offset
       }
       |> then(fn open ->

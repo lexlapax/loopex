@@ -347,10 +347,10 @@ defmodule LoopexDaemon.Request do
 
   defp parse_method("artifact.open_transfer", request) do
     with :ok <- exact_fields(request, ["use_ref", "start_offset"], ["window_length"]),
-         {:ok, reference} <- field(request, "use_ref", &Wire.reference/1),
+         {:ok, use_locator} <- field(request, "use_ref", &use_locator/1),
          {:ok, start_offset} <- u64(request, "start_offset"),
          {:ok, window_length} <- optional_u64(request, "window_length") do
-      {:ok, %{reference: reference, start_offset: start_offset, window_length: window_length}}
+      {:ok, %{use_locator: use_locator, start_offset: start_offset, window_length: window_length}}
     end
   end
 
@@ -425,6 +425,12 @@ defmodule LoopexDaemon.Request do
              do: {:ok, %{bounds: decoded}}
     end
   end
+
+  defp use_locator("use:" <> digest = locator) do
+    with {:ok, _digest} <- Wire.digest(digest), do: {:ok, locator}
+  end
+
+  defp use_locator(_locator), do: :error
 
   defp exact_fields(request, required, optional \\ []) do
     allowed = ["method", "request_id" | required ++ optional]
