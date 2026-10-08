@@ -1,8 +1,11 @@
 # M7 Implementation Tasks
 
 Post-reboot verification continues from pushed `8e46d04c`. Original cleanup
-formatter19048 is collected PASS with six joins in12.019 seconds; complete
-paired38 proof original16501 is live, uncollected and grants no task completion.
+formatter19048 is collected PASS with six joins in12.019 seconds. Complete
+paired38 proof original16501 failed its two new cases after36 current passes;
+floor was unrun. The actual failure is collected and retained. Source repair
+removes the ordinary abort from startup refusal while retaining the original
+before-stop assertions and bounds; its complete91-case proof remains unrun.
 Recovered ownership source is committed raw558d77fc and independently reviewed;
 its complete74-case native proof remains unrun. The exact recovered context is
 retained outside temporary storage and linked by the [resume record](M7-resume.md).

@@ -44,11 +44,24 @@ The actual clean format-only child is isolated
 NUL projection hashesc81da123. Original formatter cuts remain correctly recorded
 against raw a79b4fd5 with formatting dirt.
 
-Cleanup paired38 proof original16501 is LIVE and uncollected. Its reviewed
-enabled carrier is96eabdae; output
-`M7/resume-prepared-cleanup-proof-20261007-v1`. Poll that original handle, collect
-its terminal exactly once with flat collectorb4671fa3 and preserve any failure.
-Do not rerun completed stages. Its independent factual review is0d47f3fc.
+Cleanup paired38 proof original16501 is TERMINAL1 and collected FAIL. Current
+executed38 with36 passed and2 failed; floor was not run. Four original processes
+joined and25 artifacts authenticate in77.622 seconds. Output
+`M7/resume-prepared-cleanup-proof-20261007-v1`; collection
+`d5c6117bb4cb4bc3f65f918fc8627fd771927095ed583f1bf1935892fbe2ac31`, terminal
+`78b6b2bdcae154f45928a9dea6036b24f29d78d6f0ee3c2f7acb22549e119836`.
+Latest collected registry1737 hashes
+`425f597b12c0f13fc5a4871ffbe514dd5e5dee45d9d89d4714884e0b69ac32d5`.
+Do not repoll16501 or retry the unchanged candidate. Ready startup refusal calls
+the ordinary abort path before abandonment, fencing the prepared capability
+and potentially committing an abort receipt. Installer exceptions reach that
+same abort via interrupt/run. Source repair owns only Chat, Driver and the new
+workflow-test block in the isolated checkout. Preserve all original assertions
+and captured limits; route startup refusal to bounded local attachment cleanup,
+then abandon without activating or issuing a session abort. The next changed
+candidate must prove complete91 cases per pair:15 workflow,23 resume and53 driver.
+The original failing test remains a failure; accepting fenced state or extra
+receipts would weaken its required abandonment proof.
 The complete recovered source, carriers, factual binding and reviews are31
 immutable files retained at
 `M7/reboot-cleanup-and-ownership-progress-context-20261007-v1/retention.json`,
