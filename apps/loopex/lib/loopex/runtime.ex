@@ -251,6 +251,73 @@ defmodule Loopex.Runtime do
 
   def configuration(_runtime), do: {:error, :runtime_unavailable}
 
+  @typedoc """
+  ## Concept
+
+  A transient observation of this Control initialization's creation startup.
+
+  ## Technical depth
+
+  The identity is exactly 32 opaque bytes. The signed cutoff is same-VM
+  monotonic milliseconds, including valid negative values. Neither grants
+  mutation authority or becomes a durable recovery fact.
+  """
+  @type creation_startup_snapshot :: %{
+          state: :starting | :ready | :unavailable,
+          startup_id: binary(),
+          startup_deadline_ms: integer()
+        }
+
+  @doc """
+  ## Concept
+
+  Observes whether the original creation startup barrier completed.
+
+  ## Technical depth
+
+  The timeout is an integer from 1 through 1,000 milliseconds, defaulting to
+  1,000. Invalid timeouts are rejected before contacting Control. The pure read
+  returns exactly state, startup_id and startup_deadline_ms, without waiting for
+  startup or calling the Store. Ready remains true after its original cutoff
+  and during later authored creation, but stopping or quiescing is unavailable.
+  Missing capture, invalid runtime/token, Control loss and read timeout return
+  runtime_unavailable. Observation never reserves the current creation slot.
+  """
+  @spec creation_startup_status(t(), integer()) ::
+          {:ok, creation_startup_snapshot()}
+          | {:error, :invalid_status_timeout | :runtime_unavailable}
+  def creation_startup_status(runtime, timeout \\ 1_000)
+
+  def creation_startup_status(_runtime, timeout)
+      when not is_integer(timeout) or timeout < 1 or timeout > 1_000,
+      do: {:error, :invalid_status_timeout}
+
+  def creation_startup_status(%__MODULE__{supervisor: supervisor, token: token} = runtime, timeout)
+      when is_pid(supervisor) and is_reference(token),
+      do: creation_startup_status_call(runtime, timeout)
+
+  def creation_startup_status(_runtime, _timeout), do: {:error, :runtime_unavailable}
+
+  # Concept: child resolution and the original Control read spend one caller bound.
+  # Technical depth: direct bounded supervisor resolution creates no helper or
+  # waiter, and a replacement is never followed within this observation.
+  defp creation_startup_status_call(%__MODULE__{supervisor: supervisor, token: token}, timeout) do
+    deadline = System.monotonic_time(:millisecond) + timeout
+
+    with children when is_list(children) <- safe_call(supervisor, :which_children, timeout),
+         {Control, control, _type, _modules} when is_pid(control) <-
+           List.keyfind(children, Control, 0),
+         remaining when remaining > 0 <- deadline - System.monotonic_time(:millisecond) do
+      result = safe_call(control, {:creation_startup_status, token}, remaining)
+
+      if System.monotonic_time(:millisecond) < deadline,
+        do: result,
+        else: {:error, :runtime_unavailable}
+    else
+      _ -> {:error, :runtime_unavailable}
+    end
+  end
+
   @doc """
   ## Concept
 

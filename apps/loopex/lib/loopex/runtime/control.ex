@@ -381,6 +381,13 @@ defmodule Loopex.Runtime.Control do
         self()
       )
 
+    startup = %{
+      startup_id: :crypto.strong_rand_bytes(32),
+      startup_deadline_ms: System.monotonic_time(:millisecond) + 60_000,
+      invocation: make_ref(),
+      state: :starting
+    }
+
     send(self(), :creation_startup)
 
     {:ok,
@@ -422,6 +429,7 @@ defmodule Loopex.Runtime.Control do
        creation_incarnation: make_ref(),
        creation_selection: :crypto.strong_rand_bytes(32) |> Base.encode16(case: :lower),
        creation_status: :starting,
+       creation_startup: startup,
        creation_stopping: false,
        creation_head: nil,
        creation: nil,
@@ -508,6 +516,15 @@ defmodule Loopex.Runtime.Control do
     else
       {:reply, {:error, :runtime_unavailable}, state}
     end
+  end
+
+  def handle_call({:creation_startup_status, token}, _from, state) do
+    reply =
+      if token == state.token,
+        do: creation_startup_snapshot(state),
+        else: {:error, :runtime_unavailable}
+
+    {:reply, reply, state}
   end
 
   def handle_call({:configuration, token}, _from, state) do
@@ -1544,8 +1561,12 @@ defmodule Loopex.Runtime.Control do
   end
 
   def handle_info(:creation_startup, %{creation_status: :starting, creation: nil} = state) do
-    entry = creation_episode(state, :startup)
-    {:noreply, creation_read(%{state | creation: entry}, :initial_head, nil)}
+    if is_map(Map.get(state, :creation_startup)) do
+      entry = creation_episode(state, :startup)
+      {:noreply, creation_read(%{state | creation: entry}, :initial_head, nil)}
+    else
+      {:noreply, %{state | creation_status: :unavailable}}
+    end
   end
 
   def handle_info(:creation_startup, state), do: {:noreply, state}
@@ -2687,14 +2708,18 @@ defmodule Loopex.Runtime.Control do
   end
 
   defp creation_episode(state, kind) do
-    invocation = make_ref()
-    cutoff = System.monotonic_time(:millisecond) + 60_000
+    {invocation, cutoff} =
+      if kind == :startup do
+        {state.creation_startup.invocation, state.creation_startup.startup_deadline_ms}
+      else
+        {make_ref(), System.monotonic_time(:millisecond) + 60_000}
+      end
 
     timer =
       Process.send_after(
         self(),
         {:creation_expired, state.creation_incarnation, invocation},
-        60_000
+        if(kind == :startup, do: max(cutoff - System.monotonic_time(:millisecond), 0), else: 60_000)
       )
 
     %{
@@ -3554,12 +3579,52 @@ defmodule Loopex.Runtime.Control do
       if entry.cleanup_timer, do: Process.cancel_timer(entry.cleanup_timer)
       if entry.caller_monitor, do: Process.demonitor(entry.caller_monitor, [:flush])
 
+      state = retain_creation_startup_result(state, eligible)
+      eligible = if entry.kind == :startup, do: state.creation_startup.state == :ready, else: eligible
+
       %{
         state
         | creation: nil,
           creation_status:
             if(eligible and not state.creation_stopping, do: :ready, else: :unavailable)
       }
+    end
+  end
+
+  # Concept: original startup readiness survives retirement and later authored work.
+  # Technical depth: proof requires all original joins before the initialization
+  # cutoff. The read never relies on timer delivery or changes admission state.
+  defp retain_creation_startup_result(%{creation: %{kind: :startup}} = state, eligible) do
+    startup = state.creation_startup
+
+    ready =
+      eligible and not state.creation.stopped and not state.creation_stopping and
+        is_nil(state.quiescing) and
+        System.monotonic_time(:millisecond) < startup.startup_deadline_ms
+
+    %{state | creation_startup: %{startup | state: if(ready, do: :ready, else: :unavailable)}}
+  end
+
+  defp retain_creation_startup_result(state, _eligible), do: state
+
+  defp creation_startup_snapshot(state) do
+    case Map.get(state, :creation_startup) do
+      %{startup_id: id, startup_deadline_ms: cutoff, state: result}
+      when is_binary(id) and byte_size(id) == 32 and is_integer(cutoff) and
+             result in [:starting, :ready, :unavailable] ->
+        observed =
+          cond do
+            state.creation_stopping or not is_nil(state.quiescing) -> :unavailable
+            result == :unavailable -> :unavailable
+            result == :ready -> :ready
+            System.monotonic_time(:millisecond) >= cutoff -> :unavailable
+            true -> :starting
+          end
+
+        {:ok, %{state: observed, startup_id: id, startup_deadline_ms: cutoff}}
+
+      _ ->
+        {:error, :runtime_unavailable}
     end
   end
 
@@ -3576,6 +3641,7 @@ defmodule Loopex.Runtime.Control do
   # Technical depth: timer order cannot renew an expired observation period.
   # Preserve original monitors, the complete lane and the occupied invocation.
   defp creation_unproved(state) do
+    state = retain_creation_startup_result(state, false)
     entry = state.creation
 
     if entry.from do
@@ -3611,6 +3677,7 @@ defmodule Loopex.Runtime.Control do
   defp creation_stop(%{creation: nil} = state), do: state
 
   defp creation_stop(state) do
+    state = retain_creation_startup_result(state, false)
     entry = state.creation
     cleanup = entry.cleanup || creation_cleanup(state.cleanup_grace_ms)
 
