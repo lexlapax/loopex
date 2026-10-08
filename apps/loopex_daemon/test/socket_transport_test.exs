@@ -1551,7 +1551,7 @@ defmodule LoopexDaemon.SocketTransportTest do
         Loopex.CompactionProgress.new(
           "queued-episode-#{index}",
           %{"kind" => "compact", "id" => "queued-command-#{index}"},
-          item.progress_domain,
+          item.stream_domain_id,
           cursor
         )
 
@@ -1567,7 +1567,7 @@ defmodule LoopexDaemon.SocketTransportTest do
       Loopex.CompactionProgress.new(
         "overflow-episode",
         %{"kind" => "compact", "id" => "overflow-command"},
-        item.progress_domain,
+        item.stream_domain_id,
         cursor
       )
 
