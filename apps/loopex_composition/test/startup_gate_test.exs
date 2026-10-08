@@ -39,14 +39,21 @@ defmodule LoopexComposition.StartupGateTest do
   end
 
   test "an owned first unavailable snapshot stays unavailable after its cutoff" do
-    {:ok, root} = Supervisor.start_link([
-      Supervisor.child_spec({Task.Supervisor, []}, id: Loopex.Runtime.Workers)
-    ], strategy: :one_for_one)
+    {:ok, root} =
+      Supervisor.start_link(
+        [
+          Supervisor.child_spec({Task.Supervisor, []}, id: Loopex.Runtime.Workers)
+        ],
+        strategy: :one_for_one
+      )
+
     runtime = %Runtime{supervisor: root, token: make_ref()}
     Process.put({StartupGate, :test_listener}, self())
     cutoff = System.monotonic_time(:millisecond) - 1
+
     assert {:error, :runtime_unavailable} =
-      StartupGate.await(runtime, fn _, _ -> status(:unavailable, cutoff) end)
+             StartupGate.await(runtime, fn _, _ -> status(:unavailable, cutoff) end)
+
     assert_receive {:startup_task, observer, _owner, _initial}
     monitor = Process.monitor(observer)
     assert_receive {:DOWN, ^monitor, :process, ^observer, _}
@@ -106,10 +113,11 @@ defmodule LoopexComposition.StartupGateTest do
     test = self()
     cutoff = now_ms() + 1_000
 
-    {holder, ref} = holder(self(), self(), fn runtime, _timeout ->
-      send(test, {:read_held, self(), runtime})
-      receive do: (:release -> status(:ready, cutoff))
-    end)
+    {holder, ref} =
+      holder(self(), self(), fn runtime, _timeout ->
+        send(test, {:read_held, self(), runtime})
+        receive do: (:release -> status(:ready, cutoff))
+      end)
 
     assert_receive {:read_held, observer, runtime}
     state = :sys.get_state(holder)
@@ -158,10 +166,11 @@ defmodule LoopexComposition.StartupGateTest do
     owner = if lost == :owner, do: dependency, else: self()
     root = if lost == :root, do: dependency, else: self()
 
-    {holder, _ref} = holder(owner, root, fn runtime, _timeout ->
-      send(test, {:read_held, self(), runtime})
-      receive do: (:never -> status(:ready, now_ms() + 1_000))
-    end)
+    {holder, _ref} =
+      holder(owner, root, fn runtime, _timeout ->
+        send(test, {:read_held, self(), runtime})
+        receive do: (:never -> status(:ready, now_ms() + 1_000))
+      end)
 
     assert_receive {:read_held, observer, runtime}
     holder_down = Process.monitor(holder)
@@ -211,7 +220,9 @@ defmodule LoopexComposition.StartupGateTest do
 
   defp dependency(test) do
     receive do
-      :finish -> :ok
+      :finish ->
+        :ok
+
       message ->
         send(test, message)
         dependency(test)

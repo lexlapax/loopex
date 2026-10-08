@@ -465,10 +465,20 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
   # Technical depth: an exact granted holder reports custody independently of
   # readiness. Retain its monitor for rollback without advancing the phase;
   # late evidence may reconcile a still-unknown grant during bounded abort.
-  def handle_info({:runtime_custody, holder, reference, %Runtime{} = runtime},
-        %{startup: %{reference: reference, expected: :runtime, granted: true,
-                     registered: %{runtime_holder: holder}} = startup,
-          phase: phase} = state) when phase in [:starting, :aborting] do
+  def handle_info(
+        {:runtime_custody, holder, reference, %Runtime{} = runtime},
+        %{
+          startup:
+            %{
+              reference: reference,
+              expected: :runtime,
+              granted: true,
+              registered: %{runtime_holder: holder}
+            } = startup,
+          phase: phase
+        } = state
+      )
+      when phase in [:starting, :aborting] do
     case register_result(startup, :runtime, runtime) do
       {:ok, retained} ->
         next = %{state | startup: retained}

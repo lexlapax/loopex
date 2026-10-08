@@ -82,8 +82,7 @@ defmodule LoopexComposition.Ephemeral.RuntimeHolder do
           send(owner, {:runtime_custody, self(), ref, runtime})
           send(state.root, {:runtime_custody, self(), ref, runtime})
 
-          {:noreply,
-           %{state | phase: :owned, runtime: runtime, runtime_monitor: monitor}}
+          {:noreply, %{state | phase: :owned, runtime: runtime, runtime_monitor: monitor}}
 
         result ->
           send(owner, {:phase_result, self(), ref, :runtime, result})
@@ -105,8 +104,10 @@ defmodule LoopexComposition.Ephemeral.RuntimeHolder do
   # Concept: custody is known before startup observation can be held.
   # Technical depth: only the original owner's exact acknowledgement releases
   # the reader. This reports no readiness and advances no startup phase.
-  def handle_info({:runtime_custody_ack, owner, ref, runtime},
-        %{owner: owner, ref: ref, phase: :owned, runtime: runtime} = state) do
+  def handle_info(
+        {:runtime_custody_ack, owner, ref, runtime},
+        %{owner: owner, ref: ref, phase: :owned, runtime: runtime} = state
+      ) do
     observer = StartupGate.start(runtime, state.deadline, status_reader())
     {:noreply, %{state | phase: :observing, observer: observer}}
   end
@@ -116,14 +117,18 @@ defmodule LoopexComposition.Ephemeral.RuntimeHolder do
     {:noreply, %{state | observation_result: result}}
   end
 
-  def handle_info({:DOWN, monitor, :process, pid, _reason},
-        %{phase: :observing, observer: %{pid: pid, monitor: monitor}, stop_reason: reason} = state)
+  def handle_info(
+        {:DOWN, monitor, :process, pid, _reason},
+        %{phase: :observing, observer: %{pid: pid, monitor: monitor}, stop_reason: reason} = state
+      )
       when reason != nil do
     {:stop, reason, %{state | observer: nil}}
   end
 
-  def handle_info({:DOWN, monitor, :process, pid, _reason},
-        %{phase: :observing, observer: %{pid: pid, monitor: monitor}} = state) do
+  def handle_info(
+        {:DOWN, monitor, :process, pid, _reason},
+        %{phase: :observing, observer: %{pid: pid, monitor: monitor}} = state
+      ) do
     publish_observation(%{state | observer: nil})
   end
 
