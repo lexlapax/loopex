@@ -3587,17 +3587,7 @@ defmodule LoopexDaemon.OwnerTest do
           {gate,
            fn
              :waiting, event, _extra ->
-               matched =
-                 case event do
-                   {:in, {:"$gen_call", {^registry, _tag}, {:close, ^incarnation}}} ->
-                     cut == :before_close
-
-                   {:out, :ok, {^registry, _tag}, %{incarnation: ^incarnation}} ->
-                     cut == :after_reply
-
-                   _ ->
-                     false
-                 end
+               matched = registry_native_close_event?(cut, event, registry, incarnation)
 
                if matched do
                  send(observer, {:registry_guardian_held, gate, cut})
@@ -3633,6 +3623,19 @@ defmodule LoopexDaemon.OwnerTest do
       assert_receive {:DOWN, ^guardian_monitor, :process, ^guardian, :normal}, 1_000
       assert :ets.info(arena) == :undefined
       # This late physical guardian retirement never changes the Owner verdict.
+    end
+  end
+
+  defp registry_native_close_event?(cut, event, registry, incarnation) do
+    case {cut, event} do
+      {:before_close, {:in, {:"$gen_call", {^registry, _tag}, {:close, ^incarnation}}}} ->
+        true
+
+      {:after_reply, {:out, :ok, {^registry, _tag}, %{incarnation: ^incarnation}}} ->
+        true
+
+      _ ->
+        false
     end
   end
 
