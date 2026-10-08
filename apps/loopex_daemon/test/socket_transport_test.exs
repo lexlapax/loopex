@@ -1597,10 +1597,13 @@ defmodule LoopexDaemon.SocketTransportTest do
     assert length(records) == 31
 
     try do
-      eventually(fn ->
-        state = :sys.get_state(connection)
-        state.progress_frames == %{} and state.progress_leases == %{}
-      end, div(max(release_deadline - System.monotonic_time(:millisecond), 0), 10))
+      eventually(
+        fn ->
+          state = :sys.get_state(connection)
+          state.progress_frames == %{} and state.progress_leases == %{}
+        end,
+        div(max(release_deadline - System.monotonic_time(:millisecond), 0), 10)
+      )
     rescue
       exception in ExUnit.AssertionError ->
         state = :sys.get_state(connection)
