@@ -292,7 +292,10 @@ defmodule Loopex.Runtime do
       when not is_integer(timeout) or timeout < 1 or timeout > 1_000,
       do: {:error, :invalid_status_timeout}
 
-  def creation_startup_status(%__MODULE__{supervisor: supervisor, token: token} = runtime, timeout)
+  def creation_startup_status(
+        %__MODULE__{supervisor: supervisor, token: token} = runtime,
+        timeout
+      )
       when is_pid(supervisor) and is_reference(token),
       do: creation_startup_status_call(runtime, timeout)
 

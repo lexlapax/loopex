@@ -2719,7 +2719,10 @@ defmodule Loopex.Runtime.Control do
       Process.send_after(
         self(),
         {:creation_expired, state.creation_incarnation, invocation},
-        if(kind == :startup, do: max(cutoff - System.monotonic_time(:millisecond), 0), else: 60_000)
+        if(kind == :startup,
+          do: max(cutoff - System.monotonic_time(:millisecond), 0),
+          else: 60_000
+        )
       )
 
     %{
@@ -3580,7 +3583,9 @@ defmodule Loopex.Runtime.Control do
       if entry.caller_monitor, do: Process.demonitor(entry.caller_monitor, [:flush])
 
       state = retain_creation_startup_result(state, eligible)
-      eligible = if entry.kind == :startup, do: state.creation_startup.state == :ready, else: eligible
+
+      eligible =
+        if entry.kind == :startup, do: state.creation_startup.state == :ready, else: eligible
 
       %{
         state

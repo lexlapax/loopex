@@ -47,23 +47,35 @@ defmodule Loopex.CreationStartupStatusTest do
     {pid, store} = fixture()
     seed_reservation(store)
 
-    :ok = Fixture.hold_next_transition_before_linearization(
-      pid, :runtime_control_claim_creation_domain, self()
-    )
+    :ok =
+      Fixture.hold_next_transition_before_linearization(
+        pid,
+        :runtime_control_claim_creation_domain,
+        self()
+      )
 
-    :ok = Fixture.hold_next_transition_before_linearization(
-      pid, :runtime_control_close_creation_reservation, self()
-    )
+    :ok =
+      Fixture.hold_next_transition_before_linearization(
+        pid,
+        :runtime_control_close_creation_reservation,
+        self()
+      )
 
     runtime = runtime(store)
+
     assert_receive {:record_held_before_linearization, claim_waiter, ^pid,
-                    :runtime_control_claim_creation_domain, _claim}, 1_000
+                    :runtime_control_claim_creation_domain, _claim},
+                   1_000
+
     on_exit(fn -> Fixture.release(claim_waiter) end)
     assert {:ok, initial} = Runtime.creation_startup_status(runtime)
     assert initial.state == :starting
     Fixture.release(claim_waiter)
+
     assert_receive {:record_held_before_linearization, close_waiter, ^pid,
-                    :runtime_control_close_creation_reservation, _close}, 1_000
+                    :runtime_control_close_creation_reservation, _close},
+                   1_000
+
     on_exit(fn -> Fixture.release(close_waiter) end)
     assert {:ok, ^initial} = Runtime.creation_startup_status(runtime, 100)
     {:ok, %{control: control, sessions: sessions}} = Runtime.children(runtime)
@@ -86,12 +98,20 @@ defmodule Loopex.CreationStartupStatusTest do
     await_status(runtime, :ready)
     {pid, store} = fixture()
     :ok = Fixture.hold_next_creation_recovery(pid, self())
+
     {:ok, %{start: {Control, :start_link, [options]}}} =
       Supervisor.get_childspec(runtime.supervisor, Control)
+
     options = Keyword.put(options, :store, store)
-    {:ok, delayed_supervisor} = Supervisor.start_link([
-      %{id: Control, start: {__MODULE__, :start_delayed_control, [options, self()]}}
-    ], strategy: :one_for_one)
+
+    {:ok, delayed_supervisor} =
+      Supervisor.start_link(
+        [
+          %{id: Control, start: {__MODULE__, :start_delayed_control, [options, self()]}}
+        ],
+        strategy: :one_for_one
+      )
+
     [{Control, delayed, :worker, _}] = Supervisor.which_children(delayed_supervisor)
 
     on_exit(fn ->
@@ -100,6 +120,7 @@ defmodule Loopex.CreationStartupStatusTest do
         Supervisor.stop(delayed_supervisor)
       end
     end)
+
     delayed_monitor = Process.monitor(delayed)
     assert_receive {:initialized, ^delayed, capture, before_init, after_init}, 1_000
     assert capture.startup_deadline_ms >= before_init + 60_000
@@ -114,11 +135,17 @@ defmodule Loopex.CreationStartupStatusTest do
     assert entry.cutoff == capture.startup_deadline_ms
     assert entry.invocation == capture.invocation
     assert Process.read_timer(entry.timer) <= capture.startup_deadline_ms - after_init - 20
-    assert {:ok, snapshot} = GenServer.call(delayed, {:creation_startup_status, runtime.token}, 100)
+
+    assert {:ok, snapshot} =
+             GenServer.call(delayed, {:creation_startup_status, runtime.token}, 100)
+
     assert_snapshot(snapshot, :starting, capture)
     Fixture.release(waiter)
     await(fn -> :sys.get_state(delayed).creation == nil end)
-    assert {:ok, snapshot} = GenServer.call(delayed, {:creation_startup_status, runtime.token}, 100)
+
+    assert {:ok, snapshot} =
+             GenServer.call(delayed, {:creation_startup_status, runtime.token}, 100)
+
     assert_snapshot(snapshot, :ready, capture)
     :ok = Supervisor.stop(delayed_supervisor)
     assert_receive {:DOWN, ^delayed_monitor, :process, ^delayed, :shutdown}, 1_000
@@ -135,6 +162,7 @@ defmodule Loopex.CreationStartupStatusTest do
     after_init = System.monotonic_time(:millisecond)
     :proc_lib.init_ack({:ok, self()})
     send(observer, {:initialized, self(), state.creation_startup, before_init, after_init})
+
     receive do
       :enter_loop -> :gen_server.enter_loop(Control, [], state)
     end
@@ -147,7 +175,12 @@ defmodule Loopex.CreationStartupStatusTest do
     {:ok, %{control: control}} = Runtime.children(runtime)
     :ok = :sys.suspend(runtime.supervisor)
     :ok = :sys.suspend(control)
-    on_exit(fn -> resume(control); resume(runtime.supervisor) end)
+
+    on_exit(fn ->
+      resume(control)
+      resume(runtime.supervisor)
+    end)
+
     before_root = Process.info(runtime.supervisor, :messages)
     before_control = Process.info(control, :messages)
 
@@ -190,8 +223,14 @@ defmodule Loopex.CreationStartupStatusTest do
     assert starting.state == :starting
     refute starting.startup_id == ready.startup_id
 
-    for invalid <- [nil, %{}, %{a | supervisor: nil}, %{a | token: nil},
-                    %{a | token: make_ref()}, %{a | token: b.token}] do
+    for invalid <- [
+          nil,
+          %{},
+          %{a | supervisor: nil},
+          %{a | token: nil},
+          %{a | token: make_ref()},
+          %{a | token: b.token}
+        ] do
       assert {:error, :runtime_unavailable} = Runtime.creation_startup_status(invalid, 100)
     end
 
@@ -207,23 +246,35 @@ defmodule Loopex.CreationStartupStatusTest do
     {:ok, %{control: control}} = Runtime.children(runtime)
     :ok = :sys.suspend(runtime.supervisor)
     :ok = :sys.suspend(control)
-    on_exit(fn -> resume(control); resume(runtime.supervisor) end)
+
+    on_exit(fn ->
+      resume(control)
+      resume(runtime.supervisor)
+    end)
+
     parent = self()
     timeout_ms = 500
     observation_scheduling_grace_ms = 100
-    {caller, monitor} = spawn_monitor(fn ->
-      started = System.monotonic_time(:millisecond)
-      send(parent, {:status_started, self(), started})
-      result = Runtime.creation_startup_status(runtime, timeout_ms)
-      elapsed = System.monotonic_time(:millisecond) - started
-      send(parent, {:bounded_status, self(), result, elapsed})
-    end)
+
+    {caller, monitor} =
+      spawn_monitor(fn ->
+        started = System.monotonic_time(:millisecond)
+        send(parent, {:status_started, self(), started})
+        result = Runtime.creation_startup_status(runtime, timeout_ms)
+        elapsed = System.monotonic_time(:millisecond) - started
+        send(parent, {:bounded_status, self(), result, elapsed})
+      end)
+
     on_exit(fn -> if Process.alive?(caller), do: Process.exit(caller, :kill) end)
     assert_receive {:status_started, ^caller, started}, 1_000
-    await(fn -> Enum.any?(elem(Process.info(runtime.supervisor, :messages), 1), fn
-      {:'$gen_call', _, :which_children} -> true
-      _ -> false
-    end) end)
+
+    await(fn ->
+      Enum.any?(elem(Process.info(runtime.supervisor, :messages), 1), fn
+        {:"$gen_call", _, :which_children} -> true
+        _ -> false
+      end)
+    end)
+
     wait_until(started + 250)
     resume(runtime.supervisor)
     assert_receive {:bounded_status, ^caller, {:error, :runtime_unavailable}, elapsed}, 1_000
@@ -242,18 +293,30 @@ defmodule Loopex.CreationStartupStatusTest do
     :ok = :sys.suspend(control)
     on_exit(fn -> resume(control) end)
     parent = self()
-    {caller, caller_monitor} = spawn_monitor(fn -> send(parent, {:late_status, self(), Runtime.creation_startup_status(runtime, 100)}) end)
-    await(fn -> Enum.any?(elem(Process.info(control, :messages), 1), fn
-      {:'$gen_call', _, {:creation_startup_status, _}} -> true
-      _ -> false
-    end) end)
+
+    {caller, caller_monitor} =
+      spawn_monitor(fn ->
+        send(parent, {:late_status, self(), Runtime.creation_startup_status(runtime, 100)})
+      end)
+
+    await(fn ->
+      Enum.any?(elem(Process.info(control, :messages), 1), fn
+        {:"$gen_call", _, {:creation_startup_status, _}} -> true
+        _ -> false
+      end)
+    end)
+
     :erlang.suspend_process(caller)
     on_exit(fn -> if Process.alive?(caller), do: Process.exit(caller, :kill) end)
     resume(control)
-    await(fn -> Enum.any?(elem(Process.info(caller, :messages), 1), fn
-      {_tag, {:ok, %{startup_id: id}}} -> id == original.startup_id
-      _ -> false
-    end) end)
+
+    await(fn ->
+      Enum.any?(elem(Process.info(caller, :messages), 1), fn
+        {_tag, {:ok, %{startup_id: id}}} -> id == original.startup_id
+        _ -> false
+      end)
+    end)
+
     wait_until(System.monotonic_time(:millisecond) + 101)
     :erlang.resume_process(caller)
     assert_receive {:late_status, ^caller, {:error, :runtime_unavailable}}, 1_000
@@ -281,12 +344,21 @@ defmodule Loopex.CreationStartupStatusTest do
     :ok = :sys.suspend(control)
     on_exit(fn -> resume(control) end)
     parent = self()
-    {observer, observer_monitor} = spawn_monitor(fn -> send(parent, {:status_answer, self(), Runtime.creation_startup_status(runtime)}) end)
+
+    {observer, observer_monitor} =
+      spawn_monitor(fn ->
+        send(parent, {:status_answer, self(), Runtime.creation_startup_status(runtime)})
+      end)
+
     on_exit(fn -> if Process.alive?(observer), do: Process.exit(observer, :kill) end)
-    await(fn -> Enum.any?(elem(Process.info(control, :messages), 1), fn
-      {:'$gen_call', _, {:creation_startup_status, _}} -> true
-      _ -> false
-    end) end)
+
+    await(fn ->
+      Enum.any?(elem(Process.info(control, :messages), 1), fn
+        {:"$gen_call", _, {:creation_startup_status, _}} -> true
+        _ -> false
+      end)
+    end)
+
     monitor = Process.monitor(control)
     Process.exit(control, :kill)
     assert_receive {:DOWN, ^monitor, :process, ^control, :killed}, 1_000
@@ -301,15 +373,36 @@ defmodule Loopex.CreationStartupStatusTest do
     {pid, store} = fixture()
     runtime = runtime(store)
     original = await_status(runtime, :ready)
-    :ok = Fixture.hold_next_transition_before_linearization(pid, :runtime_control_reserve_creation, self())
+
+    :ok =
+      Fixture.hold_next_transition_before_linearization(
+        pid,
+        :runtime_control_reserve_creation,
+        self()
+      )
+
     parent = self()
-    {caller, caller_monitor} = spawn_monitor(fn -> send(parent, {:create_answer, self(), Runtime.create_session(runtime, "authored", %{"version" => 1})}) end)
+
+    {caller, caller_monitor} =
+      spawn_monitor(fn ->
+        send(
+          parent,
+          {:create_answer, self(), Runtime.create_session(runtime, "authored", %{"version" => 1})}
+        )
+      end)
+
     on_exit(fn -> if Process.alive?(caller), do: Process.exit(caller, :kill) end)
+
     assert_receive {:record_held_before_linearization, waiter, ^pid,
-                    :runtime_control_reserve_creation, _}, 1_000
+                    :runtime_control_reserve_creation, _},
+                   1_000
+
     on_exit(fn -> Fixture.release(waiter) end)
     assert {:ok, ^original} = Runtime.creation_startup_status(runtime)
-    assert {:error, :creation_in_progress} = Runtime.create_session(runtime, "overlap", %{"version" => 1})
+
+    assert {:error, :creation_in_progress} =
+             Runtime.create_session(runtime, "overlap", %{"version" => 1})
+
     Process.exit(caller, :kill)
     assert_receive {:DOWN, ^caller_monitor, :process, ^caller, :killed}, 1_000
     {:ok, %{control: control}} = Runtime.children(runtime)
@@ -328,12 +421,16 @@ defmodule Loopex.CreationStartupStatusTest do
       on_exit(fn -> Fixture.release(waiter) end)
       assert {:ok, initial} = Runtime.creation_startup_status(runtime)
       {:ok, %{control: control}} = Runtime.children(runtime)
-      assert :ok = case operation do
-        :stop -> Control.stop_creation(control, runtime.token)
+
+      assert :ok = case(operation) do
+        :stop ->
+          Control.stop_creation(control, runtime.token)
+
         :quiesce ->
           assert {:ok, []} = Control.begin_quiesce(control, runtime.token, "drain", 1_000)
           :ok
       end
+
       assert_snapshot(elem(Runtime.creation_startup_status(runtime), 1), :unavailable, initial)
       Fixture.release(waiter)
     end
@@ -347,11 +444,23 @@ defmodule Loopex.CreationStartupStatusTest do
     on_exit(fn -> Fixture.release(waiter) end)
     {:ok, %{control: control}} = Runtime.children(runtime)
     entry = :sys.get_state(control).creation
-    monitors = for actor <- [entry.action.pid, entry.action.group, entry.action.worker,
-                             control, runtime.supervisor], do: {actor, Process.monitor(actor)}
+
+    monitors =
+      for actor <- [
+            entry.action.pid,
+            entry.action.group,
+            entry.action.worker,
+            control,
+            runtime.supervisor
+          ],
+          do: {actor, Process.monitor(actor)}
+
     assert {:ok, %{state: :starting}} = Runtime.creation_startup_status(runtime)
     assert :ok = Runtime.stop(runtime)
-    for {actor, monitor} <- monitors, do: assert_receive({:DOWN, ^monitor, :process, ^actor, _}, 1_000)
+
+    for {actor, monitor} <- monitors,
+        do: assert_receive({:DOWN, ^monitor, :process, ^actor, _}, 1_000)
+
     assert {:error, :runtime_unavailable} = Runtime.creation_startup_status(runtime)
     assert Fixture.inspect_state(pid).creation_calls == []
     Fixture.release(waiter)
@@ -377,10 +486,20 @@ defmodule Loopex.CreationStartupStatusTest do
     runtime = runtime(store)
     assert_receive {:creation_read_held, first_waiter, _, _}, 1_000
     assert {:ok, original} = Runtime.creation_startup_status(runtime)
-    :ok = Fixture.hold_next_transition_before_linearization(pid, :runtime_control_close_creation_reservation, self())
+
+    :ok =
+      Fixture.hold_next_transition_before_linearization(
+        pid,
+        :runtime_control_close_creation_reservation,
+        self()
+      )
+
     Fixture.release(first_waiter)
+
     assert_receive {:record_held_before_linearization, waiter, ^pid,
-                    :runtime_control_close_creation_reservation, _}, 1_000
+                    :runtime_control_close_creation_reservation, _},
+                   1_000
+
     on_exit(fn -> Fixture.release(waiter) end)
     {:ok, %{control: control}} = Runtime.children(runtime)
     entry = :sys.get_state(control).creation
@@ -388,15 +507,30 @@ defmodule Loopex.CreationStartupStatusTest do
     :ok = :sys.suspend(control)
     on_exit(fn -> resume(control) end)
     parent = self()
-    {observer, observer_monitor} = spawn_monitor(fn -> send(parent, {:expired_status, self(), Runtime.creation_startup_status(runtime)}) end)
+
+    {observer, observer_monitor} =
+      spawn_monitor(fn ->
+        send(parent, {:expired_status, self(), Runtime.creation_startup_status(runtime)})
+      end)
+
     on_exit(fn -> if Process.alive?(observer), do: Process.exit(observer, :kill) end)
-    await(fn -> Enum.any?(elem(Process.info(control, :messages), 1), fn
-      {:'$gen_call', _, {:creation_startup_status, _}} -> true
-      _ -> false
-    end) end)
-    monitors = for actor <- [entry.action.pid, entry.action.group, entry.action.worker], do: {actor, Process.monitor(actor)}
+
+    await(fn ->
+      Enum.any?(elem(Process.info(control, :messages), 1), fn
+        {:"$gen_call", _, {:creation_startup_status, _}} -> true
+        _ -> false
+      end)
+    end)
+
+    monitors =
+      for actor <- [entry.action.pid, entry.action.group, entry.action.worker],
+          do: {actor, Process.monitor(actor)}
+
     Fixture.release(waiter)
-    for {actor, monitor} <- monitors, do: assert_receive({:DOWN, ^monitor, :process, ^actor, _}, 1_000)
+
+    for {actor, monitor} <- monitors,
+        do: assert_receive({:DOWN, ^monitor, :process, ^actor, _}, 1_000)
+
     wait_until(original.startup_deadline_ms + 1)
     resume(control)
     assert_receive {:expired_status, ^observer, {:ok, snapshot}}, 1_000
@@ -417,9 +551,16 @@ defmodule Loopex.CreationStartupStatusTest do
 
   defp runtime(store) do
     before_start = System.monotonic_time(:millisecond)
-    {:ok, runtime} = Loopex.start_link(runtime_id: "runtime", store: store,
-      context_token_budget: 8_192, cleanup_grace_ms: 5_000,
-      session_creation_defaults: Map.drop(genesis(), [:kind, "options"]))
+
+    {:ok, runtime} =
+      Loopex.start_link(
+        runtime_id: "runtime",
+        store: store,
+        context_token_budget: 8_192,
+        cleanup_grace_ms: 5_000,
+        session_creation_defaults: Map.drop(genesis(), [:kind, "options"])
+      )
+
     after_start = System.monotonic_time(:millisecond)
     on_exit(fn -> if Process.alive?(runtime.supervisor), do: Runtime.stop(runtime) end)
     assert {:ok, capture} = Runtime.creation_startup_status(runtime)
@@ -448,28 +589,43 @@ defmodule Loopex.CreationStartupStatusTest do
   end
 
   defp await_status(runtime, desired) do
-    await_value(fn -> case Runtime.creation_startup_status(runtime) do
-      {:ok, %{state: ^desired} = snapshot} -> snapshot
-      _ -> nil
-    end end)
+    await_value(fn ->
+      case Runtime.creation_startup_status(runtime) do
+        {:ok, %{state: ^desired} = snapshot} -> snapshot
+        _ -> nil
+      end
+    end)
   end
 
   defp await(check), do: await_value(fn -> if check.(), do: true end)
   defp await_value(check), do: await_value(check, System.monotonic_time(:millisecond) + 1_000)
+
   defp await_value(check, cutoff) do
     case check.() do
       nil ->
         assert System.monotonic_time(:millisecond) < cutoff
-        receive do after 1 -> :ok end
+
+        receive do
+        after
+          1 -> :ok
+        end
+
         await_value(check, cutoff)
-      value -> value
+
+      value ->
+        value
     end
   end
 
   defp wait_until(cutoff) do
     remaining = cutoff - System.monotonic_time(:millisecond)
+
     if remaining > 0 do
-      receive do after remaining -> :ok end
+      receive do
+      after
+        remaining -> :ok
+      end
+
       wait_until(cutoff)
     end
   end
