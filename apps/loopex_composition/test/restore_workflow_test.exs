@@ -234,6 +234,232 @@ defmodule LoopexComposition.RestoreWorkflowTest do
     assert manifest(fixture.backup) == fixture.baseline
   end
 
+  for control <- [:preserve, :normalize] do
+    test "public special-mode restore #{control} preserves complete state or refuses before guarded activation",
+         context do
+      fixture = actual_cut(context.root, nil, :without_helpers)
+      control = unquote(control)
+      assert {:ok, old_entries} = RestoreCodec.manifest(fixture.baseline, @total)
+
+      modes = %{
+        "." => 0o3750,
+        "special-empty" => 0o1750,
+        "special-nested" => 0o2750,
+        "special-nested/inner" => 0o4750,
+        "special-nested/inner/all" => 0o7750,
+        "special-setgid" => 0o2750,
+        "special-sticky" => 0o1750
+      }
+
+      contents = %{
+        "special-nested/inner/all" => :binary.copy(<<0, 255, 1, 2>>, 40_000),
+        "special-setgid" => "retained setgid bytes",
+        "special-sticky" => ""
+      }
+
+      for state_root <- [fixture.source, fixture.backup] do
+        File.mkdir!(Path.join(state_root, "special-empty"))
+        File.mkdir_p!(Path.join(state_root, "special-nested/inner"))
+        for {relative, bytes} <- contents, do: File.write!(Path.join(state_root, relative), bytes)
+
+        for {relative, mode} <- modes do
+          path = if relative == ".", do: state_root, else: Path.join(state_root, relative)
+
+          assert {"", 0} =
+                   System.cmd("python3", [
+                     "-c",
+                     "import os,sys; os.chmod(sys.argv[1],int(sys.argv[2]))",
+                     path,
+                     Integer.to_string(mode)
+                   ])
+
+          assert Bitwise.band(File.lstat!(path).mode, 0o7777) == mode
+        end
+      end
+
+      paths = Enum.sort(Enum.uniq(Enum.map(old_entries, & &1["path"]) ++ Map.keys(modes)))
+      baseline = special_mode_manifest(fixture.backup, paths)
+      assert special_mode_manifest(fixture.source, paths) == baseline
+      assert {:ok, entries} = RestoreCodec.manifest(baseline, @total)
+      assert manifest(fixture.backup) == baseline
+      assert manifest(fixture.source) == baseline
+      plan = refresh_plan(fixture.plan, baseline, fixture.backup)
+      fixture = %{fixture | baseline: baseline, plan: plan}
+      original_source = placement(fixture.source)
+      original_backup = placement(fixture.backup)
+      identities = Map.new([fixture.source, fixture.backup], fn state_root ->
+        {state_root, Map.new(paths, fn relative ->
+          path = if relative == ".", do: state_root, else: Path.join(state_root, relative)
+          {relative, placement(path)}
+        end)}
+      end)
+      original_workspace = manifest(fixture.workspace)
+      receipts = workspace_receipts(fixture)
+      receipt_payloads = workspace_receipt_payloads(fixture.store_bytes, fixture.session)
+
+      invocation = %{
+        "work_ms" => 1_000,
+        "cleanup_grace_ms" => 100,
+        "max_total_file_bytes" => @total,
+        "prior_admin_authority" => "none",
+        "prior_admin_evidence_sha256" => nil
+      }
+
+      parent = self()
+      tag = make_ref()
+
+      {caller, caller_monitor} =
+        spawn_monitor(fn ->
+          send(parent, {tag, LoopexComposition.Restore.test_restore(plan, invocation,
+            probe: parent, pause_at: :manifest_stat)})
+        end)
+
+      assert_receive {:restore_io, guardian, worker, reference,
+                      {:installed, admitted, work_cutoff}}, 1_000
+
+      owned = %{
+        caller: caller,
+        caller_monitor: caller_monitor,
+        guardian: guardian,
+        guardian_monitor: Process.monitor(guardian),
+        worker: worker,
+        worker_monitor: Process.monitor(worker),
+        reference: reference,
+        tag: tag,
+        work_cutoff: work_cutoff
+      }
+
+      assert work_cutoff == admitted + 1_000
+      Process.put({:restore_release_monitors, reference}, [])
+
+      on_exit(fn ->
+        for actor <- [caller, guardian, worker] do
+          if Process.alive?(actor) do
+            monitor = Process.monitor(actor)
+            Process.exit(actor, :kill)
+            assert_receive {:DOWN, ^monitor, :process, ^actor, _}, 1_000
+          end
+        end
+      end)
+
+      # Concept: observe the complete copied baseline before the audit.
+      # Technical depth: non-root directories acknowledge initial 0700 and
+      # their final mode; the existing root acknowledges only its final mode.
+      mode_count = Enum.reduce(entries, 0, fn entry, count ->
+        count + if(entry["kind"] == "directory" and entry["path"] == ".", do: 1, else: 2)
+      end)
+
+      {result, events, copied} = special_mode_public_finish(owned, fixture, paths, mode_count, control)
+
+      assert [{:terminal, {:joined, {:ok, %{restore_result: native_result, release_claims: []}}, evidence}}] =
+               Enum.filter(events, &match?({:terminal, _}, &1))
+
+      assert evidence.opens == evidence.closes and evidence.opens > 0
+      assert evidence.work_cutoff == work_cutoff and evidence.stop == :complete
+      acknowledged = for {:acknowledged, _, kind, status} <- events, do: {kind, status}
+      assert Enum.count(acknowledged, fn {kind, status} ->
+        match?({:close, _}, kind) and status == :closed
+      end) == evidence.closes
+      assert Enum.count(acknowledged, &(&1 == {:file_sync, :completed})) >= map_size(contents)
+      assert Enum.count(acknowledged, &(&1 == {:directory_sync, :completed})) >= 4
+      assert System.monotonic_time(:millisecond) < evidence.cleanup_cutoff
+      exact_joins(owned)
+      assert System.monotonic_time(:millisecond) < evidence.cleanup_cutoff
+
+      [{:stopping, :complete, stopped, cutoff}] =
+        Enum.filter(events, &match?({:stopping, :complete, _, _}, &1))
+      assert cutoff == stopped + 10_000 and cutoff == evidence.cleanup_cutoff
+
+      if copied == baseline do
+        assert {:committed, receipt} = result
+        assert {:committed, ^receipt} = native_result
+        assert receipt["tx_id"] == plan["tx_id"]
+        assert receipt["cut_id"] == plan["cut_id"]
+        assert receipt["baseline_manifest_sha256"] == hash(baseline)
+        assert {:ok, _} = RestoreCodec.encode(:receipt, receipt)
+        assert {:committed, ^receipt} = LoopexComposition.Restore.restore(plan, invocation)
+        assert {:committed, %{"receipt" => ^receipt, "view" => "current"}} =
+                 LoopexComposition.Restore.lookup(fixture.destination, plan["tx_id"],
+                   Map.take(invocation, ["work_ms", "cleanup_grace_ms"]))
+
+        assert_complete_copy(fixture)
+        assert Enum.all?(claims(plan), &(File.lstat(&1) == {:error, :enoent}))
+        assert {:error, :source_retired} = RestoreGuard.state(fixture.source)
+        assert Enum.count(events, &match?({:terminal_release_installed, _}, &1)) == 1
+        reopen_workspace_history(fixture, "special-mode-reopen", receipts, receipt_payloads)
+
+        for {relative, mode} <- modes do
+          path = if relative == ".", do: fixture.destination, else: Path.join(fixture.destination, relative)
+          assert Bitwise.band(File.lstat!(path).mode, 0o7777) == mode
+        end
+      else
+        assert {:not_committed, refusal} = result
+        assert {:not_committed, "inventory_mismatch"} = native_result
+        assert refusal["code"] == "inventory_mismatch"
+        assert refusal["cleanup"] == "joined" and refusal["claim"] == "retained"
+        assert {:ok, _} = RestoreCodec.encode(:refusal, refusal)
+        assert evidence.restore.intent == false and evidence.claim_count == 2
+        assert {:error, :restore_incomplete} = RestoreGuard.state(fixture.destination)
+        assert {:error, :restore_incomplete} =
+                 LoopexComposition.TestHost.start(
+                   runtime_id: @runtime,
+                   state_root: fixture.destination,
+                   workspace: fixture.workspace,
+                   model: "openai:test",
+                   policy: Policy,
+                   policy_identity: @policy,
+                   artifact_transfers: true,
+                   active_tools: ~w(loopex.read loopex.bash)
+                 )
+        assert File.lstat(Path.join(fixture.destination, ".loopex-restore")) == {:error, :enoent}
+        assert Enum.all?(claims(plan), &File.dir?/1)
+        refute Enum.any?(events, &match?({:issued, _, {:restore_phase, "destination_intent"}}, &1))
+        assert Enum.count(events, &match?({:terminal_release_installed, _}, &1)) == 0
+        assert special_mode_manifest(fixture.source, paths) == baseline
+        assert special_mode_manifest(fixture.destination, paths) == copied
+      end
+
+      assert manifest(fixture.backup) == baseline
+      assert placement(fixture.source) == original_source
+      assert placement(fixture.backup) == original_backup
+      assert manifest(fixture.workspace) == original_workspace
+
+      for state_root <- [fixture.source, fixture.backup], relative <- paths do
+        path = if relative == ".", do: state_root, else: Path.join(state_root, relative)
+        assert placement(path) == identities[state_root][relative]
+      end
+
+      if copied == baseline do
+        source_additions = ~w(.loopex-restore .loopex-restore/lineage .loopex-restore/lineage/00000001) ++
+          Enum.map(~w(intent source-retirement), &Path.join(".loopex-restore/lineage/00000001", &1)) ++
+          Enum.flat_map(plan["ledgers"], fn declaration ->
+            relative = declaration["relative_root"]
+            [Path.join(relative, "restore-lineage"), Path.join([relative, "restore-lineage", "00000001"])] ++
+              Enum.map(~w(intent source-retired), &Path.join([relative, "restore-lineage", "00000001", &1]))
+          end)
+
+        full_source = special_mode_manifest(fixture.source, Enum.sort(paths ++ source_additions))
+        assert {:ok, source_entries} = RestoreCodec.manifest(full_source, @total)
+        index = Map.new(source_entries, &{&1["path"], &1})
+        for entry <- entries, do: assert(index[entry["path"]] == entry)
+
+        for entry <- source_entries, entry["path"] in source_additions do
+          assert entry["mode"] == if(entry["kind"] == "directory", do: 0o700, else: 0o600)
+        end
+      end
+
+      for {relative, mode} <- modes do
+        path = if relative == ".", do: fixture.source, else: Path.join(fixture.source, relative)
+        assert Bitwise.band(File.lstat!(path).mode, 0o7777) == mode
+      end
+
+      for {relative, bytes} <- contents do
+        assert File.read!(Path.join(fixture.source, relative)) == bytes
+        assert File.read!(Path.join(fixture.backup, relative)) == bytes
+      end
+    end
+  end
+
   test "one owned first transition preserves real histories and reopens both guarded compositions",
        context do
     fixture = actual_cut(context.root)
@@ -2881,6 +3107,115 @@ defmodule LoopexComposition.RestoreWorkflowTest do
 
     for {actor, monitor} <- actors,
         do: assert_receive({:DOWN, ^monitor, :process, ^actor, :normal}, 1_000)
+  end
+
+  # Concept: the validated facade must compare physically preserved modes.
+  # Technical depth: existing probe permits hold only the original manifest IO;
+  # the final mode acknowledgements identify complete staging, before any intent.
+  # Every receive and terminal-worker join uses the same original cleanup bound.
+  defp special_mode_public_finish(owned, fixture, paths, mode_count, control,
+         events \\ [], phase \\ nil, applied \\ 0, copied \\ nil) do
+    guardian = owned.guardian
+    reference = owned.reference
+    tag = owned.tag
+
+    receive do
+      {:restore_io, ^guardian, worker, ^reference, event} ->
+        if match?({:terminal_release_installed, _}, event) do
+          assert worker != owned.worker
+          assert Process.alive?(worker)
+          monitors = Process.get({:restore_release_monitors, reference})
+          assert monitors == []
+          Process.put({:restore_release_monitors, reference}, [{worker, Process.monitor(worker)}])
+          on_exit(fn ->
+            if Process.alive?(worker) do
+              monitor = Process.monitor(worker)
+              Process.exit(worker, :kill)
+              assert_receive {:DOWN, ^monitor, :process, ^worker, _}, 1_000
+            end
+          end)
+        end
+
+        release_actors = Process.get({:restore_release_monitors, reference})
+        assert worker == owned.worker or Enum.any?(release_actors, &(elem(&1, 0) == worker))
+        phase = if match?({:issued, _, {:restore_phase, _}}, event), do: elem(elem(event, 2), 1), else: phase
+        applied = if phase == "baseline_copy" and match?({:acknowledged, _, :mode, :completed}, event), do: applied + 1, else: applied
+
+        copied =
+          case event do
+            {:issued, id, :manifest_stat} ->
+              observed =
+                if worker == owned.worker and phase == "baseline_copy" and
+                     applied == mode_count and is_nil(copied) do
+                  assert System.monotonic_time(:millisecond) < owned.work_cutoff
+                  before = special_mode_manifest(fixture.destination, paths)
+
+                  if control == :normalize do
+                    assert before == fixture.baseline
+                    path = Path.join(fixture.destination, "special-nested/inner/all")
+                    assert {"", 0} = System.cmd("python3", ["-c",
+                      "import os,sys; os.chmod(sys.argv[1],0o6750)", path])
+                    assert Bitwise.band(File.lstat!(path).mode, 0o7777) == 0o6750
+                  end
+
+                  actual = special_mode_manifest(fixture.destination, paths)
+                  {:ok, expected_entries} = RestoreCodec.manifest(fixture.baseline, @total)
+                  {:ok, actual_entries} = RestoreCodec.manifest(actual, @total)
+                  assert Enum.map(actual_entries, &Map.delete(&1, "mode")) ==
+                           Enum.map(expected_entries, &Map.delete(&1, "mode"))
+                  assert System.monotonic_time(:millisecond) < owned.work_cutoff
+                  actual
+                else
+                  copied
+                end
+
+              if worker == owned.worker and phase == "destination_intent" do
+                assert observed == fixture.baseline
+                assert special_mode_manifest(fixture.destination, paths) == fixture.baseline
+              end
+
+              send(guardian, {:proceed, reference, id})
+              observed
+
+            _ ->
+              copied
+          end
+
+        special_mode_public_finish(owned, fixture, paths, mode_count, control,
+          [event | events], phase, applied, copied)
+
+      {^tag, result} ->
+        assert not is_nil(copied)
+        assert System.monotonic_time(:millisecond) < owned.work_cutoff + 10_000
+        {result, Enum.reverse(events), copied}
+    after
+      max(0, owned.work_cutoff + 10_000 - System.monotonic_time(:millisecond)) ->
+        flunk("public special-mode restore exceeded its original work/cleanup cutoff")
+    end
+  end
+
+  defp special_mode_manifest(root, paths) do
+    entries = for relative <- paths do
+      path = if relative == ".", do: root, else: Path.join(root, relative)
+      info = File.lstat!(path)
+      assert info.type in [:directory, :regular]
+
+      if info.type == :directory do
+        children = for candidate <- paths, candidate != ".", Path.dirname(candidate) == relative,
+                       do: Path.basename(candidate)
+        assert Enum.sort(File.ls!(path)) == Enum.sort(children)
+      end
+
+      %{
+        "path" => relative,
+        "kind" => if(info.type == :directory, do: "directory", else: "regular"),
+        "mode" => Bitwise.band(info.mode, 0o7777),
+        "size" => if(info.type == :directory, do: 0, else: info.size),
+        "sha256" => if(info.type == :directory, do: nil, else: hash(File.read!(path)))
+      }
+    end
+
+    :erlang.term_to_binary(["loopex:current-state-manifest:v1", entries], [:deterministic])
   end
 
   defp effect_rows(runtime, session, cursor, rows) do
