@@ -136,30 +136,48 @@ defmodule LoopexComposition.DelegationParentBindingFixture do
   def commit_creation(store, capture) do
     {:ok, final} = Store.create_session(capture.runtime, capture.command, capture.genesis)
     {:ok, final_id} = Store.transaction_id(final)
+
     assert Base.encode16(final.canonical_mutation_digest, case: :lower) ==
              capture.creation["canonical_create_digest"]
+
     assert final.genesis["options"] == capture.options
+
     assert {:ok, %{head: head, command: nil}} =
              Store.creation_recovery(store, %{runtime_id: capture.runtime, command_id: nil})
+
     assert head.active_command_id == nil
     selection = Base.encode16(:crypto.strong_rand_bytes(32), case: :lower)
     {:ok, claim} = Store.claim_creation_domain(capture.runtime, head.owner_generation, selection)
     {:ok, claim_id} = Store.transaction_id(claim)
     assert {:committed, ^claim_id, claimed} = Store.transact(store, claim)
+
     assert {:ok, %{head: current, command: nil}} =
              Store.creation_recovery(store, %{runtime_id: capture.runtime, command_id: nil})
+
     assert {current.owner_generation, current.owner_selection, current.domain_version,
             current.active_command_id} ==
              {claimed.owner_generation, claimed.owner_selection, claimed.domain_version, nil}
 
-    {:ok, reserve} = Store.reserve_creation(capture.runtime, capture.command,
-      current.owner_generation, current.owner_selection, current.domain_version, final.genesis)
+    {:ok, reserve} =
+      Store.reserve_creation(
+        capture.runtime,
+        capture.command,
+        current.owner_generation,
+        current.owner_selection,
+        current.domain_version,
+        final.genesis
+      )
+
     {:ok, reserve_id} = Store.transaction_id(reserve)
     assert reserve.genesis == final.genesis
     assert {:committed, ^reserve_id, reserved} = Store.transact(store, reserve)
+
     assert {:ok, %{command: capsule}} =
-             Store.creation_recovery(store, %{runtime_id: capture.runtime,
-               command_id: capture.command})
+             Store.creation_recovery(store, %{
+               runtime_id: capture.runtime,
+               command_id: capture.command
+             })
+
     assert capsule.state == :reserved and capsule.genesis == final.genesis
     assert capsule.reservation_tx_id == reserve_id
     assert capsule.reservation_owner_generation == current.owner_generation
@@ -168,9 +186,13 @@ defmodule LoopexComposition.DelegationParentBindingFixture do
     assert capsule.final_resolution == nil and capsule.session_id == nil
 
     assert {:committed, ^final_id, receipt} = result = Store.transact(store, final)
+
     assert {:ok, %{head: terminal, command: created}} =
-             Store.creation_recovery(store, %{runtime_id: capture.runtime,
-               command_id: capture.command})
+             Store.creation_recovery(store, %{
+               runtime_id: capture.runtime,
+               command_id: capture.command
+             })
+
     assert terminal.active_command_id == nil
     assert created.state == :created and created.final_resolution == :committed
     assert created.genesis == final.genesis and created.session_id == receipt.session_id
