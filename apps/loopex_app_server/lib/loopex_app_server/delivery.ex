@@ -682,7 +682,7 @@ defmodule Loopex.AppServer.Delivery do
 
   defp event_identity(value, ceiling \\ 65_536)
 
-  defp event_identity(value, ceiling) when is_binary(value) and byte_size(value) in 1..ceiling,
+  defp event_identity(value, ceiling) when is_binary(value) and byte_size(value) in 1..ceiling//1,
     do: {:ok, Wire.encode_identity(value)}
 
   defp event_identity(_value, _ceiling), do: :error
