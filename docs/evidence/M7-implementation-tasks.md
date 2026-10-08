@@ -1,15 +1,20 @@
 # M7 Implementation Tasks
 
-Current checkpoint: original71798 passed project compilation but failed the
-complete94 AppServer cases:64 passed/30 failed, zero exclusions/skips/invalid.
-Protocol18 and floor were unrun. Four coordinated fixture corrections are
-source-qualified at isolated9b0b148f; original73407 passed paired formatting.
-The formatting-only child4492dad4 is now under the unchanged complete112
-selection in original29729. No test result is inferred yet. After a positive
-result, integrate the exact17 foreground files, then restore175. Counts remain
-originals88/85/6 and additions364/24.
-See the [current resume record](M7-resume.md) for actual run/source identities;
-the paragraphs below retain previous checkpoints.
+Current checkpoint: original59747 is terminal FAIL at source9d1ed79d after
+200.102seconds, four joins/24 artifacts/2,227registry rows. Current complete94
+again ran92passed/2failed, zero exclusions/skips/invalid; protocol18 and floor
+unrun. The original body errors are now visible. The held-creation fixture fix
+is saved and source-reviewed at6dd21158; changed-case proof remains. The stopped
+proxy cannot read STOP, and a cached PID is not external signal authority.
+A concrete guarded-output topology proposal is being prepared before dependent
+implementation. Original deadlines and joins remain required.
+A primitive CAS breakpoint investigation is unavailable on both pairs; its two
+actual stages preserve the canonical registry through2,229 rows. It proves no
+product behavior or32-loss bound. No native handle is live and no checkbox closes.
+After positive whole112 proof, integrate exact foreground files, then restore175.
+Counts remain originals88/85/6 and additions364/24.
+See the [current resume record](M7-resume.md) for exact identities; paragraphs
+below retain previous checkpoints.
 
 Latest checkpoint: whole112 original79276 failed compilation at source089
 before selected tests ran. Source `e5ce3b67` removes the unreachable closing

@@ -76,23 +76,112 @@ runner `e71616efafa6fabd1e0ca6178146df375acfccd3e489a89e237a0d395ca662ce`.
 Root read the independent source audit, entire builder and exact carrier
 reversal before admission; no independent admission-review credit is claimed.
 
-Original29729 is the current live whole112 handle at clean4492. Poll that same
-handle to actual terminal and collect once; never restart on an observation
-timeout. Actual proof preparation
-`/private/tmp/m7-foreground-actual-fixture-proof-preparation-20261008-v4`:
-capture `195d7ec22b942404befa291f3bea59bde93f8e306813b856b118a0dcde1cb21e`,
-runner `31edcb31b1f780d3e50ffd4b7f234010fec2e411b69ce5f87120f8482201185e`;
-output `M7/foreground-actual-fixture-proof-20261008-v4`. The actual complete
-73407 registry seeds the unchanged94+18 selection including all four Node
-cases, separate application VMs and both toolchain pairs. Outcome remains
-unknown. Root admission record
-`e8ca7ff1cdcbfeedb7af5db6ece38fcf2cdd746cac6366516bdbe20a3be106ba`.
+Original29729 is terminal FAIL_OR_UNAVAILABLE and collected once at clean4492.
+The current pair passed pinned Node, formatting and project compilation; the
+complete AppServer population ran 94 cases, with 92 passed and two failed,
+zero excluded/skipped/invalid. Protocol18 and all floor stages were unrun.
+Duration 199.806 seconds, four actual joins, 24 artifacts and 2,223 registry rows.
+Output `M7/foreground-actual-fixture-proof-20261008-v4`; collection
+`614437de9b61e726e3c175abc7aa1f1f6bf6e978a027c354e53df8a1698014f9`,
+terminal `b09e786f2e3c8d86f60c0d8276c05dd951464e1286e8964162d18d66a41d9d5c`,
+registry `af7793c73441dca8435115d935c8e001af0e9299599ffdffa1382766d0e24b3f`.
+Do not repoll, recollect or repeat the unchanged failed candidate.
+
+Both reported failures arise during cleanup, which hides the original test-body
+errors. The source diagnosis is retained at
+`/private/tmp/m7-foreground-two-remaining-failure-diagnosis-20261008-v1.md`,
+SHA-256 `c971d0be8b7c55e1744260a217878d4dfb9ad3fae31f45c6fd17331051cebce7`.
+Current Control delegates creation to a carrier; no held-Store Control deadlock
+is proved. Root saved a single fixture-only child at
+`9d1ed79dd05662e93e6cf641df1dcd874d180cef`, parent4492. It preserves original
+body and all parent cleanup exception stacks, retains every cleanup action,
+and collects actual FIFO bytes without repeatedly scanning the growing prefix.
+The original one-byte reads, LF boundary, 2 MiB ceiling, actor joins and captured
+cutoffs remain. All other16 foreground and Core32 files are unchanged.
+Frozen packet `/private/tmp/m7-foreground-failure-preservation-source-20261008-v1/source.json`,
+SHA-256 `9cb95c96e89f5aff0955acac986d226200315d1887b3640c9efcd5bbda62c88a`;
+patch `1f135f189e99a09e01aa423bdd0cc26e452cd71bca789702471abd30959e0ab0`.
+Independent source audit `39746189ab06e2d85425ea1cae2e2990765ccde001f4352ce9949d4068ed0d7b`
+qualifies the delta only.
+Child-side cleanup still retains its first error; parent aggregation cannot
+reconstruct an already lost child failure. Source review and the complete
+112-case proof on both pairs remains required.
+
+Original59747 is terminal FAIL_OR_UNAVAILABLE and collected once at clean9d1e.
+Duration200.102 seconds, four actual joins,24 artifacts and2,227 registry rows.
+Current pinned Node/formatting/project compilation passed; complete94 again
+reported92passed/2failed, zero exclusions/skips/invalid. Protocol18 and floor
+were unrun. Output `M7/foreground-failure-preservation-proof-20261008-v5`;
+collection `bfbec603be078da5942abf51f99a67e3ce8dc2a8d4bbf85b619e9d8724248fe2`,
+terminal `b55e19c1767d239e438313b5394314473e53243d821db52cce11cbd6c10d5dd8`,
+registry `118bffc44ac990f798d2234150a4ef451ab057a98a56e52f9f9b3f99ed3061b9`.
+Do not repoll, recollect or repeat that unchanged failed candidate.
+The diagnostic correction exposes the body failures: lifecycle227 reports
+`{:error, :cleanup_unproved}`; lifecycle372 loses the control socket before
+observing the held final creation transaction and before closing EOF.
+
+Root saved the held-creation fixture fix at
+`6dd21158b7005fadf706eb85dfb69bd951f7f7f2`, soleparent9d1e. The final creation
+transaction uses command_id rather than tx_id. Use existing
+`Loopex.Store.transaction_id/1`, retaining the original waiter in the existing
+controller key before fallible projection/send. Envelope, actual Store gate,
+EOF order, no-fabricated-reply assertions and deadlines are unchanged.
+Packet `/private/tmp/m7-foreground-held-creation-identity-source-20261008-v1/source.json`,
+SHA-256 `71da3335503d5967ab692016f8bfcae3be34e8b83a8edfc9545d940d0fbaf27b`;
+independent source audit
+`15877d01b15765ef9093a168921b6b1f4dd7e513e24b6d201f033fb468230cc4`.
+The original child stack was lost; this is a source-proved path, not a recovered
+native KeyError observation. Changed-case qualification remains unrun.
+
+Stopped-writer diagnosis
+`/private/tmp/m7-stopped-writer-cleanup-diagnosis-20261008-v1.md`, SHA-256
+`5b63ee7e1ca829857cc6a283ca4a22a71b6ee4b5653a8e8d1a0a52a5a18a7bc8`:
+nonce STOP cannot be read while its only proxy/control reader is SIGSTOPed.
+The refusal is honest. A sampled numeric PID cannot authorize external CONT,
+even with a retained Port. An independently responsive live group guardian
+would change ADR0058's pinned topology and requires a concrete reviewed
+amendment. Private ADR0064 drafting is in progress; no proposal is accepted or
+dependent implementation authorized. Keep all original deadlines and oracles.
+Root found two stopped orphan proxy groups at the exact fixture script path
+and nonce, terminated only those anchored test groups and proved absence.
+Maintenance record `/private/tmp/m7-stopped-proxy-maintenance-cleanup-20261008-v1.json`,
+SHA-256 `a54315ed75e476e244cc41028762067cf4f0773d29f074abd011e2683d2b43b5`.
+This late cleanup supplies no within-bound product proof or repaired result.
+
+The primitive ETS breakpoint investigation is terminal, both pairs unavailable:
+current reports zero matches; floor reports one match but no required pre-call
+callback, then normal target DOWN. Positive match count does not prove actual
+BIF interception. Both compiler stages succeeded; actual inner/outer process
+groups were observed absent. Duration0.974 seconds. No production module or
+arena was loaded and no32-loss or fault-restoration proof is claimed.
+Output `M7/ets-bif-eligibility-mechanics-20261008-v1/`; mechanics-results.json
+retains actual argv/PIDs/results/log references. Its canonical registry
+preserves all2,227 predecessors and adds only the two actual mechanics stages:
+2,229 rows, SHA-256
+`3c8f0457e33416fe831179312084e127cda01c04e3cea7bcce4e1cfc72a1faf2`.
+Future qualification recipes must preserve this complete prefix; original59747's
+immutable registry remains2,227 and cannot be rewritten or represented as2,229.
+No native handle is live. The guardian proposal and next legitimate CAS proof
+options remain source work. Whole112, literal foreground integration and
+restore175 remain open. No checkbox closes.
+
 Source, diagnoses, recipes and maps are retained as134 immutable assets at
 `/Users/spuri/projects/lexlapax/loopex-evidence/M7/foreground-compile-and-restore-context-20261008-v1/retention.json`,
 SHA-256 `141767afc20a3d532f362d22ecc7d13149487c9e9ec301b654f848f08965c919`.
 Native outputs remain separate original collections.
+The two following immutable retention indexes preserve completed new work:
+`M7/foreground-failure-preservation-context-20261008-v2/retention.json`,14 assets,
+SHA-256 `620a9a958b2821e1770f870f0ac5e57f53e1c9e47b942a8c14a362e4d11ac5a0`;
+`M7/foreground-failure-diagnosis-context-20261008-v3/retention.json`,14 more assets,
+SHA-256 `0d04c5d397c7cdcedbc0cb6be40e9f0028f50a7c285112d7a2b355530e0af181`.
+Each references its immutable parent. Latest retained source is6dd21158.
+The primitive investigation result summary has SHA-256
+`03c69dba4a7fb829166761e060e5eb57823a88d4df00b98de594c1dfee772e69`;
+independent actual interpretation
+`b37029c070d79d8b664e727da99110c093a59e51890150e0a720fc1c93b52f43`
+records current0/floor1 without a qualified gate. No unchanged rerun is justified.
 
-The earlier e5 primary join map is historical and cannot integrate repaired4492
+The earlier e5 primary join map is historical and cannot integrate the latest repaired
 bytes. Refresh it after a positive complete112 result. Then restore3 from fd1b and whole175, remaining
 protocol/helper integration and T17. ADR0063 remains the sole asked pending
 decision. No added or original checkbox closes: originals88/85/6,
