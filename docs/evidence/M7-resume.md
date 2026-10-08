@@ -27,6 +27,77 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+### Current helper-codec failure and creation rejoin, 2026-10-08
+
+Primary `m7` is pushed at `3d57e8bf3e96188dae716818c9833e0f80d5998c`.
+Its three new commits are pure RunMutation integration `f944bc31`, portable
+AST-equal formatting `294dac8b`, and shared struct refusal `3d57e8bf`.
+Candidate `6d0db7f1` remains unchanged, unserved and separately retained.
+No original or added checkbox closes: T01-T19 totals remain88/85/6 original
+and367/23 added. Native helper execution and complete grammar integration remain
+open. Read this newest subsection before the older historical checkpoints.
+
+Complete changed-owner proof original31576 is terminal FAIL at3d57e8bf:
+current151/196,45 failures, floor unrun,204.425seconds, four original joins,
+20 verified assets, zero exclusions/skips/invalid. Output
+`M7/helper-run-mutation-focused-20261008-v2`; terminal SHA-256
+`4241b3458cf24cafff3b1d21c1e2b2be7ecca7795e4fc550938956e66f7dc0ff`;
+collection `c8da0826a68d2dab38240dbafc693d3824d0bb38985a485611238b316dd47ba7`.
+The seven complete files are mutation41,codec33,genesis11,retained17,
+parent-binding19,binding-log34 and primary restore-workflow41. Five direct
+Store seeds refuse creation_reservation_required; forty actual restore creates
+return store_unavailable before startup readiness. The actual64-history case
+finishes. Retain the failure, all cases and original bounds. Do not rerun these
+same bytes or replace the broad scope with74 passing pure cases.
+
+Original74720 at294dac8b remains failed current73/74, floor unrun,
+7.226seconds/four joins/20 assets. Its nested URI exposed LedgerCodec's
+Enumerable exception. The owner now refuses structs before enumeration, with
+URI and empty/pair-valued Enumerable MapSet controls in both classes. Independent
+review `0b609103a4ed9c7dc8e66f0e946afa272d9d151382bf3b0afd82a1cbff8f51cf`
+authenticates the exact repair and complete196 caller census. Original46947
+formatter37 remains failed for floor guard layout; original33682 formatter38
+passes both pairs and compares both the raw and original reviewed source AST,
+3.243seconds/five joins/36 assets. No production semantics changed in formatting.
+
+Primary Control already owns ADR0059 creation, integrated at a6e8a76e.
+The candidate's relevant Control delta supplies ADR0063's captured startup
+identity/readiness. Rejoin its smallest complete existing owner unit and migrate
+actual runtime test hosts to wait within their original allowance. Separately
+migrate helper direct-Store fixtures to the approved claim/reserve/final protocol,
+with actual Memory/Local histories, exact candidate/genesis/command identity and
+no session activation. No unreserved fallback or copied private schema is allowed.
+`/root/restore_custody_rejoin_review` prepares the exact read-only rejoin audit;
+`/root/restore_custody_rejoin` has frozen the bounded three-path fixture packet
+at `/private/tmp/m7-helper-current-creation-fixtures-20261008-v1`, patch
+`83e60744e8e76a72f6974d81cfd3f1bfbf22f1a0c33206a34eaf159bec53591a`.
+Its complete affected scope is parent-binding19 plus binding-log34,53 cases.
+Independent review is running in `/root/daemon_retirement_v2_review`, including
+the positive runtime startup/no-mutation baseline and honest negative history.
+Both units are source-only until root review/integration/native proof.
+
+Daemon retirement v3 has source clearance `c728800bb7a70a033808df56788995cb2fb41010982389b6abba25e7bbb0c776`.
+It retains original Port/status/DOWN custody, scoped collector/session joins and
+one pre-launch-root cleanup callback handed to the custodian before launch.
+Input-successor v3 has source clearance `407fcbb68da554e6537752dea914862e27d236115719ccbad391b276c978cb50`.
+It joins the original settlement waiter, enforces its existing setup cutoff and
+excludes natural successor hold completion through the unchanged1000ms observer.
+Both sealed private packets remain unintegrated/native unrun. Root owns their
+complete45 and21 affected scopes. Prior sourceblocked versions remain immutable.
+
+Immutable recovery manifest `M7/coupled-current-context-20261008-v16/retention.json`,
+SHA-256 `3310a3847e72ce483ddac482cdd5985bf187ba0c1ba81d13c573d05743cf4c3d`,
+chains v15, retaining118 sealed assets, three primary commits, four completed
+native records and a verified candidate/m7 bundle. All root native originals
+are terminal and collected once. Next registry2632 is
+`M7/helper-run-mutation-focused-20261008-v2/stage-attempt-registry.json`, SHA-256
+`d28f311d631df22b4eaccd307cabc6c3c489a5d12a5f667414d0cf59bde9987f`.
+Docs-v8 original68505 passed once atf0295363,37.713seconds/two joins/13 assets;
+its terminal is9f8cefb162fd7ad68164d02082440f97368aa7a63e188bf4f7f08b0dbe73cc78.
+This new prose checkpoint needs its own once-only gate. ADR0065 is still the sole
+pending exact-pair decision; its physical attempts writer remains closed.
+No main merge, milestone closure, tag, release or paid campaign is authorized.
+
 ### Current creation-custody restore qualification, 2026-10-08
 
 Use clean candidate `6d0db7f1dc732972eb4e0fb7860b7e42b88f52e7` in

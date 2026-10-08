@@ -1,42 +1,51 @@
 # M7 Implementation Tasks
 
-Latest checkpoint, 2026-10-08: active M7 implementation continues on `m7`.
-One newly tracked added T04 creation-custody restore component is complete.
-Exact unserved candidate `6d0db7f1dc732972eb4e0fb7860b7e42b88f52e7`
-passes all179 current and179 floor restore cases, including all three IO
-long-bound cases and both actual64-restore/65-refusal histories. Original49568
-is terminal PASS in587.277seconds, eight original stage joins,34 verified
-artifacts and zero exclusions/skips/invalid. Runtime creation heads, retained
-candidate capsules and created/cancelled resolutions now participate in the
-complete physical restore audit. Original restore and the broader T04 parent
-remain open for their remaining semantic/integration/activation obligations.
+Latest checkpoint, 2026-10-08: helper RunMutation and the shared codec repair
+are committed and pushed on primary `m7` at
+`3d57e8bf3e96188dae716818c9833e0f80d5998c`. The pure eight-kind stored
+grammar, independent literals and original-job controls remain unqualified as
+a complete component until its affected scope passes both pairs. Helpers remain
+unregistered and unexecutable.
 
-Private task attribution also qualifies its complete nine-case selection on
-both pairs at `66c52ee8`, original80550,35.385seconds. Its strict quiet and
-genuine fault evidence does not attribute old untraced reports or close T16.
-The corrected daemon current-create callers and full custody-reference fixture
-are committed and formatted at the new candidate; their native qualification
-and the actual three signal106 failures remain open. The real one-client
-retirement witness is prepared for independent review. Separate writers prepare
-the accepted pure helper run-mutation validator and a shared test-only shutdown
-observer/input-successor witness. Neither pending source unit has native proof.
+Original74720 at `294dac8b` failed current73/74 because nested URI structs
+raised during LedgerCodec measurement. The repair rejects structs before map
+enumeration; twelve direct/nested URI and empty/pair-valued Enumerable MapSet
+controls cover both object/frame classes in the existing case. Independent
+source review `0b609103` clears the repair and preserves valid encoded bytes.
+Original31576 then completed the whole changed-owner scope: current151/196,
+45 failures, floor unrun,204.425seconds, four original joins and20 verified
+assets, zero exclusions/skips/invalid. Five direct Store creation fixtures lack
+current reservations; forty restore fixtures create before asynchronous startup
+is ready. The actual64-history restore still completes. This failed run remains
+failed; no narrowed selection substitutes for the complete scope. Primary
+Control already owns ADR0059 creation; the smallest complete ADR0063 startup
+readiness rejoin and the separate direct-Store fixture migration are next.
 
-Immutable `M7/coupled-current-context-20261008-v14/retention.json`, SHA-256
-`dc4a395a6fd289bde69fd242efb864f4b85ba79569d800cc37d570a83164feea`,
-chains v13, retaining137 assets,12 source commits,12 completed native records
-and a verified candidate/primary Git bundle. Active writer packets are excluded
-until handed off and sealed. Next registry2613, SHA-256
-`5ed10ab760750b221bc4c051155a6d7bdf135eb01a886978fe6ae1c143904fcc`.
-All root native handles in that manifest are terminal and collected once.
+Formatter37's original46947 floor layout failure remains retained. Formatter38
+original33682 passes both pairs and proves the portable layout equal to the
+original reviewed non-line AST,3.243seconds/five joins/36 assets. Earlier
+creation-custody restore179/179 and private shutdown9/9 proofs retain their exact
+candidate identities and limited scope. Corrected daemon retirement v3 and
+input-successor shutdown v3 now have independent source clearance; their full45
+and21 native scopes remain unrun. Existing daemon signal106 failures remain open.
 
-Proposed ADR0065 at `b651904a84be33800f3a2bf19cf782940e3fc1fb` awaits
-its existing exact-pair decision. Its physical attempts writer remains unbuilt.
-Coordinated generation activation, whole integration, foreground native output
-accounting/packaging and helper execution remain open. No main merge, closure,
-release, tag or paid campaign is authorized. T01-T19 originals remain
-**88 done /85 remaining /6 retired**; additions are **367 done /23 remaining**.
-T00 is separate. The [resume record](M7-resume.md) names exact proofs and next
-work. Older checkpoint paragraphs below are historical.
+Immutable `M7/coupled-current-context-20261008-v16/retention.json`, SHA-256
+`3310a3847e72ce483ddac482cdd5985bf187ba0c1ba81d13c573d05743cf4c3d`,
+chains v15 with118 sealed assets, three primary source commits, four completed
+native records and a verified candidate/primary bundle. All root native handles
+are terminal and collected once. Next registry2632, SHA-256
+`d28f311d631df22b4eaccd307cabc6c3c489a5d12a5f667414d0cf59bde9987f`.
+The exact f0295363 documentation gate already passed once; this new prose
+checkpoint needs its own clean-commit documentation gate.
+
+Proposed ADR0065 awaits its existing exact-pair decision. Physical attempts,
+coordinated activation, whole integration, foreground packaging/accounting and
+helper execution remain open. No main merge, closure, release, tag or paid
+campaign is authorized. T01-T19 originals remain **88 done /85 remaining /6
+retired**; additions remain **367 done /23 remaining**. T00 is separate. No
+checkbox closes from source clearance or the failed native scope. The
+[resume record](M7-resume.md) names exact next work. Older paragraphs below are
+historical checkpoints.
 
 Current checkpoint: the complete contract source is staged in isolated,
 unserved candidate `a7a83d22`. The independent Node runner proved both manifests
