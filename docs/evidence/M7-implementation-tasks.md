@@ -13674,6 +13674,20 @@ or check was relaxed.
   Control/carrier, cancellation generations and physical restore stay open.
 
 - [ ] Implement accepted ADR0059's atomic creation heads, complete candidate capsules and exact created/cancelled resolutions in the shipped Stores; prove claim/reservation and final/close races, physical replay and complete current-format backup/restore, with no unreserved fresh-create fallback after coordinated rejoin.
+- [x] Implement the current-format atomic creation adapter unit: strict frame2 heads/capsules/resolutions, final/close and claim/reservation races, custody-versus-owner-stage exclusion, current OwnerLane scope and cold physical replay. Preserve all48 selected adapter cases and prove both supported pairs; complete Composition backup/restore and Control activation remain in the parent row.
+  Whole48 passed per pair at isolated `0d088f1a61f7001f2e3d665416032f8d51df2c18`,
+  original9327,31.375seconds, zero failures/exclusions/skips/invalid and warning-free
+  compilation. Output `M7/creation-storage-proof-20261007-v2`; collection
+  `aff74509a590654e589e0b2b259f5d89f81909ec40198ccef55e2cec033cb100`, terminal
+  `5319ec7ccbe5fc9f8a0b9ad61e0400c2f0d2d8dd55d935ba904e925070974796`;
+  eight original joins/42 artifacts,1921-row registry
+  `76c725ac196f11f50095e46431312ec54d20fd47dee8958395e5463287857d61`.
+  Original98876 remains failed at45/48 current, floor unrun. Repairs add the
+  accepted creation families to runtime_control scope, use all current command
+  fields, and retain the cold module-absence check before dynamic replay calls.
+  No case, fault pair, cutoff or validation was removed. Formatter85681 passed
+  both pairs in8.066seconds with exact unchanged final bytes. The complete
+  current-format restore and native responsive lifecycle obligations stay open.
 - [ ] Implement accepted ADR0059's owned Control creation slot, conservative pre-permit fence and mechanical carrier with finite startup/recovery; prove actual held Store stop/status/overlap behavior, occupied-read refusals, original joins/cutoffs, actor/root/VM loss and no historical activation before coordinated rejoin.
 
 - [x] Prove resumed prepared-startup abandonment after callback refusal, raise, throw and exit, and truthful uncertainty when the activation guard dies before acknowledgement; preserve exact committed records, unread input, zero model/job dispatch, native activation paths and all owned process joins on both supported pairs.

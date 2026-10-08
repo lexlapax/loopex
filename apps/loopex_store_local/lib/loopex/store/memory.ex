@@ -73,6 +73,10 @@ defmodule Loopex.Store.Memory do
     do: GenServer.call(reference, {:creation_provenance, runtime, selector}, @call_timeout)
 
   @impl Store
+  def creation_recovery(reference, request),
+    do: GenServer.call(reference, {:creation_recovery, request}, @call_timeout)
+
+  @impl Store
   def load_records(reference, session_id, after_version, limit) do
     GenServer.call(reference, {:load_records, session_id, after_version, limit}, @call_timeout)
   end
@@ -110,6 +114,9 @@ defmodule Loopex.Store.Memory do
 
   def handle_call({:creation_provenance, runtime, selector}, _from, state),
     do: {:reply, State.creation_provenance(state.store, runtime, selector), state}
+
+  def handle_call({:creation_recovery, request}, _from, state),
+    do: {:reply, State.creation_recovery(state.store, request), state}
 
   def handle_call({:load_records, session_id, after_version, limit}, _from, state) do
     {:reply, State.load_records(state.store, session_id, after_version, limit), state}

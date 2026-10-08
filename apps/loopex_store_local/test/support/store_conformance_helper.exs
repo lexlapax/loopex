@@ -244,6 +244,7 @@ defmodule LoopexStoreLocalTest.Conformance do
       command = create_command(transaction)
 
       assert :absent = Store.runtime_command(context.store, command)
+      reserve_fixture(context.store, transaction)
       assert {:committed, ^command_id, receipt} = Store.transact(context.store, transaction)
 
       before = store_snapshot(context)
@@ -293,6 +294,7 @@ defmodule LoopexStoreLocalTest.Conformance do
           {:ok, transaction} =
             Store.create_session(runtime, "create-#{index}", supported_genesis(index))
 
+          reserve_fixture(context.store, transaction)
           assert {:committed, _, receipt} = Store.transact(context.store, transaction)
           {transaction, receipt.session_id}
         end
@@ -360,8 +362,10 @@ defmodule LoopexStoreLocalTest.Conformance do
       # and a subsequent create cannot change the first captured cut.
       assert {:committed, _, _} = Store.transact(context.store, first)
       {:ok, other} = Store.create_session("another-runtime", "create-1", supported_genesis(1))
+      reserve_fixture(context.store, other)
       assert {:committed, _, _} = Store.transact(context.store, other)
       {:ok, concurrent} = Store.create_session(runtime, "create-4", supported_genesis(4))
+      reserve_fixture(context.store, concurrent)
       assert {:committed, _, _} = Store.transact(context.store, concurrent)
 
       assert {:page, tail} =
@@ -405,16 +409,21 @@ defmodule LoopexStoreLocalTest.Conformance do
                  Loopex.Store.Local.State.creation_provenance(damaged, runtime, page_selector)
       end
 
-      {:ok, unsupported} = Store.create_session("unsupported", "create", genesis("legacy"))
-      assert {:committed, _, _} = Store.transact(context.store, unsupported)
+      {:ok, unsupported} =
+        Store.create_session("unsupported", "create", %{kind: :session_genesis})
 
-      assert :unavailable =
+      assert {:not_committed, :creation_reservation_required} =
+               Store.transact(context.store, unsupported)
+
+      assert :conflict =
                Store.creation_provenance(context.store, "unsupported", %{
                  kind: :command,
                  command_id: "create"
                })
 
-      assert :unavailable = Store.creation_provenance(context.store, "unsupported", page_selector)
+      assert {:page, %{rows: [], through_create_ordinal: 0}} =
+               Store.creation_provenance(context.store, "unsupported", page_selector)
+
       before_reopen = store_snapshot(context)
 
       if context.kind == :local do
@@ -702,6 +711,7 @@ defmodule LoopexStoreLocalTest.Conformance do
       label = unique("retained")
       {:ok, create} = Store.create_session("runtime-#{label}", "create-#{label}", genesis(label))
 
+      reserve_fixture(context.store, create)
       assert {:committed, _tx, create_receipt} = Store.transact(context.store, create)
       assert {:committed, _tx, ^create_receipt} = Store.transact(context.store, create)
 
@@ -1100,6 +1110,7 @@ defmodule LoopexStoreLocalTest.Conformance do
 
   defp create_owned(context, label, owner_id) do
     {:ok, create} = Store.create_session("runtime-#{label}", "create-#{label}", genesis(label))
+    reserve_fixture(context.store, create)
     assert {:committed, _tx, create_receipt} = Store.transact(context.store, create)
 
     {:ok, advance} =
@@ -1443,8 +1454,39 @@ defmodule LoopexStoreLocalTest.Conformance do
     try do
       label = unique("catalogue")
       {:ok, create} = Store.create_session("runtime-#{label}", "create-#{label}", genesis(label))
+      {:ok, claim} = Store.claim_creation_domain(create.runtime_id, 0, String.duplicate("a", 64))
+      assert {:committed, _, claimed} = Store.transact(context.store, claim)
+      assert {:committed, _, ^claimed} = Store.transact(context.store, claim)
+
+      {:ok, reserve} =
+        Store.reserve_creation(
+          create.runtime_id,
+          create.command_id,
+          claimed.owner_generation,
+          claimed.owner_selection,
+          claimed.domain_version,
+          create.genesis
+        )
+
+      assert {:committed, _, reserved} = Store.transact(context.store, reserve)
+      assert {:committed, _, ^reserved} = Store.transact(context.store, reserve)
       assert {:committed, _tx, create_receipt} = Store.transact(context.store, create)
       assert {:committed, _tx, _receipt} = Store.transact(context.store, create)
+
+      {:ok, close} =
+        Store.close_creation_reservation(
+          create.runtime_id,
+          create.command_id,
+          reserved.owner_generation,
+          reserved.owner_selection,
+          reserved.domain_version,
+          reserve.tx_id,
+          reserved.reservation_domain_version,
+          create
+        )
+
+      assert {:committed, _, closed} = Store.transact(context.store, close)
+      assert {:committed, _, ^closed} = Store.transact(context.store, close)
 
       command = owner_command("runtime-#{label}", "resume-#{label}", create_receipt.session_id)
 
@@ -1568,9 +1610,54 @@ defmodule LoopexStoreLocalTest.Conformance do
     end
   end
 
-  defp fault_target(_context, :runtime_control_create_session, label) do
+  defp fault_target(context, :runtime_control_create_session, label) do
     {:ok, transaction} =
       Store.create_session("runtime-#{label}", "create-#{label}", genesis(label))
+
+    reserve_fixture(context.store, transaction)
+    transaction
+  end
+
+  defp fault_target(_context, :runtime_control_claim_creation_domain, label) do
+    {:ok, transaction} =
+      Store.claim_creation_domain("runtime-#{label}", 0, String.duplicate("a", 64))
+
+    transaction
+  end
+
+  defp fault_target(context, :runtime_control_reserve_creation, label) do
+    {:ok, claim} = Store.claim_creation_domain("runtime-#{label}", 0, String.duplicate("a", 64))
+    assert {:committed, _, receipt} = Store.transact(context.store, claim)
+
+    {:ok, transaction} =
+      Store.reserve_creation(
+        claim.runtime_id,
+        "create-#{label}",
+        receipt.owner_generation,
+        receipt.owner_selection,
+        receipt.domain_version,
+        genesis(label)
+      )
+
+    transaction
+  end
+
+  defp fault_target(context, :runtime_control_close_creation_reservation, label) do
+    reserve = fault_target(context, :runtime_control_reserve_creation, label)
+    assert {:committed, _, receipt} = Store.transact(context.store, reserve)
+    {:ok, final} = Store.create_session(reserve.runtime_id, reserve.command_id, reserve.genesis)
+
+    {:ok, transaction} =
+      Store.close_creation_reservation(
+        reserve.runtime_id,
+        reserve.command_id,
+        receipt.owner_generation,
+        receipt.owner_selection,
+        receipt.domain_version,
+        reserve.tx_id,
+        receipt.reservation_domain_version,
+        final
+      )
 
     transaction
   end
@@ -1578,6 +1665,7 @@ defmodule LoopexStoreLocalTest.Conformance do
   defp fault_target(context, :runtime_control_stage_owner_attempt, label) do
     runtime_id = "runtime-#{label}"
     {:ok, create} = Store.create_session(runtime_id, "create-#{label}", genesis(label))
+    reserve_fixture(context.store, create)
     assert {:committed, _tx_id, receipt} = Store.transact(context.store, create)
     command = owner_command(runtime_id, "resume-#{label}", receipt.session_id)
 
@@ -1605,6 +1693,7 @@ defmodule LoopexStoreLocalTest.Conformance do
 
   defp fault_target(context, :session_journal_advance_owner, label) do
     {:ok, create} = Store.create_session("runtime-#{label}", "create-#{label}", genesis(label))
+    reserve_fixture(context.store, create)
     assert {:committed, _tx_id, receipt} = Store.transact(context.store, create)
 
     {:ok, transaction} =
@@ -1942,6 +2031,9 @@ defmodule LoopexStoreLocalTest.Conformance do
     core_ebin = Loopex.Store |> :code.which() |> List.to_string() |> Path.dirname()
     local_ebin = Log |> :code.which() |> List.to_string() |> Path.dirname()
 
+    protocol_ebin =
+      LoopexProtocol.ToolDefinition |> :code.which() |> List.to_string() |> Path.dirname()
+
     script = """
     state_module = Loopex.Store.Local.State
 
@@ -1962,7 +2054,18 @@ defmodule LoopexStoreLocalTest.Conformance do
     assert {"cold-replay-ok", 0} =
              System.cmd(
                executable,
-               ["--erl", "+S 1:1", "-pa", core_ebin, "-pa", local_ebin, "-e", script],
+               [
+                 "--erl",
+                 "+S 1:1",
+                 "-pa",
+                 core_ebin,
+                 "-pa",
+                 local_ebin,
+                 "-pa",
+                 protocol_ebin,
+                 "-e",
+                 script
+               ],
                stderr_to_stdout: true
              )
   end
@@ -2006,7 +2109,7 @@ defmodule LoopexStoreLocalTest.Conformance do
       end
 
     frame = %{
-      schema_version: 1,
+      schema_version: 2,
       transition_id: :session_journal_commit,
       transaction: transaction,
       resolution: %{
@@ -2082,7 +2185,14 @@ defmodule LoopexStoreLocalTest.Conformance do
         stop(context.pid)
 
         assert {:ok, frames, :complete} = Log.read(context.path)
-        broken = mutate_frames(frames, mutation)
+        {custody, session_frames} = Enum.split(frames, 2)
+
+        assert Enum.map(custody, & &1.transaction.type) == [
+                 :claim_creation_domain,
+                 :reserve_creation
+               ]
+
+        broken = custody ++ mutate_frames(session_frames, mutation)
         write_frames(context.path, broken)
 
         assert {:error, {:invalid_history, _index, _reason}} =
@@ -2191,7 +2301,37 @@ defmodule LoopexStoreLocalTest.Conformance do
     %{context | pid: pid, store: store}
   end
 
-  defp genesis(label), do: %{kind: :session_genesis, label: label}
+  defp reserve_fixture(store, final) do
+    assert {:ok, %{head: head, command: nil}} =
+             Store.creation_recovery(store, %{runtime_id: final.runtime_id, command_id: nil})
+
+    assert head.active_command_id == nil
+
+    {:ok, claim} =
+      Store.claim_creation_domain(
+        final.runtime_id,
+        head.owner_generation,
+        String.duplicate("a", 64)
+      )
+
+    assert {:committed, _, claimed} = Store.transact(store, claim)
+
+    {:ok, reserve} =
+      Store.reserve_creation(
+        final.runtime_id,
+        final.command_id,
+        claimed.owner_generation,
+        claimed.owner_selection,
+        claimed.domain_version,
+        final.genesis
+      )
+
+    assert {:committed, _, receipt} = Store.transact(store, reserve)
+    {reserve, receipt}
+  end
+
+  defp genesis(label),
+    do: Loopex.ConfiguredGenesisFixture.genesis([]) |> Map.put("options", %{"label" => label})
 
   defp store_path do
     root = System.fetch_env!("LOOPEX_HOME")

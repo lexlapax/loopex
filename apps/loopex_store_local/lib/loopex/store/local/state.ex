@@ -6,13 +6,23 @@ defmodule Loopex.Store.Local.State do
   alias Loopex.Store.CreationProvenance
   alias Loopex.Store.Transitions
 
-  @schema_version 1
+  # Concept: restart consumes one current creation-custody format.
+  # Technical depth: version 2 requires complete reservation lineage before
+  # unknown final creation. Exact finals retained in this format resolve first;
+  # version 1 roots and capsule-free imported histories are not decoded.
+  @schema_version 2
+  @creation_uint64 18_446_744_073_709_551_615
+  @creation_reply_bytes 1_048_576
+  @creation_types [:claim_creation_domain, :reserve_creation, :close_creation_reservation]
 
   @spec new() :: map()
   def new do
     %{
       next_session_number: 1,
       runtime_commands: %{},
+      creation_heads: %{},
+      creation_capsules: %{},
+      creation_resolutions: %{},
       create_ordinals: %{},
       creation_rows: %{},
       session_creations: %{},
@@ -26,6 +36,15 @@ defmodule Loopex.Store.Local.State do
           | {:new, map(), map(), Store.outcome()}
           | {:invalid, Store.outcome()}
   def prepare(state, transaction) when is_map(state) and is_map(transaction) do
+    if Map.get(transaction, :type) in @creation_types and
+         Store.validate_transaction(transaction) != :ok do
+      {:invalid, {:not_committed, :invalid_transaction}}
+    else
+      prepare_valid(state, transaction)
+    end
+  end
+
+  defp prepare_valid(state, transaction) do
     case retained_resolution(state, transaction) do
       {:ok, retained} ->
         resolve_known(retained, transaction)
@@ -80,7 +99,11 @@ defmodule Loopex.Store.Local.State do
   end
 
   @spec runtime_command(map(), map()) ::
-          :absent | {:error, :runtime_command_conflict} | {:open, map()} | {:completed, map()}
+          :absent
+          | {:error, :runtime_command_conflict}
+          | {:open, map()}
+          | {:completed, map()}
+          | {:not_committed, :creation_cancelled}
   def runtime_command(state, command) do
     case fetch_nested(state.runtime_commands, command.runtime_id, command.command_id) do
       :absent ->
@@ -90,6 +113,13 @@ defmodule Loopex.Store.Local.State do
       when command.command_kind == :create ->
         if create_command_matches?(command, binding),
           do: {:completed, %{result: session_id}},
+          else: {:error, :runtime_command_conflict}
+
+      {:ok,
+       %{binding: binding, resolution: %{status: :not_committed, reason: :creation_cancelled}}}
+      when command.command_kind == :create ->
+        if create_command_matches?(command, binding),
+          do: {:not_committed, :creation_cancelled},
           else: {:error, :runtime_command_conflict}
 
       {:ok, %{command: ^command, status: :open, generation: generation, candidate: candidate}} ->
@@ -303,50 +333,199 @@ defmodule Loopex.Store.Local.State do
     end
   end
 
+  defp linearize(state, :runtime_control_claim_creation_domain, transaction) do
+    head = creation_head(state, transaction.runtime_id)
+
+    maximum =
+      if is_nil(head.active_command_id), do: @creation_uint64 - 3, else: @creation_uint64 - 2
+
+    cond do
+      head.owner_generation != transaction.expected_owner_generation ->
+        refuse_creation(state, transaction, :stale_creation_generation)
+
+      head.owner_generation > maximum ->
+        refuse_creation(state, transaction, :creation_counter_exhausted)
+
+      true ->
+        next_head = %{
+          head
+          | owner_generation: head.owner_generation + 1,
+            owner_selection: transaction.owner_selection
+        }
+
+        commit_creation(
+          state,
+          transaction,
+          next_head,
+          nil,
+          creation_receipt(transaction, next_head)
+        )
+    end
+  end
+
+  defp linearize(state, :runtime_control_reserve_creation, transaction) do
+    head = creation_head(state, transaction.runtime_id)
+    reason = creation_eligibility(head, transaction)
+    capsule = reserve_capsule(transaction)
+
+    next_head = %{
+      head
+      | owner_generation: head.owner_generation + 1,
+        domain_version: head.domain_version + 1,
+        active_command_id: transaction.command_id
+    }
+
+    cond do
+      reason ->
+        refuse_creation(state, transaction, reason)
+
+      not is_nil(head.active_command_id) ->
+        refuse_creation(state, transaction, :creation_in_progress)
+
+      Map.has_key?(state.creation_capsules, {transaction.runtime_id, transaction.command_id}) or
+          fetch_nested(state.runtime_commands, transaction.runtime_id, transaction.command_id) !=
+            :absent ->
+        refuse_creation(state, transaction, :runtime_command_conflict)
+
+      head.owner_generation > @creation_uint64 - 2 or head.domain_version > @creation_uint64 - 2 ->
+        refuse_creation(state, transaction, :creation_counter_exhausted)
+
+      not prospective_recovery_fits?(transaction.runtime_id, next_head, capsule) ->
+        refuse_creation(state, transaction, :creation_recovery_too_large)
+
+      true ->
+        commit_creation(
+          state,
+          transaction,
+          next_head,
+          capsule,
+          creation_receipt(transaction, next_head)
+        )
+    end
+  end
+
+  defp linearize(state, :runtime_control_close_creation_reservation, transaction) do
+    head = creation_head(state, transaction.runtime_id)
+    capsule = Map.get(state.creation_capsules, {transaction.runtime_id, transaction.command_id})
+
+    if close_relation?(state, head, capsule, transaction) do
+      {:ok, final} = Store.create_session(capsule.runtime_id, capsule.command_id, capsule.genesis)
+
+      case retained_resolution(state, final) do
+        {:ok, _terminal} ->
+          receipt = creation_close_receipt(transaction, head, capsule)
+          retain_creation_resolution(state, transaction, committed_resolution(receipt))
+
+        :absent ->
+          reason = creation_eligibility(head, transaction)
+
+          cond do
+            reason ->
+              refuse_creation(state, transaction, reason)
+
+            head.owner_generation > @creation_uint64 - 1 or
+                head.domain_version > @creation_uint64 - 1 ->
+              refuse_creation(state, transaction, :creation_counter_exhausted)
+
+            true ->
+              resolution = %{status: :not_committed, reason: :creation_cancelled}
+
+              next =
+                put_runtime_command(
+                  state,
+                  final.runtime_id,
+                  final.command_id,
+                  retained(final, resolution)
+                )
+
+              terminal = %{
+                capsule
+                | state: :not_committed,
+                  final_resolution: {:not_committed, :creation_cancelled},
+                  session_id: nil
+              }
+
+              next_head = %{
+                head
+                | owner_generation: head.owner_generation + 1,
+                  domain_version: head.domain_version + 1,
+                  active_command_id: nil
+              }
+
+              commit_creation(
+                next,
+                transaction,
+                next_head,
+                terminal,
+                creation_close_receipt(transaction, next_head, terminal)
+              )
+          end
+      end
+    else
+      # Concept: an unrelated close never gains access to another reservation.
+      # Technical depth: eligibility errors precede relation errors for an
+      # unknown close; exact known close bindings were resolved before this path.
+      reason = creation_eligibility(head, transaction) || :creation_reservation_conflict
+      refuse_creation(state, transaction, reason)
+    end
+  end
+
   defp linearize(state, :runtime_control_create_session, transaction) do
-    {session_id, session_number} = allocate_session_id(state, transaction)
-    genesis = stamp_genesis(transaction.genesis)
+    head = creation_head(state, transaction.runtime_id)
+    capsule = Map.get(state.creation_capsules, {transaction.runtime_id, transaction.command_id})
 
-    receipt = %{
-      type: :create_session,
-      session_id: session_id,
-      journal_version: 1
-    }
+    cond do
+      is_nil(capsule) ->
+        resolution = %{status: :not_committed, reason: :creation_reservation_required}
 
-    resolution = committed_resolution(receipt)
-    retained = retained(transaction, resolution)
+        next =
+          put_runtime_command(
+            state,
+            transaction.runtime_id,
+            transaction.command_id,
+            retained(transaction, resolution)
+          )
 
-    session = %{
-      runtime_id: transaction.runtime_id,
-      owner_epoch: 0,
-      owner_incarnation_id: nil,
-      journal_version: 1,
-      event_sequence: 0,
-      records: [genesis],
-      events: [],
-      event_ids: %{},
-      resolutions: %{}
-    }
+        {:new, next, frame(:runtime_control_create_session, transaction, resolution, [], []),
+         {:not_committed, :creation_reservation_required}}
 
-    runtime_commands =
-      put_nested(
-        state.runtime_commands,
-        transaction.runtime_id,
-        transaction.command_id,
-        Map.put(retained, :session_id, session_id)
-      )
+      capsule.runtime_id != transaction.runtime_id or capsule.command_id != transaction.command_id or
+        not capsule_valid?(state, head, capsule) or capsule.state != :reserved ->
+        {:invalid, {:not_committed, :creation_reservation_conflict}}
 
-    next =
-      %{
-        state
-        | next_session_number: session_number + 1,
-          runtime_commands: runtime_commands,
-          sessions: Map.put(state.sessions, session_id, session)
-      }
-      |> retain_creation_index(transaction, session_id)
+      capsule.genesis != transaction.genesis ->
+        {:invalid, {:not_committed, :tx_id_conflict}}
 
-    frame = frame(:runtime_control_create_session, transaction, resolution, [genesis], [])
-    {:new, next, frame, {:committed, transaction.command_id, receipt}}
+      head.owner_generation > @creation_uint64 - 1 or head.domain_version > @creation_uint64 - 1 ->
+        {:invalid, {:not_committed, :creation_counter_exhausted}}
+
+      true ->
+        {:new, next, result_frame, {:committed, _id, receipt} = outcome} =
+          commit_created_session(state, transaction)
+
+        terminal = %{
+          capsule
+          | state: :created,
+            final_resolution: :committed,
+            session_id: receipt.session_id
+        }
+
+        next_head = %{
+          head
+          | owner_generation: head.owner_generation + 1,
+            domain_version: head.domain_version + 1,
+            active_command_id: nil
+        }
+
+        next =
+          %{
+            next
+            | creation_heads: Map.put(next.creation_heads, transaction.runtime_id, next_head)
+          }
+          |> put_capsule(terminal)
+
+        {:new, next, result_frame, outcome}
+    end
   end
 
   defp linearize(state, :runtime_control_stage_owner_attempt, transaction) do
@@ -417,6 +596,384 @@ defmodule Loopex.Store.Local.State do
           nil -> commit_records(state, session, transaction)
           reason -> retain_non_commit(state, session, transaction, reason)
         end
+    end
+  end
+
+  defp commit_created_session(state, transaction) do
+    {session_id, session_number} = allocate_session_id(state, transaction)
+    genesis = stamp_genesis(transaction.genesis)
+
+    receipt = %{
+      type: :create_session,
+      session_id: session_id,
+      journal_version: 1
+    }
+
+    resolution = committed_resolution(receipt)
+    retained = retained(transaction, resolution)
+
+    session = %{
+      runtime_id: transaction.runtime_id,
+      owner_epoch: 0,
+      owner_incarnation_id: nil,
+      journal_version: 1,
+      event_sequence: 0,
+      records: [genesis],
+      events: [],
+      event_ids: %{},
+      resolutions: %{}
+    }
+
+    runtime_commands =
+      put_nested(
+        state.runtime_commands,
+        transaction.runtime_id,
+        transaction.command_id,
+        Map.put(retained, :session_id, session_id)
+      )
+
+    next =
+      %{
+        state
+        | next_session_number: session_number + 1,
+          runtime_commands: runtime_commands,
+          sessions: Map.put(state.sessions, session_id, session)
+      }
+      |> retain_creation_index(transaction, session_id)
+
+    frame = frame(:runtime_control_create_session, transaction, resolution, [genesis], [])
+    {:new, next, frame, {:committed, transaction.command_id, receipt}}
+  end
+
+  # Concept: creation custody belongs to one runtime domain, before a session exists.
+  # Technical depth: the serial Store owner publishes each head, capsule and
+  # resolution together. A historical receipt never supplies fresh eligibility.
+  @doc false
+  def creation_recovery(state, request) do
+    if closed_map?(request, [:runtime_id, :command_id]) and
+         creation_id?(request.runtime_id) and
+         (is_nil(request.command_id) or creation_id?(request.command_id)) do
+      head = creation_head(state, request.runtime_id)
+      selected = request.command_id || head.active_command_id
+      capsule = Map.get(state.creation_capsules, {request.runtime_id, selected})
+
+      reply = %{version: 1, runtime_id: request.runtime_id, head: head, command: capsule}
+
+      if creation_head_valid?(head) and active_capsule_valid?(state, request.runtime_id, head) and
+           (is_nil(capsule) or
+              (capsule.runtime_id == request.runtime_id and capsule.command_id == selected and
+                 capsule_valid?(state, head, capsule))) and
+           (selected != head.active_command_id or is_nil(selected) or not is_nil(capsule)) and
+           recovery_size?(reply) do
+        {:ok, reply}
+      else
+        :unavailable
+      end
+    else
+      {:error, :invalid_creation_recovery}
+    end
+  rescue
+    _ -> :unavailable
+  end
+
+  defp creation_head(state, runtime) do
+    Map.get(state.creation_heads, runtime, %{
+      version: 1,
+      owner_generation: 0,
+      owner_selection: nil,
+      domain_version: 0,
+      active_command_id: nil
+    })
+  end
+
+  defp creation_head_valid?(head) do
+    closed_map?(head, [
+      :version,
+      :owner_generation,
+      :owner_selection,
+      :domain_version,
+      :active_command_id
+    ]) and
+      head.version == 1 and counter?(head.owner_generation) and counter?(head.domain_version) and
+      (is_nil(head.active_command_id) or creation_id?(head.active_command_id)) and
+      if head.owner_generation == 0 do
+        head.owner_selection == nil and head.domain_version == 0 and head.active_command_id == nil
+      else
+        selection?(head.owner_selection) and head.owner_generation > head.domain_version and
+          (is_nil(head.active_command_id) or
+             (head.owner_generation >= 2 and head.owner_generation <= @creation_uint64 - 1 and
+                head.domain_version >= 1 and head.domain_version <= @creation_uint64 - 1))
+      end
+  end
+
+  defp active_capsule_valid?(_state, _runtime, %{active_command_id: nil}), do: true
+
+  defp active_capsule_valid?(state, runtime, head) do
+    case Map.fetch(state.creation_capsules, {runtime, head.active_command_id}) do
+      {:ok, %{state: :reserved} = capsule} ->
+        capsule.runtime_id == runtime and capsule.command_id == head.active_command_id and
+          capsule_valid?(state, head, capsule)
+
+      _ ->
+        false
+    end
+  end
+
+  defp capsule_valid?(state, head, capsule) do
+    with true <-
+           closed_map?(capsule, [
+             :version,
+             :runtime_id,
+             :command_id,
+             :reservation_tx_id,
+             :reservation_owner_generation,
+             :reservation_owner_selection,
+             :reservation_domain_version,
+             :genesis,
+             :state,
+             :final_resolution,
+             :session_id
+           ]),
+         true <-
+           capsule.version == 1 and creation_id?(capsule.runtime_id) and
+             creation_id?(capsule.command_id),
+         true <-
+           is_integer(capsule.reservation_owner_generation) and
+             capsule.reservation_owner_generation > 0 and
+             capsule.reservation_owner_generation <= @creation_uint64 - 2,
+         true <-
+           is_integer(capsule.reservation_domain_version) and
+             capsule.reservation_domain_version > 0 and
+             capsule.reservation_domain_version <= @creation_uint64 - 1,
+         {:ok, reservation} <-
+           Store.reserve_creation(
+             capsule.runtime_id,
+             capsule.command_id,
+             capsule.reservation_owner_generation,
+             capsule.reservation_owner_selection,
+             capsule.reservation_domain_version - 1,
+             capsule.genesis
+           ),
+         true <-
+           reservation.genesis == capsule.genesis and
+             reservation.tx_id == capsule.reservation_tx_id,
+         {:ok, retained} <- retained_resolution(state, reservation),
+         {:ok, binding} <- Store.immutable_binding(reservation),
+         true <- retained.binding == binding and retained.resolution.status == :committed,
+         true <-
+           retained.resolution.receipt ==
+             creation_receipt(reservation, %{
+               version: 1,
+               owner_generation: capsule.reservation_owner_generation + 1,
+               owner_selection: capsule.reservation_owner_selection,
+               domain_version: capsule.reservation_domain_version,
+               active_command_id: capsule.command_id
+             }),
+         true <-
+           head.owner_generation >= capsule.reservation_owner_generation + 1 and
+             head.domain_version >= capsule.reservation_domain_version,
+         true <-
+           head.owner_generation != capsule.reservation_owner_generation + 1 or
+             head.owner_selection == capsule.reservation_owner_selection,
+         {:ok, final} <-
+           Store.create_session(capsule.runtime_id, capsule.command_id, capsule.genesis) do
+      capsule_terminal_valid?(state, head, capsule, final)
+    else
+      _ -> false
+    end
+  end
+
+  defp capsule_terminal_valid?(
+         state,
+         head,
+         %{state: :reserved, final_resolution: nil, session_id: nil} = capsule,
+         final
+       ) do
+    head.active_command_id == capsule.command_id and
+      head.domain_version == capsule.reservation_domain_version and
+      retained_resolution(state, final) == :absent
+  end
+
+  defp capsule_terminal_valid?(state, head, capsule, final) do
+    with true <-
+           head.active_command_id != capsule.command_id and
+             head.owner_generation >= capsule.reservation_owner_generation + 2 and
+             head.domain_version > capsule.reservation_domain_version,
+         {:ok, retained} <- retained_resolution(state, final),
+         {:ok, binding} <- Store.immutable_binding(final),
+         true <- retained.binding == binding do
+      case {capsule.state, capsule.final_resolution, capsule.session_id, retained.resolution} do
+        {:created, :committed, session_id, %{status: :committed, receipt: receipt}} ->
+          case Map.fetch(state.sessions, session_id) do
+            {:ok, session} ->
+              creation_id?(session_id) and
+                receipt == %{type: :create_session, session_id: session_id, journal_version: 1} and
+                retained.session_id == session_id and session.runtime_id == capsule.runtime_id and
+                match?([%{payload: genesis} | _] when genesis == capsule.genesis, session.records)
+
+            :error ->
+              false
+          end
+
+        {:not_committed, {:not_committed, :creation_cancelled}, nil,
+         %{status: :not_committed, reason: :creation_cancelled}} ->
+          true
+
+        _ ->
+          false
+      end
+    else
+      _ -> false
+    end
+  end
+
+  defp creation_receipt(transaction, head) do
+    common =
+      head
+      |> Map.delete(:version)
+      |> Map.merge(%{type: transaction.type, runtime_id: transaction.runtime_id})
+
+    case transaction.type do
+      :claim_creation_domain ->
+        common
+
+      :reserve_creation ->
+        Map.merge(common, %{
+          reservation_tx_id: transaction.tx_id,
+          reservation_domain_version: head.domain_version
+        })
+    end
+  end
+
+  defp creation_close_receipt(transaction, head, capsule) do
+    head
+    |> Map.delete(:version)
+    |> Map.merge(%{
+      type: :close_creation_reservation,
+      runtime_id: transaction.runtime_id,
+      command_id: transaction.command_id,
+      reservation_tx_id: transaction.reservation_tx_id,
+      final_resolution: capsule.final_resolution,
+      session_id: capsule.session_id
+    })
+  end
+
+  defp commit_creation(state, transaction, head, capsule, receipt) do
+    resolution = committed_resolution(receipt)
+    next = %{state | creation_heads: Map.put(state.creation_heads, transaction.runtime_id, head)}
+    next = if capsule, do: put_capsule(next, capsule), else: next
+    retain_creation_resolution(next, transaction, resolution)
+  end
+
+  defp retain_creation_resolution(state, transaction, resolution) do
+    key = {transaction.runtime_id, transaction.type, transaction.tx_id}
+
+    next = %{
+      state
+      | creation_resolutions:
+          Map.put(state.creation_resolutions, key, retained(transaction, resolution))
+    }
+
+    {:ok, transition} = Transitions.id(transaction)
+
+    {:new, next, frame(transition, transaction, resolution, [], []),
+     outcome_of(resolution, transaction.tx_id)}
+  end
+
+  defp refuse_creation(state, transaction, reason),
+    do: retain_creation_resolution(state, transaction, %{status: :not_committed, reason: reason})
+
+  defp put_capsule(state, capsule),
+    do: %{
+      state
+      | creation_capsules:
+          Map.put(state.creation_capsules, {capsule.runtime_id, capsule.command_id}, capsule)
+    }
+
+  defp creation_eligibility(head, transaction) do
+    cond do
+      head.owner_generation != transaction.owner_generation or
+          head.owner_selection != transaction.owner_selection ->
+        :stale_creation_generation
+
+      head.domain_version != transaction.expected_domain_version ->
+        :creation_domain_conflict
+
+      true ->
+        nil
+    end
+  end
+
+  defp reserve_capsule(transaction) do
+    %{
+      version: 1,
+      runtime_id: transaction.runtime_id,
+      command_id: transaction.command_id,
+      reservation_tx_id: transaction.tx_id,
+      reservation_owner_generation: transaction.owner_generation,
+      reservation_owner_selection: transaction.owner_selection,
+      reservation_domain_version: transaction.expected_domain_version + 1,
+      genesis: transaction.genesis,
+      state: :reserved,
+      final_resolution: nil,
+      session_id: nil
+    }
+  end
+
+  defp prospective_recovery_fits?(runtime, head, capsule) do
+    terminal_head = %{
+      head
+      | owner_generation: head.owner_generation + 1,
+        domain_version: head.domain_version + 1,
+        active_command_id: nil
+    }
+
+    created = %{
+      capsule
+      | state: :created,
+        final_resolution: :committed,
+        session_id: :binary.copy("s", 256)
+    }
+
+    cancelled = %{
+      capsule
+      | state: :not_committed,
+        final_resolution: {:not_committed, :creation_cancelled},
+        session_id: nil
+    }
+
+    Enum.all?([{head, capsule}, {terminal_head, created}, {terminal_head, cancelled}], fn {h, c} ->
+      recovery_size?(%{version: 1, runtime_id: runtime, head: h, command: c})
+    end)
+  end
+
+  defp recovery_size?(reply),
+    do: byte_size(:erlang.term_to_binary(reply, [:deterministic])) <= @creation_reply_bytes
+
+  defp counter?(value), do: is_integer(value) and value >= 0 and value <= @creation_uint64
+  defp creation_id?(value), do: is_binary(value) and byte_size(value) in 1..256
+
+  defp selection?(value) when is_binary(value) and byte_size(value) == 64,
+    do: Enum.all?(:binary.bin_to_list(value), &(&1 in ?0..?9 or &1 in ?a..?f))
+
+  defp selection?(_), do: false
+
+  defp closed_map?(map, keys),
+    do:
+      is_map(map) and not is_struct(map) and
+        map_size(map) == length(keys) and Enum.all?(keys, &Map.has_key?(map, &1))
+
+  defp close_relation?(state, head, capsule, transaction) do
+    with true <- is_map(capsule) and capsule_valid?(state, head, capsule),
+         true <-
+           capsule.reservation_tx_id == transaction.reservation_tx_id and
+             capsule.reservation_domain_version == transaction.reservation_domain_version,
+         {:ok, final} <-
+           Store.create_session(capsule.runtime_id, capsule.command_id, capsule.genesis) do
+      final.canonical_record_bytes == transaction.final_canonical_record_bytes and
+        final.canonical_mutation_digest == transaction.final_canonical_mutation_digest
+    else
+      _ -> false
     end
   end
 
@@ -580,6 +1137,14 @@ defmodule Loopex.Store.Local.State do
 
   defp replay_frame(_state, _frame), do: {:error, :invalid_frame_schema}
 
+  defp retained_resolution(state, %{type: type, runtime_id: runtime, tx_id: id})
+       when type in @creation_types and is_binary(runtime) and is_binary(id) do
+    case Map.fetch(state.creation_resolutions, {runtime, type, id}) do
+      {:ok, value} -> {:ok, value}
+      :error -> :absent
+    end
+  end
+
   defp retained_resolution(state, %{type: :create_session} = transaction) do
     fetch_nested(state.runtime_commands, transaction[:runtime_id], transaction[:command_id])
   end
@@ -618,25 +1183,32 @@ defmodule Loopex.Store.Local.State do
   defp owner_command_refusal(state, %{runtime_id: runtime_id} = transaction) do
     command = owner_command_binding(transaction)
 
-    case fetch_nested(state.runtime_commands, runtime_id, transaction.command_id) do
-      {:ok,
-       %{
-         command: ^command,
-         status: :open,
-         generation: generation,
-         candidate: %{tx_id: tx_id} = candidate
-       }}
-      when generation == transaction.attempt_generation and tx_id == transaction.tx_id ->
-        case {Store.immutable_binding(candidate), Store.immutable_binding(transaction)} do
-          {{:ok, binding}, {:ok, binding}} -> nil
-          _mismatch -> :owner_candidate_conflict
-        end
+    # Concept: a reserved creation already owns its logical command identity.
+    # Technical depth: creation capsules and resume commands share {R,X};
+    # a session-owner mutation cannot replace a retained candidate or its F.
+    if Map.has_key?(state.creation_capsules, {runtime_id, transaction.command_id}) do
+      :runtime_command_conflict
+    else
+      case fetch_nested(state.runtime_commands, runtime_id, transaction.command_id) do
+        {:ok,
+         %{
+           command: ^command,
+           status: :open,
+           generation: generation,
+           candidate: %{tx_id: tx_id} = candidate
+         }}
+        when generation == transaction.attempt_generation and tx_id == transaction.tx_id ->
+          case {Store.immutable_binding(candidate), Store.immutable_binding(transaction)} do
+            {{:ok, binding}, {:ok, binding}} -> nil
+            _mismatch -> :owner_candidate_conflict
+          end
 
-      {:ok, %{command: ^command, status: :completed}} ->
-        :command_completed
+        {:ok, %{command: ^command, status: :completed}} ->
+          :command_completed
 
-      _other ->
-        :runtime_command_conflict
+        _other ->
+          :runtime_command_conflict
+      end
     end
   end
 
@@ -649,6 +1221,9 @@ defmodule Loopex.Store.Local.State do
 
       unresolved_other_owner_command?(state, session, transaction) ->
         :owner_attempt_in_progress
+
+      Map.has_key?(state.creation_capsules, {transaction.runtime_id, transaction.command_id}) ->
+        :runtime_command_conflict
 
       true ->
         case fetch_nested(

@@ -135,8 +135,14 @@ defmodule Loopex.Store.OwnerLane do
     {outcome, next}
   end
 
-  defp scope(%{type: :create_session, runtime_id: runtime_id}) when is_binary(runtime_id),
-    do: {:ok, {:runtime_control, runtime_id}}
+  defp scope(%{type: type, runtime_id: runtime_id})
+       when type in [
+              :create_session,
+              :claim_creation_domain,
+              :reserve_creation,
+              :close_creation_reservation
+            ] and is_binary(runtime_id),
+       do: {:ok, {:runtime_control, runtime_id}}
 
   defp scope(%{session_id: session_id, mutation_domain: mutation_domain})
        when is_binary(session_id) and is_binary(mutation_domain),

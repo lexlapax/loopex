@@ -1,3 +1,5 @@
+Code.require_file("../../loopex/test/support/configured_genesis_helper.exs", __DIR__)
+
 defmodule Loopex.Store.MemoryTest do
   use ExUnit.Case, async: false
 
@@ -12,7 +14,28 @@ defmodule Loopex.Store.MemoryTest do
     assert {:registered_name, []} = Process.info(first, :registered_name)
 
     {:ok, store} = Store.new(Memory, first)
-    {:ok, create} = Store.create_session("memory-runtime", "create", %{kind: :session_genesis})
+
+    {:ok, create} =
+      Store.create_session(
+        "memory-runtime",
+        "create",
+        Loopex.ConfiguredGenesisFixture.genesis([])
+      )
+
+    {:ok, claim} = Store.claim_creation_domain("memory-runtime", 0, String.duplicate("a", 64))
+    assert {:committed, _, claimed} = Store.transact(store, claim)
+
+    {:ok, reserve} =
+      Store.reserve_creation(
+        "memory-runtime",
+        "create",
+        claimed.owner_generation,
+        claimed.owner_selection,
+        claimed.domain_version,
+        create.genesis
+      )
+
+    assert {:committed, _, _} = Store.transact(store, reserve)
     assert {:committed, "create", receipt} = Store.transact(store, create)
     assert {:ok, [_]} = Store.load_records(store, receipt.session_id, 0, 10)
 
@@ -102,6 +125,8 @@ defmodule Loopex.Store.MemoryTest do
             Memory.transaction_status(pid, "absent", "session_journal", "tx")
             Memory.ownership_head(pid, "absent", "session_journal")
             Memory.runtime_command(pid, %{runtime_id: "absent", command_id: "command"})
+            Memory.creation_recovery(pid, %{runtime_id: "absent", command_id: nil})
+            Memory.creation_provenance(pid, "absent", %{kind: :command, command_id: "command"})
             Memory.load_records(pid, "absent", 0, 1)
             Memory.load_events(pid, "absent", 0, 1)
             send(parent, {:callbacks_done, self()})
@@ -124,6 +149,8 @@ defmodule Loopex.Store.MemoryTest do
               :transaction_status,
               :ownership_head,
               :runtime_command,
+              :creation_recovery,
+              :creation_provenance,
               :load_records,
               :load_events
             ] do

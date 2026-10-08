@@ -29,6 +29,38 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Reboot continuation on 2026-10-07
 
+Latest completed unit: atomic creation adapters, whole48 per supported pair at
+isolated `0d088f1a61f7001f2e3d665416032f8d51df2c18`. Original9327 PASS in31.375seconds,
+eight joins/42 artifacts,1921-row registry. Output `M7/creation-storage-proof-20261007-v2`,
+collection `aff74509a590654e589e0b2b259f5d89f81909ec40198ccef55e2cec033cb100`,
+terminal `5319ec7ccbe5fc9f8a0b9ad61e0400c2f0d2d8dd55d935ba904e925070974796`,
+registry `76c725ac196f11f50095e46431312ec54d20fd47dee8958395e5463287857d61`.
+The six adapter paths and current OwnerLane scope are integrated literally;
+Core source matches its earlier proved32-case unit. One narrow added T04 row
+closes, while its parent complete adapter/restore row stays open. Original
+T01–T19 tally88/85/6; added359/24/0. Including T00: original88/91/7, added363/25/0.
+Original98876 remains FAIL current45/48, floor unrun,14.339seconds, four joins/
+24artifacts,1905-row registry. Output `M7/creation-storage-proof-20261007-v1`,
+collection `4ace326fb4c4ba3d5a5b737de9695414a84586074b8e6e3a7d82b28990e4e9ec`,
+terminal `1c279c146fe5b4a8315c2bd3851e359d313d7f0fc58a0d66742ed13384acc872`.
+Formatter85681 passed both pairs on repaired bytes,8.066seconds, eight joins/
+45artifacts,1913 rows; no formatted child was needed. All native handles are
+terminal and collected once. Root must seed the next run from actual1921 rows.
+
+Resume context `M7/custody-continuation-context-20261007-v1/retention.json`,
+SHA-256 `21609673d54dff2f7af55aced4e6a9990de1db43b1f0a617a231706490fc52f3`,55 files,
+retains the repair recipe, cancellation codec packet and qualified independent
+reviewa2705a88, plus restore map860785b2. Codec remains dormant/native UNRUN;
+include node_client for all14 cases and use pinned Node. t15_original_closure_map
+now writes only Restore.Audit and its two physical test files in isolated
+m7-custody-restore at385610f2. cleanup_binding_audit revises the28-case physical
+ProgressSink tests to remove a redundant synthetic readiness message and make
+new cleanup actions independent; original26 and bounds stay exact. Control
+writer owns its native lifecycle/carrier/current M1 Store fixture join; authored
+creation remains later work. No asked decision is pending. Full integrated
+passing baseline remainsd1132591; no full check, closure or release claim.
+
+
 Latest completed checklist unit: public stop while an answered interaction holds
 its actual policy task. Whole21 passed per pair at isolated
 `0551250a77fc2fec8f5662676afc456fda349bf2`, original63622,37.305seconds,
