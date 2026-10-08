@@ -29,6 +29,71 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Reboot continuation on 2026-10-07
 
+Latest checkpoint after `84f0aa85`: ADR0061's repeated approval matches the
+accepted `d7c23f3d` record. ADR0063's exact question is pending; no dependent
+startup status/host-wait implementation is authorized yet. Independent proposal
+review is sealed at
+`/private/tmp/m7-creation-startup-status-proposal-independent-review-20261007-v1.md`,
+SHA-256 `f62556cef887d565e3b9942d0d05fdf6312861b6ac1f2da7481cdd2c040ec970`.
+Its exact Proposed pair and prior canonical docs PASS remain unchanged.
+
+Foreground writer formatter original8232 passed on both pairs. Original47604
+stopped on current compilation warnings before tests; source36994934 causally
+pins the two captured bitstring sizes. Original14097 then passed current
+warning-free compile but failed13 of14 complete cases before the real fixture VM
+launched. `List.flatten` recursively reduced charlist arguments to integer
+characters. Source `6c6d3bc42d6d2234775e169b27d8fb0d18fc5de7` changes that one
+expression to `Enum.concat`, preserving every argument. All assertions,14 cases,
+production writer/Bash/fixture and deadlines remain unchanged. Patch
+`/private/tmp/m7-foreground-writer-argv-repair-v1/complete.patch`, SHA-256
+`6deb76db820d43688fb3b916344a2f3e434d09099c99ac4b8dea4a7490110099`;
+review `5d33da68c0f7f217fe9a3f45a375bbc648e369f19a3d7a98d92f1854e51b17b4`.
+Original14097 is terminal1 and collected once,46.707seconds,4 joins/24 artifacts,
+2032 registry rows. Output `M7/foreground-writer-proof-20261007-v2`; collection
+`b6d8953a9b238bb419502c7eabd1d1944f6581da88bc10e2cc4851150240e037`, terminal
+`dd31daeaecd526b3eb7c45c8aea05e7794bb692da883c03f2ebe0c087dd10da0`, registry
+`7843a0db27576ef400a1bbe47c4640404fcda262816213fc4710d4aef64b1573`.
+Floor remains unrun at that failed source. New whole14 paired proof original75037
+is live, output `M7/foreground-writer-proof-20261007-v3`, runner
+`/private/tmp/m7-foreground-writer-proof-preparation-v3/proof.enabled.py`, SHA-256
+`3f1c396f0de75d0454a9ac67a925bf34d58157db9ee53cb1b36125c29010d845`, capture
+`ce7cad41beb610396b7236730820d8c7098ef936cfbf51bc88e5d86c6aeea3c4`.
+Collect that original handle once after terminal; do not repeat an unchanged stage.
+
+Credited ingress V1 source3656be05 is source-reviewed BLOCKED at
+`/private/tmp/m7-progress-runtime-credit-source-independent-review-20261007-v1.md`,
+SHA-256 `8ebbaeb170950bbf709bd0dc2d83736dde363bb4ed33606ef55d13458e0bf7ca`.
+The ordering gap allowed a later Control request to overtake an earlier reserved
+reference. V2 owns a bounded ordered-prefix handoff and real paused model/executor
+producer proofs. It also repairs missing lifecycle sink ownership, four native
+PID boundary assertions and an uncredited test payload-copy helper. No native
+PASS is claimed. Expanded complete census382 includes two existing long-bound
+cases; source327 static declarations and all28 original Sink bodies are retained.
+Expanded census SHA-256 `aa390bac87f3ceaa9029e79c1f9dec7c7fc9126e4a396ade520342616ce81f2d`.
+
+Authored creation writer owns the existing managed worktree
+`/Users/spuri/.codex/worktrees/m7-authored-creation-slot/loopex`, base84f0aa85,
+Control/CreationCarrier/Runtime/facade/Model docs/new authored lifecycle proofs.
+Implementation map
+`/private/tmp/m7-authored-creation-native-slot-implementation-map-20261007-v1.md`,
+SHA-256 `950a92c71e030056f75624abcdd8949fa4dcae8d8ba58e4108ed8692d7722d04`.
+Within CreationCarrier, a private preparation-group owner reuses the unchanged
+ProviderLifetime Starter/register protocol and arbitrary registered resources.
+Runtime ownership acknowledgement and exact child/resource joins precede phase
+advance within the original absolute cutoffs. It creates no synthetic session
+and narrows no adapter registration contract. Root owns native/Git/integration;
+workers remain source-only and preserve unrelated work. Original22 native case
+bodies and current creation truth remain unchanged.
+
+External immutable restart retention
+`M7/current-native-parallel-context-20261007-v1/retention.json`, SHA-256
+`5f01b8b3b31b638f2c519500bf3a5072036e9a370c803908674c049a1693279a`,154 files.
+Its captured14097-live metadata predates the terminal failure recorded above;
+it is not rewritten. All failures and original handles remain distinct.
+Task counts remain unchanged; no floor/full integration/release/closure claim.
+Earlier entries below retain their historical revisions and are superseded by
+these current facts where stated.
+
 Latest verified creation unit: isolated52808005 passed complete22 on each supported
 pair, original45191,69.460seconds, eight original joins/42 retained artifacts,
 zero failures/exclusions/skips/invalid. Output

@@ -1,21 +1,24 @@
 # M7 Implementation Tasks
 
-Current continuation: ADR0061 is accepted at `d7c23f3d`; no asked approval
-is pending. Private single-lane attempts continuation is integrated literally
-from tested `8008e065`: all128 cases pass on both supported pairs, original17391,
-98.397seconds, eight exact joins/42 retained artifacts. One added T14 row closes;
-all ten original T14 rows remain open. T01–T19 originals remain88 done/85 todo/6
-retired; added362 done/23 todo. Native creation's cleanup cutoff repair, credited
-Core ingress and foreground output writer continue in separate worktrees.
-Custody restore is source-qualified pending current boundary/readiness joins
-and complete175 native cases. Exact identities and earlier failures remain in
-the [resume record](M7-resume.md). Earlier entries below are historical.
+Current continuation on 2026-10-07: ADR0061 is accepted at `d7c23f3d`;
+the repeated approval matches that recorded decision. ADR0063 remains Proposed
+at `16c251ad`; its exact startup-status and bounded host-wait question is pending.
+Private continuation128 and native creation22 passed on both supported pairs.
+Creation joins literally at `84f0aa85`; the broader authored/host/VM-loss row
+remains open. T01–T19 originals remain88 done/85 todo/6 retired; added362
+done/23 todo. Exact identities remain in the [resume record](M7-resume.md).
 
-Creation current21/22 failure is retained, not retried: the two-unknown fixture
-installed only one fault. Explicit count-two repair52808005 awaits paired proof.
-Startup status ADR0063 is Proposed, with review/check/acceptance still pending.
-All completed native handles are collected once; next proof uses the actual
-2005-row attempt registry. Counts remain unchanged.
+Foreground writer's original47604 compile failure and original14097 current
+1/14 test failure are retained. Two causal repairs pin captured bitstring sizes
+and preserve fixture launcher argument charlists. Changed source `6c6d3bc4`
+is under complete14 paired proof, original75037, not yet a passing result.
+Credited Core ingress V1 received a blocking independent review; V2 repairs
+ordered Control handoff and actual producer/PID/accounting proofs. Its expanded
+complete census is382, including two existing long-bound cases. Authored native
+creation proceeds in its separate worktree from `84f0aa85`, preserving the
+accepted ProviderLifetime registration and original absolute cutoffs. Custody
+restore remains source-qualified pending current boundary/readiness joins and
+complete175 native cases. No task closes from source review or a live run.
 
 ADR0059 is accepted and pushed at `3212b0ed`. The first Core Store contract
 unit is assigned in its own worktree; durable adapters, Control/carrier
