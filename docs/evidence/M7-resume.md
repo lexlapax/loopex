@@ -27,6 +27,104 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+### Current fixture proof and foreground checkpoint after original5052
+
+T01–T19 originals88 done/85 todo/6 retired; additions363 done/23 todo remain
+unchanged. No row closes for source review or formatting. ADR0063 exact Proposed
+pair16c251ad remains the only asked pending decision. Root owns Git, rejoin,
+registries and the sole native execution slot; workers remain source-only.
+
+The six fixture repairs aa3 are now joined with real Store claim/reserve/close
+fault drivers, caller-neutral constructor retirement and current hostile-prefix
+proofs at raw4ba08a5511f9ad22663fd55b322fe81f91688772. Separate source saves are
+fault582d8b578ba85dd9a552ceb7e30e75caeaaa3885 and constructor
+ed0bb04810dcf698c4bb3e4114cbd02f15cd3950. Source reviews: faultc8df8884,
+constructorb1dbf7e2 plus exact expected public refusal correctionb97dffb7,
+hostile-prefix5eb2ff75. Every original dangerous stimulus and gap/cutoff assertion
+remains. Constructor failure tracks original model/executor/owned Store/runtime
+and stops all independently under one captured existing1,000ms fixture grace;
+borrowed Stores survive and unproved cleanup retains the original failure.
+
+Root corrected the per-file source census without changing frozen packet bytes:
+AgentLoop has109→110 top-level literal lines,110→111 declaration sites and111→112
+expanded cases, including its unchanged two-value phase loop. Separate correction
+`/private/tmp/m7-hostile-prefix-test-migration-census-correction-20261008-v1.json`,
+SHA-256 `bb8a3478c581303a0db37662f6983c735804ea5f513ba3c0a3942de1db5fe247`.
+Next complete selection is490: actual original36358 executed485 plus one real
+credit-tail case and four constructor cases. All five original long_bound cases
+remain, with no exclusion/skip/invalid expected. Actual32-CAS-loss proof stays open.
+
+Original48407 remains FAIL: both toolchains'31 raw/post AST and format checks
+passed, but final maps differed only in AgentLoopHelper.17.776seconds, ten actual
+joins,48 artifacts and2108 registry keys. Collection981f353d, terminal4dbc19ff,
+registry91f29f66. The missing current-formatted bytes prevent an exact layout
+diff; independent diagnosis944772b3 treats the long keyword-if as a hypothesis.
+Root saved the equivalent explicit do/end and formatted files at
+8d26a9716383fccaa5901cca5018cb7e6fd4dab1. Original raw4ba snapshots remain the
+semantic comparison baseline; exact raw8d31 source snapshots are separately
+retained in `/private/tmp/m7-core-authored-8d-raw-snapshots-20261008-v1`,
+snapshot index96a92d9a. Before/capture differences are intentional across those
+baselines; never use live formatting bytes as a frozen source snapshot.
+
+Original5052 passed paired formatting on clean source8d:17.635seconds, ten actual
+joins,48 artifacts and2118 registry keys. All31 final hashes match both supported
+pairs, and no source change was needed afterward. Output:
+`/Users/spuri/projects/lexlapax/loopex-evidence/M7/core-authored-fixture-format-20261008-v2`.
+Collection `4958d4fe7a1bfdcc3ef88868618f444b5a79614f71598fb03cd43a7ae2d00f94`,
+terminal `a260f4b89d5e0ffcdc92d5bb40f6512c085478fd55d3f18b0597229fd3af5052`,
+registry `f6a55f3bf756912ee0c1f615900d039ea5652c280ab689eded18977a79c76951`.
+Do not repoll or recollect5052. Original6965 is terminal FAIL and collected
+once. Current formatting and warning-free Core compilation passed. The complete
+current selection executed490 cases:487 passed, three failed, zero exclusions,
+skips or invalid; all five long_bound cases ran. Floor did not run after the
+first failed stage. The producer took368.000seconds, with three actual process
+joins,21 artifacts and2,121 registry keys. No native handle is live.
+
+Output:
+`/Users/spuri/projects/lexlapax/loopex-evidence/M7/core-authored-fixture-proof-20261008-v1`.
+Collection SHA-256
+`ee3a08968561cf212e0cd499b57ecdfa51a709ec6a5c2c22cd2e2f43c9666b30`,
+terminal `05dcd1b1eeab1df8dc74eaa2e9b4c0ae4b3a254e4bd42e4d5d197a356fd71e71`,
+registry `3dc1541d450d4ecde7fc65cb2d92fd2e7fbe0a4614c57366e0a790541db7f073`.
+Never retry failed8d bytes or recollect6965; the next grant seeds this actual
+2,121-row registry. Recipe reviewc6883de1 and runnerc9023051 remain historical.
+
+Three bounded fixture corrections are next, with no removed cases or increased
+cutoffs. Constructor catch receives raw badmatch, and its receipt proves actual
+original-actor and worker joins; packetad0f6d1a preserves that exact reason. The
+late first offer after guardian loss joins its original resources and returns
+invalid_session_creation; diagnosis e13e9174 distinguishes this from unproved
+cleanup, which keeps store_unavailable. The Store-refused model case must observe
+the actual matching leased delta before releasing the original held Model. Its
+callback return proves metadata custody, not consumer observation. Diagnosis
+c8afed21 retains the reachable scheduling gap and proposes one shared original
+5,000ms observation cutoff; actual owner DOWN, no false complete closure, absent
+settlement record and the existing50ms drain stay required. This is not an exact
+trace reconstructing the failed interleaving or a claim of lost leased progress.
+Independent source review and a new paired complete490 proof remain required.
+
+Foreground V2 plus exact current-final hold correction is source-saved at
+`d792b7e0a5a2964340b9277dacc5f265e3ce1c15`, parent03e87fe7. Review0ee549c6
+retains frozen V2's stale-transition blocker and qualifies separate two-literal
+correction4874447a. All112 cases, original cutoffs/custody/credit and actual EOF
+hold remain. Foreground17/Core31 have no overlap; join map812d70cb qualifies all15 existing baselines and two new paths,
+including current Store/Sink/standalone-constructor prerequisites. No native
+foreground proof or generation activation is claimed.
+
+Immutable216-file source/context retention:
+`/Users/spuri/projects/lexlapax/loopex-evidence/M7/core-authored-fixture-source-context-20261008-v1/retention.json`,
+SHA-256 `1757d88e5670c2bca6577758b0670e04f6e8b978f6a7e33370e593f9e76260e7`.
+This retains the fixture/fault/hostile packets and reviews, raw4ba rejoin,
+formatter V1 preparation and foreground V2/correction. The later common-layout,
+V2 preparation/review, exact raw8d31 snapshots, reviewed490 recipe, qualified
+foreground save and no-overlap join map are retained separately in
+`/Users/spuri/projects/lexlapax/loopex-evidence/M7/core-authored-fixture-proof-context-20261008-v1/retention.json`,
+SHA-256 `6870892d257da7df006c7c07eb0e94ab566fa6e1e326cedadf82bc23b2f36ac5`,
+88 immutable files. The foreground join map812d70cb qualifies all15 existing baselines and two new
+paths against Core8d; no missing source prerequisite or new decision was found.
+Root owns the literal17-path integration after current source qualification.
+Earlier entries below are historical where superseded.
+
 ### Latest Core/authored rejoin and paired formatter qualification
 
 Primaryd66c20da was pushed. M7 remains active; T01–T19 originals88 done/85 todo/6

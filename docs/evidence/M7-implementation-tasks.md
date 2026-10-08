@@ -1,5 +1,26 @@
 # M7 Implementation Tasks
 
+Current source8d26a971 has passed both supported toolchain format/AST checks
+for all31 files; all final hashes match. Original5052 is collected once with
+17.635seconds, ten actual joins,48 artifacts and2118 registry keys. Original48407
+remains a failed byte-comparison run; its equivalent common-layout repair was
+verified on changed source. No native test result follows from formatting.
+
+Original6965 is terminal FAIL and collected once:490 executed,487 passed, three
+failed, zero exclusions/skips/invalid, all five original long_bound cases included.
+Current formatting and warning-free Core compilation passed; floor did not run.
+No native handle is live. The three remaining corrections preserve raw caught
+constructor failure, distinguish joined guardian loss from unproved cleanup, and
+observe the actual leased model prefix before release under the original bound.
+Source review and a new paired complete490 proof remain required.
+
+Foreground112 is source-saved atd792b7e0 with the exact current-final hold correction;
+its17-path dependency join is source-qualified and native proof remains. Restore175
+and protocol/client/helper integration follow. ADR0063 is still the sole asked
+pending decision. Counts stay88 original done/85 todo/6 retired and363 added
+done/23 todo. The [resume record](M7-resume.md) retains exact source, run and
+restart identities. Earlier entries below are historical where superseded.
+
 The combined Core/authored run at25973c8e is terminal FAIL and collected once:
 485 cases ran,449 passed and36 failed; all five long-bound cases ran, with zero
 exclusions/skips/invalid. Current formatting and warning-free compilation passed;
