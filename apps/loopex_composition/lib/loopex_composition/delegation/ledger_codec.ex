@@ -254,6 +254,7 @@ defmodule LoopexComposition.Delegation.LedgerCodec do
   # Technical depth: validate before the shared encoder; count exact punctuation
   # and escaped string lengths. Integer ETF size bounds temporary decimal work.
   defp measure(_value, _depth, remaining) when remaining < 0, do: :invalid
+  defp measure(value, _depth, _remaining) when is_struct(value), do: :invalid
 
   defp measure(value, depth, remaining)
        when is_map(value) and depth < @depth and map_size(value) <= @members do

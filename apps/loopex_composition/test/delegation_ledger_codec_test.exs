@@ -81,6 +81,18 @@ defmodule LoopexComposition.DelegationLedgerCodecTest do
       [],
       1,
       true,
+      %URI{},
+      MapSet.new([1]),
+      MapSet.new(),
+      MapSet.new([{"a", 1}]),
+      %{"a" => %URI{}},
+      %{"a" => [%URI{}]},
+      %{"a" => MapSet.new([1])},
+      %{"a" => [MapSet.new([1])]},
+      %{"a" => MapSet.new()},
+      %{"a" => [MapSet.new()]},
+      %{"a" => MapSet.new([{"b", 1}])},
+      %{"a" => [MapSet.new([{"b", 1}])]},
       %{a: 1},
       %{"a" => :invented},
       %{"a" => 1.0},
@@ -95,7 +107,8 @@ defmodule LoopexComposition.DelegationLedgerCodecTest do
     ]
 
     for value <- invalid,
-        do: assert(LedgerCodec.encode_json(value, :object) == {:error, :invalid_ledger_bytes})
+        class <- [:object, :frame],
+        do: assert(LedgerCodec.encode_json(value, class) == {:error, :invalid_ledger_bytes})
 
     assert LedgerCodec.encode_json(%{}, :unbounded) == {:error, :invalid_ledger_bytes}
     assert LedgerCodec.decode_json("{}", :unbounded) == {:error, :invalid_ledger_bytes}
