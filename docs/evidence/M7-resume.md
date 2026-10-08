@@ -27,7 +27,47 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
-### Current foreground formatter PASS and next 112-case proof
+### Current dead-clause formatter PASS and next 112-case proof
+
+Original44295 is terminal PASS_FOREGROUND_FIFO_FORMAT and collected once at
+clean source `e5ce3b67cca1a0d57522e920c49edb0ae05178a4`. Both supported pairs
+passed all 15 raw/post syntax-preservation checks and formatting checks, and
+their final 17-file byte maps agree. Duration 11.103 seconds, ten actual joins,
+48 artifacts and 2,205 registry rows. No native handle remains live.
+Output `M7/foreground-dead-clause-format-20261008-v4`; collection
+`6dc55351ba3f6cc883883a25010adfb205854fc63393034d58be7152e6e6d7b6`,
+terminal `5f9295330c845c35cda1b480e05ea25041b318c01a45de51c56c5db45ded26fe`,
+registry `987227de8e4d793e51faf9eb48a3a02c9ea7d31c4f0950c4230ae8318e4625de`.
+Do not repoll, recollect or repeat these unchanged source/pair/stage keys.
+
+The previous whole112 original79276 failed warning-as-error compilation at
+source089 before any selected tests or floor stages ran. The unreachable
+`consume_progress/1` closing clause was removed in e5; no test or bound changed.
+Its independent source review is
+`4ccc58379925fab9a39d2b092e3256c8b4f15a7bdf99d9c1de963650d681fbe4`.
+Failed output `M7/foreground-common-layout-proof-20261008-v2`; collection
+`c978b81d165ec89c5890471a58bef3d84c4705d639353aec848c36cbbc21b750`,
+terminal `154e1a886c97639b3076311ab1712215aa8c58b32d03b9f79b2d7695791343d5`.
+The failure remains evidence; neither formatting nor source review proves112.
+
+Next prepare a fresh whole112 recipe bound to clean e5, actual positive44295,
+its complete 2,205-row registry and unchanged Core942 proof. Require app-server94
+including all four Node cases and protocol18 in a separate VM on both pairs.
+After a positive result, integrate the exact17 foreground files into primary.
+Then integrate the three restore files from clean
+`fd1b1e513c7ec0042f7796714f4a191f456e78ed`, preserving current shared helpers,
+and run paired formatting plus the complete175 restore cases including long bounds.
+The four-call private readiness repair is independently source-qualified by
+`90d25c1f49ffa1bd1d1ddefa5bf1d117fbcd6850e7d0307895edc45dddf3b0e5`;
+no native175 result is claimed. Remaining protocol/helper work precedes T17
+candidate preparation. ADR0063 remains the sole asked pending decision.
+Original T01–T19 counts remain 88 done / 85 todo / 6 retired; additions
+364 done / 24 todo. No broad task closes from this formatting prerequisite.
+
+### Historical common-layout formatter PASS and superseded next-run recipe
+
+The current checkpoint above supersedes source, registry, readiness-review and
+next-run statements below. Historical runs remain evidence at their named bytes.
 
 Original36294 is terminal PASS_FOREGROUND_FIFO_FORMAT and collected once at
 raw source `089e4a73a372ad9c152f3b2df26a49b2ae2c7240`. Both supported pairs
@@ -69,17 +109,38 @@ assets at
 `/Users/spuri/projects/lexlapax/loopex-evidence/M7/foreground-common-layout-context-20261008-v1/retention.json`,
 SHA-256 `f5eef710c588ecd6851a05dfaa9acabd7fd1c6fcccdc56a34885efe0e9f664b5`.
 Native originals remain separate immutable collections. Current checklist
-counts are unchanged: originals 88 done / 85 todo / 6 retired; additions
-364 done / 23 todo. This format prerequisite closes no broad T16 row.
+counts now include one explicit open foreground integration subtask: originals
+88 done / 85 todo / 6 retired; additions 364 done / 24 todo. T16 additions are
+69 done / 4 todo; including T00, originals 88 / 91 / 7 and additions 368 / 25 / 0.
+This format prerequisite closes no broad T16 row.
 
 Next bind and run the new whole112 recipe against this actual positive
 formatter, unchanged Core942 proof and clean source089: app-server94 with all
 four Node cases, protocol18 in a separate VM, on both supported pairs. The
 older foreground proof builder's formatter-V2 gate remains invalid for this
-source. Its replacement is being prepared; no whole112 native run is claimed.
-Then T15 restore175, its two bounded private readiness fixture migrations,
+source. Its replacement has been prepared from reviewed draft
+`9642b2125c20b87b935e119925d37980135c08f2fbbd1ff378725bc6502a5089`;
+review `e9c78c14d26f57cc63cfbf2b020d86d61f1a8f9c4bac38242a88aaf0bf46d480`.
+Actual preparation
+`/private/tmp/m7-foreground-common-layout-proof-preparation-20261008-v2/capture.json`,
+SHA-256 `b5f1cfbaacd33071d48d2759ded689d268b0b57fc7bc14c06172dfccc2a4831d`,
+runner `eeca103326b6f3c97edc33f3fd0e6ccef3af0c7251c3e6ed325809ebaf736b61`.
+Generated binding review remains before execution. No whole112 native run is claimed.
+Then T15 restore175, its four private readiness fixture migrations,
 remaining protocol/helper integration and T17 candidate preparation. ADR0063
 remains the sole asked pending decision. M7 remains in progress.
+
+The four-call restore fixture repair is now source-frozen in its isolated
+custody-restore worktree, with no native execution. Packet
+`/private/tmp/m7-restore-startup-fixture-source-20261008-v2/source.json`, SHA-256
+`06cd10bb756ee34c9bc52bdaa41ede69543c56f5fc83806145ba8ab2d445897c`;
+workflow after `1e3fc61a3e5e49a34237d2bfb93bf605dffdf27b8dbb6c34e13f8a4a11a26de7`.
+Implementation report `e6f935d82f6806d9d1400fe7963659328d160ca476cde4b1093a2235840a721f`
+retains unchanged commands, monitor/DOWN oracles, loop/case census and bounds.
+The current shared readiness helper423728a4 is required after guarded rejoin;
+the isolated older helper321166a1 lacks that method and must remain untouched.
+This reuses the existing private observation semantics, not a hard acquisition
+deadline or Proposed0063 public contract. Independent repair review remains.
 
 ### Historical Core PASS, primary integration and foreground formatter failure
 

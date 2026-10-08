@@ -1,5 +1,15 @@
 # M7 Implementation Tasks
 
+Latest checkpoint: whole112 original79276 failed compilation at source089
+before selected tests ran. Source `e5ce3b67` removes the unreachable closing
+clause; original44295 passed paired formatting and syntax-preservation checks
+in 11.103 seconds, with ten joins, 48 artifacts and 2,205 registry rows.
+Next prove whole112 at e5 and integrate foreground17, then integrate the
+source-reviewed four-call restore fixture repair committed at `fd1b1e51`
+and prove whole175. No native handle is live; no additional checkbox closes.
+The following formatter source and startup-repair statements describe earlier
+checkpoints; the [resume record](M7-resume.md) owns the current execution order.
+
 Completed one added T16 fixture-repair subtask. Exact source `9420464c` passed
 all 490 selected Core cases on each supported pair, with all five long_bound
 cases and zero failures, exclusions, skips or invalid cases. Original86174 is
@@ -16,17 +26,19 @@ Ten actual joins, 48 artifacts and 2,192 registry rows are retained. The source
 is clean with no formatter-only child needed; original82284 remains failed.
 Next execute the complete 112-case foreground/protocol subtask on both pairs,
 including all four Node cases. No native handle is live at this checkpoint.
-T15 restore175 follows foreground qualification; its two direct workflow
+T15 restore175 follows foreground qualification; its four direct workflow
 startup callers first need bounded private readiness observations under their
 existing fixture allowances. No public ADR0063 startup wait is implemented.
 
 Current counts: originals 88 done / 85 todo / 6 retired; additions 364 done /
-23 todo. T16 additions are now 69 done / 3 todo. The added completion is the
+24 todo. T16 additions are now 69 done / 4 todo. The added completion is the
 bounded fixture repair recorded under T16 below. Original checklist rows stay
 unchanged. ADR0063 remains the sole asked pending decision. Exact artifacts are
 in the [resume record](M7-resume.md); earlier entries are historical where superseded.
 Formatter convergence is a prerequisite inside the open T16 integration work;
 it adds no checklist completion or whole112 test result.
+One added open T16 subtask now tracks the foreground FIFO integration and its
+complete 112-case proof separately from generation activation and full integration.
 
 Original91795 passed the entire four-case constructor file on both pairs in
 27.327 seconds, and original61348 passed all 31 formatting/AST checks in
@@ -14617,6 +14629,8 @@ in the restart checkpoint. Broader restore/decoder/public/helper rows stay open.
 - [ ] Independently review integration changes and fix confirmed defects without weakening checks.
 
 ### Added implementation subtasks
+
+- [ ] Integrate foreground FIFO and emitted-cursor custody through the physical OutputWriter, native progress ingress and bounded frames; prove all eight whole files / 112 cases per supported pair, including all four Node cases and allocation negative controls, then integrate the exact 17 owned files above qualified Core32. Preserve original actor/credit/cursor/cleanup oracles and cutoffs; Linux stress, served-generation activation, forced 32-CAS exhaustion and full integration remain separate.
 
 - [x] Repair the constructor failure shape, joined-guardian refusal/count, actual leased model-prefix observation and outer-carrier fixture supervisor teardown without weakening original actor joins, Store-call oracles or cutoffs. Retain every failing producer and prove the complete 18-file / 490-case selection, including all five long_bound cases, on both supported toolchains; integrate the exact 32 owned source files. This bounded fixture repair does not close full integration or forced 32-CAS exhaustion.
 
