@@ -40,7 +40,8 @@ six actual joins, 36 artifacts and 2,172 registry rows. Output
 terminal `742047f82500c24fa9774053a52c009fd410388225ad61c9c3cd60ad79292c24`,
 registry `53a98842844bd727a374806dd6584a72eb615cf1a0070f5bf4cc526301933d01`.
 Do not repoll/recollect original86174 or rerun those same source/pair/stage keys.
-Its actual registry is the next seed; all earlier failed producers remain retained.
+Its positive Core result remains a prerequisite; the latest actual registry seed
+is now original82284's 2,182 rows below. All failed producers remain retained.
 
 The tested 32 owned Core files are literally joined into primary m7, changing
 31 paths. Root compared every copied byte to the exact tested capture, confined
@@ -61,20 +62,37 @@ prove all Core32 preserved, 16 actual foreground changes and ownership union49.
 The original 3f donor is retained through local `codex/m7-foreground-source-v3`.
 No foreground native result or generation activation is inferred from the join.
 
-Formatter V2 is now prepared after the actual positive Core prerequisite:
+Formatter V2 ran after the actual positive Core prerequisite:
 `/private/tmp/m7-foreground-fifo-format-preparation-20261008-v2/approved-capture.json`,
 SHA-256 `34dc960bf37e2bc8cac1c2e318f5580667c8a699db777d1da3306dfb3c83bdac`;
 runner `e1a2e11e07a94ef1ffa53acdf5f84d07133893993b77add7657ea7d997a533f7`.
 Independent conditional builder review is
 `65c72d081dae283a45d4a658c75dacb1960b705f6aa1eb0fb9f9879d8101b867`;
-actual bound review is pending before native execution. It covers all 17 files,
-with 15 Elixir AST/format files and exact byte guards on workflow.mjs/fixture.txt.
-No native handle is live at this checkpoint. Next run is this paired formatter,
-then a clean formatting-only source save and the complete foreground112 proof:
-app-server94 with all four Node cases and protocol18 in separate VMs. The future
-proof builder is independently conditionally qualified at
+actual bound review is
+`cf0f331206cca072f994b79821674feb822f333671a5640b454c187fc7f81929`.
+Original82284 is terminal FAIL_OR_UNAVAILABLE, collected once after 11.108
+seconds, ten actual joins, 48 artifacts and 2,182 registry rows. All native
+stages exited zero and all 15 Elixir syntax-preservation checks passed on each
+pair. The final 17-file byte maps differ only for
+`apps/loopex_app_server/lib/loopex_app_server/delivery.ex` and
+`apps/loopex_protocol/test/frame_test.exs`; the required map equality failed.
+Collection `fcc65e9309e41ad10e40b62df1b5479f1de59ffba1ec623e31074cfab79e17d0`,
+terminal `b45ab264885c00f27710e77bd0bfaa75c2f387a4b09578f9d14a22f1f8fb0d05`,
+registry `5bd6131e7acca8f35b79b494cc6447b4feb12e95e38f05ab1594120ab2b786cd`.
+Output `M7/foreground-fifo-format-20261008-v2`. Preserve the failed original;
+do not repoll, recollect or retry unchanged source/pair/stage keys.
+
+Floor formatter output is saved in clean formatting-only child
+`3550198da451d7dec4ab3d129b4a97ea9f3bdb3d`, twelve changed files. It preserves
+the syntax but does not qualify paired byte equality. No native handle is live.
+Next repair the two differing layouts, qualify a new paired formatter using
+the actual 2,182-row registry, then execute the complete foreground112 proof:
+app-server94 including all four Node cases and protocol18 in separate VMs.
+The older future proof builder is independently conditionally qualified at
 `a7dbf64402df894bcd4065c834837336bd359bce97bc25e5f20b93f841356538`;
-actual formatting producer/source/registry binding remains required.
+its positive formatter-V2 gate is blocked by the actual failure. A new version
+must bind the changed source and an actual positive formatter result; no future
+112-case result is claimed.
 
 Latest source/join/recipe context is retained as 137 immutable files at
 `/Users/spuri/projects/lexlapax/loopex-evidence/M7/core942-foreground-context-20261008-v1/retention.json`,
@@ -82,7 +100,14 @@ SHA-256 `4dc626137d9fd10f20160a2440469196bdbe9ccc1496749d64bb6652d8a0fae1`.
 Native outputs remain separate immutable original collections. The finite-CAS
 native ETS-breakpoint feasibility report is retained as research only: exact
 BIF support is unknown and no probe ran. It changes no proof requirement.
-T15 restore175 follows foreground proof, then remaining protocol/helper work
+T15 restore175 follows foreground proof. Its latest source-only integration map
+`/private/tmp/m7-restore175-current-integration-map-20261008-v1.md`, SHA-256
+`d16e1ac6823c88adfbec7795dd72dc72e15825a27c8f4f630e7472b1f6e2a650`, qualifies
+the three-file join while preserving current Core32 and foreground17. Before
+native verification, two direct workflow callers need private startup readiness
+observations under their existing fixture capture, with cleanup registered first
+and each command called once. No retry, new allowance or public ADR0063 wait
+is authorized by that map. Then finish remaining protocol/helper work
 and T17 closure preparation. ADR0063 remains the sole asked pending decision.
 No full-fast, floor closure matrix, release check, milestone closure or publication
 follows from these selected unit proofs.

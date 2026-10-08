@@ -8,11 +8,16 @@ and 2,172 registry rows. Its 32 owned files are now literally joined into primar
 m7, changing 31 paths and preserving unrelated source/docs. This result does not
 close full integration, the finite 32-CAS-exhaustion proof or generation activation.
 
-Next is the foreground 112-case subtask. Source `5cea1861` preserves Core32 and
-contains the qualified foreground17 delta. Formatter V2 is prepared after the
-actual Core PASS, with 15 Elixir AST/format paths and two non-Elixir byte guards;
-independent bound review precedes native execution. No native handle remains
-live at this checkpoint. T15 restore175 follows foreground qualification.
+Next is the foreground 112-case subtask. Original82284's paired formatter at
+`5cea1861` failed the final byte-map equality check: all ten native stages and
+all 15 Elixir syntax-preservation checks passed, but Delivery and frame_test
+formatted differently between supported pairs. The actual failed result remains
+retained. Floor formatter output is saved in clean source `3550198d`; this is
+not a passing paired-format qualification. Repair those two layouts before a
+new paired formatter and the whole112 proof. No native handle is live.
+T15 restore175 follows foreground qualification; its two direct workflow
+startup callers first need bounded private readiness observations under their
+existing fixture allowances. No public ADR0063 startup wait is implemented.
 
 Current counts: originals 88 done / 85 todo / 6 retired; additions 364 done /
 23 todo. T16 additions are now 69 done / 3 todo. The added completion is the
