@@ -27,6 +27,79 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+### Real chat qualification and restore fixture migration, 2026-10-08
+
+Source candidate `17205ba8abda609dbcae9e5f99e01e44863fafb5` is clean and
+unserved. Continue using its existing managed candidate checkout; do not
+activate the coupled public generations from this selected proof. Complete
+Chat13 PASSES each supported pair, original20467 duration39.727seconds,
+eight exact stage joins and34 verified artifacts. Output:
+`M7/chat-composition-startup-focused-20261008-v4`; terminal SHA-256
+`04a8e077e6309f898b210e71e3f3461fb4eec8fad7671e5d9142452eef134c99`;
+collection `013986d4b989166211cd3cd6b117e74b1b69463360d50afae318aaf27ec812a1`.
+Zero excluded/skipped/invalid. The actual default Chat caller runs in an owned
+standalone VM because ExUnit's SIGQUIT handler made the earlier in-runner
+signal admission refuse. Its unlinked custodian installs safe cleanup before
+launch and retains original port status/DOWN within captured60s/first5s bounds.
+Original held Local startup body/carrier/group/observer, identity/cutoff,
+no-input/no-create before readiness, one create/genesis, actual driver binding,
+canonical input record, no-model or durable intent and all original joins remain.
+Two later fixture errors are corrected: input has no session_id wire field;
+settings JSON shares its device with inspected runtime diagnostics. Those
+failures remain current12/13 FAIL, floorUNRUN; no product schema changed.
+
+Restore original46610 at `c45a6f438c8d892b364f47c8a3dfb81da3ebc9ab` is
+terminal FAIL after278.855seconds, five joins and23 artifacts. Its current IO
+stage passes all122 cases including three long-bound cases without warnings;
+complete current workflow passes1/43, failing42 immediate-create setup calls,
+floorUNRUN. The existing64-real-restores history case completes successfully.
+Output `M7/restore-special-modes-focused-20261008-v4`; terminal
+`ad56c0d90cacb165ba1ad9bedc7b0aa7d34735c76030ce47a0e5a8cce3915c58`;
+collection `6381bf22a74b95dd7786ae8aaceafd266c8abf222a66c3e6c221dd05b34a56bd`.
+Original30910 also remains FAIL: all122 case executions passed but the generated
+literal comparison caused warnings-as-errors to abort. V5 moves only the pure
+mode selection into the outer generator. Full imported0o7777 preserve/refuse
+and separate strict baseline6750-to4750 control, original bounds and actors
+remain unchanged. Older invalid current Store fixtures now use real current
+claim/reservation/final transactions; earlier failures remain retained.
+
+The workflow-only correction rawc8a15956, formatter0576fb46, captures the
+canonical ConfiguredGenesisFixture1,000ms observation allowance before each
+direct start. Pure public reads pin the exact32-byte startup ID and Core cutoff,
+spend the smaller original interval, and require positive time after reads and
+before the single original create/resume. No creation retry, private readiness,
+new grace or restore/prompt-bound change. Native qualification remains UNRUN.
+Next run: reuse the selected warning-free currentIO122 proof with exact
+unchanged source-byte confinement; run complete currentWF43 and complete
+floorIO122/floorWF43. Retain the approved600000ms aggregate64-restore tag and all
+original per-restore work, grace, cleanup and exact joins. This is composite
+selected proof, not165 cases at one SHA or full restore175.
+
+Recovery manifest `M7/coupled-current-context-20261008-v12/retention.json`,
+SHA-256 `bc1d64f181a434b0d2fca5036ee95c00d11fae2cb0a592cc47652a2f6bdee3c3`,
+chains v11 and retains157 exact source/review/preparation assets, eighteen
+source commits,21 completed native records, complete patch and verified bundle.
+The next registry is `M7/chat-composition-startup-focused-20261008-v4/`:
+2548 rows, SHA-256
+`09803ec044cc776b2aeef346e5e47a2686bfd403a9122d158aea4c768b8949fb`.
+The later checkpoint docs-v6 original will replace that seed once terminal.
+All recorded originals are terminal and collected once; no live native handle
+is captured by this section. Three-hunk private task attribution source is
+frozen, unjoined/unrun: retain original actor link metadata already counted
+under8192 cap and include the already-monitored sessions supervisor in report
+scope. Three cases, concurrency32 and original1000ms cutoffs remain. Its frozen
+patch/report and read-only diagnostic next unit are in v12; independent review
+and root qualification remain required before any diagnostic closure claim.
+
+ADR0065 remains exact Proposedb651, with one unanswered decision. Do not
+implement its dependent physical writer. Native helper packaging/active-output
+accounting remains unapproved and unimplemented. Foreground112, restore175,
+helpers, whole integration and serving activation remain open; no main merge,
+closure, release, tag or paid evidence is authorized. T01-T19 counts remain
+original88/85/6 and added365/24. The older sections below retain historical
+qualification; their old next-registry and work-in-flight statements do not
+replace this section.
+
 ### Qualified Core and host startup units, 2026-10-08
 
 Core16 at `ddcf105433c8c80a46397a6ce26c1796ce3d445d` PASSES on both supported

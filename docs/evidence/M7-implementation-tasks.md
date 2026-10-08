@@ -1,35 +1,41 @@
 # M7 Implementation Tasks
 
 Latest checkpoint, 2026-10-08: the active M7 goal continues on `m7`.
-Core startup status at `ddcf105433c8c80a46397a6ce26c1796ce3d445d` passes all16
-cases on both supported pairs, including three actual60-second cases and normal
-physical worker/group/guardian joins after cutoff. Host startup at unserved
-`1e30df7e9ae2e01c9e835b9ba5253f12480560fc` passes all121 selected cases on both
-pairs after two fixture corrections; original failing runs remain failed.
-Core duration369.508s; host233.860s. Zero exclusions/skips/invalid cases.
-The qualified source is pushed on `origin/codex/m7-resume-20261008`; its whole
-integration and serving activation remain open. The earlier Socket195 proof
-remains valid at its tested bytes.
+The complete real chat startup selection passes all13 cases on each supported
+pair at unserved `17205ba8abda609dbcae9e5f99e01e44863fafb5`, original20467,
+39.727seconds, eight exact stage joins and zero exclusions/skips/invalid.
+The new standalone caller retains default Local composition and signal
+installation, held original startup identity/cutoff, unread input before
+readiness, one real create/genesis, actual driver/session binding, no model
+request and joined cleanup. Earlier failed Chat originals remain failed.
 
-Proposed ADR0065 at `b651904a84be33800f3a2bf19cf782940e3fc1fb` is reviewed,
-documentation-checked and pushed to `m7`. One exact-pair prerequisite question
-is pending: Python standard library for private physical attempts IO, its tests
-and indexed M7 checks. No dependent writer implementation is authorized yet.
-The real held-startup chat caller case is being implemented separately. No root
-native check is live at this recorded instant; writers/readers must still be
-inventoried before any restart.
+Current restore IO passes all122 cases, including the three long-bound cases,
+without warnings at `c45a6f438c8d892b364f47c8a3dfb81da3ebc9ab`. The same
+original46610 complete workflow run fails42 of43 cases during immediate
+creation in its shared setup; the64-restore history case passes. Floor is
+unrun. The existing1,000ms fixture startup allowance is now captured before
+direct start and consumed through actual public readiness with the original
+ID/Core cutoff; that workflow correction is committed but remains unrun.
+Original30910 remains failed despite122 passing executions because of its
+compiler warning. Neither full-mode nor full restore completion is claimed.
 
-Immutable `M7/coupled-current-context-20261008-v11/retention.json`, SHA-256
-`20c8d0b0ea4451f71cb856a8ab1d124a0402dc517908e0637f298aecf7494ab9`,
-chains v10 and retains65 assets, six candidate commits, eight completed native
-records and a verified candidate/primary-proposal Git bundle. The next registry
-has2461 rows. Foreground complete112, page-aware active-output accounting,
-restore175, physical attempts, helpers and whole integration remain open.
+Immutable `M7/coupled-current-context-20261008-v12/retention.json`, SHA-256
+`bc1d64f181a434b0d2fca5036ee95c00d11fae2cb0a592cc47652a2f6bdee3c3`,
+chains v11 and retains157 assets, eighteen candidate commits,21 completed
+native records and a verified candidate/primary Git bundle. Registry2548 is
+the next source-run seed until the subsequent checkpoint documentation check
+completes. Private task-lifetime attribution source is frozen separately,
+unjoined and unrun. Core16/host121/socket195 prior qualified bytes remain
+unchanged. Foreground112, full restore175, attempts, helpers, coordinated
+activation and whole integration remain open.
+
+Proposed ADR0065 at `b651904a84be33800f3a2bf19cf782940e3fc1fb` still awaits
+its one exact-pair prerequisite decision; no physical attempts writer is
+implemented. No main merge, closure, release, tag or paid campaign is authorized.
 T01-T19 totals remain originals **88 done /85 remaining /6 retired** and
-additions **365 done /24 remaining**; T00 is separate. These focused startup
-proofs do not close their broader parent rows. The [resume record](M7-resume.md)
-names exact evidence and next work. Older checkpoint paragraphs below are
-historical.
+additions **365 done /24 remaining**; T00 is separate. The
+[resume record](M7-resume.md) names exact outputs and the next qualification.
+Older checkpoint paragraphs below are historical.
 
 Current checkpoint: the complete contract source is staged in isolated,
 unserved candidate `a7a83d22`. The independent Node runner proved both manifests
