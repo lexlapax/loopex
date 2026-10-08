@@ -1064,13 +1064,18 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
       end)
 
     {:ok, runtime} = Loopex.start_link(options)
-    {:ok, session_id} = Loopex.create_session(runtime, %{}, command_id: "create")
 
     on_exit(fn ->
       if Loopex.Runtime.alive?(runtime), do: Loopex.stop(runtime)
       stop_quietly(store_pid)
       File.rm_rf(path)
     end)
+
+    # Concept: these transfer cases begin with an eligible session owner.
+    # Technical depth: observe the actual startup custody episode under the
+    # existing fixture cutoff before the single unchanged creation call.
+    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(runtime)
+    {:ok, session_id} = Loopex.create_session(runtime, %{}, command_id: "create")
 
     %{runtime: runtime, session_id: session_id}
   end
