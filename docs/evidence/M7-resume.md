@@ -29,6 +29,52 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Reboot continuation on 2026-10-07
 
+Checkpoint `e50e8ddf` is pushed. Original formatter `24045` is terminal and
+collected FAIL at the floor formatting check. All six original processes joined;
+38 artifacts authenticate; elapsed 12.439 seconds. Collection SHA-256
+`5c09c7d8bcb90d3f4c84579ae8d095704630ee088761d21eaa3eeb7ae5c79a64`, terminal
+`9b43ba71b6a19aa6f37849ca2facc034301e0c73624c5d0649a7db3a40e7acaf` and latest
+1789-row registry `dba99e9aa2e835c917f99b9a8f109f4ec20840721655a2786216d9bfb11e116d`
+are under `M7/progress-sink-format-20261007-v5`. The successful current syntax/
+AST substage is narrower evidence; the complete run stays failed. Do not rerun
+or recollect it. All26 tests remain UNRUN.
+
+The two common-layout production changes and actual formatted test are saved
+at isolated raw `8ad87a5f4c6861f9eedfef019dc6de9ad36002a2`, tree
+`717670becf56950078d17bc6ebc1152b45b77d66`, direct parent `aaaef55d`. Packet
+`d3b668a4`, independent review `a8d6d74e` and root review `acd15797` qualify the
+same pre-copy accounting order and nullable guard. Raw facts `6d41fb76`, complete
+1193-record NUL `0ccb5000` and unchanged actual test `f5e728a6` are retained in
+`M7/progress-sink-common-layout-source-context-20261007-v1/retention.json`, SHA-256
+`2e55aeec42f05965935fc379ad4b4149fc93f875a124d84677df8fc85a08c782`. The actual
+support count is21; the independent report's prose20 is a typo.
+
+The corrected V5 binding review `086ea065`, enabled runner `b5f0c2b7`, blocked
+V1 factual review `62a46e4a`, both immutable bindings and unused V5 proof binder
+are retained in `M7/progress-sink-v5-execution-context-20261007-v1/retention.json`,
+SHA-256 `57e6882752345ec16f1e45e5382d458323b1a853ab5ff18d41d628b1e617797e`.
+V1 used an evidence directory instead of the actual command cwd and stayed
+disabled; corrected V2 was independently reviewed before original24045.
+
+**Private preparation choice.** Replace repeated large carrier bindings with
+one source-pinned captured-input recipe for this specific ProgressSink unit.
+Preserve the six formatter/eight whole26 test stages, both supported pairs,
+commands, deadlines, retries, process joins, output custody and complete registry
+succession. Earlier richfull60564 remains already-reviewed retained history;
+it need not be reauthenticated in full for each reversible source correction.
+This changes no required product check or proof. V6 source preparation is
+assigned under `/private/tmp/m7-progress-sink-native-preparation-20261007-v6`,
+fully disabled until review and actual capture. If formatting is a no-op,
+proof may use the same clean SHA; otherwise save the actual format-only direct
+child and compare full projections. Never invent an empty formatting commit.
+
+The new interaction-stop fixture V1 is source-blocked on cleanup ordering:
+trace acquisition and retention exceptions could skip physical actor cleanup.
+Review `f007ec4d` names those concrete gaps. The author owns a minimal V2 repair
+in its isolated worktree; no native test ran and no production defect is claimed.
+Original T01–T19 counts remain88 done/85 todo/6 retired; added356 done/22 todo.
+
+
 Checkpointfbc8a2f8 is pushed. ProgressSink raw syntax repair is saved in its
 isolated worktree at `aaaef55d836bbc1bf1d6052c7cda26464e88e74b`, tree
 `a1d5a8721652319983a9c6a395c4d3cbbab660e7`, direct child of failedraw6e0aad7d.

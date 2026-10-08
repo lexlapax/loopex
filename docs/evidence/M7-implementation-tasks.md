@@ -1,5 +1,13 @@
 # M7 Implementation Tasks
 
+ProgressSink's second formatter run is collected FAIL on two floor-only layouts.
+The equivalent common-layout source is saved and reviewed, with all26 tests still
+pending. A smaller private recipe preserves the same six formatter/eight test
+stages and complete attempt history. The new interaction-stop fixture is being
+repaired for cleanup-order gaps found during source review. Exact references are
+in the [resume record](M7-resume.md). Counts remain88 original done/85 todo/6
+retired and356 added done/22 todo across T01–T19.
+
 ProgressSink formatter original82636 failed before tests on an unmatched `end`
 in the new test source. Its two process joins,19 artifacts and successor registry
 are collected; the isolated source repair is running. No ProgressSink completion
