@@ -27,6 +27,47 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+### Reboot continuation on 2026-10-07
+
+The primary restart baseline is pushed `8e46d04c`. The reboot cleared temporary
+files, so exact context was recovered from four retained manifests. Completed
+native work was not repeated. Original formatter19048 had already exited0;
+it is now collected PASS_RESUME_PREPARED_CLEANUP_FORMAT in12.019 seconds with
+six original joins and38 authenticated artifacts. Output
+`M7/resume-prepared-cleanup-format-20261007-v1`; collection
+`22e069dc45c0e6be6395fd3b0cfa99bd0ae4e1b18dcbf48a929409e03b4ec6ef`;
+terminal `41b30405043c2f19c827928ed088ea80dd23b9e3592081471495f58bf9c31e4a`.
+Latest collected registry1733 is
+`67f825416dd7655ac7623a35a4aa5fcb76dc81919ac91709528e1045eb849acd`.
+The actual clean format-only child is isolated
+`1525158e219b8b2ffb7698b8bcee01b884a52bb7`, tree713ee094; complete1187-record
+NUL projection hashesc81da123. Original formatter cuts remain correctly recorded
+against raw a79b4fd5 with formatting dirt.
+
+Cleanup paired38 proof original16501 is LIVE and uncollected. Its reviewed
+enabled carrier is96eabdae; output
+`M7/resume-prepared-cleanup-proof-20261007-v1`. Poll that original handle, collect
+its terminal exactly once with flat collectorb4671fa3 and preserve any failure.
+Do not rerun completed stages. Its independent factual review is0d47f3fc.
+The complete recovered source, carriers, factual binding and reviews are31
+immutable files retained at
+`M7/reboot-cleanup-and-ownership-progress-context-20261007-v1/retention.json`,
+SHA-256 `d41c7c995cb25f09e9e62bc931310b8a083cc7e9f0a91f01e891df3ab658d03f`.
+
+Ownership source recovered unchanged in its isolated worktree. Fresh V2 source
+packet3d69b21e and independent review9abb6990 supersede unavailable temporary V1
+metadata. Root read both complete patches and committed exactly two files as
+raw `558d77fcf98320b8e6725530865b9d8ec30fcc1d`, treec011c9bc, parent36e97968.
+Its actual complete1189-record NUL projection hashes527cb97c. The native
+formatter/complete74-case carriers are being prepared; no ownership native
+proof has run. The source projects ownership only and grants no case-state,
+evidence, physical custody, quiescence or dispatch authority.
+
+T01–T19 totals remain87 done/86 todo/6 retired; added351 done/23 todo.
+ADR0058 remains the sole unanswered approval and has been presented again after
+reboot. Accepted0057 is not pending. A new changed-source full integration
+check remains required. The checkpoint below is historical where superseded.
+
 Accepted0057's body codec is proved and literally integrated from isolated
 `99dd199bdda7a319d144519d2252989ddf1e5519`. Original96348 is TERMINAL0 and
 collected PASS_ATTEMPT_BODY_CODEC_PROOF:54 cases on each supported pair,

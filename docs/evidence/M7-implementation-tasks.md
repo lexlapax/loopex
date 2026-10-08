@@ -1,5 +1,15 @@
 # M7 Implementation Tasks
 
+Post-reboot verification continues from pushed `8e46d04c`. Original cleanup
+formatter19048 is collected PASS with six joins in12.019 seconds; complete
+paired38 proof original16501 is live, uncollected and grants no task completion.
+Recovered ownership source is committed raw558d77fc and independently reviewed;
+its complete74-case native proof remains unrun. The exact recovered context is
+retained outside temporary storage and linked by the [resume record](M7-resume.md).
+T01–T19 counts remain87 done/86 todo/6 retired; added351 done/23 todo.
+ADR0058 is the sole unanswered decision. Earlier progress below is historical
+where superseded by this continuation.
+
 The physical helper parent-binding log is implemented and proved at isolated
 `c6eee6466f8342f4a67e3e7541392dbb340808ad`. Original36158 passed all70 affected
 cases on each supported pair, with zero exclusions/skips/invalid. Both version
