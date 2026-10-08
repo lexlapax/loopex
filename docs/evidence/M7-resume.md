@@ -29,6 +29,34 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Reboot continuation on 2026-10-07
 
+Latest completed unit: physical ProgressSink owner/producer custody, whole28 per
+pair at isolated `03a03b21b02badfd539f0c31ff9fa2819d70b5f3`. Original26848 PASS
+in19.937seconds, eight joins/42 artifacts,1953 rows. Complete output
+`M7/progress-physical-proof-20261007-v1`; collection
+`b966acfb5240dae99277f8479326a4831be2e2036e992ceb3bf8ad8d9ae47081`, terminal
+`47d88da708579c52b655494fbaeed9f7da32d7719c615ff14d4016c2cf23dfdb`, registry
+`438ec403ca5cb0b6bcea70f51747d2026ba205e1c1dd87f867cf2a2e08cc632a`.
+Test integrates literally; unchanged production5682384f and all26 earlier cases
+retain their identity. One narrow added T07 row closes, parent broad row stays
+open. T01–T19 originals88/85/6, added361/24/0; including T00 originals88/91/7,
+added365/25/0. Formatter94133 PASS5.174seconds, eight joins/45artifacts/1945 rows;
+sole AST-equivalent child03a03b21 alters added-case layout only. Every native
+handle is terminal/collected; next native grant uses actual1953-row producer.
+
+Resume context `M7/codec-progress-restore-context-20261007-v1/retention.json`,
+SHA-256 `ef622ad1fa6d80f1e7dfddbf44bd1ed072647a0457c6d5ae7b152c538347af44`,86 files,
+retains final codec/progress verification recipes and packets, physicalV3/root
+review, restore packet and ingress map. Restore sourcea0a7d4f is frozen across
+three paths in m7-custody-restore; cleanup_binding_audit independently reviews it.
+Native Control writer sealsV2 after preservingV1 and fixing a deterministic
+fixture inspection. t15_original_closure_map prepares the smallest private
+credited ingress layout until that Control packet is ready, then independently
+reviews Control. Do not assign overlapping Core writes before current Control
+source freeze. Accepted0058 authorizes generic facade retirement; no asked
+approval is pending. Full integration baseline remainsd1132591; current/floor
+integration, real-provider release and milestone closure still require proof.
+
+
 Latest completed unit: dormant ADR0061 cancellation codec, whole14 per pair
 including node_client,102 literal vectors and69 Node boundary controls at
 isolated `89212a79926d5c3e34a5bfba7f9d90a2a877c573`. Original83950 PASS in7.446seconds,

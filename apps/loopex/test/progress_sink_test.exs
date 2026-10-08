@@ -757,6 +757,208 @@ defmodule Loopex.ProgressSinkTest do
     assert_receive {:DOWN, ^monitor, :process, ^producer, :normal}, 5_000
   end
 
+  test "actual opening owner death retires all leased credit and rejects it in a fresh incarnation",
+       %{
+         sink: fixture
+       } do
+    parent = self()
+
+    {owner, owner_monitor} =
+      owned_worker(fn ->
+        {:ok, owned} = Sink.open()
+        send(parent, {:lease_owner_opened, self(), owned})
+
+        receive do
+          :hold_all -> :ok
+        end
+
+        for sequence <- 0..31 do
+          assert :ok = Sink.try_offer(owned, "s", %{text("x") | model_sequence: sequence})
+        end
+
+        leases =
+          for sequence <- 0..31 do
+            assert {:ok, lease, "s", %{model_sequence: ^sequence}} = Sink.take(owned)
+            lease
+          end
+
+        assert occupied(owned) == 32
+        assert charged(owned) > 0 and charged(owned) <= 524_288
+        assert {:error, :cleanup_unproved} = Sink.close(owned)
+        send(parent, {:leased_owner_held, self(), leases, charged(owned)})
+
+        receive do
+          :finish -> :ok
+        end
+      end)
+
+    {guardian, incarnation, arena} =
+      owned =
+      receive do
+        {:lease_owner_opened, ^owner, opened} -> opened
+      after
+        5_000 -> flunk("missing opening owner's physical sink handle")
+      end
+
+    guardian_monitor = Process.monitor(guardian)
+
+    try do
+      send(owner, :hold_all)
+      assert_receive {:leased_owner_held, ^owner, leases, credit}, 5_000
+      assert length(leases) == 32
+      assert elem(state(owned), 3) == :closed
+      assert charged(owned) == credit
+      assert occupied(owned) == 32
+
+      assert Enum.map(leases, &elem(&1, 1)) |> Enum.sort() == Enum.to_list(0..31)
+
+      for lease <- leases do
+        assert {^incarnation, index, token} = lease
+        assert {^token, :leased, ^owner, charge} = slot(owned, index)
+        assert charge > 0
+      end
+
+      assert :dropped = Sink.try_offer(owned, "s", text("late while held"))
+      Process.exit(owner, :kill)
+      assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :killed}, 5_000
+      assert_receive {:DOWN, ^guardian_monitor, :process, ^guardian, :normal}, 5_000
+      assert :ets.info(arena) == :undefined
+      assert :closed = Sink.take(owned)
+      assert {:error, :cleanup_unproved} = Sink.close(owned)
+      assert :dropped = Sink.try_offer(owned, "s", text("after owner loss"))
+
+      {:ok, fresh} = Sink.open()
+      {fresh_guardian, fresh_incarnation, fresh_arena} = fresh
+
+      on_exit(fn ->
+        finish_custody_cleanup([
+          fn ->
+            monitor = Process.monitor(fresh_guardian)
+            assert_receive {:DOWN, ^monitor, :process, ^fresh_guardian, _reason}, 5_000
+          end,
+          fn -> assert :ets.info(fresh_arena) == :undefined end
+        ])
+      end)
+
+      try do
+        refute fresh_incarnation == incarnation
+        assert :ok = Sink.try_offer(fresh, "s", text("fresh"))
+        assert {:ok, {^fresh_incarnation, 0, fresh_token} = current, "s", item} = Sink.take(fresh)
+        assert item == text("fresh")
+        fresh_credit = charged(fresh)
+
+        for old <- leases do
+          refute elem(old, 2) == fresh_token
+          assert {:error, :stale_lease} = Sink.release(owned, old)
+          assert {:error, :stale_lease} = Sink.release(fresh, old)
+          assert occupied(fresh) == 1
+          assert charged(fresh) == fresh_credit
+        end
+
+        assert :ok = Sink.release(fresh, current)
+        assert charged(fresh) == 0 and occupied(fresh) == 0
+        assert :ok = Sink.close(fresh)
+      after
+        Sink.close(fresh)
+      end
+    after
+      finish_custody_cleanup([
+        fn ->
+          cleanup_owner = Process.monitor(owner)
+          if Process.alive?(owner), do: Process.exit(owner, :kill)
+          assert_receive {:DOWN, ^cleanup_owner, :process, ^owner, _reason}, 5_000
+        end,
+        fn ->
+          cleanup_guardian = Process.monitor(guardian)
+          assert_receive {:DOWN, ^cleanup_guardian, :process, ^guardian, _reason}, 5_000
+        end
+      ])
+    end
+
+    assert :ok = Sink.close(fixture)
+  end
+
+  test "actual publication survives producer death before notification and keeps credit through reuse",
+       %{
+         sink: sink
+       } do
+    parent = self()
+    {guardian, incarnation, arena} = sink
+    :ok = :sys.suspend(guardian)
+
+    {token, credit} =
+      try do
+        {producer, producer_monitor} =
+          owned_worker(fn ->
+            send(
+              parent,
+              {:published_before_notify, self(), Sink.try_offer(sink, "s", text("original"))}
+            )
+
+            receive do
+              :finish -> :ok
+            end
+          end)
+
+        try do
+          assert_receive {:published_before_notify, ^producer, :ok}, 5_000
+          assert {token, :ready, owner, credit} = slot(sink, 0)
+          assert owner == self()
+          assert occupied(sink) == 1 and charged(sink) == credit and credit > 0
+          assert [{{:payload, 0}, ^token, "s", item}] = :ets.lookup(arena, {:payload, 0})
+          assert item == text("original")
+          refute_received {:loopex_progress_ready, ^sink}
+          Process.exit(producer, :kill)
+          assert_receive {:DOWN, ^producer_monitor, :process, ^producer, :killed}, 5_000
+          assert {^token, :ready, ^owner, ^credit} = slot(sink, 0)
+          assert charged(sink) == credit
+          {token, credit}
+        after
+          cleanup_producer = Process.monitor(producer)
+          if Process.alive?(producer), do: Process.exit(producer, :kill)
+          assert_receive {:DOWN, ^cleanup_producer, :process, ^producer, _reason}, 5_000
+        end
+      after
+        :ok = :sys.resume(guardian)
+      end
+
+    assert_receive {:loopex_progress_ready, ^sink}, 5_000
+    assert {:ok, {^incarnation, 0, ^token} = lease, "s", item} = Sink.take(sink)
+    assert item == text("original")
+    assert charged(sink) == credit and occupied(sink) == 1
+    assert :ok = Sink.release(sink, lease)
+    assert charged(sink) == 0 and occupied(sink) == 0
+    assert :ok = Sink.try_offer(sink, "s", text("replacement"))
+    assert {:ok, {^incarnation, 0, fresh_token} = next, "s", replacement} = Sink.take(sink)
+    assert replacement == text("replacement")
+    refute fresh_token == token
+    replacement_credit = charged(sink)
+    assert {:error, :stale_lease} = Sink.release(sink, lease)
+    assert charged(sink) == replacement_credit and occupied(sink) == 1
+    assert :ok = Sink.release(sink, next)
+    assert :ok = Sink.close(sink)
+  end
+
+  # Concept: attempt every owned cleanup action even after another action fails.
+  # Technical depth: retain the first original exception and stack; independent
+  # physical joins and arena witnesses still run with their existing deadlines.
+  defp finish_custody_cleanup(actions) do
+    failure =
+      Enum.reduce(actions, nil, fn action, first ->
+        try do
+          action.()
+          first
+        catch
+          kind, reason -> first || {kind, reason, __STACKTRACE__}
+        end
+      end)
+
+    case failure do
+      nil -> :ok
+      {kind, reason, stack} -> :erlang.raise(kind, reason, stack)
+    end
+  end
+
   defp trace_counts(_arena, counts, []), do: counts
 
   defp trace_counts(arena, counts, barriers) do

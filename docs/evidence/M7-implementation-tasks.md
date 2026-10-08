@@ -13925,6 +13925,20 @@ the still-open real-provider, live protocol, persistent-fault or closure lanes.
 ### Added implementation subtasks
 
 - [ ] Implement and prove accepted ADR 0058's standalone ProgressSink arena and owner custody on both toolchains, including finite pre-mailbox admission, conservative retained-byte charges, lease generations, pressure and death races. Sink-only proof does not complete runtime/caller migration or real output qualification.
+- [x] Prove physical ProgressSink custody at actual opening-owner death with all32 slots leased, and actual producer death after publication before notification. Preserve credit through genuine take/release, guardian/arena retirement and fresh-token/incarnation refusal; keep all26 earlier library cases, production and deadlines unchanged.
+  Whole28 passed per pair at isolated `03a03b21b02badfd539f0c31ff9fa2819d70b5f3`,
+  original26848,19.937seconds, zero failures/exclusions/skips/invalid and warning-free
+  compilation. Output `M7/progress-physical-proof-20261007-v1`; collection
+  `b966acfb5240dae99277f8479326a4831be2e2036e992ceb3bf8ad8d9ae47081`, terminal
+  `47d88da708579c52b655494fbaeed9f7da32d7719c615ff14d4016c2cf23dfdb`; eight
+  original joins/42 artifacts,1953-row registry
+  `438ec403ca5cb0b6bcea70f51747d2026ba205e1c1dd87f867cf2a2e08cc632a`.
+  Sourceebac9c89 root-qualifiedc4ef77a6 contains no synthetic readiness, arena write
+  or production hook. Independent cleanup actions preserve the first failure and
+  attempt every owned join. Formatter94133 passed both pairs in5.174seconds;
+  its sole AST-equivalent child alters added-case layout only. Forced32-CAS
+  exhaustion, intermediate physical cuts, raw ingress and host writers remain
+  obligations in the broad parent row; this narrow proof does not close T07.
 
   Partial evidence: exact isolated `5b8ab5ac2f83187a04f25047a54a0207fca21347`,
   original13329,26 passed per pair, zero failures/exclusions/skips/invalid,
