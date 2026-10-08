@@ -7,16 +7,13 @@ defmodule Loopex.RuntimeStartTest do
   alias Loopex.M1RuntimeTestStore
   alias Loopex.Runtime
 
-  # Concept: `start_link/1` hands back a runtime that can already serve, so a
-  # resume issued at once is not refused for a dispatcher still registering.
-  #
-  # Technical depth: the dispatcher registers with Control asynchronously after
-  # the supervisor starts it. Before `start_link/1` waited for that, Control
-  # still held the dispatcher as `:initializing` in almost every start, and an
-  # ordinary succession — a resume of an active session — answered
-  # `:runtime_unavailable`. Each of twenty starts here asserts the ready
-  # dispatcher and then creates and resumes a session straight away.
-  test "a started runtime has a ready dispatcher and resumes an active session at once" do
+  # Concept: start_link returns a ready dispatcher, and native callers separately
+  # observe the original creation startup before issuing their one create.
+  # Technical depth: accepted ADR0063 distinguishes dispatcher readiness from
+  # creation eligibility. Each of twenty starts preserves the dispatcher check,
+  # pins the public startup identity/cutoff and spends one 1,000-ms fixture bound
+  # observing it before the unchanged create/resume and owned cleanup sequence.
+  test "a started runtime has a ready dispatcher and creates after original startup proof" do
     for index <- 1..20 do
       {store_pid, store} = M1RuntimeTestStore.start_store()
 
@@ -32,6 +29,8 @@ defmodule Loopex.RuntimeStartTest do
       {:ok, %{control: control}} = Runtime.children(runtime)
       assert %{status: :ready} = :sys.get_state(control).dispatcher
 
+      assert :ok = await_startup(runtime)
+
       assert {:ok, session_id} = Runtime.create_session(runtime, "start-create-#{index}", %{})
 
       assert {:ok, ^session_id} =
@@ -39,6 +38,34 @@ defmodule Loopex.RuntimeStartTest do
 
       :ok = Loopex.stop(runtime)
       GenServer.stop(store_pid)
+    end
+  end
+
+  defp await_startup(runtime) do
+    cutoff = System.monotonic_time(:millisecond) + 1_000
+    assert {:ok, snapshot} = Runtime.creation_startup_status(runtime, 1_000)
+    await_startup(runtime, snapshot, min(cutoff, snapshot.startup_deadline_ms))
+  end
+
+  defp await_startup(runtime, snapshot, cutoff) do
+    remaining = cutoff - System.monotonic_time(:millisecond)
+    assert remaining > 0
+
+    case snapshot.state do
+      :ready -> :ok
+      :starting ->
+        receive do
+        after
+          min(10, remaining) -> :ok
+        end
+
+        remaining = cutoff - System.monotonic_time(:millisecond)
+        assert remaining > 0
+        assert {:ok, next} = Runtime.creation_startup_status(runtime, min(1_000, remaining))
+        assert next.startup_id == snapshot.startup_id
+        assert next.startup_deadline_ms == snapshot.startup_deadline_ms
+        await_startup(runtime, next, cutoff)
+      unavailable -> flunk("original creation startup unavailable: #{inspect(unavailable)}")
     end
   end
 end
