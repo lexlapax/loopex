@@ -166,6 +166,8 @@ defmodule LoopexCli.ChatCompositionStartupDriver do
     assert Interrupt.chat_live(manager, signal_ref)
     assert_receive {:input_held, ^input, input_worker, input_ref}, 1_000
     input_down = Process.monitor(input_worker)
+    assert %{runtime: ^runtime, session: ^session, input_worker: ^input_worker} =
+      :sys.get_state(driver, 1_000)
     assert StringIO.contents(bytes) == {"/quit\n", ""}
     assert [_] = genesis(state_root)
     send(input, {:release_input, input_ref})
@@ -180,8 +182,10 @@ defmodule LoopexCli.ChatCompositionStartupDriver do
     assert closing["exit_code"] == 0 and closing["cleanup"] == "confirmed"
     assert closing["last_outcome"] == nil
     assert [admitted] = Enum.filter(controls, &(&1["event"] == "input"))
-    assert admitted["disposition"] == "admitted"
-    assert admitted["session_id"] == LoopexProtocol.Wire.encode_identity(session)
+    assert %{"v" => 1, "event" => "input", "input_sequence" => "1",
+      "command_id" => command, "disposition" => "admitted", "code" => "accepted"} = admitted
+    assert map_size(admitted) == 6
+    assert is_binary(command) and byte_size(command) > 0
     refute Enum.any?(controls, &(&1["event"] == "error"))
     assert elem(StringIO.contents(diagnostic), 1) =~ "/session/model"
     assert [%{"origin" => "env", "value" => ^state_root}] =
