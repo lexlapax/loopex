@@ -276,4 +276,3 @@ function sorted(object) {
   return Object.fromEntries(Object.keys(object).sort().map((key) => [key, object[key]]));
 }
 
-export { GENERATION };
