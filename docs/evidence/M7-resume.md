@@ -27,7 +27,80 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
-### Core startup status proof and host repair, 2026-10-08
+### Qualified Core and host startup units, 2026-10-08
+
+Core16 at `ddcf105433c8c80a46397a6ce26c1796ce3d445d` PASSES on both supported
+pairs, including all three production60-second cases and genuine normal physical
+joins after cutoff. Original6927 terminal duration369.508seconds, eight exact
+stage joins,34 verified artifacts, zero exclusions/skips/invalid. Output:
+`M7/creation-startup-status-core-20261008-v4`; terminal SHA-256
+`48abece4e7f6050a188c011c26a01154723dfdc4893533533b81617c4b578d20`;
+collection `7e759e163911b1b9a63af9b5f9ebb3de1b6125a4cb9e736aabdeb1d496d3575d`.
+Source review verifies the fifteen original cases/helpers remain byte-preserved
+apart from formatting. The new case captures the actual final Store reply,
+keeps original Control live and original identity/cutoff unavailable, and joins
+original worker/group/guardian normally after cutoff within retained cleanup.
+No synthetic readiness, DOWN, new owner or renewed allowance supplies the proof.
+
+Hostv3 original90268 at00cc41c1 remains FAILED111/121 with ten fixture failures;
+floor UNRUN. Observer-owned suspension vanished on observer exit, and tests
+mistook the nested Store body for a directly supervised carrier. V4 corrects
+only the two test files: the live test owns both suspend/resume calls; real
+monitor/link topology identifies the actual carrier and private group. Original
+actor monitors, observer membership, at-least-two direct Tasks, test identities
+and all bounds remain. The queued-result production repair is unchanged;
+source reasoning does not independently establish its cause in older v2 failures.
+
+The complete host121 selection PASSES both pairs at
+`1e30df7e9ae2e01c9e835b9ba5253f12480560fc`, raw join265acd36 and format-only
+child1e30df7e. Original10088 duration233.860seconds, eight exact stage joins,
+34 verified artifacts, zero exclusions/skips/invalid. Output:
+`M7/creation-startup-hosts-focused-20261008-v4`; terminal
+`e18d9c3de7a462f01ac7c7389b557361dbe167aea281b598d58f9b73b46b9363`;
+collection `ea335156180a87aa43a93c0586dc2235e67f40a6f6a2c1472a3f42362008dbb8`.
+These prove selected Core/host startup units, not complete CLI/daemon/provider
+callers, serving activation, full integration or milestone closure.
+
+Both source units are saved and pushed on the existing recovery ref
+`origin/codex/m7-resume-20261008`. Primary `m7` proposal
+`b651904a84be33800f3a2bf19cf782940e3fc1fb` is also pushed. Its exact Proposed
+[ADR0065](../adr/0065-private-attempts-io-prerequisite.md#concept) pair has source
+review and documentation check87418 PASS once in35.856seconds: output
+`M7/adr0065-proposal-docs-check-20261008-v1`; terminal
+`5246ecdb6ac0720a899e7620260cf261d19979736763fb3e1c8ffb9c69e10db8`;
+collection `a8b8f9ff284e5df7fb6fec9dff4f62df326441fd296d6a29955a3c9e46cde807`.
+Concept digest `f0158d313484b9c0133e93d2ef2311cb51ed8e227caecff1e45cd0c254d9db7f`;
+technical `6f57ec6ac97e0bbc04c10a6a71e04f328d45e5210be768ed837126ef39dc58e4`.
+One asynchronous exact-pair question is pending. Do not treat proposal/review as
+acceptance or implement its dependent physical writer before the maintainer
+chooses. The full-fast-suite Python prerequisite consequence is explicit;
+ordinary runtime/chat and unrelated direct lanes acquire no Python dependency.
+
+Immutable recovery manifest:
+`M7/coupled-current-context-20261008-v11/retention.json`, SHA-256
+`20c8d0b0ea4451f71cb856a8ab1d124a0402dc517908e0637f298aecf7494ab9`.
+It chains v10, retains65 assets, six source commits, eight new completed native
+records, a complete patch and a verified bundle containing candidate and primary
+proposal. Next registry2461, SHA-256
+`7bc3e3bbcbc8e223595e888492f9552bd4affccc4ca369c1a7312616822f79c8`.
+All listed root native/push handles are terminal and collected once. No complete
+restart-safe worker stop is claimed: a host writer owns one new unjoined
+`apps/loopex_cli/test/chat_composition_startup_test.exs` in its separate donor.
+Other read-only next-unit investigations may finish after this manifest and need
+retention before a later restart. The next real caller proof is new held Local
+startup through actual Chat.run, one create/genesis, untouched input until ready
+and /quit cleanup; expected whole new/driver/built selection13 per pair.
+
+Foreground investigation found the native fixed-mapping path's16KiB page rounding
+can exceed the existing smallest item's8,668-byte charge. Its old private0064
+whole-charge assertion remains withdrawn. A new native packaging and explicit
+active-output accounting decision is not acceptance-ready; no silent multiplier,
+reserve increase or dropping positive queue proofs is authorized. Whole112,
+restore175, attempts physical/handoff, helper activation and full integration
+remain open. Counts are unchanged: originals88 done /85 remaining /6 retired;
+additions365 done /24 remaining.
+
+### Historical Core startup status proof and host repair, 2026-10-08
 
 The accepted ADR0063 Core implementation at
 `b7abd911fd28c31271f340222c5dfb44890413be` passes all15 new cases on both

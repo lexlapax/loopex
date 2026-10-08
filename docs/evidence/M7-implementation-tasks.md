@@ -1,28 +1,35 @@
 # M7 Implementation Tasks
 
-Resumed checkpoint, 2026-10-08: the active M7 goal continues. The clean unserved
-candidate is `d8b40c828e53dc302fcc6c56e1743bd35192fd7e`, saved on recovery ref
-`origin/codex/m7-resume-20261008`; `m7` retains its integrated product baseline.
-Three new actual-path cases are now proved on both supported toolchains: Service
-compaction activity to two subscribed Socket clients, pending actual enqueue
-custody, and genuine kernel partial/select custody through exact emission ACK.
-The final focused run took24.943s, zero failures/skips/invalid cases. The initial
-Service phase-capture failure and wrong partial-case selector remain retained;
-a history FIFO barrier spends the original cutoff and preserves the exact two
-compact activity notices and privacy assertions. Existing Core42, Registry/Owner6,
-Buffer8 and held-ACK proofs remain at their tested bytes and were not repeated.
-No product native handle is live. The next registry seed has2344 rows.
-Successful drained Socket native retirement is next; complete daemon cleanup,
-32-CAS exhaustion, foreground112, restore175 and full integration remain open.
-ADR0063 is now accepted at5d77836b; Core and both host gates are being
-implemented in separate worktrees. No approval is pending for that work. T01-T19
-totals remain
-originals **88 done / 85 remaining / 6 retired** and additions **365 done / 24
-remaining**; T00 is separate. No broad checkbox closes for a prerequisite proof.
-The [resume record](M7-resume.md) names exact commits, results and remaining work.
-Immutable v8 chains to v7 and retains17 new report/source/runner assets, five
-new source commits, six original run records, a complete patch and verified
-Git bundle. Earlier checkpoint paragraphs below remain historical.
+Latest checkpoint, 2026-10-08: the active M7 goal continues on `m7`.
+Core startup status at `ddcf105433c8c80a46397a6ce26c1796ce3d445d` passes all16
+cases on both supported pairs, including three actual60-second cases and normal
+physical worker/group/guardian joins after cutoff. Host startup at unserved
+`1e30df7e9ae2e01c9e835b9ba5253f12480560fc` passes all121 selected cases on both
+pairs after two fixture corrections; original failing runs remain failed.
+Core duration369.508s; host233.860s. Zero exclusions/skips/invalid cases.
+The qualified source is pushed on `origin/codex/m7-resume-20261008`; its whole
+integration and serving activation remain open. The earlier Socket195 proof
+remains valid at its tested bytes.
+
+Proposed ADR0065 at `b651904a84be33800f3a2bf19cf782940e3fc1fb` is reviewed,
+documentation-checked and pushed to `m7`. One exact-pair prerequisite question
+is pending: Python standard library for private physical attempts IO, its tests
+and indexed M7 checks. No dependent writer implementation is authorized yet.
+The real held-startup chat caller case is being implemented separately. No root
+native check is live at this recorded instant; writers/readers must still be
+inventoried before any restart.
+
+Immutable `M7/coupled-current-context-20261008-v11/retention.json`, SHA-256
+`20c8d0b0ea4451f71cb856a8ab1d124a0402dc517908e0637f298aecf7494ab9`,
+chains v10 and retains65 assets, six candidate commits, eight completed native
+records and a verified candidate/primary-proposal Git bundle. The next registry
+has2461 rows. Foreground complete112, page-aware active-output accounting,
+restore175, physical attempts, helpers and whole integration remain open.
+T01-T19 totals remain originals **88 done /85 remaining /6 retired** and
+additions **365 done /24 remaining**; T00 is separate. These focused startup
+proofs do not close their broader parent rows. The [resume record](M7-resume.md)
+names exact evidence and next work. Older checkpoint paragraphs below are
+historical.
 
 Current checkpoint: the complete contract source is staged in isolated,
 unserved candidate `a7a83d22`. The independent Node runner proved both manifests
