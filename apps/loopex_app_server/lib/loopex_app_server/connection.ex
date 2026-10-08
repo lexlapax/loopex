@@ -29,6 +29,8 @@ defmodule Loopex.AppServer.Connection do
   defstruct state: :uninitialized,
             generation: nil,
             runtime: nil,
+            holder: nil,
+            emitted_cursor: nil,
             attachment: nil,
             in_flight: MapSet.new()
 
@@ -37,6 +39,8 @@ defmodule Loopex.AppServer.Connection do
           generation: binary() | nil,
           runtime: term() | nil,
           attachment: term() | nil,
+          holder: pid() | nil,
+          emitted_cursor: {binary(), non_neg_integer()} | nil,
           in_flight: MapSet.t(binary())
         }
 
@@ -55,7 +59,11 @@ defmodule Loopex.AppServer.Connection do
   """
   @spec new(keyword()) :: t()
   def new(options \\ []) do
-    %__MODULE__{state: :uninitialized, runtime: Keyword.get(options, :runtime)}
+    %__MODULE__{
+      state: :uninitialized,
+      runtime: Keyword.get(options, :runtime),
+      holder: Keyword.get(options, :holder, self())
+    }
   end
 
   @doc """
@@ -86,6 +94,10 @@ defmodule Loopex.AppServer.Connection do
   """
   @spec attachment(t()) :: term() | nil
   def attachment(%__MODULE__{attachment: attachment}), do: attachment
+
+  @doc false
+  def emitted(connection, session_id, cursor),
+    do: %{connection | emitted_cursor: {session_id, cursor}}
 
   @doc """
   ## Concept
@@ -207,6 +219,7 @@ defmodule Loopex.AppServer.Connection do
   @spec initialize(t(), map()) :: {:ok, map(), t()} | {:error, map(), t()}
   def initialize(%__MODULE__{state: :uninitialized} = connection, request) do
     with {:ok, request_id} <- request_id(request),
+         :ok <- request_envelope(request, "initialize"),
          {:ok, generations} <- generations(request),
          {:ok, capabilities} <- capabilities(request) do
       case Session.negotiate(generations, capabilities) do
@@ -257,7 +270,13 @@ defmodule Loopex.AppServer.Connection do
     case Map.get(request, "method") do
       method when is_binary(method) ->
         if method in Session.methods() do
-          claimed(connection, request_id, &answer(&1, request, request_id))
+          with {:ok, admitted_id} <- request_id(request),
+               :ok <- request_envelope(request, method) do
+            claimed(connection, admitted_id, &answer(&1, request, admitted_id))
+          else
+            {:error, reason, correlation} ->
+              {:error, error("invalid_request", reason, correlation), connection}
+          end
         else
           {:error, error("unsupported_method", "no such method in this generation", request_id),
            connection}
@@ -280,12 +299,9 @@ defmodule Loopex.AppServer.Connection do
   # Concept: one answer, with its identity claimed for exactly as long as it
   # takes to produce.
   #
-  # Technical depth: an identity that did not parse claims nothing, because an
-  # unusable identity correlates nothing and two of them are not a collision.
-  # The release runs on both outcomes, so a refusal does not strand an identity
-  # a client may legitimately use again.
-  defp claimed(connection, nil, answer), do: answer.(connection)
-
+  # Technical depth: only a validated identity and closed current envelope
+  # reach this claim. Both outcomes release it, so a refusal does not strand an
+  # identity a client may legitimately use again.
   defp claimed(connection, request_id, answer) do
     with {:ok, claimed} <- begin_request(connection, request_id) do
       case answer.(claimed) do
@@ -315,7 +331,12 @@ defmodule Loopex.AppServer.Connection do
          connection}
 
       true ->
-        context = %{runtime: connection.runtime, attachment: connection.attachment}
+        context = %{
+          runtime: connection.runtime,
+          attachment: connection.attachment,
+          holder: connection.holder,
+          emitted_cursor: connection.emitted_cursor
+        }
 
         case Mapping.call(request, context) do
           {:ok, record} ->
@@ -336,6 +357,30 @@ defmodule Loopex.AppServer.Connection do
              ), connection}
         end
     end
+  end
+
+  # Concept: every admitted method has one exact current request envelope.
+  # Technical depth: the negotiated complete manifest owns required and optional
+  # fields. Unknown members, omitted required members and explicit nulls refuse
+  # before a facade call. The existing resource decision alone permits null.
+  # Nested domains remain with their shared mapping/native validators.
+  defp request_envelope(request, method) do
+    contract = Session.manifest()["payload_definitions"]["requests"]
+    definition = contract["methods"][method]
+    required = contract["common_required"] ++ Map.keys(definition["required"])
+    optional = Map.keys(Map.get(definition, "optional", %{}))
+    keys = Map.keys(request)
+
+    valid =
+      not is_struct(request) and request["method"] == method and
+        required -- keys == [] and keys -- (required ++ optional) == [] and
+        Enum.all?(keys, fn key ->
+          request[key] != nil or (method == "session.admit_resources" and key == "decision")
+        end)
+
+    if valid,
+      do: :ok,
+      else: {:error, "request fields do not match this method", safe_request_id(request)}
   end
 
   # Concept: the request identity, which must be safe before it correlates

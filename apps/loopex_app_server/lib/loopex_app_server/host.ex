@@ -109,7 +109,7 @@ defmodule Loopex.AppServer.Host do
       {:ok, options} ->
         announce(options)
 
-        case LoopexComposition.with_runtime(options, &Stdio.serve/1) do
+        case serve_with_sink(options) do
           :ok ->
             :ok
 
@@ -129,6 +129,38 @@ defmodule Loopex.AppServer.Host do
 
       {:error, message} ->
         refuse(message)
+    end
+  end
+
+  # Concept: the same caller owns the runtime bracket, Stdio and native sink.
+  # Technical depth: acquire before composition and bracket immediately. The
+  # trusted capability never joins public configuration or a wire request.
+  defp serve_with_sink(options) do
+    case Loopex.ProgressSink.open() do
+      {:ok, sink} ->
+        result =
+          try do
+            LoopexComposition.with_runtime(
+              Keyword.put(options, :progress_sink, sink),
+              fn runtime -> Stdio.serve(runtime, sink) end
+            )
+          rescue
+            exception ->
+              Loopex.ProgressSink.close(sink)
+              reraise exception, __STACKTRACE__
+          catch
+            kind, reason ->
+              Loopex.ProgressSink.close(sink)
+              :erlang.raise(kind, reason, __STACKTRACE__)
+          end
+
+        case Loopex.ProgressSink.close(sink) do
+          :ok -> result
+          {:error, _reason} -> {:error, :cleanup_unproved}
+        end
+
+      {:error, _reason} ->
+        {:error, :progress_sink_unavailable}
     end
   end
 

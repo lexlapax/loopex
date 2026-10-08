@@ -329,44 +329,29 @@ defmodule LoopexProtocol.Frame do
   defp encode_value(nil), do: "null"
   defp encode_value(value) when is_atom(value), do: encode_string(Atom.to_string(value))
 
-  defp encode_string(value) do
-    [?", escape(value, []), ?"]
+  defp encode_string(value), do: [?", escape(value, <<>>), ?"]
+
+  # Concept: escaping retains one growing binary, not a list per code point.
+  # Technical depth: each tail clause appends directly to its private accumulator;
+  # no escaped temporary binary or reversed N-cell list survives the next call.
+  # Closed progress fields expand at most twice; other JSON C0 escapes remain
+  # the exact six lowercase bytes of the existing encoder. Map/array iodata is
+  # unchanged and proportional to members, rather than string length.
+  defp escape(<<>>, acc), do: acc
+  defp escape(<<?", rest::binary>>, acc), do: escape(rest, <<acc::binary, ?\\, ?">>)
+  defp escape(<<?\\, rest::binary>>, acc), do: escape(rest, <<acc::binary, ?\\, ?\\>>)
+  defp escape(<<?\b, rest::binary>>, acc), do: escape(rest, <<acc::binary, ?\\, ?b>>)
+  defp escape(<<?\f, rest::binary>>, acc), do: escape(rest, <<acc::binary, ?\\, ?f>>)
+  defp escape(<<?\n, rest::binary>>, acc), do: escape(rest, <<acc::binary, ?\\, ?n>>)
+  defp escape(<<?\r, rest::binary>>, acc), do: escape(rest, <<acc::binary, ?\\, ?r>>)
+  defp escape(<<?\t, rest::binary>>, acc), do: escape(rest, <<acc::binary, ?\\, ?t>>)
+
+  defp escape(<<code, rest::binary>>, acc) when code < 0x20 do
+    escape(rest, <<acc::binary, ?\\, ?u, ?0, ?0, hex(div(code, 16)), hex(rem(code, 16))>>)
   end
 
-  defp escape(<<>>, acc), do: acc |> Enum.reverse() |> IO.iodata_to_binary()
+  defp escape(<<code::utf8, rest::binary>>, acc), do: escape(rest, <<acc::binary, code::utf8>>)
 
-  defp escape(<<character::utf8, rest::binary>>, acc) do
-    escaped =
-      case character do
-        ?" ->
-          "\\\""
-
-        ?\\ ->
-          "\\\\"
-
-        ?\b ->
-          "\\b"
-
-        ?\f ->
-          "\\f"
-
-        ?\n ->
-          "\\n"
-
-        ?\r ->
-          "\\r"
-
-        ?\t ->
-          "\\t"
-
-        code when code < 0x20 ->
-          "\\u" <>
-            (code |> Integer.to_string(16) |> String.pad_leading(4, "0") |> String.downcase())
-
-        code ->
-          <<code::utf8>>
-      end
-
-    escape(rest, [escaped | acc])
-  end
+  defp hex(value) when value < 10, do: ?0 + value
+  defp hex(value), do: ?a + value - 10
 end

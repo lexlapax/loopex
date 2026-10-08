@@ -375,7 +375,7 @@ defmodule Loopex.AppServer.DeliveryBoundsTest do
 
     # What it holds after detaching is bounded: the backlog stopped growing at
     # the ceiling rather than at whatever the emitter produced.
-    {pending, _drained} = Delivery.take(flooded)
+    {pending, _drained} = drain(flooded)
     assert length(pending) <= Map.fetch!(limits, "durable_queue_records") + 1
 
     # Nothing about this blocked an emitter: every one of those calls returned.
@@ -397,13 +397,13 @@ defmodule Loopex.AppServer.DeliveryBoundsTest do
       end)
 
     assert Delivery.detached?(detached)
-    {_pending, drained} = Delivery.take(detached)
+    {_pending, drained} = drain(detached)
 
     # Progress arriving after the detachment is dropped rather than queued: the
     # reader is gone, and holding a rendering aid for it would be holding memory
     # for nobody.
     after_detach = Delivery.progress(drained, %{"seq" => 1, "bytes" => "late"})
-    {records, _queue} = Delivery.take(after_detach)
+    {records, _queue} = drain(after_detach)
     assert records == []
 
     # The same is true of a durable event: a detached queue accepts neither, and
@@ -416,7 +416,7 @@ defmodule Loopex.AppServer.DeliveryBoundsTest do
         payload: %{}
       })
 
-    {late, _queue} = Delivery.take(after_event)
+    {late, _queue} = drain(after_event)
     assert late == []
     assert Delivery.detached?(after_event)
   end
@@ -508,6 +508,7 @@ defmodule Loopex.AppServer.DeliveryBoundsTest do
 
     {:ok, _reply, connection} =
       Connection.initialize(connection, %{
+        "method" => "initialize",
         "request_id" => "r0",
         "generations" => [Session.generation()],
         "capabilities" => []
@@ -515,6 +516,7 @@ defmodule Loopex.AppServer.DeliveryBoundsTest do
 
     {:ok, created, connection} =
       Connection.dispatch(connection, %{
+        "session_options" => %{"version" => 1},
         "method" => "session.create",
         "request_id" => "r1",
         "command_id" => Wire.encode_identity("cs")
@@ -551,6 +553,27 @@ defmodule Loopex.AppServer.DeliveryBoundsTest do
     else
       {:ok, bytes} = Wire.bytes(body["bytes_b64"], 65_536)
       read_all(connection, transfer_ref, collected <> bytes)
+    end
+  end
+
+  # Concept: projection assertions simulate successful joins, not OS evidence.
+  # Technical depth: the lifecycle suite separately drives the actual writer.
+  # This helper selects one entry, keeps its charge active, decodes its LF frame,
+  # and explicitly joins before selecting the next entry.
+  defp drain(queue), do: drain(queue, [])
+
+  defp drain(queue, records) do
+    case Delivery.next(queue) do
+      {:ok, entry} ->
+        reference = make_ref()
+        {:ok, active} = Delivery.activate(queue, entry.token, reference)
+        payload = binary_part(entry.frame, 0, byte_size(entry.frame) - 1)
+        {:ok, record} = LoopexProtocol.Frame.decode(payload, 2_097_152)
+        {:ok, _entry, joined} = Delivery.joined(active, reference)
+        drain(joined, [record | records])
+
+      :empty ->
+        {Enum.reverse(records), queue}
     end
   end
 end

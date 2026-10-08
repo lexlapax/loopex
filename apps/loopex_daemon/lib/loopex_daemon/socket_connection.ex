@@ -1252,8 +1252,7 @@ defmodule LoopexDaemon.SocketConnection do
           {:installed, attachment_id,
            WireRecords.snapshot(
              request_id,
-             Loopex.Attachment.snapshot(attachment),
-             Loopex.Attachment.open_interaction(attachment)
+             Loopex.Attachment.snapshot(attachment)
            )}
 
         {:error, :runtime_unavailable} ->

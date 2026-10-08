@@ -79,7 +79,7 @@ async function run(connection) {
 
   const created = await connection.request("session.create", {
     command_id: wire.identity("client-create"),
-    session_options: {},
+    session_options: { version: 1 },
   });
 
   assert(created.type === "admission", `expected an admission, received ${created.type}`);
@@ -95,7 +95,20 @@ async function run(connection) {
   });
 
   assert(attached.type === "snapshot", `expected a snapshot, received ${attached.type}`);
-  assert(attached.snapshot.snapshot_revision === 2, "unexpected snapshot revision");
+  assert(attached.snapshot.snapshot_revision === 3, "unexpected snapshot revision");
+  const snapshotMembers = [
+    "active_maintenance", "active_run_id", "active_run_phase", "checkpoint",
+    "configuration", "event_sequence", "last_compact", "open_interaction",
+    "session_id", "snapshot_revision",
+  ];
+  assert(JSON.stringify(Object.keys(attached.snapshot).sort()) === JSON.stringify(snapshotMembers),
+    "snapshot does not carry exactly the current ten fields");
+  assert(attached.snapshot.session_id === sessionId, "snapshot changed the opaque session identity");
+  assert(attached.snapshot.event_sequence === attached.event_cursor, "snapshot and cursor differ");
+  assert(Buffer.from(attached.snapshot.session_id, "base64url").equals(Buffer.from(sessionId, "base64url")),
+    "snapshot identity bytes differ");
+  wire.decodeU64(attached.snapshot.event_sequence);
+  summary.snapshot_revision = attached.snapshot.snapshot_revision;
   summary.attached_cursor = attached.event_cursor;
   summary.snapshot_members = Object.keys(attached.snapshot).sort();
 

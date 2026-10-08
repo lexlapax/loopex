@@ -22,7 +22,7 @@ defmodule Loopex.AppServer.Mapping do
   would stop retrying the one identity that could still resolve it.
   """
 
-  alias LoopexProtocol.Session.Snapshot
+  alias LoopexProtocol.Session.{Answer, CommandBounds, CreationOptions, Inspection, Snapshot}
   alias LoopexProtocol.Wire
 
   @content_bytes 1_048_576
@@ -44,7 +44,8 @@ defmodule Loopex.AppServer.Mapping do
     "session.resume",
     "session.admit_resources",
     "session.activate_skill",
-    "session.configure"
+    "session.configure",
+    "session.compact"
   ]
 
   # Concept: current configure decoding prepares authored input without serving a route.
@@ -129,6 +130,9 @@ defmodule Loopex.AppServer.Mapping do
              "session_id" => Wire.encode_identity(session_id)
            })}
 
+        {:error, :commit_unknown} ->
+          {:error, error(request, "admission_unknown", :commit_unknown)}
+
         {:error, reason} ->
           {:ok, refused(request, command_id, reason)}
       end
@@ -207,7 +211,7 @@ defmodule Loopex.AppServer.Mapping do
          {:ok, replace} <- attach_replacement(request),
          :ok <- attachable(context, replace, request),
          {:ok, options} <- attach_options(request) do
-      case Loopex.attach(context.runtime, session_id, options) do
+      case attach_for_holder(context, session_id, options) do
         {:ok, attachment} ->
           # The attachment goes back with the snapshot because the connection,
           # not this call, is what holds it: a later command is admitted through
@@ -244,10 +248,10 @@ defmodule Loopex.AppServer.Mapping do
 
   def call(%{"method" => "session.respond_interaction"} = request, context) do
     with {:ok, interaction_id} <- field(request, "interaction_id", &Wire.identity/1),
-         {:ok, choice_id} <- answer_choice(request) do
+         {:ok, answer} <- interaction_answer(request) do
       admit(request, context, :interaction_answer, [],
         interaction_id: interaction_id,
-        choice_id: choice_id
+        answer: answer
       )
     end
   end
@@ -296,15 +300,26 @@ defmodule Loopex.AppServer.Mapping do
   end
 
   def call(%{"method" => "session.prompt"} = request, context) do
-    admit(request, context, :prompt, ["content_b64"])
+    admit(request, context, :prompt, ["content_b64", "bounds"])
   end
 
   def call(%{"method" => "session.follow_up"} = request, context) do
-    admit(request, context, :follow_up, ["content_b64"])
+    admit(request, context, :follow_up, ["content_b64", "bounds"])
   end
 
   def call(%{"method" => "session.steer"} = request, context) do
-    admit(request, context, :steer, ["content_b64", "run_id"])
+    if Map.has_key?(request, "bounds"),
+      do: {:error, error(request, "invalid_request", :invalid_field)},
+      else: admit(request, context, :steer, ["content_b64", "run_id"])
+  end
+
+  # Concept: compact admission is distinct from its eventual committed completion.
+  # Technical depth: the shared codec preserves explicit maintenance bounds.
+  # The existing attachment and command facade own authority, duplicate facts,
+  # dispatch and cleanup. Completion uses CompactResult in the event projection.
+  # This handler remains outside the served method inventory until activation.
+  def call(%{"method" => "session.compact"} = request, context) do
+    admit(request, context, :compact, ["bounds"])
   end
 
   def call(%{"method" => "session.abort"} = request, context) do
@@ -385,12 +400,45 @@ defmodule Loopex.AppServer.Mapping do
             {:halt, {:error, refusal}}
         end
 
+      "bounds", {:ok, acc} ->
+        case command_bounds(request) do
+          {:ok, :omitted} -> {:cont, {:ok, acc}}
+          {:ok, bounds} -> {:cont, {:ok, Map.put(acc, :bounds, bounds)}}
+          {:error, refusal} -> {:halt, {:error, refusal}}
+        end
+
       "run_id", {:ok, acc} ->
         case field(request, "run_id", &Wire.identity/1) do
           {:ok, run_id} -> {:cont, {:ok, Map.put(acc, :run_id, run_id)}}
           {:error, refusal} -> {:halt, {:error, refusal}}
         end
     end)
+  end
+
+  # Concept: preserve omission separately from explicit empty authored bounds.
+  # Technical depth: fixed method names select the shared closed codec. No
+  # default or clock enters command identity here; the serial owner captures it.
+  defp command_bounds(request) do
+    kind =
+      case request["method"] do
+        "session.prompt" -> :prompt
+        "session.follow_up" -> :follow_up
+        "session.compact" -> :compact
+      end
+
+    case Map.fetch(request, "bounds") do
+      :error when kind != :compact ->
+        {:ok, :omitted}
+
+      {:ok, bounds} ->
+        case CommandBounds.decode_wire(bounds, kind) do
+          {:ok, decoded} -> {:ok, decoded}
+          :error -> {:error, error(request, "invalid_request", :invalid_field)}
+        end
+
+      :error ->
+        {:error, error(request, "invalid_request", :invalid_field)}
+    end
   end
 
   # Concept: the window a client asked to read, in the facade's own terms.
@@ -564,22 +612,14 @@ defmodule Loopex.AppServer.Mapping do
     end
   end
 
-  # Concept: an answer is exactly one offered choice, named by its identity.
-  #
-  # Technical depth: accepted ADR 0023 fixes the shape as a single-member object
-  # so an answer cannot carry anything else a policy might read. Whether that
-  # choice was offered is the reducer's decision, not this layer's: an answer is
-  # not an allow and never becomes one here.
-  defp answer_choice(request) do
-    case Map.get(request, "answer") do
-      %{"choice_id" => choice_id} = answer when map_size(answer) == 1 ->
-        case Wire.identity(choice_id) do
-          {:ok, decoded} -> {:ok, decoded}
-          :error -> {:error, error(request, "invalid_request", :invalid_field)}
-        end
-
-      _other ->
-        {:error, error(request, "invalid_request", :invalid_answer)}
+  # Concept: an answer preserves one choice, text or explicit decline branch.
+  # Technical depth: decoding grants nothing. The owner binds the retained
+  # question and admits text/decline only for a model question; policy questions
+  # still require an offered choice and independent policy re-evaluation.
+  defp interaction_answer(request) do
+    case Answer.decode_wire(Map.get(request, "answer")) do
+      {:ok, answer} -> {:ok, answer}
+      :error -> {:error, error(request, "invalid_request", :invalid_answer)}
     end
   end
 
@@ -621,6 +661,42 @@ defmodule Loopex.AppServer.Mapping do
 
   defp read_projection(resource), do: resource
 
+  # Concept: the transport holder outlives its request worker.
+  # Technical depth: same-session replacement names the exact previous handle.
+  # Cross-session replacement retires that holder before a fresh attach; neither
+  # a worker exit nor an attachment-conflict bypass substitutes for retirement.
+  defp attach_for_holder(context, session_id, options) do
+    holder = Map.get(context, :holder, self())
+    runtime = context.runtime
+
+    case {Map.get(context, :attachment), Loopex.Attachment.routing(Map.get(context, :attachment))} do
+      {nil, {:error, _reason}} ->
+        Loopex.Runtime.attach_for_holder(runtime, session_id, holder, options)
+
+      {_old, {:ok, ^runtime, ^session_id, previous, _incarnation}} ->
+        options =
+          case Map.get(context, :emitted_cursor) do
+            {^session_id, cursor} -> Keyword.put_new(options, :after_event_sequence, cursor)
+            _none -> options
+          end
+
+        Loopex.Runtime.attach_for_holder(
+          runtime,
+          session_id,
+          holder,
+          Keyword.put(options, :replace_attachment_id, previous)
+        )
+
+      {_old, {:ok, ^runtime, _other_session, _previous, _incarnation}} ->
+        with :ok <- Loopex.Runtime.release_holder(runtime, holder) do
+          Loopex.Runtime.attach_for_holder(runtime, session_id, holder, options)
+        end
+
+      _stale ->
+        {:error, :invalid_attachment}
+    end
+  end
+
   # Concept: the attachment's authoritative snapshot, at its own cursor.
   #
   # Technical depth: the cursor and the snapshot's event sequence are the same
@@ -644,17 +720,19 @@ defmodule Loopex.AppServer.Mapping do
   defp attached(%{attachment: attachment}) when not is_nil(attachment), do: :ok
   defp attached(_context), do: {:error, %{"type" => "error", "code" => "not_attached"}}
 
-  # Concept: the bounded options a client may supply at creation.
-  #
-  # Technical depth: absent is an empty set rather than an error, because a
-  # session with no options is ordinary. What is present must already be plain
-  # data: the frame decoder produced it, so nothing richer than JSON can be
-  # here, and this layer adds no run policy of its own.
+  # Concept: creation carries versioned authored options into central validation.
+  # Technical depth: required version 1 and the closed wire grammar decode exact
+  # quantities without filling omissions, sorting tools or capturing host facts.
+  # Native creation retains whole-input validation, instruction capture and the
+  # duplicate-before-default/preparation boundary under its existing custody.
   defp session_options(request) do
-    case Map.get(request, "session_options") do
-      nil -> {:ok, %{}}
-      options when is_map(options) -> {:ok, options}
-      _other -> {:error, error(request, "invalid_request", :invalid_session_options)}
+    with true <-
+           Enum.sort(Map.keys(request)) ==
+             ~w(command_id method request_id session_options),
+         {:ok, options} <- CreationOptions.decode_wire(Map.get(request, "session_options")) do
+      {:ok, options}
+    else
+      _ -> {:error, error(request, "invalid_request", :invalid_session_options)}
     end
   end
 
@@ -665,31 +743,30 @@ defmodule Loopex.AppServer.Mapping do
     end
   end
 
-  # Concept: the public status projection, and only it.
-  #
-  # Technical depth: accepted ADR 0023 names the exact members. Owner epoch,
-  # journal version, handles and attachment state are deliberately absent: they
-  # are how the runtime keeps its promises, not what a client is owed, and a
-  # client that could read them would start depending on them.
+  # Concept: inspection exposes the owner's eleven committed public fields.
+  # Technical depth: one owner read supplies the captured configuration, bounds,
+  # checkpoint and maintenance. Explicit selection excludes owner epochs,
+  # journal versions and compact_pending before the closed shared codec checks
+  # every nested public DTO and exact quantity. Nothing supplies a default.
   defp projected_status(status) do
-    %{
-      "status" => to_string(Map.get(status, :status)),
-      "event_sequence" => Wire.encode_u64(Map.get(status, :event_sequence, 0)),
-      "active_run_id" => optional_identity(Map.get(status, :active_run_id)),
-      "cleanup_grace_ms" => Wire.encode_u64(Map.get(status, :cleanup_grace_ms, 0)),
-      "active_context_token_budget" =>
-        optional_u64(Map.get(status, :active_context_token_budget)),
-      "pending_work_ids" =>
-        status |> Map.get(:pending_work_ids, []) |> Enum.map(&Wire.encode_identity/1),
-      "open_interaction" => Map.get(status, :open_interaction)
-    }
+    public =
+      Map.take(status, [
+        :status,
+        :event_sequence,
+        :active_run_id,
+        :cleanup_grace_ms,
+        :active_context_token_budget,
+        :pending_work_ids,
+        :open_interaction,
+        :configuration,
+        :active_bounds,
+        :checkpoint,
+        :active_maintenance
+      ])
+
+    {:ok, projected} = Inspection.encode_wire(public)
+    projected
   end
-
-  defp optional_identity(nil), do: nil
-  defp optional_identity(value) when is_binary(value), do: Wire.encode_identity(value)
-
-  defp optional_u64(nil), do: nil
-  defp optional_u64(value) when is_integer(value), do: Wire.encode_u64(value)
 
   # Concept: one query answer, named by the method that asked.
   #
@@ -745,8 +822,8 @@ defmodule Loopex.AppServer.Mapping do
 
   defp message(:invalid_field), do: "a field is missing or not in its wire representation"
   defp message(:empty_content), do: "content must not be empty"
-  defp message(:invalid_session_options), do: "session_options must be an object"
-  defp message(:invalid_answer), do: "an answer must name exactly one offered choice"
+  defp message(:invalid_session_options), do: "session_options must be a version 1 creation object"
+  defp message(:invalid_answer), do: "an answer must contain exactly one choice, text or decline"
   defp message(:attachment_conflict), do: "another attachment holds this session"
   defp message(:unknown), do: "the request could not be answered"
   defp message(:recovery_required), do: "this session cannot be resumed without recovery"

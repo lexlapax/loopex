@@ -32,7 +32,7 @@ defmodule Loopex.AppServer.SessionMappingTest do
   alias Loopex.AppServer.Delivery
   alias LoopexProtocol.Wire
 
-  test "dormant configure capture preserves raw instruction bytes without serving an old generation" do
+  test "configure capture preserves raw instruction bytes and the current connection refuses an incomplete envelope" do
     raw = %{
       "version" => "wire.v1",
       "base" => "exact wire bytes 猫\n",
@@ -64,6 +64,7 @@ defmodule Loopex.AppServer.SessionMappingTest do
 
     assert {:ok, _initialized, connection} =
              Connection.initialize(Connection.new(), %{
+               "method" => "initialize",
                "request_id" => "configure-generation",
                "generations" => [LoopexProtocol.Session.generation()],
                "capabilities" => []
@@ -75,7 +76,7 @@ defmodule Loopex.AppServer.SessionMappingTest do
                "request_id" => "configure"
              })
 
-    assert refusal["code"] == "unsupported_method"
+    assert refusal["code"] == "invalid_request"
   end
 
   test "a session created over the wire is the session the facade would have created" do
@@ -86,7 +87,8 @@ defmodule Loopex.AppServer.SessionMappingTest do
       dispatch(wire, %{
         "method" => "session.create",
         "request_id" => "r1",
-        "command_id" => Wire.encode_identity("cs")
+        "command_id" => Wire.encode_identity("cs"),
+        "session_options" => %{"version" => 1}
       })
 
     assert record["type"] == "admission"
@@ -96,7 +98,7 @@ defmodule Loopex.AppServer.SessionMappingTest do
     assert {:ok, "cs"} = Wire.identity(record["command_id"])
     assert {:ok, wire_session} = Wire.identity(record["session_id"])
 
-    {:ok, facade_session} = Loopex.create_session(facade.runtime, %{}, command_id: "cs")
+    {:ok, facade_session} = Loopex.create_session(facade.runtime, %{"version" => 1}, command_id: "cs")
 
     # The same command identity produced the same durable genesis on both
     # surfaces: identical record kinds, in the same order, at the same versions.
@@ -109,7 +111,7 @@ defmodule Loopex.AppServer.SessionMappingTest do
     facade = fixture()
 
     {wire_connection, wire_session} = created(wire)
-    {:ok, facade_session} = Loopex.create_session(facade.runtime, %{}, command_id: "cs")
+    {:ok, facade_session} = Loopex.create_session(facade.runtime, %{"version" => 1}, command_id: "cs")
 
     {:ok, wire_attachment} = Loopex.attach(wire.runtime, wire_session, after_event_sequence: 0)
 
@@ -190,9 +192,13 @@ defmodule Loopex.AppServer.SessionMappingTest do
     projection = record["result"]
 
     assert Enum.sort(Map.keys(projection)) == [
+             "active_bounds",
              "active_context_token_budget",
+             "active_maintenance",
              "active_run_id",
+             "checkpoint",
              "cleanup_grace_ms",
+             "configuration",
              "event_sequence",
              "open_interaction",
              "pending_work_ids",
@@ -205,6 +211,7 @@ defmodule Loopex.AppServer.SessionMappingTest do
     assert is_binary(projection["cleanup_grace_ms"])
 
     # How the runtime keeps its promises is not what a client is owed.
+    refute Map.has_key?(projection, "compact_pending")
     refute Map.has_key?(projection, "owner_epoch")
     refute Map.has_key?(projection, "journal_version")
     refute Map.has_key?(projection, "owner_incarnation_id")
@@ -231,8 +238,8 @@ defmodule Loopex.AppServer.SessionMappingTest do
     {connection, _session_id} = created(wire)
 
     for bad <- [
-          %{"method" => "session.create", "request_id" => "r2", "command_id" => "not base64url!"},
-          %{"method" => "session.create", "request_id" => "r2"},
+          %{"session_options" => %{"version" => 1}, "method" => "session.create", "request_id" => "r2", "command_id" => "not base64url!"},
+          %{"session_options" => %{"version" => 1}, "method" => "session.create", "request_id" => "r2"},
           %{
             "method" => "session.create",
             "request_id" => "r2",
@@ -257,7 +264,7 @@ defmodule Loopex.AppServer.SessionMappingTest do
     ]
 
     through_facade = fixture()
-    {:ok, facade_session} = Loopex.create_session(through_facade.runtime, %{}, command_id: "cs")
+    {:ok, facade_session} = Loopex.create_session(through_facade.runtime, %{"version" => 1}, command_id: "cs")
     {:ok, facade_attachment} = Loopex.attach(through_facade.runtime, facade_session, [])
 
     for command <- corpus do
@@ -390,6 +397,7 @@ defmodule Loopex.AppServer.SessionMappingTest do
 
     {:ok, _reply, second_connection} =
       Connection.initialize(second_connection, %{
+        "method" => "initialize",
         "request_id" => "r0",
         "generations" => [LoopexProtocol.Session.generation()],
         "capabilities" => []
@@ -447,6 +455,7 @@ defmodule Loopex.AppServer.SessionMappingTest do
 
     {:ok, _reply, connection} =
       Connection.initialize(connection, %{
+        "method" => "initialize",
         "request_id" => "r0",
         "generations" => [LoopexProtocol.Session.generation()],
         "capabilities" => []
@@ -507,7 +516,7 @@ defmodule Loopex.AppServer.SessionMappingTest do
 
     refute Delivery.detached?(flooded_progress)
 
-    {progress_records, _drained_progress} = Delivery.take(flooded_progress)
+    {progress_records, _drained_progress} = drain(flooded_progress)
     assert length(progress_records) > 0
     assert length(progress_records) < 32
     assert Enum.all?(progress_records, &(byte_size(&1["progress"]["text"]) == 32_768))
@@ -575,6 +584,7 @@ defmodule Loopex.AppServer.SessionMappingTest do
 
     {:ok, _reply, fresh} =
       Connection.initialize(fresh, %{
+        "method" => "initialize",
         "request_id" => "r0",
         "generations" => [LoopexProtocol.Session.generation()],
         "capabilities" => []
@@ -605,6 +615,7 @@ defmodule Loopex.AppServer.SessionMappingTest do
 
     {:ok, _reply, connection} =
       Connection.initialize(connection, %{
+        "method" => "initialize",
         "request_id" => "r0",
         "generations" => [LoopexProtocol.Session.generation()],
         "capabilities" => []
@@ -618,6 +629,7 @@ defmodule Loopex.AppServer.SessionMappingTest do
 
     {:ok, _reply, connection} =
       Connection.initialize(connection, %{
+        "method" => "initialize",
         "request_id" => "r0",
         "generations" => [LoopexProtocol.Session.generation()],
         "capabilities" => []
@@ -627,7 +639,8 @@ defmodule Loopex.AppServer.SessionMappingTest do
       Connection.dispatch(connection, %{
         "method" => "session.create",
         "request_id" => "r1",
-        "command_id" => Wire.encode_identity("cs")
+        "command_id" => Wire.encode_identity("cs"),
+        "session_options" => %{"version" => 1}
       })
 
     {:ok, session_id} = Wire.identity(record["session_id"])
@@ -664,6 +677,27 @@ defmodule Loopex.AppServer.SessionMappingTest do
 
       _other ->
         :active
+    end
+  end
+
+  # Concept: projection assertions simulate successful joins, not OS evidence.
+  # Technical depth: the lifecycle suite separately drives the actual writer.
+  # This helper selects one entry, keeps its charge active, decodes its LF frame,
+  # and explicitly joins before selecting the next entry.
+  defp drain(queue), do: drain(queue, [])
+
+  defp drain(queue, records) do
+    case Delivery.next(queue) do
+      {:ok, entry} ->
+        reference = make_ref()
+        {:ok, active} = Delivery.activate(queue, entry.token, reference)
+        payload = binary_part(entry.frame, 0, byte_size(entry.frame) - 1)
+        {:ok, record} = LoopexProtocol.Frame.decode(payload, 2_097_152)
+        {:ok, _entry, joined} = Delivery.joined(active, reference)
+        drain(joined, [record | records])
+
+      :empty ->
+        {Enum.reverse(records), queue}
     end
   end
 end

@@ -89,6 +89,7 @@ async function run(connection) {
 
   const created = await connection.request("session.create", {
     command_id: wire.identity("chain-create"),
+    session_options: { version: 1 },
   });
 
   assert(created.status === "accepted", `creation was ${created.status}`);

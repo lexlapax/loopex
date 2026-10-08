@@ -112,13 +112,13 @@ defmodule Loopex.AppServer.ConfigureIngressTest do
     assert Adapter.prepare_configuration_request(request) == {:error, :invalid_request}
   end
 
-  test "duplicate-aware Frame and served generation stay unchanged by this prerequisite" do
+  test "duplicate-aware Frame and current configure inventory retain their exact contract" do
     for vector <- vectors()["frame_cases"] do
       assert Frame.decode(vector["json"], 2_097_152) == {:error, :duplicate_member}
     end
 
     assert Adapter.implemented?("session.configure")
-    refute "session.configure" in LoopexProtocol.Session.methods()
+    assert "session.configure" in LoopexProtocol.Session.methods()
 
     assert {:error, %{"code" => "not_attached"}} =
              Adapter.call(%{"method" => "session.configure"}, %{})
@@ -241,7 +241,7 @@ defmodule Loopex.AppServer.ConfigureIngressTest do
     assert Agent.get(fixture.controller, & &1.calls) == 0
   end
 
-  test "current connection negotiation refuses implemented configure before any callback or durable work" do
+  test "current connection refuses pre-initialization and extra configure fields before any callback or durable work" do
     fixture = native_fixture()
     request = native_request()
     before_records = Fixture.records(fixture, fixture.session)
@@ -251,18 +251,19 @@ defmodule Loopex.AppServer.ConfigureIngressTest do
 
     assert {:ok, initialized, connection} =
              Connection.initialize(fresh, %{
+               "method" => "initialize",
                "request_id" => "initialize",
                "generations" => [LoopexProtocol.Session.generation()],
                "capabilities" => []
              })
 
-    assert initialized["selected_generation"] == "loopex.experimental/1"
+    assert initialized["selected_generation"] == "loopex.experimental/3"
     assert initialized["exact_schema_sha256"] == LoopexProtocol.Session.schema_digest()
     assert initialized["supported_methods"] == LoopexProtocol.Session.methods()
-    refute "session.configure" in initialized["supported_methods"]
+    assert "session.configure" in initialized["supported_methods"]
     attached = Connection.attach(connection, fixture.attachment)
-    assert {:error, refusal, ^attached} = Connection.dispatch(attached, request)
-    assert refusal["code"] == "unsupported_method"
+    assert {:error, refusal, ^attached} = Connection.dispatch(attached, Map.put(request, "writer_epoch", "forbidden-foreground-authority"))
+    assert refusal["code"] == "invalid_request"
     assert refusal["request_id"] == request["request_id"]
     refute Map.has_key?(refusal, "status")
     assert Fixture.records(fixture, fixture.session) == before_records

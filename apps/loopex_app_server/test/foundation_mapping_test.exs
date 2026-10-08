@@ -359,10 +359,11 @@ defmodule Loopex.AppServer.FoundationMappingTest do
     connection = attached(connection, session_id)
     {:ok, configuration} = Loopex.Runtime.configuration(fixture.runtime)
 
-    # A request carrying launch-shaped members changes nothing: the mapping reads
-    # the members its method names and the runtime it was launched with, and a
-    # member it does not name is not an instruction.
-    assert {:ok, _admission, connection} =
+    # Concept: launch-shaped fields refuse before any facade work.
+    # Technical depth: the closed current envelope cannot replace captured host
+    # configuration, even when a supplied policy field sounds permissive.
+    before = Fixture.records(fixture, session_id)
+    assert {:error, prompt_refusal, connection} =
              Connection.dispatch(connection, %{
                "method" => "session.prompt",
                "request_id" => "rp",
@@ -375,12 +376,16 @@ defmodule Loopex.AppServer.FoundationMappingTest do
                "executor" => "somewhere-else"
              })
 
+    assert prompt_refusal["code"] == "invalid_request"
+    assert Fixture.records(fixture, session_id) == before
+    assert Loopex.AgentLoopTestModel.dispatched(fixture.model) == []
+    assert Loopex.AgentLoopTestExecutor.jobs(fixture.executor) == []
     assert {:ok, after_prompt} = Loopex.Runtime.configuration(fixture.runtime)
     assert after_prompt == configuration
 
     # The same is true of an attach: a client names a session and a cursor, and
     # nothing about what answers it.
-    assert {:ok, _snapshot, _connection} =
+    assert {:error, attach_refusal, _connection} =
              Connection.dispatch(connection, %{
                "method" => "session.attach",
                "request_id" => "ra",
@@ -389,6 +394,8 @@ defmodule Loopex.AppServer.FoundationMappingTest do
                "runtime_id" => "someone-elses-runtime"
              })
 
+    assert attach_refusal["code"] == "invalid_request"
+    assert Fixture.records(fixture, session_id) == before
     assert {:ok, ^configuration} = Loopex.Runtime.configuration(fixture.runtime)
   end
 
@@ -471,6 +478,29 @@ defmodule Loopex.AppServer.FoundationMappingTest do
 
     kinds_before = record_kinds(fixture, session_id)
     assert "interaction_requested_v1" in kinds_before
+
+    # Concept: text and decline cannot answer a host policy question.
+    # Technical depth: the shared response grammar admits both branches, but
+    # the serial owner refuses them without policy permission or executor work.
+    for {command, answer} <- [
+          {"text-policy-answer", %{"text" => "allow"}},
+          {"decline-policy-answer", %{"disposition" => "declined"}}
+        ] do
+      assert {:ok, refused, _connection} =
+               Connection.dispatch(connection, %{
+                 "method" => "session.respond_interaction",
+                 "request_id" => command,
+                 "command_id" => Wire.encode_identity(command),
+                 "interaction_id" => Wire.encode_identity(interaction_id),
+                 "answer" => answer
+               })
+
+      assert refused["status"] == "refused"
+      assert refused["reason"] == "invalid_interaction_answer"
+      assert Loopex.AgentLoopTestExecutor.jobs(fixture.executor) == []
+      refute "effect_intent_committed_v2" in record_kinds(fixture, session_id)
+      assert await_interaction(fixture, session_id) == interaction_id
+    end
 
     # The answer is admitted as its own durable command. Nothing about the
     # policy's second decision has happened yet.
@@ -655,6 +685,7 @@ defmodule Loopex.AppServer.FoundationMappingTest do
 
     {:ok, _reply, connection} =
       Connection.initialize(connection, %{
+        "method" => "initialize",
         "request_id" => "r0",
         "generations" => [Session.generation()],
         "capabilities" => []
@@ -664,7 +695,8 @@ defmodule Loopex.AppServer.FoundationMappingTest do
       Connection.dispatch(connection, %{
         "method" => "session.create",
         "request_id" => "r1",
-        "command_id" => Wire.encode_identity("cs")
+        "command_id" => Wire.encode_identity("cs"),
+        "session_options" => %{"version" => 1}
       })
 
     {:ok, session_id} = Wire.identity(record["session_id"])

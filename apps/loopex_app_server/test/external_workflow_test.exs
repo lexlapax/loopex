@@ -48,6 +48,7 @@ defmodule Loopex.AppServer.ExternalWorkflowTest do
           ebin(:loopex_protocol),
           ebin(:loopex),
           ebin(:loopex_app_server),
+          ebin(:loopex_executor_local),
           ebin(:telemetry)
         ] ++ require_paths(),
         env: child_environment(),
@@ -63,7 +64,7 @@ defmodule Loopex.AppServer.ExternalWorkflowTest do
     # It negotiated the contract it was written against, by digest.
     assert summary["generation"] == LoopexProtocol.Session.generation()
     assert summary["schema_digest"] == LoopexProtocol.Session.schema_digest()
-    assert summary["method_count"] == 16
+    assert summary["method_count"] == 18
     assert summary["frame_bytes"] == 1_048_576
 
     # It created a session and received back the identity it sent.
@@ -71,10 +72,17 @@ defmodule Loopex.AppServer.ExternalWorkflowTest do
     assert summary["command_id_returned"] == "client-create"
 
     # It attached and was given the exact snapshot members.
+    assert summary["snapshot_revision"] == 3
+
     assert summary["snapshot_members"] == [
+             "active_maintenance",
              "active_run_id",
              "active_run_phase",
+             "checkpoint",
+             "configuration",
              "event_sequence",
+             "last_compact",
+             "open_interaction",
              "session_id",
              "snapshot_revision"
            ]
@@ -88,9 +96,13 @@ defmodule Loopex.AppServer.ExternalWorkflowTest do
 
     # It read the session back and saw the public projection only.
     assert summary["inspect_members"] == [
+             "active_bounds",
              "active_context_token_budget",
+             "active_maintenance",
              "active_run_id",
+             "checkpoint",
              "cleanup_grace_ms",
+             "configuration",
              "event_sequence",
              "open_interaction",
              "pending_work_ids",
@@ -121,6 +133,7 @@ defmodule Loopex.AppServer.ExternalWorkflowTest do
           ebin(:loopex_protocol),
           ebin(:loopex),
           ebin(:loopex_app_server),
+          ebin(:loopex_executor_local),
           ebin(:telemetry)
         ] ++ require_paths(),
         env: [{"LOOPEX_WORKSPACE_REF", "workspace-ref"} | child_environment()],
@@ -246,6 +259,7 @@ defmodule Loopex.AppServer.ExternalWorkflowTest do
           ebin(:loopex_protocol),
           ebin(:loopex),
           ebin(:loopex_app_server),
+          ebin(:loopex_executor_local),
           ebin(:loopex_store_local),
           ebin(:telemetry)
         ] ++ require_paths(),
@@ -529,7 +543,16 @@ defmodule Loopex.AppServer.ExternalWorkflowTest do
     elixir = System.find_executable("elixir") || flunk("Elixir executable unavailable")
 
     arguments =
-      ["-pa", ebin(:loopex_protocol), "-pa", ebin(:loopex), "-pa", ebin(:loopex_app_server)] ++
+      [
+        "-pa",
+        ebin(:loopex_protocol),
+        "-pa",
+        ebin(:loopex),
+        "-pa",
+        ebin(:loopex_app_server),
+        "-pa",
+        ebin(:loopex_executor_local)
+      ] ++
         ["-pa", ebin(:loopex_store_local), "-pa", ebin(:telemetry)] ++
         Enum.flat_map(require_paths(), &["-r", &1]) ++
         ["-e", "Loopex.AppServer.Fixture.serve()"]
@@ -550,6 +573,7 @@ defmodule Loopex.AppServer.ExternalWorkflowTest do
   defp create_and_prompt(port) do
     created =
       request(port, %{
+        "session_options" => %{"version" => 1},
         "method" => "session.create",
         "request_id" => "c1",
         "command_id" => encode("cs")

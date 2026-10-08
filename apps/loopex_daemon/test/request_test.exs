@@ -6,7 +6,7 @@ defmodule LoopexDaemon.RequestTest do
 
   @digest String.duplicate("a", 64)
 
-  test "dormant configure capture preserves raw instruction bytes without serving an old generation" do
+  test "configure preparation preserves raw instruction bytes before ordinary admission" do
     raw = %{
       "version" => "wire.v1",
       "base" => "exact wire bytes 猫\n",
@@ -34,16 +34,19 @@ defmodule LoopexDaemon.RequestTest do
                LoopexDaemon.Request.capture_configuration_changes(invalid)
     end
 
-    assert {:error, :unsupported_method} =
-             Request.parse(%{
-               "method" => "session.configure",
-               "request_id" => "request",
-               "command_id" => "configure",
-               "changes" => authored
-             })
+    wire =
+      request("session.configure", %{
+        "command_id" => identity("configure"),
+        "writer_epoch" => identity("epoch"),
+        "changes" => Map.put(authored, "max_tokens", "512")
+      })
+
+    assert {:ok, parsed} = Request.parse(wire)
+    assert parsed.operation == :session_configure
+    assert parsed.fields == %{command_id: "configure", writer_epoch: "epoch", changes: captured}
   end
 
-  test "every generation-two method has one exact decoded request shape" do
+  test "every current daemon method has one exact decoded request shape" do
     examples = examples()
     assert Enum.sort(Map.keys(examples)) == Enum.sort(V2.methods())
 
@@ -57,13 +60,27 @@ defmodule LoopexDaemon.RequestTest do
 
     assert parsed["session.create"].fields == %{
              command_id: "create-command",
-             session_options: %{"mode" => "test"}
+             session_options: %{"version" => 1}
            }
 
     assert parsed["session.attach"].fields == %{
              session_id: "session",
              after_event_sequence: nil,
              replace: false
+           }
+
+    assert parsed["session.configure"].fields == %{
+             command_id: "command", writer_epoch: "epoch", changes: %{"model" => "host-alias"}
+           }
+
+    assert parsed["session.compact"].fields == %{
+             command_id: "command", writer_epoch: "epoch",
+             bounds: %{"max_attempts" => 4, "deadline_ms" => 60_000, "token_budget" => 32_768}
+           }
+
+    assert parsed["session.respond_interaction"].fields == %{
+             command_id: "command", interaction_id: "interaction",
+             answer: %{"choice_id" => "choice"}, writer_epoch: "epoch"
            }
 
     assert parsed["session.prompt"].fields.content == <<0, 255>>
@@ -191,6 +208,10 @@ defmodule LoopexDaemon.RequestTest do
     assert {:ok, _parsed} = Request.parse(Map.put(examples()["session.list"], "limit", 256))
 
     for options <- [
+          %{},
+          %{"version" => 1, "private" => "CREATION_CANARY"},
+          %{"version" => 1, "tools" => [self()]},
+          %{"version" => 1, "configuration" => %{"model" => fn -> :private end}},
           %{"pid" => self()},
           %{"tuple" => {:runtime, :term}},
           %{:atom_key => "value"},
@@ -204,7 +225,7 @@ defmodule LoopexDaemon.RequestTest do
 
     assert {:ok, _parsed} =
              examples()["session.create"]
-             |> Map.put("session_options", %{"deep" => nested_maps(15)})
+             |> Map.put("session_options", %{"version" => 1, "tools" => []})
              |> Request.parse()
   end
 
@@ -261,10 +282,12 @@ defmodule LoopexDaemon.RequestTest do
     end
   end
 
-  test "writer epochs are required only on the nine lease-authorized methods" do
+  test "writer epochs are required only on the eleven lease-authorized methods" do
     authorized =
       MapSet.new([
         "session.resume",
+        "session.configure",
+        "session.compact",
         "session.prompt",
         "session.steer",
         "session.follow_up",
@@ -285,6 +308,158 @@ defmodule LoopexDaemon.RequestTest do
     end
   end
 
+  test "daemon configure envelopes preserve every authored subset and refuse malformed vectors" do
+    for vector <- vectors("configure-request.v1.json")["cases"], vector["transport"] == "daemon" do
+      if vector["error"] do
+        assert {:error, :invalid_request} = Request.parse(vector["input"]), vector["name"]
+      else
+        assert {:ok, parsed} = Request.parse(vector["input"]), vector["name"]
+        assert parsed.operation == :session_configure
+        assert parsed.request_id == vector["decoded"]["request_id"]
+
+        changes = parsed.fields.changes
+
+        changes =
+          if Map.has_key?(changes, "instructions") do
+            instructions = changes["instructions"]
+            assert :ok = Loopex.Runtime.Instructions.validate(instructions)
+
+            assert Map.take(instructions, ~w(version base environment appendix)) ==
+                     vector["input"]["changes"]["instructions"]
+
+            Map.put(changes, "instructions", Map.delete(instructions, "digest"))
+          else
+            changes
+          end
+
+        assert retained(%{parsed.fields | changes: changes}) ==
+                 Map.delete(vector["decoded"], "request_id"), vector["name"]
+      end
+    end
+  end
+
+  test "current command envelopes apply every accepted bounds vector without defaults" do
+    for vector <- vectors("command-bounds.v1.json")["cases"],
+        vector["kind"] in ~w(prompt follow_up compact) do
+      method = "session." <> vector["kind"]
+      input = Map.put(examples()[method], "bounds", vector["input"])
+
+      if vector["error"] do
+        assert {:error, :invalid_request} = Request.parse(input), vector["name"]
+      else
+        assert {:ok, parsed} = Request.parse(input), vector["name"]
+        assert retained(parsed.fields.bounds) == vector["decoded"], vector["name"]
+        assert parsed.fields.command_id == "command"
+        assert parsed.fields.writer_epoch == "epoch"
+      end
+    end
+  end
+
+  test "prompt and follow-up retain omitted empty and partial bounds across request retries" do
+    for vector <- vectors("command-bounds.v1.json")["enclosing_request_cases"] do
+      method = "session." <> vector["kind"]
+      input = Map.merge(examples()[method], vector["request"])
+      assert {:ok, parsed} = Request.parse(input)
+      assert Map.has_key?(parsed.fields, :bounds) == Map.has_key?(vector["expected"], "bounds")
+
+      if Map.has_key?(parsed.fields, :bounds) do
+        assert retained(parsed.fields.bounds) == vector["expected"]["bounds"]
+      end
+
+      assert {:ok, retried} = Request.parse(Map.put(input, "request_id", "retry"))
+      assert retried.fields == parsed.fields
+    end
+
+    prompt = examples()["session.prompt"]
+    assert {:ok, omitted} = Request.parse(prompt)
+    assert {:ok, empty} = Request.parse(Map.put(prompt, "bounds", %{}))
+    assert omitted.fields != empty.fields
+    assert omitted.fields.command_id == empty.fields.command_id
+
+    for method <- ~w(session.prompt session.follow_up) do
+      assert {:error, :invalid_request} = Request.parse(Map.put(examples()[method], "bounds", nil))
+    end
+
+    assert {:error, :invalid_request} =
+             Request.parse(Map.put(examples()["session.steer"], "bounds", %{}))
+  end
+
+  test "answer envelopes preserve exactly one choice text or declined branch" do
+    base = examples()["session.respond_interaction"]
+
+    for vector <- vectors("question-answer.v1.json")["cases"] do
+      input = Map.put(base, "answer", vector["input"])
+
+      if vector["error"] do
+        assert {:error, :invalid_request} = Request.parse(input), vector["name"]
+      else
+        assert {:ok, parsed} = Request.parse(input), vector["name"]
+        assert parsed.operation == :session_respond_interaction
+        assert parsed.fields.command_id == "command"
+        assert parsed.fields.interaction_id == "interaction"
+        assert parsed.fields.writer_epoch == "epoch"
+        refute Map.has_key?(parsed.fields, :choice_id)
+
+        if Map.has_key?(vector, "decoded_choice_hex") do
+          assert parsed.fields.answer == %{
+                   "choice_id" => Base.decode16!(vector["decoded_choice_hex"], case: :lower)
+                 }
+        else
+          assert parsed.fields.answer == vector["decoded"]
+        end
+      end
+    end
+
+    for authority <- ["producer", "kind", "permit", "policy_decision"] do
+      assert {:error, :invalid_request} = Request.parse(Map.put(base, authority, "allow"))
+    end
+  end
+
+  test "creation envelopes apply closed version-one options and preserve authored presence" do
+    base = examples()["session.create"]
+
+    for vector <- vectors("creation-options.v1.json")["cases"] do
+      input = Map.put(base, "session_options", vector["input"])
+
+      if vector["error"] do
+        assert {:error, :invalid_request} = Request.parse(input), vector["name"]
+      else
+        assert {:ok, parsed} = Request.parse(input), vector["name"]
+        assert parsed.operation == :session_create
+        assert parsed.fields.command_id == "create-command"
+        assert retained(parsed.fields.session_options) == vector["decoded"], vector["name"]
+        assert Map.keys(parsed.fields.session_options) |> Enum.sort() ==
+                 Map.keys(vector["input"]) |> Enum.sort()
+      end
+    end
+  end
+
+  test "new mutation routes retain full command identity and bounded writer authority" do
+    for method <- ~w(session.configure session.compact) do
+      command = :binary.copy(<<0, 255>>, 32_768)
+      epoch = :binary.copy(<<255>>, 64)
+
+      input =
+        examples()[method]
+        |> Map.put("command_id", identity(command))
+        |> Map.put("writer_epoch", identity(epoch))
+
+      assert {:ok, parsed} = Request.parse(input)
+      assert parsed.fields.command_id == command
+      assert parsed.fields.writer_epoch == epoch
+
+      for {field, value} <- [
+            {"command_id", identity(command <> "x")},
+            {"writer_epoch", identity(epoch <> "x")},
+            {"writer_epoch", nil},
+            {"writer_epoch", ""},
+            {"writer_epoch", "ZXBvY2g="}
+          ] do
+        assert {:error, :invalid_request} = Request.parse(Map.put(input, field, value))
+      end
+    end
+  end
+
   defp examples do
     session_id = identity("session")
     writer_epoch = identity("epoch")
@@ -294,7 +469,7 @@ defmodule LoopexDaemon.RequestTest do
       "session.create" =>
         request("session.create", %{
           "command_id" => identity("create-command"),
-          "session_options" => %{"mode" => "test"}
+          "session_options" => %{"version" => 1}
         }),
       "session.resume" =>
         request("session.resume", %{
@@ -304,6 +479,18 @@ defmodule LoopexDaemon.RequestTest do
         }),
       "session.inspect" => request("session.inspect", %{"session_id" => session_id}),
       "session.attach" => request("session.attach", %{"session_id" => session_id}),
+      "session.configure" =>
+        request("session.configure", %{
+          "command_id" => command_id,
+          "changes" => %{"model" => "host-alias"},
+          "writer_epoch" => writer_epoch
+        }),
+      "session.compact" =>
+        request("session.compact", %{
+          "command_id" => command_id,
+          "bounds" => %{"max_attempts" => "4", "deadline_ms" => "60000", "token_budget" => "32768"},
+          "writer_epoch" => writer_epoch
+        }),
       "session.prompt" =>
         request("session.prompt", %{
           "command_id" => command_id,
@@ -401,4 +588,27 @@ defmodule LoopexDaemon.RequestTest do
 
   defp nested_maps(0), do: "leaf"
   defp nested_maps(depth), do: %{"next" => nested_maps(depth - 1)}
+
+  defp vectors(file) do
+    :loopex_protocol
+    |> Application.app_dir("priv/vectors/" <> file)
+    |> File.read!()
+    |> JSON.decode!()
+  end
+
+  defp retained(value, key \\ nil)
+
+  defp retained(value, _key) when is_map(value),
+    do: Map.new(value, fn {key, member} -> {to_string(key), retained(member, to_string(key))} end)
+
+  defp retained(value, _key) when is_list(value), do: Enum.map(value, &retained/1)
+
+  defp retained(value, key) when is_binary(value) and key in ~w(command_id writer_epoch),
+    do: %{"opaque_hex" => Base.encode16(value, case: :lower)}
+
+  defp retained(value, key)
+       when is_integer(value) and key in ~w(max_tokens context_token_budget system_class_tokens max_turns max_attempts token_budget deadline_ms),
+       do: Integer.to_string(value)
+
+  defp retained(value, _key), do: value
 end

@@ -16,9 +16,9 @@ defmodule Loopex.AppServer.Delivery do
   costs nothing but smoothness. So the queues have different sizes, and only one
   of them advances a cursor.
 
-  Both dimensions are checked before a record is queued rather than after.
-  Checking afterwards would mean the bound is whatever arrived plus one, which
-  for a 4 MiB byte budget is not a bound at all.
+  Durable reservations, queued entries and the active frame share one finite
+  budget. Accepted ADR 0058 retains their charges until the exact writer joins;
+  selecting an entry neither frees capacity nor advances its emitted cursor.
   """
 
   alias LoopexProtocol.Frame
@@ -84,16 +84,29 @@ defmodule Loopex.AppServer.Delivery do
     ]
   }
 
+  @quantity_progress_fields [
+    :model_sequence,
+    :progress_sequence,
+    :base_event_sequence,
+    :byte_offset,
+    :delta_count,
+    :progress_count
+  ]
+
   @durable_records 64
   @durable_bytes 4_194_304
   @progress_records 32
   @progress_bytes 524_288
 
-  @enforce_keys [:session_id]
   defstruct session_id: nil,
-            durable: {[], 0, 0},
-            progress: {[], 0, 0},
+            incarnation: nil,
+            baseline_joined: true,
+            entries: [],
+            active: nil,
+            durable: {0, 0},
+            progress: {0, 0},
             cursor: 0,
+            pulled_cursor: 0,
             detached: false
 
   @type t :: %__MODULE__{}
@@ -101,41 +114,136 @@ defmodule Loopex.AppServer.Delivery do
   @doc """
   ## Concept
 
-  A delivery queue for one attached session, starting at a cursor.
+  One connection's output custody, optionally anchored to an attached session.
 
   ## Technical depth
 
-  The queue starts at the cursor the caller supplies rather than at zero, so a
-  reattaching client resumes where it stopped instead of replaying what it
-  already holds. Both arguments are guarded, because a cursor arriving from the
-  wire decides what a session is shown.
+  The supplied cursor is an already emitted baseline. Queued and active entries
+  retain their counts and encoded bytes until matching physical completion.
   """
-  @spec new(binary(), non_neg_integer()) :: t()
-  def new(session_id, cursor) when is_binary(session_id) and is_integer(cursor) do
-    %__MODULE__{session_id: session_id, cursor: cursor}
+  @spec new(binary() | nil, non_neg_integer()) :: t()
+  def new(session_id, cursor)
+      when (is_binary(session_id) or is_nil(session_id)) and
+             is_integer(cursor) and cursor >= 0 do
+    %__MODULE__{session_id: session_id, incarnation: nil, cursor: cursor, pulled_cursor: cursor}
+  end
+
+  # Concept: a facade may run only after its maximum reply already fits.
+  # Technical depth: a placeholder occupies its FIFO position and the unchanged
+  # 2 MiB output ceiling. Encoding can shrink that reservation, never enlarge it.
+  @doc false
+  def reserve(%__MODULE__{detached: false} = queue) do
+    {count, bytes} = queue.durable
+    size = Frame.output_record_bytes()
+
+    if count < @durable_records and bytes + size <= @durable_bytes do
+      token = make_ref()
+
+      entry = %{
+        token: token,
+        plane: :durable,
+        bytes: size,
+        frame: nil,
+        incarnation: queue.incarnation,
+        sequence: nil,
+        baseline: nil,
+        lease: nil
+      }
+
+      {:ok, token,
+       %{
+         queue
+         | entries: insert_durable(queue.entries, entry),
+           durable: {count + 1, bytes + size}
+       }}
+    else
+      :full
+    end
+  end
+
+  def reserve(_queue), do: :full
+
+  @doc false
+  def encode(record) do
+    case Frame.encode(record) do
+      {:ok, iodata} -> {:ok, IO.iodata_to_binary(iodata)}
+      {:error, :output_record_too_large} -> {:error, :output_record_too_large}
+    end
+  end
+
+  @doc false
+  def commit(queue, token, record, metadata \\ %{}) do
+    with {:ok, frame} <- encode(record) do
+      commit_frame(queue, token, frame, metadata)
+    end
+  end
+
+  @doc false
+  def commit_frame(queue, token, frame, metadata \\ %{}) when is_binary(frame) do
+    case Enum.find(queue.entries, &(&1.token == token and is_nil(&1.frame))) do
+      nil ->
+        {:error, :stale_reservation, queue}
+
+      entry ->
+        size = byte_size(frame)
+
+        if size <= entry.bytes and size > 0 and :binary.last(frame) == ?\n do
+          entry = %{
+            entry
+            | frame: frame,
+              bytes: size,
+              incarnation: Map.get(metadata, :incarnation, entry.incarnation),
+              sequence: Map.get(metadata, :sequence),
+              baseline: Map.get(metadata, :baseline)
+          }
+
+          {count, bytes} = queue.durable
+
+          entries =
+            Enum.map(queue.entries, fn old -> if old.token == token, do: entry, else: old end)
+
+          {:ok,
+           %{
+             queue
+             | entries: entries,
+               durable: {count, bytes - Frame.output_record_bytes() + size}
+           }}
+        else
+          {:error, :output_record_too_large, queue}
+        end
+    end
+  end
+
+  @doc false
+  def cancel(queue, token) do
+    case Enum.split_with(queue.entries, &(&1.token != token)) do
+      {kept, [entry]} -> subtract(%{queue | entries: kept}, entry)
+      _other -> queue
+    end
   end
 
   @doc """
   ## Concept
 
-  Offers one durable event for delivery.
+  Offers one committed event without claiming it has reached the client.
 
   ## Technical depth
 
-  The cursor advances only here, and only when the event is actually queued. An
-  event that does not fit detaches the writer at the last cursor it completely
-  emitted, so a client reattaching knows exactly where its view ends rather than
-  guessing whether the last thing it saw was the last thing sent.
+  Reserve before building its envelope. Only the pulled position moves here;
+  the emitted cursor changes on the exact joined completion.
   """
   @spec event(t(), map()) :: t()
   def event(%__MODULE__{detached: true} = queue, _event), do: queue
 
-  def event(%__MODULE__{} = queue, event) do
-    record = event_record(queue.session_id, event)
+  def event(queue, event) do
+    case reserve(queue) do
+      {:ok, token, reserved} ->
+        record = event_record(queue.session_id, event)
 
-    case offer(queue.durable, record, @durable_records, @durable_bytes) do
-      {:ok, durable} ->
-        %{queue | durable: durable, cursor: Map.get(event, :event_sequence, queue.cursor)}
+        case commit(reserved, token, record, %{sequence: Map.fetch!(event, :event_sequence)}) do
+          {:ok, committed} -> %{committed | pulled_cursor: event.event_sequence}
+          {:error, _reason, failed} -> %{cancel(failed, token) | detached: true}
+        end
 
       :full ->
         %{queue | detached: true}
@@ -145,83 +253,163 @@ defmodule Loopex.AppServer.Delivery do
   @doc """
   ## Concept
 
-  Offers one transient progress item for delivery.
+  Queues one validated transient projection without moving durable history.
 
   ## Technical depth
 
-  A progress item that does not fit is dropped, not a reason to detach. Progress
-  is a rendering aid: a client that missed some has a less smooth picture, while
-  a client detached over one would lose its durable stream for no reason.
+  Pure projection callers own their input. A foreground consumer additionally
+  keeps its native lease on the entry through discard or joined output.
   """
   @spec progress(t(), map()) :: t()
-  def progress(%__MODULE__{detached: true} = queue, _item), do: queue
+  def progress(queue, item), do: progress(queue, item, nil)
 
-  def progress(%__MODULE__{} = queue, item) do
+  @doc false
+  def progress(%__MODULE__{detached: true} = queue, _item, _lease), do: queue
+
+  def progress(queue, item, lease) do
     case progress_record(queue.session_id, item) do
       :error ->
         queue
 
       record ->
-        case offer(queue.progress, record, @progress_records, @progress_bytes) do
-          {:ok, progress} -> %{queue | progress: progress}
-          :full -> queue
+        {count, bytes} = queue.progress
+        size = progress_frame_bytes(record)
+
+        if count < @progress_records and bytes + size <= @progress_bytes do
+          case encode(record) do
+            {:ok, frame} when byte_size(frame) == size ->
+              entry = %{
+                token: make_ref(),
+                plane: :progress,
+                bytes: size,
+                frame: frame,
+                incarnation: queue.incarnation,
+                sequence: nil,
+                baseline: nil,
+                lease: lease
+              }
+
+              %{queue | entries: queue.entries ++ [entry], progress: {count + 1, bytes + size}}
+
+            _invalid ->
+              queue
+          end
+        else
+          queue
         end
     end
   end
 
-  @doc """
-  ## Concept
+  @doc false
+  def next(%__MODULE__{active: nil, entries: [%{frame: frame} = entry | _]})
+      when is_binary(frame),
+      do: {:ok, entry}
 
-  Takes everything queued, durable first.
+  def next(_queue), do: :empty
 
-  ## Technical depth
-
-  Durable records go out ahead of progress so a client's history never trails
-  the rendering of it. Within each plane the order is the order they arrived,
-  which for durable events is the order they committed.
-  """
-  @spec take(t()) :: {[map()], t()}
-  def take(%__MODULE__{} = queue) do
-    {durable, _count, _bytes} = queue.durable
-    {progress, _progress_count, _progress_bytes} = queue.progress
-
-    records = Enum.reverse(durable) ++ Enum.reverse(progress)
-
-    {records, %{queue | durable: {[], 0, 0}, progress: {[], 0, 0}}}
+  @doc false
+  def activate(
+        %__MODULE__{active: nil, entries: [%{token: token} = entry | rest]} = queue,
+        token,
+        writer_ref
+      )
+      when is_reference(writer_ref) do
+    {:ok, %{queue | entries: rest, active: Map.put(entry, :writer_ref, writer_ref)}}
   end
 
-  @doc """
-  ## Concept
+  def activate(queue, _token, _writer_ref), do: {:error, :stale_entry, queue}
 
-  Whether this writer was detached, and the cursor it reached.
+  # Concept: physical JOINED is the only emitted-cursor transition.
+  # Technical depth: the writer reference and attachment incarnation must both
+  # match. An old snapshot/event cannot establish a fresh attachment's cursor.
+  @doc false
+  def joined(%__MODULE__{active: %{writer_ref: reference} = entry} = queue, reference) do
+    queue = subtract(%{queue | active: nil}, entry)
 
-  ## Technical depth
+    queue =
+      if entry.incarnation == queue.incarnation do
+        cond do
+          is_integer(entry.baseline) ->
+            %{queue | cursor: entry.baseline, baseline_joined: true}
 
-  Detachment is terminal: once it is true the writer emits its one uncorrelated
-  error and delivery stops, so this is the flag to consult before offering
-  anything further. The cursor it reached is read separately, through
-  `cursor/1`.
-  """
+          is_integer(entry.sequence) ->
+            %{queue | cursor: entry.sequence}
+
+          true ->
+            queue
+        end
+      else
+        queue
+      end
+
+    {:ok, entry, queue}
+  end
+
+  def joined(queue, _reference), do: {:error, :stale_completion, queue}
+
+  # Concept: this retirement follows physically proved failed-write cleanup.
+  # Technical depth: an unproved writer keeps its active entry and charge while
+  # the connection closes; it cannot use this transition to reclaim capacity.
+  @doc false
+  def failed(%__MODULE__{active: %{writer_ref: reference} = entry} = queue, reference) do
+    {:ok, entry, %{subtract(%{queue | active: nil}, entry) | detached: true}}
+  end
+
+  def failed(queue, _reference), do: {:error, :stale_completion, queue}
+
+  @doc false
+  def discard_queued(queue) do
+    entries = queue.entries
+    retired = Enum.reduce(entries, %{queue | entries: []}, &subtract(&2, &1))
+    {entries, retired}
+  end
+
+  @doc false
+  def discard_progress(queue) do
+    {retired, kept} = Enum.split_with(queue.entries, &(&1.plane == :progress))
+    {retired, Enum.reduce(retired, %{queue | entries: kept}, &subtract(&2, &1))}
+  end
+
+  @doc false
+  def attachment(queue, session_id, cursor, incarnation) do
+    %{
+      queue
+      | session_id: session_id,
+        incarnation: incarnation,
+        cursor: 0,
+        pulled_cursor: cursor,
+        baseline_joined: false
+    }
+  end
+
+  @doc false
+  def empty?(queue), do: queue.entries == [] and is_nil(queue.active)
+  @doc false
+  def active?(queue), do: not is_nil(queue.active)
+  @doc false
+  def ready?(queue), do: queue.baseline_joined and not queue.detached
+  @doc false
+  def pulled_cursor(queue), do: queue.pulled_cursor
+  @doc false
+  def usage(queue), do: %{durable: queue.durable, progress: queue.progress}
+
   @spec detached?(t()) :: boolean()
-  def detached?(%__MODULE__{detached: detached}), do: detached
-
+  def detached?(queue), do: queue.detached
   @spec cursor(t()) :: non_neg_integer()
-  def cursor(%__MODULE__{cursor: cursor}), do: cursor
+  def cursor(queue), do: queue.cursor
 
   @doc """
   ## Concept
 
-  The one uncorrelated error a detached writer emits before delivery stops.
+  Describes the last physically joined durable position.
 
   ## Technical depth
 
-  It names the last completely emitted durable cursor, which is what a client
-  reattaches at. Nothing after it is sent, because a client that received a
-  later event after being told where its view ended would have a gap it could
-  not see.
+  A writer failure closes output without writing this record into a possibly
+  partial frame. A clean pre-write detachment can reserve it normally.
   """
   @spec detachment(t()) :: map()
-  def detachment(%__MODULE__{} = queue) do
+  def detachment(queue) do
     %{
       "type" => "error",
       "code" => "detached",
@@ -231,24 +419,46 @@ defmodule Loopex.AppServer.Delivery do
     }
   end
 
-  # Concept: one record joins a plane, or the plane says it is full.
-  #
-  # Technical depth: both dimensions are measured on the encoded record, because
-  # the byte budget is about what has to be written and not about how large the
-  # structure looks in memory. A record that cannot be encoded at all counts as
-  # not fitting, which is the same outcome for the same reason.
-  defp offer({records, count, bytes}, record, max_records, max_bytes) do
-    case Frame.encode(record) do
-      {:ok, encoded} ->
-        size = IO.iodata_length(encoded)
+  # Concept: reserve the exact progress LF bytes before allocating JSON output.
+  # Technical depth: this measures only the validated closed wire projection;
+  # its nested owner contains the same primitive kinds. Frame remains the sole
+  # encoder and the result must equal this byte count before queue admission.
+  defp progress_frame_bytes(record), do: progress_json_bytes(record) + 1
+  defp progress_json_bytes(value) when is_binary(value), do: progress_string_bytes(value, 2)
 
-        if count + 1 > max_records or bytes + size > max_bytes,
-          do: :full,
-          else: {:ok, {[record | records], count + 1, bytes + size}}
+  defp progress_json_bytes(value) when is_integer(value),
+    do: byte_size(Integer.to_string(value))
 
-      {:error, :output_record_too_large} ->
-        :full
-    end
+  defp progress_json_bytes(nil), do: 4
+
+  defp progress_json_bytes(value) when is_map(value) do
+    2 + max(map_size(value) - 1, 0) +
+      Enum.reduce(value, 0, fn {key, member}, size ->
+        size + progress_json_bytes(key) + 1 + progress_json_bytes(member)
+      end)
+  end
+
+  defp progress_string_bytes(<<>>, size), do: size
+
+  defp progress_string_bytes(<<byte, rest::binary>>, size) do
+    extra =
+      cond do
+        byte in [?", ?\\, ?\n, ?\r, ?\t] -> 2
+        byte < 32 -> 6
+        true -> 1
+      end
+
+    progress_string_bytes(rest, size + extra)
+  end
+
+  defp insert_durable(entries, entry) do
+    {durable, progress} = Enum.split_while(entries, &(&1.plane == :durable))
+    durable ++ [entry] ++ progress
+  end
+
+  defp subtract(queue, %{plane: plane, bytes: size}) do
+    {count, bytes} = Map.fetch!(queue, plane)
+    Map.put(queue, plane, {count - 1, bytes - size})
   end
 
   # Concept: a durable event, with only the members its kind carries.
@@ -342,9 +552,10 @@ defmodule Loopex.AppServer.Delivery do
 
   defp ordinary_progress(item) when is_map(item) and not is_struct(item) do
     kind = Map.get(item, :kind)
-    fields = Map.get(@ordinary_progress_fields, kind)
+    fields = if is_atom(kind), do: Map.get(@ordinary_progress_fields, kind), else: nil
 
-    if is_list(fields) and Enum.sort(Map.keys(item)) == Enum.sort(fields) do
+    if is_atom(kind) and is_list(fields) and map_size(item) == length(fields) and
+         Enum.all?(fields, &Map.has_key?(item, &1)) do
       encoded =
         Enum.reduce_while(item, {:ok, %{}}, fn {field, value}, {:ok, progress} ->
           case progress_member(kind, field, value) do
@@ -384,14 +595,7 @@ defmodule Loopex.AppServer.Delivery do
   end
 
   defp progress_member(_kind, field, value)
-       when field in [
-              :model_sequence,
-              :progress_sequence,
-              :base_event_sequence,
-              :byte_offset,
-              :delta_count,
-              :progress_count
-            ] and
+       when field in @quantity_progress_fields and
               is_integer(value) and value >= 0 and value <= 18_446_744_073_709_551_615,
        do: {:ok, Wire.encode_u64(value)}
 

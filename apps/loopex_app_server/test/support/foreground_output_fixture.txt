@@ -1,0 +1,715 @@
+Code.require_file("../../../loopex/test/support/m1_runtime_helper.exs", __DIR__)
+Code.require_file("../../../loopex/test/support/agent_loop_helper.exs", __DIR__)
+Code.require_file("fixture_server.exs", __DIR__)
+
+defmodule Loopex.AppServer.ForegroundOutputHarness do
+  @moduledoc false
+  import ExUnit.Assertions
+  @request_ms 30_000
+  @join_grace 1_000
+
+  def with_fixture(mode, runtime_mode, function) do
+    Code.ensure_loaded!(Loopex.AppServer.Stdio)
+    cutoff = now_ms() + @request_ms
+    root = Path.join(System.tmp_dir!(), "loopex-foreground-#{System.unique_integer([:positive])}")
+    File.mkdir!(root)
+    key = {__MODULE__, make_ref()}
+    Process.put(key, %{root: root, cutoff: cutoff})
+    result = try do
+      File.chmod!(root, 0o700)
+      input_path = Path.join(root, "stdin")
+      output = Path.join(root, "stdout")
+      stderr = Path.join(root, "stderr")
+      {"", 0} = System.cmd("/usr/bin/mkfifo", [input_path])
+      {:ok, input} = :file.open(String.to_charlist(input_path), [:read, :write, :raw, :binary])
+      own(key, :input, input)
+      fifo = if mode == :fifo do
+        {"", 0} = System.cmd("/usr/bin/mkfifo", [output])
+        {:ok, device} = :file.open(String.to_charlist(output), [:read, :write, :raw, :binary])
+        own(key, :fifo, device)
+        device
+      end
+      {:ok, listener} = :gen_tcp.listen(0, [:binary, packet: 4, active: false, ip: {127, 0, 0, 1}])
+      own(key, :listener, listener)
+      {:ok, {_address, number}} = :inet.sockname(listener)
+      script = Path.join(root, "launch.bash")
+      File.write!(script, "exec \"$1\" \"${@:7}\" \"$2\" \"$3\" \"$4\" <\"$5\" >\"$6\" 2>\"$LOOPEX_FOREGROUND_STDERR\"\n")
+      paths = for path <- :code.get_path(), File.dir?(List.to_string(path)), do: [~c"-pa", path]
+      cleared = for {name, _} <- System.get_env(), do: {String.to_charlist(name), false}
+      environment = cleared ++ [
+        {~c"PATH", String.to_charlist(System.get_env("PATH"))},
+        {~c"HOME", String.to_charlist(root)},
+        {~c"LOOPEX_HOME", String.to_charlist(root)},
+        {~c"LOOPEX_FOREGROUND_FIXTURE", ~c"1"},
+        {~c"LOOPEX_FOREGROUND_STDERR", String.to_charlist(stderr)},
+        {~c"ERL_CRASH_DUMP", String.to_charlist(Path.join(root, "crash.dump"))},
+        {~c"ELIXIR_ERL_OPTIONS", ~c"+S 2:2 -noinput"}]
+      launcher = Port.open({:spawn_executable, ~c"/bin/bash"}, [:binary, :exit_status,
+        {:args, [~c"--noprofile", ~c"--norc", String.to_charlist(script),
+          String.to_charlist(System.find_executable("elixir") || flunk("Elixir unavailable")),
+          String.to_charlist(__ENV__.file), String.to_charlist(Integer.to_string(number)),
+          String.to_charlist(Atom.to_string(runtime_mode)), String.to_charlist(input_path),
+          String.to_charlist(output)] ++ Enum.concat(paths)}, {:env, environment}])
+      own(key, :launcher, launcher)
+      monitor = :erlang.monitor(:port, launcher)
+      own(key, :monitor, monitor)
+      {:ok, socket} = :gen_tcp.accept(listener, remaining(cutoff))
+      own(key, :socket, socket)
+      fixture = %{socket: socket, input: input, output: output, stderr: stderr,
+        fifo: fifo, launcher: launcher, monitor: monitor, cutoff: cutoff}
+      assert {:ready, _os_pid, session, reference} = next(fixture, &match?({:ready, _, _, _}, &1))
+      fixture = Map.merge(fixture, %{session: session, reference: reference})
+      own(key, :fixture, fixture)
+      {:ok, function.(fixture)}
+    catch
+      kind, reason -> {:error, {kind, reason, __STACKTRACE__}}
+    end
+
+    # Concept: Cleanup must not hide the failure that caused it.
+    # Technical depth: Retain original stacks and attempt every existing action under the same cutoff.
+    cleanup_errors = try do
+      owned = Process.get(key)
+      cleanup_all([
+          fn ->
+            if owned[:fixture],
+              do: command(owned.fixture, :release_controls, &(&1 == :controls_released))
+          end,
+          fn -> if owned[:input], do: :file.close(owned.input) end,
+          fn -> if owned[:fixture], do: finished(owned.fixture) end,
+          fn -> if owned[:socket], do: :gen_tcp.close(owned.socket) end,
+          fn ->
+            if not is_nil(owned[:launcher]) and not is_nil(owned[:monitor]) do
+              fixture = %{launcher: owned.launcher, monitor: owned.monitor}
+              assert_exit(fixture, cutoff + @join_grace)
+            end
+          end,
+          fn -> if owned[:fifo], do: :file.close(owned.fifo) end,
+          fn -> if owned[:listener], do: :gen_tcp.close(owned.listener) end,
+          fn -> if owned[:launcher], do: close_launcher(owned.launcher) end,
+          fn -> if owned[:monitor], do: :erlang.demonitor(owned.monitor, [:flush]) end,
+          fn ->
+            if owned[:launcher] do
+              for field <- [:records, :finished, :wire_buffer],
+                do: Process.delete({__MODULE__, owned.launcher, field})
+            end
+          end,
+          fn -> File.rm_rf!(root) end
+      ])
+    catch
+      kind, reason -> [{kind, reason, __STACKTRACE__}]
+    after
+      Process.delete(key)
+    end
+
+    errors = case result do
+      {:ok, _value} -> cleanup_errors
+      {:error, error} -> [error | cleanup_errors]
+    end
+    case errors do
+      [] -> elem(result, 1)
+      [{kind, reason, stacktrace}] -> :erlang.raise(kind, reason, stacktrace)
+      _ -> raise ExUnit.MultiError, errors: errors
+    end
+  end
+
+  defp own(key, name, value), do: Process.put(key, Map.put(Process.get(key), name, value))
+  defp close_launcher(launcher) do
+    try do Port.close(launcher) rescue ArgumentError -> :ok end
+  end
+
+  defp cleanup_all(actions) do
+    Enum.reduce(actions, [], fn action, errors ->
+      try do
+        action.()
+        errors
+      catch
+        kind, reason -> [{kind, reason, __STACKTRACE__} | errors]
+      end
+    end) |> Enum.reverse()
+  end
+
+  def command(fixture, command, predicate) do
+    assert :gen_tcp.send(fixture.socket, :erlang.term_to_binary(command)) == :ok
+    next(fixture, predicate)
+  end
+
+  def next(fixture, predicate) do
+    key = {__MODULE__, fixture.launcher, :records}
+    records = Process.get(key, [])
+    case Enum.find_index(records, predicate) do
+      index when is_integer(index) ->
+        {record, rest} = List.pop_at(records, index)
+        Process.put(key, rest)
+        record
+      nil ->
+        assert {:ok, bytes} = :gen_tcp.recv(fixture.socket, 0, remaining(fixture.cutoff))
+        record = :erlang.binary_to_term(bytes, [:safe])
+        assert length(records) < 64
+        Process.put(key, records ++ [record])
+        next(fixture, predicate)
+    end
+  end
+
+  def finished(fixture) do
+    key = {__MODULE__, fixture.launcher, :finished}
+    case Process.get(key) do
+      nil ->
+        {:finished, summary} = next(fixture, &match?({:finished, _}, &1))
+        Process.put(key, summary)
+        summary
+      summary -> summary
+    end
+  end
+
+  def await_lines(fixture, count) do
+    bytes = if File.exists?(fixture.output), do: File.read!(fixture.output), else: ""
+    lines = String.split(bytes, "\n")
+    complete = Enum.drop(lines, -1)
+    if length(complete) >= count do
+      assert length(complete) == count
+      complete
+    else
+      assert remaining(fixture.cutoff) > 0
+      Process.sleep(10)
+      await_lines(fixture, count)
+    end
+  end
+
+  def send_frame(fixture, record) do
+    {:ok, frame} = LoopexProtocol.Frame.encode(record)
+    assert :file.write(fixture.input, frame) == :ok
+  end
+
+  def metadata(fixture), do: command(fixture, :metadata, &match?({:metadata, _}, &1))
+
+  def blocked(fixture) do
+    {:metadata, metadata} = metadata(fixture)
+    case metadata do
+      %{active: %{worker: worker, written_at: nil}} when is_integer(worker) -> metadata
+      _other ->
+        assert remaining(fixture.cutoff) > 0
+        Process.sleep(10)
+        blocked(fixture)
+    end
+  end
+
+  def read_fifo_frame(fixture) do
+    key = {__MODULE__, fixture.launcher, :wire_buffer}
+    read_fifo_frame(fixture, Process.get(key, ""), key)
+  end
+  defp read_fifo_frame(fixture, acc, key) do
+    case :binary.match(acc, "\n") do
+      {offset, 1} ->
+        frame = binary_part(acc, 0, offset + 1)
+        Process.put(key, :binary.copy(binary_part(acc, offset + 1, byte_size(acc) - offset - 1)))
+        frame
+      :nomatch ->
+        assert remaining(fixture.cutoff) > 0
+        assert {:ok, bytes} = :file.read(fixture.fifo, 1)
+        read_fifo_bytes(fixture, [bytes, acc], byte_size(acc) + byte_size(bytes), key, bytes)
+    end
+  end
+
+  # Concept: Read the physical LF frame without repeatedly scanning its growing prefix.
+  # Technical depth: Keep raw one-byte reads, the captured cutoff and the exact frame ceiling.
+  defp read_fifo_bytes(fixture, fragments, size, key, last_byte) do
+    assert size <= 2_097_152
+    if last_byte == "\n" do
+      Process.put(key, "")
+      fragments |> Enum.reverse() |> IO.iodata_to_binary()
+    else
+      assert remaining(fixture.cutoff) > 0
+      assert {:ok, bytes} = :file.read(fixture.fifo, 1)
+      read_fifo_bytes(fixture, [bytes | fragments], size + byte_size(bytes), key, bytes)
+    end
+  end
+
+  def assert_group_absent(group) do
+    assert {table, 0} = Loopex.Executor.Local.answer_within("/bin/ps", ["-axo", "pid=,pgid="], 500)
+    rows = String.split(table, "\n", trim: true)
+    refute Enum.any?(rows, fn row ->
+      case String.split(row) do
+        [_pid, pgid] -> pgid == Integer.to_string(group)
+        _other -> false
+      end
+    end)
+  end
+
+  defp assert_exit(fixture, cutoff) do
+    receive do
+      {port, {:exit_status, status}} when port == fixture.launcher ->
+        assert status == 0
+        receive do
+          {:DOWN, reference, :port, port, :normal}
+              when reference == fixture.monitor and port == fixture.launcher -> :ok
+        after
+          remaining(cutoff) -> flunk("foreground launcher did not join")
+        end
+      {:DOWN, reference, :port, port, :normal}
+          when reference == fixture.monitor and port == fixture.launcher ->
+        receive do
+          {port, {:exit_status, 0}} when port == fixture.launcher -> :ok
+        after
+          remaining(cutoff) -> flunk("foreground exit status missing")
+        end
+    after
+      remaining(cutoff) -> flunk("foreground process did not exit")
+    end
+  end
+
+  defp remaining(cutoff), do: max(cutoff - now_ms(), 0)
+  defp now_ms(), do: System.monotonic_time(:millisecond)
+end
+
+defmodule Loopex.AppServer.ForegroundOutputFixture do
+  @moduledoc false
+  alias Loopex.AppServer.Stdio
+  alias Loopex.AgentLoopFixture, as: Fixture
+  alias Loopex.M1RuntimeTestStore, as: Store
+
+  def main do
+    [number, mode] = System.argv()
+    {:ok, socket} = :gen_tcp.connect(~c"127.0.0.1", String.to_integer(number),
+      [:binary, packet: 4, active: true], 5_000)
+    fixture_process = self()
+    {owner, owner_monitor} = spawn_monitor(fn -> own(fixture_process, mode) end)
+    cutoff = now_ms() + 30_000
+    key = {__MODULE__, :controller}
+    Process.put(key, %{socket: socket, owner: owner, owner_monitor: owner_monitor,
+      owner_down: false, writer: nil, writer_monitor: nil, writer_down: false,
+      dispatcher_suspended: nil, owner_suspended: false, writer_suspended: false,
+      cleanup_worker: nil, cleanup_monitor: nil, cleanup_worker_down: false,
+      input_monitor: nil, input_port: nil, input_down: false, cutoff: cutoff})
+    try do
+    receive do
+      {:fixture_ready, ^owner, runtime_fixture, sink, session, reference, artifact} ->
+        writer = find_writer(owner, cutoff)
+        writer_monitor = Process.monitor(writer)
+        Process.put(key, Map.merge(Process.get(key), %{writer: writer, writer_monitor: writer_monitor}))
+        send_record(socket, {:ready, System.pid(), session, reference})
+        loop(%{socket: socket, owner: owner, owner_monitor: owner_monitor,
+          writer: writer, writer_monitor: writer_monitor, writer_down: false, owner_down: false,
+          fixture: runtime_fixture, sink: sink, session: session, reference: reference,
+          artifact: artifact, served: nil, held: nil, cutoff: cutoff, mode: mode,
+          dispatcher_suspended: nil, owner_suspended: false, writer_suspended: false, cleanup_cutoff: nil,
+          cleanup_worker: nil, cleanup_monitor: nil, cleanup_worker_down: false, input_monitor: nil, input_port: nil, input_down: false})
+    after
+      max(cutoff - now_ms(), 0) -> exit(:fixture_ready_missing)
+    end
+    after
+      state = Process.get(key)
+      try do
+        cleanup_all([
+          fn -> if state[:held], do: Store.release(state.held) end,
+          fn ->
+            if state.dispatcher_suspended,
+              do: :sys.resume(state.dispatcher_suspended, max(cutoff + 1_000 - now_ms(), 0))
+          end,
+          fn ->
+            if state.owner_suspended and Process.alive?(owner),
+              do: :erlang.resume_process(owner)
+          end,
+          fn ->
+            if state.writer_suspended and not is_nil(state.writer) and Process.alive?(state.writer),
+              do: :sys.resume(state.writer, max(cutoff + 1_000 - now_ms(), 0))
+          end,
+          fn -> if not state.owner_down and Process.alive?(owner), do: Process.exit(owner, :kill) end,
+          fn -> unless state.owner_down, do: join_actor(owner, owner_monitor, cutoff + 1_000) end,
+          fn ->
+            if not is_nil(state.writer) and not state.writer_down,
+              do: join_actor(state.writer, state.writer_monitor, cutoff + 1_000)
+          end,
+          fn ->
+            if not is_nil(state.cleanup_monitor) and not state.cleanup_worker_down,
+              do: join_actor(state.cleanup_worker, state.cleanup_monitor, cutoff + 1_000)
+          end,
+          fn ->
+            if not is_nil(state.input_monitor) and not state.input_down,
+              do: join_port(state.input_port, state.input_monitor, cutoff + 1_000)
+          end,
+          fn -> :gen_tcp.close(socket) end
+        ])
+      after
+        Process.delete(key)
+      end
+    end
+  end
+
+  defp join_actor(actor, monitor, cutoff) do
+    receive do
+      {:DOWN, ^monitor, :process, ^actor, _reason} -> :ok
+    after
+      max(cutoff - now_ms(), 0) -> exit(:fixture_actor_not_joined)
+    end
+  end
+
+  defp join_port(port, monitor, cutoff) do
+    receive do
+      {:DOWN, ^monitor, :port, ^port, _reason} -> :ok
+    after
+      max(cutoff - now_ms(), 0) -> exit(:fixture_input_not_joined)
+    end
+  end
+
+  defp own(observer, "bare") do
+    send(observer, {:fixture_ready, self(), nil, nil, nil, nil, nil})
+    result = Stdio.serve(nil)
+    send(observer, {:served, self(), %{result: result, holders: 0, transfers: 0,
+      command_ids: [], observed_at: now_ms(), sink_closed: true}})
+  end
+
+  defp own(observer, mode) when mode in ["runtime", "writer_failure"] do
+    artifacts = Loopex.AppServer.WorkflowArtifacts
+    {:ok, artifact} = artifacts.start()
+    try do
+    {:ok, reference} = artifacts.put(artifact, :binary.copy("a", 1_048_576),
+      %{media_type: "text/plain", role: "tool_output", metadata: %{}})
+    {:ok, sink} = Loopex.ProgressSink.open()
+    try do
+    fixture = Fixture.start(script: [%{text: "done", calls: []}],
+      progress_sink: sink, artifact_store: %{module: artifacts, handle: artifact})
+    try do
+      await_ready(fixture.runtime, now_ms() + 1_000)
+      {:ok, session} = Loopex.create_session(fixture.runtime, %{}, command_id: "bootstrap")
+      send(observer, {:fixture_ready, self(), fixture, sink, session, reference, artifact})
+      result =
+        try do
+          Stdio.serve(fixture.runtime, sink)
+        catch
+          :exit, {cause, {_module, :call, _arguments}} = reason ->
+            if mode == "writer_failure" and cause in [:killed, :noproc, :normal],
+              do: {:caught_exit, cause}, else: exit(reason)
+        end
+      {:ok, %{dispatcher: dispatcher}} = Loopex.Runtime.Supervisor.children(fixture.runtime.supervisor)
+      holders = :sys.get_state(dispatcher).holders |> map_size()
+      transfers = Agent.get(artifact, &map_size(&1.transfers))
+      command_ids = Store.inspect_state(fixture.store).runtime_commands |> Map.keys() |> Enum.map(&elem(&1, 1))
+      closed = Loopex.ProgressSink.close(sink)
+      send(observer, {:served, self(), %{result: result, holders: holders, transfers: transfers,
+        command_ids: command_ids, observed_at: now_ms(), sink_closed: closed == :ok,
+        caller_survived: Process.alive?(self())}})
+      receive do
+        :finish_fixture -> :ok
+      after
+        30_000 -> exit(:fixture_finish_missing)
+      end
+    after
+      cleanup_all([fn -> Fixture.stop(fixture) end,
+        fn -> Loopex.ProgressSink.close(sink) end])
+    end
+    after
+      Loopex.ProgressSink.close(sink)
+    end
+    after
+      Agent.stop(artifact)
+    end
+  end
+
+  defp cleanup_all(actions) do
+    first = Enum.reduce(actions, nil, fn action, first ->
+      try do
+        action.()
+        first
+      catch
+        kind, reason -> first || {kind, reason, __STACKTRACE__}
+      end
+    end)
+    if first do
+      {kind, reason, stacktrace} = first
+      :erlang.raise(kind, reason, stacktrace)
+    end
+    :ok
+  end
+
+  defp await_ready(runtime, cutoff) do
+    {:ok, %{control: control}} = Loopex.Runtime.Supervisor.children(runtime.supervisor)
+    case :sys.get_state(control, max(cutoff - now_ms(), 0)).creation_status do
+      :ready -> :ok
+      :starting ->
+        if now_ms() < cutoff, do: (Process.sleep(1); await_ready(runtime, cutoff)),
+          else: exit(:creation_startup_unavailable)
+      _unavailable -> exit(:creation_startup_unavailable)
+    end
+  end
+
+  defp find_writer(owner, cutoff) do
+    {:monitors, monitors} = Process.info(owner, :monitors)
+    case Enum.find_value(monitors, fn
+      {:process, pid} when is_pid(pid) ->
+        if :proc_lib.translate_initial_call(pid) == {Loopex.AppServer.OutputWriter, :init, 1}, do: pid
+      _other -> nil
+    end) do
+      nil ->
+        if now_ms() < cutoff, do: (Process.sleep(1); find_writer(owner, cutoff)),
+          else: exit(:writer_not_found)
+      writer -> writer
+    end
+  end
+
+  defp loop(state) do
+    Process.put({__MODULE__, :controller}, state)
+    if now_ms() >= state.cutoff, do: exit(:fixture_deadline)
+    receive do
+      {:tcp, socket, bytes} when socket == state.socket ->
+        state |> command(:erlang.binary_to_term(bytes, [:safe])) |> loop()
+      {:record_held_before_linearization, waiter, _store, kind, transaction} ->
+        state = %{state | held: waiter}
+        Process.put({__MODULE__, :controller}, state)
+        {:ok, tx_id} = Loopex.Store.transaction_id(transaction)
+        send_record(state.socket, {:held, kind, tx_id})
+        loop(state)
+      {:served, owner, summary} when owner == state.owner ->
+        if state.held, do: Store.release(state.held)
+        send(owner, :finish_fixture)
+        loop(%{state | served: summary, held: nil})
+      {:DOWN, monitor, :process, writer, :normal}
+          when monitor == state.writer_monitor and writer == state.writer ->
+        finish_or_loop(%{state | writer_down: true})
+      {:DOWN, monitor, :process, owner, :normal}
+          when monitor == state.owner_monitor and owner == state.owner ->
+        finish_or_loop(%{state | owner_down: true})
+      {:DOWN, monitor, :process, writer, :killed}
+          when monitor == state.writer_monitor and writer == state.writer and
+            state.mode == "writer_failure" ->
+        finish_or_loop(%{state | writer_down: true})
+      {:DOWN, monitor, :port, port, _reason}
+          when monitor == state.input_monitor and port == state.input_port ->
+        finish_or_loop(%{state | input_down: true})
+      {:DOWN, _monitor, :process, _pid, reason} ->
+        send_record(state.socket, {:fixture_failed, reason})
+        exit(:fixture_actor_failed)
+      {:tcp_closed, socket} when socket == state.socket ->
+        if state.owner_down and state.writer_down, do: :ok,
+          else: exit(:fixture_connection_lost)
+    after
+      max(state.cutoff - now_ms(), 0) -> exit(:fixture_deadline)
+    end
+  end
+
+  defp finish_or_loop(state) do
+    Process.put({__MODULE__, :controller}, state)
+    finish_joined_or_loop(state)
+  end
+
+  defp finish_joined_or_loop(%{owner_down: true, writer_down: true, served: summary} = state)
+      when not is_nil(summary) and (state.mode != "writer_failure" or state.input_down) do
+    summary = Map.merge(summary, %{owner_joined: true, writer_joined: true,
+      original_input_joined: state.input_down})
+    send_record(state.socket, {:finished, summary})
+    loop(state)
+  end
+  defp finish_joined_or_loop(state), do: loop(state)
+
+  defp command(state, :metadata) do
+    observer = self()
+    tag = make_ref()
+    :sys.replace_state(state.writer, fn writer_state ->
+      active = if writer_state.active, do: Map.take(writer_state.active,
+        [:reference, :leader, :group, :worker, :written_at, :joined_at, :write_cutoff, :cleanup_cutoff]), else: nil
+      send(observer, {:writer_metadata, tag, active})
+      writer_state
+    end, max(state.cutoff - now_ms(), 0))
+    receive do
+      {:writer_metadata, ^tag, active} ->
+        usage = if state.sink do
+          {_guardian, incarnation, arena} = state.sink
+          [{:state, ^incarnation, _owner, _status, bytes, slots, _ready}] = :ets.lookup(arena, :state)
+          %{bytes: bytes, slots: Enum.count(Tuple.to_list(slots), &(not is_nil(&1)))}
+        else
+          %{bytes: 0, slots: 0}
+        end
+        attachments = holder_attachments(state)
+        send_record(state.socket, {:metadata, %{active: active, credit: usage,
+          attachments: attachments, observed_at: now_ms()}})
+        state
+    end
+  end
+  defp command(state, :hold_holder_cleanup) do
+    {:ok, %{dispatcher: dispatcher}} = Loopex.Runtime.Supervisor.children(state.fixture.runtime.supervisor)
+    Process.put({__MODULE__, :controller}, %{state | dispatcher_suspended: dispatcher})
+    :ok = :sys.suspend(dispatcher)
+    send_record(state.socket, :holder_cleanup_held)
+    %{state | dispatcher_suspended: dispatcher}
+  end
+
+  defp command(state, :suspend_cleanup_owner) do
+    owned = await_owned(state.owner, fn owned ->
+      owned.closing and match?(%{kind: :cleanup, pid: _}, owned.job)
+    end, state.cutoff)
+    Process.put({__MODULE__, :controller}, %{state | owner_suspended: true})
+    true = :erlang.suspend_process(state.owner)
+    worker = owned.job.pid
+    monitor = Process.monitor(worker)
+    Process.put({__MODULE__, :controller}, %{state | owner_suspended: true,
+      cleanup_worker: worker, cleanup_monitor: monitor, cleanup_worker_down: false})
+    :ok = :sys.resume(state.dispatcher_suspended)
+    Process.put({__MODULE__, :controller}, %{state | owner_suspended: true,
+      dispatcher_suspended: nil, cleanup_worker: worker, cleanup_monitor: monitor,
+      cleanup_worker_down: false})
+    receive do
+      {:DOWN, ^monitor, :process, ^worker, :normal} -> :ok
+    after
+      max(min(state.cutoff, owned.cutoff) - now_ms(), 0) -> exit(:cleanup_worker_not_joined)
+    end
+    Process.put({__MODULE__, :controller}, %{state | owner_suspended: true,
+      dispatcher_suspended: nil, cleanup_cutoff: owned.cutoff, cleanup_worker: worker,
+      cleanup_monitor: monitor, cleanup_worker_down: true})
+    send_record(state.socket, {:cleanup_joined_while_owner_suspended, owned.cutoff})
+    %{state | owner_suspended: true, dispatcher_suspended: nil,
+      cleanup_cutoff: owned.cutoff, cleanup_worker: worker, cleanup_monitor: monitor,
+      cleanup_worker_down: true}
+  end
+
+  defp command(state, :resume_expired_owner) do
+    receive do
+    after
+      max(state.cleanup_cutoff - now_ms() + 1, 0) -> :ok
+    end
+    true = :erlang.resume_process(state.owner)
+    send_record(state.socket, {:owner_resumed_after_cutoff, now_ms()})
+    %{state | owner_suspended: false}
+  end
+
+  defp command(state, :suspend_idle_writer) do
+    await_idle_writer(state.writer, state.cutoff)
+    Process.put({__MODULE__, :controller}, %{state | writer_suspended: true})
+    :ok = :sys.suspend(state.writer)
+    send_record(state.socket, :idle_writer_suspended)
+    %{state | writer_suspended: true}
+  end
+
+  defp command(state, :kill_blocked_writer) do
+    await_write_call(state.writer, state.cutoff)
+    {:links, links} = Process.info(state.owner, :links)
+    port = Enum.find(links, fn link ->
+      is_port(link) and Port.info(link, :connected) == {:connected, state.owner}
+    end)
+    true = is_port(port)
+    monitor = :erlang.monitor(:port, port)
+    Process.put({__MODULE__, :controller}, %{state | input_monitor: monitor, input_port: port})
+    Process.exit(state.writer, :kill)
+    Process.put({__MODULE__, :controller}, %{state | input_monitor: monitor, input_port: port,
+      writer_suspended: false})
+    send_record(state.socket, :original_blocked_writer_killed)
+    %{state | input_monitor: monitor, input_port: port, writer_suspended: false}
+  end
+
+  defp command(state, :release_controls) do
+    cleanup_all([
+      fn -> if state.dispatcher_suspended, do: :sys.resume(state.dispatcher_suspended) end,
+      fn -> if state.owner_suspended and Process.alive?(state.owner),
+        do: :erlang.resume_process(state.owner) end,
+      fn -> if state.writer_suspended and Process.alive?(state.writer),
+        do: :sys.resume(state.writer) end,
+      fn -> if state.held, do: Store.release(state.held) end
+    ])
+    send_record(state.socket, :controls_released)
+    %{state | dispatcher_suspended: nil, owner_suspended: false, writer_suspended: false, held: nil}
+  end
+
+  defp command(state, :await_baseline_joined) do
+    require_time(state.cutoff)
+
+    await_owned(
+      state.owner,
+      fn owned -> Loopex.AppServer.Delivery.ready?(owned.delivery) end,
+      state.cutoff
+    )
+
+    require_time(state.cutoff)
+    send_record(state.socket, :baseline_joined)
+    state
+  end
+
+  defp command(state, :hold_create) do
+    Store.hold_next_transition_before_linearization(state.fixture.store, :runtime_control_create_session, self())
+    send_record(state.socket, :holding_next_create)
+    state
+  end
+  defp command(state, {:offer, kind, size}) do
+    result = Loopex.ProgressSink.try_offer(state.sink, state.session, item(kind, size))
+    send_record(state.socket, {:offered, result})
+    state
+  end
+  defp command(state, action) when action in [:stop_leader, :continue_leader] do
+    observer = self()
+    :sys.replace_state(state.writer, fn writer_state ->
+      send(observer, {:leader, writer_state.active.leader})
+      writer_state
+    end, max(state.cutoff - now_ms(), 0))
+    receive do
+      {:leader, leader} ->
+        signal = if action == :stop_leader, do: "-STOP", else: "-CONT"
+        {"", 0} = Loopex.Executor.Local.answer_within("/bin/kill", [signal, Integer.to_string(leader)], 500)
+        send_record(state.socket, if(action == :stop_leader, do: :leader_stopped, else: :leader_continued))
+    end
+    state
+  end
+
+  # These new controls observe only their small no-progress failure scenarios.
+  # They neither export resident frames nor mutate the owned Stdio state.
+  defp await_owned(owner, predicate, cutoff) do
+    {:dictionary, dictionary} = Process.info(owner, :dictionary)
+    owned = Enum.find_value(dictionary, fn
+      {{Stdio, reference}, %{owned_key: {Stdio, reference}} = owned}
+          when is_reference(reference) -> owned
+      _other -> nil
+    end)
+    if owned && predicate.(owned), do: owned,
+      else: (require_time(cutoff); Process.sleep(1); await_owned(owner, predicate, cutoff))
+  end
+
+  defp await_idle_writer(writer, cutoff) do
+    if :sys.get_state(writer, max(cutoff - now_ms(), 0)).active == nil, do: :ok,
+      else: (require_time(cutoff); Process.sleep(1); await_idle_writer(writer, cutoff))
+  end
+
+  defp await_write_call(writer, cutoff) do
+    {:messages, messages} = Process.info(writer, :messages)
+    if Enum.any?(messages, fn
+      {:"$gen_call", _from, {:write, _frame}} -> true
+      _other -> false
+    end), do: :ok,
+      else: (require_time(cutoff); Process.sleep(1); await_write_call(writer, cutoff))
+  end
+
+  defp require_time(cutoff), do: if(now_ms() >= cutoff, do: exit(:fixture_observation_expired))
+
+  # Only attachment identities cross this observation boundary. In particular,
+  # no dispatcher state, resident progress item or writer frame is returned.
+  defp holder_attachments(%{fixture: nil}), do: []
+  defp holder_attachments(state) do
+    {:ok, %{dispatcher: dispatcher}} = Loopex.Runtime.Supervisor.children(state.fixture.runtime.supervisor)
+    observer = self()
+    tag = make_ref()
+    :sys.replace_state(dispatcher, fn dispatcher_state ->
+      identities = for {identity, %{holder: holder}} <- dispatcher_state.attachments,
+        holder == state.owner, do: identity
+      send(observer, {:holder_attachments, tag, identities})
+      dispatcher_state
+    end, max(state.cutoff - now_ms(), 0))
+    receive do
+      {:holder_attachments, ^tag, identities} -> identities
+    end
+  end
+
+  defp item(kind, size) do
+    base = %{kind: kind, turn_id: "turn", stream_domain_id: "0123456789abcdef0123456789abcdef", base_event_sequence: 0}
+    case kind do
+      :text_delta -> Map.merge(base, %{model_sequence: 0, content_index: 0, text: :binary.copy("\t", size)})
+      :reasoning_delta -> Map.merge(base, %{model_sequence: 0, content_index: 0, text: :binary.copy("\t", size)})
+      :tool_call_delta -> Map.merge(base, %{model_sequence: 0, call_index: 0, tool_call_id: nil, name: nil, arguments_fragment: :binary.copy("\t", size)})
+      :tool_progress -> Map.merge(base, %{tool_call_id: "call", progress_sequence: 0, stream: "stdout", byte_offset: 0, chunk: :binary.copy("\t", size)})
+      :model_stream_closed -> Map.merge(base, %{disposition: :complete, delta_count: 1})
+      :tool_stream_closed -> Map.merge(base, %{tool_call_id: "call", disposition: :complete, progress_count: 1})
+      :activity -> %{kind: "context.compaction_progress", episode_id: "episode",
+        owner: %{"kind" => "run", "id" => "turn"}, base_event_sequence: 0,
+        stream_domain_id: "0123456789abcdef0123456789abcdef", progress_sequence: 0}
+    end
+  end
+
+  defp send_record(socket, record), do: :gen_tcp.send(socket, :erlang.term_to_binary(record))
+  defp now_ms(), do: System.monotonic_time(:millisecond)
+end
+
+if System.get_env("LOOPEX_FOREGROUND_FIXTURE") == "1", do: Loopex.AppServer.ForegroundOutputFixture.main()

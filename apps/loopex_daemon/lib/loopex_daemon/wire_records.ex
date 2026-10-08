@@ -2,7 +2,7 @@ defmodule LoopexDaemon.WireRecords do
   @moduledoc """
   ## Concept
 
-  The daemon renders generation-two attachment succession with the same stable
+  The daemon renders attachment succession with the same stable
   records it will use while serving a client. Keeping those records in one pure
   boundary prevents the capacity reservation from measuring a shape different
   from the one a connection later emits.
@@ -17,6 +17,9 @@ defmodule LoopexDaemon.WireRecords do
   """
 
   alias LoopexProtocol.Wire
+  alias LoopexProtocol.Session.{Inspection, Snapshot}
+
+  @inspection_fields ~w(status event_sequence active_run_id cleanup_grace_ms active_context_token_budget pending_work_ids open_interaction configuration active_bounds checkpoint active_maintenance)a
 
   @ordinary_progress_fields %{
     text_delta: [
@@ -269,28 +272,23 @@ defmodule LoopexDaemon.WireRecords do
 
   ## Technical depth
 
+  The complete revision-3 snapshot passes through the closed Snapshot codec.
   The cursor and the snapshot's event sequence are one number reported twice;
-  the open interaction is projected at that same cursor by core.
+  the envelope repeats that snapshot's own encoded interaction. Malformed or
+  incomplete captures fail before record construction, without defaults.
   """
-  @spec snapshot(binary(), map(), map() | nil) :: map()
-  def snapshot(request_id, snapshot, open_interaction)
-      when is_binary(request_id) and is_map(snapshot) do
-    cursor = Map.get(snapshot, :event_sequence, 0)
-    session_id = Map.fetch!(snapshot, :session_id)
+  @spec snapshot(binary(), map()) :: map()
+  def snapshot(request_id, captured_snapshot)
+      when is_binary(request_id) and is_map(captured_snapshot) do
+    {:ok, snapshot} = Snapshot.encode_wire(captured_snapshot)
 
     %{
       "type" => "snapshot",
       "request_id" => request_id,
-      "session_id" => Wire.encode_identity(session_id),
-      "event_cursor" => Wire.encode_u64(cursor),
-      "snapshot" => %{
-        "snapshot_revision" => Map.fetch!(snapshot, :snapshot_revision),
-        "session_id" => Wire.encode_identity(session_id),
-        "event_sequence" => Wire.encode_u64(cursor),
-        "active_run_id" => optional_identity(Map.get(snapshot, :active_run_id)),
-        "active_run_phase" => optional_word(Map.get(snapshot, :active_run_phase))
-      },
-      "open_interaction" => open_interaction
+      "session_id" => snapshot["session_id"],
+      "event_cursor" => snapshot["event_sequence"],
+      "snapshot" => snapshot,
+      "open_interaction" => snapshot["open_interaction"]
     }
   end
 
@@ -498,13 +496,6 @@ defmodule LoopexDaemon.WireRecords do
 
   defp model_payload_bounded?(_item), do: true
 
-  defp optional_identity(nil), do: nil
-  defp optional_identity(value) when is_binary(value), do: Wire.encode_identity(value)
-
-  defp optional_word(nil), do: nil
-  defp optional_word(value) when is_atom(value), do: Atom.to_string(value)
-  defp optional_word(value) when is_binary(value), do: value
-
   @doc false
   @spec result(binary(), binary(), map()) :: map()
   def result(request_id, method, body)
@@ -519,22 +510,15 @@ defmodule LoopexDaemon.WireRecords do
 
   ## Technical depth
 
-  ADR 0023 names the exact members; owner epoch, journal version, handles and
-  attachment state never cross.
+  Select the eleven approved M7 fields from one captured owner observation,
+  then validate their exact native shapes through Inspection. Owner epoch,
+  journal version, compact_pending, handles and attachment state never cross.
+  Missing or malformed public data refuses without defaults.
   """
   @spec session_status(map()) :: map()
   def session_status(status) when is_map(status) do
-    %{
-      "status" => to_string(Map.get(status, :status)),
-      "event_sequence" => Wire.encode_u64(Map.get(status, :event_sequence, 0)),
-      "active_run_id" => optional_identity(Map.get(status, :active_run_id)),
-      "cleanup_grace_ms" => Wire.encode_u64(Map.get(status, :cleanup_grace_ms, 0)),
-      "active_context_token_budget" =>
-        optional_u64(Map.get(status, :active_context_token_budget)),
-      "pending_work_ids" =>
-        status |> Map.get(:pending_work_ids, []) |> Enum.map(&Wire.encode_identity/1),
-      "open_interaction" => Map.get(status, :open_interaction)
-    }
+    {:ok, inspection} = status |> Map.take(@inspection_fields) |> Inspection.encode_wire()
+    inspection
   end
 
   @doc false
@@ -626,9 +610,6 @@ defmodule LoopexDaemon.WireRecords do
   end
 
   def resource_read(resource) when is_map(resource), do: resource
-
-  defp optional_u64(nil), do: nil
-  defp optional_u64(value) when is_integer(value), do: Wire.encode_u64(value)
 
   @doc """
   ## Concept

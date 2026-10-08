@@ -171,7 +171,8 @@ defmodule Loopex.AppServer.HostTest do
 
     test "two routes and maintenance reach real composition and stop when input ends" do
       entry = """
-      parent = self()
+      owned = :ets.new(:host_test_owned_edges, [:duplicate_bag, :public])
+      try do
       names = ~w(LOOPEX_PROVIDER_API_KEY M7_SERVER_A M7_SERVER_B)
       Process.put(:"$loopex_composition_edge_observer", fn module, function, [options] = arguments ->
         if module == Loopex do
@@ -188,8 +189,8 @@ defmodule Loopex.AppServer.HostTest do
         end
         result = apply(module, function, arguments)
         case result do
-          {:ok, pid} when is_pid(pid) -> send(parent, {:owned, pid})
-          {:ok, %Loopex.Runtime{supervisor: pid}} -> send(parent, {:owned, pid})
+          {:ok, pid} when is_pid(pid) -> :ets.insert(owned, {:owned, pid})
+          {:ok, %Loopex.Runtime{supervisor: pid}} -> :ets.insert(owned, {:owned, pid})
           _ -> :ok
         end
         result
@@ -199,11 +200,13 @@ defmodule Loopex.AppServer.HostTest do
         model: "openai:test",
         maintenance_model: "anthropic:claude-haiku-4-5",
         active_tools: [])
-      pids = Stream.repeatedly(fn -> receive do {:owned, pid} -> pid after 0 -> nil end end)
-        |> Enum.take_while(&is_pid/1)
+      pids = :ets.lookup(owned, :owned) |> Enum.map(fn {:owned, pid} -> pid end)
       unless length(pids) == 9 and Enum.all?(pids, &(not Process.alive?(&1))),
         do: raise("owned cleanup incomplete")
       IO.puts("explicit routes closed")
+      after
+        :ets.delete(owned)
+      end
       """
 
       {output, status} =
