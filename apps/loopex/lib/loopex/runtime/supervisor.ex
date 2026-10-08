@@ -17,6 +17,11 @@ defmodule Loopex.Runtime.Supervisor do
   control failure then removes every later child, a session-supervisor failure
   removes delivery state, and a dispatcher failure leaves current session
   coordinators alive so public events can be re-read from the durable outbox.
+
+  Native creation guardians live under Runtime.Workers and own private call
+  groups. Their original joins complete before a supervised Control successor
+  starts its fresh creation selection. Startup Store failure keeps the current
+  Control alive and creation unavailable; it never requests a restart episode.
   """
 
   use Supervisor

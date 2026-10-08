@@ -160,8 +160,16 @@ defmodule Loopex.Runtime do
   Store mutation or deletes durable history.
   """
   @spec stop(t()) :: :ok | {:error, :runtime_unavailable}
-  def stop(%__MODULE__{supervisor: supervisor}) when is_pid(supervisor) do
+  def stop(%__MODULE__{supervisor: supervisor, token: token}) when is_pid(supervisor) do
     try do
+      # Concept: creation stops at its serial owner before the root removes work.
+      # Technical depth: this immediate selection captures the existing cleanup
+      # episode; root shutdown still joins actors and never claims Store rollback.
+      case RuntimeSupervisor.control(supervisor) do
+        {:ok, control} -> Control.stop_creation(control, token)
+        _ -> :ok
+      end
+
       Supervisor.stop(supervisor, :normal)
     catch
       :exit, _reason -> {:error, :runtime_unavailable}
@@ -382,6 +390,10 @@ defmodule Loopex.Runtime do
 
   def effect_intents(_, _, _, _), do: {:error, :runtime_unavailable}
 
+  # Concept: native creation shares Control's single responsive custody slot.
+  # Technical depth: dispatcher readiness does not grant creation eligibility;
+  # startup claim/read/close is finite. Occupied intake refuses immediately and
+  # missing current recovery capability never falls back to unreserved creation.
   @doc false
   @spec create_session(t(), binary(), map()) :: {:ok, binary()} | {:error, term()}
   def create_session(%__MODULE__{} = runtime, command_id, session_options) do

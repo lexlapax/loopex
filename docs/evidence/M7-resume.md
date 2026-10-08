@@ -29,6 +29,42 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Reboot continuation on 2026-10-07
 
+Latest verified creation unit: isolated52808005 passed complete22 on each supported
+pair, original45191,69.460seconds, eight original joins/42 retained artifacts,
+zero failures/exclusions/skips/invalid. Output
+`M7/creation-control-proof-20261007-v3`; collection
+`9bb4dd75122324a8081949390ad202bf0b984da61673b66ed3cd8593d6ab3dac`, terminal
+`9764b9a5db9b1068fab71c8e332b45cb0ff0f7030c8b80af955975e5307dfda2`, registry
+`4971b51e27a88e00c1f3c7d51ce9c08c3d8c32a91794756b2fb9796b1a84d6e1`,2013rows.
+Seven tested paths join literally; all nine tested Core/Store context paths
+match primary. Join731ff6c0 is retained at
+`/private/tmp/m7-creation-control-literal-integration-20261007-v1/join.json`.
+Explicit count-two repair independently qualifies at9daf75e8. Earlier original67170
+remains current21/22 failed; no retries or allowance changes occurred. This proves
+the selected native lifecycle unit, not authored/host/VM-loss/full-M7 integration.
+The broad Control parent row remains open, so task counts do not change.
+
+Proposed ADR0063 is saved at16c251ad with exact paira28aa264/751549dc.
+Original48640 canonical current documentation check passed in72.279seconds,
+two joins/18 artifacts/2015registryrows. Output
+`M7/adr0063-proposed-docs-20261007-v1`; collection
+`bcf239bfc036e5f6038d443fba8ee5108c48f5f0496a68d6c477ea8a9df9f295`, terminal
+`1283df35abd189471f95b2183bd07dd10edb3f919de05a3d5f251952b1c6f997`, registry
+`b2f92cc86ca53acfaa0a43c1bda8954b2dc3d49d12b16d8e172537ce4b2d3e60`.
+Four canonical docs steps passed; dependency warnings remain visible.
+Independent semantic review is being sealed. No acceptance or host status/wait
+implementation occurs before the exact question is answered.
+
+Foreground writer is saved isolated raw8b31d984, packetc4c006f6, independent
+source review765929fb and follow-up20cb717d. Four new files preserve25 originals;
+14 expanded cases require paired native proof. Current component is dormant.
+Credited runtime ingress is frozen packet3656be05,23 paths and327 static test
+declarations. It preserves28 original Sink bodies; native expanded census and
+independent review remain. Both creationV2 rejoin and host callers remain open.
+Root alone owns Git/native; latest grant seeds actual2015 rows. No native handle
+is live. All previous entries below are historical where superseded.
+
+
 Latest continuation after original17391: creation Control V3's sticky cleanup
 repair is saved in isolated m7-creation-control, with tested Core/adapter context.
 Private source80d793bd passed current formatting and warning-free compilation,

@@ -9,8 +9,13 @@ defmodule Loopex.Runtime.Control do
 
   ## Technical depth
 
-  Session creation uses one retained runtime-control `Store.OwnerLane` and does
-  not cache a mapping before the transaction is terminal. Starting or resuming
+  Native creation and startup recovery retain one slot, one original work cutoff
+  and one runtime-control `Store.OwnerLane`. Control installs the complete fence
+  before each mechanical Store permit and consumes only matching, originally
+  monitored, fully joined results. Creation eligibility is independent of dispatcher
+  readiness. Missing recovery capability leaves creation unavailable. Authored
+  intake and preparation remain a separate migration into this same slot.
+  Session creation does not cache a mapping before the transaction is terminal. Starting or resuming
   a coordinator is serialized here; the DynamicSupervisor child completes
   `advance_owner` before this process marks it active.
 
@@ -28,6 +33,7 @@ defmodule Loopex.Runtime.Control do
   alias Loopex.Instrumentation
   alias Loopex.Model
   alias Loopex.ResumeActivation
+  alias Loopex.Runtime.CreationCarrier
   alias Loopex.Runtime.DaemonRoute
   alias Loopex.Runtime.EventDispatcher
   alias Loopex.Runtime.EffectIntents
@@ -85,6 +91,9 @@ defmodule Loopex.Runtime.Control do
   """
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(options) when is_list(options), do: GenServer.start_link(__MODULE__, options)
+
+  @doc false
+  def stop_creation(control, token), do: control_call(control, {:stop_creation, token})
 
   # Concept: whether this owner still speaks for the session -- and, separately,
   # whether the runtime was reachable enough to answer at all.
@@ -346,6 +355,8 @@ defmodule Loopex.Runtime.Control do
 
   @impl GenServer
   def init(options) do
+    send(self(), :creation_startup)
+
     {:ok,
      %{
        root: Keyword.fetch!(options, :root),
@@ -382,6 +393,12 @@ defmodule Loopex.Runtime.Control do
        # configuration or changing production's System clock.
        wall_clock: fn -> System.system_time(:millisecond) end,
        lane: OwnerLane.new(Keyword.fetch!(options, :store)),
+       creation_incarnation: make_ref(),
+       creation_selection: :crypto.strong_rand_bytes(32) |> Base.encode16(case: :lower),
+       creation_status: :starting,
+       creation_stopping: false,
+       creation_head: nil,
+       creation: nil,
        sessions: %{},
        writer_domains: MapSet.new(),
        quiescing: nil,
@@ -484,6 +501,15 @@ defmodule Loopex.Runtime.Control do
     end
   end
 
+  def handle_call({:stop_creation, token}, _from, state) do
+    if token == state.token do
+      next = %{state | creation_stopping: true, creation_status: :unavailable}
+      {:reply, :ok, creation_stop(next)}
+    else
+      {:reply, {:error, :runtime_unavailable}, state}
+    end
+  end
+
   def handle_call({:begin_quiesce, token, drain_id}, _from, state) do
     cond do
       token != state.token or not valid_identifier?(drain_id) ->
@@ -499,6 +525,7 @@ defmodule Loopex.Runtime.Control do
           |> Map.put(:quiescing, drain_id)
           |> Map.put(:quiesce_writer_domains, state.writer_domains)
           |> refuse_dispatcher_waiting_attaches()
+          |> creation_stop()
 
         Logger.debug("runtime quiesce gate installed",
           writer_domains: MapSet.size(next.writer_domains)
@@ -566,10 +593,14 @@ defmodule Loopex.Runtime.Control do
   def handle_call({:session_existence, token, session_id}, _from, state) do
     reply =
       if token == state.token and valid_identifier?(session_id) do
-        case Store.ownership_head(state.store, session_id, "session") do
-          {:ok, _head} -> {:ok, :present}
-          :absent -> {:ok, :absent}
-          :unavailable -> {:ok, :store_unavailable}
+        if state.creation do
+          {:ok, :store_unavailable}
+        else
+          case Store.ownership_head(state.store, session_id, "session") do
+            {:ok, _head} -> {:ok, :present}
+            :absent -> {:ok, :absent}
+            :unavailable -> {:ok, :store_unavailable}
+          end
         end
       else
         {:error, :runtime_unavailable}
@@ -585,7 +616,9 @@ defmodule Loopex.Runtime.Control do
       ) do
     reply =
       if token == state.token do
-        {:ok, lookup_create_result(state, command_id, session_options)}
+        if state.creation,
+          do: {:ok, :store_unavailable},
+          else: {:ok, lookup_create_result(state, command_id, session_options)}
       else
         {:error, :runtime_unavailable}
       end
@@ -600,9 +633,11 @@ defmodule Loopex.Runtime.Control do
       ) do
     reply =
       if token == state.token do
-        if is_map(genesis),
-          do: {:ok, lookup_create_result(state, command_id, session_options, genesis)},
-          else: {:ok, :unexpected}
+        cond do
+          not is_map(genesis) -> {:ok, :unexpected}
+          state.creation -> {:ok, :store_unavailable}
+          true -> {:ok, lookup_create_result(state, command_id, session_options, genesis)}
+        end
       else
         {:error, :runtime_unavailable}
       end
@@ -613,9 +648,13 @@ defmodule Loopex.Runtime.Control do
   def handle_call({:creation_provenance, token, selector}, _from, state) do
     reply =
       if token == state.token do
-        case Store.creation_provenance(state.store, state.runtime_id, selector) do
-          :unavailable -> {:ok, :store_unavailable}
-          observation -> {:ok, observation}
+        if state.creation do
+          {:ok, :store_unavailable}
+        else
+          case Store.creation_provenance(state.store, state.runtime_id, selector) do
+            :unavailable -> {:ok, :store_unavailable}
+            observation -> {:ok, observation}
+          end
         end
       else
         {:error, :runtime_unavailable}
@@ -627,11 +666,15 @@ defmodule Loopex.Runtime.Control do
   def handle_call({:effect_intents, token, session_id, cursor, limit}, _from, state) do
     reply =
       if token == state.token do
-        case bounded_store_read(fn ->
-               EffectIntents.read(state.store, state.runtime_id, session_id, cursor, limit)
-             end) do
-          :unavailable -> {:error, :history_unavailable}
-          result -> result
+        if state.creation do
+          {:error, :history_unavailable}
+        else
+          case bounded_store_read(fn ->
+                 EffectIntents.read(state.store, state.runtime_id, session_id, cursor, limit)
+               end) do
+            :unavailable -> {:error, :history_unavailable}
+            result -> result
+          end
         end
       else
         {:error, :runtime_unavailable}
@@ -643,54 +686,67 @@ defmodule Loopex.Runtime.Control do
   def handle_call({:resume_session, token, session_id, command_id, mode}, from, state) do
     if token == state.token and is_nil(state.quiescing) and valid_identifier?(session_id) and
          valid_identifier?(command_id) do
-      command = resume_command(state.runtime_id, session_id, command_id)
+      if state.creation do
+        {:reply,
+         detailed_session_reply(
+           {:error, :store_unavailable},
+           mode,
+           :no_activation,
+           state,
+           session_id
+         ), state}
+      else
+        command = resume_command(state.runtime_id, session_id, command_id)
 
-      case Store.runtime_command(state.store, command) do
-        {:completed, %{result: ^session_id}} ->
-          reply = completed_resume_reply(mode, session_id)
-          {:reply, detailed_session_reply(reply, mode, :no_activation, state, session_id), state}
+        case Store.runtime_command(state.store, command) do
+          {:completed, %{result: ^session_id}} ->
+            reply = completed_resume_reply(mode, session_id)
 
-        {:completed, _changed_result} ->
-          reply =
-            detailed_session_reply(
-              {:error, :runtime_command_conflict},
-              mode,
-              :no_activation,
-              state,
-              session_id
-            )
+            {:reply, detailed_session_reply(reply, mode, :no_activation, state, session_id),
+             state}
 
-          {:reply, reply, state}
+          {:completed, _changed_result} ->
+            reply =
+              detailed_session_reply(
+                {:error, :runtime_command_conflict},
+                mode,
+                :no_activation,
+                state,
+                session_id
+              )
 
-        {:open, open} ->
-          start_resume_owner(state, session_id, from, Map.put(command, :open, open), mode)
+            {:reply, reply, state}
 
-        :absent ->
-          start_resume_owner(state, session_id, from, Map.put(command, :open, nil), mode)
+          {:open, open} ->
+            start_resume_owner(state, session_id, from, Map.put(command, :open, open), mode)
 
-        :unavailable ->
-          reply =
-            detailed_session_reply(
-              {:error, :store_unavailable},
-              mode,
-              :no_activation,
-              state,
-              session_id
-            )
+          :absent ->
+            start_resume_owner(state, session_id, from, Map.put(command, :open, nil), mode)
 
-          {:reply, reply, state}
+          :unavailable ->
+            reply =
+              detailed_session_reply(
+                {:error, :store_unavailable},
+                mode,
+                :no_activation,
+                state,
+                session_id
+              )
 
-        {:error, :runtime_command_conflict} ->
-          reply =
-            detailed_session_reply(
-              {:error, :runtime_command_conflict},
-              mode,
-              :no_activation,
-              state,
-              session_id
-            )
+            {:reply, reply, state}
 
-          {:reply, reply, state}
+          {:error, :runtime_command_conflict} ->
+            reply =
+              detailed_session_reply(
+                {:error, :runtime_command_conflict},
+                mode,
+                :no_activation,
+                state,
+                session_id
+              )
+
+            {:reply, reply, state}
+        end
       end
     else
       if not is_nil(state.quiescing) do
@@ -1115,7 +1171,111 @@ defmodule Loopex.Runtime.Control do
   defp carried_owner_attachments(state, _entry, _previous), do: {state, %{}}
 
   @impl GenServer
-  def handle_cast({:owner_ready, coordinator, owner, durable}, state) do
+  def handle_cast(
+        {:owner_ready, coordinator, owner, durable},
+        %{creation: %{activation: activation} = entry} = state
+      )
+      when not is_nil(activation) and activation.session == durable.session_id and
+             activation.coordinator == coordinator do
+    current =
+      case Map.get(state.sessions, activation.session) do
+        %{status: :acquiring, coordinator: ^coordinator, generation: generation} ->
+          generation == owner.generation
+
+        _ ->
+          false
+      end
+
+    cond do
+      not current ->
+        {:noreply, state}
+
+      creation_activation_allowed?(state) ->
+        {:noreply, next} = accept_owner_ready(coordinator, owner, durable, state)
+        {:noreply, creation_release(%{next | creation: %{entry | from: nil}}, true)}
+
+      true ->
+        next = creation_stop(state)
+        session = Map.get(next.sessions, activation.session)
+
+        if is_map(session) do
+          reply_waiting(session, {:error, :store_unavailable}, next, activation.session)
+
+          next = %{
+            next
+            | sessions: Map.put(next.sessions, activation.session, %{session | waiting: nil})
+          }
+
+          {:noreply, %{next | creation: %{next.creation | from: nil}}}
+        else
+          {:noreply, next}
+        end
+    end
+  end
+
+  def handle_cast({:owner_ready, coordinator, owner, durable}, state),
+    do: accept_owner_ready(coordinator, owner, durable, state)
+
+  # Concept: an owner that gave up says why, so the caller waiting on it hears
+  # the reason that is true instead of the one the monitor can infer.
+  #
+  # Technical depth: the coordinator casts this and then stops, so this message
+  # and the coordinator monitor's `:DOWN` both arrive. Signals from one process
+  # to another keep their order and the `:DOWN` is one of them, so this runs first: it
+  # answers the waiter with the coordinator's own reason and clears `waiting`,
+  # which is what makes the answer exactly one rather than this reason followed
+  # by `:owner_recovery_failed` from the `:DOWN` behind it. Clearing the waiter
+  # is not belt-and-braces around that ordering; it is the whole mechanism, and
+  # it holds even if the two ever arrived the other way round. The coordinator
+  # pid is matched because a superseded generation's late report must not answer
+  # a caller waiting on the current one.
+  def handle_cast({:owner_unavailable, coordinator, session_id, reason}, state) do
+    case Map.fetch(state.sessions, session_id) do
+      {:ok, %{status: :acquiring, coordinator: ^coordinator} = entry} ->
+        EventDispatcher.release_fence(state.root, session_id)
+        answered = %{entry | status: :unavailable, waiting: nil}
+
+        sessions =
+          if reason == :runtime_placement_mismatch and is_nil(state.quiescing),
+            do: Map.delete(state.sessions, session_id),
+            else: Map.put(state.sessions, session_id, answered)
+
+        next = %{state | sessions: sessions}
+        reply_waiting(entry, {:error, reason}, next, session_id)
+        next = creation_activation_answered(next, session_id)
+        {:noreply, next}
+
+      _other ->
+        {:noreply, state}
+    end
+  end
+
+  def handle_cast({:owner_replayed, coordinator, session_id}, state) do
+    case Map.fetch(state.sessions, session_id) do
+      {:ok, %{status: :acquiring, coordinator: ^coordinator} = entry} ->
+        EventDispatcher.release_fence(state.root, session_id)
+
+        answered = %{entry | status: :unavailable, waiting: nil}
+
+        next = %{
+          state
+          | sessions:
+              if(is_nil(state.quiescing),
+                do: Map.delete(state.sessions, session_id),
+                else: Map.put(state.sessions, session_id, answered)
+              ),
+            spent_attempts: forget_spent_attempts(state.spent_attempts, session_id)
+        }
+
+        reply_waiting(entry, replayed_reply(entry, session_id), next, session_id)
+        {:noreply, creation_activation_answered(next, session_id)}
+
+      _other ->
+        {:noreply, state}
+    end
+  end
+
+  defp accept_owner_ready(coordinator, owner, durable, state) do
     case Map.get(state.sessions, durable.session_id) do
       %{
         status: :acquiring,
@@ -1159,64 +1319,6 @@ defmodule Loopex.Runtime.Control do
     end
   end
 
-  # Concept: an owner that gave up says why, so the caller waiting on it hears
-  # the reason that is true instead of the one the monitor can infer.
-  #
-  # Technical depth: the coordinator casts this and then stops, so this message
-  # and the coordinator monitor's `:DOWN` both arrive. Signals from one process
-  # to another keep their order and the `:DOWN` is one of them, so this runs first: it
-  # answers the waiter with the coordinator's own reason and clears `waiting`,
-  # which is what makes the answer exactly one rather than this reason followed
-  # by `:owner_recovery_failed` from the `:DOWN` behind it. Clearing the waiter
-  # is not belt-and-braces around that ordering; it is the whole mechanism, and
-  # it holds even if the two ever arrived the other way round. The coordinator
-  # pid is matched because a superseded generation's late report must not answer
-  # a caller waiting on the current one.
-  def handle_cast({:owner_unavailable, coordinator, session_id, reason}, state) do
-    case Map.fetch(state.sessions, session_id) do
-      {:ok, %{status: :acquiring, coordinator: ^coordinator} = entry} ->
-        EventDispatcher.release_fence(state.root, session_id)
-        answered = %{entry | status: :unavailable, waiting: nil}
-
-        sessions =
-          if reason == :runtime_placement_mismatch and is_nil(state.quiescing),
-            do: Map.delete(state.sessions, session_id),
-            else: Map.put(state.sessions, session_id, answered)
-
-        next = %{state | sessions: sessions}
-        reply_waiting(entry, {:error, reason}, next, session_id)
-        {:noreply, next}
-
-      _other ->
-        {:noreply, state}
-    end
-  end
-
-  def handle_cast({:owner_replayed, coordinator, session_id}, state) do
-    case Map.fetch(state.sessions, session_id) do
-      {:ok, %{status: :acquiring, coordinator: ^coordinator} = entry} ->
-        EventDispatcher.release_fence(state.root, session_id)
-
-        answered = %{entry | status: :unavailable, waiting: nil}
-
-        next = %{
-          state
-          | sessions:
-              if(is_nil(state.quiescing),
-                do: Map.delete(state.sessions, session_id),
-                else: Map.put(state.sessions, session_id, answered)
-              ),
-            spent_attempts: forget_spent_attempts(state.spent_attempts, session_id)
-        }
-
-        reply_waiting(entry, replayed_reply(entry, session_id), next, session_id)
-        {:noreply, next}
-
-      _other ->
-        {:noreply, state}
-    end
-  end
-
   # Concept: releasing a session clears any unresolved attempt identities that
   # could not be retired from committed settlement evidence.
   #
@@ -1241,6 +1343,11 @@ defmodule Loopex.Runtime.Control do
   # missing, delayed, malformed or oversized read preserves the complete map.
   # Sessions without their own spent attempt need no retirement read; another
   # session's live work must not make their acknowledgements wait on the Store.
+  defp retire_settled_attempts(%{creation: creation} = state, _session, _entry, _receipt)
+       when not is_nil(creation) do
+    state
+  end
+
   defp retire_settled_attempts(%{spent_attempts: spent} = state, _session_id, _entry, _receipt)
        when map_size(spent) == 0,
        do: state
@@ -1389,6 +1496,121 @@ defmodule Loopex.Runtime.Control do
   defp record_kind(_record), do: nil
 
   @impl GenServer
+  def handle_info(:creation_startup, %{creation_status: :starting, creation: nil} = state) do
+    entry = creation_episode(state, :startup)
+    {:noreply, creation_read(%{state | creation: entry}, :initial_head, nil)}
+  end
+
+  def handle_info(:creation_startup, state), do: {:noreply, state}
+
+  def handle_info(
+        {:creation_carrier_ready, incarnation, invocation, permit, guardian, group, worker},
+        state
+      )
+      when is_pid(guardian) and is_pid(group) and is_pid(worker) do
+    {:noreply, creation_ready(state, incarnation, invocation, permit, guardian, group, worker)}
+  end
+
+  def handle_info(
+        {:creation_carrier_joined, incarnation, invocation, permit, guardian, group, worker,
+         outcome},
+        state
+      ) do
+    {:noreply,
+     creation_joined(state, incarnation, invocation, permit, guardian, group, worker, outcome)}
+  end
+
+  def handle_info(
+        {:creation_carrier_stopping, incarnation, invocation, permit, guardian,
+         %{cooperative: cooperative, observe: observe} = cleanup},
+        state
+      )
+      when is_integer(cooperative) and is_integer(observe) and cooperative <= observe do
+    case state.creation do
+      %{invocation: ^invocation, action: %{permit: ^permit, pid: ^guardian}} = entry
+      when incarnation == state.creation_incarnation ->
+        retained =
+          if entry.cleanup,
+            do: %{
+              cooperative: min(entry.cleanup.cooperative, cooperative),
+              observe: min(entry.cleanup.observe, observe)
+            },
+            else: cleanup
+
+        {:noreply, creation_stop(%{state | creation: %{entry | cleanup: retained}})}
+
+      _ ->
+        {:noreply, state}
+    end
+  end
+
+  def handle_info({:creation_cleanup_unproved, incarnation, invocation, permit, guardian}, state) do
+    case state.creation do
+      %{invocation: ^invocation, action: %{permit: ^permit, pid: ^guardian}}
+      when incarnation == state.creation_incarnation ->
+        {:noreply, state |> creation_stop() |> creation_unproved()}
+
+      _ ->
+        {:noreply, state}
+    end
+  end
+
+  def handle_info({:creation_cleanup_expired, incarnation, invocation}, state) do
+    case state.creation do
+      %{invocation: ^invocation, cleanup: cleanup} = entry
+      when incarnation == state.creation_incarnation and not is_nil(cleanup) ->
+        remaining = cleanup.observe - System.monotonic_time(:millisecond)
+
+        if remaining > 0 do
+          timer =
+            Process.send_after(
+              self(),
+              {:creation_cleanup_expired, incarnation, invocation},
+              min(remaining, 3_600_000)
+            )
+
+          {:noreply, %{state | creation: %{entry | cleanup_timer: timer}}}
+        else
+          {:noreply, creation_unproved(state)}
+        end
+
+      _ ->
+        {:noreply, state}
+    end
+  end
+
+  def handle_info({:creation_activation_force, incarnation, invocation}, state) do
+    case state.creation do
+      %{invocation: ^invocation, activation: activation, cleanup: cleanup}
+      when incarnation == state.creation_incarnation and not is_nil(activation) and
+             not is_nil(cleanup) ->
+        if System.monotonic_time(:millisecond) >= cleanup.cooperative do
+          Process.exit(activation.coordinator, :kill)
+        else
+          Process.send_after(
+            self(),
+            {:creation_activation_force, incarnation, invocation},
+            min(cleanup.cooperative - System.monotonic_time(:millisecond), 3_600_000)
+          )
+        end
+
+        {:noreply, state}
+
+      _ ->
+        {:noreply, state}
+    end
+  end
+
+  def handle_info({:creation_expired, incarnation, invocation}, state) do
+    case state.creation do
+      %{invocation: ^invocation} when incarnation == state.creation_incarnation ->
+        {:noreply, creation_stop(state)}
+
+      _ ->
+        {:noreply, state}
+    end
+  end
+
   def handle_info(
         {:start_quiesce_fence, token, drain_id, operation_ref, phase_owner, session_id, deadline,
          abort_resolution},
@@ -1872,7 +2094,19 @@ defmodule Loopex.Runtime.Control do
     {:noreply, %{state | quiesce_fences: fences, quiesce_fence_monitors: monitor_index}}
   end
 
-  def handle_info({:DOWN, reference, :process, pid, _reason}, state) do
+  def handle_info({:DOWN, reference, :process, pid, reason}, %{creation: creation} = state)
+      when not is_nil(creation) do
+    if creation_monitor?(state, reference) do
+      {:noreply, creation_down(state, reference, pid)}
+    else
+      handle_control_down(reference, pid, reason, state)
+    end
+  end
+
+  def handle_info({:DOWN, reference, :process, pid, reason}, state),
+    do: handle_control_down(reference, pid, reason, state)
+
+  defp handle_control_down(reference, pid, _reason, state) do
     case Map.pop(state.trace_exclusion_monitors, reference) do
       {^pid, monitors} ->
         next =
@@ -2274,154 +2508,954 @@ defmodule Loopex.Runtime.Control do
     |> Map.put(:log, [])
   end
 
-  # Concept: implicit creation binds metadata to the host's captured defaults.
-  # Technical depth: the complete current v3 record is validated and measured
-  # before Store mutation. Explicit genesis uses the same exact writer; absent
-  # defaults refuse rather than manufacturing settings or an older record.
-  defp create_session(
-         state,
-         command_id,
-         session_options,
-         from,
-         mode,
-         supplied_genesis \\ :runtime_defaults
-       ) do
-    with true <- valid_identifier?(command_id),
-         {:ok, genesis} <-
-           creation_genesis(session_options, state.session_creation_defaults, supplied_genesis),
-         {:ok, transaction} <- Store.create_session(state.runtime_id, command_id, genesis),
-         {:ok, fresh?} <- create_command_absent?(state, command_id, transaction),
-         :ok <- validate_fresh_selection(state, genesis, fresh?) do
-      {outcome, lane} = resolve_transaction(state.lane, transaction)
-      state = %{state | lane: lane}
-      transaction_session_id = Map.get(transaction, :session_id)
+  # Concept: one native request or startup episode owns every creation Store wait.
+  # Technical depth: Control selects each closed action and retains its lane before
+  # permit. Joined guardians return evidence; they never select a phase or activate.
+  defp create_session(state, command_id, options, from, mode, supplied \\ :runtime_defaults) do
+    cond do
+      not valid_identifier?(command_id) or not is_map(options) or is_struct(options) or
+          not (supplied == :runtime_defaults or (is_map(supplied) and not is_struct(supplied))) ->
+        creation_refusal(state, from, mode, :invalid_session_creation)
 
-      case outcome do
-        {:committed, ^command_id, %{type: :create_session, session_id: session_id}} ->
-          cond do
-            match?({:ok, %{status: :active}}, Map.fetch(state.sessions, session_id)) ->
-              reply =
-                detailed_session_reply(
-                  {:ok, session_id},
-                  mode,
-                  :no_activation,
-                  state,
-                  session_id
-                )
+      match?(%{kind: :startup}, state.creation) ->
+        creation_refusal(state, from, mode, :store_unavailable)
 
-              {:reply, reply, state}
+      not is_nil(state.creation) ->
+        creation_refusal(state, from, mode, :creation_in_progress)
 
-            not fresh? ->
-              reply =
-                detailed_session_reply(
-                  {:ok, session_id},
-                  mode,
-                  :no_activation,
-                  state,
-                  session_id
-                )
+      state.creation_status != :ready ->
+        creation_refusal(state, from, mode, :store_unavailable)
 
-              {:reply, reply, state}
+      true ->
+        entry = creation_episode(state, :native)
+        caller = elem(from, 0)
 
-            true ->
-              case start_owner(
-                     state,
-                     session_id,
-                     succession_id(state.runtime_id, "create", session_id, command_id),
-                     from,
-                     nil,
-                     mode
-                   ) do
-                {:waiting, next} ->
-                  {:noreply, next}
+        entry = %{
+          entry
+          | from: from,
+            caller: caller,
+            caller_monitor: Process.monitor(caller),
+            command_id: command_id,
+            options: options,
+            supplied: supplied,
+            defaults: state.session_creation_defaults,
+            mode: mode
+        }
 
-                {:error, reason, next, disposition} ->
-                  reply =
-                    detailed_session_reply(
-                      {:error, reason},
-                      mode,
-                      disposition,
-                      next,
-                      session_id
-                    )
+        next = %{state | creation: entry}
+        {:noreply, creation_read(next, :initial_command, command_id)}
+    end
+  end
 
-                  {:reply, reply, next}
-              end
-          end
+  defp creation_refusal(state, _from, mode, reason) do
+    {:reply, detailed_session_reply({:error, reason}, mode, :no_activation, state, nil), state}
+  end
 
-        {:not_committed, reason} ->
-          reply =
-            detailed_session_reply(
-              {:error, reason},
-              mode,
-              :no_activation,
-              state,
-              transaction_session_id
-            )
+  defp creation_episode(state, kind) do
+    invocation = make_ref()
+    cutoff = System.monotonic_time(:millisecond) + 60_000
 
-          {:reply, reply, state}
+    timer =
+      Process.send_after(
+        self(),
+        {:creation_expired, state.creation_incarnation, invocation},
+        60_000
+      )
 
-        {:commit_unknown, _tx_id} ->
-          reply =
-            detailed_session_reply(
-              {:error, :commit_unknown},
-              mode,
-              :no_activation,
-              state,
-              transaction_session_id
-            )
+    %{
+      kind: kind,
+      invocation: invocation,
+      cutoff: cutoff,
+      timer: timer,
+      cleanup: nil,
+      cleanup_timer: nil,
+      cleanup_unproved: false,
+      stopped: false,
+      from: nil,
+      caller: nil,
+      caller_monitor: nil,
+      command_id: nil,
+      options: nil,
+      supplied: nil,
+      defaults: nil,
+      mode: :detailed,
+      phase: nil,
+      action: nil,
+      final: nil,
+      reservation: nil,
+      transaction: nil,
+      presentations: 0,
+      claims: 0,
+      reads: 0,
+      head: state.creation_head,
+      terminal: nil,
+      fresh: false,
+      activation: nil,
+      historical_row: nil,
+      history_reread: false
+    }
+  end
 
-          {:reply, reply, state}
+  defp creation_read(state, phase, command) do
+    entry = state.creation
+    limit = if entry.kind == :startup, do: 4, else: 3
 
-        {:fenced, :commit_unknown} ->
-          reply =
-            detailed_session_reply(
-              {:error, :commit_unknown},
-              mode,
-              :no_activation,
-              state,
-              transaction_session_id
-            )
+    if entry.reads < limit do
+      state = %{state | creation: %{entry | reads: entry.reads + 1}}
 
-          {:reply, reply, state}
+      creation_call(
+        state,
+        phase,
+        {:recovery, %{runtime_id: state.runtime_id, command_id: command}}
+      )
+    else
+      creation_finish(state, {:error, :store_unavailable}, false)
+    end
+  end
+
+  defp creation_call(state, phase, action) do
+    entry = state.creation
+    deadline = if entry.stopped and entry.cleanup, do: entry.cleanup.observe, else: entry.cutoff
+    resolution = phase in [:before_close, :close, :post_terminal]
+
+    with true <- is_nil(entry.action),
+         true <- not entry.cleanup_unproved,
+         true <- System.monotonic_time(:millisecond) < deadline,
+         true <- not entry.stopped or resolution,
+         {:ok, lane} <- creation_admission(state.lane, action, entry.final),
+         {:ok, children} <- RuntimeSupervisor.children(state.root) do
+      permit = make_ref()
+
+      retained = %{
+        entry
+        | phase: phase,
+          action: %{
+            permit: permit,
+            operation: action,
+            pid: nil,
+            monitor: nil,
+            worker: nil,
+            worker_monitor: nil,
+            group: nil,
+            group_monitor: nil,
+            worker_down: false,
+            group_down: false,
+            guardian_down: false,
+            joined: nil,
+            permitted: false
+          }
+      }
+
+      # The complete fence is installed in this serial callback before any permit.
+      state = %{state | lane: lane, creation: retained}
+
+      case CreationCarrier.start(
+             children.workers,
+             self(),
+             state.creation_incarnation,
+             entry.invocation,
+             permit,
+             state.store,
+             action,
+             deadline,
+             state.cleanup_grace_ms,
+             entry.cleanup
+           ) do
+        {:ok, pid} ->
+          monitor = Process.monitor(pid)
+
+          send(
+            pid,
+            {:creation_guard_owned, self(), state.creation_incarnation, entry.invocation, permit}
+          )
+
+          carrier = %{retained.action | pid: pid, monitor: monitor}
+          %{state | creation: %{retained | action: carrier}}
+
+        _ ->
+          creation_finish(state, {:error, :store_unavailable}, false)
       end
     else
-      {:error, :session_configuration_too_large} ->
-        reply =
-          detailed_session_reply(
-            {:error, :session_configuration_too_large},
-            mode,
-            :no_activation,
-            state,
-            nil
-          )
-
-        {:reply, reply, state}
-
-      {:error, :store_unavailable} ->
-        reply =
-          detailed_session_reply(
-            {:error, :store_unavailable},
-            mode,
-            :no_activation,
-            state,
-            nil
-          )
-
-        {:reply, reply, state}
-
-      _other ->
-        reply =
-          detailed_session_reply(
-            {:error, :invalid_session_creation},
-            mode,
-            :no_activation,
-            state,
-            nil
-          )
-
-        {:reply, reply, state}
+      {:error, :commit_unknown} -> creation_finish(state, {:error, :commit_unknown}, false)
+      _ -> creation_finish(state, {:error, :store_unavailable}, false)
     end
+  end
+
+  defp creation_admission(lane, {:transaction, %{type: :close_creation_reservation} = tx}, final) do
+    case OwnerLane.admit_creation_close(lane, tx, final) do
+      {:ok, _binding, next} -> {:ok, next}
+      _ -> {:error, :commit_unknown}
+    end
+  end
+
+  defp creation_admission(lane, {:transaction, tx}, _final) do
+    case OwnerLane.admit(lane, tx) do
+      {:ok, _binding, next} -> {:ok, next}
+      _ -> {:error, :commit_unknown}
+    end
+  end
+
+  defp creation_admission(lane, _read, _final), do: {:ok, lane}
+
+  defp creation_present(state, phase, transaction) do
+    entry = %{state.creation | transaction: transaction, presentations: 1}
+    creation_call(%{state | creation: entry}, phase, {:transaction, transaction})
+  end
+
+  defp creation_ready(state, incarnation, invocation, permit, guardian, group, worker) do
+    case state.creation do
+      %{invocation: ^invocation, action: %{permit: ^permit, pid: ^guardian, worker: nil} = action} =
+          entry
+      when incarnation == state.creation_incarnation ->
+        action = %{
+          action
+          | group: group,
+            worker: worker,
+            group_monitor: Process.monitor(group),
+            worker_monitor: Process.monitor(worker)
+        }
+
+        state = %{state | creation: %{entry | action: action}}
+
+        deadline =
+          if entry.stopped and entry.cleanup, do: entry.cleanup.observe, else: entry.cutoff
+
+        if not entry.cleanup_unproved and System.monotonic_time(:millisecond) < deadline and
+             (not entry.stopped or entry.phase in [:before_close, :close, :post_terminal]) do
+          send(worker, {:creation_permit, self(), incarnation, invocation, permit})
+          %{state | creation: %{state.creation | action: %{action | permitted: true}}}
+        else
+          creation_stop(state)
+        end
+
+      _ ->
+        state
+    end
+  end
+
+  defp creation_joined(state, incarnation, invocation, permit, guardian, group, worker, outcome) do
+    case state.creation do
+      %{
+        invocation: ^invocation,
+        action: %{permit: ^permit, pid: ^guardian, group: ^group, worker: ^worker} = action
+      } = entry
+      when incarnation == state.creation_incarnation ->
+        creation_advance(%{state | creation: %{entry | action: %{action | joined: outcome}}})
+
+      _ ->
+        state
+    end
+  end
+
+  defp creation_down(state, monitor, pid) do
+    entry = state.creation
+    action = entry.action
+
+    cond do
+      monitor == entry.caller_monitor and pid == entry.caller ->
+        creation_stop(state)
+
+      is_nil(action) and not is_nil(entry.activation) ->
+        creation_activation_down(state, monitor, pid)
+
+      is_nil(action) ->
+        state
+
+      monitor == action.worker_monitor and pid == action.worker ->
+        creation_advance(%{state | creation: %{entry | action: %{action | worker_down: true}}})
+
+      monitor == action.group_monitor and pid == action.group ->
+        creation_advance(%{state | creation: %{entry | action: %{action | group_down: true}}})
+
+      monitor == action.monitor and pid == action.pid ->
+        action = %{action | guardian_down: true}
+        state = %{state | creation: %{entry | action: action}}
+
+        if is_nil(action.joined),
+          do: creation_stop(state) |> creation_advance(),
+          else: creation_advance(state)
+
+      true ->
+        state
+    end
+  end
+
+  defp creation_advance(
+         %{
+           creation:
+             %{action: %{worker_down: true, group_down: true, guardian_down: true} = action} =
+               entry
+         } = state
+       ) do
+    # Concept: original joins after the observation cutoff do not restore eligibility.
+    # Technical depth: check the captured instant before observing a transaction or
+    # dispatching another phase. Retain its full fence and original actor identities.
+    if creation_cleanup_unproved?(entry) do
+      creation_unproved(state)
+    else
+      outcome = action.joined || creation_missing_outcome(action.operation)
+
+      lane =
+        case action.operation do
+          {:transaction, tx} ->
+            OwnerLane.observe(state.lane, tx, creation_observed_outcome(outcome))
+
+          _ ->
+            state.lane
+        end
+
+      state = %{state | lane: lane, creation: %{entry | action: nil}}
+      creation_step(state, entry.phase, creation_observed_outcome(outcome))
+    end
+  end
+
+  defp creation_advance(state), do: state
+
+  defp creation_observed_outcome({:undispatched, outcome}), do: outcome
+  defp creation_observed_outcome(outcome), do: outcome
+
+  defp creation_missing_outcome({:transaction, tx}) do
+    {:ok, id} = Store.transaction_id(tx)
+    {:commit_unknown, id}
+  end
+
+  defp creation_missing_outcome(_), do: :unavailable
+
+  defp creation_step(state, phase, {:commit_unknown, _})
+       when phase in [:claim, :reserve, :final, :close] do
+    entry = state.creation
+
+    if entry.presentations == 1 and (not entry.stopped or phase == :close) do
+      next = %{state | creation: %{entry | presentations: 2}}
+      creation_call(next, phase, {:transaction, entry.transaction})
+    else
+      if phase in [:reserve, :final],
+        do: creation_read(state, :before_close, entry.command_id),
+        else: creation_finish(state, {:error, :commit_unknown}, false)
+    end
+  end
+
+  defp creation_step(state, phase, {:not_committed, :stale_creation_generation})
+       when phase == :claim do
+    if state.creation.claims == 1 and not state.creation.stopped,
+      do: creation_read(state, :stale_claim, nil),
+      else: creation_finish(state, {:error, :store_unavailable}, false)
+  end
+
+  defp creation_step(state, phase, {:not_committed, reason})
+       when phase in [:claim, :reserve, :final, :close] do
+    cond do
+      phase == :final and reason == :creation_cancelled ->
+        entry = %{
+          state.creation
+          | terminal: {:error, :creation_cancelled},
+            fresh: false,
+            head: creation_final_head(state.creation.head)
+        }
+
+        creation_read(%{state | creation: entry}, :post_terminal, state.creation.command_id)
+
+      phase == :final ->
+        creation_read(state, :before_close, state.creation.command_id)
+
+      true ->
+        creation_finish(state, {:error, creation_reason(reason)}, false)
+    end
+  end
+
+  defp creation_step(state, phase, {:ok, %{head: head}})
+       when phase in [:initial_head, :stale_claim] do
+    if not state.creation.stopped do
+      with {:ok, claim} <-
+             Store.claim_creation_domain(
+               state.runtime_id,
+               head.owner_generation,
+               state.creation_selection
+             ) do
+        entry = %{state.creation | head: head, claims: state.creation.claims + 1}
+        creation_present(%{state | creation: entry}, :claim, claim)
+      else
+        _ -> creation_finish(state, {:error, :store_unavailable}, false)
+      end
+    else
+      creation_finish(state, {:error, :store_unavailable}, false)
+    end
+  end
+
+  defp creation_step(state, :claim, {:committed, _, %{type: :claim_creation_domain} = receipt}) do
+    entry = %{state.creation | head: creation_receipt_head(receipt)}
+    creation_read(%{state | creation: entry}, :post_claim, nil)
+  end
+
+  defp creation_step(state, :post_claim, {:ok, %{head: head, command: capsule}}) do
+    if head == state.creation.head and head.owner_selection == state.creation_selection do
+      state = %{state | creation: %{state.creation | head: head}}
+
+      if is_nil(capsule) and is_nil(head.active_command_id) do
+        creation_finish(%{state | creation_head: head}, :startup_ready, true)
+      else
+        creation_close_capsule(state, capsule, head)
+      end
+    else
+      creation_finish(state, {:error, :store_unavailable}, false)
+    end
+  end
+
+  defp creation_step(state, :initial_command, {:ok, %{head: head, command: capsule}}) do
+    if head == state.creation_head and head.owner_selection == state.creation_selection and
+         is_nil(head.active_command_id) and not state.creation.stopped do
+      state = %{state | creation: %{state.creation | head: head}}
+
+      case capsule do
+        nil ->
+          creation_call(
+            state,
+            :provenance,
+            {:provenance, state.runtime_id,
+             %{kind: :command, command_id: state.creation.command_id}}
+          )
+
+        %{state: status} when status in [:created, :not_committed] ->
+          creation_history(state, capsule.genesis, capsule)
+
+        _ ->
+          creation_finish(state, {:error, :commit_unknown}, false)
+      end
+    else
+      creation_finish(state, {:error, :store_unavailable}, false)
+    end
+  end
+
+  defp creation_step(state, :provenance, {:historical, row}) do
+    entry = %{state.creation | historical_row: row}
+    creation_call(%{state | creation: entry}, :historical_genesis, {:genesis, row.session_id})
+  end
+
+  defp creation_step(%{creation: %{history_reread: true}} = state, :provenance, :absent),
+    do: creation_finish(state, {:error, :store_unavailable}, false)
+
+  defp creation_step(state, :provenance, :absent) do
+    entry = state.creation
+
+    with false <- entry.stopped,
+         {:ok, genesis} <- creation_genesis(entry.options, entry.defaults, entry.supplied),
+         :ok <- validate_fresh_selection(state, genesis),
+         {:ok, final} <- Store.create_session(state.runtime_id, entry.command_id, genesis) do
+      state = %{state | creation: %{entry | final: final}}
+
+      creation_call(
+        state,
+        :history_probe,
+        {:runtime_command, create_command(state.runtime_id, entry.command_id, final)}
+      )
+    else
+      {:error, :session_configuration_too_large} ->
+        creation_finish(state, {:error, :session_configuration_too_large}, true)
+
+      _ ->
+        creation_finish(state, {:error, :invalid_session_creation}, not entry.stopped)
+    end
+  end
+
+  defp creation_step(state, :provenance, :conflict),
+    do: creation_finish(state, {:error, :runtime_command_conflict}, true)
+
+  defp creation_step(state, :historical_genesis, {:ok, [%{payload: genesis}]}) do
+    row = state.creation.historical_row
+
+    with {:ok, normalized} <- SessionGenesis.normalize(genesis),
+         true <- normalized.kind == "session_genesis_v3",
+         {:ok, final} <-
+           Store.create_session(state.runtime_id, state.creation.command_id, normalized),
+         true <-
+           Base.encode16(final.canonical_mutation_digest, case: :lower) ==
+             row.canonical_create_digest do
+      creation_history(state, normalized, %{state: :created, session_id: row.session_id})
+    else
+      _ -> creation_finish(state, {:error, :store_unavailable}, false)
+    end
+  end
+
+  defp creation_step(state, :history_probe, :absent) do
+    entry = state.creation
+
+    with false <- entry.stopped,
+         {:ok, reserve} <-
+           Store.reserve_creation(
+             state.runtime_id,
+             entry.command_id,
+             entry.head.owner_generation,
+             state.creation_selection,
+             entry.head.domain_version,
+             entry.final.genesis
+           ) do
+      creation_present(
+        %{state | creation: %{entry | reservation: reserve, fresh: true}},
+        :reserve,
+        reserve
+      )
+    else
+      _ -> creation_finish(state, {:error, :store_unavailable}, false)
+    end
+  end
+
+  defp creation_step(state, :history_probe, {:completed, _}) do
+    if not state.creation.history_reread do
+      state = %{state | creation: %{state.creation | history_reread: true}}
+
+      creation_call(
+        state,
+        :provenance,
+        {:provenance, state.runtime_id, %{kind: :command, command_id: state.creation.command_id}}
+      )
+    else
+      creation_finish(state, {:error, :store_unavailable}, false)
+    end
+  end
+
+  defp creation_step(state, :history_probe, {:error, :runtime_command_conflict}),
+    do: creation_finish(state, {:error, :runtime_command_conflict}, true)
+
+  defp creation_step(state, :history_terminal, result) do
+    expected = state.creation.terminal
+
+    matching =
+      case {expected, result} do
+        {{:ok, session}, {:completed, %{result: session}}} -> true
+        {{:error, :creation_cancelled}, {:not_committed, :creation_cancelled}} -> true
+        _ -> false
+      end
+
+    if matching,
+      do: creation_finish(state, expected, true),
+      else: creation_finish(state, {:error, :store_unavailable}, false)
+  end
+
+  defp creation_step(state, :reserve, {:committed, _, %{type: :reserve_creation} = receipt}) do
+    entry = %{state.creation | head: creation_receipt_head(receipt)}
+    state = %{state | creation: entry}
+
+    if entry.stopped,
+      do: creation_read(state, :before_close, entry.command_id),
+      else: creation_present(state, :final, entry.final)
+  end
+
+  defp creation_step(
+         state,
+         :final,
+         {:committed, command, %{type: :create_session, session_id: session}}
+       )
+       when command == state.creation.command_id do
+    head = creation_final_head(state.creation.head)
+    entry = %{state.creation | terminal: {:ok, session}, head: head}
+    creation_read(%{state | creation: entry}, :post_terminal, command)
+  end
+
+  defp creation_step(state, :before_close, {:ok, %{head: head, command: capsule}}) do
+    if head.owner_selection == state.creation_selection and is_map(capsule) and
+         capsule.command_id == state.creation.command_id and
+         capsule.genesis == state.creation.final.genesis and
+         creation_reservation_matches?(state.creation, capsule) do
+      creation_close_capsule(state, capsule, head)
+    else
+      creation_finish(state, {:error, :commit_unknown}, false)
+    end
+  end
+
+  defp creation_step(
+         state,
+         :close,
+         {:committed, _, %{type: :close_creation_reservation} = receipt}
+       ) do
+    terminal =
+      if receipt.final_resolution == :committed,
+        do: {:ok, receipt.session_id},
+        else: {:error, :creation_cancelled}
+
+    entry = %{
+      state.creation
+      | head: creation_receipt_head(receipt),
+        terminal: terminal,
+        fresh: false
+    }
+
+    selector = if entry.kind == :startup, do: nil, else: entry.command_id
+    creation_read(%{state | creation: entry}, :post_terminal, selector)
+  end
+
+  defp creation_step(state, :post_terminal, {:ok, %{head: head, command: capsule}}) do
+    entry = state.creation
+
+    current =
+      head == entry.head and head.owner_selection == state.creation_selection and
+        is_nil(head.active_command_id)
+
+    terminal =
+      if entry.kind == :startup,
+        do: is_nil(capsule),
+        else: creation_terminal_matches?(entry, capsule)
+
+    if current and terminal do
+      state = %{state | creation_head: head}
+
+      if entry.kind == :startup do
+        creation_finish(state, :startup_ready, not entry.stopped)
+      else
+        if entry.fresh and not entry.stopped and match?({:ok, _}, entry.terminal) and
+             System.monotonic_time(:millisecond) < entry.cutoff do
+          creation_activate(state)
+        else
+          creation_finish(state, entry.terminal, true)
+        end
+      end
+    else
+      creation_finish(state, {:error, :store_unavailable}, false)
+    end
+  end
+
+  defp creation_step(state, _phase, _result),
+    do: creation_finish(state, {:error, :store_unavailable}, false)
+
+  defp creation_history(state, genesis, capsule) do
+    entry = state.creation
+
+    with {:ok, original} <- creation_genesis(entry.options, nil, genesis),
+         true <-
+           entry.supplied == :runtime_defaults or
+             match?({:ok, ^original}, creation_genesis(entry.options, nil, entry.supplied)),
+         {:ok, final} <- Store.create_session(state.runtime_id, entry.command_id, original) do
+      terminal =
+        if capsule.state == :created,
+          do: {:ok, capsule.session_id},
+          else: {:error, :creation_cancelled}
+
+      entry = %{entry | final: final, terminal: terminal, fresh: false}
+
+      creation_call(
+        %{state | creation: entry},
+        :history_terminal,
+        {:runtime_command, create_command(state.runtime_id, entry.command_id, final)}
+      )
+    else
+      _ -> creation_finish(state, {:error, :runtime_command_conflict}, true)
+    end
+  end
+
+  defp creation_close_capsule(state, capsule, head) when is_map(capsule) do
+    with {:ok, final} <-
+           Store.create_session(state.runtime_id, capsule.command_id, capsule.genesis),
+         true <- is_nil(state.creation.final) or state.creation.final == final,
+         {:ok, close} <-
+           Store.close_creation_reservation(
+             state.runtime_id,
+             capsule.command_id,
+             head.owner_generation,
+             state.creation_selection,
+             head.domain_version,
+             capsule.reservation_tx_id,
+             capsule.reservation_domain_version,
+             final
+           ) do
+      entry = %{
+        state.creation
+        | command_id: capsule.command_id,
+          head: head,
+          final: final,
+          fresh: false
+      }
+
+      creation_present(%{state | creation: entry}, :close, close)
+    else
+      _ -> creation_finish(state, {:error, :store_unavailable}, false)
+    end
+  end
+
+  defp creation_close_capsule(state, _capsule, _head),
+    do: creation_finish(state, {:error, :store_unavailable}, false)
+
+  defp creation_reservation_matches?(%{reservation: nil}, _capsule), do: true
+
+  defp creation_reservation_matches?(%{reservation: reserve}, capsule) do
+    capsule.reservation_tx_id == reserve.tx_id and
+      capsule.reservation_owner_generation == reserve.owner_generation and
+      capsule.reservation_owner_selection == reserve.owner_selection and
+      capsule.reservation_domain_version == reserve.expected_domain_version + 1
+  end
+
+  defp creation_terminal_matches?(entry, capsule) when is_map(capsule) do
+    capsule.command_id == entry.command_id and capsule.genesis == entry.final.genesis and
+      creation_reservation_matches?(entry, capsule) and
+      case {entry.terminal, capsule.state, capsule.session_id} do
+        {{:ok, session}, :created, session} -> true
+        {{:error, :creation_cancelled}, :not_committed, nil} -> true
+        _ -> false
+      end
+  end
+
+  defp creation_terminal_matches?(_entry, _capsule), do: false
+
+  defp creation_final_head(head),
+    do: %{
+      head
+      | owner_generation: head.owner_generation + 1,
+        domain_version: head.domain_version + 1,
+        active_command_id: nil
+    }
+
+  defp creation_receipt_head(receipt),
+    do:
+      receipt
+      |> Map.take([:owner_generation, :owner_selection, :domain_version, :active_command_id])
+      |> Map.put(:version, 1)
+
+  defp creation_reason(reason) when reason in [:creation_cancelled, :runtime_command_conflict],
+    do: reason
+
+  defp creation_reason(_private), do: :store_unavailable
+
+  defp creation_activate(state) do
+    if creation_activation_allowed?(state),
+      do: creation_start_owner(state),
+      else: creation_finish(creation_stop(state), state.creation.terminal, true)
+  end
+
+  defp creation_start_owner(state) do
+    entry = state.creation
+    {:ok, session} = entry.terminal
+
+    case start_owner(
+           state,
+           session,
+           succession_id(state.runtime_id, "create", session, entry.command_id),
+           entry.from,
+           nil,
+           entry.mode
+         ) do
+      {:waiting, next} ->
+        acquired = Map.fetch!(next.sessions, session)
+
+        activation = %{
+          session: session,
+          coordinator: acquired.coordinator,
+          coordinator_monitor: acquired.coordinator_monitor,
+          group: acquired.owner_group,
+          group_monitor: acquired.owner_group_monitor,
+          coordinator_down: false,
+          group_down: false
+        }
+
+        %{next | creation: %{next.creation | activation: activation}}
+
+      {:error, reason, next, disposition} ->
+        GenServer.reply(
+          entry.from,
+          detailed_session_reply({:error, reason}, entry.mode, disposition, next, session)
+        )
+
+        creation_release(next, true)
+    end
+  end
+
+  defp creation_finish(state, result, eligible) do
+    entry = state.creation
+
+    cond do
+      creation_cleanup_unproved?(entry) ->
+        creation_unproved(state)
+
+      entry.action ->
+        # Unjoined resources retain the occupied slot and fence, including on failure.
+        creation_stop(state)
+
+      true ->
+        if entry.from do
+          session =
+            case result do
+              {:ok, id} -> id
+              _ -> nil
+            end
+
+          GenServer.reply(
+            entry.from,
+            detailed_session_reply(result, entry.mode, :no_activation, state, session)
+          )
+        end
+
+        creation_release(state, eligible)
+    end
+  end
+
+  defp creation_release(state, eligible) do
+    entry = state.creation
+
+    if creation_cleanup_unproved?(entry) do
+      creation_unproved(state)
+    else
+      Process.cancel_timer(entry.timer)
+      if entry.cleanup_timer, do: Process.cancel_timer(entry.cleanup_timer)
+      if entry.caller_monitor, do: Process.demonitor(entry.caller_monitor, [:flush])
+
+      %{
+        state
+        | creation: nil,
+          creation_status:
+            if(eligible and not state.creation_stopping, do: :ready, else: :unavailable)
+      }
+    end
+  end
+
+  defp creation_cleanup_unproved?(entry) do
+    entry.cleanup_unproved or
+      (not is_nil(entry.cleanup) and System.monotonic_time(:millisecond) >= entry.cleanup.observe)
+  end
+
+  # Concept: unavailable cleanup is a retained disposition for this placement.
+  # Technical depth: timer order cannot renew an expired observation period.
+  # Preserve original monitors, the complete lane and the occupied invocation.
+  defp creation_unproved(state) do
+    entry = state.creation
+
+    if entry.from do
+      GenServer.reply(
+        entry.from,
+        detailed_session_reply(
+          {:error, :store_unavailable},
+          entry.mode,
+          :no_activation,
+          state,
+          nil
+        )
+      )
+    end
+
+    sessions =
+      if entry.activation do
+        Map.update(state.sessions, entry.activation.session, nil, fn session ->
+          Map.put(session, :waiting, nil)
+        end)
+      else
+        state.sessions
+      end
+
+    %{
+      state
+      | creation: %{entry | cleanup_unproved: true, stopped: true, fresh: false, from: nil},
+        sessions: sessions,
+        creation_status: :unavailable
+    }
+  end
+
+  defp creation_stop(%{creation: nil} = state), do: state
+
+  defp creation_stop(state) do
+    entry = state.creation
+    cleanup = entry.cleanup || creation_cleanup(state.cleanup_grace_ms)
+
+    cleanup_timer =
+      entry.cleanup_timer ||
+        Process.send_after(
+          self(),
+          {:creation_cleanup_expired, state.creation_incarnation, entry.invocation},
+          min(max(cleanup.observe - System.monotonic_time(:millisecond), 0), 3_600_000)
+        )
+
+    entry = %{entry | stopped: true, cleanup: cleanup, cleanup_timer: cleanup_timer, fresh: false}
+
+    if is_map(entry.action) and is_pid(entry.action.pid) do
+      send(
+        entry.action.pid,
+        {:creation_retire, self(), state.creation_incarnation, entry.invocation,
+         entry.action.permit, cleanup}
+      )
+    end
+
+    if entry.activation do
+      GenServer.cast(entry.activation.coordinator, {:superseded, "creation-stopped"})
+      Process.exit(entry.activation.coordinator, :shutdown)
+
+      Process.send_after(
+        self(),
+        {:creation_activation_force, state.creation_incarnation, entry.invocation},
+        min(max(cleanup.cooperative - System.monotonic_time(:millisecond), 0), 3_600_000)
+      )
+    end
+
+    %{state | creation: entry}
+  end
+
+  defp creation_cleanup(grace) do
+    {:ok, bounds} = Loopex.Executor.cancellation_bounds(grace)
+    instant = System.monotonic_time(:millisecond)
+    %{cooperative: instant + grace, observe: instant + bounds.executor_observe_ms}
+  end
+
+  defp creation_activation_answered(
+         %{creation: %{activation: %{session: session}} = entry} = state,
+         session
+       ),
+       do: creation_stop(%{state | creation: %{entry | from: nil}})
+
+  defp creation_activation_answered(state, _session), do: state
+
+  defp creation_activation_down(state, monitor, pid) do
+    entry = state.creation
+    activation = entry.activation
+    {:noreply, next} = handle_session_monitor_down(monitor, pid, state)
+
+    activation =
+      cond do
+        monitor == activation.coordinator_monitor and pid == activation.coordinator ->
+          %{activation | coordinator_down: true}
+
+        monitor == activation.group_monitor and pid == activation.group ->
+          %{activation | group_down: true}
+
+        true ->
+          activation
+      end
+
+    # Session's original monitor handler has already answered its sole waiter.
+    next = %{next | creation: %{entry | activation: activation, from: nil}}
+
+    if activation.coordinator_down and activation.group_down do
+      proved =
+        is_nil(entry.cleanup) or System.monotonic_time(:millisecond) < entry.cleanup.observe
+
+      creation_release(next, proved)
+    else
+      creation_stop(next)
+    end
+  end
+
+  defp creation_activation_allowed?(state) do
+    entry = state.creation
+    alive = Process.alive?(entry.caller)
+
+    stopped =
+      receive do
+        {:DOWN, monitor, :process, caller, _}
+        when monitor == entry.caller_monitor and caller == entry.caller ->
+          true
+      after
+        0 -> false
+      end
+
+    alive and not stopped and not entry.stopped and is_nil(state.quiescing) and
+      System.monotonic_time(:millisecond) < entry.cutoff
+  end
+
+  defp creation_monitor?(state, monitor) do
+    entry = state.creation
+
+    monitor == entry.caller_monitor or
+      (not is_nil(entry.action) and
+         monitor in [
+           entry.action.monitor,
+           entry.action.worker_monitor,
+           entry.action.group_monitor
+         ]) or
+      (not is_nil(entry.activation) and
+         monitor in [entry.activation.coordinator_monitor, entry.activation.group_monitor])
   end
 
   defp creation_genesis(options, defaults, :runtime_defaults) when is_map(defaults) do
@@ -2457,9 +3491,7 @@ defmodule Loopex.Runtime.Control do
   # Technical depth: only a proved fresh create checks the runtime's admitted
   # definitions and model route. The transaction binds complete captured genesis
   # and its normalized original options, never current cleanup defaults.
-  defp validate_fresh_selection(_state, _genesis, false), do: :ok
-
-  defp validate_fresh_selection(state, %{kind: "session_genesis_v3"} = genesis, true) do
+  defp validate_fresh_selection(state, %{kind: "session_genesis_v3"} = genesis) do
     definitions = genesis["tool_selection"]["definitions"]
     configuration = genesis["initial_configuration"]
     model = configuration["model"]
@@ -2476,34 +3508,6 @@ defmodule Loopex.Runtime.Control do
       :ok
     else
       _invalid -> {:error, :invalid_session_creation}
-    end
-  end
-
-  # Concept: only a create whose command key the Store proves was absent an
-  # instant ago may take ownership of the session it creates.
-  #
-  # Technical depth: ADR 0008 makes a completed create replay historical only --
-  # it "returns its original result without advancing the epoch" and "does not
-  # recreate a dead coordinator" -- and reserves ownership acquisition for the
-  # staged resume paths. `Store.transact/2` cannot carry that distinction: an
-  # exact re-presentation returns the retained receipt byte-for-byte, so a
-  # runtime that lost its process-local session table read its own replay as a
-  # first commit and advanced the epoch through the create path's unstaged
-  # succession. The runtime-command read is the one API keyed by exactly
-  # `runtime_id + command_id`, and `:absent` is the only answer that proves this
-  # transaction is the one committing now. Every other answer -- a retained
-  # entry, an open candidate, or a binding an adapter cannot project -- means
-  # the freshness cannot be proved, so the command is answered from its durable
-  # result and starts nothing. `:unavailable` decides nothing at all and commits
-  # nothing.
-  defp create_command_absent?(state, command_id, transaction) do
-    case Store.runtime_command(
-           state.store,
-           create_command(state.runtime_id, command_id, transaction)
-         ) do
-      :absent -> {:ok, true}
-      :unavailable -> {:error, :store_unavailable}
-      _retained -> {:ok, false}
     end
   end
 
@@ -3700,6 +4704,11 @@ defmodule Loopex.Runtime.Control do
   # head. Harmless admissions advance the head without replacing that attempt.
   # One cardinality-capped interval uses the existing bounded Store guardian;
   # every row retains this owner and no intervening row may invalidate authority.
+  defp provider_position_binding(%{creation: creation}, _session, _authority, _binding)
+       when not is_nil(creation) do
+    {:error, :invalid_provider_attempt_binding}
+  end
+
   defp provider_position_binding(
          state,
          session_id,
@@ -4004,13 +5013,6 @@ defmodule Loopex.Runtime.Control do
     do: is_integer(first) and first > 0 and first <= event
 
   defp event_receipt_matches?(_event, _receipt), do: false
-
-  defp resolve_transaction(lane, transaction) do
-    case OwnerLane.transact(lane, transaction) do
-      {{:commit_unknown, _tx_id}, next_lane} -> OwnerLane.transact(next_lane, transaction)
-      result -> result
-    end
-  end
 
   defp fresh_id(namespace, scope, counter) do
     bytes = :erlang.term_to_binary([namespace, scope, counter, make_ref()], [:deterministic])

@@ -13697,6 +13697,15 @@ or check was relaxed.
   current-format restore and native responsive lifecycle obligations stay open.
 - [ ] Implement accepted ADR0059's owned Control creation slot, conservative pre-permit fence and mechanical carrier with finite startup/recovery; prove actual held Store stop/status/overlap behavior, occupied-read refusals, original joins/cutoffs, actor/root/VM loss and no historical activation before coordinated rejoin.
 
+  Partial native unit proved: isolated52808005, complete22 per supported pair,
+  original45191,69.460seconds, eight joins/42 artifacts, no exclusions/skips/invalid.
+  Literal seven-path integration and nine tested boundary-context paths are retained
+  in the resume record. Held reads/claim/reservation/final/close, overlap, stop,
+  original actor joins and actual captured-cutoff cases pass. Authored intake,
+  host readiness, complete original caller migration, root/VM-loss and coordinated
+  serving/rejoin remain required. Parent stays open. Original67170's one actual
+  failing fixture case remains failed; explicit two-fault repair retains bounds.
+
 - [x] Prove resumed prepared-startup abandonment after callback refusal, raise, throw and exit, and truthful uncertainty when the activation guard dies before acknowledgement; preserve exact committed records, unread input, zero model/job dispatch, native activation paths and all owned process joins on both supported pairs.
 
 - [x] Prepare durable ask's complete current v3 genesis before placement and credential custody, retain canonical model/instructions/derived capacity and exact selected tools through the public create facade, keep concrete adapter imports in composition, and prove real Local Store create/reopen/resume, capture refusal, tool profiles, resource and cleanup cases on both supported pairs. Retain failed complete CLI outputs and their focused repairs; other host creation paths and Core v2 removal remain open.

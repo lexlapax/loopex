@@ -16,9 +16,11 @@ defmodule Loopex.M1RuntimeTestStore do
     {pid, store}
   end
 
-  def inject(pid, {transition, phase} = pair) do
+  def inject(pid, pair), do: inject(pid, pair, 1)
+
+  def inject(pid, {transition, phase} = pair, count) when count in 1..2 do
     :ok = Transitions.validate_pair(transition, phase)
-    GenServer.call(pid, {:inject, pair})
+    GenServer.call(pid, {:inject, pair, count})
   end
 
   def delay_after_commit(pid, transition, observer) when is_pid(observer),
@@ -105,6 +107,17 @@ defmodule Loopex.M1RuntimeTestStore do
   def load_events(pid, session_id, after_sequence, limit),
     do: GenServer.call(pid, {:load_events, session_id, after_sequence, limit}, :infinity)
 
+  @impl Store
+  def creation_recovery(pid, request),
+    do: GenServer.call(pid, {:creation_recovery, request}, :infinity)
+
+  @impl Store
+  def creation_provenance(pid, runtime, selector),
+    do: GenServer.call(pid, {:creation_provenance, runtime, selector}, :infinity)
+
+  def hold_next_creation_recovery(pid, observer),
+    do: GenServer.call(pid, {:hold_creation_read, observer})
+
   @impl GenServer
   def init(options) do
     {:ok,
@@ -112,11 +125,18 @@ defmodule Loopex.M1RuntimeTestStore do
        label: Keyword.get(options, :label, "test-store"),
        next_session: 1,
        runtime_commands: %{},
+       creation_heads: %{},
+       creation_capsules: %{},
+       creation_resolutions: %{},
+       creation_queries: [],
+       creation_calls: [],
+       creation_read_block: nil,
        sessions: %{},
        resolutions: %{},
        status_queries: [],
        representation_observer: nil,
        event_reads: [],
+       record_reads: [],
        injected: MapSet.new(),
        observed: MapSet.new(),
        faults: %{},
@@ -137,7 +157,7 @@ defmodule Loopex.M1RuntimeTestStore do
   def handle_call({:observe_representations, observer}, _from, state),
     do: {:reply, :ok, %{state | representation_observer: observer}}
 
-  def handle_call({:inject, {transition, phase} = pair}, _from, state) do
+  def handle_call({:inject, {transition, phase} = pair, count}, _from, state) do
     recovery_setup =
       if phase == :recovery_representation,
         do: MapSet.put(state.recovery_setup, transition),
@@ -147,7 +167,7 @@ defmodule Loopex.M1RuntimeTestStore do
      %{
        state
        | injected: MapSet.put(state.injected, pair),
-         faults: Map.put(state.faults, pair, 1),
+         faults: Map.put(state.faults, pair, count),
          recovery_setup: recovery_setup
      }}
   end
@@ -194,6 +214,71 @@ defmodule Loopex.M1RuntimeTestStore do
     {:reply, :ok, %{state | refuse_records: MapSet.put(state.refuse_records, kind)}}
   end
 
+  def handle_call({:hold_creation_read, observer}, _from, state),
+    do: {:reply, :ok, %{state | creation_read_block: observer}}
+
+  def handle_call({:creation_recovery, request}, from, state) do
+    head = creation_head(state, request.runtime_id)
+    command = request.command_id || head.active_command_id
+
+    reply =
+      if state.fail_reads,
+        do: :unavailable,
+        else:
+          {:ok,
+           %{
+             version: 1,
+             runtime_id: request.runtime_id,
+             head: head,
+             command: Map.get(state.creation_capsules, {request.runtime_id, command})
+           }}
+
+    state = %{state | creation_queries: state.creation_queries ++ [request]}
+
+    if state.creation_read_block do
+      waiter = delayed_reply(from, reply)
+      send(state.creation_read_block, {:creation_read_held, waiter, elem(from, 0), request})
+      {:noreply, %{state | creation_read_block: nil}}
+    else
+      {:reply, reply, state}
+    end
+  end
+
+  def handle_call(
+        {:creation_provenance, runtime, %{kind: :command, command_id: command}},
+        _from,
+        state
+      ) do
+    result =
+      case Map.get(state.runtime_commands, {runtime, command}) do
+        %{binding: binding, outcome: {:committed, _, _}, session_id: session} ->
+          {:historical,
+           %{
+             version: 1,
+             runtime_id: runtime,
+             command_id: command,
+             session_id: session,
+             genesis_version: 3,
+             canonical_create_digest:
+               Base.encode16(binding.canonical_mutation_digest, case: :lower)
+           }}
+
+        nil ->
+          :absent
+
+        %{outcome: {:not_committed, :creation_cancelled}} ->
+          :absent
+
+        _ ->
+          :conflict
+      end
+
+    {:reply, if(state.fail_reads, do: :unavailable, else: result), state}
+  end
+
+  def handle_call({:creation_provenance, _runtime, _selector}, _from, state),
+    do: {:reply, :unavailable, state}
+
   def handle_call(:observed, _from, state), do: {:reply, state.observed, state}
   def handle_call(:injected, _from, state), do: {:reply, state.injected, state}
 
@@ -214,6 +299,18 @@ defmodule Loopex.M1RuntimeTestStore do
   end
 
   def handle_call({:transact, transaction}, from, state) do
+    state =
+      if transaction.type in [
+           :claim_creation_domain,
+           :reserve_creation,
+           :close_creation_reservation,
+           :create_session
+         ] do
+        %{state | creation_calls: state.creation_calls ++ [transaction]}
+      else
+        state
+      end
+
     case held_before_record(state, transaction) do
       {kind, observer} -> hold_before_linearization(state, from, transaction, kind, observer)
       nil -> transact(state, from, transaction)
@@ -273,6 +370,12 @@ defmodule Loopex.M1RuntimeTestStore do
             do: {:completed, %{result: session_id}},
             else: {:error, :runtime_command_conflict}
 
+        %{binding: binding, outcome: {:not_committed, :creation_cancelled}}
+        when command.command_kind == :create ->
+          if create_command_matches?(command, binding),
+            do: {:not_committed, :creation_cancelled},
+            else: {:error, :runtime_command_conflict}
+
         %{command: ^command, status: status, generation: generation, candidate: candidate} =
             entry ->
           details = %{attempt_generation: generation, candidate_tx_id: candidate.tx_id}
@@ -304,7 +407,8 @@ defmodule Loopex.M1RuntimeTestStore do
       |> Enum.filter(&(&1.journal_version > after_version))
       |> Enum.take(limit)
 
-    {:reply, {:ok, records}, state}
+    query = {session_id, after_version, limit}
+    {:reply, {:ok, records}, %{state | record_reads: state.record_reads ++ [query]}}
   end
 
   def handle_call(
@@ -570,41 +674,194 @@ defmodule Loopex.M1RuntimeTestStore do
     end
   end
 
+  # Concept: this serialized fixture models the current creation custody contract.
+  # Technical depth: existing delay/fault hooks surround these exact transitions;
+  # a held deliverable is not removed when its original caller exits.
+  defp linearize(state, %{type: :claim_creation_domain} = tx, binding) do
+    head = creation_head(state, tx.runtime_id)
+
+    maximum =
+      if head.active_command_id, do: 18_446_744_073_709_551_613, else: 18_446_744_073_709_551_612
+
+    cond do
+      tx.expected_owner_generation != head.owner_generation ->
+        retain_noncommit(state, tx, binding, :stale_creation_generation)
+
+      head.owner_generation > maximum ->
+        retain_noncommit(state, tx, binding, :creation_counter_exhausted)
+
+      true ->
+        head = %{
+          head
+          | owner_generation: head.owner_generation + 1,
+            owner_selection: tx.owner_selection
+        }
+
+        creation_commit(state, tx, binding, head, %{})
+    end
+  end
+
+  defp linearize(state, %{type: :reserve_creation} = tx, binding) do
+    head = creation_head(state, tx.runtime_id)
+    key = {tx.runtime_id, tx.command_id}
+
+    capsule = %{
+      version: 1,
+      runtime_id: tx.runtime_id,
+      command_id: tx.command_id,
+      reservation_tx_id: tx.tx_id,
+      reservation_owner_generation: tx.owner_generation,
+      reservation_owner_selection: tx.owner_selection,
+      reservation_domain_version: tx.expected_domain_version + 1,
+      genesis: tx.genesis,
+      state: :reserved,
+      final_resolution: nil,
+      session_id: nil
+    }
+
+    cond do
+      Map.has_key?(state.runtime_commands, key) or Map.has_key?(state.creation_capsules, key) ->
+        retain_noncommit(state, tx, binding, :runtime_command_conflict)
+
+      tx.owner_generation != head.owner_generation or tx.owner_selection != head.owner_selection ->
+        retain_noncommit(state, tx, binding, :stale_creation_generation)
+
+      tx.expected_domain_version != head.domain_version ->
+        retain_noncommit(state, tx, binding, :creation_domain_conflict)
+
+      not is_nil(head.active_command_id) ->
+        retain_noncommit(state, tx, binding, :creation_in_progress)
+
+      head.owner_generation > 18_446_744_073_709_551_613 or
+          head.domain_version > 18_446_744_073_709_551_613 ->
+        retain_noncommit(state, tx, binding, :creation_counter_exhausted)
+
+      not creation_reply_fits?(head, capsule) ->
+        retain_noncommit(state, tx, binding, :creation_recovery_too_large)
+
+      true ->
+        head = %{
+          head
+          | owner_generation: head.owner_generation + 1,
+            domain_version: head.domain_version + 1,
+            active_command_id: tx.command_id
+        }
+
+        state = %{state | creation_capsules: Map.put(state.creation_capsules, key, capsule)}
+
+        creation_commit(state, tx, binding, head, %{
+          reservation_tx_id: tx.tx_id,
+          reservation_domain_version: capsule.reservation_domain_version
+        })
+    end
+  end
+
+  defp linearize(state, %{type: :close_creation_reservation} = tx, binding) do
+    head = creation_head(state, tx.runtime_id)
+    key = {tx.runtime_id, tx.command_id}
+    capsule = Map.get(state.creation_capsules, key)
+    retained = Map.get(state.runtime_commands, key)
+
+    exact =
+      is_map(capsule) and capsule.reservation_tx_id == tx.reservation_tx_id and
+        capsule.reservation_domain_version == tx.reservation_domain_version
+
+    final =
+      if is_map(capsule),
+        do: Store.create_session(tx.runtime_id, tx.command_id, capsule.genesis),
+        else: :absent
+
+    full =
+      case final do
+        {:ok, final} ->
+          final.canonical_record_bytes == tx.final_canonical_record_bytes and
+            final.canonical_mutation_digest == tx.final_canonical_mutation_digest
+
+        _ ->
+          false
+      end
+
+    cond do
+      not exact or not full ->
+        retain_noncommit(state, tx, binding, :creation_reservation_conflict)
+
+      is_map(retained) ->
+        case Map.get(retained, :outcome) do
+          {:committed, _, %{session_id: session}} ->
+            creation_commit(state, tx, binding, head, %{
+              command_id: tx.command_id,
+              reservation_tx_id: tx.reservation_tx_id,
+              final_resolution: :committed,
+              session_id: session
+            })
+
+          {:not_committed, :creation_cancelled} ->
+            creation_commit(state, tx, binding, head, %{
+              command_id: tx.command_id,
+              reservation_tx_id: tx.reservation_tx_id,
+              final_resolution: {:not_committed, :creation_cancelled},
+              session_id: nil
+            })
+
+          _ ->
+            retain_noncommit(state, tx, binding, :runtime_command_conflict)
+        end
+
+      tx.owner_generation != head.owner_generation or tx.owner_selection != head.owner_selection ->
+        retain_noncommit(state, tx, binding, :stale_creation_generation)
+
+      tx.expected_domain_version != head.domain_version ->
+        retain_noncommit(state, tx, binding, :creation_domain_conflict)
+
+      head.active_command_id != tx.command_id or capsule.state != :reserved ->
+        retain_noncommit(state, tx, binding, :creation_reservation_conflict)
+
+      head.owner_generation >= 18_446_744_073_709_551_615 or
+          head.domain_version >= 18_446_744_073_709_551_615 ->
+        retain_noncommit(state, tx, binding, :creation_counter_exhausted)
+
+      true ->
+        {:ok, final} = final
+        {:ok, final_binding} = Store.immutable_binding(final)
+        outcome = {:not_committed, :creation_cancelled}
+        retained = %{binding: final_binding, outcome: outcome, session_id: nil}
+        capsule = %{capsule | state: :not_committed, final_resolution: outcome}
+
+        state = %{
+          state
+          | runtime_commands: Map.put(state.runtime_commands, key, retained),
+            creation_capsules: Map.put(state.creation_capsules, key, capsule)
+        }
+
+        head = %{
+          head
+          | owner_generation: head.owner_generation + 1,
+            domain_version: head.domain_version + 1,
+            active_command_id: nil
+        }
+
+        creation_commit(state, tx, binding, head, %{
+          command_id: tx.command_id,
+          reservation_tx_id: tx.reservation_tx_id,
+          final_resolution: outcome,
+          session_id: nil
+        })
+    end
+  end
+
   defp linearize(state, %{type: :create_session} = transaction, binding) do
-    session_id = "s_test_" <> Integer.to_string(state.next_session)
+    capsule = Map.get(state.creation_capsules, {transaction.runtime_id, transaction.command_id})
+    head = creation_head(state, transaction.runtime_id)
 
-    genesis = %{
-      journal_version: 1,
-      owner_epoch: 0,
-      owner_incarnation_id: nil,
-      payload: transaction.genesis
-    }
-
-    receipt = %{type: :create_session, session_id: session_id, journal_version: 1}
-    outcome = {:committed, transaction.command_id, receipt}
-
-    retained = %{binding: binding, outcome: outcome, session_id: session_id}
-    command_key = {transaction.runtime_id, transaction.command_id}
-
-    session = %{
-      runtime_id: transaction.runtime_id,
-      owner_epoch: 0,
-      owner_incarnation_id: nil,
-      journal_version: 1,
-      event_sequence: 0,
-      records: [genesis],
-      events: [],
-      event_ids: MapSet.new()
-    }
-
-    next = %{
-      state
-      | next_session: state.next_session + 1,
-        runtime_commands: Map.put(state.runtime_commands, command_key, retained),
-        sessions: Map.put(state.sessions, session_id, session)
-    }
-
-    {next, outcome}
+    if is_map(capsule) and capsule.state == :reserved and
+         capsule.genesis == transaction.genesis and
+         head.active_command_id == transaction.command_id and
+         head.owner_generation < 18_446_744_073_709_551_615 and
+         head.domain_version < 18_446_744_073_709_551_615 do
+      create_reserved_session(state, transaction, binding, capsule, head)
+    else
+      {state, {:not_committed, :creation_reservation_conflict}}
+    end
   end
 
   defp linearize(state, %{type: :stage_owner_attempt} = transaction, binding) do
@@ -619,6 +876,9 @@ defmodule Loopex.M1RuntimeTestStore do
 
         session.runtime_id != transaction.runtime_id ->
           :runtime_placement_mismatch
+
+        Map.has_key?(state.creation_capsules, {transaction.runtime_id, transaction.command_id}) ->
+          :runtime_command_conflict
 
         unresolved_other_owner_command?(state, transaction) ->
           :owner_attempt_in_progress
@@ -803,10 +1063,118 @@ defmodule Loopex.M1RuntimeTestStore do
     end
   end
 
+  defp creation_head(state, runtime),
+    do:
+      Map.get(state.creation_heads, runtime, %{
+        version: 1,
+        owner_generation: 0,
+        owner_selection: nil,
+        domain_version: 0,
+        active_command_id: nil
+      })
+
+  defp creation_commit(state, tx, binding, head, extra) do
+    receipt =
+      head
+      |> Map.delete(:version)
+      |> Map.merge(extra)
+      |> Map.merge(%{type: tx.type, runtime_id: tx.runtime_id})
+
+    outcome = {:committed, tx.tx_id, receipt}
+    state = %{state | creation_heads: Map.put(state.creation_heads, tx.runtime_id, head)}
+    {put_resolution(state, tx, binding, outcome), outcome}
+  end
+
+  defp creation_reply_fits?(head, capsule) do
+    head = %{
+      head
+      | owner_generation: 18_446_744_073_709_551_615,
+        domain_version: 18_446_744_073_709_551_615,
+        owner_selection: String.duplicate("f", 64),
+        active_command_id: String.duplicate("x", 65_536)
+    }
+
+    for {status, resolution, session} <- [
+          {:reserved, nil, nil},
+          {:created, :committed, String.duplicate("s", 65_536)},
+          {:not_committed, {:not_committed, :creation_cancelled}, nil}
+        ] do
+      reply = %{
+        version: 1,
+        runtime_id: capsule.runtime_id,
+        head: head,
+        command: %{capsule | state: status, final_resolution: resolution, session_id: session}
+      }
+
+      byte_size(:erlang.term_to_binary(reply, [:deterministic])) <= 1_048_576
+    end
+    |> Enum.all?()
+  end
+
+  defp create_reserved_session(state, transaction, binding, capsule, head) do
+    session_id = "s_test_" <> Integer.to_string(state.next_session)
+
+    genesis = %{
+      journal_version: 1,
+      owner_epoch: 0,
+      owner_incarnation_id: nil,
+      payload: transaction.genesis
+    }
+
+    receipt = %{type: :create_session, session_id: session_id, journal_version: 1}
+    outcome = {:committed, transaction.command_id, receipt}
+
+    retained = %{binding: binding, outcome: outcome, session_id: session_id}
+    command_key = {transaction.runtime_id, transaction.command_id}
+
+    session = %{
+      runtime_id: transaction.runtime_id,
+      owner_epoch: 0,
+      owner_incarnation_id: nil,
+      journal_version: 1,
+      event_sequence: 0,
+      records: [genesis],
+      events: [],
+      event_ids: MapSet.new()
+    }
+
+    next = %{
+      state
+      | next_session: state.next_session + 1,
+        runtime_commands: Map.put(state.runtime_commands, command_key, retained),
+        sessions: Map.put(state.sessions, session_id, session)
+    }
+
+    head = %{
+      head
+      | owner_generation: head.owner_generation + 1,
+        domain_version: head.domain_version + 1,
+        active_command_id: nil
+    }
+
+    capsule = %{capsule | state: :created, final_resolution: :committed, session_id: session_id}
+
+    next = %{
+      next
+      | creation_heads: Map.put(next.creation_heads, transaction.runtime_id, head),
+        creation_capsules: Map.put(next.creation_capsules, command_key, capsule)
+    }
+
+    {next, outcome}
+  end
+
   defp retained(state, %{type: :create_session} = transaction) do
     case Map.get(state.runtime_commands, {transaction.runtime_id, transaction.command_id}) do
       nil -> :absent
       retained -> {:ok, retained}
+    end
+  end
+
+  defp retained(state, %{type: type, runtime_id: runtime, tx_id: id})
+       when type in [:claim_creation_domain, :reserve_creation, :close_creation_reservation] do
+    case Map.fetch(state.creation_resolutions, {runtime, type, id}) do
+      {:ok, retained} -> {:ok, retained}
+      :error -> :absent
     end
   end
 
@@ -823,6 +1191,18 @@ defmodule Loopex.M1RuntimeTestStore do
   defp retain_noncommit(state, transaction, binding, reason) do
     outcome = {:not_committed, reason}
     {put_resolution(state, transaction, binding, outcome), outcome}
+  end
+
+  defp put_resolution(state, %{type: type, runtime_id: runtime, tx_id: id}, binding, outcome)
+       when type in [:claim_creation_domain, :reserve_creation, :close_creation_reservation] do
+    %{
+      state
+      | creation_resolutions:
+          Map.put(state.creation_resolutions, {runtime, type, id}, %{
+            binding: binding,
+            outcome: outcome
+          })
+    }
   end
 
   defp put_resolution(state, transaction, binding, outcome) do
