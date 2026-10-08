@@ -1,24 +1,14 @@
 # M7 Implementation Tasks
 
-Current continuation: ADR0061's exact proposal9ba346fe passed documentation
-validation; its asked approval is pending. Core recovery-state review is being
-repaired before native verification. Adapter atomic mechanics proceed in a
-separate worktree; exact persistent replay encoding needs a concrete decision.
-ProgressSink whole83764 remains failed, with current26/floor24 passing. The
-reviewed eight-byte fixture repair is saved ate13e15b9; new proof remains UNRUN.
-T01–T19 totals remain88 original done/85 todo/6 retired and356 added done/26 todo.
-The [resume record](M7-resume.md) retains original run/source identities.
-
-Latest status: ADR0059's Core Store unit has26 new cases and awaits review/native
-proof. Durable adapters, Control/carrier and cancellation readers remain open.
-ADR0061 is Proposed and independently reviewed; its exact cancellation envelope
-needs maintainer acceptance after documentation validation. ProgressSink's
-paired run25214 remains failed, with current26/26 and floor24/26 passing.
-The test-only arithmetic repair is saved atf3b91da5 and awaits a fresh paired
-proof. Interaction-stop V2 is source-qualified and native UNRUN. Full retained
-references are in the [resume record](M7-resume.md). T01–T19 totals remain88
-original done/85 todo/6 retired and356 added done/26 todo. Earlier status entries
-below are historical where superseded.
+Current continuation: ADR0061 is accepted at `d7c23f3d`; no asked approval
+is pending. The Core Store creation boundary passed all32 cases on both
+supported pairs and is integrated. T01–T19 remain88 original done/85 todo/6
+retired; added357 done/25 todo. Atomic adapters are under independent review;
+Control/carrier and the cancellation codec are being implemented in separate
+worktrees. ProgressSink original37920 remains failed; its exact OTP reporting
+vectors are independently reviewed and saved atb78ebdf6, with fresh proof
+pending. The [resume record](M7-resume.md) retains exact source, run and review
+references. Earlier status entries below are historical where superseded.
 
 ADR0059 is accepted and pushed at `3212b0ed`. The first Core Store contract
 unit is assigned in its own worktree; durable adapters, Control/carrier
@@ -13669,7 +13659,20 @@ or check was relaxed.
 
 ### Added implementation subtasks
 
-- [ ] Implement accepted ADR0059's three closed Core Store creation transaction families, exact canonical identities/receipts and bounded optional recovery read; preserve final-create bytes and prove complete malformed, counter, cap and callback controls on both supported pairs before adapter or Control activation.
+- [x] Implement accepted ADR0059's three closed Core Store creation transaction families, exact canonical identities/receipts and bounded optional recovery read; preserve final-create bytes and prove complete malformed, counter, cap and callback controls on both supported pairs before adapter or Control activation.
+
+  Evidence: exact isolated `5a4dc84a614e542e0a9916397f5f64b3223a1af2`,
+  original55084,32 passed per supported pair, zero failures/exclusions/skips/invalid,
+  warning-free compilation,19.556seconds. Complete outputs:
+  `/Users/spuri/projects/lexlapax/loopex-evidence/M7/creation-store-proof-20261007-v1`;
+  collection SHA-256 `de66e20b520ff04960cd5fc73129955b3d1d86cab1d1b5efb29dd1bc99cfae2b`,
+  terminal `debbd8d5390eff39d5d33a02ea33f4fcc306a6732f54ef1e4eeb4ab504c0fc43`.
+  Eight original joins/42 artifacts;1861-row registry
+  `8f2694a8957038a6cb8aaecf62e17f7628242299c770985650ec448f04a31a13`.
+  Original82304 formatting passed both pairs at identical bytes in5.491seconds;
+  the two earlier formatting failures remain failed. Adapter atomicity,
+  Control/carrier, cancellation generations and physical restore stay open.
+
 - [ ] Implement accepted ADR0059's atomic creation heads, complete candidate capsules and exact created/cancelled resolutions in the shipped Stores; prove claim/reservation and final/close races, physical replay and complete current-format backup/restore, with no unreserved fresh-create fallback after coordinated rejoin.
 - [ ] Implement accepted ADR0059's owned Control creation slot, conservative pre-permit fence and mechanical carrier with finite startup/recovery; prove actual held Store stop/status/overlap behavior, occupied-read refusals, original joins/cutoffs, actor/root/VM loss and no historical activation before coordinated rejoin.
 

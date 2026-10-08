@@ -9,7 +9,8 @@ defmodule Loopex.Store.Transitions do
 
   ## Technical depth
 
-  Every Store transaction is one of four accepted shapes: runtime-controlled
+  Every Store transaction is one of seven accepted shapes: creation-domain claim,
+  complete-candidate reservation, reservation close, runtime-controlled
   session creation, owner-attempt staging, session-owner succession, or an
   ordinary session commit. Each shape exposes the same three phase identities
   around its one linearization point. Adapters validate both identities before
@@ -28,7 +29,10 @@ defmodule Loopex.Store.Transitions do
   and are derived from those shapes before fault dispatch.
   """
   @type transition_id ::
-          :runtime_control_create_session
+          :runtime_control_claim_creation_domain
+          | :runtime_control_reserve_creation
+          | :runtime_control_close_creation_reservation
+          | :runtime_control_create_session
           | :runtime_control_stage_owner_attempt
           | :session_journal_advance_owner
           | :session_journal_commit
@@ -55,6 +59,9 @@ defmodule Loopex.Store.Transitions do
   ]
 
   @catalogue %{
+    runtime_control_claim_creation_domain: @phases,
+    runtime_control_reserve_creation: @phases,
+    runtime_control_close_creation_reservation: @phases,
     runtime_control_create_session: @phases,
     runtime_control_stage_owner_attempt: @phases,
     session_journal_advance_owner: @phases,
@@ -73,6 +80,12 @@ defmodule Loopex.Store.Transitions do
   disagrees with the transaction they ask the adapter to execute.
   """
   @spec id(map()) :: {:ok, transition_id()} | {:error, :unknown_transaction_type}
+  def id(%{type: :claim_creation_domain}), do: {:ok, :runtime_control_claim_creation_domain}
+  def id(%{type: :reserve_creation}), do: {:ok, :runtime_control_reserve_creation}
+
+  def id(%{type: :close_creation_reservation}),
+    do: {:ok, :runtime_control_close_creation_reservation}
+
   def id(%{type: :create_session}), do: {:ok, :runtime_control_create_session}
   def id(%{type: :stage_owner_attempt}), do: {:ok, :runtime_control_stage_owner_attempt}
   def id(%{type: :advance_owner}), do: {:ok, :session_journal_advance_owner}

@@ -29,6 +29,68 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Reboot continuation on 2026-10-07
 
+Latest continuation checkpoint: ADR0061 is accepted and recorded atd7c23f3d.
+No asked approval is pending. The Core Store unit is integrated literally from
+isolated `5a4dc84a614e542e0a9916397f5f64b3223a1af2`, after complete32-case paired
+PASS original55084 in19.556seconds. The one added T04 Core boundary row closes;
+T01–T19 originals remain88/85/6, added357/25/0. Including T00: original88/91/7,
+added361/26/0. The current full integration baseline remainsd1132591; no new
+full check or milestone closure is claimed by this focused proof.
+
+Complete Store proof output is retained under
+`M7/creation-store-proof-20261007-v1`: collection
+`de66e20b520ff04960cd5fc73129955b3d1d86cab1d1b5efb29dd1bc99cfae2b`, terminal
+`debbd8d5390eff39d5d33a02ea33f4fcc306a6732f54ef1e4eeb4ab504c0fc43`, eight
+original joins/42 artifacts,1861-row registry
+`8f2694a8957038a6cb8aaecf62e17f7628242299c770985650ec448f04a31a13`.
+Current and floor each32 passed, zero failures/exclusions/skips/invalid and
+warning-free Core compile. Formatter82304 at the same clean source passed in
+5.491seconds,eight joins/45artifacts,1853-row registry44f4e106. Earlier Store
+formatter16050 failed on one layout;21462 passed every command but failed the
+same-final-byte comparison. Both original failures are collected and retained
+under format-v1/v2, and neither source was retried unchanged.
+
+ProgressSink formatter37883 passed in11.579seconds, then whole proof37920
+failed in28.840seconds: current26 passed, floor24 passed2 failed before queue
+accounting. Complete output `M7/progress-sink-proof-20261007-v9` carries collection
+`aa391096817f1d0054169ea6ebca0019549b6506d412ba411e403838144f0e7e`, terminal
+`d52aee1e9d9027aa9fc44b00ee0fe3c707a892965e807addd4830d0b8c33b4c2`, eight
+joins/44artifacts and1833-row registry0dbbe086. Do not rerun/recollect those
+original handles. OTP27's heap-binary referenced-size branch reports bits;
+OTP28 adds the byte conversion. The earlier allocation-rounding diagnosis is
+superseded by the verified upstream function:
+[OTP27.3.4](https://raw.githubusercontent.com/erlang/otp/OTP-27.3.4/erts/emulator/beam/erl_bif_binary.c),
+[OTP28.0](https://raw.githubusercontent.com/erlang/otp/OTP-28.0/erts/emulator/beam/erl_bif_binary.c).
+The fixture now uses explicit literal API vectors8/8/32 and64/64/256, preserves
+cap524288/extra524296/backing/drop/lease proofs, and fails on other vectors.
+Production5682384f and the other24 cases are unchanged. Independent review
+6a37a45b qualifies source only. Raw `b78ebdf6eadc953b28ad271a5676462be13bcaf8`
+is saved in managed m7-progress-sink. Native proof is pending. The new private
+focused recipe reuses the reviewed Store engine with two owned files and26
+complete cases; actual latest-producer capture must precede any new VM grant.
+Broad ADR0058 runtime/host/physical-race obligations remain open even after a
+library PASS.
+
+Source/review/private recipe resume context is durably retained under
+`M7/creation-core-and-progress-context-20261007-v1/retention.json`, SHA-256
+`1ab5fb92353a82e2dbf4460e04c108033c09085b96970563d50e03131dc2a669`,97 files.
+This includes Core V3/V4, V4 independent root qualification, native recipes and
+captures, formatted sources, ProgressSink V9 and the OTP-vector review/packet.
+Native outputs remain at their original separate immutable run references.
+
+Parallel ownership: attempt_case_replay writes native Control/OwnerLane/carrier
+in managed m7-creation-control; authored creation intake remains a later unit.
+cleanup_binding_audit independently reviews frozen adapter packet441692e3 in
+m7-creation-storage; a candidate cross-family command-identity collision needs
+resolution before adapter landing. t15_original_closure_map writes dormant
+ADR0061 codec/schema/vectors and independent Node consumers in managed
+m7-creation-cancellation-codec. Root alone owns Git, native runs, collection,
+integration and push. No native VM remains active at this checkpoint.
+
+Historical checkpoint entries below retain their original dispositions; the
+latest continuation above supersedes their approval, source and run status.
+
+
 ADR0061 exact-pair approval has arrived for9ba346fe: six-field remote cancellation
 is accepted. The [disposition](../developer/agent-context-map.md#disposition-m7-creation-cancellation-envelope-2026-10-07)
 binds both historical digests; dependent codec/vector work is authorized,

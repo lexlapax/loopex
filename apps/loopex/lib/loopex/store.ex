@@ -6,7 +6,8 @@ defmodule Loopex.Store do
   durable truth. A Store allocates a session together with its runtime command
   mapping and genesis, advances session ownership before command admission, and
   atomically appends private records and public outbox events for the current
-  owner.
+  owner. Private creation claims, complete-candidate reservations and exact
+  closes retain custody under one shared runtime-control mutation fence.
 
   The boundary has exactly three mutation outcomes. A confirmed commit is
   durable, a confirmed non-commit changes no journal or outbox truth, and an
@@ -42,6 +43,25 @@ defmodule Loopex.Store do
   @max_item_bytes 65_536
   @max_mutation_bytes 1_048_576
   @max_items 1_024
+
+  @creation_uint64 18_446_744_073_709_551_615
+  @creation_types [:claim_creation_domain, :reserve_creation, :close_creation_reservation]
+  @creation_transitions [
+    :runtime_control_claim_creation_domain,
+    :runtime_control_reserve_creation,
+    :runtime_control_close_creation_reservation
+  ]
+  @creation_refusals [
+    :invalid_transaction,
+    :tx_id_conflict,
+    :stale_creation_generation,
+    :creation_domain_conflict,
+    :creation_in_progress,
+    :runtime_command_conflict,
+    :creation_counter_exhausted,
+    :creation_recovery_too_large,
+    :creation_reservation_conflict
+  ]
 
   @create_command_keys [
     :runtime_id,
@@ -236,16 +256,100 @@ defmodule Loopex.Store do
   @typedoc """
   ## Concept
 
+  One closed claim creation domain mutation.
+
+  ## Technical depth
+
+  Semantic members and canonical binding follow accepted ADR0059; generation
+  and domain counters are unsigned64 and selection is lowercase hexadecimal.
+  """
+  @type claim_creation_domain_transaction :: %{
+          type: :claim_creation_domain,
+          runtime_id: id(),
+          expected_owner_generation: non_neg_integer(),
+          owner_selection: binary(),
+          tx_id: id(),
+          canonical_record_bytes: binary(),
+          canonical_mutation_digest: digest()
+        }
+
+  @typedoc """
+  ## Concept
+
+  One closed reserve creation mutation.
+
+  ## Technical depth
+
+  Semantic members and canonical binding follow accepted ADR0059; generation
+  and domain counters are unsigned64 and selection is lowercase hexadecimal.
+  """
+  @type reserve_creation_transaction :: %{
+          type: :reserve_creation,
+          runtime_id: id(),
+          command_id: id(),
+          owner_generation: pos_integer(),
+          owner_selection: binary(),
+          expected_domain_version: non_neg_integer(),
+          genesis: plain_record(),
+          tx_id: id(),
+          canonical_record_bytes: binary(),
+          canonical_mutation_digest: digest()
+        }
+
+  @typedoc """
+  ## Concept
+
+  One closed close creation reservation mutation.
+
+  ## Technical depth
+
+  Semantic members and canonical binding follow accepted ADR0059; generation
+  and domain counters are unsigned64 and selection is lowercase hexadecimal.
+  """
+  @type close_creation_reservation_transaction :: %{
+          type: :close_creation_reservation,
+          runtime_id: id(),
+          command_id: id(),
+          owner_generation: pos_integer(),
+          owner_selection: binary(),
+          expected_domain_version: non_neg_integer(),
+          reservation_tx_id: id(),
+          reservation_domain_version: pos_integer(),
+          final_canonical_record_bytes: binary(),
+          final_canonical_mutation_digest: digest(),
+          tx_id: id(),
+          canonical_record_bytes: binary(),
+          canonical_mutation_digest: digest()
+        }
+
+  @typedoc """
+  ## Concept
+
+  The three private creation mutations share one runtime-control fence.
+
+  ## Technical depth
+
+  Resolutions retain distinct runtime/type/transaction-ID keys; final create
+  preserves its existing command namespace and complete canonical bytes.
+  """
+  @type creation_transaction ::
+          claim_creation_domain_transaction()
+          | reserve_creation_transaction()
+          | close_creation_reservation_transaction()
+
+  @typedoc """
+  ## Concept
+
   Any mutation admitted by the Store boundary.
 
   ## Technical depth
 
-  The union is closed to session creation, owner succession, and ordinary
-  owner-attempt staging, and session commit; the transition catalogue derives
+  The union also includes the three private creation-custody mutations; the transition catalogue derives
   from the same shapes.
   """
   @type transaction ::
-          create_session_transaction()
+          creation_transaction()
+          | create_session_transaction()
           | stage_owner_attempt_transaction()
           | advance_owner_transaction()
           | session_transaction()
@@ -261,7 +365,13 @@ defmodule Loopex.Store do
   allocated identity or Store-assigned versions needed by the caller.
   """
   @type committed_receipt :: %{
-          required(:type) => :create_session | :advance_owner | :session_commit,
+          required(:type) =>
+            :create_session
+            | :advance_owner
+            | :session_commit
+            | :claim_creation_domain
+            | :reserve_creation
+            | :close_creation_reservation,
           optional(atom()) => term()
         }
 
@@ -393,6 +503,7 @@ defmodule Loopex.Store do
               | {:error, :runtime_command_conflict}
               | {:open, map()}
               | {:completed, map()}
+              | {:not_committed, :creation_cancelled}
 
   @doc """
   ## Concept
@@ -413,7 +524,21 @@ defmodule Loopex.Store do
   @callback creation_provenance(reference :: term(), runtime_id :: id(), selector :: map()) ::
               {:historical, map()} | {:page, map()} | :absent | :conflict | :unavailable
 
-  @optional_callbacks creation_provenance: 3
+  @doc """
+  ## Concept
+
+  Atomically reads one private runtime creation head and selected capsule.
+
+  ## Technical depth
+
+  Exact runtime_id/command_id keys select the active capsule with nil or one
+  command ID. The closed version1 reply retains one complete current-v3 genesis;
+  Core normalizes and bounds the entire reply. This observation grants no permit.
+  """
+  @callback creation_recovery(reference :: term(), request :: map()) ::
+              {:ok, map()} | :unavailable
+
+  @optional_callbacks creation_provenance: 3, creation_recovery: 2
 
   @doc """
   ## Concept
@@ -977,7 +1102,8 @@ defmodule Loopex.Store do
   @spec transact(t(), transaction()) :: outcome()
   def transact(%__MODULE__{adapter: adapter, reference: reference}, transaction) do
     with {:ok, _transition} <- Transitions.id(transaction),
-         {:ok, tx_id} <- transaction_id(transaction) do
+         {:ok, tx_id} <- transaction_id(transaction),
+         :ok <- validate_creation_dispatch(transaction) do
       span(
         [:store, :transact],
         %{
@@ -990,7 +1116,11 @@ defmodule Loopex.Store do
             fn -> adapter.transact(reference, transaction) end,
             {:commit_unknown, tx_id}
           )
-          |> normalize_outcome(tx_id)
+          |> then(fn result ->
+            if transaction.type in @creation_types,
+              do: normalize_creation_outcome(result, transaction, tx_id),
+              else: normalize_outcome(result, tx_id)
+          end)
         end
       )
     else
@@ -1273,6 +1403,518 @@ defmodule Loopex.Store do
 
   def transaction_id(transaction), do: fetch_identifier(transaction, :tx_id)
 
+  @doc """
+  ## Concept
+
+  Builds one generation claim for the runtime's shared creation domain.
+
+  ## Technical depth
+
+  The ID binds runtime, observed generation and the fresh 64-byte lowercase
+  hexadecimal selection. Atomic headroom and current-generation comparisons
+  remain adapter responsibilities; a retained receipt is not current authority.
+  """
+  @spec claim_creation_domain(id(), non_neg_integer(), binary()) ::
+          {:ok, creation_transaction()} | {:error, term()}
+  def claim_creation_domain(runtime_id, expected_owner_generation, owner_selection) do
+    with {:ok, _runtime} <- validate_identifier(runtime_id),
+         true <-
+           creation_counter?(expected_owner_generation) and creation_selection?(owner_selection) do
+      build_transaction(
+        type: :claim_creation_domain,
+        runtime_id: runtime_id,
+        expected_owner_generation: expected_owner_generation,
+        owner_selection: owner_selection,
+        tx_id:
+          creation_id([
+            "loopex_creation_claim_v1",
+            runtime_id,
+            expected_owner_generation,
+            owner_selection
+          ])
+      )
+    else
+      _ -> {:error, :invalid_creation_transaction}
+    end
+  end
+
+  @doc """
+  ## Concept
+
+  Reserves one complete original candidate before final creation dispatch.
+
+  ## Technical depth
+
+  The generation-specific ID excludes genesis so changed bytes under the same
+  reservation conflict. All three new families share the runtime-control fence;
+  their retained resolutions use runtime, type and transaction ID separately.
+  """
+  @spec reserve_creation(id(), id(), pos_integer(), binary(), non_neg_integer(), map()) ::
+          {:ok, creation_transaction()} | {:error, term()}
+  def reserve_creation(runtime_id, command_id, generation, selection, domain_version, genesis) do
+    with {:ok, _runtime} <- validate_identifier(runtime_id),
+         {:ok, _command} <- validate_identifier(command_id),
+         true <-
+           creation_positive?(generation) and creation_selection?(selection) and
+             creation_counter?(domain_version),
+         {:ok, normalized} <- normalize_creation_genesis(genesis) do
+      build_transaction(
+        type: :reserve_creation,
+        runtime_id: runtime_id,
+        command_id: command_id,
+        owner_generation: generation,
+        owner_selection: selection,
+        expected_domain_version: domain_version,
+        genesis: normalized,
+        tx_id: creation_id(["loopex_creation_reserve_v1", runtime_id, command_id, generation])
+      )
+    else
+      {:error, reason} -> {:error, reason}
+      _ -> {:error, :invalid_creation_transaction}
+    end
+  end
+
+  @doc """
+  ## Concept
+
+  Builds a distinct close transaction for the exact original final proposal.
+
+  ## Technical depth
+
+  The existing final transaction keeps command ID and canonical bytes unchanged.
+  Close binds their complete bytes and digest plus the reservation identity and
+  version. Atomic lookup and created-versus-cancelled resolution belong to Store.
+  """
+  @spec close_creation_reservation(
+          id(),
+          id(),
+          pos_integer(),
+          binary(),
+          non_neg_integer(),
+          id(),
+          pos_integer(),
+          map()
+        ) ::
+          {:ok, creation_transaction()} | {:error, term()}
+  def close_creation_reservation(
+        runtime_id,
+        command_id,
+        generation,
+        selection,
+        domain_version,
+        reservation_id,
+        reservation_version,
+        final
+      ) do
+    with {:ok, _runtime} <- validate_identifier(runtime_id),
+         {:ok, _command} <- validate_identifier(command_id),
+         true <-
+           creation_positive?(generation) and creation_selection?(selection) and
+             creation_counter?(domain_version),
+         {:ok, _reservation} <- validate_identifier(reservation_id),
+         true <- creation_positive?(reservation_version),
+         %{type: :create_session, runtime_id: ^runtime_id, command_id: ^command_id} <- final,
+         :ok <- validate_transaction(final) do
+      build_transaction(
+        type: :close_creation_reservation,
+        runtime_id: runtime_id,
+        command_id: command_id,
+        owner_generation: generation,
+        owner_selection: selection,
+        expected_domain_version: domain_version,
+        reservation_tx_id: reservation_id,
+        reservation_domain_version: reservation_version,
+        final_canonical_record_bytes: final.canonical_record_bytes,
+        final_canonical_mutation_digest: final.canonical_mutation_digest,
+        tx_id:
+          creation_id([
+            "loopex_creation_close_v1",
+            runtime_id,
+            command_id,
+            reservation_id,
+            generation,
+            domain_version,
+            selection
+          ])
+      )
+    else
+      _ -> {:error, :invalid_creation_transaction}
+    end
+  end
+
+  @doc """
+  ## Concept
+
+  Observes one atomic creation head and selected capsule without authority.
+
+  ## Technical depth
+
+  The closed request selects the active command with nil or one exact command
+  ID. Missing capability, callback failure and malformed or oversized output
+  are unavailable. Genesis normalization spends its own depth budget; the
+  fixed envelope does not reduce or expand that budget.
+  """
+  @spec creation_recovery(t(), map()) ::
+          {:ok, map()} | :unavailable | {:error, :invalid_creation_recovery}
+  def creation_recovery(%__MODULE__{adapter: adapter, reference: reference}, request) do
+    if valid_creation_request?(request) do
+      if function_exported?(adapter, :creation_recovery, 2) do
+        span([:store, :creation_recovery], %{runtime_id: request.runtime_id}, fn ->
+          adapter_call(fn -> adapter.creation_recovery(reference, request) end, :unavailable)
+          |> then(&normalize_creation_recovery(request, &1))
+        end)
+      else
+        :unavailable
+      end
+    else
+      {:error, :invalid_creation_recovery}
+    end
+  end
+
+  defp creation_id(values),
+    do:
+      values
+      |> :erlang.term_to_binary([:deterministic])
+      |> digest()
+      |> Base.encode16(case: :lower)
+
+  defp creation_fields(:claim_creation_domain),
+    do: [:type, :runtime_id, :expected_owner_generation, :owner_selection, :tx_id]
+
+  defp creation_fields(:reserve_creation),
+    do: [
+      :type,
+      :runtime_id,
+      :command_id,
+      :owner_generation,
+      :owner_selection,
+      :expected_domain_version,
+      :genesis,
+      :tx_id
+    ]
+
+  defp creation_fields(:close_creation_reservation),
+    do: [
+      :type,
+      :runtime_id,
+      :command_id,
+      :owner_generation,
+      :owner_selection,
+      :expected_domain_version,
+      :reservation_tx_id,
+      :reservation_domain_version,
+      :final_canonical_record_bytes,
+      :final_canonical_mutation_digest,
+      :tx_id
+    ]
+
+  defp creation_recipe(%{type: :claim_creation_domain} = t),
+    do: ["loopex_creation_claim_v1", t.runtime_id, t.expected_owner_generation, t.owner_selection]
+
+  defp creation_recipe(%{type: :reserve_creation} = t),
+    do: ["loopex_creation_reserve_v1", t.runtime_id, t.command_id, t.owner_generation]
+
+  defp creation_recipe(%{type: :close_creation_reservation} = t),
+    do: [
+      "loopex_creation_close_v1",
+      t.runtime_id,
+      t.command_id,
+      t.reservation_tx_id,
+      t.owner_generation,
+      t.expected_domain_version,
+      t.owner_selection
+    ]
+
+  defp validate_creation_transaction(t) do
+    with {:ok, _runtime} <- fetch_identifier(t, :runtime_id),
+         true <- creation_selection?(t.owner_selection),
+         true <- valid_creation_members?(t),
+         true <- t.tx_id == creation_id(creation_recipe(t)) do
+      :ok
+    else
+      _ -> {:error, :invalid_creation_transaction}
+    end
+  end
+
+  defp valid_creation_members?(%{type: :claim_creation_domain} = t),
+    do: creation_counter?(t.expected_owner_generation)
+
+  defp valid_creation_members?(%{type: :reserve_creation} = t) do
+    creation_identifier?(t.command_id) and creation_positive?(t.owner_generation) and
+      creation_counter?(t.expected_domain_version) and
+      match?({:ok, genesis} when genesis == t.genesis, normalize_creation_genesis(t.genesis))
+  end
+
+  defp valid_creation_members?(%{type: :close_creation_reservation} = t) do
+    creation_identifier?(t.command_id) and creation_positive?(t.owner_generation) and
+      creation_counter?(t.expected_domain_version) and creation_identifier?(t.reservation_tx_id) and
+      creation_positive?(t.reservation_domain_version) and
+      valid_creation_final?(t)
+  end
+
+  # Concept: final identity is its original full deterministic record, never digest alone.
+  # Technical depth: only the uncompressed canonical list is decoded, safely;
+  # reconstruction rejects trailing bytes, foreign identities and non-v3 genesis.
+  defp valid_creation_final?(t) do
+    with <<131, 108, _::binary>> <- t.final_canonical_record_bytes,
+         true <- byte_size(t.final_canonical_record_bytes) <= @max_mutation_bytes,
+         [
+           "loopex_store_transaction_v1",
+           {:type, :create_session},
+           {:runtime_id, runtime},
+           {:command_id, command},
+           {:genesis, genesis}
+         ] <-
+           :erlang.binary_to_term(t.final_canonical_record_bytes, [:safe]),
+         true <- runtime == t.runtime_id and command == t.command_id,
+         {:ok, ^genesis} <- normalize_creation_genesis(genesis),
+         {:ok, final} <- create_session(runtime, command, genesis) do
+      final.canonical_record_bytes == t.final_canonical_record_bytes and
+        final.canonical_mutation_digest == t.final_canonical_mutation_digest
+    else
+      _ -> false
+    end
+  rescue
+    _ -> false
+  end
+
+  defp normalize_creation_genesis(genesis) do
+    with {:ok, normalized} <- Loopex.Runtime.SessionGenesis.normalize(genesis),
+         :ok <- validate_creation_capture(normalized) do
+      {:ok, normalized}
+    end
+  end
+
+  # Concept: authored captures retain their exact presence, sections and tool order.
+  # Technical depth: native current-v3 options do not acquire the authored version1 grammar.
+  defp validate_creation_capture(%{"options" => %{"version" => _}} = genesis) do
+    case Loopex.Runtime.CreationOptions.reconstruct(genesis) do
+      {:ok, _capture} -> :ok
+      _ -> {:error, :invalid_session_creation}
+    end
+  end
+
+  defp validate_creation_capture(_genesis), do: :ok
+
+  defp closed_creation_map?(map, keys),
+    do:
+      is_map(map) and not is_struct(map) and map_size(map) == length(keys) and
+        Enum.all?(keys, &Map.has_key?(map, &1))
+
+  defp creation_identifier?(value), do: match?({:ok, _}, validate_identifier(value))
+  defp creation_nullable_id?(value), do: is_nil(value) or creation_identifier?(value)
+
+  defp creation_counter?(value),
+    do: is_integer(value) and value >= 0 and value <= @creation_uint64
+
+  defp creation_positive?(value), do: creation_counter?(value) and value > 0
+
+  defp creation_selection?(value) when is_binary(value) and byte_size(value) == 64,
+    do: Enum.all?(:binary.bin_to_list(value), &(&1 in ?0..?9 or &1 in ?a..?f))
+
+  defp creation_selection?(_value), do: false
+
+  defp valid_creation_head?(head) do
+    closed_creation_map?(head, [
+      :version,
+      :owner_generation,
+      :owner_selection,
+      :domain_version,
+      :active_command_id
+    ]) and
+      head.version === 1 and creation_counter?(head.owner_generation) and
+      creation_counter?(head.domain_version) and
+      creation_nullable_id?(head.active_command_id) and
+      if head.owner_generation == 0 do
+        head.owner_selection == nil and head.domain_version == 0 and head.active_command_id == nil
+      else
+        # Concept: Creation heads retain their prior owner claim and alternating occupancy.
+        # Technical depth: Claim increments G alone; each V increment also increments G.
+        # Reserve occupies odd V; final/close empties the next even V; claims preserve V.
+        creation_selection?(head.owner_selection) and head.owner_generation > head.domain_version and
+          rem(head.domain_version, 2) == if(is_nil(head.active_command_id), do: 0, else: 1) and
+          (is_nil(head.active_command_id) or
+             (head.owner_generation >= 2 and head.owner_generation <= @creation_uint64 - 1 and
+                head.domain_version >= 1 and head.domain_version <= @creation_uint64 - 1))
+      end
+  end
+
+  defp valid_creation_request?(request),
+    do:
+      closed_creation_map?(request, [:runtime_id, :command_id]) and
+        creation_identifier?(request.runtime_id) and creation_nullable_id?(request.command_id)
+
+  defp normalize_creation_recovery(request, {:ok, reply}) do
+    with true <- closed_creation_map?(reply, [:version, :runtime_id, :head, :command]),
+         true <- reply.version === 1 and reply.runtime_id == request.runtime_id,
+         true <- valid_creation_head?(reply.head),
+         {:ok, command} <- normalize_creation_capsule(request, reply.head, reply.command),
+         normalized = %{reply | command: command},
+         true <- deterministic_external_size(normalized) <= @max_mutation_bytes do
+      {:ok, normalized}
+    else
+      _ -> :unavailable
+    end
+  end
+
+  defp normalize_creation_recovery(_request, _reply), do: :unavailable
+
+  defp normalize_creation_capsule(request, head, nil) do
+    if (is_nil(request.command_id) and is_nil(head.active_command_id)) or
+         (not is_nil(request.command_id) and head.active_command_id != request.command_id),
+       do: {:ok, nil},
+       else: :unavailable
+  end
+
+  defp normalize_creation_capsule(request, head, capsule) do
+    # Concept: Reservation origin and later head changes retain one consistent candidate.
+    # Technical depth: Each later V increment spends a G increment; only extra G increments
+    # can change selection through a claim. Reservation starts from an empty even V.
+    with true <-
+           closed_creation_map?(capsule, [
+             :version,
+             :runtime_id,
+             :command_id,
+             :reservation_tx_id,
+             :reservation_owner_generation,
+             :reservation_owner_selection,
+             :reservation_domain_version,
+             :genesis,
+             :state,
+             :final_resolution,
+             :session_id
+           ]),
+         true <-
+           capsule.version === 1 and capsule.runtime_id == request.runtime_id and
+             creation_identifier?(capsule.command_id),
+         selected =
+           if(is_nil(request.command_id), do: head.active_command_id, else: request.command_id),
+         true <- selected == capsule.command_id,
+         true <-
+           creation_positive?(capsule.reservation_owner_generation) and
+             capsule.reservation_owner_generation <= @creation_uint64 - 2,
+         true <- creation_selection?(capsule.reservation_owner_selection),
+         true <-
+           creation_positive?(capsule.reservation_domain_version) and
+             capsule.reservation_domain_version <= @creation_uint64 - 1,
+         true <-
+           rem(capsule.reservation_domain_version, 2) == 1 and
+             capsule.reservation_owner_generation >= capsule.reservation_domain_version,
+         true <-
+           capsule.reservation_tx_id ==
+             creation_id([
+               "loopex_creation_reserve_v1",
+               capsule.runtime_id,
+               capsule.command_id,
+               capsule.reservation_owner_generation
+             ]),
+         true <-
+           head.owner_generation >= capsule.reservation_owner_generation + 1 and
+             head.domain_version >= capsule.reservation_domain_version,
+         generation_advances = head.owner_generation - capsule.reservation_owner_generation - 1,
+         version_advances = head.domain_version - capsule.reservation_domain_version,
+         true <- generation_advances >= version_advances,
+         true <-
+           generation_advances != version_advances or
+             head.owner_selection == capsule.reservation_owner_selection,
+         true <-
+           valid_creation_terminal?(capsule.state, capsule.final_resolution, capsule.session_id),
+         true <-
+           if(capsule.state == :reserved,
+             do:
+               head.active_command_id == capsule.command_id and
+                 head.domain_version == capsule.reservation_domain_version,
+             else:
+               head.active_command_id != capsule.command_id and
+                 head.owner_generation >= capsule.reservation_owner_generation + 2 and
+                 head.domain_version > capsule.reservation_domain_version
+           ),
+         {:ok, genesis} <- normalize_creation_genesis(capsule.genesis) do
+      {:ok, %{capsule | genesis: genesis}}
+    else
+      _ -> :unavailable
+    end
+  end
+
+  defp valid_creation_terminal?(:reserved, nil, nil), do: true
+  defp valid_creation_terminal?(:created, :committed, session), do: creation_identifier?(session)
+
+  defp valid_creation_terminal?(:not_committed, {:not_committed, :creation_cancelled}, nil),
+    do: true
+
+  defp valid_creation_terminal?(_state, _resolution, _session), do: false
+
+  defp normalize_creation_outcome({:committed, tx_id, receipt}, t, tx_id) do
+    if valid_creation_receipt?(t, receipt),
+      do: {:committed, tx_id, receipt},
+      else: {:commit_unknown, tx_id}
+  end
+
+  defp normalize_creation_outcome({:not_committed, reason}, _t, _tx_id)
+       when reason in @creation_refusals do
+    {:not_committed, reason}
+  end
+
+  defp normalize_creation_outcome(_reply, _t, tx_id), do: {:commit_unknown, tx_id}
+
+  defp valid_creation_receipt?(t, receipt) do
+    common = [
+      :type,
+      :runtime_id,
+      :owner_generation,
+      :owner_selection,
+      :domain_version,
+      :active_command_id
+    ]
+
+    extra =
+      case t.type do
+        :claim_creation_domain ->
+          []
+
+        :reserve_creation ->
+          [:reservation_tx_id, :reservation_domain_version]
+
+        :close_creation_reservation ->
+          [:command_id, :reservation_tx_id, :final_resolution, :session_id]
+      end
+
+    with true <- closed_creation_map?(receipt, common ++ extra),
+         true <- receipt.type == t.type and receipt.runtime_id == t.runtime_id,
+         head = Map.take(receipt, common -- [:type, :runtime_id]) |> Map.put(:version, 1),
+         true <- valid_creation_head?(head) do
+      case t.type do
+        :claim_creation_domain ->
+          # Concept: A confirmed empty-head claim leaves reservation and closing headroom.
+          # Technical depth: Valid uint64 proposals still defer atomic exhaustion refusal to Store.
+          receipt.owner_generation == t.expected_owner_generation + 1 and
+            receipt.owner_selection == t.owner_selection and
+            (not is_nil(receipt.active_command_id) or
+               receipt.owner_generation <= @creation_uint64 - 2)
+
+        :reserve_creation ->
+          receipt.owner_generation == t.owner_generation + 1 and
+            receipt.owner_selection == t.owner_selection and
+            receipt.domain_version == t.expected_domain_version + 1 and
+            receipt.active_command_id == t.command_id and receipt.reservation_tx_id == t.tx_id and
+            receipt.reservation_domain_version == receipt.domain_version
+
+        :close_creation_reservation ->
+          rem(t.reservation_domain_version, 2) == 1 and receipt.command_id == t.command_id and
+            receipt.reservation_tx_id == t.reservation_tx_id and
+            receipt.active_command_id != t.command_id and
+            receipt.domain_version > t.reservation_domain_version and
+            valid_creation_terminal?(
+              if(receipt.final_resolution == :committed, do: :created, else: :not_committed),
+              receipt.final_resolution,
+              receipt.session_id
+            )
+      end
+    else
+      _ -> false
+    end
+  end
+
   defp build_transaction(fields) do
     with :ok <- validate_fields(fields),
          {:ok, canonical} <- canonical_bytes(fields) do
@@ -1282,6 +1924,14 @@ defmodule Loopex.Store do
        |> Map.put(:canonical_record_bytes, canonical)
        |> Map.put(:canonical_mutation_digest, digest(canonical))}
     end
+  end
+
+  defp semantic_fields(%{type: type} = transaction) when type in @creation_types do
+    names = creation_fields(type)
+
+    if closed_creation_map?(transaction, names ++ @canonical_field_names),
+      do: fetch_fields(transaction, names),
+      else: {:error, :invalid_transaction_shape}
   end
 
   defp semantic_fields(%{type: :create_session} = transaction) do
@@ -1386,6 +2036,9 @@ defmodule Loopex.Store do
     end
   end
 
+  defp validate_common(transition, transaction) when transition in @creation_transitions,
+    do: validate_creation_transaction(transaction)
+
   defp validate_common(:runtime_control_create_session, transaction) do
     with {:ok, _runtime_id} <- fetch_identifier(transaction, :runtime_id),
          {:ok, _command_id} <- fetch_identifier(transaction, :command_id) do
@@ -1411,6 +2064,8 @@ defmodule Loopex.Store do
       :ok
     end
   end
+
+  defp validate_shape(transition, _transaction) when transition in @creation_transitions, do: :ok
 
   defp validate_shape(:runtime_control_create_session, transaction) do
     validate_item(:record, Map.get(transaction, :genesis))
@@ -1747,6 +2402,11 @@ defmodule Loopex.Store do
 
   defp validate_page(_after_position, _limit), do: {:error, :invalid_page}
 
+  defp validate_creation_dispatch(%{type: type} = transaction) when type in @creation_types,
+    do: validate_transaction(transaction)
+
+  defp validate_creation_dispatch(_transaction), do: :ok
+
   defp normalize_outcome({:committed, tx_id, receipt}, tx_id) when is_map(receipt),
     do: {:committed, tx_id, receipt}
 
@@ -1777,6 +2437,11 @@ defmodule Loopex.Store do
 
   defp normalize_ownership_head(result) when result in [:absent, :unavailable], do: result
   defp normalize_ownership_head(_malformed), do: :unavailable
+
+  defp normalize_runtime_command({:not_committed, :creation_cancelled} = result, %{
+         command_kind: :create
+       }),
+       do: result
 
   defp normalize_runtime_command(:absent, _command), do: :absent
   defp normalize_runtime_command(:unavailable, _command), do: :unavailable
