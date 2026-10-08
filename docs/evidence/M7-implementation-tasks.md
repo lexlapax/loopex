@@ -1,32 +1,29 @@
 # M7 Implementation Tasks
 
-Current continuation on 2026-10-07: ADR0061 is accepted at `d7c23f3d`;
-the repeated approval matches that recorded decision. ADR0063 remains Proposed
-at `16c251ad`; its exact startup-status and bounded host-wait question is pending.
-Private continuation128, native creation22 and the dormant physical foreground
-writer14 passed on both supported pairs. Writer original61523 passed in
-156.763seconds with eight exact joins/42 artifacts, and four tested files join
-literally. T01–T19 originals remain88 done/85 todo/6 retired; added363 done/23
-todo. Exact identities remain in the [resume record](M7-resume.md).
+Current continuation on 2026-10-08: ADR0061 is accepted at `d7c23f3d`;
+ADR0063's exact Proposed pair `16c251ad` remains the only asked pending decision.
+T01–T19 originals88 done/85 todo/6 retired; added363 done/23 todo, unchanged.
+Completed paired units remain continuation128, creation22 and physical writer14.
 
-Foreground host FIFO/emitted-cursor integration is now assigned from4d435363.
-Original47604/14097/75037/90126 failures remain retained. Credited Core ingress V2
-is frozen with expected385 cases but independently blocked by finite-CAS prefix
-ordering in both Control and StreamRelay; V3 correction and stronger private
-projected credit are assigned.
-Current creation rejoins at isolatede194ff94 with complete conflict state saved
-and exact reverse reproduction of current bytes; no new native result is claimed.
-Authored creation's six-path packet is source-ready,92 declarations across five
-complete files. Expanded census confirms92 conditional registered cases including
-three long-bound cases. Source review identified an offered-resource retention
-race and a noncausal fixture read; V2 repair, independent review and paired native
-remain. Foreground progress credit also requires a bounded, byte-equivalent
-Protocol Frame encoder repair; the existing temporary lists exceed the proposed
-charge. These are prerequisites of the open custody/output rows, with no new
-completion credit.
-Custody restore remains source-qualified pending current boundary/readiness joins
-and complete175 native cases. Exact references and ownership are in the resume
-record. All broad rows remain open; counts change only for the proved writer unit.
+Credited ingress V3 is source-reviewed and has410 conditional cases across13
+complete files, including both original long-bound cases. Paired formatting and
+all23 AST comparisons passed atb1e1e31f. Original33634 then failed warning-free
+compilation on an ineffective `:uniq` option; no tests or floor stage ran.
+Its terminal failure is collected once with latest2074-row registry. The narrow
+source repair is assigned; forced contention, encoding and physical host custody
+remain open. No completion credit follows from formatting or source review.
+
+Authored creation V2 repairs first-admitted-resource custody using the existing
+single-resource contract. Explicit duplicate refusals retain adapter cleanup;
+root's earlier all-rejected-offers requirement is superseded by the independent
+authority audit. No additional approval is needed. Original cutoffs and all71
+existing cases remain. The exact-capture fixture repair is saved; final V2
+review/census/paired proof remain. Foreground FIFO, bounded Frame encoding and
+current Node Snapshot3 real workflow proceed in parallel. Restore175 remains
+source-qualified and native unrun. All source/failure/ownership identities and
+255-file immutable retention are in the [resume record](M7-resume.md).
+
+Earlier entries below are historical where superseded.
 
 ADR0059 is accepted and pushed at `3212b0ed`. The first Core Store contract
 unit is assigned in its own worktree; durable adapters, Control/carrier

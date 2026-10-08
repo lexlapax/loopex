@@ -27,6 +27,85 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+### Current continuation on 2026-10-08
+
+M7 remains active on `m7`. T01–T19 originals88 done/85 todo/6 retired and
+added363 done/23 todo are unchanged. No new task is closed by source review or
+formatter results. ADR0061's repeated approval is already accepted atd7c23f3d;
+ADR0063's exact Proposed pair16c251ad is the only asked pending decision.
+No dependent startup-status/host-wait work is authorized before acceptance.
+
+**Latest original native handle33634 is terminal FAIL, collected once.** Current
+Core compilation ofb1e1e31fb6feb0a71c9b788ebfa1118d6696ca4b failed on the unused
+`:uniq` comprehension in ProgressSink.notify_raw/1 at973. No410-case test or
+floor stage ran. The original joined one process and retained15 artifacts in
+7.304seconds; latest attempt registry has2074 rows. Output root is
+`/Users/spuri/projects/lexlapax/loopex-evidence/M7/progress-ingress-v3-proof-20261008-v1`.
+Collection SHA-256 `4e852ddcf2669ea1b8455b70976e30fe4bde78e1a1795d0a51dbf706c6e4e07f`;
+terminal `88af6b3e6887a869f7662ec800caa83e087cbb82ff2835b1a9219ee56e3c6d82`;
+registry `a89a8adc6d937f0c3978356f10df42149dc1e8b8b9a03ffcbec587f5f9179f8f`.
+No native handle is live. Root owns the next revised-source gate and registry.
+`t15_original_closure_map` is assigned only the narrow notify_raw warning repair
+in the isolated ingress worktree, preserving notification semantics and bounds.
+
+V3 source packet97153c4c seals96 files; independent source review5ce9376c
+qualifies its bounded claim. Raw8a306afa is saved above rejoinede194ff94.
+Ordered Control and StreamRelay drains halt on `:blocked`, retaining the earlier
+reference. Absent/stale stays distinct. Conservative private charges are
+projected8192+2B+12V and raw8192+8B+12V. Three added Sink cases preserve original
+28 assertions/helpers; complete census13 files/355 declarations/410 conditional
+registered cases, with two original long_bound cases included in any native run.
+Forced32-loss Control/relay ordering, bounded Frame encoder and physical host
+custody remain open. Review and formatting do not establish those outcomes.
+
+Original formatter48322 FAIL preserved at raw8a306afa: generated multiline
+ProgressIngress fallback required a block form. Root saved the AST-equivalent
+repair atb341c3ee. Original33592 FAIL preserved there: both pairs individually
+passed but Sink's inline if formatted differently. Root saved common block form
+atb1e1e31f. Original8290 PASS atb1e1e31f in14.992seconds, both supported pairs,
+all23 non-line AST comparisons and identical final source bytes, ten original
+joins/48 artifacts/2073 registry rows. Its collection is
+`ae8c0198549bc12143fd0e59bfd7c9ab69fc0db024eea2a9fe83fc869b4558e5`,
+terminal `acb2ed1aae5e7d9b75b35b33013d9d8341b26a78ad30570e22aa429a7df1cb21`,
+registry `7e00ed1ae43dbbbb5316f4b05cdc3d66dacb40babcf3b8a62e081b4fb4232e5f`.
+All formatter outputs/repairs/preparations are retained; do not rerun or recollect.
+
+Authored creation V1 remains source-blocked by late first-offer custody.
+Independent authority audit
+`m7-authored-creation-provider-registration-authority-reconciliation-20261008-v1.md`,
+SHA-256 `598a232ea67ac3b83baa119e267c7e6f1dbbb88b64aafe8b9981dfe5a8a1742e`,
+confirms the existing single-resource contract. Accepted ADR0039 retains explicit
+pre-registration refusal cleanup with the adapter. Root's earlier demand to
+adopt all rejected arbitrary resource offers is superseded; no new count cap,
+multi-resource contract or approval is required. Atomic first admission must
+retain custody despite acknowledgement loss and closing; inventory drains only
+after original producer/Starter children DOWN. Explicit duplicate losers remain
+host-owned unless already managed Starter children. Single-owner loss must retain
+the admitted resource; double-owner loss is not a proved clean outcome.
+`cleanup_binding_audit` is implementing this V2 within the original captures and
+cutoffs. Existing71 cases and V1 remain preserved. The separate fixture repair
+4139d3ac waits for the exact existing Control cleanup pair within its original
+1,000-ms fixture bound before reading state. Final V2 census/review/native remain.
+
+`attempt_case_replay` continues foreground FIFO integration in its separate
+4d435363-based worktree. Its ownership includes Protocol Frame and complete
+Frame tests, plus the narrow current Node Snapshot3 ten-field migration and its
+real workflow test. No generation3/4 activation, public startup API or host wait
+is assigned. Proved physical writer14 stays literal; all existing complete host
+proof files remain. Real held-Store/blocked-output/broken-pipe/EOF/holder joins,
+physical emitted-cursor and native lease accounting remain implementation/proof
+obligations. Custody restore175 remains source-qualified, native unrun.
+
+Immutable external context retention is
+`/Users/spuri/projects/lexlapax/loopex-evidence/M7/progress-authored-source-context-20261008-v2/retention.json`,
+SHA-256 `248e852cb1949cf47312ec016091ae72d14eebeaf8a7845aa2cb862e097eb862`.
+It captures255 exact source, census, review, formatter preparation/repair and
+failed33634 preparation files, including superseded all-offers analysis and its
+explicit authority reconciliation. This complements earlier retentions without
+rewriting them. Root sole Git/native/collector/integrator; one native VM at a
+time. Workers remain source-only in non-overlapping worktrees. Latest full check
+stays d1132591/4,924 PASS; floor/release/closure remain open.
+
 ### Reboot continuation on 2026-10-07
 
 Current source work after `4d435363`: foreground physical writer14 is the latest
