@@ -287,12 +287,16 @@ defmodule LoopexComposition.RestoreWorkflowTest do
       fixture = %{fixture | baseline: baseline, plan: plan}
       original_source = placement(fixture.source)
       original_backup = placement(fixture.backup)
-      identities = Map.new([fixture.source, fixture.backup], fn state_root ->
-        {state_root, Map.new(paths, fn relative ->
-          path = if relative == ".", do: state_root, else: Path.join(state_root, relative)
-          {relative, placement(path)}
-        end)}
-      end)
+
+      identities =
+        Map.new([fixture.source, fixture.backup], fn state_root ->
+          {state_root,
+           Map.new(paths, fn relative ->
+             path = if relative == ".", do: state_root, else: Path.join(state_root, relative)
+             {relative, placement(path)}
+           end)}
+        end)
+
       original_workspace = manifest(fixture.workspace)
       receipts = workspace_receipts(fixture)
       receipt_payloads = workspace_receipt_payloads(fixture.store_bytes, fixture.session)
@@ -310,12 +314,19 @@ defmodule LoopexComposition.RestoreWorkflowTest do
 
       {caller, caller_monitor} =
         spawn_monitor(fn ->
-          send(parent, {tag, LoopexComposition.Restore.test_restore(plan, invocation,
-            probe: parent, pause_at: :manifest_stat)})
+          send(
+            parent,
+            {tag,
+             LoopexComposition.Restore.test_restore(plan, invocation,
+               probe: parent,
+               pause_at: :manifest_stat
+             )}
+          )
         end)
 
       assert_receive {:restore_io, guardian, worker, reference,
-                      {:installed, admitted, work_cutoff}}, 1_000
+                      {:installed, admitted, work_cutoff}},
+                     1_000
 
       owned = %{
         caller: caller,
@@ -345,21 +356,28 @@ defmodule LoopexComposition.RestoreWorkflowTest do
       # Concept: observe the complete copied baseline before the audit.
       # Technical depth: non-root directories acknowledge initial 0700 and
       # their final mode; the existing root acknowledges only its final mode.
-      mode_count = Enum.reduce(entries, 0, fn entry, count ->
-        count + if(entry["kind"] == "directory" and entry["path"] == ".", do: 1, else: 2)
-      end)
+      mode_count =
+        Enum.reduce(entries, 0, fn entry, count ->
+          count + if(entry["kind"] == "directory" and entry["path"] == ".", do: 1, else: 2)
+        end)
 
-      {result, events, copied} = special_mode_public_finish(owned, fixture, paths, mode_count, control)
+      {result, events, copied} =
+        special_mode_public_finish(owned, fixture, paths, mode_count, control)
 
-      assert [{:terminal, {:joined, {:ok, %{restore_result: native_result, release_claims: []}}, evidence}}] =
+      assert [
+               {:terminal,
+                {:joined, {:ok, %{restore_result: native_result, release_claims: []}}, evidence}}
+             ] =
                Enum.filter(events, &match?({:terminal, _}, &1))
 
       assert evidence.opens == evidence.closes and evidence.opens > 0
       assert evidence.work_cutoff == work_cutoff and evidence.stop == :complete
       acknowledged = for {:acknowledged, _, kind, status} <- events, do: {kind, status}
+
       assert Enum.count(acknowledged, fn {kind, status} ->
-        match?({:close, _}, kind) and status == :closed
-      end) == evidence.closes
+               match?({:close, _}, kind) and status == :closed
+             end) == evidence.closes
+
       assert Enum.count(acknowledged, &(&1 == {:file_sync, :completed})) >= map_size(contents)
       assert Enum.count(acknowledged, &(&1 == {:directory_sync, :completed})) >= 4
       assert System.monotonic_time(:millisecond) < evidence.cleanup_cutoff
@@ -368,6 +386,7 @@ defmodule LoopexComposition.RestoreWorkflowTest do
 
       [{:stopping, :complete, stopped, cutoff}] =
         Enum.filter(events, &match?({:stopping, :complete, _, _}, &1))
+
       assert cutoff == stopped + 10_000 and cutoff == evidence.cleanup_cutoff
 
       if copied == baseline do
@@ -378,9 +397,13 @@ defmodule LoopexComposition.RestoreWorkflowTest do
         assert receipt["baseline_manifest_sha256"] == hash(baseline)
         assert {:ok, _} = RestoreCodec.encode(:receipt, receipt)
         assert {:committed, ^receipt} = LoopexComposition.Restore.restore(plan, invocation)
+
         assert {:committed, %{"receipt" => ^receipt, "view" => "current"}} =
-                 LoopexComposition.Restore.lookup(fixture.destination, plan["tx_id"],
-                   Map.take(invocation, ["work_ms", "cleanup_grace_ms"]))
+                 LoopexComposition.Restore.lookup(
+                   fixture.destination,
+                   plan["tx_id"],
+                   Map.take(invocation, ["work_ms", "cleanup_grace_ms"])
+                 )
 
         assert_complete_copy(fixture)
         assert Enum.all?(claims(plan), &(File.lstat(&1) == {:error, :enoent}))
@@ -389,7 +412,11 @@ defmodule LoopexComposition.RestoreWorkflowTest do
         reopen_workspace_history(fixture, "special-mode-reopen", receipts, receipt_payloads)
 
         for {relative, mode} <- modes do
-          path = if relative == ".", do: fixture.destination, else: Path.join(fixture.destination, relative)
+          path =
+            if relative == ".",
+              do: fixture.destination,
+              else: Path.join(fixture.destination, relative)
+
           assert Bitwise.band(File.lstat!(path).mode, 0o7777) == mode
         end
       else
@@ -400,6 +427,7 @@ defmodule LoopexComposition.RestoreWorkflowTest do
         assert {:ok, _} = RestoreCodec.encode(:refusal, refusal)
         assert evidence.restore.intent == false and evidence.claim_count == 2
         assert {:error, :restore_incomplete} = RestoreGuard.state(fixture.destination)
+
         assert {:error, :restore_incomplete} =
                  LoopexComposition.TestHost.start(
                    runtime_id: @runtime,
@@ -411,9 +439,15 @@ defmodule LoopexComposition.RestoreWorkflowTest do
                    artifact_transfers: true,
                    active_tools: ~w(loopex.read loopex.bash)
                  )
+
         assert File.lstat(Path.join(fixture.destination, ".loopex-restore")) == {:error, :enoent}
         assert Enum.all?(claims(plan), &File.dir?/1)
-        refute Enum.any?(events, &match?({:issued, _, {:restore_phase, "destination_intent"}}, &1))
+
+        refute Enum.any?(
+                 events,
+                 &match?({:issued, _, {:restore_phase, "destination_intent"}}, &1)
+               )
+
         assert Enum.count(events, &match?({:terminal_release_installed, _}, &1)) == 0
         assert special_mode_manifest(fixture.source, paths) == baseline
         assert special_mode_manifest(fixture.destination, paths) == copied
@@ -430,13 +464,24 @@ defmodule LoopexComposition.RestoreWorkflowTest do
       end
 
       if copied == baseline do
-        source_additions = ~w(.loopex-restore .loopex-restore/lineage .loopex-restore/lineage/00000001) ++
-          Enum.map(~w(intent source-retirement), &Path.join(".loopex-restore/lineage/00000001", &1)) ++
-          Enum.flat_map(plan["ledgers"], fn declaration ->
-            relative = declaration["relative_root"]
-            [Path.join(relative, "restore-lineage"), Path.join([relative, "restore-lineage", "00000001"])] ++
-              Enum.map(~w(intent source-retired), &Path.join([relative, "restore-lineage", "00000001", &1]))
-          end)
+        source_additions =
+          ~w(.loopex-restore .loopex-restore/lineage .loopex-restore/lineage/00000001) ++
+            Enum.map(
+              ~w(intent source-retirement),
+              &Path.join(".loopex-restore/lineage/00000001", &1)
+            ) ++
+            Enum.flat_map(plan["ledgers"], fn declaration ->
+              relative = declaration["relative_root"]
+
+              [
+                Path.join(relative, "restore-lineage"),
+                Path.join([relative, "restore-lineage", "00000001"])
+              ] ++
+                Enum.map(
+                  ~w(intent source-retired),
+                  &Path.join([relative, "restore-lineage", "00000001", &1])
+                )
+            end)
 
         full_source = special_mode_manifest(fixture.source, Enum.sort(paths ++ source_additions))
         assert {:ok, source_entries} = RestoreCodec.manifest(full_source, @total)
@@ -3113,8 +3158,17 @@ defmodule LoopexComposition.RestoreWorkflowTest do
   # Technical depth: existing probe permits hold only the original manifest IO;
   # the final mode acknowledgements identify complete staging, before any intent.
   # Every receive and terminal-worker join uses the same original cleanup bound.
-  defp special_mode_public_finish(owned, fixture, paths, mode_count, control,
-         events \\ [], phase \\ nil, applied \\ 0, copied \\ nil) do
+  defp special_mode_public_finish(
+         owned,
+         fixture,
+         paths,
+         mode_count,
+         control,
+         events \\ [],
+         phase \\ nil,
+         applied \\ 0,
+         copied \\ nil
+       ) do
     guardian = owned.guardian
     reference = owned.reference
     tag = owned.tag
@@ -3127,6 +3181,7 @@ defmodule LoopexComposition.RestoreWorkflowTest do
           monitors = Process.get({:restore_release_monitors, reference})
           assert monitors == []
           Process.put({:restore_release_monitors, reference}, [{worker, Process.monitor(worker)}])
+
           on_exit(fn ->
             if Process.alive?(worker) do
               monitor = Process.monitor(worker)
@@ -3138,8 +3193,16 @@ defmodule LoopexComposition.RestoreWorkflowTest do
 
         release_actors = Process.get({:restore_release_monitors, reference})
         assert worker == owned.worker or Enum.any?(release_actors, &(elem(&1, 0) == worker))
-        phase = if match?({:issued, _, {:restore_phase, _}}, event), do: elem(elem(event, 2), 1), else: phase
-        applied = if phase == "baseline_copy" and match?({:acknowledged, _, :mode, :completed}, event), do: applied + 1, else: applied
+
+        phase =
+          if match?({:issued, _, {:restore_phase, _}}, event),
+            do: elem(elem(event, 2), 1),
+            else: phase
+
+        applied =
+          if phase == "baseline_copy" and match?({:acknowledged, _, :mode, :completed}, event),
+            do: applied + 1,
+            else: applied
 
         copied =
           case event do
@@ -3153,16 +3216,24 @@ defmodule LoopexComposition.RestoreWorkflowTest do
                   if control == :normalize do
                     assert before == fixture.baseline
                     path = Path.join(fixture.destination, "special-nested/inner/all")
-                    assert {"", 0} = System.cmd("python3", ["-c",
-                      "import os,sys; os.chmod(sys.argv[1],0o6750)", path])
+
+                    assert {"", 0} =
+                             System.cmd("python3", [
+                               "-c",
+                               "import os,sys; os.chmod(sys.argv[1],0o6750)",
+                               path
+                             ])
+
                     assert Bitwise.band(File.lstat!(path).mode, 0o7777) == 0o6750
                   end
 
                   actual = special_mode_manifest(fixture.destination, paths)
                   {:ok, expected_entries} = RestoreCodec.manifest(fixture.baseline, @total)
                   {:ok, actual_entries} = RestoreCodec.manifest(actual, @total)
+
                   assert Enum.map(actual_entries, &Map.delete(&1, "mode")) ==
                            Enum.map(expected_entries, &Map.delete(&1, "mode"))
+
                   assert System.monotonic_time(:millisecond) < owned.work_cutoff
                   actual
                 else
@@ -3181,8 +3252,17 @@ defmodule LoopexComposition.RestoreWorkflowTest do
               copied
           end
 
-        special_mode_public_finish(owned, fixture, paths, mode_count, control,
-          [event | events], phase, applied, copied)
+        special_mode_public_finish(
+          owned,
+          fixture,
+          paths,
+          mode_count,
+          control,
+          [event | events],
+          phase,
+          applied,
+          copied
+        )
 
       {^tag, result} ->
         assert not is_nil(copied)
@@ -3195,25 +3275,30 @@ defmodule LoopexComposition.RestoreWorkflowTest do
   end
 
   defp special_mode_manifest(root, paths) do
-    entries = for relative <- paths do
-      path = if relative == ".", do: root, else: Path.join(root, relative)
-      info = File.lstat!(path)
-      assert info.type in [:directory, :regular]
+    entries =
+      for relative <- paths do
+        path = if relative == ".", do: root, else: Path.join(root, relative)
+        info = File.lstat!(path)
+        assert info.type in [:directory, :regular]
 
-      if info.type == :directory do
-        children = for candidate <- paths, candidate != ".", Path.dirname(candidate) == relative,
-                       do: Path.basename(candidate)
-        assert Enum.sort(File.ls!(path)) == Enum.sort(children)
+        if info.type == :directory do
+          children =
+            for candidate <- paths,
+                candidate != ".",
+                Path.dirname(candidate) == relative,
+                do: Path.basename(candidate)
+
+          assert Enum.sort(File.ls!(path)) == Enum.sort(children)
+        end
+
+        %{
+          "path" => relative,
+          "kind" => if(info.type == :directory, do: "directory", else: "regular"),
+          "mode" => Bitwise.band(info.mode, 0o7777),
+          "size" => if(info.type == :directory, do: 0, else: info.size),
+          "sha256" => if(info.type == :directory, do: nil, else: hash(File.read!(path)))
+        }
       end
-
-      %{
-        "path" => relative,
-        "kind" => if(info.type == :directory, do: "directory", else: "regular"),
-        "mode" => Bitwise.band(info.mode, 0o7777),
-        "size" => if(info.type == :directory, do: 0, else: info.size),
-        "sha256" => if(info.type == :directory, do: nil, else: hash(File.read!(path)))
-      }
-    end
 
     :erlang.term_to_binary(["loopex:current-state-manifest:v1", entries], [:deterministic])
   end

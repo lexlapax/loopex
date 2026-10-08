@@ -554,12 +554,15 @@ defmodule LoopexComposition.RestoreIOTest do
         %{"expanded_root" => path, "major_device" => info.major_device, "inode" => info.inode}
       end
 
-      original = Map.new([source, backup], fn state_root ->
-        {state_root, Map.new(paths, fn relative ->
-          path = if relative == ".", do: state_root, else: Path.join(state_root, relative)
-          {relative, placement.(path)}
-        end)}
-      end)
+      original =
+        Map.new([source, backup], fn state_root ->
+          {state_root,
+           Map.new(paths, fn relative ->
+             path = if relative == ".", do: state_root, else: Path.join(state_root, relative)
+             {relative, placement.(path)}
+           end)}
+        end)
+
       workspace_identity = placement.(workspace)
 
       workspace_ref =
@@ -616,8 +619,9 @@ defmodule LoopexComposition.RestoreIOTest do
         # Concept: observe the complete copied baseline before the audit.
         # Technical depth: each regular file has two mode acknowledgements;
         # each directory has its final mode plus initial 0700, except the root.
-        mode_count: 2 * map_size(contents) +
-          2 * (map_size(modes) - map_size(contents)) - 1
+        mode_count:
+          2 * map_size(contents) +
+            2 * (map_size(modes) - map_size(contents)) - 1
       }
 
       {result, events, release, copied} =
@@ -626,8 +630,10 @@ defmodule LoopexComposition.RestoreIOTest do
       assert {:joined, {:ok, %{restore_result: outcome, release_claims: []}}, evidence} = result
       assert evidence.opens == evidence.closes and evidence.opens > 0
       assert evidence.work_cutoff == owned.work_cutoff and evidence.stop == :complete
+
       [{_actor, {:stopping, :complete, stopped, cleanup_cutoff}}] =
         Enum.filter(events, fn {_actor, event} -> match?({:stopping, :complete, _, _}, event) end)
+
       assert cleanup_cutoff == stopped + 10_000 and cleanup_cutoff == evidence.cleanup_cutoff
       assert System.monotonic_time(:millisecond) < evidence.cleanup_cutoff
       joined(owned)
@@ -647,14 +653,19 @@ defmodule LoopexComposition.RestoreIOTest do
 
         for state_root <- [source, destination] do
           {:ok, digest} = RestoreCodec.claim_digest(state_root)
-          assert File.lstat(Path.join(root, ".loopex-restore-claim-" <> digest)) == {:error, :enoent}
+
+          assert File.lstat(Path.join(root, ".loopex-restore-claim-" <> digest)) ==
+                   {:error, :enoent}
         end
       else
         assert {:not_committed, "inventory_mismatch"} = outcome
         assert is_nil(release)
         assert evidence.restore.intent == false and evidence.claim_count == 2
         assert File.lstat(Path.join(destination, ".loopex-restore")) == {:error, :enoent}
-        assert {:error, :restore_incomplete} = Loopex.Executor.Local.RestoreGuard.state(destination)
+
+        assert {:error, :restore_incomplete} =
+                 Loopex.Executor.Local.RestoreGuard.state(destination)
+
         refute Enum.any?(events, fn {_actor, event} ->
                  match?({:issued, _, {:restore_phase, "destination_intent"}}, event)
                end)
@@ -666,27 +677,46 @@ defmodule LoopexComposition.RestoreIOTest do
         for relative <- paths do
           path = if relative == ".", do: state_root, else: Path.join(state_root, relative)
           assert placement.(path) == original[state_root][relative]
-          destination_path = if relative == ".", do: destination, else: Path.join(destination, relative)
+
+          destination_path =
+            if relative == ".", do: destination, else: Path.join(destination, relative)
+
           refute placement.(destination_path) == original[state_root][relative]
         end
       end
 
       assert special_mode_manifest(backup, paths) == baseline
       acknowledged = for {_actor, {:acknowledged, _, kind, status}} <- events, do: {kind, status}
+
       assert Enum.count(acknowledged, fn {kind, status} ->
-        match?({:close, _}, kind) and status == :closed
-      end) == evidence.closes
+               match?({:close, _}, kind) and status == :closed
+             end) == evidence.closes
+
       assert Enum.count(acknowledged, &(&1 == {:file_sync, :completed})) >= map_size(contents)
       assert Enum.count(acknowledged, &(&1 == {:directory_sync, :completed})) >= 4
 
       if copied == baseline do
-        administrative = ~w(.loopex-restore .loopex-restore/lineage .loopex-restore/lineage/00000001)
-        source_additions = administrative ++
-          Enum.map(~w(intent source-retirement), &Path.join(".loopex-restore/lineage/00000001", &1))
-        destination_additions = administrative ++
-          Enum.map(~w(baseline intent source-retirement committed), &Path.join(".loopex-restore/lineage/00000001", &1))
+        administrative =
+          ~w(.loopex-restore .loopex-restore/lineage .loopex-restore/lineage/00000001)
 
-        for {state_root, additions} <- [{source, source_additions}, {destination, destination_additions}] do
+        source_additions =
+          administrative ++
+            Enum.map(
+              ~w(intent source-retirement),
+              &Path.join(".loopex-restore/lineage/00000001", &1)
+            )
+
+        destination_additions =
+          administrative ++
+            Enum.map(
+              ~w(baseline intent source-retirement committed),
+              &Path.join(".loopex-restore/lineage/00000001", &1)
+            )
+
+        for {state_root, additions} <- [
+              {source, source_additions},
+              {destination, destination_additions}
+            ] do
           full = special_mode_manifest(state_root, Enum.sort(paths ++ additions))
           assert {:ok, full_entries} = RestoreCodec.manifest(full, 1_048_576)
 
@@ -4597,6 +4627,7 @@ defmodule LoopexComposition.RestoreIOTest do
               assert is_nil(release) and worker != owned.worker
               assert Process.alive?(worker)
               monitor = Process.monitor(worker)
+
               on_exit(fn ->
                 if Process.alive?(worker) do
                   cleanup_monitor = Process.monitor(worker)
@@ -4604,6 +4635,7 @@ defmodule LoopexComposition.RestoreIOTest do
                   assert_receive {:DOWN, ^cleanup_monitor, :process, ^worker, _}, 1_000
                 end
               end)
+
               %{worker: worker, monitor: monitor, cleanup_cutoff: cleanup_cutoff}
 
             _ ->
@@ -4611,8 +4643,16 @@ defmodule LoopexComposition.RestoreIOTest do
           end
 
         assert worker == owned.worker or (release && worker == release.worker)
-        phase = if match?({:issued, _, {:restore_phase, _}}, event), do: elem(elem(event, 2), 1), else: phase
-        modes = if phase == "baseline_copy" and match?({:acknowledged, _, :mode, :completed}, event), do: modes + 1, else: modes
+
+        phase =
+          if match?({:issued, _, {:restore_phase, _}}, event),
+            do: elem(elem(event, 2), 1),
+            else: phase
+
+        modes =
+          if phase == "baseline_copy" and match?({:acknowledged, _, :mode, :completed}, event),
+            do: modes + 1,
+            else: modes
 
         copied =
           case event do
@@ -4640,6 +4680,7 @@ defmodule LoopexComposition.RestoreIOTest do
                   actual = special_mode_manifest(fixture.destination, fixture.paths)
                   {:ok, expected_entries} = RestoreCodec.manifest(fixture.baseline, 1_048_576)
                   {:ok, actual_entries} = RestoreCodec.manifest(actual, 1_048_576)
+
                   assert Enum.map(actual_entries, &Map.delete(&1, "mode")) ==
                            Enum.map(expected_entries, &Map.delete(&1, "mode"))
 
@@ -4654,7 +4695,9 @@ defmodule LoopexComposition.RestoreIOTest do
 
               if worker == owned.worker and phase == "destination_intent" do
                 assert observed == fixture.baseline
-                assert special_mode_manifest(fixture.destination, fixture.paths) == fixture.baseline
+
+                assert special_mode_manifest(fixture.destination, fixture.paths) ==
+                         fixture.baseline
               end
 
               send(guardian, {:proceed, reference, id})
@@ -4664,7 +4707,16 @@ defmodule LoopexComposition.RestoreIOTest do
               copied
           end
 
-        drive_special_mode_restore(owned, fixture, cutoff, [{worker, event} | events], phase, modes, copied, release)
+        drive_special_mode_restore(
+          owned,
+          fixture,
+          cutoff,
+          [{worker, event} | events],
+          phase,
+          modes,
+          copied,
+          release
+        )
 
       {^tag, result} ->
         assert not is_nil(copied)
@@ -4683,8 +4735,12 @@ defmodule LoopexComposition.RestoreIOTest do
       assert info.type in [:directory, :regular]
 
       if info.type == :directory do
-        children = for candidate <- paths, candidate != ".", Path.dirname(candidate) == relative,
-                       do: Path.basename(candidate)
+        children =
+          for candidate <- paths,
+              candidate != ".",
+              Path.dirname(candidate) == relative,
+              do: Path.basename(candidate)
+
         assert Enum.sort(File.ls!(path)) == Enum.sort(children)
       end
     end
