@@ -1533,7 +1533,7 @@ defmodule LoopexDaemon.ConnectionRegistry do
     if now_ms() >= deadline do
       {:noreply, finish_registry_progress_close(state, {:error, :connections_lost})}
     else
-      timer = Process.send_after(self(), {:close_all_deadline, deadline}, deadline - now_ms())
+      timer = Process.send_after(self(), {:close_all_deadline, deadline}, max(deadline - now_ms(), 0))
       {:noreply, put_in(state, [:close_all, :timer], timer)}
     end
   end
@@ -1548,7 +1548,7 @@ defmodule LoopexDaemon.ConnectionRegistry do
       Logger.debug("loopex daemon connection close-all forced at deadline")
       {:noreply, %{state | close_all: nil}}
     else
-      timer = Process.send_after(self(), {:close_all_deadline, deadline}, deadline - now_ms())
+      timer = Process.send_after(self(), {:close_all_deadline, deadline}, max(deadline - now_ms(), 0))
       {:noreply, put_in(state, [:close_all, :timer], timer)}
     end
   end
