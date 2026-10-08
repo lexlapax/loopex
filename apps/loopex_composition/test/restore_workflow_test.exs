@@ -2678,8 +2678,9 @@ defmodule LoopexComposition.RestoreWorkflowTest do
                     nil
 
                   :created ->
-                    assert {:committed, _, receipt} = Loopex.Store.transact(port, final)
-                    {:committed, final.tx_id, receipt}
+                    {:ok, final_tx_id} = Loopex.Store.transaction_id(final)
+                    assert {:committed, ^final_tx_id, receipt} = Loopex.Store.transact(port, final)
+                    {:committed, final_tx_id, receipt}
 
                   :not_committed ->
                     {:ok, close} =
