@@ -29,6 +29,23 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Reboot continuation on 2026-10-07
 
+Latest completed unit: private single-lane attempts continuation and negative
+consumption barriers. Whole128 passed on each supported pair at isolated
+`8008e0657dff3bd636dd1954a5f19bb5c6f428c2`; original17391 PASS98.397seconds,
+eight original joins/42 artifacts/1974 registry rows, no failures/exclusions/
+skips/invalid. Project compilation passed warnings-as-errors; dependency warnings
+remain visible in complete logs. Output `M7/attempt-continuation-proof-20261007-v1`,
+collection `e210b05951a7ef257d618bc225f181bc2179943474a556ae1fa070b0d82eeeae`,
+terminal `0f36bac9d7c340547071cab57e56b442e3a5cdc8577a98768b666f733c4b717b`,
+registry `11bd304b521e8a9173b60f98ae0eb4916eb74b550848e8ba6269c8508c933bb3`.
+Both tested paths integrate literally: AttemptEventsf55327c1 and test908b797f.
+All99 originals remain preserved through paired non-line AST proof;29 added
+cases retain originals and refuse incomplete authority/matrix joins. No physical
+append/fsync/dispatch or complete originalT14 claim. One added T14 row closes;
+T01–T19 originals88/85/6, added362/23/0; includingT00 originals88/91/7,
+added366/24/0. All native handles are terminal/collected once. Next grant seeds
+actual1974-row producer; no unmodified-source stage or full check repeats.
+
 Current parallel work: ControlV2 independent review is blocked by one accepted
 cleanup invariant. A late original outcome can clear its complete fence and
 reopen admission after the captured observation cutoff. Sealed report
@@ -71,10 +88,9 @@ FAIL at the wrong owned-path AST helper,2.196seconds,three joins/22 artifacts/
 Its real formatted child8008e065 is proved equivalent to reviewed raw70a12beb
 by matching CLI helper51ce1bdd on both pairs. Formatter46874 PASS6.224seconds,
 ten joins/51 artifacts/1966rows; output `M7/attempt-continuation-format-20261007-v2`,
-collectionc75b4419. Native whole128 proof original17391 is running from
+collectionc75b4419. Native whole128 proof original17391 subsequently passed; its recipe is
 `/private/tmp/m7-attempt-continuation-focused-preparation-v2/proof.enabled.py`,
-runner4ce07b26, output `M7/attempt-continuation-proof-20261007-v1`. Collect its
-original handle once after terminal, never repeat executed stages. No native
+runner4ce07b26, output `M7/attempt-continuation-proof-20261007-v1`. Its original handle is terminal and collected once; never repeat executed stages. No native
 creation/restore/progress caller/writer run is active concurrently. No asked
 approval is pending; T01–T19 originals88/85/6 and added361/24/0 remain.
 

@@ -21,12 +21,19 @@ defmodule Mix.Tasks.Loopex.M7Evidence.AttemptEvents do
   original case records through the consumed linear transitions. Repeated
   pre-dispatch observations, additional reviews and changed review evidence
   return an explicit unresolved projection with every original record retained.
-  This performs no IO, tail recovery, evidence dereferencing, manifest admission
-  or continuation checks. Matching handoff references do not prove actual
+  Lane-history verification selects the greatest committed anchor and joins
+  consumed-case and post-head barriers before proposing a single-lane
+  continuation. Its trusted in-memory selection retains original pass histories
+  and only recorded pre-dispatch rows; missing invocation, grouped-subcase,
+  head-recording or authority joins remain unresolved. Fresh full invocations
+  cannot bypass consumed matrix histories. This performs no IO, tail recovery,
+  evidence dereferencing or manifest admission. Matching handoff references do
+  not prove actual
   quiescence, custody or authority; no projection grants dispatch permission.
   """
 
   alias Mix.Tasks.Loopex.M7Evidence.AttemptFrames
+  alias Mix.Tasks.Loopex.M7Evidence.AttemptHeads
 
   @epoch_max 18_446_744_073_709_551_615
   @genesis Enum.sort(~w(kind version campaign_id codec_version))
@@ -99,6 +106,197 @@ defmodule Mix.Tasks.Loopex.M7Evidence.AttemptEvents do
       case_projection(bytes, ownership)
     end
   end
+
+  @doc false
+  def verify_lane_history(bytes, concept, campaign, selection, mode) do
+    with {:ok, head} <- AttemptHeads.select(concept, campaign),
+         {:ok, projection} <- verify_case_history(bytes, head),
+         true <- mode in [:new, :continue] and lane_selection?(selection) do
+      lane_projection(projection, head, selection, mode)
+    else
+      false -> {:error, :invalid_attempt_lane_selection}
+      other -> other
+    end
+  end
+
+  # Concept: Continuation preserves consumed work instead of proposing a retry.
+  # Technical depth: The private selection is trusted composition input, not a
+  # persisted manifest or permission. Complete framing/ownership/case replay
+  # precedes these negative barriers. Original records and references remain in
+  # every result; missing invocation, subcase or authority joins stay unresolved.
+  defp lane_projection(projection, head, selection, mode) do
+    scope = Map.take(selection, ~w(candidate_sha lane_id logical_matrix_id))
+
+    scoped =
+      Enum.filter(projection.histories, fn {locator, _} -> lane_scope(locator) == scope end)
+
+    selected =
+      Enum.map(selection["cases"], fn pin ->
+        locator = Map.merge(scope, Map.take(pin, ~w(case_key subcase_key)))
+        %{pin: pin, history: Map.get(projection.histories, locator)}
+      end)
+
+    result = %{
+      case_history: projection,
+      committed_head: head,
+      selection: selection,
+      reused: [],
+      remaining: [],
+      reason: nil
+    }
+
+    cond do
+      mode == :new and not is_nil(selection["logical_matrix_id"]) and
+          Enum.any?(projection.records, fn record ->
+            body = record["body"]
+
+            body["candidate_sha"] == selection["candidate_sha"] and
+              not is_nil(body["logical_matrix_id"]) and consumed_record?(record)
+          end) ->
+        lane_stopped(result, :blocked, :fresh_matrix_already_consumed)
+
+      mode == :new and Enum.any?(projection.records, &post_head_consumed?(&1, head)) ->
+        lane_stopped(result, :blocked, :post_head_consumed_case)
+
+      Enum.any?(selected, &selection_pin_changed?(&1, selection)) ->
+        lane_stopped(result, :blocked, :attempt_selection_pin_mismatch)
+
+      length(scoped) != Enum.count(selected, &(not is_nil(&1.history))) ->
+        lane_stopped(result, :unresolved, :unselected_lane_history)
+
+      Enum.any?(scoped, fn {_, history} -> consumed_failure?(history) end) ->
+        lane_stopped(result, :blocked, :consumed_lane_failure)
+
+      not is_nil(selection["logical_matrix_id"]) and
+          Enum.any?(projection.histories, fn {locator, history} ->
+            locator["candidate_sha"] == selection["candidate_sha"] and
+              locator["logical_matrix_id"] == selection["logical_matrix_id"] and
+                consumed_failure?(history)
+          end) ->
+        lane_stopped(result, :blocked, :consumed_matrix_failure)
+
+      not is_nil(projection.ownership.pending) ->
+        lane_stopped(result, :unresolved, :pending_writer_handoff)
+
+      is_nil(projection.ownership.owner) ->
+        lane_stopped(result, :unresolved, :writer_designation_unavailable)
+
+      prior_lane_failure?(projection, scope) ->
+        lane_stopped(result, :unresolved, :prior_failure_authority_join_required)
+
+      not is_nil(selection["logical_matrix_id"]) ->
+        lane_stopped(result, :unresolved, :matrix_invocation_join_required)
+
+      mode == :new and scoped != [] ->
+        lane_stopped(result, :blocked, :lane_continuation_required)
+
+      mode == :new ->
+        {:ok, %{result | remaining: selected}}
+
+      scoped == [] ->
+        lane_stopped(result, :unresolved, :lane_history_unavailable)
+
+      Enum.any?(projection.records, fn record ->
+        body = record["body"]
+
+        body["candidate_sha"] == selection["candidate_sha"] and
+          lane_scope(body) != scope and
+            post_head_consumed?(record, head)
+      end) ->
+        lane_stopped(result, :unresolved, :multi_lane_invocation_join_required)
+
+      Enum.any?(selected, &is_nil(&1.history)) ->
+        lane_stopped(result, :unresolved, :not_dispatched_evidence_unavailable)
+
+      Enum.any?(selected, fn row ->
+        row.history.state == "not_dispatched" and
+            List.last(row.history.records)["sequence"] <= head["sequence"]
+      end) ->
+        lane_stopped(result, :unresolved, :head_recorded_lane_join_required)
+
+      true ->
+        suspended_lane(result, selected)
+    end
+  end
+
+  defp suspended_lane(result, selected) do
+    {reused, remaining} = Enum.split_while(selected, &completed_pass?(&1.history))
+
+    cond do
+      remaining == [] ->
+        lane_stopped(result, :blocked, :lane_already_ended)
+
+      Enum.any?(remaining, &completed_pass?(&1.history)) ->
+        lane_stopped(result, :unresolved, :noncontiguous_case_order)
+
+      Enum.any?(remaining, fn pending ->
+        Enum.any?(reused, &(&1.pin["case_key"] == pending.pin["case_key"]))
+      end) ->
+        lane_stopped(result, :unresolved, :grouped_subcase_join_required)
+
+      true ->
+        {:ok, %{result | reused: reused, remaining: remaining}}
+    end
+  end
+
+  defp selection_pin_changed?(%{history: nil}, _selection), do: false
+
+  defp selection_pin_changed?(%{pin: pin, history: history}, selection) do
+    first = hd(history.records)["body"]
+
+    first["manifest_digest"] != selection["manifest_digest"] or
+      first["specification_digest"] != pin["specification_digest"]
+  end
+
+  defp consumed_failure?(history) do
+    consumed = Enum.any?(history.records, &consumed_record?/1)
+    consumed and not completed_pass?(history)
+  end
+
+  defp completed_pass?(history) do
+    completed = Enum.find(history.records, &(&1["body"]["state"] == "completed"))
+    latest = List.last(history.records)["body"]
+
+    not is_nil(completed) and completed["body"]["mechanical_result"] == "pass" and
+      latest["verdict"] in [nil, "pass"]
+  end
+
+  defp prior_lane_failure?(projection, scope) do
+    Enum.any?(projection.histories, fn {locator, history} ->
+      locator["lane_id"] == scope["lane_id"] and
+        lane_scope(locator) != scope and consumed_failure?(history)
+    end)
+  end
+
+  defp post_head_consumed?(record, head),
+    do: record["sequence"] > head["sequence"] and consumed_record?(record)
+
+  defp consumed_record?(record), do: record["body"]["state"] != "not_dispatched"
+  defp lane_scope(body), do: Map.take(body, ~w(candidate_sha lane_id logical_matrix_id))
+  defp lane_stopped(result, tag, reason), do: {tag, %{result | reason: reason}}
+
+  defp lane_selection?(selection) do
+    closed?(selection, ~w(candidate_sha cases lane_id logical_matrix_id manifest_digest)) and
+      git?(selection["candidate_sha"]) and identity?(selection["lane_id"]) and
+      nullable?(selection["logical_matrix_id"], &identity?/1) and
+      digest?(selection["manifest_digest"]) and selection["cases"] != [] and
+      lane_cases?(selection["cases"], MapSet.new())
+  end
+
+  defp lane_cases?([], _seen), do: true
+
+  defp lane_cases?([pin | rest], seen) do
+    if closed?(pin, ~w(case_key specification_digest subcase_key)) and
+         identity?(pin["case_key"]) and nullable?(pin["subcase_key"], &identity?/1) and
+         digest?(pin["specification_digest"]) do
+      key = Map.take(pin, ~w(case_key subcase_key))
+      not MapSet.member?(seen, key) and lane_cases?(rest, MapSet.put(seen, key))
+    else
+      false
+    end
+  end
+
+  defp lane_cases?(_, _seen), do: false
 
   # Concept: A consumed attempt retains its original result and all authors.
   # Technical depth: The locator separates independent candidate/lane/matrix/

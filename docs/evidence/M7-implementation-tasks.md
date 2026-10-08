@@ -1,16 +1,15 @@
 # M7 Implementation Tasks
 
 Current continuation: ADR0061 is accepted at `d7c23f3d`; no asked approval
-is pending. Core Store32, atomic adapters48, dormant cancellation codec14 and
-physical ProgressSink28 have complete paired focused proof and are integrated.
-T01–T19 remain88 original done/85 todo/6 retired; added361 done/24 todo.
-Native creation Control has one independently identified cleanup cutoff blocker
-under repair. Credited Core ingress and the foreground output writer are assigned
-in separate worktrees; custody restore is source-qualified pending current
-boundary/readiness joins and complete175 native cases. Private T14 continuation
-whole128 is running after qualified paired formatting. No broad row closes from
-source review. Exact identities and earlier failures remain in the
-[resume record](M7-resume.md). Earlier status entries below are historical.
+is pending. Private single-lane attempts continuation is integrated literally
+from tested `8008e065`: all128 cases pass on both supported pairs, original17391,
+98.397seconds, eight exact joins/42 retained artifacts. One added T14 row closes;
+all ten original T14 rows remain open. T01–T19 originals remain88 done/85 todo/6
+retired; added362 done/23 todo. Native creation's cleanup cutoff repair, credited
+Core ingress and foreground output writer continue in separate worktrees.
+Custody restore is source-qualified pending current boundary/readiness joins
+and complete175 native cases. Exact identities and earlier failures remain in
+the [resume record](M7-resume.md). Earlier entries below are historical.
 
 ADR0059 is accepted and pushed at `3212b0ed`. The first Core Store contract
 unit is assigned in its own worktree; durable adapters, Control/carrier
@@ -14337,7 +14336,7 @@ repeating completed provider work.
 - [x] Validate ordered attempts ownership with the existing frame and accepted body codecs; prove genesis/designation, optional succession placement, original relinquishment-to-acceptance joins, exact owner tuples and epochs, pending handoff, reused identities and unresolved tails on both supported pairs. Keep this ownership projection distinct from case-state replay, evidence, quiescence, authority and physical dispatch.
 - [x] Project the accepted consumed case-history core through original started, completed, reviewed and authorized-candidate records; preserve immutable execution identities, original mechanical facts and whole record history, propagate exact ownership/framing/anchor errors and retain unapproved same-state or reference choices explicitly unresolved. Prove complete original plus new cases on both supported pairs; no manifest, evidence, authority or physical dispatch claim.
 
-- [ ] Implement and prove the accepted private single-lane continuation plan and negative-consumption barriers through the greatest retained head and complete consumed histories. Retain all99 original cases, add29, preserve every original record, reuse only eligible recorded work and propose only a recorded not-dispatched suffix; keep missing/grouped/full-matrix or referenced-authority histories unresolved without granting dispatch or evidence authority. Complete paired128 proof and literal integration are required; original T14 remains open.
+- [x] Implement and prove the accepted private single-lane continuation plan and negative-consumption barriers through the greatest retained head and complete consumed histories. Retain all99 original cases, add29, preserve every original record, reuse only eligible recorded work and propose only a recorded not-dispatched suffix; keep missing/grouped/full-matrix or referenced-authority histories unresolved without granting dispatch or evidence authority. Complete paired128 proof and literal integration are required; original T14 remains open.
 
 - [x] Inventory all 74 numbered V1–V13 steps and 155 descriptive subcases against exact accepted plan spans and current supporting tests; retain source identities, existing evidence and every missing executable owner/oracle pin. This is read-only planning evidence, not an accepted execution manifest or provider execution.
 

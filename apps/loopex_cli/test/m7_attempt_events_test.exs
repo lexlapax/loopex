@@ -1490,6 +1490,583 @@ defmodule LoopexCli.M7AttemptEventsTest do
     end
   end
 
+  test "suspended single lane reuses exact original pass records and proposes only its untouched case" do
+    first = [lane_started("first"), lane_completed("first")]
+    reviewed = reviewed_body(List.last(first), "pass")
+    bodies = ownership_prefix() ++ first ++ [reviewed, lane_pending("second")]
+    {result, records} = lane_call(bodies, lane_selection(["first", "second"]), :continue)
+    assert {:ok, plan} = result
+    assert plan.reason == nil
+    assert plan.case_history.records == Enum.drop(records, 2)
+    assert [reused] = plan.reused
+    assert reused.history.records == Enum.slice(records, 2, 3)
+    assert [pending] = plan.remaining
+    assert pending.pin["case_key"] == "second"
+    assert pending.history.records == [List.last(records)]
+    assert pending.history.state == "not_dispatched"
+    assert lane_call(bodies, plan.selection, :continue) == {result, records}
+  end
+
+  test "a lane containing only original pre-dispatch observations proposes them in pinned order" do
+    bodies = ownership_prefix() ++ [lane_pending("first"), lane_pending("second")]
+    assert {{:ok, plan}, _} = lane_call(bodies, lane_selection(["first", "second"]), :continue)
+    assert plan.reused == []
+    assert Enum.map(plan.remaining, & &1.pin["case_key"]) == ["first", "second"]
+    assert Enum.all?(plan.remaining, &is_nil(hd(&1.history.records)["body"]["attempt_id"]))
+  end
+
+  test "an ended pass lane cannot be selected again as either fresh work or a continuation" do
+    bodies = ownership_prefix() ++ [lane_started("first"), lane_completed("first")]
+    {bytes, records} = ownership_chain(bodies)
+    head = ownership_head(List.last(records))
+    selection = lane_selection(["first"])
+
+    assert {:blocked, ended} =
+             Events.verify_lane_history(bytes, head_line(head), "m7-vector", selection, :continue)
+
+    assert ended.reason == :lane_already_ended
+    assert ended.reused == [] and ended.remaining == []
+
+    assert {:blocked, fresh} =
+             Events.verify_lane_history(bytes, head_line(head), "m7-vector", selection, :new)
+
+    assert fresh.reason == :lane_continuation_required
+    assert fresh.case_history == ended.case_history
+  end
+
+  test "an unfinished started case stops the lane before its later pre-dispatch case" do
+    bodies = ownership_prefix() ++ [lane_started("first"), lane_pending("second")]
+
+    assert {{:blocked, plan}, records} =
+             lane_call(bodies, lane_selection(["first", "second"]), :continue)
+
+    assert plan.reason == :consumed_lane_failure
+    assert plan.remaining == [] and plan.reused == []
+    assert plan.case_history.records == Enum.drop(records, 2)
+    assert hd(plan.case_history.records)["body"]["evidence"] == lane_started("first")["evidence"]
+  end
+
+  test "every consumed non-pass mechanical result stops before later selected work" do
+    for mechanical <-
+          ~w(required_action_absent assertion_failed evidence_incomplete_post_dispatch provider_environment_failure) do
+      completed = Map.put(lane_completed("first"), "mechanical_result", mechanical)
+
+      completed =
+        if mechanical == "evidence_incomplete_post_dispatch",
+          do: Map.put(completed, "evidence", nil),
+          else: completed
+
+      bodies = ownership_prefix() ++ [lane_started("first"), completed, lane_pending("second")]
+
+      assert {{:blocked, plan}, _} =
+               lane_call(bodies, lane_selection(["first", "second"]), :continue)
+
+      assert plan.reason == :consumed_lane_failure
+      assert Enum.at(plan.case_history.records, 1)["body"] == completed
+      assert plan.remaining == []
+    end
+  end
+
+  test "all independent cause verdicts retain consumption and a failed review cannot turn mechanics into reuse" do
+    for verdict <-
+          ~w(pass product_failure model_nonconformance evidence_unavailable environment_failure) do
+      completed = lane_completed("first")
+      reviewed = reviewed_body(completed, verdict)
+
+      bodies =
+        ownership_prefix() ++ [lane_started("first"), completed, reviewed, lane_pending("second")]
+
+      {result, _} = lane_call(bodies, lane_selection(["first", "second"]), :continue)
+
+      if verdict == "pass" do
+        assert {:ok, plan} = result
+        assert length(plan.reused) == 1
+      else
+        assert {:blocked, plan} = result
+        assert plan.reason == :consumed_lane_failure
+        assert plan.reused == [] and plan.remaining == []
+      end
+
+      assert elem(result, 1).case_history.records |> Enum.at(2) |> Map.fetch!("body") == reviewed
+    end
+  end
+
+  test "later authorization never resets consumption on the failed original candidate" do
+    completed = Map.put(lane_completed("first"), "mechanical_result", "assertion_failed")
+    reviewed = reviewed_body(completed, "product_failure")
+    authorized = authorized_body(reviewed)
+
+    bodies =
+      ownership_prefix() ++
+        [lane_started("first"), completed, reviewed, authorized, lane_pending("second")]
+
+    assert {{:blocked, plan}, _} =
+             lane_call(bodies, lane_selection(["first", "second"]), :continue)
+
+    assert plan.reason == :consumed_lane_failure
+    assert Enum.at(plan.case_history.records, 3)["body"] == authorized
+    assert plan.remaining == []
+  end
+
+  test "fresh invocation cannot bypass a recorded pre-dispatch lane by choosing new mode" do
+    bodies = ownership_prefix() ++ [lane_pending("first")]
+    assert {{:blocked, plan}, _} = lane_call(bodies, lane_selection(["first"]), :new)
+    assert plan.reason == :lane_continuation_required
+    assert plan.case_history.records |> hd() |> Map.fetch!("body") == lane_pending("first")
+  end
+
+  test "missing continuation histories do not acquire no-execution proof from absence" do
+    for cases <- [[], [lane_pending("first")]] do
+      {result, _} =
+        lane_call(ownership_prefix() ++ cases, lane_selection(["first", "second"]), :continue)
+
+      assert {:unresolved, plan} = result
+      assert plan.reason in [:lane_history_unavailable, :not_dispatched_evidence_unavailable]
+      assert plan.reused == [] and plan.remaining == []
+      assert length(plan.case_history.records) == length(cases)
+    end
+  end
+
+  test "selected manifest and specification digests must equal the retained case pins" do
+    bodies = ownership_prefix() ++ [lane_pending("first")]
+    base = lane_selection(["first"])
+
+    changed_spec =
+      put_in(base, ["cases"], [
+        Map.put(hd(base["cases"]), "specification_digest", String.duplicate("a", 64))
+      ])
+
+    for selection <- [Map.put(base, "manifest_digest", String.duplicate("b", 64)), changed_spec] do
+      assert {{:blocked, plan}, _} = lane_call(bodies, selection, :continue)
+      assert plan.reason == :attempt_selection_pin_mismatch
+      assert plan.case_history.records |> hd() |> Map.fetch!("body") == lane_pending("first")
+    end
+  end
+
+  test "omitted same-lane history stays visible and prevents a partial selection from claiming continuation" do
+    bodies = ownership_prefix() ++ [lane_pending("first"), lane_pending("second")]
+    assert {{:unresolved, plan}, _} = lane_call(bodies, lane_selection(["first"]), :continue)
+    assert plan.reason == :unselected_lane_history
+    assert length(plan.case_history.records) == 2
+    assert plan.remaining == []
+  end
+
+  test "a new candidate retains head-recorded originals and proposes its own full selection without borrowing passes" do
+    bodies =
+      ownership_prefix() ++
+        [lane_started("first"), lane_completed("first"), lane_pending("second")]
+
+    {bytes, records} = ownership_chain(bodies)
+    old_head = ownership_head(Enum.at(records, 1))
+    new_head = ownership_head(List.last(records))
+    text = head_line(new_head) <> "\n" <> head_line(old_head) <> "\n" <> head_line(new_head)
+
+    selection =
+      Map.put(lane_selection(["first", "second"]), "candidate_sha", String.duplicate("2", 40))
+
+    assert {:ok, plan} = Events.verify_lane_history(bytes, text, "m7-vector", selection, :new)
+    assert plan.committed_head == new_head
+    assert plan.case_history.records == Enum.drop(records, 2)
+    assert plan.reused == []
+    assert Enum.map(plan.remaining, & &1.pin["case_key"]) == ["first", "second"]
+    assert Enum.all?(plan.remaining, &is_nil(&1.history))
+    assert List.last(plan.case_history.records)["body"]["state"] == "not_dispatched"
+  end
+
+  test "new-lane post-head barrier uses every original consumed record independent of its latest state or locator" do
+    completed = Map.put(lane_completed("other"), "mechanical_result", "assertion_failed")
+    reviewed = reviewed_body(completed, "product_failure")
+    cases = [lane_started("other"), completed, reviewed, authorized_body(reviewed)]
+    cases = Enum.map(cases, &Map.put(&1, "lane_id", "other-lane"))
+
+    for count <- 1..4 do
+      bodies = ownership_prefix() ++ Enum.take(cases, count)
+      assert {{:blocked, plan}, _} = lane_call(bodies, lane_selection(["first"]), :new)
+      assert plan.reason == :post_head_consumed_case
+      assert length(plan.case_history.records) == count
+      assert plan.remaining == []
+    end
+  end
+
+  test "consumed records at or before the committed head do not create a fictitious post-head barrier" do
+    bodies =
+      ownership_prefix() ++
+        [
+          Map.put(lane_started("other"), "lane_id", "other-lane"),
+          Map.put(lane_completed("other"), "lane_id", "other-lane")
+        ]
+
+    {bytes, records} = ownership_chain(bodies)
+    head = ownership_head(List.last(records))
+
+    assert {:ok, plan} =
+             Events.verify_lane_history(
+               bytes,
+               head_line(head),
+               "m7-vector",
+               lane_selection(["first"]),
+               :new
+             )
+
+    assert plan.reused == []
+    assert [%{history: nil}] = plan.remaining
+    assert Enum.all?(plan.case_history.records, &(&1["sequence"] <= head["sequence"]))
+  end
+
+  test "fresh full invocation refuses consumed matrix history even after its latest head was committed" do
+    for matrix <- ["matrix-1", "different-matrix"] do
+      bodies =
+        ownership_prefix() ++
+          Enum.map(
+            [lane_started("first"), lane_completed("first")],
+            &Map.put(&1, "logical_matrix_id", matrix)
+          )
+
+      {bytes, records} = ownership_chain(bodies)
+      head = ownership_head(List.last(records))
+      selection = Map.put(lane_selection(["first"]), "logical_matrix_id", "new-matrix")
+
+      assert {:blocked, plan} =
+               Events.verify_lane_history(bytes, head_line(head), "m7-vector", selection, :new)
+
+      assert plan.reason == :fresh_matrix_already_consumed
+      assert plan.remaining == []
+    end
+  end
+
+  test "completed pre-merge rows remain separate from a prospective full matrix requiring invocation joins" do
+    bodies = ownership_prefix() ++ [lane_started("first"), lane_completed("first")]
+    {bytes, records} = ownership_chain(bodies)
+    head = ownership_head(List.last(records))
+    selection = Map.put(lane_selection(["first"]), "logical_matrix_id", "matrix-1")
+
+    assert {:unresolved, plan} =
+             Events.verify_lane_history(bytes, head_line(head), "m7-vector", selection, :new)
+
+    assert plan.reason == :matrix_invocation_join_required
+    assert plan.reused == [] and plan.remaining == []
+    assert is_nil(hd(plan.case_history.records)["body"]["logical_matrix_id"])
+  end
+
+  test "a same-matrix continuation retains its identities but cannot invent complete invocation joins" do
+    bodies =
+      ownership_prefix() ++
+        Enum.map(
+          [lane_started("first"), lane_completed("first"), lane_pending("second")],
+          &Map.put(&1, "logical_matrix_id", "matrix-1")
+        )
+
+    selection = Map.put(lane_selection(["first", "second"]), "logical_matrix_id", "matrix-1")
+    assert {{:unresolved, plan}, _} = lane_call(bodies, selection, :continue)
+    assert plan.reason == :matrix_invocation_join_required
+    assert plan.remaining == []
+    assert Enum.all?(plan.case_history.records, &(&1["body"]["logical_matrix_id"] == "matrix-1"))
+  end
+
+  test "a consumed failure in another lane of the same matrix blocks further case proposals" do
+    other_started =
+      Map.merge(lane_started("other"), %{
+        "lane_id" => "other-lane",
+        "logical_matrix_id" => "matrix-1"
+      })
+
+    pending = Map.put(lane_pending("first"), "logical_matrix_id", "matrix-1")
+    bodies = ownership_prefix() ++ [other_started, pending]
+    selection = Map.put(lane_selection(["first"]), "logical_matrix_id", "matrix-1")
+    assert {{:blocked, plan}, _} = lane_call(bodies, selection, :continue)
+    assert plan.reason == :consumed_matrix_failure
+    assert plan.case_history.records |> hd() |> Map.fetch!("body") == other_started
+  end
+
+  test "other null-matrix lane consumption cannot be guessed into or out of this invocation" do
+    for completed <- [
+          lane_completed("other"),
+          Map.put(lane_completed("other"), "mechanical_result", "assertion_failed")
+        ],
+        matrix <- [nil, "matrix-1"] do
+      cases =
+        Enum.map(
+          [lane_started("other"), completed],
+          &Map.merge(&1, %{"lane_id" => "other-lane", "logical_matrix_id" => matrix})
+        )
+
+      bodies = ownership_prefix() ++ cases ++ [lane_pending("first")]
+      assert {{:unresolved, plan}, _} = lane_call(bodies, lane_selection(["first"]), :continue)
+      assert plan.reason == :multi_lane_invocation_join_required
+      assert plan.remaining == [] and plan.reused == []
+    end
+  end
+
+  test "an unexecuted subcase of a consumed case never becomes a new independent retry proposal" do
+    first =
+      Enum.map(
+        [lane_started("group"), lane_completed("group")],
+        &Map.put(&1, "subcase_key", "one")
+      )
+
+    pending = Map.put(lane_pending("group"), "subcase_key", "two")
+
+    selection =
+      lane_selection([
+        Map.take(hd(first), ~w(case_key specification_digest subcase_key)),
+        Map.take(pending, ~w(case_key specification_digest subcase_key))
+      ])
+
+    assert {{:unresolved, plan}, _} =
+             lane_call(ownership_prefix() ++ first ++ [pending], selection, :continue)
+
+    assert plan.reason == :grouped_subcase_join_required
+    assert plan.remaining == []
+  end
+
+  test "independent completed cases may share an attempt identity without losing their original histories" do
+    bodies =
+      ownership_prefix() ++
+        [
+          lane_started("first"),
+          lane_completed("first"),
+          lane_started("second"),
+          lane_completed("second"),
+          lane_pending("third")
+        ]
+
+    assert {{:ok, plan}, _} =
+             lane_call(bodies, lane_selection(["first", "second", "third"]), :continue)
+
+    assert Enum.map(plan.reused, & &1.pin["case_key"]) == ["first", "second"]
+    assert Enum.all?(plan.reused, &(hd(&1.history.records)["body"]["attempt_id"] == "attempt-1"))
+    assert Enum.map(plan.remaining, & &1.pin["case_key"]) == ["third"]
+  end
+
+  test "later completed selection cannot conceal an earlier untouched case or reorder the pinned work" do
+    bodies =
+      ownership_prefix() ++
+        [lane_pending("first"), lane_started("second"), lane_completed("second")]
+
+    assert {{:unresolved, plan}, _} =
+             lane_call(bodies, lane_selection(["first", "second"]), :continue)
+
+    assert plan.reason == :noncontiguous_case_order
+    assert length(plan.case_history.records) == 3
+    assert plan.reused == [] and plan.remaining == []
+  end
+
+  test "missing writer designation and pending handoff retain ownership uncertainty without proposing work" do
+    cases = [
+      [ownership_body(0)],
+      ownership_prefix() ++ [lane_pending("first"), ownership_body(2)]
+    ]
+
+    for bodies <- cases do
+      {bytes, records} = ownership_chain(bodies)
+      head = ownership_head(hd(records))
+
+      assert {:unresolved, plan} =
+               Events.verify_lane_history(
+                 bytes,
+                 head_line(head),
+                 "m7-vector",
+                 lane_selection(["first"]),
+                 :new
+               )
+
+      assert plan.reason in [:writer_designation_unavailable, :pending_writer_handoff]
+      assert plan.remaining == []
+    end
+  end
+
+  test "previously unresolved repeated observations and changed reviews propagate the exact original case result" do
+    observed = lane_pending("first")
+    completed = lane_completed("first")
+
+    changed_review =
+      Map.put(reviewed_body(completed, "pass"), "evidence", lane_started("first")["evidence"])
+
+    for cases <- [[observed, observed], [lane_started("first"), completed, changed_review]] do
+      {bytes, records} = ownership_chain(ownership_prefix() ++ cases)
+      head = ownership_head(Enum.at(records, 1))
+      expected = Events.verify_case_history(bytes, head)
+      assert {:unresolved, _} = expected
+
+      assert Events.verify_lane_history(
+               bytes,
+               head_line(head),
+               "m7-vector",
+               lane_selection(["first"]),
+               :continue
+             ) == expected
+    end
+  end
+
+  test "framing ownership anchor and incomplete-tail errors propagate before lane planning" do
+    {bytes, records} = ownership_chain(ownership_prefix() ++ [lane_pending("first")])
+    head = ownership_head(List.last(records))
+    text = head_line(head)
+    selection = lane_selection(["first"])
+    {stale, _} = ownership_chain(ownership_prefix())
+
+    {bad_owner, _} =
+      ownership_chain(
+        ownership_prefix() ++ [Map.put(lane_pending("first"), "writer_id", "other")]
+      )
+
+    for input <- [bytes <> "{", stale, bad_owner] do
+      assert Events.verify_lane_history(input, text, "m7-vector", selection, :continue) ==
+               Events.verify_case_history(input, head)
+    end
+
+    assert Events.verify_lane_history(bytes, "", "m7-vector", selection, :continue) ==
+             {:error, :committed_attempt_head_unavailable}
+
+    conflicting = Map.put(head, "digest", String.duplicate("a", 64))
+
+    assert Events.verify_lane_history(
+             bytes,
+             text <> "\n" <> head_line(conflicting),
+             "m7-vector",
+             selection,
+             :continue
+           ) == {:error, :conflicting_committed_attempt_heads}
+  end
+
+  test "private lane selection is closed and refuses ambiguous repeated keys improper tails and invalid modes" do
+    {bytes, records} = ownership_chain(ownership_prefix())
+    text = head_line(ownership_head(List.last(records)))
+    base = lane_selection(["first"])
+    pin = hd(base["cases"])
+
+    invalid = [
+      nil,
+      %{},
+      Map.put(base, "extra", true),
+      Map.put(base, "candidate_sha", "bad"),
+      Map.put(base, "logical_matrix_id", :matrix),
+      Map.put(base, "cases", []),
+      Map.put(base, "cases", [pin, pin]),
+      Map.put(base, "cases", [pin | :tail]),
+      Map.put(base, "cases", [Map.put(pin, "extra", nil)]),
+      Map.put(base, "cases", [Map.delete(pin, "subcase_key")])
+    ]
+
+    for selection <- invalid do
+      assert Events.verify_lane_history(bytes, text, "m7-vector", selection, :new) ==
+               {:error, :invalid_attempt_lane_selection}
+    end
+
+    assert Events.verify_lane_history(bytes, text, "m7-vector", base, :retry) ==
+             {:error, :invalid_attempt_lane_selection}
+  end
+
+  test "an authorized later candidate still requires actual authority evidence instead of trusting reference syntax" do
+    completed =
+      Map.put(lane_completed("first"), "mechanical_result", "provider_environment_failure")
+
+    reviewed = reviewed_body(completed, "environment_failure")
+    authorized = authorized_body(reviewed)
+
+    {bytes, records} =
+      ownership_chain(
+        ownership_prefix() ++ [lane_started("first"), completed, reviewed, authorized]
+      )
+
+    head = ownership_head(List.last(records))
+
+    selection =
+      Map.put(lane_selection(["first"]), "candidate_sha", authorized["authorized_candidate_sha"])
+
+    assert {:unresolved, plan} =
+             Events.verify_lane_history(bytes, head_line(head), "m7-vector", selection, :new)
+
+    assert plan.reason == :prior_failure_authority_join_required
+    assert plan.case_history.records == Enum.drop(records, 2)
+    assert plan.reused == [] and plan.remaining == []
+  end
+
+  test "a head-recorded pre-dispatch row cannot establish continuation or old-host abandonment discovery" do
+    bodies =
+      ownership_prefix() ++
+        [lane_started("first"), lane_completed("first"), lane_pending("second")]
+
+    {bytes, records} = ownership_chain(bodies)
+    head = ownership_head(List.last(records))
+
+    assert {:unresolved, plan} =
+             Events.verify_lane_history(
+               bytes,
+               head_line(head),
+               "m7-vector",
+               lane_selection(["first", "second"]),
+               :continue
+             )
+
+    assert plan.reason == :head_recorded_lane_join_required
+    assert plan.case_history.records == Enum.drop(records, 2)
+    assert plan.reused == [] and plan.remaining == []
+  end
+
+  test "different candidate lane and matrix identities cannot borrow this lane's pre-dispatch proof" do
+    bodies = ownership_prefix() ++ [lane_pending("first")]
+
+    for {field, value} <- [
+          {"candidate_sha", String.duplicate("2", 40)},
+          {"lane_id", "different-lane"},
+          {"logical_matrix_id", "matrix-1"}
+        ] do
+      selection = Map.put(lane_selection(["first"]), field, value)
+      assert {{:unresolved, plan}, _} = lane_call(bodies, selection, :continue)
+      assert plan.reason in [:lane_history_unavailable, :matrix_invocation_join_required]
+      assert plan.remaining == [] and plan.reused == []
+      assert plan.case_history.records |> hd() |> Map.fetch!("body") == lane_pending("first")
+    end
+  end
+
+  defp lane_started(key) do
+    Map.merge(case_body("started"), %{
+      "case_key" => key,
+      "subcase_key" => nil,
+      "logical_matrix_id" => nil
+    })
+  end
+
+  defp lane_completed(key) do
+    Map.merge(case_body("completed"), %{
+      "case_key" => key,
+      "subcase_key" => nil,
+      "logical_matrix_id" => nil,
+      "mechanical_result" => "pass"
+    })
+  end
+
+  defp lane_pending(key), do: Map.merge(ownership_body(5), case_locator(lane_started(key)))
+
+  defp lane_selection(keys) do
+    Map.merge(
+      Map.take(
+        lane_started("first"),
+        ~w(candidate_sha lane_id logical_matrix_id manifest_digest)
+      ),
+      %{
+        "cases" =>
+          Enum.map(keys, fn
+            key when is_binary(key) ->
+              Map.take(lane_started(key), ~w(case_key specification_digest subcase_key))
+
+            pin ->
+              pin
+          end)
+      }
+    )
+  end
+
+  defp lane_call(bodies, selection, mode) do
+    {bytes, records} = ownership_chain(bodies)
+    head = ownership_head(Enum.at(records, 1))
+    {Events.verify_lane_history(bytes, head_line(head), "m7-vector", selection, mode), records}
+  end
+
+  defp head_line(head),
+    do: "index-head: #{head["campaign_id"]} #{head["sequence"]} #{head["digest"]}"
+
   defp case_locator(body),
     do: Map.take(body, ~w(candidate_sha lane_id logical_matrix_id case_key subcase_key))
 
