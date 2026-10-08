@@ -106,7 +106,17 @@ for (const [name, decode] of Object.entries(decoders)) {
   // scalar strings. They are test inputs, not canonical schema data.
   const payload = JSON.parse(readFileSync(resolve(dirname(path), name), "utf8"));
   for (const vector of payload.cases) {
-    assert.deepEqual(retained(decode(vector)), vector.error ? null : vector.decoded, `${name}: ${vector.name}`);
+    let expected = vector.error ? null : vector.decoded;
+    if (name === "question-answer.v1.json" && !vector.error) {
+      // The accepted answer vectors retain text choices as UTF-8 and binary
+      // choices separately as hex. Compare both against exact opaque bytes.
+      if (vector.decoded_choice_hex !== undefined) {
+        expected = { choice_id: { opaque_hex: vector.decoded_choice_hex } };
+      } else if (vector.decoded.choice_id !== undefined) {
+        expected = { choice_id: { opaque_hex: Buffer.from(vector.decoded.choice_id, "utf8").toString("hex") } };
+      }
+    }
+    assert.deepEqual(retained(decode(vector)), expected, `${name}: ${vector.name}`);
     payloadVectors++;
   }
 }
