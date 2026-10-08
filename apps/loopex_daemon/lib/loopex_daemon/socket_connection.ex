@@ -71,6 +71,7 @@ defmodule LoopexDaemon.SocketConnection do
   }
 
   alias LoopexProtocol.{Frame, Session.V2, Wire}
+  alias LoopexProtocol.Session.CompactResult
 
   @owner_loss_close_ms 1_000
 
@@ -86,6 +87,8 @@ defmodule LoopexDaemon.SocketConnection do
   @registry_request_ms 5_000
 
   @mutation_operations [
+    :session_configure,
+    :session_compact,
     :session_prompt,
     :session_steer,
     :session_follow_up,
@@ -2559,6 +2562,18 @@ defmodule LoopexDaemon.SocketConnection do
       {:routed, _route, {:accepted, accepted_id}} ->
         {:accepted, WireRecords.admission(request_id, method, accepted_id, :accepted)}
 
+      # Concept: a completed compact retry acknowledges its retained admission.
+      # Technical depth: the checked result proves a completed native branch;
+      # completion remains only in its committed event and snapshot projection.
+      {:routed, _route, result} when method == "session.compact" and is_map(result) ->
+        case CompactResult.encode_wire(result) do
+          {:ok, _completed} ->
+            {:accepted, WireRecords.admission(request_id, method, command.command_id, :accepted)}
+
+          :error ->
+            {:admission_unknown, WireRecords.succession_error(request_id, "admission_unknown")}
+        end
+
       {:routed, _route, {:error, :commit_unknown}} ->
         {:admission_unknown, WireRecords.succession_error(request_id, "admission_unknown")}
 
@@ -2593,11 +2608,25 @@ defmodule LoopexDaemon.SocketConnection do
     end
   end
 
+  defp command_for(:session_configure, fields),
+    do: %{type: :configure, command_id: fields.command_id, changes: fields.changes}
+
+  defp command_for(:session_compact, fields),
+    do: %{type: :compact, command_id: fields.command_id, bounds: fields.bounds}
+
   defp command_for(:session_prompt, fields),
-    do: %{type: :prompt, command_id: fields.command_id, content: fields.content}
+    do:
+      Map.merge(
+        %{type: :prompt, command_id: fields.command_id, content: fields.content},
+        Map.take(fields, [:bounds])
+      )
 
   defp command_for(:session_follow_up, fields),
-    do: %{type: :follow_up, command_id: fields.command_id, content: fields.content}
+    do:
+      Map.merge(
+        %{type: :follow_up, command_id: fields.command_id, content: fields.content},
+        Map.take(fields, [:bounds])
+      )
 
   defp command_for(:session_steer, fields) do
     %{
@@ -2615,7 +2644,7 @@ defmodule LoopexDaemon.SocketConnection do
       type: :interaction_answer,
       command_id: fields.command_id,
       interaction_id: fields.interaction_id,
-      choice_id: fields.choice_id
+      answer: fields.answer
     }
   end
 

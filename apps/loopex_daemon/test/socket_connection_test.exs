@@ -150,7 +150,7 @@ defmodule LoopexDaemon.SocketConnectionTest do
         "method" => "session.create",
         "request_id" => "create-progress",
         "command_id" => Wire.encode_identity("create-progress"),
-        "session_options" => %{"purpose" => "current-progress-gate"}
+        "session_options" => %{"version" => 1}
       })
 
     assert [

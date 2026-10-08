@@ -39,9 +39,12 @@ defmodule LoopexDaemon.LeaseOwnerTest do
     end
   end
 
-  for refusal <- [:missing_attachment, :wrong_epoch, :wrong_incarnation, :other_holder, :expired] do
+  for operation <- [:configure, :compact],
+      refusal <- [:missing_attachment, :wrong_epoch, :wrong_incarnation, :other_holder, :expired] do
+    @current_operation operation
+    @current_class if(operation == :configure, do: :session_configure, else: :session_compact)
     @configure_authority_refusal refusal
-    test "configure #{@configure_authority_refusal} refuses before the native callback" do
+    test "#{@current_operation} #{@configure_authority_refusal} refuses before native admission" do
       native = configure_native_fixture()
       term = if @configure_authority_refusal == :expired, do: 60, else: 30_000
       fixture = start_fixture(session_id: native.session, lease_term_ms: term)
@@ -81,7 +84,7 @@ defmodule LoopexDaemon.LeaseOwnerTest do
       worker_monitor = Process.monitor(worker)
 
       assert {:ok, ^origin} =
-               open_mutation(fixture, connection, origin, :session_configure, worker)
+               open_mutation(fixture, connection, origin, @current_class, worker)
 
       epoch =
         if @configure_authority_refusal == :wrong_epoch, do: incarnation(), else: writer_epoch
@@ -96,12 +99,12 @@ defmodule LoopexDaemon.LeaseOwnerTest do
           lease_mutate(
             fixture.owner,
             origin,
-            :session_configure,
+            @current_class,
             "configure-refused",
             supplied_incarnation,
             epoch,
             worker,
-            configure_native_task(native, "configure-refused", "must-not-admit", 512)
+            current_native_task(native, @current_operation, "configure-refused", "must-not-admit")
           )
         end)
 
@@ -126,6 +129,7 @@ defmodule LoopexDaemon.LeaseOwnerTest do
 
       refute_receive {:configure_preparation, _, _}, 40
       refute_received {:native_configure_result, "must-not-admit", _}
+      refute_received {:native_compact_result, "must-not-admit", _}
       assert configure_status(native) == original_configuration
       assert Loopex.AgentLoopFixture.records(native, native.session) == original_records
       if expiry, do: assert(:ok = resolve(fixture, :expiry, expiry))
@@ -262,6 +266,71 @@ defmodule LoopexDaemon.LeaseOwnerTest do
       stop_connection(holder, fixture.relay, holder_incarnation)
       assert %{tickets: 0} = AdmissionRelay.status(fixture.relay)
     end
+  end
+
+  test "a held compact commit reports unknown and retains its candidate renewal" do
+    native = configure_native_fixture()
+    fixture = start_fixture(session_id: native.session)
+    {holder, holder_incarnation, writer_epoch} = grant_first(fixture)
+    configure_connection_cleanup(holder)
+    assert :ok = attach(fixture, holder, holder_incarnation, "compact-attachment")
+    original_deadline = :sys.get_state(fixture.owner).lease.deadline
+    eventually(fn -> now_ms() + 30_000 > original_deadline end)
+    origin = {holder_incarnation, 1, 1}
+    worker = start_ticket_worker(holder)
+    worker_monitor = Process.monitor(worker)
+    assert {:ok, ^origin} = open_mutation(fixture, holder, origin, :session_compact, worker)
+    assert :ok = Loopex.M1RuntimeTestStore.inject(native.store, {:session_journal_commit, :after_linearization_before_result})
+    :ok = :sys.suspend(native.store)
+
+    on_exit(fn ->
+      if Process.alive?(native.store), do: :sys.resume(native.store)
+    end)
+
+    assert {:ok, :admitted} =
+             invoke(holder, fn ->
+               lease_mutate(
+                 fixture.owner,
+                 origin,
+                 :session_compact,
+                 "compact-unknown",
+                 holder_incarnation,
+                 writer_epoch,
+                 worker,
+                 current_native_task(native, :compact, "compact-unknown", "compact-command")
+               )
+             end)
+
+    assert %{in_flight: 1, phase: :held} = LeaseOwner.status(fixture.owner)
+    candidate = :sys.get_state(fixture.owner).in_flight[origin].candidate_deadline
+    assert is_integer(candidate) and candidate > original_deadline
+    refute_receive {:native_compact_result, _, _}, 40
+    refute_receive {:connection_message, ^holder, {:relay_ticket_result, ^origin, _}}, 40
+    :ok = :sys.resume(native.store)
+    assert_receive {:native_compact_result, "compact-command", {:routed, _, {:error, :commit_unknown}}}, 5_000
+    expected = WireRecords.succession_error("compact-unknown", "admission_unknown")
+    assert_receive {:connection_message, ^holder, {:relay_ticket_result, ^origin, ^expected}}, 5_000
+    assert_receive {:DOWN, ^worker_monitor, :process, ^worker, :killed}, 500
+    eventually(fn -> LeaseOwner.status(fixture.owner).in_flight == 0 end)
+    assert :sys.get_state(fixture.owner).lease.deadline == candidate
+
+    eventually(fn ->
+      case Loopex.session_status(native.runtime, native.session) do
+        {:ok, status} -> is_map(status.last_compact)
+        {:error, :session_unavailable} -> false
+        other -> flunk("unexpected compact observation: #{inspect(other)}")
+      end
+    end)
+
+    assert [admission] = Enum.filter(Loopex.AgentLoopFixture.records(native, native.session), &(&1.payload.kind == "compact_command_admitted_v1"))
+    assert admission.payload["command_id"] == "compact-command"
+    assert admission.payload["bounds"] == %{"max_attempts" => 4, "deadline_ms" => 60_000, "token_budget" => 32_768}
+    assert [completion] = Enum.filter(Loopex.AgentLoopFixture.events(native, native.session), &(&1.kind == "context.compaction_finished"))
+    assert completion["command_id"] == "compact-command"
+    assert completion["result"]["disposition"] == "unchanged"
+    refute_receive {:configure_preparation, _, _}, 40
+    stop_connection(holder, fixture.relay, holder_incarnation)
+    assert %{tickets: 0} = AdmissionRelay.status(fixture.relay)
   end
 
   test "configure descriptors serialize actual native configuration and join before the next callback" do
@@ -3307,6 +3376,30 @@ defmodule LoopexDaemon.LeaseOwnerTest do
   # already-classified wire reply is constructed by this fixture.
   # Technical depth: the callback is held by a message so the owner queue and
   # candidate renewal can be observed before durable configuration admission.
+  defp current_native_task(native, :configure, request_id, command_id),
+    do: configure_native_task(native, request_id, command_id, 512)
+
+  defp current_native_task(native, :compact, request_id, command_id) do
+    fn ->
+      result =
+        Loopex.Runtime.command_for_daemon(native.attachment, %{
+          type: :compact,
+          command_id: command_id,
+          bounds: %{"max_attempts" => 4, "deadline_ms" => 60_000, "token_budget" => 32_768}
+        })
+
+      send(native.observer, {:native_compact_result, command_id, result})
+
+      case result do
+        {:routed, _route, {:accepted, ^command_id}} ->
+          {:accepted, WireRecords.admission(request_id, "session.compact", command_id, :accepted)}
+
+        {:routed, _route, {:error, :commit_unknown}} ->
+          {:admission_unknown, WireRecords.succession_error(request_id, "admission_unknown")}
+      end
+    end
+  end
+
   defp configure_native_task(native, request_id, command_id, max_tokens) do
     fn ->
       result =

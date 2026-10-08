@@ -404,6 +404,8 @@ defmodule LoopexDaemon.AdmissionRelayTest do
       {:session_create, nil, nil},
       {:session_resume, "session", owner_binding},
       {:session_attach, "session", nil},
+      {:session_configure, "session", owner_binding},
+      {:session_compact, "session", owner_binding},
       {:session_prompt, "session", owner_binding},
       {:session_steer, "session", owner_binding},
       {:session_follow_up, "session", owner_binding},
@@ -443,13 +445,13 @@ defmodule LoopexDaemon.AdmissionRelayTest do
              invoke(connection, fn ->
                AdmissionRelay.open_ticket(
                  relay,
-                 {incarnation, 10, 1},
+                 {incarnation, length(classes), 1},
                  :session_prompt,
                  "session"
                )
              end)
 
-    for slot <- 10..31 do
+    for slot <- length(classes)..31 do
       origin = {incarnation, slot, 1}
 
       assert {:ok, ^origin} =

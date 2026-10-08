@@ -148,7 +148,7 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
         "method" => "session.create",
         "request_id" => "create",
         "command_id" => Wire.encode_identity("lifecycle-create"),
-        "session_options" => %{"purpose" => "lifecycle"}
+        "session_options" => %{"version" => 1}
       })
 
     assert [%{"status" => "accepted", "session_id" => encoded}] = receive_records(client, 1)
@@ -229,7 +229,7 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
         "method" => "session.create",
         "request_id" => "create",
         "command_id" => Wire.encode_identity("t14-create"),
-        "session_options" => %{"purpose" => "t14"}
+        "session_options" => %{"version" => 1}
       })
 
     assert [%{"status" => "accepted", "session_id" => session_id}] = receive_records(client, 1)
@@ -296,7 +296,7 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
         "method" => "session.create",
         "request_id" => "create",
         "command_id" => Wire.encode_identity("t14b-create"),
-        "session_options" => %{"purpose" => "t14b"}
+        "session_options" => %{"version" => 1}
       })
 
     assert [%{"status" => "accepted", "session_id" => session_id}] = receive_records(holder, 1)
@@ -595,7 +595,7 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
         "method" => "session.create",
         "request_id" => "create",
         "command_id" => Wire.encode_identity("t21-create"),
-        "session_options" => %{"purpose" => "t21"}
+        "session_options" => %{"version" => 1}
       })
 
     assert [%{"status" => "accepted", "session_id" => session_id}] = receive_records(holder, 1)
@@ -968,7 +968,7 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
           "method" => "session.create",
           "request_id" => "create",
           "command_id" => Wire.encode_identity("replayed-create"),
-          "session_options" => %{}
+          "session_options" => %{"version" => 1}
         })
 
       assert [%{"status" => "accepted", "session_id" => session_id}] = receive_records(client, 1)
@@ -1695,7 +1695,7 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
         "method" => "session.create",
         "request_id" => "create",
         "command_id" => Wire.encode_identity("freeze-create"),
-        "session_options" => %{"purpose" => "freeze"}
+        "session_options" => %{"version" => 1}
       })
 
     assert [%{"status" => "accepted", "session_id" => encoded}] = receive_records(client, 1)
