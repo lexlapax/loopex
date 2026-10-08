@@ -29,6 +29,31 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Reboot continuation on 2026-10-07
 
+Cleanup source repair is committed as isolated raw
+`b71039b6132d956e552ddaec6440155b21a0d485`, treeed5a517e, parent1525158e;
+actual complete1187-record NUL projection hashesaa59d563. Frozen V2 source
+packetc79925d9, root review19bd6ac1 and independent review5b241d9c authenticate
+exactly Chat, Driver and the new workflow-test block. Formatting and complete91
+proof remain unrun; no source is integrated yet. The ordinary cancellation
+bound and native abort behavior remain unchanged. Startup refusal now captures
+that same deadline and reaps only local attachments before abandonment.
+
+Ownership V3 blueprints are source-reviewed at71009fbf, independent reportea858948.
+Their formatter requires the future positive cleanup91 proof; all future fields
+remain unresolved and gates disabled. Ownership raw558d77fc remains unrun.
+
+The repair source, actual raw facts, source reviews, ownership blueprints and
+original-row audits are retained as36 immutable files in
+`M7/cleanup-repair-and-ownership-review-context-20261007-v1/retention.json`,
+SHA-256 `a2983ee2dab7206ad6c7fa8f7e693cd69684df369e1bfd40d15376d90a57f31e`.
+T15 original item6 is reconciled as implemented access prevention and complete
+instructions for the accepted eligible current-format restore profile. Report
+`a4428b02` joins unchanged current selected sources to retained paired proofs and
+passing operator-doc evidence18190; helper namespace refusal stays explicit.
+Original item7's complete helper-containing restore and attended proof remain
+open. T01–T19 totals are88 done/85 todo/6 retired; added351 done/23 todo.
+The earlier checkpoint below is historical where superseded by this entry.
+
 The primary restart baseline is pushed `8e46d04c`. The reboot cleared temporary
 files, so exact context was recovered from four retained manifests. Completed
 native work was not repeated. Original formatter19048 had already exited0;

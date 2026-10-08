@@ -1,5 +1,13 @@
 # M7 Implementation Tasks
 
+T15 original item6 is reconciled as implemented access prevention and complete
+instructions for the accepted eligible restore profile. Its helper-containing
+all-plane restore outcome remains open in item7. T01–T19 counts are now88 done /
+85 todo /6 retired; added351 done /23 todo. Cleanup source repair is committed
+rawb71039b6 and independently reviewed; complete91-case native proof remains
+unrun. Its source and the ownership blueprints are retained as36 immutable files
+in the context manifest named in the [resume record](M7-resume.md).
+
 Post-reboot verification continues from pushed `8e46d04c`. Original cleanup
 formatter19048 is collected PASS with six joins in12.019 seconds. Complete
 paired38 proof original16501 failed its two new cases after36 current passes;
@@ -14162,10 +14170,23 @@ repeating completed provider work.
 - [-] Observe the actual historical reader against disposable new-format roots.
 - [-] Preserve the existing v0.2.0↔v0.3.0 rollback proof.
 - [-] Add the separate v0.3.0↔M7 proof.
-- [ ] Implement access-prevention and complete backup-restore instructions.
+- [x] Implement access-prevention and complete backup-restore instructions.
 - [ ] Restore into an empty root and compare complete manifests.
 - [x] Restore workspace state separately from runtime state.
 - [-] Join automated rollback artifacts to attended restore inspection without rerunning the case.
+
+Item 6 is implemented for the accepted eligible current-format restore profile.
+The operator procedure excludes every owner, inventories and syncs the complete
+backup, preserves physical workspace identity, handles each public outcome and
+compares the complete state and separate workspace manifests. Composition and
+Local access guards refuse retired, malformed or incomplete roots before mutable
+startup or effect claim. Current selected source is byte-identical to the retained
+paired restore proofs; the operator document is byte-identical to the passing
+18190 documentation source. Read-only reconciliation reporta4428b02 is retained
+in `M7/cleanup-repair-and-ownership-review-context-20261007-v1/retention.json`,
+SHA-256a2983ee2. The instructions explicitly retain refusal of helper namespaces.
+Item 7's complete helper-containing restore and operator attendance remain open;
+this row supplies no full-check, all-plane restore or milestone-closure claim.
 
 Item 2 maps to `EndToEndRecoveryTest`'s actual effect/restart cases, exact receipt
 reconciliation and removed-receipt outcome_unknown control. The current
