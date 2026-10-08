@@ -992,11 +992,20 @@ defmodule LoopexComposition.RestoreWorkflowTest do
       baseline = manifest(fixture.backup)
       assert manifest(fixture.source) == baseline
 
+      plan = %{
+        fixture.plan
+        | "manifest_sha256" => hash(baseline),
+          "stores" =>
+            Enum.map(fixture.plan["stores"], fn store ->
+              %{store | "sha256" => hash(File.read!(Path.join(fixture.backup, store["relative_path"])))}
+            end)
+      }
+
       fixture = %{
         fixture
         | baseline: baseline,
           store_bytes: bytes,
-          plan: refresh_plan(fixture.plan, baseline, fixture.backup)
+          plan: plan
       }
 
       assert_custody_refusal(fixture, fixture.plan)
