@@ -1,39 +1,35 @@
 # M7 Implementation Tasks
 
 Latest checkpoint, 2026-10-08: the active M7 goal continues on `m7`.
-The complete real chat startup selection passes all13 cases on each supported
-pair at unserved `17205ba8abda609dbcae9e5f99e01e44863fafb5`, original20467,
-39.727seconds, eight exact stage joins and zero exclusions/skips/invalid.
-The new standalone caller retains default Local composition and signal
-installation, held original startup identity/cutoff, unread input before
-readiness, one real create/genesis, actual driver/session binding, no model
-request and joined cleanup. Earlier failed Chat originals remain failed.
+The added T15 special-permission-bits qualification is complete. Original
+36773 at unserved `17205ba8abda609dbcae9e5f99e01e44863fafb5` passes all
+43 current workflow tests, 122 floor IO tests including all three long-bound
+cases, and 43 floor workflow tests. The composite proof reuses only the exact
+unchanged warning-free current IO122 stage at `c45a6f43`, with retained
+source-byte confinement. Duration531.883seconds, nine original stage joins,
+38 verified artifacts and zero exclusions/skips/invalid. Both workflow history
+cases complete all64 physical restores under the accepted aggregate cutoff.
+The original broader restore and operator obligations remain open.
 
-Current restore IO passes all122 cases, including the three long-bound cases,
-without warnings at `c45a6f438c8d892b364f47c8a3dfb81da3ebc9ab`. The same
-original46610 complete workflow run fails42 of43 cases during immediate
-creation in its shared setup; the64-restore history case passes. Floor is
-unrun. The existing1,000ms fixture startup allowance is now captured before
-direct start and consumed through actual public readiness with the original
-ID/Core cutoff; that workflow correction is committed but remains unrun.
-Original30910 remains failed despite122 passing executions because of its
-compiler warning. Neither full-mode nor full restore completion is claimed.
+Complete real chat startup selection previously passed all13 cases on each
+supported pair at the same unserved source. Core16/host121/socket195 prior
+qualified bytes remain unchanged. Foreground112, complete restore qualification,
+attempts, helpers, coordinated activation and whole integration remain open.
 
-Immutable `M7/coupled-current-context-20261008-v12/retention.json`, SHA-256
-`bc1d64f181a434b0d2fca5036ee95c00d11fae2cb0a592cc47652a2f6bdee3c3`,
-chains v11 and retains157 assets, eighteen candidate commits,21 completed
-native records and a verified candidate/primary Git bundle. Registry2548 is
-the next source-run seed until the subsequent checkpoint documentation check
-completes. Private task-lifetime attribution source is frozen separately,
-unjoined and unrun. Core16/host121/socket195 prior qualified bytes remain
-unchanged. Foreground112, full restore175, attempts, helpers, coordinated
-activation and whole integration remain open.
+Immutable `M7/coupled-current-context-20261008-v13/retention.json`, SHA-256
+`a47d6690115c627f211922dc47fe1eaec79cdc30afd00b5709e6042dad70ba3b`,
+chains v12 and retains ten new assets, the completed restore and checkpoint
+native records, and a verified candidate/primary Git bundle. Next source-run
+registry2559, SHA-256
+`f2fe8bb0833302eb94e759d3d8e20e685993a0ade3babef08970effe415421aa`.
+The independently reviewed private task attribution patch remains unjoined
+and unrun; it is the next diagnostic qualification unit.
 
 Proposed ADR0065 at `b651904a84be33800f3a2bf19cf782940e3fc1fb` still awaits
 its one exact-pair prerequisite decision; no physical attempts writer is
 implemented. No main merge, closure, release, tag or paid campaign is authorized.
-T01-T19 totals remain originals **88 done /85 remaining /6 retired** and
-additions **365 done /24 remaining**; T00 is separate. The
+T01-T19 totals are originals **88 done /85 remaining /6 retired** and additions
+**366 done /23 remaining**; T00 is separate. The
 [resume record](M7-resume.md) names exact outputs and the next qualification.
 Older checkpoint paragraphs below are historical.
 
@@ -14693,7 +14689,26 @@ in the restart checkpoint. Broader restore/decoder/public/helper rows stay open.
 
 - [x] Reapply the imported regular-file mode after the last payload write and before sync/close in streamed copy and both publication paths. Physically establish `0o4750`, prove actual supported restore admission, complete pre-administration copied manifests, original actor/descriptor joins and unchanged cutoffs, and run all111 IO,16 publication,23 install and25 prefix cases including3 long-bound on both pairs at768b2191. This bounded file-mode repair does not establish sticky-file/directory preservation or close the full `0o7777` obligation.
 
-- [ ] Establish special permission bits physically before current-format restore; prove exact preservation or refusal before successful activation under the accepted full `0o7777` mode domain on both supported toolchains. Keep this separate from the ordinary-mode workspace workflow and retain original owner, work and cleanup bounds.
+- [x] Establish special permission bits physically before current-format restore; prove exact preservation or refusal before successful activation under the accepted full `0o7777` mode domain on both supported toolchains. Keep this separate from the ordinary-mode workspace workflow and retain original owner, work and cleanup bounds.
+
+Completed on 2026-10-08 using composite selected proof. Original36773 at
+`17205ba8abda609dbcae9e5f99e01e44863fafb5` passes complete currentWF43,
+floorIO122 including all three long-bound cases, and floorWF43, zero
+exclusions/skips/invalid, in531.883seconds. Nine original stage processes
+joined and38 artifacts verified. Output
+`M7/restore-special-modes-focused-20261008-v5`; terminal SHA-256
+`bd6e47e597fb535b3eaec2b92f3265fa1f3a974acfff14d6680d2c2a78f8c3ed`;
+collection `d971c36d3a5c10dc2d0ff90a89da6201bb018b105b052affaf0bfb507a5a0575`.
+The retained `reused-current-io-proof.json` binds unchanged warning-free
+currentIO122 at `c45a6f438c8d892b364f47c8a3dfb81da3ebc9ab`, exact prior
+stage/log/joins and source-byte confinement. The old original46610 as a whole
+remains FAIL. Full imported0o7777 preserve-or-refuse cases and the separate
+strict6750-to4750 negative control preserve physical modes, authority and
+original work/cleanup joins. Both64-real-restore workflow cases complete under
+the accepted600000ms aggregate cutoff with unchanged per-restore bounds.
+This closes only special-mode qualification, not165 tests at one SHA,
+full restore175, operator attendance, helpers or whole integration.
+
 
 - [x] Prove a bounded current-format physical Store/executor backup/restore slice with quiescent exact owner joins, complete unexcluded manifests, empty destination roots, separate workspace restoration and unknown-effect nonredispatch on both pairs. This does not close operator attendance or future helper/catalog/ledger coverage.
 

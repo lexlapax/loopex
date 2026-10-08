@@ -27,6 +27,62 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+### Special-mode restore qualification, 2026-10-08
+
+Source candidate `17205ba8abda609dbcae9e5f99e01e44863fafb5` is clean,
+pushed on the existing recovery branch and unserved. Original36773 is terminal
+PASS after531.883seconds. It ran complete current workflow43, floor IO122
+including all three long-bound cases, and floor workflow43, with zero
+exclusions/skips/invalid. All nine original stage processes joined, complete
+logs reached EOF and38 artifacts verified. Both workflow history cases finish
+all64 actual restores under the accepted600000ms aggregate cutoff; per-restore
+work, fixture grace, cleanup and actor joins remain unchanged.
+
+Output `M7/restore-special-modes-focused-20261008-v5`; terminal SHA-256
+`bd6e47e597fb535b3eaec2b92f3265fa1f3a974acfff14d6680d2c2a78f8c3ed`;
+collection `d971c36d3a5c10dc2d0ff90a89da6201bb018b105b052affaf0bfb507a5a0575`.
+The retained `reused-current-io-proof.json` binds exact prior warning-free
+current IO122 at `c45a6f438c8d892b364f47c8a3dfb81da3ebc9ab`, original stage
+and joins, source hashes and confinement to three unrelated test-file changes.
+This is composite selected evidence, not165 cases at one SHA or full restore175.
+Original46610 remains FAIL as a whole. Full imported0o7777 preserve-or-refuse
+cases and separate strict6750-to4750 control now qualify on both toolchains.
+Only the corresponding added T15 item closes. Original restore/attendance and
+future helper/catalog/ledger coverage remain open.
+
+Checkpoint docs-v6 original13514 previously passed once at primary
+`4d0db3b7257b82c5cb9db9a6b41b90bb9e62bb22` in36.186seconds, two stage joins
+and13 verified artifacts. Output `M7/checkpoint-docs-check-20261008-v6`;
+terminal `6a36f61656e58521f9b6f82c446e696a750255d59801054bc8a33714a51721a9`;
+collection `5a1ad68afac05d85ff642c83bfb178101eda7738b6d4341d70016386f9c6086a`.
+Do not repeat that same-revision documentation check.
+
+Immutable recovery manifest
+`M7/coupled-current-context-20261008-v13/retention.json`, SHA-256
+`a47d6690115c627f211922dc47fe1eaec79cdc30afd00b5709e6042dad70ba3b`,
+chains v12, retains ten new source/review/context assets, both completed native
+records and a verified candidate/primary Git bundle. Next registry2559:
+`M7/restore-special-modes-focused-20261008-v5/stage-attempt-registry.json`,
+SHA-256 `f2fe8bb0833302eb94e759d3d8e20e685993a0ade3babef08970effe415421aa`.
+All root native handles listed here are terminal and collected once.
+
+Next source unit is the reviewed three-hunk private task attribution patch.
+It adds the already-monitored sessions supervisor to scoped diagnostic reports
+and retains fixed original-actor link metadata under the existing8192 cap.
+Its three cases, concurrency32, original1000ms cutoffs, classifications and
+joins remain unchanged. Independent review SHA-256
+`5226416aa88bfcce74cac5887cbb3490d02b0f865c1c30941e4a7fbdda6ad057`
+is retained in v13. Root integration, format and full three-case qualification
+on both pairs remain. This does not resolve historical untraced reports or
+close the broader T16 diagnostic obligation.
+
+ADR0065 remains exact Proposedb651 with one unanswered decision. Do not
+implement its dependent attempts writer. Native helper packaging and active
+output accounting remain unapproved and unimplemented. No served generation
+activation, main merge, closure, release, tag or paid campaign is authorized.
+T01-T19 totals are originals88/85/6 and additions366/23, excludingT00.
+Older sections below retain historical evidence and superseded next-step state.
+
 ### Real chat qualification and restore fixture migration, 2026-10-08
 
 Source candidate `17205ba8abda609dbcae9e5f99e01e44863fafb5` is clean and
