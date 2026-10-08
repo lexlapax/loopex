@@ -27,7 +27,64 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
-### Three fixture corrections and current exact proof
+### Current Core verification and next foreground subtask
+
+The reviewed constructor cleanup repair is saved at
+`b4e06ed5a1144830ef695515dd8b8eb9947983de`. It catches only the exact nested
+normal exit from the original bounded stop. The original model monitor still
+must observe normal DOWN within the existing 1,000 ms grace; an expired cleanup
+receipt remains unproved. Independent source review SHA-256 is
+`ddd3a96c779dfc11a3742393eb5a5af0a9181dd00c94b31073e343484e655888`.
+
+Original61348 passed both toolchains' complete 31-file formatting and AST checks
+in 19.177 seconds, with ten actual process joins, 48 artifacts and 2,147 registry
+rows. The source stayed clean. Output `M7/constructor-normal-race-format-20261008-v1`;
+collection `c3d3d1fda6d0a7cc900b13d9d4ead254231ad53fb5468950d66f394d36ed2616`,
+terminal `07bee9b561dadd32f53837e31c033a30b63e64d6eadd4acfd86d473705681177`,
+registry `922d5f1761ef7649275c182d3cc61965c5393a30303fb8afcd1a32e7b0e2382e`.
+
+Original91795 passed the entire four-case constructor test file on both pairs
+in 27.327 seconds. Each pair executed four cases with zero failures, exclusions,
+skips or invalid cases; formatting and warning-free compilation passed. Six
+actual joins, 36 artifacts and 2,153 registry rows are retained. Output
+`M7/constructor-normal-race-proof-20261008-v1`; collection
+`6c52620b1bc76aab1dcdac0277d5716344e114176a899ab4fa9d94c412c1eda6`,
+terminal `4dcbc550a56419ed0f1f18ab11fb5005f79b4c789b8f23dfed1aa0b8169dd358`,
+registry `2f05a3ea7e3027eaa11d367349cad4d3c0f98fbb6847d8b5e8ecd65187ca993d`.
+Do not repoll or recollect either terminal producer. The focused four-case result
+does not establish the complete 490-case integration result.
+
+Original92991 is the sole live native handle, running the complete 490 cases
+with all five long_bound cases on each supported pair at exact `b4e06ed5`.
+Output `M7/core-authored-normal-reap-proof-20261008-v1`; runner
+`/private/tmp/m7-core-authored-normal-reap-proof-preparation-20261008-v1/proof.enabled.py`,
+SHA-256 `c628cdeb1960ea703f41b24c694d1e6d41d4b5b04ee20b41048eda5889a8dc88`,
+capture SHA-256 `d8ba17ad3a1bc5929ae264ab42e02777b3e9aba5d4b5a86bd98560c9b730f81d`.
+It seeds the actual 2,153-row registry and retains earlier failures. Poll this
+original handle to terminal and collect once; no concurrent VM, source mutation
+or unchanged-source retry is permitted. No full paired PASS is claimed yet.
+
+After Core qualification, T16's next subtask is to advance the 17-path foreground
+join from `3fcd42dc` above the qualified current Core, then verify its eight
+complete files: app-server 94 and protocol 18 cases in separate VMs, including
+all four Node cases. The existing foreground join is based on `2c9dbc91`, whose
+floor run failed. Its conditional format draft therefore remains unbound and
+must not run with that failed prerequisite. Foreground qualification precedes
+T15's 175-case backup/restore proof, followed by remaining protocol/helper
+integration and T17 closure-candidate preparation. The finite 32-CAS-exhaustion
+proof remains a separate open obligation.
+
+New repair, preparation, source-join and review context is retained as 98
+immutable files at
+`/Users/spuri/projects/lexlapax/loopex-evidence/M7/normal-reap-resume-context-20261008-v1/retention.json`,
+SHA-256 `ff9633fd9b6c00688e2b544b355f0b1cb71f5b9c44449c4d06aff943bfacb569`.
+Native outputs have separate original collections. Checklist counts remain
+T01–T19 originals 88 done / 85 todo / 6 retired, additions 363 done / 23 todo.
+ADR0063's exact Proposed pair remains the sole asked pending decision.
+
+### Historical three-fixture proof checkpoint
+
+The current checkpoint above supersedes live-handle and next-run statements below.
 
 Primary checkpointbdb507e8 is pushed. The three case-local corrections are saved
 at rawb5a4b843cde86c206d11442575b7c9ce573881a8, then paired formatting-only child
@@ -45,14 +102,27 @@ registry `4aa53d3c00c14182c053d14edaf730d7b4eb0997cd6ea5608a11d47c2e56d142`.
 Do not repoll or recollect50875. Its sole formatting wrap was saved and independently
 reversed to the reviewed raw constructor case; no semantic change.
 
-Original35386 is now the sole live native handle. It runs the unchanged18 whole
-files/490 cases on clean2c9, including all five long_bound cases, under current
-then floor. Exact bound review9fb766cd qualifies capture6ec1999a/runner55f16078,
-complete2,131-row predecessor and unchanged commands/joins/finalizers. Preparation:
-`/private/tmp/m7-core-three-fixture-proof-preparation-20261008-v1`;
-output `M7/core-three-fixture-proof-20261008-v1`. Poll original35386 to terminal
-and collect once with its actual exit. Do not mutate ingress source, start a
-second VM or infer a result from source review. Prior6965 remains FAILED.
+Original35386 is terminal FAIL and collected once: current490/490 passed,
+floor489/490 passed with one failure; zero exclusions/skips/invalid on each pair,
+all five long_bound cases included. Formatting and warning-free compilation passed
+on both pairs. Producer737.145seconds, six actual process joins,37 artifacts and
+2,137 registry rows. No native handle is live. Output:
+`M7/core-three-fixture-proof-20261008-v1`; collection
+`15ba78ba54a17deaba0d2ef50477062e2881b97f2796b2aef34d5d5a391aa148`,
+terminal `efce9987d6a2b793b6ff15a94c9c808adb3fa641a72bd2da19a845a9d34cc7fe`,
+registry `5bdc4c665608dd87987d448f1c8a4fdf6639be1beddb3cc45e733de6e559570c`.
+Never retry unchanged2c9 or recollect35386. The next grant seeds actual2,137.
+
+The remaining floor failure is the suspended-model case's post-proof cleanup:
+GenServer.stop raises nested normal after resume. The original queued stop can
+race this second stop; the failed run does not identify the winner. Diagnosis7989a3f7 verifies the exact floor sys/GenServer wrapper and keeps
+the bounded second stop plus original-model monitor normal DOWN. It does not infer
+that the old stop was definitely dispatched or upgrade the expired unproved receipt.
+The narrow one-clause correction is source-saved atb4e06ed5 in the separate
+constructor worktree; packetb3d58695/patch0ae7fa9d, independent review and native
+qualification remain. All cases, original actors and1,000ms bounds stay unchanged.
+Earlier three corrections now pass both actual populations; the whole paired
+unit remains failed until this cleanup race is corrected and verified.
 
 Foreground17 is now literally integrated in its separate worktree above clean2c9
 at3fcd42dc79eaaa2e8531fb62e1c68de4b1616e34. All31 Core files are byte-preserved;
@@ -62,7 +132,10 @@ and factual bounded72817d qualify the join. No native foreground result or serve
 generation activation follows. Saved d792 source stays reachable through local
 codex/m7-foreground-source-v2. Selection mapc51f1c9b names eight complete files:
 app-server94 plus protocol18 in separate VMs, including all four Node cases.
-Foreground formatting/compilation/112-case proof is next after Core490 qualification.
+Foreground formatting/compilation/112-case proof follows Core qualification.
+Conditional builderaf1a4318/review597f320f stays unbound after the failed Core
+predecessor; no foreground native run or PASS is claimed. Its fifteen .ex/.exs
+AST/format paths leave physical fixture.txt and independent workflow.mjs byte-guarded.
 
 New source/proof context is retained as75 immutable files:
 `/Users/spuri/projects/lexlapax/loopex-evidence/M7/core-three-fixture-context-20261008-v1/retention.json`,

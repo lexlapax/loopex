@@ -1,18 +1,28 @@
 # M7 Implementation Tasks
 
-Three bounded fixture corrections are source-reviewed and saved at rawb5a4b843,
-formatted2c9dbc91. Original50875 passed all31 paired format/AST checks in18.063s,
-with ten actual joins and2,131 registry rows. Original35386 is now the sole live
-native handle for the unchanged18 whole files/490 cases/allfive long_bound under
-both supported pairs. No result is claimed before original terminal collection.
+Current T16 subtask: original92991 is running the complete 490-case Core selection
+on both supported toolchains at reviewed `b4e06ed5`. All five long_bound cases
+remain. It is the sole native handle; no complete paired result is claimed yet.
+Original91795 already passed the entire four-case constructor file on both pairs
+in 27.327 seconds, and original61348 passed all 31 formatting/AST checks in
+19.177 seconds. Both terminal originals are collected once. Earlier original35386
+remains a retained failure, with current 490 passed and floor 489 passed / one
+failed; the bounded normal-reap correction preserves the original monitor,
+cleanup receipt and 1,000 ms grace.
 
-Foreground17 is literally rejoined above current Core at3fcd42dc, preserving all31
-Core files. Its112 cases require separate app-server94/protocol18 VMs and explicit
-inclusion of all four Node cases. Native foreground proof remains unrun. Counts
-remain88 original done/85 todo/6 retired and363 added done/23 todo; source work
-closes no row. ADR0063 remains the sole asked pending decision. Exact run/source
-and75-file immutable retention are in the [resume record](M7-resume.md).
-Earlier entries below are historical where superseded.
+Next is T16 foreground output integration: advance the saved 17-path join above
+qualified current Core, then prove app-server 94 and protocol 18 cases in separate
+VMs, including all four Node cases. Existing foreground `3fcd42dc` still has failed
+`2c9dbc91` as its Core parent, so its conditional format draft cannot run yet.
+T15's 175-case backup/restore proof follows, then remaining protocol/helper
+integration and T17 closure-candidate preparation. Actual 32-CAS-exhaustion proof
+remains open. No original or added checklist row closes for these source repairs,
+reviews or focused prerequisites.
+
+Counts remain originals 88 done / 85 todo / 6 retired and additions 363 done /
+23 todo. ADR0063 remains the sole asked pending decision. Exact run/source
+identities and the new 98-file immutable retention are in the
+[resume record](M7-resume.md). Earlier entries below are historical where superseded.
 
 Current source8d26a971 has passed both supported toolchain format/AST checks
 for all31 files; all final hashes match. Original5052 is collected once with
