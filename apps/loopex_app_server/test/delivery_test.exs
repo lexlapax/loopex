@@ -231,6 +231,23 @@ defmodule Loopex.AppServer.DeliveryTest do
     end
   end
 
+  test "compaction activity applies the session identity boundary before encoding" do
+    for kind <- ["run", "compact"] do
+      item = compaction_item(kind, 7)
+
+      for session <- [nil, :session, 7, "", :binary.copy(<<255>>, 257)] do
+        queue = Delivery.new(session, 7)
+        assert Delivery.progress(queue, item) == queue
+      end
+
+      session = :binary.copy(<<255>>, 256)
+      {[record], drained} = Delivery.new(session, 7) |> Delivery.progress(item) |> drain()
+      assert {:ok, ^session} = LoopexProtocol.Wire.identity(record["session_id"])
+      assert Delivery.cursor(drained) == 7
+      assert Delivery.usage(drained).progress == {0, 0}
+    end
+  end
+
   test "malformed compaction activity drops whole before private values can reach encoding" do
     item = compaction_item("run", 0)
     queue = Delivery.new("session", 0)

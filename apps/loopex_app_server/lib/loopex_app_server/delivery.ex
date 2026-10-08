@@ -670,6 +670,10 @@ defmodule Loopex.AppServer.Delivery do
   # Concept: maintenance activity crosses only its closed public projection.
   # Technical depth: malformed members drop before generic serialization; the
   # existing offer still applies the unchanged transient record and byte limits.
+  defp progress_record(session_id, _item)
+       when not is_binary(session_id) or byte_size(session_id) not in 1..256,
+       do: :error
+
   defp progress_record(session_id, %{kind: "context.compaction_progress"} = item),
     do: compaction_progress_record(session_id, item)
 
