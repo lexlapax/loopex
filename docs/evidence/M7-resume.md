@@ -29,6 +29,29 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Reboot continuation on 2026-10-07
 
+Ordered ownership is proved and literally integrated from isolated
+`3c15f020c8faaa053ab1d5b53aa187d831a91101`. Original50168 is TERMINAL0 and
+collected PASS_ATTEMPT_OWNERSHIP_REPLAY_PROOF:74 cases on each supported pair,
+zero failures/exclusions/skips/invalid, both format checks and warning-free CLI
+compilation. Eight original processes joined and43 artifacts authenticate in
+102.218 seconds. Output `M7/attempt-ownership-replay-proof-20261007-v2`;
+collection SHA-256 `23820c6ee00643acc860df88f6cc6aa2a2db9394af9f2997ff8a2b6e7433e24b`;
+terminal `e238cf591e012094fa8863b46b3b095633c513e3fef98cb56e9c417f65a06831`; latest registry1765
+`320d07e4790f56b8aaf0e41ecf56910ded4484040aff4affcc7febab4559fe06`. Do not repoll50168 or rerun this unchanged proof.
+Only the added T14 ownership row closes. Original T14 physical writer, case
+transitions, manifest/evidence/authority and runner outcomes remain open.
+T01–T19 originals remain88 done/85 todo/6 retired; added353 done/22 todo,
+including the separately unproved case-replay row.
+
+The separate case-replay writer has implemented source for its accepted pure
+core and is preparing a frozen packet; native checks remain unrun. Review and
+prove that bounded unit before the next combined canonical full check, so the
+full check runs once against the joined units. Its latest-producer binding
+will need an exact revised preparation after the actual case proof is collected.
+The existing full-check V2 stays disabled and source-only; original14854 remains
+FAIL. ADR0058 is still the sole asked pending approval. Earlier entries are
+historical where superseded.
+
 Ownership complete74-case proof original50168 is LIVE at isolated
 `3c15f020c8faaa053ab1d5b53aa187d831a91101`, treee032285f. Poll that original
 handle through termination and collect once. Output

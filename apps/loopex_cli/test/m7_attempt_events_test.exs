@@ -588,6 +588,419 @@ defmodule LoopexCli.M7AttemptEventsTest do
     end
   end
 
+  # Concept: These are complete legal control chains, not concatenated body examples.
+  # Technical depth: Python stdlib derived canonical unsigned bytes and SHA-256
+  # independently; preceding heads and successor sequence three are literal.
+  @ownership_chains [
+    {"handoff", %{"writer_id" => "writer-2", "host_id" => "host-2", "ownership_epoch" => 2},
+     [
+       {~S|{"body":{"campaign_id":"m7-vector","codec_version":1,"kind":"genesis","version":1},"campaign_id":"m7-vector","previous_digest":null,"sequence":1,"version":1}|,
+        "d4f20cd596c808cc8f75483de8890ed7f09e44b4f846c809aa41fbb489dc9826",
+        ~S|{"body":{"campaign_id":"m7-vector","codec_version":1,"kind":"genesis","version":1},"campaign_id":"m7-vector","digest":"d4f20cd596c808cc8f75483de8890ed7f09e44b4f846c809aa41fbb489dc9826","previous_digest":null,"sequence":1,"version":1}| <>
+          "\n"},
+       {~S|{"body":{"host_id":"host-1","kind":"writer_designated","ownership_epoch":1,"version":1,"writer_id":"writer-1"},"campaign_id":"m7-vector","previous_digest":"d4f20cd596c808cc8f75483de8890ed7f09e44b4f846c809aa41fbb489dc9826","sequence":2,"version":1}|,
+        "398fecfa28498910f0bee161530aff2f83eaca76fc9cddf94dea71fe8c723ce5",
+        ~S|{"body":{"host_id":"host-1","kind":"writer_designated","ownership_epoch":1,"version":1,"writer_id":"writer-1"},"campaign_id":"m7-vector","digest":"398fecfa28498910f0bee161530aff2f83eaca76fc9cddf94dea71fe8c723ce5","previous_digest":"d4f20cd596c808cc8f75483de8890ed7f09e44b4f846c809aa41fbb489dc9826","sequence":2,"version":1}| <>
+          "\n"},
+       {~S|{"body":{"destination_host_id":"host-2","destination_writer_id":"writer-2","handoff_id":"handoff-1","host_id":"host-1","kind":"writer_relinquished","ownership_epoch":1,"preceding_head":{"campaign_id":"m7-vector","digest":"398fecfa28498910f0bee161530aff2f83eaca76fc9cddf94dea71fe8c723ce5","sequence":2},"quiescence":{"reference":"/evidence/m7/quiescence.json","sha256":"0000000000000000000000000000000000000000000000000000000000000000"},"version":1,"writer_id":"writer-1"},"campaign_id":"m7-vector","previous_digest":"398fecfa28498910f0bee161530aff2f83eaca76fc9cddf94dea71fe8c723ce5","sequence":3,"version":1}|,
+        "02740df72c4e3ecaddf49efc05efc6ebe1aca35fbe7c84f3c7b699b54b62e0da",
+        ~S|{"body":{"destination_host_id":"host-2","destination_writer_id":"writer-2","handoff_id":"handoff-1","host_id":"host-1","kind":"writer_relinquished","ownership_epoch":1,"preceding_head":{"campaign_id":"m7-vector","digest":"398fecfa28498910f0bee161530aff2f83eaca76fc9cddf94dea71fe8c723ce5","sequence":2},"quiescence":{"reference":"/evidence/m7/quiescence.json","sha256":"0000000000000000000000000000000000000000000000000000000000000000"},"version":1,"writer_id":"writer-1"},"campaign_id":"m7-vector","digest":"02740df72c4e3ecaddf49efc05efc6ebe1aca35fbe7c84f3c7b699b54b62e0da","previous_digest":"398fecfa28498910f0bee161530aff2f83eaca76fc9cddf94dea71fe8c723ce5","sequence":3,"version":1}| <>
+          "\n"},
+       {~S|{"body":{"handoff_id":"handoff-1","host_id":"host-2","kind":"writer_accepted","ownership_epoch":2,"quiescence":{"reference":"/evidence/m7/quiescence.json","sha256":"0000000000000000000000000000000000000000000000000000000000000000"},"relinquishment_head":{"campaign_id":"m7-vector","digest":"02740df72c4e3ecaddf49efc05efc6ebe1aca35fbe7c84f3c7b699b54b62e0da","sequence":3},"source_host_id":"host-1","source_ownership_epoch":1,"source_revocation":{"reference":"/evidence/m7/revocation.json","sha256":"0000000000000000000000000000000000000000000000000000000000000000"},"source_writer_id":"writer-1","transfer":{"reference":"/evidence/m7/transfer.json","sha256":"0000000000000000000000000000000000000000000000000000000000000000"},"version":1,"writer_id":"writer-2"},"campaign_id":"m7-vector","previous_digest":"02740df72c4e3ecaddf49efc05efc6ebe1aca35fbe7c84f3c7b699b54b62e0da","sequence":4,"version":1}|,
+        "ade107d02dee578f715f235d1c9a293d9b4ae2b92059c457bf99600a20351220",
+        ~S|{"body":{"handoff_id":"handoff-1","host_id":"host-2","kind":"writer_accepted","ownership_epoch":2,"quiescence":{"reference":"/evidence/m7/quiescence.json","sha256":"0000000000000000000000000000000000000000000000000000000000000000"},"relinquishment_head":{"campaign_id":"m7-vector","digest":"02740df72c4e3ecaddf49efc05efc6ebe1aca35fbe7c84f3c7b699b54b62e0da","sequence":3},"source_host_id":"host-1","source_ownership_epoch":1,"source_revocation":{"reference":"/evidence/m7/revocation.json","sha256":"0000000000000000000000000000000000000000000000000000000000000000"},"source_writer_id":"writer-1","transfer":{"reference":"/evidence/m7/transfer.json","sha256":"0000000000000000000000000000000000000000000000000000000000000000"},"version":1,"writer_id":"writer-2"},"campaign_id":"m7-vector","digest":"ade107d02dee578f715f235d1c9a293d9b4ae2b92059c457bf99600a20351220","previous_digest":"02740df72c4e3ecaddf49efc05efc6ebe1aca35fbe7c84f3c7b699b54b62e0da","sequence":4,"version":1}| <>
+          "\n"}
+     ]},
+    {"successor", %{"writer_id" => "writer-1", "host_id" => "host-1", "ownership_epoch" => 1},
+     [
+       {~S|{"body":{"campaign_id":"m7-vector","codec_version":1,"kind":"genesis","version":1},"campaign_id":"m7-vector","previous_digest":null,"sequence":1,"version":1}|,
+        "d4f20cd596c808cc8f75483de8890ed7f09e44b4f846c809aa41fbb489dc9826",
+        ~S|{"body":{"campaign_id":"m7-vector","codec_version":1,"kind":"genesis","version":1},"campaign_id":"m7-vector","digest":"d4f20cd596c808cc8f75483de8890ed7f09e44b4f846c809aa41fbb489dc9826","previous_digest":null,"sequence":1,"version":1}| <>
+          "\n"},
+       {~S|{"body":{"host_id":"host-1","kind":"writer_designated","ownership_epoch":1,"version":1,"writer_id":"writer-1"},"campaign_id":"m7-vector","previous_digest":"d4f20cd596c808cc8f75483de8890ed7f09e44b4f846c809aa41fbb489dc9826","sequence":2,"version":1}|,
+        "398fecfa28498910f0bee161530aff2f83eaca76fc9cddf94dea71fe8c723ce5",
+        ~S|{"body":{"host_id":"host-1","kind":"writer_designated","ownership_epoch":1,"version":1,"writer_id":"writer-1"},"campaign_id":"m7-vector","digest":"398fecfa28498910f0bee161530aff2f83eaca76fc9cddf94dea71fe8c723ce5","previous_digest":"d4f20cd596c808cc8f75483de8890ed7f09e44b4f846c809aa41fbb489dc9826","sequence":2,"version":1}| <>
+          "\n"},
+       {~S|{"body":{"disposition":{"reference":"git:2222222222222222222222222222222222222222:docs/evidence/decision.md#acceptance","sha256":"0000000000000000000000000000000000000000000000000000000000000000"},"host_id":"host-1","kind":"campaign_succession","ownership_epoch":1,"predecessor_head":{"campaign_id":"m7-predecessor","digest":"0000000000000000000000000000000000000000000000000000000000000000","sequence":9},"prior_rows":{"reference":"/evidence/m7/prior-rows.json","sha256":"0000000000000000000000000000000000000000000000000000000000000000"},"unavailable_interval":{"reference":"/evidence/m7/lost-interval.json","sha256":"0000000000000000000000000000000000000000000000000000000000000000"},"version":1,"writer_id":"writer-1"},"campaign_id":"m7-vector","previous_digest":"398fecfa28498910f0bee161530aff2f83eaca76fc9cddf94dea71fe8c723ce5","sequence":3,"version":1}|,
+        "47c887e33aa15a7b50fbd65276f10b52b0f5750ea534687ecc2c86f71821a5a1",
+        ~S|{"body":{"disposition":{"reference":"git:2222222222222222222222222222222222222222:docs/evidence/decision.md#acceptance","sha256":"0000000000000000000000000000000000000000000000000000000000000000"},"host_id":"host-1","kind":"campaign_succession","ownership_epoch":1,"predecessor_head":{"campaign_id":"m7-predecessor","digest":"0000000000000000000000000000000000000000000000000000000000000000","sequence":9},"prior_rows":{"reference":"/evidence/m7/prior-rows.json","sha256":"0000000000000000000000000000000000000000000000000000000000000000"},"unavailable_interval":{"reference":"/evidence/m7/lost-interval.json","sha256":"0000000000000000000000000000000000000000000000000000000000000000"},"version":1,"writer_id":"writer-1"},"campaign_id":"m7-vector","digest":"47c887e33aa15a7b50fbd65276f10b52b0f5750ea534687ecc2c86f71821a5a1","previous_digest":"398fecfa28498910f0bee161530aff2f83eaca76fc9cddf94dea71fe8c723ce5","sequence":3,"version":1}| <>
+          "\n"}
+     ]}
+  ]
+
+  for {name, owner, rows} <- @ownership_chains do
+    test "independent literal #{name} chain fixes ordered ownership and complete bytes" do
+      owner = unquote(Macro.escape(owner))
+      rows = unquote(Macro.escape(rows))
+
+      {bytes, last} =
+        Enum.reduce(rows, {"", nil}, fn {preimage, digest, line}, {bytes, _last} ->
+          assert Base.encode16(:crypto.hash(:sha256, preimage), case: :lower) == digest
+          assert {:ok, unsigned} = ConfigJson.decode(preimage)
+          assert {:ok, ^line, record} = encode(unsigned)
+          assert record == Map.put(unsigned, "digest", digest)
+          assert {:ok, ^record} = Events.decode(strip_lf(line))
+          {bytes <> line, record}
+        end)
+
+      assert {:ok, projection} = Events.verify_ownership(bytes)
+      assert projection.head == ownership_head(last)
+      assert projection.owner == owner
+      assert projection.pending == nil
+      assert {:ok, ^projection} = Events.verify_ownership(bytes, ownership_head(last))
+    end
+  end
+
+  test "genesis and designation prefixes preserve exactly the known ownership facts" do
+    {genesis, [first]} = ownership_chain([ownership_body(0)])
+
+    assert Events.verify_ownership(genesis) ==
+             {:ok, %{head: ownership_head(first), owner: nil, pending: nil, succession: nil}}
+
+    {bytes, [_, designation]} = ownership_chain(ownership_prefix())
+    assert {:ok, projection} = Events.verify_ownership(bytes)
+    assert projection.head == ownership_head(designation)
+    assert projection.owner == ownership_tuple(ownership_body(1))
+    assert projection.pending == nil
+    assert projection.succession == nil
+  end
+
+  test "body-valid non-genesis starts and non-designation second records refuse ordering" do
+    ownership_ok!(ownership_prefix())
+
+    for bodies <- [
+          [ownership_body(6)],
+          [ownership_body(0), ownership_body(6)],
+          [ownership_body(0), ownership_body(4)],
+          [ownership_body(0), ownership_body(2)]
+        ] do
+      {bytes, _} = ownership_chain(bodies)
+      assert {:ok, _} = Frames.verify(bytes)
+      assert Events.verify_ownership(bytes) == {:error, :invalid_attempt_ownership}
+    end
+  end
+
+  test "full-chain framing does not replace closed body admission or permit repeated controls" do
+    ownership_ok!(ownership_prefix())
+
+    for bodies <- [
+          [%{}],
+          ownership_prefix() ++ [ownership_body(0)],
+          ownership_prefix() ++ [ownership_body(1)]
+        ] do
+      {bytes, _} = framed_ownership_chain(bodies)
+      assert {:ok, _} = Frames.verify(bytes)
+      assert Events.verify_ownership(bytes) == {:error, :invalid_attempt_event}
+    end
+  end
+
+  test "succession is first after designation and cannot recur or follow a case" do
+    bodies = ownership_prefix() ++ [ownership_body(4)]
+    projection = ownership_ok!(bodies)
+    assert projection.succession == ownership_body(4)
+
+    for changed <- [
+          bodies ++ [ownership_body(4)],
+          ownership_prefix() ++ [ownership_body(6), ownership_body(4)]
+        ] do
+      {bytes, _} = ownership_chain(changed)
+      assert Events.verify_ownership(bytes) == {:error, :invalid_attempt_ownership}
+    end
+
+    assert {:ok, _, _} = encode(vector(4))
+  end
+
+  test "succession must name the designated writer and host without authenticating its references" do
+    original = ownership_body(4)
+    ownership_ok!(ownership_prefix() ++ [original])
+
+    for key <- ~w(writer_id host_id) do
+      changed = Map.put(original, key, "different")
+      {bytes, _} = ownership_chain(ownership_prefix() ++ [changed])
+      assert Events.verify_ownership(bytes) == {:error, :invalid_attempt_ownership}
+    end
+  end
+
+  test "each case record must retain the exact currently designated tuple" do
+    original = ownership_body(6)
+    ownership_ok!(ownership_prefix() ++ [original])
+
+    for {key, value} <- [
+          {"writer_id", "different"},
+          {"host_id", "different"},
+          {"ownership_epoch", 2},
+          {"ownership_epoch", 18_446_744_073_709_551_615}
+        ] do
+      changed = Map.put(original, key, value)
+      {bytes, _} = ownership_chain(ownership_prefix() ++ [changed])
+      assert Events.verify_ownership(bytes) == {:error, :invalid_attempt_ownership}
+    end
+  end
+
+  test "relinquishment must be issued by the current owner" do
+    original = ownership_body(2)
+    ownership_ok!(ownership_prefix() ++ [original])
+
+    for {key, value} <- [
+          {"writer_id", "different"},
+          {"host_id", "different"},
+          {"ownership_epoch", 2}
+        ] do
+      changed = Map.put(original, key, value)
+      {bytes, _} = ownership_chain(ownership_prefix() ++ [changed])
+      assert Events.verify_ownership(bytes) == {:error, :invalid_attempt_ownership}
+    end
+  end
+
+  test "pending relinquishment retains the exact original head and body without advancing owner" do
+    {bytes, records} = ownership_chain(ownership_prefix() ++ [ownership_body(2)])
+    last = List.last(records)
+    assert {:ok, projection} = Events.verify_ownership(bytes)
+    assert projection.owner == ownership_tuple(ownership_body(1))
+    assert projection.pending == %{"head" => ownership_head(last), "body" => last["body"]}
+    assert projection.head == ownership_head(last)
+    assert {:ok, ^projection} = Events.verify_ownership(bytes, ownership_head(last))
+  end
+
+  test "no case or another control can follow a pending relinquishment instead of acceptance" do
+    prefix = ownership_prefix() ++ [ownership_body(2)]
+    ownership_ok!(prefix)
+    ownership_ok!(prefix ++ [ownership_body(3)])
+
+    for next <- [ownership_body(6), ownership_body(2), ownership_body(4)] do
+      {bytes, _} = ownership_chain(prefix ++ [next])
+      assert Events.verify_ownership(bytes) == {:error, :invalid_attempt_ownership}
+    end
+  end
+
+  test "body-valid acceptance mutations must match every original handoff tuple and quiescence field" do
+    prefix = ownership_prefix() ++ [ownership_body(2)]
+    original = ownership_body(3)
+    ownership_ok!(prefix ++ [original])
+
+    changes = [
+      Map.put(original, "writer_id", "different"),
+      Map.put(original, "host_id", "different"),
+      Map.put(original, "source_writer_id", "different"),
+      Map.put(original, "source_host_id", "different"),
+      Map.merge(original, %{"source_ownership_epoch" => 2, "ownership_epoch" => 3}),
+      Map.merge(original, %{
+        "source_ownership_epoch" => 18_446_744_073_709_551_614,
+        "ownership_epoch" => 18_446_744_073_709_551_615
+      }),
+      Map.put(original, "handoff_id", "different"),
+      put_in(original, ["quiescence", "reference"], "/evidence/m7/different.json"),
+      put_in(original, ["quiescence", "sha256"], String.duplicate("b", 64))
+    ]
+
+    for changed <- changes do
+      {bytes, _} = ownership_chain(prefix ++ [changed])
+      assert Events.verify_ownership(bytes) == {:error, :invalid_attempt_ownership}
+    end
+  end
+
+  test "acceptance head and exact epoch cannot be replaced even within an otherwise authentic chain" do
+    prefix = ownership_prefix() ++ [ownership_body(2)]
+    original = ownership_body(3)
+    ownership_ok!(prefix ++ [original])
+    {prefix_bytes, records} = ownership_chain(prefix)
+    head = ownership_head(List.last(records))
+    valid = Map.put(original, "relinquishment_head", head)
+
+    for changed <- [
+          put_in(valid, ["relinquishment_head", "campaign_id"], "foreign"),
+          put_in(valid, ["relinquishment_head", "sequence"], 2),
+          put_in(valid, ["relinquishment_head", "digest"], String.duplicate("b", 64)),
+          Map.put(valid, "ownership_epoch", 3),
+          Map.merge(valid, %{
+            "source_ownership_epoch" => 18_446_744_073_709_551_615,
+            "ownership_epoch" => 18_446_744_073_709_551_616
+          })
+        ] do
+      assert {:ok, line, _} = Frames.encode("m7-vector", 4, head["digest"], changed)
+      assert {:ok, _} = Frames.verify(prefix_bytes <> line)
+      assert Events.verify_ownership(prefix_bytes <> line) == {:error, :invalid_attempt_event}
+    end
+  end
+
+  test "a body-valid acceptance without an outstanding relinquishment refuses" do
+    ownership_ok!(ownership_prefix() ++ [ownership_body(2), ownership_body(3)])
+    {bytes, _} = ownership_chain(ownership_prefix() ++ [ownership_body(3)])
+    assert Events.verify_ownership(bytes) == {:error, :invalid_attempt_ownership}
+  end
+
+  test "completed handoff advances case ownership and a fresh return handoff advances it again" do
+    prefix = ownership_prefix() ++ [ownership_body(2), ownership_body(3)]
+    owner_two = ownership_tuple(ownership_body(3))
+    case_two = Map.merge(ownership_body(6), owner_two)
+    projection = ownership_ok!(prefix ++ [case_two])
+    assert projection.owner == owner_two
+
+    return_relinquishment =
+      ownership_body(2)
+      |> Map.merge(owner_two)
+      |> Map.merge(%{
+        "destination_writer_id" => "writer-1",
+        "destination_host_id" => "host-1",
+        "handoff_id" => "handoff-2"
+      })
+
+    return_acceptance =
+      ownership_body(3)
+      |> Map.merge(%{
+        "writer_id" => "writer-1",
+        "host_id" => "host-1",
+        "ownership_epoch" => 3,
+        "source_writer_id" => "writer-2",
+        "source_host_id" => "host-2",
+        "source_ownership_epoch" => 2,
+        "handoff_id" => "handoff-2"
+      })
+
+    owner_three = ownership_tuple(return_acceptance)
+    case_three = Map.merge(ownership_body(6), owner_three)
+    bodies = prefix ++ [case_two, return_relinquishment, return_acceptance, case_three]
+    projection = ownership_ok!(bodies)
+    assert projection.owner == owner_three
+    assert projection.pending == nil
+
+    for stale <- [ownership_body(6), case_two] do
+      {bytes, _} = ownership_chain(bodies ++ [stale])
+      assert Events.verify_ownership(bytes) == {:error, :invalid_attempt_ownership}
+    end
+  end
+
+  test "previously used handoff identities cannot be reused by the new owner" do
+    prefix = ownership_prefix() ++ [ownership_body(2), ownership_body(3)]
+
+    next =
+      ownership_body(2)
+      |> Map.merge(ownership_tuple(ownership_body(3)))
+      |> Map.merge(%{"destination_writer_id" => "writer-1", "destination_host_id" => "host-1"})
+
+    ownership_ok!(prefix ++ [Map.put(next, "handoff_id", "fresh")])
+    {bytes, _} = ownership_chain(prefix ++ [next])
+    assert Events.verify_ownership(bytes) == {:error, :invalid_attempt_ownership}
+  end
+
+  test "ownership projection deliberately proves neither case transitions nor actual quiescence" do
+    started = ownership_body(6)
+
+    not_dispatched =
+      ownership_body(5)
+      |> Map.put("logical_matrix_id", started["logical_matrix_id"])
+      |> Map.put("subcase_key", started["subcase_key"])
+
+    for cases <- [[started, not_dispatched], [started]] do
+      bodies = ownership_prefix() ++ cases ++ [ownership_body(2), ownership_body(3)]
+      projection = ownership_ok!(bodies)
+      assert projection.owner == ownership_tuple(ownership_body(3))
+      assert projection.pending == nil
+      assert projection.succession == nil
+      assert Enum.sort(Map.keys(projection)) == [:head, :owner, :pending, :succession]
+    end
+  end
+
+  test "committed anchors still require exact full history rather than a valid stale copy or fork" do
+    bodies = ownership_prefix() ++ [ownership_body(6)]
+    {bytes, [first, designation, _case]} = ownership_chain(bodies)
+    assert {:ok, projection} = Events.verify_ownership(bytes)
+
+    for anchor <- [ownership_head(first), ownership_head(designation), projection.head] do
+      assert Events.verify_ownership(bytes, anchor) == {:ok, projection}
+    end
+
+    {stale, _} = ownership_chain(ownership_prefix())
+
+    assert Events.verify_ownership(stale, projection.head) ==
+             {:error, :committed_attempt_head_mismatch}
+
+    fork = Map.put(ownership_body(6), "attempt_id", "another-attempt")
+    {forked, _} = ownership_chain(ownership_prefix() ++ [fork])
+    assert {:ok, _} = Events.verify_ownership(forked)
+
+    assert Events.verify_ownership(forked, projection.head) ==
+             {:error, :committed_attempt_head_mismatch}
+
+    assert Events.verify_ownership(bytes, nil) == {:error, :invalid_committed_attempt_head}
+  end
+
+  test "all incomplete final line cuts remain unresolved even after the committed anchor" do
+    {prefix, records} = ownership_chain(ownership_prefix())
+    head = ownership_head(List.last(records))
+    {complete, _} = ownership_chain(ownership_prefix() ++ [ownership_body(2)])
+    line = binary_part(complete, byte_size(prefix), byte_size(complete) - byte_size(prefix))
+    ownership_ok!(ownership_prefix() ++ [ownership_body(2)])
+
+    for size <- 1..(byte_size(line) - 1) do
+      tail = binary_part(line, 0, size)
+      expected = {:error, {:incomplete_attempt_append, head, tail}}
+      assert Events.verify_ownership(prefix <> tail) == expected
+      assert Events.verify_ownership(prefix <> tail, head) == expected
+    end
+
+    assert Events.verify_ownership("{") == {:error, {:incomplete_attempt_append, nil, "{"}}
+  end
+
+  test "invalid, reordered and oversized framing refuses before any ownership projection" do
+    {bytes, _} = ownership_chain(ownership_prefix())
+    ownership_ok!(ownership_prefix())
+    [genesis, designation, ""] = String.split(bytes, "\n")
+
+    for invalid <- [
+          nil,
+          "",
+          bytes <> "\n",
+          designation <> "\n" <> genesis <> "\n",
+          String.duplicate("x", 65_537)
+        ] do
+      assert Events.verify_ownership(invalid) == Frames.verify(invalid)
+      refute match?({:ok, _}, Events.verify_ownership(invalid))
+    end
+  end
+
+  defp ownership_prefix, do: [ownership_body(0), ownership_body(1)]
+  defp ownership_body(index), do: vector(index)["body"]
+  defp ownership_tuple(body), do: Map.take(body, ~w(writer_id host_id ownership_epoch))
+  defp ownership_head(record), do: Map.take(record, ~w(campaign_id sequence digest))
+
+  defp ownership_ok!(bodies) do
+    {bytes, _} = ownership_chain(bodies)
+    assert {:ok, projection} = Events.verify_ownership(bytes)
+    projection
+  end
+
+  defp ownership_chain(bodies) do
+    {bytes, records} = framed_ownership_chain(bodies)
+
+    for record <- records do
+      assert {:ok, line, ^record} = encode(record)
+      assert {:ok, ^record} = Events.decode(strip_lf(line))
+    end
+
+    assert {:ok, _} = Frames.verify(bytes)
+    {bytes, records}
+  end
+
+  defp framed_ownership_chain(bodies) do
+    {bytes, records, _head} =
+      Enum.reduce(bodies, {"", [], nil}, fn original, {bytes, records, head} ->
+        body =
+          case original["kind"] do
+            "writer_relinquished" -> Map.put(original, "preceding_head", head)
+            "writer_accepted" -> Map.put(original, "relinquishment_head", head)
+            _ -> original
+          end
+
+        sequence = length(records) + 1
+        previous = if is_nil(head), do: nil, else: head["digest"]
+        assert {:ok, line, record} = Frames.encode("m7-vector", sequence, previous, body)
+        {bytes <> line, records ++ [record], ownership_head(record)}
+      end)
+
+    {bytes, records}
+  end
+
   defp vector(index) do
     {preimage, _} = Enum.at(@vectors, index)
     {:ok, unsigned} = ConfigJson.decode(preimage)

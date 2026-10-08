@@ -13,8 +13,13 @@ defmodule Mix.Tasks.Loopex.M7Evidence.AttemptEvents do
   codec reuses AttemptFrames for canonical JSON, nested duplicate refusal,
   SHA-256 coverage and the 65,536-byte envelope cap. Encode returns the existing
   LF-terminated record; decode accepts its complete canonical bytes before LF.
-  It performs no IO, ordered replay, tail recovery or evidence dereferencing.
-  Cross-record ownership and transition facts remain the later reducer's work.
+  Ownership verification first authenticates the complete chain with optional
+  committed-head anchoring, then folds the same decoded bodies. It projects
+  genesis/designation, succession, pending relinquishment and exact acceptance,
+  checking each case's current writer tuple. Incomplete tails remain unresolved.
+  This performs no IO, tail recovery, evidence dereferencing or case-state
+  replay. Matching handoff references do not prove actual quiescence, custody or
+  authority; a projected owner or case grants no dispatch permission.
   """
 
   alias Mix.Tasks.Loopex.M7Evidence.AttemptFrames
@@ -62,6 +67,115 @@ defmodule Mix.Tasks.Loopex.M7Evidence.AttemptEvents do
       _ -> {:error, :invalid_attempt_event}
     end
   end
+
+  @doc false
+  def verify_ownership(bytes) do
+    with {:ok, _head} <- AttemptFrames.verify(bytes) do
+      ownership_projection(bytes)
+    end
+  end
+
+  @doc false
+  def verify_ownership(bytes, committed_head) do
+    with {:ok, _head} <- AttemptFrames.verify(bytes, committed_head) do
+      ownership_projection(bytes)
+    end
+  end
+
+  # Concept: This projection checks record ownership, not execution admission.
+  # Technical depth: Complete framing precedes body replay. A pending handoff
+  # retains the old owner and original relinquishment; acceptance alone advances
+  # the tuple. Cases are checked only for that tuple, never their transitions.
+  defp ownership_projection(bytes) do
+    state = %{head: nil, owner: nil, pending: nil, succession: nil, handoff_ids: MapSet.new()}
+    ownership_lines(bytes, state)
+  end
+
+  defp ownership_lines(<<>>, state),
+    do: {:ok, Map.take(state, [:head, :owner, :pending, :succession])}
+
+  defp ownership_lines(bytes, state) do
+    {length, 1} = :binary.match(bytes, "\n")
+    <<line::binary-size(^length), "\n", remaining::binary>> = bytes
+
+    with {:ok, record} <- decode(line),
+         {:ok, state} <- ownership_record(record, state) do
+      ownership_lines(remaining, %{
+        state
+        | head: Map.take(record, ~w(campaign_id sequence digest))
+      })
+    end
+  end
+
+  defp ownership_record(%{"body" => %{"kind" => "genesis"}}, %{head: nil} = state),
+    do: {:ok, state}
+
+  defp ownership_record(_, %{head: nil}), do: {:error, :invalid_attempt_ownership}
+
+  defp ownership_record(
+         %{"body" => %{"kind" => "writer_designated"} = body},
+         %{head: %{"sequence" => 1}} = state
+       ),
+       do: {:ok, %{state | owner: owner_tuple(body)}}
+
+  defp ownership_record(_, %{head: %{"sequence" => 1}}),
+    do: {:error, :invalid_attempt_ownership}
+
+  defp ownership_record(
+         %{"body" => %{"kind" => "writer_accepted"} = body},
+         %{pending: %{"head" => relinquishment_head, "body" => original}} = state
+       ) do
+    if body["writer_id"] == original["destination_writer_id"] and
+         body["host_id"] == original["destination_host_id"] and
+         body["source_writer_id"] == original["writer_id"] and
+         body["source_host_id"] == original["host_id"] and
+         body["source_ownership_epoch"] == original["ownership_epoch"] and
+         body["ownership_epoch"] == original["ownership_epoch"] + 1 and
+         body["handoff_id"] == original["handoff_id"] and
+         body["quiescence"] == original["quiescence"] and
+         body["relinquishment_head"] == relinquishment_head do
+      {:ok, %{state | owner: owner_tuple(body), pending: nil}}
+    else
+      {:error, :invalid_attempt_ownership}
+    end
+  end
+
+  defp ownership_record(_, %{pending: pending}) when not is_nil(pending),
+    do: {:error, :invalid_attempt_ownership}
+
+  defp ownership_record(
+         %{"sequence" => 3, "body" => %{"kind" => "campaign_succession"} = body},
+         %{succession: nil} = state
+       ) do
+    if owner_tuple(body) == state.owner,
+      do: {:ok, %{state | succession: body}},
+      else: {:error, :invalid_attempt_ownership}
+  end
+
+  defp ownership_record(%{"body" => %{"kind" => "case"} = body}, state) do
+    if owner_tuple(body) == state.owner,
+      do: {:ok, state},
+      else: {:error, :invalid_attempt_ownership}
+  end
+
+  defp ownership_record(%{"body" => %{"kind" => "writer_relinquished"} = body} = record, state) do
+    if owner_tuple(body) == state.owner and
+         not MapSet.member?(state.handoff_ids, body["handoff_id"]) do
+      pending = %{
+        "head" => Map.take(record, ~w(campaign_id sequence digest)),
+        "body" => body
+      }
+
+      {:ok,
+       %{state | pending: pending, handoff_ids: MapSet.put(state.handoff_ids, body["handoff_id"])}}
+    else
+      {:error, :invalid_attempt_ownership}
+    end
+  end
+
+  defp ownership_record(_, _), do: {:error, :invalid_attempt_ownership}
+
+  defp owner_tuple(body), do: Map.take(body, ~w(writer_id host_id ownership_epoch))
 
   defp event?(campaign, sequence, previous, body) do
     identity?(campaign) and positive?(sequence) and is_map(body) and not is_struct(body) and
