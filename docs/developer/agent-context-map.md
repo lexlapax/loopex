@@ -7094,3 +7094,24 @@ envelope wording; zero activation, durability, recovery and cleanup remain.
 Complete coordinated foreground3/daemon4 schemas and independent clients are
 still required before serving. Acceptance closes no implementation task and
 supplies no milestone closure, merge, publication or release authority.
+
+<a id="disposition-m7-creation-startup-status-2026-10-08"></a>
+### M7 creation startup status accepted, 2026-10-08
+
+The maintainer selected "Approve the exact pair", accepting
+[ADR0063 Concept](../adr/0063-runtime-creation-startup-status.md#concept) and
+[Technical depth](../adr/0063-runtime-creation-startup-status-technical.md#technical-depth)
+at candidate `16c251ad572f9907fdc7ea3cf14be71622778c28`. Historical Proposed Concept SHA-256 is
+`a28aa264c9e05186c2f877c6998b07b9d82e1593fb99b34658d7b869ef584064`; Technical SHA-256 is
+`751549dcd11b20a7c175a8f3f6380c100eb424c708ff4e4a389c3c8be0131d2b`. Both files were unchanged at acceptance. Within the pair only
+Status and the empty Acceptance row change.
+
+Implement the native starting/ready/unavailable snapshot with its retained
+original identity and initialization-time60,000-ms cutoff. Durable composition
+and the separate ephemeral holder wait within their approved original cutoffs
+before publishing readiness or issuing the single initial create. Read failure,
+changed facts and expiry follow existing owned cleanup; observation supplies no
+creation retry, cancellation proof or new recovery authority. Exact runtime and
+both real host-path proofs remain required. This acceptance closes no task,
+supplies no test result and authorizes no other proposal, milestone closure,
+merge or publication.
