@@ -1,5 +1,18 @@
 # M7 Implementation Tasks
 
+Current checkpoint: the saved EOF repair at `d4f13dcc` passed all three selected
+real lifecycle cases on both supported toolchains. Original87974 is terminal
+and collected once after 123.580 seconds, 12 actual joins and 54 artifacts.
+Its complete 2,246-row registry is the next native seed. Each focused selection
+executed one case and excluded 20; complete foreground integration stays open.
+Three workers now implement the coupled foreground /3 and daemon /4 handlers,
+manifests and independent clients in separate worktrees. Their source units are
+unrun and neither generation is activated. The stopped-writer guardian memory
+census and real 32-CAS exhaustion proof remain unresolved. No native handle is
+live and no further checkbox closes. Counts stay originals88/85/6 and
+additions365/24. Exact proofs, saved source commits and ownership are in the
+[resume record](M7-resume.md). The following entries are historical checkpoints.
+
 Current checkpoint: App Server now declares its existing production OTP
 crypto dependency; the unchanged complete application-declaration check passes.
 Original15015's preceding documentation gate remains a retained failure at

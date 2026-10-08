@@ -27,6 +27,92 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+### EOF qualification and coupled protocol work — 2026-10-08
+
+This entry supersedes the native-registry seed and execution order in the
+older entries below. Primary is clean `19a475eb8ca5c774b5bab6a17a97f74aff8d6e2a`,
+pushed to `origin/m7`. No product native handle is live. Three source workers
+are implementing the complete coupled foreground /3 and daemon /4 contract
+in separate worktrees. Their unrun source units do not activate either generation
+and close no checklist item.
+
+Original87074 is terminal FAIL_OR_UNAVAILABLE at isolated `6dd21158`, collected
+once after 85.241 seconds, four actual joins and 24 verified artifacts. The
+held final creation transaction was reached, but intentional request retirement
+was reported as `owned_actor_lost`; the parent safe decoder then rejected the
+unloaded error atom. Current pinned Node, formatting and project compilation
+passed; the focused case failed and the floor was unrun. Output
+`M7/held-creation-focused-20261008-v1`; collection
+`182008a9f5f8f5aa795177e51df04d3c96fc1455bf960110ef32603dbb56c9cc`,
+terminal `09442c5199bf44f1bd5d3d11a5c0cd302d236863773b1f4370aebdd450442c15`.
+Its 2,234-row registry remains immutable.
+
+The saved correction is isolated `d4f13dcc880ea25153754c48a2b4d1c067c8f06a`.
+It dispatches the intentional kill before unlinking the original request,
+drains only an already queued exact-PID killed EXIT, and retains the original
+monitor/DOWN and holder cleanup. The parent fixture loads trusted Stdio atoms
+before safe decoding. The rejected unlink-before-kill draft was never executed.
+Independent source audit SHA-256
+`a7c232d06f82ec05056f927cfb571487ff1c8d32d163a11e99d5e91c0f9c0dd5`
+qualifies this delta; it is not milestone review.
+
+Original87974 is terminal PASS_EOF_RETIREMENT_FOCUSED at d4, collected once
+after 123.580 seconds, 12 actual joins and 54 verified artifacts. The original
+held-creation EOF, late-holder cleanup and writer-loss cases each passed on
+both supported toolchains in separate VMs. Each selection executed one case
+and explicitly excluded the other 20 lifecycle cases. This is focused evidence,
+not the complete foreground population or integration acceptance. Output
+`M7/held-creation-eof-proof-20261008-v2`; collection
+`706d572ebd63c1c125dc228b9211f37e1615096f4f5a2daf8510bc614db2e083`,
+terminal `e7aaa5abeb1107dafb1db28f37bc831dd7db84743bddc12dcea8204e150093a0`.
+Seed the next actual native stage from this complete 2,246-row registry,
+SHA-256 `3a77b6d18665d530933a17aec7ff7a392a54e2e4636b838db9a7db5e0c80fe14`.
+Neither original may be recollected or repeated unchanged.
+
+The source workers have disjoint ownership:
+
+- `m7-foreground-current-commands/loopex` under the managed worktree root:
+  saved Mapping unit `9815e76d3b84b89456497b8b8fd462fa8dbde8f1`, parent d4.
+  Current unit owns Connection, direct foreground request fixtures and the
+  Node workflow callers. Preserve Stdio, Delivery, physical writer and the
+  EOF fixture; they belong to the integrator.
+- `m7-current-wire-activation/loopex`: saved current WireRecords unit
+  `15993649e81cbf2af2f8989d98c7ee3a4d3c54e7` and Request unit
+  `3cccc9cd60b4fb89dc16b5c1eb544acdcd53b9a8`, based on primary19a.
+  Current unit owns SocketConnection, AdmissionRelay, LeaseOwner and direct
+  daemon command tests/envelopes.
+- `m7-current-protocol-manifests/loopex`, based on primary19a: owns complete
+  Session /3 and Session.V2 /4 manifests, schemas, literal canonical preimages,
+  independent Node pins and negotiation gates. No source unit is committed yet.
+
+All three paths above are under `/Users/spuri/.codex/worktrees/`. Root alone
+owns integration, native runs, source commits and pushes. Both generations
+must join all handlers, public projections, codecs and independent consumers
+together. Completed compact retries use ordinary accepted admission for the
+original command; completion remains the durable event/snapshot, as the
+accepted plan and ADR 0043 require. Existing Answer vectors explicitly accept
+unused base64url tail bits; this work does not silently narrow those inputs.
+
+The stopped-proxy guardian design remains unapproved and unimplemented.
+Private v2 records an unresolved physical allocator/COW and argument census;
+no four-frame memory proof is claimed. Native CAS tracing supplied no qualified
+pre-comparison gate; the private observation-seam design is also unapproved.
+ADR 0063 remains the sole asked pending maintainer decision. Independent protocol
+and handler work continues without it.
+
+Thirty-eight new immutable assets and four exact saved source-commit patches
+and tree projections are retained at
+`M7/eof-current-contract-context-20261008-v4/retention.json`, SHA-256
+`5f7f0f6195dc2ae1fa56f8828d5b9e96317dfc9413598f4dda76009b33f14b29`.
+It references the prior immutable v3 index. Original native output directories
+remain the authoritative complete run evidence. Uncommitted later worker edits
+are not represented as saved source commits in this index.
+
+Counts stay originals 88 done / 85 todo / 6 retired and additions 365 done /
+24 todo. Remaining work is the coupled protocol/handler join, complete physical
+foreground proof including stopped-writer cleanup, complete restore175, helper
+and other integration obligations, then T17. No T18/T19 authorization is added.
+
 ### App Server OTP declaration repair — 2026-10-08
 
 Original15015 is terminal FAIL_OR_UNAVAILABLE at clean primary
