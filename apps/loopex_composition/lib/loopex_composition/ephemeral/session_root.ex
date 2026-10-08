@@ -109,9 +109,18 @@ defmodule LoopexComposition.Ephemeral.SessionRoot do
     {:noreply, next_state}
   end
 
+  # Concept: runtime custody does not authorize trace binding or publication.
+  # Technical depth: retain only the registered holder's reference-bound runtime;
+  # the final observation result still releases the next phase.
+  def handle_info({:runtime_custody, holder, ref, %Runtime{supervisor: supervisor} = runtime},
+        %{ref: ref, phase: :holding, children: %{runtime_holder: holder}, runtime: nil} = state)
+      when is_pid(supervisor) do
+    {:noreply, %{state | runtime: runtime}}
+  end
+
   def handle_info(
         {:phase_result, holder, ref, :runtime, {:ok, %Runtime{} = runtime}},
-        %{ref: ref, phase: :holding, children: %{runtime_holder: holder}} = state
+        %{ref: ref, phase: :holding, children: %{runtime_holder: holder}, runtime: runtime} = state
       ) do
     if fresh?(state.deadline) and is_pid(runtime.supervisor) do
       next_state = %{state | phase: :trace_bind, runtime: runtime}

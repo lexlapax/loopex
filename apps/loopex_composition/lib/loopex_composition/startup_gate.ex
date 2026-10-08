@@ -29,58 +29,117 @@ defmodule LoopexComposition.StartupGate do
   end
 
   @doc false
-  def await(runtime) do
-    with {:ok, observer} <- start_owned(runtime), do: await_owned(observer)
+  def await(runtime, read \\ &Loopex.creation_startup_status/2) do
+    initial = System.monotonic_time() + System.convert_time_unit(1_000, :millisecond, :native)
+    with {:ok, observer} <- start_owned(runtime, initial, read), do: await_owned(observer, initial)
   end
 
   # Concept: tracked host cleanup owns every observer through its returned runtime.
   # Technical depth: the existing runtime worker supervisor owns this temporary
-  # read-only task. A delayed cancellation DOWN cannot leave an unreturned child
-  # outside the runtime subtree. Monitoring precedes the exact observation grant.
-  defp start_owned(runtime) do
+  # read-only task. Resolution, admission and the first public read share one
+  # initial failure cap. Async requests leave owner loss and host stop responsive.
+  # A late admitted task stays inert beneath Workers and retires without a grant.
+  defp start_owned(runtime, initial, read) do
     owner = self()
     tag = make_ref()
 
-    with {:ok, %{workers: workers}} <- Loopex.Runtime.children(runtime),
-         {:ok, pid} <-
-           Task.Supervisor.start_child(
-             workers,
-             fn ->
-               Process.flag(:sensitive, true)
+    listener = test_listener()
+    task = fn -> owned_observer(owner, tag, runtime, initial, listener, read) end
+    callers = [owner | Process.get(:"$callers", [])]
+    args = [{node(), owner, owner}, callers, {:erlang, :apply, [task, []]}]
 
-               receive do
-                 {^owner, ^tag, :observe} ->
-                   send(
-                     owner,
-                     {tag, observe(runtime, nil, nil, &Loopex.creation_startup_status/2)}
-                   )
-               end
-             end,
-             shutdown: :brutal_kill
-           ) do
+    # Concept: admission uses the same temporary task owned by Runtime.Workers.
+    # Technical depth: Elixir 1.18.5/OTP27 and 1.20.3/OTP29 Task.Supervisor use
+    # this exact private request/Task.Supervised argument shape. The public
+    # start_child helper waits infinitely; this source-pinned adapter uses OTP's
+    # asynchronous GenServer request API and requires proof on both pairs.
+    with {:ok, children} <- request(runtime.supervisor, :which_children, initial),
+         {Loopex.Runtime.Workers, workers, _type, _modules} when is_pid(workers) <-
+           List.keyfind(children, Loopex.Runtime.Workers, 0),
+         {:ok, {:ok, pid}} when is_pid(pid) <-
+           request(workers, {:start_task, args, :temporary, :brutal_kill}, initial) do
       monitor = Process.monitor(pid)
       send(pid, {owner, tag, :observe})
       {:ok, %{pid: pid, monitor: monitor, tag: tag}}
     else
+      {:error, _reason} = error -> error
       _failure -> {:error, :runtime_unavailable}
     end
   catch
     :exit, _reason -> {:error, :runtime_unavailable}
   end
 
-  defp await_owned(observer) do
+  defp request(server, message, initial) do
+    request = :gen_server.send_request(server, message)
+    operation = if message == :which_children, do: :resolve, else: :admit
+    notify(test_listener(), {:startup_request, self(), server, operation})
+
+    try do
+      await_request(request, initial)
+    after
+      # Abandon the response alias, not the queued supervisor operation.
+      :gen_server.receive_response(request, 0)
+    end
+  end
+
+  defp await_request(request, initial) do
+    with :ok <- interrupted(), remaining when remaining > 0 <- remaining_ms(initial) do
+      case :gen_server.wait_response(request, min(10, remaining)) do
+        {:reply, response} ->
+          with :ok <- interrupted(), true <- fresh?(initial), do: {:ok, response}
+        :timeout -> await_request(request, initial)
+        {:error, _reason} -> {:error, :runtime_unavailable}
+      end
+    else
+      {:error, _reason} = error -> error
+      _expired -> {:error, :runtime_unavailable}
+    end
+  end
+
+  defp owned_observer(owner, tag, runtime, initial, listener, read) do
+    Process.flag(:sensitive, true)
+    owner_monitor = Process.monitor(owner)
+    notify(listener, {:startup_task, self(), owner, initial})
+
+    if Process.alive?(owner) and fresh?(initial) do
+      receive do
+        {^owner, ^tag, :observe} ->
+          if Process.alive?(owner) and remaining_ms(initial) > 0 do
+            notify(listener, {:startup_first_read, self(), runtime})
+            first = status_read(read, runtime, timeout(initial))
+            if valid_snapshot?(first), do: send(owner, {tag, :snapshot, first})
+            result = accept(first, runtime, nil, nil, read)
+            send(owner, {tag, result})
+          end
+
+        {:DOWN, ^owner_monitor, :process, ^owner, _reason} -> :ok
+      after
+        remaining_ms(initial) -> :ok
+      end
+    end
+  end
+
+  # Concept: fault schedules identify the actual request and original child.
+  # Technical depth: this test-only listener reports admission/read phases and
+  # never changes constructors, snapshots, deadlines or cleanup operations.
+  if Mix.env() == :test do
+    defp test_listener, do: Process.get({__MODULE__, :test_listener})
+    defp notify(listener, message) when is_pid(listener), do: send(listener, message)
+    defp notify(_listener, _message), do: :ok
+  else
+    defp test_listener, do: nil
+    defp notify(_listener, _message), do: :ok
+  end
+
+  defp await_owned(observer, initial) do
     result =
       try do
-        await_result(observer)
+        await_result(observer, initial, false)
       after
         case cancel(observer) do
-          :ok ->
-            :ok
-
+          :ok -> :ok
           {:pending, identity} ->
-            Process.put({__MODULE__, :pending}, [
-              identity | Process.get({__MODULE__, :pending}, [])
-            ])
+            Process.put({__MODULE__, :pending}, [identity | Process.get({__MODULE__, :pending}, [])])
         end
       end
 
@@ -124,8 +183,7 @@ defmodule LoopexComposition.StartupGate do
 
     receive do
       {:DOWN, monitor, :process, pid, _reason}
-      when monitor == observer.monitor and pid == observer.pid ->
-        :ok
+      when monitor == observer.monitor and pid == observer.pid -> :ok
     after
       1_000 -> {:pending, {observer.pid, observer.monitor}}
     end
@@ -138,19 +196,39 @@ defmodule LoopexComposition.StartupGate do
     :ok
   end
 
-  defp await_result(observer) do
-    with :ok <- interrupted() do
+  defp await_result(observer, deadline, pinned?) do
+    with :ok <- interrupted(), remaining when remaining > 0 <- remaining_ms(deadline) do
       receive do
+        {tag, :snapshot, {:ok, %{state: :unavailable}}}
+        when tag == observer.tag and not pinned? ->
+          {:error, :runtime_unavailable}
+
+        {tag, :snapshot, {:ok, %{startup_deadline_ms: cutoff}} = snapshot}
+        when tag == observer.tag and not pinned? ->
+          if valid_snapshot?(snapshot) and fresh?(deadline),
+            do: await_result(observer, System.convert_time_unit(cutoff, :millisecond, :native), true),
+            else: {:error, :runtime_unavailable}
+
         {tag, result} when tag == observer.tag ->
           with :ok <- interrupted(), :ok <- publication(result), do: result
       after
-        10 ->
+        min(10, remaining) ->
           if Process.alive?(observer.pid),
-            do: await_result(observer),
+            do: await_result(observer, deadline, pinned?),
             else: {:error, :runtime_unavailable}
       end
+    else
+      {:error, _reason} = error -> error
+      _expired -> {:error, if(pinned?, do: :startup_deadline_expired, else: :runtime_unavailable)}
     end
   end
+
+  defp valid_snapshot?({:ok, %{state: state, startup_id: id, startup_deadline_ms: cutoff} = snapshot})
+       when state in [:starting, :ready, :unavailable] and is_binary(id) and
+              byte_size(id) == 32 and is_integer(cutoff) and map_size(snapshot) == 3,
+       do: true
+
+  defp valid_snapshot?(_snapshot), do: false
 
   defp interrupted do
     alive? =
@@ -204,9 +282,7 @@ defmodule LoopexComposition.StartupGate do
 
   defp pause(runtime, deadline, pinned, read) do
     case remaining_ms(deadline) do
-      0 ->
-        {:error, :startup_deadline_expired}
-
+      0 -> {:error, :startup_deadline_expired}
       remaining ->
         receive do
         after
@@ -223,8 +299,7 @@ defmodule LoopexComposition.StartupGate do
   # Technical depth: sub-millisecond time cannot fund the API's minimum one-ms
   # read, so it expires conservatively instead of extending the captured bound.
   defp remaining_ms(deadline),
-    do:
-      System.convert_time_unit(max(deadline - System.monotonic_time(), 0), :native, :millisecond)
+    do: System.convert_time_unit(max(deadline - System.monotonic_time(), 0), :native, :millisecond)
 
   defp status_read(read, runtime, timeout) do
     read.(runtime, timeout)

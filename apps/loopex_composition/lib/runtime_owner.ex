@@ -190,8 +190,7 @@ defmodule LoopexComposition.RuntimeOwner do
         {:ok, _runtime} = started ->
           with :ok <- LoopexComposition.StartupGate.confirm(), do: started
 
-        refusal ->
-          refusal
+        refusal -> refusal
       end
     rescue
       exception -> {:error, {:composition_start_raised, exception}}
@@ -202,9 +201,7 @@ defmodule LoopexComposition.RuntimeOwner do
 
   defp cleanup(seams) do
     observer_pending = LoopexComposition.StartupGate.pending()
-
-    observer_failures =
-      if observer_pending == [], do: [], else: [:startup_observer_stop_unconfirmed]
+    observer_failures = if observer_pending == [], do: [], else: [:startup_observer_stop_unconfirmed]
 
     seams.owned_key
     |> Process.get([])

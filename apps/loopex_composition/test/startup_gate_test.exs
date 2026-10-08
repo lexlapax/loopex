@@ -27,24 +27,7 @@ defmodule LoopexComposition.StartupGateTest do
 
   for changed <- [:identity, :cutoff] do
     test "a changed #{changed} refuses the acquisition" do
-      changed = unquote(changed)
-      cutoff = System.monotonic_time(:millisecond) + 1_000
-      reads = :atomics.new(1, [])
-
-      read = fn _runtime, _timeout ->
-        if :atomics.add_get(reads, 1, 1) == 1 do
-          status(:starting, cutoff)
-        else
-          case changed do
-            :identity -> status(:ready, cutoff, <<1::256>>)
-            :cutoff -> status(:ready, cutoff + 1)
-          end
-        end
-      end
-
-      observer = StartupGate.start(:fixture, nil, read)
-      assert_receive {tag, {:error, :runtime_unavailable}} when tag == observer.tag
-      assert :ok = StartupGate.cancel(observer)
+      changed_observation(unquote(changed))
     end
   end
 
@@ -53,6 +36,21 @@ defmodule LoopexComposition.StartupGateTest do
     observer = StartupGate.start(:fixture, nil, fn _, _ -> status(:ready, cutoff) end)
     assert_receive {tag, {:error, :startup_deadline_expired}} when tag == observer.tag
     assert :ok = StartupGate.cancel(observer)
+  end
+
+  test "an owned first unavailable snapshot stays unavailable after its cutoff" do
+    {:ok, root} = Supervisor.start_link([
+      Supervisor.child_spec({Task.Supervisor, []}, id: Loopex.Runtime.Workers)
+    ], strategy: :one_for_one)
+    runtime = %Runtime{supervisor: root, token: make_ref()}
+    Process.put({StartupGate, :test_listener}, self())
+    cutoff = System.monotonic_time(:millisecond) - 1
+    assert {:error, :runtime_unavailable} =
+      StartupGate.await(runtime, fn _, _ -> status(:unavailable, cutoff) end)
+    assert_receive {:startup_task, observer, _owner, _initial}
+    monitor = Process.monitor(observer)
+    assert_receive {:DOWN, ^monitor, :process, ^observer, _}
+    Supervisor.stop(root)
   end
 
   test "polled ready after the original cutoff cannot publish" do
@@ -108,11 +106,10 @@ defmodule LoopexComposition.StartupGateTest do
     test = self()
     cutoff = now_ms() + 1_000
 
-    {holder, ref} =
-      holder(self(), self(), fn runtime, _timeout ->
-        send(test, {:read_held, self(), runtime})
-        receive do: (:release -> status(:ready, cutoff))
-      end)
+    {holder, ref} = holder(self(), self(), fn runtime, _timeout ->
+      send(test, {:read_held, self(), runtime})
+      receive do: (:release -> status(:ready, cutoff))
+    end)
 
     assert_receive {:read_held, observer, runtime}
     state = :sys.get_state(holder)
@@ -130,35 +127,57 @@ defmodule LoopexComposition.StartupGateTest do
 
   for lost <- [:owner, :root, :runtime] do
     test "#{lost} loss interrupts a held first read and joins the original observer" do
-      lost = unquote(lost)
-      test = self()
-      dependency = spawn(fn -> dependency(test) end)
-      on_exit(fn -> if Process.alive?(dependency), do: Process.exit(dependency, :kill) end)
-      owner = if lost == :owner, do: dependency, else: self()
-      root = if lost == :root, do: dependency, else: self()
-
-      {holder, _ref} =
-        holder(owner, root, fn runtime, _timeout ->
-          send(test, {:read_held, self(), runtime})
-          receive do: (:never -> status(:ready, now_ms() + 1_000))
-        end)
-
-      assert_receive {:read_held, observer, runtime}
-      holder_down = Process.monitor(holder)
-      observer_down = Process.monitor(observer)
-      runtime_down = Process.monitor(runtime.supervisor)
-
-      if lost == :runtime do
-        send(runtime.supervisor, :finish)
-      else
-        send(dependency, :finish)
-      end
-
-      assert_receive {:DOWN, ^observer_down, :process, ^observer, _}, 500
-      assert_receive {:DOWN, ^holder_down, :process, ^holder, _}, 500
-      assert_receive {:DOWN, ^runtime_down, :process, _, _}, 500
-      if Process.alive?(dependency), do: send(dependency, :finish)
+      held_read_loss(unquote(lost))
     end
+  end
+
+  defp changed_observation(changed) do
+    cutoff = System.monotonic_time(:millisecond) + 1_000
+    reads = :atomics.new(1, [])
+
+    read = fn _runtime, _timeout ->
+      if :atomics.add_get(reads, 1, 1) == 1 do
+        status(:starting, cutoff)
+      else
+        case changed do
+          :identity -> status(:ready, cutoff, <<1::256>>)
+          :cutoff -> status(:ready, cutoff + 1)
+        end
+      end
+    end
+
+    observer = StartupGate.start(:fixture, nil, read)
+    assert_receive {tag, {:error, :runtime_unavailable}} when tag == observer.tag
+    assert :ok = StartupGate.cancel(observer)
+  end
+
+  defp held_read_loss(lost) do
+    test = self()
+    dependency = spawn(fn -> dependency(test) end)
+    on_exit(fn -> if Process.alive?(dependency), do: Process.exit(dependency, :kill) end)
+    owner = if lost == :owner, do: dependency, else: self()
+    root = if lost == :root, do: dependency, else: self()
+
+    {holder, _ref} = holder(owner, root, fn runtime, _timeout ->
+      send(test, {:read_held, self(), runtime})
+      receive do: (:never -> status(:ready, now_ms() + 1_000))
+    end)
+
+    assert_receive {:read_held, observer, runtime}
+    holder_down = Process.monitor(holder)
+    observer_down = Process.monitor(observer)
+    runtime_down = Process.monitor(runtime.supervisor)
+
+    if lost == :runtime do
+      send(runtime.supervisor, :finish)
+    else
+      send(dependency, :finish)
+    end
+
+    assert_receive {:DOWN, ^observer_down, :process, ^observer, _}, 500
+    assert_receive {:DOWN, ^holder_down, :process, ^holder, _}, 500
+    assert_receive {:DOWN, ^runtime_down, :process, _, _}, 500
+    if Process.alive?(dependency), do: send(dependency, :finish)
   end
 
   defp holder(owner, root, read) do
@@ -179,6 +198,8 @@ defmodule LoopexComposition.StartupGateTest do
     send(holder, {root, ref, :registered})
     assert_receive {:phase_ready, ^holder, ^ref, :runtime}
     send(holder, {:grant, owner, ref, :runtime, []})
+    assert_receive {:runtime_custody, ^holder, ^ref, runtime}
+    send(holder, {:runtime_custody_ack, owner, ref, runtime})
     {holder, ref}
   end
 
@@ -190,9 +211,7 @@ defmodule LoopexComposition.StartupGateTest do
 
   defp dependency(test) do
     receive do
-      :finish ->
-        :ok
-
+      :finish -> :ok
       message ->
         send(test, message)
         dependency(test)

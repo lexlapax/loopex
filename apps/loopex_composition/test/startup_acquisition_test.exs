@@ -3,6 +3,7 @@ defmodule LoopexComposition.StartupAcquisitionTest do
 
   alias Loopex.LLM.ReqLLM.{CredentialCustody, CredentialRegistry, CredentialToken}
   alias Loopex.Trace.Capability
+  alias LoopexComposition.StartupGate
 
   alias LoopexComposition.StartupAcquisitionTest.{HeldStore, WithoutStartupRead}
 
@@ -16,9 +17,7 @@ defmodule LoopexComposition.StartupAcquisitionTest do
   end
 
   setup do
-    root =
-      Path.join(System.tmp_dir!(), "loopex-startup-gate-#{System.unique_integer([:positive])}")
-
+    root = Path.join(System.tmp_dir!(), "loopex-startup-gate-#{System.unique_integer([:positive])}")
     workspace = Path.join(root, "workspace")
     File.mkdir_p!(workspace)
     on_exit(fn -> File.rm_rf!(root) end)
@@ -33,104 +32,35 @@ defmodule LoopexComposition.StartupAcquisitionTest do
 
     plane = %{
       capability: capability,
-      model_options: [
-        credential_token: token,
-        credential_registry: registry,
-        tracing_capability: capability
-      ]
+      model_options: [credential_token: token, credential_registry: registry,
+                      tracing_capability: capability]
     }
 
-    options = [
-      runtime_id: "startup-gate",
-      state_root: Path.join(root, "state"),
-      workspace: workspace,
-      policy: Policy,
-      credential_plane: plane
-    ]
-
+    options = [runtime_id: "startup-gate", state_root: Path.join(root, "state"),
+               workspace: workspace, policy: Policy, credential_plane: plane]
     %{options: options}
   end
 
   for backend <- [:local, :memory], path <- [:start, :with_runtime, :start_edges] do
     test "#{path} cannot publish before actual #{backend} startup completes", %{options: options} do
-      path = unquote(path)
-      backend = unquote(backend)
-      test = self()
-
-      {caller, caller_down} =
-        spawn_monitor(fn ->
-          Process.flag(:trap_exit, true)
-          observe(test, backend)
-
-          result =
-            case path do
-              :start ->
-                LoopexComposition.start(options)
-
-              :with_runtime ->
-                LoopexComposition.with_runtime(options, fn runtime ->
-                  send(test, {:callback, runtime})
-                  :callback_result
-                end)
-
-              :start_edges ->
-                LoopexComposition.start_edges(options)
-            end
-
-          send(test, {:acquired, result})
-          receive do: (:finish -> :ok)
-        end)
-
-      on_exit(fn -> if Process.alive?(caller), do: Process.exit(caller, :kill) end)
-      assert_receive {:runtime_owned, owner, runtime}, 1_000
-      assert_receive {:startup_read, worker, %{command_id: nil}}, 1_000
-      assert {:ok, %{state: :starting}} = Loopex.creation_startup_status(runtime, 1_000)
-      {:ok, children} = Loopex.Runtime.children(runtime)
-      owned_workers = Task.Supervisor.children(children.workers)
-      assert length(owned_workers) >= 2
-      refute_receive {:acquired, _}, 40
-      refute_received {:callback, _}
-      send(worker, :release_startup)
-
-      case path do
-        :start ->
-          assert_receive {:acquired, {:ok, ^runtime}}, 1_000
-          assert {:ok, _} = Loopex.create_session(runtime, %{}, command_id: "once")
-          :ok = Loopex.stop(runtime)
-          owner_down = Process.monitor(owner)
-          assert_receive {:DOWN, ^owner_down, :process, ^owner, _}, 2_000
-
-        :with_runtime ->
-          assert_receive {:callback, ^runtime}, 1_000
-          assert_receive {:acquired, :callback_result}, 2_000
-          refute Loopex.Runtime.alive?(runtime)
-
-        :start_edges ->
-          assert_receive {:acquired, {:ok, edges}}, 1_000
-          assert edges.runtime == runtime
-          :ok = Loopex.stop(runtime)
-          stop_edges(edges)
-      end
-
-      for worker <- owned_workers, do: refute(Process.alive?(worker))
-
-      send(caller, :finish)
-      assert_receive {:DOWN, ^caller_down, :process, ^caller, :normal}, 1_000
+      held_acquisition(options, unquote(path), unquote(backend))
     end
   end
 
-  test "an adapter missing startup custody observation cannot publish or enter a bracket", %{
-    options: options
-  } do
+  for target <- [:root, :workers], action <- [:caller_loss, :interrupt, :initial_cap] do
+    test "#{target} bootstrap remains bounded through #{action}", %{options: options} do
+      held_bootstrap(options, unquote(target), unquote(action))
+    end
+  end
+
+  test "an adapter missing startup custody observation cannot publish or enter a bracket", %{options: options} do
     test = self()
     Process.put(@edge, nil)
     observe(test, :local, WithoutStartupRead)
 
     try do
       assert {:error, :runtime_unavailable} =
-               LoopexComposition.with_runtime(options, fn _ ->
-                 send(test, :unexpected_callback)
-               end)
+        LoopexComposition.with_runtime(options, fn _ -> send(test, :unexpected_callback) end)
 
       assert_receive {:runtime_owned, owner, runtime}, 1_000
       owner_down = Process.monitor(owner)
@@ -144,12 +74,10 @@ defmodule LoopexComposition.StartupAcquisitionTest do
 
   test "caller death during actual held Local startup enters owned cleanup", %{options: options} do
     test = self()
-
-    caller =
-      spawn(fn ->
-        observe(test)
-        LoopexComposition.with_runtime(options, fn _ -> send(test, :unexpected_callback) end)
-      end)
+    caller = spawn(fn ->
+      observe(test)
+      LoopexComposition.with_runtime(options, fn _ -> send(test, :unexpected_callback) end)
+    end)
 
     assert_receive {:runtime_owned, owner, runtime}, 1_000
     assert_receive {:startup_read, _worker, _}, 1_000
@@ -163,50 +91,20 @@ defmodule LoopexComposition.StartupAcquisitionTest do
 
   for lost <- [:owner, :store] do
     test "#{lost} loss interrupts actual held Local acquisition", %{options: options} do
-      lost = unquote(lost)
-      test = self()
-
-      caller =
-        spawn(fn ->
-          observe(test)
-
-          result =
-            LoopexComposition.with_runtime(options, fn _ -> send(test, :unexpected_callback) end)
-
-          send(test, {:refused, result})
-        end)
-
-      on_exit(fn -> if Process.alive?(caller), do: Process.exit(caller, :kill) end)
-      assert_receive {:edge_owned, Loopex.Store.Local, store}, 1_000
-      assert_receive {:runtime_owned, owner, runtime}, 1_000
-      assert_receive {:startup_read, _worker, _}, 1_000
-      owner_down = Process.monitor(owner)
-      runtime_down = Process.monitor(runtime.supervisor)
-      victim = if lost == :owner, do: owner, else: store
-      Process.exit(victim, :kill)
-      assert_receive {:DOWN, ^runtime_down, :process, _, _}, 3_000
-      assert_receive {:DOWN, ^owner_down, :process, ^owner, _}, 3_000
-      assert_receive {:refused, {:error, _}}, 3_000
-      refute_received :unexpected_callback
+      held_acquisition_loss(options, unquote(lost))
     end
   end
 
   test "tracked host interrupt remains responsive during actual held startup", %{options: options} do
     test = self()
     stop = :atomics.new(1, [])
-
-    caller =
-      spawn(fn ->
-        Process.flag(:trap_exit, true)
-        observe(test)
-
-        interrupt = fn ->
-          if :atomics.get(stop, 1) == 0, do: :continue, else: {:stop, :operator_stop}
-        end
-
-        send(test, {:interrupted, LoopexComposition.start_edges(options, interrupt: interrupt)})
-        receive do: (:finish -> :ok)
-      end)
+    caller = spawn(fn ->
+      Process.flag(:trap_exit, true)
+      observe(test)
+      interrupt = fn -> if :atomics.get(stop, 1) == 0, do: :continue, else: {:stop, :operator_stop} end
+      send(test, {:interrupted, LoopexComposition.start_edges(options, interrupt: interrupt)})
+      receive do: (:finish -> :ok)
+    end)
 
     on_exit(fn -> if Process.alive?(caller), do: Process.exit(caller, :kill) end)
     assert_receive {:runtime_owned, _owner, runtime}, 1_000
@@ -219,45 +117,214 @@ defmodule LoopexComposition.StartupAcquisitionTest do
     assert_receive {:interrupted, {:error, {:stop, :operator_stop}, edges}}, 500
     assert edges.runtime == runtime
     :ok = Loopex.stop(runtime)
-
     for {worker, monitor} <- worker_monitors do
       assert_receive {:DOWN, ^monitor, :process, ^worker, _}, 1_000
     end
-
     stop_edges(edges)
     send(caller, :finish)
   end
 
-  defp observe(test, backend \\ :local, adapter \\ HeldStore) do
-    reads = :atomics.new(1, [])
+  defp held_acquisition(options, path, backend) do
+    test = self()
 
+    {caller, caller_down} = spawn_monitor(fn ->
+      Process.flag(:trap_exit, true)
+      observe(test, backend)
+
+      result = case path do
+        :start -> LoopexComposition.start(options)
+        :with_runtime ->
+          LoopexComposition.with_runtime(options, fn runtime ->
+            send(test, {:callback, runtime})
+            :callback_result
+          end)
+        :start_edges -> LoopexComposition.start_edges(options)
+      end
+
+      send(test, {:acquired, result})
+      receive do: (:finish -> :ok)
+    end)
+
+    on_exit(fn -> if Process.alive?(caller), do: Process.exit(caller, :kill) end)
+    assert_receive {:runtime_owned, owner, runtime}, 1_000
+    assert_receive {:startup_read, worker, %{command_id: nil}}, 1_000
+    assert_receive {:startup_task, observer, ^owner, _initial}, 1_000
+    observer_down = Process.monitor(observer)
+    assert {:ok, %{state: :starting}} = Loopex.creation_startup_status(runtime, 1_000)
+    {:ok, children} = Loopex.Runtime.children(runtime)
+    owned_workers = Task.Supervisor.children(children.workers)
+    assert length(owned_workers) >= 2
+    refute_receive {:acquired, _}, 40
+    refute_received {:callback, _}
+    send(worker, :release_startup)
+    assert_receive {:DOWN, ^observer_down, :process, ^observer, _}, 1_000
+
+    case path do
+      :start ->
+        assert_receive {:acquired, {:ok, ^runtime}}, 1_000
+        assert {:ok, _} = Loopex.create_session(runtime, %{}, command_id: "once")
+        :ok = Loopex.stop(runtime)
+        owner_down = Process.monitor(owner)
+        assert_receive {:DOWN, ^owner_down, :process, ^owner, _}, 2_000
+      :with_runtime ->
+        assert_receive {:callback, ^runtime}, 1_000
+        assert_receive {:acquired, :callback_result}, 2_000
+        refute Loopex.Runtime.alive?(runtime)
+      :start_edges ->
+        assert_receive {:acquired, {:ok, edges}}, 1_000
+        assert edges.runtime == runtime
+        :ok = Loopex.stop(runtime)
+        stop_edges(edges)
+    end
+
+    for worker <- owned_workers, do: refute(Process.alive?(worker))
+
+    send(caller, :finish)
+    assert_receive {:DOWN, ^caller_down, :process, ^caller, :normal}, 1_000
+  end
+
+  defp held_bootstrap(options, target, action) do
+    test = self()
+    stop = :atomics.new(1, [])
+
+    caller = spawn(fn ->
+      Process.flag(:trap_exit, true)
+      observe(test, :local, HeldStore, target)
+      Process.put(:"$loopex_composition_effect_observer", fn module, function, arguments ->
+        if module == Loopex and function == :stop,
+          do: send(test, {:cleanup_started, self(), hd(arguments)})
+        apply(module, function, arguments)
+      end)
+
+      if action == :caller_loss do
+        send(test, {:bootstrap_result,
+          LoopexComposition.with_runtime(options, fn _ -> send(test, :unexpected_callback) end)})
+      else
+        interrupt = fn ->
+          if :atomics.get(stop, 1) == 0, do: :continue, else: {:stop, :operator_stop}
+        end
+        send(test, {:bootstrap_result, LoopexComposition.start_edges(options, interrupt: interrupt)})
+      end
+
+      receive do: (:finish -> :ok)
+    end)
+
+    on_exit(fn -> if Process.alive?(caller), do: Process.exit(caller, :kill) end)
+    assert_receive {:bootstrap_held, owner, suspended, runtime, original_workers}, 1_000
+    on_exit(fn ->
+      try do
+        :sys.resume(suspended)
+      catch
+        :exit, _ -> :ok
+      end
+      if Process.alive?(runtime.supervisor), do: Process.exit(runtime.supervisor, :kill)
+    end)
+    operation = if target == :root, do: :resolve, else: :admit
+    assert_receive {:startup_request, ^owner, ^suspended, ^operation}, 1_000
+    runtime_down = Process.monitor(runtime.supervisor)
+    worker_monitors = Enum.map(original_workers, &{&1, Process.monitor(&1)})
+
+    if action == :caller_loss do
+      owner_down = Process.monitor(owner)
+      Process.exit(caller, :kill)
+      assert_receive {:cleanup_started, ^owner, ^runtime}, 500
+      :sys.resume(suspended)
+      assert_receive {:DOWN, ^runtime_down, :process, _, _}, 3_000
+      assert_receive {:DOWN, ^owner_down, :process, ^owner, _}, 3_000
+    else
+      if action == :interrupt, do: :atomics.put(stop, 1, 1)
+      expected = if action == :interrupt, do: {:stop, :operator_stop}, else: :runtime_unavailable
+      bound = if action == :interrupt, do: 500, else: 1_500
+      assert_receive {:bootstrap_result, {:error, ^expected, edges}}, bound
+      assert edges.runtime == runtime
+      refute_received {:startup_first_read, _, ^runtime}
+      :sys.resume(suspended)
+
+      late = if target == :workers do
+        assert_receive {:startup_task, pid, ^owner, initial}, 1_000
+        if action == :initial_cap, do: assert(System.monotonic_time() >= initial)
+        monitor = Process.monitor(pid)
+        if action == :initial_cap do
+          assert_receive {:DOWN, ^monitor, :process, ^pid, _}, 1_000
+          nil
+        else
+          {pid, monitor}
+        end
+      end
+
+      :ok = Loopex.stop(runtime)
+      assert_receive {:DOWN, ^runtime_down, :process, _, _}, 1_000
+      if late do
+        {pid, monitor} = late
+        assert_receive {:DOWN, ^monitor, :process, ^pid, _}, 1_000
+      end
+      stop_edges(edges)
+      send(caller, :finish)
+    end
+
+    for {worker, monitor} <- worker_monitors do
+      assert_receive {:DOWN, ^monitor, :process, ^worker, _}, 1_000
+    end
+    refute_received {:startup_first_read, _, ^runtime}
+    refute_received :unexpected_callback
+  end
+
+  defp held_acquisition_loss(options, lost) do
+    test = self()
+    caller = spawn(fn ->
+      observe(test)
+      result = LoopexComposition.with_runtime(options, fn _ -> send(test, :unexpected_callback) end)
+      send(test, {:refused, result})
+    end)
+
+    on_exit(fn -> if Process.alive?(caller), do: Process.exit(caller, :kill) end)
+    assert_receive {:edge_owned, Loopex.Store.Local, store}, 1_000
+    assert_receive {:runtime_owned, owner, runtime}, 1_000
+    assert_receive {:startup_read, _worker, _}, 1_000
+    owner_down = Process.monitor(owner)
+    runtime_down = Process.monitor(runtime.supervisor)
+    victim = if lost == :owner, do: owner, else: store
+    Process.exit(victim, :kill)
+    assert_receive {:DOWN, ^runtime_down, :process, _, _}, 3_000
+    assert_receive {:DOWN, ^owner_down, :process, ^owner, _}, 3_000
+    assert_receive {:refused, {:error, _}}, 3_000
+    refute_received :unexpected_callback
+  end
+
+  defp observe(test, backend \\ :local, adapter \\ HeldStore, suspend \\ nil) do
+    reads = :atomics.new(1, [])
+    Process.put({StartupGate, :test_listener}, test)
     Process.put(@edge, fn
       Loopex.Store.Local, :start_link, [_options] when backend == :memory ->
         Loopex.Store.Memory.start_link([])
 
       Loopex, :start_link, [options] ->
+        Process.put({StartupGate, :test_listener}, test)
         store = Keyword.fetch!(options, :store)
         store = if backend == :memory, do: %{store | adapter: Loopex.Store.Memory}, else: store
         {:ok, held} = Loopex.Store.new(adapter, %{store: store, test: test, reads: reads})
         result = Loopex.start_link(Keyword.put(options, :store, held))
-
         case result do
-          {:ok, runtime} -> send(test, {:runtime_owned, self(), runtime})
+          {:ok, runtime} ->
+            if suspend do
+              {:ok, children} = Loopex.Runtime.children(runtime)
+              original_workers = Task.Supervisor.children(children.workers)
+              suspended = if suspend == :root, do: runtime.supervisor, else: children.workers
+              :ok = :sys.suspend(suspended)
+              send(test, {:bootstrap_held, self(), suspended, runtime, original_workers})
+            end
+            send(test, {:runtime_owned, self(), runtime})
           _ -> :ok
         end
-
         result
-
       module, function, arguments ->
         result = apply(module, function, arguments)
-
         if function == :start_link do
           case result do
             {:ok, pid} when is_pid(pid) -> send(test, {:edge_owned, module, pid})
             _ -> :ok
           end
         end
-
         result
     end)
   end

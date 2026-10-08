@@ -50,11 +50,8 @@ defmodule LoopexComposition.StartupStatusFixture do
   # Real Memory/Local acquisition tests always read the original Core snapshot.
   def ready(_runtime, _timeout) do
     {:ok,
-     %{
-       state: :ready,
-       startup_id: <<0::256>>,
-       startup_deadline_ms: System.monotonic_time(:millisecond) + 1_000
-     }}
+     %{state: :ready, startup_id: <<0::256>>,
+       startup_deadline_ms: System.monotonic_time(:millisecond) + 1_000}}
   end
 end
 
@@ -63,21 +60,14 @@ defmodule LoopexComposition.StartupAcquisitionTest.WithoutStartupRead do
   @behaviour Loopex.Store
 
   for {function, arity} <- [
-        transact: 2,
-        transaction_status: 4,
-        runtime_command: 2,
-        ownership_head: 3,
-        load_records: 4,
-        load_events: 4
+        transact: 2, transaction_status: 4, runtime_command: 2,
+        ownership_head: 3, load_records: 4, load_events: 4
       ] do
     arguments = Macro.generate_arguments(arity - 1, __MODULE__)
     @impl true
     def unquote(function)(reference, unquote_splicing(arguments)),
-      do:
-        apply(LoopexComposition.StartupAcquisitionTest.HeldStore, unquote(function), [
-          reference,
-          unquote_splicing(arguments)
-        ])
+      do: apply(LoopexComposition.StartupAcquisitionTest.HeldStore,
+                unquote(function), [reference, unquote_splicing(arguments)])
   end
 end
 
@@ -89,12 +79,8 @@ defmodule LoopexComposition.StartupAcquisitionTest.HeldStore do
   @behaviour Loopex.Store
 
   for {function, arity} <- [
-        transact: 2,
-        transaction_status: 4,
-        runtime_command: 2,
-        ownership_head: 3,
-        load_records: 4,
-        load_events: 4,
+        transact: 2, transaction_status: 4, runtime_command: 2,
+        ownership_head: 3, load_records: 4, load_events: 4,
         creation_provenance: 3
       ] do
     arguments = Macro.generate_arguments(arity - 1, __MODULE__)
