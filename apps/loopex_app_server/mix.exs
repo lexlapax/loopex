@@ -26,7 +26,7 @@ defmodule Loopex.AppServer.MixProject do
   end
 
   def application do
-    [extra_applications: []]
+    [extra_applications: [:crypto]]
   end
 
   # Concept: the foreground server is a client of the runtime, not a second

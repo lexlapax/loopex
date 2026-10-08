@@ -27,6 +27,38 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+### App Server OTP declaration repair — 2026-10-08
+
+Original15015 is terminal FAIL_OR_UNAVAILABLE at clean primary
+`a9eb423da326ff4023c2e4985c7c4803fa3f6e08`; collected once after58.566seconds,
+one actual stage join,11 verified artifacts and2,230 registry rows. Project
+compilation and formatting passed. The structure gate refused App Server's
+production `:crypto.strong_rand_bytes/1` call because its application did not
+declare `:crypto`. Later documentation checks were unrun. Output
+`M7/checkpoint-docs-a9eb423d-20261008-v1`; collection SHA-256
+`650b9ad81a45ef0cb8d2d907e408cc4295c66a621be869c1911815020b5a3652`,
+terminal `c6869e227225c93933abc5afad2ef41888e9a538ba654a7e25e91ea2e4cbb23f`,
+registry `6110a30766505bb8c6f4e830611209e52ba634406d176f8f16c56d46a79c39c4`.
+Seed the next actual native stage from this complete2,230-row prefix. Do not
+repeat unchanged a9 or claim a passing documentation gate.
+
+App Server now declares the OTP application already used by its production
+writer in `extra_applications: [:crypto]`. The unchanged repository command
+`bash scripts/check-otp-applications.sh` passes across the complete application
+inventory. This adds no external package or new dependency policy and closes
+only this declaration repair. Counts: T01–T19 originals88done/85todo/6retired;
+additions365done/24todo. T16 additions70done/4todo. Whole112, literal foreground
+integration, restore175 and full integration remain open.
+
+Private ADR0064's first source review found an accounting gap: `unset` does
+not prove an E-sized physical allocation is reclaimed before descendants fork,
+and the worker's expanded literal printf argument needs counting. The revised
+pair must bound retained allocator/COW storage and arguments before proposal
+integration or a decision request. No guarded topology is accepted or
+implemented. No native handle is live at this entry; older checkpoints below
+remain historical at their named revisions.
+
+
 ### Current four-file fixture repair and failed complete AppServer run
 
 Original71798 is terminal FAIL_OR_UNAVAILABLE and collected once at e5 source.

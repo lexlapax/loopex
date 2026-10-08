@@ -1,5 +1,16 @@
 # M7 Implementation Tasks
 
+Current checkpoint: App Server now declares its existing production OTP
+crypto dependency; the unchanged complete application-declaration check passes.
+Original15015's preceding documentation gate remains a retained failure at
+`a9eb423d`: compilation/formatting passed, structure refused that missing
+application declaration, and later docs steps were unrun. No native handle is
+live. The guardian proposal is being revised after source review found its
+physical memory census incomplete. Whole112 and restore175 remain open.
+Counts: originals88done/85todo/6retired; additions365done/24todo; T16 additions
+70done/4todo. Exact failure identities are in the [resume record](M7-resume.md).
+The entries below describe earlier checkpoints.
+
 Current checkpoint: original59747 is terminal FAIL at source9d1ed79d after
 200.102seconds, four joins/24 artifacts/2,227registry rows. Current complete94
 again ran92passed/2failed, zero exclusions/skips/invalid; protocol18 and floor
@@ -14645,6 +14656,8 @@ in the restart checkpoint. Broader restore/decoder/public/helper rows stay open.
 - [ ] Independently review integration changes and fix confirmed defects without weakening checks.
 
 ### Added implementation subtasks
+
+- [x] Declare App Server's existing production `:crypto` use in its OTP application dependencies. Preserve the application-declaration checker and verify its complete inventory passes; this repairs the structure failure from original15015 and adds no external package. Whole documentation, foreground and integration checks remain separate.
 
 - [ ] Integrate foreground FIFO and emitted-cursor custody through the physical OutputWriter, native progress ingress and bounded frames; prove all eight whole files / 112 cases per supported pair, including all four Node cases and allocation negative controls, then integrate the exact 17 owned files above qualified Core32. Preserve original actor/credit/cursor/cleanup oracles and cutoffs; Linux stress, served-generation activation, forced 32-CAS exhaustion and full integration remain separate.
 
