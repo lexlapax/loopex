@@ -7073,3 +7073,24 @@ Store, and recovered creation never activates a session. This amends only the
 named ADR 0006 and ADR 0055 clauses. Native, wire, independent-client, fault,
 restart and complete current-format restore proofs remain required. Other
 proposals, milestone closure, merge and publication remain separate decisions.
+
+
+<a id="disposition-m7-creation-cancellation-envelope-2026-10-07"></a>
+### M7 creation cancellation envelope accepted, 2026-10-07
+
+The maintainer selected "Approve the existing six-field format", accepting
+[ADR0061 Concept](../adr/0061-creation-cancellation-admission-envelope.md#concept)
+and [Technical depth](../adr/0061-creation-cancellation-admission-envelope-technical.md#technical-depth)
+at candidate `9ba346fe8784ee69d33132300522521e348291bc`. Historical Proposed
+Concept SHA-256 is `e86f697a10e5568f22a66d666380b2ef2a74b754cfd20244f7e2c3c29aa0e9ec`;
+Technical SHA-256 is `41a89917cdffb5ca40187c42326abb9e2b9557075ef90d632df49b1ec8dd57b8`.
+Both bytes were unchanged at acceptance. Within the pair only Status and the
+empty Acceptance row change. Independent source review5a337605 and canonical
+documentation original25772 at that candidate passed before the decision.
+
+Implement the six-member `refused`/`creation_cancelled` admission with no
+session identity or wire disposition. This narrowly supersedes0059's remote
+envelope wording; zero activation, durability, recovery and cleanup remain.
+Complete coordinated foreground3/daemon4 schemas and independent clients are
+still required before serving. Acceptance closes no implementation task and
+supplies no milestone closure, merge, publication or release authority.

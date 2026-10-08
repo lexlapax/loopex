@@ -29,6 +29,23 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Reboot continuation on 2026-10-07
 
+ADR0061 exact-pair approval has arrived for9ba346fe: six-field remote cancellation
+is accepted. The [disposition](../developer/agent-context-map.md#disposition-m7-creation-cancellation-envelope-2026-10-07)
+binds both historical digests; dependent codec/vector work is authorized,
+complete generation activation still waits for coordinated integration. No
+asked approval remains unanswered at this checkpoint.
+
+The persistent-format interpretation is resolved from the explicit pre-1.0
+maintainer rule and accepted0059's one-new-current-format requirement: known
+exact final histories are those already retained in that current format with
+completed custody lineage. There is no capsule-free seed/import authority,
+older-root decoder or live unreserved fallback. Implement current frameversion2,
+change writer/replay/format validators together, preserve originalF identity
+and reject missing lineage. This implements the approved version change; it
+introduces no migration contract. The adapter writer continues under this
+reading, superseding the earlier pending-encoding note below.
+
+
 Latest checkpoint after native verification: exact proposal candidate9ba346fe
 is pushed. ADR0061 documentation original25772 is collected PASS in71.019seconds,
 two original joins and18 authenticated artifacts. Complete output is under
