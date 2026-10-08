@@ -494,6 +494,26 @@ defmodule LoopexComposition.RestoreIOTest do
   end
 
   for control <- [:preserve, :normalize] do
+    modes = %{
+      "." => 0o3750,
+      "empty" => 0o1750,
+      "nested" => 0o2750,
+      "nested/inner" => 0o4750,
+      "nested/inner/all" => 0o7750,
+      "setgid" => 0o2750,
+      "sticky" => 0o1750
+    }
+
+    # Concept: the negative control starts from a naturally exact native copy.
+    # Technical depth: OTP 29.0.5 unix_prim_file.c:769-780 excludes
+    # S_ISVTX in efile_set_permissions.
+    # Preserve keeps every imported special bit and requires exact copy or
+    # precise refusal; only this control's initial fixture omits sticky.
+    modes =
+      if control == :normalize,
+        do: Map.new(modes, fn {path, mode} -> {path, Bitwise.band(mode, 0o6777)} end),
+        else: modes
+
     test "real special-mode restore #{control} compares root directories and remaining regular bits before publication",
          context do
       control = unquote(control)
@@ -521,25 +541,7 @@ defmodule LoopexComposition.RestoreIOTest do
       assert File.lstat!(destination).gid ==
                String.to_integer(String.trim(destination_group))
 
-      modes = %{
-        "." => 0o3750,
-        "empty" => 0o1750,
-        "nested" => 0o2750,
-        "nested/inner" => 0o4750,
-        "nested/inner/all" => 0o7750,
-        "setgid" => 0o2750,
-        "sticky" => 0o1750
-      }
-
-      # Concept: the negative control starts from a naturally exact native copy.
-      # Technical depth: OTP 29.0.5 unix_prim_file.c:769-780 excludes
-      # S_ISVTX in efile_set_permissions.
-      # Preserve keeps every imported special bit and requires exact copy or
-      # precise refusal; only this control's initial fixture omits sticky.
-      modes =
-        if control == :normalize,
-          do: Map.new(modes, fn {path, mode} -> {path, Bitwise.band(mode, 0o6777)} end),
-          else: modes
+      modes = unquote(Macro.escape(modes))
 
       contents = %{
         "nested/inner/all" => :binary.copy(<<0, 255, 1, 2>>, 40_000),

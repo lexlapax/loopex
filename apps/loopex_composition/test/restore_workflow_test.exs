@@ -235,6 +235,26 @@ defmodule LoopexComposition.RestoreWorkflowTest do
   end
 
   for control <- [:preserve, :normalize] do
+    modes = %{
+      "." => 0o3750,
+      "special-empty" => 0o1750,
+      "special-nested" => 0o2750,
+      "special-nested/inner" => 0o4750,
+      "special-nested/inner/all" => 0o7750,
+      "special-setgid" => 0o2750,
+      "special-sticky" => 0o1750
+    }
+
+    # Concept: the negative control starts from a naturally exact native copy.
+    # Technical depth: OTP 29.0.5 unix_prim_file.c:769-780 excludes
+    # S_ISVTX in efile_set_permissions.
+    # Preserve keeps every imported special bit and requires exact copy or
+    # precise refusal; only this control's initial fixture omits sticky.
+    modes =
+      if control == :normalize,
+        do: Map.new(modes, fn {path, mode} -> {path, Bitwise.band(mode, 0o6777)} end),
+        else: modes
+
     test "public special-mode restore #{control} preserves complete state or refuses before guarded activation",
          context do
       fixture = actual_cut(context.root, nil, :without_helpers)
@@ -254,25 +274,7 @@ defmodule LoopexComposition.RestoreWorkflowTest do
       assert File.lstat!(fixture.destination).gid ==
                String.to_integer(String.trim(destination_group))
 
-      modes = %{
-        "." => 0o3750,
-        "special-empty" => 0o1750,
-        "special-nested" => 0o2750,
-        "special-nested/inner" => 0o4750,
-        "special-nested/inner/all" => 0o7750,
-        "special-setgid" => 0o2750,
-        "special-sticky" => 0o1750
-      }
-
-      # Concept: the negative control starts from a naturally exact native copy.
-      # Technical depth: OTP 29.0.5 unix_prim_file.c:769-780 excludes
-      # S_ISVTX in efile_set_permissions.
-      # Preserve keeps every imported special bit and requires exact copy or
-      # precise refusal; only this control's initial fixture omits sticky.
-      modes =
-        if control == :normalize,
-          do: Map.new(modes, fn {path, mode} -> {path, Bitwise.band(mode, 0o6777)} end),
-          else: modes
+      modes = unquote(Macro.escape(modes))
 
       contents = %{
         "special-nested/inner/all" => :binary.copy(<<0, 255, 1, 2>>, 40_000),
