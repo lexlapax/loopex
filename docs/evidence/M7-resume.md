@@ -29,6 +29,49 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Reboot continuation on 2026-10-07
 
+The CLI reconciliation checkpoint is pushed at `48786946`. The second recovered
+added T16 repair, long temporary paths, also closes without a new native run.
+Original13676 at2826b30b passed paired model28/read-only22/adjacent21+21 and whole
+ordinary Composition677/Local302 with3/2 designated exclusions. Its70 original
+joins and246 sealed outputs authenticate; terminalda42f26d, inventory7a67dce6,
+final sourcesb52183cf and NUL247238fb bind the tested source. All five current
+fixture files are literal matches. Earlier restore-join before-format snapshots
+equal rawd754's727011/2b75 source; its actual eight-file AST stage7b86051f passed
+and joined, resultingfc59/fa079 bytes match current. That earlier complete
+formatter stays failed; successful13676 supplies the complete paired proof.
+Current60564 later application/NUL joins are current regression only. Original
+Ledger6baa and Receiptfdd6 remain failed. Root read the recovered mape1812d74,
+which supersedes the earlier map's missing-packet assessment for this row only.
+Its immutable retention is
+`M7/long-temp-path-existing-proof-recovery-20261007-v1/retention.json`, SHA-256
+`8a261c93d17910ae84d4be5aecc970164889e02523e24561dcd20c5d70998edc`.
+T01–T19 originals remain88 done/85 todo/6 retired; added356 done/21 todo.
+Historical quiesce attribution and broader diagnostics remain open.
+
+ProgressSink native V4cee9f6b1 corrects the cache phase mismatch and is
+independently source-qualified702d7218. Root bound55 current-schema facts in
+disabledaed38561 with full reverse and two false gates; packet1090625a uses
+actual1781 successor, raw6e0aad7d and separately captured2faf80bb cache context.
+The measured PASS errorNone remains None as an actual fact, not an unbound
+prediction. Factual review1dcf0bab passed, then root enabled only the two gates
+in runner469a1b1e. Original82636 failed at the current-pair formatter with a
+syntax error at progress_sink_test.exs:620 before the 26 tests ran. The tool-version
+stage passed; two original handles joined,19 artifacts authenticated,4.888 seconds.
+Collectionc03a9334 and terminal3e1014e5 retain that failure. Successor registry has
+1783 keys, digestb4bae82f. Its output is
+`M7/progress-sink-format-20261007-v4`; do not rerun or recollect it.
+Production source was partially formatted; test source remained raw. The isolated
+writer owns the minimal syntax correction and preserves that actual format diff.
+Future proof bindings remain disabled. No ProgressSink row closes.
+
+The full V4 blueprint, factual review, binders and enabled carrier are retained
+under `M7/progress-sink-v4-reviewed-bound-context-20261007-v1/retention.json`,
+SHA-256 `a4073f818740a4f7aece61afa7717abbc1792123013b3751e687c05d79293fce`,35 files.
+BinderV4V1 failed before any output/native/source/registry write because root used
+the older schema field name; V2 reads the exact current future_none_fields and
+retains all55 obligations. Failure receipt130bda2a stays distinct. Earlier
+entries below are historical where superseded.
+
 The full-check checkpoint is pushed at `d77b86d1`. Subsequent read-only
 reconciliation closes only added T16's seed406612 guarded CLI lifecycle repair.
 Original56356 at00cf26bb proved cold1/mixed13 on both pairs, with all56 outputs

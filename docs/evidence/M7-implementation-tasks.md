@@ -1,5 +1,18 @@
 # M7 Implementation Tasks
 
+ProgressSink formatter original82636 failed before tests on an unmatched `end`
+in the new test source. Its two process joins,19 artifacts and successor registry
+are collected; the isolated source repair is running. No ProgressSink completion
+is claimed. The [resume record](M7-resume.md) retains exact failure identities.
+
+Two added T16 fixture repairs are reconciled against existing complete paired
+proof: guarded CLI lifecycle and long temporary paths. The recovered native
+outputs, raw-to-formatted witness and literal current fixture joins are retained
+in the [resume record](M7-resume.md). Earlier failed runs remain failed; no
+unchanged tests were repeated. T01–T19 originals remain88 done/85 todo/6 retired;
+added356 done/21 todo. Broader integration, historical quiesce attribution and
+diagnostic obligations remain open.
+
 The full current-pair check at `d1132591` is collected PASS: all eleven
 applications,4,924 passed,61 designated exclusions,zero failures/skips/invalid,
 2,102.132 seconds for the check and2,121.176 seconds for the complete runner.
@@ -14402,7 +14415,18 @@ SHA-256 `2bf0acb413503132d77798582f2ebbac65106c1371cb3fa82904ff5d9f841e25`.
 - [x] Correct ordinary foreground/daemon progress projection to the accepted ADR 0023 identity and quantity encodings before live routing; prove actual complete native records, per-kind nullability, maximum values, malformed/private refusal and unchanged positive queue/frame pressure on both toolchains. Keep ADR 0054 codec, current generation gates and actual writer-pressure proof separate.
 - [x] Preserve the historical-lookup fixture's paused writer claim identity through hostile directory substitution instead of in-place owner rewrites; verify original bytes/inode/mode/mtime/ctime before releasing the pause, retain all 38 lookup cases and original bounds/joins, and prove the complete 378-case finalization selection on both supported pairs with original21368's failure retained.
 
-- [ ] Repair the inherited long-temporary-path fixture failures exposed by Ledger6baa and receiptfdd6 ordinary checks: supply bounded explicit instructions only to seven failed model startup cases while preserving the 1,000-token ceiling and give only the actual Unix socket/exact8MiB cases fresh short temporary workspaces. Preserve real HTTP/effects/questions/cleanup, actual special files, all exact path-byte/first-over assertions and original deadlines; prove focused, adjacent and complete affected application populations on both supported pairs with both original failed runs retained.
+- [x] Repair the inherited long-temporary-path fixture failures exposed by Ledger6baa and receiptfdd6 ordinary checks: supply bounded explicit instructions only to seven failed model startup cases while preserving the 1,000-token ceiling and give only the actual Unix socket/exact8MiB cases fresh short temporary workspaces. Preserve real HTTP/effects/questions/cleanup, actual special files, all exact path-byte/first-over assertions and original deadlines; prove focused, adjacent and complete affected application populations on both supported pairs with both original failed runs retained.
+
+Reconciled on2026-10-07 from recovered original13676 at2826b30b: both pairs
+passed complete model28/read-only22, adjacent21+21 and ordinary Composition677/
+Local302, with the recorded3/2 designated ordinary exclusions. All246 retained
+outputs and70 original process joins authenticate; all five current fixtures
+match the tested final inventory. The separately captured raw d754 before-format
+copies and successful eight-file AST stage prove the exact formatting relation;
+that older formatter remains failed as a whole. Later60564 supplies current
+regression only. Recovery mape1812d74 and retention8a261c93 bind the exact
+references in the [resume record](M7-resume.md). Ledger6baa and Receiptfdd6 remain
+failed, and no broader current-floor or T16 completion is claimed.
 - [x] Preserve captured restore fixture permissions under ordinary022 through exact copied modes and baseline-bound generation payload normalization; retain wrong-mode, wrong-byte and wrong-ordinal controls, all134 affected cases, actual64-transition witness and original actor/deadline proofs on both supported pairs. Retain the original full-check and focused failures; broader temporary-path repairs remain separate.
 - [x] Repair the e327e46c incomplete foreground revision-3 snapshot and superseded policy-answer admission fixture; prove all ten captured fields, exact historical cursor parity after live advancement, actual answer-admission order and the complete AppServer population on both supported pairs without changing generation activation or implementing unaccepted ADR0052.
 
