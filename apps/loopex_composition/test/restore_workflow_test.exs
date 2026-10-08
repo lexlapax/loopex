@@ -241,6 +241,19 @@ defmodule LoopexComposition.RestoreWorkflowTest do
       control = unquote(control)
       assert {:ok, old_entries} = RestoreCodec.manifest(fixture.baseline, @total)
 
+      # Concept: special-mode fixtures select an eligible temporary directory group.
+      # Technical depth: group identity is outside the mode manifest; verify the
+      # fresh destination group before its native restore copies any entries.
+      assert {destination_group, 0} =
+               System.cmd("python3", [
+                 "-c",
+                 "import os,sys; p=sys.argv[1]; g=os.getegid(); os.chown(p,-1,g); print(g)",
+                 fixture.destination
+               ])
+
+      assert File.lstat!(fixture.destination).gid ==
+               String.to_integer(String.trim(destination_group))
+
       modes = %{
         "." => 0o3750,
         "special-empty" => 0o1750,
@@ -268,7 +281,7 @@ defmodule LoopexComposition.RestoreWorkflowTest do
           assert {"", 0} =
                    System.cmd("python3", [
                      "-c",
-                     "import os,sys; os.chmod(sys.argv[1],int(sys.argv[2]))",
+                     "import os,sys; p=sys.argv[1]; g=os.getegid(); os.chown(p,-1,g); os.lstat(p).st_gid==g or sys.exit(1); os.chmod(p,int(sys.argv[2]))",
                      path,
                      Integer.to_string(mode)
                    ])
@@ -3220,7 +3233,7 @@ defmodule LoopexComposition.RestoreWorkflowTest do
                     assert {"", 0} =
                              System.cmd("python3", [
                                "-c",
-                               "import os,sys; os.chmod(sys.argv[1],0o6750)",
+                               "import os,sys; p=sys.argv[1]; g=os.getegid(); os.chown(p,-1,g); os.lstat(p).st_gid==g or sys.exit(1); os.chmod(p,0o6750)",
                                path
                              ])
 
