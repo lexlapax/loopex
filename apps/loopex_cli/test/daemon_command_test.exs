@@ -114,7 +114,13 @@ defmodule LoopexCli.DaemonCommandTest do
     config = Map.new(Keyword.fetch!(control.model.options, :adapter_options))
     assert config.excluded_env_names == names
 
-    custodies = for {{:custody, _}, pid} <- state.pids, do: pid
+    custodies =
+      for {{:custody, _}, pid} <- state.pids do
+        assert {:ok, reference} = Loopex.LLM.ReqLLM.CredentialCustody.reference(pid)
+        assert :ok == Loopex.LLM.ReqLLM.CredentialCustody.validate(reference)
+        reference
+      end
+
     assert length(custodies) == 2
 
     for {route, value} <- [
@@ -129,6 +135,7 @@ defmodule LoopexCli.DaemonCommandTest do
                  selected.credential_token
                )
 
+      assert :ok == Loopex.LLM.ReqLLM.CredentialCustody.validate(custody)
       assert custody in custodies
       assert {:ok, %{credential: ^value}} = Loopex.LLM.ReqLLM.CredentialCustody.resolve(custody)
     end
@@ -732,7 +739,7 @@ defmodule LoopexCli.DaemonCommandTest do
         "method" => "session.create",
         "request_id" => "create",
         "command_id" => LoopexProtocol.Wire.encode_identity("abrupt-create"),
-        "session_options" => %{}
+        "session_options" => %{"version" => 1}
       })
 
     assert [%{"status" => "accepted", "session_id" => encoded}] = receive_records(client, 1)
@@ -906,7 +913,7 @@ defmodule LoopexCli.DaemonCommandTest do
         "method" => "session.create",
         "request_id" => "create",
         "command_id" => LoopexProtocol.Wire.encode_identity("signal-create"),
-        "session_options" => %{}
+        "session_options" => %{"version" => 1}
       })
 
     assert [%{"status" => "accepted", "session_id" => encoded}] = receive_records(holder, 1)

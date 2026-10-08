@@ -505,7 +505,7 @@ defmodule LoopexCli.Live do
   defp ensure_session(%{session_id: nil, form: :run} = state) do
     case request(state, "session.create", %{
            "command_id" => Wire.encode_identity(state.create_id),
-           "session_options" => %{}
+           "session_options" => %{"version" => 1}
          }) do
       {:ok, %{"type" => "admission", "status" => "accepted", "session_id" => encoded}, state} ->
         session_id = decode_identity(encoded)

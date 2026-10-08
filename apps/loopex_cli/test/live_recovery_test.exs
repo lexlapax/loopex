@@ -260,7 +260,7 @@ defmodule LoopexCli.LiveRecoveryTest do
       {:ok, %{"status" => "accepted", "session_id" => encoded}, _client} =
         LoopexCli.DaemonClient.request(client, "session.create", %{
           "command_id" => LoopexProtocol.Wire.encode_identity(label),
-          "session_options" => %{}
+          "session_options" => %{"version" => 1}
         })
 
       {:ok, session_id} = LoopexProtocol.Wire.identity(encoded)

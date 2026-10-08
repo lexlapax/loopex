@@ -496,7 +496,7 @@ defmodule LoopexCli.LiveDaemonTest do
     {:ok, %{"session_id" => encoded}, _client} =
       LoopexCli.DaemonClient.request(client, "session.create", %{
         "command_id" => LoopexProtocol.Wire.encode_identity("dormant-take-over"),
-        "session_options" => %{}
+        "session_options" => %{"version" => 1}
       })
 
     LoopexCli.DaemonClient.close(client)
