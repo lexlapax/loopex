@@ -112,7 +112,10 @@ defmodule Loopex.AppServer.CurrentCommandsMappingTest do
         attached_fixture(script: [%{hold: self(), text: "done"}, %{text: "next"}])
 
       context = %{runtime: fixture.runtime, attachment: attachment}
-      prompt = request("session.prompt", "prompt") |> Map.put("content_b64", Wire.encode_bytes("go"))
+
+      prompt =
+        request("session.prompt", "prompt") |> Map.put("content_b64", Wire.encode_bytes("go"))
+
       prompt = if authored == :omitted, do: prompt, else: Map.put(prompt, "bounds", authored)
       assert {:ok, %{"status" => "accepted"}} = Mapping.call(prompt, context)
       assert_receive {:holding, worker}, 5_000
@@ -133,7 +136,14 @@ defmodule Loopex.AppServer.CurrentCommandsMappingTest do
       assert_receive {:DOWN, ^monitor, :process, ^worker, _reason}, 5_000
       run = SessionState.command_run_id(session, "follow")
       await_event(fixture, session, "run.finished", run)
-      assert {:ok, recovered} = SessionState.recover(session, Fixture.records(fixture, session), Fixture.events(fixture, session))
+
+      assert {:ok, recovered} =
+               SessionState.recover(
+                 session,
+                 Fixture.records(fixture, session),
+                 Fixture.events(fixture, session)
+               )
+
       {bounds, _accounting} = SessionState.accounting(recovered, run)
       assert bounds.deadline_at_ms == ceiling
       assert bounds.max_turns == 8
@@ -204,7 +214,10 @@ defmodule Loopex.AppServer.CurrentCommandsMappingTest do
     assert Fixture.records(fixture, session) == before
 
     for options <- [%{"version" => 1}, %{"version" => 1, "tools" => []}] do
-      request = request("session.create", :erlang.term_to_binary(options)) |> Map.put("session_options", options)
+      request =
+        request("session.create", :erlang.term_to_binary(options))
+        |> Map.put("session_options", options)
+
       assert {:ok, %{"status" => "accepted", "session_id" => id}} = Mapping.call(request, context)
       assert {:ok, created} = Wire.identity(id)
       [retained | _] = Fixture.records(fixture, created)
@@ -214,7 +227,10 @@ defmodule Loopex.AppServer.CurrentCommandsMappingTest do
     decoded = %{"version" => 1, "configuration" => %{"max_tokens" => 9_007_199_254_740_993}}
     wire_options = put_in(decoded, ["configuration", "max_tokens"], "9007199254740993")
     assert CreationOptions.decode_wire(wire_options) == {:ok, decoded}
-    assert {:error, native_reason} = Loopex.create_session(fixture.runtime, decoded, command_id: "explicit")
+
+    assert {:error, native_reason} =
+             Loopex.create_session(fixture.runtime, decoded, command_id: "explicit")
+
     request = request("session.create", "explicit") |> Map.put("session_options", wire_options)
     assert {:ok, refused} = Mapping.call(request, context)
     assert refused["reason"] == Atom.to_string(native_reason)
@@ -233,7 +249,8 @@ defmodule Loopex.AppServer.CurrentCommandsMappingTest do
         |> Map.put("answer", vector["input"])
 
       if vector["error"] do
-        assert {:error, %{"code" => "invalid_request"}} = Mapping.call(request, context), vector["name"]
+        assert {:error, %{"code" => "invalid_request"}} = Mapping.call(request, context),
+               vector["name"]
       else
         assert {:ok, reply} = Mapping.call(request, context), vector["name"]
         assert reply["reason"] == "session_unavailable"
@@ -253,17 +270,31 @@ defmodule Loopex.AppServer.CurrentCommandsMappingTest do
         attached_fixture(
           tools: [ToolDefinition.question_definition()],
           script: [
-            %{text: "question", calls: [%{id: "ask-1", name: "ask", arguments: vector["arguments"]}]},
+            %{
+              text: "question",
+              calls: [%{id: "ask-1", name: "ask", arguments: vector["arguments"]}]
+            },
             %{text: "done", calls: []}
           ]
         )
 
       context = %{runtime: fixture.runtime, attachment: attachment}
-      assert {:accepted, "prompt"} = Loopex.command(attachment, %{type: :prompt, command_id: "prompt", content: "implement"})
+
+      assert {:accepted, "prompt"} =
+               Loopex.command(attachment, %{
+                 type: :prompt,
+                 command_id: "prompt",
+                 content: "implement"
+               })
+
       opened = await_event(fixture, session, "interaction.requested")
       assert opened["producer"] == "model_tool"
       answer = vector["answer"]
-      wire_answer = if Map.has_key?(answer, "choice_id"), do: Map.update!(answer, "choice_id", &Wire.encode_identity/1), else: answer
+
+      wire_answer =
+        if Map.has_key?(answer, "choice_id"),
+          do: Map.update!(answer, "choice_id", &Wire.encode_identity/1),
+          else: answer
 
       request =
         request("session.respond_interaction", corpus["command_id"])
@@ -293,6 +324,7 @@ defmodule Loopex.AppServer.CurrentCommandsMappingTest do
   test "an uncertain prompt admission remains an error under its original command identity" do
     {fixture, session, attachment} = attached_fixture()
     context = %{runtime: fixture.runtime, attachment: attachment}
+
     request =
       request("session.prompt", "uncertain")
       |> Map.put("content_b64", Wire.encode_bytes("go"))
@@ -305,6 +337,7 @@ defmodule Loopex.AppServer.CurrentCommandsMappingTest do
              )
 
     assert {:error, unknown} = Mapping.call(request, context)
+
     assert unknown == %{
              "type" => "error",
              "code" => "admission_unknown",
@@ -324,7 +357,15 @@ defmodule Loopex.AppServer.CurrentCommandsMappingTest do
   test "compact maps explicit admission separately from its committed unchanged result through the current generation" do
     {fixture, session, attachment} = attached_fixture()
     context = %{runtime: fixture.runtime, attachment: attachment}
-    request = request("session.compact", <<0, 255, 128>>) |> Map.put("bounds", %{"max_attempts" => "4", "deadline_ms" => "60000", "token_budget" => "32768"})
+
+    request =
+      request("session.compact", <<0, 255, 128>>)
+      |> Map.put("bounds", %{
+        "max_attempts" => "4",
+        "deadline_ms" => "60000",
+        "token_budget" => "32768"
+      })
+
     assert Mapping.implemented?("session.compact")
     assert "session.compact" in LoopexProtocol.Session.methods()
     assert {:ok, admission} = Mapping.call(request, context)
@@ -345,7 +386,15 @@ defmodule Loopex.AppServer.CurrentCommandsMappingTest do
     assert Fixture.records(fixture, session) == before
 
     connection = Connection.new(runtime: fixture.runtime)
-    assert {:ok, _initialized, connection} = Connection.initialize(connection, %{"method" => "initialize", "request_id" => "initialize", "generations" => [LoopexProtocol.Session.generation()], "capabilities" => []})
+
+    assert {:ok, _initialized, connection} =
+             Connection.initialize(connection, %{
+               "method" => "initialize",
+               "request_id" => "initialize",
+               "generations" => [LoopexProtocol.Session.generation()],
+               "capabilities" => []
+             })
+
     connection = Connection.attach(connection, attachment)
     assert {:ok, connected_replay, ^connection} = Connection.dispatch(connection, request)
     assert connected_replay == admission
@@ -353,10 +402,19 @@ defmodule Loopex.AppServer.CurrentCommandsMappingTest do
     assert Fixture.records(fixture, session) == before
   end
 
-  defp request(method, command), do: %{"method" => method, "request_id" => "request", "command_id" => Wire.encode_identity(command)}
+  defp request(method, command),
+    do: %{
+      "method" => method,
+      "request_id" => "request",
+      "command_id" => Wire.encode_identity(command)
+    }
 
   defp vectors(name) do
-    :loopex_protocol |> :code.priv_dir() |> Path.join("vectors/" <> name <> ".v1.json") |> File.read!() |> JSON.decode!()
+    :loopex_protocol
+    |> :code.priv_dir()
+    |> Path.join("vectors/" <> name <> ".v1.json")
+    |> File.read!()
+    |> JSON.decode!()
   end
 
   defp fixture(options \\ []) do
@@ -367,7 +425,10 @@ defmodule Loopex.AppServer.CurrentCommandsMappingTest do
 
   defp attached_fixture(options \\ []) do
     fixture = fixture(options)
-    assert {:ok, session} = Loopex.create_session(fixture.runtime, %{"version" => 1}, command_id: "create")
+
+    assert {:ok, session} =
+             Loopex.create_session(fixture.runtime, %{"version" => 1}, command_id: "create")
+
     assert {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
     {fixture, session, attachment}
   end
@@ -382,7 +443,13 @@ defmodule Loopex.AppServer.CurrentCommandsMappingTest do
 
   defp await_event_until(fixture, session, kind, run, cutoff) do
     assert System.monotonic_time(:millisecond) < cutoff
-    event = Enum.find(Fixture.events(fixture, session), &(&1.kind == kind and (run == nil or &1["run_id"] == run)))
+
+    event =
+      Enum.find(
+        Fixture.events(fixture, session),
+        &(&1.kind == kind and (run == nil or &1["run_id"] == run))
+      )
+
     assert System.monotonic_time(:millisecond) <= cutoff
 
     if event do

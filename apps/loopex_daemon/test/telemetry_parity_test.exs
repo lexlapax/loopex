@@ -338,7 +338,9 @@ defmodule LoopexDaemon.TelemetryParityTest do
           host_options(root, provider)
 
       LoopexComposition.with_runtime(options, fn runtime ->
-        {:ok, session_id} = Loopex.create_session(runtime, %{"version" => 1}, command_id: "parity-create")
+        {:ok, session_id} =
+          Loopex.create_session(runtime, %{"version" => 1}, command_id: "parity-create")
+
         {:ok, attachment} = Loopex.attach(runtime, session_id, after_event_sequence: 0)
 
         {:accepted, "parity-prompt"} =

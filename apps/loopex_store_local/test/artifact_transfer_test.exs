@@ -376,18 +376,26 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
     def put(handle, bytes, use), do: Artifacts.put(handle.local, bytes, use)
     def fetch(handle, object), do: Artifacts.fetch(handle.local, object)
     def stat(handle, locator), do: Artifacts.stat(handle.local, locator)
+
     def describe(handle, locator) do
       send(handle.observer, {:described, locator})
-      if Map.has_key?(handle, :use), do: {:ok, handle.use},
+
+      if Map.has_key?(handle, :use),
+        do: {:ok, handle.use},
         else: Artifacts.describe(handle.local, locator)
     end
+
     def open_transfer(handle, object, locator, window) do
       send(handle.observer, {:opened_bytes, locator})
+
       with {:ok, transfer} <- Artifacts.open_transfer(handle.local, object, locator, window) do
         {:ok, Map.put(transfer, :private_capture, "PRIVATE_STORE_CAPTURE")}
       end
     end
-    def read_transfer(handle, transfer, length), do: Artifacts.read_transfer(handle.local, transfer, length)
+
+    def read_transfer(handle, transfer, length),
+      do: Artifacts.read_transfer(handle.local, transfer, length)
+
     def close_transfer(handle, transfer), do: Artifacts.close_transfer(handle.local, transfer)
   end
 
@@ -399,10 +407,16 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
     {:ok, attachment} = Loopex.attach(runtime, session_id, after_event_sequence: 0)
     request = %{use_locator: reference.use_locator, start: 0}
 
-    for invalid <- [Map.put(request, :object, object(reference)), Map.put(request, :start, -1),
-      Map.put(request, :length, nil), Map.delete(request, :start),
-      Map.put(request, :use_locator, "use:" <> String.duplicate("A", 64))] do
-      assert {:error, :invalid_artifact_request} = Loopex.open_artifact_transfer(attachment, invalid)
+    for invalid <- [
+          Map.put(request, :object, object(reference)),
+          Map.put(request, :start, -1),
+          Map.put(request, :length, nil),
+          Map.delete(request, :start),
+          Map.put(request, :use_locator, "use:" <> String.duplicate("A", 64))
+        ] do
+      assert {:error, :invalid_artifact_request} =
+               Loopex.open_artifact_transfer(attachment, invalid)
+
       refute_receive {:described, _}, 20
       refute_receive {:opened_bytes, _}, 20
     end
@@ -426,8 +440,13 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
     refute inspect(transfer) =~ "PRIVATE_STORE_CAPTURE"
     assert :ok = Loopex.close_artifact_transfer(attachment, transfer.transfer_ref)
 
-    {:ok, _replacement} = Loopex.Runtime.attach_for_holder(runtime, session_id, self(),
-      request_id: "replace", after_event_sequence: 0, replace_attachment_id: attachment.attachment_id)
+    {:ok, _replacement} =
+      Loopex.Runtime.attach_for_holder(runtime, session_id, self(),
+        request_id: "replace",
+        after_event_sequence: 0,
+        replace_attachment_id: attachment.attachment_id
+      )
+
     assert {:error, :stale_attachment} = Loopex.open_artifact_transfer(attachment, request)
     refute_receive {:described, _}, 20
     refute_receive {:opened_bytes, _}, 20
@@ -439,21 +458,36 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
     reference = bound_reference(handle, original, bound_session)
     {:ok, use} = Artifacts.describe(handle, reference.use_locator)
     huge = :binary.copy("p", ArtifactStore.max_use_bytes() + 1)
-    invalid = [nil, Map.put(use, :private, "PRIVATE_USE_PROVENANCE"),
+
+    invalid = [
+      nil,
+      Map.put(use, :private, "PRIVATE_USE_PROVENANCE"),
       Map.put(use, :metadata, %{use.metadata | "run_id" => self()}),
       put_in(use.metadata["run_id"], huge),
       put_in(use.metadata["attempt"], :binary.decode_unsigned(:binary.copy(<<255>>, 131_073))),
       put_in(use.metadata["run_id"], "different capture"),
-      Map.put(use, :canonicalization_version, "future")]
+      Map.put(use, :canonicalization_version, "future")
+    ]
+
     for captured <- invalid do
       probe = %{local: handle, observer: self(), use: captured}
       %{runtime: runtime, session_id: session_id} = session(probe, DescribedStore)
       {:ok, attachment} = Loopex.attach(runtime, session_id, after_event_sequence: 0)
-      assert {:error, :artifact_use_mismatch} = Loopex.open_artifact_transfer(attachment,
-        %{use_locator: reference.use_locator, start: 0})
+
+      assert {:error, :artifact_use_mismatch} =
+               Loopex.open_artifact_transfer(
+                 attachment,
+                 %{use_locator: reference.use_locator, start: 0}
+               )
+
       assert_receive {:described, _}
       # Some malformed captures reach the existing facade's second describe.
-      receive do {:described, _} -> :ok after 0 -> :ok end
+      receive do
+        {:described, _} -> :ok
+      after
+        0 -> :ok
+      end
+
       refute_receive {:opened_bytes, _}, 20
       assert [] = Transfers.live(handle.transfers)
     end
@@ -1043,11 +1077,18 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
 
   defp bound_reference(handle, reference, session_id) do
     {:ok, bytes} = Artifacts.fetch(handle, object(reference))
-    {:ok, reference} = ArtifactStore.put(%{module: Artifacts, handle: handle}, bytes, %{
-      "media_type" => "text/plain", "role" => "tool_output", "session_id" => session_id,
-      "run_id" => <<255, 0>>, "operation_id" => "operation",
-      "tool_call_id" => "PRIVATE_USE_PROVENANCE", "attempt" => 1
-    })
+
+    {:ok, reference} =
+      ArtifactStore.put(%{module: Artifacts, handle: handle}, bytes, %{
+        "media_type" => "text/plain",
+        "role" => "tool_output",
+        "session_id" => session_id,
+        "run_id" => <<255, 0>>,
+        "operation_id" => "operation",
+        "tool_call_id" => "PRIVATE_USE_PROVENANCE",
+        "attempt" => 1
+      })
+
     reference
   end
 

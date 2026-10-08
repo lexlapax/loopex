@@ -363,6 +363,7 @@ defmodule Loopex.AppServer.FoundationMappingTest do
     # Technical depth: the closed current envelope cannot replace captured host
     # configuration, even when a supplied policy field sounds permissive.
     before = Fixture.records(fixture, session_id)
+
     assert {:error, prompt_refusal, connection} =
              Connection.dispatch(connection, %{
                "method" => "session.prompt",

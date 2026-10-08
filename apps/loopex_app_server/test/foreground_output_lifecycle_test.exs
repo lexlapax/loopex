@@ -518,7 +518,12 @@ defmodule Loopex.AppServer.ForegroundOutputLifecycleTest do
   end
 
   defp event(sequence),
-    do: %{"run_id" => "run", kind: "session.settled", event_id: "event#{sequence}", event_sequence: sequence}
+    do: %{
+      "run_id" => "run",
+      kind: "session.settled",
+      event_id: "event#{sequence}",
+      event_sequence: sequence
+    }
 
   defp text_item(text),
     do: %{

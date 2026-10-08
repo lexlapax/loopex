@@ -62,14 +62,19 @@ defmodule LoopexProtocol.Session.Manifest do
   defp references?(value, nested) when is_map(value) do
     valid =
       case Map.fetch(value, "definition_ref") do
-        :error -> true
-        {:ok, reference} -> is_binary(reference) and resolves?(nested, String.split(reference, "."))
+        :error ->
+          true
+
+        {:ok, reference} ->
+          is_binary(reference) and resolves?(nested, String.split(reference, "."))
       end
 
     valid and Enum.all?(Map.values(value), &references?(&1, nested))
   end
 
-  defp references?(value, nested) when is_list(value), do: Enum.all?(value, &references?(&1, nested))
+  defp references?(value, nested) when is_list(value),
+    do: Enum.all?(value, &references?(&1, nested))
+
   defp references?(_value, _nested), do: true
 
   defp resolves?(_value, []), do: true

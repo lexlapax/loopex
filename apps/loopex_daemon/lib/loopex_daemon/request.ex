@@ -409,7 +409,11 @@ defmodule LoopexDaemon.Request do
          {:ok, content} <- nonempty_bytes(request, "content_b64", @content_bytes),
          {:ok, writer_epoch} <- writer_epoch(request),
          {:ok, authored} <- authored_bounds(request, kind) do
-      {:ok, Map.merge(%{command_id: command_id, content: content, writer_epoch: writer_epoch}, authored)}
+      {:ok,
+       Map.merge(
+         %{command_id: command_id, content: content, writer_epoch: writer_epoch},
+         authored
+       )}
     else
       _invalid -> :error
     end

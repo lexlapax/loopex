@@ -85,16 +85,26 @@ defmodule LoopexDaemon.WireRecordsTest do
     cases = JSON.decode!(File.read!(path))["cases"]
 
     for kind <- ["run", "compact"] do
-      wire = Enum.find(cases, fn vector ->
-        is_nil(vector["error"]) and vector["input"]["owner"]["kind"] == kind
-      end)["input"]
+      wire =
+        Enum.find(cases, fn vector ->
+          is_nil(vector["error"]) and vector["input"]["owner"]["kind"] == kind
+        end)["input"]
+
       assert {:ok, native} = LoopexProtocol.Session.Checkpoint.decode_wire(wire)
-      event = Map.merge(native, %{kind: "context.compacted", event_id: "event", event_sequence: 1})
+
+      event =
+        Map.merge(native, %{kind: "context.compacted", event_id: "event", event_sequence: 1})
+
       record = WireRecords.event("session", event)
       assert record["event"]["data"] == wire
       assert record["event"]["event_sequence"] == "1"
       assert {:ok, _} = Frame.encode(record)
-      assert :error = WireRecords.event("session", Map.put(event, "summary", "PRIVATE_CHECKPOINT_CANARY"))
+
+      assert :error =
+               WireRecords.event(
+                 "session",
+                 Map.put(event, "summary", "PRIVATE_CHECKPOINT_CANARY")
+               )
     end
   end
 
@@ -119,7 +129,8 @@ defmodule LoopexDaemon.WireRecordsTest do
       assert record["event"]["data"] == wire
       assert {:ok, _} = Frame.encode(record)
 
-      assert :error = WireRecords.event("session", Map.put(event, "source", "PRIVATE_COMPLETION_CANARY"))
+      assert :error =
+               WireRecords.event("session", Map.put(event, "source", "PRIVATE_COMPLETION_CANARY"))
     end
   end
 

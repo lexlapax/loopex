@@ -70,17 +70,22 @@ defmodule LoopexDaemon.RequestTest do
            }
 
     assert parsed["session.configure"].fields == %{
-             command_id: "command", writer_epoch: "epoch", changes: %{"model" => "host-alias"}
+             command_id: "command",
+             writer_epoch: "epoch",
+             changes: %{"model" => "host-alias"}
            }
 
     assert parsed["session.compact"].fields == %{
-             command_id: "command", writer_epoch: "epoch",
+             command_id: "command",
+             writer_epoch: "epoch",
              bounds: %{"max_attempts" => 4, "deadline_ms" => 60_000, "token_budget" => 32_768}
            }
 
     assert parsed["session.respond_interaction"].fields == %{
-             command_id: "command", interaction_id: "interaction",
-             answer: %{"choice_id" => "choice"}, writer_epoch: "epoch"
+             command_id: "command",
+             interaction_id: "interaction",
+             answer: %{"choice_id" => "choice"},
+             writer_epoch: "epoch"
            }
 
     assert parsed["session.prompt"].fields.content == <<0, 255>>
@@ -304,7 +309,8 @@ defmodule LoopexDaemon.RequestTest do
   end
 
   test "daemon configure envelopes preserve every authored subset and refuse malformed vectors" do
-    for vector <- vectors("configure-request.v1.json")["cases"], vector["transport"] == "daemon" do
+    for vector <- vectors("configure-request.v1.json")["cases"],
+        vector["transport"] == "daemon" do
       if vector["error"] do
         assert {:error, :invalid_request} = Request.parse(vector["input"]), vector["name"]
       else
@@ -328,7 +334,8 @@ defmodule LoopexDaemon.RequestTest do
           end
 
         assert retained(%{parsed.fields | changes: changes}) ==
-                 Map.delete(vector["decoded"], "request_id"), vector["name"]
+                 Map.delete(vector["decoded"], "request_id"),
+               vector["name"]
       end
     end
   end
@@ -372,7 +379,8 @@ defmodule LoopexDaemon.RequestTest do
     assert omitted.fields.command_id == empty.fields.command_id
 
     for method <- ~w(session.prompt session.follow_up) do
-      assert {:error, :invalid_request} = Request.parse(Map.put(examples()[method], "bounds", nil))
+      assert {:error, :invalid_request} =
+               Request.parse(Map.put(examples()[method], "bounds", nil))
     end
 
     assert {:error, :invalid_request} =
@@ -423,6 +431,7 @@ defmodule LoopexDaemon.RequestTest do
         assert parsed.operation == :session_create
         assert parsed.fields.command_id == "create-command"
         assert retained(parsed.fields.session_options) == vector["decoded"], vector["name"]
+
         assert Map.keys(parsed.fields.session_options) |> Enum.sort() ==
                  Map.keys(vector["input"]) |> Enum.sort()
       end
@@ -483,7 +492,11 @@ defmodule LoopexDaemon.RequestTest do
       "session.compact" =>
         request("session.compact", %{
           "command_id" => command_id,
-          "bounds" => %{"max_attempts" => "4", "deadline_ms" => "60000", "token_budget" => "32768"},
+          "bounds" => %{
+            "max_attempts" => "4",
+            "deadline_ms" => "60000",
+            "token_budget" => "32768"
+          },
           "writer_epoch" => writer_epoch
         }),
       "session.prompt" =>
@@ -568,16 +581,38 @@ defmodule LoopexDaemon.RequestTest do
   end
 
   test "artifact open admits the literal only and preserves authored windows" do
-    valid = request("artifact.open_transfer", %{"use_ref" => "use:" <> @digest,
-      "start_offset" => "0", "window_length" => "0"})
+    valid =
+      request("artifact.open_transfer", %{
+        "use_ref" => "use:" <> @digest,
+        "start_offset" => "0",
+        "window_length" => "0"
+      })
+
     assert {:ok, parsed} = Request.parse(valid)
     assert parsed.fields == %{use_locator: "use:" <> @digest, start_offset: 0, window_length: 0}
-    old_envelope = Wire.encode_bytes(JSON.encode!(%{"digest" => @digest,
-      "size" => "9", "locator" => "artifact", "use_locator" => "use:" <> @digest}))
-    for locator <- [old_envelope, "use:", "use:" <> String.upcase(@digest),
-      "use:" <> String.duplicate("g", 64), "use:" <> @digest <> "a", nil, 7] do
+
+    old_envelope =
+      Wire.encode_bytes(
+        JSON.encode!(%{
+          "digest" => @digest,
+          "size" => "9",
+          "locator" => "artifact",
+          "use_locator" => "use:" <> @digest
+        })
+      )
+
+    for locator <- [
+          old_envelope,
+          "use:",
+          "use:" <> String.upcase(@digest),
+          "use:" <> String.duplicate("g", 64),
+          "use:" <> @digest <> "a",
+          nil,
+          7
+        ] do
       assert {:error, :invalid_request} = Request.parse(Map.put(valid, "use_ref", locator))
     end
+
     for offset <- [nil, 0, "00", "-1", "18446744073709551616"] do
       assert {:error, :invalid_request} = Request.parse(Map.put(valid, "start_offset", offset))
     end
@@ -611,7 +646,8 @@ defmodule LoopexDaemon.RequestTest do
     do: %{"opaque_hex" => Base.encode16(value, case: :lower)}
 
   defp retained(value, key)
-       when is_integer(value) and key in ~w(max_tokens context_token_budget system_class_tokens max_turns max_attempts token_budget deadline_ms),
+       when is_integer(value) and
+              key in ~w(max_tokens context_token_budget system_class_tokens max_turns max_attempts token_budget deadline_ms),
        do: Integer.to_string(value)
 
   defp retained(value, _key), do: value

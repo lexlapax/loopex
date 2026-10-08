@@ -1138,6 +1138,7 @@ defmodule Loopex.Store.Local.ArtifactStoreConformanceTest do
   test "Core describe enforces the complete immutable use ceiling independently of adapter decoding" do
     {_root, handle} = open_local("core-described-use-limit")
     assert {:ok, seed} = put_artifact(Artifacts, handle, "described boundary")
+
     for {size, accepted} <- [{131_072, true}, {131_073, false}] do
       metadata = metadata_for_exact_use_size(seed, size)
       use = expected_use(seed, metadata)
@@ -1146,21 +1147,31 @@ defmodule Loopex.Store.Local.ArtifactStoreConformanceTest do
       assert ArtifactStore.valid_reference?(reference)
       assert byte_size(Canonical.encode(["artifact-use-v2", use])) == size
       result = ArtifactStore.describe(%{module: DescribeCapture, handle: use}, reference)
+
       if accepted do
         assert {:ok, ^use} = result
       else
         assert {:error, :artifact_use_mismatch} = result
       end
     end
+
     use = expected_use(seed, caller_metadata())
+
     for labels <- [
-      Map.put(use.metadata, "run_id", :binary.copy("r", 131_073)),
-      Map.put(use.metadata, "attempt", :binary.decode_unsigned(:binary.copy(<<255>>, 131_073))),
-      Map.put(use.metadata, "run_id", self()),
-      Map.put(use.metadata, "private", "PRIVATE_USE_PROVENANCE")
-    ] do
-      assert {:error, :artifact_use_mismatch} = ArtifactStore.describe(
-        %{module: DescribeCapture, handle: %{use | metadata: labels}}, seed)
+          Map.put(use.metadata, "run_id", :binary.copy("r", 131_073)),
+          Map.put(
+            use.metadata,
+            "attempt",
+            :binary.decode_unsigned(:binary.copy(<<255>>, 131_073))
+          ),
+          Map.put(use.metadata, "run_id", self()),
+          Map.put(use.metadata, "private", "PRIVATE_USE_PROVENANCE")
+        ] do
+      assert {:error, :artifact_use_mismatch} =
+               ArtifactStore.describe(
+                 %{module: DescribeCapture, handle: %{use | metadata: labels}},
+                 seed
+               )
     end
   end
 

@@ -239,7 +239,8 @@ defmodule Loopex.AppServer.Delivery do
     case reserve(queue) do
       {:ok, token, reserved} ->
         with {:ok, record} <- event_record(queue.session_id, event),
-             {:ok, committed} <- commit(reserved, token, record, %{sequence: event.event_sequence}) do
+             {:ok, committed} <-
+               commit(reserved, token, record, %{sequence: event.event_sequence}) do
           %{committed | pulled_cursor: event.event_sequence}
         else
           :error -> %{cancel(reserved, token) | detached: true}
@@ -469,8 +470,9 @@ defmodule Loopex.AppServer.Delivery do
   defp event_record(session_id, event) when is_map(event) and not is_struct(event) do
     with {:ok, session} <- event_identity(session_id, 256),
          {:ok, id} <- event_identity(Map.get(event, :event_id)),
-         sequence when is_integer(sequence) and sequence >= 0 and
-                         sequence <= 18_446_744_073_709_551_615 <- Map.get(event, :event_sequence),
+         sequence
+         when is_integer(sequence) and sequence >= 0 and
+                sequence <= 18_446_744_073_709_551_615 <- Map.get(event, :event_sequence),
          kind when is_binary(kind) <- Map.get(event, :kind),
          {:ok, data} <- event_data(kind, Map.drop(event, [:kind, :event_id, :event_sequence])) do
       {:ok,
@@ -520,9 +522,13 @@ defmodule Loopex.AppServer.Delivery do
     do: ordinary_event(data, ~w(run_id turn_id tool_call_id operation_id tool_id tool_version))
 
   defp event_data("tool.finished", data) do
-    with true <- data["outcome"] in ~w(completed failed denied cancelled outcome_unknown cancelled_workspace_lease_lost),
+    with true <-
+           data["outcome"] in ~w(completed failed denied cancelled outcome_unknown cancelled_workspace_lease_lost),
          true <- data["reason"] == nil do
-      ordinary_event(data, ~w(run_id turn_id tool_call_id operation_id tool_id outcome reason artifacts))
+      ordinary_event(
+        data,
+        ~w(run_id turn_id tool_call_id operation_id tool_id outcome reason artifacts)
+      )
     else
       _invalid -> :error
     end
@@ -550,27 +556,39 @@ defmodule Loopex.AppServer.Delivery do
   # references stay explicit; failure and reason never both appear on the wire.
   defp event_data("run.finished", data) do
     base = ~w(run_id outcome reconciliation_ref cleanup_grace_ms command_id)
-    outcome = Enum.find([:completed, :cancelled, :failed, :bound_reached, :outcome_unknown],
-      &(Atom.to_string(&1) == data["outcome"]))
-    extra = case outcome do
-      :bound_reached -> ~w(bound observed declared_limit accounting_source)
-      :failed -> if Map.has_key?(data, "failure"), do: ["failure"], else: ["reason"]
-      _ -> []
-    end
+
+    outcome =
+      Enum.find(
+        [:completed, :cancelled, :failed, :bound_reached, :outcome_unknown],
+        &(Atom.to_string(&1) == data["outcome"])
+      )
+
+    extra =
+      case outcome do
+        :bound_reached -> ~w(bound observed declared_limit accounting_source)
+        :failed -> if Map.has_key?(data, "failure"), do: ["failure"], else: ["reason"]
+        _ -> []
+      end
+
     details = Map.take(data, ["cleanup_grace_ms" | extra])
-    details = case outcome do
-      :failed -> Map.merge(%{"reason" => nil, "failure" => nil}, details)
-      :outcome_unknown -> Map.put(details, "reconciliation_ref", data["reconciliation_ref"])
-      _ -> details
-    end
+
+    details =
+      case outcome do
+        :failed -> Map.merge(%{"reason" => nil, "failure" => nil}, details)
+        :outcome_unknown -> Map.put(details, "reconciliation_ref", data["reconciliation_ref"])
+        _ -> details
+      end
 
     with true <- event_closed?(data, base ++ extra),
          {:ok, run} <- event_identity(data["run_id"]),
          {:ok, command} <- event_optional_identity(data["command_id"]),
          {:ok, ref} <- event_optional_identity(data["reconciliation_ref"]),
-         {:ok, encoded} <- LoopexProtocol.Session.Outcome.encode_wire(%{outcome: outcome, details: details}) do
+         {:ok, encoded} <-
+           LoopexProtocol.Session.Outcome.encode_wire(%{outcome: outcome, details: details}) do
       payload = Map.merge(data, Map.take(encoded["details"], ["cleanup_grace_ms" | extra]))
-      {:ok, Map.merge(payload, %{"run_id" => run, "command_id" => command, "reconciliation_ref" => ref})}
+
+      {:ok,
+       Map.merge(payload, %{"run_id" => run, "command_id" => command, "reconciliation_ref" => ref})}
     else
       _invalid -> :error
     end
@@ -585,7 +603,9 @@ defmodule Loopex.AppServer.Delivery do
           {:ok, encoded} ->
             key = if field == "content", do: "content_b64", else: field
             {:cont, {:ok, Map.put(payload, key, encoded)}}
-          :error -> {:halt, :error}
+
+          :error ->
+            {:halt, :error}
         end
       end)
     else
@@ -593,14 +613,16 @@ defmodule Loopex.AppServer.Delivery do
     end
   end
 
-  defp event_member(field, value) when field in ~w(command_id run_id turn_id tool_call_id operation_id),
-    do: event_identity(value)
+  defp event_member(field, value)
+       when field in ~w(command_id run_id turn_id tool_call_id operation_id),
+       do: event_identity(value)
 
   defp event_member("content", value) when is_binary(value), do: {:ok, Wire.encode_bytes(value)}
 
   defp event_member("tool_id", value) when is_binary(value) and byte_size(value) in 1..128 do
     if Regex.match?(~r/\A[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*\z/, value),
-      do: {:ok, value}, else: :error
+      do: {:ok, value},
+      else: :error
   end
 
   defp event_member("tool_version", value) when is_binary(value) do
@@ -608,9 +630,11 @@ defmodule Loopex.AppServer.Delivery do
   end
 
   defp event_member("reason", nil), do: {:ok, nil}
+
   defp event_member("reason", value) do
     if is_binary(value) and byte_size(value) <= 131_072 and String.valid?(value),
-      do: {:ok, value}, else: :error
+      do: {:ok, value},
+      else: :error
   end
 
   defp event_member(field, value) when field in ~w(outcome disposition), do: {:ok, value}
@@ -631,10 +655,15 @@ defmodule Loopex.AppServer.Delivery do
   defp event_member(_field, _value), do: :error
 
   defp event_artifact(value) do
-    with true <- event_closed?(value, ~w(digest size locator media_type role use_canonicalization_version use_digest use_locator)),
+    with true <-
+           event_closed?(
+             value,
+             ~w(digest size locator media_type role use_canonicalization_version use_digest use_locator)
+           ),
          {:ok, _} <- Wire.digest(value["digest"]),
          {:ok, _} <- Wire.digest(value["use_digest"]),
-         size when is_integer(size) and size >= 0 and size <= 18_446_744_073_709_551_615 <- value["size"],
+         size when is_integer(size) and size >= 0 and size <= 18_446_744_073_709_551_615 <-
+           value["size"],
          true <- event_safe_text?(value["locator"], 1_024),
          true <- event_safe_text?(value["media_type"], 255),
          "tool_output" <- value["role"],
@@ -647,12 +676,15 @@ defmodule Loopex.AppServer.Delivery do
   end
 
   defp event_safe_text?(value, ceiling),
-    do: is_binary(value) and byte_size(value) in 1..ceiling and String.valid?(value) and
-      not Regex.match?(~r/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u, value)
+    do:
+      is_binary(value) and byte_size(value) in 1..ceiling and String.valid?(value) and
+        not Regex.match?(~r/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u, value)
 
   defp event_identity(value, ceiling \\ 65_536)
+
   defp event_identity(value, ceiling) when is_binary(value) and byte_size(value) in 1..ceiling,
     do: {:ok, Wire.encode_identity(value)}
+
   defp event_identity(_value, _ceiling), do: :error
   defp event_optional_identity(nil), do: {:ok, nil}
   defp event_optional_identity(value), do: event_identity(value)

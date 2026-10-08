@@ -99,7 +99,9 @@ defmodule Loopex.AppServer.DeliveryTest do
       vector = Enum.find(cases, &(is_nil(&1["error"]) and &1["input"]["owner"]["kind"] == kind))
       wire = put_in(vector["input"], ["owner", "id"], "AP8K")
       assert {:ok, native} = LoopexProtocol.Session.Checkpoint.decode_wire(wire)
-      event = Map.merge(native, %{kind: "context.compacted", event_id: "event", event_sequence: 1})
+
+      event =
+        Map.merge(native, %{kind: "context.compacted", event_id: "event", event_sequence: 1})
 
       {[record], drained} = Delivery.new("session", 0) |> Delivery.event(event) |> drain()
       assert record["event"]["data"] == wire
@@ -130,8 +132,12 @@ defmodule Loopex.AppServer.DeliveryTest do
       assert record["event"]["data"] == wire
       assert {:ok, _} = LoopexProtocol.Frame.encode(record)
 
-      rejected = Delivery.event(Delivery.new("session", 0),
-        Map.put(event, "source", "PRIVATE_COMPLETION_CANARY"))
+      rejected =
+        Delivery.event(
+          Delivery.new("session", 0),
+          Map.put(event, "source", "PRIVATE_COMPLETION_CANARY")
+        )
+
       assert Delivery.detached?(rejected)
       assert Delivery.cursor(rejected) == 0
       assert Delivery.pulled_cursor(rejected) == 0

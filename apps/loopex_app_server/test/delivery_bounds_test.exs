@@ -188,11 +188,15 @@ defmodule Loopex.AppServer.DeliveryBoundsTest do
     assert {:ok, transfer_ref} = Wire.identity(opened["transfer_ref"])
     assert is_binary(transfer_ref)
 
-    assert opened["object_reference"] == Map.take(reference_members(reference), ~w(digest size locator))
-    assert opened["use_reference"] == Map.new(reference, fn
-      {:size, size} -> {"size", Integer.to_string(size)}
-      {key, value} -> {Atom.to_string(key), value}
-    end)
+    assert opened["object_reference"] ==
+             Map.take(reference_members(reference), ~w(digest size locator))
+
+    assert opened["use_reference"] ==
+             Map.new(reference, fn
+               {:size, size} -> {"size", Integer.to_string(size)}
+               {key, value} -> {Atom.to_string(key), value}
+             end)
+
     rendered = inspect(opened, limit: :infinity)
     refute rendered =~ "PRIVATE_ARTIFACT_PROVENANCE"
     refute rendered =~ "metadata"
@@ -274,14 +278,25 @@ defmodule Loopex.AppServer.DeliveryBoundsTest do
     %{connection: connection, reference: reference} = opened()
     old_envelope = Wire.encode_bytes(JSON.encode!(reference_members(reference)))
 
-    for bad <- [old_envelope, Wire.encode_identity("not a reference"), "use:",
-      "use:" <> String.duplicate("A", 64), "use:" <> String.duplicate("g", 64),
-      reference.use_locator <> "x", "use:" <> String.duplicate("a", 63), nil, 7] do
+    for bad <- [
+          old_envelope,
+          Wire.encode_identity("not a reference"),
+          "use:",
+          "use:" <> String.duplicate("A", 64),
+          "use:" <> String.duplicate("g", 64),
+          reference.use_locator <> "x",
+          "use:" <> String.duplicate("a", 63),
+          nil,
+          7
+        ] do
       assert {:error, refusal, _connection} =
                Connection.dispatch(connection, %{
-                 "method" => "artifact.open_transfer", "request_id" => "t1",
-                 "use_ref" => bad, "start_offset" => "0"
+                 "method" => "artifact.open_transfer",
+                 "request_id" => "t1",
+                 "use_ref" => bad,
+                 "start_offset" => "0"
                })
+
       assert refusal["code"] == "invalid_request", "admitted #{inspect(bad)}"
     end
   end
@@ -527,11 +542,18 @@ defmodule Loopex.AppServer.DeliveryBoundsTest do
       })
 
     {:ok, session_id} = Wire.identity(created["session_id"])
-    {:ok, reference} = Loopex.ArtifactStore.put(%{module: TransferStore, handle: store}, @content, %{
-      "session_id" => session_id, "run_id" => "run", "operation_id" => "operation",
-      "tool_call_id" => "PRIVATE_ARTIFACT_PROVENANCE", "attempt" => 1,
-      "media_type" => "text/plain", "role" => "tool_output"
-    })
+
+    {:ok, reference} =
+      Loopex.ArtifactStore.put(%{module: TransferStore, handle: store}, @content, %{
+        "session_id" => session_id,
+        "run_id" => "run",
+        "operation_id" => "operation",
+        "tool_call_id" => "PRIVATE_ARTIFACT_PROVENANCE",
+        "attempt" => 1,
+        "media_type" => "text/plain",
+        "role" => "tool_output"
+      })
+
     {:ok, attachment} = Loopex.attach(fixture.runtime, session_id, after_event_sequence: 0)
 
     %{connection: Connection.attach(connection, attachment), reference: reference}

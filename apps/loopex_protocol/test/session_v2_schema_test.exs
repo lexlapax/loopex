@@ -183,8 +183,10 @@ defmodule LoopexProtocol.Session.V2Test do
 
     for method <- writer_methods do
       identity = request_methods[method]["required"]["writer_epoch"]
+
       if method == "session.configure" do
-        assert identity == manifest["payload_definitions"]["nested"]["configure_request"]["writer_epoch"]
+        assert identity ==
+                 manifest["payload_definitions"]["nested"]["configure_request"]["writer_epoch"]
       else
         assert identity == %{
                  "encoding" => "unpadded_base64url_of_original_opaque_bytes",

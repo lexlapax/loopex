@@ -39,7 +39,10 @@ defmodule LoopexDaemon.IdentityCorpusTest do
   # so nothing in the durable history differs.
   test "the same corpus through the socket and the facade commits identical identities" do
     facade = fixture()
-    {:ok, facade_session} = Loopex.create_session(facade.runtime, %{"version" => 1}, command_id: "cs")
+
+    {:ok, facade_session} =
+      Loopex.create_session(facade.runtime, %{"version" => 1}, command_id: "cs")
+
     {:ok, attachment} = Loopex.attach(facade.runtime, facade_session)
 
     {:accepted, "p1"} =

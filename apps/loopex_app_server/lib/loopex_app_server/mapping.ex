@@ -831,7 +831,10 @@ defmodule Loopex.AppServer.Mapping do
 
   defp message(:invalid_field), do: "a field is missing or not in its wire representation"
   defp message(:empty_content), do: "content must not be empty"
-  defp message(:invalid_session_options), do: "session_options must be a version 1 creation object"
+
+  defp message(:invalid_session_options),
+    do: "session_options must be a version 1 creation object"
+
   defp message(:invalid_answer), do: "an answer must contain exactly one choice, text or decline"
   defp message(:attachment_conflict), do: "another attachment holds this session"
   defp message(:unknown), do: "the request could not be answered"

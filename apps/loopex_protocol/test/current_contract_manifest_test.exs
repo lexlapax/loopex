@@ -24,8 +24,12 @@ defmodule LoopexProtocol.CurrentContractManifestTest do
   test "seven exact manifest keys bind literal canonical bytes and every inventory" do
     for {contract, vector} <- Enum.zip([Session, V2], @fixture["manifests"]) do
       manifest = contract.manifest()
+
       assert Enum.sort(Map.keys(manifest)) ==
-               Enum.sort(~w(generation canonicalization_revision methods record_families error_codes limits payload_definitions))
+               Enum.sort(
+                 ~w(generation canonicalization_revision methods record_families error_codes limits payload_definitions)
+               )
+
       assert contract.generation() == vector["generation"]
       assert manifest["canonicalization_revision"] == "loopex.canonical.v1"
       assert manifest["methods"] == vector["methods"]
@@ -35,6 +39,7 @@ defmodule LoopexProtocol.CurrentContractManifestTest do
       assert Base.encode16(bytes, case: :lower) == vector["canonical_hex"]
       assert byte_size(bytes) == vector["canonical_bytes"]
       assert contract.schema_digest() == vector["sha256"]
+
       assert File.read!(Path.join([@priv, "schema", vector["schema"]]))
              |> Canonical.digest_bytes() == vector["schema_file_sha256"]
     end
@@ -57,10 +62,12 @@ defmodule LoopexProtocol.CurrentContractManifestTest do
     encoded = Session.manifest() |> JSON.encode!()
     assert Manifest.decode!(encoded) == Session.manifest()
 
-    for manifest <- [Map.put(Session.manifest(), "unknown", true),
-                     Map.put(Session.manifest(), "canonicalization_revision", "unknown"),
-                     Map.put(Session.manifest(), "payload_definitions", %{}),
-                     Map.put(Session.manifest(), "methods", ["session.create", "session.create"])] do
+    for manifest <- [
+          Map.put(Session.manifest(), "unknown", true),
+          Map.put(Session.manifest(), "canonicalization_revision", "unknown"),
+          Map.put(Session.manifest(), "payload_definitions", %{}),
+          Map.put(Session.manifest(), "methods", ["session.create", "session.create"])
+        ] do
       assert_raise ArgumentError, fn -> Manifest.decode!(JSON.encode!(manifest)) end
     end
 
@@ -84,8 +91,17 @@ defmodule LoopexProtocol.CurrentContractManifestTest do
       assert nested["creation_options"]["version"]["exact"] == 1
       assert nested["configure_request"]["changes"]["members_min"] == 1
       assert nested["compaction_progress"]["owner"] == nested["checkpoint_owner"]
-      assert nested["standalone_compact_completion"]["result"] == nested["standalone_compact_result"]
-      changed = put_in(contract.manifest(), ["payload_definitions", "nested", "creation_options", "version", "exact"], 2)
+
+      assert nested["standalone_compact_completion"]["result"] ==
+               nested["standalone_compact_result"]
+
+      changed =
+        put_in(
+          contract.manifest(),
+          ["payload_definitions", "nested", "creation_options", "version", "exact"],
+          2
+        )
+
       refute Canonical.digest(changed) == contract.schema_digest()
     end
   end
@@ -107,9 +123,16 @@ defmodule LoopexProtocol.CurrentContractManifestTest do
   end
 
   defp run_node(script, arguments) do
-    node = System.find_executable("node") || flunk("Node is required for current contract conformance")
+    node =
+      System.find_executable("node") || flunk("Node is required for current contract conformance")
+
     root = Path.expand("../../..", __DIR__)
-    {output, status} = System.cmd(node, [Path.join([root, "clients", "node", script]) | arguments], stderr_to_stdout: true)
+
+    {output, status} =
+      System.cmd(node, [Path.join([root, "clients", "node", script]) | arguments],
+        stderr_to_stdout: true
+      )
+
     assert status == 0, output
     assert {:ok, report} = Frame.decode(String.trim_trailing(output, "\n"), 65_536)
     report

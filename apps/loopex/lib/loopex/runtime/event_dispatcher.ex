@@ -1610,8 +1610,9 @@ defmodule Loopex.Runtime.EventDispatcher do
          true <- Enum.all?(:binary.bin_to_list(digest), &(&1 in ?0..?9 or &1 in ?a..?f)),
          start when is_integer(start) and start in 0..18_446_744_073_709_551_615 <-
            Map.get(request, :start),
-         true <- not Map.has_key?(request, :length) or
-                   (is_integer(request.length) and request.length in 0..18_446_744_073_709_551_615) do
+         true <-
+           not Map.has_key?(request, :length) or
+             (is_integer(request.length) and request.length in 0..18_446_744_073_709_551_615) do
       {:ok, locator, Map.take(request, [:start, :length])}
     else
       _invalid -> {:error, :invalid_artifact_request}
@@ -1648,8 +1649,18 @@ defmodule Loopex.Runtime.EventDispatcher do
   # the remaining fixed fields; metadata never becomes a public reference.
   defp bounded_transfer_use?(use) when is_map(use) and not is_struct(use) do
     map_size(use) == 7 and
-      Enum.all?(Map.keys(use), &(&1 in [:canonicalization_version, :object_digest,
-        :object_size, :object_locator, :media_type, :role, :metadata])) and
+      Enum.all?(
+        Map.keys(use),
+        &(&1 in [
+            :canonicalization_version,
+            :object_digest,
+            :object_size,
+            :object_locator,
+            :media_type,
+            :role,
+            :metadata
+          ])
+      ) and
       bounded_transfer_labels?(Map.get(use, :metadata))
   end
 

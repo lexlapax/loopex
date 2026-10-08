@@ -145,8 +145,17 @@ defmodule Loopex.AppServer.InitializationTest do
     connection = Connection.new()
 
     for bad <- [
-          %{"method" => "initialize", "generations" => [Session.generation()], "capabilities" => []},
-          %{"method" => "initialize", "request_id" => "", "generations" => [Session.generation()], "capabilities" => []},
+          %{
+            "method" => "initialize",
+            "generations" => [Session.generation()],
+            "capabilities" => []
+          },
+          %{
+            "method" => "initialize",
+            "request_id" => "",
+            "generations" => [Session.generation()],
+            "capabilities" => []
+          },
           %{
             "method" => "initialize",
             "request_id" => String.duplicate("r", 65),
@@ -159,10 +168,29 @@ defmodule Loopex.AppServer.InitializationTest do
             "generations" => [Session.generation()],
             "capabilities" => []
           },
-          %{"method" => "initialize", "request_id" => "r1", "generations" => [], "capabilities" => []},
-          %{"method" => "initialize", "request_id" => "r1", "generations" => "not-an-array", "capabilities" => []},
-          %{"method" => "initialize", "request_id" => "r1", "generations" => [1], "capabilities" => []},
-          %{"method" => "initialize", "request_id" => "r1", "generations" => [Session.generation()]},
+          %{
+            "method" => "initialize",
+            "request_id" => "r1",
+            "generations" => [],
+            "capabilities" => []
+          },
+          %{
+            "method" => "initialize",
+            "request_id" => "r1",
+            "generations" => "not-an-array",
+            "capabilities" => []
+          },
+          %{
+            "method" => "initialize",
+            "request_id" => "r1",
+            "generations" => [1],
+            "capabilities" => []
+          },
+          %{
+            "method" => "initialize",
+            "request_id" => "r1",
+            "generations" => [Session.generation()]
+          },
           %{
             "method" => "initialize",
             "request_id" => "r1",

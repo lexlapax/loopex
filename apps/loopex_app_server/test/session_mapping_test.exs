@@ -98,7 +98,8 @@ defmodule Loopex.AppServer.SessionMappingTest do
     assert {:ok, "cs"} = Wire.identity(record["command_id"])
     assert {:ok, wire_session} = Wire.identity(record["session_id"])
 
-    {:ok, facade_session} = Loopex.create_session(facade.runtime, %{"version" => 1}, command_id: "cs")
+    {:ok, facade_session} =
+      Loopex.create_session(facade.runtime, %{"version" => 1}, command_id: "cs")
 
     # The same command identity produced the same durable genesis on both
     # surfaces: identical record kinds, in the same order, at the same versions.
@@ -111,7 +112,9 @@ defmodule Loopex.AppServer.SessionMappingTest do
     facade = fixture()
 
     {wire_connection, wire_session} = created(wire)
-    {:ok, facade_session} = Loopex.create_session(facade.runtime, %{"version" => 1}, command_id: "cs")
+
+    {:ok, facade_session} =
+      Loopex.create_session(facade.runtime, %{"version" => 1}, command_id: "cs")
 
     {:ok, wire_attachment} = Loopex.attach(wire.runtime, wire_session, after_event_sequence: 0)
 
@@ -238,8 +241,17 @@ defmodule Loopex.AppServer.SessionMappingTest do
     {connection, _session_id} = created(wire)
 
     for bad <- [
-          %{"session_options" => %{"version" => 1}, "method" => "session.create", "request_id" => "r2", "command_id" => "not base64url!"},
-          %{"session_options" => %{"version" => 1}, "method" => "session.create", "request_id" => "r2"},
+          %{
+            "session_options" => %{"version" => 1},
+            "method" => "session.create",
+            "request_id" => "r2",
+            "command_id" => "not base64url!"
+          },
+          %{
+            "session_options" => %{"version" => 1},
+            "method" => "session.create",
+            "request_id" => "r2"
+          },
           %{
             "method" => "session.create",
             "request_id" => "r2",
@@ -264,7 +276,10 @@ defmodule Loopex.AppServer.SessionMappingTest do
     ]
 
     through_facade = fixture()
-    {:ok, facade_session} = Loopex.create_session(through_facade.runtime, %{"version" => 1}, command_id: "cs")
+
+    {:ok, facade_session} =
+      Loopex.create_session(through_facade.runtime, %{"version" => 1}, command_id: "cs")
+
     {:ok, facade_attachment} = Loopex.attach(through_facade.runtime, facade_session, [])
 
     for command <- corpus do

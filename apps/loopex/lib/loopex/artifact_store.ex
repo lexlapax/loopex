@@ -805,15 +805,16 @@ defmodule Loopex.ArtifactStore do
   # the shape first turns an adapter returning a pid or a struct into a typed
   # refusal rather than an exception inside whatever was resolving provenance.
   defp well_shaped_use?(use) when is_map(use) and not is_struct(use) do
-    map_size(use) == 7 and Enum.sort(Map.keys(use)) == [
-      :canonicalization_version,
-      :media_type,
-      :metadata,
-      :object_digest,
-      :object_locator,
-      :object_size,
-      :role
-    ] and
+    map_size(use) == 7 and
+      Enum.sort(Map.keys(use)) == [
+        :canonicalization_version,
+        :media_type,
+        :metadata,
+        :object_digest,
+        :object_locator,
+        :object_size,
+        :role
+      ] and
       is_binary(use.canonicalization_version) and valid_digest?(use.object_digest) and
       valid_size?(use.object_size) and valid_locator?(use.object_locator) and
       valid_media_type?(use.media_type) and use.role in @roles and

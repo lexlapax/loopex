@@ -262,7 +262,13 @@ defmodule Loopex.AppServer.ConfigureIngressTest do
     assert initialized["supported_methods"] == LoopexProtocol.Session.methods()
     assert "session.configure" in initialized["supported_methods"]
     attached = Connection.attach(connection, fixture.attachment)
-    assert {:error, refusal, ^attached} = Connection.dispatch(attached, Map.put(request, "writer_epoch", "forbidden-foreground-authority"))
+
+    assert {:error, refusal, ^attached} =
+             Connection.dispatch(
+               attached,
+               Map.put(request, "writer_epoch", "forbidden-foreground-authority")
+             )
+
     assert refusal["code"] == "invalid_request"
     assert refusal["request_id"] == request["request_id"]
     refute Map.has_key?(refusal, "status")

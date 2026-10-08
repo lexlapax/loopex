@@ -149,6 +149,7 @@ defmodule LoopexDaemon.ConnectionProtocolTest do
 
     assert configured.operation == :session_configure
     assert configured.request_id == "configure"
+
     assert configured.fields == %{
              command_id: "configure",
              writer_epoch: "epoch",
@@ -171,6 +172,7 @@ defmodule LoopexDaemon.ConnectionProtocolTest do
     assert refused["code"] == "not_initialized"
     assert {:request, parsed, ^initialized} = ConnectionProtocol.handle(initialized, compact)
     assert parsed.operation == :session_compact
+
     assert parsed.fields == %{
              command_id: "compact",
              writer_epoch: "epoch",

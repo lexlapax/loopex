@@ -24,7 +24,8 @@ defmodule LoopexDaemon.WireRecordsCurrentViewsTest do
   end
 
   test "native compact admission stays private for both pending states" do
-    {:ok, captured} = Inspection.decode_wire(vector("inspection.v1.json", "idle-current-configuration"))
+    {:ok, captured} =
+      Inspection.decode_wire(vector("inspection.v1.json", "idle-current-configuration"))
 
     for pending <- [false, true] do
       source = Map.put(owner_observation(captured), :compact_pending, pending)
@@ -61,7 +62,8 @@ defmodule LoopexDaemon.WireRecordsCurrentViewsTest do
                "event_cursor" => expected["event_sequence"],
                "snapshot" => expected,
                "open_interaction" => expected["open_interaction"]
-             }, vector["name"]
+             },
+             vector["name"]
 
       assert map_size(record["snapshot"]) == 10
       assert {:ok, ^captured} = Snapshot.decode_wire(record["snapshot"])
@@ -70,7 +72,10 @@ defmodule LoopexDaemon.WireRecordsCurrentViewsTest do
   end
 
   test "snapshot completion preserves every accepted outcome and cleanup uncertainty" do
-    {:ok, settled} = Snapshot.decode_wire(vector("session-snapshot.v3.json", "settled-checkpoint-and-completion"))
+    {:ok, settled} =
+      Snapshot.decode_wire(
+        vector("session-snapshot.v3.json", "settled-checkpoint-and-completion")
+      )
 
     for vector <- accepted_vectors("standalone-compact-completion.v1.json") do
       assert {:ok, completion} = CompactResult.decode_completion(vector["input"])
@@ -82,7 +87,9 @@ defmodule LoopexDaemon.WireRecordsCurrentViewsTest do
   end
 
   test "inspection and attachment views preserve the same captured cursor and public data" do
-    {:ok, idle} = Inspection.decode_wire(vector("inspection.v1.json", "idle-current-configuration"))
+    {:ok, idle} =
+      Inspection.decode_wire(vector("inspection.v1.json", "idle-current-configuration"))
+
     {:ok, active} = Inspection.decode_wire(vector("inspection.v1.json", "active-before-deadline"))
 
     for name <- [
@@ -120,9 +127,16 @@ defmodule LoopexDaemon.WireRecordsCurrentViewsTest do
   end
 
   test "inspection refuses incomplete captures and malformed public members without defaults" do
-    {:ok, captured} = Inspection.decode_wire(vector("inspection.v1.json", "active-policy-answer-exact-bounds"))
+    {:ok, captured} =
+      Inspection.decode_wire(vector("inspection.v1.json", "active-policy-answer-exact-bounds"))
 
-    for field <- [:event_sequence, :configuration, :active_bounds, :checkpoint, :active_maintenance] do
+    for field <- [
+          :event_sequence,
+          :configuration,
+          :active_bounds,
+          :checkpoint,
+          :active_maintenance
+        ] do
       assert_raise MatchError, fn ->
         WireRecords.session_status(Map.delete(owner_observation(captured), field))
       end
@@ -133,8 +147,15 @@ defmodule LoopexDaemon.WireRecordsCurrentViewsTest do
           %{captured | configuration: nil},
           %{captured | event_sequence: 18_446_744_073_709_551_616},
           %{captured | active_bounds: nil},
-          %{captured | active_bounds: Map.put(captured.active_bounds, :source, "PRIVATE_BOUND_CANARY")},
-          %{captured | configuration: Map.put(captured.configuration, "credential_ref", "PRIVATE_CONFIG_CANARY")},
+          %{
+            captured
+            | active_bounds: Map.put(captured.active_bounds, :source, "PRIVATE_BOUND_CANARY")
+          },
+          %{
+            captured
+            | configuration:
+                Map.put(captured.configuration, "credential_ref", "PRIVATE_CONFIG_CANARY")
+          },
           %{captured | open_interaction: Map.put(captured.open_interaction, "permit", self())},
           %{captured | checkpoint: %{"summary" => "PRIVATE_CHECKPOINT_CANARY"}},
           %{captured | active_maintenance: %{"source" => "PRIVATE_MAINTENANCE_CANARY"}}
@@ -144,9 +165,16 @@ defmodule LoopexDaemon.WireRecordsCurrentViewsTest do
   end
 
   test "snapshots refuse private canaries, missing views and inconsistent question ownership" do
-    {:ok, captured} = Snapshot.decode_wire(vector("session-snapshot.v3.json", "pending-model-choice"))
-    {:ok, settled} = Snapshot.decode_wire(vector("session-snapshot.v3.json", "settled-checkpoint-and-completion"))
-    {:ok, maintenance} = Snapshot.decode_wire(vector("session-snapshot.v3.json", "run-captured-null-deadline"))
+    {:ok, captured} =
+      Snapshot.decode_wire(vector("session-snapshot.v3.json", "pending-model-choice"))
+
+    {:ok, settled} =
+      Snapshot.decode_wire(
+        vector("session-snapshot.v3.json", "settled-checkpoint-and-completion")
+      )
+
+    {:ok, maintenance} =
+      Snapshot.decode_wire(vector("session-snapshot.v3.json", "run-captured-null-deadline"))
 
     for invalid <- [
           Map.put(captured, :compact_pending, true),
@@ -157,11 +185,28 @@ defmodule LoopexDaemon.WireRecordsCurrentViewsTest do
           %{captured | snapshot_revision: 2},
           %{captured | active_run_id: "another-run"},
           %{captured | event_sequence: 0},
-          %{captured | configuration: Map.put(captured.configuration, "instructions_text", "PRIVATE_CONFIG_CANARY")},
-          %{captured | open_interaction: Map.put(captured.open_interaction, "host_reference", self())},
-          %{settled | checkpoint: Map.put(settled.checkpoint, "summary", "PRIVATE_CHECKPOINT_CANARY")},
-          %{settled | last_compact: Map.put(settled.last_compact, "source", "PRIVATE_COMPLETION_CANARY")},
-          %{maintenance | active_maintenance: Map.put(maintenance.active_maintenance, "source", "PRIVATE_MAINTENANCE_CANARY")}
+          %{
+            captured
+            | configuration:
+                Map.put(captured.configuration, "instructions_text", "PRIVATE_CONFIG_CANARY")
+          },
+          %{
+            captured
+            | open_interaction: Map.put(captured.open_interaction, "host_reference", self())
+          },
+          %{
+            settled
+            | checkpoint: Map.put(settled.checkpoint, "summary", "PRIVATE_CHECKPOINT_CANARY")
+          },
+          %{
+            settled
+            | last_compact: Map.put(settled.last_compact, "source", "PRIVATE_COMPLETION_CANARY")
+          },
+          %{
+            maintenance
+            | active_maintenance:
+                Map.put(maintenance.active_maintenance, "source", "PRIVATE_MAINTENANCE_CANARY")
+          }
         ] do
       assert_raise MatchError, fn -> WireRecords.snapshot("attach", invalid) end
     end

@@ -280,7 +280,13 @@ defmodule LoopexDaemon.LeaseOwnerTest do
     worker = start_ticket_worker(holder)
     worker_monitor = Process.monitor(worker)
     assert {:ok, ^origin} = open_mutation(fixture, holder, origin, :session_compact, worker)
-    assert :ok = Loopex.M1RuntimeTestStore.inject(native.store, {:session_journal_commit, :after_linearization_before_result})
+
+    assert :ok =
+             Loopex.M1RuntimeTestStore.inject(
+               native.store,
+               {:session_journal_commit, :after_linearization_before_result}
+             )
+
     :ok = :sys.suspend(native.store)
 
     on_exit(fn ->
@@ -307,9 +313,16 @@ defmodule LoopexDaemon.LeaseOwnerTest do
     refute_receive {:native_compact_result, _, _}, 40
     refute_receive {:connection_message, ^holder, {:relay_ticket_result, ^origin, _}}, 40
     :ok = :sys.resume(native.store)
-    assert_receive {:native_compact_result, "compact-command", {:routed, _, {:error, :commit_unknown}}}, 5_000
+
+    assert_receive {:native_compact_result, "compact-command",
+                    {:routed, _, {:error, :commit_unknown}}},
+                   5_000
+
     expected = WireRecords.succession_error("compact-unknown", "admission_unknown")
-    assert_receive {:connection_message, ^holder, {:relay_ticket_result, ^origin, ^expected}}, 5_000
+
+    assert_receive {:connection_message, ^holder, {:relay_ticket_result, ^origin, ^expected}},
+                   5_000
+
     assert_receive {:DOWN, ^worker_monitor, :process, ^worker, :killed}, 500
     eventually(fn -> LeaseOwner.status(fixture.owner).in_flight == 0 end)
     assert :sys.get_state(fixture.owner).lease.deadline == candidate
@@ -322,10 +335,26 @@ defmodule LoopexDaemon.LeaseOwnerTest do
       end
     end)
 
-    assert [admission] = Enum.filter(Loopex.AgentLoopFixture.records(native, native.session), &(&1.payload.kind == "compact_command_admitted_v1"))
+    assert [admission] =
+             Enum.filter(
+               Loopex.AgentLoopFixture.records(native, native.session),
+               &(&1.payload.kind == "compact_command_admitted_v1")
+             )
+
     assert admission.payload["command_id"] == "compact-command"
-    assert admission.payload["bounds"] == %{"max_attempts" => 4, "deadline_ms" => 60_000, "token_budget" => 32_768}
-    assert [completion] = Enum.filter(Loopex.AgentLoopFixture.events(native, native.session), &(&1.kind == "context.compaction_finished"))
+
+    assert admission.payload["bounds"] == %{
+             "max_attempts" => 4,
+             "deadline_ms" => 60_000,
+             "token_budget" => 32_768
+           }
+
+    assert [completion] =
+             Enum.filter(
+               Loopex.AgentLoopFixture.events(native, native.session),
+               &(&1.kind == "context.compaction_finished")
+             )
+
     assert completion["command_id"] == "compact-command"
     assert completion["result"]["disposition"] == "unchanged"
     refute_receive {:configure_preparation, _, _}, 40

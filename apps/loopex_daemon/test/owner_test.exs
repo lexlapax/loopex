@@ -10,7 +10,11 @@ defmodule LoopexDaemon.OwnerTest do
     assert components.registry_progress_sink == :sys.get_state(components.registry).progress_sink
     assert {:error, :owner_mismatch} = ConnectionRegistry.progress_sink(components.registry)
     :ok = :sys.suspend(components.registry)
-    on_exit(fn -> if Process.alive?(components.registry), do: :sys.resume(components.registry) end)
+
+    on_exit(fn ->
+      if Process.alive?(components.registry), do: :sys.resume(components.registry)
+    end)
+
     assert GenServer.call(owner, :components, 250) == components
     :ok = :sys.resume(components.registry)
   end
