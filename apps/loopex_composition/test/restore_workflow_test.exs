@@ -2973,8 +2973,10 @@ defmodule LoopexComposition.RestoreWorkflowTest do
   # Store mutation, create retry, private Control read or new grace is involved.
   defp await_fixture_creation_ready(runtime, cutoff, pinned \\ nil) do
     remaining = fixture_startup_remaining(cutoff)
+
     assert {:ok, %{state: state, startup_id: id, startup_deadline_ms: core_cutoff} = snapshot} =
              Loopex.creation_startup_status(runtime, min(1_000, remaining))
+
     assert map_size(snapshot) == 3
     assert is_binary(id) and byte_size(id) == 32 and is_integer(core_cutoff)
     assert pinned in [nil, {id, core_cutoff}], "original fixture startup identity/cutoff changed"
@@ -2983,7 +2985,9 @@ defmodule LoopexComposition.RestoreWorkflowTest do
     remaining = fixture_startup_remaining(cutoff)
 
     case state do
-      :ready -> cutoff
+      :ready ->
+        cutoff
+
       :starting ->
         Process.sleep(min(10, remaining))
         await_fixture_creation_ready(runtime, cutoff, {id, core_cutoff})
