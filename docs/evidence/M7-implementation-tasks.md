@@ -11,6 +11,12 @@ Custody restore is source-qualified pending current boundary/readiness joins
 and complete175 native cases. Exact identities and earlier failures remain in
 the [resume record](M7-resume.md). Earlier entries below are historical.
 
+Creation current21/22 failure is retained, not retried: the two-unknown fixture
+installed only one fault. Explicit count-two repair52808005 awaits paired proof.
+Startup status ADR0063 is Proposed, with review/check/acceptance still pending.
+All completed native handles are collected once; next proof uses the actual
+2005-row attempt registry. Counts remain unchanged.
+
 ADR0059 is accepted and pushed at `3212b0ed`. The first Core Store contract
 unit is assigned in its own worktree; durable adapters, Control/carrier
 integration and cancellation wire readers are separate added subtasks below.

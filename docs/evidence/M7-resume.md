@@ -29,6 +29,45 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Reboot continuation on 2026-10-07
 
+Latest continuation after original17391: creation Control V3's sticky cleanup
+repair is saved in isolated m7-creation-control, with tested Core/adapter context.
+Private source80d793bd passed current formatting and warning-free compilation,
+but original67170 failed one of22 creation cases,35.070seconds, four original
+joins/24 artifacts/2005 registry rows. Floor remained unrun. Output
+`M7/creation-control-proof-20261007-v2`; collection
+`27675e67148daf18c6e6a8759c54633a2201e5696ee3627efda89e9cec24b08b`, terminal
+`a4f3ce956adf6a99464e18f420e739b06df767dc20e803e593a792ab6ef87042`, registry
+`cb581b82bc1359bf61cc294297bc0905906bbdd16b47d3453972c97a17f0724b`.
+The case installed one fault twice via replacement rather than two faults.
+Causal fixture repair52808005 adds explicit count-two injection and preserves
+existing one-shot calls, all22 declarations and all deadlines. Native verification
+is pending; no creation row closes. Repair patch31c64e57 and review749f91fa are
+in `/private/tmp/m7-creation-control-double-fault-repair-v1`. All original handles
+are now terminal and collected once. Next native grant seeds the actual2005-row
+producer, with changed-source proof only.
+
+Prior failures remain retained: formatter31814 failed two carrier layouts;
+formatter53248 failed cross-pair common layout; formatter90371 passed at65aec6e3;
+compile21050 failed three Control warnings. Root repaired strict Boolean map
+handling and removed unreachable private branches at80d793bd. No previous
+failure is a pass. V3 source/review, all preparations and startup caller audit
+are retained in `M7/creation-v3-native-context-20261007-v1/retention.json`,
+SHA-256 `8cf7a3dcd2b44dd4f4f38298c8fbd42d612ed636b242c6ad3d90de11abdbc1d3`,136files.
+Its recorded live67170 state is historical; the terminal result above controls.
+
+Startup caller audit787cd31f found that durable composition has no captured
+startup wait cutoff. ADR0063 is Proposed in isolated
+m7-creation-startup-status-proposal: native three-state status and observation
+of the original Core cutoff, preserving the shorter ephemeral caller deadline.
+Packetac12b90a, Concepta28aa264, Technical751549dc are source-only; independent
+review, docs check and exact-pair maintainer acceptance remain. No dependent
+public API or host wait is implemented. ADR0062 remains superseded/reserved.
+No asked approval is unanswered. Current writers remain credited Core ingress
+and the foreground output writer in their earlier isolated worktrees.
+Counts stay T01–T19 originals88/85/6 and added362/23/0.
+
+Earlier continuation entries below are historical where superseded.
+
 Latest completed unit: private single-lane attempts continuation and negative
 consumption barriers. Whole128 passed on each supported pair at isolated
 `8008e0657dff3bd636dd1954a5f19bb5c6f428c2`; original17391 PASS98.397seconds,
