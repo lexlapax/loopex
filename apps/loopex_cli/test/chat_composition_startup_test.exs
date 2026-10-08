@@ -21,7 +21,13 @@ defmodule LoopexCli.ChatCompositionStartupTest do
 
   test "fresh chat waits for actual Local creation startup before creating or consuming input" do
     test = self()
-    root = Path.join(System.tmp_dir!(), "chat-composition-startup-#{System.unique_integer([:positive])}")
+
+    root =
+      Path.join(
+        System.tmp_dir!(),
+        "chat-composition-startup-#{System.unique_integer([:positive])}"
+      )
+
     workspace = Path.join(root, "workspace")
     home = Path.join(root, "home")
     state_root = Path.join(root, "state")
@@ -49,40 +55,72 @@ defmodule LoopexCli.ChatCompositionStartupTest do
       File.rm_rf!(root)
     end)
 
-    :ok = :telemetry.attach(handler, [:loopex, :model, :complete, :start], &__MODULE__.model_start/4, test)
+    :ok =
+      :telemetry.attach(
+        handler,
+        [:loopex, :model, :complete, :start],
+        &__MODULE__.model_start/4,
+        test
+      )
+
     for module <- Enum.uniq(Enum.map(@calls ++ @returns, &elem(&1, 0))) do
       assert {:module, ^module} = Code.ensure_loaded(module)
     end
+
     for boundary <- @calls, do: assert(:erlang.trace_pattern(boundary, true, [:local]) == 1)
+
     for boundary <- @returns do
       assert :erlang.trace_pattern(boundary, [{:_, [], [{:return_trace}]}], [:local]) == 1
     end
 
-    {host, host_down} = spawn_monitor(fn ->
-      observe_edges(test)
-      :erlang.trace(self(), true, [:call, {:tracer, test}])
-      result = Chat.run(["chat", "--config", config],
-        cwd: root, home: home, input: input, output: output,
-        diagnostic_device: diagnostic, mode: :pipe)
-      send(test, {:chat_result, self(), result})
-      receive do: (:finish -> :ok)
-    end)
+    {host, host_down} =
+      spawn_monitor(fn ->
+        observe_edges(test)
+        :erlang.trace(self(), true, [:call, {:tracer, test}])
+
+        result =
+          Chat.run(["chat", "--config", config],
+            cwd: root,
+            home: home,
+            input: input,
+            output: output,
+            diagnostic_device: diagnostic,
+            mode: :pipe
+          )
+
+        send(test, {:chat_result, self(), result})
+        receive do: (:finish -> :ok)
+      end)
+
     on_exit(fn -> if Process.alive?(host), do: Process.exit(host, :kill) end)
 
-    assert_receive {:trace, ^host, :return_from, {ChatDriver, :bootstrap, 3}, {:ok, driver}}, 5_000
+    assert_receive {:trace, ^host, :return_from, {ChatDriver, :bootstrap, 3}, {:ok, driver}},
+                   5_000
+
     assert_receive {:runtime_owned, owner, runtime, consumer}, 5_000
     assert_receive {:startup_read, body, %{command_id: nil}}, 1_000
     assert_receive {:startup_task, observer, ^owner, _initial}, 1_000
     assert_receive {:startup_first_read, ^observer, ^runtime}, 1_000
-    assert_receive {:startup_snapshot_pinned, ^owner, ^observer,
-      {:ok, %{state: :starting, startup_id: startup_id, startup_deadline_ms: cutoff}}}, 1_000
 
-    edges = for module <- [CredentialRegistry, CredentialCustody, Capability,
-      Loopex.Store.Local, Loopex.Store.Local.Transfers, Loopex.Executor.Local.WorkspaceLease,
-      Loopex.Executor.Local] do
-      assert_receive {:edge_started, ^module, pid}, 1_000
-      pid
-    end
+    assert_receive {:startup_snapshot_pinned, ^owner, ^observer,
+                    {:ok,
+                     %{state: :starting, startup_id: startup_id, startup_deadline_ms: cutoff}}},
+                   1_000
+
+    edges =
+      for module <- [
+            CredentialRegistry,
+            CredentialCustody,
+            Capability,
+            Loopex.Store.Local,
+            Loopex.Store.Local.Transfers,
+            Loopex.Executor.Local.WorkspaceLease,
+            Loopex.Executor.Local
+          ] do
+        assert_receive {:edge_started, ^module, pid}, 1_000
+        pid
+      end
+
     {:ok, children} = Loopex.Runtime.children(runtime)
     workers = Task.Supervisor.children(children.workers)
     assert length(workers) >= 2
@@ -90,18 +128,33 @@ defmodule LoopexCli.ChatCompositionStartupTest do
     {carrier, group} = held_carrier(body, workers)
     assert carrier in workers
     boot = :sys.get_state(driver)
-    actors = Enum.uniq([owner, runtime.supervisor, driver, boot.writer, consumer, body, group | edges ++ workers])
-    monitors = Enum.map(actors, fn pid ->
-      assert Process.alive?(pid)
-      {pid, Process.monitor(pid)}
-    end)
+
+    actors =
+      Enum.uniq([
+        owner,
+        runtime.supervisor,
+        driver,
+        boot.writer,
+        consumer,
+        body,
+        group | edges ++ workers
+      ])
+
+    monitors =
+      Enum.map(actors, fn pid ->
+        assert Process.alive?(pid)
+        {pid, Process.monitor(pid)}
+      end)
+
     {^observer, observer_down} = List.keyfind(monitors, observer, 0)
+
     on_exit(fn ->
       for pid <- actors, Process.alive?(pid), do: Process.exit(pid, :kill)
     end)
 
     assert {:ok, %{state: :starting, startup_id: ^startup_id, startup_deadline_ms: ^cutoff}} =
-      Loopex.creation_startup_status(runtime, 1_000)
+             Loopex.creation_startup_status(runtime, 1_000)
+
     assert boot.runtime == nil and boot.session == nil and boot.input_worker == nil
     assert boot.workers == %{}
     assert StringIO.contents(bytes) == {"/quit\n", ""}
@@ -120,14 +173,28 @@ defmodule LoopexCli.ChatCompositionStartupTest do
 
     send(body, :release_startup)
     assert_receive {:DOWN, ^observer_down, :process, ^observer, _}, 1_000
+
     assert {:ok, %{state: :ready, startup_id: ^startup_id, startup_deadline_ms: ^cutoff}} =
-      Loopex.creation_startup_status(runtime, 1_000)
+             Loopex.creation_startup_status(runtime, 1_000)
+
     assert System.monotonic_time(:millisecond) < cutoff
-    assert_receive {:trace, ^host, :call, {Loopex, :create_session, [^runtime, _, create_options]}}, 1_000
+
+    assert_receive {:trace, ^host, :call,
+                    {Loopex, :create_session, [^runtime, _, create_options]}},
+                   1_000
+
     assert is_binary(create_options[:command_id])
-    assert_receive {:trace, ^host, :call, {ChatDriver, :bind, [^driver, ^runtime, session, _]}}, 1_000
-    assert_receive {:trace, ^host, :call, {Interrupt, :install_chat, [^driver, signal_ref, 5_000]}}, 1_000
-    assert_receive {:trace, ^host, :return_from, {Interrupt, :install_chat, 3}, {:ok, manager}}, 1_000
+
+    assert_receive {:trace, ^host, :call, {ChatDriver, :bind, [^driver, ^runtime, session, _]}},
+                   1_000
+
+    assert_receive {:trace, ^host, :call,
+                    {Interrupt, :install_chat, [^driver, signal_ref, 5_000]}},
+                   1_000
+
+    assert_receive {:trace, ^host, :return_from, {Interrupt, :install_chat, 3}, {:ok, manager}},
+                   1_000
+
     assert Interrupt.chat_live(manager, signal_ref)
     assert_receive {:input_held, ^input, input_worker, input_ref}, 1_000
     input_down = Process.monitor(input_worker)
@@ -152,12 +219,21 @@ defmodule LoopexCli.ChatCompositionStartupTest do
     refute Interrupt.chat_live(manager, signal_ref)
     assert {:ok, [%{session_id: ^session}]} = Loopex.list_sessions(state_root)
     assert [_] = genesis(state_root)
-    refute Enum.any?(records(state_root), &(Map.get(&1, :kind) in
-      ["run.started", "model_request_committed_v2", "model_request_committed_resources_v2",
-       "model_attempt_opened_v1"]))
+
+    refute Enum.any?(
+             records(state_root),
+             &(Map.get(&1, :kind) in [
+                 "run.started",
+                 "model_request_committed_v2",
+                 "model_request_committed_resources_v2",
+                 "model_attempt_opened_v1"
+               ])
+           )
+
     for {actor, monitor} <- monitors, actor != observer do
       assert_receive {:DOWN, ^monitor, :process, ^actor, _}, 1_000
     end
+
     assert_receive {:DOWN, ^input_down, :process, ^input_worker, _}, 1_000
     send(host, :finish)
     assert_receive {:DOWN, ^host_down, :process, ^host, :normal}, 1_000
@@ -173,27 +249,35 @@ defmodule LoopexCli.ChatCompositionStartupTest do
 
   defp observe_edges(test) do
     reads = :atomics.new(1, [])
+
     Process.put(@edge, fn module, function, arguments ->
-      result = if {module, function} == {Loopex, :start_link} do
-        [options] = arguments
-        Process.put({StartupGate, :test_listener}, test)
-        original = Keyword.fetch!(options, :store)
-        assert original.adapter == Loopex.Store.Local
-        {:ok, store} = Loopex.Store.new(HeldLocal, %{store: original, test: test, reads: reads})
-        result = Loopex.start_link(Keyword.put(options, :store, store))
-        case result do
-          {:ok, runtime} -> send(test, {:runtime_owned, self(), runtime,
-            options[:diagnostics_to]})
-          _ -> :ok
+      result =
+        if {module, function} == {Loopex, :start_link} do
+          [options] = arguments
+          Process.put({StartupGate, :test_listener}, test)
+          original = Keyword.fetch!(options, :store)
+          assert original.adapter == Loopex.Store.Local
+          {:ok, store} = Loopex.Store.new(HeldLocal, %{store: original, test: test, reads: reads})
+          result = Loopex.start_link(Keyword.put(options, :store, store))
+
+          case result do
+            {:ok, runtime} ->
+              send(test, {:runtime_owned, self(), runtime, options[:diagnostics_to]})
+
+            _ ->
+              :ok
+          end
+
+          result
+        else
+          apply(module, function, arguments)
         end
-        result
-      else
-        apply(module, function, arguments)
-      end
+
       case result do
         {:ok, pid} when is_pid(pid) -> send(test, {:edge_started, module, pid})
         _ -> :ok
       end
+
       result
     end)
   end
@@ -225,11 +309,14 @@ defmodule LoopexCli.ChatCompositionStartupTest do
           send(test, {:input_held, self(), reader, reply})
           receive do: ({:release_input, ^reply} -> :ok)
         end
+
         forwarded = make_ref()
         send(bytes, {:io_request, self(), forwarded, request})
+
         receive do
           {:io_reply, ^forwarded, result} -> send(reader, {:io_reply, reply, result})
         end
+
         input_relay(bytes, test, false)
     end
   end
@@ -239,7 +326,9 @@ defmodule LoopexCli.ChatCompositionStartupTest do
     assert_receive {:trace_delivered, ^host, ^delivered}, 1_000
   end
 
-  defp genesis(root), do: Enum.filter(records(root), &(Map.get(&1, :kind) == "session_genesis_v3"))
+  defp genesis(root),
+    do: Enum.filter(records(root), &(Map.get(&1, :kind) == "session_genesis_v3"))
+
   defp records(root) do
     assert {:ok, frames, :complete} = Log.read(Path.join(root, "store.log"))
     for frame <- frames, record <- frame.records, do: record.payload
@@ -260,8 +349,11 @@ defmodule LoopexCli.ChatCompositionStartupTest do
       "policy" => "allow-all",
       "paths" => %{"workspace" => "workspace", "state_root" => "state"},
       "session" => %{
-        "model" => "anthropic:claude-haiku-4-5", "tools" => "none", "max_tokens" => 128,
-        "system_class_tokens" => 8000, "cleanup_grace_ms" => 5_000,
+        "model" => "anthropic:claude-haiku-4-5",
+        "tools" => "none",
+        "max_tokens" => 128,
+        "system_class_tokens" => 8000,
+        "cleanup_grace_ms" => 5_000,
         "instructions" => %{"system_file" => "system.txt"},
         "bounds" => %{"max_turns" => 8, "deadline_ms" => 60_000, "token_budget" => 10_000}
       }
@@ -274,21 +366,31 @@ defmodule LoopexCli.ChatCompositionStartupTest do
   defmodule HeldLocal do
     @moduledoc false
     @behaviour Loopex.Store
-    for {function, arity} <- [transact: 2, transaction_status: 4, runtime_command: 2,
-      ownership_head: 3, load_records: 4, load_events: 4, creation_provenance: 3] do
+    for {function, arity} <- [
+          transact: 2,
+          transaction_status: 4,
+          runtime_command: 2,
+          ownership_head: 3,
+          load_records: 4,
+          load_events: 4,
+          creation_provenance: 3
+        ] do
       arguments = Macro.generate_arguments(arity - 1, __MODULE__)
       @impl true
       def unquote(function)(reference, unquote_splicing(arguments)),
         do: delegate(reference, unquote(function), [unquote_splicing(arguments)])
     end
+
     @impl true
     def creation_recovery(reference, request) do
       if :atomics.add_get(reference.reads, 1, 1) == 1 do
         send(reference.test, {:startup_read, self(), request})
         receive do: (:release_startup -> :ok)
       end
+
       delegate(reference, :creation_recovery, [request])
     end
+
     defp delegate(reference, function, arguments),
       do: apply(reference.store.adapter, function, [reference.store.reference | arguments])
   end
