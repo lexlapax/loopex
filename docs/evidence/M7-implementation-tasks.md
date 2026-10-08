@@ -1,13 +1,19 @@
 # M7 Implementation Tasks
 
-Current T16 subtask: diagnose the creation-custody teardown race from original92991.
-That complete Core run is terminal FAIL at reviewed `b4e06ed5`: current 489 of
-490 cases passed, one failed, with all five long_bound cases and zero exclusions,
-skips or invalid cases. The floor pair did not run. The sole failure is an on_exit
-stop of an already-exited process in `creation_custody_lifecycle_test.exs:727`.
-Read-only cleanup diagnosis is assigned; no source repair is claimed. Original
-92991 is collected once, with 367.211 seconds, three joins and 2,156 registry rows.
-No native handle remains live; unchanged-source retry is prohibited.
+Current T16 subtask: complete paired Core verification after the exact custody
+supervisor teardown repair. Source-qualified raw `a88b11db` and formatting-only
+child `9420464c` preserve all 22 custody tests, original carrier joins, permits,
+Store-call assertions and cutoffs. Only the original workers supervisor's exact
+normal/infinity noproc stop is accepted. Original60053 passed all 32 owned-file
+formatting/AST checks on both pairs in 18.253 seconds, with ten joins and a
+2,166-row registry. The custody test is newly included in ownership; selection
+remains the complete 18 files / 490 cases, including all five long_bound cases.
+
+Original86174 is the sole live native handle for that full paired test selection
+at clean `9420464c`. No test result or checklist completion is claimed yet.
+Original92991 remains retained FAIL, current 489/490 and floor unrun; no unchanged
+retry is allowed. Exact context and the new 54-file immutable retention are in
+the [resume record](M7-resume.md). Earlier entries are historical where superseded.
 
 Original91795 passed the entire four-case constructor file on both pairs in
 27.327 seconds, and original61348 passed all 31 formatting/AST checks in

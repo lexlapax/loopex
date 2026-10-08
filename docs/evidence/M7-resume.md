@@ -27,7 +27,63 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
-### Current Core verification and next foreground subtask
+### Current custody cleanup repair and complete paired verification
+
+The retained original92991 failure was traced to the direct carrier test's
+linked outer Task.Supervisor. The preceding log names its exact PID as
+Task.Supervisor; the Store is a separate unlinked fixture. ExUnit can retire the
+linked test supervisor between the on_exit alive check and stop. The correction
+accepts only `{:noproc, {GenServer, :stop, [original_workers, :normal, :infinity]}}`.
+Every abnormal/timeout stop still fails, and all 22 custody tests retain their
+original carrier monitors, joins, wrong/correct permits, Store-call assertions
+and cutoffs. Diagnosis SHA-256 is
+`1c5631bb68b16dbc493c8ac0bc44abbce2458716c39a3d620530f95f95834143`;
+independent authored-delta review is
+`4767824cc7dc977dfbe7e280940b626d5d1e33afb86fc0d5cff9c6bd3a395adb`.
+Raw repair `a88b11dbebb96e61a6b661194168dca6a0e57e0e` has packet
+`e122a4719d0235ab2736ef3d3e646ecbbcb9f1849f7c3a36551bd15531a62412`.
+An initial guard expecting 31 custody cases failed before any mutation; the
+actual file has 22 declarations. This was corrected without deleting a case.
+
+Original60053 passed paired formatting/AST checks for all 32 owned files in
+18.253 seconds, with ten actual joins, 48 artifacts and 2,166 registry rows.
+Ownership now includes the newly edited custody test in addition to the prior
+31 paths; the complete selected test population remains 18 files / 490 cases.
+Output `M7/custody-supervisor-noproc-format-20261008-v1`; collection
+`c8b9f49a3658898e240eee3961e09e742e5cf4d5f8446987bbcd6fe211684f61`,
+terminal `ec26793b89784c12b7f4c3c40934f4e9052efb90254bbae9fded99fc4aae3fe1`,
+registry `14d1210250e6429f4c9b0574a2e254b6a4e993541d937da398ea5415df4b5b4c`.
+Its sole formatter delta is one blank line after the repaired callback, saved
+at clean `9420464c3953f88021617cd66ec05005b340ccdb`. The paired AST checks preserve
+all non-line syntax. Do not repoll or recollect original60053.
+
+Original86174 is now the sole live native handle. It runs the unchanged complete
+18-file / 490-case Core selection, with all five long_bound cases, on current
+then floor at exact `9420464c`. Output `M7/core-custody-noproc-proof-20261008-v1`;
+runner `/private/tmp/m7-core-custody-noproc-proof-preparation-20261008-v1/proof.enabled.py`,
+SHA-256 `880cba31cc565da79dceca91b1e3793078ecbefef9e0b180b0ac42ad199cd99a`;
+capture `d8abbebe297933010e7f11f82cbc645ddccd35eccdf786a2cd2564eabd7b1e45`.
+It seeds the actual 2,166-row registry and preserves all failed producers. Poll
+this original handle to terminal and collect once. No concurrent VM, source
+mutation, unchanged-byte retry or passing result is permitted before collection.
+Original92991 remains failed and is never retried or relabeled.
+
+New source/review/preparation context is retained as 54 immutable files at
+`/Users/spuri/projects/lexlapax/loopex-evidence/M7/custody-noproc-resume-context-20261008-v1/retention.json`,
+SHA-256 `c5b5c11e204d422caab5c0c595926db54abe0a2b247cd96a10a9e3597bd8d4c8`.
+The conditional foreground b4 report is retained as written before original92991
+finished; its prospective positive prerequisites did not occur. Foreground 17
+must join above qualified current Core 32 before the separate 112-case proof.
+T15 restore175 and remaining protocol/helper integration follow. Actual finite
+32-CAS exhaustion remains open, with a read-only causal-proof options review
+assigned to `cleanup_binding_audit`. No checklist row closes. Totals remain
+originals 88 done / 85 todo / 6 retired and additions 363 done / 23 todo.
+ADR0063's exact Proposed pair remains the sole asked pending decision.
+
+### Historical Core verification and next foreground subtask
+
+The current checkpoint above supersedes live-handle and next-run statements below.
+
 
 The reviewed constructor cleanup repair is saved at
 `b4e06ed5a1144830ef695515dd8b8eb9947983de`. It catches only the exact nested
