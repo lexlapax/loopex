@@ -1,14 +1,20 @@
 # M7 Implementation Tasks
 
-Current T16 subtask: original92991 is running the complete 490-case Core selection
-on both supported toolchains at reviewed `b4e06ed5`. All five long_bound cases
-remain. It is the sole native handle; no complete paired result is claimed yet.
-Original91795 already passed the entire four-case constructor file on both pairs
-in 27.327 seconds, and original61348 passed all 31 formatting/AST checks in
-19.177 seconds. Both terminal originals are collected once. Earlier original35386
-remains a retained failure, with current 490 passed and floor 489 passed / one
-failed; the bounded normal-reap correction preserves the original monitor,
-cleanup receipt and 1,000 ms grace.
+Current T16 subtask: diagnose the creation-custody teardown race from original92991.
+That complete Core run is terminal FAIL at reviewed `b4e06ed5`: current 489 of
+490 cases passed, one failed, with all five long_bound cases and zero exclusions,
+skips or invalid cases. The floor pair did not run. The sole failure is an on_exit
+stop of an already-exited process in `creation_custody_lifecycle_test.exs:727`.
+Read-only cleanup diagnosis is assigned; no source repair is claimed. Original
+92991 is collected once, with 367.211 seconds, three joins and 2,156 registry rows.
+No native handle remains live; unchanged-source retry is prohibited.
+
+Original91795 passed the entire four-case constructor file on both pairs in
+27.327 seconds, and original61348 passed all 31 formatting/AST checks in
+19.177 seconds. Both terminal originals are collected once. The bounded constructor
+normal-reap correction preserves the original monitor, cleanup receipt and
+1,000 ms grace. Earlier original35386 remains a retained failure with current
+490 passed and floor 489 passed / one failed. No complete paired Core unit closes.
 
 Next is T16 foreground output integration: advance the saved 17-path join above
 qualified current Core, then prove app-server 94 and protocol 18 cases in separate

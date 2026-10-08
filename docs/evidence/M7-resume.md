@@ -54,15 +54,29 @@ registry `2f05a3ea7e3027eaa11d367349cad4d3c0f98fbb6847d8b5e8ecd65187ca993d`.
 Do not repoll or recollect either terminal producer. The focused four-case result
 does not establish the complete 490-case integration result.
 
-Original92991 is the sole live native handle, running the complete 490 cases
-with all five long_bound cases on each supported pair at exact `b4e06ed5`.
-Output `M7/core-authored-normal-reap-proof-20261008-v1`; runner
-`/private/tmp/m7-core-authored-normal-reap-proof-preparation-20261008-v1/proof.enabled.py`,
-SHA-256 `c628cdeb1960ea703f41b24c694d1e6d41d4b5b04ee20b41048eda5889a8dc88`,
-capture SHA-256 `d8ba17ad3a1bc5929ae264ab42e02777b3e9aba5d4b5a86bd98560c9b730f81d`.
-It seeds the actual 2,153-row registry and retains earlier failures. Poll this
-original handle to terminal and collect once; no concurrent VM, source mutation
-or unchanged-source retry is permitted. No full paired PASS is claimed yet.
+Original92991 is terminal FAIL and collected once at exact
+`b4e06ed5a1144830ef695515dd8b8eb9947983de`. The current pair executed all 490
+cases, including all five long_bound cases, with 489 passed and one failed;
+zero exclusions, skips or invalid cases. Formatting and warning-free compilation
+passed. The floor pair did not run. Producer duration is 367.211 seconds, with
+three actual process joins, 21 artifacts and 2,156 registry rows. No native
+handle remains live. Output `M7/core-authored-normal-reap-proof-20261008-v1`;
+collection `72222c133bc91e12611bfe225e7e5b26b4ded1d9f61ddab4723caf2a8dbf7007`,
+terminal `0d684cdd3b43b60b7adc12251fecff34acc7cf7c8bc93abf94c1dc1aa1bd86f1`,
+registry `3765ae033679532e2e2391b66c484654d4d7beac46b743662c7d91c8f763dac3`.
+Runner SHA-256 is `c628cdeb1960ea703f41b24c694d1e6d41d4b5b04ee20b41048eda5889a8dc88`;
+capture is `d8ba17ad3a1bc5929ae264ab42e02777b3e9aba5d4b5a86bd98560c9b730f81d`.
+Do not repoll, recollect or retry unchanged b4. A later changed-source grant
+must seed the actual 2,156-row registry and preserve every earlier failure.
+
+The sole failed case is `creation_custody_lifecycle_test.exs:727`, owned carrier
+before permit and positive exact permit. Its on_exit callback called
+`GenServer.stop(pid, :normal, :infinity)` after that process had exited and
+raised noproc. Root assigned a read-only cleanup diagnosis to
+`cleanup_binding_audit`; no repair or exact interleaving is yet claimed. The
+constructor correction itself passed in this complete current population, as
+well as the earlier focused paired four-case proof. The complete Core unit
+remains open, and the foreground positive prerequisite is unavailable.
 
 After Core qualification, T16's next subtask is to advance the 17-path foreground
 join from `3fcd42dc` above the qualified current Core, then verify its eight
