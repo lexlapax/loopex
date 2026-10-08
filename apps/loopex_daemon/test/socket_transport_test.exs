@@ -1161,7 +1161,9 @@ defmodule LoopexDaemon.SocketTransportTest do
           [
             %{text: "question", calls: [%{id: "ask", name: "ask", arguments: arguments}]},
             %{text: "done", calls: []}
-          ], tools: [LoopexProtocol.ToolDefinition.question_definition()])
+          ],
+          tools: [LoopexProtocol.ToolDefinition.question_definition()]
+        )
 
       daemon = start_daemon(native.runtime)
       {client, session, epoch} = controlled_current_session(daemon, "question-wire-create")
@@ -1231,7 +1233,10 @@ defmodule LoopexDaemon.SocketTransportTest do
       current_command_fixture(
         [
           %{text: "write", calls: [%{id: "write", name: "write", arguments: %{"path" => "file"}}]}
-        ], tools: [Fixture.tool_definition()], policy: CurrentCommandPolicy)
+        ],
+        tools: [Fixture.tool_definition()],
+        policy: CurrentCommandPolicy
+      )
 
     daemon = start_daemon(native.runtime)
     {client, session, epoch} = controlled_current_session(daemon, "policy-wire-create")
