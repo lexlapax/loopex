@@ -80,19 +80,21 @@ defmodule LoopexDaemon.WireRecordsTest do
     end
   end
 
-  test "both checkpoint owner kinds preserve opaque bytes in the daemon envelope" do
-    for kind <- ["run", "compact"] do
-      event = %{
-        :kind => "context.compacted",
-        :event_id => "event",
-        :event_sequence => 1,
-        "owner" => %{"kind" => kind, "id" => <<0, 255, 10>>}
-      }
+  test "both checkpoint owner kinds use the complete closed public event" do
+    path = Path.join(:code.priv_dir(:loopex_protocol), "vectors/checkpoint-projection.v1.json")
+    cases = JSON.decode!(File.read!(path))["cases"]
 
+    for kind <- ["run", "compact"] do
+      wire = Enum.find(cases, fn vector ->
+        is_nil(vector["error"]) and vector["input"]["owner"]["kind"] == kind
+      end)["input"]
+      assert {:ok, native} = LoopexProtocol.Session.Checkpoint.decode_wire(wire)
+      event = Map.merge(native, %{kind: "context.compacted", event_id: "event", event_sequence: 1})
       record = WireRecords.event("session", event)
-      assert record["event"]["data"] == %{"owner" => %{"kind" => kind, "id" => "AP8K"}}
+      assert record["event"]["data"] == wire
       assert record["event"]["event_sequence"] == "1"
       assert {:ok, _} = Frame.encode(record)
+      assert :error = WireRecords.event("session", Map.put(event, "summary", "PRIVATE_CHECKPOINT_CANARY"))
     end
   end
 
@@ -117,9 +119,7 @@ defmodule LoopexDaemon.WireRecordsTest do
       assert record["event"]["data"] == wire
       assert {:ok, _} = Frame.encode(record)
 
-      assert_raise MatchError, fn ->
-        WireRecords.event("session", Map.put(event, "source", "PRIVATE_COMPLETION_CANARY"))
-      end
+      assert :error = WireRecords.event("session", Map.put(event, "source", "PRIVATE_COMPLETION_CANARY"))
     end
   end
 
@@ -169,6 +169,12 @@ defmodule LoopexDaemon.WireRecordsTest do
           %{"kind" => "context.compaction_progress", "summary" => fn -> :private end}
         ] do
       assert :error = WireRecords.progress("session", invalid)
+    end
+  end
+
+  test "compaction activity refuses invalid session envelopes before serialization" do
+    for session <- [nil, "", String.duplicate("s", 257), self()] do
+      assert :error = WireRecords.progress(session, compaction_item("compact", 0))
     end
   end
 

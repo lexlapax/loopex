@@ -102,6 +102,74 @@ defmodule LoopexDaemon.SocketTransportTest do
     eventually(fn -> AdmissionRelay.status(daemon.relay).tickets == 0 end)
   end
 
+  test "a real unknown create retains its original binding and an exact retry publishes no activation" do
+    native = current_command_fixture([])
+    daemon = start_daemon(native.runtime)
+    client = initialized_client(daemon)
+    {:ok, %{control: control, sessions: sessions}} = Loopex.Runtime.children(native.runtime)
+    options = %{"version" => 1}
+    command_id = "unknown-create"
+
+    :ok = Loopex.M1RuntimeTestStore.inject(native.store, {:runtime_control_create_session, :recovery_representation})
+    :ok = Loopex.M1RuntimeTestStore.inject(native.store, {:runtime_control_close_creation_reservation, :before_linearization}, 2)
+    :ok = Loopex.M1RuntimeTestStore.hold_next_transition_before_linearization(native.store, :runtime_control_reserve_creation, self())
+    :ok = send_frame(client, create("unknown-original", command_id, options))
+    store = native.store
+    assert_receive {:record_held_before_linearization, reserve_waiter, ^store, :runtime_control_reserve_creation, reservation}, 5_000
+    on_exit(fn -> Loopex.M1RuntimeTestStore.release(reserve_waiter) end)
+    original = :sys.get_state(control).creation
+    assert original.phase == :reserve
+    assert original.command_id == command_id
+    assert original.reservation == reservation
+    assert {:ok, original_authored} = Loopex.Runtime.CreationOptions.normalize(options)
+    assert original.authored == original_authored
+    assert original.fresh
+    assert %{activations_used: 1, activation_reservations: 1, active_sessions: 0} = ConnectionRegistry.status(daemon.registry)
+    assert DynamicSupervisor.which_children(sessions) == []
+    Loopex.M1RuntimeTestStore.release(reserve_waiter)
+
+    assert [unknown] = receive_records(client, 1)
+    assert unknown == WireRecords.succession_error("unknown-original", "admission_unknown")
+    refute Map.has_key?(unknown, "session_id")
+    refute Map.has_key?(unknown, "status")
+    eventually(fn -> AdmissionRelay.status(daemon.relay).tickets == 0 end)
+    assert %{activations_used: 0, active_sessions: 0} = ConnectionRegistry.status(daemon.registry)
+    assert DynamicSupervisor.which_children(sessions) == []
+    state = Loopex.M1RuntimeTestStore.inspect_state(store)
+    finals = Enum.filter(state.creation_calls, &(&1.type == :create_session))
+    closes = Enum.filter(state.creation_calls, &(&1.type == :close_creation_reservation))
+    assert [final, exact_final] = finals
+    assert final == exact_final
+    assert final == original.final
+    assert [close, exact_close] = closes
+    assert close == exact_close
+    assert close.reservation_tx_id == reservation.tx_id
+    assert close.final_canonical_record_bytes == final.canonical_record_bytes
+    assert close.final_canonical_mutation_digest == final.canonical_mutation_digest
+    assert %{state: :created, session_id: session_id} = state.creation_capsules[{"daemon-current-command", command_id}]
+    assert map_size(state.sessions) == 1
+    assert state.sessions[session_id].owner_epoch == 0
+    assert :sys.get_state(control).creation_status == :unavailable
+    assert map_size(:sys.get_state(control).lane.fences) == 1
+    assert {:ok, {:historical, ^session_id}} = Loopex.Runtime.lookup_create_result(native.runtime, command_id, options)
+
+    for request_id <- ["unknown-retry", "unknown-retry-again"] do
+      :ok = send_frame(client, create(request_id, command_id, options))
+      assert [admission] = receive_records(client, 1)
+      assert admission == WireRecords.admission(request_id, "session.create", command_id, :accepted, session_id)
+      assert %{activations_used: 0, active_sessions: 0} = ConnectionRegistry.status(daemon.registry)
+      assert DynamicSupervisor.which_children(sessions) == []
+      assert Loopex.M1RuntimeTestStore.inspect_state(store).creation_calls == state.creation_calls
+      assert Loopex.M1RuntimeTestStore.inspect_state(store).sessions == state.sessions
+    end
+
+    :ok = send_frame(client, attach("unknown-attach", session_id))
+    assert [%{"request_id" => "unknown-attach", "code" => "session_dormant"}] = receive_records(client, 1)
+    assert %{activations_used: 0, active_sessions: 0} = ConnectionRegistry.status(daemon.registry)
+    assert Process.get({LoopexDaemon.Test.DaemonSocketFixture, client}, "") == ""
+    assert {:error, :timeout} = :socket.recv(client, 0, 40)
+  end
+
   @tag timeout: 120_000
   test "the sixty-fifth fresh create refuses while a historical replay still answers",
        %{daemon: daemon} do
@@ -942,6 +1010,136 @@ defmodule LoopexDaemon.SocketTransportTest do
       assert {:ok, %{open_interaction: ^interaction}} = Loopex.session_status(native.runtime, session)
       assert Loopex.AgentLoopTestExecutor.jobs(native.executor) == []
     end
+  end
+
+  test "actual compact activity reaches only installed subscriptions with its native lease retained" do
+    sink = Loopex.ProgressTestConsumer.open_sink()
+    summary = ~s({"summary":"retain this fact","carry_forward":{"files_read":[],"files_changed":[]}})
+    native = current_command_fixture(
+      [
+        %{text: "retained fact", calls: []},
+        %{raw_result: {:error, {:not_dispatched, "model_call_failed"}}},
+        %{text: summary, hold: self(), deltas: ["PRIVATE_SUMMARY_DELTA"], reply_overrides: %{completion: "natural", continuation: nil}}
+      ],
+      progress_sink: sink,
+      maintenance_model: current_maintenance_model(),
+      maintenance_instructions: %{"version" => "summary.v1", "body" => "Keep facts"}
+    )
+    daemon = start_daemon(native.runtime)
+    {controller, session, epoch} = controlled_current_session(daemon, "activity-create")
+    observer = initialized_client(daemon)
+    :ok = send_frame(observer, attach("activity-observe", session))
+    assert [%{"type" => "snapshot"}] = receive_records(observer, 1)
+    outsider = initialized_client(daemon)
+    other_session = create_session(outsider, "other-activity-create")
+    :ok = send_frame(outsider, attach("other-activity-attach", other_session))
+    assert [%{"type" => "snapshot"}] = receive_records(outsider, 1)
+    :ok = send_frame(controller, current_mutation("session.prompt", "activity-history", epoch, %{"content_b64" => Wire.encode_bytes(String.duplicate("retained fact ", 700))}))
+    assert [%{"status" => "accepted"} | _] = receive_until(controller, &(&1["request_id"] == "activity-history"))
+    eventually(fn -> match?({:ok, %{active_run_id: nil}}, Loopex.session_status(native.runtime, session)) end)
+    :ok = send_frame(controller, current_mutation("session.compact", "activity-compact", epoch, %{"bounds" => %{"max_attempts" => "4", "deadline_ms" => "60000", "token_budget" => "32768"}}))
+    assert [%{"status" => "accepted"} | _] = receive_until(controller, &(&1["request_id"] == "activity-compact"))
+    assert_receive {:holding, model_worker}, 5_000
+    worker_monitor = Process.monitor(model_worker)
+    {:ok, %{control: control}} = Loopex.Runtime.children(native.runtime)
+    coordinator = :sys.get_state(control).sessions[session].coordinator
+    live = :sys.get_state(coordinator)
+    relay = Loopex.Runtime.StreamRelay.pid(live.compaction_relay)
+    relay_monitor = Process.monitor(relay)
+    assert is_pid(relay)
+    assert {:ok, held_status} = Loopex.session_status(native.runtime, session)
+    attached_connections = Enum.filter(connection_pids(daemon), fn connection ->
+      match?(%{attachment: %{session_id: ^session}}, :sys.get_state(connection))
+    end)
+    assert length(attached_connections) == 2
+    eventually(fn -> Enum.all?(attached_connections, &(:sys.get_state(&1).attachment.emitted_cursor == held_status.event_sequence)) end)
+
+    # Concept: the host retains native custody while the daemon copies frames.
+    # Technical depth: the actual sink owner takes permitted Core activity and
+    # retains every lease until this test owner exits. No fake release or socket
+    # cleanup acknowledgement returns native credit during these assertions.
+    items = for _ <- 1..2 do
+      assert {^session, item} = Loopex.ProgressTestConsumer.matching(fn
+        {^session, %{kind: "context.compaction_progress"}} -> true
+        _ -> false
+      end, 5_000)
+      item
+    end
+    assert length(Enum.uniq_by(items, & &1.stream_domain_id)) == 2
+    assert Enum.all?(items, &(&1.owner == %{"kind" => "compact", "id" => "activity-compact"} and &1.progress_sequence == 0))
+    opened = Enum.filter(Fixture.records(native, session), &(&1.payload.kind == "maintenance_attempt_opened_v1"))
+    assert length(opened) == 2
+    for {item, record} <- Enum.zip(items, opened) do
+      assert item.stream_domain_id == Loopex.StreamDomain.derive(:compaction, session, record.payload["operation_id"], record.payload["attempt"])
+      assert item.base_event_sequence <= held_status.event_sequence
+      assert {:ok, expected} = LoopexProtocol.Session.CompactionProgress.encode_wire(item)
+      send(daemon.registry, {:loopex_progress, session, item})
+      for client <- [controller, observer] do
+        assert [%{"type" => "progress", "progress" => ^expected} = activity | _] = receive_until(client, &(&1["type"] == "progress"))
+        assert activity["session_id"] == Wire.encode_identity(session)
+        refute inspect(activity) =~ "PRIVATE_SUMMARY_DELTA"
+      end
+    end
+    assert {:error, :timeout} = :socket.recv(outsider, 0, 40)
+    assert {:ok, after_activity} = Loopex.session_status(native.runtime, session)
+    assert after_activity.event_sequence == held_status.event_sequence
+    assert Enum.all?(attached_connections, &(:sys.get_state(&1).attachment.emitted_cursor == held_status.event_sequence))
+    {_guardian, sink_incarnation, arena} = sink
+    [custody] = :ets.lookup(arena, :state)
+    leases = for {^sink, {^sink_incarnation, index, token}} <- Process.get({Loopex.ProgressTestConsumer, :observed}, []) do
+      assert {^token, :leased, owner, charge} = elem(elem(custody, 5), index)
+      assert owner == self() and charge > 0
+      {index, token}
+    end
+    assert length(leases) == 2
+
+    send(model_worker, :release)
+    assert_receive {:DOWN, ^worker_monitor, :process, ^model_worker, :normal}, 5_000
+    [completion | _] = receive_until(controller, &compact_finished?/1)
+    assert {:ok, completed} = LoopexProtocol.Session.CompactResult.decode_completion(completion["event"]["data"])
+    assert completed["result"]["usage"]["attempts"] == 2
+    predecessor_monitor = Process.monitor(coordinator)
+    Process.exit(coordinator, :kill)
+    assert_receive {:DOWN, ^predecessor_monitor, :process, ^coordinator, :killed}, 5_000
+    assert_receive {:DOWN, ^relay_monitor, :process, ^relay, _}, 5_000
+    assert {:ok, {:prepared, activation}} = Loopex.prepare_resume_session(native.runtime, session, "activity-successor")
+    assert {:ok, ^session} = Loopex.activate_resume(activation)
+    successor = :sys.get_state(control).sessions[session].coordinator
+    assert :sys.get_state(successor).compaction_relay == nil
+    assert Loopex.ProgressTestConsumer.matching(fn
+      {^session, %{kind: "context.compaction_progress"}} -> true
+      _ -> false
+    end, 40) == :empty
+    assert length(Loopex.AgentLoopTestModel.dispatched(native.model)) == 3
+  end
+
+  test "malformed durable data detaches at actual emitted truth without private publication" do
+    native = current_command_fixture([%{text: "done", calls: []}])
+    daemon = start_daemon(native.runtime)
+    {client, session, epoch} = controlled_current_session(daemon, "malformed-event-create")
+    :ok = send_frame(client, current_mutation("session.prompt", "malformed-event-history", epoch, %{"content_b64" => Wire.encode_bytes("actual history")}))
+    assert [%{"status" => "accepted"} | _] = receive_until(client, &(&1["request_id"] == "malformed-event-history"))
+    [settled | _] = receive_until(client, &(&1["type"] == "event" and &1["event"]["kind"] == "session.settled"))
+    {:ok, cursor} = Wire.u64(settled["event"]["event_sequence"])
+    connection = initialized_connection(daemon)
+    eventually(fn -> :sys.get_state(connection).attachment.emitted_cursor == cursor end)
+    attached = :sys.get_state(connection).attachment
+    pump_monitor = Process.monitor(attached.pump)
+    connection_monitor = Process.monitor(connection)
+    records_before = Fixture.records(native, session)
+    invalid = %{:kind => "run.started", :event_id => "forged", :event_sequence => cursor + 10,
+      "run_id" => "run", "command_id" => "cmd", "private_capture" => "PRIVATE_DURABLE_CANARY"}
+    send(connection, {:attachment_event, attached.pump, invalid})
+    assert [%{"type" => "error", "code" => "detached", "event_cursor" => encoded_cursor} = detached] = receive_records(client, 1)
+    assert encoded_cursor == Integer.to_string(cursor)
+    assert detached["session_id"] == Wire.encode_identity(session)
+    refute inspect(detached) =~ "PRIVATE_DURABLE_CANARY"
+    assert_receive {:DOWN, ^pump_monitor, :process, _, :killed}, 1_000
+    assert_receive {:DOWN, ^connection_monitor, :process, ^connection, _}, 5_000
+    assert {:ok, final} = Loopex.session_status(native.runtime, session)
+    assert final.event_sequence == cursor
+    assert Fixture.records(native, session) == records_before
+    assert closed?(client, 1_000)
   end
 
   # Reads event records through the next appended prompt and returns their
@@ -2288,6 +2486,7 @@ defmodule LoopexDaemon.SocketTransportTest do
       store: handle,
       context_token_budget: 8_192,
       session_creation_defaults: Fixture.creation_defaults(definitions),
+      progress_sink: Keyword.get(options, :progress_sink),
       maintenance_model: Keyword.get(options, :maintenance_model),
       maintenance_instructions: Keyword.get(options, :maintenance_instructions),
       model: %{module: CurrentCommandModel, model: "scripted:v1", options: [observer: self(), script: model, hold_configuration: Keyword.get(options, :hold_configuration, false), max_tokens: 256]},

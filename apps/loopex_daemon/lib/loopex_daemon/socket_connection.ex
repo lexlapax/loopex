@@ -246,19 +246,6 @@ defmodule LoopexDaemon.SocketConnection do
   # Technical depth: at most 32 records and 512 KiB of encoded progress wait,
   # ADR 0023's transient bound. The queue is written only when this
   # connection's durable output is empty.
-  # Concept: the accepted compaction codec remains unserved until its complete
-  # current generation is activated.
-  # Technical depth: reject this family before serialization under the current
-  # negotiated contract, including alternate-key or malformed native items.
-  def handle_info({:daemon_progress, _session_id, %{kind: "context.compaction_progress"}}, state),
-    do: {:noreply, state}
-
-  def handle_info(
-        {:daemon_progress, _session_id, %{"kind" => "context.compaction_progress"}},
-        state
-      ),
-      do: {:noreply, state}
-
   def handle_info(
         {:daemon_progress, session_id, item},
         %{attachment: %{session_id: session_id}} = state
@@ -1397,20 +1384,26 @@ defmodule LoopexDaemon.SocketConnection do
   defp stop_pump(state), do: state
 
   defp deliver_event(%{attachment: attached} = state, event) do
-    state = %{state | last_activity: System.monotonic_time(:millisecond)}
-    record = WireRecords.event(attached.session_id, event)
-    held = state.succession != nil
-    kind = {:event, attached.pump}
+    # Concept: malformed durable data ends this attachment before publication.
+    # Technical depth: projection precedes queue admission and cursor labeling;
+    # failure uses the same last completely emitted cursor as output loss.
+    with record when is_map(record) <- WireRecords.event(attached.session_id, event) do
+      state = %{state | last_activity: System.monotonic_time(:millisecond)}
+      held = state.succession != nil
+      kind = {:event, attached.pump}
 
-    # A sent event lets the pump continue once the registry accepts it; a
-    # held one continues it at once, as it always has.
-    case send_record(state, record, Map.fetch!(event, :event_sequence), kind) do
-      {:ok, state} ->
-        if held, do: LoopexDaemon.AttachmentPump.continue(attached.pump)
-        {:noreply, state}
+      # A sent event lets the pump continue once the registry accepts it; a
+      # held one continues it at once, as it always has.
+      case send_record(state, record, Map.fetch!(event, :event_sequence), kind) do
+        {:ok, state} ->
+          if held, do: LoopexDaemon.AttachmentPump.continue(attached.pump)
+          {:noreply, state}
 
-      {:error, state} ->
-        begin_detach_close(state)
+        {:error, state} ->
+          begin_detach_close(state)
+      end
+    else
+      :error -> begin_detach_close(state)
     end
   end
 
@@ -1457,6 +1450,9 @@ defmodule LoopexDaemon.SocketConnection do
             do: send(fatal_recipient, {:daemon_component_fatal, self(), :runtime_lost})
 
           {:no_activation, nil, WireRecords.request_error(request_id, "internal_failure")}
+
+        {:error, :commit_unknown, %{disposition: disposition}} ->
+          {disposition, nil, WireRecords.succession_error(request_id, "admission_unknown")}
 
         {:error, reason, %{disposition: disposition}} ->
           {disposition, nil, create_admission(request_id, command_id, {:refused, reason})}

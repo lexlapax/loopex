@@ -219,7 +219,7 @@ defmodule LoopexDaemon.TelemetryParityTest do
             "method" => "session.respond_interaction",
             "request_id" => "answer",
             "command_id" => Wire.encode_identity("parity-answer"),
-            "interaction_id" => Wire.encode_identity(find_key(event, "interaction_id")),
+            "interaction_id" => event["data"]["interaction_id"],
             "answer" => %{"choice_id" => Wire.encode_identity("allow")},
             "writer_epoch" => epoch
           })
@@ -481,7 +481,7 @@ defmodule LoopexDaemon.TelemetryParityTest do
             "method" => "session.respond_interaction",
             "request_id" => "answer",
             "command_id" => Wire.encode_identity("parity-answer"),
-            "interaction_id" => Wire.encode_identity(find_key(event, "interaction_id")),
+            "interaction_id" => event["data"]["interaction_id"],
             "answer" => %{"choice_id" => Wire.encode_identity("allow")},
             "writer_epoch" => epoch
           })
