@@ -39,14 +39,21 @@ defmodule LoopexComposition.StartupGateTest do
   end
 
   test "an owned first unavailable snapshot stays unavailable after its cutoff" do
-    {:ok, root} = Supervisor.start_link([
-      Supervisor.child_spec({Task.Supervisor, []}, id: Loopex.Runtime.Workers)
-    ], strategy: :one_for_one)
+    {:ok, root} =
+      Supervisor.start_link(
+        [
+          Supervisor.child_spec({Task.Supervisor, []}, id: Loopex.Runtime.Workers)
+        ],
+        strategy: :one_for_one
+      )
+
     runtime = %Runtime{supervisor: root, token: make_ref()}
     Process.put({StartupGate, :test_listener}, self())
     cutoff = System.monotonic_time(:millisecond) - 1
+
     assert {:error, :runtime_unavailable} =
-      StartupGate.await(runtime, fn _, _ -> status(:unavailable, cutoff) end)
+             StartupGate.await(runtime, fn _, _ -> status(:unavailable, cutoff) end)
+
     assert_receive {:startup_task, observer, _owner, _initial}
     monitor = Process.monitor(observer)
     assert_receive {:DOWN, ^monitor, :process, ^observer, _}
@@ -112,10 +119,11 @@ defmodule LoopexComposition.StartupGateTest do
     test = self()
     cutoff = now_ms() + 1_000
 
-    {holder, ref} = holder(self(), self(), fn runtime, _timeout ->
-      send(test, {:read_held, self(), runtime})
-      receive do: (:release -> status(:ready, cutoff))
-    end)
+    {holder, ref} =
+      holder(self(), self(), fn runtime, _timeout ->
+        send(test, {:read_held, self(), runtime})
+        receive do: (:release -> status(:ready, cutoff))
+      end)
 
     assert_receive {:read_held, observer, runtime}
     state = :sys.get_state(holder)
@@ -160,49 +168,66 @@ defmodule LoopexComposition.StartupGateTest do
   defp suspended_owned_result(outcome) do
     test = self()
     cutoff = now_ms() + 1_000
-    {:ok, root} = Supervisor.start_link([
-      Supervisor.child_spec({Task.Supervisor, []}, id: Loopex.Runtime.Workers)
-    ], strategy: :one_for_one)
+
+    {:ok, root} =
+      Supervisor.start_link(
+        [
+          Supervisor.child_spec({Task.Supervisor, []}, id: Loopex.Runtime.Workers)
+        ],
+        strategy: :one_for_one
+      )
+
     runtime = %Runtime{supervisor: root, token: make_ref()}
 
-    owner = spawn(fn ->
-      acquirer = self()
-      reads = :atomics.new(1, [])
-      Process.put({StartupGate, :test_listener}, test)
+    owner =
+      spawn(fn ->
+        acquirer = self()
+        reads = :atomics.new(1, [])
+        Process.put({StartupGate, :test_listener}, test)
 
-      read = fn _, _ ->
-        if :atomics.add_get(reads, 1, 1) == 1 do
-          send(test, {:owned_first_read, self()})
-          receive do: (:first_snapshot -> status(:starting, cutoff))
-        else
-          send(test, {:owned_second_read, self()})
-          receive do: (:suspend_owner -> :ok)
-          waiting = await_owned_receive(acquirer, cutoff)
-          send(test, {:owned_waiting, acquirer, self(), waiting})
-          [status: :waiting, current_function: {StartupGate, :await_result, 3}] = waiting
-          true = :erlang.suspend_process(acquirer)
-          send(test, {:owned_suspended, acquirer, self()})
-          receive do: (:return_result -> :ok)
-          if outcome == :no_result, do: Process.exit(self(), :kill), else: status(:ready, cutoff)
+        read = fn _, _ ->
+          if :atomics.add_get(reads, 1, 1) == 1 do
+            send(test, {:owned_first_read, self()})
+            receive do: (:first_snapshot -> status(:starting, cutoff))
+          else
+            send(test, {:owned_second_read, self()})
+            receive do: (:suspend_owner -> :ok)
+            waiting = await_owned_receive(acquirer, cutoff)
+            send(test, {:owned_waiting, acquirer, self(), waiting})
+            [status: :waiting, current_function: {StartupGate, :await_result, 3}] = waiting
+            true = :erlang.suspend_process(acquirer)
+            send(test, {:owned_suspended, acquirer, self()})
+            receive do: (:return_result -> :ok)
+
+            if outcome == :no_result,
+              do: Process.exit(self(), :kill),
+              else: status(:ready, cutoff)
+          end
         end
-      end
 
-      send(test, {:owned_result, StartupGate.await(runtime, read)})
-    end)
+        send(test, {:owned_result, StartupGate.await(runtime, read)})
+      end)
 
     on_exit(fn ->
       if Process.alive?(owner), do: Process.exit(owner, :kill)
       if Process.alive?(root), do: Process.exit(root, :kill)
     end)
+
     assert_receive {:startup_task, observer, ^owner, _initial}, 1_000
     assert_receive {:owned_first_read, ^observer}, 1_000
     observer_down = Process.monitor(observer)
     send(observer, :first_snapshot)
-    assert_receive {:startup_snapshot_pinned, ^owner, ^observer, {:ok, %{state: :starting}}}, 1_000
+
+    assert_receive {:startup_snapshot_pinned, ^owner, ^observer, {:ok, %{state: :starting}}},
+                   1_000
+
     assert_receive {:owned_second_read, ^observer}, 1_000
     send(observer, :suspend_owner)
+
     assert_receive {:owned_waiting, ^owner, ^observer,
-      [status: :waiting, current_function: {StartupGate, :await_result, 3}]}, 1_000
+                    [status: :waiting, current_function: {StartupGate, :await_result, 3}]},
+                   1_000
+
     assert_receive {:owned_suspended, ^owner, ^observer}, 1_000
 
     if outcome == :late_ready,
@@ -213,11 +238,14 @@ defmodule LoopexComposition.StartupGateTest do
     reason = if outcome == :no_result, do: :killed, else: :normal
     assert_receive {:DOWN, ^observer_down, :process, ^observer, ^reason}, 1_000
     true = :erlang.resume_process(owner)
-    expected = case outcome do
-      :ready -> {:ok, System.convert_time_unit(cutoff, :millisecond, :native)}
-      :late_ready -> {:error, :startup_deadline_expired}
-      :no_result -> {:error, :runtime_unavailable}
-    end
+
+    expected =
+      case outcome do
+        :ready -> {:ok, System.convert_time_unit(cutoff, :millisecond, :native)}
+        :late_ready -> {:error, :startup_deadline_expired}
+        :no_result -> {:error, :runtime_unavailable}
+      end
+
     assert_receive {:owned_result, ^expected}, 1_000
     Supervisor.stop(root)
   end
@@ -226,8 +254,12 @@ defmodule LoopexComposition.StartupGateTest do
     state = Process.info(owner, [:status, :current_function])
 
     cond do
-      state == [status: :waiting, current_function: {StartupGate, :await_result, 3}] -> state
-      now_ms() >= cutoff -> {:not_waiting_before_cutoff, state}
+      state == [status: :waiting, current_function: {StartupGate, :await_result, 3}] ->
+        state
+
+      now_ms() >= cutoff ->
+        {:not_waiting_before_cutoff, state}
+
       true ->
         :erlang.yield()
         await_owned_receive(owner, cutoff)
@@ -241,10 +273,11 @@ defmodule LoopexComposition.StartupGateTest do
     owner = if lost == :owner, do: dependency, else: self()
     root = if lost == :root, do: dependency, else: self()
 
-    {holder, _ref} = holder(owner, root, fn runtime, _timeout ->
-      send(test, {:read_held, self(), runtime})
-      receive do: (:never -> status(:ready, now_ms() + 1_000))
-    end)
+    {holder, _ref} =
+      holder(owner, root, fn runtime, _timeout ->
+        send(test, {:read_held, self(), runtime})
+        receive do: (:never -> status(:ready, now_ms() + 1_000))
+      end)
 
     assert_receive {:read_held, observer, runtime}
     holder_down = Process.monitor(holder)
@@ -294,7 +327,9 @@ defmodule LoopexComposition.StartupGateTest do
 
   defp dependency(test) do
     receive do
-      :finish -> :ok
+      :finish ->
+        :ok
+
       message ->
         send(test, message)
         dependency(test)
