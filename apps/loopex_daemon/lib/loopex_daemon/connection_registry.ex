@@ -743,6 +743,7 @@ defmodule LoopexDaemon.ConnectionRegistry do
            owner: owner,
            progress_sink: progress_sink,
            progress_guardian_monitor: Process.monitor(guardian),
+           progress_phase: :open,
            progress_monitors: %{},
            connection_module: Keyword.get(options, :connection_module, SocketConnection),
            connection_context: Keyword.get(options, :connection_context),
@@ -1525,7 +1526,19 @@ defmodule LoopexDaemon.ConnectionRegistry do
 
   def handle_info({:relay_request_unanswered, _request}, state), do: {:noreply, state}
 
-  def handle_info({:close_all_deadline, deadline}, %{close_all: %{ref: ref}} = state) do
+  def handle_info(
+        {:close_all_deadline, deadline},
+        %{close_all: %{deadline: deadline, phase: :joining}} = state
+      ) do
+    if now_ms() >= deadline do
+      {:noreply, finish_registry_progress_close(state, {:error, :connections_lost})}
+    else
+      timer = Process.send_after(self(), {:close_all_deadline, deadline}, deadline - now_ms())
+      {:noreply, put_in(state, [:close_all, :timer], timer)}
+    end
+  end
+
+  def handle_info({:close_all_deadline, deadline}, %{close_all: %{ref: ref, deadline: deadline}} = state) do
     if now_ms() >= deadline do
       Enum.each(state.rows, fn {_token, row} ->
         if is_pid(row.connection_pid), do: Process.exit(row.connection_pid, :kill)
@@ -1705,7 +1718,7 @@ defmodule LoopexDaemon.ConnectionRegistry do
   # Technical depth: take acknowledges the exact coalesced ready notification.
   # The upstream lease spans every bounded local offer, then releases; neither
   # a slow socket nor an absent/closing attachment can retain this ingress.
-  def handle_info({:loopex_progress_ready, sink}, %{progress_sink: sink} = state) do
+  def handle_info({:loopex_progress_ready, sink}, %{progress_sink: sink, progress_phase: :open} = state) do
     send(self(), {:loopex_progress_ready, sink})
     case drain_progress(state, 32) do
       :ok -> {:noreply, state}
@@ -1829,8 +1842,36 @@ defmodule LoopexDaemon.ConnectionRegistry do
       Process.send_after(self(), {:close_all_deadline, deadline}, max(deadline - now_ms(), 0))
 
     Logger.debug("loopex daemon connection close-all start")
-    {:noreply, maybe_finish_close_all(%{state | close_all: %{ref: ref, timer: timer}})}
+    {:noreply, maybe_finish_close_all(%{state | close_all: %{ref: ref, timer: timer, deadline: deadline, phase: :waiting}})}
   end
+
+  # Concept: normal final close joins this Registry's own native arena after
+  # the existing connection retirement barrier has emptied its rows.
+  # Technical depth: only this opening owner invokes close. One metadata-only
+  # callback retains the original ref/deadline/timer; the independent Owner
+  # watchdog contains a blocked call. Actor death/forced transport is no join.
+  def handle_info(
+        {:close_registry_progress, ref},
+        %{close_all: %{ref: ref, deadline: deadline, phase: :joining},
+          progress_phase: :joining} = state
+      ) when map_size(state.rows) == 0 do
+    result =
+      if now_ms() < deadline do
+        Loopex.ProgressSink.close(state.progress_sink)
+      else
+        {:error, :cleanup_unproved}
+      end
+
+    if result == :ok and now_ms() < deadline do
+      Process.demonitor(state.progress_guardian_monitor, [:flush])
+      state = %{state | progress_guardian_monitor: nil, progress_phase: :closed}
+      {:noreply, finish_registry_progress_close(state, :ok)}
+    else
+      {:noreply, finish_registry_progress_close(state, {:error, :connections_lost})}
+    end
+  end
+
+  def handle_info({:close_registry_progress, _ref}, state), do: {:noreply, state}
 
   # Concept: the daemon owner says when the relay has begun tearing down; from
   # then on no relay flow runs, and every remaining one is abandoned.
@@ -2900,15 +2941,36 @@ defmodule LoopexDaemon.ConnectionRegistry do
     end
   end
 
-  defp maybe_finish_close_all(%{close_all: %{ref: ref, timer: timer}} = state)
+  defp maybe_finish_close_all(%{close_all: %{ref: ref, deadline: deadline, phase: :waiting}} = state)
        when map_size(state.rows) == 0 do
-    _ = Process.cancel_timer(timer)
-    send(state.owner, {:owner_reply, self(), ref, :ok})
-    Logger.debug("loopex daemon connection close-all complete")
-    %{state | close_all: nil}
+    cond do
+      now_ms() >= deadline ->
+        finish_registry_progress_close(state, {:error, :connections_lost})
+      state.progress_phase == :closed ->
+        finish_registry_progress_close(state, :ok)
+      state.progress_phase == :open ->
+        send(self(), {:close_registry_progress, ref})
+        state
+        |> Map.put(:progress_phase, :joining)
+        |> put_in([:close_all, :phase], :joining)
+      true ->
+        finish_registry_progress_close(state, {:error, :connections_lost})
+    end
   end
 
   defp maybe_finish_close_all(state), do: state
+
+  defp finish_registry_progress_close(%{close_all: %{ref: ref, timer: timer, deadline: deadline}} = state, reply) do
+    _ = Process.cancel_timer(timer)
+    reply = if reply == :ok and now_ms() >= deadline, do: {:error, :connections_lost}, else: reply
+    send(state.owner, {:owner_reply, self(), ref, reply})
+    # The old capability is retained only as startup identity. Closed/failed
+    # phase permanently retires its ready route. Failed cleanup supplies no
+    # claim that its native arena was closed; transport remains stopped.
+    phase = if state.progress_phase == :closed, do: :closed, else: :failed
+    Logger.debug("loopex daemon Registry native close decided")
+    %{state | close_all: nil, progress_phase: phase}
+  end
 
   defp connection_down(state, token) do
     case Map.fetch(state.rows, token) do

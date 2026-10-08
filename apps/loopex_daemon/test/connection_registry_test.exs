@@ -204,6 +204,110 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
     end
   end
 
+  test "normal empty-row close joins the actual Registry arena once and retires stale readiness" do
+    registry = start_registry(5_000)
+    assert {:ok, sink} = ConnectionRegistry.progress_sink(registry)
+    {guardian, incarnation, arena} = sink
+    guardian_monitor = Process.monitor(guardian)
+    1 = :erlang.trace(guardian, true, [:receive])
+    ref = make_ref()
+    gate = make_ref()
+    observer = self()
+    deadline = now_ms() + 5_000
+    :ok = :sys.install(registry, {gate, fn
+      :waiting, {:in, {:close_registry_progress, ^ref}}, _extra ->
+        send(observer, {:registry_native_join_parked, gate})
+        receive do {:continue_registry_native_join, ^gate} -> :done end
+      debug, _event, _extra -> debug
+    end, :waiting})
+    on_exit(fn -> send(registry, {:continue_registry_native_join, gate}) end)
+    send(registry, {:owner_request, self(), ref, {:close_all, WireRecords.daemon_stopping("operator_stop"), deadline}})
+    assert_receive {:registry_native_join_parked, ^gate}, 1_000
+    {:ok, item} = Loopex.CompactionProgress.new("episode", %{"kind" => "compact", "id" => "command"}, String.duplicate("a", 32), 0)
+    for _ <- 1..32, do: assert(:ok = Loopex.ProgressSink.try_offer(sink, "session", item))
+    assert :dropped = Loopex.ProgressSink.try_offer(sink, "session", item)
+    [{:state, ^incarnation, ^registry, :open, retained_bytes, slots, _ready}] = :ets.lookup(arena, :state)
+    assert retained_bytes > 0 and retained_bytes <= 524_288
+    assert Enum.count(Tuple.to_list(slots), &(not is_nil(&1))) == 32
+    send(registry, {:continue_registry_native_join, gate})
+    assert_receive {:trace, ^guardian, :receive, {:"$gen_call", {^registry, _tag}, {:close, ^incarnation}}}, 1_000
+    assert_receive {:DOWN, ^guardian_monitor, :process, ^guardian, :normal}, 1_000
+    assert :ets.info(arena) == :undefined
+    assert_receive {:owner_reply, ^registry, ^ref, :ok}, 1_000
+    assert now_ms() < deadline
+    assert Process.alive?(registry)
+    assert %{progress_phase: :closed, progress_guardian_monitor: nil, close_all: nil, rows: rows} = :sys.get_state(registry)
+    assert rows == %{}
+    assert :dropped = Loopex.ProgressSink.try_offer(sink, "session", item)
+
+    send(registry, {:loopex_progress_ready, sink})
+    send(registry, {:close_registry_progress, ref})
+    send(registry, {:close_registry_progress, make_ref()})
+    send(registry, {:close_all_deadline, deadline})
+    repeated = make_ref()
+    send(registry, {:owner_request, self(), repeated, {:close_all, WireRecords.daemon_stopping("operator_stop"), deadline}})
+    assert_receive {:owner_reply, ^registry, ^repeated, :ok}, 1_000
+    assert %{progress_phase: :closed, progress_guardian_monitor: nil, close_all: nil} = :sys.get_state(registry)
+    refute_receive {:owner_reply, ^registry, ^ref, _duplicate}, 0
+  end
+
+  test "a delayed Registry arena join cannot accept an expired original close deadline" do
+    registry = start_registry(5_000)
+    assert {:ok, sink} = ConnectionRegistry.progress_sink(registry)
+    {guardian, _incarnation, arena} = sink
+    ref = make_ref()
+    gate = make_ref()
+    observer = self()
+    deadline = now_ms() + 200
+    :ok = :sys.install(registry, {gate, fn
+      :waiting, {:in, {:close_registry_progress, ^ref}}, _extra ->
+        send(observer, {:expired_registry_join_parked, gate})
+        receive do {:continue_expired_registry_join, ^gate} -> :done end
+      debug, _event, _extra -> debug
+    end, :waiting})
+    on_exit(fn -> send(registry, {:continue_expired_registry_join, gate}) end)
+    send(registry, {:owner_request, self(), ref, {:close_all, WireRecords.daemon_stopping("operator_stop"), deadline}})
+    assert_receive {:expired_registry_join_parked, ^gate}, 1_000
+    receive do after max(deadline - now_ms() + 1, 0) -> :ok end
+    send(registry, {:continue_expired_registry_join, gate})
+    assert_receive {:owner_reply, ^registry, ^ref, {:error, :connections_lost}}, 1_000
+    assert Process.alive?(guardian) and :ets.info(arena) != :undefined
+    assert %{progress_phase: :failed, close_all: nil} = :sys.get_state(registry)
+    repeated = make_ref()
+    send(registry, {:owner_request, self(), repeated, {:close_all, WireRecords.daemon_stopping("operator_stop"), now_ms() + 1_000}})
+    assert_receive {:owner_reply, ^registry, ^repeated, {:error, :connections_lost}}, 1_000
+    refute_receive {:owner_reply, ^registry, ^ref, :ok}, 0
+  end
+
+  test "a genuine native close observed after the Registry external deadline remains connections_lost" do
+    registry = start_registry(5_000)
+    Process.unlink(registry)
+    registry_monitor = Process.monitor(registry)
+    assert {:ok, {guardian, incarnation, arena}} = ConnectionRegistry.progress_sink(registry)
+    guardian_monitor = Process.monitor(guardian)
+    gate = make_ref()
+    observer = self()
+    :ok = :sys.install(guardian, {gate, fn
+      :waiting, {:out, :ok, {^registry, _tag}, %{incarnation: ^incarnation}}, _extra ->
+        send(observer, {:late_native_close_replied, gate})
+        receive do {:continue_late_native_close, ^gate} -> :done end
+      debug, _event, _extra -> debug
+    end, :waiting})
+    on_exit(fn -> send(guardian, {:continue_late_native_close, gate}) end)
+    ref = make_ref()
+    deadline = now_ms() + 200
+    send(registry, {:owner_request, self(), ref, {:close_all, WireRecords.daemon_stopping("operator_stop"), deadline}})
+    assert_receive {:late_native_close_replied, ^gate}, 1_000
+    assert Process.alive?(guardian) and :ets.info(arena) != :undefined
+    receive do after max(deadline - now_ms() + 1, 0) -> :ok end
+    send(guardian, {:continue_late_native_close, gate})
+    assert_receive {:DOWN, ^guardian_monitor, :process, ^guardian, :normal}, 1_000
+    assert :ets.info(arena) == :undefined
+    assert_receive {:owner_reply, ^registry, ^ref, {:error, :connections_lost}}, 1_000
+    assert_receive {:DOWN, ^registry_monitor, :process, ^registry, :connections_lost}, 1_000
+    refute_receive {:owner_reply, ^registry, ^ref, :ok}, 0
+  end
+
   test "progress promotion binds only the exact waiting child and incarnation" do
     registry = start_registry(5_000, connection_module: ManualConnection)
     connection = start_manual_connection(registry)
