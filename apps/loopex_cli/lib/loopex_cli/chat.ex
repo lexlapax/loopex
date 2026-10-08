@@ -223,8 +223,7 @@ defmodule LoopexCli.Chat do
                ) do
           case guarded(fn -> drive(driver, prepared, activation, deps, tag) end) do
             {:error, :chat_startup_failed} ->
-              ChatDriver.interrupt(driver)
-              guarded(fn -> ChatDriver.run(driver) end)
+              guarded(fn -> ChatDriver.refuse_startup(driver, :chat_startup_failed) end)
               {:error, :chat_startup_failed}
 
             result ->

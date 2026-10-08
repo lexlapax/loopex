@@ -289,7 +289,15 @@ defmodule LoopexCli.ChatDriver do
         %{owner: caller, startup: :ready, from: nil, finished: false} = state
       )
       when is_atom(code) and code not in [nil, true, false] do
-    {:noreply, %{state | from: from} |> error(code) |> fail(code)}
+    # Concept: startup owns only local attachments until the host activates.
+    # Technical depth: capture the ordinary join cutoff, then reap without a
+    # session abort. Even output refusal sees stopping=true before it can fail.
+    {:noreply,
+     %{state | from: from, transport: code, exit_code: max(state.exit_code, 1)}
+     |> capture_stop_deadline()
+     |> error(code)
+     |> reap()
+     |> maybe_finished()}
   end
 
   def handle_call(
@@ -1293,6 +1301,16 @@ defmodule LoopexCli.ChatDriver do
   defp begin_stop(%{stopping: true} = state), do: state
 
   defp begin_stop(state) do
+    state = capture_stop_deadline(state)
+    if state.pending == nil and state.unresolved == nil, do: abort_for_stop(state), else: state
+  end
+
+  # Concept: startup refusal and ordinary cancellation share one join budget.
+  # Technical depth: this helper captures only local lifetime mechanics. The
+  # ordinary stop path separately submits its runtime abort; startup reaps.
+  defp capture_stop_deadline(%{stopping: true} = state), do: state
+
+  defp capture_stop_deadline(state) do
     grace = state.cleanup_grace_ms || Loopex.Executor.default_cleanup_grace_ms()
 
     {:ok, bounds} = Loopex.Executor.cancellation_bounds(grace)
@@ -1310,7 +1328,7 @@ defmodule LoopexCli.ChatDriver do
     }
 
     if state.input_worker, do: Process.exit(state.input_worker, :kill)
-    if state.pending == nil and state.unresolved == nil, do: abort_for_stop(state), else: state
+    state
   end
 
   # Concept: a late writer notification may shorten an active shutdown.

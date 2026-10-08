@@ -445,6 +445,440 @@ defmodule LoopexCli.ChatWorkflowTest do
     assert List.last(controls(f.output))["cleanup"] == "confirmed"
   end
 
+  test "resumed installer refusal and exceptions abandon before outer runtime teardown", f do
+    Enum.reduce([:refuse, :raise, :throw, :exit], [], fn fault, capabilities ->
+      capability = resumed_startup_failure(f, fault)
+      refute capability in capabilities
+      [capability | capabilities]
+    end)
+  end
+
+  test "actual guarded resume transfer loss retains unknown cleanup before outer teardown", f do
+    assert is_reference(resumed_startup_failure(f, :guard_loss))
+  end
+
+  # Concept: each startup fault owns a fresh prepared capability and disposable
+  # root, whose deletion requires the original actors' positive DOWN joins.
+  # Technical depth: the callback observation precedes outer runtime stop. A
+  # native guard loss spends one captured five-second endpoint and returns the
+  # actual transfer result; no installer result or owner verdict is fabricated.
+  defp resumed_startup_failure(f, fault) do
+    tag = make_ref()
+
+    Process.put(tag, %{
+      root: nil,
+      fixture: nil,
+      actors: [],
+      capture: nil,
+      observation_failure: nil
+    })
+
+    try do
+      bound = resumed_startup_context(f, tag)
+
+      fixture =
+        Fixture.start(
+          script: [],
+          tools: [],
+          model: bound.prepared.selection.configuration["model"],
+          runtime_id: "chat-workflow-runtime",
+          cleanup_grace_ms: bound.prepared.selection.profile["session"]["cleanup_grace_ms"]
+        )
+
+      Process.put(tag, %{Process.get(tag) | fixture: fixture})
+
+      resumed_capture_actors(tag, [
+        fixture.runtime.supervisor,
+        fixture.store,
+        fixture.model,
+        fixture.executor
+      ])
+
+      {:ok, children} = Loopex.Runtime.children(fixture.runtime)
+      resumed_capture_actors(tag, Map.values(children))
+
+      assert {:ok, session} =
+               Loopex.create_session(fixture.runtime, bound.prepared.session_options,
+                 command_id: "create-resume-startup-fault",
+                 genesis: bound.prepared.genesis
+               )
+
+      assert :ok =
+               Loopex.track_session(
+                 Path.join(bound.root, "state"),
+                 session,
+                 "chat-workflow-runtime"
+               )
+
+      opts =
+        options(bound, fixture)
+        |> Keyword.put(:install_signal, fn driver, _, _, activation ->
+          assert %Loopex.ResumeActivation{} = activation
+          assert {:ok, retained} = Loopex.prepared_session_configuration(activation)
+          assert retained.configuration == bound.prepared.selection.configuration
+          assert retained.tool_selection == bound.prepared.genesis["tool_selection"]
+
+          assert retained.cleanup_grace_ms ==
+                   bound.prepared.selection.profile["session"]["cleanup_grace_ms"]
+
+          state = :sys.get_state(driver)
+          assert state.startup == :ready
+          assert state.input_worker == nil
+
+          assert Enum.sort(Enum.map(state.workers, fn {_, worker} -> worker.kind end)) ==
+                   [:command, :reader]
+
+          workers = Map.keys(state.workers)
+          resumed_capture_actors(tag, [activation.coordinator, driver, state.writer | workers])
+
+          capture = %{
+            activation: activation,
+            driver: driver,
+            writer: state.writer,
+            workers: workers,
+            records: Fixture.records(fixture, session),
+            events: Fixture.events(fixture, session),
+            observed_before_stop: false,
+            outer_joined: false,
+            deadline: System.monotonic_time(:millisecond) + 5_000
+          }
+
+          Process.put(tag, %{Process.get(tag) | capture: capture})
+
+          case fault do
+            :refuse -> {:error, :interrupt_handler_unavailable}
+            :raise -> raise "private resumed installer failure"
+            :throw -> throw(:private_resumed_installer_failure)
+            :exit -> exit(:private_resumed_installer_failure)
+            :guard_loss -> resumed_guard_loss(tag, activation, capture.deadline)
+          end
+        end)
+        |> Keyword.put(:with_runtime, fn _, callback ->
+          try do
+            result = callback.(fixture.runtime)
+            capture = Process.get(tag).capture
+            assert is_map(capture)
+            assert Process.alive?(fixture.runtime.supervisor)
+            assert Process.alive?(capture.activation.coordinator)
+            assert Process.alive?(capture.driver)
+
+            assert {:error, :resume_activation_abandoned} =
+                     Loopex.prepared_session_configuration(capture.activation)
+
+            assert {:error, :resume_activation_abandoned} =
+                     Loopex.activate_resume(capture.activation)
+
+            assert Fixture.records(fixture, session) == capture.records
+            assert Fixture.events(fixture, session) == capture.events
+            assert Loopex.AgentLoopTestModel.dispatched(fixture.model) == []
+            assert Agent.get(fixture.executor, & &1.jobs) == []
+            assert StringIO.contents(bound.input) == {"must remain unread\n/quit\n", ""}
+            refute Enum.any?(controls(bound.output), &(&1["event"] == "closing"))
+            resumed_join_actors(tag, capture.workers, capture.deadline)
+
+            if fault == :guard_loss do
+              assert capture.native_transfer_result == {:unresolved, :resume_handoff_unresolved}
+              %{guard: guard, holder: holder, nonce: nonce} = capture.handoff
+
+              assert_receive {^tag, :committed_before_guard_loss, ^guard, ^holder, ^nonce,
+                              handoff, prepare, commit},
+                             max(capture.deadline - System.monotonic_time(:millisecond), 0)
+
+              assert is_reference(handoff) and is_reference(prepare) and is_reference(commit)
+              reasons = resumed_join_actors(tag, [guard, holder], capture.deadline)
+              assert reasons[guard] == :resume_fixture_guard_lost_before_ack
+              assert reasons[holder] in [:resume_fixture_guard_lost_before_ack, :killed]
+            end
+
+            # Concept: guarded host callbacks can convert a failed assertion into
+            # a startup refusal. The outer test therefore requires both positive
+            # observations before it can accept that refusal as proof.
+            # Technical depth: mark this cut before stop and the original joins
+            # afterwards; the independent assertions run outside Chat.run/2.
+            state = Process.get(tag)
+
+            Process.put(tag, %{
+              state
+              | capture: Map.put(state.capture, :observed_before_stop, true)
+            })
+
+            assert :ok == Loopex.stop(fixture.runtime)
+
+            resumed_join_actors(
+              tag,
+              [fixture.runtime.supervisor, capture.activation.coordinator | Map.values(children)],
+              capture.deadline
+            )
+
+            state = Process.get(tag)
+            Process.put(tag, %{state | capture: Map.put(state.capture, :outer_joined, true)})
+            result
+          catch
+            kind, reason ->
+              stacktrace = __STACKTRACE__
+              state = Process.get(tag)
+
+              Process.put(tag, %{
+                state
+                | observation_failure: {kind, reason, stacktrace}
+              })
+
+              :erlang.raise(kind, reason, stacktrace)
+          end
+        end)
+
+      result = Chat.run(["chat", "--config", bound.path, "--resume", session], opts)
+
+      # Concept: retain assertion failures outside the guarded host callback.
+      # Technical depth: rethrow the original class, reason and stack before a
+      # startup refusal can be accepted as this fixture's positive proof.
+      case Process.get(tag).observation_failure do
+        nil -> :ok
+        {kind, reason, stacktrace} -> :erlang.raise(kind, reason, stacktrace)
+      end
+
+      assert result == 1
+      capture = Process.get(tag).capture
+      assert capture.observed_before_stop
+      assert capture.outer_joined
+
+      assert resumed_join_actors(tag, [capture.driver, capture.writer], capture.deadline) ==
+               %{capture.driver => :normal, capture.writer => :normal}
+
+      assert StringIO.contents(bound.input) == {"must remain unread\n/quit\n", ""}
+      assert Loopex.AgentLoopTestModel.dispatched(fixture.model) == []
+      assert Agent.get(fixture.executor, & &1.jobs) == []
+      records = controls(bound.output)
+      assert Enum.count(records, &(&1["event"] == "closing")) == 1
+      assert List.last(records)["exit_code"] == 1
+
+      assert List.last(records)["cleanup"] ==
+               if(fault == :guard_loss, do: "unknown", else: "confirmed")
+
+      {_, transcript} = StringIO.contents(bound.output)
+      refute transcript =~ "private resumed installer failure"
+      refute transcript =~ "private_resumed_installer_failure"
+      capture.activation.capability
+    after
+      resumed_cleanup_fixture(tag)
+    end
+  end
+
+  defp resumed_startup_context(f, tag) do
+    root =
+      Path.join(System.tmp_dir!(), "chat-resume-startup-#{System.unique_integer([:positive])}")
+
+    Process.put(tag, %{Process.get(tag) | root: root})
+    File.mkdir_p!(Path.join(root, "workspace"))
+    File.mkdir!(Path.join(root, "state"))
+    path = Path.join(root, "config.json")
+    File.write!(path, :json.encode(f.profile))
+    assert {:ok, prepared} = ChatConfiguration.load(["chat", "--config", path], root, nil)
+    assert {:ok, input} = StringIO.open("must remain unread\n/quit\n", encoding: :latin1)
+    resumed_capture_actors(tag, [input])
+    assert {:ok, output} = StringIO.open("", encoding: :latin1)
+    resumed_capture_actors(tag, [output])
+    assert {:ok, diagnostic} = StringIO.open("", encoding: :latin1)
+    resumed_capture_actors(tag, [diagnostic])
+
+    %{
+      f
+      | root: root,
+        path: path,
+        prepared: prepared,
+        input: input,
+        output: output,
+        diagnostic: diagnostic
+    }
+  end
+
+  defp resumed_guard_loss(tag, activation, deadline) do
+    installer = self()
+    coordinator = activation.coordinator
+    nonce = make_ref()
+
+    {guard, guard_monitor} =
+      spawn_monitor(fn ->
+        installer_monitor = Process.monitor(installer)
+        coordinator_monitor = Process.monitor(coordinator)
+
+        holder =
+          spawn_link(fn ->
+            receive do
+              :stop -> :ok
+            after
+              max(deadline - System.monotonic_time(:millisecond), 0) ->
+                exit(:resume_fixture_holder_deadline)
+            end
+          end)
+
+        holder_monitor = Process.monitor(holder)
+        send(installer, {tag, :guard_ready, self(), holder})
+
+        receive do
+          {^tag, :participants_captured} ->
+            resumed_transfer_guard(
+              installer,
+              coordinator,
+              holder,
+              nonce,
+              tag,
+              deadline,
+              [installer_monitor, coordinator_monitor, holder_monitor],
+              nil,
+              nil
+            )
+        after
+          max(deadline - System.monotonic_time(:millisecond), 0) ->
+            exit(:resume_fixture_guard_deadline)
+        end
+      end)
+
+    state = Process.get(tag)
+    Process.put(tag, %{state | actors: [{guard, guard_monitor} | state.actors]})
+
+    assert_receive {^tag, :guard_ready, ^guard, holder},
+                   max(deadline - System.monotonic_time(:millisecond), 0)
+
+    resumed_capture_actors(tag, [holder])
+    assert Process.alive?(guard) and Process.alive?(holder)
+    assert {:monitors, originals} = Process.info(guard, :monitors)
+
+    assert MapSet.new(originals) ==
+             MapSet.new([{:process, installer}, {:process, coordinator}, {:process, holder}])
+
+    assert {:links, links} = Process.info(holder, :links)
+    assert guard in links
+    capture = Process.get(tag).capture
+    handoff = %{guard: guard, holder: holder, nonce: nonce}
+    Process.put(tag, %{Process.get(tag) | capture: Map.put(capture, :handoff, handoff)})
+    send(guard, {tag, :participants_captured})
+    result = Loopex.transfer_resume(activation, holder, {guard, nonce})
+    assert result == {:unresolved, :resume_handoff_unresolved}
+    state = Process.get(tag)
+    Process.put(tag, %{state | capture: Map.put(state.capture, :native_transfer_result, result)})
+    result
+  end
+
+  defp resumed_transfer_guard(
+         installer,
+         coordinator,
+         holder,
+         nonce,
+         tag,
+         deadline,
+         monitors,
+         pending,
+         prepared
+       ) do
+    [installer_monitor, coordinator_monitor, holder_monitor] = monitors
+
+    case {pending, prepared} do
+      {handoff, {handoff, prepare}} when is_reference(handoff) and is_reference(prepare) ->
+        send(
+          coordinator,
+          {:loopex_prepared_transfer_guard_ready, self(), holder, nonce, handoff, prepare}
+        )
+
+        receive do
+          {:loopex_prepared_owner_verdict, ^coordinator, ^holder, ^nonce, ^handoff, commit,
+           :committed}
+          when is_reference(commit) ->
+            send(
+              installer,
+              {tag, :committed_before_guard_loss, self(), holder, nonce, handoff, prepare, commit}
+            )
+
+            exit(:resume_fixture_guard_lost_before_ack)
+
+          {:DOWN, monitor, :process, _, _}
+          when monitor == installer_monitor or monitor == coordinator_monitor or
+                 monitor == holder_monitor ->
+            exit(:resume_fixture_participant_lost)
+        after
+          max(deadline - System.monotonic_time(:millisecond), 0) ->
+            exit(:resume_fixture_guard_deadline)
+        end
+
+      _ ->
+        receive do
+          {:loopex_prepared_transfer_pending, ^installer, ^coordinator, ^holder, ^nonce, handoff}
+          when is_reference(handoff) and pending == nil ->
+            resumed_transfer_guard(
+              installer,
+              coordinator,
+              holder,
+              nonce,
+              tag,
+              deadline,
+              monitors,
+              handoff,
+              prepared
+            )
+
+          {:loopex_prepared_owner_prepare, ^coordinator, ^holder, ^nonce, handoff, prepare}
+          when is_reference(handoff) and is_reference(prepare) and prepared == nil ->
+            resumed_transfer_guard(
+              installer,
+              coordinator,
+              holder,
+              nonce,
+              tag,
+              deadline,
+              monitors,
+              pending,
+              {handoff, prepare}
+            )
+
+          {:DOWN, monitor, :process, _, _}
+          when monitor == installer_monitor or monitor == coordinator_monitor or
+                 monitor == holder_monitor ->
+            exit(:resume_fixture_participant_lost)
+        after
+          max(deadline - System.monotonic_time(:millisecond), 0) ->
+            exit(:resume_fixture_guard_deadline)
+        end
+    end
+  end
+
+  defp resumed_capture_actors(tag, pids) do
+    state = Process.get(tag)
+    captured = Enum.map(state.actors, &elem(&1, 0))
+    fresh = Enum.uniq(pids) -- captured
+    Enum.each(fresh, &Process.unlink/1)
+    Process.put(tag, %{state | actors: monitor_actors(fresh) ++ state.actors})
+  end
+
+  defp resumed_join_actors(tag, pids, deadline) do
+    joined =
+      for {pid, reference} <- Process.get(tag).actors, pid in pids do
+        assert_receive {:DOWN, ^reference, :process, ^pid, reason},
+                       max(deadline - System.monotonic_time(:millisecond), 0)
+
+        refute Process.alive?(pid)
+        state = Process.get(tag)
+        Process.put(tag, %{state | actors: List.keydelete(state.actors, pid, 0)})
+        {pid, reason}
+      end
+
+    Map.new(joined)
+  end
+
+  defp resumed_cleanup_fixture(tag) do
+    state = Process.get(tag)
+    deadline = System.monotonic_time(:millisecond) + 5_000
+    if state.fixture != nil, do: Fixture.stop(state.fixture)
+
+    for {pid, _} <- Process.get(tag).actors do
+      if Process.alive?(pid), do: Process.exit(pid, :kill)
+    end
+
+    resumed_join_actors(tag, Enum.map(Process.get(tag).actors, &elem(&1, 0)), deadline)
+    assert Process.get(tag).actors == []
+    if state.root != nil, do: File.rm_rf!(state.root)
+    Process.delete(tag)
+  end
+
   defp assert_trace_workflow(f, file_enabled, flags, enabled, origin) do
     trace = %{
       "enabled" => file_enabled,

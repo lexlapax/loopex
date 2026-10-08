@@ -29,6 +29,28 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Reboot continuation on 2026-10-07
 
+The resumed startup-cleanup repair is proved and literally integrated from
+isolated `2475a387fd953f6c529f78d721c219818b0c1fdc`. Original68155 is
+TERMINAL0 and collected PASS_RESUME_PREPARED_CLEANUP_PROOF:91 cases passed on
+each supported pair with no failures, exclusions, skips or invalid cases.
+Eight original processes joined and43 artifacts authenticate in205.363 seconds.
+Output `M7/resume-prepared-cleanup-repair-proof-20261007-v1`; collection SHA-256
+`11e95e6ee3979307fbc7a4835b0c7c5a3fcb665340f8a8e6c1a9ec33b695d4ad`; terminal
+`695611551e56d691277f485378d53ba9a01bfba8ba4d271c82a71e36c02df558`. Latest collected registry1751
+hashes `5420a35061b749ae4f97c1b51afc56e4cf4980a820b548090640932e97056fb3`. Do not repoll68155 or repeat the unchanged proof.
+Only the added T04 resumed-cleanup row closes; all four broader T04 original
+items remain open. Original16501 remains FAIL. Ready startup refusal joins local
+attachments before capability abandonment; ordinary cancellation still aborts
+through its existing native path. The new tests prove before-stop unchanged
+records/events, unread input, zero dispatch, exact owner joins and truthful
+guard-loss uncertainty. All original tests and captured cutoffs are preserved.
+T01–T19 originals remain88 done/85 todo/6 retired; added352 done/22 todo.
+
+Next, bind the already-reviewed ownership V3 formatter to this actual positive
+91 collection and latest registry. Ownership74 and the changed-source full
+repository check remain required. ADR0058 is still the sole asked pending
+approval. Earlier records below are historical where superseded.
+
 The continuation after the next reboot starts from pushed `90d06391`. The repair
 formatter original9541 is collected PASS in11.987 seconds with six original
 joins and38 authenticated artifacts. Output

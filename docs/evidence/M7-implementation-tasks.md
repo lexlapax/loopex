@@ -1,5 +1,13 @@
 # M7 Implementation Tasks
 
+The resumed startup-cleanup repair is integrated from tested2475a387. Original
+68155 passed all91 cases on each supported pair in205.363 seconds, with
+eight joined processes and43 authenticated artifacts. Only its added T04 row
+closes. T01–T19 originals remain88 done/85 todo/6 retired; added352 done/22 todo.
+Exact proof and retained-context references are in the [resume record](M7-resume.md).
+Ownership74 and the next changed-source full check remain open. Earlier entries
+below are historical where superseded.
+
 Repair formatter9541 passed both supported pairs in11.987 seconds; complete91
 proof original68155 is running against frozen isolated2475a387. No task row
 closes before its original terminal collection. Exact execution/context
@@ -13561,7 +13569,7 @@ or check was relaxed.
 
 ### Added implementation subtasks
 
-- [ ] Prove resumed prepared-startup abandonment after callback refusal, raise, throw and exit, and truthful uncertainty when the activation guard dies before acknowledgement; preserve exact committed records, unread input, zero model/job dispatch, native activation paths and all owned process joins on both supported pairs.
+- [x] Prove resumed prepared-startup abandonment after callback refusal, raise, throw and exit, and truthful uncertainty when the activation guard dies before acknowledgement; preserve exact committed records, unread input, zero model/job dispatch, native activation paths and all owned process joins on both supported pairs.
 
 - [x] Prepare durable ask's complete current v3 genesis before placement and credential custody, retain canonical model/instructions/derived capacity and exact selected tools through the public create facade, keep concrete adapter imports in composition, and prove real Local Store create/reopen/resume, capture refusal, tool profiles, resource and cleanup cases on both supported pairs. Retain failed complete CLI outputs and their focused repairs; other host creation paths and Core v2 removal remain open.
 
