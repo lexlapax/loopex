@@ -29,6 +29,57 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Reboot continuation on 2026-10-07
 
+Latest continuation: ADR0059 acceptance is pushed at `3212b0ed`. Its first
+Core Store source unit is frozen at packet `f189b278`, with26 new boundary
+cases. Independent review is running; native proof, Local persistence and
+Control/OwnerLane integration remain open. Three T04 and one T05 workstream
+rows were added. T01–T19 totals are88 original done/85 todo/6 retired and356
+added done/26 todo. Acceptance itself closes no implementation row.
+
+ADR0061 is Proposed, clarifying the accepted0059 remote cancellation wording.
+It preserves six admission fields, `refused`/`creation_cancelled`, no session
+identity and no wire disposition. Exact Proposed Concept SHA-256
+`e86f697a10e5568f22a66d666380b2ef2a74b754cfd20244f7e2c3c29aa0e9ec` and
+Technical SHA-256 `41a89917cdffb5ca40187c42326abb9e2b9557075ef90d632df49b1ec8dd57b8`
+are source-qualified by independent review `5a337605`. Documentation validation
+and maintainer acceptance are pending; dependent codec edits stay paused.
+Proposal/support snapshots are retained under
+`M7/adr0061-proposal-context-20261007-v1/retention.json`, SHA-256
+`9ced27425159f3fec6b05101c46a2443a14a60fa80a9143430e3b692b5f0b3de`,33 files.
+
+ProgressSink formatter original25957 is collected PASS,11.840seconds, six joins,
+38 artifacts,1795 registry rows. Its source8ad87a5f formatting was a no-op.
+Collection `4f080027`, terminal `70be2f12` and registry `db226893` are retained
+under `M7/progress-sink-format-20261007-v7`. Whole proof original25214 is
+collected FAIL,29.331seconds, eight joins,44 artifacts and1803 registry rows:
+current26/26 pass; floor24/26 pass with two arithmetic fixture failures.
+Collection SHA-256 `418ad7a67ad09557cbf578f7487e2e38314b20665225208319d7ebc11f74dec5`,
+terminal `1338edd7` and registry `03c5285f` remain under
+`M7/progress-sink-proof-20261007-v7`. Do not rerun or recollect either original.
+V6's earlier multiline census guard failed before any native stage; V7 added
+only the missing multiline flag. Recipe/capture context is retained under
+`M7/progress-sink-v7-run-context-20261007-v1/retention.json`, SHA-256
+`3ac02f45282414d76bc39f03c33c3c37a6ff268ec7950ea7f61354d8f1be95f4`,32 files.
+
+The reviewed test-only arithmetic repair is saved at clean isolated
+`f3b91da55f4494aaa4c23e93895e567a2b4be270`, tree
+`131673d4682430f73a57ed2f9dd0abdf1de140b4`, parent8ad87a5f. Both controls now
+copy every charged binary and witness visible/referenced sizes before asserting
+independent accounting. Production5682384f, cap and cutoffs are unchanged;
+testb4cebcc6 retains26 cases. Packet0dfedeab and independent repair review4e996342
+are retained under `M7/progress-sink-detached-fixture-context-20261007-v1/retention.json`,
+SHA-256 `ff330f023675d9eccaef485496daf6dc8eaeb7ab0b697b0a2e362a266f403168`,19 files.
+New V8 recipee35f1395 consumes the actual failed1803-row proof history. Its
+source bindings/gates remain unbound/false; the repaired source is native UNRUN.
+
+Interaction-stop V2 cleanup source is independently qualified by265fb4fe, with
+all20 original cases plus one bounded stop case. Its native21-case proof is
+UNRUN. Packet2abdbab2 and reviews are retained under
+`M7/interaction-stop-v2-source-context-20261007-v1/retention.json`, SHA-256
+`96499385b3b1a0079fb0d2560ebb54f79e2bad53c2aedd40c91d92096dc439ba`,16 files.
+Earlier paragraphs below describe their named historical revisions.
+
+
 ADR 0059 is accepted against exact candidate
 `a550ae337be6d94cea5dfcf9aa07a44ec0a571f7`; its
 [disposition](../developer/agent-context-map.md#disposition-m7-responsive-creation-transactions-2026-10-07)
@@ -38,6 +89,26 @@ native implementation and proofs remain open. The separate ProgressSink V6
 verification recipe and interaction-stop V2 cleanup repair continue. This
 acceptance closes no original or added implementation row. Counts remain
 88/85/6 original and 356/22 added for T01–T19.
+
+The four implementation workstreams now have added checklist rows, bringing
+added todo to26. Core Store contracts are assigned in
+`/Users/spuri/.codex/worktrees/m7-creation-store-contract/loopex`, base3212b0ed,
+owning Store, Transitions and a new pure boundary test. Local persistence and
+Control/OwnerLane wait for that exact schema; no carrier-only activation is
+allowed. The cancellation reader worktree is
+`/Users/spuri/.codex/worktrees/m7-creation-cancellation-codec/loopex` at the same
+base. Its author is checking the accepted result schema before edits because
+the current remote admission lacks an explicit disposition field.
+
+ProgressSink V6 packet880e8119 is frozen with16 sealed assets, formatterb12d6c3a
+and proof982ee700; actual capture/review/native execution are still pending.
+The interaction-stop V2 source packet2abdbab2 fixes cleanup ownership while
+preserving all20 original cases and the single1,000-ms cutoff; its21-case native
+proof remains unrun. V1 blocked source and review are permanently retained in
+`M7/interaction-stop-blocked-source-context-20261007-v1/retention.json`, SHA-256
+`ce5e6b886621dd3b3f94afe37d8780c69dc9018a4ba484e0be8f9d2905685694`,10 files.
+Acceptance documentation validation is pending the root-owned native sequence;
+no new documentation PASS is claimed for3212b0ed.
 
 Checkpoint `e50e8ddf` is pushed. Original formatter `24045` is terminal and
 collected FAIL at the floor formatting check. All six original processes joined;

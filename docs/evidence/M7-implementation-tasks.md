@@ -1,5 +1,23 @@
 # M7 Implementation Tasks
 
+Latest status: ADR0059's Core Store unit has26 new cases and awaits review/native
+proof. Durable adapters, Control/carrier and cancellation readers remain open.
+ADR0061 is Proposed and independently reviewed; its exact cancellation envelope
+needs maintainer acceptance after documentation validation. ProgressSink's
+paired run25214 remains failed, with current26/26 and floor24/26 passing.
+The test-only arithmetic repair is saved atf3b91da5 and awaits a fresh paired
+proof. Interaction-stop V2 is source-qualified and native UNRUN. Full retained
+references are in the [resume record](M7-resume.md). T01–T19 totals remain88
+original done/85 todo/6 retired and356 added done/26 todo. Earlier status entries
+below are historical where superseded.
+
+ADR0059 is accepted and pushed at `3212b0ed`. The first Core Store contract
+unit is assigned in its own worktree; durable adapters, Control/carrier
+integration and cancellation wire readers are separate added subtasks below.
+ProgressSink V6 preparation is frozen with native proof pending, and the
+interaction-stop V2 cleanup repair awaits review. Original T01–T19 counts
+remain88 done/85 todo/6 retired; added356 done/26 todo.
+
 ProgressSink's second formatter run is collected FAIL on two floor-only layouts.
 The equivalent common-layout source is saved and reviewed, with all26 tests still
 pending. A smaller private recipe preserves the same six formatter/eight test
@@ -13642,6 +13660,10 @@ or check was relaxed.
 
 ### Added implementation subtasks
 
+- [ ] Implement accepted ADR0059's three closed Core Store creation transaction families, exact canonical identities/receipts and bounded optional recovery read; preserve final-create bytes and prove complete malformed, counter, cap and callback controls on both supported pairs before adapter or Control activation.
+- [ ] Implement accepted ADR0059's atomic creation heads, complete candidate capsules and exact created/cancelled resolutions in the shipped Stores; prove claim/reservation and final/close races, physical replay and complete current-format backup/restore, with no unreserved fresh-create fallback after coordinated rejoin.
+- [ ] Implement accepted ADR0059's owned Control creation slot, conservative pre-permit fence and mechanical carrier with finite startup/recovery; prove actual held Store stop/status/overlap behavior, occupied-read refusals, original joins/cutoffs, actor/root/VM loss and no historical activation before coordinated rejoin.
+
 - [x] Prove resumed prepared-startup abandonment after callback refusal, raise, throw and exit, and truthful uncertainty when the activation guard dies before acknowledgement; preserve exact committed records, unread input, zero model/job dispatch, native activation paths and all owned process joins on both supported pairs.
 
 - [x] Prepare durable ask's complete current v3 genesis before placement and credential custody, retain canonical model/instructions/derived capacity and exact selected tools through the public create facade, keep concrete adapter imports in composition, and prove real Local Store create/reopen/resume, capture refusal, tool profiles, resource and cleanup cases on both supported pairs. Retain failed complete CLI outputs and their focused repairs; other host creation paths and Core v2 removal remain open.
@@ -13700,6 +13722,8 @@ or check was relaxed.
 - [ ] Run the required independent-client workflows.
 
 ### Added implementation subtasks
+
+- [ ] Join accepted ADR0059's closed creation cancellation through native result readers, both complete negotiated generation schemas and independent clients; prove refused/no-activation/no-session correlation and exact replay before coordinated serving activation.
 
 - [x] Compose the accepted model and policy interaction codecs through one pure kind/producer-aware Elixir selector and an independent Node selector; prove requested, terminal and answer-admitted branch correlation, shared expiry/cancel kinds, exact opaque/quantity domains and malformed/private/cross-kind refusal on both pairs. Keep this four-file preparation unit dormant until coordinated transport/client generation activation.
 

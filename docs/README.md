@@ -112,6 +112,7 @@ pairing, link, review, code-documentation, and enforcement contracts.
 | 0058 — bounded progress delivery | [Decision](adr/0058-bounded-progress-delivery.md#concept) | [Technical depth](adr/0058-bounded-progress-delivery-technical.md#technical-depth) |
 | 0059 — responsive creation transactions and durable custody | [Decision](adr/0059-responsive-creation-transactions.md#concept) | [Technical depth](adr/0059-responsive-creation-transactions-technical.md#technical-depth) |
 | 0060 — restore full-mode helper | [Decision](adr/0060-restore-full-mode-helper.md#concept) | [Technical depth](adr/0060-restore-full-mode-helper-technical.md#technical-depth) |
+| 0061 — creation cancellation admission envelope | [Decision](adr/0061-creation-cancellation-admission-envelope.md#concept) | [Technical depth](adr/0061-creation-cancellation-admission-envelope-technical.md#technical-depth) |
 
 An ADR pair is one decision. Its status and governance record live in the
 Concept file and bind both files when accepted.
