@@ -1,451 +1,284 @@
 defmodule LoopexCli.ChatCompositionStartupTest do
   use ExUnit.Case, async: false
-  @moduletag capture_log: true
 
-  alias Loopex.LLM.ReqLLM
-  alias Loopex.LLM.ReqLLM.{CredentialCustody, CredentialRegistry}
-  alias Loopex.Store.Local.Log
-  alias Loopex.Trace.Capability
-  alias LoopexCli.{Chat, ChatDriver, Interrupt}
-  alias LoopexComposition.{DiagnosticConsumer, StartupGate}
-  alias __MODULE__.HeldLocal
-
-  @edge :"$loopex_composition_edge_observer"
-  @slot "M7_CHAT_STARTUP_SLOT"
-  @calls [
-    {Loopex, :create_session, 3},
-    {ChatDriver, :bind, 4},
-    {DiagnosticConsumer, :settings_report, 2}
-  ]
-  @returns [{ChatDriver, :bootstrap, 3}, {Interrupt, :install_chat, 3}]
-  @signal_returns [
-    {Interrupt, :observe_handlers, 1},
-    {Interrupt, :ask_handlers_supported?, 1},
-    {Interrupt, :install_handler, 3},
-    {Interrupt, :handle_ask_signals, 0}
-  ]
+  @driver Path.join(__DIR__, "support/chat_composition_startup_driver.txt")
+  @proof "@m7_chat_startup "
+  @output_limit 65_536
+  @command_ms 60_000
+  @failure_ms 5_000
 
   test "fresh chat waits for actual Local creation startup before creating or consuming input" do
-    test = self()
+    root = Path.join(System.tmp_dir!(), "chat-composition-startup-#{System.unique_integer([:positive])}")
+    File.mkdir!(root)
+    cleanup = make_ref()
+    on_exit(cleanup, fn -> File.rm_rf!(root) end)
+    beams = Path.join(root, "beams")
+    File.mkdir!(beams)
 
-    root =
-      Path.join(
-        System.tmp_dir!(),
-        "chat-composition-startup-#{System.unique_integer([:positive])}"
-      )
+    {compiled, diagnostics} = Code.with_diagnostics(fn -> Code.compile_file(@driver) end)
+    assert diagnostics == [], "standalone fixture emitted diagnostics: #{inspect(diagnostics)}"
+    assert length(compiled) == 2
+    for {module, bytes} <- compiled do
+      File.write!(Path.join(beams, Atom.to_string(module) <> ".beam"), bytes)
+    end
 
-    workspace = Path.join(root, "workspace")
+    elixir = System.find_executable("elixir") || flunk("elixir executable unavailable")
+    paths = [beams | Enum.map(:code.get_path(), &List.to_string/1)]
+    token = Base.encode16(:crypto.strong_rand_bytes(16))
+    args = ["--erl", "+B -kernel standard_io_encoding latin1"] ++
+      Enum.flat_map(paths, &["-pa", &1]) ++
+      ["-e", "LoopexCli.ChatCompositionStartupDriver.main()", "--", root, token]
     home = Path.join(root, "home")
-    state_root = Path.join(root, "state")
-    for path <- [workspace, home], do: File.mkdir_p!(path)
-    File.write!(Path.join(root, "system.txt"), "Keep this chat local.\n")
-    config = Path.join(root, "chat.json")
-    File.write!(config, JSON.encode!(profile()))
-    previous = System.get_env(@slot)
-    legacy_name = ReqLLM.credential_variable()
-    legacy = System.get_env(legacy_name)
-    System.put_env(@slot, "m7-chat-startup-synthetic-credential")
-    {:ok, bytes} = StringIO.open("/quit\n", encoding: :latin1)
-    {:ok, output} = StringIO.open("", encoding: :latin1)
-    {:ok, diagnostic} = StringIO.open("", encoding: :latin1)
-    input = spawn(fn -> input_relay(bytes, test, true) end)
-    handler = make_ref()
+    environment = [
+      {~c"LOOPEX_HOME", String.to_charlist(home)},
+      {~c"LOOPEX_WORKSPACE", String.to_charlist(Path.join(root, "workspace"))},
+      {~c"LOOPEX_PROVIDER_API_KEY", false}, {~c"ANTHROPIC_API_KEY", false},
+      {~c"OPENAI_API_KEY", false}, {~c"OPENROUTER_API_KEY", false},
+      {~c"OPEN_ROUTER_API_KEY", false},
+      {~c"ERL_CRASH_DUMP", ~c"/dev/null"}, {~c"ERL_CRASH_DUMP_SECONDS", ~c"0"}
+    ]
+    test = self()
+    cutoff = System.monotonic_time(:millisecond) + @command_ms
+    {owner, owner_down} = spawn_monitor(fn -> await_launch(test) end)
 
-    on_exit(fn ->
-      :telemetry.detach(handler)
-
-      for boundary <- @calls ++ @returns ++ @signal_returns,
-          do: :erlang.trace_pattern(boundary, false, [:local])
-
-      Process.exit(input, :kill)
-      for device <- [bytes, output, diagnostic], do: StringIO.close(device)
-      restore_env(@slot, previous)
-      restore_env(legacy_name, legacy)
+    # Concept: command custody survives the test's exit into its callback.
+    # Technical depth: on_exit runs in another process after the test dies.
+    # The unlinked owner retains the original port monitor until this callback
+    # obtains its exact join and retires that same owner before root removal.
+    on_exit(cleanup, fn ->
+      retire_command(owner)
       File.rm_rf!(root)
     end)
 
-    :ok =
-      :telemetry.attach(
-        handler,
-        [:loopex, :model, :complete, :start],
-        &__MODULE__.model_start/4,
-        test
-      )
+    send(owner, {:launch, test, elixir, args, environment, root, cutoff})
 
-    for module <- Enum.uniq(Enum.map(@calls ++ @returns, &elem(&1, 0))) do
-      assert {:module, ^module} = Code.ensure_loaded(module)
-    end
-
-    for boundary <- @calls, do: assert(:erlang.trace_pattern(boundary, true, [:local]) == 1)
-
-    for boundary <- @returns ++ @signal_returns do
-      assert :erlang.trace_pattern(boundary, [{:_, [], [{:exception_trace}]}], [:local]) == 1
-    end
-
-    {host, host_down} =
-      spawn_monitor(fn ->
-        observe_edges(test)
-        :erlang.trace(self(), true, [:call, :set_on_spawn, {:tracer, test}])
-
-        result =
-          Chat.run(["chat", "--config", config],
-            cwd: root,
-            home: home,
-            input: input,
-            output: output,
-            diagnostic_device: diagnostic,
-            mode: :pipe
-          )
-
-        send(test, {:chat_result, self(), result})
-        receive do: (:finish -> :ok)
-      end)
-
-    on_exit(fn -> if Process.alive?(host), do: Process.exit(host, :kill) end)
-
-    assert_receive {:trace, ^host, :return_from, {ChatDriver, :bootstrap, 3}, {:ok, driver}},
-                   5_000
-
-    assert_receive {:runtime_owned, owner, runtime, consumer}, 5_000
-    assert_receive {:startup_read, body, %{command_id: nil}}, 1_000
-    assert_receive {:startup_task, observer, ^owner, _initial}, 1_000
-    assert_receive {:startup_first_read, ^observer, ^runtime}, 1_000
-
-    assert_receive {:startup_snapshot_pinned, ^owner, ^observer,
-                    {:ok,
-                     %{state: :starting, startup_id: startup_id, startup_deadline_ms: cutoff}}},
-                   1_000
-
-    edges =
-      for module <- [
-            CredentialRegistry,
-            CredentialCustody,
-            Capability,
-            Loopex.Store.Local,
-            Loopex.Store.Local.Transfers,
-            Loopex.Executor.Local.WorkspaceLease,
-            Loopex.Executor.Local
-          ] do
-        assert_receive {:edge_started, ^module, pid}, 1_000
-        pid
-      end
-
-    {:ok, children} = Loopex.Runtime.children(runtime)
-    workers = Task.Supervisor.children(children.workers)
-    assert length(workers) >= 2
-    assert observer in workers
-    {carrier, group} = held_carrier(body, workers)
-    assert carrier in workers
-    boot = :sys.get_state(driver)
-
-    actors =
-      Enum.uniq([
-        owner,
-        runtime.supervisor,
-        driver,
-        boot.writer,
-        consumer,
-        body,
-        group | edges ++ workers
-      ])
-
-    monitors =
-      Enum.map(actors, fn pid ->
-        assert Process.alive?(pid)
-        {pid, Process.monitor(pid)}
-      end)
-
-    {^observer, observer_down} = List.keyfind(monitors, observer, 0)
-
-    on_exit(fn ->
-      for pid <- actors, Process.alive?(pid), do: Process.exit(pid, :kill)
-    end)
-
-    assert {:ok, %{state: :starting, startup_id: ^startup_id, startup_deadline_ms: ^cutoff}} =
-             Loopex.creation_startup_status(runtime, 1_000)
-
-    assert boot.runtime == nil and boot.session == nil and boot.input_worker == nil
-    assert boot.workers == %{}
-    assert StringIO.contents(bytes) == {"/quit\n", ""}
-    assert StringIO.contents(output) == {"", ""}
-    refute elem(StringIO.contents(diagnostic), 1) =~ "/session/model"
-    assert genesis(state_root) == []
-    assert System.get_env(@slot) == nil
-    trace_fence(host)
-    refute_received {:trace, ^host, :call, {Loopex, :create_session, _}}
-    refute_received {:trace, ^host, :call, {ChatDriver, :bind, _}}
-    refute_received {:trace, ^host, :call, {DiagnosticConsumer, :settings_report, _}}
-    refute_received {:trace, ^host, :call, {Interrupt, :install_chat, _}}
-    refute_received :model_started
-    refute_receive {:input_held, ^input, _, _}, 40
-    refute_received {:chat_result, ^host, _}
-
-    send(body, :release_startup)
-    assert_receive {:DOWN, ^observer_down, :process, ^observer, _}, 1_000
-
-    assert {:ok, %{state: :ready, startup_id: ^startup_id, startup_deadline_ms: ^cutoff}} =
-             Loopex.creation_startup_status(runtime, 1_000)
-
-    assert System.monotonic_time(:millisecond) < cutoff
-
-    assert_receive {:trace, ^host, :call,
-                    {Loopex, :create_session, [^runtime, _, create_options]}},
-                   1_000
-
-    assert is_binary(create_options[:command_id])
-
-    assert_receive {:trace, ^host, :call, {ChatDriver, :bind, [^driver, ^runtime, session, _]}},
-                   1_000
-
-    assert_receive {:trace, ^host, :call,
-                    {Interrupt, :install_chat, [^driver, signal_ref, 5_000]}},
-                   1_000
-
-    manager = installed_signal_manager(host, output, diagnostic)
-    assert Interrupt.chat_live(manager, signal_ref)
-    assert_receive {:input_held, ^input, input_worker, input_ref}, 1_000
-    input_down = Process.monitor(input_worker)
-    assert StringIO.contents(bytes) == {"/quit\n", ""}
-    assert [_] = genesis(state_root)
-    send(input, {:release_input, input_ref})
-    assert_receive {:chat_result, ^host, 0}, 5_000
-
-    trace_fence(host)
-    refute_received {:trace, ^host, :call, {Loopex, :create_session, _}}
-    refute_received :model_started
-    assert StringIO.contents(bytes) == {"", ""}
-    controls = controls(output)
-    assert [closing] = Enum.filter(controls, &(&1["event"] == "closing"))
-    assert closing["exit_code"] == 0 and closing["cleanup"] == "confirmed"
-    assert closing["last_outcome"] == nil
-    assert [admitted] = Enum.filter(controls, &(&1["event"] == "input"))
-    assert admitted["disposition"] == "admitted"
-    assert admitted["session_id"] == LoopexProtocol.Wire.encode_identity(session)
-    refute Enum.any?(controls, &(&1["event"] == "error"))
-    assert elem(StringIO.contents(diagnostic), 1) =~ "/session/model"
-    refute Interrupt.chat_live(manager, signal_ref)
-    assert {:ok, [%{session_id: ^session}]} = Loopex.list_sessions(state_root)
-    assert [_] = genesis(state_root)
-
-    refute Enum.any?(
-             records(state_root),
-             &(Map.get(&1, :kind) in [
-                 "run.started",
-                 "model_request_committed_v2",
-                 "model_request_committed_resources_v2",
-                 "model_attempt_opened_v1"
-               ])
-           )
-
-    for {actor, monitor} <- monitors, actor != observer do
-      assert_receive {:DOWN, ^monitor, :process, ^actor, _}, 1_000
-    end
-
-    assert_receive {:DOWN, ^input_down, :process, ^input_worker, _}, 1_000
-    send(host, :finish)
-    assert_receive {:DOWN, ^host_down, :process, ^host, :normal}, 1_000
-    refute_received :model_started
-  end
-
-  # Concept: this serial caller case refuses every actual model-start event.
-  # Technical depth: ExUnit runs async:false cases after async cases. The span
-  # identifies session/run/attempt, so no absent runtime_id field is filtered.
-  @doc false
-  def model_start(_event, _measurements, _metadata, test),
-    do: send(test, :model_started)
-
-  defp observe_edges(test) do
-    reads = :atomics.new(1, [])
-
-    Process.put(@edge, fn module, function, arguments ->
-      result =
-        if {module, function} == {Loopex, :start_link} do
-          [options] = arguments
-          Process.put({StartupGate, :test_listener}, test)
-          original = Keyword.fetch!(options, :store)
-          assert original.adapter == Loopex.Store.Local
-          {:ok, store} = Loopex.Store.new(HeldLocal, %{store: original, test: test, reads: reads})
-          result = Loopex.start_link(Keyword.put(options, :store, store))
-
-          case result do
-            {:ok, runtime} ->
-              send(test, {:runtime_owned, self(), runtime, options[:diagnostics_to]})
-
-            _ ->
-              :ok
-          end
-
-          result
-        else
-          apply(module, function, arguments)
-        end
-
-      case result do
-        {:ok, pid} when is_pid(pid) -> send(test, {:edge_started, module, pid})
-        _ -> :ok
-      end
-
-      result
-    end)
-  end
-
-  # Concept: retain the nested Store body separately from its direct carrier.
-  # Technical depth: the carrier's actual body/group monitors and group links
-  # identify original actors while the callback is held, without Control reads.
-  defp held_carrier(body, workers) do
-    {:monitored_by, owners} = Process.info(body, :monitored_by)
-    [carrier] = Enum.filter(workers, &(&1 in owners))
-    {:monitors, monitors} = Process.info(carrier, :monitors)
-    assert {:process, body} in monitors
-    {:links, links} = Process.info(body, :links)
-    [group] = for {:process, pid} <- monitors, pid in links, do: pid
-    {:links, group_links} = Process.info(group, :links)
-    assert body in group_links and carrier in group_links
-    refute body in workers
-    refute group in workers
-    {carrier, group}
-  end
-
-  # Concept: ordinary quit input remains unread until actual readiness is inspected.
-  # Technical depth: only the first standard IO request is held; its original
-  # request and response are relayed unchanged to the actual Latin-1 StringIO.
-  defp input_relay(bytes, test, hold?) do
     receive do
-      {:io_request, reader, reply, request} ->
-        if hold? do
-          send(test, {:input_held, self(), reader, reply})
-          receive do: ({:release_input, ^reply} -> :ok)
+      {:command_opened, ^owner, port, port_down, os_pid} ->
+        remaining(cutoff)
+        assert is_port(port) and is_reference(port_down) and is_integer(os_pid)
+        completed = await_command(owner, owner_down, cutoff)
+        remaining(cutoff)
+        assert completed.joined_at < cutoff
+        assert completed.port == port and completed.monitor == port_down
+        assert completed.os_pid == os_pid
+        assert completed.down == {:DOWN, port_down, :port, port, :normal}
+        assert completed.status == 0, "standalone witness exited #{completed.status}: #{completed.output}"
+        assert Port.info(port) == nil
+        lines = String.split(completed.output, "\n", trim: true)
+        assert [@proof <> encoded] = lines
+        evidence = JSON.decode!(encoded)
+        assert evidence["proof_token"] == token
+        assert evidence["state_root"] == home
+        assert evidence["create_calls"] == 1 and evidence["genesis"] == 1
+        assert evidence["model_calls"] == 0 and evidence["actors_joined"] > 0
+        assert byte_size(Base.decode16!(evidence["startup_id"])) == 32
+        assert is_integer(evidence["startup_deadline_ms"])
+        assert {:ok, [%{session_id: session}]} = Loopex.list_sessions(home)
+        assert LoopexProtocol.Wire.encode_identity(session) == evidence["session_id"]
+      {:DOWN, ^owner_down, :process, ^owner, reason} ->
+        flunk("command custody failed before launch: #{inspect(reason)}")
+    after
+      remaining(cutoff) -> flunk("standalone command did not open within its original cutoff")
+    end
+  end
+
+  defp await_command(owner, monitor, cutoff) do
+    receive do
+      {:command_complete, ^owner, completed} ->
+        remaining(cutoff)
+        completed
+      {:command_failed, ^owner, reason, output} ->
+        flunk("standalone command #{inspect(reason)}: #{output}")
+      {:DOWN, ^monitor, :process, ^owner, reason} ->
+        flunk("command custody exited before original port join: #{inspect(reason)}")
+    after
+      remaining(cutoff) -> flunk("standalone command did not finish within its original cutoff")
+    end
+  end
+
+  # Concept: the original child can launch only after safe cleanup registration.
+  # Technical depth: this unlinked actor starts idle. The test sends its one
+  # launch grant after installing on_exit; original test death retires an idle
+  # actor without opening a command or leaving an unbounded custodian behind.
+  defp await_launch(test) do
+    Process.flag(:trap_exit, true)
+    test_down = Process.monitor(test)
+    receive do
+      {:launch, ^test, executable, args, environment, root, cutoff} ->
+        if Process.alive?(test) and System.monotonic_time(:millisecond) < cutoff do
+          own_command(test, test_down, executable, args, environment, root, cutoff)
+        else
+          retire_idle(System.monotonic_time(:millisecond) + @failure_ms)
         end
+      {:DOWN, ^test_down, :process, ^test, _} ->
+        retire_idle(System.monotonic_time(:millisecond) + @failure_ms)
+      {:retire, caller, reference, cutoff} ->
+        acknowledge_idle(caller, reference, cutoff)
+    end
+  end
 
-        forwarded = make_ref()
-        send(bytes, {:io_request, self(), forwarded, request})
+  defp retire_idle(cutoff) do
+    receive do
+      {:retire, caller, reference, requested} ->
+        acknowledge_idle(caller, reference, min(cutoff, requested))
+    after
+      wait_delay(cutoff) -> :ok
+    end
+  end
 
-        receive do
-          {:io_reply, ^forwarded, result} -> send(reader, {:io_reply, reply, result})
+  defp acknowledge_idle(caller, reference, cutoff) do
+    if System.monotonic_time(:millisecond) >= cutoff,
+      do: exit(:idle_retirement_observation_expired)
+    send(caller, {:command_retired, reference, :not_launched, nil})
+  end
+
+  defp own_command(test, test_down, executable, args, environment, root, cutoff) do
+    port = Port.open({:spawn_executable, executable}, [
+      :binary, :exit_status, :use_stdio, :stderr_to_stdout,
+      args: args, env: environment, cd: root
+    ])
+    {:os_pid, os_pid} = Port.info(port, :os_pid)
+    monitor = :erlang.monitor(:port, port)
+    send(test, {:command_opened, self(), port, monitor, os_pid})
+    command_loop(%{test: test, test_down: test_down, port: port, monitor: monitor,
+      os_pid: os_pid, cutoff: cutoff, status: nil, down: nil, output: "", cancel_cutoff: nil, joined_at: nil})
+  end
+
+  defp command_loop(state) do
+    if System.monotonic_time(:millisecond) >= state.cutoff do
+      send(state.test, {:command_failed, self(), :command_cutoff, state.output})
+      retain_command(cancel_original(state))
+    else
+      state = record_join(state, state.cutoff)
+      if state.joined_at do
+        if System.monotonic_time(:millisecond) >= state.cutoff do
+          send(state.test, {:command_failed, self(), :command_cutoff, state.output})
+        else
+          send(state.test, {:command_complete, self(),
+            Map.take(state, [:port, :monitor, :os_pid, :status, :down, :output, :joined_at])})
         end
-
-        input_relay(bytes, test, false)
-    end
-  end
-
-  defp trace_fence(host) do
-    delivered = :erlang.trace_delivered(host)
-    assert_receive {:trace_delivered, ^host, ^delivered}, 1_000
-  end
-
-  # Concept: a default signal refusal reports its real observation before failing.
-  # Technical depth: inherited call tracing records the original installer's
-  # handler snapshot and branch returns without replacing the VM manager. The
-  # same 1,000 ms receive accepts an exact return or exception; success remains
-  # {:ok, manager}. Failure diagnostics print only bounded test-owned devices.
-  defp installed_signal_manager(host, output, diagnostic) do
-    observation =
-      receive do
-        {:trace, ^host, :return_from, {Interrupt, :install_chat, 3}, result} ->
-          {:return, result}
-
-        {:trace, ^host, :exception_from, {Interrupt, :install_chat, 3}, exception} ->
-          {:exception, exception}
-      after
-        1_000 -> :not_observed
+        retain_command(state)
+      else
+        receive_command(state)
       end
-
-    {:messages, messages} = Process.info(self(), :messages)
-
-    signals =
-      for {:trace, actor, kind, boundary, result} <- messages,
-          kind in [:return_from, :exception_from],
-          boundary in @signal_returns,
-          do: {actor, kind, boundary, result}
-
-    evidence = inspect(Enum.take(signals, 16), limit: 50, printable_limit: 4_096)
-
-    device_contents = %{
-      output: elem(StringIO.contents(output), 1),
-      diagnostic: elem(StringIO.contents(diagnostic), 1)
-    }
-
-    devices = inspect(device_contents, limit: 20, printable_limit: 4_096)
-
-    case observation do
-      {:return, {:ok, manager}} ->
-        manager
-
-      _ ->
-        flunk(
-          "default signal installation #{inspect(observation, limit: 20)}; " <>
-            "registered manager #{inspect(Process.whereis(:erl_signal_server))}; " <>
-            "original installer observations #{evidence}; test IO #{devices}"
-        )
     end
   end
 
-  defp genesis(root),
-    do: Enum.filter(records(root), &(Map.get(&1, :kind) == "session_genesis_v3"))
-
-  defp records(root) do
-    assert {:ok, frames, :complete} = Log.read(Path.join(root, "store.log"))
-    for frame <- frames, record <- frame.records, do: record.payload
-  end
-
-  defp controls(output) do
-    {_, transcript} = StringIO.contents(output)
-    for "@loopex " <> json <- String.split(transcript, "\n"), do: JSON.decode!(json)
-  end
-
-  defp restore_env(name, nil), do: System.delete_env(name)
-  defp restore_env(name, value), do: System.put_env(name, value)
-
-  defp profile do
-    %{
-      "schema_version" => 1,
-      "providers" => %{"anthropic" => %{"credential" => %{"env" => @slot}}},
-      "policy" => "allow-all",
-      "paths" => %{"workspace" => "workspace", "state_root" => "state"},
-      "session" => %{
-        "model" => "anthropic:claude-haiku-4-5",
-        "tools" => "none",
-        "max_tokens" => 128,
-        "system_class_tokens" => 8000,
-        "cleanup_grace_ms" => 5_000,
-        "instructions" => %{"system_file" => "system.txt"},
-        "bounds" => %{"max_turns" => 8, "deadline_ms" => 60_000, "token_budget" => 10_000}
-      }
-    }
-  end
-
-  # Concept: startup reads real Local data and every creation remains real.
-  # Technical depth: this Store wrapper holds only the original first recovery
-  # read, then delegates every callback unchanged to the captured Local Store.
-  defmodule HeldLocal do
-    @moduledoc false
-    @behaviour Loopex.Store
-    for {function, arity} <- [
-          transact: 2,
-          transaction_status: 4,
-          runtime_command: 2,
-          ownership_head: 3,
-          load_records: 4,
-          load_events: 4,
-          creation_provenance: 3
-        ] do
-      arguments = Macro.generate_arguments(arity - 1, __MODULE__)
-      @impl true
-      def unquote(function)(reference, unquote_splicing(arguments)),
-        do: delegate(reference, unquote(function), [unquote_splicing(arguments)])
+  defp receive_command(state) do
+    receive do
+      {port, {:data, bytes}} when port == state.port ->
+        if byte_size(state.output) + byte_size(bytes) <= @output_limit do
+          command_loop(%{state | output: state.output <> bytes})
+        else
+          send(state.test, {:command_failed, self(), :output_limit, state.output})
+          retain_command(cancel_original(state))
+        end
+      {port, {:exit_status, status}} when port == state.port ->
+        command_loop(%{state | status: status})
+      {:DOWN, monitor, :port, port, _} = down when monitor == state.monitor and port == state.port ->
+        command_loop(%{state | down: down})
+      {:EXIT, port, _} when port == state.port -> command_loop(state)
+      {:DOWN, monitor, :process, test, _} when monitor == state.test_down and test == state.test ->
+        retain_command(cancel_original(state))
+      {:retire, caller, reference, cutoff} -> dispose_command(state, caller, reference, cutoff)
+    after
+      wait_delay(state.cutoff) ->
+        send(state.test, {:command_failed, self(), :command_cutoff, state.output})
+        retain_command(cancel_original(state))
     end
-
-    @impl true
-    def creation_recovery(reference, request) do
-      if :atomics.add_get(reference.reads, 1, 1) == 1 do
-        send(reference.test, {:startup_read, self(), request})
-        receive do: (:release_startup -> :ok)
-      end
-
-      delegate(reference, :creation_recovery, [request])
-    end
-
-    defp delegate(reference, function, arguments),
-      do: apply(reference.store.adapter, function, [reference.store.reference | arguments])
   end
+
+  # Concept: timely original evidence remains available after its command ends.
+  # Technical depth: both exit_status and exact original DOWN must be observed
+  # before the active cutoff. The retained joined_at distinguishes proved
+  # earlier observation from queued evidence consumed after observer delay.
+  defp record_join(%{down: down, status: status, joined_at: nil} = state, cutoff)
+       when not is_nil(down) and not is_nil(status) do
+    observed = System.monotonic_time(:millisecond)
+    if observed >= cutoff, do: exit({:original_command_join_unproved, state.os_pid})
+    %{state | joined_at: observed}
+  end
+  defp record_join(state, _cutoff), do: state
+
+  # Concept: a retained result remains available to the different on_exit actor.
+  # Technical depth: no original monitor is moved or recaptured. The custodian
+  # remains alive until it acknowledges retirement after its exact port join.
+  defp retain_command(state) do
+    receive do
+      {:retire, caller, reference, cutoff} -> dispose_command(state, caller, reference, cutoff)
+      {:EXIT, port, _} when port == state.port -> retain_command(state)
+    end
+  end
+
+  defp dispose_command(state, caller, reference, cutoff) do
+    joined = cancel_original(state, cutoff)
+    if System.monotonic_time(:millisecond) >= cutoff,
+      do: exit(:retirement_observation_expired)
+    send(caller, {:command_retired, reference, joined.down, joined.status})
+  end
+
+  defp cancel_original(state, cutoff \\ nil)
+  defp cancel_original(%{joined_at: observed} = state, _cutoff)
+       when not is_nil(observed), do: state
+  defp cancel_original(state, requested_cutoff) do
+    cutoff = state.cancel_cutoff || System.monotonic_time(:millisecond) + @failure_ms
+    cutoff = if requested_cutoff, do: min(cutoff, requested_cutoff), else: cutoff
+    state = %{state | cancel_cutoff: cutoff}
+    case Port.info(state.port, :os_pid) do
+      {:os_pid, pid} when pid == state.os_pid ->
+        {_output, _status} = System.cmd("/bin/kill", ["-KILL", Integer.to_string(pid)], stderr_to_stdout: true)
+      nil -> :ok
+    end
+    join_original(state, cutoff)
+  end
+
+  defp join_original(%{down: down, status: status} = state, cutoff)
+       when not is_nil(down) and not is_nil(status), do: record_join(state, cutoff)
+  defp join_original(state, cutoff) do
+    if System.monotonic_time(:millisecond) >= cutoff,
+      do: exit({:original_command_join_unproved, state.os_pid})
+    receive do
+      {:DOWN, monitor, :port, port, _} = down when monitor == state.monitor and port == state.port ->
+        join_original(%{state | down: down}, cutoff)
+      {port, {:exit_status, status}} when port == state.port ->
+        join_original(%{state | status: status}, cutoff)
+      {port, {:data, bytes}} when port == state.port ->
+        left = max(0, @output_limit - byte_size(state.output))
+        bounded = binary_part(bytes, 0, min(left, byte_size(bytes)))
+        join_original(%{state | output: state.output <> bounded}, cutoff)
+      {:EXIT, port, _} when port == state.port -> join_original(state, cutoff)
+    after
+      wait_delay(cutoff) -> exit({:original_command_join_unproved, state.os_pid})
+    end
+  end
+
+  defp retire_command(owner) do
+    monitor = Process.monitor(owner)
+    reference = make_ref()
+    cutoff = System.monotonic_time(:millisecond) + @failure_ms
+    send(owner, {:retire, self(), reference, cutoff})
+    receive do
+      {:command_retired, ^reference, {:DOWN, original, :port, port, _}, status} ->
+        remaining(cutoff)
+        assert is_reference(original) and is_port(port) and is_integer(status)
+        assert_receive {:DOWN, ^monitor, :process, ^owner, :normal}, remaining(cutoff)
+        remaining(cutoff)
+      {:command_retired, ^reference, :not_launched, nil} ->
+        remaining(cutoff)
+        assert_receive {:DOWN, ^monitor, :process, ^owner, :normal}, remaining(cutoff)
+        remaining(cutoff)
+      {:DOWN, ^monitor, :process, ^owner, reason} ->
+        flunk("original command cleanup evidence unavailable: #{inspect(reason)}")
+    after
+      remaining(cutoff) -> flunk("original command cleanup did not acknowledge its join")
+    end
+  end
+
+  defp remaining(cutoff) do
+    remaining = cutoff - System.monotonic_time(:millisecond)
+    assert remaining > 0, "original fixture observation cutoff exhausted"
+    remaining
+  end
+
+  defp wait_delay(cutoff), do: max(0, cutoff - System.monotonic_time(:millisecond))
 end
