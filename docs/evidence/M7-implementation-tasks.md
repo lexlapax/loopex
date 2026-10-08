@@ -1,24 +1,26 @@
 # M7 Implementation Tasks
 
-Resumed checkpoint, 2026-10-08: the active M7 goal continues. The complete
-unserved source candidate is `772131c1b456db9ee3fec1782c52b9166a74af79`, pushed to
+Resumed checkpoint, 2026-10-08: the active M7 goal continues. The clean unserved
+candidate is `d8b40c828e53dc302fcc6c56e1743bd35192fd7e`, saved on recovery ref
 `origin/codex/m7-resume-20261008`; `m7` retains its integrated product baseline.
-The complete 42-case ProgressSink file passed on both supported pairs. The
-six actual Registry/Owner native-close cases and complete eight-case Buffer file
-also passed per pair. The real Socket held-ACK test passed per pair after valid
-activity/domain and peer-drain fixture repairs; its original 32-slot pressure,
-exact ACK/lease/cursor assertions and captured 1,000-ms release cutoff remain.
-The two Service ingress/guardian-loss cases passed per pair. These are focused
-proofs, with each selected/excluded population and failed original retained;
-complete daemon cleanup and actual Service-bound producer routing stay open.
-No product native handle is live. The next registry seed has 2,320 rows.
+Three new actual-path cases are now proved on both supported toolchains: Service
+compaction activity to two subscribed Socket clients, pending actual enqueue
+custody, and genuine kernel partial/select custody through exact emission ACK.
+The final focused run took24.943s, zero failures/skips/invalid cases. The initial
+Service phase-capture failure and wrong partial-case selector remain retained;
+a history FIFO barrier spends the original cutoff and preserves the exact two
+compact activity notices and privacy assertions. Existing Core42, Registry/Owner6,
+Buffer8 and held-ACK proofs remain at their tested bytes and were not repeated.
+No product native handle is live. The next registry seed has2344 rows.
+Successful drained Socket native retirement is next; complete daemon cleanup,
+32-CAS exhaustion, foreground112, restore175 and full integration remain open.
 ADR0063 remains the sole asked unanswered decision. T01-T19 totals remain
 originals **88 done / 85 remaining / 6 retired** and additions **365 done / 24
 remaining**; T00 is separate. No broad checkbox closes for a prerequisite proof.
-The [resume record](M7-resume.md) names exact commits, results and remaining
-work. Its v7 retention includes all new runners/reports, 12 source commits,
-17 original native runs, the complete candidate patch and verified Git bundle.
-Earlier checkpoint paragraphs below remain historical.
+The [resume record](M7-resume.md) names exact commits, results and remaining work.
+Immutable v8 chains to v7 and retains17 new report/source/runner assets, five
+new source commits, six original run records, a complete patch and verified
+Git bundle. Earlier checkpoint paragraphs below remain historical.
 
 Current checkpoint: the complete contract source is staged in isolated,
 unserved candidate `a7a83d22`. The independent Node runner proved both manifests

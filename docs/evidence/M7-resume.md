@@ -27,6 +27,73 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+### Actual producer and Socket custody proof, 2026-10-08
+
+The maintainer resumed M7 again. The active goal continues. This entry
+supersedes the candidate, registry seed and next work order below. The clean
+unserved candidate is `d8b40c828e53dc302fcc6c56e1743bd35192fd7e`, saved on recovery
+ref `origin/codex/m7-resume-20261008`. Primary `m7` retains its integrated product
+baseline. There is no complete integration, serving activation or cleanup claim.
+
+Three new actual-path cases are qualified on both supported toolchains:
+
+- Service routes actual permitted compaction activity through its native arena,
+  Registry and two subscribed Socket clients. An unattached client gets no
+  activity. Exact owner/domain/base identity, once-only activity, private summary
+  exclusion, durable checkpoint, confirmed Core cleanup and final actor joins are
+  asserted. The fixture uses the existing isolated HTTP provider, not a real
+  provider release witness.
+- A held actual Registry enqueue retains Socket pending and local copies under
+  their exact native leases until the actual enqueue/emission acknowledgements.
+- A real kernel partial send and select continuation retain the complete claimed
+  frame's native credit through physical peer reads and the exact emission ACK.
+  Unsupported or absent selection fails; no synthetic selection or skipped case
+  substitutes for it. This proves the admitted frame case, not a reachable native
+  encoded 512-KiB population or whole-VM memory bound.
+
+Original37704 at797d37e6 retains current pending-enqueue success and the failed
+Service count assertion. Its line1739 selector did not select the partial case
+at1740; the missing case is not claimed as executed. History ended at the durable
+`run.finished` event, leaving transient bytes already sent but unread in the
+peer. The corrected fixture first settles custody, then performs a same-socket
+FIFO status round trip under the original history cutoff. Its compact phase
+still requires exactly two activity notices and excludes all private summary
+content. No progress filter, deadline extension or production suppression makes
+that assertion pass. Original87433 at0a76c236 retains a formatter-only failure.
+
+Original94071 atd8b40c82 passes the missing current partial/select case with62
+exclusions and current Service case with47 exclusions, then all three floor
+cases with108 exclusions. Each selection has zero skips and invalid cases.
+Both pairs pass owned formatting and warning-free compilation. All nine original
+stage handles have EOF, exact wait and process-group absence; elapsed24.943s.
+Output: `M7/native-progress-real-cuts-20261008-v3`.
+Terminal SHA-256:
+`71789c41eac2e7f1a81c13fdeb5d4fddc8d7db6eecc1787bb3f926d501e5e538`.
+Collection SHA-256:
+`52504c68dbfb87d77f7a1bfd2753ef96363b7a68d41228d7ce3c390ee624ff0a`.
+The next complete registry has2344 rows, SHA-256
+`35a3de61a99de4d387068c24aab47a7eca2c5044193dea9bcd0acff87be8a663`.
+
+Immutable v8 context: `M7/coupled-current-context-20261008-v8/retention.json`,
+SHA-256 `b8b462f803e438ea0d87a0e65203b146443659156870fdbfe0f42331fb226e5f`.
+It chains to v7 and retains17 new report/source/runner assets, five new source
+commits, six original run records, the complete candidate patch and verified
+Git bundle. Worker donor source is included. Both donor worktrees were submitted
+for archive after rejoin; archive completion must be checked before claiming
+removal. Failed originals remain failed. Original52247 also retains the primary
+3f52fe84 documentation check,36.778s, without a suite claim.
+
+Next implementation is bounded successful retirement of a drained Socket native
+arena. Socket opening-owner `close/1 :ok`, its exact guardian join, actual child
+join and correlated Registry evidence must be distinguished from ordinary owner
+DOWN. The real route test's physical joins do not prove this missing success
+acknowledgement. Universal cleanup, finite32-CAS exhaustion, foreground112,
+restore175, full integration and generation activation remain open. ADR0063 is
+still Proposed and unanswered; it was re-presented unchanged on resume. Do not
+implement the public startup read or either host gate before acceptance. Original
+T01-T19 totals remain88 done/85 remaining/6 retired; additions365 done/24 remaining.
+No broad checkbox closes for these narrower proofs.
+
 ### Resumed native qualification, 2026-10-08
 
 The maintainer resumed M7. The goal is active, not paused or complete. This
