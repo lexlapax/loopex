@@ -7026,3 +7026,26 @@ unchanged retry authority. Ordered replay, writer ownership, physical durability
 handoff recovery and runner admission remain separate required implementation
 and proof. This acceptance supplies no test result, original T14 completion,
 other Proposed ADR acceptance, milestone closure or publication authority.
+
+<a id="disposition-m7-bounded-progress-delivery-2026-10-07"></a>
+### M7 bounded progress delivery accepted, 2026-10-07
+
+The maintainer explicitly identified the approval as "ADR 0058: bounded progress
+queue and owned writer", accepting the exact [Concept](../adr/0058-bounded-progress-delivery.md#concept)
+and [Technical depth](../adr/0058-bounded-progress-delivery-technical.md#technical-depth)
+pair at candidate `3c97b6a1ca0cd73350cfe0f1b55c05fff316e655`.
+Historical Proposed Concept SHA-256 is
+`292a45cec72a9011e1bb6eb48eebccdd24a325c11f43b083089f8008db781762`;
+Technical SHA-256 is
+`57fd78afae837af50c2cc51123083413a519b06f75cb656b101b6f36c6c39f12`.
+Within the pair only Status and the empty Acceptance row change.
+
+Implement the runtime-scoped 32-item/512-KiB credited ProgressSink, finite atomic
+admission and ordinary-domain tail sealing after pressure, preserving original
+producer counts and durable outcomes. Implement Stdio's owned Bash proxy with
+full-write and exact-worker joins, the captured 5,000-ms write interval and
+separate 5,000-ms cleanup observation. Migrate current consumers and remove
+superseded PID delivery. Required native custody, real output, platform,
+independent-client and coordinated integration proofs remain owed. This
+acceptance supplies no test result, other ADR acceptance, milestone closure,
+merge, activation or publication authority.

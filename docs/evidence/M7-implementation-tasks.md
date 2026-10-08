@@ -1,5 +1,11 @@
 # M7 Implementation Tasks
 
+The maintainer accepted ADR0058, resolving its asked decision. Its
+[disposition](../developer/agent-context-map.md#disposition-m7-bounded-progress-delivery-2026-10-07)
+binds the exact proposal. Implementation and proof remain open. Case replay
+is frozen at99 cases, with independent review and native preparation running.
+Original and added completion counts are unchanged by this acceptance.
+
 Ordered ownership is integrated from tested3c15f020. Original50168 passed all74
 cases on each supported pair in102.218 seconds, eight joins/43 artifacts.
 Only its added T14 row closes. Original T01–T19 remain88 done/85 todo/6 retired;

@@ -29,6 +29,16 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Reboot continuation on 2026-10-07
 
+Ownership integration is committed and pushed at `bd0c9a57`. The maintainer
+accepted the exact ADR0058 pair, resolving its previously asked decision;
+[disposition](../developer/agent-context-map.md#disposition-m7-bounded-progress-delivery-2026-10-07)
+binds the historical proposal. Implementation and required proof remain open.
+The case-replay source packet is frozen at99 cases, not97:74 existing plus25
+new. Packet SHA-256
+`1cd062e9db5c69e16bff0a202364be5f0538966d018ec3843b191e7318fa3b0e`.
+Independent review and disabled native preparation are running; no case proof
+has run. Earlier pending0058 and preliminary population notes are historical.
+
 Ordered ownership is proved and literally integrated from isolated
 `3c15f020c8faaa053ab1d5b53aa187d831a91101`. Original50168 is TERMINAL0 and
 collected PASS_ATTEMPT_OWNERSHIP_REPLAY_PROOF:74 cases on each supported pair,
