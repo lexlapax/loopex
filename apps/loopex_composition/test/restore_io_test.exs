@@ -531,6 +531,16 @@ defmodule LoopexComposition.RestoreIOTest do
         "sticky" => 0o1750
       }
 
+      # Concept: the negative control starts from a naturally exact native copy.
+      # Technical depth: OTP 29.0.5 unix_prim_file.c:769-780 excludes
+      # S_ISVTX in efile_set_permissions.
+      # Preserve keeps every imported special bit and requires exact copy or
+      # precise refusal; only this control's initial fixture omits sticky.
+      modes =
+        if control == :normalize,
+          do: Map.new(modes, fn {path, mode} -> {path, Bitwise.band(mode, 0o6777)} end),
+          else: modes
+
       contents = %{
         "nested/inner/all" => :binary.copy(<<0, 255, 1, 2>>, 40_000),
         "setgid" => "retained setgid bytes",
@@ -4726,14 +4736,19 @@ defmodule LoopexComposition.RestoreIOTest do
                     assert before == fixture.baseline
                     path = Path.join(fixture.destination, "nested/inner/all")
 
+                    # Concept: a real changed special bit must fence publication.
+                    # Technical depth: full baseline equality above includes
+                    # this file's 6750; remove setgid only, then let the audit decide.
+                    assert Bitwise.band(File.lstat!(path).mode, 0o7777) == 0o6750
+
                     assert {"", 0} =
                              System.cmd("python3", [
                                "-c",
-                               "import os,sys; p=sys.argv[1]; g=os.getegid(); os.chown(p,-1,g); os.lstat(p).st_gid==g or sys.exit(1); os.chmod(p,0o6750)",
+                               "import os,sys; p=sys.argv[1]; g=os.getegid(); os.chown(p,-1,g); os.lstat(p).st_gid==g or sys.exit(1); os.chmod(p,0o4750)",
                                path
                              ])
 
-                    assert Bitwise.band(File.lstat!(path).mode, 0o7777) == 0o6750
+                    assert Bitwise.band(File.lstat!(path).mode, 0o7777) == 0o4750
                   end
 
                   actual = special_mode_manifest(fixture.destination, fixture.paths)
