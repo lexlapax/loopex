@@ -35,9 +35,12 @@ defmodule LoopexComposition.RuntimeOwner do
 
   defp own_started(caller, tag, configuration, compose, seams) do
     initialize(seams)
+    caller_monitor = Process.monitor(caller)
+    startup_interrupt(caller, caller_monitor)
 
     case guarded_compose(configuration, compose) do
       {:ok, _runtime} = started ->
+        Process.demonitor(caller_monitor, [:flush])
         send(caller, {tag, started})
 
         receive do
@@ -75,6 +78,7 @@ defmodule LoopexComposition.RuntimeOwner do
   defp own_bracketed(caller, tag, token, configuration, compose, seams) do
     initialize(seams)
     caller_monitor = Process.monitor(caller)
+    startup_interrupt(caller, caller_monitor)
 
     case guarded_compose(configuration, compose) do
       {:ok, runtime} ->
@@ -153,9 +157,41 @@ defmodule LoopexComposition.RuntimeOwner do
     Process.put(seams.owned_key, [])
   end
 
+  # Concept: acquisition remains owned when its original caller or a child dies.
+  # Technical depth: the startup observer runs separately; the owner consumes
+  # these loss signals between bounded receive intervals and uses normal cleanup.
+  defp startup_interrupt(caller, caller_monitor) do
+    Process.put(LoopexComposition.StartupGate.interrupt_key(), fn ->
+      startup_loss(caller, caller_monitor)
+    end)
+  end
+
+  defp startup_loss(caller, caller_monitor) do
+    receive do
+      {:DOWN, ^caller_monitor, :process, ^caller, _reason} ->
+        {:error, :runtime_unavailable}
+
+      {:EXIT, pid, _reason} ->
+        owned? =
+          Enum.any?(Process.get(:"$loopex_composition_owned", []), fn
+            {Loopex, %{supervisor: supervisor}} -> pid == supervisor
+            {_module, owned} -> pid == owned
+          end)
+
+        if owned?, do: {:error, :runtime_unavailable}, else: startup_loss(caller, caller_monitor)
+    after
+      0 -> :ok
+    end
+  end
+
   defp guarded_compose(configuration, compose) do
     try do
-      compose.(configuration)
+      case compose.(configuration) do
+        {:ok, _runtime} = started ->
+          with :ok <- LoopexComposition.StartupGate.confirm(), do: started
+
+        refusal -> refusal
+      end
     rescue
       exception -> {:error, {:composition_start_raised, exception}}
     catch
@@ -164,9 +200,12 @@ defmodule LoopexComposition.RuntimeOwner do
   end
 
   defp cleanup(seams) do
+    observer_pending = LoopexComposition.StartupGate.pending()
+    observer_failures = if observer_pending == [], do: [], else: [:startup_observer_stop_unconfirmed]
+
     seams.owned_key
     |> Process.get([])
-    |> Enum.reduce({[], []}, fn owned, {failures, pending} ->
+    |> Enum.reduce({observer_failures, observer_pending}, fn owned, {failures, pending} ->
       case stop_owned(owned, seams.effect) do
         :ok -> {failures, pending}
         {:error, detail} -> {[detail | failures], pending}

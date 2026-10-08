@@ -176,6 +176,7 @@ defmodule LoopexComposition.Ephemeral.SessionRootStartTest do
         Capability.handle(pid)
       end,
       runtime_holder: %{
+        creation_startup_status: &LoopexComposition.StartupStatusFixture.ready/2,
         runtime_start: fn options ->
           send(test, {:runtime_start, options})
           supervisor = spawn_link(fn -> receive do: (:stop -> :ok) end)
@@ -256,6 +257,7 @@ defmodule LoopexComposition.Ephemeral.SessionRootStartTest do
 
     {:ok, holder} =
       RuntimeHolder.start_link(self(), self(), ref, deadline, %{
+        creation_startup_status: &LoopexComposition.StartupStatusFixture.ready/2,
         runtime_start: fn options ->
           send(test, {:started, options})
           supervisor = spawn_link(fn -> receive do: (:stop -> :ok) end)
@@ -318,6 +320,7 @@ defmodule LoopexComposition.Ephemeral.SessionRootStartTest do
 
         {:ok, holder} =
           RuntimeHolder.start_link(self(), root, ref, deadline, %{
+            creation_startup_status: &LoopexComposition.StartupStatusFixture.ready/2,
             runtime_start: fn _options ->
               supervisor = spawn_link(fn -> receive do: (:finish -> :ok) end)
               send(test, {:runtime_supervisor, supervisor})
