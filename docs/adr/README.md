@@ -71,6 +71,7 @@ a decision adds a new record rather than rewriting the old one.
 | 0059 | Responsive creation transactions and durable custody | Accepted (remote cancellation envelope clarified by 0061) | [Decision](0059-responsive-creation-transactions.md#concept) | [Technical depth](0059-responsive-creation-transactions-technical.md#technical-depth) |
 | 0060 | Restore full-mode helper | Proposed | [Decision](0060-restore-full-mode-helper.md#concept) | [Technical depth](0060-restore-full-mode-helper-technical.md#technical-depth) |
 | 0061 | Creation cancellation admission envelope | Accepted | [Decision](0061-creation-cancellation-admission-envelope.md#concept) | [Technical depth](0061-creation-cancellation-admission-envelope-technical.md#technical-depth) |
+| 0063 | Runtime creation startup status | Proposed | [Decision](0063-runtime-creation-startup-status.md#concept) | [Technical depth](0063-runtime-creation-startup-status-technical.md#technical-depth) |
 
 0001 and 0002 were the prerequisites that unblocked the first milestone
 candidate; the [plans register](../plans/README.md) records current status.
