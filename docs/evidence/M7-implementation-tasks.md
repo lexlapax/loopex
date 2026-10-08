@@ -8,13 +8,14 @@ and 2,172 registry rows. Its 32 owned files are now literally joined into primar
 m7, changing 31 paths and preserving unrelated source/docs. This result does not
 close full integration, the finite 32-CAS-exhaustion proof or generation activation.
 
-Next is the foreground 112-case subtask. Original82284's paired formatter at
-`5cea1861` failed the final byte-map equality check: all ten native stages and
-all 15 Elixir syntax-preservation checks passed, but Delivery and frame_test
-formatted differently between supported pairs. The actual failed result remains
-retained. Floor formatter output is saved in clean source `3550198d`; this is
-not a passing paired-format qualification. Repair those two layouts before a
-new paired formatter and the whole112 proof. No native handle is live.
+The foreground formatter repair now passes. New source `089e4a73` retains the
+same six quantity fields and exact 32 escape bytes in shorter source layouts.
+Original36294 passed all 15 syntax-preservation checks on each supported pair,
+both formatting checks and identical final 17-file byte maps in 11.057 seconds.
+Ten actual joins, 48 artifacts and 2,192 registry rows are retained. The source
+is clean with no formatter-only child needed; original82284 remains failed.
+Next execute the complete 112-case foreground/protocol subtask on both pairs,
+including all four Node cases. No native handle is live at this checkpoint.
 T15 restore175 follows foreground qualification; its two direct workflow
 startup callers first need bounded private readiness observations under their
 existing fixture allowances. No public ADR0063 startup wait is implemented.
@@ -24,6 +25,8 @@ Current counts: originals 88 done / 85 todo / 6 retired; additions 364 done /
 bounded fixture repair recorded under T16 below. Original checklist rows stay
 unchanged. ADR0063 remains the sole asked pending decision. Exact artifacts are
 in the [resume record](M7-resume.md); earlier entries are historical where superseded.
+Formatter convergence is a prerequisite inside the open T16 integration work;
+it adds no checklist completion or whole112 test result.
 
 Original91795 passed the entire four-case constructor file on both pairs in
 27.327 seconds, and original61348 passed all 31 formatting/AST checks in

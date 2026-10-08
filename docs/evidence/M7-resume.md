@@ -27,7 +27,64 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
-### Current Core PASS, primary integration and next foreground proof
+### Current foreground formatter PASS and next 112-case proof
+
+Original36294 is terminal PASS_FOREGROUND_FIFO_FORMAT and collected once at
+raw source `089e4a73a372ad9c152f3b2df26a49b2ae2c7240`. Both supported pairs
+passed all 15 raw/post syntax-preservation checks and formatting checks; their
+complete final 17-file byte maps agree. Duration 11.057 seconds, ten actual
+joins, 48 artifacts, 2,192 registry rows. The clean source needs no formatting
+child. No native handle is live. The earlier original82284 remains failed.
+
+Output `M7/foreground-common-layout-format-20261008-v3a`; collection
+`fc08a22da2b08f2e8c0a30b21226ab4bbc1d87aa7aac58913bfe8812d4df6273`,
+terminal `2113f0b15f9738c15fb1950b93f9f8f4ab65699d253f1cbd211ced3c5089b17b`,
+registry `668d0d675a61b484915a6432bae157ee952aeb8bf488e994089925afe701950a`.
+The complete 2,182-row failed predecessor prefix remains unchanged. Do not
+repoll, recollect or rerun original36294's unchanged source/pair/stage keys.
+Use its actual complete 2,192-row registry as the next seed.
+
+Root saved the exact two-file repair above floor-output child355: a private
+literal attribute expands to the same six quantity fields; four short literal
+binary chunks retain the exact control octets 0 through 31. Complete other
+source, bounds, assertions, JSON witness and all current Core32 bytes remain
+unchanged. Authored source packet `c2a3e1fddbb3d6fceace7b19acbe3118b309187c75c8a818168542809fd20ad7`;
+independent source review `49acee5d013b70701e347b28889d65038c525879c8297fd5816ed7a29eb4a8ee`.
+The earlier source's AST is not compared with the rewritten authored syntax;
+each actual formatter compares its own new raw source with its formatted result.
+
+Final V3a capture
+`/private/tmp/m7-foreground-common-layout-format-preparation-20261008-v3a/approved-capture.json`,
+SHA-256 `add5bfdd237379e8a166d55a71f2a3d18b9b77cce87b7490ebd7b5288ddd82fb`;
+runner `a934ad127a12ae5fc26f07d79840306311fcd13f591ca2113c5287b0a1ef82b6`.
+Independent builder/bound reviews
+`a873b271f65c9c627ec463bc246b78baf80b5ab8a36fdf7466d75d087e7d128c` and
+`d05c2a921358dbc3008833c2f98c795a42ca91e61af3fc32d66c03d274c03890`
+qualified actual source, carrier and prior original custody before execution.
+Superseded unrun V3 remains retained; V3a restores its omitted current/floor
+population-label gate. Both actual positive Core populations remain required.
+
+Repair source, both draft preparations and reviews are retained as 61 immutable
+assets at
+`/Users/spuri/projects/lexlapax/loopex-evidence/M7/foreground-common-layout-context-20261008-v1/retention.json`,
+SHA-256 `f5eef710c588ecd6851a05dfaa9acabd7fd1c6fcccdc56a34885efe0e9f664b5`.
+Native originals remain separate immutable collections. Current checklist
+counts are unchanged: originals 88 done / 85 todo / 6 retired; additions
+364 done / 23 todo. This format prerequisite closes no broad T16 row.
+
+Next bind and run the new whole112 recipe against this actual positive
+formatter, unchanged Core942 proof and clean source089: app-server94 with all
+four Node cases, protocol18 in a separate VM, on both supported pairs. The
+older foreground proof builder's formatter-V2 gate remains invalid for this
+source. Its replacement is being prepared; no whole112 native run is claimed.
+Then T15 restore175, its two bounded private readiness fixture migrations,
+remaining protocol/helper integration and T17 candidate preparation. ADR0063
+remains the sole asked pending decision. M7 remains in progress.
+
+### Historical Core PASS, primary integration and foreground formatter failure
+
+The current checkpoint above supersedes next-run, registry-seed and source
+statements in the earlier checkpoint below.
 
 Original86174 is terminal PASS and collected once at tested
 `9420464c3953f88021617cd66ec05005b340ccdb`. Each supported pair executed and
