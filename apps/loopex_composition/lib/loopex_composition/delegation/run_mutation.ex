@@ -242,10 +242,14 @@ defmodule LoopexComposition.Delegation.RunMutation do
       end) and match?({:ok, _}, Executor.cancellation_bounds(value["cleanup_grace_ms"]))
   end
 
-  defp commands?(value, ids), do: command?(value, ids, "create") and command?(value, ids, "prompt")
+  defp commands?(value, ids),
+    do: command?(value, ids, "create") and command?(value, ids, "prompt")
 
   defp command?(value, [runtime, _session, _run], kind) do
-    case domain("loopex:helper-" <> kind <> ":v1", [Base.encode64(runtime), value["operation_identity"]]) do
+    case domain("loopex:helper-" <> kind <> ":v1", [
+           Base.encode64(runtime),
+           value["operation_identity"]
+         ]) do
       {:ok, id} -> value[kind <> "_command_id"] == Base.encode64(id)
       _ -> false
     end
@@ -255,31 +259,45 @@ defmodule LoopexComposition.Delegation.RunMutation do
     closed?(value, @terminal) and positive?(value["journal_version"]) and
       hash?(value["terminal_record_sha256"]) and value["cleanup"] == "confirmed" and
       case value["state"] do
-        "uncreated" -> is_nil(value["child_session_id"]) and is_nil(value["child_run_id"])
+        "uncreated" ->
+          is_nil(value["child_session_id"]) and is_nil(value["child_run_id"])
+
         state when state in ~w(completed failed cancelled bound_reached) ->
           binary?(value["child_session_id"], 256) and
             (binary?(value["child_run_id"], 8_192) or
                (state == "failed" and is_nil(value["child_run_id"])))
-        _ -> false
+
+        _ ->
+          false
       end
   end
 
   defp accounting?(value, terminal, operation) do
     closed?(value, @accounting) and
-      Enum.all?(~w(reported_input_tokens reported_output_tokens estimated_tokens charged_tokens through_version), fn key ->
-        nonnegative?(value[key])
-      end) and is_boolean(value["unresolved_usage"]) and
+      Enum.all?(
+        ~w(reported_input_tokens reported_output_tokens estimated_tokens charged_tokens through_version),
+        fn key ->
+          nonnegative?(value[key])
+        end
+      ) and is_boolean(value["unresolved_usage"]) and
       (value["estimated_tokens"] == 0 or value["unresolved_usage"]) and
       hash?(value["evidence_sha256"]) and
       accounting_endpoint?(value, terminal) and
-      case domain("loopex:helper-accounting-evidence:v1", [operation, terminal, Map.delete(value, "evidence_sha256")]) do
+      case domain("loopex:helper-accounting-evidence:v1", [
+             operation,
+             terminal,
+             Map.delete(value, "evidence_sha256")
+           ]) do
         {:ok, hash} -> hash == value["evidence_sha256"]
         _ -> false
       end
   end
 
   defp accounting_endpoint?(value, %{"state" => "uncreated"}) do
-    Enum.all?(~w(reported_input_tokens reported_output_tokens estimated_tokens charged_tokens through_version), &(value[&1] == 0)) and
+    Enum.all?(
+      ~w(reported_input_tokens reported_output_tokens estimated_tokens charged_tokens through_version),
+      &(value[&1] == 0)
+    ) and
       value["unresolved_usage"] === false and is_nil(value["prefix_token"])
   end
 
@@ -292,15 +310,21 @@ defmodule LoopexComposition.Delegation.RunMutation do
   # validator, so exact max(R, Q) and refund admission belong to the reducer.
   defp settlement_projection?(value) do
     accounting = value["accounting"]
-    usage = accounting["reported_input_tokens"] + accounting["reported_output_tokens"] + accounting["estimated_tokens"]
+
+    usage =
+      accounting["reported_input_tokens"] + accounting["reported_output_tokens"] +
+        accounting["estimated_tokens"]
 
     cond do
       value["terminal"]["state"] == "uncreated" ->
         value["charge_tokens"] == 0 and value["refund_tokens"] == 0
+
       is_nil(value["terminal"]["child_run_id"]) ->
         usage == 0 and accounting["unresolved_usage"] === false and value["charge_tokens"] == 0
+
       accounting["unresolved_usage"] ->
         value["charge_tokens"] >= usage and value["refund_tokens"] == 0
+
       true ->
         value["charge_tokens"] == usage
     end
@@ -327,8 +351,12 @@ defmodule LoopexComposition.Delegation.RunMutation do
   end
 
   defp target(%{"kind" => "initialize"}), do: []
+
   defp target(%{"kind" => kind, "operation_identity" => operation, "job" => job})
-       when kind in ~w(reserve bind_receipt), do: [operation, job["job_id"]]
+       when kind in ~w(reserve bind_receipt) do
+    [operation, job["job_id"]]
+  end
+
   defp target(%{"operation_identity" => operation}), do: operation
 
   defp domain(label, value) do
@@ -339,6 +367,7 @@ defmodule LoopexComposition.Delegation.RunMutation do
   end
 
   defp binary?(value, maximum, minimum \\ 1)
+
   defp binary?(value, maximum, minimum) when is_binary(value) do
     byte_size(value) <= div(maximum + 2, 3) * 4 and
       case Base.decode64(value) do
@@ -346,17 +375,22 @@ defmodule LoopexComposition.Delegation.RunMutation do
         _ -> false
       end
   end
+
   defp binary?(_, _, _), do: false
 
   defp hashes?(value, keys), do: Enum.all?(keys, &hash?(value[&1]))
+
   defp hash?(value) when is_binary(value) and byte_size(value) == 64,
     do: Enum.all?(:binary.bin_to_list(value), &(&1 in ?0..?9 or &1 in ?a..?f))
+
   defp hash?(_), do: false
   defp nonnegative?(value), do: is_integer(value) and value >= 0
   defp positive?(value), do: is_integer(value) and value > 0
   defp uint64_positive?(value), do: positive?(value) and value <= @uint64
   defp role?(value), do: is_binary(value) and Regex.match?(@role, value)
+
   defp closed?(value, keys),
     do: is_map(value) and not is_struct(value) and Enum.sort(Map.keys(value)) == Enum.sort(keys)
+
   defp error, do: {:error, :invalid_run_transaction}
 end
