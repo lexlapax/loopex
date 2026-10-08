@@ -406,6 +406,85 @@ defmodule Loopex.ProgressSinkTest do
     assert :ok = Sink.close(setup_sink)
   end
 
+  # Concept: scheduling delay cannot turn a late native join into timely cleanup.
+  # Technical depth: this 15 s fixture includes an actual caller suspension and
+  # cleanup observation; the production close cutoff remains exactly 5,000 ms.
+  @tag timeout: 15_000
+  test "a genuine normal DOWN queued to a late resumed owner leaves cleanup unproved", %{
+    sink: setup_sink
+  } do
+    gate = make_ref()
+    %{owner: owner, owner_monitor: owner_monitor, sink: sink} = close_owner_fixture(gate)
+    {guardian, incarnation, arena} = sink
+    guardian_monitor = Process.monitor(guardian)
+    observer = self()
+
+    # This is the same installed OTP after-reply cut as the prior join test.
+    # The original guardian sends its real reply; the hook sends no reply.
+    hook = fn
+      _debug, {:out, :ok, {^owner, _call_tag}, %{incarnation: ^incarnation}}, _extra ->
+        send(observer, {:after_close_reply, gate, self(), System.monotonic_time(:millisecond)})
+
+        receive do
+          {:release_close_reply, ^gate} -> :done
+        end
+
+      debug, _event, _extra ->
+        debug
+    end
+
+    assert :ok = :sys.install(guardian, {gate, hook, :waiting})
+    reference = make_ref()
+    send(owner, {:close, reference})
+    assert_receive {:close_started, ^reference, started}, 1_000
+    assert_receive {:after_close_reply, ^gate, ^guardian, replied}, 1_000
+    assert replied >= started
+    assert Process.alive?(guardian)
+
+    try do
+      assert :erlang.suspend_process(owner)
+      assert {:status, :suspended} = Process.info(owner, :status)
+      refute_receive {:close_result, ^reference, _result, _started, _finished}, 0
+
+      send(guardian, {:release_close_reply, gate})
+      assert_receive {:DOWN, ^guardian_monitor, :process, ^guardian, :normal}, 5_000
+      assert :ets.info(arena) == :undefined
+      close_monitor = wait_for_close_down(owner, guardian, System.monotonic_time(:millisecond) + 1_000)
+      assert is_reference(close_monitor)
+
+      # The real reply observation follows the close capture. Waiting until
+      # that observation plus 5,100 ms therefore passes the original cutoff,
+      # without guessing when the owner executed its internal capture.
+      resume_after = replied + 5_100
+
+      receive do
+      after
+        max(resume_after - System.monotonic_time(:millisecond), 0) -> :ok
+      end
+
+      assert System.monotonic_time(:millisecond) >= resume_after
+      assert {:status, :suspended} = Process.info(owner, :status)
+      assert :erlang.resume_process(owner)
+
+      assert_receive {:close_result, ^reference, {:error, :cleanup_unproved}, ^started, finished},
+                     1_000
+      assert finished >= resume_after
+      send(owner, :finish)
+      assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :normal}, 5_000
+    after
+      # resume_process belongs to the actual suspender. On assertion failure
+      # resume here before the fixture's independent exact actor joins. OTP
+      # also drops this suspend count if the suspending test process is killed.
+      if Process.info(owner, :status) == {:status, :suspended} do
+        assert :erlang.resume_process(owner)
+      end
+
+      send(guardian, {:release_close_reply, gate})
+    end
+
+    assert :ok = Sink.close(setup_sink)
+  end
+
   test "guardian suspension does not queue reservation requests or payloads", %{sink: sink} do
     {guardian, _incarnation, _arena} = sink
     :ok = :sys.suspend(guardian)
@@ -1513,6 +1592,30 @@ defmodule Loopex.ProgressSinkTest do
       end
 
       wait_for_close_call(guardian, owner, incarnation, cutoff)
+    end
+  end
+
+  defp wait_for_close_down(owner, guardian, cutoff) do
+    assert {:status, :suspended} = Process.info(owner, :status)
+    assert {:messages, messages} = Process.info(owner, :messages)
+
+    case Enum.find(messages, fn
+           {:DOWN, monitor, :process, ^guardian, :normal} -> is_reference(monitor)
+           _other -> false
+         end) do
+      {:DOWN, monitor, :process, ^guardian, :normal} ->
+        monitor
+
+      nil ->
+        assert System.monotonic_time(:millisecond) < cutoff,
+               "missing original guardian normal DOWN in suspended owner's mailbox"
+
+        receive do
+        after
+          1 -> :ok
+        end
+
+        wait_for_close_down(owner, guardian, cutoff)
     end
   end
 

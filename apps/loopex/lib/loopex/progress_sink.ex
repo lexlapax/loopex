@@ -216,7 +216,13 @@ defmodule Loopex.ProgressSink do
         case GenServer.call(guardian, {:close, incarnation}, close_remaining(deadline)) do
           :ok ->
             receive do
-              {:DOWN, ^monitor, :process, ^guardian, :normal} -> :ok
+              {:DOWN, ^monitor, :process, ^guardian, :normal} ->
+                # Concept: cleanup must be observed before the original cutoff.
+                # Technical depth: after0 still consumes a queued DOWN after
+                # caller suspension; the matching branch must check the clock.
+                if System.monotonic_time(:millisecond) < deadline,
+                  do: :ok,
+                  else: {:error, :cleanup_unproved}
               {:DOWN, ^monitor, :process, ^guardian, _reason} -> {:error, :cleanup_unproved}
             after
               close_remaining(deadline) -> {:error, :cleanup_unproved}
