@@ -29,6 +29,27 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Reboot continuation on 2026-10-07
 
+Original case formatter30525 is TERMINAL1 before native stage admission.
+The source-packet authentication loops shadowed the CLI registry digest;
+registry comparison refused before admission.json or any e.stage. No Elixir/OTP
+process, formatter/AST/test stage or registry reservation occurred. Product
+sourcea276ad8d remains clean and unchanged. Preserve
+`M7/attempt-case-replay-format-20261007-v1/preflight-failure.json`, SHA-256
+`1d5449ea742b1c7c109d88ffeecfb59148482b0f708643db051d5c65460c2d98`,
+with original tool-reported traceback, enabledf863a596 and unchanged1765
+registry. Do not repoll30525 or use the native flat collector on this preflight
+failure, which has no native terminal/result records.
+
+The author is preparing V2 carriers in a new immutable packet directory,
+renaming only source-packet digest iterators and auditing other CLI-name
+collisions. New formatter output is case-formatv2; proof remains case-proofv1.
+Independent review is assigned. All actual case tests remain UNRUN and no row
+closes. Next-fullV3 independent sourcedd07a437 approved only its strict future
+case99 producer replacement; execution remains disabled. ProgressSink source
+implementation continues separately. ADR0059 is the sole asked pending decision.
+Earlier entries below are historical where superseded.
+
+
 Case native preparation and next-fullV3 are retained as38 immutable files at
 `M7/case-replay-native-preparation-context-20261007-v1/retention.json`, SHA-256
 `388f71af5d21f7de8a6e45b76357781c5e5e13e71ef326a94b301f97f4c06975`.
