@@ -3,22 +3,23 @@
 Current continuation on 2026-10-07: ADR0061 is accepted at `d7c23f3d`;
 the repeated approval matches that recorded decision. ADR0063 remains Proposed
 at `16c251ad`; its exact startup-status and bounded host-wait question is pending.
-Private continuation128 and native creation22 passed on both supported pairs.
-Creation joins literally at `84f0aa85`; the broader authored/host/VM-loss row
-remains open. T01–T19 originals remain88 done/85 todo/6 retired; added362
-done/23 todo. Exact identities remain in the [resume record](M7-resume.md).
+Private continuation128, native creation22 and the dormant physical foreground
+writer14 passed on both supported pairs. Writer original61523 passed in
+156.763seconds with eight exact joins/42 artifacts, and four tested files join
+literally. T01–T19 originals remain88 done/85 todo/6 retired; added363 done/23
+todo. Exact identities remain in the [resume record](M7-resume.md).
 
-Foreground writer's original47604 compile failure and original14097 current
-1/14 test failure are retained. Two causal repairs pin captured bitstring sizes
-and preserve fixture launcher argument charlists. Changed source `6c6d3bc4`
-is under complete14 paired proof, original75037, not yet a passing result.
+Foreground host FIFO/emitted-cursor integration remains open. Original47604,
+14097,75037 and90126 retain their actual failures; changed fixture source5646d450
+preserves safe decoding, actual process observations and all original cutoffs.
 Credited Core ingress V1 received a blocking independent review; V2 repairs
-ordered Control handoff and actual producer/PID/accounting proofs. Its expanded
-complete census is382, including two existing long-bound cases. Authored native
-creation proceeds in its separate worktree from `84f0aa85`, preserving the
-accepted ProviderLifetime registration and original absolute cutoffs. Custody
-restore remains source-qualified pending current boundary/readiness joins and
-complete175 native cases. No task closes from source review or a live run.
+ordered Control handoff and real model/executor producer custody. Its expected
+complete census is385, including two existing long-bound cases; native is unrun.
+Authored native creation proceeds in its separate worktree from `84f0aa85`,
+preserving the accepted ProviderLifetime registration and original absolute
+cutoffs. Custody restore remains source-qualified pending current boundary and
+readiness joins plus complete175 native cases. The broader authored/host/VM-loss
+creation row remains open. No full integration or milestone completion is claimed.
 
 ADR0059 is accepted and pushed at `3212b0ed`. The first Core Store contract
 unit is assigned in its own worktree; durable adapters, Control/carrier
@@ -14508,6 +14509,23 @@ in the restart checkpoint. Broader restore/decoder/public/helper rows stay open.
 - [ ] Independently review integration changes and fix confirmed defects without weakening checks.
 
 ### Added implementation subtasks
+
+- [x] Implement and prove accepted ADR0058's dormant physical foreground OutputWriter through actual inherited stdout, exact worker/leader/port joins, nonce-bound controls and bounded cleanup. Preserve full-frame, blocked/partial/broken pipe, malformed control, owner/manager loss and EOF proofs on both supported toolchains. Foreground FIFO/emitted-cursor integration, native ingress migration and Linux qualification remain separate.
+
+  Evidence: isolated `5646d450f730bc4d7c453b42869fce89c94069ec`, original61523,
+  complete14 passed on each supported pair, zero failures/exclusions/skips/invalid,
+  warning-free project compilation and formatting,156.763seconds. Output
+  `M7/foreground-writer-proof-20261007-v5`; collection SHA-256
+  `5e035e6dc7c75e3d322cba092152c6c08a927d09fb9ecbca8b2c98dfdbed32f8`, terminal
+  `5184df02ce6d52c764920cf523ce9f07dc21c223764a20677fcddad61970aedb`.
+  Eight original process joins/42 retained artifacts;2048-row registry
+  `7aa67e979b312d473cb562fc78329febe988fd6a8cd2368d42d1709f4ea3c33d`.
+  Four tested paths integrate literally, join `5c29c699ea4de59848d41e01dd67cb9e0fcd9b1034c27b1d0ec8bb28893e192d`.
+  Independent fixture repair reviews `0ce1c737` and `a0152dfa` preserve all original
+  cases/assertions/cutoffs and safe decoding. Original47604 compilation and
+  original14097/75037/90126 fixture failures remain retained as failures.
+  The writer is dormant; existing Stdio output is the next host integration unit.
+
 
 - [x] Prove ordinary public runtime stop while an answered interaction's real policy re-evaluation task is held; capture exact coordinator/private-worker/supervisor lifetimes and attribute actual shutdown reports under one captured approved fixture-grace cutoff. Preserve existing whole-file interaction proofs, run both supported pairs and retain no-dispatch/no-invented-durable-fact oracles. This narrow unit does not close broad historical diagnostic attribution.
 

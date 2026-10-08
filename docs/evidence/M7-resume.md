@@ -29,6 +29,60 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Reboot continuation on 2026-10-07
 
+Latest completed unit: dormant physical foreground writer at isolated
+`5646d450f730bc4d7c453b42869fce89c94069ec`, original61523, complete14 PASS
+on each supported pair,156.763seconds, zero failures/exclusions/skips/invalid.
+Warning-free project compilation and formatting passed on both pairs.
+Eight original joins/42 artifacts,2048-row successor registry. Output
+`M7/foreground-writer-proof-20261007-v5`; collection
+`5e035e6dc7c75e3d322cba092152c6c08a927d09fb9ecbca8b2c98dfdbed32f8`, terminal
+`5184df02ce6d52c764920cf523ce9f07dc21c223764a20677fcddad61970aedb`, registry
+`7aa67e979b312d473cb562fc78329febe988fd6a8cd2368d42d1709f4ea3c33d`.
+Original61523 is terminal0 and collected once; never rerun/recollect those bytes.
+Four paths join literally into primary from that tested source; join
+`/private/tmp/m7-foreground-writer-literal-integration-20261007-v1/join.json`,
+SHA-256 `5c29c699ea4de59848d41e01dd67cb9e0fcd9b1034c27b1d0ec8bb28893e192d`.
+Existing AppServer source is unchanged againstdf138b22. Current writer remains
+dormant; host FIFO/reservation/JOINED-cursor/native ingress and Linux load proof
+remain open. One added T16 unit closes: T01–T19 originals88/85/6,
+added363/23. Including T00 originals88/91/7, added367/24/0.
+
+Earlier original75037 failed current12/14 at6c6d3bc4,80.985seconds,4 joins/24
+artifacts/2036rows; collection
+`7fe990d7a767c1a1a1f4de5c95ee56bfb1184f01103baf68bbf26781d0efbb79`, terminal
+`9b661d0db8b129cf0e08ef09db3d2538b6955c8b23b28a42cde40cafd38aa776`, registry
+`fee5b00a8ce864d15412b03a23800fe8999ea58d4b44a9ec3a22f30f72f74ec0`.
+Original90126 failed current13/14 at310ad782,83.067seconds,4 joins/24
+artifacts/2040rows; collection
+`787fa153c025e350f8d6f9fe63792c1794f7e6df3013ea276650cc9ac23d03f9`, terminal
+`adc6f051954bf3fa0c26d65078a348474b897df3546f4c43d2da6c50bf2c7564`, registry
+`4102473f0d1ce345573cdb90c43f4f1b66fee8919664162a1f431a064274d8e5`.
+Both failed before floor execution and are collected once. Closed fixture loss
+acknowledgements and owner monitor observation repair safe decoder vocabulary;
+no permissive decode or allowance change. Independent reports
+`/private/tmp/m7-foreground-writer-fixture-repairs-independent-review-v1.md`,
+SHA-256 `0ce1c737950fa5525d0b62268ca20a0fc875fe226fe65a420c21533559f229b1`, and
+`/private/tmp/m7-foreground-writer-fixture-repairs-independent-review-followup-v1.md`,
+SHA-256 `a0152dfa2f8f83c7d53b5a0083d7677f6bc5a2adbf34815845dade5a381d178c`.
+Root read both full reports. Earlier original47604/14097 failures remain failed.
+Immutable fixture recipe retention
+`M7/foreground-fixture-repair-context-20261007-v1/retention.json`, SHA-256
+`4a31cfd2cbb5577fb83634820caa8db0635805878cf2ee045246c9e52679dc3e`,22 files.
+Its61523-live capture predates the completed proof recorded above.
+Literal join and final independent follow-up are separately retained at
+`M7/foreground-writer-integration-context-20261007-v1/retention.json`, SHA-256
+`15486e2f9a126b0c3fee723e660d460fe25e5b38ae077e4e2957bd5d8b9b8735`,3 files.
+
+Credited ingress V2 source edits now add three actual ordered model/executor and
+lost-first-request custody cases. Expected static330 declarations expand to385,
+including the same two long-bound cases. Final source audit/packet and independent
+review remain; native is unrun. Root will rejoin the proved current creation
+Control delta before native and verify all22 creation lifecycle cases alongside
+the complete changed ingress selection. Authored creation continues independently
+within its allocated paths and accepted bounds. Foreground source-only integration
+map is being sealed. ADR0063 remains the one asked pending approval; no dependent
+startup status/host-wait implementation. No native run is live at this checkpoint.
+
 Latest checkpoint after `84f0aa85`: ADR0061's repeated approval matches the
 accepted `d7c23f3d` record. ADR0063's exact question is pending; no dependent
 startup status/host-wait implementation is authorized yet. Independent proposal

@@ -1,0 +1,204 @@
+defmodule Loopex.AppServer.OutputWriterFixture do
+  @moduledoc """
+  ## Concept
+
+  A fixture owns the writer and reports its actual lifecycle over a loopback
+  channel independent of inherited stdout. It never supplies a successful
+  process-table answer or stdout result on behalf of the writer.
+
+  ## Technical depth
+
+  The separate VM retains an owner process and a writer monitor. Private fault
+  commands corrupt bounded control data or terminate real actors. The one
+  suspension is fixture-owned and resumed on channel EOF and closure; an actual
+  WRITTEN must be observed before its deliberately repeated copy is enqueued.
+  A fixed 30,000-ms fixture cutoff ends a non-answer as failure.
+  """
+  alias Loopex.AppServer.OutputWriter
+
+  def main do
+    [port] = System.argv()
+    {:ok, socket} = :gen_tcp.connect(~c"127.0.0.1", String.to_integer(port),
+      [:binary, packet: 4, active: true], 5_000)
+    fixture = self()
+
+    {owner, owner_monitor} = spawn_monitor(fn ->
+      {:ok, writer} = OutputWriter.start()
+      send(fixture, {:created, self(), writer})
+      own(writer, fixture)
+    end)
+
+    receive do
+      {:created, ^owner, writer} ->
+        writer_monitor = Process.monitor(writer)
+        send_record(socket, {:ready, System.pid()})
+        loop(%{socket: socket, owner: owner, writer: writer,
+          owner_monitor: owner_monitor, writer_monitor: writer_monitor,
+          owner_down: false, writer_down: false, closing: false, suspended: false,
+          cutoff: System.monotonic_time(:millisecond) + 30_000})
+    after
+      5_000 -> System.halt(2)
+    end
+  end
+
+  defp own(writer, fixture) do
+    receive do
+      {:write, frame} ->
+        send(fixture, {:reply, OutputWriter.write(writer, frame)})
+        own(writer, fixture)
+
+      :stop ->
+        result = OutputWriter.stop(writer)
+        drain(writer, fixture)
+        send(fixture, {:stopped, result})
+
+      {:loopex_output_writer_retired, ^writer, reference, reason} ->
+        send(fixture, {:retired, reference, reason})
+        own(writer, fixture)
+
+      {:loopex_output_writer, ^writer, reference, result} ->
+        send(fixture, {:result, reference, result, System.monotonic_time(:millisecond)})
+        own(writer, fixture)
+    end
+  end
+
+  defp drain(writer, fixture) do
+    receive do
+      {:loopex_output_writer_retired, ^writer, reference, reason} ->
+        send(fixture, {:retired, reference, reason})
+        drain(writer, fixture)
+      {:loopex_output_writer, ^writer, reference, result} ->
+        send(fixture, {:result, reference, result, System.monotonic_time(:millisecond)})
+        drain(writer, fixture)
+    after
+      0 -> :ok
+    end
+  end
+
+  defp loop(state) do
+    if System.monotonic_time(:millisecond) >= state.cutoff do
+      System.halt(2)
+    end
+
+    if state.closing and state.owner_down and state.writer_down do
+      System.halt(0)
+    else
+      receive do
+        {:tcp, socket, bytes} when socket == state.socket ->
+          command = :erlang.binary_to_term(bytes, [:safe])
+          case command do
+            "suspend" ->
+              :ok = :sys.suspend(state.writer, 5_000)
+              send_record(socket, :suspended)
+
+            "repeat_written" ->
+              repeat_written(state.writer)
+              :ok = :sys.resume(state.writer, 5_000)
+              send_record(socket, :repeated_written)
+            {"environment", startup} ->
+              System.put_env("BASH_ENV", startup)
+              System.put_env("LOOPEX_PROVIDER_API_KEY", "writer-environment-fixture")
+              send_record(socket, :environment_ready)
+            {"write", frame} -> send(state.owner, {:write, frame})
+            "state" ->
+              captured = :sys.get_state(state.writer, 5_000)
+              active = case captured.active do
+                nil -> nil
+                active -> Map.take(active, [:nonce, :phase, :leader, :worker,
+                  :group, :write_cutoff, :cleanup_cutoff])
+              end
+              send_record(socket, {:state, active, captured.sealed})
+
+            {"inject", fault} ->
+              captured = :sys.get_state(state.writer, 5_000).active
+              prefix = "STARTED #{captured.nonce} #{captured.worker}"
+              bytes = case fault do
+                "nonce" ->
+                  <<first, rest::binary>> = captured.nonce
+                  wrong = if first == ?0, do: ?1, else: ?0
+                  "WRITTEN #{<<wrong, rest::binary>>}\n"
+                "order" -> "JOINED #{captured.nonce} #{captured.worker}\n"
+                "repeat" -> prefix <> "\n"
+                "trailing" -> "WRITTEN #{captured.nonce} extra\n"
+              end
+              send(state.writer, {captured.port, {:data, bytes}})
+              send_record(socket, :injected)
+
+            "close_proxy" ->
+              captured = :sys.get_state(state.writer, 5_000).active
+              Port.close(captured.port)
+              send_record(socket, :closed_proxy)
+
+            "kill_owner" ->
+              Process.exit(state.owner, :kill)
+              send_record(socket, :killed_owner)
+
+            "kill_writer" ->
+              Process.exit(state.writer, :kill)
+              send_record(socket, :killed_writer)
+
+            "stop" -> send(state.owner, :stop)
+            "close" ->
+              resume_if_owned(state)
+              send(state.owner, :stop)
+          end
+          suspended = case command do
+            "suspend" -> true
+            "repeat_written" -> false
+            "close" -> false
+            _ -> state.suspended
+          end
+          loop(%{state | closing: state.closing or command == "close", suspended: suspended})
+
+        {:tcp_closed, socket} when socket == state.socket ->
+          resume_if_owned(state)
+          unless state.owner_down, do: send(state.owner, :stop)
+          loop(%{state | closing: true, suspended: false})
+
+        {:DOWN, monitor, :process, _pid, reason} when monitor == state.owner_monitor ->
+          send_record(state.socket, {:owner_down, reason, System.monotonic_time(:millisecond)})
+          loop(%{state | owner_down: true})
+
+        {:DOWN, monitor, :process, _pid, reason} when monitor == state.writer_monitor ->
+          send_record(state.socket, {:writer_down, reason, System.monotonic_time(:millisecond)})
+          loop(%{state | writer_down: true})
+
+        record ->
+          send_record(state.socket, record)
+          loop(state)
+      after
+        max(0, state.cutoff - System.monotonic_time(:millisecond)) -> System.halt(2)
+      end
+    end
+  end
+
+  defp resume_if_owned(%{suspended: true, writer_down: false, writer: writer}),
+    do: :sys.resume(writer, 5_000)
+
+  defp resume_if_owned(_state), do: :ok
+
+  defp repeat_written(writer) do
+    active = :sys.get_state(writer, 5_000).active
+    if System.monotonic_time(:millisecond) >= active.write_cutoff,
+      do: raise("actual WRITTEN was not captured within its original write interval")
+    {:messages, messages} = Process.info(writer, :messages)
+    pending = Enum.reduce(messages, active.control, fn
+      {port, {:data, bytes}}, buffer when port == active.port -> buffer <> bytes
+      _message, buffer -> buffer
+    end)
+    record = "WRITTEN #{active.nonce}\n"
+
+    if :binary.match(pending, record) != :nomatch do
+      # The duplicate is queued behind the actual observed worker record and
+      # before resuming the manager. No successful write record is invented.
+      send(writer, {active.port, {:data, record}})
+    else
+      Process.sleep(1)
+      repeat_written(writer)
+    end
+  end
+
+  defp send_record(socket, record), do: :gen_tcp.send(socket, :erlang.term_to_binary(record))
+end
+
+Loopex.AppServer.OutputWriterFixture.main()
