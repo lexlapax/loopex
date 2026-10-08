@@ -164,6 +164,8 @@ defmodule Loopex.PrivateTaskShutdownTest do
         :ok = Loopex.stop(fixture.runtime)
         {:ok, store} = Loopex.Store.new(Loopex.M1RuntimeTestStore, fixture.store)
 
+        startup_cutoff = System.monotonic_time(:millisecond) + 1_000
+
         {:ok, runtime} =
           Loopex.start_link(
             runtime_id: "private-task-shutdown-#{index}",
@@ -187,7 +189,9 @@ defmodule Loopex.PrivateTaskShutdownTest do
             grant_decision: {:host_policy, :allow}
           )
 
-        send(observer, {:fixture, self(), %{fixture | runtime: runtime}})
+        readiness_cutoff = await_fixture_creation_ready(runtime, startup_cutoff)
+        fixture_startup_remaining(readiness_cutoff)
+        send(observer, {:fixture, self(), %{fixture | runtime: runtime}, readiness_cutoff})
 
         receive do
           :stop ->
@@ -200,7 +204,7 @@ defmodule Loopex.PrivateTaskShutdownTest do
         end
       end)
 
-    assert_receive {:fixture, ^owner, fixture}, 5_000
+    assert_receive {:fixture, ^owner, fixture, readiness_cutoff}, 5_000
 
     on_exit(fn ->
       Fixture.stop(fixture)
@@ -208,10 +212,45 @@ defmodule Loopex.PrivateTaskShutdownTest do
       for agent <- [fixture.model, fixture.executor], Process.alive?(agent), do: Agent.stop(agent)
     end)
 
-    %{fixture: fixture, owner: owner, owner_monitor: monitor, mode: mode}
+    %{fixture: fixture, owner: owner, owner_monitor: monitor, mode: mode, readiness_cutoff: readiness_cutoff}
+  end
+
+  # Concept: the replacement runtime is ready before its one original create.
+  # Technical depth: the existing AgentLoopFixture permits 1,000 ms to observe
+  # startup. Capture that allowance before replacement start and spend only the
+  # smaller original public Core cutoff, pinning its identity through every read.
+  # This changes no shutdown cutoff, retry, quiet assertion or fault control.
+  defp await_fixture_creation_ready(runtime, cutoff, pinned \\ nil) do
+    remaining = fixture_startup_remaining(cutoff)
+
+    assert {:ok, %{state: state, startup_id: id, startup_deadline_ms: core_cutoff} = snapshot} =
+             Loopex.creation_startup_status(runtime, min(1_000, remaining))
+
+    assert map_size(snapshot) == 3
+    assert is_binary(id) and byte_size(id) == 32 and is_integer(core_cutoff)
+    assert pinned in [nil, {id, core_cutoff}], "original fixture startup identity/cutoff changed"
+    assert state in [:starting, :ready], "original fixture creation startup is unavailable"
+    cutoff = min(cutoff, core_cutoff)
+    remaining = fixture_startup_remaining(cutoff)
+
+    case state do
+      :ready ->
+        cutoff
+
+      :starting ->
+        Process.sleep(min(10, remaining))
+        await_fixture_creation_ready(runtime, cutoff, {id, core_cutoff})
+    end
+  end
+
+  defp fixture_startup_remaining(cutoff) do
+    remaining = cutoff - System.monotonic_time(:millisecond)
+    assert remaining > 0, "original fixture startup observation cutoff exhausted"
+    remaining
   end
 
   defp hold(run) do
+    fixture_startup_remaining(run.readiness_cutoff)
     {_session, _attachment, {:accepted, _}} = Fixture.run(run.fixture, "held shutdown")
     assert_receive {:holding, callback, child, guard, stop_reference}, 5_000
     assert_receive {:managed_child_ready, ^callback, ^child}, 5_000
