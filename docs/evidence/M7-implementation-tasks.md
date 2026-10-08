@@ -18,7 +18,12 @@ Current creation rejoins at isolatede194ff94 with complete conflict state saved
 and exact reverse reproduction of current bytes; no new native result is claimed.
 Authored creation's six-path packet is source-ready,92 declarations across five
 complete files. Expanded census confirms92 conditional registered cases including
-three long-bound cases; independent review and paired native remain.
+three long-bound cases. Source review identified an offered-resource retention
+race and a noncausal fixture read; V2 repair, independent review and paired native
+remain. Foreground progress credit also requires a bounded, byte-equivalent
+Protocol Frame encoder repair; the existing temporary lists exceed the proposed
+charge. These are prerequisites of the open custody/output rows, with no new
+completion credit.
 Custody restore remains source-qualified pending current boundary/readiness joins
 and complete175 native cases. Exact references and ownership are in the resume
 record. All broad rows remain open; counts change only for the proved writer unit.

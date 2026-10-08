@@ -83,7 +83,11 @@ raw projection admission must remain sufficient. The selected conservative
 private profile is projected `8192 + 2*backing + 12*visible_bytes` and raw
 `8192 + 8*backing + 12*visible_bytes`. The foreground writer must retain its
 actual encoding/copy accounting proof; these formulas are source work, not a
-passing capacity result. Genuine finite-CAS loss,
+passing capacity result. Further source review found Protocol.Frame.escape's
+per-codepoint accumulator and reverse lists can retain about32N list-node bytes
+on64-bit BEAM. Foreground writer ownership now includes Protocol Frame and its
+complete frame tests for a byte-equivalent bounded encoder repair. The old
+encoder does not qualify under the proposed14N projected charge. Genuine finite-CAS loss,
 physical custody and actual copy accounting proofs are required. No fake stage
 result, production hook, synthetic arena edit or renewed allowance is authorized.
 Original28 Sink assertions/helpers/cutoffs remain. Independent V3 review follows.
@@ -103,7 +107,15 @@ Immutable external retention
 `M7/progress-authored-census-context-20261007-v1/retention.json`, SHA-256
 `47d367ef85f476f97143a03a2cc3596432e9a5552efb5d77a4dfe72a2755d145`.
 Do not equate this conditional census with execution. All native/parser/Git
-qualification remains unrun. Independent review and current Core-credit rejoin
+qualification remains unrun. Root verified all41 frozen artifact identities and
+read the full patch/report. V1 source review found a reachable offered-resource
+escape during owner-loss/closing registration: a point-in-time dictionary scan
+can precede the offer, while a closing handler refuses without retaining its
+arbitrary PID. It also found the resource-stopping fixture reads Control's cleanup
+without a cross-recipient barrier. The same writer is assigned a V2 repair under
+the existing registration/Starter protocol and original cutoffs, preserving V1
+and all71 existing cases. No V1 native grant or passing qualification is claimed.
+Independent review and current Core-credit rejoin
 must precede actual paired proof. Store carrier custody body is mechanically
 preserved; managed preparation retains one cleanup capture through later phases.
 
