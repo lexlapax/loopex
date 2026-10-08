@@ -1582,10 +1582,30 @@ defmodule LoopexDaemon.SocketTransportTest do
     assert Enum.count(Tuple.to_list(slots), &(not is_nil(&1))) == 32
     send(daemon.registry, :continue_progress_emission)
 
-    eventually(fn ->
-      :sys.get_state(connection).progress_frames == %{} and
-        :sys.get_state(connection).progress_leases == %{}
-    end)
+    try do
+      eventually(fn ->
+        state = :sys.get_state(connection)
+        state.progress_frames == %{} and state.progress_leases == %{}
+      end)
+    rescue
+      exception in ExUnit.AssertionError ->
+        state = :sys.get_state(connection)
+
+        counts = %{
+          leases: map_size(state.progress_leases),
+          frames: map_size(state.progress_frames),
+          bytes: state.progress_bytes,
+          local_queue: :queue.len(state.progress),
+          cursors: :queue.len(state.output_cursors),
+          enqueues_pending: state.enqueues_pending,
+          exchanges: map_size(state.exchanges),
+          claim: if(is_map(state.output_claim), do: :active, else: state.output_claim),
+          selecting: not is_nil(state.send_select)
+        }
+
+        reraise %{exception | message: exception.message <> "; retained custody: " <> inspect(counts)},
+                __STACKTRACE__
+    end
 
     assert length(receive_records(client, 31)) == 31
     assert :sys.get_state(connection).progress_bytes == 0
