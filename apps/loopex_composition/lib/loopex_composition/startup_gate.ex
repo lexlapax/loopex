@@ -31,9 +31,7 @@ defmodule LoopexComposition.StartupGate do
   @doc false
   def await(runtime, read \\ &Loopex.creation_startup_status/2) do
     initial = System.monotonic_time() + System.convert_time_unit(1_000, :millisecond, :native)
-
-    with {:ok, observer} <- start_owned(runtime, initial, read),
-         do: await_owned(observer, initial)
+    with {:ok, observer} <- start_owned(runtime, initial, read), do: await_owned(observer, initial)
   end
 
   # Concept: tracked host cleanup owns every observer through its returned runtime.
@@ -89,12 +87,8 @@ defmodule LoopexComposition.StartupGate do
       case :gen_server.wait_response(request, min(10, remaining)) do
         {:reply, response} ->
           with :ok <- interrupted(), true <- fresh?(initial), do: {:ok, response}
-
-        :timeout ->
-          await_request(request, initial)
-
-        {:error, _reason} ->
-          {:error, :runtime_unavailable}
+        :timeout -> await_request(request, initial)
+        {:error, _reason} -> {:error, :runtime_unavailable}
       end
     else
       {:error, _reason} = error -> error
@@ -118,8 +112,7 @@ defmodule LoopexComposition.StartupGate do
             send(owner, {tag, result})
           end
 
-        {:DOWN, ^owner_monitor, :process, ^owner, _reason} ->
-          :ok
+        {:DOWN, ^owner_monitor, :process, ^owner, _reason} -> :ok
       after
         remaining_ms(initial) -> :ok
       end
@@ -144,13 +137,9 @@ defmodule LoopexComposition.StartupGate do
         await_result(observer, initial, false)
       after
         case cancel(observer) do
-          :ok ->
-            :ok
-
+          :ok -> :ok
           {:pending, identity} ->
-            Process.put({__MODULE__, :pending}, [
-              identity | Process.get({__MODULE__, :pending}, [])
-            ])
+            Process.put({__MODULE__, :pending}, [identity | Process.get({__MODULE__, :pending}, [])])
         end
       end
 
@@ -194,8 +183,7 @@ defmodule LoopexComposition.StartupGate do
 
     receive do
       {:DOWN, monitor, :process, pid, _reason}
-      when monitor == observer.monitor and pid == observer.pid ->
-        :ok
+      when monitor == observer.monitor and pid == observer.pid -> :ok
     after
       1_000 -> {:pending, {observer.pid, observer.monitor}}
     end
@@ -210,6 +198,11 @@ defmodule LoopexComposition.StartupGate do
 
   defp await_result(observer, deadline, pinned?) do
     with :ok <- interrupted(), remaining when remaining > 0 <- remaining_ms(deadline) do
+      # Concept: an observer's exit cannot discard its already-queued result.
+      # Technical depth: a dead observer gets one zero-wait selective receive;
+      # its exact DOWN remains for cancellation/retention, and the cutoff still
+      # precedes acceptance. A timeout returns here before classifying death.
+      wait = if Process.alive?(observer.pid), do: min(10, remaining), else: 0
       receive do
         {tag, :snapshot, {:ok, %{state: :unavailable}}}
         when tag == observer.tag and not pinned? ->
@@ -217,22 +210,20 @@ defmodule LoopexComposition.StartupGate do
 
         {tag, :snapshot, {:ok, %{startup_deadline_ms: cutoff}} = snapshot}
         when tag == observer.tag and not pinned? ->
-          if valid_snapshot?(snapshot) and fresh?(deadline),
-            do:
-              await_result(
-                observer,
-                System.convert_time_unit(cutoff, :millisecond, :native),
-                true
-              ),
-            else: {:error, :runtime_unavailable}
+          if valid_snapshot?(snapshot) and fresh?(deadline) do
+            notify(test_listener(), {:startup_snapshot_pinned, self(), observer.pid, snapshot})
+            await_result(observer, System.convert_time_unit(cutoff, :millisecond, :native), true)
+          else
+            {:error, :runtime_unavailable}
+          end
 
         {tag, result} when tag == observer.tag ->
           with :ok <- interrupted(), :ok <- publication(result), do: result
       after
-        min(10, remaining) ->
-          if Process.alive?(observer.pid),
-            do: await_result(observer, deadline, pinned?),
-            else: {:error, :runtime_unavailable}
+        wait ->
+          if wait == 0,
+            do: {:error, :runtime_unavailable},
+            else: await_result(observer, deadline, pinned?)
       end
     else
       {:error, _reason} = error -> error
@@ -240,9 +231,7 @@ defmodule LoopexComposition.StartupGate do
     end
   end
 
-  defp valid_snapshot?(
-         {:ok, %{state: state, startup_id: id, startup_deadline_ms: cutoff} = snapshot}
-       )
+  defp valid_snapshot?({:ok, %{state: state, startup_id: id, startup_deadline_ms: cutoff} = snapshot})
        when state in [:starting, :ready, :unavailable] and is_binary(id) and
               byte_size(id) == 32 and is_integer(cutoff) and map_size(snapshot) == 3,
        do: true
@@ -301,9 +290,7 @@ defmodule LoopexComposition.StartupGate do
 
   defp pause(runtime, deadline, pinned, read) do
     case remaining_ms(deadline) do
-      0 ->
-        {:error, :startup_deadline_expired}
-
+      0 -> {:error, :startup_deadline_expired}
       remaining ->
         receive do
         after
@@ -320,8 +307,7 @@ defmodule LoopexComposition.StartupGate do
   # Technical depth: sub-millisecond time cannot fund the API's minimum one-ms
   # read, so it expires conservatively instead of extending the captured bound.
   defp remaining_ms(deadline),
-    do:
-      System.convert_time_unit(max(deadline - System.monotonic_time(), 0), :native, :millisecond)
+    do: System.convert_time_unit(max(deadline - System.monotonic_time(), 0), :native, :millisecond)
 
   defp status_read(read, runtime, timeout) do
     read.(runtime, timeout)
