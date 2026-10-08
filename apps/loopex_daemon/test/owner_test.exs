@@ -3588,13 +3588,12 @@ defmodule LoopexDaemon.OwnerTest do
            fn
              :waiting, event, _extra ->
                matched =
-                 case {cut, event} do
-                   {:before_close,
-                    {:in, {:"$gen_call", {^registry, _tag}, {:close, ^incarnation}}}} ->
-                     true
+                 case event do
+                   {:in, {:"$gen_call", {^registry, _tag}, {:close, ^incarnation}}} ->
+                     cut == :before_close
 
-                   {:after_reply, {:out, :ok, {^registry, _tag}, %{incarnation: ^incarnation}}} ->
-                     true
+                   {:out, :ok, {^registry, _tag}, %{incarnation: ^incarnation}} ->
+                     cut == :after_reply
 
                    _ ->
                      false
