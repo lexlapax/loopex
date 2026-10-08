@@ -27,6 +27,97 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+### Resumed native qualification, 2026-10-08
+
+The maintainer resumed M7. The goal is active, not paused or complete. This
+entry supersedes the source, native registry seed and next qualification order
+in the paused entry below. All currently assigned engineering agents are read
+only; root remains the sole integrator and native/Git owner. No product native
+handle is live after the original runs listed below.
+
+Saved, clean and pushed unserved candidate:
+`772131c1b456db9ee3fec1782c52b9166a74af79` in
+`/Users/spuri/.codex/worktrees/m7-coupled-current-contract/loopex`, recovery ref
+`origin/codex/m7-resume-20261008`. Primary `m7` keeps its integrated product
+baseline. No transport serving activation or complete integration claim follows
+from saving the candidate.
+
+Immutable v7 context:
+`M7/coupled-current-context-20261008-v7/retention.json`, SHA-256
+`31517ff392998c1ee2e2bd0c302c066efa9a18bc6c0f34c650d61c92e908782c`.
+It chains to v6, retains 30 report/runner assets, all 12 new source commits,
+17 original native runs with immutable output references, the complete candidate
+patch and a verified Git bundle. Failed originals remain failed.
+
+Source changes since b17 are formatting with non-line AST preservation, a
+warning-free Registry binding, valid activity constructors/domain fields in the
+Socket pressure fixture, the shared exact Owner fixture matcher, and a bounded
+Socket failure census. The actual held-ACK failure showed five retained leases,
+one active selected frame and four queued frames while the peer had not read.
+The repaired fixture reads the real peer before requiring final release, with
+both reads and final ACK observations inside one captured 1,000-ms cutoff. This
+removes a circular fixture wait; it increases no deadline or capacity and keeps
+all 32 actual slots, stale-ref/incarnation, exact release and durable-cursor
+assertions. Production Socket custody was not cleared to make the test pass.
+
+| Original | Source | Result and scope | Seconds | Output under external M7 evidence |
+| --- | --- | --- | ---: | --- |
+| 25857 | 19372f19 | Current compile and complete ProgressSink42 pass; floor formatting fails before floor compile/tests | 21.955 | native-progress-core-focused-20261008-v3 |
+| 69234 | 19372f19 | One WireRecords test has identical non-line AST; complete owned formatting passes both pairs | 3.328 | candidate-format-preparation-20261008-v5 |
+| 58450 | 2338a33d | Floor compile and complete ProgressSink42 pass; Core bytes unchanged from19372f19 | 22.999 | native-progress-core-focused-20261008-v4 |
+| 76398 | 2338a33d | Current14 selected cases execute successfully; generated fixture warnings fail qualification; floor unrun | 6.537 | native-progress-daemon-focused-20261008-v1 |
+| 27238 | be8e4958 | Current14 execute successfully; constant comparisons still warn; floor unrun | 7.258 | native-progress-daemon-focused-20261008-v2 |
+| 11208 | 852f9b8c | Current14 pass,175 excluded; floor6 pass,183 excluded, but expected14 assertion fails | 14.718 | native-progress-daemon-focused-20261008-v3 |
+| 8294 | 852f9b8c | Complete floor Buffer8 pass, zero exclusions, separately qualifying the omitted file | 1.614 | native-progress-buffer-floor-20261008-v1 |
+| 81719 | 852f9b8c | Current Service2 pass; Socket fails on wrong fixture domain member;105 excluded; floor unrun | 5.666 | native-progress-socket-service-20261008-v1 |
+| 62040 | 701c4926 | Current Socket1 fails release-before-peer-read;60 excluded; floor unrun | 5.106 | native-progress-socket-service-20261008-v2 |
+| 96917 | 6dc268fe | Current Socket1 retains real selected-frame custody at the failed final wait;60 excluded; floor unrun | 5.753 | native-progress-socket-service-20261008-v4 |
+| 27068 | 772131c1 | Current Socket1 pass,60 excluded; floor Socket/Service3 pass,105 excluded | 10.349 | native-progress-socket-service-20261008-v6 |
+
+All original handles have EOF, exact wait and process-group absence. The v7
+manifest also retains formatter-only failures and the earlier formatter/source
+preparations. Each selected proof has zero skips and invalid cases. The floor
+ExUnit mixed line-selector command omitted the unlocated Buffer file. Its actual
+six close cases passed; its failed population assertion is preserved, and a
+separate complete eight-case Buffer run supplies the missing proof. No aggregate
+failed run is relabelled. Current Service2 results remain at852f9b8c because only
+the Socket test file changed afterwards; no unchanged successful selection was
+repeated.
+
+The next native registry is the complete 2,320-row
+`M7/native-progress-socket-service-20261008-v6/stage-attempt-registry.json`, SHA-256
+`0b33286036aaffc46f2e077fb0c1a8f54d889c607e7bc77d1ce79851431bcc7c`.
+Original27068 terminal SHA-256:
+`8a50831a4b3264dcf7ba15b5868182a0c72b190b65ea6ac96917643c2cfa540f`;
+collection SHA-256:
+`5f130386a59977cce692e84c77cd18a626d126bfdd243b0aa5280fe633bfa7f3`.
+Use the retained v7 wrappers and engine as mechanics with a new exact source
+pin, stage scope and unique registry key. Do not recollect originals.
+
+Next work:
+
+1. Complete actual Service-bound producer-to-two-socket routing and subscription
+   negatives; manual offers or manual forwarding do not prove that route.
+2. Complete Socket/Service owned native cleanup and external-copy acknowledgements,
+   active claimed pressure and actual partial/select custody. The drained normal
+   Socket subset still needs independently enforced existing one-second cutoff
+   and exact correlated native-close evidence before aggregate success. Owner
+   death causing a normal guardian exit is not successful native close.
+3. Resolve existing unanswered ADR0063 before implementing public startup status
+   or host waiting gates. Forced32-CAS exhaustion, foreground guardian custody,
+   artifact open's pre-verification deadline, foreground112 and restore175 remain
+   open. No complete daemon, integration, Linux or closure proof is claimed.
+
+The v7 engineering calculation bounds current admitted native Socket encoded
+frames by74,013 bytes, making a native-admitted512-KiB encoded population
+unreachable. Pure Buffer512-KiB saturation remains proved. A maintainer
+disposition is required before changing any recorded real-Socket proof
+obligation; none is inferred. Engineering source scans are not formal
+independent milestone review. Before1.0 current contracts remain the only target.
+
+T01-T19 counts remain originals88 done/85 remaining/6 retired and additions365
+done/24 remaining. These focused proofs do not complete an open broad row.
+
 ### Paused restart checkpoint, 2026-10-08
 
 The maintainer requested a safe stop for restart. All source agents have stopped

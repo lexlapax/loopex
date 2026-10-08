@@ -1,20 +1,24 @@
 # M7 Implementation Tasks
 
-Restart checkpoint: all three source agents are stopped, every final source
-unit is committed, and no product native handle is live. The complete unserved
-candidate is `b17bc00a`, pushed to `origin/codex/m7-resume-20261008`.
-The `m7` branch retains its integrated product source and this handoff. Protocol
-57 and real Local Store artifact61 selections passed on both supported pairs;
-failed originals and fixes remain retained. Latest daemon native progress,
-Core close/late-observation and Registry own-arena cleanup source are unformatted,
-uncompiled and untested. Next run AST-preserving formatting, compile, complete
-ProgressSink on both pairs and focused genuine daemon delivery/cleanup proofs.
-The next registry seed has 2,266 rows. ADR0063 remains the sole asked unanswered
-decision. T01-T19 totals remain originals **88 done / 85 remaining / 6 retired**
-and additions **365 done / 24 remaining**; T00 is separate. No checkbox changed
-for source saving or focused prerequisite proofs. The [resume record](M7-resume.md)
-contains exact source, result, retention and restart instructions. Earlier
-checkpoint paragraphs below remain historical.
+Resumed checkpoint, 2026-10-08: the active M7 goal continues. The complete
+unserved source candidate is `772131c1b456db9ee3fec1782c52b9166a74af79`, pushed to
+`origin/codex/m7-resume-20261008`; `m7` retains its integrated product baseline.
+The complete 42-case ProgressSink file passed on both supported pairs. The
+six actual Registry/Owner native-close cases and complete eight-case Buffer file
+also passed per pair. The real Socket held-ACK test passed per pair after valid
+activity/domain and peer-drain fixture repairs; its original 32-slot pressure,
+exact ACK/lease/cursor assertions and captured 1,000-ms release cutoff remain.
+The two Service ingress/guardian-loss cases passed per pair. These are focused
+proofs, with each selected/excluded population and failed original retained;
+complete daemon cleanup and actual Service-bound producer routing stay open.
+No product native handle is live. The next registry seed has 2,320 rows.
+ADR0063 remains the sole asked unanswered decision. T01-T19 totals remain
+originals **88 done / 85 remaining / 6 retired** and additions **365 done / 24
+remaining**; T00 is separate. No broad checkbox closes for a prerequisite proof.
+The [resume record](M7-resume.md) names exact commits, results and remaining
+work. Its v7 retention includes all new runners/reports, 12 source commits,
+17 original native runs, the complete candidate patch and verified Git bundle.
+Earlier checkpoint paragraphs below remain historical.
 
 Current checkpoint: the complete contract source is staged in isolated,
 unserved candidate `a7a83d22`. The independent Node runner proved both manifests
