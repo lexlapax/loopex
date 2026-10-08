@@ -778,6 +778,7 @@ defmodule Loopex.PrivateTaskShutdownTest do
       Map.new(
         Enum.flat_map(runs, &[{&1.workers, true}, {&1.owner_groups, true}, {&1.sessions, true}])
       )
+
     actors = Enum.reduce(runs, %{}, &Map.merge(&2, &1.roles))
 
     receive do
