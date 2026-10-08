@@ -26,7 +26,8 @@ defmodule LoopexCli.DaemonCommandTest do
   # Technical depth: synthetic canaries remain ambient until Service's shared
   # loader opens custody. The Git wrapper refuses any inherited slot; route
   # lookup, runtime settings and monitored shutdown prove the complete handoff.
-  test "named command bindings reach both routes and exclude project Git before custody", context do
+  test "named command bindings reach both routes and exclude project Git before custody",
+       context do
     names = seed_named_credentials()
     System.delete_env("LOOPEX_PROVIDER_API_KEY")
     File.write!(Path.join(context.workspace, "AGENTS.md"), "project instructions")
@@ -36,7 +37,11 @@ defmodule LoopexCli.DaemonCommandTest do
     git = Path.join(bin, "git")
     checks = Enum.map_join(names, "\n", &"[ \"${#{&1}+x}\" != x ] || exit 42")
 
-    File.write!(git, "#!/bin/sh\n#{checks}\nprintf invoked > \"#{marker}\"\nprintf command-revision\n")
+    File.write!(
+      git,
+      "#!/bin/sh\n#{checks}\nprintf invoked > \"#{marker}\"\nprintf command-revision\n"
+    )
+
     File.chmod!(git, 0o700)
     prior_path = System.get_env("PATH")
     System.put_env("PATH", bin <> ":" <> (prior_path || "/usr/bin:/bin"))
@@ -86,12 +91,20 @@ defmodule LoopexCli.DaemonCommandTest do
     assert Enum.all?(names, &(System.get_env(&1) == nil))
     assert File.read!(marker) == "invoked"
     assert state.options[:project_manifest].workspace.revision == "command-revision"
-    assert_receive {:trace, _, :call, {LoopexComposition.ResourcePacks, :discover, [workspace, pack_options]}}
+
+    assert_receive {:trace, _, :call,
+                    {LoopexComposition.ResourcePacks, :discover, [workspace, pack_options]}}
+
     assert workspace == context.workspace
     assert pack_options[:excluded_env_names] == names
-    assert_receive {:trace, _, :call, {LoopexComposition.ProjectResources, :discover, [^workspace, project_options]}}
+
+    assert_receive {:trace, _, :call,
+                    {LoopexComposition.ProjectResources, :discover, [^workspace, project_options]}}
+
     assert project_options[:excluded_env_names] == names
-    assert_receive {:trace, _, :call, {LoopexComposition.CredentialPlane, :load_bindings, [^bindings, _starter]}}
+
+    assert_receive {:trace, _, :call,
+                    {LoopexComposition.CredentialPlane, :load_bindings, [^bindings, _starter]}}
 
     {:ok, children} = Loopex.Runtime.children(state.edges.runtime)
     control = :sys.get_state(children.control)
@@ -109,11 +122,13 @@ defmodule LoopexCli.DaemonCommandTest do
           {"anthropic:test", "command-second-canary"}
         ] do
       assert {:ok, selected} = Loopex.LLM.ReqLLM.ProviderConfiguration.select_route(config, route)
+
       assert {:ok, custody} =
                Loopex.LLM.ReqLLM.CredentialRegistry.route(
                  selected.credential_registry,
                  selected.credential_token
                )
+
       assert custody in custodies
       assert {:ok, %{credential: ^value}} = Loopex.LLM.ReqLLM.CredentialCustody.resolve(custody)
     end
@@ -150,6 +165,7 @@ defmodule LoopexCli.DaemonCommandTest do
       ])
 
     base = [provider_bindings: named_bindings(), model: "openai:test"]
+
     cases = [
       Keyword.put(base, :credential, "conflicting-command-canary"),
       Keyword.put(base, :provider_bindings, %{
@@ -158,15 +174,20 @@ defmodule LoopexCli.DaemonCommandTest do
       Keyword.put(base, :model, "openrouter:unbound"),
       Keyword.put(base, :maintenance_model, "openrouter:unbound")
     ]
+
     {:ok, expected} = ExitStatus.fetch(:credential_plane_start_failed)
 
     for candidate <- cases do
       {:ok, output} = StringIO.open("")
 
-      assert LoopexCli.Daemon.run(command_arguments(context),
+      assert LoopexCli.Daemon.run(
+               command_arguments(context),
                candidate ++
                  [
-                   env: fn name -> send(test, {:unexpected_command_env, name}); nil end,
+                   env: fn name ->
+                     send(test, {:unexpected_command_env, name})
+                     nil
+                   end,
                    output: output,
                    install_signals: false,
                    notify: test
@@ -214,16 +235,22 @@ defmodule LoopexCli.DaemonCommandTest do
 
   defp command_arguments(context) do
     [
-      "--state-root", context.state_root,
-      "--workspace", context.workspace,
-      "--provider-launch", context.launch,
-      "--policy", "allow-all"
+      "--state-root",
+      context.state_root,
+      "--workspace",
+      context.workspace,
+      "--provider-launch",
+      context.launch,
+      "--policy",
+      "allow-all"
     ]
   end
 
   defp command_ready(output, deadline) do
     case StringIO.contents(output) do
-      {"", line} when byte_size(line) > 0 -> :ok
+      {"", line} when byte_size(line) > 0 ->
+        :ok
+
       _ ->
         assert System.monotonic_time(:millisecond) < deadline, "daemon never announced readiness"
         Process.sleep(5)
