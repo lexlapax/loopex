@@ -60,7 +60,8 @@ defmodule LoopexDaemon.Owner do
           relay: pid(),
           registry: pid(),
           daemon_incarnation: binary(),
-          routing_incarnation: binary()
+          routing_incarnation: binary(),
+          registry_progress_sink: Loopex.ProgressSink.t()
         }
   def components(owner), do: GenServer.call(owner, :components)
 
@@ -326,7 +327,8 @@ defmodule LoopexDaemon.Owner do
            {:ok, registry} <- start_registry(options, relay, daemon_incarnation),
            :ok <-
              AdmissionRelay.register_registry(relay, registry, routing_incarnation),
-           :ok <- ConnectionRegistry.bind_relay(registry, relay, routing_incarnation) do
+           :ok <- ConnectionRegistry.bind_relay(registry, relay, routing_incarnation),
+           {:ok, registry_progress_sink} <- ConnectionRegistry.progress_sink(registry) do
         Logger.debug("loopex daemon owner start")
 
         {:ok,
@@ -336,6 +338,7 @@ defmodule LoopexDaemon.Owner do
            routing_incarnation: routing_incarnation,
            relay: relay,
            registry: registry,
+           registry_progress_sink: registry_progress_sink,
            mirror_deadline_ms: mirror_deadline_ms,
            lease_term_ms: lease_term_ms,
            retirement_pop_gate: retirement_pop_gate,
@@ -369,6 +372,7 @@ defmodule LoopexDaemon.Owner do
      %{
        relay: state.relay,
        registry: state.registry,
+       registry_progress_sink: state.registry_progress_sink,
        daemon_incarnation: state.daemon_incarnation,
        routing_incarnation: state.routing_incarnation
      }, state}

@@ -140,6 +140,10 @@ defmodule LoopexDaemon.Service do
       pending_fatal: nil,
       relay: nil,
       registry: nil,
+      progress_sink: nil,
+      progress_guardian_monitor: nil,
+      registry_progress_sink: nil,
+      registry_progress_monitor: nil,
       daemon_incarnation: nil,
       runtime_control: nil,
       runtime_monitors: %{}
@@ -206,14 +210,21 @@ defmodule LoopexDaemon.Service do
     orderly_stop(state)
   end
 
-  # Concept: the runtime is composed before the connection registry exists, so
-  # this owner is the runtime's session-routed progress sink and forwards each
-  # item to the registry once it is running; earlier progress is dropped.
-  def handle_info({:loopex_progress, session_id, item} = progress, state)
-      when is_binary(session_id) and is_map(item) do
-    if is_pid(state.registry), do: send(state.registry, progress)
-    {:noreply, state}
+  # Concept: Service owns the runtime's finite ingress before Registry exists.
+  # Technical depth: acknowledge the actual coalesced wakeup before bounded
+  # draining. Missing startup/downstream routes drop under the original lease;
+  # a live route offers into Registry credit before transferring any payload.
+  def handle_info({:loopex_progress_ready, sink}, %{progress_sink: sink} = state) do
+    send(self(), {:loopex_progress_ready, sink})
+    case drain_progress(state, 32) do
+      :ok -> {:noreply, state}
+      :error -> fail_stop(state, :connections_lost)
+    end
   end
+
+  def handle_info({:DOWN, monitor, :process, _pid, _reason}, state)
+      when monitor == state.progress_guardian_monitor or monitor == state.registry_progress_monitor,
+      do: fail_stop(%{state | registry_progress_sink: nil}, :connections_lost)
 
   def handle_info(_message, state), do: {:noreply, state}
 
@@ -254,6 +265,7 @@ defmodule LoopexDaemon.Service do
            {:ok, state} <- step(state, :composition_start_failed, &prepare_creation_defaults/1),
            {:ok, state} <- step(state, :placement_lock_failed, &acquire_placement/1),
            {:ok, state} <- step(state, :credential_plane_start_failed, plane),
+           {:ok, state} <- step(state, :composition_start_failed, &start_progress/1),
            {:ok, state} <- step(state, :composition_start_failed, &start_composition/1),
            {:ok, state} <- step(state, :session_index_corrupt, &start_index/1),
            {:ok, state} <- step(state, :daemon_services_start_failed, &start_collaboration/1),
@@ -292,6 +304,13 @@ defmodule LoopexDaemon.Service do
   # acquisition rather than after it.
   defp checkpoint(state) do
     receive do
+      {:loopex_progress_ready, sink} when sink == state.progress_sink ->
+        send(self(), {:loopex_progress_ready, sink})
+        case drain_progress(state, 32) do
+          :ok -> checkpoint(state)
+          :error -> {:stop, {:fatal, :composition_start_failed}}
+        end
+
       {:daemon_signal, owner_ref, :sigterm} when owner_ref == state.owner_ref ->
         {:stop, :operator_stop}
 
@@ -320,11 +339,15 @@ defmodule LoopexDaemon.Service do
         {:stop, {:fatal, :daemon_services_start_failed}}
 
       {:DOWN, monitor, :process, _pid, _reason}
-      when is_map_key(state.runtime_monitors, monitor) ->
+      when is_map_key(state.runtime_monitors, monitor) or monitor == state.progress_guardian_monitor or
+             monitor == state.registry_progress_monitor ->
         {:stop, {:fatal, :composition_start_failed}}
     after
       0 ->
-        case Enum.find(state.pids, fn {_name, pid} -> not Process.alive?(pid) end) do
+        case progress_components_alive?(state) and
+               Enum.find(state.pids, fn {_name, pid} -> not Process.alive?(pid) end) do
+          false ->
+            {:stop, {:fatal, :composition_start_failed}}
           nil when is_pid(state.relay) ->
             if Process.alive?(state.relay),
               do: :continue,
@@ -486,6 +509,41 @@ defmodule LoopexDaemon.Service do
     end
   end
 
+  defp progress_components_alive?(%{progress_sink: nil}), do: true
+  defp progress_components_alive?(state) do
+    {guardian, _, _} = state.progress_sink
+    Process.alive?(guardian) and (is_nil(state.registry) or Process.alive?(state.registry))
+  end
+
+  defp clear_progress_route(state) do
+    if state.registry_progress_monitor, do: Process.demonitor(state.registry_progress_monitor, [:flush])
+    %{state | registry_progress_sink: nil, registry_progress_monitor: nil}
+  end
+
+  defp start_progress(state) do
+    case Loopex.ProgressSink.open() do
+      {:ok, sink} ->
+        {guardian, _, _} = sink
+        {:ok, %{state | progress_sink: sink, progress_guardian_monitor: Process.monitor(guardian)}}
+      {:error, _} -> {:stop, {:fatal, :composition_start_failed}, state}
+    end
+  end
+
+  defp drain_progress(_state, 0), do: :ok
+  defp drain_progress(state, remaining) do
+    case Loopex.ProgressSink.take(state.progress_sink) do
+      {:ok, lease, session, item} ->
+        if state.registry_progress_sink,
+          do: Loopex.ProgressSink.try_offer(state.registry_progress_sink, session, item)
+        case Loopex.ProgressSink.release(state.progress_sink, lease) do
+          :ok -> drain_progress(state, remaining - 1)
+          {:error, _} -> :error
+        end
+      :empty -> :ok
+      :closed -> :error
+    end
+  end
+
   defp start_composition(state) do
     options =
       state.options
@@ -508,7 +566,7 @@ defmodule LoopexDaemon.Service do
         :maintenance_model,
         :session_creation_defaults
       ])
-      |> Keyword.put(:progress_to, {:session, self()})
+      |> Keyword.put(:progress_sink, state.progress_sink)
       |> Keyword.merge(
         state_root: option!(state, :state_root),
         runtime_id: state.placement_identity,
@@ -580,8 +638,9 @@ defmodule LoopexDaemon.Service do
         # returns, so a collaboration owner that later stops answering can
         # never take this owner down with a call.
         case safe(fn -> Owner.components(owner) end) do
-          %{relay: relay, registry: registry, daemon_incarnation: incarnation} ->
-            {:ok, %{state | relay: relay, registry: registry, daemon_incarnation: incarnation}}
+          %{relay: relay, registry: registry, registry_progress_sink: sink, daemon_incarnation: incarnation} ->
+            {:ok, %{state | relay: relay, registry: registry, registry_progress_sink: sink,
+              registry_progress_monitor: Process.monitor(registry), daemon_incarnation: incarnation}}
 
           _unavailable ->
             {:stop, {:fatal, :daemon_services_start_failed}, state}
@@ -1145,6 +1204,10 @@ defmodule LoopexDaemon.Service do
         Logger.debug("loopex daemon runtime process lost during stop")
         {:fatal, :runtime_lost}
 
+      {:DOWN, monitor, :process, _pid, _reason}
+      when monitor == state.progress_guardian_monitor or monitor == state.registry_progress_monitor ->
+        {:fatal, :connections_lost}
+
       {:daemon_component_fatal, _reporter, class}
       when class in [:relay_lost, :connections_lost] or
              (class == :runtime_lost and runtime_owned) ->
@@ -1341,7 +1404,7 @@ defmodule LoopexDaemon.Service do
   # The relay is the collaboration owner's child and stops with it.
   defp orderly_stop_step(state, :collaboration, deadline) do
     with {:ok, state} <- stop_classified(state, :collaboration, deadline),
-         do: {:ok, %{state | relay: nil}}
+         do: {:ok, clear_progress_route(%{state | relay: nil})}
   end
 
   # The Store's stop is its own fixed phase, begun when the shared teardown

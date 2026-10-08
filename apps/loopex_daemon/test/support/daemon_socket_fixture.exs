@@ -120,6 +120,7 @@ defmodule LoopexDaemon.Test.DaemonSocketFixture do
       })
 
     components = Owner.components(owner)
+    assert components.registry_progress_sink == :sys.get_state(components.registry).progress_sink
     {:ok, socket} = ListenerSocket.open_parked(path, uid)
     startup_ref = make_ref()
 

@@ -172,10 +172,29 @@ defmodule LoopexDaemon.ConnectionRegistry do
   end
 
   @doc false
-  @spec promote(pid(), binary(), binary()) :: :ok | {:error, atom()}
-  def promote(registry, rollback_token, connection_incarnation) do
-    GenServer.call(registry, {:promote, rollback_token, connection_incarnation})
+  @spec promote(pid(), binary(), binary(), Loopex.ProgressSink.t()) :: :ok | {:error, atom()}
+  def promote(registry, rollback_token, connection_incarnation, sink) do
+    GenServer.call(registry, {:promote, rollback_token, connection_incarnation, sink})
   end
+
+  # Concept: startup discovery belongs only to the existing collaboration owner.
+  # Technical depth: Owner caches this capability; item delivery never calls
+  # the Registry. The capability remains bound to this exact registry lifetime.
+  @doc false
+  @spec progress_sink(pid()) :: {:ok, Loopex.ProgressSink.t()} | {:error, :owner_mismatch}
+  def progress_sink(registry), do: GenServer.call(registry, :progress_sink)
+
+  @doc false
+  def enqueue_progress(registry, incarnation, encoded),
+    do: GenServer.call(registry, {:enqueue_progress, incarnation, encoded})
+
+  @doc false
+  def fence_progress(registry, incarnation),
+    do: GenServer.call(registry, {:fence_progress, incarnation})
+
+  @doc false
+  def discard_progress(registry, incarnation, refs),
+    do: GenServer.call(registry, {:discard_progress, incarnation, refs})
 
   @doc false
   @spec initialize_complete(pid(), binary(), binary()) :: :ok | {:error, atom()}
@@ -274,6 +293,9 @@ defmodule LoopexDaemon.ConnectionRegistry do
              :promote,
              :initialize_complete,
              :enqueue_output,
+             :enqueue_progress,
+             :fence_progress,
+             :discard_progress,
              :claim_output,
              :output_emitted,
              :reserve_succession,
@@ -713,10 +735,15 @@ defmodule LoopexDaemon.ConnectionRegistry do
 
       true ->
         Logger.debug("loopex daemon connection registry start")
+        {:ok, progress_sink} = Loopex.ProgressSink.open()
+        {guardian, _, _} = progress_sink
 
         {:ok,
          %{
            owner: owner,
+           progress_sink: progress_sink,
+           progress_guardian_monitor: Process.monitor(guardian),
+           progress_monitors: %{},
            connection_module: Keyword.get(options, :connection_module, SocketConnection),
            connection_context: Keyword.get(options, :connection_context),
            cleanup_monitors: %{},
@@ -799,6 +826,9 @@ defmodule LoopexDaemon.ConnectionRegistry do
             connection_pid: nil,
             connection_incarnation: nil,
             connection_monitor: nil,
+            progress_sink: nil,
+            progress_monitor: nil,
+            progress_fenced: false,
             listener_closed: false,
             listener_down: false,
             connection_down: false,
@@ -876,7 +906,13 @@ defmodule LoopexDaemon.ConnectionRegistry do
     end
   end
 
-  def handle_call({:promote, token, incarnation}, {caller, _tag}, state) do
+  def handle_call(:progress_sink, {owner, _tag}, %{owner: owner} = state),
+    do: {:reply, {:ok, state.progress_sink}, state}
+
+  def handle_call(:progress_sink, _from, state),
+    do: {:reply, {:error, :owner_mismatch}, state}
+
+  def handle_call({:promote, token, incarnation, sink}, {caller, _tag}, state) do
     case Map.fetch(state.rows, token) do
       {:ok,
        %{
@@ -887,10 +923,17 @@ defmodule LoopexDaemon.ConnectionRegistry do
        } = row}
       when state.transport == :serving ->
         if before_deadline?(row) do
-          row = %{row | phase: :live}
-          state = put_in(state, [:rows, token], row)
-          state = release_listener_token(state, row.listener_incarnation, token)
-          {:reply, :ok, state}
+          if progress_sink_shape?(sink) do
+            {guardian, _, _} = sink
+            monitor = Process.monitor(guardian)
+            row = %{row | phase: :live, progress_sink: sink, progress_monitor: monitor}
+            state = put_in(state, [:rows, token], row)
+            state = put_in(state, [:progress_monitors, monitor], token)
+            state = release_listener_token(state, row.listener_incarnation, token)
+            {:reply, :ok, state}
+          else
+            {:reply, {:error, :promotion_unavailable}, state}
+          end
         else
           state = request_abort(state, token, :initialize_deadline)
           {:reply, {:error, :initialize_deadline_expired}, state}
@@ -962,6 +1005,54 @@ defmodule LoopexDaemon.ConnectionRegistry do
 
       _other ->
         {:reply, {:error, :output_unavailable}, state}
+    end
+  end
+
+  # Concept: transient pressure never evicts a durable holder or closes it.
+  # Technical depth: the socket already holds native credit. Admission returns
+  # the exact retained frame reference; only its emission/discard reply lets
+  # that owner release after all its own copies have gone.
+  def handle_call({:enqueue_progress, incarnation, encoded}, {caller, _tag}, state) do
+    case initialized_connection_row(state, caller, incarnation) do
+      {token, %{phase: :live, progress_fenced: false} = row} when state.transport == :serving ->
+        before = OutputBuffer.commitment(row.output)
+        wake = OutputBuffer.empty?(row.output)
+        case OutputBuffer.enqueue_progress(row.output, encoded) do
+          {:ok, ref, output} ->
+            commitment = state.output_commitment + OutputBuffer.commitment(output) - before
+            if commitment <= state.aggregate_output_bytes do
+              state = %{put_in(state, [:rows, token, :output], output) | output_commitment: commitment}
+              if wake, do: send(caller, {:output_ready, incarnation})
+              {:reply, {:ok, ref}, state}
+            else
+              {:reply, :dropped, state}
+            end
+          {:error, _} -> {:reply, :dropped, state}
+        end
+      _ -> {:reply, :dropped, state}
+    end
+  end
+
+  def handle_call({:fence_progress, incarnation}, {caller, _tag}, state) do
+    case connection_row(state, caller, incarnation) do
+      {token, %{phase: phase}} when phase in [:live, :closing] ->
+        {:reply, :ok, put_in(state, [:rows, token, :progress_fenced], true)}
+      _ -> {:reply, {:error, :output_unavailable}, state}
+    end
+  end
+
+  def handle_call({:discard_progress, incarnation, refs}, {caller, _tag}, state) do
+    case connection_row(state, caller, incarnation) do
+      {token, %{phase: phase, progress_fenced: true} = row} when phase in [:live, :closing] ->
+        before = OutputBuffer.commitment(row.output)
+        case OutputBuffer.discard_progress(row.output, refs) do
+          {:ok, output} ->
+            commitment = state.output_commitment + OutputBuffer.commitment(output) - before
+            state = %{put_in(state, [:rows, token, :output], output) | output_commitment: commitment}
+            {:reply, :ok, state}
+          {:error, _} -> {:reply, {:error, :output_unavailable}, state}
+        end
+      _ -> {:reply, {:error, :output_unavailable}, state}
     end
   end
 
@@ -1602,28 +1693,16 @@ defmodule LoopexDaemon.ConnectionRegistry do
     {:noreply, state}
   end
 
-  # Concept: a session's transient progress reaches every client attached to
-  # that session and no other; the connection decides whether it can be sent
-  # without delaying durable output.
-  def handle_info({:loopex_progress, session_id, item}, state)
-      when is_binary(session_id) and is_map(item) do
-    Enum.each(state.attachments, fn
-      {incarnation, %{phase: :installed, session_id: ^session_id}} ->
-        case Enum.find(state.rows, fn {_token, row} ->
-               row.connection_incarnation == incarnation and row.phase == :live
-             end) do
-          {_token, %{connection_pid: pid}} when is_pid(pid) ->
-            send(pid, {:daemon_progress, session_id, item})
-
-          _absent ->
-            :ok
-        end
-
-      _other ->
-        :ok
-    end)
-
-    {:noreply, state}
+  # Concept: each destination reserves its own credit before the fanout copy.
+  # Technical depth: take acknowledges the exact coalesced ready notification.
+  # The upstream lease spans every bounded local offer, then releases; neither
+  # a slow socket nor an absent/closing attachment can retain this ingress.
+  def handle_info({:loopex_progress_ready, sink}, %{progress_sink: sink} = state) do
+    send(self(), {:loopex_progress_ready, sink})
+    case drain_progress(state, 32) do
+      :ok -> {:noreply, state}
+      :error -> {:stop, :connections_lost, state}
+    end
   end
 
   def handle_info({:relay_connection_retired, _relay, incarnation}, state) do
@@ -1667,6 +1746,13 @@ defmodule LoopexDaemon.ConnectionRegistry do
 
   def handle_info({:DOWN, monitor, :process, pid, _reason}, state) do
     cond do
+      monitor == state.progress_guardian_monitor ->
+        {:stop, :connections_lost, state}
+
+      token = Map.get(state.progress_monitors, monitor) ->
+        state = %{state | progress_monitors: Map.delete(state.progress_monitors, monitor)}
+        {:noreply, close_live(state, token, :progress_sink_lost)}
+
       origin_id = Map.get(state.activation_preparation_monitors, monitor) ->
         case Map.get(state.activation_preparations, origin_id) do
           %{owner: ^pid, owner_monitor: ^monitor} ->
@@ -2557,6 +2643,41 @@ defmodule LoopexDaemon.ConnectionRegistry do
 
   defp preparation_flow?(_flow, _origin_id, _owner, _owner_incarnation), do: false
 
+  defp progress_sink_shape?({guardian, incarnation, arena})
+       when is_pid(guardian) and is_reference(incarnation) and is_reference(arena) do
+    Process.alive?(guardian) and :ets.info(arena, :owner) == guardian
+  rescue
+    ArgumentError -> false
+  end
+  defp progress_sink_shape?(_), do: false
+
+  defp drain_progress(_state, 0), do: :ok
+  defp drain_progress(state, remaining) do
+    case Loopex.ProgressSink.take(state.progress_sink) do
+      {:ok, lease, session, item} ->
+        if state.transport == :serving do
+          Enum.each(state.attachments, fn
+            {incarnation, %{phase: :installed, session_id: ^session}} ->
+              case Enum.find(state.rows, fn {_token, row} ->
+                row.connection_incarnation == incarnation and row.phase == :live and
+                  row.initialized and not row.progress_fenced
+              end) do
+                {_token, %{progress_sink: sink}} when not is_nil(sink) ->
+                  Loopex.ProgressSink.try_offer(sink, session, item)
+                _ -> :ok
+              end
+            _ -> :ok
+          end)
+        end
+        case Loopex.ProgressSink.release(state.progress_sink, lease) do
+          :ok -> drain_progress(state, remaining - 1)
+          {:error, _} -> :error
+        end
+      :empty -> :ok
+      :closed -> :error
+    end
+  end
+
   defp start_waiting_connection(state, row) do
     incarnation = :crypto.strong_rand_bytes(16)
 
@@ -2737,7 +2858,7 @@ defmodule LoopexDaemon.ConnectionRegistry do
   defp close_live(state, token, reason) do
     case Map.fetch(state.rows, token) do
       {:ok, %{phase: phase} = row} when phase in [:live, :closing] ->
-        row = %{row | phase: :closing}
+        row = %{row | phase: :closing, progress_fenced: true}
         if row.connection_pid, do: send(row.connection_pid, {:connection_abort, token, reason})
         put_in(state, [:rows, token], row)
 
@@ -2893,6 +3014,8 @@ defmodule LoopexDaemon.ConnectionRegistry do
 
       {row, rows} ->
         cancel_timer(row.timer, token)
+        if row.progress_monitor, do: Process.demonitor(row.progress_monitor, [:flush])
+        state = %{state | progress_monitors: Map.delete(state.progress_monitors, row.progress_monitor)}
         state = release_row_attachment(state, row.connection_incarnation)
 
         child_monitors =

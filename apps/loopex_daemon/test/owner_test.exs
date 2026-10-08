@@ -4,12 +4,25 @@ defmodule LoopexDaemon.OwnerTest do
 
   alias LoopexDaemon.{AdmissionRelay, ConnectionRegistry, LeaseOwner, Owner, WireRecords}
 
+  test "startup caches the exact Registry progress capability without a serving-time Registry call" do
+    owner = start_owner()
+    components = Owner.components(owner)
+    assert components.registry_progress_sink == :sys.get_state(components.registry).progress_sink
+    assert {:error, :owner_mismatch} = ConnectionRegistry.progress_sink(components.registry)
+    :ok = :sys.suspend(components.registry)
+    on_exit(fn -> if Process.alive?(components.registry), do: :sys.resume(components.registry) end)
+    assert GenServer.call(owner, :components, 250) == components
+    :ok = :sys.resume(components.registry)
+  end
+
   defmodule ManualConnection do
     def start_link(options) do
       listener = Keyword.fetch!(options, :listener)
 
       pid =
         spawn_link(fn ->
+          {:ok, sink} = Loopex.ProgressSink.open()
+          options = Keyword.put(options, :progress_sink, sink)
           send(listener, {:manual_connection_started, self(), options})
           loop(listener, options)
         end)
@@ -43,7 +56,8 @@ defmodule LoopexDaemon.OwnerTest do
             ConnectionRegistry.promote(
               Keyword.fetch!(options, :registry),
               Keyword.fetch!(options, :rollback_token),
-              Keyword.fetch!(options, :connection_incarnation)
+              Keyword.fetch!(options, :connection_incarnation),
+              Keyword.fetch!(options, :progress_sink)
             )
 
           send(caller, {:manual_result, reference, result})
