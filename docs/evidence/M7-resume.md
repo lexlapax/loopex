@@ -29,6 +29,37 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Reboot continuation on 2026-10-07
 
+Completed-library resume assets are retained under
+`M7/progress-sink-completed-library-context-20261007-v1/retention.json`, SHA-256
+`8ea07af03d25392e4d4a2f221f6acf8c0d4f67b231d0d6e83fc48d789c10d7d9`,21 files.
+Native results remain under their original immutable run references below.
+
+Newest landed unit: the bounded ProgressSink library passed whole26 on both
+supported pairs at `5b8ab5ac2f83187a04f25047a54a0207fca21347`. Original13329 is
+collected PASS in19.554seconds, eight joins/42 artifacts,1877-row registry.
+Complete output `M7/progress-sink-proof-20261007-v10`, collection
+`6e30b93975608ab92079b0bff38036fd3dd779633af4cb746f089dbe2e776dcf`, terminal
+`648955b858236f9e653e4abda7734ffcdeb810098774993fd6021f78357446c9`, registry
+`4ee3716e398d60e61fc148e4eb242a93cfe37fcc9c2b65232b66dd8e1f06f25a`.
+Both pairs26 passed, zero failures/exclusions/skips/invalid, warning-free compile.
+Formatter7112 passed in5.184seconds and its sole AST-equivalent child saves only
+fixture layout. Production5682384f is unchanged from the reviewed library.
+The two literal paths are integrated; broad T07 standalone/caller/runtime and
+real-output rows stay open. No original or added row closes for this partial
+library. T01–T19 remain88/85/6 and357/25/0 after the completed Core Store row.
+
+Adapter V1 is source-blocked by reviewer11fa9784: an owner-stage command can
+occupy a reserved creation's runtime/X namespace and prevent its original
+settlement. Reviewer now authors guards in State and two new actual transition/
+replay cases in managed m7-creation-storage, expected48 whole-file cases. Core,
+Log and contracts stay unchanged; root must independently review the repair.
+Control author also owns the current M1RuntimeTestStore fixture migration;
+no unreserved-final fallback or direct-final test bootstrap is permitted.
+Cancellation codec author owns six dormant new protocol/Node paths and does not
+activate negotiated generations. No new asked decision is pending. Root alone
+owns integration and native runs; original13329 is terminal and collected.
+
+
 Latest continuation checkpoint: ADR0061 is accepted and recorded atd7c23f3d.
 No asked approval is pending. The Core Store unit is integrated literally from
 isolated `5a4dc84a614e542e0a9916397f5f64b3223a1af2`, after complete32-case paired

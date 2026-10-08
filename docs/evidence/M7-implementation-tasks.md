@@ -5,9 +5,9 @@ is pending. The Core Store creation boundary passed all32 cases on both
 supported pairs and is integrated. T01–T19 remain88 original done/85 todo/6
 retired; added357 done/25 todo. Atomic adapters are under independent review;
 Control/carrier and the cancellation codec are being implemented in separate
-worktrees. ProgressSink original37920 remains failed; its exact OTP reporting
-vectors are independently reviewed and saved atb78ebdf6, with fresh proof
-pending. The [resume record](M7-resume.md) retains exact source, run and review
+worktrees. ProgressSink whole26 original13329 passed both pairs at5b8ab5ac; the bounded
+library is integrated, while its broader T07 race/integration row stays open.
+Original37920 and earlier failures remain retained. The [resume record](M7-resume.md) retains exact source, run and review
 references. Earlier status entries below are historical where superseded.
 
 ADR0059 is accepted and pushed at `3212b0ed`. The first Core Store contract
@@ -13897,6 +13897,20 @@ the still-open real-provider, live protocol, persistent-fault or closure lanes.
 ### Added implementation subtasks
 
 - [ ] Implement and prove accepted ADR 0058's standalone ProgressSink arena and owner custody on both toolchains, including finite pre-mailbox admission, conservative retained-byte charges, lease generations, pressure and death races. Sink-only proof does not complete runtime/caller migration or real output qualification.
+
+  Partial evidence: exact isolated `5b8ab5ac2f83187a04f25047a54a0207fca21347`,
+  original13329,26 passed per pair, zero failures/exclusions/skips/invalid,
+  warning-free compilation,19.554seconds. Complete outputs:
+  `/Users/spuri/projects/lexlapax/loopex-evidence/M7/progress-sink-proof-20261007-v10`;
+  collection SHA-256 `6e30b93975608ab92079b0bff38036fd3dd779633af4cb746f089dbe2e776dcf`,
+  terminal `648955b858236f9e653e4abda7734ffcdeb810098774993fd6021f78357446c9`.
+  Eight original joins/42 artifacts;1877-row registry
+  `4ee3716e398d60e61fc148e4eb242a93cfe37fcc9c2b65232b66dd8e1f06f25a`.
+  Exact native API vectors repair only the fixtures; production charges and
+  limits are unchanged. The row remains open for forced CAS exhaustion,
+  physical reserve/materialize/publish/notify/ABA crash cuts and complete
+  owner-custody proofs. Runtime/caller migration and real output remain separate.
+
 
 - [x] Deliver accepted ADR 0054 standalone closed activity schema,185 literal vectors and independent Node decoder with51 byte/descriptor controls; retain both owners and exact opaque/uint64/frame boundaries, preserve12 prior activity tests, and prove all20 activity/owner cases including both actual Node consumers on both supported toolchains. This does not activate foreground/daemon generations or close live transport delivery.
 
