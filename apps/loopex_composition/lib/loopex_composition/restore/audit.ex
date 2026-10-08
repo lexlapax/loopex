@@ -53,7 +53,9 @@ defmodule LoopexComposition.Restore.Audit do
           Enum.map(facts.store.sessions, fn {_id, s} -> s.runtime_id end) ++
           Map.keys(facts.store.creation_heads) ++
           Enum.map(Map.keys(facts.store.creation_capsules), fn {runtime, _command} -> runtime end) ++
-          Enum.map(Map.keys(facts.store.creation_resolutions), fn {runtime, _type, _tx} -> runtime end)
+          Enum.map(Map.keys(facts.store.creation_resolutions), fn {runtime, _type, _tx} ->
+            runtime
+          end)
       end)
       |> Enum.uniq()
       |> Enum.sort()

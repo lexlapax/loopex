@@ -1110,17 +1110,28 @@ defmodule LoopexComposition.RestoreIOTest do
     joined(owned)
   end
 
-  test "physical Store audit retains custody-only and closed namespaces without sessions for pending work", context do
+  test "physical Store audit retains custody-only and closed namespaces without sessions for pending work",
+       context do
     fixture = store_fixture(context.root, 0)
     selection = String.duplicate("d", 64)
     {:ok, claim} = Store.claim_creation_domain("pending-only", 0, selection)
     fixture = append_transaction(fixture, claim)
-    {:ok, reserve} = Store.reserve_creation("pending-only", "pending", 1, selection, 0,
-      ConfiguredGenesisFixture.genesis([]))
+
+    {:ok, reserve} =
+      Store.reserve_creation(
+        "pending-only",
+        "pending",
+        1,
+        selection,
+        0,
+        ConfiguredGenesisFixture.genesis([])
+      )
+
     fixture = append_transaction(fixture, reserve)
     {:ok, refused} = Store.claim_creation_domain("refusal-only", 1, selection)
+
     assert {:new, state, frame, {:not_committed, :stale_creation_generation}} =
-      State.prepare(fixture.state, refused)
+             State.prepare(fixture.state, refused)
 
     frames = fixture.frames ++ [frame]
     bytes = fixture.bytes <> encoded_frame(frame)
@@ -1135,8 +1146,12 @@ defmodule LoopexComposition.RestoreIOTest do
     assert facts.store.creation_capsules[{"pending-only", "pending"}].state == :reserved
     refute Map.has_key?(facts.store.runtime_commands, "pending-only")
     refute Map.has_key?(facts.store.creation_heads, "refusal-only")
-    assert facts.store.creation_resolutions[{"refusal-only", :claim_creation_domain, refused.tx_id}].resolution ==
-      %{status: :not_committed, reason: :stale_creation_generation}
+
+    assert facts.store.creation_resolutions[
+             {"refusal-only", :claim_creation_domain, refused.tx_id}
+           ].resolution ==
+             %{status: :not_committed, reason: :stale_creation_generation}
+
     assert evidence.opens == 1 and evidence.closes == 1
     assert Enum.count(issued_kinds(events), &(&1 == :session_recover)) == 1
     assert File.read!(fixture.path) == fixture.bytes
@@ -3715,8 +3730,17 @@ defmodule LoopexComposition.RestoreIOTest do
     selection = String.duplicate("c", 64)
     {:ok, claim} = Store.claim_creation_domain(runtime, head.owner_generation, selection)
     {:new, claimed, _frame, {:committed, _, receipt}} = State.prepare(state, claim)
-    {:ok, reserve} = Store.reserve_creation(runtime, command, receipt.owner_generation,
-      receipt.owner_selection, receipt.domain_version, ConfiguredGenesisFixture.genesis([]))
+
+    {:ok, reserve} =
+      Store.reserve_creation(
+        runtime,
+        command,
+        receipt.owner_generation,
+        receipt.owner_selection,
+        receipt.domain_version,
+        ConfiguredGenesisFixture.genesis([])
+      )
+
     {:new, _reserved, _frame, {:committed, _, _}} = State.prepare(claimed, reserve)
     {:ok, final} = Store.create_session(runtime, command, reserve.genesis)
     [claim, reserve, final]
