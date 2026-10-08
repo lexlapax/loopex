@@ -52,7 +52,9 @@ defmodule Loopex.RuntimeStartTest do
     assert remaining > 0
 
     case snapshot.state do
-      :ready -> :ok
+      :ready ->
+        :ok
+
       :starting ->
         receive do
         after
@@ -65,7 +67,9 @@ defmodule Loopex.RuntimeStartTest do
         assert next.startup_id == snapshot.startup_id
         assert next.startup_deadline_ms == snapshot.startup_deadline_ms
         await_startup(runtime, next, cutoff)
-      unavailable -> flunk("original creation startup unavailable: #{inspect(unavailable)}")
+
+      unavailable ->
+        flunk("original creation startup unavailable: #{inspect(unavailable)}")
     end
   end
 end
