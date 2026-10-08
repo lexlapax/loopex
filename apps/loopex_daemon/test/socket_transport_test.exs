@@ -24,11 +24,7 @@ defmodule LoopexDaemon.SocketTransportTest do
     @impl true
     def prepare_configuration(current, authored, definitions, context, options) do
       Loopex.ModelPreparationConformance.assert_context(context, 5_000)
-
-      send(
-        Keyword.fetch!(options, :observer),
-        {:current_configuration_preparation, self(), authored}
-      )
+      send(Keyword.fetch!(options, :observer), {:current_configuration_preparation, self(), authored})
 
       if Keyword.get(options, :hold_configuration, false) do
         receive do
@@ -48,19 +44,10 @@ defmodule LoopexDaemon.SocketTransportTest do
     def decide(request) do
       case Map.get(request, :interaction_response) do
         nil ->
-          {:defer,
-           %{
-             kind: :choice,
-             prompt: "May the tool write?",
-             choices: [%{id: "allow", label: "Allow"}, %{id: "deny", label: "Deny"}],
-             expires_in_ms: 60_000
-           }}
+          {:defer, %{kind: :choice, prompt: "May the tool write?", choices: [%{id: "allow", label: "Allow"}, %{id: "deny", label: "Deny"}], expires_in_ms: 60_000}}
 
-        %{answer: %{choice_id: "allow"}} ->
-          {:allow, nil}
-
-        %{answer: %{choice_id: _}} ->
-          {:deny, :policy_denied}
+        %{answer: %{choice_id: "allow"}} -> {:allow, nil}
+        %{answer: %{choice_id: _}} -> {:deny, :policy_denied}
       end
     end
   end
@@ -123,33 +110,12 @@ defmodule LoopexDaemon.SocketTransportTest do
     options = %{"version" => 1}
     command_id = "unknown-create"
 
-    :ok =
-      Loopex.M1RuntimeTestStore.inject(
-        native.store,
-        {:runtime_control_create_session, :recovery_representation}
-      )
-
-    :ok =
-      Loopex.M1RuntimeTestStore.inject(
-        native.store,
-        {:runtime_control_close_creation_reservation, :before_linearization},
-        2
-      )
-
-    :ok =
-      Loopex.M1RuntimeTestStore.hold_next_transition_before_linearization(
-        native.store,
-        :runtime_control_reserve_creation,
-        self()
-      )
-
+    :ok = Loopex.M1RuntimeTestStore.inject(native.store, {:runtime_control_create_session, :recovery_representation})
+    :ok = Loopex.M1RuntimeTestStore.inject(native.store, {:runtime_control_close_creation_reservation, :before_linearization}, 2)
+    :ok = Loopex.M1RuntimeTestStore.hold_next_transition_before_linearization(native.store, :runtime_control_reserve_creation, self())
     :ok = send_frame(client, create("unknown-original", command_id, options))
     store = native.store
-
-    assert_receive {:record_held_before_linearization, reserve_waiter, ^store,
-                    :runtime_control_reserve_creation, reservation},
-                   5_000
-
+    assert_receive {:record_held_before_linearization, reserve_waiter, ^store, :runtime_control_reserve_creation, reservation}, 5_000
     on_exit(fn -> Loopex.M1RuntimeTestStore.release(reserve_waiter) end)
     original = :sys.get_state(control).creation
     assert original.phase == :reserve
@@ -158,10 +124,7 @@ defmodule LoopexDaemon.SocketTransportTest do
     assert {:ok, original_authored} = Loopex.Runtime.CreationOptions.normalize(options)
     assert original.authored == original_authored
     assert original.fresh
-
-    assert %{activations_used: 1, activation_reservations: 1, active_sessions: 0} =
-             ConnectionRegistry.status(daemon.registry)
-
+    assert %{activations_used: 1, activation_reservations: 1, active_sessions: 0} = ConnectionRegistry.status(daemon.registry)
     assert DynamicSupervisor.which_children(sessions) == []
     Loopex.M1RuntimeTestStore.release(reserve_waiter)
 
@@ -183,44 +146,25 @@ defmodule LoopexDaemon.SocketTransportTest do
     assert close.reservation_tx_id == reservation.tx_id
     assert close.final_canonical_record_bytes == final.canonical_record_bytes
     assert close.final_canonical_mutation_digest == final.canonical_mutation_digest
-
-    assert %{state: :created, session_id: session_id} =
-             state.creation_capsules[{"daemon-current-command", command_id}]
-
+    assert %{state: :created, session_id: session_id} = state.creation_capsules[{"daemon-current-command", command_id}]
     assert map_size(state.sessions) == 1
     assert state.sessions[session_id].owner_epoch == 0
     assert :sys.get_state(control).creation_status == :unavailable
     assert map_size(:sys.get_state(control).lane.fences) == 1
-
-    assert {:ok, {:historical, ^session_id}} =
-             Loopex.Runtime.lookup_create_result(native.runtime, command_id, options)
+    assert {:ok, {:historical, ^session_id}} = Loopex.Runtime.lookup_create_result(native.runtime, command_id, options)
 
     for request_id <- ["unknown-retry", "unknown-retry-again"] do
       :ok = send_frame(client, create(request_id, command_id, options))
       assert [admission] = receive_records(client, 1)
-
-      assert admission ==
-               WireRecords.admission(
-                 request_id,
-                 "session.create",
-                 command_id,
-                 :accepted,
-                 session_id
-               )
-
-      assert %{activations_used: 0, active_sessions: 0} =
-               ConnectionRegistry.status(daemon.registry)
-
+      assert admission == WireRecords.admission(request_id, "session.create", command_id, :accepted, session_id)
+      assert %{activations_used: 0, active_sessions: 0} = ConnectionRegistry.status(daemon.registry)
       assert DynamicSupervisor.which_children(sessions) == []
       assert Loopex.M1RuntimeTestStore.inspect_state(store).creation_calls == state.creation_calls
       assert Loopex.M1RuntimeTestStore.inspect_state(store).sessions == state.sessions
     end
 
     :ok = send_frame(client, attach("unknown-attach", session_id))
-
-    assert [%{"request_id" => "unknown-attach", "code" => "session_dormant"}] =
-             receive_records(client, 1)
-
+    assert [%{"request_id" => "unknown-attach", "code" => "session_dormant"}] = receive_records(client, 1)
     assert %{activations_used: 0, active_sessions: 0} = ConnectionRegistry.status(daemon.registry)
     assert Process.get({LoopexDaemon.Test.DaemonSocketFixture, client}, "") == ""
     assert {:error, :timeout} = :socket.recv(client, 0, 40)
@@ -876,14 +820,7 @@ defmodule LoopexDaemon.SocketTransportTest do
 
     for {method, fields} <- [
           {"session.configure", %{"changes" => %{"max_tokens" => "512"}}},
-          {"session.compact",
-           %{
-             "bounds" => %{
-               "max_attempts" => "4",
-               "deadline_ms" => "60000",
-               "token_budget" => "32768"
-             }
-           }}
+          {"session.compact", %{"bounds" => %{"max_attempts" => "4", "deadline_ms" => "60000", "token_budget" => "32768"}}}
         ],
         {client, writer, suffix} <- [
           {observer, epoch, "observer"},
@@ -891,7 +828,6 @@ defmodule LoopexDaemon.SocketTransportTest do
         ] do
       id = method <> "-after-succession-" <> suffix
       :ok = send_frame(client, current_mutation(method, id, writer, fields))
-
       assert [%{"type" => "error", "code" => "control_not_held", "request_id" => ^id} | _] =
                receive_until(client, &(&1["request_id"] == id))
     end
@@ -923,32 +859,15 @@ defmodule LoopexDaemon.SocketTransportTest do
       changes = %{"model" => " authored-alias ", "max_tokens" => "512"}
 
       if @current_configuration_disposition == :admission_unknown do
-        assert :ok =
-                 Loopex.M1RuntimeTestStore.inject(
-                   native.store,
-                   {:session_journal_commit, :after_linearization_before_result}
-                 )
+        assert :ok = Loopex.M1RuntimeTestStore.inject(native.store, {:session_journal_commit, :after_linearization_before_result})
       end
 
-      :ok =
-        send_frame(
-          client,
-          current_mutation("session.configure", "configure-wire", epoch, %{"changes" => changes})
-        )
-
-      assert_receive {:current_configuration_preparation, callback,
-                      %{"model" => " authored-alias ", "max_tokens" => 512}},
-                     5_000
-
+      :ok = send_frame(client, current_mutation("session.configure", "configure-wire", epoch, %{"changes" => changes}))
+      assert_receive {:current_configuration_preparation, callback, %{"model" => " authored-alias ", "max_tokens" => 512}}, 5_000
       callback_monitor = Process.monitor(callback)
       assert {:ok, status} = Loopex.session_status(native.runtime, session)
       assert status.configuration["max_tokens"] == 256
-
-      refute Enum.any?(
-               Fixture.records(native, session),
-               &(&1.payload.kind == "session_configuration_admitted_v2")
-             )
-
+      refute Enum.any?(Fixture.records(native, session), &(&1.payload.kind == "session_configuration_admitted_v2"))
       send(callback, :continue_configuration)
       assert_receive {:DOWN, ^callback_monitor, :process, ^callback, :normal}, 1_000
       [reply | _] = receive_until(client, &(&1["request_id"] == "configure-wire"))
@@ -966,24 +885,10 @@ defmodule LoopexDaemon.SocketTransportTest do
         end
       end)
 
-      :ok =
-        send_frame(
-          client,
-          current_mutation("session.configure", "configure-retry", epoch, %{"changes" => changes})
-          |> Map.put("command_id", Wire.encode_identity("configure-wire"))
-        )
-
-      assert [%{"type" => "admission", "status" => "accepted"} | _] =
-               receive_until(client, &(&1["request_id"] == "configure-retry"))
-
+      :ok = send_frame(client, current_mutation("session.configure", "configure-retry", epoch, %{"changes" => changes}) |> Map.put("command_id", Wire.encode_identity("configure-wire")))
+      assert [%{"type" => "admission", "status" => "accepted"} | _] = receive_until(client, &(&1["request_id"] == "configure-retry"))
       refute_receive {:current_configuration_preparation, _, _}, 40
-
-      records =
-        Enum.filter(
-          Fixture.records(native, session),
-          &(&1.payload.kind == "session_configuration_admitted_v2")
-        )
-
+      records = Enum.filter(Fixture.records(native, session), &(&1.payload.kind == "session_configuration_admitted_v2"))
       assert [record] = records
       assert record.payload["changes"] == %{"model" => " authored-alias ", "max_tokens" => 512}
       assert Loopex.AgentLoopTestModel.dispatched(native.model) == []
@@ -992,50 +897,26 @@ defmodule LoopexDaemon.SocketTransportTest do
   end
 
   test "socket compact completion retry preserves one original episode and completed truth" do
-    native =
-      current_command_fixture(
-        [
-          %{text: "retained fact", calls: []},
-          %{
-            text:
-              ~s({"summary":"retain this fact","carry_forward":{"files_read":[],"files_changed":[]}}),
-            reply_overrides: %{completion: "natural", continuation: nil}
-          }
-        ],
-        maintenance_model: current_maintenance_model(),
-        maintenance_instructions: %{"version" => "summary.v1", "body" => "Keep facts"}
-      )
-
+    native = current_command_fixture(
+      [
+        %{text: "retained fact", calls: []},
+        %{text: ~s({"summary":"retain this fact","carry_forward":{"files_read":[],"files_changed":[]}}), reply_overrides: %{completion: "natural", continuation: nil}}
+      ],
+      maintenance_model: current_maintenance_model(),
+      maintenance_instructions: %{"version" => "summary.v1", "body" => "Keep facts"}
+    )
     daemon = start_daemon(native.runtime)
     {client, session, epoch} = controlled_current_session(daemon, "compact-wire-create")
-
-    :ok =
-      send_frame(
-        client,
-        current_mutation("session.prompt", "compact-history", epoch, %{
-          "content_b64" => Wire.encode_bytes(String.duplicate("retained fact ", 700))
-        })
-      )
-
-    assert [%{"status" => "accepted"} | _] =
-             receive_until(client, &(&1["request_id"] == "compact-history"))
-
-    eventually(fn ->
-      match?({:ok, %{active_run_id: nil}}, Loopex.session_status(native.runtime, session))
-    end)
-
+    :ok = send_frame(client, current_mutation("session.prompt", "compact-history", epoch, %{"content_b64" => Wire.encode_bytes(String.duplicate("retained fact ", 700))}))
+    assert [%{"status" => "accepted"} | _] = receive_until(client, &(&1["request_id"] == "compact-history"))
+    eventually(fn -> match?({:ok, %{active_run_id: nil}}, Loopex.session_status(native.runtime, session)) end)
     bounds = %{"max_attempts" => "4", "deadline_ms" => "60000", "token_budget" => "32768"}
     request = current_mutation("session.compact", "compact-wire", epoch, %{"bounds" => bounds})
     :ok = send_frame(client, request)
     records = receive_until(client, &(&1["request_id"] == "compact-wire"))
     assert [%{"type" => "admission", "status" => "accepted"} | _] = records
-
-    completed =
-      Enum.find(records, &compact_finished?/1) || hd(receive_until(client, &compact_finished?/1))
-
-    assert {:ok, completion} =
-             LoopexProtocol.Session.CompactResult.decode_completion(completed["event"]["data"])
-
+    completed = Enum.find(records, &compact_finished?/1) || hd(receive_until(client, &compact_finished?/1))
+    assert {:ok, completion} = LoopexProtocol.Session.CompactResult.decode_completion(completed["event"]["data"])
     assert completion["command_id"] == "compact-wire"
     assert completion["result"]["disposition"] == "checkpointed"
     assert completion["result"]["cleanup"] == "confirmed"
@@ -1043,107 +924,46 @@ defmodule LoopexDaemon.SocketTransportTest do
     assert {:ok, before_retry} = Loopex.session_status(native.runtime, session)
 
     :ok = send_frame(client, Map.put(request, "request_id", "compact-retry"))
-
-    assert [%{"type" => "admission", "status" => "accepted"} | _] =
-             receive_until(client, &(&1["request_id"] == "compact-retry"))
-
+    assert [%{"type" => "admission", "status" => "accepted"} | _] = receive_until(client, &(&1["request_id"] == "compact-retry"))
     assert {:ok, after_retry} = Loopex.session_status(native.runtime, session)
     assert after_retry.event_sequence == before_retry.event_sequence
     assert after_retry.last_compact == before_retry.last_compact
     assert after_retry.checkpoint == before_retry.checkpoint
-
-    assert [finished] =
-             Enum.filter(
-               Fixture.events(native, session),
-               &(&1.kind == "context.compaction_finished")
-             )
-
+    assert [finished] = Enum.filter(Fixture.events(native, session), &(&1.kind == "context.compaction_finished"))
     assert finished["episode_id"] == completion["episode_id"]
     assert finished["result"] == completion["result"]
-
-    assert Enum.count(
-             Fixture.records(native, session),
-             &(&1.payload.kind == "compact_command_admitted_v1")
-           ) == 1
-
-    assert [episode] =
-             Enum.filter(
-               Fixture.records(native, session),
-               &(&1.payload.kind == "standalone_maintenance_episode_admitted_v1")
-             )
-
+    assert Enum.count(Fixture.records(native, session), &(&1.payload.kind == "compact_command_admitted_v1")) == 1
+    assert [episode] = Enum.filter(Fixture.records(native, session), &(&1.payload.kind == "standalone_maintenance_episode_admitted_v1"))
     assert episode.payload["episode_id"] == completion["episode_id"]
     assert length(Loopex.AgentLoopTestModel.dispatched(native.model)) == 2
   end
 
   test "socket prompt and queued follow-up preserve authored bounds through the actual owner" do
-    native =
-      current_command_fixture([
-        %{text: "first", calls: [], hold: self()},
-        %{text: "second", calls: []}
-      ])
-
+    native = current_command_fixture([%{text: "first", calls: [], hold: self()}, %{text: "second", calls: []}])
     daemon = start_daemon(native.runtime)
     {client, session, epoch} = controlled_current_session(daemon, "bounds-wire-create")
     huge = "184467440737095516160000000001"
     prompt_bounds = %{"max_turns" => huge, "token_budget" => huge, "deadline_ms" => "60000"}
-
-    :ok =
-      send_frame(
-        client,
-        current_mutation("session.prompt", "bounds-prompt", epoch, %{
-          "content_b64" => Wire.encode_bytes("first"),
-          "bounds" => prompt_bounds
-        })
-      )
-
+    :ok = send_frame(client, current_mutation("session.prompt", "bounds-prompt", epoch, %{"content_b64" => Wire.encode_bytes("first"), "bounds" => prompt_bounds}))
     assert_receive {:holding, model_worker}, 5_000
-
-    assert [%{"status" => "accepted"} | _] =
-             receive_until(client, &(&1["request_id"] == "bounds-prompt"))
-
+    assert [%{"status" => "accepted"} | _] = receive_until(client, &(&1["request_id"] == "bounds-prompt"))
     assert {:ok, active} = Loopex.session_status(native.runtime, session)
     assert active.active_bounds.max_turns == String.to_integer(huge)
     assert active.active_bounds.token_budget == String.to_integer(huge)
     assert active.active_bounds.deadline_ms == 60_000
     ceiling = System.system_time(:millisecond) + 60_000
-
-    :ok =
-      send_frame(
-        client,
-        current_mutation("session.follow_up", "bounds-follow", epoch, %{
-          "content_b64" => Wire.encode_bytes("second"),
-          "bounds" => %{"deadline_at_ms" => ceiling}
-        })
-      )
-
-    assert [%{"status" => "accepted"} | _] =
-             receive_until(client, &(&1["request_id"] == "bounds-follow"))
-
+    :ok = send_frame(client, current_mutation("session.follow_up", "bounds-follow", epoch, %{"content_b64" => Wire.encode_bytes("second"), "bounds" => %{"deadline_at_ms" => ceiling}}))
+    assert [%{"status" => "accepted"} | _] = receive_until(client, &(&1["request_id"] == "bounds-follow"))
     send(model_worker, :release)
-
     eventually(fn ->
       case Loopex.session_status(native.runtime, session) do
         {:ok, status} -> is_nil(status.active_run_id) and status.pending_work_ids == []
         other -> flunk("unexpected bounds observation: #{inspect(other)}")
       end
     end)
-
-    admitted =
-      Enum.filter(
-        Fixture.records(native, session),
-        &(&1.payload.kind in ["prompt_admitted_v3", "command_admitted"])
-      )
-
-    assert [prompt, follow] =
-             Enum.filter(
-               admitted,
-               &(&1.payload["command_id"] in ["bounds-prompt", "bounds-follow"])
-             )
-
-    assert prompt.payload["authored_bounds"] ==
-             Map.new(prompt_bounds, fn {key, value} -> {key, String.to_integer(value)} end)
-
+    admitted = Enum.filter(Fixture.records(native, session), &(&1.payload.kind in ["prompt_admitted_v3", "command_admitted"]))
+    assert [prompt, follow] = Enum.filter(admitted, &(&1.payload["command_id"] in ["bounds-prompt", "bounds-follow"]))
+    assert prompt.payload["authored_bounds"] == Map.new(prompt_bounds, fn {key, value} -> {key, String.to_integer(value)} end)
     assert follow.payload["authored_bounds"] == %{"deadline_at_ms" => ceiling}
     assert length(Loopex.AgentLoopTestModel.dispatched(native.model)) == 2
   end
@@ -1151,76 +971,23 @@ defmodule LoopexDaemon.SocketTransportTest do
   for branch <- [:choice, :text, :declined] do
     @current_answer_branch branch
     test "socket model question admits the exact #{@current_answer_branch} response" do
-      arguments =
-        if @current_answer_branch == :choice,
-          do: %{"question" => "Choose", "choices" => ["Proceed", "Stop"]},
-          else: %{"question" => "Explain"}
-
-      native =
-        current_command_fixture(
-          [
-            %{text: "question", calls: [%{id: "ask", name: "ask", arguments: arguments}]},
-            %{text: "done", calls: []}
-          ],
-          tools: [LoopexProtocol.ToolDefinition.question_definition()]
-        )
-
+      arguments = if @current_answer_branch == :choice, do: %{"question" => "Choose", "choices" => ["Proceed", "Stop"]}, else: %{"question" => "Explain"}
+      native = current_command_fixture([%{text: "question", calls: [%{id: "ask", name: "ask", arguments: arguments}]}, %{text: "done", calls: []}], tools: [LoopexProtocol.ToolDefinition.question_definition()])
       daemon = start_daemon(native.runtime)
       {client, session, epoch} = controlled_current_session(daemon, "question-wire-create")
-
-      :ok =
-        send_frame(
-          client,
-          current_mutation("session.prompt", "question-prompt", epoch, %{
-            "content_b64" => Wire.encode_bytes("ask")
-          })
-        )
-
-      assert [%{"status" => "accepted"} | _] =
-               receive_until(client, &(&1["request_id"] == "question-prompt"))
-
-      eventually(fn ->
-        match?(
-          {:ok, %{open_interaction: interaction}} when is_map(interaction),
-          Loopex.session_status(native.runtime, session)
-        )
-      end)
-
-      assert {:ok, %{open_interaction: interaction}} =
-               Loopex.session_status(native.runtime, session)
-
-      answer =
-        case @current_answer_branch do
-          :choice -> %{"choice_id" => Wire.encode_identity(hd(interaction["choices"])["id"])}
-          :text -> %{"text" => " Exact λ answer\n"}
-          :declined -> %{"disposition" => "declined"}
-        end
-
-      :ok =
-        send_frame(
-          client,
-          current_mutation("session.respond_interaction", "question-answer", epoch, %{
-            "interaction_id" => Wire.encode_identity(interaction["interaction_id"]),
-            "answer" => answer
-          })
-        )
-
-      assert [%{"status" => "accepted"} | _] =
-               receive_until(client, &(&1["request_id"] == "question-answer"))
-
-      eventually(fn ->
-        match?(
-          {:ok, %{active_run_id: nil, open_interaction: nil}},
-          Loopex.session_status(native.runtime, session)
-        )
-      end)
-
-      assert [response] =
-               Enum.filter(
-                 Fixture.records(native, session),
-                 &(&1.payload.kind == "model_question_response_admitted_v2")
-               )
-
+      :ok = send_frame(client, current_mutation("session.prompt", "question-prompt", epoch, %{"content_b64" => Wire.encode_bytes("ask")}))
+      assert [%{"status" => "accepted"} | _] = receive_until(client, &(&1["request_id"] == "question-prompt"))
+      eventually(fn -> match?({:ok, %{open_interaction: interaction}} when is_map(interaction), Loopex.session_status(native.runtime, session)) end)
+      assert {:ok, %{open_interaction: interaction}} = Loopex.session_status(native.runtime, session)
+      answer = case @current_answer_branch do
+        :choice -> %{"choice_id" => Wire.encode_identity(hd(interaction["choices"])["id"])}
+        :text -> %{"text" => " Exact λ answer\n"}
+        :declined -> %{"disposition" => "declined"}
+      end
+      :ok = send_frame(client, current_mutation("session.respond_interaction", "question-answer", epoch, %{"interaction_id" => Wire.encode_identity(interaction["interaction_id"]), "answer" => answer}))
+      assert [%{"status" => "accepted"} | _] = receive_until(client, &(&1["request_id"] == "question-answer"))
+      eventually(fn -> match?({:ok, %{active_run_id: nil, open_interaction: nil}}, Loopex.session_status(native.runtime, session)) end)
+      assert [response] = Enum.filter(Fixture.records(native, session), &(&1.payload.kind == "model_question_response_admitted_v2"))
       assert {:ok, expected} = LoopexProtocol.Session.Answer.decode_wire(answer)
       assert response.payload["answer"] == expected
       assert response.payload["command_id"] == "question-answer"
@@ -1229,93 +996,35 @@ defmodule LoopexDaemon.SocketTransportTest do
   end
 
   test "socket policy question refuses text and decline before any executor effect" do
-    native =
-      current_command_fixture(
-        [
-          %{text: "write", calls: [%{id: "write", name: "write", arguments: %{"path" => "file"}}]}
-        ],
-        tools: [Fixture.tool_definition()],
-        policy: CurrentCommandPolicy
-      )
-
+    native = current_command_fixture([%{text: "write", calls: [%{id: "write", name: "write", arguments: %{"path" => "file"}}]}], tools: [Fixture.tool_definition()], policy: CurrentCommandPolicy)
     daemon = start_daemon(native.runtime)
     {client, session, epoch} = controlled_current_session(daemon, "policy-wire-create")
-
-    :ok =
-      send_frame(
-        client,
-        current_mutation("session.prompt", "policy-prompt", epoch, %{
-          "content_b64" => Wire.encode_bytes("write")
-        })
-      )
-
-    assert [%{"status" => "accepted"} | _] =
-             receive_until(client, &(&1["request_id"] == "policy-prompt"))
-
-    eventually(fn ->
-      match?(
-        {:ok, %{open_interaction: interaction}} when is_map(interaction),
-        Loopex.session_status(native.runtime, session)
-      )
-    end)
-
-    assert {:ok, %{open_interaction: interaction}} =
-             Loopex.session_status(native.runtime, session)
-
+    :ok = send_frame(client, current_mutation("session.prompt", "policy-prompt", epoch, %{"content_b64" => Wire.encode_bytes("write")}))
+    assert [%{"status" => "accepted"} | _] = receive_until(client, &(&1["request_id"] == "policy-prompt"))
+    eventually(fn -> match?({:ok, %{open_interaction: interaction}} when is_map(interaction), Loopex.session_status(native.runtime, session)) end)
+    assert {:ok, %{open_interaction: interaction}} = Loopex.session_status(native.runtime, session)
     assert interaction["producer"] == "policy_defer"
-
-    for {id, answer} <- [
-          {"policy-text", %{"text" => "allow"}},
-          {"policy-decline", %{"disposition" => "declined"}}
-        ] do
-      :ok =
-        send_frame(
-          client,
-          current_mutation("session.respond_interaction", id, epoch, %{
-            "interaction_id" => Wire.encode_identity(interaction["interaction_id"]),
-            "answer" => answer
-          })
-        )
-
-      assert [
-               %{
-                 "type" => "admission",
-                 "status" => "refused",
-                 "reason" => "invalid_interaction_answer"
-               }
-               | _
-             ] = receive_until(client, &(&1["request_id"] == id))
-
-      assert {:ok, %{open_interaction: ^interaction}} =
-               Loopex.session_status(native.runtime, session)
-
+    for {id, answer} <- [{"policy-text", %{"text" => "allow"}}, {"policy-decline", %{"disposition" => "declined"}}] do
+      :ok = send_frame(client, current_mutation("session.respond_interaction", id, epoch, %{"interaction_id" => Wire.encode_identity(interaction["interaction_id"]), "answer" => answer}))
+      assert [%{"type" => "admission", "status" => "refused", "reason" => "invalid_interaction_answer"} | _] = receive_until(client, &(&1["request_id"] == id))
+      assert {:ok, %{open_interaction: ^interaction}} = Loopex.session_status(native.runtime, session)
       assert Loopex.AgentLoopTestExecutor.jobs(native.executor) == []
     end
   end
 
   test "actual compact activity reaches only installed subscriptions with its native lease retained" do
     sink = Loopex.ProgressTestConsumer.open_sink()
-
-    summary =
-      ~s({"summary":"retain this fact","carry_forward":{"files_read":[],"files_changed":[]}})
-
-    native =
-      current_command_fixture(
-        [
-          %{text: "retained fact", calls: []},
-          %{raw_result: {:error, {:not_dispatched, "model_call_failed"}}},
-          %{
-            text: summary,
-            hold: self(),
-            deltas: ["PRIVATE_SUMMARY_DELTA"],
-            reply_overrides: %{completion: "natural", continuation: nil}
-          }
-        ],
-        progress_sink: sink,
-        maintenance_model: current_maintenance_model(),
-        maintenance_instructions: %{"version" => "summary.v1", "body" => "Keep facts"}
-      )
-
+    summary = ~s({"summary":"retain this fact","carry_forward":{"files_read":[],"files_changed":[]}})
+    native = current_command_fixture(
+      [
+        %{text: "retained fact", calls: []},
+        %{raw_result: {:error, {:not_dispatched, "model_call_failed"}}},
+        %{text: summary, hold: self(), deltas: ["PRIVATE_SUMMARY_DELTA"], reply_overrides: %{completion: "natural", continuation: nil}}
+      ],
+      progress_sink: sink,
+      maintenance_model: current_maintenance_model(),
+      maintenance_instructions: %{"version" => "summary.v1", "body" => "Keep facts"}
+    )
     daemon = start_daemon(native.runtime)
     {controller, session, epoch} = controlled_current_session(daemon, "activity-create")
     observer = initialized_client(daemon)
@@ -1325,37 +1034,11 @@ defmodule LoopexDaemon.SocketTransportTest do
     other_session = create_session(outsider, "other-activity-create")
     :ok = send_frame(outsider, attach("other-activity-attach", other_session))
     assert [%{"type" => "snapshot"}] = receive_records(outsider, 1)
-
-    :ok =
-      send_frame(
-        controller,
-        current_mutation("session.prompt", "activity-history", epoch, %{
-          "content_b64" => Wire.encode_bytes(String.duplicate("retained fact ", 700))
-        })
-      )
-
-    assert [%{"status" => "accepted"} | _] =
-             receive_until(controller, &(&1["request_id"] == "activity-history"))
-
-    eventually(fn ->
-      match?({:ok, %{active_run_id: nil}}, Loopex.session_status(native.runtime, session))
-    end)
-
-    :ok =
-      send_frame(
-        controller,
-        current_mutation("session.compact", "activity-compact", epoch, %{
-          "bounds" => %{
-            "max_attempts" => "4",
-            "deadline_ms" => "60000",
-            "token_budget" => "32768"
-          }
-        })
-      )
-
-    assert [%{"status" => "accepted"} | _] =
-             receive_until(controller, &(&1["request_id"] == "activity-compact"))
-
+    :ok = send_frame(controller, current_mutation("session.prompt", "activity-history", epoch, %{"content_b64" => Wire.encode_bytes(String.duplicate("retained fact ", 700))}))
+    assert [%{"status" => "accepted"} | _] = receive_until(controller, &(&1["request_id"] == "activity-history"))
+    eventually(fn -> match?({:ok, %{active_run_id: nil}}, Loopex.session_status(native.runtime, session)) end)
+    :ok = send_frame(controller, current_mutation("session.compact", "activity-compact", epoch, %{"bounds" => %{"max_attempts" => "4", "deadline_ms" => "60000", "token_budget" => "32768"}}))
+    assert [%{"status" => "accepted"} | _] = receive_until(controller, &(&1["request_id"] == "activity-compact"))
     assert_receive {:holding, model_worker}, 5_000
     worker_monitor = Process.monitor(model_worker)
     {:ok, %{control: control}} = Loopex.Runtime.children(native.runtime)
@@ -1365,149 +1048,136 @@ defmodule LoopexDaemon.SocketTransportTest do
     relay_monitor = Process.monitor(relay)
     assert is_pid(relay)
     assert {:ok, held_status} = Loopex.session_status(native.runtime, session)
-
-    attached_connections =
-      Enum.filter(connection_pids(daemon), fn connection ->
-        match?(%{attachment: %{session_id: ^session}}, :sys.get_state(connection))
-      end)
-
-    assert length(attached_connections) == 2
-
-    eventually(fn ->
-      Enum.all?(
-        attached_connections,
-        &(:sys.get_state(&1).attachment.emitted_cursor == held_status.event_sequence)
-      )
+    attached_connections = Enum.filter(connection_pids(daemon), fn connection ->
+      match?(%{attachment: %{session_id: ^session}}, :sys.get_state(connection))
     end)
+    assert length(attached_connections) == 2
+    eventually(fn -> Enum.all?(attached_connections, &(:sys.get_state(&1).attachment.emitted_cursor == held_status.event_sequence)) end)
 
     # Concept: the host retains native custody while the daemon copies frames.
     # Technical depth: the actual sink owner takes permitted Core activity and
     # retains every lease until this test owner exits. No fake release or socket
     # cleanup acknowledgement returns native credit during these assertions.
-    items =
-      for _ <- 1..2 do
-        assert {^session, item} =
-                 Loopex.ProgressTestConsumer.matching(
-                   fn
-                     {^session, %{kind: "context.compaction_progress"}} -> true
-                     _ -> false
-                   end,
-                   5_000
-                 )
-
-        item
-      end
-
+    items = for _ <- 1..2 do
+      assert {^session, item} = Loopex.ProgressTestConsumer.matching(fn
+        {^session, %{kind: "context.compaction_progress"}} -> true
+        _ -> false
+      end, 5_000)
+      item
+    end
     assert length(Enum.uniq_by(items, & &1.stream_domain_id)) == 2
-
-    assert Enum.all?(
-             items,
-             &(&1.owner == %{"kind" => "compact", "id" => "activity-compact"} and
-                 &1.progress_sequence == 0)
-           )
-
-    opened =
-      Enum.filter(
-        Fixture.records(native, session),
-        &(&1.payload.kind == "maintenance_attempt_opened_v1")
-      )
-
+    assert Enum.all?(items, &(&1.owner == %{"kind" => "compact", "id" => "activity-compact"} and &1.progress_sequence == 0))
+    opened = Enum.filter(Fixture.records(native, session), &(&1.payload.kind == "maintenance_attempt_opened_v1"))
     assert length(opened) == 2
-
     for {item, record} <- Enum.zip(items, opened) do
-      assert item.stream_domain_id ==
-               Loopex.StreamDomain.derive(
-                 :compaction,
-                 session,
-                 record.payload["operation_id"],
-                 record.payload["attempt"]
-               )
-
+      assert item.stream_domain_id == Loopex.StreamDomain.derive(:compaction, session, record.payload["operation_id"], record.payload["attempt"])
       assert item.base_event_sequence <= held_status.event_sequence
       assert {:ok, expected} = LoopexProtocol.Session.CompactionProgress.encode_wire(item)
-      send(daemon.registry, {:loopex_progress, session, item})
-
+      :ok = Loopex.ProgressSink.try_offer(daemon.registry_progress_sink, session, item)
       for client <- [controller, observer] do
-        assert [%{"type" => "progress", "progress" => ^expected} = activity | _] =
-                 receive_until(client, &(&1["type"] == "progress"))
-
+        assert [%{"type" => "progress", "progress" => ^expected} = activity | _] = receive_until(client, &(&1["type"] == "progress"))
         assert activity["session_id"] == Wire.encode_identity(session)
         refute inspect(activity) =~ "PRIVATE_SUMMARY_DELTA"
       end
     end
-
     assert {:error, :timeout} = :socket.recv(outsider, 0, 40)
     assert {:ok, after_activity} = Loopex.session_status(native.runtime, session)
     assert after_activity.event_sequence == held_status.event_sequence
-
-    assert Enum.all?(
-             attached_connections,
-             &(:sys.get_state(&1).attachment.emitted_cursor == held_status.event_sequence)
-           )
-
+    assert Enum.all?(attached_connections, &(:sys.get_state(&1).attachment.emitted_cursor == held_status.event_sequence))
     {_guardian, sink_incarnation, arena} = sink
     [custody] = :ets.lookup(arena, :state)
-
-    leases =
-      for {^sink, {^sink_incarnation, index, token}} <-
-            Process.get({Loopex.ProgressTestConsumer, :observed}, []) do
-        assert {^token, :leased, owner, charge} = elem(elem(custody, 5), index)
-        assert owner == self() and charge > 0
-        {index, token}
-      end
-
+    leases = for {^sink, {^sink_incarnation, index, token}} <- Process.get({Loopex.ProgressTestConsumer, :observed}, []) do
+      assert {^token, :leased, owner, charge} = elem(elem(custody, 5), index)
+      assert owner == self() and charge > 0
+      {index, token}
+    end
     assert length(leases) == 2
 
     send(model_worker, :release)
     assert_receive {:DOWN, ^worker_monitor, :process, ^model_worker, :normal}, 5_000
     [completion | _] = receive_until(controller, &compact_finished?/1)
-
-    assert {:ok, completed} =
-             LoopexProtocol.Session.CompactResult.decode_completion(completion["event"]["data"])
-
+    assert {:ok, completed} = LoopexProtocol.Session.CompactResult.decode_completion(completion["event"]["data"])
     assert completed["result"]["usage"]["attempts"] == 2
     predecessor_monitor = Process.monitor(coordinator)
     Process.exit(coordinator, :kill)
     assert_receive {:DOWN, ^predecessor_monitor, :process, ^coordinator, :killed}, 5_000
     assert_receive {:DOWN, ^relay_monitor, :process, ^relay, _}, 5_000
-
-    assert {:ok, {:prepared, activation}} =
-             Loopex.prepare_resume_session(native.runtime, session, "activity-successor")
-
+    assert {:ok, {:prepared, activation}} = Loopex.prepare_resume_session(native.runtime, session, "activity-successor")
     assert {:ok, ^session} = Loopex.activate_resume(activation)
     successor = :sys.get_state(control).sessions[session].coordinator
     assert :sys.get_state(successor).compaction_relay == nil
-
-    assert Loopex.ProgressTestConsumer.matching(
-             fn
-               {^session, %{kind: "context.compaction_progress"}} -> true
-               _ -> false
-             end,
-             40
-           ) == :empty
-
+    assert Loopex.ProgressTestConsumer.matching(fn
+      {^session, %{kind: "context.compaction_progress"}} -> true
+      _ -> false
+    end, 40) == :empty
     assert length(Loopex.AgentLoopTestModel.dispatched(native.model)) == 3
+  end
+
+  test "a real socket retains native lease and encoded charge until exact Registry emission ACK" do
+    native = current_command_fixture([])
+    daemon = start_daemon(native.runtime)
+    {client, session, _epoch} = controlled_current_session(daemon, "credited-ack-create")
+    [connection] = connection_pids(daemon)
+    socket_state = :sys.get_state(connection)
+    sink = socket_state.progress_sink
+    assert :sys.get_state(daemon.registry).rows[socket_state.rollback_token].progress_sink == sink
+    cursor = socket_state.attachment.emitted_cursor || socket_state.attachment.snapshot_cursor
+    {:ok, item} = Loopex.CompactionProgress.new("held-episode", %{"kind" => "compact", "id" => "held-command"}, String.duplicate("a", 32), cursor)
+    test = self()
+    :ok = :sys.install(daemon.registry, {fn
+      :waiting, {:in, {:"$gen_call", _from, {:output_emitted, incarnation, ref}}}, _state ->
+        send(test, {:progress_emission_held, incarnation, ref})
+        receive do :continue_progress_emission -> :done end
+      :waiting, _event, _state -> :waiting
+    end, :waiting})
+    on_exit(fn -> send(daemon.registry, :continue_progress_emission) end)
+    assert :ok = Loopex.ProgressSink.try_offer(daemon.registry_progress_sink, session, item)
+    assert_receive {:progress_emission_held, incarnation, frame_ref}, 5_000
+    assert incarnation == socket_state.incarnation
+    assert [%{"type" => "progress", "progress" => activity}] = receive_records(client, 1)
+    assert {:ok, expected} = LoopexProtocol.Session.CompactionProgress.encode_wire(item)
+    assert activity == expected
+    held = :sys.get_state(connection)
+    assert Map.has_key?(held.progress_frames, frame_ref)
+    {:ok, encoded_activity} = LoopexProtocol.Frame.encode(WireRecords.progress(session, item))
+    assert held.progress_bytes == byte_size(IO.iodata_to_binary(encoded_activity))
+    assert map_size(held.progress_leases) == 1 and held.progress_bytes > 0
+    assert held.output_claim in [nil, :claiming]
+    assert held.attachment.emitted_cursor == socket_state.attachment.emitted_cursor
+    send(connection, {:progress_discarded, :crypto.strong_rand_bytes(16), [frame_ref]})
+    send(connection, {:progress_discarded, incarnation, [make_ref()]})
+    after_stale = :sys.get_state(connection)
+    assert after_stale.progress_frames == held.progress_frames
+    assert after_stale.progress_leases == held.progress_leases
+    assert after_stale.progress_bytes == held.progress_bytes
+    for sequence <- 1..31 do
+      assert :ok = Loopex.ProgressSink.try_offer(sink, session, %{item | progress_sequence: sequence})
+    end
+    eventually(fn -> map_size(:sys.get_state(connection).progress_leases) == 32 end)
+    saturated = :sys.get_state(connection)
+    assert saturated.progress_bytes == Enum.sum(Map.values(saturated.progress_leases))
+    assert saturated.progress_bytes > held.progress_bytes and saturated.progress_bytes <= 524_288
+    assert :dropped = Loopex.ProgressSink.try_offer(sink, session, %{item | progress_sequence: 32})
+    {_guardian, sink_incarnation, arena} = sink
+    [{:state, ^sink_incarnation, ^connection, _status, bytes, slots, _ready}] = :ets.lookup(arena, :state)
+    assert bytes > 0 and bytes <= 524_288
+    assert Enum.count(Tuple.to_list(slots), &(not is_nil(&1))) == 32
+    send(daemon.registry, :continue_progress_emission)
+    eventually(fn -> :sys.get_state(connection).progress_frames == %{} and :sys.get_state(connection).progress_leases == %{} end)
+    assert length(receive_records(client, 31)) == 31
+    assert :sys.get_state(connection).progress_bytes == 0
+    [{:state, ^sink_incarnation, ^connection, _status, 0, final_slots, []}] = :ets.lookup(arena, :state)
+    assert Enum.all?(Tuple.to_list(final_slots), &is_nil/1)
+    assert :sys.get_state(connection).attachment.emitted_cursor == socket_state.attachment.emitted_cursor
   end
 
   test "malformed durable data detaches at actual emitted truth without private publication" do
     native = current_command_fixture([%{text: "done", calls: []}])
     daemon = start_daemon(native.runtime)
     {client, session, epoch} = controlled_current_session(daemon, "malformed-event-create")
-
-    :ok =
-      send_frame(
-        client,
-        current_mutation("session.prompt", "malformed-event-history", epoch, %{
-          "content_b64" => Wire.encode_bytes("actual history")
-        })
-      )
-
-    assert [%{"status" => "accepted"} | _] =
-             receive_until(client, &(&1["request_id"] == "malformed-event-history"))
-
-    [settled | _] =
-      receive_until(client, &(&1["type"] == "event" and &1["event"]["kind"] == "session.settled"))
-
+    :ok = send_frame(client, current_mutation("session.prompt", "malformed-event-history", epoch, %{"content_b64" => Wire.encode_bytes("actual history")}))
+    assert [%{"status" => "accepted"} | _] = receive_until(client, &(&1["request_id"] == "malformed-event-history"))
+    [settled | _] = receive_until(client, &(&1["type"] == "event" and &1["event"]["kind"] == "session.settled"))
     {:ok, cursor} = Wire.u64(settled["event"]["event_sequence"])
     connection = initialized_connection(daemon)
     eventually(fn -> :sys.get_state(connection).attachment.emitted_cursor == cursor end)
@@ -1515,23 +1185,10 @@ defmodule LoopexDaemon.SocketTransportTest do
     pump_monitor = Process.monitor(attached.pump)
     connection_monitor = Process.monitor(connection)
     records_before = Fixture.records(native, session)
-
-    invalid = %{
-      :kind => "run.started",
-      :event_id => "forged",
-      :event_sequence => cursor + 10,
-      "run_id" => "run",
-      "command_id" => "cmd",
-      "private_capture" => "PRIVATE_DURABLE_CANARY"
-    }
-
+    invalid = %{:kind => "run.started", :event_id => "forged", :event_sequence => cursor + 10,
+      "run_id" => "run", "command_id" => "cmd", "private_capture" => "PRIVATE_DURABLE_CANARY"}
     send(connection, {:attachment_event, attached.pump, invalid})
-
-    assert [
-             %{"type" => "error", "code" => "detached", "event_cursor" => encoded_cursor} =
-               detached
-           ] = receive_records(client, 1)
-
+    assert [%{"type" => "error", "code" => "detached", "event_cursor" => encoded_cursor} = detached] = receive_records(client, 1)
     assert encoded_cursor == Integer.to_string(cursor)
     assert detached["session_id"] == Wire.encode_identity(session)
     refute inspect(detached) =~ "PRIVATE_DURABLE_CANARY"
@@ -2876,49 +2533,29 @@ defmodule LoopexDaemon.SocketTransportTest do
       end
     end)
 
-    assert {:ok, runtime} =
-             Loopex.start_link(
-               runtime_id: "daemon-current-command",
-               store: handle,
-               context_token_budget: 8_192,
-               session_creation_defaults: Fixture.creation_defaults(definitions),
-               progress_sink: Keyword.get(options, :progress_sink),
-               maintenance_model: Keyword.get(options, :maintenance_model),
-               maintenance_instructions: Keyword.get(options, :maintenance_instructions),
-               model: %{
-                 module: CurrentCommandModel,
-                 model: "scripted:v1",
-                 options: [
-                   observer: self(),
-                   script: model,
-                   hold_configuration: Keyword.get(options, :hold_configuration, false),
-                   max_tokens: 256
-                 ]
-               },
-               executor: %{
-                 module: Loopex.AgentLoopTestExecutor,
-                 reference: executor,
-                 identity: "agent-loop-executor",
-                 epoch: 1,
-                 fencing_token: 1,
-                 workspace_ref: "workspace-ref",
-                 workspace_lease: "workspace-lease"
-               },
-               tools: definitions,
-               active_tools: Enum.map(definitions, & &1["tool_id"]),
-               policy: Keyword.get(options, :policy, Loopex.AgentLoopTestPolicy),
-               policy_identity: %{"id" => "current-command-test", "revision" => "1"},
-               grant_decision: {:host_policy, :allow},
-               bounds: Fixture.bounds(),
-               cleanup_grace_ms: 5_000
-             )
-
+    assert {:ok, runtime} = Loopex.start_link(
+      runtime_id: "daemon-current-command",
+      store: handle,
+      context_token_budget: 8_192,
+      session_creation_defaults: Fixture.creation_defaults(definitions),
+      progress_sink: Keyword.get(options, :progress_sink),
+      maintenance_model: Keyword.get(options, :maintenance_model),
+      maintenance_instructions: Keyword.get(options, :maintenance_instructions),
+      model: %{module: CurrentCommandModel, model: "scripted:v1", options: [observer: self(), script: model, hold_configuration: Keyword.get(options, :hold_configuration, false), max_tokens: 256]},
+      executor: %{module: Loopex.AgentLoopTestExecutor, reference: executor, identity: "agent-loop-executor", epoch: 1, fencing_token: 1, workspace_ref: "workspace-ref", workspace_lease: "workspace-lease"},
+      tools: definitions,
+      active_tools: Enum.map(definitions, & &1["tool_id"]),
+      policy: Keyword.get(options, :policy, Loopex.AgentLoopTestPolicy),
+      policy_identity: %{"id" => "current-command-test", "revision" => "1"},
+      grant_decision: {:host_policy, :allow},
+      bounds: Fixture.bounds(),
+      cleanup_grace_ms: 5_000
+    )
     on_exit(fn ->
       monitor = Process.monitor(runtime.supervisor)
       if Process.alive?(runtime.supervisor), do: Loopex.stop(runtime)
       assert_receive {:DOWN, ^monitor, :process, _, _}, 5_000
     end)
-
     assert :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(runtime)
     %{runtime: runtime, model: model, executor: executor, store: store}
   end
@@ -2929,10 +2566,7 @@ defmodule LoopexDaemon.SocketTransportTest do
     %{
       "model" => source["model"],
       "reasoning" => "none",
-      "model_capabilities" => %{
-        source["model_capabilities"]
-        | "reasoning_levels" => ["none", "default"]
-      },
+      "model_capabilities" => %{source["model_capabilities"] | "reasoning_levels" => ["none", "default"]},
       "provider_mapping" => %{source["provider_mapping"] | "thinking_disabled" => true}
     }
   end
@@ -2948,15 +2582,7 @@ defmodule LoopexDaemon.SocketTransportTest do
   end
 
   defp current_mutation(method, id, epoch, fields) do
-    Map.merge(
-      %{
-        "method" => method,
-        "request_id" => id,
-        "command_id" => Wire.encode_identity(id),
-        "writer_epoch" => epoch
-      },
-      fields
-    )
+    Map.merge(%{"method" => method, "request_id" => id, "command_id" => Wire.encode_identity(id), "writer_epoch" => epoch}, fields)
   end
 
   defp compact_finished?(record),

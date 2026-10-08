@@ -216,7 +216,6 @@ defmodule LoopexDaemon.Service do
   # a live route offers into Registry credit before transferring any payload.
   def handle_info({:loopex_progress_ready, sink}, %{progress_sink: sink} = state) do
     send(self(), {:loopex_progress_ready, sink})
-
     case drain_progress(state, 32) do
       :ok -> {:noreply, state}
       :error -> fail_stop(state, :connections_lost)
@@ -224,8 +223,7 @@ defmodule LoopexDaemon.Service do
   end
 
   def handle_info({:DOWN, monitor, :process, _pid, _reason}, state)
-      when monitor == state.progress_guardian_monitor or
-             monitor == state.registry_progress_monitor,
+      when monitor == state.progress_guardian_monitor or monitor == state.registry_progress_monitor,
       do: fail_stop(%{state | registry_progress_sink: nil}, :connections_lost)
 
   def handle_info(_message, state), do: {:noreply, state}
@@ -308,7 +306,6 @@ defmodule LoopexDaemon.Service do
     receive do
       {:loopex_progress_ready, sink} when sink == state.progress_sink ->
         send(self(), {:loopex_progress_ready, sink})
-
         case drain_progress(state, 32) do
           :ok -> checkpoint(state)
           :error -> {:stop, {:fatal, :composition_start_failed}}
@@ -342,8 +339,7 @@ defmodule LoopexDaemon.Service do
         {:stop, {:fatal, :daemon_services_start_failed}}
 
       {:DOWN, monitor, :process, _pid, _reason}
-      when is_map_key(state.runtime_monitors, monitor) or
-             monitor == state.progress_guardian_monitor or
+      when is_map_key(state.runtime_monitors, monitor) or monitor == state.progress_guardian_monitor or
              monitor == state.registry_progress_monitor ->
         {:stop, {:fatal, :composition_start_failed}}
     after
@@ -352,7 +348,6 @@ defmodule LoopexDaemon.Service do
                Enum.find(state.pids, fn {_name, pid} -> not Process.alive?(pid) end) do
           false ->
             {:stop, {:fatal, :composition_start_failed}}
-
           nil when is_pid(state.relay) ->
             if Process.alive?(state.relay),
               do: :continue,
@@ -515,16 +510,13 @@ defmodule LoopexDaemon.Service do
   end
 
   defp progress_components_alive?(%{progress_sink: nil}), do: true
-
   defp progress_components_alive?(state) do
     {guardian, _, _} = state.progress_sink
     Process.alive?(guardian) and (is_nil(state.registry) or Process.alive?(state.registry))
   end
 
   defp clear_progress_route(state) do
-    if state.registry_progress_monitor,
-      do: Process.demonitor(state.registry_progress_monitor, [:flush])
-
+    if state.registry_progress_monitor, do: Process.demonitor(state.registry_progress_monitor, [:flush])
     %{state | registry_progress_sink: nil, registry_progress_monitor: nil}
   end
 
@@ -532,33 +524,23 @@ defmodule LoopexDaemon.Service do
     case Loopex.ProgressSink.open() do
       {:ok, sink} ->
         {guardian, _, _} = sink
-
-        {:ok,
-         %{state | progress_sink: sink, progress_guardian_monitor: Process.monitor(guardian)}}
-
-      {:error, _} ->
-        {:stop, {:fatal, :composition_start_failed}, state}
+        {:ok, %{state | progress_sink: sink, progress_guardian_monitor: Process.monitor(guardian)}}
+      {:error, _} -> {:stop, {:fatal, :composition_start_failed}, state}
     end
   end
 
   defp drain_progress(_state, 0), do: :ok
-
   defp drain_progress(state, remaining) do
     case Loopex.ProgressSink.take(state.progress_sink) do
       {:ok, lease, session, item} ->
         if state.registry_progress_sink,
           do: Loopex.ProgressSink.try_offer(state.registry_progress_sink, session, item)
-
         case Loopex.ProgressSink.release(state.progress_sink, lease) do
           :ok -> drain_progress(state, remaining - 1)
           {:error, _} -> :error
         end
-
-      :empty ->
-        :ok
-
-      :closed ->
-        :error
+      :empty -> :ok
+      :closed -> :error
     end
   end
 
@@ -656,21 +638,9 @@ defmodule LoopexDaemon.Service do
         # returns, so a collaboration owner that later stops answering can
         # never take this owner down with a call.
         case safe(fn -> Owner.components(owner) end) do
-          %{
-            relay: relay,
-            registry: registry,
-            registry_progress_sink: sink,
-            daemon_incarnation: incarnation
-          } ->
-            {:ok,
-             %{
-               state
-               | relay: relay,
-                 registry: registry,
-                 registry_progress_sink: sink,
-                 registry_progress_monitor: Process.monitor(registry),
-                 daemon_incarnation: incarnation
-             }}
+          %{relay: relay, registry: registry, registry_progress_sink: sink, daemon_incarnation: incarnation} ->
+            {:ok, %{state | relay: relay, registry: registry, registry_progress_sink: sink,
+              registry_progress_monitor: Process.monitor(registry), daemon_incarnation: incarnation}}
 
           _unavailable ->
             {:stop, {:fatal, :daemon_services_start_failed}, state}
@@ -916,6 +886,11 @@ defmodule LoopexDaemon.Service do
       {:DOWN, runtime_monitor, :process, _pid, _reason}
       when is_map_key(state.runtime_monitors, runtime_monitor) ->
         {:fatal, :runtime_lost}
+
+      {:DOWN, native_monitor, :process, _guardian, _reason}
+      when native_monitor == state.progress_guardian_monitor or
+             native_monitor == state.registry_progress_monitor ->
+        {:fatal, :connections_lost}
 
       {:daemon_component_fatal, _reporter, class}
       when class in @reported_classes ->
@@ -1174,6 +1149,11 @@ defmodule LoopexDaemon.Service do
       when is_map_key(state.runtime_monitors, runtime_monitor) ->
         end_responsive(helper, monitor, {:fatal, runtime_monitor_class(state, pid)})
 
+      {:DOWN, native_monitor, :process, _guardian, _reason}
+      when native_monitor == state.progress_guardian_monitor or
+             native_monitor == state.registry_progress_monitor ->
+        end_responsive(helper, monitor, {:fatal, :connections_lost})
+
       {:daemon_component_fatal, _reporter, class}
       when class in @reported_classes ->
         end_responsive(helper, monitor, {:fatal, class})
@@ -1235,8 +1215,7 @@ defmodule LoopexDaemon.Service do
         {:fatal, :runtime_lost}
 
       {:DOWN, monitor, :process, _pid, _reason}
-      when monitor == state.progress_guardian_monitor or
-             monitor == state.registry_progress_monitor ->
+      when monitor == state.progress_guardian_monitor or monitor == state.registry_progress_monitor ->
         {:fatal, :connections_lost}
 
       {:daemon_component_fatal, _reporter, class}

@@ -137,7 +137,7 @@ defmodule LoopexDaemon.SocketConnectionTest do
     end
   end
 
-  test "the current negotiated socket drops compaction activity while ordinary progress still arrives",
+  test "the current socket consumes only credited closed activity and ordinary progress",
        %{daemon: daemon, runtime: runtime} do
     client = initialized_client(daemon)
     [connection] = initialized_connections(daemon)
@@ -196,7 +196,8 @@ defmodule LoopexDaemon.SocketConnectionTest do
           Map.put(activity, :episode_id, :binary.copy(<<255>>, 65_537)),
           %{"kind" => "context.compaction_progress", "summary" => fn -> :private end}
         ] do
-      send(connection, {:daemon_progress, session_id, item})
+      result = Loopex.ProgressSink.try_offer(:sys.get_state(connection).progress_sink, session_id, item)
+      assert result == if(item == activity, do: :ok, else: :dropped)
     end
 
     ordinary = %{
@@ -209,12 +210,14 @@ defmodule LoopexDaemon.SocketConnectionTest do
       base_event_sequence: cursor
     }
 
-    # Concept: the observed ordinary item proves the prior same-sender items
-    # crossed the actual handler, without interpreting a quiet interval.
-    # Technical depth: all injected messages share this sender's FIFO ordering;
-    # any leaked activity would be the first returned progress record.
-    send(connection, {:daemon_progress, session_id, ordinary})
-    assert [%{"type" => "progress", "progress" => progress}] = receive_records(client, 1)
+    # Concept: only closed native items become socket decoration.
+    # Technical depth: the actual native arena refuses private/oversized inputs;
+    # accepted activity and ordinary items retain their offer order.
+    :ok = Loopex.ProgressSink.try_offer(:sys.get_state(connection).progress_sink, session_id, ordinary)
+    assert [%{"type" => "progress", "progress" => observed_activity},
+            %{"type" => "progress", "progress" => progress}] = receive_records(client, 2)
+    assert {:ok, expected_activity} = LoopexProtocol.Session.CompactionProgress.encode_wire(activity)
+    assert observed_activity == expected_activity
     assert progress["kind"] == "text_delta"
     assert progress["text"] == "ordinary-barrier"
     assert progress["base_event_sequence"] == Integer.to_string(cursor)
@@ -224,8 +227,14 @@ defmodule LoopexDaemon.SocketConnectionTest do
     assert {:ok, %{event_sequence: ^cursor}} = Loopex.session_status(runtime, session_id)
   end
 
-  test "current ordinary daemon progress retains record byte and frame drop bounds" do
+  test "credited ordinary Socket progress retains32 leases and refuses native byte pressure" do
+    {:ok, sink} = Loopex.ProgressSink.open()
     state = %{
+      progress_sink: sink,
+      progress_leases: %{},
+      progress_frames: %{},
+      closing: nil,
+      succession: nil,
       attachment: %{session_id: "session"},
       progress: :queue.new(),
       progress_bytes: 0,
@@ -246,18 +255,20 @@ defmodule LoopexDaemon.SocketConnectionTest do
           content_index: 0
         }
 
-        assert {:noreply, next} =
-                 LoopexDaemon.SocketConnection.handle_info(
-                   {:daemon_progress, "session", item},
-                   state
-                 )
-
-        next
+        if index <= 32 do
+          assert :ok = Loopex.ProgressSink.try_offer(sink, "session", item)
+          assert_receive {:loopex_progress_ready, ^sink}, 1_000
+          assert {:noreply, next} = LoopexDaemon.SocketConnection.handle_info({:loopex_progress_ready, sink}, state)
+          next
+        else
+          assert :dropped = Loopex.ProgressSink.try_offer(sink, "session", item)
+          state
+        end
       end)
 
     assert :queue.len(queued.progress) == 32
     assert queued.progress_bytes <= 524_288
-    [first | _] = :queue.to_list(queued.progress)
+    [{_lease, first} | _] = :queue.to_list(queued.progress)
 
     assert {:ok, first_record} =
              LoopexProtocol.Frame.decode(
@@ -265,7 +276,10 @@ defmodule LoopexDaemon.SocketConnectionTest do
                LoopexProtocol.Frame.output_record_bytes()
              )
 
-    assert first_record["progress"]["text"] == "item-2"
+    assert first_record["progress"]["text"] == "item-1"
+
+    assert map_size(queued.progress_leases) == 32
+    for {lease, _} <- :queue.to_list(queued.progress), do: assert(:ok == Loopex.ProgressSink.release(sink, lease))
 
     large = %{
       kind: :text_delta,
@@ -278,81 +292,41 @@ defmodule LoopexDaemon.SocketConnectionTest do
     }
 
     for _ <- 1..2 do
-      assert {:noreply, ^state} =
-               LoopexDaemon.SocketConnection.handle_info(
-                 {:daemon_progress, "session", large},
-                 state
-               )
+      assert :dropped = Loopex.ProgressSink.try_offer(sink, "session", large)
     end
 
-    # Concept: valid byte pressure still drops progress without detaching.
-    # Technical depth: each encoded identity and chunk fits its native ceiling;
-    # two complete records exceed the existing 512 KiB transient byte budget.
+    # Concept: native credit refuses oversized backing before encoded copies.
+    # Technical depth: the accepted native charge is stricter than the encoded
+    # ceiling; real byte pressure cannot be manufactured by bypassing admission.
     bytes = :binary.copy(<<255>>, 65_536)
-
     byte_pressure = %{
-      kind: :tool_progress,
-      turn_id: bytes,
-      tool_call_id: bytes,
+      kind: :tool_progress, turn_id: bytes, tool_call_id: bytes,
       stream_domain_id: "0123456789abcdef0123456789abcdef",
-      progress_sequence: 0,
-      base_event_sequence: 0,
-      stream: "stdout",
-      byte_offset: 0,
-      chunk: String.duplicate("x", 65_536)
+      progress_sequence: 0, base_event_sequence: 0, stream: "stdout",
+      byte_offset: 0, chunk: String.duplicate("x", 65_536)
     }
-
-    assert {:noreply, one} =
-             LoopexDaemon.SocketConnection.handle_info(
-               {:daemon_progress, "session", byte_pressure},
-               state
-             )
-
+    assert :dropped = Loopex.ProgressSink.try_offer(sink, "session", byte_pressure)
+    fitting = %{large | text: String.duplicate("x", 30_000)}
+    assert :ok = Loopex.ProgressSink.try_offer(sink, "session", fitting)
+    assert_receive {:loopex_progress_ready, ^sink}, 1_000
+    assert {:noreply, one} = LoopexDaemon.SocketConnection.handle_info({:loopex_progress_ready, sink}, state)
     assert :queue.len(one.progress) == 1
-    assert one.progress_bytes > 262_144
-    [first_encoded] = :queue.to_list(one.progress)
-    assert byte_size(first_encoded) == one.progress_bytes
-    assert byte_size(first_encoded) <= LoopexProtocol.Frame.output_record_bytes()
-
-    assert {:ok, first_byte_record} =
-             LoopexProtocol.Frame.decode(
-               String.trim_trailing(first_encoded, "\n"),
-               LoopexProtocol.Frame.output_record_bytes()
-             )
-
-    assert first_byte_record["progress"]["progress_sequence"] == "0"
-
-    assert {:ok, ^bytes} =
-             LoopexProtocol.Wire.identity(first_byte_record["progress"]["tool_call_id"])
-
-    assert {:noreply, trimmed} =
-             LoopexDaemon.SocketConnection.handle_info(
-               {:daemon_progress, "session",
-                %{byte_pressure | progress_sequence: 1, byte_offset: 65_536}},
-               one
-             )
-
-    assert :queue.len(trimmed.progress) == 1
-    assert trimmed.progress_bytes <= 524_288
-    [encoded] = :queue.to_list(trimmed.progress)
-
-    assert {:ok, record} =
-             LoopexProtocol.Frame.decode(
-               String.trim_trailing(encoded, "\n"),
-               LoopexProtocol.Frame.output_record_bytes()
-             )
-
-    assert {:ok, ^bytes} = LoopexProtocol.Wire.identity(record["progress"]["turn_id"])
-    assert record["progress"]["progress_sequence"] == "1"
-    assert record["progress"]["byte_offset"] == "65536"
-
-    oversized = %{large | text: String.duplicate("x", LoopexProtocol.Frame.output_record_bytes())}
-
-    assert {:noreply, ^state} =
-             LoopexDaemon.SocketConnection.handle_info(
-               {:daemon_progress, "session", oversized},
-               state
-             )
+    assert map_size(one.progress_leases) == 1
+    [{lease, encoded}] = :queue.to_list(one.progress)
+    assert byte_size(encoded) == one.progress_bytes
+    assert one.progress_bytes > 30_000 and one.progress_bytes <= 524_288
+    {_guardian, native_incarnation, arena} = sink
+    [{:state, ^native_incarnation, owner, _status, native_bytes, slots, _ready}] = :ets.lookup(arena, :state)
+    assert owner == self()
+    {^native_incarnation, slot, token} = lease
+    assert {^token, :leased, ^owner, charge} = elem(slots, slot)
+    assert native_bytes == charge and native_bytes <= 524_288
+    assert native_bytes + charge > 524_288
+    assert :dropped = Loopex.ProgressSink.try_offer(sink, "session", %{fitting | model_sequence: 1})
+    assert {:ok, record} = LoopexProtocol.Frame.decode(String.trim_trailing(encoded, "\n"), LoopexProtocol.Frame.output_record_bytes())
+    assert record["progress"]["text"] == fitting.text
+    assert :ok = Loopex.ProgressSink.release(sink, lease)
+    assert :ok = Loopex.ProgressSink.close(sink)
   end
 
   defp initialized_connections(daemon) do

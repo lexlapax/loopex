@@ -83,8 +83,7 @@ defmodule LoopexDaemon.OutputBuffer do
   @spec enqueue_progress(t(), iodata()) :: {:ok, frame_ref(), t()} | {:error, atom()}
   def enqueue_progress(%__MODULE__{} = buffer, encoded) do
     with {:ok, bytes} <- encoded_binary(encoded),
-         true <-
-           buffer.progress_items < 32 and buffer.progress_bytes + byte_size(bytes) <= 524_288,
+         true <- buffer.progress_items < 32 and buffer.progress_bytes + byte_size(bytes) <= 524_288,
          :ok <- ordinary_admissible(buffer, byte_size(bytes)) do
       {frame_ref, buffer} = push_with_ref(buffer, bytes, :progress)
       {:ok, frame_ref, buffer}
@@ -114,30 +113,26 @@ defmodule LoopexDaemon.OutputBuffer do
 
     cond do
       MapSet.size(requested) != length(refs) or not Enum.all?(refs, &is_reference/1) or
-          not MapSet.subset?(requested, present) ->
-        {:error, :frame_mismatch}
-
-      MapSet.member?(requested, buffer.claim) ->
-        {:error, :claimed}
-
+          not MapSet.subset?(requested, present) -> {:error, :frame_mismatch}
+      MapSet.member?(requested, buffer.claim) -> {:error, :claimed}
       true ->
-        {discarded, kept} =
-          Enum.split_with(frames, fn {ref, _, _} -> MapSet.member?(requested, ref) end)
-
+        {discarded, kept} = Enum.split_with(frames, fn {ref, _, _} -> MapSet.member?(requested, ref) end)
         bytes = Enum.reduce(discarded, 0, fn {_, bytes, _}, total -> total + byte_size(bytes) end)
-
-        {:ok,
-         %{
-           buffer
-           | frames: :queue.from_list(kept),
-             bytes: buffer.bytes - bytes,
-             progress_items: buffer.progress_items - length(discarded),
-             progress_bytes: buffer.progress_bytes - bytes
-         }}
+        {:ok, %{buffer | frames: :queue.from_list(kept), bytes: buffer.bytes - bytes,
+          progress_items: buffer.progress_items - length(discarded), progress_bytes: buffer.progress_bytes - bytes}}
     end
   end
 
   def discard_progress(%__MODULE__{}, _refs), do: {:error, :frame_mismatch}
+
+  @doc false
+  @spec discard_unclaimed_progress(t()) :: {[frame_ref()], t()}
+  def discard_unclaimed_progress(%__MODULE__{} = buffer) do
+    refs = for {ref, _bytes, :progress} <- :queue.to_list(buffer.frames),
+      ref != buffer.claim, do: ref
+    {:ok, output} = discard_progress(buffer, refs)
+    {refs, output}
+  end
 
   @doc false
   @spec reserve_succession(t(), pos_integer(), pos_integer()) ::
@@ -255,15 +250,9 @@ defmodule LoopexDaemon.OutputBuffer do
             claim: nil
         }
 
-        buffer =
-          if kind == :progress,
-            do: %{
-              buffer
-              | progress_items: buffer.progress_items - 1,
-                progress_bytes: buffer.progress_bytes - byte_size(bytes)
-            },
-            else: buffer
-
+        buffer = if kind == :progress,
+          do: %{buffer | progress_items: buffer.progress_items - 1, progress_bytes: buffer.progress_bytes - byte_size(bytes)},
+          else: buffer
         {:ok, advance_succession(buffer, kind, frame_ref)}
 
       _other ->
@@ -354,16 +343,9 @@ defmodule LoopexDaemon.OutputBuffer do
     frame_ref = make_ref()
     frames = :queue.in({frame_ref, bytes, kind}, buffer.frames)
     buffer = %{buffer | frames: frames, bytes: buffer.bytes + byte_size(bytes)}
-
-    buffer =
-      if kind == :progress,
-        do: %{
-          buffer
-          | progress_items: buffer.progress_items + 1,
-            progress_bytes: buffer.progress_bytes + byte_size(bytes)
-        },
-        else: buffer
-
+    buffer = if kind == :progress,
+      do: %{buffer | progress_items: buffer.progress_items + 1, progress_bytes: buffer.progress_bytes + byte_size(bytes)},
+      else: buffer
     {frame_ref, buffer}
   end
 

@@ -56,55 +56,32 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
           loop(options, token)
 
         {:registry_call, caller, reference, {:promote_sink, sink}} ->
-          result =
-            ConnectionRegistry.promote(
-              Keyword.fetch!(options, :registry),
-              token,
-              Keyword.fetch!(options, :connection_incarnation),
-              sink
-            )
-
+          result = ConnectionRegistry.promote(Keyword.fetch!(options, :registry), token,
+            Keyword.fetch!(options, :connection_incarnation), sink)
           send(caller, {:registry_result, reference, result})
           loop(options, token)
 
         {:registry_call, caller, reference, {:enqueue_progress, bytes}} ->
-          result =
-            ConnectionRegistry.enqueue_progress(
-              Keyword.fetch!(options, :registry),
-              Keyword.fetch!(options, :connection_incarnation),
-              bytes
-            )
-
+          result = ConnectionRegistry.enqueue_progress(Keyword.fetch!(options, :registry),
+            Keyword.fetch!(options, :connection_incarnation), bytes)
           send(caller, {:registry_result, reference, result})
           loop(options, token)
 
         {:registry_call, caller, reference, :fence_progress} ->
-          result =
-            ConnectionRegistry.fence_progress(
-              Keyword.fetch!(options, :registry),
-              Keyword.fetch!(options, :connection_incarnation)
-            )
-
+          result = ConnectionRegistry.fence_progress(Keyword.fetch!(options, :registry),
+            Keyword.fetch!(options, :connection_incarnation))
           send(caller, {:registry_result, reference, result})
           loop(options, token)
 
         {:registry_call, caller, reference, {:discard_progress, refs}} ->
-          result =
-            ConnectionRegistry.discard_progress(
-              Keyword.fetch!(options, :registry),
-              Keyword.fetch!(options, :connection_incarnation),
-              refs
-            )
-
+          result = ConnectionRegistry.discard_progress(Keyword.fetch!(options, :registry),
+            Keyword.fetch!(options, :connection_incarnation), refs)
           send(caller, {:registry_result, reference, result})
           loop(options, token)
 
         {:registry_call, caller, reference, :take_progress} ->
           sink = Keyword.fetch!(options, :progress_sink)
-
-          if Process.delete(:manual_progress_ready),
-            do: send(self(), {:loopex_progress_ready, sink})
-
+          if Process.delete(:manual_progress_ready), do: send(self(), {:loopex_progress_ready, sink})
           result = Loopex.ProgressSink.take(sink)
           send(caller, {:registry_result, reference, result})
           loop(options, token)
@@ -115,9 +92,7 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
           loop(options, token)
 
         {:loopex_progress_ready, sink} ->
-          if sink == Keyword.fetch!(options, :progress_sink),
-            do: Process.put(:manual_progress_ready, true)
-
+          if sink == Keyword.fetch!(options, :progress_sink), do: Process.put(:manual_progress_ready, true)
           loop(options, token)
 
         {:registry_call, caller, reference, :initialize_complete} ->
@@ -232,54 +207,23 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
   test "progress promotion binds only the exact waiting child and incarnation" do
     registry = start_registry(5_000, connection_module: ManualConnection)
     connection = start_manual_connection(registry)
-
-    assert {:error, :promotion_unavailable} =
-             ConnectionRegistry.promote(
-               registry,
-               connection.token,
-               connection.incarnation,
-               connection.progress_sink
-             )
-
-    assert {:error, :promotion_unavailable} =
-             manual_registry_call(connection.pid, {:promote_sink, self()})
-
-    assert {:error, :promotion_unavailable} =
-             manual_registry_call(
-               connection.pid,
-               {:promote_sink, {self(), make_ref(), make_ref()}}
-             )
-
+    assert {:error, :promotion_unavailable} = ConnectionRegistry.promote(registry,
+      connection.token, connection.incarnation, connection.progress_sink)
+    assert {:error, :promotion_unavailable} = manual_registry_call(connection.pid, {:promote_sink, self()})
+    assert {:error, :promotion_unavailable} = manual_registry_call(connection.pid, {:promote_sink, {self(), make_ref(), make_ref()}})
     assert :ok = manual_registry_call(connection.pid, :promote)
     row = :sys.get_state(registry).rows[connection.token]
     assert row.progress_sink == connection.progress_sink
     assert is_reference(row.progress_monitor)
-
-    assert {:error, :promotion_unavailable} =
-             manual_registry_call(
-               connection.pid,
-               {:invoke,
-                fn ->
-                  ConnectionRegistry.promote(
-                    registry,
-                    connection.token,
-                    incarnation(),
-                    connection.progress_sink
-                  )
-                end}
-             )
-
+    assert {:error, :promotion_unavailable} = manual_registry_call(connection.pid, {:invoke, fn ->
+      ConnectionRegistry.promote(registry, connection.token, incarnation(), connection.progress_sink)
+    end})
     assert {:error, :promotion_unavailable} = manual_registry_call(connection.pid, :promote)
   end
 
   test "transient output pressure drops without evicting durable output and keeps exact emission identity" do
-    registry =
-      start_registry(5_000,
-        connection_module: ManualConnection,
-        output_buffer_bytes: 16,
-        aggregate_output_bytes: 16
-      )
-
+    registry = start_registry(5_000, connection_module: ManualConnection,
+      output_buffer_bytes: 16, aggregate_output_bytes: 16)
     durable = initialized_manual_connection(registry)
     progress = initialized_manual_connection(registry)
     assert :ok = manual_registry_call(durable.pid, {:enqueue_output, "DURABLE_FIFO"})
@@ -290,27 +234,41 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
     assert {:ok, ref} = manual_registry_call(progress.pid, {:enqueue_progress, "1234"})
     assert :dropped = manual_registry_call(progress.pid, {:enqueue_progress, "5"})
     assert %{live: 2, closing: 0, output_commitment: 16} = ConnectionRegistry.status(registry)
-
-    assert :dropped =
-             ConnectionRegistry.enqueue_progress(registry, progress.incarnation, "forged")
-
-    assert {:error, :output_unavailable} =
-             ConnectionRegistry.discard_progress(registry, progress.incarnation, [ref])
-
+    assert :dropped = ConnectionRegistry.enqueue_progress(registry, progress.incarnation, "forged")
+    assert {:error, :output_unavailable} = ConnectionRegistry.discard_progress(registry, progress.incarnation, [ref])
     assert {:ok, ^ref, "1234"} = manual_registry_call(progress.pid, :claim_output)
-
-    assert {:error, :output_unavailable} =
-             manual_registry_call(progress.pid, {:output_emitted, make_ref()})
-
+    assert {:error, :output_unavailable} = manual_registry_call(progress.pid, {:output_emitted, make_ref()})
     assert ConnectionRegistry.status(registry).output_commitment == 16
     assert :ok = manual_registry_call(progress.pid, {:output_emitted, ref})
-
-    assert {:error, :output_unavailable} =
-             manual_registry_call(progress.pid, {:output_emitted, ref})
-
+    assert {:error, :output_unavailable} = manual_registry_call(progress.pid, {:output_emitted, ref})
     assert ConnectionRegistry.status(registry).output_commitment == 12
     assert {:ok, durable_ref, "DURABLE_FIFO"} = manual_registry_call(durable.pid, :claim_output)
     assert :ok = manual_registry_call(durable.pid, {:output_emitted, durable_ref})
+  end
+
+  test "durable admission drops unclaimed progress locally and across aggregate peers before reclamation" do
+    registry = start_registry(5_000, connection_module: ManualConnection,
+      output_buffer_bytes: 16, aggregate_output_bytes: 16)
+    connection = initialized_manual_connection(registry)
+    assert {:ok, ref} = manual_registry_call(connection.pid, {:enqueue_progress, "1234"})
+    assert :ok = manual_registry_call(connection.pid, {:enqueue_output, String.duplicate("d", 12)})
+    assert :ok = manual_registry_call(connection.pid, {:enqueue_output, "e"})
+    assert %{live: 1, closing: 0, output_commitment: 13} = ConnectionRegistry.status(registry)
+    row = :sys.get_state(registry).rows[connection.token]
+    assert row.output.progress_items == 0
+    refute Enum.any?(:queue.to_list(row.output.frames), fn {frame, _, _} -> frame == ref end)
+    assert {:ok, durable, bytes} = manual_registry_call(connection.pid, :claim_output)
+    assert bytes == String.duplicate("d", 12)
+    assert :ok = manual_registry_call(connection.pid, {:output_emitted, durable})
+    assert {:ok, tail, "e"} = manual_registry_call(connection.pid, :claim_output)
+    assert :ok = manual_registry_call(connection.pid, {:output_emitted, tail})
+
+    peer = initialized_manual_connection(registry)
+    assert {:ok, _} = manual_registry_call(peer.pid, {:enqueue_progress, "1234"})
+    assert :ok = manual_registry_call(connection.pid, {:enqueue_output, String.duplicate("d", 12)})
+    assert :ok = manual_registry_call(connection.pid, {:enqueue_output, "e"})
+    assert %{live: 2, closing: 0, output_commitment: 13} = ConnectionRegistry.status(registry)
+    assert :sys.get_state(registry).rows[peer.token].output.progress_items == 0
   end
 
   test "a progress fence refuses late admission and selective discard cannot remove an active or durable frame" do
@@ -319,28 +277,16 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
     assert {:ok, first} = manual_registry_call(connection.pid, {:enqueue_progress, "first"})
     assert :ok = manual_registry_call(connection.pid, {:enqueue_output, "durable"})
     assert {:ok, last} = manual_registry_call(connection.pid, {:enqueue_progress, "last"})
-
-    assert {:error, :output_unavailable} =
-             manual_registry_call(connection.pid, {:discard_progress, [last]})
-
+    assert {:error, :output_unavailable} = manual_registry_call(connection.pid, {:discard_progress, [last]})
     assert :ok = manual_registry_call(connection.pid, :fence_progress)
     assert :dropped = manual_registry_call(connection.pid, {:enqueue_progress, "late"})
     assert {:ok, ^first, "first"} = manual_registry_call(connection.pid, :claim_output)
-
-    assert {:error, :output_unavailable} =
-             manual_registry_call(connection.pid, {:discard_progress, [first, last]})
-
+    assert {:error, :output_unavailable} = manual_registry_call(connection.pid, {:discard_progress, [first, last]})
     assert :ok = manual_registry_call(connection.pid, {:discard_progress, [last]})
-
-    assert {:error, :output_unavailable} =
-             manual_registry_call(connection.pid, {:discard_progress, [last]})
-
+    assert {:error, :output_unavailable} = manual_registry_call(connection.pid, {:discard_progress, [last]})
     assert :ok = manual_registry_call(connection.pid, {:output_emitted, first})
     assert {:ok, durable, "durable"} = manual_registry_call(connection.pid, :claim_output)
-
-    assert {:error, :output_unavailable} =
-             manual_registry_call(connection.pid, {:discard_progress, [durable]})
-
+    assert {:error, :output_unavailable} = manual_registry_call(connection.pid, {:discard_progress, [durable]})
     assert :ok = manual_registry_call(connection.pid, {:output_emitted, durable})
     assert :empty = manual_registry_call(connection.pid, :claim_output)
     assert :sys.get_state(registry).rows[connection.token].output.progress_items == 0
@@ -354,29 +300,19 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
     assert {:ok, lease, "session", ^item} = take_manual_progress(connection.pid)
     charged = native_progress_bytes(connection.progress_sink)
     assert charged > 0
-
-    assert {:ok, frame} =
-             manual_registry_call(connection.pid, {:enqueue_progress, "encoded-activity"})
-
+    assert {:ok, frame} = manual_registry_call(connection.pid, {:enqueue_progress, "encoded-activity"})
     assert native_progress_bytes(connection.progress_sink) == charged
     assert {:ok, ^frame, "encoded-activity"} = manual_registry_call(connection.pid, :claim_output)
     assert :ok = manual_registry_call(connection.pid, :fence_progress)
-
-    assert {:error, :output_unavailable} =
-             manual_registry_call(connection.pid, {:discard_progress, [frame]})
-
-    assert {:error, :output_unavailable} =
-             manual_registry_call(connection.pid, {:output_emitted, make_ref()})
-
+    assert {:error, :output_unavailable} = manual_registry_call(connection.pid, {:discard_progress, [frame]})
+    assert {:error, :output_unavailable} = manual_registry_call(connection.pid, {:output_emitted, make_ref()})
     assert native_progress_bytes(connection.progress_sink) == charged
     assert :ok = manual_registry_call(connection.pid, {:output_emitted, frame})
     assert native_progress_bytes(connection.progress_sink) == charged
     assert :empty = manual_registry_call(connection.pid, :claim_output)
     assert :ok = manual_registry_call(connection.pid, {:release_progress, lease})
     assert native_progress_bytes(connection.progress_sink) == 0
-
-    assert {:error, :stale_lease} =
-             manual_registry_call(connection.pid, {:release_progress, lease})
+    assert {:error, :stale_lease} = manual_registry_call(connection.pid, {:release_progress, lease})
   end
 
   test "credited installed fanout lets a slow target lose activity without blocking another target" do
@@ -390,13 +326,11 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
     install_attachment(registry, relay, outsider, "other", 2, "other-attachment")
     assert {:ok, ingress} = ConnectionRegistry.progress_sink(registry)
     item = progress_item()
-
     for _ <- 1..32 do
       assert :ok = Loopex.ProgressSink.try_offer(ingress, "session", item)
       {:ok, lease, "session", ^item} = take_manual_progress(fast.pid)
       assert :ok = manual_registry_call(fast.pid, {:release_progress, lease})
     end
-
     assert :dropped = Loopex.ProgressSink.try_offer(slow.progress_sink, "session", item)
     assert :ok = Loopex.ProgressSink.try_offer(ingress, "session", item)
     {:ok, lease, "session", ^item} = take_manual_progress(fast.pid)
@@ -406,12 +340,10 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
     assert :ok = Loopex.ProgressSink.try_offer(ingress, "session", item)
     eventually(fn -> native_progress_bytes(ingress) == 0 end)
     assert :empty = manual_registry_call(fast.pid, :take_progress)
-
     for _ <- 1..32 do
       assert {:ok, lease, "session", ^item} = manual_registry_call(slow.pid, :take_progress)
       assert :ok = manual_registry_call(slow.pid, {:release_progress, lease})
     end
-
     assert :empty = manual_registry_call(slow.pid, :take_progress)
     assert native_progress_bytes(ingress) == 0
     assert native_progress_bytes(slow.progress_sink) == 0
@@ -419,14 +351,7 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
   end
 
   defp progress_item do
-    {:ok, item} =
-      Loopex.CompactionProgress.new(
-        "episode",
-        %{"kind" => "compact", "id" => "command"},
-        String.duplicate("a", 32),
-        0
-      )
-
+    {:ok, item} = Loopex.CompactionProgress.new("episode", %{"kind" => "compact", "id" => "command"}, String.duplicate("a", 32), 0)
     item
   end
 
@@ -436,18 +361,11 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
   end
 
   defp take_manual_progress(pid, attempts \\ 100)
-
-  defp take_manual_progress(pid, 0),
-    do: flunk("destination never received credited progress: #{inspect(pid)}")
-
+  defp take_manual_progress(pid, 0), do: flunk("destination never received credited progress: #{inspect(pid)}")
   defp take_manual_progress(pid, attempts) do
     case manual_registry_call(pid, :take_progress) do
-      :empty ->
-        Process.sleep(10)
-        take_manual_progress(pid, attempts - 1)
-
-      result ->
-        result
+      :empty -> Process.sleep(10); take_manual_progress(pid, attempts - 1)
+      result -> result
     end
   end
 
@@ -2875,12 +2793,7 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
     if disposition == :connection_owned,
       do: assert(:ok = ConnectionRegistry.transfer_result(registry, token, incarnation, :ok))
 
-    %{
-      pid: pid,
-      token: token,
-      incarnation: incarnation,
-      progress_sink: Keyword.fetch!(options, :progress_sink)
-    }
+    %{pid: pid, token: token, incarnation: incarnation, progress_sink: Keyword.fetch!(options, :progress_sink)}
   end
 
   defp manual_registry_call(pid, operation) do
