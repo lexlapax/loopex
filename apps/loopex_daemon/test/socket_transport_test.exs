@@ -1580,13 +1580,27 @@ defmodule LoopexDaemon.SocketTransportTest do
 
     assert bytes > 0 and bytes <= 524_288
     assert Enum.count(Tuple.to_list(slots), &(not is_nil(&1))) == 32
+    release_deadline = System.monotonic_time(:millisecond) + 1_000
     send(daemon.registry, :continue_progress_emission)
+
+    # Concept: the real peer reads while the kernel drains credited output.
+    # Technical depth: reading and final ACK joins spend one captured cutoff;
+    # waiting for release before reading deadlocks on genuine socket selection.
+    records =
+      for _ <- 1..31 do
+        remaining = release_deadline - System.monotonic_time(:millisecond)
+        assert remaining > 0
+        assert [record] = receive_records(client, 1, remaining)
+        record
+      end
+
+    assert length(records) == 31
 
     try do
       eventually(fn ->
         state = :sys.get_state(connection)
         state.progress_frames == %{} and state.progress_leases == %{}
-      end)
+      end, div(max(release_deadline - System.monotonic_time(:millisecond), 0), 10))
     rescue
       exception in ExUnit.AssertionError ->
         state = :sys.get_state(connection)
@@ -1610,7 +1624,7 @@ defmodule LoopexDaemon.SocketTransportTest do
                 __STACKTRACE__
     end
 
-    assert length(receive_records(client, 31)) == 31
+    assert System.monotonic_time(:millisecond) < release_deadline
     assert :sys.get_state(connection).progress_bytes == 0
 
     [{:state, ^sink_incarnation, ^connection, _status, 0, final_slots, []}] =
