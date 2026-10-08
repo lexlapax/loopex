@@ -662,7 +662,8 @@ defmodule Loopex.CreationStartupStatusTest do
              {:creation_outcome, ^worker, ^permit, {:ok, %{command: nil, head: head}}} ->
                head == entry.head and is_nil(head.active_command_id)
 
-             _ -> false
+             _ ->
+               false
            end)
 
     :erlang.resume_process(guardian)
