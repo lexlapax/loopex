@@ -1034,74 +1034,39 @@ defmodule LoopexDaemon.ConnectionRegistry do
   # Technical depth: one original cutoff and exact incarnation/sink binding
   # survive both acknowledgements and actor loss. Permission awaits control
   # readiness, ensuring both monitors exist before the synchronous owner call.
-  def handle_call(
-        {:socket_retirement_intent, incarnation, sink, close_ref, cutoff},
-        {caller, _tag} = from,
-        state
-      ) do
+  def handle_call({:socket_retirement_intent, incarnation, sink, close_ref, cutoff},
+        {caller, _tag} = from, state) do
     case connection_row(state, caller, incarnation) do
-      {token,
-       %{phase: phase, initialized: true, progress_sink: ^sink, native_retirement: nil} = row}
+      {token, %{phase: phase, initialized: true, progress_sink: ^sink,
+                native_retirement: nil} = row}
       when phase in [:live, :closing] and is_reference(close_ref) and is_integer(cutoff) ->
         now = now_ms()
-
         if now < cutoff and cutoff <= now + 1_000 and empty_retirement_output?(row.output) do
           registry = self()
+          {control, monitor} = spawn_monitor(fn ->
+            socket_retirement_control(registry, caller, token, close_ref, cutoff)
+          end)
 
-          {control, monitor} =
-            spawn_monitor(fn ->
-              socket_retirement_control(registry, caller, token, close_ref, cutoff)
-            end)
-
-          intent = %{
-            close_ref: close_ref,
-            cutoff: cutoff,
-            sink: sink,
-            control: control,
-            control_monitor: monitor,
-            from: from,
-            ready: false,
-            result: nil,
-            guardian_joined: false,
-            control_joined: false,
-            outcome: :pending
-          }
-
+          intent = %{close_ref: close_ref, cutoff: cutoff, sink: sink, control: control,
+            control_monitor: monitor, from: from, ready: false, result: nil,
+            guardian_joined: false, control_joined: false, outcome: :pending}
           row = %{row | phase: :closing, progress_fenced: true, native_retirement: intent}
-
-          state =
-            state
-            |> put_in([:rows, token], row)
+          state = state |> put_in([:rows, token], row)
             |> put_in([:socket_retirement_controls, monitor], {token, control})
-
           {:noreply, state}
         else
           {:reply, {:error, :output_unavailable}, state}
         end
 
-      _ ->
-        {:reply, {:error, :output_unavailable}, state}
+      _ -> {:reply, {:error, :output_unavailable}, state}
     end
   end
 
-  def handle_call(
-        {:socket_native_retirement_result, incarnation, sink, close_ref, cutoff, :ok},
-        {caller, _tag},
-        state
-      ) do
+  def handle_call({:socket_native_retirement_result, incarnation, sink, close_ref, cutoff, :ok},
+        {caller, _tag}, state) do
     case connection_row(state, caller, incarnation) do
-      {token,
-       %{
-         native_retirement:
-           %{
-             sink: ^sink,
-             close_ref: ^close_ref,
-             cutoff: ^cutoff,
-             ready: true,
-             result: nil,
-             outcome: :pending
-           } = intent
-       } = row} ->
+      {token, %{native_retirement: %{sink: ^sink, close_ref: ^close_ref, cutoff: ^cutoff,
+                   ready: true, result: nil, outcome: :pending} = intent} = row} ->
         if now_ms() < cutoff and (Process.alive?(intent.control) or intent.control_joined) and
              empty_retirement_output?(row.output) do
           row = %{row | native_retirement: %{intent | result: :ok}}
@@ -1111,17 +1076,12 @@ defmodule LoopexDaemon.ConnectionRegistry do
           {:reply, {:error, :cleanup_unproved}, fail_socket_retirement(state, token)}
         end
 
-      _ ->
-        {:reply, {:error, :output_unavailable}, state}
+      _ -> {:reply, {:error, :output_unavailable}, state}
     end
   end
 
-  def handle_call(
-        {:socket_native_retirement_result, _incarnation, _sink, _ref, _cutoff, _result},
-        _from,
-        state
-      ),
-      do: {:reply, {:error, :output_unavailable}, state}
+  def handle_call({:socket_native_retirement_result, _incarnation, _sink, _ref, _cutoff, _result},
+        _from, state), do: {:reply, {:error, :output_unavailable}, state}
 
   # Concept: transient pressure never evicts a durable holder or closes it.
   # Technical depth: the socket already holds native credit. Admission returns
@@ -1681,14 +1641,11 @@ defmodule LoopexDaemon.ConnectionRegistry do
 
       send(state.owner, {:owner_reply, self(), ref, {:ok, :forced}})
       Logger.debug("loopex daemon connection close-all forced at deadline")
-
-      selected_unproved =
-        Enum.any?(state.close_all.selected, fn token ->
-          Map.get(state.close_all.dispositions, token) != :proved
-        end)
-
-      {:noreply,
-       %{state | close_all: nil, close_all_failed: state.close_all_failed or selected_unproved}}
+      selected_unproved = Enum.any?(state.close_all.selected, fn token ->
+        Map.get(state.close_all.dispositions, token) != :proved
+      end)
+      {:noreply, %{state | close_all: nil,
+        close_all_failed: state.close_all_failed or selected_unproved}}
     else
       timer =
         Process.send_after(self(), {:close_all_deadline, deadline}, max(deadline - now_ms(), 0))
@@ -1915,13 +1872,8 @@ defmodule LoopexDaemon.ConnectionRegistry do
 
   def handle_info({:socket_retirement_control_ready, control, token, close_ref, cutoff}, state) do
     case Map.get(state.rows, token) do
-      %{
-        connection_down: false,
-        native_retirement:
-          %{control: ^control, close_ref: ^close_ref, cutoff: ^cutoff, ready: false, from: from} =
-              intent
-      } = row
-      when not is_nil(from) ->
+      %{connection_down: false, native_retirement: %{control: ^control, close_ref: ^close_ref,
+          cutoff: ^cutoff, ready: false, from: from} = intent} = row when not is_nil(from) ->
         if now_ms() < cutoff and Process.alive?(control) do
           GenServer.reply(from, {:ok, control})
           row = %{row | native_retirement: %{intent | ready: true, from: nil}}
@@ -1929,9 +1881,7 @@ defmodule LoopexDaemon.ConnectionRegistry do
         else
           {:noreply, fail_socket_retirement(state, token)}
         end
-
-      _ ->
-        {:noreply, state}
+      _ -> {:noreply, state}
     end
   end
 
@@ -1942,19 +1892,22 @@ defmodule LoopexDaemon.ConnectionRegistry do
     case Map.get(state.rows, token) do
       %{native_retirement: %{control: ^control, control_monitor: ^monitor} = intent} = row
       when control == expected ->
-        state = %{
-          state
-          | socket_retirement_controls: Map.delete(state.socket_retirement_controls, monitor)
-        }
-
+        state = %{state | socket_retirement_controls:
+          Map.delete(state.socket_retirement_controls, monitor)}
         joined = reason == :normal and now_ms() < intent.cutoff
         row = %{row | native_retirement: %{intent | control_joined: true}}
         state = put_in(state, [:rows, token], row)
-        state = if joined, do: state, else: fail_socket_retirement(state, token)
+        state = if joined do
+          state
+        else
+          # Concept: failed containment cannot leave its blocked opening owner live.
+          # Technical depth: kill only this intent's exact Socket; its existing
+          # child monitor must still observe actual DOWN before row retirement.
+          Process.exit(row.connection_pid, :kill)
+          fail_socket_retirement(state, token)
+        end
         {:noreply, socket_retirement_step(state, token)}
-
-      _ ->
-        {:noreply, state}
+      _ -> {:noreply, state}
     end
   end
 
@@ -1972,10 +1925,7 @@ defmodule LoopexDaemon.ConnectionRegistry do
             state = put_in(state, [:rows, token], row)
             state = if joined, do: state, else: fail_socket_retirement(state, token)
             {:noreply, socket_retirement_step(state, token)}
-
-          %{native_retirement: intent} when is_map(intent) ->
-            {:noreply, state}
-
+          %{native_retirement: intent} when is_map(intent) -> {:noreply, state}
           _ ->
             state = %{state | progress_monitors: Map.delete(state.progress_monitors, monitor)}
             {:noreply, close_live(state, token, :progress_sink_lost)}
@@ -1993,7 +1943,6 @@ defmodule LoopexDaemon.ConnectionRegistry do
 
       Map.has_key?(state.child_monitors, monitor) ->
         token = Map.fetch!(state.child_monitors, monitor)
-
         case Map.get(state.rows, token) do
           %{connection_pid: expected, native_retirement: intent}
           when is_map(intent) and expected != pid ->
@@ -2001,21 +1950,13 @@ defmodule LoopexDaemon.ConnectionRegistry do
 
           _ ->
             state = %{state | child_monitors: Map.delete(state.child_monitors, monitor)}
-
-            state =
-              update_row(state, token, &%{&1 | connection_down: true, connection_exit: reason})
-
-            state =
-              case Map.get(state.rows, token) do
-                %{native_retirement: intent} when is_map(intent) ->
-                  if reason == :normal and now_ms() < intent.cutoff and intent.result == :ok,
-                    do: state,
-                    else: fail_socket_retirement(state, token)
-
-                _ ->
-                  state
-              end
-
+            state = update_row(state, token, &%{&1 | connection_down: true, connection_exit: reason})
+            state = case Map.get(state.rows, token) do
+              %{native_retirement: intent} when is_map(intent) ->
+                if reason == :normal and now_ms() < intent.cutoff and intent.result == :ok,
+                  do: state, else: fail_socket_retirement(state, token)
+              _ -> state
+            end
             state = socket_retirement_step(state, token)
             {:noreply, connection_down(state, token)}
         end
@@ -2067,11 +2008,8 @@ defmodule LoopexDaemon.ConnectionRegistry do
       )
       when is_reference(ref) and is_map(record) and is_integer(deadline) do
     state = begin_close_all(state, record)
-
-    selected =
-      MapSet.new(
-        for {token, row} <- state.rows, row.initialized and is_pid(row.connection_pid), do: token
-      )
+    selected = MapSet.new(for {token, row} <- state.rows,
+      row.initialized and is_pid(row.connection_pid), do: token)
 
     timer =
       Process.send_after(self(), {:close_all_deadline, deadline}, max(deadline - now_ms(), 0))
@@ -2081,14 +2019,8 @@ defmodule LoopexDaemon.ConnectionRegistry do
     {:noreply,
      maybe_finish_close_all(%{
        state
-       | close_all: %{
-           ref: ref,
-           timer: timer,
-           deadline: deadline,
-           phase: :waiting,
-           selected: selected,
-           dispositions: %{}
-         }
+       | close_all: %{ref: ref, timer: timer, deadline: deadline, phase: :waiting,
+                     selected: selected, dispositions: %{}}
      })}
   end
 
@@ -3216,7 +3148,7 @@ defmodule LoopexDaemon.ConnectionRegistry do
   # Concept: this child contains a blocked owner call without borrowing its arena.
   # Technical depth: both exact monitors precede ready. The original absolute
   # cutoff never changes; only Socket may be killed, and only its actual DOWN
-  # ends containment. Registry loss stops this child without a success claim.
+  # ends containment. Registry loss contains Socket too, without a success claim.
   defp socket_retirement_control(registry, socket, token, close_ref, cutoff) do
     socket_monitor = Process.monitor(socket)
     registry_monitor = Process.monitor(registry)
@@ -3224,15 +3156,18 @@ defmodule LoopexDaemon.ConnectionRegistry do
 
     receive do
       {:DOWN, ^socket_monitor, :process, ^socket, _reason} -> :ok
-      {:DOWN, ^registry_monitor, :process, ^registry, _reason} -> :ok
+      {:DOWN, ^registry_monitor, :process, ^registry, _reason} ->
+        contain_retiring_socket(socket, socket_monitor)
     after
       max(cutoff - now_ms(), 0) ->
-        Process.exit(socket, :kill)
+        contain_retiring_socket(socket, socket_monitor)
+    end
+  end
 
-        receive do
-          {:DOWN, ^socket_monitor, :process, ^socket, _reason} -> :ok
-          {:DOWN, ^registry_monitor, :process, ^registry, _reason} -> :ok
-        end
+  defp contain_retiring_socket(socket, socket_monitor) do
+    Process.exit(socket, :kill)
+    receive do
+      {:DOWN, ^socket_monitor, :process, ^socket, _reason} -> :ok
     end
   end
 
@@ -3240,66 +3175,41 @@ defmodule LoopexDaemon.ConnectionRegistry do
     case Map.get(state.rows, token) do
       %{native_retirement: intent} = row when is_map(intent) ->
         if intent.from, do: GenServer.reply(intent.from, {:error, :cleanup_unproved})
-
-        put_in(state, [:rows, token], %{
-          row
-          | native_retirement: %{intent | outcome: :unproved, from: nil}
-        })
-
-      _ ->
-        state
+        put_in(state, [:rows, token],
+          %{row | native_retirement: %{intent | outcome: :unproved, from: nil}})
+      _ -> state
     end
   end
 
   defp socket_retirement_step(state, token) do
-    state =
-      case Map.get(state.rows, token) do
-        %{
-          connection_down: true,
-          connection_exit: :normal,
-          native_retirement:
-            %{result: :ok, guardian_joined: true, control_joined: true, outcome: :pending} =
-                intent
-        } = row ->
-          if now_ms() < intent.cutoff do
-            put_in(state, [:rows, token], %{row | native_retirement: %{intent | outcome: :proved}})
-          else
-            fail_socket_retirement(state, token)
-          end
-
-        %{native_retirement: %{outcome: :pending, cutoff: cutoff}} ->
-          if now_ms() >= cutoff, do: fail_socket_retirement(state, token), else: state
-
-        _ ->
-          state
-      end
-
+    state = case Map.get(state.rows, token) do
+      %{connection_down: true, connection_exit: :normal,
+        native_retirement: %{result: :ok, guardian_joined: true,
+          control_joined: true, outcome: :pending} = intent} = row ->
+        if now_ms() < intent.cutoff do
+          put_in(state, [:rows, token], %{row | native_retirement: %{intent | outcome: :proved}})
+        else
+          fail_socket_retirement(state, token)
+        end
+      %{native_retirement: %{outcome: :pending, cutoff: cutoff}} ->
+        if now_ms() >= cutoff, do: fail_socket_retirement(state, token), else: state
+      _ -> state
+    end
     retirement_step(state, token, & &1)
   end
 
   defp socket_retirement_joined?(%{native_retirement: nil}), do: true
-
   defp socket_retirement_joined?(%{native_retirement: intent}),
     do: intent.control_joined and intent.outcome in [:proved, :unproved]
 
   # Concept: removing a selected row cannot erase its missing native proof.
   # Technical depth: only the current close-all population contributes here.
   # The sticky failure also prevents a later empty-row close from repairing it.
-  defp retain_socket_retirement_disposition(
-         %{close_all: %{selected: selected}} = state,
-         token,
-         row
-       ) do
+  defp retain_socket_retirement_disposition(%{close_all: %{selected: selected}} = state,
+        token, row) do
     if MapSet.member?(selected, token) do
       proved = match?(%{outcome: :proved}, row.native_retirement)
-
-      state =
-        put_in(
-          state,
-          [:close_all, :dispositions, token],
-          if(proved, do: :proved, else: :unproved)
-        )
-
+      state = put_in(state, [:close_all, :dispositions, token], if(proved, do: :proved, else: :unproved))
       %{state | close_all_failed: state.close_all_failed or not proved}
     else
       state
@@ -3339,10 +3249,7 @@ defmodule LoopexDaemon.ConnectionRegistry do
        ) do
     _ = Process.cancel_timer(timer)
     reply = if reply == :ok and now_ms() >= deadline, do: {:error, :connections_lost}, else: reply
-
-    reply =
-      if reply == :ok and state.close_all_failed, do: {:error, :connections_lost}, else: reply
-
+    reply = if reply == :ok and state.close_all_failed, do: {:error, :connections_lost}, else: reply
     send(state.owner, {:owner_reply, self(), ref, reply})
     # The old capability is retained only as startup identity. Closed/failed
     # phase permanently retires its ready route. Failed cleanup supplies no
@@ -3442,14 +3349,8 @@ defmodule LoopexDaemon.ConnectionRegistry do
       |> Map.update!(:cleanup_monitors, &Map.put(&1, monitor, token))
     else
       if is_map(row.native_retirement) do
-        row =
-          Map.merge(row, %{
-            phase: :retiring,
-            relay_retired: true,
-            holder_cleanup_acked: true,
-            cleanup_worker_reaped: true
-          })
-
+        row = Map.merge(row, %{phase: :retiring, relay_retired: true,
+          holder_cleanup_acked: true, cleanup_worker_reaped: true})
         state |> put_in([:rows, token], row) |> retirement_step(token, & &1)
       else
         remove_row(state, token)

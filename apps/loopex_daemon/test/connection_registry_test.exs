@@ -622,9 +622,15 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
     slow = initialized_manual_connection(registry)
     fast = initialized_manual_connection(registry)
     outsider = initialized_manual_connection(registry)
+    # Concept: installed fanout observes sessions activated in this daemon lifetime.
+    # Technical depth: reserve and resolve each session before the exact attach
+    # promotion/owner-record/relay-settlement flow; dormant refusal opens no route.
+    activate(registry, "session")
+    activate(registry, "other")
     install_attachment(registry, relay, slow, "session", 0, "slow-attachment")
     install_attachment(registry, relay, fast, "session", 1, "fast-attachment")
     install_attachment(registry, relay, outsider, "other", 2, "other-attachment")
+    assert %{active_sessions: 2, attachments: 3} = ConnectionRegistry.status(registry)
     assert {:ok, ingress} = ConnectionRegistry.progress_sink(registry)
     item = progress_item()
 
