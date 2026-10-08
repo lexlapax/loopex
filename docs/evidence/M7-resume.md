@@ -27,6 +27,50 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+### Three fixture corrections and current exact proof
+
+Primary checkpointbdb507e8 is pushed. The three case-local corrections are saved
+at rawb5a4b843cde86c206d11442575b7c9ce573881a8, then paired formatting-only child
+2c9dbc91bab3ec6405a75c70793bfc847fa4309e. Original490 population and all five
+long_bound cases remain; source reviews9628aea4, afe1c97d and abf48062 qualify the
+raw caught failure, guardian-only refusal/count and actually leased Model prefix.
+The separate constructor worker correction is saved at3e18b618.
+
+Original50875 paired format/AST proof passed:18.063seconds, ten actual process
+joins,48 artifacts and2,131 registry rows; every final31 hash matches both pairs.
+Output `M7/core-three-fixture-format-20261008-v1`, collection
+`e8ed6ec9370cab523d4bda71f67083ddca4b47c40cb0595f33bb79e4644b1081`,
+terminal `d7bd505589145fe9ba193c75ee1652489d3f7e73216ceaa7181ac430abeded2c`,
+registry `4aa53d3c00c14182c053d14edaf730d7b4eb0997cd6ea5608a11d47c2e56d142`.
+Do not repoll or recollect50875. Its sole formatting wrap was saved and independently
+reversed to the reviewed raw constructor case; no semantic change.
+
+Original35386 is now the sole live native handle. It runs the unchanged18 whole
+files/490 cases on clean2c9, including all five long_bound cases, under current
+then floor. Exact bound review9fb766cd qualifies capture6ec1999a/runner55f16078,
+complete2,131-row predecessor and unchanged commands/joins/finalizers. Preparation:
+`/private/tmp/m7-core-three-fixture-proof-preparation-20261008-v1`;
+output `M7/core-three-fixture-proof-20261008-v1`. Poll original35386 to terminal
+and collect once with its actual exit. Do not mutate ingress source, start a
+second VM or infer a result from source review. Prior6965 remains FAILED.
+
+Foreground17 is now literally integrated in its separate worktree above clean2c9
+at3fcd42dc79eaaa2e8531fb62e1c68de4b1616e34. All31 Core files are byte-preserved;
+17 guards include15 existing paths and two additions, with16 actual Git changes.
+Join audit0b6c35e3/patch348b3ba0 retain exact parents/bytes. Independent script824ebf93
+and factual bounded72817d qualify the join. No native foreground result or served
+generation activation follows. Saved d792 source stays reachable through local
+codex/m7-foreground-source-v2. Selection mapc51f1c9b names eight complete files:
+app-server94 plus protocol18 in separate VMs, including all four Node cases.
+Foreground formatting/compilation/112-case proof is next after Core490 qualification.
+
+New source/proof context is retained as75 immutable files:
+`/Users/spuri/projects/lexlapax/loopex-evidence/M7/core-three-fixture-context-20261008-v1/retention.json`,
+SHA-256 `212bbe2dc7dd52c7a6df00a47b70825d38e54a5c43c982a5290e7faaf90b7501`.
+Native outputs remain separate immutable producers. No checklist row closes for
+these source joins/reviews; T01–T19 originals88/85/6 and additions363/23 remain.
+ADR0063 exact Proposed pair16c251ad is still the sole asked pending decision.
+
 ### Current fixture proof and foreground checkpoint after original5052
 
 T01–T19 originals88 done/85 todo/6 retired; additions363 done/23 todo remain

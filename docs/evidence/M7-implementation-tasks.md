@@ -1,5 +1,19 @@
 # M7 Implementation Tasks
 
+Three bounded fixture corrections are source-reviewed and saved at rawb5a4b843,
+formatted2c9dbc91. Original50875 passed all31 paired format/AST checks in18.063s,
+with ten actual joins and2,131 registry rows. Original35386 is now the sole live
+native handle for the unchanged18 whole files/490 cases/allfive long_bound under
+both supported pairs. No result is claimed before original terminal collection.
+
+Foreground17 is literally rejoined above current Core at3fcd42dc, preserving all31
+Core files. Its112 cases require separate app-server94/protocol18 VMs and explicit
+inclusion of all four Node cases. Native foreground proof remains unrun. Counts
+remain88 original done/85 todo/6 retired and363 added done/23 todo; source work
+closes no row. ADR0063 remains the sole asked pending decision. Exact run/source
+and75-file immutable retention are in the [resume record](M7-resume.md).
+Earlier entries below are historical where superseded.
+
 Current source8d26a971 has passed both supported toolchain format/AST checks
 for all31 files; all final hashes match. Original5052 is collected once with
 17.635seconds, ten actual joins,48 artifacts and2118 registry keys. Original48407
