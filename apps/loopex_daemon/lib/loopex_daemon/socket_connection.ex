@@ -256,8 +256,10 @@ defmodule LoopexDaemon.SocketConnection do
   # exact frame has been emitted or discarded. Ready notifications carry no data.
   # Technical depth: one callback takes at most 32 leases; encoded accounting
   # includes queue, pending admission, retained output, writer and pending ACK.
-  def handle_info({:loopex_progress_ready, sink},
-        %{progress_sink: sink, closing: %{owner: nil, retirement: retirement}} = state)
+  def handle_info(
+        {:loopex_progress_ready, sink},
+        %{progress_sink: sink, closing: %{owner: nil, retirement: retirement}} = state
+      )
       when retirement in [:registering, :joined],
       do: {:noreply, state}
 
@@ -417,12 +419,25 @@ defmodule LoopexDaemon.SocketConnection do
       ),
       do: finish_owner_loss_close(state)
 
-  def handle_info({:socket_native_retirement, close_ref},
-        %{closing: %{owner: nil, close_ref: close_ref, cutoff: cutoff,
-                     retirement: :joined, sink: sink, control: control}} = state) do
+  def handle_info(
+        {:socket_native_retirement, close_ref},
+        %{
+          closing: %{
+            owner: nil,
+            close_ref: close_ref,
+            cutoff: cutoff,
+            retirement: :joined,
+            sink: sink,
+            control: control
+          }
+        } = state
+      ) do
     if System.monotonic_time(:millisecond) < cutoff and Process.alive?(control) do
-      _ = ConnectionRegistry.connection_request(state.registry,
-        {:socket_native_retirement_result, state.incarnation, sink, close_ref, cutoff, :ok})
+      _ =
+        ConnectionRegistry.connection_request(
+          state.registry,
+          {:socket_native_retirement_result, state.incarnation, sink, close_ref, cutoff, :ok}
+        )
     end
 
     {:stop, :normal, state}
@@ -430,8 +445,10 @@ defmodule LoopexDaemon.SocketConnection do
 
   def handle_info({:socket_native_retirement, _close_ref}, state), do: {:noreply, state}
 
-  def handle_info({:DOWN, monitor, :process, control, _reason},
-        %{closing: %{owner: nil, control: control, control_monitor: monitor}} = state),
+  def handle_info(
+        {:DOWN, monitor, :process, control, _reason},
+        %{closing: %{owner: nil, control: control, control_monitor: monitor}} = state
+      ),
       do: {:stop, :normal, state}
 
   # Concept: a stop that reaches a connection still completing its
@@ -1455,9 +1472,17 @@ defmodule LoopexDaemon.SocketConnection do
   defp begin_final_close(state, record) do
     close_ref = make_ref()
     cutoff = System.monotonic_time(:millisecond) + @owner_loss_close_ms
-    Process.send_after(self(), {:owner_loss_close_deadline, close_ref},
-      max(cutoff - System.monotonic_time(:millisecond), 0))
-    state = %{state | closing: %{owner: nil, close_ref: close_ref, cutoff: cutoff, retirement: nil}}
+
+    Process.send_after(
+      self(),
+      {:owner_loss_close_deadline, close_ref},
+      max(cutoff - System.monotonic_time(:millisecond), 0)
+    )
+
+    state = %{
+      state
+      | closing: %{owner: nil, close_ref: close_ref, cutoff: cutoff, retirement: nil}
+    }
 
     case send_record(state, record) do
       {:ok, state} -> {:noreply, state}
@@ -2164,7 +2189,9 @@ defmodule LoopexDaemon.SocketConnection do
   end
 
   defp output_step(%{closing: %{owner: nil, retirement: retirement}} = state)
-       when retirement in [:registering, :joined], do: {:noreply, state}
+       when retirement in [:registering, :joined] do
+    {:noreply, state}
+  end
 
   defp output_step(%{output_claim: nil} = state) do
     request =
@@ -2411,16 +2438,25 @@ defmodule LoopexDaemon.SocketConnection do
 
   defp output_answered(state, {:emitted, frame_ref}, {:reply, :ok}) do
     state = release_progress_frame(state, frame_ref)
+
     if match?(%{owner: nil, retirement: nil}, state.closing),
-      do: output_step(state), else: {:noreply, state}
+      do: output_step(state),
+      else: {:noreply, state}
   end
 
   defp output_answered(state, {:socket_retirement_intent, close_ref}, {:reply, {:ok, control}})
        when is_pid(control) do
     case state.closing do
       %{owner: nil, close_ref: ^close_ref, cutoff: cutoff, retirement: :registering} = closing ->
-        state = %{state | closing: Map.merge(closing, %{control: control,
-          control_monitor: Process.monitor(control), sink: state.progress_sink})}
+        state = %{
+          state
+          | closing:
+              Map.merge(closing, %{
+                control: control,
+                control_monitor: Process.monitor(control),
+                sink: state.progress_sink
+              })
+        }
 
         if drained_final_custody?(state) and System.monotonic_time(:millisecond) < cutoff and
              Process.alive?(control) and :socket.close(state.socket) == :ok do
@@ -2430,8 +2466,14 @@ defmodule LoopexDaemon.SocketConnection do
                System.monotonic_time(:millisecond) < cutoff and Process.alive?(control) do
             Process.demonitor(state.progress_guardian_monitor, [:flush])
             send(self(), {:socket_native_retirement, close_ref})
-            {:noreply, %{state | progress_sink: nil, progress_guardian_monitor: nil,
-              closing: %{state.closing | retirement: :joined}}}
+
+            {:noreply,
+             %{
+               state
+               | progress_sink: nil,
+                 progress_guardian_monitor: nil,
+                 closing: %{state.closing | retirement: :joined}
+             }}
           else
             {:stop, :normal, state}
           end
@@ -2439,7 +2481,8 @@ defmodule LoopexDaemon.SocketConnection do
           {:stop, :normal, state}
         end
 
-      _ -> {:noreply, state}
+      _ ->
+        {:noreply, state}
     end
   end
 
@@ -2458,12 +2501,17 @@ defmodule LoopexDaemon.SocketConnection do
   # No queue, claim, lease or exchange is cleared to qualify for this step.
   defp begin_drained_final_close(%{closing: %{retirement: nil} = closing} = state) do
     if drained_final_custody?(state) and System.monotonic_time(:millisecond) < closing.cutoff do
-      request = ConnectionRegistry.connection_request(state.registry,
-        {:socket_retirement_intent, state.incarnation, state.progress_sink,
-         closing.close_ref, closing.cutoff})
+      request =
+        ConnectionRegistry.connection_request(
+          state.registry,
+          {:socket_retirement_intent, state.incarnation, state.progress_sink, closing.close_ref,
+           closing.cutoff}
+        )
+
       state = %{state | closing: %{closing | retirement: :registering}}
-      {:noreply, await_exchange(state, request, :registry,
-        {:socket_retirement_intent, closing.close_ref})}
+
+      {:noreply,
+       await_exchange(state, request, :registry, {:socket_retirement_intent, closing.close_ref})}
     else
       {:noreply, state}
     end
