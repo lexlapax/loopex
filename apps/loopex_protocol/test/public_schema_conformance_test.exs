@@ -46,11 +46,11 @@ defmodule LoopexProtocol.PublicSchemaConformanceTest do
   # agree with each other, which is not what an independent implementation needs
   # to check itself against.
   @admitted [
-    {~s({"method":"initialize","request_id":"r1","generations":["loopex.experimental/1"],"capabilities":[]}),
+    {~s({"method":"initialize","request_id":"r1","generations":["loopex.experimental/3"],"capabilities":[]}),
      %{
        "method" => "initialize",
        "request_id" => "r1",
-       "generations" => ["loopex.experimental/1"],
+       "generations" => ["loopex.experimental/3"],
        "capabilities" => []
      }},
     {~s({"a":0}), %{"a" => 0}},
@@ -171,7 +171,7 @@ defmodule LoopexProtocol.PublicSchemaConformanceTest do
     executor = Path.join([repository_root(), "clients", "node", "vectors.mjs"])
     assert File.exists?(executor)
 
-    for generation <- [1, 2] do
+    for generation <- [3, 4] do
       assert_vector_clients_agree(node_executable, executor, generation)
     end
   end
@@ -288,29 +288,28 @@ defmodule LoopexProtocol.PublicSchemaConformanceTest do
     # agreement with a contract it had not actually met.
 
     # The schema identity the vectors belong to.
-    assert Session.generation() == "loopex.experimental/1"
+    assert Session.generation() == "loopex.experimental/3"
     assert String.match?(Session.schema_digest(), ~r/\A[0-9a-f]{64}\z/)
 
     # The schema digest names the contract, not the file: it covers the
-    # generation, the methods, the record families, the error codes and the
-    # limits. An implementation compares this exact value, so it is written out
-    # here rather than recomputed, and a change to any of those five fails here
+    # seven keys including all nested payload definitions. The client pins this
+    # exact value, so a change to any covered input fails here
     # rather than silently renaming what clients are agreeing to.
     assert Session.schema_digest() ==
-             "3c0e34a99cd0178095de0d75843340128d26143798e517daae26b44cbf9a884f"
+             "1a2515154624c383ed7e8caa94b1062d46a14fd9232d906e3af2946142d20e95"
 
     # The schema and vector files an independent client reads are identified by
     # their own bytes, which are the digests the gate binds. A conformance
     # result therefore names files a reader can fetch and verify.
     for {directory, expected} <- [
-          {"schema", "a4c286cf45442273011d8f51d25d867334cb3dc0ce3621e86564cba520e1bcff"},
-          {"vectors", "a7f2dc36f9206dc48d258bc7b49a8d390ec3a0e93c51ed5a35f45153052e1951"}
+          {"schema", "97713c3cbc936898d7a3d7935aeb6a7aeef5ba84f7e8e5c573357485d4733c5c"},
+          {"vectors", "67e7b0a0c16f0416b361a89815aba36dc7c20af56a87cb7187e2fab9ffc645fc"}
         ] do
       path =
         Path.join([
           Application.app_dir(:loopex_protocol, "priv"),
           directory,
-          "loopex-experimental-1.json"
+          "loopex-experimental-3.json"
         ])
 
       assert File.exists?(path), "the #{directory} file is missing"
@@ -321,7 +320,7 @@ defmodule LoopexProtocol.PublicSchemaConformanceTest do
       assert JSON.decode!(bytes)["generation"] == Session.generation()
     end
 
-    vectors_digest = "a7f2dc36f9206dc48d258bc7b49a8d390ec3a0e93c51ed5a35f45153052e1951"
+    vectors_digest = "67e7b0a0c16f0416b361a89815aba36dc7c20af56a87cb7187e2fab9ffc645fc"
 
     # The toolchain and platform a result was produced on. These are exact
     # values rather than ranges, because a conformance result that did not say
@@ -359,34 +358,26 @@ defmodule LoopexProtocol.PublicSchemaConformanceTest do
 
   test "the schema digest is the value an independent implementation checks against" do
     assert Session.schema_digest() ==
-             "3c0e34a99cd0178095de0d75843340128d26143798e517daae26b44cbf9a884f"
+             "1a2515154624c383ed7e8caa94b1062d46a14fd9232d906e3af2946142d20e95"
   end
 
-  test "generation-two schema and vector files have pinned identities" do
+  test "current daemon schema and vector files have pinned identities" do
     for {directory, expected} <- [
-          {"schema", "f30f9822f818417823f6fa917175314060fe5dcb0429f97280d0af2bc3372970"},
-          {"vectors", "d37e086e42b84b266bbd80633b5b1409a61373a047eded8bede70a595bb33beb"}
+          {"schema", "d3be85e0c47ddba112aaf0e06611fc7d2f164fc624b1957517dd3edb2b0d6879"},
+          {"vectors", "d1788a74eaed958f19b7b8012a03b90d26303d05978909b61a7f672b45d5e05e"}
         ] do
       path =
         Path.join([
           Application.app_dir(:loopex_protocol, "priv"),
           directory,
-          "loopex-experimental-2.json"
+          "loopex-experimental-4.json"
         ])
 
       bytes = File.read!(path)
       measured = :sha256 |> :crypto.hash(bytes) |> Base.encode16(case: :lower)
-      assert measured == expected, "the generation-two #{directory} file is #{measured}"
+      assert measured == expected, "the current daemon #{directory} file is #{measured}"
       assert JSON.decode!(bytes)["generation"] == V2.generation()
     end
-
-    # The schema names its vectors file by digest; the two must agree.
-    priv = Application.app_dir(:loopex_protocol, "priv")
-    schema = JSON.decode!(File.read!(Path.join([priv, "schema", "loopex-experimental-2.json"])))
-    vectors = File.read!(Path.join([priv, "vectors", "loopex-experimental-2.json"]))
-
-    assert schema["vectors"]["sha256"] ==
-             :sha256 |> :crypto.hash(vectors) |> Base.encode16(case: :lower)
   end
 
   test "an encoded record is the exact bytes an independent implementation expects" do

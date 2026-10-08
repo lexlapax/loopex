@@ -2,8 +2,8 @@ defmodule LoopexProtocol.SessionTest do
   @moduledoc """
   ## Concept
 
-  The generation-one contract is exactly what accepted ADR 0023 states, and its
-  digest names the whole of it, so a client in another language can check that
+  The current foreground contract implements the accepted M7 amendment. Its
+  digest names the complete payload contract, so a client in another language can check that
   it is talking to the contract it was written against.
 
   ## Technical depth
@@ -12,7 +12,7 @@ defmodule LoopexProtocol.SessionTest do
   a literal digest rather than recomputing them from the module under test,
   because a test that derives its expectation from the implementation proves
   only that the implementation is self-consistent. The digest is written out so
-  that any change to a method, a family, a code or a maximum fails here and has
+  that a changed inventory, maximum or nested payload fails here and has
   to be a deliberate change to the contract.
   """
 
@@ -21,10 +21,10 @@ defmodule LoopexProtocol.SessionTest do
   alias LoopexProtocol.Session
 
   test "the generation names itself experimental and is the only one offered" do
-    assert Session.generation() == "loopex.experimental/1"
+    assert Session.generation() == "loopex.experimental/3"
   end
 
-  test "the sixteen methods are exactly these, in this order" do
+  test "the eighteen methods are exactly these, in this order" do
     assert Session.methods() == [
              "session.create",
              "session.resume",
@@ -41,10 +41,12 @@ defmodule LoopexProtocol.SessionTest do
              "session.activate_skill",
              "artifact.open_transfer",
              "artifact.read_chunk",
-             "artifact.close_transfer"
+             "artifact.close_transfer",
+             "session.configure",
+             "session.compact"
            ]
 
-    assert length(Session.methods()) == 16
+    assert length(Session.methods()) == 18
     assert Enum.uniq(Session.methods()) == Session.methods()
   end
 
@@ -115,7 +117,7 @@ defmodule LoopexProtocol.SessionTest do
 
     # The vector. A change to any method, family, code or maximum changes this
     # and must be a deliberate change to the contract.
-    assert digest == "3c0e34a99cd0178095de0d75843340128d26143798e517daae26b44cbf9a884f"
+    assert digest == "1a2515154624c383ed7e8caa94b1062d46a14fd9232d906e3af2946142d20e95"
 
     assert Session.schema_digest() == digest
   end

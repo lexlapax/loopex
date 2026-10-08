@@ -4,7 +4,7 @@
 // Technical depth
 // This handles integer-only JSON schema data. Maps become sorted lists of
 // key/value tuples inside the loopex_map tuple, following loopex.canonical.v1.
-// It performs no negotiation and does not declare a served protocol contract.
+// Current client pins below identify the complete foreground and daemon manifests.
 import { createHash } from "node:crypto";
 
 const atom = (name) => Buffer.concat([Buffer.from([119, name.length]), Buffer.from(name)]);
@@ -153,4 +153,55 @@ export function matchesContractIdentity(reply, expected) {
     reply.type === "initialized" &&
     reply.selected_generation === expected.generation &&
     reply.exact_schema_sha256 === expected.schemaDigest;
+}
+
+// Concept: retain client expectations independently from the server reply.
+// Technical depth: these literal identities are checked against complete canonical
+// preimages by current-contract-manifest-vectors.mjs before transport qualification.
+export const CURRENT_CONTRACTS = Object.freeze({
+  foreground: Object.freeze({ generation: "loopex.experimental/3", schemaDigest: "1a2515154624c383ed7e8caa94b1062d46a14fd9232d906e3af2946142d20e95" }),
+  daemon: Object.freeze({ generation: "loopex.experimental/4", schemaDigest: "a339893eeabcd1a071d0ebde25ceeccaf05aabf984019ac4f3b252c4ace0b5d7" }),
+});
+
+// Concept: the complete current manifest has one closed top-level recipe.
+// Technical depth: reject duplicate JSON members first, then require all seven
+// keys and exact inventory-to-definition coverage. Canonical encoding separately
+// refuses values outside the integer-only schema data domain.
+export function parseContractManifest(bytes) {
+  const manifest = parseSchemaJson(bytes);
+  const required = ["generation", "canonicalization_revision", "methods", "record_families", "error_codes", "limits", "payload_definitions"];
+  if (manifest === null || typeof manifest !== "object" || Array.isArray(manifest) ||
+      Object.keys(manifest).length !== required.length || required.some(key => !Object.hasOwn(manifest, key)) ||
+      !["loopex.experimental/3", "loopex.experimental/4"].includes(manifest.generation) ||
+      manifest.canonicalization_revision !== "loopex.canonical.v1") throw new Error("invalid current contract manifest");
+  for (const key of ["methods", "record_families", "error_codes"]) {
+    const inventory = manifest[key];
+    if (!Array.isArray(inventory) || inventory.length === 0 || inventory.some(value => typeof value !== "string") ||
+        new Set(inventory).size !== inventory.length) throw new Error("invalid ordered manifest inventory");
+  }
+  const definitions = manifest.payload_definitions;
+  const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
+  if (!object(manifest.limits) || !object(definitions) || Object.keys(definitions).length === 0 ||
+      !object(definitions.requests?.methods) || !object(definitions.records)) throw new Error("missing manifest definitions");
+  const sameKeys = (value, keys) => Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key));
+  if (!sameKeys(definitions.requests.methods, ["initialize", ...manifest.methods]) ||
+      !sameKeys(definitions.records, manifest.record_families) ||
+      Object.values(definitions.requests.methods).some(value => value.closed !== true) ||
+      Object.values(definitions.records).some(value => value.closed !== true)) throw new Error("incomplete closed manifest definitions");
+  if (!object(definitions.nested)) throw new Error("missing nested manifest definitions");
+  function references(value) {
+    if (value === null || typeof value !== "object") return;
+    if (!Array.isArray(value) && Object.hasOwn(value, "definition_ref")) {
+      if (typeof value.definition_ref !== "string") throw new Error("invalid manifest definition reference");
+      let definition = definitions.nested;
+      for (const key of value.definition_ref.split(".")) {
+        if (!object(definition) || !Object.hasOwn(definition, key)) throw new Error("unresolved manifest definition reference");
+        definition = definition[key];
+      }
+    }
+    for (const child of Object.values(value)) references(child);
+  }
+  references(definitions);
+  canonicalSchemaBytes(manifest);
+  return manifest;
 }
