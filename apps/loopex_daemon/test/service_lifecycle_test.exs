@@ -185,6 +185,7 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
     service_await(fn -> native_progress_bytes(state.progress_sink) > 0 end, compact_cutoff)
     assert native_progress_bytes(state.registry_progress_sink) == 0
     assert ProviderFixture.count(provider) == 1
+
     assert {:ok, %{compact_pending: true} = held_status} =
              Loopex.session_status(state.edges.runtime, session)
 
@@ -206,7 +207,7 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
         service_records_until(client, &service_activity?/1, compact_cutoff)
       end
 
-    activities = Enum.map(activity_records, &(List.last(&1)["progress"]))
+    activities = Enum.map(activity_records, &List.last(&1)["progress"])
     assert [activity, observer_activity] = activities
     assert activity == observer_activity
     assert {:ok, native} = LoopexProtocol.Session.CompactionProgress.decode_wire(activity)
@@ -270,12 +271,18 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
     assert length(progress) == 2
     assert Enum.all?(progress, &service_activity?/1)
 
-    for canary <- ["PRIVATE_SERVICE_SUMMARY_CANARY", "PRIVATE_MAINTENANCE_CANARY", options[:credential]] do
+    for canary <- [
+          "PRIVATE_SERVICE_SUMMARY_CANARY",
+          "PRIVATE_MAINTENANCE_CANARY",
+          options[:credential]
+        ] do
       refute String.contains?(JSON.encode!(progress), canary)
     end
 
     assert ProviderFixture.count(provider) == 2
+
     assert Enum.all?(ProviderFixture.events(provider), fn {_request, authorized} -> authorized end)
+
     assert {:ok, %{compact_pending: false, active_run_id: nil}} =
              Loopex.session_status(state.edges.runtime, session)
 
@@ -283,7 +290,7 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
 
     sinks =
       [state.progress_sink, state.registry_progress_sink] ++
-        Enum.map(connections, &(:sys.get_state(&1).progress_sink))
+        Enum.map(connections, &:sys.get_state(&1).progress_sink)
 
     owned =
       [daemon.owner, state.registry, state.relay, state.edges.runtime.supervisor] ++
@@ -328,7 +335,8 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
   end
 
   defp service_activity?(record),
-    do: record["type"] == "progress" and record["progress"]["kind"] == "context.compaction_progress"
+    do:
+      record["type"] == "progress" and record["progress"]["kind"] == "context.compaction_progress"
 
   defp service_event?(record, kind),
     do: record["type"] == "event" and record["event"]["kind"] == kind

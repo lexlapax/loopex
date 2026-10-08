@@ -1716,6 +1716,7 @@ defmodule LoopexDaemon.SocketTransportTest do
     assert pending_size == byte_size(pending_frame)
     local = :queue.to_list(held.progress)
     assert Enum.map(local, &elem(&1, 1)) == tl(encoded)
+
     assert MapSet.new([pending_lease | Enum.map(local, &elem(&1, 0))]) ==
              MapSet.new(Map.keys(held.progress_leases))
 
@@ -1781,9 +1782,7 @@ defmodule LoopexDaemon.SocketTransportTest do
       :sys.install(
         daemon.registry,
         {fn
-           :waiting,
-           {:in, {:"$gen_call", _from, {:output_emitted, ^incarnation, ref}}},
-           _state ->
+           :waiting, {:in, {:"$gen_call", _from, {:output_emitted, ^incarnation, ref}}}, _state ->
              send(test, {:selected_progress_emission_held, ref})
 
              receive do
@@ -3274,7 +3273,10 @@ defmodule LoopexDaemon.SocketTransportTest do
     do: 2 * :binary.referenced_byte_size(value) + 12 * byte_size(value)
 
   defp socket_progress_value_charge(value) when is_map(value),
-    do: Enum.reduce(value, 0, fn {_key, field}, total -> total + socket_progress_value_charge(field) end)
+    do:
+      Enum.reduce(value, 0, fn {_key, field}, total ->
+        total + socket_progress_value_charge(field)
+      end)
 
   defp socket_progress_value_charge(_value), do: 0
 
@@ -3303,6 +3305,7 @@ defmodule LoopexDaemon.SocketTransportTest do
   end
 
   defp receive_socket_progress_records(socket, count, deadline, buffered \\ "")
+
   defp receive_socket_progress_records(_socket, 0, deadline, buffered) do
     _remaining = socket_progress_remaining(deadline)
     assert buffered == ""
