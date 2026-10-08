@@ -1639,6 +1639,238 @@ defmodule LoopexDaemon.SocketTransportTest do
              socket_state.attachment.emitted_cursor
   end
 
+  test "a held Registry enqueue keeps actual native credit in the pending exchange and local queue" do
+    native = current_command_fixture([])
+    daemon = start_daemon(native.runtime)
+    {client, session, _epoch} = controlled_current_session(daemon, "credited-enqueue-create")
+    [connection] = connection_pids(daemon)
+    initial = :sys.get_state(connection)
+    cursor = initial.attachment.emitted_cursor || initial.attachment.snapshot_cursor
+    assert Process.get({LoopexDaemon.Test.DaemonSocketFixture, client}, "") == ""
+
+    items =
+      for index <- 1..3 do
+        {:ok, item} =
+          Loopex.CompactionProgress.new(
+            "enqueue-episode-#{index}",
+            %{"kind" => "compact", "id" => "enqueue-command-#{index}"},
+            String.duplicate("e", 32),
+            cursor
+          )
+
+        item
+      end
+
+    encoded = Enum.map(items, &socket_progress_frame(session, &1))
+    expected_bytes = Enum.sum(Enum.map(encoded, &byte_size/1))
+    expected_charge = Enum.sum(Enum.map(items, &socket_progress_charge(session, &1)))
+    test = self()
+    incarnation = initial.incarnation
+
+    :ok =
+      :sys.install(
+        daemon.registry,
+        {fn
+           :waiting,
+           {:in, {:"$gen_call", _from, {:enqueue_progress, ^incarnation, frame}}},
+           _state ->
+             send(test, {:progress_enqueue_held, frame})
+
+             receive do
+               :continue_progress_enqueue -> :done
+             end
+
+           :waiting, _event, _state ->
+             :waiting
+         end, :waiting}
+      )
+
+    on_exit(fn -> send(daemon.registry, :continue_progress_enqueue) end)
+    deadline = System.monotonic_time(:millisecond) + 5_000
+    assert :ok = Loopex.ProgressSink.try_offer(initial.progress_sink, session, hd(items))
+    remaining = socket_progress_remaining(deadline)
+    assert_receive {:progress_enqueue_held, pending_frame}, remaining
+    assert pending_frame == hd(encoded)
+
+    for item <- tl(items) do
+      assert :ok = Loopex.ProgressSink.try_offer(initial.progress_sink, session, item)
+    end
+
+    held =
+      socket_progress_state_until(connection, deadline, fn state ->
+        map_size(state.progress_leases) == 3 and :queue.len(state.progress) == 2
+      end)
+
+    assert held.enqueues_pending == 1
+    assert held.output_claim == :claiming
+    assert held.progress_frames == %{}
+    assert held.progress_bytes == expected_bytes
+    assert Enum.sum(Map.values(held.progress_leases)) == expected_bytes
+    assert :queue.len(held.output_cursors) == 0
+    assert held.attachment.emitted_cursor == initial.attachment.emitted_cursor
+
+    [{pending_lease, pending_size}] =
+      for {_request, %{target: :registry, label: {:enqueue_progress, lease}}} <- held.exchanges,
+          do: {lease, Map.fetch!(held.progress_leases, lease)}
+
+    assert pending_size == byte_size(pending_frame)
+    local = :queue.to_list(held.progress)
+    assert Enum.map(local, &elem(&1, 1)) == tl(encoded)
+    assert MapSet.new([pending_lease | Enum.map(local, &elem(&1, 0))]) ==
+             MapSet.new(Map.keys(held.progress_leases))
+
+    assert_socket_progress_native(held, connection, expected_charge)
+    send(daemon.registry, :continue_progress_enqueue)
+    records = receive_socket_progress_records(client, 3, deadline)
+    assert records == Enum.map(items, &WireRecords.progress(session, &1))
+
+    released =
+      socket_progress_state_until(connection, deadline, fn state ->
+        state.progress_leases == %{} and state.progress_frames == %{} and
+          socket_progress_native_empty?(state.progress_sink)
+      end)
+
+    assert released.progress_bytes == 0
+    assert :queue.is_empty(released.progress)
+    assert released.attachment.emitted_cursor == initial.attachment.emitted_cursor
+    assert_socket_progress_native(released, connection, 0)
+  end
+
+  test "a genuine kernel partial select holds the native lease through exact emission ACK" do
+    native = current_command_fixture([])
+    daemon = start_daemon(native.runtime)
+    {client, session, _epoch} = controlled_current_session(daemon, "credited-select-create")
+    [connection] = connection_pids(daemon)
+    initial = :sys.get_state(connection)
+    cursor = initial.attachment.emitted_cursor || initial.attachment.snapshot_cursor
+    assert Process.get({LoopexDaemon.Test.DaemonSocketFixture, client}, "") == ""
+
+    empty = %{
+      kind: :text_delta,
+      turn_id: "select-turn",
+      stream_domain_id: String.duplicate("a", 32),
+      base_event_sequence: cursor,
+      model_sequence: 0,
+      content_index: 0,
+      text: ""
+    }
+
+    # Concept: one valid escaping-heavy item fills reachable native byte credit.
+    # Technical depth: compute its length from actual backing allocations; do
+    # not fabricate leases or the unreachable native 524,288 encoded-byte cut.
+    text_bytes = div(524_288 - socket_progress_charge(session, empty), 14)
+    item = %{empty | text: :binary.copy("\"\\", div(text_bytes, 2))}
+    charge = socket_progress_charge(session, item)
+    encoded = socket_progress_frame(session, item)
+    assert charge > 262_144 and charge <= 524_288
+    assert byte_size(encoded) > 65_536 and byte_size(encoded) <= 74_013
+
+    assert :ok = :socket.setopt(initial.socket, :socket, :sndbuf, 1_024)
+    assert :ok = :socket.setopt(client, :socket, :rcvbuf, 1_024)
+    assert {:ok, send_buffer} = :socket.getopt(initial.socket, :socket, :sndbuf)
+    assert {:ok, receive_buffer} = :socket.getopt(client, :socket, :rcvbuf)
+    assert send_buffer > 0 and receive_buffer > 0
+
+    assert 4 * (send_buffer + receive_buffer) < byte_size(encoded),
+           "accepted kernel buffers cannot establish the required native partial/select cut"
+
+    test = self()
+    incarnation = initial.incarnation
+
+    :ok =
+      :sys.install(
+        daemon.registry,
+        {fn
+           :waiting,
+           {:in, {:"$gen_call", _from, {:output_emitted, ^incarnation, ref}}},
+           _state ->
+             send(test, {:selected_progress_emission_held, ref})
+
+             receive do
+               :continue_selected_progress_emission -> :done
+             end
+
+           :waiting, _event, _state ->
+             :waiting
+         end, :waiting}
+      )
+
+    on_exit(fn -> send(daemon.registry, :continue_selected_progress_emission) end)
+    deadline = System.monotonic_time(:millisecond) + 5_000
+    assert :ok = Loopex.ProgressSink.try_offer(initial.progress_sink, session, item)
+
+    selected =
+      socket_progress_state_until(connection, deadline, fn state ->
+        match?({:select_info, _, _}, state.send_select) and is_map(state.output_claim)
+      end)
+
+    {:select_info, _send_tag, select_handle} = selected.send_select
+    %{frame_ref: frame_ref, remaining: remainder} = selected.output_claim
+    assert is_reference(select_handle)
+    assert byte_size(remainder) > 0 and byte_size(remainder) < byte_size(encoded)
+    assert selected.progress_bytes == byte_size(encoded)
+    assert map_size(selected.progress_leases) == 1
+    assert [lease] = Map.keys(selected.progress_leases)
+    assert selected.progress_frames == %{frame_ref => lease}
+    assert selected.attachment.emitted_cursor == initial.attachment.emitted_cursor
+    assert_socket_progress_native(selected, connection, charge)
+    assert :dropped = Loopex.ProgressSink.try_offer(initial.progress_sink, session, item)
+
+    retained =
+      :sys.get_state(daemon.registry, socket_progress_remaining(deadline))
+      |> Map.fetch!(:rows)
+      |> Map.fetch!(initial.rollback_token)
+      |> Map.fetch!(:output)
+
+    assert retained.claim == frame_ref
+    assert retained.progress_items == 1
+    assert retained.progress_bytes == byte_size(encoded)
+    assert [{^frame_ref, ^encoded, :progress}] = :queue.to_list(retained.frames)
+    socket = initial.socket
+
+    :ok =
+      :sys.install(
+        connection,
+        {fn
+           :waiting, {:in, {:"$socket", ^socket, :select, ^select_handle}}, _state ->
+             send(test, {:real_progress_select_resumed, select_handle})
+             :done
+
+           :waiting, _event, _state ->
+             :waiting
+         end, :waiting},
+        socket_progress_remaining(deadline)
+      )
+
+    # Concept: only the real peer's reads reopen kernel write capacity.
+    # Technical depth: every fragment read and completion observation spends
+    # this operation's original five-second cutoff, without timeout renewal.
+    assert [record] = receive_socket_progress_records(client, 1, deadline)
+    assert record == WireRecords.progress(session, item)
+    remaining = socket_progress_remaining(deadline)
+    assert_receive {:real_progress_select_resumed, ^select_handle}, remaining
+    remaining = socket_progress_remaining(deadline)
+    assert_receive {:selected_progress_emission_held, ^frame_ref}, remaining
+    ack_pending = :sys.get_state(connection, socket_progress_remaining(deadline))
+    assert ack_pending.progress_frames == %{frame_ref => lease}
+    assert ack_pending.progress_leases == %{lease => byte_size(encoded)}
+    assert ack_pending.progress_bytes == byte_size(encoded)
+    assert ack_pending.output_claim in [nil, :claiming]
+    assert_socket_progress_native(ack_pending, connection, charge)
+    assert :dropped = Loopex.ProgressSink.try_offer(initial.progress_sink, session, item)
+    send(daemon.registry, :continue_selected_progress_emission)
+
+    released =
+      socket_progress_state_until(connection, deadline, fn state ->
+        state.progress_frames == %{} and state.progress_leases == %{} and
+          socket_progress_native_empty?(state.progress_sink)
+      end)
+
+    assert released.progress_bytes == 0
+    assert released.attachment.emitted_cursor == initial.attachment.emitted_cursor
+    assert_socket_progress_native(released, connection, 0)
+  end
+
   test "malformed durable data detaches at actual emitted truth without private publication" do
     native = current_command_fixture([%{text: "done", calls: []}])
     daemon = start_daemon(native.runtime)
@@ -3011,6 +3243,85 @@ defmodule LoopexDaemon.SocketTransportTest do
 
   defp list(request_id, limit),
     do: %{"method" => "session.list", "request_id" => request_id, "limit" => limit}
+
+  defp socket_progress_remaining(deadline) do
+    remaining = deadline - System.monotonic_time(:millisecond)
+    assert remaining > 0, "native Socket custody operation exceeded its original cutoff"
+    remaining
+  end
+
+  defp socket_progress_state_until(connection, deadline, predicate) do
+    state = :sys.get_state(connection, socket_progress_remaining(deadline))
+    _remaining = socket_progress_remaining(deadline)
+
+    if predicate.(state) do
+      state
+    else
+      Process.sleep(min(10, socket_progress_remaining(deadline)))
+      socket_progress_state_until(connection, deadline, predicate)
+    end
+  end
+
+  defp socket_progress_frame(session, item) do
+    assert {:ok, encoded} = LoopexProtocol.Frame.encode(WireRecords.progress(session, item))
+    IO.iodata_to_binary(encoded)
+  end
+
+  defp socket_progress_charge(session, item),
+    do: 8_192 + socket_progress_value_charge(session) + socket_progress_value_charge(item)
+
+  defp socket_progress_value_charge(value) when is_binary(value),
+    do: 2 * :binary.referenced_byte_size(value) + 12 * byte_size(value)
+
+  defp socket_progress_value_charge(value) when is_map(value),
+    do: Enum.reduce(value, 0, fn {_key, field}, total -> total + socket_progress_value_charge(field) end)
+
+  defp socket_progress_value_charge(_value), do: 0
+
+  defp assert_socket_progress_native(state, connection, expected_charge) do
+    {_guardian, incarnation, arena} = state.progress_sink
+
+    assert [{:state, ^incarnation, ^connection, :open, ^expected_charge, slots, []}] =
+             :ets.lookup(arena, :state)
+
+    leases =
+      for {{token, :leased, ^connection, _charge}, index} <- Enum.with_index(Tuple.to_list(slots)),
+          do: {incarnation, index, token}
+
+    assert Enum.count(Tuple.to_list(slots), &(not is_nil(&1))) == length(leases)
+    assert MapSet.new(leases) == MapSet.new(Map.keys(state.progress_leases))
+  end
+
+  defp socket_progress_native_empty?({_guardian, incarnation, arena}) do
+    case :ets.lookup(arena, :state) do
+      [{:state, ^incarnation, _owner, :open, 0, slots, []}] ->
+        Enum.all?(Tuple.to_list(slots), &is_nil/1)
+
+      _retained ->
+        false
+    end
+  end
+
+  defp receive_socket_progress_records(socket, count, deadline, buffered \\ "")
+  defp receive_socket_progress_records(_socket, 0, deadline, buffered) do
+    _remaining = socket_progress_remaining(deadline)
+    assert buffered == ""
+    []
+  end
+
+  defp receive_socket_progress_records(socket, count, deadline, buffered) do
+    case :binary.split(buffered, "\n") do
+      [payload, rest] ->
+        assert {:ok, record} =
+                 LoopexProtocol.Frame.decode(payload, LoopexProtocol.Frame.output_record_bytes())
+
+        [record | receive_socket_progress_records(socket, count - 1, deadline, rest)]
+
+      [_partial] ->
+        assert {:ok, bytes} = :socket.recv(socket, 0, socket_progress_remaining(deadline))
+        receive_socket_progress_records(socket, count, deadline, buffered <> bytes)
+    end
+  end
 
   defp current_command_fixture(script, options \\ []) do
     definitions = Keyword.get(options, :tools, [])

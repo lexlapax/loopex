@@ -1,5 +1,10 @@
 Code.require_file("support/daemon_socket_fixture.exs", __DIR__)
 
+Code.require_file(
+  "../../loopex_llm_reqllm/test/support/provider_isolation_fixture.exs",
+  __DIR__
+)
+
 defmodule LoopexDaemon.ServiceLifecycleTest do
   use ExUnit.Case, async: false
   @moduletag capture_log: true
@@ -8,6 +13,7 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
     only: [send_frame: 2, receive_records: 2, receive_records: 3, eventually: 1]
 
   alias LoopexComposition.Placement
+  alias Loopex.LLM.ReqLLM.ProviderIsolationFixture, as: ProviderFixture
   alias LoopexDaemon.Sentinel
   alias LoopexProtocol.{Session.V2, Wire}
 
@@ -17,6 +23,374 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
 
     @impl Loopex.Policy
     def decide(_request), do: {:deny, :policy_denied}
+  end
+
+  defmodule AllowPolicy do
+    @moduledoc false
+    @behaviour Loopex.Policy
+
+    @impl Loopex.Policy
+    def decide(_request), do: {:allow, nil}
+  end
+
+  # Concept: the daemon delivers actual permitted compaction activity only to
+  # installed subscriptions, while its native custody follows the real route.
+  # Technical depth: hold the existing isolated provider before entry and park
+  # successive actual consumers. No test actor takes, offers or releases an item.
+  @tag timeout: 120_000
+  test "actual compaction crosses Service native custody to two subscribed Socket clients",
+       %{options: options, state_root: state_root} do
+    summary =
+      ~s({"summary":"PRIVATE_SERVICE_SUMMARY_CANARY","carry_forward":{"files_read":[],"files_changed":[]}})
+
+    provider =
+      ProviderFixture.new(:delayed_entry,
+        credential: options[:credential],
+        response_bodies: [
+          service_text_response("retained fact", "service-history"),
+          service_text_response(summary, "service-summary")
+        ]
+      )
+
+    options =
+      Keyword.merge(options,
+        policy: AllowPolicy,
+        active_tools: [],
+        context_token_budget: 8_192,
+        sampling: %{"max_tokens" => 256},
+        maintenance_model: Loopex.LLM.ReqLLM.default_model(),
+        maintenance_instructions: %{
+          "version" => "summary.v1",
+          "body" => "Keep facts. PRIVATE_MAINTENANCE_CANARY"
+        },
+        provider_launch:
+          Keyword.drop(provider.options, [
+            :credential_token,
+            :credential_registry,
+            :tracing_capability
+          ])
+      )
+
+    daemon = start_daemon(options)
+    _ = await_ready(daemon.output)
+    state = :sys.get_state(daemon.owner)
+
+    on_exit(fn ->
+      ProviderFixture.release(provider)
+
+      for pid <- [daemon.owner, state.registry], Process.alive?(pid) do
+        try do
+          :sys.resume(pid)
+        catch
+          :exit, _ -> :ok
+        end
+      end
+
+      if Process.alive?(daemon.sentinel),
+        do: send(daemon.sentinel, {:daemon_signal, daemon.owner_ref, :sigterm})
+    end)
+
+    assert :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(state.edges.runtime)
+    {:ok, %{control: control}} = Loopex.Runtime.children(state.edges.runtime)
+    assert :sys.get_state(control).progress_sink == state.progress_sink
+    assert :sys.get_state(state.registry).progress_sink == state.registry_progress_sink
+
+    controller = initialized(options[:socket_path])
+    observer = initialized(options[:socket_path])
+    outsider = initialized(options[:socket_path])
+    clients = [controller, observer, outsider]
+    on_exit(fn -> Enum.each(clients, &:socket.close/1) end)
+
+    :ok =
+      send_frame(controller, %{
+        "method" => "session.create",
+        "request_id" => "service-create",
+        "command_id" => Wire.encode_identity("service-create"),
+        "session_options" => %{"version" => 1}
+      })
+
+    assert [%{"status" => "accepted", "session_id" => encoded}] =
+             receive_records(controller, 1)
+
+    {:ok, session} = Wire.identity(encoded)
+
+    :ok =
+      send_frame(controller, %{
+        "method" => "session.acquire_control",
+        "request_id" => "service-acquire",
+        "session_id" => encoded
+      })
+
+    assert [%{"result" => %{"writer_epoch" => epoch}}] = receive_records(controller, 1)
+
+    for {client, request_id} <- [{controller, "service-attach"}, {observer, "service-observe"}] do
+      :ok =
+        send_frame(client, %{
+          "method" => "session.attach",
+          "request_id" => request_id,
+          "session_id" => encoded,
+          "after_event_sequence" => "0"
+        })
+
+      assert [%{"type" => "snapshot"}] = receive_records(client, 1)
+    end
+
+    ProviderFixture.release(provider)
+    history_cutoff = System.monotonic_time(:millisecond) + 60_000
+
+    :ok =
+      send_frame(controller, %{
+        "method" => "session.prompt",
+        "request_id" => "service-history",
+        "command_id" => Wire.encode_identity("service-history"),
+        "writer_epoch" => epoch,
+        "content_b64" => Wire.encode_bytes(String.duplicate("retained fact ", 700))
+      })
+
+    for client <- [controller, observer] do
+      records = service_records_until(client, &service_event?(&1, "run.finished"), history_cutoff)
+      assert List.last(records)["event"]["data"]["outcome"] == "completed"
+    end
+
+    assert ProviderFixture.count(provider) == 1
+    assert {:ok, %{active_run_id: nil}} = Loopex.session_status(state.edges.runtime, session)
+    :ok = File.rm(ProviderFixture.marker(provider, "release"))
+    :ok = File.rm(ProviderFixture.marker(provider, "pid"))
+    connections = service_connection_pids(state.registry)
+    assert length(connections) == 3
+    service_await(fn -> service_progress_settled?(state, connections) end, history_cutoff)
+
+    :ok = :sys.suspend(daemon.owner)
+    compact_cutoff = System.monotonic_time(:millisecond) + 60_000
+
+    :ok =
+      send_frame(controller, %{
+        "method" => "session.compact",
+        "request_id" => "service-compact",
+        "command_id" => Wire.encode_identity("service-compact"),
+        "writer_epoch" => epoch,
+        "bounds" => %{
+          "max_attempts" => "4",
+          "deadline_ms" => "60000",
+          "token_budget" => "32768"
+        }
+      })
+
+    admission_records =
+      service_records_until(controller, &(&1["request_id"] == "service-compact"), compact_cutoff)
+
+    assert %{"type" => "admission", "status" => "accepted"} = List.last(admission_records)
+
+    service_await(fn -> ProviderFixture.reached?(provider, "pid") end, compact_cutoff)
+    service_await(fn -> native_progress_bytes(state.progress_sink) > 0 end, compact_cutoff)
+    assert native_progress_bytes(state.registry_progress_sink) == 0
+    assert ProviderFixture.count(provider) == 1
+    assert {:ok, %{compact_pending: true} = held_status} =
+             Loopex.session_status(state.edges.runtime, session)
+
+    :ok = :sys.suspend(state.registry)
+    :ok = :sys.resume(daemon.owner)
+
+    service_await(
+      fn ->
+        native_progress_bytes(state.progress_sink) == 0 and
+          native_progress_bytes(state.registry_progress_sink) > 0
+      end,
+      compact_cutoff
+    )
+
+    :ok = :sys.resume(state.registry)
+
+    activity_records =
+      for client <- [controller, observer] do
+        service_records_until(client, &service_activity?/1, compact_cutoff)
+      end
+
+    activities = Enum.map(activity_records, &(List.last(&1)["progress"]))
+    assert [activity, observer_activity] = activities
+    assert activity == observer_activity
+    assert {:ok, native} = LoopexProtocol.Session.CompactionProgress.decode_wire(activity)
+    assert native.owner == %{"kind" => "compact", "id" => "service-compact"}
+    assert native.progress_sequence == 0
+    assert native.base_event_sequence == held_status.event_sequence
+
+    attached =
+      Enum.filter(connections, fn connection ->
+        match?(%{attachment: %{session_id: ^session}}, :sys.get_state(connection))
+      end)
+
+    assert length(attached) == 2
+
+    service_await(
+      fn ->
+        Enum.all?(attached, fn connection ->
+          :sys.get_state(connection).attachment.emitted_cursor == held_status.event_sequence
+        end)
+      end,
+      compact_cutoff
+    )
+
+    assert Enum.all?(activity_records, fn records ->
+             List.last(records)["session_id"] == encoded
+           end)
+
+    :ok = send_frame(outsider, %{"method" => "daemon.status", "request_id" => "outsider-held"})
+
+    outsider_records =
+      service_records_until(outsider, &(&1["request_id"] == "outsider-held"), compact_cutoff)
+
+    assert List.last(outsider_records)["type"] == "result"
+    refute Enum.any?(outsider_records, &(&1["type"] == "progress"))
+    ProviderFixture.release(provider)
+
+    completions =
+      for client <- [controller, observer] do
+        service_records_until(
+          client,
+          &service_event?(&1, "context.compaction_finished"),
+          compact_cutoff
+        )
+      end
+
+    for records <- completions do
+      assert {:ok, completion} =
+               LoopexProtocol.Session.CompactResult.decode_completion(
+                 List.last(records)["event"]["data"]
+               )
+
+      assert completion["command_id"] == "service-compact"
+      assert completion["episode_id"] == native.episode_id
+      assert completion["result"]["disposition"] == "checkpointed"
+      assert completion["result"]["cleanup"] == "confirmed"
+      assert completion["result"]["usage"]["attempts"] == 1
+    end
+
+    records = admission_records ++ List.flatten(activity_records ++ completions)
+    progress = Enum.filter(records, &(&1["type"] == "progress"))
+    assert length(progress) == 2
+    assert Enum.all?(progress, &service_activity?/1)
+
+    for canary <- ["PRIVATE_SERVICE_SUMMARY_CANARY", "PRIVATE_MAINTENANCE_CANARY", options[:credential]] do
+      refute String.contains?(JSON.encode!(progress), canary)
+    end
+
+    assert ProviderFixture.count(provider) == 2
+    assert Enum.all?(ProviderFixture.events(provider), fn {_request, authorized} -> authorized end)
+    assert {:ok, %{compact_pending: false, active_run_id: nil}} =
+             Loopex.session_status(state.edges.runtime, session)
+
+    service_await(fn -> service_progress_settled?(state, connections) end, compact_cutoff)
+
+    sinks =
+      [state.progress_sink, state.registry_progress_sink] ++
+        Enum.map(connections, &(:sys.get_state(&1).progress_sink))
+
+    owned =
+      [daemon.owner, state.registry, state.relay, state.edges.runtime.supervisor] ++
+        Map.values(state.pids) ++ connections ++ Enum.map(sinks, &elem(&1, 0))
+
+    monitors = for pid <- Enum.uniq(owned), is_pid(pid), do: {pid, Process.monitor(pid)}
+    stop_cutoff = System.monotonic_time(:millisecond) + 60_000
+    send(daemon.sentinel, {:daemon_signal, daemon.owner_ref, :sigterm})
+    assert Task.await(daemon.task, max(stop_cutoff - System.monotonic_time(:millisecond), 1)) == 0
+
+    for {pid, monitor} <- monitors do
+      remaining = max(stop_cutoff - System.monotonic_time(:millisecond), 0)
+      assert_receive {:DOWN, ^monitor, :process, ^pid, _reason}, remaining
+      refute Process.alive?(pid)
+    end
+
+    for {_guardian, _incarnation, arena} <- sinks, do: assert(:ets.info(arena) == :undefined)
+    assert System.monotonic_time(:millisecond) < stop_cutoff
+    assert Placement.live_owner(state_root) == :none
+  end
+
+  defp service_records_until(socket, predicate, cutoff, records \\ []) do
+    remaining = cutoff - System.monotonic_time(:millisecond)
+    assert remaining > 0
+    [record] = receive_records(socket, 1, min(remaining, 5_000))
+    records = [record | records]
+
+    if predicate.(record),
+      do: Enum.reverse(records),
+      else: service_records_until(socket, predicate, cutoff, records)
+  end
+
+  defp service_await(predicate, cutoff) do
+    if predicate.() do
+      :ok
+    else
+      remaining = cutoff - System.monotonic_time(:millisecond)
+      assert remaining > 0
+      Process.sleep(min(remaining, 10))
+      service_await(predicate, cutoff)
+    end
+  end
+
+  defp service_activity?(record),
+    do: record["type"] == "progress" and record["progress"]["kind"] == "context.compaction_progress"
+
+  defp service_event?(record, kind),
+    do: record["type"] == "event" and record["event"]["kind"] == kind
+
+  defp service_connection_pids(registry) do
+    for {_token, row} <- :sys.get_state(registry).rows,
+        is_pid(row.connection_pid),
+        do: row.connection_pid
+  end
+
+  defp service_progress_settled?(state, connections) do
+    native_progress_bytes(state.progress_sink) == 0 and
+      native_progress_bytes(state.registry_progress_sink) == 0 and
+      Enum.all?(connections, fn connection ->
+        socket = :sys.get_state(connection)
+
+        native_progress_bytes(socket.progress_sink) == 0 and
+          socket.progress_bytes == 0 and map_size(socket.progress_leases) == 0 and
+          map_size(socket.progress_frames) == 0 and :queue.is_empty(socket.progress) and
+          socket.output_claim == nil and socket.enqueues_pending == 0
+      end) and
+      Enum.all?(:sys.get_state(state.registry).rows, fn {_token, row} ->
+        LoopexDaemon.OutputBuffer.empty?(row.output)
+      end)
+  end
+
+  defp service_text_response(text, response_id) do
+    [
+      %{
+        "type" => "message_start",
+        "message" => %{
+          "id" => response_id,
+          "type" => "message",
+          "role" => "assistant",
+          "model" => "claude-haiku-4-5-20251001",
+          "content" => [],
+          "stop_reason" => nil,
+          "stop_sequence" => nil,
+          "usage" => %{"input_tokens" => 4, "output_tokens" => 0}
+        }
+      },
+      %{
+        "type" => "content_block_start",
+        "index" => 0,
+        "content_block" => %{"type" => "text", "text" => ""}
+      },
+      %{
+        "type" => "content_block_delta",
+        "index" => 0,
+        "delta" => %{"type" => "text_delta", "text" => text}
+      },
+      %{"type" => "content_block_stop", "index" => 0},
+      %{
+        "type" => "message_delta",
+        "delta" => %{"stop_reason" => "end_turn", "stop_sequence" => nil},
+        "usage" => %{"output_tokens" => 2}
+      },
+      %{"type" => "message_stop"}
+    ]
+    |> Enum.map_join(fn event ->
+      "event: #{event["type"]}\ndata: #{Jason.encode!(event)}\n\n"
+    end)
   end
 
   test "actual Service ingress binds Runtime and drains credited Registry routing with coalesced readiness",
