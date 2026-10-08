@@ -17,9 +17,13 @@ defmodule Mix.Tasks.Loopex.M7Evidence.AttemptEvents do
   committed-head anchoring, then folds the same decoded bodies. It projects
   genesis/designation, succession, pending relinquishment and exact acceptance,
   checking each case's current writer tuple. Incomplete tails remain unresolved.
-  This performs no IO, tail recovery, evidence dereferencing or case-state
-  replay. Matching handoff references do not prove actual quiescence, custody or
-  authority; a projected owner or case grants no dispatch permission.
+  Case-history verification reuses that ordered ownership result, retaining
+  original case records through the consumed linear transitions. Repeated
+  pre-dispatch observations, additional reviews and changed review evidence
+  return an explicit unresolved projection with every original record retained.
+  This performs no IO, tail recovery, evidence dereferencing, manifest admission
+  or continuation checks. Matching handoff references do not prove actual
+  quiescence, custody or authority; no projection grants dispatch permission.
   """
 
   alias Mix.Tasks.Loopex.M7Evidence.AttemptFrames
@@ -80,6 +84,152 @@ defmodule Mix.Tasks.Loopex.M7Evidence.AttemptEvents do
     with {:ok, _head} <- AttemptFrames.verify(bytes, committed_head) do
       ownership_projection(bytes)
     end
+  end
+
+  @doc false
+  def verify_case_history(bytes) do
+    with {:ok, ownership} <- verify_ownership(bytes) do
+      case_projection(bytes, ownership)
+    end
+  end
+
+  @doc false
+  def verify_case_history(bytes, committed_head) do
+    with {:ok, ownership} <- verify_ownership(bytes, committed_head) do
+      case_projection(bytes, ownership)
+    end
+  end
+
+  # Concept: A consumed attempt retains its original result and all authors.
+  # Technical depth: The locator separates independent candidate/lane/matrix/
+  # case/subcase rows; manifest and specification remain immutable within it.
+  # Every original record retains its envelope and body. Unspecified repeated
+  # observations or reviews stop semantic projection, never replace prior facts.
+  defp case_projection(bytes, ownership) do
+    case_lines(bytes, %{ownership: ownership, histories: %{}, records: [], unresolved: []})
+  end
+
+  defp case_lines(<<>>, projection) do
+    tag = if projection.unresolved == [], do: :ok, else: :unresolved
+    {tag, projection}
+  end
+
+  defp case_lines(bytes, projection) do
+    {length, 1} = :binary.match(bytes, "\n")
+    <<line::binary-size(^length), "\n", remaining::binary>> = bytes
+
+    with {:ok, record} <- decode(line),
+         {:ok, projection} <- case_record(record, projection) do
+      case_lines(remaining, projection)
+    end
+  end
+
+  defp case_record(%{"body" => %{"kind" => "case"} = body} = record, projection) do
+    locator = Map.take(body, ~w(candidate_sha lane_id logical_matrix_id case_key subcase_key))
+    history = Map.get(projection.histories, locator)
+
+    with {:ok, history, reason} <- case_transition(history, record) do
+      unresolved =
+        if is_nil(reason),
+          do: projection.unresolved,
+          else:
+            projection.unresolved ++
+              [%{head: Map.take(record, ~w(campaign_id sequence digest)), reason: reason}]
+
+      {:ok,
+       %{
+         projection
+         | histories: Map.put(projection.histories, locator, history),
+           records: projection.records ++ [record],
+           unresolved: unresolved
+       }}
+    end
+  end
+
+  defp case_record(_, projection), do: {:ok, projection}
+
+  defp case_transition(nil, %{"body" => %{"state" => state}} = record)
+       when state in ["not_dispatched", "started"] do
+    {:ok, %{state: state, records: [record], unresolved: false}, nil}
+  end
+
+  defp case_transition(nil, _), do: {:error, :invalid_attempt_case_history}
+
+  defp case_transition(history, %{"body" => body} = record) do
+    first = hd(history.records)["body"]
+    consumed = Enum.find(history.records, &(&1["body"]["state"] == "started"))
+    completed = Enum.find(history.records, &(&1["body"]["state"] == "completed"))
+
+    if Map.take(body, ~w(manifest_digest specification_digest)) ==
+         Map.take(first, ~w(manifest_digest specification_digest)) and
+         (is_nil(consumed) or body["attempt_id"] == consumed["body"]["attempt_id"]) and
+         (is_nil(completed) or body["mechanical_result"] == completed["body"]["mechanical_result"]) do
+      case_step(history, record)
+    else
+      {:error, :invalid_attempt_case_history}
+    end
+  end
+
+  defp case_step(%{unresolved: true} = history, record),
+    do: retain_case(history, record, :unresolved_case_history)
+
+  defp case_step(
+         %{state: "not_dispatched"} = history,
+         %{"body" => %{"state" => "not_dispatched"}} = record
+       ),
+       do: retain_case(history, record, :repeated_not_dispatched)
+
+  defp case_step(
+         %{state: "not_dispatched"} = history,
+         %{"body" => %{"state" => "started"}} = record
+       ),
+       do: retain_case(history, record, nil)
+
+  defp case_step(%{state: "started"} = history, %{"body" => %{"state" => "completed"}} = record),
+    do: retain_case(history, record, nil)
+
+  defp case_step(
+         %{state: "completed"} = history,
+         %{"body" => %{"state" => "reviewed"} = body} = record
+       ) do
+    original = List.last(history.records)["body"]
+    reason = if body["evidence"] == original["evidence"], do: nil, else: :changed_review_evidence
+    retain_case(history, record, reason)
+  end
+
+  defp case_step(%{state: "reviewed"} = history, %{"body" => %{"state" => "reviewed"}} = record),
+    do: retain_case(history, record, :additional_review)
+
+  defp case_step(
+         %{state: "reviewed"} = history,
+         %{"body" => %{"state" => "authorized_next_candidate"} = body} = record
+       ) do
+    original = List.last(history.records)["body"]
+    retained = ~w(attempt_id mechanical_result verdict reviewer_id evidence)
+
+    if original["verdict"] != "pass" and Map.take(body, retained) == Map.take(original, retained) do
+      reason =
+        if body["diagnosis"] == original["diagnosis"] and
+             (is_nil(original["disposition"]) or body["disposition"] == original["disposition"]),
+           do: nil,
+           else: :changed_authorization_boundary_references
+
+      retain_case(history, record, reason)
+    else
+      {:error, :invalid_attempt_case_history}
+    end
+  end
+
+  defp case_step(_, _), do: {:error, :invalid_attempt_case_history}
+
+  defp retain_case(history, %{"body" => body} = record, reason) do
+    {:ok,
+     %{
+       history
+       | state: if(is_nil(reason), do: body["state"], else: history.state),
+         records: history.records ++ [record],
+         unresolved: history.unresolved or not is_nil(reason)
+     }, reason}
   end
 
   # Concept: This projection checks record ownership, not execution admission.

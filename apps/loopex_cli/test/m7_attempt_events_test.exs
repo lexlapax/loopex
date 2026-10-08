@@ -959,6 +959,586 @@ defmodule LoopexCli.M7AttemptEventsTest do
     end
   end
 
+  # Concept: These full case chains retain an original consumed attempt.
+  # Technical depth: Python stdlib independently hashes each unsigned envelope,
+  # including genesis, designation and every linked case record. References are
+  # synthetic and establish no evidence admission or reviewer authority.
+  @case_chains [
+    {"pass",
+     [
+       {~S|{"body":{"campaign_id":"m7-vector","codec_version":1,"kind":"genesis","version":1},"campaign_id":"m7-vector","previous_digest":null,"sequence":1,"version":1}|,
+        "d4f20cd596c808cc8f75483de8890ed7f09e44b4f846c809aa41fbb489dc9826",
+        ~S|{"body":{"campaign_id":"m7-vector","codec_version":1,"kind":"genesis","version":1},"campaign_id":"m7-vector","digest":"d4f20cd596c808cc8f75483de8890ed7f09e44b4f846c809aa41fbb489dc9826","previous_digest":null,"sequence":1,"version":1}| <>
+          "\n"},
+       {~S|{"body":{"host_id":"host-1","kind":"writer_designated","ownership_epoch":1,"version":1,"writer_id":"writer-1"},"campaign_id":"m7-vector","previous_digest":"d4f20cd596c808cc8f75483de8890ed7f09e44b4f846c809aa41fbb489dc9826","sequence":2,"version":1}|,
+        "398fecfa28498910f0bee161530aff2f83eaca76fc9cddf94dea71fe8c723ce5",
+        ~S|{"body":{"host_id":"host-1","kind":"writer_designated","ownership_epoch":1,"version":1,"writer_id":"writer-1"},"campaign_id":"m7-vector","digest":"398fecfa28498910f0bee161530aff2f83eaca76fc9cddf94dea71fe8c723ce5","previous_digest":"d4f20cd596c808cc8f75483de8890ed7f09e44b4f846c809aa41fbb489dc9826","sequence":2,"version":1}| <>
+          "\n"},
+       {~S|{"body":{"attempt_id":"attempt-1","authorization_evidence":null,"authorized_candidate_sha":null,"candidate_sha":"1111111111111111111111111111111111111111","case_key":"m7.vector","diagnosis":null,"disposition":null,"evidence":[{"reference":"/evidence/m7/execution-path.json","sha256":"0000000000000000000000000000000000000000000000000000000000000000"}],"host_id":"host-1","kind":"case","lane_id":"lane-1","logical_matrix_id":"matrix-1","manifest_digest":"0000000000000000000000000000000000000000000000000000000000000000","mechanical_result":null,"ownership_epoch":1,"reviewer_id":null,"specification_digest":"0000000000000000000000000000000000000000000000000000000000000000","state":"started","subcase_key":"V1.1","verdict":null,"version":1,"writer_id":"writer-1"},"campaign_id":"m7-vector","previous_digest":"398fecfa28498910f0bee161530aff2f83eaca76fc9cddf94dea71fe8c723ce5","sequence":3,"version":1}|,
+        "587d1e8cb08be34d402f50a8bc977dc2096a8a07e7705099326afcfdad7dc2f3",
+        ~S|{"body":{"attempt_id":"attempt-1","authorization_evidence":null,"authorized_candidate_sha":null,"candidate_sha":"1111111111111111111111111111111111111111","case_key":"m7.vector","diagnosis":null,"disposition":null,"evidence":[{"reference":"/evidence/m7/execution-path.json","sha256":"0000000000000000000000000000000000000000000000000000000000000000"}],"host_id":"host-1","kind":"case","lane_id":"lane-1","logical_matrix_id":"matrix-1","manifest_digest":"0000000000000000000000000000000000000000000000000000000000000000","mechanical_result":null,"ownership_epoch":1,"reviewer_id":null,"specification_digest":"0000000000000000000000000000000000000000000000000000000000000000","state":"started","subcase_key":"V1.1","verdict":null,"version":1,"writer_id":"writer-1"},"campaign_id":"m7-vector","digest":"587d1e8cb08be34d402f50a8bc977dc2096a8a07e7705099326afcfdad7dc2f3","previous_digest":"398fecfa28498910f0bee161530aff2f83eaca76fc9cddf94dea71fe8c723ce5","sequence":3,"version":1}| <>
+          "\n"},
+       {~S|{"body":{"attempt_id":"attempt-1","authorization_evidence":null,"authorized_candidate_sha":null,"candidate_sha":"1111111111111111111111111111111111111111","case_key":"m7.vector","diagnosis":null,"disposition":null,"evidence":[{"reference":"/evidence/m7/complete.log","sha256":"0000000000000000000000000000000000000000000000000000000000000000"}],"host_id":"host-1","kind":"case","lane_id":"lane-1","logical_matrix_id":"matrix-1","manifest_digest":"0000000000000000000000000000000000000000000000000000000000000000","mechanical_result":"pass","ownership_epoch":1,"reviewer_id":null,"specification_digest":"0000000000000000000000000000000000000000000000000000000000000000","state":"completed","subcase_key":"V1.1","verdict":null,"version":1,"writer_id":"writer-1"},"campaign_id":"m7-vector","previous_digest":"587d1e8cb08be34d402f50a8bc977dc2096a8a07e7705099326afcfdad7dc2f3","sequence":4,"version":1}|,
+        "514ce32bc02653eecb9b1e1312f24d3f8bf18a84435071575e1096a88b75368e",
+        ~S|{"body":{"attempt_id":"attempt-1","authorization_evidence":null,"authorized_candidate_sha":null,"candidate_sha":"1111111111111111111111111111111111111111","case_key":"m7.vector","diagnosis":null,"disposition":null,"evidence":[{"reference":"/evidence/m7/complete.log","sha256":"0000000000000000000000000000000000000000000000000000000000000000"}],"host_id":"host-1","kind":"case","lane_id":"lane-1","logical_matrix_id":"matrix-1","manifest_digest":"0000000000000000000000000000000000000000000000000000000000000000","mechanical_result":"pass","ownership_epoch":1,"reviewer_id":null,"specification_digest":"0000000000000000000000000000000000000000000000000000000000000000","state":"completed","subcase_key":"V1.1","verdict":null,"version":1,"writer_id":"writer-1"},"campaign_id":"m7-vector","digest":"514ce32bc02653eecb9b1e1312f24d3f8bf18a84435071575e1096a88b75368e","previous_digest":"587d1e8cb08be34d402f50a8bc977dc2096a8a07e7705099326afcfdad7dc2f3","sequence":4,"version":1}| <>
+          "\n"},
+       {~S|{"body":{"attempt_id":"attempt-1","authorization_evidence":null,"authorized_candidate_sha":null,"candidate_sha":"1111111111111111111111111111111111111111","case_key":"m7.vector","diagnosis":null,"disposition":null,"evidence":[{"reference":"/evidence/m7/complete.log","sha256":"0000000000000000000000000000000000000000000000000000000000000000"}],"host_id":"host-1","kind":"case","lane_id":"lane-1","logical_matrix_id":"matrix-1","manifest_digest":"0000000000000000000000000000000000000000000000000000000000000000","mechanical_result":"pass","ownership_epoch":1,"reviewer_id":"reviewer-1","specification_digest":"0000000000000000000000000000000000000000000000000000000000000000","state":"reviewed","subcase_key":"V1.1","verdict":"pass","version":1,"writer_id":"writer-1"},"campaign_id":"m7-vector","previous_digest":"514ce32bc02653eecb9b1e1312f24d3f8bf18a84435071575e1096a88b75368e","sequence":5,"version":1}|,
+        "02414152567ff93a3d4935ead5884b28e13b81c1898c80eef918b0d42ccc5e9d",
+        ~S|{"body":{"attempt_id":"attempt-1","authorization_evidence":null,"authorized_candidate_sha":null,"candidate_sha":"1111111111111111111111111111111111111111","case_key":"m7.vector","diagnosis":null,"disposition":null,"evidence":[{"reference":"/evidence/m7/complete.log","sha256":"0000000000000000000000000000000000000000000000000000000000000000"}],"host_id":"host-1","kind":"case","lane_id":"lane-1","logical_matrix_id":"matrix-1","manifest_digest":"0000000000000000000000000000000000000000000000000000000000000000","mechanical_result":"pass","ownership_epoch":1,"reviewer_id":"reviewer-1","specification_digest":"0000000000000000000000000000000000000000000000000000000000000000","state":"reviewed","subcase_key":"V1.1","verdict":"pass","version":1,"writer_id":"writer-1"},"campaign_id":"m7-vector","digest":"02414152567ff93a3d4935ead5884b28e13b81c1898c80eef918b0d42ccc5e9d","previous_digest":"514ce32bc02653eecb9b1e1312f24d3f8bf18a84435071575e1096a88b75368e","sequence":5,"version":1}| <>
+          "\n"}
+     ]},
+    {"failed authorization",
+     [
+       {~S|{"body":{"campaign_id":"m7-vector","codec_version":1,"kind":"genesis","version":1},"campaign_id":"m7-vector","previous_digest":null,"sequence":1,"version":1}|,
+        "d4f20cd596c808cc8f75483de8890ed7f09e44b4f846c809aa41fbb489dc9826",
+        ~S|{"body":{"campaign_id":"m7-vector","codec_version":1,"kind":"genesis","version":1},"campaign_id":"m7-vector","digest":"d4f20cd596c808cc8f75483de8890ed7f09e44b4f846c809aa41fbb489dc9826","previous_digest":null,"sequence":1,"version":1}| <>
+          "\n"},
+       {~S|{"body":{"host_id":"host-1","kind":"writer_designated","ownership_epoch":1,"version":1,"writer_id":"writer-1"},"campaign_id":"m7-vector","previous_digest":"d4f20cd596c808cc8f75483de8890ed7f09e44b4f846c809aa41fbb489dc9826","sequence":2,"version":1}|,
+        "398fecfa28498910f0bee161530aff2f83eaca76fc9cddf94dea71fe8c723ce5",
+        ~S|{"body":{"host_id":"host-1","kind":"writer_designated","ownership_epoch":1,"version":1,"writer_id":"writer-1"},"campaign_id":"m7-vector","digest":"398fecfa28498910f0bee161530aff2f83eaca76fc9cddf94dea71fe8c723ce5","previous_digest":"d4f20cd596c808cc8f75483de8890ed7f09e44b4f846c809aa41fbb489dc9826","sequence":2,"version":1}| <>
+          "\n"},
+       {~S|{"body":{"attempt_id":"attempt-1","authorization_evidence":null,"authorized_candidate_sha":null,"candidate_sha":"1111111111111111111111111111111111111111","case_key":"m7.vector","diagnosis":null,"disposition":null,"evidence":[{"reference":"/evidence/m7/execution-path.json","sha256":"0000000000000000000000000000000000000000000000000000000000000000"}],"host_id":"host-1","kind":"case","lane_id":"lane-1","logical_matrix_id":"matrix-1","manifest_digest":"0000000000000000000000000000000000000000000000000000000000000000","mechanical_result":null,"ownership_epoch":1,"reviewer_id":null,"specification_digest":"0000000000000000000000000000000000000000000000000000000000000000","state":"started","subcase_key":"V1.1","verdict":null,"version":1,"writer_id":"writer-1"},"campaign_id":"m7-vector","previous_digest":"398fecfa28498910f0bee161530aff2f83eaca76fc9cddf94dea71fe8c723ce5","sequence":3,"version":1}|,
+        "587d1e8cb08be34d402f50a8bc977dc2096a8a07e7705099326afcfdad7dc2f3",
+        ~S|{"body":{"attempt_id":"attempt-1","authorization_evidence":null,"authorized_candidate_sha":null,"candidate_sha":"1111111111111111111111111111111111111111","case_key":"m7.vector","diagnosis":null,"disposition":null,"evidence":[{"reference":"/evidence/m7/execution-path.json","sha256":"0000000000000000000000000000000000000000000000000000000000000000"}],"host_id":"host-1","kind":"case","lane_id":"lane-1","logical_matrix_id":"matrix-1","manifest_digest":"0000000000000000000000000000000000000000000000000000000000000000","mechanical_result":null,"ownership_epoch":1,"reviewer_id":null,"specification_digest":"0000000000000000000000000000000000000000000000000000000000000000","state":"started","subcase_key":"V1.1","verdict":null,"version":1,"writer_id":"writer-1"},"campaign_id":"m7-vector","digest":"587d1e8cb08be34d402f50a8bc977dc2096a8a07e7705099326afcfdad7dc2f3","previous_digest":"398fecfa28498910f0bee161530aff2f83eaca76fc9cddf94dea71fe8c723ce5","sequence":3,"version":1}| <>
+          "\n"},
+       {~S|{"body":{"attempt_id":"attempt-1","authorization_evidence":null,"authorized_candidate_sha":null,"candidate_sha":"1111111111111111111111111111111111111111","case_key":"m7.vector","diagnosis":null,"disposition":null,"evidence":[{"reference":"/evidence/m7/boundary.log","sha256":"0000000000000000000000000000000000000000000000000000000000000000"}],"host_id":"host-1","kind":"case","lane_id":"lane-1","logical_matrix_id":"matrix-1","manifest_digest":"0000000000000000000000000000000000000000000000000000000000000000","mechanical_result":"provider_environment_failure","ownership_epoch":1,"reviewer_id":null,"specification_digest":"0000000000000000000000000000000000000000000000000000000000000000","state":"completed","subcase_key":"V1.1","verdict":null,"version":1,"writer_id":"writer-1"},"campaign_id":"m7-vector","previous_digest":"587d1e8cb08be34d402f50a8bc977dc2096a8a07e7705099326afcfdad7dc2f3","sequence":4,"version":1}|,
+        "375ddba7a008cd5de047368dfea7eaab8083b46fbd547d6d62979d574c38e21d",
+        ~S|{"body":{"attempt_id":"attempt-1","authorization_evidence":null,"authorized_candidate_sha":null,"candidate_sha":"1111111111111111111111111111111111111111","case_key":"m7.vector","diagnosis":null,"disposition":null,"evidence":[{"reference":"/evidence/m7/boundary.log","sha256":"0000000000000000000000000000000000000000000000000000000000000000"}],"host_id":"host-1","kind":"case","lane_id":"lane-1","logical_matrix_id":"matrix-1","manifest_digest":"0000000000000000000000000000000000000000000000000000000000000000","mechanical_result":"provider_environment_failure","ownership_epoch":1,"reviewer_id":null,"specification_digest":"0000000000000000000000000000000000000000000000000000000000000000","state":"completed","subcase_key":"V1.1","verdict":null,"version":1,"writer_id":"writer-1"},"campaign_id":"m7-vector","digest":"375ddba7a008cd5de047368dfea7eaab8083b46fbd547d6d62979d574c38e21d","previous_digest":"587d1e8cb08be34d402f50a8bc977dc2096a8a07e7705099326afcfdad7dc2f3","sequence":4,"version":1}| <>
+          "\n"},
+       {~S|{"body":{"attempt_id":"attempt-1","authorization_evidence":null,"authorized_candidate_sha":null,"candidate_sha":"1111111111111111111111111111111111111111","case_key":"m7.vector","diagnosis":{"reference":"/evidence/m7/diagnosis.json","sha256":"0000000000000000000000000000000000000000000000000000000000000000"},"disposition":null,"evidence":[{"reference":"/evidence/m7/boundary.log","sha256":"0000000000000000000000000000000000000000000000000000000000000000"}],"host_id":"host-1","kind":"case","lane_id":"lane-1","logical_matrix_id":"matrix-1","manifest_digest":"0000000000000000000000000000000000000000000000000000000000000000","mechanical_result":"provider_environment_failure","ownership_epoch":1,"reviewer_id":"reviewer-1","specification_digest":"0000000000000000000000000000000000000000000000000000000000000000","state":"reviewed","subcase_key":"V1.1","verdict":"environment_failure","version":1,"writer_id":"writer-1"},"campaign_id":"m7-vector","previous_digest":"375ddba7a008cd5de047368dfea7eaab8083b46fbd547d6d62979d574c38e21d","sequence":5,"version":1}|,
+        "6c8bd8f8b25650e779430609f18612a462cfc30ac4354e5ec32eb70069dea94e",
+        ~S|{"body":{"attempt_id":"attempt-1","authorization_evidence":null,"authorized_candidate_sha":null,"candidate_sha":"1111111111111111111111111111111111111111","case_key":"m7.vector","diagnosis":{"reference":"/evidence/m7/diagnosis.json","sha256":"0000000000000000000000000000000000000000000000000000000000000000"},"disposition":null,"evidence":[{"reference":"/evidence/m7/boundary.log","sha256":"0000000000000000000000000000000000000000000000000000000000000000"}],"host_id":"host-1","kind":"case","lane_id":"lane-1","logical_matrix_id":"matrix-1","manifest_digest":"0000000000000000000000000000000000000000000000000000000000000000","mechanical_result":"provider_environment_failure","ownership_epoch":1,"reviewer_id":"reviewer-1","specification_digest":"0000000000000000000000000000000000000000000000000000000000000000","state":"reviewed","subcase_key":"V1.1","verdict":"environment_failure","version":1,"writer_id":"writer-1"},"campaign_id":"m7-vector","digest":"6c8bd8f8b25650e779430609f18612a462cfc30ac4354e5ec32eb70069dea94e","previous_digest":"375ddba7a008cd5de047368dfea7eaab8083b46fbd547d6d62979d574c38e21d","sequence":5,"version":1}| <>
+          "\n"},
+       {~S|{"body":{"attempt_id":"attempt-1","authorization_evidence":{"reference":"/evidence/m7/authorization.json","sha256":"0000000000000000000000000000000000000000000000000000000000000000"},"authorized_candidate_sha":"2222222222222222222222222222222222222222","candidate_sha":"1111111111111111111111111111111111111111","case_key":"m7.vector","diagnosis":{"reference":"/evidence/m7/diagnosis.json","sha256":"0000000000000000000000000000000000000000000000000000000000000000"},"disposition":{"reference":"git:2222222222222222222222222222222222222222:docs/evidence/decision.md#acceptance","sha256":"0000000000000000000000000000000000000000000000000000000000000000"},"evidence":[{"reference":"/evidence/m7/boundary.log","sha256":"0000000000000000000000000000000000000000000000000000000000000000"}],"host_id":"host-1","kind":"case","lane_id":"lane-1","logical_matrix_id":"matrix-1","manifest_digest":"0000000000000000000000000000000000000000000000000000000000000000","mechanical_result":"provider_environment_failure","ownership_epoch":1,"reviewer_id":"reviewer-1","specification_digest":"0000000000000000000000000000000000000000000000000000000000000000","state":"authorized_next_candidate","subcase_key":"V1.1","verdict":"environment_failure","version":1,"writer_id":"writer-1"},"campaign_id":"m7-vector","previous_digest":"6c8bd8f8b25650e779430609f18612a462cfc30ac4354e5ec32eb70069dea94e","sequence":6,"version":1}|,
+        "d1cb38cfa05eb2ae22820970573d3c830b48e4e4d8034f3b15986f58572bd9bd",
+        ~S|{"body":{"attempt_id":"attempt-1","authorization_evidence":{"reference":"/evidence/m7/authorization.json","sha256":"0000000000000000000000000000000000000000000000000000000000000000"},"authorized_candidate_sha":"2222222222222222222222222222222222222222","candidate_sha":"1111111111111111111111111111111111111111","case_key":"m7.vector","diagnosis":{"reference":"/evidence/m7/diagnosis.json","sha256":"0000000000000000000000000000000000000000000000000000000000000000"},"disposition":{"reference":"git:2222222222222222222222222222222222222222:docs/evidence/decision.md#acceptance","sha256":"0000000000000000000000000000000000000000000000000000000000000000"},"evidence":[{"reference":"/evidence/m7/boundary.log","sha256":"0000000000000000000000000000000000000000000000000000000000000000"}],"host_id":"host-1","kind":"case","lane_id":"lane-1","logical_matrix_id":"matrix-1","manifest_digest":"0000000000000000000000000000000000000000000000000000000000000000","mechanical_result":"provider_environment_failure","ownership_epoch":1,"reviewer_id":"reviewer-1","specification_digest":"0000000000000000000000000000000000000000000000000000000000000000","state":"authorized_next_candidate","subcase_key":"V1.1","verdict":"environment_failure","version":1,"writer_id":"writer-1"},"campaign_id":"m7-vector","digest":"d1cb38cfa05eb2ae22820970573d3c830b48e4e4d8034f3b15986f58572bd9bd","previous_digest":"6c8bd8f8b25650e779430609f18612a462cfc30ac4354e5ec32eb70069dea94e","sequence":6,"version":1}| <>
+          "\n"}
+     ]}
+  ]
+
+  for {name, rows} <- @case_chains do
+    test "independent literal #{name} chain fixes original case records and final head" do
+      rows = unquote(Macro.escape(rows))
+
+      records =
+        Enum.map(rows, fn {preimage, digest, line} ->
+          assert Base.encode16(:crypto.hash(:sha256, preimage), case: :lower) == digest
+          assert {:ok, unsigned} = ConfigJson.decode(preimage)
+          assert {:ok, ^line, record} = encode(unsigned)
+          assert record == Map.put(unsigned, "digest", digest)
+          assert {:ok, ^record} = Events.decode(strip_lf(line))
+          record
+        end)
+
+      bytes = Enum.map_join(rows, fn {_, _, line} -> line end)
+      assert {:ok, projection} = Events.verify_case_history(bytes)
+      assert_case_records(projection, records)
+      assert projection.ownership.head == ownership_head(List.last(records))
+      assert {:ok, ^projection} = Events.verify_case_history(bytes, projection.ownership.head)
+      history = projection.histories |> Map.values() |> hd()
+      assert history.state == List.last(records)["body"]["state"]
+      assert history.unresolved == false
+      assert hd(history.records)["body"]["attempt_id"] == "attempt-1"
+
+      assert Enum.at(history.records, 1)["body"]["mechanical_result"] ==
+               List.last(history.records)["body"]["mechanical_result"]
+    end
+  end
+
+  test "case-free verified prefixes retain exact ownership without inventing histories" do
+    for bodies <- [Enum.take(ownership_prefix(), 1), ownership_prefix()] do
+      {bytes, _} = ownership_chain(bodies)
+      assert {:ok, ownership} = Events.verify_ownership(bytes)
+
+      assert Events.verify_case_history(bytes) ==
+               {:ok, %{ownership: ownership, histories: %{}, records: [], unresolved: []}}
+    end
+  end
+
+  test "initial pre-dispatch observation and direct started histories retain nullable matrix identity" do
+    for matrix <- [nil, "matrix-1"] do
+      started = Map.put(case_body("started"), "logical_matrix_id", matrix)
+      observed = Map.merge(ownership_body(5), case_locator(started))
+
+      for cases <- [[started], [observed, started]] do
+        projection = case_ok!(ownership_prefix() ++ cases)
+        [history] = Map.values(projection.histories)
+        assert history.state == "started"
+        assert List.last(history.records)["body"]["logical_matrix_id"] === matrix
+        assert List.last(history.records)["body"]["attempt_id"] == "attempt-1"
+        assert length(history.records) == length(cases)
+      end
+    end
+  end
+
+  test "unfinished started history stays consumed and preserves its execution-path evidence" do
+    bodies = ownership_prefix() ++ [case_body("started")]
+    {bytes, records} = ownership_chain(bodies)
+    assert {:ok, projection} = Events.verify_case_history(bytes)
+    assert_case_records(projection, records)
+    [history] = Map.values(projection.histories)
+    assert history.state == "started"
+    assert history.records == [List.last(records)]
+    assert List.last(history.records)["body"]["mechanical_result"] == nil
+    assert List.last(history.records)["body"]["evidence"] == case_body("started")["evidence"]
+  end
+
+  test "each accepted mechanical result and independent verdict survives review and non-pass authorization" do
+    routes = [
+      {"pass", "pass"},
+      {"pass", "product_failure"},
+      {"required_action_absent", "model_nonconformance"},
+      {"assertion_failed", "model_nonconformance"},
+      {"assertion_failed", "product_failure"},
+      {"evidence_incomplete_post_dispatch", "evidence_unavailable"},
+      {"provider_environment_failure", "environment_failure"}
+    ]
+
+    for {mechanical, verdict} <- routes do
+      completed = Map.put(case_body("completed"), "mechanical_result", mechanical)
+
+      completed =
+        if verdict == "evidence_unavailable",
+          do: Map.put(completed, "evidence", nil),
+          else: completed
+
+      reviewed = reviewed_body(completed, verdict)
+      cases = [case_body("started"), completed, reviewed]
+      cases = if verdict == "pass", do: cases, else: cases ++ [authorized_body(reviewed)]
+      projection = case_ok!(ownership_prefix() ++ cases)
+      [history] = Map.values(projection.histories)
+      assert Enum.at(history.records, 1)["body"] == completed
+      assert List.last(history.records)["body"]["mechanical_result"] == mechanical
+      assert List.last(history.records)["body"]["verdict"] == verdict
+      assert List.last(history.records)["body"]["candidate_sha"] == completed["candidate_sha"]
+    end
+  end
+
+  test "complete null-matrix pre-merge history stays bound to its original lane without coercion" do
+    cases =
+      Enum.map(
+        [
+          case_body("started"),
+          case_body("completed"),
+          case_body("reviewed"),
+          case_body("authorized_next_candidate")
+        ],
+        &Map.put(&1, "logical_matrix_id", nil)
+      )
+
+    projection = case_ok!(ownership_prefix() ++ cases)
+    [history] = Map.values(projection.histories)
+    assert Enum.all?(history.records, &is_nil(&1["body"]["logical_matrix_id"]))
+    assert history.state == "authorized_next_candidate"
+    case_refuses!(ownership_prefix() ++ [hd(cases), case_body("completed")])
+  end
+
+  test "a locally non-pass authorization cannot replace an original reviewed pass" do
+    completed = Map.put(case_body("completed"), "mechanical_result", "pass")
+    reviewed = reviewed_body(completed, "pass")
+
+    non_pass =
+      Map.merge(reviewed, %{
+        "verdict" => "product_failure",
+        "diagnosis" => ownership_body(9)["diagnosis"]
+      })
+
+    authorized = authorized_body(non_pass)
+    case_refuses!(ownership_prefix() ++ [case_body("started"), completed, reviewed, authorized])
+  end
+
+  test "post-dispatch records without original started and completed facts refuse as orphans" do
+    for cases <- [
+          [case_body("completed")],
+          [case_body("reviewed")],
+          [case_body("authorized_next_candidate")],
+          [case_body("started"), case_body("reviewed")],
+          [case_body("started"), case_body("completed"), case_body("authorized_next_candidate")]
+        ] do
+      case_refuses!(ownership_prefix() ++ cases)
+    end
+  end
+
+  test "purported completion cannot change any execution identity or hide a replacement under another locator" do
+    changes = [
+      {"manifest_digest", String.duplicate("b", 64)},
+      {"specification_digest", String.duplicate("c", 64)},
+      {"candidate_sha", String.duplicate("2", 40)},
+      {"lane_id", "different-lane"},
+      {"logical_matrix_id", nil},
+      {"case_key", "different-case"},
+      {"subcase_key", nil},
+      {"attempt_id", "different-attempt"}
+    ]
+
+    for {field, value} <- changes do
+      completed = Map.put(case_body("completed"), field, value)
+      case_refuses!(ownership_prefix() ++ [case_body("started"), completed])
+    end
+  end
+
+  test "every review and authorization identity remains bound to the original consumed row" do
+    for state <- ["reviewed", "authorized_next_candidate"],
+        {field, value} <- [
+          {"manifest_digest", String.duplicate("b", 64)},
+          {"specification_digest", String.duplicate("c", 64)},
+          {"candidate_sha", String.duplicate("3", 40)},
+          {"lane_id", "other"},
+          {"logical_matrix_id", nil},
+          {"case_key", "other"},
+          {"subcase_key", nil},
+          {"attempt_id", "other"}
+        ] do
+      prefix = [case_body("started"), case_body("completed")]
+      prefix = if state == "reviewed", do: prefix, else: prefix ++ [case_body("reviewed")]
+      case_refuses!(ownership_prefix() ++ prefix ++ [Map.put(case_body(state), field, value)])
+    end
+  end
+
+  test "consumed regressions and duplicate starts or completions refuse while ownership-only regression remains valid" do
+    started = case_body("started")
+    completed = case_body("completed")
+    reviewed = case_body("reviewed")
+    authorized = case_body("authorized_next_candidate")
+    not_dispatched = Map.merge(ownership_body(5), case_locator(started))
+
+    for cases <- [
+          [started, not_dispatched],
+          [started, started],
+          [started, completed, started],
+          [started, completed, completed],
+          [started, completed, reviewed, completed],
+          [started, completed, reviewed, authorized, reviewed],
+          [started, completed, reviewed, authorized, authorized]
+        ] do
+      case_refuses!(ownership_prefix() ++ cases)
+    end
+
+    ownership_ok!(ownership_prefix() ++ [started, not_dispatched])
+  end
+
+  test "original completion result cannot change during review or authorization" do
+    for state <- ["reviewed", "authorized_next_candidate"] do
+      prefix = [case_body("started"), case_body("completed")]
+      prefix = if state == "reviewed", do: prefix, else: prefix ++ [case_body("reviewed")]
+      changed = Map.put(case_body(state), "mechanical_result", "pass")
+      case_refuses!(ownership_prefix() ++ prefix ++ [changed])
+    end
+  end
+
+  test "review appends its diagnosis and named reviewer while retaining original boundary records and heads" do
+    completed =
+      case_body("completed")
+      |> Map.put("diagnosis", ownership_body(4)["prior_rows"])
+      |> Map.put("disposition", ownership_body(4)["disposition"])
+
+    reviewed = reviewed_body(completed, "product_failure")
+
+    {bytes, records} =
+      ownership_chain(ownership_prefix() ++ [case_body("started"), completed, reviewed])
+
+    assert {:ok, projection} = Events.verify_case_history(bytes)
+    assert_case_records(projection, records)
+    [history] = Map.values(projection.histories)
+    assert Enum.at(history.records, 1)["body"] == completed
+    assert List.last(history.records)["body"] == reviewed
+    assert Enum.at(history.records, 1)["digest"] == Enum.at(records, 3)["digest"]
+  end
+
+  test "authorization retains the exact original reviewed evidence reviewer verdict and failure candidate" do
+    prefix =
+      ownership_prefix() ++ [case_body("started"), case_body("completed"), case_body("reviewed")]
+
+    authorized = case_body("authorized_next_candidate")
+    projection = case_ok!(prefix ++ [authorized])
+    [history] = Map.values(projection.histories)
+    assert List.last(history.records)["body"] == authorized
+    assert authorized["authorized_candidate_sha"] != authorized["candidate_sha"]
+
+    for changed <- [
+          Map.put(authorized, "reviewer_id", "other-reviewer"),
+          Map.put(authorized, "verdict", "product_failure"),
+          Map.put(authorized, "evidence", case_body("started")["evidence"])
+        ] do
+      case_refuses!(prefix ++ [changed])
+    end
+  end
+
+  test "null completion evidence stays absent through review and authorization without acquiring a pass" do
+    completed =
+      Map.merge(case_body("completed"), %{
+        "mechanical_result" => "evidence_incomplete_post_dispatch",
+        "evidence" => nil
+      })
+
+    reviewed = reviewed_body(completed, "evidence_unavailable")
+    authorized = authorized_body(reviewed)
+
+    projection =
+      case_ok!(ownership_prefix() ++ [case_body("started"), completed, reviewed, authorized])
+
+    [history] = Map.values(projection.histories)
+    assert Enum.all?(Enum.drop(history.records, 1), &is_nil(&1["body"]["evidence"]))
+
+    assert List.last(history.records)["body"]["mechanical_result"] ==
+             "evidence_incomplete_post_dispatch"
+
+    case_refuses!(
+      ownership_prefix() ++
+        [
+          case_body("started"),
+          completed,
+          Map.merge(reviewed, %{
+            "mechanical_result" => "pass",
+            "evidence" => case_body("completed")["evidence"]
+          })
+        ]
+    )
+  end
+
+  test "independent interleaved subcase histories can retain the same attempt identity without global uniqueness policy" do
+    one = [case_body("started"), case_body("completed"), case_body("reviewed")]
+    two = Enum.map(one, &Map.put(&1, "subcase_key", "V1.2"))
+    interleaved = Enum.zip(one, two) |> Enum.flat_map(fn {left, right} -> [left, right] end)
+    projection = case_ok!(ownership_prefix() ++ interleaved)
+    assert map_size(projection.histories) == 2
+
+    assert Enum.all?(Map.values(projection.histories), fn history ->
+             length(history.records) == 3 and
+               hd(history.records)["body"]["attempt_id"] == "attempt-1"
+           end)
+  end
+
+  test "completed case can be reviewed after valid handoff with both original and new authors retained" do
+    reviewed = Map.merge(case_body("reviewed"), ownership_tuple(ownership_body(3)))
+
+    bodies =
+      ownership_prefix() ++
+        [
+          case_body("started"),
+          case_body("completed"),
+          ownership_body(2),
+          ownership_body(3),
+          reviewed
+        ]
+
+    projection = case_ok!(bodies)
+    [history] = Map.values(projection.histories)
+
+    assert ownership_tuple(Enum.at(history.records, 1)["body"]) ==
+             ownership_tuple(ownership_body(1))
+
+    assert ownership_tuple(List.last(history.records)["body"]) ==
+             ownership_tuple(ownership_body(3))
+
+    assert projection.ownership.owner == ownership_tuple(ownership_body(3))
+    assert Enum.map(history.records, & &1["sequence"]) == [3, 4, 7]
+  end
+
+  test "pending ownership remains pending and each ownership error propagates unchanged" do
+    bodies =
+      ownership_prefix() ++ [case_body("started"), case_body("completed"), ownership_body(2)]
+
+    projection = case_ok!(bodies)
+    assert projection.ownership.pending != nil
+    assert projection.ownership.owner == ownership_tuple(ownership_body(1))
+
+    for invalid <- [
+          bodies ++ [case_body("reviewed")],
+          ownership_prefix() ++ [Map.put(case_body("started"), "writer_id", "other")],
+          ownership_prefix() ++ [ownership_body(3)]
+        ] do
+      {bytes, _} = ownership_chain(invalid)
+      assert Events.verify_case_history(bytes) == Events.verify_ownership(bytes)
+      assert Events.verify_case_history(bytes) == {:error, :invalid_attempt_ownership}
+    end
+  end
+
+  test "complete framing body and anchor failures propagate without replacing exact unresolved tails" do
+    {prefix, records} = ownership_chain(ownership_prefix() ++ [case_body("started")])
+    head = ownership_head(List.last(records))
+
+    {complete, _} =
+      ownership_chain(ownership_prefix() ++ [case_body("started"), case_body("completed")])
+
+    line = binary_part(complete, byte_size(prefix), byte_size(complete) - byte_size(prefix))
+
+    for size <- 1..(byte_size(line) - 1) do
+      tail = binary_part(line, 0, size)
+      expected = {:error, {:incomplete_attempt_append, head, tail}}
+      assert Events.verify_case_history(prefix <> tail) == expected
+      assert Events.verify_case_history(prefix <> tail, head) == expected
+    end
+
+    for invalid <- [nil, "", prefix <> "\n", String.duplicate("x", 65_537), "{"] do
+      assert Events.verify_case_history(invalid) == Events.verify_ownership(invalid)
+    end
+
+    {invalid_body, _} = framed_ownership_chain(ownership_prefix() ++ [%{}])
+    assert Events.verify_case_history(invalid_body) == {:error, :invalid_attempt_event}
+    assert Events.verify_case_history(prefix, nil) == {:error, :invalid_committed_attempt_head}
+
+    {fork, _} =
+      ownership_chain(ownership_prefix() ++ [Map.put(case_body("started"), "attempt_id", "fork")])
+
+    assert Events.verify_case_history(fork, head) == {:error, :committed_attempt_head_mismatch}
+    {stale, _} = ownership_chain(ownership_prefix())
+    assert Events.verify_case_history(stale, head) == {:error, :committed_attempt_head_mismatch}
+    assert {:ok, projection} = Events.verify_case_history(complete)
+
+    for anchor <- Enum.map(records, &ownership_head/1) ++ [projection.ownership.head] do
+      assert Events.verify_case_history(complete, anchor) == {:ok, projection}
+    end
+  end
+
+  test "local same-candidate and pass authorization refusals still precede case replay" do
+    authorized = case_body("authorized_next_candidate")
+
+    for changed <- [
+          Map.put(authorized, "authorized_candidate_sha", authorized["candidate_sha"]),
+          Map.merge(authorized, %{"mechanical_result" => "pass", "verdict" => "pass"})
+        ] do
+      {bytes, _} = framed_ownership_chain(ownership_prefix() ++ [changed])
+      assert Events.verify_case_history(bytes) == {:error, :invalid_attempt_event}
+    end
+  end
+
+  test "repeated pre-dispatch observations remain explicitly unresolved with every body retained" do
+    observed = Map.merge(ownership_body(5), case_locator(case_body("started")))
+    changed = Map.put(observed, "evidence", case_body("started")["evidence"])
+
+    {bytes, records} =
+      ownership_chain(ownership_prefix() ++ [observed, changed, case_body("started")])
+
+    assert {:unresolved, projection} = Events.verify_case_history(bytes)
+    assert_case_records(projection, records)
+    [history] = Map.values(projection.histories)
+    assert history.state == "not_dispatched"
+    assert history.unresolved
+    assert hd(projection.unresolved).reason == :repeated_not_dispatched
+    assert Enum.map(history.records, & &1["body"]) == [observed, changed, case_body("started")]
+
+    assert {:unresolved, ^projection} =
+             Events.verify_case_history(bytes, projection.ownership.head)
+  end
+
+  test "identical and changed additional reviews retain both originals without selecting a later verdict" do
+    reviewed = case_body("reviewed")
+
+    for next <- [
+          reviewed,
+          Map.merge(reviewed, %{"reviewer_id" => "other", "verdict" => "product_failure"})
+        ] do
+      {bytes, records} =
+        ownership_chain(
+          ownership_prefix() ++
+            [case_body("started"), case_body("completed"), reviewed, next, authorized_body(next)]
+        )
+
+      assert {:unresolved, projection} = Events.verify_case_history(bytes)
+      assert_case_records(projection, records)
+      [history] = Map.values(projection.histories)
+      assert history.state == "reviewed"
+      assert history.unresolved
+      assert hd(projection.unresolved).reason == :additional_review
+      assert Enum.at(history.records, 2)["body"] == reviewed
+      assert Enum.at(history.records, 3)["body"] == next
+    end
+  end
+
+  test "review evidence replacement or augmentation retains completion and reports unresolved semantics" do
+    completed = case_body("completed")
+    reviewed = case_body("reviewed")
+
+    for evidence <- [
+          case_body("started")["evidence"],
+          completed["evidence"] ++ case_body("started")["evidence"]
+        ] do
+      changed = Map.put(reviewed, "evidence", evidence)
+
+      {bytes, records} =
+        ownership_chain(ownership_prefix() ++ [case_body("started"), completed, changed])
+
+      assert {:unresolved, projection} = Events.verify_case_history(bytes)
+      assert_case_records(projection, records)
+      assert hd(projection.unresolved).reason == :changed_review_evidence
+      [history] = Map.values(projection.histories)
+      assert Enum.at(history.records, 1)["body"] == completed
+      assert List.last(history.records)["body"] == changed
+    end
+  end
+
+  test "authorization diagnosis or existing disposition changes remain unresolved with original review retained" do
+    reviewed = Map.put(case_body("reviewed"), "disposition", ownership_body(4)["disposition"])
+    authorized = authorized_body(reviewed)
+
+    for changed <- [
+          Map.put(authorized, "diagnosis", ownership_body(4)["prior_rows"]),
+          Map.put(authorized, "disposition", ownership_body(4)["prior_rows"])
+        ] do
+      {bytes, records} =
+        ownership_chain(
+          ownership_prefix() ++ [case_body("started"), case_body("completed"), reviewed, changed]
+        )
+
+      assert {:unresolved, projection} = Events.verify_case_history(bytes)
+      assert_case_records(projection, records)
+      assert hd(projection.unresolved).reason == :changed_authorization_boundary_references
+      [history] = Map.values(projection.histories)
+      assert Enum.at(history.records, 2)["body"] == reviewed
+      assert List.last(history.records)["body"] == changed
+    end
+  end
+
+  defp case_locator(body),
+    do: Map.take(body, ~w(candidate_sha lane_id logical_matrix_id case_key subcase_key))
+
+  defp case_body("started"), do: ownership_body(6)
+  defp case_body("completed"), do: ownership_body(8)
+  defp case_body("reviewed"), do: ownership_body(9)
+  defp case_body("authorized_next_candidate"), do: ownership_body(10)
+
+  defp reviewed_body(completed, verdict) do
+    Map.merge(completed, %{
+      "state" => "reviewed",
+      "verdict" => verdict,
+      "reviewer_id" => "reviewer-1",
+      "diagnosis" =>
+        if(verdict == "pass", do: completed["diagnosis"], else: ownership_body(9)["diagnosis"])
+    })
+  end
+
+  defp authorized_body(reviewed) do
+    Map.merge(reviewed, %{
+      "state" => "authorized_next_candidate",
+      "authorized_candidate_sha" => ownership_body(10)["authorized_candidate_sha"],
+      "authorization_evidence" => ownership_body(10)["authorization_evidence"],
+      "disposition" => reviewed["disposition"] || ownership_body(10)["disposition"]
+    })
+  end
+
+  defp case_ok!(bodies) do
+    {bytes, records} = ownership_chain(bodies)
+    assert {:ok, projection} = Events.verify_case_history(bytes)
+    assert_case_records(projection, records)
+    projection
+  end
+
+  defp case_refuses!(bodies) do
+    {bytes, _} = ownership_chain(bodies)
+    assert {:ok, _} = Events.verify_ownership(bytes)
+    assert Events.verify_case_history(bytes) == {:error, :invalid_attempt_case_history}
+  end
+
+  defp assert_case_records(projection, records) do
+    cases = Enum.filter(records, &(&1["body"]["kind"] == "case"))
+    assert projection.records == cases
+
+    for {locator, history} <- projection.histories do
+      assert history.records == Enum.filter(cases, &(case_locator(&1["body"]) == locator))
+    end
+  end
+
   defp ownership_prefix, do: [ownership_body(0), ownership_body(1)]
   defp ownership_body(index), do: vector(index)["body"]
   defp ownership_tuple(body), do: Map.take(body, ~w(writer_id host_id ownership_epoch))

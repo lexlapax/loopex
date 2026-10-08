@@ -1,5 +1,14 @@
 # M7 Implementation Tasks
 
+Consumed case replay is integrated literally from tested `6a261667`.
+Original32645 passed all99 cases on each supported pair in107.513 seconds,
+with eight original joins and43 authenticated artifacts. Only its added T14
+row closes. Original T01–T19 remain88 done/85 todo/6 retired; added354 done/
+22 todo. The combined full check and broader original T14 work remain open.
+ProgressSink source has23 cases and awaits independent review/native proof.
+Exact evidence is in the [resume record](M7-resume.md). Earlier entries below
+are historical where superseded.
+
 The maintainer accepted ADR0058, resolving its asked decision. Its
 [disposition](../developer/agent-context-map.md#disposition-m7-bounded-progress-delivery-2026-10-07)
 binds the exact proposal. Implementation and proof remain open. Case replay
@@ -14190,7 +14199,7 @@ repeating completed provider work.
 
 - [x] Pin and implement the closed current attempts-event body union, including missing-evidence consumption, retained case identity, writer/handoff/head relations and causal authorization; prove exact independent vectors and all positive/negative body variants on both supported toolchains before ordered replay, physical writer ownership or runner activation. ADR0057 is accepted at `a67dc97e`; codec `99dd199b` passed all54 cases on both supported pairs in original96348; its two tested files integrate literally.
 - [x] Validate ordered attempts ownership with the existing frame and accepted body codecs; prove genesis/designation, optional succession placement, original relinquishment-to-acceptance joins, exact owner tuples and epochs, pending handoff, reused identities and unresolved tails on both supported pairs. Keep this ownership projection distinct from case-state replay, evidence, quiescence, authority and physical dispatch.
-- [ ] Project the accepted consumed case-history core through original started, completed, reviewed and authorized-candidate records; preserve immutable execution identities, original mechanical facts and whole record history, propagate exact ownership/framing/anchor errors and retain unapproved same-state or reference choices explicitly unresolved. Prove complete original plus new cases on both supported pairs; no manifest, evidence, authority or physical dispatch claim.
+- [x] Project the accepted consumed case-history core through original started, completed, reviewed and authorized-candidate records; preserve immutable execution identities, original mechanical facts and whole record history, propagate exact ownership/framing/anchor errors and retain unapproved same-state or reference choices explicitly unresolved. Prove complete original plus new cases on both supported pairs; no manifest, evidence, authority or physical dispatch claim.
 
 - [x] Inventory all 74 numbered V1–V13 steps and 155 descriptive subcases against exact accepted plan spans and current supporting tests; retain source identities, existing evidence and every missing executable owner/oracle pin. This is read-only planning evidence, not an accepted execution manifest or provider execution.
 

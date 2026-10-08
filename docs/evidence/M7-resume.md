@@ -29,6 +29,30 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Reboot continuation on 2026-10-07
 
+Case replay original32645 is TERMINAL0 and collected
+PASS_ATTEMPT_CASE_REPLAY_PROOF at isolated `6a261667` in107.513 seconds.
+Both supported pairs executed99 complete cases, zero failures/exclusions/skips/
+invalid; eight original joins and43 authenticated artifacts. Output
+`M7/attempt-case-replay-proof-20261007-v1`; collection SHA-256
+`49414f9844d98aa32f9df362913c75cde8bce0c541804397616adfe7d9c1031e`;
+terminal `e863fdf04a796dc42076ade73d28cc243c35a52bb0b38473592d499b6fc74bd6`;
+latest1779 registry `37e45fdae02cf30da8802e96b07b00e927a483cdcf2d023ad5a090cb2c8496bd`.
+Do not repoll32645, recollect it or rerun unchanged99 proof. Enabled runner
+59a30065, factual review5d1fea3d and complete prejoin review5add7c4c are
+retained at `M7/case-replay-proved-context-20261007-v1/retention.json`,
+SHA-256 `49e9d9e2ecde1019d2d9b7032ba2c7060561c7988191028dd90c6ef8639a1274`. The two tested files integrate literally;
+only added T14 pure case-replay closes. Original T01–T19 remain88/85/6;
+added354/22. Original T14 remains open. Next step is the new canonical combined
+current check, with source-only V3 recipe ba6485b1 and actual32-field binding
+pending. Original14854 remains FAIL; no full integration pass is inferred.
+
+ProgressSink A is frozen source-only in its isolated worktree with23 cases;
+packet5216b3f1 at `/private/tmp/m7-progress-sink-source-20261007-v1/source.json`.
+Independent source review and source-only native recipe preparation run in
+parallel. Native parsing/formatting/compilation/tests remain UNRUN. ADR0059
+remains the sole asked pending decision. Earlier entries below are historical
+where superseded.
+
 Corrected formatter44713 is TERMINAL0 and collected
 PASS_ATTEMPT_CASE_REPLAY_FORMAT in13.566 seconds, six original joins/38
 authenticated artifacts. Output `M7/attempt-case-replay-format-20261007-v2`;
