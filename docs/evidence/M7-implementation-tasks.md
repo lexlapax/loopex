@@ -1,5 +1,19 @@
 # M7 Implementation Tasks
 
+Current checkpoint: the complete contract source is staged in isolated,
+unserved candidate `a7a83d22`. The independent Node runner proved both manifests
+and 3,664 payload vectors at `09110861`; after removing a duplicate export,
+actual client gates passed 12 scenarios across two transports and 20 controlled
+peer connections at a7. Their earlier failed originals remain retained. Native
+server checks, real artifact delivery and complete cleanup remain unproved.
+Artifact contract/session-binding repair and daemon native progress support now
+have separate source writers. A confirmed empty steer-reason rejection is also
+being repaired. No native handle is live; the next registry seed has 2,253 rows.
+Counts remain originals88/85/6 and additions365/24 because none of these focused
+prerequisites completes an open checklist row. The [resume record](M7-resume.md)
+owns exact identities and the next integration order. Entries below are
+historical checkpoints.
+
 Current checkpoint: the saved EOF repair at `d4f13dcc` passed all three selected
 real lifecycle cases on both supported toolchains. Original87974 is terminal
 and collected once after 123.580 seconds, 12 actual joins and 54 artifacts.

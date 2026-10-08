@@ -27,6 +27,100 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+### Current contract candidate and client checks — 2026-10-08
+
+This entry supersedes the execution order and registry seed below. Primary was
+clean `2e4f5af85d3ae954819520fe12bc3165e2f37630`, pushed to `origin/m7`.
+The isolated, unserved candidate is
+`a7a83d2226e706ece6e4dc94a01983e1f16f5b40` in
+`/Users/spuri/.codex/worktrees/m7-coupled-current-contract/loopex`.
+It joins foreground Mapping/Connection/Delivery, daemon Request/dispatch/closed
+event projections, complete /3-/4 manifests and independent client gates.
+The current App Server generation delegates to the manifest. All saved Core32
+files and the declared OTP crypto dependency remain preserved. This candidate
+has not passed native formatting, compilation or complete server tests and
+must not be served as a completed generation.
+
+New saved donor commits are foreground Connection `9948ade1`, Delivery
+`53a7449d`, daemon dispatch `d13b19f1`, protocol/client source `4417342a`, and
+daemon event/create-uncertainty source `0e8c802a`. Root additionally saved the
+foreground compaction session-ID bound at `01641d68`, the aggregate answer
+vector comparison repair at `09110861`, and duplicate Node export removal at
+`0f1b5672`. Commits live in Git and exact patches/tree/commit metadata are
+retained; these isolated source commits have not been pushed as served primary
+implementation.
+
+Three original Node runs are terminal and collected once:
+
+- Original81371 at `01641d68` failed the new aggregate runner's comparison of
+  textual answer literals with opaque decoded bytes. Two joins, 1.111 seconds;
+  collection `a43e561ed57d4e845ff5122aa9c7433460ef2cc489b767f3040b03e7e9da6d8a`.
+  Output `M7/current-clients-focused-20261008-v1` remains failed.
+- Original10770 at `09110861` passed both complete canonical manifests,
+  3,664 payload vectors and 60 embedded-definition digest changes. Its following
+  client-gate stage failed on a duplicate JavaScript generation export. Three
+  joins, 1.390 seconds; collection
+  `c676239a182c7e0e4a748975311dd78b15e7333c54f053a1066b5ab08890d79a`.
+  Output `M7/current-clients-focused-20261008-v2` remains an overall failure.
+- Original24565 at `a7a83d22` passed actual independent client initialization
+  gates against controlled child-process and Unix-socket peers: two transports,
+  12 scenarios, 20 peer connections, zero session frames after mismatched
+  initialization. Two joins, 0.999 seconds; collection
+  `af0d35df075511e9f8e443d2c3eb5f496d23b895696a0a82821ed35ef8a8830e`.
+  Output `M7/current-clients-focused-20261008-v3`; terminal
+  `7605f9d21114daf149ea41401c2148a0347be1673cbe6f612ae4f23e264aa7d8`.
+  Earlier unchanged vector bytes were not rerun. Controlled peers do not prove
+  native server negotiation, artifact delivery or physical output cleanup.
+
+The next actual native stage seeds from v3's complete 2,253-row registry,
+SHA-256 `2acc4124d4aaa97f46d75d3f600bd20123ab3e13255066b03f86c16be0da12fc`.
+No native handle is live. No original may be recollected or repeated unchanged.
+
+Independent source review found three concrete contract defects. The typed
+creation-uncertainty reply and complete daemon event projections are now saved
+in the candidate, with actual Store fault/retry and malformed-event tests
+authored but unrun. Artifact open still accepts the superseded encoded object
+tuple instead of the accepted literal use locator; the existing facade and
+Store description capabilities suffice to correct it without a new API.
+Production daemon progress still lacks its required native credited route.
+A subsequent source review also found an empty steer-reason rejection; that
+small current-contract correction is assigned with the artifact unit.
+
+Active independent writers have separate worktrees and disjoint ownership:
+
+- `m7-artifact-current-repair/loopex`, based on a7, owns literal artifact request
+  parsing, immutable use/session validation, public transfer reference results,
+  obsolete encoder removal and affected caller/authority tests. It also owns
+  the confirmed empty-reason correction and its tests. Its narrow foreground
+  fixture metadata correction must preserve original actor/cleanup mechanics.
+- `m7-daemon-native-progress/loopex`, based on a7, owns Service, Owner, Registry
+  and OutputBuffer ingress/fanout/frame custody support and direct tests.
+  SocketConnection belongs to the artifact writer until that unit stops.
+  The progress writer must hand off the required Socket interface and preserve
+  the distinction between forced transport retirement and native cleanup.
+
+The protocol worker is reviewing the accounting metric against accepted
+ADR0058 and the private guardian proposal. It has no source-write ownership.
+The stopped-output guardian and actual 32-CAS exhaustion proof remain open;
+neither has an accepted new implementation proposal. ADR0063 remains the sole
+asked unanswered decision. Restore175 and complete foreground integration
+remain required after their dependencies are ready.
+
+Next finish and save the artifact unit, join the daemon progress support and
+its Socket implementation, then format/compile the exact integrated source and
+run the required changed-boundary tests. Do not replace those native tests with
+the passing controlled-peer results. Checklist counts remain originals
+88 done / 85 todo / 6 retired, additions 365 done / 24 todo. No checkbox closes
+for source preparation or these focused client prerequisites.
+
+Immutable context `M7/coupled-current-context-20261008-v5/retention.json`,
+SHA-256 `2fae290dbb69b9263261a4a019010cabccb6ffacbdbe93a77acfb7a625e7630b`,
+retains 21 reports/runners/collectors, nine exact source commits and the complete
+candidate patch from primary2e. It chains to v4; native originals remain in
+their own immutable output directories. The isolated create-unknown V1 patch
+contained a spurious resume insertion and is superseded by V2; the complete
+six-file daemon patch reconstructs all final hashes exactly.
+
 ### EOF qualification and coupled protocol work — 2026-10-08
 
 This entry supersedes the native-registry seed and execution order in the
