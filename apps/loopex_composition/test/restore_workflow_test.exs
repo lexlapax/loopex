@@ -997,7 +997,10 @@ defmodule LoopexComposition.RestoreWorkflowTest do
         | "manifest_sha256" => hash(baseline),
           "stores" =>
             Enum.map(fixture.plan["stores"], fn store ->
-              %{store | "sha256" => hash(File.read!(Path.join(fixture.backup, store["relative_path"])))}
+              %{
+                store
+                | "sha256" => hash(File.read!(Path.join(fixture.backup, store["relative_path"])))
+              }
             end)
       }
 
