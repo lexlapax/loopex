@@ -533,10 +533,12 @@ defmodule Loopex.AppServer.SessionMappingTest do
     flooded_events =
       Enum.reduce(1..128, queue, fn index, queue ->
         Delivery.event(queue, %{
+          "command_id" => "pressure-command",
+          "run_id" => "pressure-run",
+          "content" => String.duplicate("e", 65_536),
           event_id: "event-#{index}",
-          kind: "run.progressed",
-          event_sequence: index,
-          payload: %{"bytes" => String.duplicate("e", 65_536)}
+          kind: "user.message_appended",
+          event_sequence: index
         })
       end)
 

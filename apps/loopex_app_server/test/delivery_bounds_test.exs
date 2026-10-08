@@ -359,14 +359,18 @@ defmodule Loopex.AppServer.DeliveryBoundsTest do
     flooded =
       Enum.reduce(1..(Map.fetch!(limits, "durable_queue_records") * 4), queue, fn index, queue ->
         Delivery.event(queue, %{
+          "command_id" => "pressure-command",
+          "run_id" => "pressure-run",
+          "content" => String.duplicate("e", 4_096),
           event_id: "event-#{index}",
-          kind: "run.progressed",
-          event_sequence: index,
-          payload: %{"bytes" => String.duplicate("e", 4_096)}
+          kind: "user.message_appended",
+          event_sequence: index
         })
       end)
 
     assert Delivery.detached?(flooded)
+    assert elem(Delivery.usage(flooded).durable, 0) == Map.fetch!(limits, "durable_queue_records")
+    assert Delivery.pulled_cursor(flooded) == Map.fetch!(limits, "durable_queue_records")
 
     detachment = Delivery.detachment(flooded)
     assert detachment["code"] == "detached"
@@ -389,15 +393,23 @@ defmodule Loopex.AppServer.DeliveryBoundsTest do
     detached =
       Enum.reduce(1..256, queue, fn index, queue ->
         Delivery.event(queue, %{
+          "command_id" => "pressure-command",
+          "run_id" => "pressure-run",
+          "content" => String.duplicate("e", 65_536),
           event_id: "event-#{index}",
-          kind: "run.progressed",
-          event_sequence: index,
-          payload: %{"bytes" => String.duplicate("e", 65_536)}
+          kind: "user.message_appended",
+          event_sequence: index
         })
       end)
 
     assert Delivery.detached?(detached)
-    {_pending, drained} = drain(detached)
+    {count, bytes} = Delivery.usage(detached).durable
+    assert count > 0 and count < 64
+    assert bytes <= Session.limits()["durable_queue_bytes"]
+    assert bytes + Frame.output_record_bytes() > Session.limits()["durable_queue_bytes"]
+    assert Delivery.pulled_cursor(detached) == count
+    {pending, drained} = drain(detached)
+    assert length(pending) == count
 
     # Progress arriving after the detachment is dropped rather than queued: the
     # reader is gone, and holding a rendering aid for it would be holding memory
