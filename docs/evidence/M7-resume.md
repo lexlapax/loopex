@@ -29,6 +29,20 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Reboot continuation on 2026-10-07
 
+Case native preparation and next-fullV3 are retained as38 immutable files at
+`M7/case-replay-native-preparation-context-20261007-v1/retention.json`, SHA-256
+`388f71af5d21f7de8a6e45b76357781c5e5e13e71ef326a94b301f97f4c06975`.
+Independent case recipe review73b844bf approves formatterc0c0125f and
+proof1043e4ab. Root bound only two formatter review identities, producing
+disabled78a09bc1 with binding packetfcbf07a9; factual review is pending.
+Both native gates remain false and no original case handle exists yet.
+Next-fullV3 ba6485b1/58c30f1c remains disabled with all32 future facts None,
+strictly requiring actual positivecase99; independent source review is pending.
+Bind-next-full-v3 and bind-case-proof scripts are prepared only and unexecuted.
+ADR0058's ProgressSink writer is active in its isolated worktree. ADR0059 is
+the sole asked pending decision. No added or original row closes here.
+
+
 ADR0058's first implementation unit is assigned in isolated
 `/Users/spuri/.codex/worktrees/m7-progress-sink/loopex`, baseline583f84ec.
 The writer owns only new Core progress_sink.ex and progress_sink_test.exs;
