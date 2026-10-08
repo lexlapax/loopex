@@ -29,6 +29,61 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Reboot continuation on 2026-10-07
 
+Latest checkpoint after native verification: exact proposal candidate9ba346fe
+is pushed. ADR0061 documentation original25772 is collected PASS in71.019seconds,
+two original joins and18 authenticated artifacts. Complete output is under
+`M7/adr0061-proposed-docs-20261007-v1`; collection SHA-256
+`e0a7eafa1dc318873d7869764bc6a5a49c4be4f8b469ef38a9f0948003c08dca`, terminal
+`ffa0ff6f`,1819-row registry `9c444571`. The exact-pair approval question has been
+sent and remains unanswered; cancellation codec work stays paused. Both
+Proposed digests remain unchanged. Recipe/capture context is retained under
+`M7/adr0061-docs-recipe-context-20261007-v1/retention.json`, SHA-256
+`43e4c12b0ccc7c45b821d98514902969392a4dfd68b37fe9dd9e0aa58315534a`,20 files.
+V1 private docs recipe was never executed; V2 corrected its actual predecessor
+terminal shape and artifact count before the successful native run.
+
+ProgressSink formatter61580 is collected PASS,11.630seconds,six joins/38artifacts;
+its actual AST-equivalent formatting is saved at57665b26, direct childf3b91da5.
+Paired whole proof83764 is collected FAIL,28.485seconds,eight joins/44artifacts,
+current26 passed/floor24 passed2 failed. The floor now fails at the explicit
+one-byte visible/eight-byte referenced witness, before queue arithmetic.
+Collection SHA-256 `a0738ed3f05fbc5ee7e63f7cab3962df5ea00782d35fdba77d3417b5ca632a70`,
+terminal `fcd7610f`,1817-row registry `5220f110` remain under
+`M7/progress-sink-proof-20261007-v8`. Originals61580 and83764 must not be rerun
+or recollected. V8 recipe/capture context is retained under
+`M7/progress-sink-v8-execution-context-20261007-v1/retention.json`, SHA-256
+`1bab13b8bccdadb14120409e2ae3642dd2a06efcf43c7de85b64f47042e3691f`,33 files.
+
+The independently reviewed same-proof fixture repair now uses eight-byte copied
+session/turn identities, with explicit backing witnesses. Exact cap524288,
+first-extra524296, escaped5504 and genuine large-backed refusal remain.
+Production5682384f and other24 cases are unchanged. Clean isolated raw
+`e13e15b9c0d0a83fbe8badb25f646d72da78a7ce`,tree
+`b59827b161258650853936ed07779d0460a56326`,parent57665b26 is saved. Closed source
+packet8177eaf6, independent revieweec667cb and rawfacts5c516517 are retained under
+`M7/progress-sink-aligned-fixture-context-20261007-v1/retention.json`, SHA-256
+`c35d5347268a7e0d01c2e6a4ec27bd85a420b5e9fd29bbf527832d81d2bb8899`,16 files.
+Native proof is UNRUN; V9 private recipe review is running, consuming the actual
+intervening documentation run's1819-row history without repeating old checks.
+
+Core Store V1 and V2 are source-blocked by impossible recovery-state positives.
+V2 repaired positiveG>V and exact active reservationV; V3 is repairing the
+remaining occupied-oddV/empty-evenV invariant. Constructors, original final
+identity/bytes and schemas stay unchanged. Native proof remains UNRUN.
+Both frozen packets and reviews210bfd67/45ff10f9 plus adapter map88f58005 are
+retained under `M7/creation-store-core-blocked-context-20261007-v1/retention.json`,
+SHA-256 `6788299f44a98e7308f18aca98f0660900e8f58a5d3d4348525666d81228a0cf`,41 files.
+The adapter writer owns shared State/Memory/Local/conformance in managed
+`/Users/spuri/.codex/worktrees/m7-creation-storage/loopex`,base9ba346fe. Durable
+frame encoding/replay awaits a concrete decision: new reservation-based finals
+must be distinguishable from retained exact historical final bindings, with
+one current decoder and missing-lineage rejection. No new frame marker or old
+schema decoder is implemented by assumption. Independent atomic mechanics
+continue; Composition restore and Control remain separate open workstreams.
+Counts remain88/85/6 original and356/26 added for T01–T19. No task closes from
+this checkpoint; prior entries below are historical where superseded.
+
+
 Latest continuation: ADR0059 acceptance is pushed at `3212b0ed`. Its first
 Core Store source unit is frozen at packet `f189b278`, with26 new boundary
 cases. Independent review is running; native proof, Local persistence and

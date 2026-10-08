@@ -1,5 +1,14 @@
 # M7 Implementation Tasks
 
+Current continuation: ADR0061's exact proposal9ba346fe passed documentation
+validation; its asked approval is pending. Core recovery-state review is being
+repaired before native verification. Adapter atomic mechanics proceed in a
+separate worktree; exact persistent replay encoding needs a concrete decision.
+ProgressSink whole83764 remains failed, with current26/floor24 passing. The
+reviewed eight-byte fixture repair is saved ate13e15b9; new proof remains UNRUN.
+T01–T19 totals remain88 original done/85 todo/6 retired and356 added done/26 todo.
+The [resume record](M7-resume.md) retains original run/source identities.
+
 Latest status: ADR0059's Core Store unit has26 new cases and awaits review/native
 proof. Durable adapters, Control/carrier and cancellation readers remain open.
 ADR0061 is Proposed and independently reviewed; its exact cancellation envelope
