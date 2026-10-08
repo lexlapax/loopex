@@ -12,11 +12,13 @@ todo. Exact identities remain in the [resume record](M7-resume.md).
 Foreground host FIFO/emitted-cursor integration is now assigned from4d435363.
 Original47604/14097/75037/90126 failures remain retained. Credited Core ingress V2
 is frozen with expected385 cases but independently blocked by finite-CAS prefix
-ordering; V3 correction and stronger private projected credit are assigned.
+ordering in both Control and StreamRelay; V3 correction and stronger private
+projected credit are assigned.
 Current creation rejoins at isolatede194ff94 with complete conflict state saved
 and exact reverse reproduction of current bytes; no new native result is claimed.
 Authored creation's six-path packet is source-ready,92 declarations across five
-complete files; expanded census, independent review and paired native remain.
+complete files. Expanded census confirms92 conditional registered cases including
+three long-bound cases; independent review and paired native remain.
 Custody restore remains source-qualified pending current boundary/readiness joins
 and complete175 native cases. Exact references and ownership are in the resume
 record. All broad rows remain open; counts change only for the proved writer unit.

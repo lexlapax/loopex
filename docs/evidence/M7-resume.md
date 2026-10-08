@@ -71,12 +71,19 @@ and all22 existing creation lifecycle cases, after V3 review and final census.
 Rejoin is source-only, not another passing creation or integration result.
 
 V3 source ownership is assigned to `/root/t15_original_closure_map` in the same
-isolated ingress worktree, only Control/ProgressSink/AgentLoop/Sink tests and the
-existing progress consumer helper. It also coordinates a private projected
+isolated ingress worktree, Control/ProgressSink/StreamRelay, AgentLoop/Sink tests,
+the existing progress consumer helper, and relay-specific compaction tests if
+required. Review found the same finite-CAS prefix skip in StreamRelay as in
+Control: both ordered drains must halt on a retained unresolved claim, distinct
+from an actually absent reference. The writer also coordinates a private projected
 credit correction with the foreground writer. Existing projected2*backing+6*bytes
 can reserve about8N while actual tab-heavy native/flat/driver/Bash copies peak
 about9N. Stronger conservative charging keeps the same32/512KiB/public API;
-raw projection admission must remain sufficient. Genuine finite-CAS loss,
+raw projection admission must remain sufficient. The selected conservative
+private profile is projected `8192 + 2*backing + 12*visible_bytes` and raw
+`8192 + 8*backing + 12*visible_bytes`. The foreground writer must retain its
+actual encoding/copy accounting proof; these formulas are source work, not a
+passing capacity result. Genuine finite-CAS loss,
 physical custody and actual copy accounting proofs are required. No fake stage
 result, production hook, synthetic arena edit or renewed allowance is authorized.
 Original28 Sink assertions/helpers/cutoffs remain. Independent V3 review follows.
@@ -86,9 +93,16 @@ Authored creation source is frozen in its allocated worktree at
 `55afa3c3e0d19b55bee68fdc548aef2482d2cfa6a22f2114502193d4930e0ac8`;
 report `bec5b9a54109d466a50b846bec6c68d1dab3f416090b110e59c72420d32974bc`.
 Exactly six paths change; four existing proof files are preserved. It adds21
-source declarations, total92 declarations across five whole files. Expanded
-census and long-bound supplement are assigned to its writer; do not equate
-source declarations with executed or expanded cases. All native/parser/Git
+source declarations, total92 declarations across five whole files. The sealed
+expanded census confirms92 statically registered cases conditional on compilation,
+including three `long_bound` cases. Retain all five whole files and explicitly
+include those cases. Census supplement SHA-256
+`9be75e82bab672acd3c1c393cf546b55731744ac17d5b796a00ecbe1f5b31771`;
+JSON `38b3d7994e16d32338fefeed53711b76f3b07af81d30734b4415bce15f8c80e2`.
+Immutable external retention
+`M7/progress-authored-census-context-20261007-v1/retention.json`, SHA-256
+`47d367ef85f476f97143a03a2cc3596432e9a5552efb5d77a4dfe72a2755d145`.
+Do not equate this conditional census with execution. All native/parser/Git
 qualification remains unrun. Independent review and current Core-credit rejoin
 must precede actual paired proof. Store carrier custody body is mechanically
 preserved; managed preparation retains one cleanup capture through later phases.
