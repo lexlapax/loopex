@@ -1603,7 +1603,10 @@ defmodule LoopexDaemon.SocketTransportTest do
           selecting: not is_nil(state.send_select)
         }
 
-        reraise %{exception | message: exception.message <> "; retained custody: " <> inspect(counts)},
+        reraise %{
+                  exception
+                  | message: exception.message <> "; retained custody: " <> inspect(counts)
+                },
                 __STACKTRACE__
     end
 
