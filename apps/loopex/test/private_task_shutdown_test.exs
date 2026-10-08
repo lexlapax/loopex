@@ -268,6 +268,7 @@ defmodule Loopex.PrivateTaskShutdownTest do
       stop_reference: stop_reference,
       group: group,
       owner_groups: children.owner_groups,
+      sessions: children.sessions,
       roles: roles,
       monitors: monitors
     })
@@ -721,12 +722,28 @@ defmodule Loopex.PrivateTaskShutdownTest do
 
         collect(observer, [record | records], count + 1, fence, targets, actors, resources)
 
-      # Concept: process tracing can announce a link without retaining any payload.
-      # Technical depth: count these fixed metadata shapes toward the same cap;
-      # they do not prove delivery of a later EXIT and are not persisted.
-      {:trace_ts, pid, event, other, _at}
+      # Concept: original actor links retain their actual lifecycle order.
+      # Technical depth: every accepted shape still counts toward the same cap.
+      # Retain fixed metadata only for original actor pairs; these rows do not
+      # prove delivery of a later EXIT or extend the captured actor inventory.
+      {:trace_ts, pid, event, other, at}
       when is_map_key(actors, pid) and is_pid(other) and
              event in [:link, :unlink, :getting_linked, :getting_unlinked] ->
+        records =
+          if is_map_key(actors, other) do
+            [
+              %{
+                "event" => "process_" <> Atom.to_string(event),
+                "pid" => identity(pid),
+                "other" => identity(other),
+                "at_ns" => trace_time(at)
+              }
+              | records
+            ]
+          else
+            records
+          end
+
         collect(observer, records, count + 1, fence, targets, actors, resources)
 
       {:finish, ^observer, session} when fence == nil ->
@@ -757,7 +774,10 @@ defmodule Loopex.PrivateTaskShutdownTest do
   defp safe_monitor_result(_), do: %{"kind" => "unrecognized"}
 
   defp drain_reports(runs, records) do
-    watched = Map.new(Enum.flat_map(runs, &[{&1.workers, true}, {&1.owner_groups, true}]))
+    watched =
+      Map.new(
+        Enum.flat_map(runs, &[{&1.workers, true}, {&1.owner_groups, true}, {&1.sessions, true}])
+      )
     actors = Enum.reduce(runs, %{}, &Map.merge(&2, &1.roles))
 
     receive do
