@@ -169,7 +169,9 @@ defmodule LoopexComposition.Edges do
             :ok -> {:ok, Process.get(@started)}
             {:error, reason} -> {:error, reason, Process.get(@started)}
           end
-        {:error, reason} -> {:error, reason, Process.get(@started)}
+
+        {:error, reason} ->
+          {:error, reason, Process.get(@started)}
       end
     catch
       {@started, reason} -> {:error, reason, Process.get(@started)}

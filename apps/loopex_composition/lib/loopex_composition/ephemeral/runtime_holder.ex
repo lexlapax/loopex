@@ -82,8 +82,13 @@ defmodule LoopexComposition.Ephemeral.RuntimeHolder do
           observer = StartupGate.start(runtime, state.deadline, status_reader())
 
           {:noreply,
-           %{state | phase: :observing, runtime: runtime, runtime_monitor: monitor,
-             observer: observer}}
+           %{
+             state
+             | phase: :observing,
+               runtime: runtime,
+               runtime_monitor: monitor,
+               observer: observer
+           }}
 
         result ->
           send(owner, {:phase_result, self(), ref, :runtime, result})
@@ -107,14 +112,18 @@ defmodule LoopexComposition.Ephemeral.RuntimeHolder do
     {:noreply, %{state | observation_result: result}}
   end
 
-  def handle_info({:DOWN, monitor, :process, pid, _reason},
-        %{phase: :observing, observer: %{pid: pid, monitor: monitor}, stop_reason: reason} = state)
+  def handle_info(
+        {:DOWN, monitor, :process, pid, _reason},
+        %{phase: :observing, observer: %{pid: pid, monitor: monitor}, stop_reason: reason} = state
+      )
       when reason != nil do
     {:stop, reason, %{state | observer: nil}}
   end
 
-  def handle_info({:DOWN, monitor, :process, pid, _reason},
-        %{phase: :observing, observer: %{pid: pid, monitor: monitor}} = state) do
+  def handle_info(
+        {:DOWN, monitor, :process, pid, _reason},
+        %{phase: :observing, observer: %{pid: pid, monitor: monitor}} = state
+      ) do
     publish_observation(%{state | observer: nil})
   end
 

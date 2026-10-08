@@ -43,14 +43,21 @@ defmodule LoopexComposition.StartupGate do
 
     with {:ok, %{workers: workers}} <- Loopex.Runtime.children(runtime),
          {:ok, pid} <-
-           Task.Supervisor.start_child(workers, fn ->
-             Process.flag(:sensitive, true)
+           Task.Supervisor.start_child(
+             workers,
+             fn ->
+               Process.flag(:sensitive, true)
 
-             receive do
-               {^owner, ^tag, :observe} ->
-                 send(owner, {tag, observe(runtime, nil, nil, &Loopex.creation_startup_status/2)})
-             end
-           end, shutdown: :brutal_kill) do
+               receive do
+                 {^owner, ^tag, :observe} ->
+                   send(
+                     owner,
+                     {tag, observe(runtime, nil, nil, &Loopex.creation_startup_status/2)}
+                   )
+               end
+             end,
+             shutdown: :brutal_kill
+           ) do
       monitor = Process.monitor(pid)
       send(pid, {owner, tag, :observe})
       {:ok, %{pid: pid, monitor: monitor, tag: tag}}
@@ -67,9 +74,13 @@ defmodule LoopexComposition.StartupGate do
         await_result(observer)
       after
         case cancel(observer) do
-          :ok -> :ok
+          :ok ->
+            :ok
+
           {:pending, identity} ->
-            Process.put({__MODULE__, :pending}, [identity | Process.get({__MODULE__, :pending}, [])])
+            Process.put({__MODULE__, :pending}, [
+              identity | Process.get({__MODULE__, :pending}, [])
+            ])
         end
       end
 
@@ -113,7 +124,8 @@ defmodule LoopexComposition.StartupGate do
 
     receive do
       {:DOWN, monitor, :process, pid, _reason}
-      when monitor == observer.monitor and pid == observer.pid -> :ok
+      when monitor == observer.monitor and pid == observer.pid ->
+        :ok
     after
       1_000 -> {:pending, {observer.pid, observer.monitor}}
     end
@@ -192,7 +204,9 @@ defmodule LoopexComposition.StartupGate do
 
   defp pause(runtime, deadline, pinned, read) do
     case remaining_ms(deadline) do
-      0 -> {:error, :startup_deadline_expired}
+      0 ->
+        {:error, :startup_deadline_expired}
+
       remaining ->
         receive do
         after
@@ -209,7 +223,8 @@ defmodule LoopexComposition.StartupGate do
   # Technical depth: sub-millisecond time cannot fund the API's minimum one-ms
   # read, so it expires conservatively instead of extending the captured bound.
   defp remaining_ms(deadline),
-    do: System.convert_time_unit(max(deadline - System.monotonic_time(), 0), :native, :millisecond)
+    do:
+      System.convert_time_unit(max(deadline - System.monotonic_time(), 0), :native, :millisecond)
 
   defp status_read(read, runtime, timeout) do
     read.(runtime, timeout)
