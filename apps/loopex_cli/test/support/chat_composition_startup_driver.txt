@@ -190,6 +190,7 @@ defmodule LoopexCli.ChatCompositionStartupDriver do
     assert elem(StringIO.contents(diagnostic), 1) =~ "/session/model"
     assert [%{"origin" => "env", "value" => ^state_root}] =
       for line <- String.split(elem(StringIO.contents(diagnostic), 1), "\n", trim: true),
+        String.starts_with?(line, "{"),
         %{"setting" => "/paths/state_root"} = row <- [JSON.decode!(line)],
         do: Map.take(row, ["origin", "value"])
     refute Interrupt.chat_live(manager, signal_ref)
