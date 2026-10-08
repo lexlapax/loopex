@@ -29,6 +29,92 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Reboot continuation on 2026-10-07
 
+Current source work after `4d435363`: foreground physical writer14 is the latest
+completed unit; task counts remain originals88/85/6 and added363/23. No native
+handle is live. The exact last producer is original61523's2048-row registry.
+ADR0063 at16c251ad remains the one asked pending decision. Do not activate its
+startup-status/host-wait implementation before acceptance.
+
+Credited ingress V2 is frozen at
+`/private/tmp/m7-progress-runtime-credit-source-20261007-v2/source.json`, SHA-256
+`b19812d2082ba362c2db7bc287f0a141d2f9b2c6426559a7933b786daafad993`.
+Expected complete385,330 declarations, two unchanged long-bound cases.
+Root privately saved exact23 paths at
+`70224149129b12afe6fffefd02f8e890d1a14ea4`. Independent initial V2 findings are
+superseded in qualification by the sealed finite-CAS blocker:
+`/private/tmp/m7-progress-runtime-credit-source-independent-review-20261007-v2-followup-v1.md`,
+SHA-256 `500bb8457e04609822cdf01a3c0f7f023440d3157c9a4d4785d28459e0d8f312`.
+An earlier live control_ready reference can lose32 whole-row claims, be skipped,
+and project after its successor. V3 must preserve32 comparisons and stop later
+routing across an unresolved prefix in normal and full drains. No V2 native
+formatter/compiler/test gate was run or granted.
+
+Root rejoined current creation at isolated
+`e194ff94e6bf88ce47c457274f68b2aa3c36cff8`. Six ordinary merge conflicts are
+resolved, clean before the newly assigned V3 writer. Automatic approval review
+rejected the first overwrite command because unresolved state was not preserved.
+That rejected command performed no write. Root then captured every18 changed
+working path, exact Git index, six conflict files and both committed inputs at
+`/private/tmp/m7-progress-creation-conflicts-backup-20261007-v1/backup.json`,
+SHA-256 `b31aed692a8f5bedf0221a914bbbd281ab9ec7bce9ef25e970c7154a0e9e5742`.
+A temporary-tree patch check caught only differing formatting context; the live
+worktree stayed unchanged. Minimal-context progress patch
+`813ed187bb1c66212409eda724f5489184d705288973db24520628520ee6872e`
+then applied and reversed exactly to the current creation inputs. The approved
+safer resolution verifies all saved hashes before writing and preserves every
+other working file. Rejoin record
+`/private/tmp/m7-progress-creation-rejoin-20261007-v1/rejoin.json`, SHA-256
+`12b6e4b9ea6e19430b6feeb5cfc29049ead5db7e027ce7a6f30ce09fbd169ae9`.
+Four creation-context paths remain literal current; only Runtime/Control receive
+progress-owned deltas. Combined native must include the complete ingress files
+and all22 existing creation lifecycle cases, after V3 review and final census.
+Rejoin is source-only, not another passing creation or integration result.
+
+V3 source ownership is assigned to `/root/t15_original_closure_map` in the same
+isolated ingress worktree, only Control/ProgressSink/AgentLoop/Sink tests and the
+existing progress consumer helper. It also coordinates a private projected
+credit correction with the foreground writer. Existing projected2*backing+6*bytes
+can reserve about8N while actual tab-heavy native/flat/driver/Bash copies peak
+about9N. Stronger conservative charging keeps the same32/512KiB/public API;
+raw projection admission must remain sufficient. Genuine finite-CAS loss,
+physical custody and actual copy accounting proofs are required. No fake stage
+result, production hook, synthetic arena edit or renewed allowance is authorized.
+Original28 Sink assertions/helpers/cutoffs remain. Independent V3 review follows.
+
+Authored creation source is frozen in its allocated worktree at
+`/private/tmp/m7-authored-creation-slot-source-20261007-v1/source.json`, SHA-256
+`55afa3c3e0d19b55bee68fdc548aef2482d2cfa6a22f2114502193d4930e0ac8`;
+report `bec5b9a54109d466a50b846bec6c68d1dab3f416090b110e59c72420d32974bc`.
+Exactly six paths change; four existing proof files are preserved. It adds21
+source declarations, total92 declarations across five whole files. Expanded
+census and long-bound supplement are assigned to its writer; do not equate
+source declarations with executed or expanded cases. All native/parser/Git
+qualification remains unrun. Independent review and current Core-credit rejoin
+must precede actual paired proof. Store carrier custody body is mechanically
+preserved; managed preparation retains one cleanup capture through later phases.
+
+Foreground FIFO source writer `/root/attempt_case_replay` owns the clean new
+worktree `/Users/spuri/.codex/worktrees/m7-foreground-joined-fifo/loopex` from
+4d435363. Sealed map
+`/private/tmp/m7-foreground-output-integration-ownership-map-20261007-v2.md`,
+SHA-256 `d423382154f0141007f9ad983c4d158ba69517dd395a85add0572bd4c4e9dc4f`.
+Six production paths, six complete existing tests and explicitly named new
+lifecycle fixture/test are allocated. Proved OutputWriter/Bash/14case sources
+stay unchanged. Durable FIFO reservations, active charges, JOINED cursor,
+actual stable holders and EOF cleanup proceed independently of progress-credit
+coordination. Accepted0058 technical239–281 stops new frames on EOF; preserve
+the real partial-input EOF case as no-new-output plus actual cleanup, retaining
+truncated-frame classification separately. This implements that accepted amendment,
+without dropping the real-path case or creating an EOF write exception. Pending
+0063 and generation activation remain excluded. All workers are source-only;
+root alone owns Git/native/registry/integration. They preserve unrelated source.
+
+Complete immutable restart retention for these packets, maps and conflict/rejoin
+state is `M7/progress-authored-host-source-context-20261007-v1/retention.json`,
+SHA-256 `e8d69ee3ff2e1491df90c5f866a944a8f514cd36384a528fe7c8b64a217d959d`,
+178 files. Older current facts below are superseded where explicitly stated.
+Goal remains active; no full-check/floor/release/closure completion is claimed.
+
 Latest completed unit: dormant physical foreground writer at isolated
 `5646d450f730bc4d7c453b42869fce89c94069ec`, original61523, complete14 PASS
 on each supported pair,156.763seconds, zero failures/exclusions/skips/invalid.

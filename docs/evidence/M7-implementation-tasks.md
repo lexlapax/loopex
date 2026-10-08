@@ -9,17 +9,17 @@ writer14 passed on both supported pairs. Writer original61523 passed in
 literally. T01–T19 originals remain88 done/85 todo/6 retired; added363 done/23
 todo. Exact identities remain in the [resume record](M7-resume.md).
 
-Foreground host FIFO/emitted-cursor integration remains open. Original47604,
-14097,75037 and90126 retain their actual failures; changed fixture source5646d450
-preserves safe decoding, actual process observations and all original cutoffs.
-Credited Core ingress V1 received a blocking independent review; V2 repairs
-ordered Control handoff and real model/executor producer custody. Its expected
-complete census is385, including two existing long-bound cases; native is unrun.
-Authored native creation proceeds in its separate worktree from `84f0aa85`,
-preserving the accepted ProviderLifetime registration and original absolute
-cutoffs. Custody restore remains source-qualified pending current boundary and
-readiness joins plus complete175 native cases. The broader authored/host/VM-loss
-creation row remains open. No full integration or milestone completion is claimed.
+Foreground host FIFO/emitted-cursor integration is now assigned from4d435363.
+Original47604/14097/75037/90126 failures remain retained. Credited Core ingress V2
+is frozen with expected385 cases but independently blocked by finite-CAS prefix
+ordering; V3 correction and stronger private projected credit are assigned.
+Current creation rejoins at isolatede194ff94 with complete conflict state saved
+and exact reverse reproduction of current bytes; no new native result is claimed.
+Authored creation's six-path packet is source-ready,92 declarations across five
+complete files; expanded census, independent review and paired native remain.
+Custody restore remains source-qualified pending current boundary/readiness joins
+and complete175 native cases. Exact references and ownership are in the resume
+record. All broad rows remain open; counts change only for the proved writer unit.
 
 ADR0059 is accepted and pushed at `3212b0ed`. The first Core Store contract
 unit is assigned in its own worktree; durable adapters, Control/carrier
