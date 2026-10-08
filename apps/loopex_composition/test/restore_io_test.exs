@@ -1177,8 +1177,14 @@ defmodule LoopexComposition.RestoreIOTest do
     head = fixture.state.sessions[second]
 
     {:ok, owner} =
-      Store.advance_owner(second, "owner", "invalid-history-owner", 0,
-        head.journal_version, "invalid-history-owner")
+      Store.advance_owner(
+        second,
+        "owner",
+        "invalid-history-owner",
+        0,
+        head.journal_version,
+        "invalid-history-owner"
+      )
 
     assert {:new, _, _, {:committed, _, _}} = State.prepare(fixture.state, owner)
     fixture = append_transaction(fixture, owner)
@@ -1188,9 +1194,16 @@ defmodule LoopexComposition.RestoreIOTest do
     # Technical depth: a current genesis record is invalid after the real
     # genesis and owner succession; the correctly fenced Store still commits it.
     {:ok, transaction} =
-      Store.session_commit(second, "session", "invalid-history", head.owner_epoch,
-        head.owner_incarnation_id, head.journal_version,
-        [%{kind: "session_genesis_v3"}], [])
+      Store.session_commit(
+        second,
+        "session",
+        "invalid-history",
+        head.owner_epoch,
+        head.owner_incarnation_id,
+        head.journal_version,
+        [%{kind: "session_genesis_v3"}],
+        []
+      )
 
     assert {:new, _, _, {:committed, _, _}} = State.prepare(fixture.state, transaction)
     fixture = append_transaction(fixture, transaction)
@@ -3624,8 +3637,14 @@ defmodule LoopexComposition.RestoreIOTest do
       head = fixture.state.creation_heads[transaction.runtime_id]
 
       {:ok, reserve} =
-        Store.reserve_creation(transaction.runtime_id, transaction.command_id,
-          head.owner_generation, head.owner_selection, head.domain_version, transaction.genesis)
+        Store.reserve_creation(
+          transaction.runtime_id,
+          transaction.command_id,
+          head.owner_generation,
+          head.owner_selection,
+          head.domain_version,
+          transaction.genesis
+        )
 
       fixture = append_transaction(fixture, reserve)
       fixture = append_transaction(fixture, transaction)
@@ -3642,6 +3661,7 @@ defmodule LoopexComposition.RestoreIOTest do
     # populated Store. Preserve ordinary orphan refusals outside these families.
     if transaction.type in [:claim_creation_domain, :reserve_creation, :create_session],
       do: assert(match?({:committed, _, _}, outcome))
+
     frames = fixture.frames ++ [frame]
     bytes = fixture.bytes <> encoded_frame(frame)
     File.write!(fixture.path, bytes)
