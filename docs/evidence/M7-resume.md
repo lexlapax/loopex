@@ -29,6 +29,33 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Reboot continuation on 2026-10-07
 
+Corrected formatter44713 is TERMINAL0 and collected
+PASS_ATTEMPT_CASE_REPLAY_FORMAT in13.566 seconds, six original joins/38
+authenticated artifacts. Output `M7/attempt-case-replay-format-20261007-v2`;
+collection SHA-256
+`994015dc7649183fc5dd647398d02b499553fc7d73941a1f728014142d93e4b9`;
+terminald60639a3; latest1771 registryc2c0ea34. Do not repoll44713 or rerun
+this unchanged formatter. V130525 remains failed before native admission.
+
+The actual format-only direct child is isolated
+`6a2616679f2f0a2bea62b4218b78c6958ac3fdf2`, tree3f1c1626, with1189-entry
+NUL projection5ecdfdef. Both whole-file non-line AST acknowledgements passed;
+original formatter cuts remain rawa276 plus formatting dirt. Complete99
+proof is bound but disabled at6526f901 with37-key packet590d3d0b, reverse
+e349b835. Factual review and independent prejoin are running. No case test
+has run and no case source is integrated.
+
+V2 carrier/context16-file manifest
+`M7/case-replay-native-v2-context-20261007-v1/retention.json` hashes
+`567b7573defa337294752371d0e9b01b69d9e7ef8c2a37906e9ab6a120f80688`.
+Actual formatted bytes and proof bindings are10 immutable files at
+`M7/case-replay-formatted-context-20261007-v1/retention.json`, SHA-256
+`d4e33132ce641db77a987f3198ea0b9816acf856405ccacdf5b2946dfe57ca4d`.
+ProgressSink writer continues. ADR0059 remains the sole asked pending decision.
+Original/added T01–T19 counts remain88/85/6 and353/23. Earlier entries below
+are historical where superseded.
+
+
 Original case formatter30525 is TERMINAL1 before native stage admission.
 The source-packet authentication loops shadowed the CLI registry digest;
 registry comparison refused before admission.json or any e.stage. No Elixir/OTP
