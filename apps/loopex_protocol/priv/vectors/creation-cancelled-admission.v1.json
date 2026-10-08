@@ -1,0 +1,1303 @@
+{
+  "format": "loopex.experimental.payload-vectors/1",
+  "contract": "creation_cancelled_admission",
+  "cases": [
+    {
+      "name": "approved-one-opaque-byte",
+      "input": {
+        "type": "admission",
+        "request_id": "cancel-1",
+        "method": "session.create",
+        "command_id": "_w",
+        "status": "refused",
+        "reason": "creation_cancelled"
+      },
+      "decoded": {
+        "type": "admission",
+        "request_id": "cancel-1",
+        "method": "session.create",
+        "command_id": {
+          "opaque_hex": "ff"
+        },
+        "status": "refused",
+        "reason": "creation_cancelled"
+      }
+    },
+    {
+      "name": "opaque-zero-byte",
+      "input": {
+        "type": "admission",
+        "request_id": "r",
+        "method": "session.create",
+        "command_id": "AA",
+        "status": "refused",
+        "reason": "creation_cancelled"
+      },
+      "decoded": {
+        "type": "admission",
+        "request_id": "r",
+        "method": "session.create",
+        "command_id": {
+          "opaque_hex": "00"
+        },
+        "status": "refused",
+        "reason": "creation_cancelled"
+      }
+    },
+    {
+      "name": "opaque-three-bytes",
+      "input": {
+        "type": "admission",
+        "request_id": "Ab09._~-",
+        "method": "session.create",
+        "command_id": "_wCA",
+        "status": "refused",
+        "reason": "creation_cancelled"
+      },
+      "decoded": {
+        "type": "admission",
+        "request_id": "Ab09._~-",
+        "method": "session.create",
+        "command_id": {
+          "opaque_hex": "ff0080"
+        },
+        "status": "refused",
+        "reason": "creation_cancelled"
+      }
+    },
+    {
+      "name": "maximum-command-and-request",
+      "input": {
+        "type": "admission",
+        "request_id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "method": "session.create",
+        "command_id": "_____________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________w",
+        "status": "refused",
+        "reason": "creation_cancelled"
+      },
+      "decoded": {
+        "type": "admission",
+        "request_id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "method": "session.create",
+        "command_id": {
+          "opaque_hex": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+        },
+        "status": "refused",
+        "reason": "creation_cancelled"
+      }
+    },
+    {
+      "name": "every-opaque-byte-and-request-alphabet",
+      "input": {
+        "type": "admission",
+        "request_id": "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._",
+        "method": "session.create",
+        "command_id": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0-P0BBQkNERUZHSElKS0xNTk9QUVJTVFVWV1hZWltcXV5fYGFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6e3x9fn-AgYKDhIWGh4iJiouMjY6PkJGSk5SVlpeYmZqbnJ2en6ChoqOkpaanqKmqq6ytrq-wsbKztLW2t7i5uru8vb6_wMHCw8TFxsfIycrLzM3Oz9DR0tPU1dbX2Nna29zd3t_g4eLj5OXm5-jp6uvs7e7v8PHy8_T19vf4-fr7_P3-_w",
+        "status": "refused",
+        "reason": "creation_cancelled"
+      },
+      "decoded": {
+        "type": "admission",
+        "request_id": "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._",
+        "method": "session.create",
+        "command_id": {
+          "opaque_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff"
+        },
+        "status": "refused",
+        "reason": "creation_cancelled"
+      }
+    },
+    {
+      "name": "one-byte-request-dot",
+      "input": {
+        "type": "admission",
+        "request_id": ".",
+        "method": "session.create",
+        "command_id": "AQ",
+        "status": "refused",
+        "reason": "creation_cancelled"
+      },
+      "decoded": {
+        "type": "admission",
+        "request_id": ".",
+        "method": "session.create",
+        "command_id": {
+          "opaque_hex": "01"
+        },
+        "status": "refused",
+        "reason": "creation_cancelled"
+      }
+    },
+    {
+      "name": "one-byte-request-underscore",
+      "input": {
+        "type": "admission",
+        "request_id": "_",
+        "method": "session.create",
+        "command_id": "AQ",
+        "status": "refused",
+        "reason": "creation_cancelled"
+      },
+      "decoded": {
+        "type": "admission",
+        "request_id": "_",
+        "method": "session.create",
+        "command_id": {
+          "opaque_hex": "01"
+        },
+        "status": "refused",
+        "reason": "creation_cancelled"
+      }
+    },
+    {
+      "name": "one-byte-request-tilde",
+      "input": {
+        "type": "admission",
+        "request_id": "~",
+        "method": "session.create",
+        "command_id": "AQ",
+        "status": "refused",
+        "reason": "creation_cancelled"
+      },
+      "decoded": {
+        "type": "admission",
+        "request_id": "~",
+        "method": "session.create",
+        "command_id": {
+          "opaque_hex": "01"
+        },
+        "status": "refused",
+        "reason": "creation_cancelled"
+      }
+    },
+    {
+      "name": "one-byte-request-hyphen",
+      "input": {
+        "type": "admission",
+        "request_id": "-",
+        "method": "session.create",
+        "command_id": "AQ",
+        "status": "refused",
+        "reason": "creation_cancelled"
+      },
+      "decoded": {
+        "type": "admission",
+        "request_id": "-",
+        "method": "session.create",
+        "command_id": {
+          "opaque_hex": "01"
+        },
+        "status": "refused",
+        "reason": "creation_cancelled"
+      }
+    },
+    {
+      "name": "one-byte-request-digit",
+      "input": {
+        "type": "admission",
+        "request_id": "9",
+        "method": "session.create",
+        "command_id": "_w",
+        "status": "refused",
+        "reason": "creation_cancelled"
+      },
+      "decoded": {
+        "type": "admission",
+        "request_id": "9",
+        "method": "session.create",
+        "command_id": {
+          "opaque_hex": "ff"
+        },
+        "status": "refused",
+        "reason": "creation_cancelled"
+      }
+    },
+    {
+      "name": "missing-type",
+      "input": {
+        "request_id": "cancel-1",
+        "method": "session.create",
+        "command_id": "_w",
+        "status": "refused",
+        "reason": "creation_cancelled"
+      },
+      "error": true
+    },
+    {
+      "name": "null-type",
+      "input": {
+        "type": null,
+        "request_id": "cancel-1",
+        "method": "session.create",
+        "command_id": "_w",
+        "status": "refused",
+        "reason": "creation_cancelled"
+      },
+      "error": true
+    },
+    {
+      "name": "missing-request_id",
+      "input": {
+        "type": "admission",
+        "method": "session.create",
+        "command_id": "_w",
+        "status": "refused",
+        "reason": "creation_cancelled"
+      },
+      "error": true
+    },
+    {
+      "name": "null-request_id",
+      "input": {
+        "type": "admission",
+        "request_id": null,
+        "method": "session.create",
+        "command_id": "_w",
+        "status": "refused",
+        "reason": "creation_cancelled"
+      },
+      "error": true
+    },
+    {
+      "name": "missing-method",
+      "input": {
+        "type": "admission",
+        "request_id": "cancel-1",
+        "command_id": "_w",
+        "status": "refused",
+        "reason": "creation_cancelled"
+      },
+      "error": true
+    },
+    {
+      "name": "null-method",
+      "input": {
+        "type": "admission",
+        "request_id": "cancel-1",
+        "method": null,
+        "command_id": "_w",
+        "status": "refused",
+        "reason": "creation_cancelled"
+      },
+      "error": true
+    },
+    {
+      "name": "missing-command_id",
+      "input": {
+        "type": "admission",
+        "request_id": "cancel-1",
+        "method": "session.create",
+        "status": "refused",
+        "reason": "creation_cancelled"
+      },
+      "error": true
+    },
+    {
+      "name": "null-command_id",
+      "input": {
+        "type": "admission",
+        "request_id": "cancel-1",
+        "method": "session.create",
+        "command_id": null,
+        "status": "refused",
+        "reason": "creation_cancelled"
+      },
+      "error": true
+    },
+    {
+      "name": "missing-status",
+      "input": {
+        "type": "admission",
+        "request_id": "cancel-1",
+        "method": "session.create",
+        "command_id": "_w",
+        "reason": "creation_cancelled"
+      },
+      "error": true
+    },
+    {
+      "name": "null-status",
+      "input": {
+        "type": "admission",
+        "request_id": "cancel-1",
+        "method": "session.create",
+        "command_id": "_w",
+        "status": null,
+        "reason": "creation_cancelled"
+      },
+      "error": true
+    },
+    {
+      "name": "missing-reason",
+      "input": {
+        "type": "admission",
+        "request_id": "cancel-1",
+        "method": "session.create",
+        "command_id": "_w",
+        "status": "refused"
+      },
+      "error": true
+    },
+    {
+      "name": "null-reason",
+      "input": {
+        "type": "admission",
+        "request_id": "cancel-1",
+        "method": "session.create",
+        "command_id": "_w",
+        "status": "refused",
+        "reason": null
+      },
+      "error": true
+    },
+    {
+      "name": "wrong-type-0",
+      "input": {
+        "type": "result",
+        "request_id": "cancel-1",
+        "method": "session.create",
+        "command_id": "_w",
+        "status": "refused",
+        "reason": "creation_cancelled"
+      },
+      "error": true
+    },
+    {
+      "name": "wrong-type-1",
+      "input": {
+        "type": "progress",
+        "request_id": "cancel-1",
+        "method": "session.create",
+        "command_id": "_w",
+        "status": "refused",
+        "reason": "creation_cancelled"
+      },
+      "error": true
+    },
+    {
+      "name": "wrong-type-2",
+      "input": {
+        "type": "",
+        "request_id": "cancel-1",
+        "method": "session.create",
+        "command_id": "_w",
+        "status": "refused",
+        "reason": "creation_cancelled"
+      },
+      "error": true
+    },
+    {
+      "name": "wrong-type-3",
+      "input": {
+        "type": 0,
+        "request_id": "cancel-1",
+        "method": "session.create",
+        "command_id": "_w",
+        "status": "refused",
+        "reason": "creation_cancelled"
+      },
+      "error": true
+    },
+    {
+      "name": "wrong-type-4",
+      "input": {
+        "type": false,
+        "request_id": "cancel-1",
+        "method": "session.create",
+        "command_id": "_w",
+        "status": "refused",
+        "reason": "creation_cancelled"
+      },
+      "error": true
+    },
+    {
+      "name": "wrong-type-5",
+      "input": {
+        "type": [
+          "admission"
+        ],
+        "request_id": "cancel-1",
+        "method": "session.create",
+        "command_id": "_w",
+        "status": "refused",
+        "reason": "creation_cancelled"
+      },
+      "error": true
+    },
+    {
+      "name": "wrong-type-6",
+      "input": {
+        "type": {
+          "kind": "admission"
+        },
+        "request_id": "cancel-1",
+        "method": "session.create",
+        "command_id": "_w",
+        "status": "refused",
+        "reason": "creation_cancelled"
+      },
+      "error": true
+    },
+    {
+      "name": "wrong-method-0",
+      "input": {
+        "type": "admission",
+        "request_id": "cancel-1",
+        "method": "session.resume",
+        "command_id": "_w",
+        "status": "refused",
+        "reason": "creation_cancelled"
+      },
+      "error": true
+    },
+    {
+      "name": "wrong-method-1",
+      "input": {
+        "type": "admission",
+        "request_id": "cancel-1",
+        "method": "session.compact",
+        "command_id": "_w",
+        "status": "refused",
+        "reason": "creation_cancelled"
+      },
+      "error": true
+    },
+    {
+      "name": "wrong-method-2",
+      "input": {
+        "type": "admission",
+        "request_id": "cancel-1",
+        "method": "",
+        "command_id": "_w",
+        "status": "refused",
+        "reason": "creation_cancelled"
+      },
+      "error": true
+    },
+    {
+      "name": "wrong-method-3",
+      "input": {
+        "type": "admission",
+        "request_id": "cancel-1",
+        "method": 0,
+        "command_id": "_w",
+        "status": "refused",
+        "reason": "creation_cancelled"
+      },
+      "error": true
+    },
+    {
+      "name": "wrong-method-4",
+      "input": {
+        "type": "admission",
+        "request_id": "cancel-1",
+        "method": false,
+        "command_id": "_w",
+        "status": "refused",
+        "reason": "creation_cancelled"
+      },
+      "error": true
+    },
+    {
+      "name": "wrong-method-5",
+      "input": {
+        "type": "admission",
+        "request_id": "cancel-1",
+        "method": [
+          "session.create"
+        ],
+        "command_id": "_w",
+        "status": "refused",
+        "reason": "creation_cancelled"
+      },
+      "error": true
+    },
+    {
+      "name": "wrong-method-6",
+      "input": {
+        "type": "admission",
+        "request_id": "cancel-1",
+        "method": {
+          "kind": "session.create"
+        },
+        "command_id": "_w",
+        "status": "refused",
+        "reason": "creation_cancelled"
+      },
+      "error": true
+    },
+    {
+      "name": "wrong-status-0",
+      "input": {
+        "type": "admission",
+        "request_id": "cancel-1",
+        "method": "session.create",
+        "command_id": "_w",
+        "status": "accepted",
+        "reason": "creation_cancelled"
+      },
+      "error": true
+    },
+    {
+      "name": "wrong-status-1",
+      "input": {
+        "type": "admission",
+        "request_id": "cancel-1",
+        "method": "session.create",
+        "command_id": "_w",
+        "status": "unknown",
+        "reason": "creation_cancelled"
+      },
+      "error": true
+    },
+    {
+      "name": "wrong-status-2",
+      "input": {
+        "type": "admission",
+        "request_id": "cancel-1",
+        "method": "session.create",
+        "command_id": "_w",
+        "status": "",
+        "reason": "creation_cancelled"
+      },
+      "error": true
+    },
+    {
+      "name": "wrong-status-3",
+      "input": {
+        "type": "admission",
+        "request_id": "cancel-1",
+        "method": "session.create",
+        "command_id": "_w",
+        "status": 0,
+        "reason": "creation_cancelled"
+      },
+      "error": true
+    },
+    {
+      "name": "wrong-status-4",
+      "input": {
+        "type": "admission",
+        "request_id": "cancel-1",
+        "method": "session.create",
+        "command_id": "_w",
+        "status": false,
+        "reason": "creation_cancelled"
+      },
+      "error": true
+    },
+    {
+      "name": "wrong-status-5",
+      "input": {
+        "type": "admission",
+        "request_id": "cancel-1",
+        "method": "session.create",
+        "command_id": "_w",
+        "status": [
+          "refused"
+        ],
+        "reason": "creation_cancelled"
+      },
+      "error": true
+    },
+    {
+      "name": "wrong-status-6",
+      "input": {
+        "type": "admission",
+        "request_id": "cancel-1",
+        "method": "session.create",
+        "command_id": "_w",
+        "status": {
+          "kind": "refused"
+        },
+        "reason": "creation_cancelled"
+      },
+      "error": true
+    },
+    {
+      "name": "wrong-reason-0",
+      "input": {
+        "type": "admission",
+        "request_id": "cancel-1",
+        "method": "session.create",
+        "command_id": "_w",
+        "status": "refused",
+        "reason": "store_unavailable"
+      },
+      "error": true
+    },
+    {
+      "name": "wrong-reason-1",
+      "input": {
+        "type": "admission",
+        "request_id": "cancel-1",
+        "method": "session.create",
+        "command_id": "_w",
+        "status": "refused",
+        "reason": "creation_in_progress"
+      },
+      "error": true
+    },
+    {
+      "name": "wrong-reason-2",
+      "input": {
+        "type": "admission",
+        "request_id": "cancel-1",
+        "method": "session.create",
+        "command_id": "_w",
+        "status": "refused",
+        "reason": ""
+      },
+      "error": true
+    },
+    {
+      "name": "wrong-reason-3",
+      "input": {
+        "type": "admission",
+        "request_id": "cancel-1",
+        "method": "session.create",
+        "command_id": "_w",
+        "status": "refused",
+        "reason": 0
+      },
+      "error": true
+    },
+    {
+      "name": "wrong-reason-4",
+      "input": {
+        "type": "admission",
+        "request_id": "cancel-1",
+        "method": "session.create",
+        "command_id": "_w",
+        "status": "refused",
+        "reason": false
+      },
+      "error": true
+    },
+    {
+      "name": "wrong-reason-5",
+      "input": {
+        "type": "admission",
+        "request_id": "cancel-1",
+        "method": "session.create",
+        "command_id": "_w",
+        "status": "refused",
+        "reason": [
+          "creation_cancelled"
+        ]
+      },
+      "error": true
+    },
+    {
+      "name": "wrong-reason-6",
+      "input": {
+        "type": "admission",
+        "request_id": "cancel-1",
+        "method": "session.create",
+        "command_id": "_w",
+        "status": "refused",
+        "reason": {
+          "kind": "creation_cancelled"
+        }
+      },
+      "error": true
+    },
+    {
+      "name": "extra-session_id-null",
+      "input": {
+        "type": "admission",
+        "request_id": "cancel-1",
+        "method": "session.create",
+        "command_id": "_w",
+        "status": "refused",
+        "reason": "creation_cancelled",
+        "session_id": null
+      },
+      "error": true
+    },
+    {
+      "name": "extra-session_id-value",
+      "input": {
+        "type": "admission",
+        "request_id": "cancel-1",
+        "method": "session.create",
+        "command_id": "_w",
+        "status": "refused",
+        "reason": "creation_cancelled",
+        "session_id": "PRIVATE_CANARY"
+      },
+      "error": true
+    },
+    {
+      "name": "extra-disposition-null",
+      "input": {
+        "type": "admission",
+        "request_id": "cancel-1",
+        "method": "session.create",
+        "command_id": "_w",
+        "status": "refused",
+        "reason": "creation_cancelled",
+        "disposition": null
+      },
+      "error": true
+    },
+    {
+      "name": "extra-disposition-value",
+      "input": {
+        "type": "admission",
+        "request_id": "cancel-1",
+        "method": "session.create",
+        "command_id": "_w",
+        "status": "refused",
+        "reason": "creation_cancelled",
+        "disposition": "PRIVATE_CANARY"
+      },
+      "error": true
+    },
+    {
+      "name": "extra-extra-null",
+      "input": {
+        "type": "admission",
+        "request_id": "cancel-1",
+        "method": "session.create",
+        "command_id": "_w",
+        "status": "refused",
+        "reason": "creation_cancelled",
+        "extra": null
+      },
+      "error": true
+    },
+    {
+      "name": "extra-extra-value",
+      "input": {
+        "type": "admission",
+        "request_id": "cancel-1",
+        "method": "session.create",
+        "command_id": "_w",
+        "status": "refused",
+        "reason": "creation_cancelled",
+        "extra": "PRIVATE_CANARY"
+      },
+      "error": true
+    },
+    {
+      "name": "extra-credentials-null",
+      "input": {
+        "type": "admission",
+        "request_id": "cancel-1",
+        "method": "session.create",
+        "command_id": "_w",
+        "status": "refused",
+        "reason": "creation_cancelled",
+        "credentials": null
+      },
+      "error": true
+    },
+    {
+      "name": "extra-credentials-value",
+      "input": {
+        "type": "admission",
+        "request_id": "cancel-1",
+        "method": "session.create",
+        "command_id": "_w",
+        "status": "refused",
+        "reason": "creation_cancelled",
+        "credentials": "PRIVATE_CANARY"
+      },
+      "error": true
+    },
+    {
+      "name": "invalid-request-0",
+      "input": {
+        "type": "admission",
+        "request_id": "",
+        "method": "session.create",
+        "command_id": "_w",
+        "status": "refused",
+        "reason": "creation_cancelled"
+      },
+      "error": true
+    },
+    {
+      "name": "invalid-request-1",
+      "input": {
+        "type": "admission",
+        "request_id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "method": "session.create",
+        "command_id": "_w",
+        "status": "refused",
+        "reason": "creation_cancelled"
+      },
+      "error": true
+    },
+    {
+      "name": "invalid-request-2",
+      "input": {
+        "type": "admission",
+        "request_id": "é",
+        "method": "session.create",
+        "command_id": "_w",
+        "status": "refused",
+        "reason": "creation_cancelled"
+      },
+      "error": true
+    },
+    {
+      "name": "invalid-request-3",
+      "input": {
+        "type": "admission",
+        "request_id": "🚀",
+        "method": "session.create",
+        "command_id": "_w",
+        "status": "refused",
+        "reason": "creation_cancelled"
+      },
+      "error": true
+    },
+    {
+      "name": "invalid-request-4",
+      "input": {
+        "type": "admission",
+        "request_id": " a",
+        "method": "session.create",
+        "command_id": "_w",
+        "status": "refused",
+        "reason": "creation_cancelled"
+      },
+      "error": true
+    },
+    {
+      "name": "invalid-request-5",
+      "input": {
+        "type": "admission",
+        "request_id": "a ",
+        "method": "session.create",
+        "command_id": "_w",
+        "status": "refused",
+        "reason": "creation_cancelled"
+      },
+      "error": true
+    },
+    {
+      "name": "invalid-request-6",
+      "input": {
+        "type": "admission",
+        "request_id": "a\n",
+        "method": "session.create",
+        "command_id": "_w",
+        "status": "refused",
+        "reason": "creation_cancelled"
+      },
+      "error": true
+    },
+    {
+      "name": "invalid-request-7",
+      "input": {
+        "type": "admission",
+        "request_id": "a\nb",
+        "method": "session.create",
+        "command_id": "_w",
+        "status": "refused",
+        "reason": "creation_cancelled"
+      },
+      "error": true
+    },
+    {
+      "name": "invalid-request-8",
+      "input": {
+        "type": "admission",
+        "request_id": "a\r",
+        "method": "session.create",
+        "command_id": "_w",
+        "status": "refused",
+        "reason": "creation_cancelled"
+      },
+      "error": true
+    },
+    {
+      "name": "invalid-request-9",
+      "input": {
+        "type": "admission",
+        "request_id": "a\t",
+        "method": "session.create",
+        "command_id": "_w",
+        "status": "refused",
+        "reason": "creation_cancelled"
+      },
+      "error": true
+    },
+    {
+      "name": "invalid-request-10",
+      "input": {
+        "type": "admission",
+        "request_id": "a\u0000",
+        "method": "session.create",
+        "command_id": "_w",
+        "status": "refused",
+        "reason": "creation_cancelled"
+      },
+      "error": true
+    },
+    {
+      "name": "invalid-request-11",
+      "input": {
+        "type": "admission",
+        "request_id": "a/b",
+        "method": "session.create",
+        "command_id": "_w",
+        "status": "refused",
+        "reason": "creation_cancelled"
+      },
+      "error": true
+    },
+    {
+      "name": "invalid-request-12",
+      "input": {
+        "type": "admission",
+        "request_id": "a+b",
+        "method": "session.create",
+        "command_id": "_w",
+        "status": "refused",
+        "reason": "creation_cancelled"
+      },
+      "error": true
+    },
+    {
+      "name": "invalid-request-13",
+      "input": {
+        "type": "admission",
+        "request_id": "a=b",
+        "method": "session.create",
+        "command_id": "_w",
+        "status": "refused",
+        "reason": "creation_cancelled"
+      },
+      "error": true
+    },
+    {
+      "name": "invalid-request-14",
+      "input": {
+        "type": "admission",
+        "request_id": "a:b",
+        "method": "session.create",
+        "command_id": "_w",
+        "status": "refused",
+        "reason": "creation_cancelled"
+      },
+      "error": true
+    },
+    {
+      "name": "invalid-request-15",
+      "input": {
+        "type": "admission",
+        "request_id": 7,
+        "method": "session.create",
+        "command_id": "_w",
+        "status": "refused",
+        "reason": "creation_cancelled"
+      },
+      "error": true
+    },
+    {
+      "name": "invalid-request-16",
+      "input": {
+        "type": "admission",
+        "request_id": false,
+        "method": "session.create",
+        "command_id": "_w",
+        "status": "refused",
+        "reason": "creation_cancelled"
+      },
+      "error": true
+    },
+    {
+      "name": "invalid-request-17",
+      "input": {
+        "type": "admission",
+        "request_id": [],
+        "method": "session.create",
+        "command_id": "_w",
+        "status": "refused",
+        "reason": "creation_cancelled"
+      },
+      "error": true
+    },
+    {
+      "name": "invalid-request-18",
+      "input": {
+        "type": "admission",
+        "request_id": {},
+        "method": "session.create",
+        "command_id": "_w",
+        "status": "refused",
+        "reason": "creation_cancelled"
+      },
+      "error": true
+    },
+    {
+      "name": "invalid-command-0",
+      "input": {
+        "type": "admission",
+        "request_id": "cancel-1",
+        "method": "session.create",
+        "command_id": "",
+        "status": "refused",
+        "reason": "creation_cancelled"
+      },
+      "error": true
+    },
+    {
+      "name": "invalid-command-1",
+      "input": {
+        "type": "admission",
+        "request_id": "cancel-1",
+        "method": "session.create",
+        "command_id": "______________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________8",
+        "status": "refused",
+        "reason": "creation_cancelled"
+      },
+      "error": true
+    },
+    {
+      "name": "invalid-command-2",
+      "input": {
+        "type": "admission",
+        "request_id": "cancel-1",
+        "method": "session.create",
+        "command_id": "_______________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________",
+        "status": "refused",
+        "reason": "creation_cancelled"
+      },
+      "error": true
+    },
+    {
+      "name": "invalid-command-3",
+      "input": {
+        "type": "admission",
+        "request_id": "cancel-1",
+        "method": "session.create",
+        "command_id": "_w=",
+        "status": "refused",
+        "reason": "creation_cancelled"
+      },
+      "error": true
+    },
+    {
+      "name": "invalid-command-4",
+      "input": {
+        "type": "admission",
+        "request_id": "cancel-1",
+        "method": "session.create",
+        "command_id": "_w==",
+        "status": "refused",
+        "reason": "creation_cancelled"
+      },
+      "error": true
+    },
+    {
+      "name": "invalid-command-5",
+      "input": {
+        "type": "admission",
+        "request_id": "cancel-1",
+        "method": "session.create",
+        "command_id": "_x",
+        "status": "refused",
+        "reason": "creation_cancelled"
+      },
+      "error": true
+    },
+    {
+      "name": "invalid-command-6",
+      "input": {
+        "type": "admission",
+        "request_id": "cancel-1",
+        "method": "session.create",
+        "command_id": "/w",
+        "status": "refused",
+        "reason": "creation_cancelled"
+      },
+      "error": true
+    },
+    {
+      "name": "invalid-command-7",
+      "input": {
+        "type": "admission",
+        "request_id": "cancel-1",
+        "method": "session.create",
+        "command_id": "+w",
+        "status": "refused",
+        "reason": "creation_cancelled"
+      },
+      "error": true
+    },
+    {
+      "name": "invalid-command-8",
+      "input": {
+        "type": "admission",
+        "request_id": "cancel-1",
+        "method": "session.create",
+        "command_id": "_w\n",
+        "status": "refused",
+        "reason": "creation_cancelled"
+      },
+      "error": true
+    },
+    {
+      "name": "invalid-command-9",
+      "input": {
+        "type": "admission",
+        "request_id": "cancel-1",
+        "method": "session.create",
+        "command_id": "_w ",
+        "status": "refused",
+        "reason": "creation_cancelled"
+      },
+      "error": true
+    },
+    {
+      "name": "invalid-command-10",
+      "input": {
+        "type": "admission",
+        "request_id": "cancel-1",
+        "method": "session.create",
+        "command_id": " _w",
+        "status": "refused",
+        "reason": "creation_cancelled"
+      },
+      "error": true
+    },
+    {
+      "name": "invalid-command-11",
+      "input": {
+        "type": "admission",
+        "request_id": "cancel-1",
+        "method": "session.create",
+        "command_id": "_\nw",
+        "status": "refused",
+        "reason": "creation_cancelled"
+      },
+      "error": true
+    },
+    {
+      "name": "invalid-command-12",
+      "input": {
+        "type": "admission",
+        "request_id": "cancel-1",
+        "method": "session.create",
+        "command_id": "A",
+        "status": "refused",
+        "reason": "creation_cancelled"
+      },
+      "error": true
+    },
+    {
+      "name": "invalid-command-13",
+      "input": {
+        "type": "admission",
+        "request_id": "cancel-1",
+        "method": "session.create",
+        "command_id": "%FF",
+        "status": "refused",
+        "reason": "creation_cancelled"
+      },
+      "error": true
+    },
+    {
+      "name": "invalid-command-14",
+      "input": {
+        "type": "admission",
+        "request_id": "cancel-1",
+        "method": "session.create",
+        "command_id": "AA.A",
+        "status": "refused",
+        "reason": "creation_cancelled"
+      },
+      "error": true
+    },
+    {
+      "name": "invalid-command-15",
+      "input": {
+        "type": "admission",
+        "request_id": "cancel-1",
+        "method": "session.create",
+        "command_id": "é",
+        "status": "refused",
+        "reason": "creation_cancelled"
+      },
+      "error": true
+    },
+    {
+      "name": "invalid-command-16",
+      "input": {
+        "type": "admission",
+        "request_id": "cancel-1",
+        "method": "session.create",
+        "command_id": 7,
+        "status": "refused",
+        "reason": "creation_cancelled"
+      },
+      "error": true
+    },
+    {
+      "name": "invalid-command-17",
+      "input": {
+        "type": "admission",
+        "request_id": "cancel-1",
+        "method": "session.create",
+        "command_id": false,
+        "status": "refused",
+        "reason": "creation_cancelled"
+      },
+      "error": true
+    },
+    {
+      "name": "invalid-command-18",
+      "input": {
+        "type": "admission",
+        "request_id": "cancel-1",
+        "method": "session.create",
+        "command_id": [],
+        "status": "refused",
+        "reason": "creation_cancelled"
+      },
+      "error": true
+    },
+    {
+      "name": "invalid-command-19",
+      "input": {
+        "type": "admission",
+        "request_id": "cancel-1",
+        "method": "session.create",
+        "command_id": {},
+        "status": "refused",
+        "reason": "creation_cancelled"
+      },
+      "error": true
+    },
+    {
+      "name": "invalid-object-0",
+      "input": null,
+      "error": true
+    },
+    {
+      "name": "invalid-object-1",
+      "input": [],
+      "error": true
+    },
+    {
+      "name": "invalid-object-2",
+      "input": "admission",
+      "error": true
+    },
+    {
+      "name": "invalid-object-3",
+      "input": 0,
+      "error": true
+    },
+    {
+      "name": "invalid-object-4",
+      "input": false,
+      "error": true
+    }
+  ]
+}

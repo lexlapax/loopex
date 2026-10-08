@@ -1,0 +1,38 @@
+{
+  "contract": "creation_cancelled_admission",
+  "revision": 1,
+  "activation": "standalone_payload_not_independently_served",
+  "required": [
+    "type",
+    "request_id",
+    "method",
+    "command_id",
+    "status",
+    "reason"
+  ],
+  "additional_members": "refuse",
+  "type": "admission",
+  "method": "session.create",
+  "status": "refused",
+  "reason": "creation_cancelled",
+  "request_id": {
+    "encoding": "ascii",
+    "min_bytes": 1,
+    "max_bytes": 64,
+    "grammar": "[A-Za-z0-9._~-]+"
+  },
+  "command_id": {
+    "encoding": "canonical_unpadded_base64url_of_original_opaque_bytes",
+    "original_min_bytes": 1,
+    "original_max_bytes": 256,
+    "encoded_max_bytes": 342
+  },
+  "forbidden_members": [
+    "session_id",
+    "disposition"
+  ],
+  "envelope": "complete_admission_record",
+  "correlation": "echo_request_and_command; connection_matching_remains_with_transport_and_client",
+  "authority": "none; decoding_does_not_establish_cancellation_or_grant_activation",
+  "framing": "existing_duplicate_aware_Frame_and_output_limits_remain_unchanged"
+}

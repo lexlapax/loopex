@@ -29,6 +29,35 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Reboot continuation on 2026-10-07
 
+Latest completed unit: dormant ADR0061 cancellation codec, whole14 per pair
+including node_client,102 literal vectors and69 Node boundary controls at
+isolated `89212a79926d5c3e34a5bfba7f9d90a2a877c573`. Original83950 PASS in7.446seconds,
+six joins/36 artifacts,1937 rows. Output `M7/cancellation-codec-proof-20261007-v2`,
+collection `83a83a3a9021e3bad8514f8579f30469c744a26f8ba3339a74e4d48eefdd0a12`,
+terminal `8280ee4dc11b83ce05034a777fcdf767e2dbe1ba44f1bf626a968c711b042a86`.
+One narrow added T05 row closes: T01–T19 originals88/85/6, added360/24/0;
+including T00 original88/91/7, added364/25/0. All six tested files integrate
+literally; generation3/4 serving, request matching and remote lifecycle stay open.
+Original52273 remains failed before tests: exact Node-version comparison omitted
+retained log's metadata header; two successful version commands were joined,
+17artifacts/1931 rows,2.204seconds. Output `M7/cancellation-codec-proof-20261007-v1`,
+collection `8d866203dbe6c0dc61b582a308624a76a093286737aec0a90069c6c89e753e83`.
+Resume wrapperd52e43f0 authenticated those version facts and paired45253 formatter
+facts, then ran only six unrun stages. Formatter45253 PASS6.633seconds, eight
+joins/45artifacts/1929 rows; sole AST-equivalent child89212a79 preserves JSON/Node.
+Root alone owns next registry/native grant from1937; no native handle remains live.
+
+Progress physical V3 sourceebac9c89 is root-qualified c4ef77a6, saved at6af6d676
+in m7-progress-sink, whole28 pending native. Generic progress facade retirement
+is already authorized by accepted0058 per source map56e8be0b; no new decision
+was found. Private ingress must reserve credit before Control/relay payload
+transfer; Core source ownership currently overlaps the active Control writer,
+so freeze/rejoin that unit before assigning the next Core migration writer.
+Restore writer owns its three Composition paths in m7-custody-restore; no asked
+approval is pending. Earlier focused/full failures remain failed. Full current
+integration baseline remainsd1132591; floor/release/closure remain open.
+
+
 Latest completed unit: atomic creation adapters, whole48 per supported pair at
 isolated `0d088f1a61f7001f2e3d665416032f8d51df2c18`. Original9327 PASS in31.375seconds,
 eight joins/42 artifacts,1921-row registry. Output `M7/creation-storage-proof-20261007-v2`,

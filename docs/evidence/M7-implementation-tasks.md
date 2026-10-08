@@ -13750,6 +13750,20 @@ or check was relaxed.
 ### Added implementation subtasks
 
 - [ ] Join accepted ADR0059's closed creation cancellation through native result readers, both complete negotiated generation schemas and independent clients; prove refused/no-activation/no-session correlation and exact replay before coordinated serving activation.
+- [x] Prove accepted ADR0061's dormant six-field cancellation codec/schema and independent Node consumer: exact opaque identity, request grammar, missing/null/extra/member refusal and duplicate-aware framing. Run all14 cases, including node_client, on both pairs with102 vectors and69 independent Node boundary controls; keep serving/correlation/replay in the parent row.
+  Whole14 passed per pair at isolated `89212a79926d5c3e34a5bfba7f9d90a2a877c573`,
+  original83950,7.446seconds, zero failures/exclusions/skips/invalid and warning-free
+  compilation. Output `M7/cancellation-codec-proof-20261007-v2`; collection
+  `83a83a3a9021e3bad8514f8579f30469c744a26f8ba3339a74e4d48eefdd0a12`, terminal
+  `8280ee4dc11b83ce05034a777fcdf767e2dbe1ba44f1bf626a968c711b042a86`, six
+  fresh original joins/36 artifacts,1937-row registry
+  `6c6cc5a316eaa0d65d1ade7450010c9b51c8fd1ceac85d7b08a3d85b6aaa5c07`.
+  Original52273 remains a failed wrapper setup: two passing version commands,
+  no tests,2.204seconds. Its complete log included a metadata header, which the
+  wrapper's exact-line assertion overlooked. Authenticated paired formatter45253
+  toolchain facts and52273 Node22.14.0 were used without repeating those stages;
+  only the six unrun format-check/compile/whole-test stages ran. All50 existing
+  schema/vector assets remain unchanged. No negotiated generation is activated.
 
 - [x] Compose the accepted model and policy interaction codecs through one pure kind/producer-aware Elixir selector and an independent Node selector; prove requested, terminal and answer-admitted branch correlation, shared expiry/cancel kinds, exact opaque/quantity domains and malformed/private/cross-kind refusal on both pairs. Keep this four-file preparation unit dormant until coordinated transport/client generation activation.
 
