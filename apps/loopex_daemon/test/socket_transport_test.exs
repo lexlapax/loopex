@@ -3287,8 +3287,9 @@ defmodule LoopexDaemon.SocketTransportTest do
              :ets.lookup(arena, :state)
 
     leases =
-      for {{token, :leased, ^connection, _charge}, index} <- Enum.with_index(Tuple.to_list(slots)),
-          do: {incarnation, index, token}
+      for {{token, :leased, ^connection, _charge}, index} <- Enum.with_index(Tuple.to_list(slots)) do
+        {incarnation, index, token}
+      end
 
     assert Enum.count(Tuple.to_list(slots), &(not is_nil(&1))) == length(leases)
     assert MapSet.new(leases) == MapSet.new(Map.keys(state.progress_leases))
