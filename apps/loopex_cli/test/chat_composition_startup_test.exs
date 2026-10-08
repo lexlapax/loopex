@@ -367,12 +367,17 @@ defmodule LoopexCli.ChatCompositionStartupTest do
 
     devices = inspect(device_contents, limit: 20, printable_limit: 4_096)
 
-    assert {:return, {:ok, manager}} = observation,
-           "default signal installation #{inspect(observation, limit: 20)}; " <>
-             "registered manager #{inspect(Process.whereis(:erl_signal_server))}; " <>
-             "original installer observations #{evidence}; test IO #{devices}"
+    case observation do
+      {:return, {:ok, manager}} ->
+        manager
 
-    manager
+      _ ->
+        flunk(
+          "default signal installation #{inspect(observation, limit: 20)}; " <>
+            "registered manager #{inspect(Process.whereis(:erl_signal_server))}; " <>
+            "original installer observations #{evidence}; test IO #{devices}"
+        )
+    end
   end
 
   defp genesis(root),
