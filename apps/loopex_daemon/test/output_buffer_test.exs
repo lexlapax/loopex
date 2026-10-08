@@ -27,10 +27,13 @@ defmodule LoopexDaemon.OutputBufferTest do
   test "progress item and byte ceilings include active output without spending succession reserve" do
     buffer = OutputBuffer.new(1_048_576)
     assert {:ok, buffer} = OutputBuffer.reserve_succession(buffer, 100, 200)
-    buffer = Enum.reduce(1..32, buffer, fn _, acc ->
-      assert {:ok, _, next} = OutputBuffer.enqueue_progress(acc, String.duplicate("p", 16_384))
-      next
-    end)
+
+    buffer =
+      Enum.reduce(1..32, buffer, fn _, acc ->
+        assert {:ok, _, next} = OutputBuffer.enqueue_progress(acc, String.duplicate("p", 16_384))
+        next
+      end)
+
     assert buffer.progress_items == 32 and buffer.progress_bytes == 524_288
     assert OutputBuffer.commitment(buffer) == 524_588
     assert {:error, :capacity_exceeded} = OutputBuffer.enqueue_progress(buffer, "extra")
@@ -39,7 +42,13 @@ defmodule LoopexDaemon.OutputBufferTest do
     assert {:ok, buffer} = OutputBuffer.emitted(buffer, ref)
     assert {:ok, _, buffer} = OutputBuffer.enqueue_progress(buffer, String.duplicate("q", 16_384))
     assert buffer.progress_items == 32 and buffer.progress_bytes == 524_288
-    assert {:ok, _, one} = OutputBuffer.enqueue_progress(OutputBuffer.new(1_048_576), String.duplicate("p", 524_288))
+
+    assert {:ok, _, one} =
+             OutputBuffer.enqueue_progress(
+               OutputBuffer.new(1_048_576),
+               String.duplicate("p", 524_288)
+             )
+
     assert {:error, :capacity_exceeded} = OutputBuffer.enqueue_progress(one, "byte-overflow")
   end
 
@@ -50,10 +59,12 @@ defmodule LoopexDaemon.OutputBufferTest do
     assert {:ok, last, buffer} = OutputBuffer.enqueue_progress(buffer, "last")
     assert {:ok, buffer} = OutputBuffer.reserve_succession(buffer, 4, 8)
     before = buffer
+
     for refs <- [[make_ref()], [first, first], [first, make_ref()]] do
       assert {:error, :frame_mismatch} = OutputBuffer.discard_progress(buffer, refs)
       assert buffer == before
     end
+
     assert {:ok, ^first, "first", buffer} = OutputBuffer.claim(buffer)
     assert {:error, :claimed} = OutputBuffer.discard_progress(buffer, [first, last])
     assert {:ok, buffer} = OutputBuffer.discard_progress(buffer, [last])
@@ -81,7 +92,9 @@ defmodule LoopexDaemon.OutputBufferTest do
     assert {:ok, cleared} = OutputBuffer.emitted(cleared, durable)
     assert {:ok, _, "e", _} = OutputBuffer.claim(cleared)
 
-    assert {:ok, active, active_buffer} = OutputBuffer.enqueue_progress(OutputBuffer.new(16), "1234")
+    assert {:ok, active, active_buffer} =
+             OutputBuffer.enqueue_progress(OutputBuffer.new(16), "1234")
+
     assert {:ok, ^active, "1234", active_buffer} = OutputBuffer.claim(active_buffer)
     assert {:ok, queued, active_buffer} = OutputBuffer.enqueue_progress(active_buffer, "5678")
     assert {[^queued], retained} = OutputBuffer.discard_unclaimed_progress(active_buffer)

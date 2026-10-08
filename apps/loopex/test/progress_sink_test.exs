@@ -449,7 +449,10 @@ defmodule Loopex.ProgressSinkTest do
       send(guardian, {:release_close_reply, gate})
       assert_receive {:DOWN, ^guardian_monitor, :process, ^guardian, :normal}, 5_000
       assert :ets.info(arena) == :undefined
-      close_monitor = wait_for_close_down(owner, guardian, System.monotonic_time(:millisecond) + 1_000)
+
+      close_monitor =
+        wait_for_close_down(owner, guardian, System.monotonic_time(:millisecond) + 1_000)
+
       assert is_reference(close_monitor)
 
       # The real reply observation follows the close capture. Waiting until
@@ -468,6 +471,7 @@ defmodule Loopex.ProgressSinkTest do
 
       assert_receive {:close_result, ^reference, {:error, :cleanup_unproved}, ^started, finished},
                      1_000
+
       assert finished >= resume_after
       send(owner, :finish)
       assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :normal}, 5_000

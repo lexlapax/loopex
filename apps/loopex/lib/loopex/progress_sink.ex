@@ -223,7 +223,9 @@ defmodule Loopex.ProgressSink do
                 if System.monotonic_time(:millisecond) < deadline,
                   do: :ok,
                   else: {:error, :cleanup_unproved}
-              {:DOWN, ^monitor, :process, ^guardian, _reason} -> {:error, :cleanup_unproved}
+
+              {:DOWN, ^monitor, :process, ^guardian, _reason} ->
+                {:error, :cleanup_unproved}
             after
               close_remaining(deadline) -> {:error, :cleanup_unproved}
             end

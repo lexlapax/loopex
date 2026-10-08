@@ -19,39 +19,64 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
     def decide(_request), do: {:deny, :policy_denied}
   end
 
-  test "actual Service ingress binds Runtime and drains credited Registry routing with coalesced readiness", %{options: options} do
+  test "actual Service ingress binds Runtime and drains credited Registry routing with coalesced readiness",
+       %{options: options} do
     daemon = start_daemon(options)
     _ = await_ready(daemon.output)
     state = :sys.get_state(daemon.owner)
     {:ok, %{control: control}} = Loopex.Runtime.children(state.edges.runtime)
     assert :sys.get_state(control).progress_sink == state.progress_sink
-    assert LoopexDaemon.Owner.components(state.pids.collaboration).registry_progress_sink == state.registry_progress_sink
-    {:ok, item} = Loopex.CompactionProgress.new("episode", %{"kind" => "compact", "id" => "command"}, String.duplicate("a", 32), 0)
+
+    assert LoopexDaemon.Owner.components(state.pids.collaboration).registry_progress_sink ==
+             state.registry_progress_sink
+
+    {:ok, item} =
+      Loopex.CompactionProgress.new(
+        "episode",
+        %{"kind" => "compact", "id" => "command"},
+        String.duplicate("a", 32),
+        0
+      )
+
     :ok = :sys.suspend(daemon.owner)
     :ok = :sys.suspend(state.registry)
+
     on_exit(fn ->
       for pid <- [daemon.owner, state.registry], Process.alive?(pid), do: :sys.resume(pid)
     end)
-    for _ <- 1..32, do: assert(:ok = Loopex.ProgressSink.try_offer(state.progress_sink, "session", item))
+
+    for _ <- 1..32,
+        do: assert(:ok = Loopex.ProgressSink.try_offer(state.progress_sink, "session", item))
+
     assert :dropped = Loopex.ProgressSink.try_offer(state.progress_sink, "session", item)
+
     eventually(fn ->
       {:messages, messages} = Process.info(daemon.owner, :messages)
       Enum.count(messages, &(&1 == {:loopex_progress_ready, state.progress_sink})) == 1
     end)
+
     :ok = :sys.resume(daemon.owner)
     eventually(fn -> native_progress_bytes(state.progress_sink) == 0 end)
     assert native_progress_bytes(state.registry_progress_sink) > 0
     assert :dropped = Loopex.ProgressSink.try_offer(state.registry_progress_sink, "session", item)
+
     eventually(fn ->
       {:messages, messages} = Process.info(state.registry, :messages)
       Enum.count(messages, &(&1 == {:loopex_progress_ready, state.registry_progress_sink})) == 1
     end)
+
     :ok = :sys.resume(state.registry)
     eventually(fn -> native_progress_bytes(state.registry_progress_sink) == 0 end)
+
     for _ <- 1..32 do
       assert :ok = Loopex.ProgressSink.try_offer(state.progress_sink, "session", item)
-      eventually(fn -> native_progress_bytes(state.progress_sink) == 0 and native_progress_bytes(state.registry_progress_sink) == 0 end)
+
+      eventually(fn ->
+        native_progress_bytes(state.progress_sink) == 0 and
+          native_progress_bytes(state.registry_progress_sink) == 0
+      end)
     end
+
     # Existing transport teardown status is not a native close acknowledgement.
     # Native close/guardian/downstream joins remain a separate integration unit.
     send(daemon.sentinel, {:daemon_signal, daemon.owner_ref, :sigterm})

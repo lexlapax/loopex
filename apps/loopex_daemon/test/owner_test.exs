@@ -3530,12 +3530,24 @@ defmodule LoopexDaemon.OwnerTest do
     guardian_monitor = Process.monitor(guardian)
     gate = make_ref()
     observer = self()
-    :ok = :sys.install(guardian, {gate, fn
-      :waiting, {:out, :ok, {^registry, _tag}, %{incarnation: ^incarnation}}, _extra ->
-        send(observer, {:owner_native_close_replied, gate})
-        receive do {:continue_owner_native_close, ^gate} -> :done end
-      debug, _event, _extra -> debug
-    end, :waiting})
+
+    :ok =
+      :sys.install(
+        guardian,
+        {gate,
+         fn
+           :waiting, {:out, :ok, {^registry, _tag}, %{incarnation: ^incarnation}}, _extra ->
+             send(observer, {:owner_native_close_replied, gate})
+
+             receive do
+               {:continue_owner_native_close, ^gate} -> :done
+             end
+
+           debug, _event, _extra ->
+             debug
+         end, :waiting}
+      )
+
     on_exit(fn -> send(guardian, {:continue_owner_native_close, gate}) end)
     deadline = now_ms() + 5_000
     record = WireRecords.daemon_stopping("operator_stop")
@@ -3568,24 +3580,49 @@ defmodule LoopexDaemon.OwnerTest do
       gate = make_ref()
       observer = self()
       cut = @registry_native_close_cut
-      :ok = :sys.install(guardian, {gate, fn
-        :waiting, event, _extra ->
-          matched = case {cut, event} do
-            {:before_close, {:in, {:"$gen_call", {^registry, _tag}, {:close, ^incarnation}}}} -> true
-            {:after_reply, {:out, :ok, {^registry, _tag}, %{incarnation: ^incarnation}}} -> true
-            _ -> false
-          end
-          if matched do
-            send(observer, {:registry_guardian_held, gate, cut})
-            receive do {:continue_registry_guardian, ^gate} -> :done end
-          else
-            :waiting
-          end
-        debug, _event, _extra -> debug
-      end, :waiting})
+
+      :ok =
+        :sys.install(
+          guardian,
+          {gate,
+           fn
+             :waiting, event, _extra ->
+               matched =
+                 case {cut, event} do
+                   {:before_close,
+                    {:in, {:"$gen_call", {^registry, _tag}, {:close, ^incarnation}}}} ->
+                     true
+
+                   {:after_reply, {:out, :ok, {^registry, _tag}, %{incarnation: ^incarnation}}} ->
+                     true
+
+                   _ ->
+                     false
+                 end
+
+               if matched do
+                 send(observer, {:registry_guardian_held, gate, cut})
+
+                 receive do
+                   {:continue_registry_guardian, ^gate} -> :done
+                 end
+               else
+                 :waiting
+               end
+
+             debug, _event, _extra ->
+               debug
+           end, :waiting}
+        )
+
       on_exit(fn -> send(guardian, {:continue_registry_guardian, gate}) end)
       deadline = now_ms() + 300
-      close = Task.async(fn -> Owner.close_connections(owner, WireRecords.daemon_stopping("operator_stop"), deadline) end)
+
+      close =
+        Task.async(fn ->
+          Owner.close_connections(owner, WireRecords.daemon_stopping("operator_stop"), deadline)
+        end)
+
       assert_receive {:registry_guardian_held, ^gate, ^cut}, 1_000
       assert Process.alive?(guardian) and :ets.info(arena) != :undefined
       assert {:error, :connections_lost} = Task.await(close, 2_000)

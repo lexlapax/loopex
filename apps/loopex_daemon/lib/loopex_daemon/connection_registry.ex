@@ -1024,19 +1024,29 @@ defmodule LoopexDaemon.ConnectionRegistry do
       {token, %{phase: :live, progress_fenced: false} = row} when state.transport == :serving ->
         before = OutputBuffer.commitment(row.output)
         wake = OutputBuffer.empty?(row.output)
+
         case OutputBuffer.enqueue_progress(row.output, encoded) do
           {:ok, ref, output} ->
             commitment = state.output_commitment + OutputBuffer.commitment(output) - before
+
             if commitment <= state.aggregate_output_bytes do
-              state = %{put_in(state, [:rows, token, :output], output) | output_commitment: commitment}
+              state = %{
+                put_in(state, [:rows, token, :output], output)
+                | output_commitment: commitment
+              }
+
               if wake, do: send(caller, {:output_ready, incarnation})
               {:reply, {:ok, ref}, state}
             else
               {:reply, :dropped, state}
             end
-          {:error, _} -> {:reply, :dropped, state}
+
+          {:error, _} ->
+            {:reply, :dropped, state}
         end
-      _ -> {:reply, :dropped, state}
+
+      _ ->
+        {:reply, :dropped, state}
     end
   end
 
@@ -1044,7 +1054,9 @@ defmodule LoopexDaemon.ConnectionRegistry do
     case connection_row(state, caller, incarnation) do
       {token, %{phase: phase}} when phase in [:live, :closing] ->
         {:reply, :ok, put_in(state, [:rows, token, :progress_fenced], true)}
-      _ -> {:reply, {:error, :output_unavailable}, state}
+
+      _ ->
+        {:reply, {:error, :output_unavailable}, state}
     end
   end
 
@@ -1052,14 +1064,24 @@ defmodule LoopexDaemon.ConnectionRegistry do
     case connection_row(state, caller, incarnation) do
       {token, %{phase: phase, progress_fenced: true} = row} when phase in [:live, :closing] ->
         before = OutputBuffer.commitment(row.output)
+
         case OutputBuffer.discard_progress(row.output, refs) do
           {:ok, output} ->
             commitment = state.output_commitment + OutputBuffer.commitment(output) - before
-            state = %{put_in(state, [:rows, token, :output], output) | output_commitment: commitment}
+
+            state = %{
+              put_in(state, [:rows, token, :output], output)
+              | output_commitment: commitment
+            }
+
             {:reply, :ok, state}
-          {:error, _} -> {:reply, {:error, :output_unavailable}, state}
+
+          {:error, _} ->
+            {:reply, {:error, :output_unavailable}, state}
         end
-      _ -> {:reply, {:error, :output_unavailable}, state}
+
+      _ ->
+        {:reply, {:error, :output_unavailable}, state}
     end
   end
 
@@ -1533,12 +1555,17 @@ defmodule LoopexDaemon.ConnectionRegistry do
     if now_ms() >= deadline do
       {:noreply, finish_registry_progress_close(state, {:error, :connections_lost})}
     else
-      timer = Process.send_after(self(), {:close_all_deadline, deadline}, max(deadline - now_ms(), 0))
+      timer =
+        Process.send_after(self(), {:close_all_deadline, deadline}, max(deadline - now_ms(), 0))
+
       {:noreply, put_in(state, [:close_all, :timer], timer)}
     end
   end
 
-  def handle_info({:close_all_deadline, deadline}, %{close_all: %{ref: ref, deadline: deadline}} = state) do
+  def handle_info(
+        {:close_all_deadline, deadline},
+        %{close_all: %{ref: ref, deadline: deadline}} = state
+      ) do
     if now_ms() >= deadline do
       Enum.each(state.rows, fn {_token, row} ->
         if is_pid(row.connection_pid), do: Process.exit(row.connection_pid, :kill)
@@ -1548,7 +1575,9 @@ defmodule LoopexDaemon.ConnectionRegistry do
       Logger.debug("loopex daemon connection close-all forced at deadline")
       {:noreply, %{state | close_all: nil}}
     else
-      timer = Process.send_after(self(), {:close_all_deadline, deadline}, max(deadline - now_ms(), 0))
+      timer =
+        Process.send_after(self(), {:close_all_deadline, deadline}, max(deadline - now_ms(), 0))
+
       {:noreply, put_in(state, [:close_all, :timer], timer)}
     end
   end
@@ -1718,8 +1747,12 @@ defmodule LoopexDaemon.ConnectionRegistry do
   # Technical depth: take acknowledges the exact coalesced ready notification.
   # The upstream lease spans every bounded local offer, then releases; neither
   # a slow socket nor an absent/closing attachment can retain this ingress.
-  def handle_info({:loopex_progress_ready, sink}, %{progress_sink: sink, progress_phase: :open} = state) do
+  def handle_info(
+        {:loopex_progress_ready, sink},
+        %{progress_sink: sink, progress_phase: :open} = state
+      ) do
     send(self(), {:loopex_progress_ready, sink})
+
     case drain_progress(state, 32) do
       :ok -> {:noreply, state}
       :error -> {:stop, :connections_lost, state}
@@ -1842,7 +1875,12 @@ defmodule LoopexDaemon.ConnectionRegistry do
       Process.send_after(self(), {:close_all_deadline, deadline}, max(deadline - now_ms(), 0))
 
     Logger.debug("loopex daemon connection close-all start")
-    {:noreply, maybe_finish_close_all(%{state | close_all: %{ref: ref, timer: timer, deadline: deadline, phase: :waiting}})}
+
+    {:noreply,
+     maybe_finish_close_all(%{
+       state
+       | close_all: %{ref: ref, timer: timer, deadline: deadline, phase: :waiting}
+     })}
   end
 
   # Concept: normal final close joins this Registry's own native arena after
@@ -1852,9 +1890,10 @@ defmodule LoopexDaemon.ConnectionRegistry do
   # watchdog contains a blocked call. Actor death/forced transport is no join.
   def handle_info(
         {:close_registry_progress, ref},
-        %{close_all: %{ref: ref, deadline: deadline, phase: :joining},
-          progress_phase: :joining} = state
-      ) when map_size(state.rows) == 0 do
+        %{close_all: %{ref: ref, deadline: deadline, phase: :joining}, progress_phase: :joining} =
+          state
+      )
+      when map_size(state.rows) == 0 do
     result =
       if now_ms() < deadline do
         Loopex.ProgressSink.close(state.progress_sink)
@@ -2698,9 +2737,11 @@ defmodule LoopexDaemon.ConnectionRegistry do
   rescue
     ArgumentError -> false
   end
+
   defp progress_sink_shape?(_), do: false
 
   defp drain_progress(_state, 0), do: :ok
+
   defp drain_progress(state, remaining) do
     case Loopex.ProgressSink.take(state.progress_sink) do
       {:ok, lease, session, item} ->
@@ -2708,22 +2749,31 @@ defmodule LoopexDaemon.ConnectionRegistry do
           Enum.each(state.attachments, fn
             {incarnation, %{phase: :installed, session_id: ^session}} ->
               case Enum.find(state.rows, fn {_token, row} ->
-                row.connection_incarnation == incarnation and row.phase == :live and
-                  row.initialized and not row.progress_fenced
-              end) do
+                     row.connection_incarnation == incarnation and row.phase == :live and
+                       row.initialized and not row.progress_fenced
+                   end) do
                 {_token, %{progress_sink: sink}} when not is_nil(sink) ->
                   Loopex.ProgressSink.try_offer(sink, session, item)
-                _ -> :ok
+
+                _ ->
+                  :ok
               end
-            _ -> :ok
+
+            _ ->
+              :ok
           end)
         end
+
         case Loopex.ProgressSink.release(state.progress_sink, lease) do
           :ok -> drain_progress(state, remaining - 1)
           {:error, _} -> :error
         end
-      :empty -> :ok
-      :closed -> :error
+
+      :empty ->
+        :ok
+
+      :closed ->
+        :error
     end
   end
 
@@ -2856,24 +2906,32 @@ defmodule LoopexDaemon.ConnectionRegistry do
 
   defp discard_progress_for_admission(state, token, encoded) do
     output = state.rows[token].output
+
     case OutputBuffer.enqueue(output, encoded) do
       {:ok, admitted} ->
         if state.output_commitment + OutputBuffer.commitment(admitted) -
              OutputBuffer.commitment(output) <= state.aggregate_output_bytes,
-          do: state, else: discard_buffered_progress(state)
-      {:error, _} -> discard_buffered_progress(state)
+           do: state,
+           else: discard_buffered_progress(state)
+
+      {:error, _} ->
+        discard_buffered_progress(state)
     end
   end
 
   defp discard_buffered_progress(state) do
     Enum.reduce(state.rows, state, fn {token, row}, acc ->
       {refs, output} = OutputBuffer.discard_unclaimed_progress(row.output)
+
       if refs == [] do
         acc
       else
         send(row.connection_pid, {:progress_discarded, row.connection_incarnation, refs})
-        commitment = acc.output_commitment + OutputBuffer.commitment(output) -
-          OutputBuffer.commitment(row.output)
+
+        commitment =
+          acc.output_commitment + OutputBuffer.commitment(output) -
+            OutputBuffer.commitment(row.output)
+
         %{put_in(acc, [:rows, token, :output], output) | output_commitment: commitment}
       end
     end)
@@ -2941,18 +2999,24 @@ defmodule LoopexDaemon.ConnectionRegistry do
     end
   end
 
-  defp maybe_finish_close_all(%{close_all: %{ref: ref, deadline: deadline, phase: :waiting}} = state)
+  defp maybe_finish_close_all(
+         %{close_all: %{ref: ref, deadline: deadline, phase: :waiting}} = state
+       )
        when map_size(state.rows) == 0 do
     cond do
       now_ms() >= deadline ->
         finish_registry_progress_close(state, {:error, :connections_lost})
+
       state.progress_phase == :closed ->
         finish_registry_progress_close(state, :ok)
+
       state.progress_phase == :open ->
         send(self(), {:close_registry_progress, ref})
+
         state
         |> Map.put(:progress_phase, :joining)
         |> put_in([:close_all, :phase], :joining)
+
       true ->
         finish_registry_progress_close(state, {:error, :connections_lost})
     end
@@ -2960,7 +3024,10 @@ defmodule LoopexDaemon.ConnectionRegistry do
 
   defp maybe_finish_close_all(state), do: state
 
-  defp finish_registry_progress_close(%{close_all: %{ref: ref, timer: timer, deadline: deadline}} = state, reply) do
+  defp finish_registry_progress_close(
+         %{close_all: %{ref: ref, timer: timer, deadline: deadline}} = state,
+         reply
+       ) do
     _ = Process.cancel_timer(timer)
     reply = if reply == :ok and now_ms() >= deadline, do: {:error, :connections_lost}, else: reply
     send(state.owner, {:owner_reply, self(), ref, reply})
@@ -3110,7 +3177,12 @@ defmodule LoopexDaemon.ConnectionRegistry do
       {row, rows} ->
         cancel_timer(row.timer, token)
         if row.progress_monitor, do: Process.demonitor(row.progress_monitor, [:flush])
-        state = %{state | progress_monitors: Map.delete(state.progress_monitors, row.progress_monitor)}
+
+        state = %{
+          state
+          | progress_monitors: Map.delete(state.progress_monitors, row.progress_monitor)
+        }
+
         state = release_row_attachment(state, row.connection_incarnation)
 
         child_monitors =
