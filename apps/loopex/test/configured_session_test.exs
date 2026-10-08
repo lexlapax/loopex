@@ -1,3 +1,4 @@
+Code.require_file("support/progress_test_consumer.exs", __DIR__)
 Code.require_file("support/m1_runtime_helper.exs", __DIR__)
 Code.require_file("support/agent_loop_helper.exs", __DIR__)
 Code.require_file("support/configured_genesis_helper.exs", __DIR__)
@@ -40,6 +41,7 @@ end
 
 defmodule Loopex.ConfiguredSessionTest do
   use ExUnit.Case, async: false
+  import Loopex.ProgressTestConsumer
 
   import Loopex.ConfiguredGenesisFixture,
     only: [configuration: 0, configuration: 1, genesis: 1, genesis: 2]
@@ -440,7 +442,7 @@ defmodule Loopex.ConfiguredSessionTest do
 
       fixture =
         start(
-          progress_to: self(),
+          progress_sink: Loopex.ProgressTestConsumer.open_sink(),
           script: [
             %{text: "done", reply_overrides: %{completion: "natural", continuation: capsule}}
           ]
@@ -466,7 +468,7 @@ defmodule Loopex.ConfiguredSessionTest do
       assert exact["result"]["reply"]["continuation"] == capsule
       assert exact["result"]["reply"]["completion"] == "natural"
 
-      refute_receive {:loopex_progress, %{kind: :model_stream_closed}}, 0
+      refute_progress({:loopex_progress, %{kind: :model_stream_closed}}, 0)
 
       if phase == :before do
         refute Enum.any?(
@@ -497,7 +499,7 @@ defmodule Loopex.ConfiguredSessionTest do
       events = finish(attachment)
       assert Enum.find(events, &(&1.kind == "run.finished"))["outcome"] == "completed"
       assert Enum.count(events, &(&1.kind == "assistant.message_appended")) == 1
-      assert_receive {:loopex_progress, %{kind: :model_stream_closed}}, 5_000
+      assert_progress({:loopex_progress, %{kind: :model_stream_closed}}, 5_000)
       assert length(AgentLoopTestModel.dispatched(fixture.model)) == 1
 
       settlements =

@@ -76,7 +76,7 @@ defmodule Loopex.Runtime.ExecutorStream do
   @doc false
   @spec open(
           Supervisor.supervisor(),
-          pid() | {pid(), binary()} | nil,
+          {Loopex.ProgressSink.t() | nil, binary(), pid(), map(), map()},
           Executor.job_request(),
           non_neg_integer(),
           publish()
@@ -94,7 +94,12 @@ defmodule Loopex.Runtime.ExecutorStream do
     with {:ok, relay} <-
            StreamRelay.open_stateful(
              supervisor,
-             sink,
+             executor_route(sink, %{
+               turn_id: turn_id,
+               tool_call_id: tool_call_id,
+               stream_domain_id: domain,
+               base_event_sequence: base_event_sequence
+             }),
              %{
                next_sequence: 0,
                offsets: %{"stdout" => 0, "stderr" => 0, "progress" => 0}
@@ -206,6 +211,9 @@ defmodule Loopex.Runtime.ExecutorStream do
       end
     end)
   end
+
+  defp executor_route({sink, session, control, owner, _header}, header),
+    do: {sink, session, control, owner, header}
 
   defp progress_bindings(job) do
     [

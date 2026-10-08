@@ -9,12 +9,12 @@ defmodule Loopex.Runtime.Control do
 
   ## Technical depth
 
-  Native creation and startup recovery retain one slot, one original work cutoff
+  Authored and native creation and startup recovery retain one slot, one original work cutoff
   and one runtime-control `Store.OwnerLane`. Control installs the complete fence
   before each mechanical Store permit and consumes only matching, originally
   monitored, fully joined results. Creation eligibility is independent of dispatcher
   readiness. Missing recovery capability leaves creation unavailable. Authored
-  intake and preparation remain a separate migration into this same slot.
+  input is compared before owned preparation; replay uses original captured facts.
   Session creation does not cache a mapping before the transaction is terminal. Starting or resuming
   a coordinator is serialized here; the DynamicSupervisor child completes
   `advance_owner` before this process marks it active.
@@ -34,6 +34,7 @@ defmodule Loopex.Runtime.Control do
   alias Loopex.Model
   alias Loopex.ResumeActivation
   alias Loopex.Runtime.CreationCarrier
+  alias Loopex.Runtime.CreationOptions
   alias Loopex.Runtime.DaemonRoute
   alias Loopex.Runtime.EventDispatcher
   alias Loopex.Runtime.EffectIntents
@@ -44,8 +45,9 @@ defmodule Loopex.Runtime.Control do
   alias Loopex.Runtime.SessionGenesis
   alias Loopex.Runtime.SessionConfiguration
   alias Loopex.Runtime.Instructions
+  alias Loopex.ProgressSink
+  alias Loopex.Runtime.ProgressIngress
   alias Loopex.Runtime.StreamRelay
-  alias Loopex.CompactionProgress
   alias Loopex.Runtime.Supervisor, as: RuntimeSupervisor
   alias Loopex.Owner
   alias Loopex.Store
@@ -255,15 +257,30 @@ defmodule Loopex.Runtime.Control do
           | {:error, :superseded_owner}
           | {:error, :runtime_unavailable}
           | {:error, :invalid_compaction_progress}
-  def project_progress(control, session_id, owner, relay, item) when is_pid(relay) do
-    try do
-      GenServer.call(
-        control,
-        {:project_progress, session_id, owner, relay, item},
-        :infinity
-      )
-    catch
-      :exit, _reason -> {:error, :runtime_unavailable}
+  def project_progress(control, session_id, owner, relay, item) do
+    case ProgressIngress.reserve(control, session_id, owner, relay, item) do
+      {:ok, reference} ->
+        try do
+          case GenServer.call(
+                 control,
+                 {:project_progress, session_id, owner, relay, reference},
+                 :infinity
+               ) do
+            {:error, _reason} = error ->
+              ProgressSink.withdraw_raw(StreamRelay.sink(relay), reference)
+              error
+
+            :ok ->
+              :ok
+          end
+        catch
+          :exit, _reason ->
+            ProgressSink.withdraw_raw(StreamRelay.sink(relay), reference)
+            {:error, :runtime_unavailable}
+        end
+
+      :dropped ->
+        :ok
     end
   end
 
@@ -288,7 +305,9 @@ defmodule Loopex.Runtime.Control do
           | {:error, :stream_unavailable}
           | {:error, :superseded_owner}
           | {:error, :runtime_unavailable}
-  def close_progress(control, session_id, owner, relay, disposition) when is_pid(relay) do
+  def close_progress(control, session_id, owner, relay, disposition) do
+    StreamRelay.seal(relay)
+
     try do
       GenServer.call(
         control,
@@ -355,6 +374,13 @@ defmodule Loopex.Runtime.Control do
 
   @impl GenServer
   def init(options) do
+    :ok =
+      ProgressSink.register_control(
+        Keyword.get(options, :progress_sink),
+        Keyword.fetch!(options, :token),
+        self()
+      )
+
     send(self(), :creation_startup)
 
     {:ok,
@@ -384,7 +410,7 @@ defmodule Loopex.Runtime.Control do
        fault_to: Keyword.fetch!(options, :fault_to),
        cleanup_grace_ms: Keyword.fetch!(options, :cleanup_grace_ms),
        context_token_budget: Keyword.fetch!(options, :context_token_budget),
-       progress_to: Keyword.get(options, :progress_to),
+       progress_sink: Keyword.get(options, :progress_sink),
        diagnostics_to: Keyword.get(options, :diagnostics_to),
        # Concept: every provider-permit decision reads one runtime-local wall clock.
        #
@@ -561,7 +587,9 @@ defmodule Loopex.Runtime.Control do
         {:reply, {:error, :runtime_unavailable}, state}
 
       true ->
-        create_session(state, command_id, session_options, from, mode)
+        if is_map(session_options) and Map.has_key?(session_options, "version"),
+          do: create_authored_session(state, command_id, session_options, from, mode),
+          else: create_session(state, command_id, session_options, from, mode)
     end
   end
 
@@ -871,20 +899,30 @@ defmodule Loopex.Runtime.Control do
     {:reply, current_owner_post_commit_fence(state, session_id, owner), state}
   end
 
-  def handle_call({:project_progress, session_id, owner, relay, item}, _from, state) do
-    with :ok <- current_owner_post_commit_fence(state, session_id, owner),
-         :ok <- validate_compaction_progress(item) do
-      :ok = StreamRelay.emit(relay, item)
-      {:reply, :ok, state}
-    else
-      {:error, _reason} = error -> {:reply, error, state}
-    end
+  def handle_call({:project_progress, session, owner, relay, reference}, _from, state) do
+    # An earlier producer may have published its metadata and reopened the gate
+    # before issuing its Control call. Route that bounded prefix before this
+    # reference; each entry still passes the original current-owner fence.
+    result =
+      case drain_progress(state, StreamRelay.sink(relay), reference) do
+        :ok -> fence_progress(state, session, owner, relay, reference)
+        :blocked -> :ok
+      end
+
+    {:reply, result, state}
+  end
+
+  def handle_call({:flush_progress, relay}, _from, state) do
+    drain_progress(state, StreamRelay.sink(relay))
+    {:reply, :ok, state}
   end
 
   def handle_call({:close_progress, session_id, owner, relay, disposition}, _from, state) do
     case current_owner_post_commit_fence(state, session_id, owner) do
       :ok ->
-        case StreamRelay.close(relay, disposition) do
+        drain_progress(state, StreamRelay.sink(relay))
+
+        case StreamRelay.close_fenced(relay, disposition) do
           :unavailable -> {:reply, {:error, :stream_unavailable}, state}
           count -> {:reply, {:ok, count}, state}
         end
@@ -1496,6 +1534,15 @@ defmodule Loopex.Runtime.Control do
   defp record_kind(_record), do: nil
 
   @impl GenServer
+  def handle_info({:loopex_progress_ingress, sink}, state) do
+    if sink == state.progress_sink do
+      ProgressSink.acknowledge_ingress(sink)
+      drain_progress(state, sink)
+    end
+
+    {:noreply, state}
+  end
+
   def handle_info(:creation_startup, %{creation_status: :starting, creation: nil} = state) do
     entry = creation_episode(state, :startup)
     {:noreply, creation_read(%{state | creation: entry}, :initial_head, nil)}
@@ -1538,6 +1585,48 @@ defmodule Loopex.Runtime.Control do
             else: cleanup
 
         {:noreply, creation_stop(%{state | creation: %{entry | cleanup: retained}})}
+
+      _ ->
+        {:noreply, state}
+    end
+  end
+
+  def handle_info(
+        {:creation_preparation_cleanup, incarnation, invocation, permit, guardian,
+         %{cooperative: cooperative, observe: observe} = cleanup},
+        state
+      )
+      when is_integer(cooperative) and is_integer(observe) and cooperative <= observe do
+    case state.creation do
+      %{
+        invocation: ^invocation,
+        phase: :prepared_configuration,
+        action: %{permit: ^permit, pid: ^guardian}
+      } = entry
+      when incarnation == state.creation_incarnation ->
+        retained =
+          if entry.cleanup,
+            do: %{
+              cooperative: min(entry.cleanup.cooperative, cooperative),
+              observe: min(entry.cleanup.observe, observe)
+            },
+            else: cleanup
+
+        # The root-owned preparation group also receives the minimum capture
+        # directly. Guardian loss cannot leave it using a later local window.
+        if is_pid(entry.action.group),
+          do: Loopex.Runtime.CreationCarrier.PreparationGroup.retire(entry.action.group, retained)
+
+        if entry.cleanup_timer, do: Process.cancel_timer(entry.cleanup_timer)
+
+        timer =
+          Process.send_after(
+            self(),
+            {:creation_cleanup_expired, incarnation, invocation},
+            min(max(retained.observe - System.monotonic_time(:millisecond), 0), 3_600_000)
+          )
+
+        {:noreply, %{state | creation: %{entry | cleanup: retained, cleanup_timer: timer}}}
 
       _ ->
         {:noreply, state}
@@ -2547,6 +2636,52 @@ defmodule Loopex.Runtime.Control do
     end
   end
 
+  # Concept: authored intake occupies the existing pre-session slot, without a queue.
+  # Technical depth: capture compares all instruction sections and supplied members
+  # before any Store or host work; native complete genesis remains a separate route.
+  defp create_authored_session(state, command_id, options, from, mode) do
+    with true <- valid_identifier?(command_id),
+         {:ok, authored} <- CreationOptions.normalize(options) do
+      cond do
+        match?(%{kind: :startup}, state.creation) ->
+          creation_refusal(state, from, mode, :store_unavailable)
+
+        not is_nil(state.creation) ->
+          reason =
+            if state.creation.command_id == command_id and
+                 not is_nil(state.creation.authored) and state.creation.authored != authored,
+               do: :runtime_command_conflict,
+               else: :creation_in_progress
+
+          creation_refusal(state, from, mode, reason)
+
+        state.creation_status != :ready ->
+          creation_refusal(state, from, mode, :store_unavailable)
+
+        true ->
+          caller = elem(from, 0)
+          entry = creation_episode(state, :authored)
+
+          entry = %{
+            entry
+            | from: from,
+              caller: caller,
+              caller_monitor: Process.monitor(caller),
+              command_id: command_id,
+              options: authored.options,
+              authored: authored,
+              supplied: :runtime_defaults,
+              defaults: state.session_creation_defaults,
+              mode: mode
+          }
+
+          {:noreply, creation_read(%{state | creation: entry}, :initial_command, command_id)}
+      end
+    else
+      _ -> creation_refusal(state, from, mode, :invalid_session_creation)
+    end
+  end
+
   defp creation_refusal(state, _from, mode, reason) do
     {:reply, detailed_session_reply({:error, reason}, mode, :no_activation, state, nil), state}
   end
@@ -2592,7 +2727,10 @@ defmodule Loopex.Runtime.Control do
       fresh: false,
       activation: nil,
       historical_row: nil,
-      history_reread: false
+      history_reread: false,
+      authored: nil,
+      baseline: nil,
+      prepared: false
     }
   end
 
@@ -2615,7 +2753,7 @@ defmodule Loopex.Runtime.Control do
 
   defp creation_call(state, phase, action) do
     entry = state.creation
-    deadline = if entry.stopped and entry.cleanup, do: entry.cleanup.observe, else: entry.cutoff
+    deadline = creation_phase_deadline(entry)
     resolution = phase in [:before_close, :close, :post_terminal]
 
     with true <- is_nil(entry.action),
@@ -2718,7 +2856,7 @@ defmodule Loopex.Runtime.Control do
         state = %{state | creation: %{entry | action: action}}
 
         deadline =
-          if entry.stopped and entry.cleanup, do: entry.cleanup.observe, else: entry.cutoff
+          creation_phase_deadline(entry)
 
         if not entry.cleanup_unproved and System.monotonic_time(:millisecond) < deadline and
              (not entry.stopped or entry.phase in [:before_close, :close, :post_terminal]) do
@@ -2934,6 +3072,47 @@ defmodule Loopex.Runtime.Control do
   defp creation_step(%{creation: %{history_reread: true}} = state, :provenance, :absent),
     do: creation_finish(state, {:error, :store_unavailable}, false)
 
+  defp creation_step(%{creation: %{kind: :authored}} = state, :provenance, :absent) do
+    entry = state.creation
+
+    with false <- entry.stopped,
+         {:ok, baseline} <- creation_genesis(%{}, entry.defaults, :runtime_defaults),
+         {:ok, probe} <- Store.create_session(state.runtime_id, entry.command_id, baseline) do
+      creation_call(
+        state,
+        :authored_probe,
+        {:runtime_command, create_command(state.runtime_id, entry.command_id, probe)}
+      )
+    else
+      _ -> creation_finish(state, {:error, :store_unavailable}, false)
+    end
+  end
+
+  defp creation_step(state, :authored_probe, :absent), do: creation_prepare_authored(state)
+
+  defp creation_step(state, :authored_probe, result) do
+    occupied = match?({:completed, _}, result) or result == {:error, :runtime_command_conflict}
+
+    if occupied and not state.creation.history_reread do
+      state = %{state | creation: %{state.creation | history_reread: true}}
+
+      creation_call(
+        state,
+        :provenance,
+        {:provenance, state.runtime_id, %{kind: :command, command_id: state.creation.command_id}}
+      )
+    else
+      creation_finish(state, {:error, :store_unavailable}, false)
+    end
+  end
+
+  defp creation_step(state, :prepared_configuration, {:ok, candidate}) do
+    creation_authored_final(state, candidate, true)
+  end
+
+  defp creation_step(state, :prepared_configuration, _result),
+    do: creation_finish(state, {:error, :invalid_session_creation}, not state.creation.stopped)
+
   defp creation_step(state, :provenance, :absent) do
     entry = state.creation
 
@@ -2960,7 +3139,12 @@ defmodule Loopex.Runtime.Control do
   defp creation_step(state, :provenance, :conflict),
     do: creation_finish(state, {:error, :runtime_command_conflict}, true)
 
-  defp creation_step(state, :historical_genesis, {:ok, [%{payload: genesis}]}) do
+  defp creation_step(
+         state,
+         :historical_genesis,
+         {:ok,
+          [%{journal_version: 1, owner_epoch: 0, owner_incarnation_id: nil, payload: genesis}]}
+       ) do
     row = state.creation.historical_row
 
     with {:ok, normalized} <- SessionGenesis.normalize(genesis),
@@ -3116,10 +3300,80 @@ defmodule Loopex.Runtime.Control do
   defp creation_step(state, _phase, _result),
     do: creation_finish(state, {:error, :store_unavailable}, false)
 
+  # Concept: request input never substitutes for the immutable absence baseline.
+  # Technical depth: only authoritative key absence selects tools and prepares;
+  # every phase consumes the original episode cutoff and host cleanup bounds.
+  defp creation_prepare_authored(state) do
+    entry = state.creation
+
+    with false <- entry.stopped,
+         {:ok, baseline} <- CreationOptions.baseline(entry.authored, entry.defaults),
+         {:ok, changes} <- CreationOptions.changes(entry.authored) do
+      state = %{state | creation: %{entry | baseline: baseline}}
+
+      if is_nil(changes) do
+        creation_authored_final(state, :captured, false)
+      else
+        case state.model do
+          %{module: module} = model ->
+            if Code.ensure_loaded?(module) and
+                 function_exported?(module, :prepare_configuration, 5) do
+              context = %{
+                deadline_monotonic_ms: entry.cutoff,
+                cleanup_grace_ms: state.cleanup_grace_ms
+              }
+
+              creation_call(
+                state,
+                :prepared_configuration,
+                {:prepare_configuration, model, baseline["initial_configuration"], changes,
+                 baseline["tool_selection"]["definitions"], context}
+              )
+            else
+              creation_finish(state, {:error, :invalid_session_creation}, true)
+            end
+
+          _ ->
+            creation_finish(state, {:error, :invalid_session_creation}, true)
+        end
+      end
+    else
+      {:error, :session_configuration_too_large} ->
+        creation_finish(state, {:error, :session_configuration_too_large}, true)
+
+      _ ->
+        creation_finish(state, {:error, :invalid_session_creation}, not entry.stopped)
+    end
+  end
+
+  defp creation_authored_final(state, candidate, prepared) do
+    entry = state.creation
+
+    with false <- entry.stopped,
+         true <- System.monotonic_time(:millisecond) < entry.cutoff,
+         {:ok, genesis} <-
+           CreationOptions.initial_genesis(entry.authored, entry.baseline, candidate),
+         :ok <- validate_fresh_selection(state, genesis, prepared),
+         {:ok, final} <- Store.create_session(state.runtime_id, entry.command_id, genesis) do
+      creation_step(
+        %{state | creation: %{entry | final: final, prepared: prepared}},
+        :history_probe,
+        :absent
+      )
+    else
+      {:error, :session_configuration_too_large} ->
+        creation_finish(state, {:error, :session_configuration_too_large}, true)
+
+      _ ->
+        creation_finish(state, {:error, :invalid_session_creation}, not entry.stopped)
+    end
+  end
+
   defp creation_history(state, genesis, capsule) do
     entry = state.creation
 
     with {:ok, original} <- creation_genesis(entry.options, nil, genesis),
+         true <- creation_authored_matches?(entry, original),
          true <-
            entry.supplied == :runtime_defaults or
              match?({:ok, ^original}, creation_genesis(entry.options, nil, entry.supplied)),
@@ -3140,6 +3394,11 @@ defmodule Loopex.Runtime.Control do
       _ -> creation_finish(state, {:error, :runtime_command_conflict}, true)
     end
   end
+
+  defp creation_authored_matches?(%{authored: nil}, _genesis), do: true
+
+  defp creation_authored_matches?(%{authored: authored}, genesis),
+    do: CreationOptions.reconstruct(genesis) == {:ok, authored}
 
   defp creation_close_capsule(state, capsule, head) when is_map(capsule) do
     with {:ok, final} <-
@@ -3304,6 +3563,10 @@ defmodule Loopex.Runtime.Control do
     end
   end
 
+  defp creation_phase_deadline(%{cleanup: nil} = entry), do: entry.cutoff
+  defp creation_phase_deadline(%{stopped: true} = entry), do: entry.cleanup.observe
+  defp creation_phase_deadline(entry), do: min(entry.cutoff, entry.cleanup.observe)
+
   defp creation_cleanup_unproved?(entry) do
     entry.cleanup_unproved or
       (not is_nil(entry.cleanup) and System.monotonic_time(:millisecond) >= entry.cleanup.observe)
@@ -3367,6 +3630,15 @@ defmodule Loopex.Runtime.Control do
         {:creation_retire, self(), state.creation_incarnation, entry.invocation,
          entry.action.permit, cleanup}
       )
+    end
+
+    case entry.action do
+      %{operation: {:prepare_configuration, _, _, _, _, _}, group: group}
+      when is_pid(group) ->
+        Loopex.Runtime.CreationCarrier.PreparationGroup.retire(group, cleanup)
+
+      _ ->
+        :ok
     end
 
     if entry.activation do
@@ -3441,7 +3713,7 @@ defmodule Loopex.Runtime.Control do
       end
 
     alive and not stopped and not entry.stopped and is_nil(state.quiescing) and
-      System.monotonic_time(:millisecond) < entry.cutoff
+      System.monotonic_time(:millisecond) < creation_phase_deadline(entry)
   end
 
   defp creation_monitor?(state, monitor) do
@@ -3491,13 +3763,15 @@ defmodule Loopex.Runtime.Control do
   # Technical depth: only a proved fresh create checks the runtime's admitted
   # definitions and model route. The transaction binds complete captured genesis
   # and its normalized original options, never current cleanup defaults.
-  defp validate_fresh_selection(state, %{kind: "session_genesis_v3"} = genesis) do
+  defp validate_fresh_selection(state, genesis, prepared \\ false)
+
+  defp validate_fresh_selection(state, %{kind: "session_genesis_v3"} = genesis, prepared) do
     definitions = genesis["tool_selection"]["definitions"]
     configuration = genesis["initial_configuration"]
     model = configuration["model"]
 
     with true <- Enum.all?(definitions, &(&1 in state.tools)),
-         true <- is_nil(state.model) or state.model.model == model,
+         true <- prepared or is_nil(state.model) or state.model.model == model,
          {:ok, text} <- Instructions.render(configuration["instructions"]),
          {:ok, _request} <-
            Model.request(model, [%{"role" => "system", "content" => text}],
@@ -3721,7 +3995,7 @@ defmodule Loopex.Runtime.Control do
           executor: state.executor,
           tool: state.tool,
           active_tools: active_tool_definitions(state),
-          progress_to: state.progress_to,
+          progress_sink: state.progress_sink,
           diagnostics_to: state.diagnostics_to,
           bounds: state.bounds,
           policy: state.policy,
@@ -5066,12 +5340,97 @@ defmodule Loopex.Runtime.Control do
   defp validate_optional_cursor(value) when is_integer(value) and value >= 0, do: :ok
   defp validate_optional_cursor(_value), do: :error
 
-  defp validate_compaction_progress(%{kind: "context.compaction_progress"} = item) do
-    case CompactionProgress.project(item) do
-      {:ok, _projected} -> :ok
-      :error -> {:error, :invalid_compaction_progress}
+  # Concept: Control admits metadata under the original serial session fence.
+  # Technical depth: no raw lookup occurs here. Only an exact current-stage
+  # reference can transfer to its captured relay; stale references emit nothing.
+  defp fence_progress(
+         state,
+         session,
+         owner,
+         {relay, sink, gate, kind, _captured_control, session, owner, header},
+         reference
+       ) do
+    case ProgressSink.claim_stage(sink, reference, :control_ready, :control_owned) do
+      {:ok, {control, ^relay, ^session, ^owner, ^gate, ^kind, ^header, _producer}}
+      when control == self() and sink == state.progress_sink ->
+        case current_owner_post_commit_fence(state, session, owner) do
+          :ok ->
+            if Process.alive?(relay) and
+                 ProgressSink.route_stage(sink, reference, :control_owned, :relay_ready, relay) do
+              :ok
+            else
+              ProgressSink.retire_stage(sink, reference, :control_owned)
+              {:error, :runtime_unavailable}
+            end
+
+          {:error, _reason} = error ->
+            ProgressSink.retire_stage(sink, reference, :control_owned)
+            error
+        end
+
+      {:ok, _wrong_route} ->
+        ProgressSink.retire_stage(sink, reference, :control_owned)
+        :ok
+
+      :stale ->
+        :ok
+
+      :blocked ->
+        :ok
     end
   end
 
-  defp validate_compaction_progress(_ordinary_item), do: :ok
+  defp fence_progress(_state, _session, _owner, _relay, _reference), do: :ok
+
+  defp drain_progress(state, sink), do: drain_progress(state, sink, nil)
+
+  defp drain_progress(state, sink, before_reference) do
+    if sink == state.progress_sink do
+      references = ProgressSink.references(sink, self(), :control_ready)
+
+      prefix =
+        if is_nil(before_reference) do
+          references
+        else
+          case Enum.split_while(references, &(&1 != before_reference)) do
+            {prior, [^before_reference | _later]} -> prior
+            {_prior, []} -> []
+          end
+        end
+
+      # Concept: finite contention must not move a successor ahead of a live prefix.
+      # Technical depth: exhausted claims retain their original slot and charge.
+      # A later serialized drain may settle that prefix; this turn never skips it.
+      Enum.reduce_while(prefix, :ok, fn reference, :ok ->
+        case ProgressSink.claim_stage(sink, reference, :control_ready, :control_owned) do
+          {:ok, {control, relay, session, owner, _gate, _kind, _header, _producer}} ->
+            case current_owner_post_commit_fence(state, session, owner) do
+              :ok when control == self() ->
+                if not Process.alive?(relay) or
+                     not ProgressSink.route_stage(
+                       sink,
+                       reference,
+                       :control_owned,
+                       :relay_ready,
+                       relay
+                     ),
+                   do: ProgressSink.retire_stage(sink, reference, :control_owned)
+
+              _ ->
+                ProgressSink.retire_stage(sink, reference, :control_owned)
+            end
+
+            {:cont, :ok}
+
+          :stale ->
+            {:cont, :ok}
+
+          :blocked ->
+            {:halt, :blocked}
+        end
+      end)
+    else
+      :ok
+    end
+  end
 end

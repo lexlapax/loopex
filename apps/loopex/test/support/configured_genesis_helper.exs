@@ -65,4 +65,42 @@ defmodule Loopex.ConfiguredGenesisFixture do
 
     genesis
   end
+
+  # Concept: ready-placement fixtures observe actual creation eligibility.
+  # Technical depth: dispatcher readiness alone does not settle the separate
+  # startup custody episode. Capture one existing 1,000 ms observation cutoff;
+  # unavailable state or Control loss fails without retrying creation.
+  def await_creation_ready(runtime) do
+    cutoff = System.monotonic_time(:millisecond) + 1_000
+    {:ok, %{control: control}} = Loopex.Runtime.children(runtime)
+    await_creation_ready(control, cutoff)
+  end
+
+  defp await_creation_ready(control, cutoff) do
+    remaining = cutoff - System.monotonic_time(:millisecond)
+
+    if remaining <= 0,
+      do: raise("fixture creation startup did not settle within its observation bound")
+
+    case :sys.get_state(control, remaining) do
+      %{creation_status: :ready, creation: nil} ->
+        :ok
+
+      %{creation_status: :starting} ->
+        remaining = max(cutoff - System.monotonic_time(:millisecond), 0)
+
+        receive do
+          :no_fixture_message -> :ok
+        after
+          min(remaining, 10) -> :ok
+        end
+
+        await_creation_ready(control, cutoff)
+
+      other ->
+        raise "fixture creation startup unavailable: #{inspect(other.creation_status)}"
+    end
+  catch
+    :exit, _reason -> raise "fixture creation startup capability unavailable"
+  end
 end

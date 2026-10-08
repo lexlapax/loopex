@@ -108,8 +108,8 @@ defmodule Loopex.ProgressSinkTest do
 
     {bytes, identity_charge} =
       case backing do
-        [8, 8, 32] -> {64_976, 384}
-        [64, 64, 256] -> {64_892, 1_056}
+        [8, 8, 32] -> {36_816, 672}
+        [64, 64, 256] -> {36_768, 1_344}
         other -> flunk("Unexpected copied identity backing: #{inspect(other)}")
       end
 
@@ -119,7 +119,7 @@ defmodule Loopex.ProgressSinkTest do
     payload = :binary.copy("a", bytes)
     assert byte_size(payload) == bytes
     assert :binary.referenced_byte_size(payload) == bytes
-    assert 4_096 + identity_charge + 8 * bytes == 524_288
+    assert 8_192 + identity_charge + 14 * bytes == 524_288
     item = %{text(payload) | turn_id: turn_id, stream_domain_id: domain_id}
 
     assert :ok = Sink.try_offer(sink, session_id, item)
@@ -132,7 +132,7 @@ defmodule Loopex.ProgressSinkTest do
     extra = :binary.copy("a", bytes + 1)
     assert byte_size(extra) == bytes + 1
     assert :binary.referenced_byte_size(extra) == bytes + 1
-    assert 4_096 + identity_charge + 8 * (bytes + 1) == 524_296
+    assert 8_192 + identity_charge + 14 * (bytes + 1) == 524_302
     assert :dropped = Sink.try_offer(sink, session_id, %{item | text: extra})
     assert charged(sink) == 0
     assert :ok = Sink.close(sink)
@@ -153,8 +153,8 @@ defmodule Loopex.ProgressSinkTest do
              [session_id, item.turn_id, item.stream_domain_id],
              &:binary.referenced_byte_size/1
            ) do
-        [8, 8, 32] -> 5_504
-        [64, 64, 256] -> 6_176
+        [8, 8, 32] -> 10_656
+        [64, 64, 256] -> 11_328
         other -> flunk("Unexpected copied identity backing: #{inspect(other)}")
       end
 
@@ -937,6 +937,514 @@ defmodule Loopex.ProgressSinkTest do
     assert charged(sink) == replacement_credit and occupied(sink) == 1
     assert :ok = Sink.release(sink, next)
     assert :ok = Sink.close(sink)
+  end
+
+  test "raw preflight and nil bypass reject private huge and unsupported terms before any slot",
+       %{sink: sink} do
+    alias Loopex.Runtime.ProgressIngress, as: Ingress
+    gate = Ingress.gate()
+    route = raw_route(gate, self())
+    handle = {self(), sink, gate, :model, self(), "s", elem(route, 3), common()}
+    nil_handle = put_elem(handle, 1, nil)
+    assert Ingress.reserve(self(), "s", elem(route, 3), nil_handle, self()) == :dropped
+    assert :atomics.get(gate, 4) == 0
+
+    for item <- [
+          self(),
+          %{kind: :text_delta, content_index: 0, text: "x", credential: "private"},
+          %{kind: :text_delta, content_index: 0, text: :binary.copy("x", 65_537)},
+          %{Enum.to_list(1..100_000) => "private", kind: :unknown}
+        ] do
+      assert Sink.reserve_raw(sink, "s", item, route) == :dropped
+    end
+
+    assert charged(sink) == 0 and occupied(sink) == 0
+    refute_receive {:loopex_progress_ready, ^sink}, 20
+    assert :ok = Sink.close(sink)
+  end
+
+  test "native stage cut retains one charge until the projected item really transfers to a lease",
+       %{sink: sink} do
+    gate = Loopex.Runtime.ProgressIngress.gate()
+    route = raw_route(gate, self())
+    raw = %{kind: :text_delta, content_index: 0, text: "retained"}
+    assert {:ok, reference} = Sink.reserve_raw(sink, "s", raw, route)
+    charge = charged(sink)
+    assert occupied(sink) == 1 and charge > 0
+    assert Sink.take(sink) == :empty
+    assert Sink.route_stage(sink, reference, :raw_reserved, :control_ready, self())
+    assert {:ok, ^route} = Sink.claim_stage(sink, reference, :control_ready, :control_owned)
+    assert Sink.stage_payload(sink, reference) == :stale
+    assert Sink.route_stage(sink, reference, :control_owned, :relay_ready, self())
+    assert {:ok, ^route} = Sink.claim_stage(sink, reference, :relay_ready, :relay_owned)
+    assert {:ok, "s", ^raw} = Sink.stage_payload(sink, reference)
+    assert Sink.take(sink) == :empty
+    assert Sink.replace_payload(sink, reference, text("retained"))
+    assert Sink.ready_stage(sink, reference)
+    assert {:ok, lease, "s", item} = Sink.take(sink)
+    assert item == text("retained")
+    assert charged(sink) == charge and occupied(sink) == 1
+    assert :ok = Sink.release(sink, lease)
+    assert charged(sink) == 0
+    assert :ok = Sink.close(sink)
+  end
+
+  test "real raw producer DOWN settles an unfinished charged reservation before close can succeed",
+       %{sink: sink} do
+    parent = self()
+
+    {producer, monitor} =
+      owned_worker(fn ->
+        route = raw_route(Loopex.Runtime.ProgressIngress.gate(), self())
+
+        result =
+          Sink.reserve_raw(sink, "s", %{kind: :text_delta, content_index: 0, text: "x"}, route)
+
+        send(parent, {:raw_reserved_cut, result})
+
+        receive do
+          :hold -> :ok
+        end
+      end)
+
+    assert_receive {:raw_reserved_cut, {:ok, _reference}}, 5_000
+    assert occupied(sink) == 1 and charged(sink) > 0
+    assert {:error, :cleanup_unproved} = Sink.close(sink)
+    assert occupied(sink) == 1
+    Process.exit(producer, :kill)
+    assert_receive {:DOWN, ^monitor, :process, ^producer, :killed}, 5_000
+    {guardian, _, _} = sink
+    wait_until_reclaimed(guardian, sink, 100)
+    assert charged(sink) == 0
+    assert :ok = Sink.close(sink)
+  end
+
+  test "a live relay-owned raw copy keeps credit until its actual holder DOWN", %{sink: sink} do
+    parent = self()
+
+    {relay, monitor} =
+      owned_worker(fn ->
+        receive do
+          {:read, reference} ->
+            assert {:ok, _route} = Sink.claim_stage(sink, reference, :relay_ready, :relay_owned)
+            assert {:ok, "s", raw} = Sink.stage_payload(sink, reference)
+            send(parent, {:relay_copy_held, self(), reference})
+
+            receive do
+              :finish -> assert(raw.text == "held")
+            end
+        end
+      end)
+
+    route = raw_route(Loopex.Runtime.ProgressIngress.gate(), relay)
+
+    assert {:ok, reference} =
+             Sink.reserve_raw(
+               sink,
+               "s",
+               %{kind: :text_delta, content_index: 0, text: "held"},
+               route
+             )
+
+    assert Sink.route_stage(sink, reference, :raw_reserved, :control_ready, self())
+    assert {:ok, ^route} = Sink.claim_stage(sink, reference, :control_ready, :control_owned)
+    assert Sink.route_stage(sink, reference, :control_owned, :relay_ready, relay)
+    send(relay, {:read, reference})
+    assert_receive {:relay_copy_held, ^relay, ^reference}, 5_000
+    assert Sink.take(sink) == :empty
+    assert {:error, :cleanup_unproved} = Sink.close(sink)
+    assert occupied(sink) == 1 and charged(sink) > 0
+    Process.exit(relay, :kill)
+    assert_receive {:DOWN, ^monitor, :process, ^relay, :killed}, 5_000
+    {guardian, _, _} = sink
+    wait_until_reclaimed(guardian, sink, 100)
+    assert :ok = Sink.close(sink)
+  end
+
+  test "late raw stage references cannot replace or retire a reused slot generation", %{
+    sink: sink
+  } do
+    gate = Loopex.Runtime.ProgressIngress.gate()
+    route = raw_route(gate, self())
+
+    assert {:ok, old} =
+             Sink.reserve_raw(
+               sink,
+               "s",
+               %{kind: :text_delta, content_index: 0, text: "old"},
+               route
+             )
+
+    assert :ok = Sink.retire_stage(sink, old, :raw_reserved)
+
+    assert {:ok, fresh} =
+             Sink.reserve_raw(
+               sink,
+               "s",
+               %{kind: :text_delta, content_index: 0, text: "new"},
+               route
+             )
+
+    assert elem(old, 1) == elem(fresh, 1) and old != fresh
+    before = state(sink)
+    refute Sink.route_stage(sink, old, :raw_reserved, :control_ready, self())
+    assert Sink.claim_stage(sink, old, :control_ready, :control_owned) == :stale
+    assert Sink.retire_stage(sink, old, :raw_reserved) == :stale
+    assert state(sink) == before
+    assert :ok = Sink.retire_stage(sink, fresh, :raw_reserved)
+    assert :ok = Sink.close(sink)
+  end
+
+  test "one-CAS contention seals a domain while its older reserved offer finishes without reopening",
+       %{sink: sink} do
+    alias Loopex.Runtime.ProgressIngress, as: Ingress
+    token = make_ref()
+    assert :ok = Sink.bind_runtime(sink, token)
+    assert :ok = Sink.register_control(sink, token, self())
+    gate = Ingress.gate()
+    route = raw_route(gate, self())
+    owner = elem(route, 3)
+    handle = {self(), sink, gate, :model, self(), "s", owner, common()}
+    raw = %{kind: :text_delta, content_index: 0, text: "x"}
+    # Explicit native cut after the older offer acquired the one-CAS gate.
+    assert :atomics.compare_exchange(gate, 1, 0, 1) == :ok
+    assert {:ok, older} = Sink.reserve_raw(sink, "s", raw, route)
+    assert Ingress.reserve(self(), "s", owner, handle, raw) == :dropped
+    assert :atomics.get(gate, 1) == 2
+    assert Sink.route_stage(sink, older, :raw_reserved, :control_ready, self())
+    refute :atomics.compare_exchange(gate, 1, 1, 0) == :ok
+    assert {:ok, _} = Sink.claim_stage(sink, older, :control_ready, :control_owned)
+    assert :ok = Sink.retire_stage(sink, older, :control_owned)
+    assert occupied(sink) == 0
+    assert Ingress.reserve(self(), "s", owner, handle, raw) == :dropped
+    fresh_gate = Ingress.gate()
+
+    assert {:ok, fresh} =
+             Ingress.reserve(self(), "s", owner, put_elem(handle, 2, fresh_gate), raw)
+
+    assert {:ok, _} = Sink.claim_stage(sink, fresh, :control_ready, :control_owned)
+    assert :ok = Sink.retire_stage(sink, fresh, :control_owned)
+    assert :ok = Sink.close(sink)
+  end
+
+  test "activity gets independent credit in the same arena after an ordinary tail seals", %{
+    sink: sink
+  } do
+    alias Loopex.Runtime.ProgressIngress, as: Ingress
+    token = make_ref()
+    assert :ok = Sink.bind_runtime(sink, token)
+    assert :ok = Sink.register_control(sink, token, self())
+    ordinary = Ingress.gate()
+    :atomics.put(ordinary, 1, 2)
+    owner = elem(raw_route(ordinary, self()), 3)
+    handle = {self(), sink, ordinary, :model, self(), "s", owner, common()}
+
+    assert Ingress.reserve(self(), "s", owner, handle, %{
+             kind: :text_delta,
+             content_index: 0,
+             text: "tail"
+           }) == :dropped
+
+    activity = {self(), sink, Ingress.gate(), :activity, self(), "s", owner, %{}}
+
+    {:ok, item} =
+      Loopex.CompactionProgress.new(
+        "episode",
+        %{"kind" => "compact", "id" => "c"},
+        common().stream_domain_id,
+        0
+      )
+
+    assert {:ok, reference} = Ingress.reserve(self(), "s", owner, activity, item)
+    assert occupied(sink) == 1 and charged(sink) > 0
+    assert {:ok, _} = Sink.claim_stage(sink, reference, :control_ready, :control_owned)
+    assert :ok = Sink.retire_stage(sink, reference, :control_owned)
+    assert :ok = Sink.close(sink)
+  end
+
+  test "raw projection headers charge their original backing before copying and seal on capacity refusal",
+       %{sink: sink} do
+    alias Loopex.Runtime.ProgressIngress, as: Ingress
+    token = make_ref()
+    assert :ok = Sink.bind_runtime(sink, token)
+    assert :ok = Sink.register_control(sink, token, self())
+    gate = Ingress.gate()
+    owner = elem(raw_route(gate, self()), 3)
+    backing = :binary.copy("x", 1_048_576)
+    header = %{common() | turn_id: binary_part(backing, 7, 2_048)}
+    assert :binary.referenced_byte_size(header.turn_id) > 524_288
+    handle = {self(), sink, gate, :model, self(), "s", owner, header}
+    raw = %{kind: :text_delta, content_index: 0, text: "x"}
+    assert Ingress.reserve(self(), "s", owner, handle, raw) == :dropped
+    assert occupied(sink) == 0 and charged(sink) == 0
+    assert :atomics.get(gate, 1) == 2
+    assert :ok = Sink.close(sink)
+  end
+
+  test "each closed kind reserves the simultaneous encoder and joined transport bound", %{
+    sink: sink
+  } do
+    for item <- transport_credit_items() do
+      assert :ok = Sink.try_offer(sink, "session1", item)
+      credit = charged(sink)
+      assert {:ok, lease, "session1", ^item} = Sink.take(sink)
+      values = ["session1" | transport_binaries(item)]
+      backing = Enum.reduce(values, 0, &(:binary.referenced_byte_size(&1) + &2))
+      visible = Enum.reduce(values, 0, &(byte_size(&1) + &2))
+      # The independent peak includes four complete escaped frames and the
+      # native backing, rather than merely comparing with the charge formula.
+      encoded_upper = 2 * visible + 1_024
+      assert credit >= backing + 4 * encoded_upper + 4_096
+      assert charged(sink) == credit and occupied(sink) == 1
+      assert :ok = Sink.release(sink, lease)
+    end
+
+    assert :ok = Sink.close(sink)
+  end
+
+  test "a live escaped flat representation shares capacity with a real raw reservation", %{
+    sink: sink
+  } do
+    assert :ok = Sink.try_offer(sink, "s", text(:binary.copy("\t", 30_000)))
+    assert {:ok, lease, "s", item} = Sink.take(sink)
+    initial = charged(sink)
+    # This helper returns only scalar observations. Its actual escaped/flat
+    # copies have left scope before the original public lease can be released.
+    %{peak: peak, flat_bytes: flat_bytes} = retained_transport_pressure(sink, item)
+    assert peak > initial and peak <= 524_288
+    assert flat_bytes > 60_000
+    assert charged(sink) == initial and occupied(sink) == 1
+    assert :ok = Sink.release(sink, lease)
+    assert charged(sink) == 0
+    assert :ok = Sink.try_offer(sink, "s", text("after discard"))
+    assert {:ok, next, "s", _item} = Sink.take(sink)
+    assert :ok = Sink.release(sink, next)
+    assert :ok = Sink.close(sink)
+  end
+
+  test "a real stage claim under shared arena churn retains its finite result and custody", %{
+    sink: sink
+  } do
+    parent = self()
+    {_guardian, _incarnation, arena} = sink
+
+    {holder, holder_monitor} =
+      owned_worker(fn ->
+        route = raw_route(Loopex.Runtime.ProgressIngress.gate(), self())
+
+        assert {:ok, reference} =
+                 Sink.reserve_raw(
+                   sink,
+                   "s",
+                   %{kind: :text_delta, content_index: 0, text: "prefix"},
+                   route
+                 )
+
+        assert Sink.route_stage(sink, reference, :raw_reserved, :control_ready, self())
+        send(parent, {:finite_claim_ready, self(), reference})
+
+        receive do
+          :claim -> :ok
+        end
+
+        result = Sink.claim_stage(sink, reference, :control_ready, :control_owned)
+        send(parent, {:finite_claim_result, self(), result})
+
+        receive do
+          :finish -> :ok
+        end
+
+        expected = if result == :blocked, do: :control_ready, else: :control_owned
+        assert :ok = Sink.retire_stage(sink, reference, expected)
+      end)
+
+    assert_receive {:finite_claim_ready, ^holder, reference}, 5_000
+
+    workers =
+      for index <- 1..64 do
+        {pid, _monitor} =
+          owned_worker(fn ->
+            receive do
+              :offer -> :ok
+            end
+
+            result = Sink.try_offer(sink, "churn-#{index}", text("other slot"))
+            send(parent, {:finite_churn_result, self(), result})
+
+            receive do
+              :finish -> :ok
+            end
+          end)
+
+        pid
+      end
+
+    try do
+      assert :erlang.trace_pattern({Sink, :replace, 3}, [{:_, [], [{:return_trace}]}], [:local]) ==
+               1
+
+      :erlang.trace(holder, true, [:call, {:tracer, parent}])
+      for pid <- workers, do: send(pid, :offer)
+      send(holder, :claim)
+      assert_receive {:finite_claim_result, ^holder, result}, 5_000
+      assert result == :blocked or match?({:ok, _route}, result)
+      barrier = :erlang.trace_delivered(holder)
+      {comparisons, lost} = finite_claim_trace(holder, arena, barrier, {0, 0})
+      assert comparisons in 1..32
+
+      if result == :blocked do
+        assert comparisons == 32 and lost == 32
+      else
+        assert lost == comparisons - 1
+      end
+
+      # No exhaustion is fabricated if this bounded episode succeeded. The
+      # forced32-loss Control/relay ordering cut remains a separate proof.
+      {incarnation, slot_index, token} = reference
+      assert {^token, stage, ^holder, charge, _route} = slot(sink, slot_index)
+      assert stage == if(result == :blocked, do: :control_ready, else: :control_owned)
+      assert elem(sink, 1) == incarnation and charge > 0
+      assert charged(sink) <= 524_288 and occupied(sink) <= 32
+
+      for pid <- workers do
+        assert_receive {:finite_churn_result, ^pid, offered}, 5_000
+        assert offered in [:ok, :dropped]
+      end
+
+      :erlang.trace(holder, false, [:call])
+      send(holder, :finish)
+      assert_receive {:DOWN, ^holder_monitor, :process, ^holder, :normal}, 5_000
+
+      for pid <- workers do
+        monitor = Process.monitor(pid)
+        send(pid, :finish)
+        assert_receive {:DOWN, ^monitor, :process, ^pid, :normal}, 5_000
+      end
+    after
+      finish_custody_cleanup([
+        fn ->
+          try do
+            :erlang.trace(holder, false, [:call])
+          rescue
+            ArgumentError -> refute Process.alive?(holder)
+          end
+        end,
+        fn -> :erlang.trace_pattern({Sink, :replace, 3}, false, [:local]) end
+      ])
+    end
+
+    release_transport_ready(sink)
+    wait_until_reclaimed(elem(sink, 0), sink, 100)
+    assert :ok = Sink.close(sink)
+  end
+
+  defp finite_claim_trace(holder, arena, barrier, {comparisons, lost}) do
+    receive do
+      {:trace, ^holder, :call, {Sink, :replace, [^arena, _old, _next]}} ->
+        finite_claim_trace(holder, arena, barrier, {comparisons + 1, lost})
+
+      {:trace, ^holder, :return_from, {Sink, :replace, 3}, false} ->
+        finite_claim_trace(holder, arena, barrier, {comparisons, lost + 1})
+
+      {:trace, ^holder, :return_from, {Sink, :replace, 3}, true} ->
+        finite_claim_trace(holder, arena, barrier, {comparisons, lost})
+
+      {:trace_delivered, ^holder, ^barrier} ->
+        {comparisons, lost}
+    after
+      5_000 -> flunk("missing actual finite stage comparison trace barrier")
+    end
+  end
+
+  defp retained_transport_pressure(sink, item) do
+    escaped = :binary.replace(item.text, "\t", "\\t", [:global])
+    flat = IO.iodata_to_binary(["{\"text\":\"", escaped, "\"}\n"])
+    route = raw_route(Loopex.Runtime.ProgressIngress.gate(), self())
+
+    assert {:ok, raw} =
+             Sink.reserve_raw(
+               sink,
+               "s",
+               %{kind: :text_delta, content_index: 0, text: :binary.copy("\t", 4_000)},
+               route
+             )
+
+    peak = charged(sink)
+    assert occupied(sink) == 2
+    assert :dropped = Sink.try_offer(sink, "s", text("over shared bytes"))
+    assert occupied(sink) == 2 and charged(sink) == peak
+    assert :ok = Sink.retire_stage(sink, raw, :raw_reserved)
+    # These uses follow the capacity/retirement cut, proving the actual copies
+    # are live there. No driver/Bash lifecycle is inferred from this Core case.
+    assert byte_size(escaped) == 60_000
+    assert String.starts_with?(flat, "{\"text\":\"")
+    %{peak: peak, flat_bytes: byte_size(flat)}
+  end
+
+  defp release_transport_ready(sink) do
+    case Sink.take(sink) do
+      {:ok, lease, _session, _item} ->
+        assert :ok = Sink.release(sink, lease)
+        release_transport_ready(sink)
+
+      :empty ->
+        :ok
+    end
+  end
+
+  defp transport_binaries(item) do
+    Enum.flat_map(item, fn {_field, value} ->
+      cond do
+        is_binary(value) -> [value]
+        is_map(value) -> transport_binaries(value)
+        true -> []
+      end
+    end)
+  end
+
+  defp transport_credit_items do
+    payload = :binary.copy("\t", 128)
+
+    [
+      text(payload),
+      %{text(payload) | kind: :reasoning_delta},
+      Map.merge(common(), %{
+        kind: :tool_call_delta,
+        model_sequence: 0,
+        call_index: 0,
+        tool_call_id: "call",
+        name: payload,
+        arguments_fragment: payload
+      }),
+      Map.merge(common(), %{
+        kind: :tool_progress,
+        tool_call_id: "call",
+        progress_sequence: 0,
+        stream: "stdout",
+        byte_offset: 0,
+        chunk: payload
+      }),
+      Map.merge(common(), %{kind: :model_stream_closed, disposition: :complete, delta_count: 7}),
+      Map.merge(common(), %{
+        kind: :tool_stream_closed,
+        tool_call_id: "call",
+        disposition: :abandoned,
+        progress_count: 3
+      }),
+      %{
+        kind: "context.compaction_progress",
+        episode_id: "episode",
+        owner: %{"kind" => "run", "id" => "run"},
+        stream_domain_id: common().stream_domain_id,
+        progress_sequence: 0,
+        base_event_sequence: 0
+      }
+    ]
+  end
+
+  defp raw_route(gate, relay) do
+    owner = %{generation: "g", owner_epoch: 1, owner_incarnation_id: "i", transaction_id: "t"}
+    {self(), relay, "s", owner, gate, :model, common(), self()}
   end
 
   # Concept: attempt every owned cleanup action even after another action fails.

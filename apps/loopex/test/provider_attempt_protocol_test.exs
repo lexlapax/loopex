@@ -1,3 +1,4 @@
+Code.require_file("support/progress_test_consumer.exs", __DIR__)
 Code.require_file("support/m1_runtime_helper.exs", __DIR__)
 Code.require_file("support/agent_loop_helper.exs", __DIR__)
 
@@ -14,6 +15,13 @@ defmodule Loopex.ProviderAttemptPageOneStore do
   @impl Store
   def transaction_status({store, _observer}, session_id, mutation_domain, tx_id),
     do: Store.transaction_status(store, session_id, mutation_domain, tx_id)
+
+  @impl Store
+  def creation_recovery({store, _observer}, query), do: Store.creation_recovery(store, query)
+
+  @impl Store
+  def creation_provenance({store, _observer}, runtime, selector),
+    do: Store.creation_provenance(store, runtime, selector)
 
   @impl Store
   def runtime_command({store, _observer}, command), do: Store.runtime_command(store, command)
@@ -47,6 +55,14 @@ defmodule Loopex.ProviderAttemptRetirementReadStore do
   @impl Store
   def transaction_status({store, _mode, _observer}, session_id, domain, tx_id),
     do: Store.transaction_status(store, session_id, domain, tx_id)
+
+  @impl Store
+  def creation_recovery({store, _mode, _observer}, query),
+    do: Store.creation_recovery(store, query)
+
+  @impl Store
+  def creation_provenance({store, _mode, _observer}, runtime, selector),
+    do: Store.creation_provenance(store, runtime, selector)
 
   @impl Store
   def runtime_command({store, _mode, _observer}, command),
@@ -384,6 +400,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
   @moduledoc false
 
   use ExUnit.Case, async: true
+  import Loopex.ProgressTestConsumer
 
   alias Loopex.AgentLoopFixture, as: Fixture
   alias Loopex.AgentLoopTestModel
@@ -404,7 +421,12 @@ defmodule Loopex.ProviderAttemptProtocolTest do
   @delivery_ledger :provider_attempt_delivery_ledger
 
   test "the request and first attempt open atomically before one direct one-use Control permit can invoke the provider" do
-    fixture = start(script: [%{text: "done", calls: [], hold: self()}], progress_to: self())
+    fixture =
+      start(
+        script: [%{text: "done", calls: [], hold: self()}],
+        progress_sink: Loopex.ProgressTestConsumer.open_sink()
+      )
+
     {:ok, %{control: control}} = Runtime.children(fixture.runtime)
     :erlang.trace(control, true, [:send, :receive])
 
@@ -509,7 +531,12 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     # positive Store read establishes the observer before the duplicate. After
     # its exact refusal and a trace-delivery barrier, a second read would be
     # unnecessary work inside Control's runtime-wide serialization point.
-    fixture = start(script: [%{text: "done", calls: [], hold: self()}], progress_to: self())
+    fixture =
+      start(
+        script: [%{text: "done", calls: [], hold: self()}],
+        progress_sink: Loopex.ProgressTestConsumer.open_sink()
+      )
+
     {:ok, %{control: control}} = Runtime.children(fixture.runtime)
     :erlang.trace(control, true, [:send, :receive])
 
@@ -605,7 +632,12 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     # different spelling. ADR 0018 requires Control to verify that "every
     # identity equals its registered state" before it spends anything, so the
     # exact six-member binding is validated first.
-    fixture = start(script: [%{text: "done", calls: [], hold: self()}], progress_to: self())
+    fixture =
+      start(
+        script: [%{text: "done", calls: [], hold: self()}],
+        progress_sink: Loopex.ProgressTestConsumer.open_sink()
+      )
+
     {:ok, %{control: control}} = Runtime.children(fixture.runtime)
     :erlang.trace(control, true, [:send, :receive])
 
@@ -868,7 +900,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
         script: [
           %{text: "durable answer", calls: [], usage: %{input_tokens: 7, output_tokens: 5}}
         ],
-        progress_to: self(),
+        progress_sink: Loopex.ProgressTestConsumer.open_sink(),
         record_page_size_one: true
       )
 
@@ -1857,7 +1889,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
         script: [
           %{text: "close before publish", calls: [], hold: self(), hold_timeout_ms: 30_000}
         ],
-        progress_to: self()
+        progress_sink: Loopex.ProgressTestConsumer.open_sink()
       )
 
     {_session_id, attachment, {:accepted, "prompt-1"}} =
@@ -1877,12 +1909,14 @@ defmodule Loopex.ProviderAttemptProtocolTest do
                     _transition, {:committed, _tx_id, _receipt}},
                    5_000
 
-    refute_receive {:loopex_progress, %{kind: :model_stream_closed}}, 0
+    refute_progress({:loopex_progress, %{kind: :model_stream_closed}}, 0)
 
     M1RuntimeTestStore.release(terminal_waiter)
 
-    assert_receive {:loopex_progress, %{kind: :model_stream_closed, disposition: :complete}},
-                   5_000
+    assert_progress(
+      {:loopex_progress, %{kind: :model_stream_closed, disposition: :complete}},
+      5_000
+    )
 
     assert await_event(attachment, "run.finished")["outcome"] == "completed"
   end
@@ -2231,7 +2265,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
             usage: %{input_tokens: 11, output_tokens: 13}
           }
         ],
-        progress_to: self()
+        progress_sink: Loopex.ProgressTestConsumer.open_sink()
       )
 
     {session_id, attachment, {:accepted, "prompt-1"}} = Fixture.run(retry, "retry exactly once")
@@ -3139,7 +3173,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
           %{raw_result: {:error, {:provider_credential, secret}}},
           %{text: "a retry would be a leak of authority", calls: []}
         ],
-        progress_to: self(),
+        progress_sink: Loopex.ProgressTestConsumer.open_sink(),
         diagnostics_to: self(),
         bounds_token_budget: 113
       )
@@ -3205,7 +3239,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
           script: [],
           model_module: Loopex.ProviderCredentialFailureModel,
           model_options: [failure_kind: failure_kind],
-          progress_to: self(),
+          progress_sink: Loopex.ProgressTestConsumer.open_sink(),
           diagnostics_to: self(),
           bounds_token_budget: 113
         )
@@ -3271,7 +3305,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
       start(
         script: [],
         model_module: Loopex.ProviderLinkedCredentialFailureModel,
-        progress_to: self(),
+        progress_sink: Loopex.ProgressTestConsumer.open_sink(),
         diagnostics_to: self(),
         bounds_token_budget: 113
       )
@@ -3327,7 +3361,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     fixture =
       start(
         script: [%{text: "committed once", calls: [], hold: self()}],
-        progress_to: self()
+        progress_sink: Loopex.ProgressTestConsumer.open_sink()
       )
 
     :ok =
@@ -3381,7 +3415,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
           %{raw_result: {:error, {:not_dispatched, "model_call_failed"}}},
           %{text: "retry once", calls: [], hold: self()}
         ],
-        progress_to: self()
+        progress_sink: Loopex.ProgressTestConsumer.open_sink()
       )
 
     :ok =
@@ -3465,7 +3499,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
           %{text: "finished", calls: [], hold: self()}
         ],
         tools: [Fixture.tool_definition()],
-        progress_to: self()
+        progress_sink: Loopex.ProgressTestConsumer.open_sink()
       )
 
     :ok =
@@ -3531,7 +3565,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
             usage: %{input_tokens: 11, output_tokens: 13}
           }
         ],
-        progress_to: self()
+        progress_sink: Loopex.ProgressTestConsumer.open_sink()
       )
 
     :ok =
@@ -4124,13 +4158,13 @@ defmodule Loopex.ProviderAttemptProtocolTest do
           %{text: "late", calls: [], deltas: ["predecessor"], hold: self()},
           %{text: "must not run", calls: [], deltas: ["successor"]}
         ],
-        progress_to: self(),
+        progress_sink: Loopex.ProgressTestConsumer.open_sink(),
         bounds_token_budget: 17
       )
 
     {session_id, _attachment, {:accepted, "prompt-1"}} = Fixture.run(fixture, "recover")
     assert_receive {:holding, provider_worker}, 5_000
-    assert_receive {:loopex_progress, %{kind: :text_delta} = predecessor_delta}, 5_000
+    assert_progress({:loopex_progress, %{kind: :text_delta} = predecessor_delta}, 5_000)
 
     coordinator = coordinator_of(fixture.runtime)
     coordinator_ref = Process.monitor(coordinator)
@@ -4883,7 +4917,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
           },
           %{text: "must not run", calls: [], deltas: ["successor"]}
         ],
-        progress_to: self(),
+        progress_sink: Loopex.ProgressTestConsumer.open_sink(),
         bounds_token_budget: 101
       )
 
@@ -5022,9 +5056,10 @@ defmodule Loopex.ProviderAttemptProtocolTest do
   # for it before the loss makes its delivery certain; the case's claim is that
   # no closure and no successor-domain item follows, which the sweep checks.
   defp await_predecessor_delta(predecessor_domain) do
-    assert_receive {:loopex_progress,
-                    %{kind: :text_delta, stream_domain_id: ^predecessor_domain} = delta},
-                   30_000
+    assert_progress(
+      {:loopex_progress, %{kind: :text_delta, stream_domain_id: ^predecessor_domain} = delta},
+      30_000
+    )
 
     [delta]
   end
@@ -5128,7 +5163,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
           },
           %{text: "successor must not run", calls: []}
         ],
-        progress_to: self(),
+        progress_sink: Loopex.ProgressTestConsumer.open_sink(),
         bounds_token_budget: 109
       )
 
@@ -5326,7 +5361,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
           },
           %{text: "must not retry", calls: []}
         ],
-        progress_to: self(),
+        progress_sink: Loopex.ProgressTestConsumer.open_sink(),
         bounds_deadline_ms: deadline_ms,
         bounds_token_budget: 103
       )
@@ -5713,8 +5748,19 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     fixture
   end
 
+  # Concept: each replacement runtime owns a fresh native progress sink.
+  # Technical depth: the initial fixture already bound its sink; retain both
+  # owner-scoped handles and enable the replacement only when progress was enabled.
+  defp replacement_progress_sink(options) do
+    case Keyword.get(options, :progress_sink) do
+      nil -> nil
+      _bound_sink -> Loopex.ProgressTestConsumer.open_sink()
+    end
+  end
+
   defp restart_with_page_size_one_store(fixture, options) do
     :ok = Loopex.stop(fixture.runtime)
+    progress_sink = replacement_progress_sink(options)
     {:ok, backing_store} = Store.new(M1RuntimeTestStore, fixture.store)
     {:ok, page_one_store} = Store.new(ProviderAttemptPageOneStore, {backing_store, self()})
 
@@ -5724,7 +5770,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
         session_creation_defaults: Fixture.creation_defaults(fixture.definitions, options),
         runtime_id: Keyword.fetch!(options, :runtime_id),
         store: page_one_store,
-        progress_to: Keyword.get(options, :progress_to),
+        progress_sink: progress_sink,
         diagnostics_to: Keyword.get(options, :diagnostics_to),
         model: %{
           module: AgentLoopTestModel,
@@ -5755,11 +5801,15 @@ defmodule Loopex.ProviderAttemptProtocolTest do
         grant_decision: {:host_policy, :allow}
       )
 
-    %{fixture | runtime: runtime}
+    on_exit(fn -> Fixture.stop(%{fixture | runtime: runtime}) end)
+    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(runtime)
+
+    %{fixture | runtime: runtime, progress_sink: progress_sink}
   end
 
   defp restart_with_model(fixture, options) do
     :ok = Loopex.stop(fixture.runtime)
+    progress_sink = replacement_progress_sink(options)
     {:ok, store} = Store.new(M1RuntimeTestStore, fixture.store)
     model_module = Keyword.fetch!(options, :model_module)
 
@@ -5774,7 +5824,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
         runtime_id: Keyword.fetch!(options, :runtime_id),
         store: store,
         cleanup_grace_ms: Keyword.get(options, :cleanup_grace_ms),
-        progress_to: Keyword.get(options, :progress_to),
+        progress_sink: progress_sink,
         diagnostics_to: Keyword.get(options, :diagnostics_to),
         model: %{
           module: model_module,
@@ -5805,7 +5855,10 @@ defmodule Loopex.ProviderAttemptProtocolTest do
         grant_decision: {:host_policy, :allow}
       )
 
-    %{fixture | runtime: runtime}
+    on_exit(fn -> Fixture.stop(%{fixture | runtime: runtime}) end)
+    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(runtime)
+
+    %{fixture | runtime: runtime, progress_sink: progress_sink}
   end
 
   defp only_session_id(fixture) do
@@ -7344,13 +7397,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     end
   end
 
-  defp receive_progress(acc \\ []) do
-    receive do
-      {:loopex_progress, item} -> receive_progress([item | acc])
-    after
-      50 -> Enum.reverse(acc)
-    end
-  end
+  defp receive_progress(acc \\ []), do: Enum.reverse(acc) ++ Loopex.ProgressTestConsumer.drain(50)
 
   defp receive_diagnostics(acc \\ []) do
     receive do

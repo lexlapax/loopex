@@ -181,12 +181,15 @@ defmodule Loopex.Model do
   @doc """
   ## Concept
 
-  Optionally prepare a settled session's next complete configuration from its
-  authored changes and trusted host model resolution inputs.
+  Optionally prepare a complete configuration from authored changes and trusted
+  host model resolution inputs, for settled configuration or fresh creation.
 
   ## Technical depth
 
-  Current settings and immutable definitions are committed session facts.
+  Current settings and immutable definitions are committed session facts for
+  configure, or a captured version-1 host baseline for initial creation. Runtime
+  Control owns initial preparation before a session exists. It validates the
+  returned version-2 candidate and changes only its version to 1 before genesis.
   Authored changes retain their exact normalized identity, including a model
   alias. Return only the complete bounded canonical candidate; the session owner
   validates and commits it. Preparation acquires no credential and invokes no

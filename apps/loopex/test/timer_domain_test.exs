@@ -1,3 +1,4 @@
+Code.require_file("support/progress_test_consumer.exs", __DIR__)
 Code.require_file("support/m1_runtime_helper.exs", __DIR__)
 Code.require_file("support/agent_loop_helper.exs", __DIR__)
 
@@ -167,6 +168,8 @@ defmodule Loopex.TimerDomainTest do
         :exit, _reason -> :ok
       end
     end)
+
+    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(runtime)
 
     fixture
   end
@@ -523,7 +526,7 @@ defmodule Loopex.TimerDomainTest do
         runtime_id: "timer-domain-genesis-#{System.unique_integer([:positive])}",
         store: store,
         attachment_capacity: 64,
-        progress_to: nil,
+        progress_sink: nil,
         diagnostics_to: nil,
         model: %{
           module: AgentLoopTestModel,
@@ -554,6 +557,8 @@ defmodule Loopex.TimerDomainTest do
       end
     end)
 
-    %Loopex.Runtime{supervisor: supervisor, token: token}
+    runtime = %Loopex.Runtime{supervisor: supervisor, token: token}
+    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(runtime)
+    runtime
   end
 end

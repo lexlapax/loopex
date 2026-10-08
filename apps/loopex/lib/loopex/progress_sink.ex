@@ -17,10 +17,11 @@ defmodule Loopex.ProgressSink do
   Ready notifications are coalesced, contain no payload, and are consumed by
   take. A fixed guardian scan discovers unfinished custody without offer messages.
 
-  This standalone sink does not implement runtime raw ingress, ordinary-domain
-  tail sealing, current-session fencing, fanout or external writer cleanup.
-  Those callers must retain credit across every copy and representation. A
-  successful native close proves neither stdout nor socket cleanup.
+  Private runtime ingress uses this same arena through producer, Control and
+  relay phases. Control fences captured metadata before payload lookup; the
+  relay retains its charge until projection frames have returned. Domain gates
+  seal payload tails under pressure. External fanout and writer cleanup remain
+  host obligations; native close proves neither stdout nor socket cleanup.
   """
 
   use GenServer
@@ -32,7 +33,7 @@ defmodule Loopex.ProgressSink do
   @slots 32
   @bytes 524_288
   @comparisons 32
-  @overhead 4_096
+  @overhead 8_192
   @uint64 18_446_744_073_709_551_615
   @safe_integer 9_007_199_254_740_991
   @common [:kind, :turn_id, :stream_domain_id, :base_event_sequence]
@@ -224,6 +225,373 @@ defmodule Loopex.ProgressSink do
     end
   end
 
+  @doc false
+  def available?(sink) do
+    with true <- valid_sink?(sink),
+         {_guardian, incarnation, arena} <- sink,
+         [{:state, ^incarnation, _owner, :open, _bytes, _slots, _ready}] <-
+           :ets.lookup(arena, :state) do
+      :ets.lookup(arena, :runtime_binding) == []
+    else
+      _ -> false
+    end
+  rescue
+    ArgumentError -> false
+  end
+
+  @doc false
+  def bind_runtime(nil, _token), do: :ok
+
+  def bind_runtime(sink, token) when is_reference(token) do
+    if valid_sink?(sink) and :ets.insert_new(elem(sink, 2), {:runtime_binding, token}),
+      do: :ok,
+      else: {:error, :invalid_runtime_options}
+  rescue
+    ArgumentError -> {:error, :invalid_runtime_options}
+  end
+
+  @doc false
+  def register_control(nil, _token, _control), do: :ok
+
+  def register_control({_guardian, _incarnation, arena}, token, control) do
+    case :ets.lookup(arena, :runtime_binding) do
+      [{:runtime_binding, ^token}] ->
+        case :ets.lookup(arena, :control_binding) do
+          [] ->
+            if :ets.insert_new(arena, {:control_binding, token, control}), do: :ok, else: :error
+
+          [{:control_binding, ^token, prior} = old] ->
+            if prior == control or not Process.alive?(prior) do
+              if prior == control or
+                   :ets.select_replace(arena, [
+                     {old, [], [{:const, {:control_binding, token, control}}]}
+                   ]) == 1 do
+                :ok
+              else
+                :error
+              end
+            else
+              :error
+            end
+
+          _ ->
+            :error
+        end
+
+      _ ->
+        :error
+    end
+  rescue
+    ArgumentError -> :error
+  end
+
+  @doc false
+  def control({_guardian, _incarnation, arena}) do
+    case :ets.lookup(arena, :control_binding) do
+      [{:control_binding, _token, control}] -> control
+      _ -> nil
+    end
+  rescue
+    ArgumentError -> nil
+  end
+
+  @doc false
+  def reserve_raw(
+        sink,
+        session,
+        item,
+        {control, relay, session, owner, gate, kind, header, producer} = route
+      ) do
+    with true <- valid_sink?(sink),
+         true <- producer == self(),
+         true <-
+           Loopex.Runtime.ProgressIngress.route?(
+             control,
+             session,
+             owner,
+             relay,
+             gate,
+             kind,
+             header
+           ),
+         true <- Loopex.Runtime.ProgressIngress.preflight(kind, item),
+         false <- Loopex.Runtime.ProgressIngress.closed?(gate),
+         charge <-
+           8_192 + raw_charge(session) + raw_map_charge(item) + raw_map_charge(owner) +
+             raw_map_charge(header),
+         true <- charge <= @bytes,
+         {_guardian, incarnation, arena} <- sink,
+         order <- :atomics.add_get(gate, 4, 1),
+         {:ok, slot, token} <-
+           reserve_raw_slot(arena, incarnation, charge, {route, order}, @comparisons) do
+      reference = {incarnation, slot, token}
+
+      if :ets.insert_new(arena, {{:payload, slot}, token, session, item}) do
+        {:ok, reference}
+      else
+        # The producer is still the charged holder; insert_new never overwrites
+        # a different generation's resident or failed-publication marker.
+        :ets.insert_new(arena, {{:retired, slot}, token})
+        :dropped
+      end
+    else
+      _ -> :dropped
+    end
+  rescue
+    ArgumentError -> :dropped
+  end
+
+  defp reserve_raw_slot(_arena, _incarnation, _charge, _route, 0), do: :dropped
+
+  defp reserve_raw_slot(arena, incarnation, charge, {route, order}, remaining) do
+    case :ets.lookup(arena, :state) do
+      [{:state, ^incarnation, _owner, :open, bytes, slots, _ready} = old]
+      when bytes + charge <= @bytes ->
+        if Loopex.Runtime.ProgressIngress.closed?(elem(route, 4)) do
+          :dropped
+        else
+          case Enum.find(0..31, &is_nil(elem(slots, &1))) do
+            nil ->
+              :dropped
+
+            slot ->
+              token = make_ref()
+              entry = {token, :raw_reserved, self(), charge, {route, order}}
+
+              next =
+                old |> put_elem(4, bytes + charge) |> put_elem(5, put_elem(slots, slot, entry))
+
+              if replace(arena, old, next),
+                do: {:ok, slot, token},
+                else: reserve_raw_slot(arena, incarnation, charge, {route, order}, remaining - 1)
+          end
+        end
+
+      _ ->
+        :dropped
+    end
+  end
+
+  @doc false
+  def references(nil, _holder, _stage), do: []
+
+  def references(sink, holder, stage) do
+    {_guardian, incarnation, arena} = sink
+
+    case :ets.lookup(arena, :state) do
+      [{:state, ^incarnation, _owner, _status, _bytes, slots, _ready}] ->
+        for slot <- 0..31,
+            {token, ^stage, ^holder, _charge, {_route, order}} <- [elem(slots, slot)],
+            do: {order, {incarnation, slot, token}}
+
+      _ ->
+        []
+    end
+    |> Enum.sort_by(&elem(&1, 0))
+    |> Enum.map(&elem(&1, 1))
+  rescue
+    ArgumentError -> []
+  end
+
+  # Concept: a failed finite claim can leave an earlier reservation live.
+  # Technical depth: blocked exhaustion differs from an absent generation.
+  # Ordered consumers must stop that prefix and retain the existing custody;
+  # the distinction adds no comparison or successful cleanup acknowledgement.
+  @doc false
+  def claim_stage(sink, reference, expected, next) do
+    case stage_change(sink, reference, expected, next, self(), @comparisons) do
+      {:ok, route} -> {:ok, route}
+      :exhausted -> :blocked
+      _ -> :stale
+    end
+  end
+
+  @doc false
+  def route_stage(sink, reference, expected, next, holder) when is_pid(holder) do
+    match?({:ok, _}, stage_change(sink, reference, expected, next, holder, @comparisons))
+  end
+
+  defp stage_change(_sink, _reference, _expected, _next, _holder, 0), do: :exhausted
+
+  defp stage_change(
+         {_guardian, incarnation, arena} = sink,
+         {incarnation, slot, token} = reference,
+         expected,
+         next,
+         holder,
+         remaining
+       )
+       when slot in 0..31 do
+    case :ets.lookup(arena, :state) do
+      [{:state, ^incarnation, _owner, :open, _bytes, slots, _ready} = old] ->
+        case elem(slots, slot) do
+          {^token, ^expected, current, charge, {route, order}} when current == self() ->
+            revoked =
+              expected == :raw_reserved and Loopex.Runtime.ProgressIngress.closed?(elem(route, 4))
+
+            if revoked do
+              :stale
+            else
+              entry = {token, next, holder, charge, {route, order}}
+              replacement = put_elem(old, 5, put_elem(slots, slot, entry))
+
+              if replace(arena, old, replacement),
+                do: {:ok, route},
+                else: stage_change(sink, reference, expected, next, holder, remaining - 1)
+            end
+
+          _ ->
+            :stale
+        end
+
+      _ ->
+        :stale
+    end
+  rescue
+    ArgumentError -> :stale
+  end
+
+  defp stage_change(_sink, _reference, _expected, _next, _holder, _remaining), do: :stale
+
+  @doc false
+  def stage_payload({_guardian, incarnation, arena}, {incarnation, slot, token}) do
+    case :ets.lookup(arena, :state) do
+      [{:state, ^incarnation, _owner, _status, _bytes, slots, _ready}] ->
+        case elem(slots, slot) do
+          {^token, :relay_owned, holder, _charge, _route} when holder == self() ->
+            case :ets.lookup(arena, {:payload, slot}) do
+              [{{:payload, ^slot}, ^token, session, item}] -> {:ok, session, item}
+              _ -> :stale
+            end
+
+          _ ->
+            :stale
+        end
+
+      _ ->
+        :stale
+    end
+  rescue
+    ArgumentError -> :stale
+  end
+
+  @doc false
+  def replace_payload({_guardian, incarnation, arena}, {incarnation, slot, token}, item) do
+    with true <- projected?(item),
+         [{:state, ^incarnation, _owner, _status, _bytes, slots, _ready}] <-
+           :ets.lookup(arena, :state),
+         {^token, :relay_owned, holder, charge, _route} <- elem(slots, slot),
+         true <- holder == self(),
+         [{{:payload, ^slot}, ^token, session, _raw} = old] <-
+           :ets.lookup(arena, {:payload, slot}),
+         true <- @overhead + binary_charge(session) + item_charge(item) <= charge do
+      next = {{:payload, slot}, token, session, item}
+      :ets.select_replace(arena, [{old, [], [{:const, next}]}]) == 1
+    else
+      _ -> false
+    end
+  rescue
+    ArgumentError -> false
+  end
+
+  @doc false
+  def ready_stage(sink, reference), do: ready_stage(sink, reference, @comparisons)
+  defp ready_stage(_sink, _reference, 0), do: false
+
+  defp ready_stage(
+         {_guardian, incarnation, arena} = sink,
+         {incarnation, slot, token} = reference,
+         remaining
+       ) do
+    case :ets.lookup(arena, :state) do
+      [{:state, ^incarnation, owner, :open, _bytes, slots, ready} = old] ->
+        case elem(slots, slot) do
+          {^token, :relay_owned, holder, charge, _route} when holder == self() ->
+            next =
+              old
+              |> put_elem(5, put_elem(slots, slot, {token, :ready, owner, charge}))
+              |> put_elem(6, ready ++ [slot])
+
+            if replace(arena, old, next),
+              do: true,
+              else: ready_stage(sink, reference, remaining - 1)
+
+          _ ->
+            false
+        end
+
+      _ ->
+        false
+    end
+  rescue
+    ArgumentError -> false
+  end
+
+  @doc false
+  def withdraw_raw({_guardian, incarnation, arena}, {incarnation, slot, token}) do
+    case :ets.lookup(arena, :state) do
+      [{:state, ^incarnation, _owner, _status, _bytes, slots, _ready}] ->
+        case elem(slots, slot) do
+          {^token, :control_ready, _holder, _charge, {{_, _, _, _, _, _, _, producer}, _}} = entry
+          when producer == self() ->
+            # Only a not-yet-claimed metadata transfer can be withdrawn. The
+            # consumer never looked up its body in this phase; a claimed or
+            # routed reference is already that consumer's custody decision.
+            if claim_retirement(arena, incarnation, slot, entry, @comparisons) do
+              delete_payload(arena, slot, token)
+              free_slot(arena, incarnation, slot, token, @comparisons)
+            end
+
+          _ ->
+            :stale
+        end
+
+      _ ->
+        :stale
+    end
+  rescue
+    ArgumentError -> :stale
+  end
+
+  @doc false
+  def retire_stage({_guardian, incarnation, arena}, {incarnation, slot, token}, expected) do
+    case :ets.lookup(arena, :state) do
+      [{:state, ^incarnation, _owner, _status, _bytes, slots, _ready}] ->
+        case elem(slots, slot) do
+          {^token, ^expected, holder, _charge, _route} = entry when holder == self() ->
+            if claim_retirement(arena, incarnation, slot, entry, @comparisons) do
+              delete_payload(arena, slot, token)
+              free_slot(arena, incarnation, slot, token, @comparisons)
+            end
+
+          _ ->
+            :stale
+        end
+
+      _ ->
+        :stale
+    end
+  rescue
+    ArgumentError -> :stale
+  end
+
+  # Concept: reserve every simultaneous raw, projected, leased and encoded copy.
+  # Technical depth: eight backing charges and twelve escaped bytes per original
+  # byte deliberately overcount shared storage. No subsequent representation can
+  # grow the reserved credit; projection exceeding it is dropped in place.
+  defp raw_charge(value), do: 8 * :binary.referenced_byte_size(value) + 12 * byte_size(value)
+
+  defp raw_map_charge(item),
+    do:
+      Enum.reduce(item, 0, fn {_key, value}, total ->
+        total +
+          cond do
+            is_binary(value) -> raw_charge(value)
+            is_map(value) -> raw_map_charge(value)
+            true -> 0
+          end
+      end)
+
   @impl true
   def init(owner) do
     arena =
@@ -231,10 +599,12 @@ defmodule Loopex.ProgressSink do
 
     incarnation = make_ref()
     flag = :atomics.new(1, signed: false)
+    raw_flag = :atomics.new(1, signed: false)
 
     :ets.insert(arena, [
       {:state, incarnation, owner, :open, 0, List.duplicate(nil, @slots) |> List.to_tuple(), []},
-      {:notification, flag}
+      {:notification, flag},
+      {:raw_notification, raw_flag}
     ])
 
     Process.send_after(self(), :scan, 10)
@@ -246,7 +616,9 @@ defmodule Loopex.ProgressSink do
        owner: owner,
        owner_monitor: Process.monitor(owner),
        monitors: %{},
-       flag: flag
+       flag: flag,
+       raw_flag: raw_flag,
+       raw_target: nil
      }}
   end
 
@@ -293,6 +665,7 @@ defmodule Loopex.ProgressSink do
 
   def handle_info(:scan, state) do
     state = scan(state)
+    state = notify_raw(state)
     notify_ready(state)
     Process.send_after(self(), :scan, 10)
     {:noreply, state}
@@ -458,7 +831,11 @@ defmodule Loopex.ProgressSink do
       :ets.lookup(state.arena, :state)
 
     producers =
-      for {_token, :reserved, producer, _charge} <- Tuple.to_list(slots), uniq: true, do: producer
+      for entry <- Tuple.to_list(slots),
+          entry != nil,
+          tuple_size(entry) == 5 or elem(entry, 1) == :reserved,
+          uniq: true,
+          do: elem(entry, 2)
 
     monitors =
       Enum.reduce(state.monitors, %{}, fn {pid, {reference, phase}}, kept ->
@@ -479,19 +856,17 @@ defmodule Loopex.ProgressSink do
 
     for slot <- 0..31 do
       case elem(slots, slot) do
-        {token, stage, holder, _charge} ->
+        entry when is_tuple(entry) ->
+          token = elem(entry, 0)
+          stage = elem(entry, 1)
+          holder = elem(entry, 2)
           retired = :ets.lookup(state.arena, {:retired, slot}) == [{{:retired, slot}, token}]
           dead = match?({_reference, :down}, monitors[holder])
+          raw = tuple_size(entry) == 5
 
           if (retired or stage == :retiring or (stage == :ready and status == :closed) or
-                (stage == :reserved and dead)) and
-               claim_retirement(
-                 state.arena,
-                 state.incarnation,
-                 slot,
-                 elem(slots, slot),
-                 @comparisons
-               ) do
+                ((stage == :reserved or raw) and dead)) and
+               claim_retirement(state.arena, state.incarnation, slot, entry, @comparisons) do
             delete_payload(state.arena, slot, token)
             free_slot(state.arena, state.incarnation, slot, token, @comparisons)
           end
@@ -514,11 +889,16 @@ defmodule Loopex.ProgressSink do
          arena,
          incarnation,
          slot,
-         {token, stage, holder, charge} = expected,
+         expected,
          remaining
        ) do
     [{:state, ^incarnation, _owner, _status, _bytes, slots, _ready} = old] =
       :ets.lookup(arena, :state)
+
+    token = elem(expected, 0)
+    stage = elem(expected, 1)
+    holder = elem(expected, 2)
+    charge = elem(expected, 3)
 
     if elem(slots, slot) == expected do
       if stage == :retiring do
@@ -557,6 +937,52 @@ defmodule Loopex.ProgressSink do
     if status == :open and ready != [] and :atomics.compare_exchange(state.flag, 1, 0, 1) == :ok do
       send(state.owner, {:loopex_progress_ready, {self(), state.incarnation, state.arena}})
     end
+  end
+
+  @doc false
+  def acknowledge_ingress({_guardian, _incarnation, arena}) do
+    [{:raw_notification, flag}] = :ets.lookup(arena, :raw_notification)
+    :atomics.put(flag, 1, 0)
+    :ok
+  rescue
+    ArgumentError -> :ok
+  end
+
+  defp notify_raw(state) do
+    [{:state, _incarnation, _owner, status, _bytes, slots, _ready}] =
+      :ets.lookup(state.arena, :state)
+
+    control_entries =
+      for {_, :control_ready, control, _, {{_, _, _, _, _, _, _, producer}, _}} <-
+            Tuple.to_list(slots),
+          not Process.alive?(producer),
+          uniq: true,
+          do: control
+
+    target = List.first(control_entries)
+
+    if state.raw_target != nil and not Process.alive?(state.raw_target),
+      do: :atomics.put(state.raw_flag, 1, 0)
+
+    sink = {self(), state.incarnation, state.arena}
+
+    if status == :open and is_pid(target) and
+         :atomics.compare_exchange(state.raw_flag, 1, 0, 1) == :ok,
+       do: send(target, {:loopex_progress_ingress, sink})
+
+    relay_entries =
+      for {_, :relay_ready, relay, _,
+           {{_control, _route_relay, _session, _owner, gate, _kind, _header, _producer}, _order}} <-
+            Tuple.to_list(slots),
+          uniq: true,
+          do: {relay, gate}
+
+    Enum.each(relay_entries, fn {relay, gate} ->
+      if status == :open and :atomics.compare_exchange(gate, 2, 0, 1) == :ok,
+        do: send(relay, {:loopex_progress_stage, sink, gate})
+    end)
+
+    %{state | raw_target: target || state.raw_target}
   end
 
   defp projected?(item) when is_map(item) and not is_struct(item) and map_size(item) <= 9 do
@@ -630,12 +1056,16 @@ defmodule Loopex.ProgressSink do
 
   defp model_payload?(_item), do: true
 
-  # Concept: custody includes backing binaries and the next encoded representation.
-  # Technical depth: 4 KiB covers fixed native/map/lease/frame structure. Each
-  # original binary adds two backing copies and six encoded bytes per visible
-  # byte, covering JSON escaping and base64 identities/chunks without encoding.
-  # Shared backing is deliberately counted per field, never silently deduplicated.
-  defp binary_charge(value), do: 2 * :binary.referenced_byte_size(value) + 6 * byte_size(value)
+  # Concept: custody spans native projection, encoding and the joined output worker.
+  # Technical depth: 8 KiB covers fixed map/lease/frame/control structure. For
+  # total visible bytes V and backing B, each closed wire kind has encoded size
+  # at most 2V plus 1 KiB of framing. After encoder scope returns, native backing
+  # plus host flat, driver and two proxy copies costs at most B + 8V + 8 KiB.
+  # Two backing charges plus twelve visible charges dominate that peak and the
+  # earlier bounded binary-encoder cut. A per-byte list encoder must be replaced
+  # before its host uses this profile. Count shared backing per field. The host
+  # still retains its lease through actual worker/group retirement.
+  defp binary_charge(value), do: 2 * :binary.referenced_byte_size(value) + 12 * byte_size(value)
 
   defp item_charge(item),
     do: Enum.reduce(item, 0, fn {_key, value}, total -> total + value_charge(value) end)

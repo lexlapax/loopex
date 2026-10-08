@@ -1,9 +1,11 @@
+Code.require_file("support/progress_test_consumer.exs", __DIR__)
 Code.require_file("support/m1_runtime_helper.exs", __DIR__)
 Code.require_file("support/agent_loop_helper.exs", __DIR__)
 Code.require_file("support/configured_genesis_helper.exs", __DIR__)
 
 defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
   use ExUnit.Case, async: false
+  import Loopex.ProgressTestConsumer
 
   alias Loopex.AgentLoopFixture, as: Fixture
   alias Loopex.AgentLoopTestModel
@@ -1302,7 +1304,7 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
           store: fixture.store,
           model: "changed:model",
           tools: [],
-          progress_to: self(),
+          progress_sink: Loopex.ProgressTestConsumer.open_sink(),
           script: [
             %{
               text:
@@ -1388,8 +1390,11 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
         assert provenance["kind"] == "compaction_summary"
         assert provenance["summary"] == "live retained facts"
         assert List.last(ordinary.messages) == %{"role" => "user", "content" => "retained"}
-        assert_receive {:loopex_progress, %{kind: :text_delta, text: "ordinary delta"}}, 5_000
-        refute_received {:loopex_progress, %{kind: :text_delta, text: "PRIVATE_SUMMARY_DELTA"}}
+        assert_progress({:loopex_progress, %{kind: :text_delta, text: "ordinary delta"}}, 5_000)
+
+        refute_progress_received(
+          {:loopex_progress, %{kind: :text_delta, text: "PRIVATE_SUMMARY_DELTA"}}
+        )
 
         assert Enum.count(rows, &(&1.payload.kind == "model_request_committed_v2")) == 1
 

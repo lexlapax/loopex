@@ -1,19 +1,24 @@
 # M7 Implementation Tasks
 
-Current T16 subtask: complete paired Core verification after the exact custody
-supervisor teardown repair. Source-qualified raw `a88b11db` and formatting-only
-child `9420464c` preserve all 22 custody tests, original carrier joins, permits,
-Store-call assertions and cutoffs. Only the original workers supervisor's exact
-normal/infinity noproc stop is accepted. Original60053 passed all 32 owned-file
-formatting/AST checks on both pairs in 18.253 seconds, with ten joins and a
-2,166-row registry. The custody test is newly included in ownership; selection
-remains the complete 18 files / 490 cases, including all five long_bound cases.
+Completed one added T16 fixture-repair subtask. Exact source `9420464c` passed
+all 490 selected Core cases on each supported pair, with all five long_bound
+cases and zero failures, exclusions, skips or invalid cases. Original86174 is
+terminal and collected once after 736.567 seconds, six process joins, 36 artifacts
+and 2,172 registry rows. Its 32 owned files are now literally joined into primary
+m7, changing 31 paths and preserving unrelated source/docs. This result does not
+close full integration, the finite 32-CAS-exhaustion proof or generation activation.
 
-Original86174 is the sole live native handle for that full paired test selection
-at clean `9420464c`. No test result or checklist completion is claimed yet.
-Original92991 remains retained FAIL, current 489/490 and floor unrun; no unchanged
-retry is allowed. Exact context and the new 54-file immutable retention are in
-the [resume record](M7-resume.md). Earlier entries are historical where superseded.
+Next is the foreground 112-case subtask. Source `5cea1861` preserves Core32 and
+contains the qualified foreground17 delta. Formatter V2 is prepared after the
+actual Core PASS, with 15 Elixir AST/format paths and two non-Elixir byte guards;
+independent bound review precedes native execution. No native handle remains
+live at this checkpoint. T15 restore175 follows foreground qualification.
+
+Current counts: originals 88 done / 85 todo / 6 retired; additions 364 done /
+23 todo. T16 additions are now 69 done / 3 todo. The added completion is the
+bounded fixture repair recorded under T16 below. Original checklist rows stay
+unchanged. ADR0063 remains the sole asked pending decision. Exact artifacts are
+in the [resume record](M7-resume.md); earlier entries are historical where superseded.
 
 Original91795 passed the entire four-case constructor file on both pairs in
 27.327 seconds, and original61348 passed all 31 formatting/AST checks in
@@ -14604,6 +14609,22 @@ in the restart checkpoint. Broader restore/decoder/public/helper rows stay open.
 - [ ] Independently review integration changes and fix confirmed defects without weakening checks.
 
 ### Added implementation subtasks
+
+- [x] Repair the constructor failure shape, joined-guardian refusal/count, actual leased model-prefix observation and outer-carrier fixture supervisor teardown without weakening original actor joins, Store-call oracles or cutoffs. Retain every failing producer and prove the complete 18-file / 490-case selection, including all five long_bound cases, on both supported toolchains; integrate the exact 32 owned source files. This bounded fixture repair does not close full integration or forced 32-CAS exhaustion.
+
+  Evidence: tested `9420464c3953f88021617cd66ec05005b340ccdb`, original86174,
+  490 passed per pair, zero failures/exclusions/skips/invalid, formatting and
+  warning-free Core compilation, 736.567 seconds. Six actual process joins and
+  36 artifacts retained at `M7/core-custody-noproc-proof-20261008-v1`;
+  collection `fd03e9f81622a77bcd9b237fbca6216ba6401287edb8ddf3c57a94ac7656f723`,
+  terminal `742047f82500c24fa9774053a52c009fd410388225ad61c9c3cd60ad79292c24`,
+  2,172-row registry `53a98842844bd727a374806dd6584a72eb615cf1a0070f5bf4cc526301933d01`.
+  Source reviews abf48062, ddd3a96c and 4767824c preserve the original failure,
+  exact normal/noproc targets, unchanged monitor assertions and borrowed Stores.
+  Primary literal32 join audit `bf56ce9c4c07af6655b083338c4586b349a5e1693a12aae1972727606022e6cb`;
+  all 31 actual changed paths are within ownership. Earlier originals6965,
+  35386 and 92991 remain failed evidence. No full-fast or milestone claim follows.
+
 
 - [x] Implement and prove accepted ADR0058's dormant physical foreground OutputWriter through actual inherited stdout, exact worker/leader/port joins, nonce-bound controls and bounded cleanup. Preserve full-frame, blocked/partial/broken pipe, malformed control, owner/manager loss and EOF proofs on both supported toolchains. Foreground FIFO/emitted-cursor integration, native ingress migration and Linux qualification remain separate.
 

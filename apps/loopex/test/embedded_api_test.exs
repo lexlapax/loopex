@@ -1,8 +1,10 @@
+Code.require_file("support/progress_test_consumer.exs", __DIR__)
 Code.require_file("support/configured_genesis_helper.exs", __DIR__)
 Code.require_file("support/m1_runtime_helper.exs", __DIR__)
 
 defmodule Loopex.EmbeddedApiTest do
   use ExUnit.Case, async: true
+  import Loopex.ProgressTestConsumer, only: :macros
 
   alias Loopex.Attachment
   alias Loopex.M1RuntimeTestStore
@@ -10,7 +12,8 @@ defmodule Loopex.EmbeddedApiTest do
   alias Loopex.Runtime.SessionState
 
   test "progress and diagnostics never carry durable truth" do
-    fixture = start_fixture("transient-runtime", progress_to: self(), diagnostics_to: self())
+    sink = Loopex.ProgressTestConsumer.open_sink()
+    fixture = start_fixture("transient-runtime", progress_sink: sink, diagnostics_to: self())
     on_exit(fn -> stop_fixture(fixture) end)
 
     session_id = create_session!(fixture, "create-transient")
@@ -23,14 +26,26 @@ defmodule Loopex.EmbeddedApiTest do
 
     before = durable_store_projection(M1RuntimeTestStore.inspect_state(fixture.store_pid))
 
-    assert :ok = Loopex.progress(attachment, %{"step" => 1, "message" => "working"})
+    item = %{
+      kind: :text_delta,
+      turn_id: "transient-turn",
+      stream_domain_id: String.duplicate("a", 32),
+      base_event_sequence: 0,
+      model_sequence: 0,
+      content_index: 0,
+      text: "working"
+    }
+
+    assert :ok = Loopex.ProgressSink.try_offer(sink, session_id, item)
     assert :ok = Loopex.diagnostic(fixture.runtime, %{"component" => "runtime", "level" => 2})
 
-    assert_receive {:loopex_progress, ^session_id, %{"step" => 1, "message" => "working"}}
+    assert_progress({:loopex_progress, ^session_id, ^item})
 
     assert_receive {:loopex_diagnostic, %{"component" => "runtime", "level" => 2}}
 
-    assert {:error, :invalid_progress} = Loopex.progress(attachment, self())
+    assert :dropped = Loopex.ProgressSink.try_offer(sink, session_id, self())
+    refute function_exported?(Loopex, :progress, 2)
+    refute function_exported?(Runtime, :progress, 2)
     assert {:error, :invalid_diagnostic} = Loopex.diagnostic(fixture.runtime, make_ref())
 
     assert before ==
@@ -46,7 +61,7 @@ defmodule Loopex.EmbeddedApiTest do
       )
     end)
 
-    refute_receive {:loopex_progress, _, _}, 20
+    refute_progress({:loopex_progress, _, _}, 20)
     refute_receive {:loopex_diagnostic, _}, 20
     assert {:error, :stale_attachment} = Loopex.next_event(attachment)
 
@@ -397,6 +412,8 @@ defmodule Loopex.EmbeddedApiTest do
       )
 
     restarted_fixture = %{fixture | runtime: restarted}
+    on_exit(fn -> stop_fixture(restarted_fixture) end)
+    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(restarted)
 
     assert {:ok, ^session_id} =
              Loopex.resume_session(restarted, session_id, command_id: "resume-after-restart")
@@ -438,12 +455,16 @@ defmodule Loopex.EmbeddedApiTest do
 
     {:ok, runtime} = Loopex.start_link(runtime_options)
 
-    %{
+    fixture = %{
       runtime: runtime,
       runtime_id: runtime_id,
       store: store,
       store_pid: store_pid
     }
+
+    on_exit(fn -> stop_fixture(fixture) end)
+    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(runtime)
+    fixture
   end
 
   defp stop_fixture(fixture) do

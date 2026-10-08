@@ -1,15 +1,17 @@
+Code.require_file("support/progress_test_consumer.exs", __DIR__)
 Code.require_file("support/m1_runtime_helper.exs", __DIR__)
 Code.require_file("support/agent_loop_helper.exs", __DIR__)
 Code.require_file("support/configured_genesis_helper.exs", __DIR__)
 
 defmodule Loopex.Runtime.CompactionProgressTest do
   use ExUnit.Case, async: false
+  import Loopex.ProgressTestConsumer, only: :macros
 
   alias Loopex.AgentLoopFixture, as: Fixture
   alias Loopex.AgentLoopTestModel
   alias Loopex.ConfiguredGenesisFixture, as: Genesis
   alias Loopex.M1RuntimeTestStore
-  alias Loopex.Runtime.{Control, SessionState}
+  alias Loopex.Runtime.{Control, SessionState, StreamRelay}
   alias Loopex.{CompactionProgress, Store, StreamDomain}
 
   test "standalone actual permit emits its committed owner binding and discards every summary delta" do
@@ -20,16 +22,16 @@ defmodule Loopex.Runtime.CompactionProgressTest do
     :erlang.trace(control, true, [:send])
     assert {:accepted, "compact"} = Loopex.command(attachment, command())
     assert_receive {:holding, worker}, 5_000
-    assert_receive {:loopex_progress, item}, 5_000
+    assert_progress({:loopex_progress, item}, 5_000)
     live = :sys.get_state(coordinator)
     episode = live.durable.maintenance_episodes[item.episode_id]
     assert_item(item, session, episode, %{"kind" => "compact", "id" => "compact"})
     assert item.base_event_sequence == live.durable.event_sequence
     assert_positive_permit(control, worker, episode)
-    assert live.compaction_relay in Task.Supervisor.children(live.workers)
+    assert StreamRelay.pid(live.compaction_relay) in Task.Supervisor.children(live.workers)
     assert map_size(live.streams) == 0
     assert CompactionProgress.project(Map.put(item, :summary, "private summary")) == :error
-    refute_receive {:loopex_progress, _}, 0
+    refute_progress({:loopex_progress, _}, 0)
 
     monitor = Process.monitor(worker)
     send(worker, :release)
@@ -47,12 +49,13 @@ defmodule Loopex.Runtime.CompactionProgressTest do
     refute Enum.any?(Fixture.records(fixture, session), &(&1.payload.kind == item.kind))
     refute Enum.any?(Fixture.events(fixture, session), &(&1.kind == item.kind))
     assert done.commands["compact"].result == Loopex.command(attachment, command())
-    refute_receive {:loopex_progress, _}, 0
+    refute_progress({:loopex_progress, _}, 0)
 
     relay = live.compaction_relay
-    relay_monitor = Process.monitor(relay)
+    relay_pid = StreamRelay.pid(relay)
+    relay_monitor = Process.monitor(relay_pid)
     kill_owner(coordinator)
-    assert_receive {:DOWN, ^relay_monitor, :process, ^relay, :killed}, 5_000
+    assert_receive {:DOWN, ^relay_monitor, :process, ^relay_pid, :killed}, 5_000
 
     {:ok, {:prepared, activation}} =
       Loopex.prepare_resume_session(fixture.runtime, session, "replay")
@@ -62,7 +65,7 @@ defmodule Loopex.Runtime.CompactionProgressTest do
     assert done.commands["compact"].result == Loopex.command(resumed, command())
     assert :sys.get_state(owner(fixture, session)).compaction_relay == nil
     assert length(AgentLoopTestModel.dispatched(fixture.model)) == 1
-    refute_receive {:loopex_progress, _}, 0
+    refute_progress({:loopex_progress, _}, 0)
     :erlang.trace(control, false, [:all])
   end
 
@@ -73,7 +76,7 @@ defmodule Loopex.Runtime.CompactionProgressTest do
     :erlang.trace(control, true, [:send])
     assert {:ok, ^session} = Loopex.activate_resume(activation)
     assert_receive {:holding, worker}, 5_000
-    assert_receive {:loopex_progress, item}, 5_000
+    assert_progress({:loopex_progress, item}, 5_000)
     live = :sys.get_state(coordinator)
     run = live.durable.active_run_id
     episode = live.durable.maintenance_episodes[item.episode_id]
@@ -102,8 +105,8 @@ defmodule Loopex.Runtime.CompactionProgressTest do
     {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
     assert {:accepted, "compact"} = Loopex.command(attachment, command())
     assert_receive {:holding, worker}, 5_000
-    assert_receive {:loopex_progress, first}, 5_000
-    assert_receive {:loopex_progress, retry}, 5_000
+    assert_progress({:loopex_progress, first}, 5_000)
+    assert_progress({:loopex_progress, retry}, 5_000)
     refute first.stream_domain_id == retry.stream_domain_id
     assert first.episode_id == retry.episode_id
     assert first.owner == retry.owner
@@ -122,18 +125,18 @@ defmodule Loopex.Runtime.CompactionProgressTest do
     end
 
     relay = :sys.get_state(owner(fixture, session)).compaction_relay
-    assert is_pid(relay)
+    assert is_pid(StreamRelay.pid(relay))
 
     assert Enum.count(
              Task.Supervisor.children(:sys.get_state(owner(fixture, session)).workers),
-             &(&1 == relay)
+             &(&1 == StreamRelay.pid(relay))
            ) == 1
 
     send(worker, :release)
     completed = await_state(fixture, session, &is_nil(&1.pending_compact))
     assert completed.commands["compact"].result["usage"]["attempts"] == 2
     assert :sys.get_state(owner(fixture, session)).compaction_relay == relay
-    refute_receive {:loopex_progress, _}, 0
+    refute_progress({:loopex_progress, _}, 0)
   end
 
   test "further summary operations each expose only one domain and sequence zero" do
@@ -182,7 +185,7 @@ defmodule Loopex.Runtime.CompactionProgressTest do
     state = :sys.get_state(owner(fixture, session))
     assert state.compaction_relay == nil
     assert AgentLoopTestModel.dispatched(fixture.model) == []
-    refute_receive {:loopex_progress, _}, 0
+    refute_progress({:loopex_progress, _}, 0)
     :erlang.trace(control, false, [:all])
   end
 
@@ -197,7 +200,7 @@ defmodule Loopex.Runtime.CompactionProgressTest do
 
     assert :sys.get_state(owner(fixture, session)).compaction_relay == nil
     assert AgentLoopTestModel.dispatched(fixture.model) == []
-    refute_receive {:loopex_progress, _}, 0
+    refute_progress({:loopex_progress, _}, 0)
   end
 
   test "current owner rejects private payload and stale owner cannot send through a live relay" do
@@ -205,7 +208,7 @@ defmodule Loopex.Runtime.CompactionProgressTest do
     {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
     assert {:accepted, "compact"} = Loopex.command(attachment, command())
     assert_receive {:holding, worker}, 5_000
-    assert_receive {:loopex_progress, item}, 5_000
+    assert_progress({:loopex_progress, item}, 5_000)
     coordinator = owner(fixture, session)
     state = :sys.get_state(coordinator)
 
@@ -215,14 +218,20 @@ defmodule Loopex.Runtime.CompactionProgressTest do
              state.owner,
              state.compaction_relay,
              Map.put(item, :summary, "private")
-           ) == {:error, :invalid_compaction_progress}
+           ) == :ok
 
     stale = Map.update!(state.owner, :owner_epoch, &(&1 + 1))
 
-    assert Control.project_progress(state.control, session, stale, state.compaction_relay, item) ==
+    assert Control.project_progress(
+             state.control,
+             session,
+             stale,
+             put_elem(state.compaction_relay, 6, stale),
+             item
+           ) ==
              {:error, :superseded_owner}
 
-    refute_receive {:loopex_progress, _}, 0
+    refute_progress({:loopex_progress, _}, 0)
     send(worker, :release)
     _ = await_state(fixture, session, &is_nil(&1.pending_compact))
   end
@@ -232,10 +241,10 @@ defmodule Loopex.Runtime.CompactionProgressTest do
     {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
     assert {:accepted, "compact"} = Loopex.command(attachment, command())
     assert_receive {:holding, worker}, 5_000
-    assert_receive {:loopex_progress, item}, 5_000
+    assert_progress({:loopex_progress, item}, 5_000)
     predecessor = owner(fixture, session)
     relay = :sys.get_state(predecessor).compaction_relay
-    joins = for pid <- [worker, relay], do: {pid, Process.monitor(pid)}
+    joins = for pid <- [worker, StreamRelay.pid(relay)], do: {pid, Process.monitor(pid)}
     kill_owner(predecessor)
 
     for {pid, monitor} <- joins do
@@ -251,7 +260,7 @@ defmodule Loopex.Runtime.CompactionProgressTest do
     done = await_state(fixture, session, &is_nil(&1.pending_compact))
     assert done.commands["compact"].result["cleanup"] == "unknown"
     assert length(AgentLoopTestModel.dispatched(fixture.model)) == 1
-    refute_receive {:loopex_progress, _}, 0
+    refute_progress({:loopex_progress, _}, 0)
 
     assert Enum.count(
              Fixture.events(fixture, session),
@@ -262,19 +271,19 @@ defmodule Loopex.Runtime.CompactionProgressTest do
   end
 
   test "dropped activity and a delayed relay do not hold provider settlement or infer its outcome" do
-    {fixture, session, _activation} = history(:compact, [held_summary()], progress_to: nil)
+    {fixture, session, _activation} = history(:compact, [held_summary()], progress_sink: nil)
     {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
     assert {:accepted, "compact"} = Loopex.command(attachment, command())
     assert_receive {:holding, worker}, 5_000
     relay = :sys.get_state(owner(fixture, session)).compaction_relay
-    true = :erlang.suspend_process(relay)
+    true = :erlang.suspend_process(StreamRelay.pid(relay))
     send(worker, :release)
     done = await_state(fixture, session, &is_nil(&1.pending_compact))
     assert done.commands["compact"].result["disposition"] == "checkpointed"
-    true = :erlang.resume_process(relay)
+    true = :erlang.resume_process(StreamRelay.pid(relay))
     {:ok, _reattached} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
     assert recover(fixture, session).commands["compact"].result == done.commands["compact"].result
-    refute_receive {:loopex_progress, _}, 0
+    refute_progress({:loopex_progress, _}, 0)
   end
 
   for phase <- [
@@ -303,7 +312,7 @@ defmodule Loopex.Runtime.CompactionProgressTest do
       assert Enum.any?(transaction.records, &(&1.kind == "maintenance_attempt_opened_v1"))
       assert records(fixture, session, "maintenance_attempt_opened_v1") == []
       assert AgentLoopTestModel.dispatched(fixture.model) == []
-      refute_receive {:loopex_progress, _}, 0
+      refute_progress({:loopex_progress, _}, 0)
       predecessor = owner(fixture, session)
       predecessor_monitor = Process.monitor(predecessor)
       assert :ok = M1RuntimeTestStore.inject(fixture.store, {:session_journal_commit, @phase})
@@ -322,7 +331,7 @@ defmodule Loopex.Runtime.CompactionProgressTest do
                          5_000
 
           assert AgentLoopTestModel.dispatched(fixture.model) == []
-          refute_receive {:loopex_progress, _}, 0
+          refute_progress({:loopex_progress, _}, 0)
 
           {:ok, {:prepared, activation}} =
             Loopex.prepare_resume_session(fixture.runtime, session, "unknown-open")
@@ -334,11 +343,11 @@ defmodule Loopex.Runtime.CompactionProgressTest do
           assert done.commands["compact"].result["cleanup"] == "unknown"
           assert AgentLoopTestModel.dispatched(fixture.model) == []
           assert length(records(fixture, session, "maintenance_attempt_opened_v1")) == 1
-          refute_receive {:loopex_progress, _}, 0
+          refute_progress({:loopex_progress, _}, 0)
 
         _resolved_within_original_owner ->
           assert_receive {:holding, worker}, 5_000
-          assert_receive {:loopex_progress, item}, 5_000
+          assert_progress({:loopex_progress, item}, 5_000)
           [opened] = records(fixture, session, "maintenance_attempt_opened_v1")
 
           assert item.stream_domain_id ==
@@ -354,7 +363,7 @@ defmodule Loopex.Runtime.CompactionProgressTest do
           assert done.commands["compact"].result["usage"]["attempts"] == 1
           assert length(AgentLoopTestModel.dispatched(fixture.model)) == 1
           Process.demonitor(predecessor_monitor, [:flush])
-          refute_receive {:loopex_progress, _}, 0
+          refute_progress({:loopex_progress, _}, 0)
       end
 
       assert MapSet.member?(
@@ -384,7 +393,7 @@ defmodule Loopex.Runtime.CompactionProgressTest do
 
     assert length(records(fixture, session, "maintenance_attempt_opened_v1")) == 1
     assert AgentLoopTestModel.dispatched(fixture.model) == []
-    refute_receive {:loopex_progress, _}, 0
+    refute_progress({:loopex_progress, _}, 0)
     kill_owner(predecessor)
     M1RuntimeTestStore.release(waiter)
 
@@ -396,7 +405,7 @@ defmodule Loopex.Runtime.CompactionProgressTest do
     done = await_state(fixture, session, &is_nil(&1.pending_compact))
     assert done.commands["compact"].result["cleanup"] == "unknown"
     assert AgentLoopTestModel.dispatched(fixture.model) == []
-    refute_receive {:loopex_progress, _}, 0
+    refute_progress({:loopex_progress, _}, 0)
   end
 
   test "owner loss between positive permit and projection refuses the queued activity" do
@@ -406,12 +415,9 @@ defmodule Loopex.Runtime.CompactionProgressTest do
 
     hook = fn
       :armed,
-      {:in,
-       {:"$gen_call", _from,
-        {:project_progress, _session, _owner, relay,
-         %{kind: "context.compaction_progress"} = item}}},
+      {:in, {:"$gen_call", _from, {:project_progress, _session, _owner, relay, reference}}},
       _extra ->
-        send(observer, {:activity_admission_held, self(), relay, item})
+        send(observer, {:activity_admission_held, self(), relay, reference})
         receive do: (:release_activity_admission -> :held)
 
       state, _event, _extra ->
@@ -436,11 +442,12 @@ defmodule Loopex.Runtime.CompactionProgressTest do
     predecessor = owner(fixture, session)
     assert {:accepted, "compact"} = Loopex.command(attachment, command())
     assert_receive {:holding, _worker}, 5_000
-    assert_receive {:activity_admission_held, ^control, relay, item}, 5_000
-    relay_monitor = Process.monitor(relay)
-    refute_receive {:loopex_progress, _}, 0
+    assert_receive {:activity_admission_held, ^control, relay, _reference}, 5_000
+    relay_pid = StreamRelay.pid(relay)
+    relay_monitor = Process.monitor(relay_pid)
+    refute_progress({:loopex_progress, _}, 0)
     kill_owner(predecessor)
-    assert_receive {:DOWN, ^relay_monitor, :process, ^relay, :killed}, 5_000
+    assert_receive {:DOWN, ^relay_monitor, :process, ^relay_pid, :killed}, 5_000
     send(control, :release_activity_admission)
     assert :ok = :sys.remove(control, hook)
 
@@ -450,8 +457,12 @@ defmodule Loopex.Runtime.CompactionProgressTest do
     assert {:ok, ^session} = Loopex.activate_resume(activation)
     done = await_state(fixture, session, &is_nil(&1.pending_compact))
     assert done.commands["compact"].result["cleanup"] == "unknown"
-    refute_receive {:loopex_progress, _}, 0
-    refute Enum.any?(Fixture.events(fixture, session), &(&1.kind == item.kind))
+    refute_progress({:loopex_progress, _}, 0)
+
+    refute Enum.any?(
+             Fixture.events(fixture, session),
+             &(&1.kind == "context.compaction_progress")
+           )
   end
 
   for phase <- [:before_send, :after_send] do
@@ -522,7 +533,7 @@ defmodule Loopex.Runtime.CompactionProgressTest do
       # The original owner is frozen while its actual reply queues. Killing it
       # prevents adoption of either the negative or positive reply; no fake
       # callback or replacement Control route produces this uncertainty.
-      refute_receive {:loopex_progress, _}, 0
+      refute_progress({:loopex_progress, _}, 0)
       kill_owner(predecessor)
 
       {:ok, {:prepared, activation}} =
@@ -537,7 +548,7 @@ defmodule Loopex.Runtime.CompactionProgressTest do
       assert length(AgentLoopTestModel.dispatched(fixture.model)) ==
                if(@phase == :after_send, do: 1, else: 0)
 
-      refute_receive {:loopex_progress, _}, 0
+      refute_progress({:loopex_progress, _}, 0)
     end
   end
 
@@ -548,13 +559,10 @@ defmodule Loopex.Runtime.CompactionProgressTest do
 
     hook = fn
       :armed,
-      {:in,
-       {:"$gen_call", _from,
-        {:project_progress, _session, _owner, relay,
-         %{kind: "context.compaction_progress"} = item}}},
+      {:in, {:"$gen_call", _from, {:project_progress, _session, _owner, relay, reference}}},
       _extra ->
-        true = :erlang.suspend_process(relay)
-        send(observer, {:activity_relay_suspended, relay, item})
+        true = :erlang.suspend_process(StreamRelay.pid(relay))
+        send(observer, {:activity_relay_suspended, relay, reference})
         :held
 
       state, _event, _extra ->
@@ -565,15 +573,33 @@ defmodule Loopex.Runtime.CompactionProgressTest do
     {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
     assert {:accepted, "compact"} = Loopex.command(attachment, command())
     assert_receive {:holding, worker}, 5_000
-    assert_receive {:activity_relay_suspended, relay, item}, 5_000
+    assert_receive {:activity_relay_suspended, relay, _reference}, 5_000
+    # Derive the expected closed item from committed metadata, not an unleased
+    # resident lookup. The later actual take retains its own native lease.
+    durable = recover(fixture, session)
+    episode = durable.maintenance_episodes[durable.active_maintenance]
+
+    assert {:ok, item} =
+             CompactionProgress.new(
+               episode["episode_id"],
+               %{"kind" => "compact", "id" => episode["command_id"]},
+               StreamDomain.derive(
+                 :compaction,
+                 session,
+                 episode["operation_id"],
+                 episode["model_attempt"]
+               ),
+               durable.event_sequence
+             )
+
     assert :ok = :sys.remove(control, hook)
 
     on_exit(fn ->
-      if Process.alive?(control) and Process.alive?(relay) do
+      if Process.alive?(control) and Process.alive?(StreamRelay.pid(relay)) do
         try do
           :sys.replace_state(control, fn state ->
             try do
-              :erlang.resume_process(relay)
+              :erlang.resume_process(StreamRelay.pid(relay))
             catch
               :error, _reason -> :ok
             end
@@ -586,25 +612,25 @@ defmodule Loopex.Runtime.CompactionProgressTest do
       end
     end)
 
-    refute_receive {:loopex_progress, _}, 0
+    refute_progress({:loopex_progress, _}, 0)
     send(worker, :release)
     done = await_state(fixture, session, &is_nil(&1.pending_compact))
     assert done.commands["compact"].result["disposition"] == "checkpointed"
     assert item.base_event_sequence < done.event_sequence
     {:ok, _reattached} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
-    refute_receive {:loopex_progress, _}, 0
+    refute_progress({:loopex_progress, _}, 0)
     # The actual Control debug hook owns this suspension. Resume in that same
     # process; a test-process resume does not release Control's suspension.
     :sys.replace_state(control, fn state ->
-      true = :erlang.resume_process(relay)
+      true = :erlang.resume_process(StreamRelay.pid(relay))
       state
     end)
 
-    assert_receive {:loopex_progress, ^item}, 5_000
+    assert_progress({:loopex_progress, ^item}, 5_000)
     assert recover(fixture, session).commands["compact"].result == done.commands["compact"].result
     assert done.commands["compact"].result == Loopex.command(attachment, command())
     assert length(AgentLoopTestModel.dispatched(fixture.model)) == 1
-    refute_receive {:loopex_progress, _}, 0
+    refute_progress({:loopex_progress, _}, 0)
   end
 
   defp summary do
@@ -710,7 +736,8 @@ defmodule Loopex.Runtime.CompactionProgressTest do
         store: prior.store,
         maintenance_model: selection,
         maintenance_instructions: instructions,
-        progress_to: Keyword.get(options, :progress_to, self())
+        progress_sink:
+          Keyword.get_lazy(options, :progress_sink, &Loopex.ProgressTestConsumer.open_sink/0)
       )
 
     on_exit(fn -> Fixture.stop(fixture) end)
@@ -816,11 +843,5 @@ defmodule Loopex.Runtime.CompactionProgressTest do
   defp records(fixture, session, kind),
     do: for(%{payload: %{kind: ^kind} = row} <- Fixture.records(fixture, session), do: row)
 
-  defp drain_progress do
-    receive do
-      {:loopex_progress, item} -> [item | drain_progress()]
-    after
-      0 -> []
-    end
-  end
+  defp drain_progress, do: Loopex.ProgressTestConsumer.drain()
 end

@@ -1,3 +1,4 @@
+Code.require_file("support/progress_test_consumer.exs", __DIR__)
 Code.require_file("support/m1_runtime_helper.exs", __DIR__)
 Code.require_file("support/configured_genesis_helper.exs", __DIR__)
 
@@ -34,6 +35,7 @@ defmodule Loopex.SessionLifecycleTest do
   alias Loopex.M1RuntimeTestStore
   alias Loopex.Runtime
   alias Loopex.Runtime.Control
+  alias Loopex.Runtime.StreamRelay
   alias Loopex.Runtime.SessionCoordinator
   alias Loopex.Store.Transitions
 
@@ -174,12 +176,14 @@ defmodule Loopex.SessionLifecycleTest do
     :ok = stop_supervised!(:absent_progress_control)
     refute Process.alive?(absent)
 
+    relay = lifecycle_relay(fixture.runtime, session_id, entry.owner, absent)
+
     assert Control.project_progress(
              absent,
              session_id,
              entry.owner,
-             self(),
-             %{kind: :test_progress}
+             relay,
+             %{kind: :text_delta, content_index: 0, text: "unavailable"}
            ) == {:error, :runtime_unavailable}
 
     # Unavailability made no ownership decision: the real owner is unchanged.
@@ -199,11 +203,13 @@ defmodule Loopex.SessionLifecycleTest do
     :ok = stop_supervised!(:absent_closure_control)
     refute Process.alive?(absent)
 
+    relay = lifecycle_relay(fixture.runtime, session_id, entry.owner, absent)
+
     assert Control.close_progress(
              absent,
              session_id,
              entry.owner,
-             self(),
+             relay,
              :abandoned
            ) == {:error, :runtime_unavailable}
 
@@ -272,7 +278,7 @@ defmodule Loopex.SessionLifecycleTest do
     assert durable_store_projection(first) ==
              durable_store_projection(M1RuntimeTestStore.inspect_state(fixture.store_pid))
 
-    assert {:error, :tx_id_conflict} =
+    assert {:error, :runtime_command_conflict} =
              Loopex.create_session(fixture.runtime, %{"workspace" => "changed"},
                command_id: "create-session"
              )
@@ -754,6 +760,144 @@ defmodule Loopex.SessionLifecycleTest do
     assert Control.current_owner(control, session_id, entry.owner) == :ok
   end
 
+  # Concept: fault coverage follows actual startup ownership and cancellation.
+  # Technical depth: unknown re-presentations spend the two-presentation limit;
+  # they do not authorize a new claim, reservation or session activation retry.
+  defp drive_fault_pair(fixture, {:runtime_control_claim_creation_domain, phase} = pair) do
+    {:ok, %{control: control}} = Runtime.children(fixture.runtime)
+    monitor = Process.monitor(control)
+    before_calls = M1RuntimeTestStore.inspect_state(fixture.store_pid).creation_calls
+    :ok = M1RuntimeTestStore.inject(fixture.store_pid, pair)
+    Process.exit(control, :kill)
+    assert_receive {:DOWN, ^monitor, :process, ^control, :killed}, 1_000
+    status = if phase == :recovery_representation, do: :unavailable, else: :ready
+
+    assert eventually(fn ->
+             case Runtime.children(fixture.runtime) do
+               {:ok, %{control: successor}} when successor != control ->
+                 state = :sys.get_state(successor)
+                 state.creation_status == status and is_nil(state.creation)
+
+               _ ->
+                 false
+             end
+           end)
+
+    {:ok, %{control: successor}} = Runtime.children(fixture.runtime)
+    state = M1RuntimeTestStore.inspect_state(fixture.store_pid)
+    assert [claim, exact_claim] = Enum.drop(state.creation_calls, length(before_calls))
+    assert claim.type == :claim_creation_domain
+    assert claim == exact_claim
+    assert state.sessions == %{}
+    assert :sys.get_state(successor).sessions == %{}
+  end
+
+  defp drive_fault_pair(fixture, {:runtime_control_reserve_creation, phase} = pair) do
+    :ok = M1RuntimeTestStore.inject(fixture.store_pid, pair)
+    result = Loopex.create_session(fixture.runtime, %{}, command_id: "faulted-reserve")
+    state = M1RuntimeTestStore.inspect_state(fixture.store_pid)
+
+    assert [reserve, exact_reserve] =
+             Enum.filter(state.creation_calls, &(&1.type == :reserve_creation))
+
+    assert reserve == exact_reserve
+    capsule = Map.fetch!(state.creation_capsules, {fixture.runtime_id, "faulted-reserve"})
+    assert capsule.reservation_tx_id == reserve.tx_id
+    assert capsule.genesis == reserve.genesis
+
+    if phase == :recovery_representation do
+      assert result == {:error, :creation_cancelled}
+      assert capsule.state == :not_committed
+      assert capsule.final_resolution == {:not_committed, :creation_cancelled}
+      assert state.sessions == %{}
+      {:ok, %{control: control}} = Runtime.children(fixture.runtime)
+      assert :sys.get_state(control).sessions == %{}
+      refute Enum.any?(state.creation_calls, &(&1.type == :create_session))
+    else
+      assert {:ok, session} = result
+      assert capsule.state == :created
+      assert capsule.session_id == session
+      assert Map.has_key?(state.sessions, session)
+    end
+  end
+
+  defp drive_fault_pair(fixture, {:runtime_control_close_creation_reservation, phase} = pair) do
+    {:ok, %{control: control}} = Runtime.children(fixture.runtime)
+
+    :ok =
+      M1RuntimeTestStore.delay_after_commit(
+        fixture.store_pid,
+        :runtime_control_reserve_creation,
+        self()
+      )
+
+    observer = self()
+
+    caller =
+      spawn(fn ->
+        result = Loopex.create_session(fixture.runtime, %{}, command_id: "faulted-close")
+        send(observer, {:faulted_close_answer, self(), result})
+      end)
+
+    on_exit(fn -> if Process.alive?(caller), do: Process.exit(caller, :kill) end)
+    store_pid = fixture.store_pid
+
+    assert_receive {:transaction_linearized, waiter, ^store_pid,
+                    :runtime_control_reserve_creation, {:committed, _, _}},
+                   1_000
+
+    on_exit(fn -> M1RuntimeTestStore.release(waiter) end)
+    waiter_monitor = Process.monitor(waiter)
+    original = :sys.get_state(control).creation
+
+    monitors =
+      Enum.map(
+        [caller, original.action.pid, original.action.group, original.action.worker],
+        &{&1, Process.monitor(&1)}
+      )
+
+    :ok = M1RuntimeTestStore.inject(fixture.store_pid, pair)
+    Process.exit(caller, :kill)
+    cutoff = System.monotonic_time(:millisecond) + 1_000
+
+    for {pid, monitor} <- monitors do
+      assert_receive {:DOWN, ^monitor, :process, ^pid, _},
+                     max(cutoff - System.monotonic_time(:millisecond), 0)
+    end
+
+    status = if phase == :recovery_representation, do: :unavailable, else: :ready
+
+    assert eventually(fn ->
+             state = :sys.get_state(control)
+             state.creation_status == status and is_nil(state.creation)
+           end)
+
+    state = M1RuntimeTestStore.inspect_state(fixture.store_pid)
+
+    assert [close, exact_close] =
+             Enum.filter(state.creation_calls, &(&1.type == :close_creation_reservation))
+
+    assert close == exact_close
+    assert close.final_canonical_record_bytes == original.final.canonical_record_bytes
+    assert close.final_canonical_mutation_digest == original.final.canonical_mutation_digest
+    capsule = Map.fetch!(state.creation_capsules, {fixture.runtime_id, "faulted-close"})
+    assert capsule.genesis == original.final.genesis
+    assert capsule.state == :not_committed
+    assert capsule.final_resolution == {:not_committed, :creation_cancelled}
+    assert state.sessions == %{}
+    assert :sys.get_state(control).sessions == %{}
+    refute Enum.any?(state.creation_calls, &(&1.type == :create_session))
+    refute_received {:faulted_close_answer, ^caller, {:ok, _}}
+
+    M1RuntimeTestStore.release(waiter)
+    assert_receive {:DOWN, ^waiter_monitor, :process, ^waiter, :normal}, 1_000
+
+    assert M1RuntimeTestStore.inspect_state(fixture.store_pid).creation_calls ==
+             state.creation_calls
+
+    assert :sys.get_state(control).creation == nil
+  end
+
   defp drive_fault_pair(fixture, {:runtime_control_create_session, _phase} = pair) do
     :ok = M1RuntimeTestStore.inject(fixture.store_pid, pair)
 
@@ -851,6 +995,7 @@ defmodule Loopex.SessionLifecycleTest do
       )
 
     on_exit(fn -> if Runtime.alive?(restarted), do: Loopex.stop(restarted) end)
+    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(restarted)
 
     assert {:ok, ^session_id} =
              Loopex.create_session(restarted, %{"workspace" => "one"},
@@ -866,6 +1011,34 @@ defmodule Loopex.SessionLifecycleTest do
     assert :sys.get_state(control).sessions == %{}
   end
 
+  defp lifecycle_relay(runtime, session, owner, target) do
+    {:ok, %{control: control, workers: workers}} = Runtime.children(runtime)
+    sink = :sys.get_state(control).progress_sink
+
+    header = %{
+      turn_id: "lifecycle-turn",
+      stream_domain_id: String.duplicate("a", 32),
+      base_event_sequence: 0
+    }
+
+    {:ok, relay} =
+      StreamRelay.open(
+        workers,
+        {sink, session, target, owner, header},
+        fn item, sequence -> Map.merge(item, Map.put(header, :model_sequence, sequence)) end,
+        fn disposition, count ->
+          Map.merge(header, %{
+            kind: :model_stream_closed,
+            disposition: disposition,
+            delta_count: count
+          })
+        end
+      )
+
+    on_exit(fn -> if Process.alive?(StreamRelay.pid(relay)), do: StreamRelay.discard(relay) end)
+    relay
+  end
+
   defp start_fixture(runtime_id) do
     {store_pid, store} = M1RuntimeTestStore.start_store(label: runtime_id)
 
@@ -875,10 +1048,14 @@ defmodule Loopex.SessionLifecycleTest do
         session_creation_defaults:
           Loopex.ConfiguredGenesisFixture.genesis([]) |> Map.drop([:kind, "options"]),
         runtime_id: runtime_id,
-        store: store
+        store: store,
+        progress_sink: Loopex.ProgressTestConsumer.open_sink()
       )
 
-    %{runtime: runtime, runtime_id: runtime_id, store: store, store_pid: store_pid}
+    fixture = %{runtime: runtime, runtime_id: runtime_id, store: store, store_pid: store_pid}
+    on_exit(fn -> stop_fixture(fixture) end)
+    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(runtime)
+    fixture
   end
 
   defp stop_fixture(fixture) do

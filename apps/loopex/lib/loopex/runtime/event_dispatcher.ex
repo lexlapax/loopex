@@ -16,7 +16,7 @@ defmodule Loopex.Runtime.EventDispatcher do
   cursor is paged lazily so a reconnecting caller can drain more than one
   queueful without a false overflow.
 
-  Attachments, queued events, progress, and diagnostics are redacted from OTP
+  Attachments, queued events and diagnostics are redacted from OTP
   status and disappear on dispatcher restart. The same durable outbox rows can
   then be attached and delivered again with identical IDs and sequences.
 
@@ -53,7 +53,7 @@ defmodule Loopex.Runtime.EventDispatcher do
 
   ## Technical depth
 
-  Optional progress and diagnostic sinks receive best-effort messages through
+  Optional diagnostic sinks receive best-effort messages through
   ordinary `send/2`; their mailbox state is outside the runtime and never a
   coordinator barrier.
   """
@@ -257,7 +257,6 @@ defmodule Loopex.Runtime.EventDispatcher do
        registration_worker: nil,
        store: Keyword.fetch!(options, :store),
        capacity: Keyword.fetch!(options, :attachment_capacity),
-       progress_to: Keyword.fetch!(options, :progress_to),
        diagnostics_to: Keyword.fetch!(options, :diagnostics_to),
        attachments: %{},
        holders: %{},
@@ -344,24 +343,6 @@ defmodule Loopex.Runtime.EventDispatcher do
       {:error, reason} ->
         {:reply, {:error, reason}, state}
     end
-  end
-
-  def handle_call(
-        {:progress, token, session_id, attachment_id, incarnation_id, item},
-        _from,
-        state
-      ) do
-    reply =
-      with :ok <- validate_attachment(state, token, session_id, attachment_id, incarnation_id),
-           true <- plain_transient?(item) do
-        maybe_send(state.progress_to, {:loopex_progress, session_id, item})
-        :ok
-      else
-        false -> {:error, :invalid_progress}
-        {:error, reason} -> {:error, reason}
-      end
-
-    {:reply, reply, state}
   end
 
   def handle_call({:diagnostic, token, item}, _from, state) do
@@ -1780,7 +1761,6 @@ defmodule Loopex.Runtime.EventDispatcher do
 
   defp maybe_send(nil, _message), do: :ok
   defp maybe_send(pid, message) when is_pid(pid), do: send(pid, message)
-  defp maybe_send({:session, pid}, message) when is_pid(pid), do: send(pid, message)
 
   defp plain_transient?(value) do
     match?(

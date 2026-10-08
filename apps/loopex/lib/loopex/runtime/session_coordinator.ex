@@ -420,7 +420,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
        executor: Keyword.fetch!(options, :executor),
        tool: Keyword.fetch!(options, :tool),
        active_tools: Keyword.get(options, :active_tools, []),
-       progress_to: Keyword.get(options, :progress_to),
+       progress_sink: Keyword.get(options, :progress_sink),
        diagnostics_to: Keyword.get(options, :diagnostics_to),
        bounds: Keyword.get(options, :bounds),
        policy: Keyword.get(options, :policy),
@@ -8222,11 +8222,12 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
   defp project_compaction_activity(state, _ordinary_work), do: state
 
-  defp compaction_activity_relay(%{compaction_relay: relay} = state) when is_pid(relay),
-    do: {:ok, relay, state}
+  defp compaction_activity_relay(%{compaction_relay: relay} = state)
+       when is_tuple(relay) and tuple_size(relay) == 8,
+       do: {:ok, relay, state}
 
   defp compaction_activity_relay(state) do
-    case StreamRelay.open_activity(state.workers, progress_sink(state)) do
+    case StreamRelay.open_activity(state.workers, progress_route(state, %{})) do
       {:ok, relay} -> {:ok, relay, %{state | compaction_relay: relay}}
       {:error, reason} -> {:error, reason}
     end
@@ -8263,7 +8264,11 @@ defmodule Loopex.Runtime.SessionCoordinator do
     {:ok, relay} =
       StreamRelay.open(
         state.workers,
-        progress_sink(state),
+        progress_route(state, %{
+          turn_id: turn_id,
+          stream_domain_id: domain,
+          base_event_sequence: base_event_sequence
+        }),
         fn delta, sequence ->
           Map.merge(delta, %{
             turn_id: turn_id,
@@ -8289,7 +8294,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
      fn delta ->
        # A malformed delta is dropped here rather than handed on, so it never
        # consumes a sequence and never appears in any total.
-       if Model.valid_delta?(delta) do
+       if Loopex.Runtime.ProgressIngress.preflight(:model, delta) do
          _admitted =
            Control.project_progress(
              state.control,
@@ -10209,7 +10214,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
         {:ok, stream, progress} =
           ExecutorStream.open(
             state.workers,
-            progress_sink(state),
+            progress_route(state, %{}),
             work.job,
             state.durable.event_sequence,
             publish
@@ -11473,8 +11478,6 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
   # Concept: a session-routed host receives each progress item with this
   # session's identity; any other sink receives it as before.
-  defp progress_sink(%{progress_to: {:session, pid}, session_id: session_id}),
-    do: {pid, session_id}
-
-  defp progress_sink(%{progress_to: sink}), do: sink
+  defp progress_route(state, header),
+    do: {state.progress_sink, state.session_id, state.control, state.owner, header}
 end

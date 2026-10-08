@@ -727,7 +727,16 @@ defmodule Loopex.CreationCustodyLifecycleTest do
   test "owned carrier before permit dispatches nothing and its positive exact permit makes one call" do
     {pid, store} = fixture()
     {:ok, workers} = Task.Supervisor.start_link()
-    on_exit(fn -> if Process.alive?(workers), do: Supervisor.stop(workers) end)
+    # Concept: The linked fixture supervisor may exit before its on_exit callback stops it.
+    # Technical depth: Accept only absence of this original supervisor; other stop failures surface.
+    on_exit(fn ->
+      try do
+        if Process.alive?(workers), do: Supervisor.stop(workers)
+      catch
+        :exit, {:noproc, {GenServer, :stop, [^workers, :normal, :infinity]}} -> :ok
+      end
+    end)
+
     {:ok, claim} = Store.claim_creation_domain("runtime", 0, String.duplicate("a", 64))
     incarnation = make_ref()
     invocation = make_ref()

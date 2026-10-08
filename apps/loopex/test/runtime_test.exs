@@ -1,3 +1,4 @@
+Code.require_file("support/progress_test_consumer.exs", __DIR__)
 Code.require_file("support/m1_runtime_helper.exs", __DIR__)
 Code.require_file("support/configured_genesis_helper.exs", __DIR__)
 
@@ -32,6 +33,9 @@ defmodule Loopex.RuntimeTest do
     on_exit(fn -> stop_runtime(runtime_b) end)
     on_exit(fn -> stop_store(store_a_pid) end)
     on_exit(fn -> stop_store(store_b_pid) end)
+
+    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(runtime_a)
+    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(runtime_b)
 
     assert {:ok, "s_test_1"} =
              Loopex.create_session(runtime_a, %{"tenant" => "a"}, command_id: "create-1")
@@ -158,7 +162,7 @@ defmodule Loopex.RuntimeTest do
         runtime_id: "supervised-runtime",
         store: store,
         attachment_capacity: 7,
-        progress_to: self(),
+        progress_sink: Loopex.ProgressTestConsumer.open_sink(),
         diagnostics_to: self()
       )
 

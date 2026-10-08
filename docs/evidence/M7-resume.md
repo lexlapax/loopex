@@ -27,7 +27,70 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
-### Current custody cleanup repair and complete paired verification
+### Current Core PASS, primary integration and next foreground proof
+
+Original86174 is terminal PASS and collected once at tested
+`9420464c3953f88021617cd66ec05005b340ccdb`. Each supported pair executed and
+passed all 490 cases in the complete 18-file selection, including all five
+long_bound cases, with zero failures/exclusions/skips/invalid. Both formatting
+and warning-free Core compilation passed. Producer duration is 736.567 seconds,
+six actual joins, 36 artifacts and 2,172 registry rows. Output
+`M7/core-custody-noproc-proof-20261008-v1`; collection
+`fd03e9f81622a77bcd9b237fbca6216ba6401287edb8ddf3c57a94ac7656f723`,
+terminal `742047f82500c24fa9774053a52c009fd410388225ad61c9c3cd60ad79292c24`,
+registry `53a98842844bd727a374806dd6584a72eb615cf1a0070f5bf4cc526301933d01`.
+Do not repoll/recollect original86174 or rerun those same source/pair/stage keys.
+Its actual registry is the next seed; all earlier failed producers remain retained.
+
+The tested 32 owned Core files are literally joined into primary m7, changing
+31 paths. Root compared every copied byte to the exact tested capture, confined
+all changes to ownership, and preserved unrelated source/documentation. Join
+`/private/tmp/m7-core942-primary-rejoin-20261008-v1/rejoin.json`, SHA-256
+`bf56ce9c4c07af6655b083338c4586b349a5e1693a12aae1972727606022e6cb`.
+The bounded fixture-repair subtask is complete; broad integration and forced
+32-CAS-exhaustion remain open. Current T01–T19 totals: originals 88 done / 85 todo /
+6 retired; additions 364 done / 23 todo. T16 additions are 69 done / 3 todo.
+Including T00: originals 88 / 91 / 7; additions 368 / 24 / 0.
+
+Foreground source `5cea18614a6a00c9903aa8eebc6cd788bc8b567e` is a direct child
+of Core942 in its separate worktree. Literal17 source audit
+`d82c5055bf11931743088378e2bc1b097fa13a2cc5ca96720168848d840f6f17` and
+independent actual binding review
+`a1e768677ab7d560270de3a002934a1fc2345dd0b1840c268e4e7474bbfb6095`
+prove all Core32 preserved, 16 actual foreground changes and ownership union49.
+The original 3f donor is retained through local `codex/m7-foreground-source-v3`.
+No foreground native result or generation activation is inferred from the join.
+
+Formatter V2 is now prepared after the actual positive Core prerequisite:
+`/private/tmp/m7-foreground-fifo-format-preparation-20261008-v2/approved-capture.json`,
+SHA-256 `34dc960bf37e2bc8cac1c2e318f5580667c8a699db777d1da3306dfb3c83bdac`;
+runner `e1a2e11e07a94ef1ffa53acdf5f84d07133893993b77add7657ea7d997a533f7`.
+Independent conditional builder review is
+`65c72d081dae283a45d4a658c75dacb1960b705f6aa1eb0fb9f9879d8101b867`;
+actual bound review is pending before native execution. It covers all 17 files,
+with 15 Elixir AST/format files and exact byte guards on workflow.mjs/fixture.txt.
+No native handle is live at this checkpoint. Next run is this paired formatter,
+then a clean formatting-only source save and the complete foreground112 proof:
+app-server94 with all four Node cases and protocol18 in separate VMs. The future
+proof builder is independently conditionally qualified at
+`a7dbf64402df894bcd4065c834837336bd359bce97bc25e5f20b93f841356538`;
+actual formatting producer/source/registry binding remains required.
+
+Latest source/join/recipe context is retained as 137 immutable files at
+`/Users/spuri/projects/lexlapax/loopex-evidence/M7/core942-foreground-context-20261008-v1/retention.json`,
+SHA-256 `4dc626137d9fd10f20160a2440469196bdbe9ccc1496749d64bb6652d8a0fae1`.
+Native outputs remain separate immutable original collections. The finite-CAS
+native ETS-breakpoint feasibility report is retained as research only: exact
+BIF support is unknown and no probe ran. It changes no proof requirement.
+T15 restore175 follows foreground proof, then remaining protocol/helper work
+and T17 closure preparation. ADR0063 remains the sole asked pending decision.
+No full-fast, floor closure matrix, release check, milestone closure or publication
+follows from these selected unit proofs.
+
+### Historical custody cleanup repair and complete paired verification
+
+The current checkpoint above supersedes live-handle and next-run statements below.
+
 
 The retained original92991 failure was traced to the direct carrier test's
 linked outer Task.Supervisor. The preceding log names its exact PID as

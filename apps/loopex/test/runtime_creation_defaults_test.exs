@@ -45,6 +45,7 @@ defmodule Loopex.RuntimeCreationDefaultsTest do
   test "omitted and nil templates remain explicitly unconfigured", fixture do
     {:ok, runtime} = Loopex.start_link(base(fixture))
     on_exit(fn -> join_stop(runtime.supervisor, fn -> Loopex.stop(runtime) end) end)
+    :ok = Captured.await_creation_ready(runtime)
     assert captured(runtime) == nil
     assert captured(start!(fixture, nil, runtime_id: "nil")) == nil
 
@@ -288,6 +289,7 @@ defmodule Loopex.RuntimeCreationDefaultsTest do
 
     {:ok, runtime} = Loopex.start_link(options)
     on_exit(fn -> join_stop(runtime.supervisor, fn -> Loopex.stop(runtime) end) end)
+    :ok = Captured.await_creation_ready(runtime)
     runtime
   end
 

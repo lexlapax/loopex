@@ -2,174 +2,94 @@ defmodule Loopex.Runtime.StreamRelay do
   @moduledoc """
   ## Concept
 
-  One process puts an ordinary stream domain's items on the progress plane,
-  including the closing item that ends it. Compaction activity uses one relay
-  for its session owner and carries a single observation in each attempt domain.
+  One serial relay projects the credited prefix of one transient domain.
+  Pressure seals its raw tail without changing durable work or producer totals.
+  Compaction activity has independently droppable observations and no closure.
 
   ## Technical depth
 
-  ADR 0011 gives ordinary model and executor domains one gapless zero-based
-  sequence and makes
-  any closure the last item of its domain. ADR 0014 narrows the universal
-  producer-liveness promise: abrupt owner death and recognized executor owner
-  loss without a retained terminal fact end the transient plane without a
-  closure. Two parties would otherwise be emitting into one domain: a producer
-  running an adapter's or an executor's callback, and the coordinator closing
-  the domain. Nothing either of them does alone makes "last" true, because they
-  are different processes and neither orders the other.
-
-  So neither of them emits. A relay does, and it is the only emitter of its
-  domain: producers hand it items, the closer asks it to close, and it orders
-  every item and the closure in the order its own mailbox delivers them. Model
-  domains use that projected emission position as their sequence. Executor
-  domains validate their own supplied position in state carried by this relay,
-  independently of the projected-item count, and carry it unchanged so a
-  refused payload leaves a visible gap. There is no reservation separate from
-  an emission to be stranded, no seal to be read after the fact, and no wait to
-  be bounded.
-
-  Closing ends the relay. A producer that hands an item to a closed domain is
-  sending to a process that no longer exists, which is exactly ADR 0011's rule
-  that a delta offered by a stale progress function after closure is ignored --
-  dropped, uncounted, and unable to appear after the total that closed the
-  domain.
-
-  Closing is synchronous, because the caller needs the count, and the wait is
-  bounded by construction rather than by a clock. A relay's whole work is a
-  message send per item, and the items it processes before a close are exactly
-  the ones that had already arrived when the close did -- anything a producer
-  hands it afterwards queues behind that close and is never processed. So the
-  caller waits for a backlog this runtime already produced, never for an
-  adapter's, an executor's, or a consumer's patience, and never on a deadline
-  held open over somebody else's code. A relay that died before it could close
-  reports that rather than a number, because a count nobody produced is not a
-  count.
-
-  A relay also ends with the process that opened it, and it ends by link rather
-  than by message. The task supervisor it runs under belongs to the runtime
-  rather than to one session, so a coordinator that stops mid-run would otherwise
-  leave a relay blocked in `receive` for the life of the runtime. Ending the
-  transient plane does not fabricate a disposition: the durable result may have
-  committed immediately before the owner died. ADR 0011 therefore tells a
-  consumer to read a missing closure as an incomplete transient view, never as
-  abandonment. A monitor would turn owner death into an ordinary `:DOWN` mailbox
-  message behind progress the producer already queued, so the relay would emit
-  that backlog after its plane owner was gone. The untrapped exit signal carried
-  by the link terminates the relay without waiting for its mailbox, which is what
-  makes owner death end ahead of queued transient work.
-
-  ADR 0054 compaction activity has no closure or count. Its owner-scoped relay
-  retains only the sink and owner lifetime, checks each closed item, and ends
-  without draining activity whose owner is already known dead.
-
-  A relay never takes its owner down with it. Its own body is wrapped so that
-  anything it raises ends it normally rather than propagating into the session.
+  The private handle captures one sink, gate, session and exact Control owner.
+  Payloads live only in charged arena slots. Control routes metadata after its
+  current-owner fence; a coalesced reference-only wake makes the relay scan at
+  most 32 slots. Executor validation remains here and observes that prefix only.
+  Projection retains the same charge through every local representation. A
+  helper frame containing raw/projected copies returns before host-ready custody
+  is published. Owner linkage ends the plane without fabricating an outcome.
   """
 
-  alias Loopex.CompactionProgress
-
-  @typedoc """
-  ## Concept
-
-  A running relay.
-
-  ## Technical depth
-
-  The process identifier is the whole handle: a relay holds its own sequence and
-  is addressed by nothing else.
-  """
-  @type t :: pid()
-
-  @typedoc """
-  ## Concept
-
-  How a domain ended, and what its closure states.
-
-  ## Technical depth
-
-  `{:complete, count}` carries the producer's own figure, which ADR 0011 assigns
-  to a domain whose attempt produced the durable artifact of its kind.
-  `:abandoned` carries the count this relay actually emitted, which is exact
-  because it emitted all of it.
-  """
-  @type disposition :: {:complete, non_neg_integer()} | :abandoned
-
-  @typedoc """
-  ## Concept
-
-  How one item and its sequence become what crosses the plane.
-
-  ## Technical depth
-
-  Supplied by the caller, because the label and shape of an item belong to the
-  domain kind rather than to the relay.
-  """
-  @type build :: (term(), non_neg_integer() -> map())
+  alias Loopex.ProgressSink
+  alias Loopex.Runtime.Control
+  alias Loopex.Runtime.ProgressIngress
 
   @typedoc false
-  @type stateful_build ::
-          (term(), non_neg_integer(), term() ->
-             {:emit, map(), term()} | {:drop, term()})
-
-  @typedoc """
-  ## Concept
-
-  How a disposition and a total become the closing item.
-
-  ## Technical depth
-
-  Supplied by the caller for the same reason, and called by the relay rather than
-  by the caller, which is what makes the closure the last item of its domain.
-  """
+  @opaque t :: {pid(), ProgressSink.t() | nil, reference(), atom(), pid(), binary(), map(), map()}
+  @typedoc false
+  @type disposition :: {:complete, non_neg_integer()} | :abandoned
+  @typedoc false
+  @type build :: (term(), non_neg_integer() -> map())
+  @typedoc false
+  @type stateful_build :: (term(), non_neg_integer(), term() ->
+                             {:emit, map(), term()} | {:drop, term()})
+  @typedoc false
   @type closing :: (atom(), non_neg_integer() -> map())
 
-  @doc """
-  ## Concept
-
-  Opens a domain and returns the relay that owns it.
-
-  ## Technical depth
-
-  Started under the runtime's task supervisor and linked to the caller, so a
-  relay outlives neither the transient plane nor the process that opened it.
-  `build` renders one item and its sequence into what crosses the plane; `close`
-  renders the closing item.
-  """
-  @spec open(Supervisor.supervisor(), pid() | {pid(), binary()} | nil, build(), closing()) ::
-          {:ok, t()} | {:error, term()}
-  def open(supervisor, sink, build, close)
+  @doc false
+  def open(supervisor, route, build, close)
       when is_function(build, 2) and is_function(close, 2) do
-    open_stateful(
+    start(
       supervisor,
-      sink,
+      route,
+      :model,
       nil,
-      fn item, sequence, state -> {:emit, build.(item, sequence), state} end,
+      fn item, sequence, state ->
+        if Loopex.Model.valid_delta?(item),
+          do: {:emit, build.(item, sequence), state},
+          else: {:drop, state}
+      end,
       close
     )
   end
 
   @doc false
-  @spec open_stateful(
-          Supervisor.supervisor(),
-          pid() | {pid(), binary()} | nil,
-          term(),
-          stateful_build(),
-          closing()
-        ) :: {:ok, t()} | {:error, term()}
-  def open_stateful(supervisor, sink, initial_state, build, close)
-      when is_function(build, 3) and is_function(close, 2) do
-    owner = self()
+  def open_stateful(supervisor, route, initial, build, close)
+      when is_function(build, 3) and is_function(close, 2),
+      do: start(supervisor, route, :executor, initial, build, close)
+
+  @doc false
+  def open_activity(supervisor, route) do
+    start(
+      supervisor,
+      route,
+      :activity,
+      nil,
+      fn item, _sequence, state ->
+        case Loopex.CompactionProgress.project(item) do
+          {:ok, projected} -> {:emit, projected, state}
+          :error -> {:drop, state}
+        end
+      end,
+      nil
+    )
+  end
+
+  defp start(supervisor, {sink, session, control, owner, header}, kind, initial, build, close) do
+    opener = self()
+    gate = ProgressIngress.gate()
     ready = make_ref()
 
     case Task.Supervisor.start_child(supervisor, fn ->
            try do
-             Process.link(owner)
-             send(owner, {ready, self()})
+             Process.link(opener)
+             monitor = Process.monitor(opener)
+             handle = {self(), sink, gate, kind, control, session, owner, header}
+             send(opener, {ready, handle})
 
              relay(%{
-               sink: sink,
+               handle: handle,
+               opener: opener,
+               monitor: monitor,
                build: build,
-               build_state: initial_state,
+               build_state: initial,
                close: close,
                count: 0
              })
@@ -177,203 +97,180 @@ defmodule Loopex.Runtime.StreamRelay do
              _kind, _reason -> :ok
            end
          end) do
-      {:ok, relay} ->
-        reference = Process.monitor(relay)
+      {:ok, pid} ->
+        monitor = Process.monitor(pid)
 
         receive do
-          {^ready, ^relay} ->
-            Process.demonitor(reference, [:flush])
-            {:ok, relay}
+          {^ready, handle} ->
+            Process.demonitor(monitor, [:flush])
+            {:ok, handle}
 
-          {:DOWN, ^reference, :process, ^relay, reason} ->
+          {:DOWN, ^monitor, :process, ^pid, reason} ->
             {:error, {:relay_start_failed, reason}}
         end
 
       {:error, reason} ->
         {:error, reason}
+    end
+  end
+
+  defp start(_supervisor, _route, _kind, _initial, _build, _close),
+    do: {:error, :invalid_progress_route}
+
+  @doc false
+  def pid({pid, _sink, _gate, _kind, _control, _session, _owner, _header}), do: pid
+  @doc false
+  def sink({_pid, sink, _gate, _kind, _control, _session, _owner, _header}), do: sink
+  @doc false
+  def seal({_pid, _sink, gate, _kind, _control, _session, _owner, _header}),
+    do: ProgressIngress.seal(gate)
+
+  @doc false
+  def emit({_, _, _, _, control, session, owner, _header} = relay, item) do
+    Control.project_progress(control, session, owner, relay, item)
+  end
+
+  @doc false
+  def close({pid, _sink, _gate, _kind, control, _session, _owner, _header} = relay, disposition) do
+    seal(relay)
+    # Concept: closure drains only references that passed the serial owner fence.
+    # Technical depth: the flush is metadata-only and cannot await a consumer.
+    # Control calls close_fenced directly to avoid a reentrant call to itself.
+    if control != self() do
+      try do
+        GenServer.call(control, {:flush_progress, relay}, :infinity)
+      catch
+        :exit, _reason -> :ok
+      end
+    end
+
+    close_fenced(relay, pid, disposition)
+  end
+
+  @doc false
+  def close_fenced(relay, disposition), do: close_fenced(relay, pid(relay), disposition)
+
+  defp close_fenced(relay, pid, disposition) do
+    seal(relay)
+    monitor = Process.monitor(pid)
+    send(pid, {:close, self(), monitor, disposition})
+
+    receive do
+      {^monitor, count} ->
+        Process.demonitor(monitor, [:flush])
+        count
+
+      {:DOWN, ^monitor, :process, ^pid, _reason} ->
+        :unavailable
     end
   end
 
   @doc false
-  @spec open_activity(Supervisor.supervisor(), pid() | {pid(), binary()} | nil) ::
-          {:ok, t()} | {:error, term()}
-  def open_activity(supervisor, sink) do
-    owner = self()
-    ready = make_ref()
+  def discard(relay) do
+    seal(relay)
+    pid = pid(relay)
+    monitor = Process.monitor(pid)
+    Process.unlink(pid)
+    Process.exit(pid, :shutdown)
 
-    case Task.Supervisor.start_child(supervisor, fn ->
-           try do
-             Process.link(owner)
-             send(owner, {ready, self()})
-             owner_monitor = Process.monitor(owner)
-             activity_relay(sink, owner, owner_monitor)
-           catch
-             _kind, _reason -> :ok
-           end
-         end) do
-      {:ok, relay} ->
-        reference = Process.monitor(relay)
-
-        receive do
-          {^ready, ^relay} ->
-            Process.demonitor(reference, [:flush])
-            {:ok, relay}
-
-          {:DOWN, ^reference, :process, ^relay, reason} ->
-            {:error, {:relay_start_failed, reason}}
-        end
-
-      {:error, reason} ->
-        {:error, reason}
+    receive do
+      {:DOWN, ^monitor, :process, ^pid, :shutdown} -> :ok
+      {:DOWN, ^monitor, :process, ^pid, _reason} -> :unavailable
     end
   end
 
-  # Concept: one owner carries activity without retaining an attempt history.
-  # Technical depth: each item is sequence zero in its own domain. The link
-  # kills abnormal-owner backlog; the monitor joins normal owner exit. Before
-  # an emission, liveness also prevents draining queued work behind a normal
-  # owner's DOWN. The check and send are separate actions, not atomic with death.
-  # No closure, count, callback or per-attempt actor is allocated.
-  defp activity_relay(sink, owner, owner_monitor) do
+  defp relay(
+         %{handle: {_, sink, gate, _kind, _control, _session, _owner, _header}, monitor: monitor} =
+           state
+       ) do
     receive do
-      {:emit, item} ->
-        if Process.alive?(owner) do
-          case CompactionProgress.project(item) do
-            {:ok, projected} -> deliver(sink, projected)
-            :error -> :ok
-          end
-
-          activity_relay(sink, owner, owner_monitor)
-        end
-
-      {:DOWN, ^owner_monitor, :process, _owner, _reason} ->
-        :ok
-    end
-  end
-
-  @doc """
-  ## Concept
-
-  Hands one item to its domain.
-
-  ## Technical depth
-
-  Never blocks and never fails: an item offered to a closed domain reaches a
-  process that has already exited, and is dropped exactly as ADR 0011 requires.
-  A producer therefore needs no answer and has none to misread.
-  """
-  @spec emit(t(), term()) :: :ok
-  def emit(relay, item) when is_pid(relay) do
-    send(relay, {:emit, item})
-    :ok
-  end
-
-  @doc """
-  ## Concept
-
-  Closes the domain and returns the total its closure stated.
-
-  ## Technical depth
-
-  The relay emits the closing item itself, as the last thing it does, and then
-  ends. Every item it had already been handed crosses first, because it is the
-  same mailbox; every item handed to it afterwards reaches nothing.
-
-  Waiting carries no timeout and needs none: the wait is exactly the backlog this
-  relay had already been handed when the close arrived -- anything handed to it
-  afterwards queues behind the close and is never processed -- and its whole work
-  per item is a message send. So the caller waits on a queue this runtime
-  produced rather than on the patience of a process it does not own. A relay that
-  died is reported as `:unavailable`, because a domain whose relay is gone was
-  closed by nothing and has no total to state.
-  """
-  @spec close(t(), disposition()) :: non_neg_integer() | :unavailable
-  def close(relay, disposition) when is_pid(relay) do
-    reference = Process.monitor(relay)
-    send(relay, {:close, self(), reference, disposition})
-
-    receive do
-      {^reference, count} ->
-        Process.demonitor(reference, [:flush])
-        count
-
-      {:DOWN, ^reference, :process, ^relay, _reason} ->
-        :unavailable
-    end
-  end
-
-  @doc """
-  ## Concept
-
-  Ends a transient domain without stating a disposition or count.
-
-  ## Technical depth
-
-  Used only where the process that still owns the relay has lost authority
-  before it can prove whether the underlying effect completed. `open/4` does not
-  return until the owner link exists, so this owner can unlink it, send an exit
-  signal, and wait for `:DOWN` without risking that the relay's exit takes the
-  owner with it. The exit signal ends the relay ahead of queued progress and
-  without building a closure. Later producer messages reach a dead process.
-  """
-  @spec discard(t()) :: :ok | :unavailable
-  def discard(relay) when is_pid(relay) do
-    reference = Process.monitor(relay)
-    Process.unlink(relay)
-    Process.exit(relay, :shutdown)
-
-    receive do
-      {:DOWN, ^reference, :process, ^relay, :shutdown} ->
-        :ok
-
-      {:DOWN, ^reference, :process, ^relay, _reason} ->
-        :unavailable
-    end
-  end
-
-  # Concept: one mailbox, in order, and the closure is the last thing out of it.
-  defp relay(state) do
-    receive do
-      {:emit, item} ->
-        case state.build.(item, state.count, state.build_state) do
-          {:emit, projected, next_build_state} ->
-            deliver(state.sink, projected)
-            relay(%{state | count: state.count + 1, build_state: next_build_state})
-
-          {:drop, next_build_state} ->
-            relay(%{state | build_state: next_build_state})
-        end
+      {:loopex_progress_stage, ^sink, ^gate} ->
+        :atomics.put(gate, 2, 0)
+        relay(drain(state))
 
       {:close, from, reference, disposition} ->
+        state = drain(state)
         count = stated_count(disposition, state.count)
-        deliver(state.sink, state.close.(name(disposition), count))
+
+        if state.close != nil and Process.alive?(state.opener) do
+          # Closure is an independent already-projected finite offer. It may be
+          # lost even when the charged prefix projected successfully.
+          item = state.close.(name(disposition), count)
+          _offered = ProgressSink.try_offer(sink, elem(state.handle, 5), item)
+        end
+
         send(from, {reference, count})
+        :ok
+
+      {:DOWN, ^monitor, :process, _opener, _reason} ->
         :ok
     end
   end
 
-  # Concept: a complete domain states what its producer produced; an abandoned
-  # one states what this relay put on the plane.
-  #
-  # Technical depth: ADR 0011 fixes both. The producer's figure is its own
-  # evidence about the attempt, and the difference between it and what arrived is
-  # the signal a consumer reads -- erasing that difference by substituting this
-  # relay's count would hide a refusal from every live consumer.
-  defp stated_count({:complete, reported}, _emitted), do: reported
-  defp stated_count(:abandoned, emitted), do: emitted
+  defp drain(state) do
+    sink = sink(state.handle)
+    references = ProgressSink.references(sink, self(), :relay_ready)
 
+    Enum.reduce_while(references, state, fn reference, current ->
+      if Process.alive?(current.opener) do
+        # project_one returns no payload. The raw/projected stack frame has
+        # returned before ready_stage can transfer to a concurrently taking host.
+        {decision, next} = project_one(current, reference)
+
+        case decision do
+          :ready ->
+            if ProgressSink.ready_stage(sink, reference) do
+              {:cont, next}
+            else
+              :atomics.put(elem(current.handle, 2), 1, 2)
+              ProgressSink.retire_stage(sink, reference, :relay_owned)
+              {:cont, %{next | count: current.count}}
+            end
+
+          :retire ->
+            ProgressSink.retire_stage(sink, reference, :relay_owned)
+            {:cont, next}
+
+          :stale ->
+            {:cont, next}
+
+          # Concept: a still-live earlier reservation is an ordering barrier.
+          # Technical depth: finite claim exhaustion leaves custody charged in
+          # relay_ready. A later coalesced scan or close may settle that prefix;
+          # this turn cannot project a successor and later emit the old item.
+          :blocked ->
+            {:halt, current}
+        end
+      else
+        {:halt, current}
+      end
+    end)
+  end
+
+  defp project_one(state, reference) do
+    sink = sink(state.handle)
+
+    with {:ok, _route} <- ProgressSink.claim_stage(sink, reference, :relay_ready, :relay_owned),
+         {:ok, _session, raw} <- ProgressSink.stage_payload(sink, reference) do
+      case state.build.(raw, state.count, state.build_state) do
+        {:emit, projected, validation} ->
+          if ProgressSink.replace_payload(sink, reference, projected) do
+            {:ready, %{state | count: state.count + 1, build_state: validation}}
+          else
+            {:retire, %{state | build_state: validation}}
+          end
+
+        {:drop, validation} ->
+          {:retire, %{state | build_state: validation}}
+      end
+    else
+      :blocked -> {:blocked, state}
+      _ -> {:stale, state}
+    end
+  end
+
+  defp stated_count({:complete, reported}, _projected), do: reported
+  defp stated_count(:abandoned, projected), do: projected
   defp name({:complete, _reported}), do: :complete
   defp name(:abandoned), do: :abandoned
-
-  defp deliver(nil, _item), do: :ok
-
-  defp deliver(sink, item) when is_pid(sink) do
-    send(sink, {:loopex_progress, item})
-    :ok
-  end
-
-  defp deliver({sink, session_id}, item) when is_pid(sink) and is_binary(session_id) do
-    send(sink, {:loopex_progress, session_id, item})
-    :ok
-  end
 end

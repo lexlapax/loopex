@@ -74,7 +74,18 @@ defmodule Loopex do
 
   ## Technical depth
 
-  Session options become the `options` member of the current v3 genesis,
+  Version-1 authored options select an ordered subset of captured default tools
+  and optional initial configuration. Exact replay compares retained authored
+  input before current host resolution. Explicit configuration uses the optional
+  Model preparation callback in the runtime's one creation slot, under its
+  original 60,000-ms cutoff; managed invocation cleanup precedes reservation.
+  The verified next configuration changes only its version to 1, with no
+  configured event or intermediate session. Missing preparation capability
+  refuses explicit configuration; default/tool-only creation remains available.
+  Overlap returns creation_in_progress, except same-ID changed authored input
+  conflicts. Refusal activates nothing and adds no waiter or queue.
+
+  Other native session options become the `options` member of the current v3 genesis,
   joined to this runtime's host-captured `session_creation_defaults`. Omission
   of those defaults refuses implicit creation before Store mutation. The complete
   canonical item is measured before the transaction, so an oversized
@@ -339,19 +350,6 @@ defmodule Loopex do
   """
   @spec attachment_status(Attachment.t()) :: {:ok, map()} | {:error, term()}
   def attachment_status(attachment), do: Runtime.attachment_status(attachment)
-
-  @doc """
-  ## Concept
-
-  Emits best-effort transient progress for one live attachment.
-
-  ## Technical depth
-
-  Progress accepts only bounded plain data, takes no Store mutation path, and
-  may be dropped with the attachment or its configured sink.
-  """
-  @spec progress(Attachment.t(), term()) :: :ok | {:error, term()}
-  def progress(attachment, item), do: Runtime.progress(attachment, item)
 
   @doc """
   ## Concept

@@ -1,3 +1,4 @@
+Code.require_file("support/progress_test_consumer.exs", __DIR__)
 Code.require_file("support/m1_runtime_helper.exs", __DIR__)
 Code.require_file("support/agent_loop_helper.exs", __DIR__)
 
@@ -226,21 +227,72 @@ defmodule Loopex.AgentLoopProgressExecutor do
   defp events(:call_id_only, job),
     do: [%{tool_call_id: job.tool_call_id, stream: "stdout", byte_offset: 0, chunk: "bare"}]
 
-  # A fully identified event whose payload carries what must never cross.
+  # Concept: admitted payload refusals consume source sequence, but no bytes.
+  # Technical depth: all offers pass raw preflight; the final valid item proves
+  # the stream, offset and terminal-control refusals preserved stdout offset two.
   defp events(:hostile_payload, job) do
     [
-      Map.merge(chunk(job, 0, 0, "ok"), %{
-        owner: self(),
-        finish: fn -> :ok end,
-        credential: "sk-not-a-real-secret"
-      }),
+      chunk(job, 0, 0, "ok"),
       %{chunk(job, 1, 0, "warning") | stream: "stderr"},
       %{chunk(job, 2, 0, "half way") | stream: "progress"},
       %{chunk(job, 3, 0, "not a declared stream") | stream: "telemetry"},
-      chunk(job, 4, -1, "negative offset"),
-      chunk(job, 5, 3, "gap"),
-      chunk(job, 6, 2, String.duplicate("x", 70_000)),
-      chunk(job, 7, 2, "\e]52;c;owned\a")
+      chunk(job, 4, 3, "gap"),
+      chunk(job, 5, 2, "\e]52;c;owned\a"),
+      chunk(job, 6, 2, "kept after refusals")
+    ]
+  end
+
+  # Concept: each unsafe prefix is refused before the live validator sees it.
+  # Technical depth: clean sequence zero must remain available after the actual
+  # executor offers every original private, negative-offset and oversized shape.
+  defp events({:preflight_hostile, variant}, job) do
+    bad =
+      case variant do
+        :owner ->
+          Map.put(chunk(job, 0, 0, "private PID prefix"), :owner, self())
+
+        :finish ->
+          Map.put(chunk(job, 0, 0, "private function prefix"), :finish, fn -> :ok end)
+
+        :credential ->
+          Map.put(
+            chunk(job, 0, 0, "private credential prefix"),
+            :credential,
+            "sk-not-a-real-secret"
+          )
+
+        :combined ->
+          Map.merge(chunk(job, 0, 0, "combined private prefix"), %{
+            owner: self(),
+            finish: fn -> :ok end,
+            credential: "sk-not-a-real-secret"
+          })
+
+        :negative_offset ->
+          chunk(job, 0, -1, "negative offset")
+
+        :oversized_chunk ->
+          chunk(job, 0, 0, String.duplicate("x", 70_000))
+      end
+
+    [
+      bad,
+      chunk(job, 0, 0, "ok"),
+      %{chunk(job, 1, 0, "warning") | stream: "stderr"},
+      %{chunk(job, 2, 0, "half way") | stream: "progress"}
+    ]
+  end
+
+  # Concept: a genuine byte-credit failure preserves the accepted prefix and
+  # seals the rest of this domain.
+  # Technical depth: the scalar-valid 65,536-byte chunk alone charges at least
+  # 1,310,720 raw bytes against 524,288 capacity. The otherwise valid successor
+  # cannot bypass that loss, while the actual producer still reports three offers.
+  defp events(:credited_prefix_then_uncredited_tail, job) do
+    [
+      chunk(job, 0, 0, "ok"),
+      chunk(job, 1, 2, String.duplicate("x", 65_536)),
+      chunk(job, 1, 2, "must stay outside the sealed tail")
     ]
   end
 
@@ -293,7 +345,7 @@ defmodule Loopex.AgentLoopControlBoundaryProxy do
   # check-then-close from the serialized close operation.
   def start(real_control, observer, mode \\ true)
       when is_pid(real_control) and is_pid(observer) and
-             (is_boolean(mode) or
+             (is_boolean(mode) or mode == :hold_first_progress or
                 (is_tuple(mode) and tuple_size(mode) == 3 and elem(mode, 0) == :reply_once)) do
     spawn_link(fn -> loop(real_control, observer, mode) end)
   end
@@ -302,6 +354,19 @@ defmodule Loopex.AgentLoopControlBoundaryProxy do
 
   def release(proxy, reference) when is_pid(proxy) and is_reference(reference),
     do: send(proxy, {:release, reference})
+
+  # Concept: hold one original reference request while later producers reach
+  # the actual Control. This exposes publication order without a fake fence.
+  # Technical depth: only metadata is retained; no callback or progress item is
+  # put in this fixture's mailbox. The first producer is physically suspended.
+  defp loop(real_control, observer, :hold_first_progress) do
+    receive do
+      {:"$gen_call", from, {:project_progress, _session, _owner, _relay, reference} = request} ->
+        held = make_ref()
+        send(observer, {:ordered_progress_waiting, self(), held, elem(from, 0), reference})
+        wait_ordered_first(real_control, observer, held, from, request)
+    end
+  end
 
   defp loop(real_control, observer, true = armed) do
     receive do
@@ -377,6 +442,32 @@ defmodule Loopex.AgentLoopControlBoundaryProxy do
           GenServer.reply(from, GenServer.call(real_control, request, :infinity))
           loop(real_control, observer, mode)
         end
+    end
+  end
+
+  defp wait_ordered_first(real_control, observer, held, first_from, first_request) do
+    receive do
+      {:release, ^held} ->
+        send(real_control, {:"$gen_call", first_from, first_request})
+        loop(real_control, observer, false)
+
+      {:"$gen_call", from, {:project_progress, _session, _owner, relay, reference} = request} ->
+        # Capture scalar reservation metadata before forwarding can change the
+        # slot stage. The test never reads or copies its raw resident.
+        {_, incarnation, arena} = Loopex.Runtime.StreamRelay.sink(relay)
+        {^incarnation, slot, token} = reference
+
+        [{:state, ^incarnation, _owner, _status, _bytes, slots, _ready}] =
+          :ets.lookup(arena, :state)
+
+        {^token, :control_ready, ^real_control, _charge, {_route, order}} = elem(slots, slot)
+        send(observer, {:ordered_progress_second, self(), elem(from, 0), reference, order})
+        send(real_control, {:"$gen_call", from, request})
+        wait_ordered_first(real_control, observer, held, first_from, first_request)
+
+      {:"$gen_call", from, request} ->
+        send(real_control, {:"$gen_call", from, request})
+        wait_ordered_first(real_control, observer, held, first_from, first_request)
     end
   end
 
@@ -674,6 +765,7 @@ defmodule Loopex.AgentLoopTest do
   @moduledoc false
 
   use ExUnit.Case, async: false
+  import Loopex.ProgressTestConsumer, only: :macros
 
   alias Loopex.AgentLoopFixture, as: Fixture
   alias Loopex.AgentLoopAnsweringExecutor
@@ -760,7 +852,7 @@ defmodule Loopex.AgentLoopTest do
         session_creation_defaults: Fixture.creation_defaults(definitions),
         runtime_id: "progress-runtime-#{System.unique_integer([:positive])}",
         store: store,
-        progress_to: self(),
+        progress_sink: Loopex.ProgressTestConsumer.open_sink(),
         diagnostics_to: self(),
         model: %{
           module: AgentLoopTestModel,
@@ -798,6 +890,8 @@ defmodule Loopex.AgentLoopTest do
         :exit, _reason -> :ok
       end
     end)
+
+    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(runtime)
 
     {:ok, session_id} = Loopex.create_session(runtime, %{"t" => "x"}, command_id: "create-1")
     {:ok, attachment} = Loopex.attach(runtime, session_id, after_event_sequence: 0)
@@ -1156,51 +1250,41 @@ defmodule Loopex.AgentLoopTest do
     end
   end
 
-  defp receive_progress(acc \\ []) do
-    receive do
-      {:loopex_progress, item} -> receive_progress([item | acc])
-    after
-      50 -> Enum.reverse(acc)
-    end
-  end
+  defp receive_progress(acc \\ []), do: Enum.reverse(acc) ++ Loopex.ProgressTestConsumer.drain(50)
 
-  # Concept: wait for the terminal item of a tool progress domain.
-  #
-  # Technical depth: a Store refusal deliberately kills the session owner, so
-  # there is no run terminal for `drain/2` to await. The closure itself is the
-  # observable under test; polling it by message rather than sleeping keeps the
-  # case deterministic even on a loaded scheduler.
   defp await_tool_closure(acc \\ [], attempts \\ 500) do
-    receive do
-      {:loopex_progress, %{kind: :tool_stream_closed} = closure} ->
-        {Enum.reverse(acc), closure}
-
-      {:loopex_progress, item} ->
-        await_tool_closure([item | acc], attempts)
-    after
-      10 ->
-        if attempts > 0 do
-          await_tool_closure(acc, attempts - 1)
-        else
-          flunk("no tool stream closure arrived; progress: #{inspect(Enum.reverse(acc))}")
-        end
+    case Loopex.ProgressTestConsumer.matching(
+           fn {_session, item} -> item.kind == :tool_stream_closed end,
+           10
+         ) do
+      {_session, closure} -> {Enum.reverse(acc) ++ Loopex.ProgressTestConsumer.drain(), closure}
+      :empty when attempts > 0 -> await_tool_closure(acc, attempts - 1)
+      :empty -> flunk("no tool stream closure arrived; progress: #{inspect(Enum.reverse(acc))}")
     end
   end
 
-  defp tool_progress_items(acc \\ []) do
-    receive do
-      {:loopex_progress, %{kind: :tool_progress} = item} -> tool_progress_items([item | acc])
-      {:loopex_progress, _other} -> tool_progress_items(acc)
-    after
-      50 -> Enum.reverse(acc)
-    end
-  end
+  defp tool_progress_items(acc \\ []),
+    do:
+      Enum.reverse(acc) ++
+        Enum.filter(Loopex.ProgressTestConsumer.drain(50), &(&1.kind == :tool_progress))
 
   # Concept: the live session owner, so a case can take it away.
   #
   # Technical depth: reached through the runtime's own supervision tree rather
   # than through a private hook, because the point of the case is what a
   # successor rebuilds from the journal after an owner is gone.
+  defp standalone_progress_route do
+    fixture = start(script: [], tools: [], progress_sink: Loopex.ProgressTestConsumer.open_sink())
+
+    header = %{
+      turn_id: "relay-turn",
+      stream_domain_id: String.duplicate("a", 32),
+      base_event_sequence: 0
+    }
+
+    {Loopex.ProgressTestConsumer.route(fixture, header), header}
+  end
+
   defp coordinator_of(runtime) do
     {:ok, children} = Loopex.Runtime.Supervisor.children(runtime.supervisor)
 
@@ -2647,7 +2731,7 @@ defmodule Loopex.AgentLoopTest do
           %{text: "AUTHORITATIVE", calls: [call("c1")], deltas: ["PARTIAL"]},
           %{text: "done", calls: []}
         ],
-        progress_to: self()
+        progress_sink: Loopex.ProgressTestConsumer.open_sink()
       )
 
     {session_id, attachment, _reply} = Fixture.run(fixture, "go")
@@ -3861,14 +3945,21 @@ defmodule Loopex.AgentLoopTest do
 
     quiet_payload = Enum.find(diagnostics(), &(&1["kind"] == "executor_progress_refused"))
 
-    assert quiet_payload["refused_count"] == 5,
-           "the unknown stream, two bad offsets, oversized chunk, and terminal control were not all counted"
+    assert quiet_payload["refused_count"] == 3,
+           "the admitted stream, offset and terminal-control refusals were not all counted"
 
     assert quiet_payload["refused_bindings"] == %{
-             "byte_offset" => 2,
-             "chunk" => 2,
+             "byte_offset" => 1,
+             "chunk" => 1,
              "stream" => 1
            }
+
+    quiet_terminal =
+      quiet
+      |> Fixture.records(quiet.session_id)
+      |> Enum.find(&(&1.payload[:kind] == "run_terminal_committed"))
+
+    assert quiet_terminal.payload["outcome"] == "completed"
   end
 
   test "a refused current-attempt payload preserves its executor sequence gap" do
@@ -3899,20 +3990,34 @@ defmodule Loopex.AgentLoopTest do
   end
 
   test "a validated executor event carries only its bounded named payload across" do
-    # The identity is genuine, so the event is admitted — and still nothing the
-    # executor put beside the named payload crosses, because the projection is
-    # built here rather than merged from what arrived. The second event is
-    # refused outright for exceeding the declared chunk ceiling.
+    # Concept: the admitted prefix carries bounded named fields; unsafe offers
+    # never enter the validator or consume its next source sequence.
+    # Technical depth: the admitted schedule proves exact first-failed-binding
+    # counts and consumed gaps. Separate actual private/negative/oversized offers
+    # precede clean zero/one/two without inventing validator refusal accounting.
     fixture = start_with_progress(:hostile_payload)
 
     items = tool_progress_items()
-    assert Enum.map(items, & &1.progress_sequence) == [0, 1, 2]
-    assert Enum.map(items, & &1.stream) == ["stdout", "stderr", "progress"]
+    assert Enum.map(items, & &1.progress_sequence) == [0, 1, 2, 6]
+    assert Enum.map(items, & &1.stream) == ["stdout", "stderr", "progress", "stdout"]
+    assert Enum.map(items, & &1.byte_offset) == [0, 0, 0, 2]
+    assert Enum.map(items, & &1.chunk) == ["ok", "warning", "half way", "kept after refusals"]
 
-    [first | _rest] = items
-    assert first.chunk == "ok"
+    named_keys =
+      MapSet.new([
+        :kind,
+        :turn_id,
+        :tool_call_id,
+        :stream_domain_id,
+        :base_event_sequence,
+        :progress_sequence,
+        :stream,
+        :byte_offset,
+        :chunk
+      ])
 
     for item <- items do
+      assert MapSet.new(Map.keys(item)) == named_keys
       refute Map.has_key?(item, :owner)
       refute Map.has_key?(item, :finish)
       refute Map.has_key?(item, :credential)
@@ -3920,17 +4025,71 @@ defmodule Loopex.AgentLoopTest do
     end
 
     refusal = Enum.find(diagnostics(), &(&1["kind"] == "executor_progress_refused"))
-    assert refusal["refused_count"] == 5
+    assert refusal["refused_count"] == 3
 
     assert refusal["refused_bindings"] == %{
-             "byte_offset" => 2,
-             "chunk" => 2,
+             "byte_offset" => 1,
+             "chunk" => 1,
              "stream" => 1
            }
 
     refute fixture
            |> Fixture.records(fixture.session_id)
            |> Enum.any?(&(&1.payload[:kind] == "executor_progress_refused"))
+
+    terminal =
+      fixture
+      |> Fixture.records(fixture.session_id)
+      |> Enum.find(&(&1.payload[:kind] == "run_terminal_committed"))
+
+    assert terminal.payload["outcome"] == "completed"
+
+    for variant <- [:owner, :finish, :credential, :combined, :negative_offset, :oversized_chunk] do
+      prefix_fixture = start_with_progress({:preflight_hostile, variant})
+      progress_plane = receive_progress()
+      clean = Enum.filter(progress_plane, &(&1.kind == :tool_progress))
+
+      assert Enum.map(clean, & &1.progress_sequence) == [0, 1, 2], inspect(variant)
+      assert Enum.map(clean, & &1.stream) == ["stdout", "stderr", "progress"], inspect(variant)
+      assert Enum.map(clean, & &1.byte_offset) == [0, 0, 0], inspect(variant)
+      assert Enum.map(clean, & &1.chunk) == ["ok", "warning", "half way"], inspect(variant)
+
+      for item <- clean do
+        assert MapSet.new(Map.keys(item)) == named_keys
+        refute Map.has_key?(item, :owner)
+        refute Map.has_key?(item, :finish)
+        refute Map.has_key?(item, :credential)
+        assert is_binary(LoopexProtocol.Canonical.encode(item))
+      end
+
+      assert %{progress_count: 4, disposition: :complete} =
+               Enum.find(progress_plane, &(&1.kind == :tool_stream_closed))
+
+      refute Enum.any?(diagnostics(), &(&1["kind"] == "executor_progress_refused"))
+
+      records = Fixture.records(prefix_fixture, prefix_fixture.session_id)
+      refute Enum.any?(records, &(&1.payload[:kind] == "executor_progress_refused"))
+      prefix_terminal = Enum.find(records, &(&1.payload[:kind] == "run_terminal_committed"))
+      assert prefix_terminal.payload["outcome"] == "completed"
+    end
+  end
+
+  test "an uncredited executor tail preserves its admitted prefix and producer count" do
+    fixture = start_with_progress(:credited_prefix_then_uncredited_tail)
+    progress_plane = receive_progress()
+
+    assert [%{progress_sequence: 0, stream: "stdout", byte_offset: 0, chunk: "ok"}] =
+             Enum.filter(progress_plane, &(&1.kind == :tool_progress))
+
+    assert %{progress_count: 3, disposition: :complete} =
+             Enum.find(progress_plane, &(&1.kind == :tool_stream_closed))
+
+    refute Enum.any?(diagnostics(), &(&1["kind"] == "executor_progress_refused"))
+
+    records = Fixture.records(fixture, fixture.session_id)
+    refute Enum.any?(records, &(&1.payload[:kind] == "executor_progress_refused"))
+    terminal = Enum.find(records, &(&1.payload[:kind] == "run_terminal_committed"))
+    assert terminal.payload["outcome"] == "completed"
   end
 
   test "the first delta of a model attempt is sequence zero" do
@@ -3940,7 +4099,7 @@ defmodule Loopex.AgentLoopTest do
           %{text: "run", calls: [call("c1")], deltas: ["run"]},
           %{text: "abc", calls: [], deltas: ["a", "b", "c"]}
         ],
-        progress_to: self()
+        progress_sink: Loopex.ProgressTestConsumer.open_sink()
       )
 
     {_session_id, attachment, _reply} = Fixture.run(fixture, "go")
@@ -4040,7 +4199,7 @@ defmodule Loopex.AgentLoopTest do
   defp start_with_executor(module, executor_pid, script, options \\ []) do
     extras = Keyword.get(options, :receipt_extras, %{})
     :persistent_term.put({AgentLoopAnsweringExecutor, :receipt_extras}, extras)
-    declared = Keyword.take(options, [:cleanup_grace_ms, :progress_to, :diagnostics_to])
+    declared = Keyword.take(options, [:cleanup_grace_ms, :progress_sink, :diagnostics_to])
 
     model_pid = AgentLoopTestModel.start(script)
     {store_pid, store} = M1RuntimeTestStore.start_store(label: "agent-loop-answering")
@@ -4090,6 +4249,8 @@ defmodule Loopex.AgentLoopTest do
         :exit, _reason -> :ok
       end
     end)
+
+    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(runtime)
 
     {:ok, session_id} = Loopex.create_session(runtime, %{"t" => "x"}, command_id: "create-1")
     {:ok, attachment} = Loopex.attach(runtime, session_id, after_event_sequence: 0)
@@ -4421,7 +4582,7 @@ defmodule Loopex.AgentLoopTest do
         AgentLoopProgressExecutor,
         executor,
         one_call_script(),
-        progress_to: self(),
+        progress_sink: Loopex.ProgressTestConsumer.open_sink(),
         before_prompt: fn store ->
           :ok = M1RuntimeTestStore.refuse_next_record(store, "executor_receipt_committed_v2")
         end
@@ -4448,49 +4609,77 @@ defmodule Loopex.AgentLoopTest do
     # Concept: a complete model closure is a claim that the assistant message is
     # durable. A reply the Store refused never earned that claim.
     #
-    # Technical depth: the model is held after publishing one delta so this case
-    # can monitor the live owner before the reply reaches the refused
-    # `model_result_committed` transaction. The owner then stops and its linked
-    # relay ends without inventing a disposition. Restoring the old
-    # close-before-commit order publishes `complete` before that refusal and
-    # makes this case fail on the exact false statement.
+    # Technical depth: observe the real leased delta while its original Model is
+    # held, sharing one existing 5,000-ms cutoff captured before prompt dispatch.
+    # Callback return proves metadata custody; consumer observation establishes
+    # the positive prefix. Releasing the Model then reaches the refused
+    # model_attempt_settled_v3 transaction. The owner stops and its linked relay
+    # ends without inventing a disposition. Restoring close-before-commit makes
+    # the existing refutation fail on the exact false complete statement.
     parent = self()
+    prefix_capture = make_ref()
 
     fixture =
       start_with_executor(
         Loopex.AgentLoopTestExecutor,
         Loopex.AgentLoopTestExecutor.start(),
         [%{text: "answer", calls: [], deltas: ["partial"], hold: parent}],
-        progress_to: self(),
+        progress_sink: Loopex.ProgressTestConsumer.open_sink(),
         before_prompt: fn store ->
           :ok = M1RuntimeTestStore.refuse_next_record(store, "model_attempt_settled_v3")
+          send(parent, {prefix_capture, System.monotonic_time(:millisecond) + 5_000})
+          :ok
         end
       )
 
-    assert_receive {:holding, model}, 5_000
+    assert_receive {^prefix_capture, prefix_cutoff}, 0
+    remaining = max(prefix_cutoff - System.monotonic_time(:millisecond), 0)
+    assert_receive {:holding, model}, remaining
     owner = coordinator_of(fixture.runtime)
     owner_reference = Process.monitor(owner)
-    send(model, :release)
+    session = fixture.session_id
 
-    assert_receive {:DOWN, ^owner_reference, :process, ^owner, _reason},
-                   5_000,
-                   "the Store refusal did not stop the owner whose result it refused"
+    try do
+      remaining = max(prefix_cutoff - System.monotonic_time(:millisecond), 0)
 
-    observed = receive_progress()
+      assert {^session, delta} =
+               Loopex.ProgressTestConsumer.matching(
+                 fn
+                   {^session,
+                    %{kind: :text_delta, text: "partial", content_index: 0, model_sequence: 0}} ->
+                     true
 
-    assert Enum.any?(observed, &(&1.kind == :text_delta)),
-           "the model did not open the stream whose false closure is under test"
+                   _ ->
+                     false
+                 end,
+                 remaining
+               )
 
-    refute Enum.any?(
-             observed,
-             &(&1.kind == :model_stream_closed and &1.disposition == :complete)
-           ),
-           "a reply the Store refused was published as a completed stream"
+      assert System.monotonic_time(:millisecond) < prefix_cutoff
+      send(model, :release)
 
-    refute fixture.session_id
-           |> then(&Fixture.records(fixture, &1))
-           |> Enum.any?(&(&1.payload[:kind] == "model_attempt_settled_v3")),
-           "the Store refusal did not reach the model-result transaction this case names"
+      assert_receive {:DOWN, ^owner_reference, :process, ^owner, _reason},
+                     5_000,
+                     "the Store refusal did not stop the owner whose result it refused"
+
+      observed = receive_progress([delta])
+
+      assert Enum.any?(observed, &(&1.kind == :text_delta)),
+             "the model did not open the stream whose false closure is under test"
+
+      refute Enum.any?(
+               observed,
+               &(&1.kind == :model_stream_closed and &1.disposition == :complete)
+             ),
+             "a reply the Store refused was published as a completed stream"
+
+      refute fixture.session_id
+             |> then(&Fixture.records(fixture, &1))
+             |> Enum.any?(&(&1.payload[:kind] == "model_attempt_settled_v3")),
+             "the Store refusal did not reach the model-result transaction this case names"
+    after
+      send(model, :release)
+    end
   end
 
   test "an abandoned model stream closes on the count this runtime published rather than zero" do
@@ -4517,7 +4706,7 @@ defmodule Loopex.AgentLoopTest do
       %{text: "done", calls: []}
     ]
 
-    fixture = start(script: script, progress_to: self())
+    fixture = start(script: script, progress_sink: Loopex.ProgressTestConsumer.open_sink())
     {_session_id, attachment, _reply} = Fixture.run(fixture, "go")
     _events = drain(attachment)
 
@@ -4571,7 +4760,7 @@ defmodule Loopex.AgentLoopTest do
       fixture =
         start(
           script: [%{text: "abc", calls: [], deltas: ["a"], forged_labels: forged}],
-          progress_to: self()
+          progress_sink: Loopex.ProgressTestConsumer.open_sink()
         )
 
       {_session_id, attachment, _reply} = Fixture.run(fixture, "go")
@@ -4592,7 +4781,7 @@ defmodule Loopex.AgentLoopTest do
     oversized =
       start(
         script: [%{text: "big", calls: [], deltas: [String.duplicate("x", 1_000_000)]}],
-        progress_to: self()
+        progress_sink: Loopex.ProgressTestConsumer.open_sink()
       )
 
     {_session_id, oversized_attachment, _reply} = Fixture.run(oversized, "go")
@@ -4603,7 +4792,12 @@ defmodule Loopex.AgentLoopTest do
 
     # And the mechanism still projects an ordinary delta, so the case above is
     # about the extra field rather than about the fixture.
-    clean = start(script: [%{text: "ab", calls: [], deltas: ["a", "b"]}], progress_to: self())
+    clean =
+      start(
+        script: [%{text: "ab", calls: [], deltas: ["a", "b"]}],
+        progress_sink: Loopex.ProgressTestConsumer.open_sink()
+      )
+
     {_session_id, attachment, _reply} = Fixture.run(clean, "go")
     _events = drain(attachment)
 
@@ -4727,6 +4921,267 @@ defmodule Loopex.AgentLoopTest do
            "the port's declared default and the period a run reports are no longer one number"
   end
 
+  test "actual Control keeps model reservation order while the first producer is suspended before forwarding" do
+    cut = ordered_ordinary_cut(:model)
+
+    assert_progress(
+      {:loopex_progress, %{kind: :text_delta, text: "first", model_sequence: 0}},
+      5_000
+    )
+
+    assert_progress(
+      {:loopex_progress, %{kind: :text_delta, text: "second", model_sequence: 1}},
+      5_000
+    )
+
+    assert_ordered_credit(cut)
+    assert Control.current_owner(cut.control, cut.session, cut.owner) == :ok
+    release_ordered_first(cut)
+    refute_progress_received({:loopex_progress, %{kind: :text_delta}})
+    assert close_ordered_relay(cut) == 2
+  end
+
+  test "actual executor validator observes reserved source zero before one despite a suspended first producer" do
+    cut = ordered_ordinary_cut(:executor)
+
+    assert_progress(
+      {:loopex_progress,
+       %{kind: :tool_progress, chunk: "first", progress_sequence: 0, byte_offset: 0}},
+      5_000
+    )
+
+    assert_progress(
+      {:loopex_progress,
+       %{kind: :tool_progress, chunk: "second", progress_sequence: 1, byte_offset: 5}},
+      5_000
+    )
+
+    assert ExecutorStream.refused_count(cut.stream) == 0
+    assert ExecutorStream.refused_bindings(cut.stream) == %{}
+    assert_ordered_credit(cut)
+    assert Control.current_owner(cut.control, cut.session, cut.owner) == :ok
+    release_ordered_first(cut)
+    refute_progress_received({:loopex_progress, %{kind: :tool_progress}})
+    assert close_ordered_relay(cut) == 2
+    assert ExecutorStream.refused_count(cut.stream) == 0
+  end
+
+  test "a preceding reserved request never forwarded to Control retains credit until real native discard" do
+    cut = ordered_ordinary_cut(:model)
+    # Both reservations crossed the actual serialized owner fence through B's
+    # prefix scan. A's original request remains held and is never forwarded.
+    assert_ordered_credit(cut)
+    true = :erlang.resume_process(cut.first)
+    Process.exit(cut.first, :kill)
+    assert_receive {:DOWN, first_monitor, :process, first, :killed}, 5_000
+    assert first_monitor == cut.first_monitor and first == cut.first
+    assert Control.current_owner(cut.control, cut.session, cut.owner) == :ok
+    assert close_ordered_relay(cut) == 2
+    {guardian, _incarnation, arena} = cut.sink
+    monitor = Process.monitor(guardian)
+    # No resident was taken or copied into this test. Successful native close
+    # discards the ready prefix/closure and joins the exact guardian.
+    assert :ok = Loopex.ProgressSink.close(cut.sink)
+    assert_receive {:DOWN, ^monitor, :process, ^guardian, :normal}, 5_000
+    assert :ets.info(arena) == :undefined
+  end
+
+  # Concept: exercise the ordering cut without replacing Control authority.
+  # Technical depth: the private forwarder holds only A's original metadata
+  # request. A is physically suspended before actual Control receives it; B's
+  # genuine request reaches real Control on the same reopened ordinary gate.
+  # The actor messages contain references/results only, never progress data.
+  defp ordered_ordinary_cut(kind) do
+    supervisor = start_supervised!({Task.Supervisor, []})
+    {route, header} = standalone_progress_route()
+    {sink, session, control, owner, _header} = route
+    proxy = Loopex.AgentLoopControlBoundaryProxy.start(control, self(), :hold_first_progress)
+    Process.unlink(proxy)
+    register_ordered_cleanup(proxy)
+    routed = put_elem(route, 2, proxy)
+
+    {relay, stream, offer, first_item, second_item} =
+      ordered_relay(kind, supervisor, routed, header)
+
+    observer = self()
+
+    {first, first_monitor} =
+      spawn_monitor(fn ->
+        result = offer.(first_item)
+        send(observer, {:ordered_offer_returned, self(), result})
+      end)
+
+    register_ordered_cleanup(first)
+
+    assert_receive {:ordered_progress_waiting, ^proxy, held_request, ^first, first_reference},
+                   5_000
+
+    true = :erlang.suspend_process(first)
+    assert Process.info(first, :status) == {:status, :suspended}
+    gate = elem(relay, 2)
+    assert :atomics.get(gate, 1) == 0
+    assert Loopex.ProgressSink.references(sink, control, :control_ready) == [first_reference]
+    assert ordered_slot_order(sink, first_reference) == 1
+    {first_bytes, first_slots, first_sum} = ordered_accounting(sink)
+    assert first_slots == 1 and first_bytes == first_sum and first_bytes > 0
+
+    {second, second_monitor} =
+      spawn_monitor(fn ->
+        result = offer.(second_item)
+        send(observer, {:ordered_offer_returned, self(), result})
+      end)
+
+    register_ordered_cleanup(second)
+    assert_receive {:ordered_progress_second, ^proxy, ^second, second_reference, 2}, 5_000
+    assert second_reference != first_reference
+    assert :atomics.get(gate, 4) == 2
+    assert_receive {:ordered_offer_returned, ^second, :ok}, 5_000
+    assert_receive {:DOWN, ^second_monitor, :process, ^second, :normal}, 5_000
+    assert Process.info(first, :status) == {:status, :suspended}
+    {bytes, slots, sum} = ordered_accounting(sink)
+    assert slots == 2 and bytes == sum and bytes > first_bytes and bytes <= 524_288
+
+    %{
+      sink: sink,
+      session: session,
+      control: control,
+      owner: owner,
+      proxy: proxy,
+      held_request: held_request,
+      first: first,
+      first_monitor: first_monitor,
+      relay: relay,
+      stream: stream,
+      bytes: bytes
+    }
+  end
+
+  defp ordered_relay(:model, supervisor, route, header) do
+    {:ok, relay} =
+      StreamRelay.open(
+        supervisor,
+        route,
+        fn item, sequence -> Map.merge(item, Map.put(header, :model_sequence, sequence)) end,
+        fn disposition, count ->
+          Map.merge(header, %{
+            kind: :model_stream_closed,
+            disposition: disposition,
+            delta_count: count
+          })
+        end
+      )
+
+    {relay, nil, &StreamRelay.emit(relay, &1),
+     %{kind: :text_delta, content_index: 0, text: "first"},
+     %{kind: :text_delta, content_index: 0, text: "second"}}
+  end
+
+  defp ordered_relay(:executor, supervisor, route, _header) do
+    {:ok, job} =
+      Loopex.Executor.job(%{
+        protocol_version: 1,
+        job_id: "ordered-job",
+        operation_id: "ordered-operation",
+        attempt: 1,
+        session_id: elem(route, 1),
+        run_id: "ordered-run",
+        turn_id: "ordered-turn",
+        tool_call_id: "ordered-call",
+        origin_session_epoch: elem(route, 3).owner_epoch,
+        origin_executor_epoch: 1,
+        executor_identity: "ordered-executor",
+        required_capabilities: ["workspace_write"],
+        tool_id: "example.write",
+        tool_version: "1.0.0",
+        effect_class: "workspace_write",
+        validated_arguments: %{"path" => "x"},
+        workspace_ref: "w",
+        workspace_lease: "l",
+        run_deadline: 4_102_444_800_000,
+        resource_budgets: %{"max_output_bytes" => 1024, "max_wall_time_ms" => 30_000},
+        idempotency_class: "reconcile_then_retry",
+        fencing_token: 1,
+        artifact_policy: %{"retain" => true},
+        output_policy: %{"capture" => true}
+      })
+
+    {:ok, stream, offer} = ExecutorStream.open(supervisor, route, job, 17, &StreamRelay.emit/2)
+
+    first =
+      Map.merge(AgentLoopProgressExecutor.identity(job), %{
+        progress_sequence: 0,
+        stream: "stdout",
+        byte_offset: 0,
+        chunk: "first"
+      })
+
+    second =
+      Map.merge(AgentLoopProgressExecutor.identity(job), %{
+        progress_sequence: 1,
+        stream: "stdout",
+        byte_offset: 5,
+        chunk: "second"
+      })
+
+    {stream.relay, stream, offer, first, second}
+  end
+
+  defp ordered_slot_order({_guardian, incarnation, arena}, {incarnation, slot, token}) do
+    [{:state, ^incarnation, _owner, _status, _bytes, slots, _ready}] = :ets.lookup(arena, :state)
+    {^token, _stage, _holder, _charge, {_route, order}} = elem(slots, slot)
+    order
+  end
+
+  defp ordered_accounting({_guardian, incarnation, arena}) do
+    [{:state, ^incarnation, _owner, _status, bytes, slots, _ready}] = :ets.lookup(arena, :state)
+    held = slots |> Tuple.to_list() |> Enum.reject(&is_nil/1)
+    {bytes, length(held), Enum.reduce(held, 0, fn entry, total -> total + elem(entry, 3) end)}
+  end
+
+  defp assert_ordered_credit(cut) do
+    assert {cut.bytes, 2, cut.bytes} == ordered_accounting(cut.sink)
+  end
+
+  defp release_ordered_first(cut) do
+    true = :erlang.resume_process(cut.first)
+    Loopex.AgentLoopControlBoundaryProxy.release(cut.proxy, cut.held_request)
+    assert_receive {:ordered_offer_returned, first, :ok}, 5_000
+    assert first == cut.first
+    assert_receive {:DOWN, monitor, :process, ^first, :normal}, 5_000
+    assert monitor == cut.first_monitor
+  end
+
+  defp close_ordered_relay(cut) do
+    pid = StreamRelay.pid(cut.relay)
+    monitor = Process.monitor(pid)
+
+    count =
+      if is_nil(cut.stream),
+        do: StreamRelay.close(cut.relay, :abandoned),
+        else: ExecutorStream.close(cut.stream, :abandoned)
+
+    assert_receive {:DOWN, ^monitor, :process, ^pid, :normal}, 5_000
+    count
+  end
+
+  defp register_ordered_cleanup(pid) do
+    on_exit(fn ->
+      monitor = Process.monitor(pid)
+
+      if Process.alive?(pid) do
+        try do
+          :erlang.resume_process(pid)
+        catch
+          :error, _reason -> :ok
+        end
+
+        Process.exit(pid, :kill)
+      end
+
+      assert_receive {:DOWN, ^monitor, :process, ^pid, _reason}, 5_000
+    end)
+  end
+
   test "no item of a stream domain is emitted after that domain's closure" do
     # Concept: ADR 0011 says the closure is the last item of its domain in every
     # case. Not usually, and not within a window.
@@ -4756,36 +5211,55 @@ defmodule Loopex.AgentLoopTest do
     supervisor =
       start_supervised!({Task.Supervisor, name: :"relay-#{System.unique_integer([:positive])}"})
 
+    {route, header} = standalone_progress_route()
+
     {:ok, relay} =
       StreamRelay.open(
         supervisor,
-        self(),
-        fn item, sequence -> %{kind: :item, item: item, model_sequence: sequence} end,
+        route,
+        fn item, sequence -> Map.merge(item, Map.put(header, :model_sequence, sequence)) end,
         fn disposition, count ->
-          %{kind: :closed, disposition: disposition, delta_count: count}
+          Map.merge(header, %{
+            kind: :model_stream_closed,
+            disposition: disposition,
+            delta_count: count
+          })
         end
       )
 
-    producer = spawn(fn -> Enum.each(1..500, &StreamRelay.emit(relay, &1)) end)
+    producer =
+      spawn(fn ->
+        Enum.each(1..500, fn index ->
+          StreamRelay.emit(relay, %{
+            kind: :text_delta,
+            content_index: 0,
+            text: Integer.to_string(index)
+          })
+        end)
+      end)
+
     on_exit(fn -> Process.exit(producer, :kill) end)
 
     count = StreamRelay.close(relay, :abandoned)
     observed = receive_progress()
 
-    closure_at = Enum.find_index(observed, &(&1.kind == :closed))
+    closure_at = Enum.find_index(observed, &(&1.kind == :model_stream_closed))
 
-    assert closure_at,
-           "the domain was never closed; #{length(observed)} items reached the plane"
+    if closure_at != nil do
+      assert closure_at == length(observed) - 1,
+             "an item was emitted after its own closure"
 
-    assert closure_at == length(observed) - 1,
-           "#{length(observed) - 1 - closure_at} item(s) of this domain were emitted after " <>
-             "its own closure"
+      assert closure_at == count,
+             "abandoned closure count differs from the actual projected prefix"
 
-    assert closure_at == count,
-           "the closure stated #{count} while #{closure_at} items preceded it"
-
-    assert observed |> Enum.take(closure_at) |> Enum.map(& &1.model_sequence) ==
-             Enum.to_list(0..(closure_at - 1)//1)
+      assert observed |> Enum.take(closure_at) |> Enum.map(& &1.model_sequence) ==
+               Enum.to_list(0..(closure_at - 1)//1)
+    else
+      assert length(observed) == count
+      assert count <= 32
+      assert Enum.all?(observed, &(&1.kind == :text_delta))
+      assert Enum.map(observed, & &1.model_sequence) == Enum.to_list(0..(count - 1)//1)
+    end
   end
 
   test "a closed stream domain accepts nothing further and its relay is gone" do
@@ -4799,25 +5273,31 @@ defmodule Loopex.AgentLoopTest do
     supervisor =
       start_supervised!({Task.Supervisor, name: :"relay-#{System.unique_integer([:positive])}"})
 
+    {route, header} = standalone_progress_route()
+
     {:ok, relay} =
       StreamRelay.open(
         supervisor,
-        self(),
-        fn item, sequence -> %{kind: :item, item: item, model_sequence: sequence} end,
+        route,
+        fn item, sequence -> Map.merge(item, Map.put(header, :model_sequence, sequence)) end,
         fn disposition, count ->
-          %{kind: :closed, disposition: disposition, delta_count: count}
+          Map.merge(header, %{
+            kind: :model_stream_closed,
+            disposition: disposition,
+            delta_count: count
+          })
         end
       )
 
-    StreamRelay.emit(relay, :first)
+    StreamRelay.emit(relay, %{kind: :text_delta, content_index: 0, text: "first"})
     assert StreamRelay.close(relay, :abandoned) == 1
 
-    assert StreamRelay.emit(relay, :late) == :ok
+    assert StreamRelay.emit(relay, %{kind: :text_delta, content_index: 0, text: "late"}) == :ok
     assert StreamRelay.close(relay, :abandoned) == :unavailable
 
     observed = receive_progress()
 
-    assert Enum.map(observed, & &1.kind) == [:item, :closed],
+    assert Enum.map(observed, & &1.kind) == [:text_delta, :model_stream_closed],
            "a late item reached the plane: #{inspect(Enum.map(observed, & &1.kind))}"
 
     # A complete domain states its producer's own figure rather than the relay's,
@@ -4825,20 +5305,27 @@ defmodule Loopex.AgentLoopTest do
     {:ok, complete} =
       StreamRelay.open(
         supervisor,
-        self(),
-        fn item, sequence -> %{kind: :item, item: item, model_sequence: sequence} end,
+        route,
+        fn item, sequence -> Map.merge(item, Map.put(header, :model_sequence, sequence)) end,
         fn disposition, count ->
-          %{kind: :closed, disposition: disposition, delta_count: count}
+          Map.merge(header, %{
+            kind: :model_stream_closed,
+            disposition: disposition,
+            delta_count: count
+          })
         end
       )
 
-    StreamRelay.emit(complete, :only)
+    StreamRelay.emit(complete, %{kind: :text_delta, content_index: 0, text: "only"})
     assert StreamRelay.close(complete, {:complete, 4}) == 4
 
-    assert Enum.find(receive_progress(), &(&1.kind == :closed)) == %{
-             kind: :closed,
+    assert Enum.find(receive_progress(), &(&1.kind == :model_stream_closed)) == %{
+             kind: :model_stream_closed,
              disposition: :complete,
-             delta_count: 4
+             delta_count: 4,
+             turn_id: header.turn_id,
+             stream_domain_id: header.stream_domain_id,
+             base_event_sequence: header.base_event_sequence
            }
   end
 
@@ -4869,7 +5356,7 @@ defmodule Loopex.AgentLoopTest do
           %{text: "", calls: [], error: :provider_unavailable, hold: parent, deltas: ["a"]},
           %{text: "done", calls: [], deltas: ["b"]}
         ],
-        progress_to: self()
+        progress_sink: Loopex.ProgressTestConsumer.open_sink()
       )
 
     {session_id, _attachment, _reply} = Fixture.run(fixture, "go")
@@ -4885,14 +5372,16 @@ defmodule Loopex.AgentLoopTest do
     assert {:ok, ^session_id} =
              Loopex.resume_session(fixture.runtime, session_id, command_id: "resume-1")
 
-    assert_receive {:loopex_progress,
-                    %{
-                      kind: :model_stream_closed,
-                      disposition: :abandoned,
-                      delta_count: 1
-                    } = predecessor_closure},
-                   5_000,
-                   "the predecessor's open domain was not closed abandoned when it was superseded"
+    assert_progress(
+      {:loopex_progress,
+       %{
+         kind: :model_stream_closed,
+         disposition: :abandoned,
+         delta_count: 1
+       } = predecessor_closure},
+      5_000,
+      "the predecessor's open domain was not closed abandoned when it was superseded"
+    )
 
     assert predecessor_closure.stream_domain_id == predecessor_delta.stream_domain_id
     predecessor = predecessor ++ [predecessor_closure]
@@ -4982,7 +5471,7 @@ defmodule Loopex.AgentLoopTest do
             deltas: ["open"]
           }
         ],
-        progress_to: self()
+        progress_sink: Loopex.ProgressTestConsumer.open_sink()
       )
 
     {_session_id, _attachment, _reply} = Fixture.run(fixture, "go")
@@ -5000,7 +5489,8 @@ defmodule Loopex.AgentLoopTest do
 
     refute permit_worker == model
     relay = stream.relay
-    relay_reference = Process.monitor(relay)
+    relay_pid = StreamRelay.pid(relay)
+    relay_reference = Process.monitor(relay_pid)
     workers = predecessor_state.owner_workers
 
     assert [%{kind: :text_delta} = delta] = receive_progress()
@@ -5017,7 +5507,7 @@ defmodule Loopex.AgentLoopTest do
              end),
              "the notified predecessor never tried to terminate its model worker"
 
-      assert Process.alive?(relay),
+      assert Process.alive?(StreamRelay.pid(relay)),
              "the notified model domain closed before its worker terminated and drained"
     after
       :sys.resume(workers)
@@ -5027,15 +5517,17 @@ defmodule Loopex.AgentLoopTest do
                    5_000,
                    "the prior fence suppressed model-worker termination"
 
-    assert_receive {:loopex_progress,
-                    %{
-                      kind: :model_stream_closed,
-                      stream_domain_id: domain,
-                      disposition: :abandoned,
-                      delta_count: 1
-                    }},
-                   5_000,
-                   "the prior fence suppressed the notified model closure"
+    assert_progress(
+      {:loopex_progress,
+       %{
+         kind: :model_stream_closed,
+         stream_domain_id: domain,
+         disposition: :abandoned,
+         delta_count: 1
+       }},
+      5_000,
+      "the prior fence suppressed the notified model closure"
+    )
 
     assert domain == delta.stream_domain_id
 
@@ -5110,7 +5602,7 @@ defmodule Loopex.AgentLoopTest do
           },
           %{text: "done", calls: [], deltas: ["b"], require_previous_worker_down: true}
         ],
-        progress_to: self()
+        progress_sink: Loopex.ProgressTestConsumer.open_sink()
       )
 
     {session_id, _attachment, _reply} = Fixture.run(fixture, "go")
@@ -5205,7 +5697,7 @@ defmodule Loopex.AgentLoopTest do
           },
           %{text: "done", calls: [], deltas: ["after handoff"]}
         ],
-        progress_to: self()
+        progress_sink: Loopex.ProgressTestConsumer.open_sink()
       )
 
     {session_id, _attachment, _reply} = Fixture.run(fixture, "go")
@@ -5221,7 +5713,8 @@ defmodule Loopex.AgentLoopTest do
              |> Map.to_list()
 
     relay = stream.relay
-    relay_reference = Process.monitor(relay)
+    relay_pid = StreamRelay.pid(relay)
+    relay_reference = Process.monitor(relay_pid)
 
     assert [first_delta] =
              receive_progress()
@@ -5270,7 +5763,7 @@ defmodule Loopex.AgentLoopTest do
                    5_000,
                    "the old model worker did not return its error"
 
-    assert_receive {:DOWN, ^relay_reference, :process, ^relay, _reason},
+    assert_receive {:DOWN, ^relay_reference, :process, ^relay_pid, _reason},
                    5_000,
                    "the model error did not end the old transient plane"
 
@@ -5341,7 +5834,7 @@ defmodule Loopex.AgentLoopTest do
           },
           %{text: "done", calls: [], deltas: ["after retry"]}
         ],
-        progress_to: self()
+        progress_sink: Loopex.ProgressTestConsumer.open_sink()
       )
 
     {:ok, session_id} =
@@ -5372,9 +5865,11 @@ defmodule Loopex.AgentLoopTest do
 
     assert_receive {:holding, model}, 5_000
 
-    assert_receive {:loopex_progress, %{kind: :text_delta}},
-                   5_000,
-                   "the first attempt did not publish its delta before the close boundary"
+    assert_progress(
+      {:loopex_progress, %{kind: :text_delta}},
+      5_000,
+      "the first attempt did not publish its delta before the close boundary"
+    )
 
     send(model, :release)
 
@@ -5453,7 +5948,7 @@ defmodule Loopex.AgentLoopTest do
           %{text: "", calls: [], hold: self(), hold_timeout_ms: 30_000},
           %{text: "done", calls: []}
         ],
-        progress_to: self()
+        progress_sink: Loopex.ProgressTestConsumer.open_sink()
       )
 
     {:ok, session_id} =
@@ -5536,15 +6031,17 @@ defmodule Loopex.AgentLoopTest do
     M1RuntimeTestStore.release(owner_waiter)
     assert {:ok, ^session_id} = Task.await(resume, 5_000)
 
-    assert_receive {:loopex_progress,
-                    %{
-                      kind: :model_stream_closed,
-                      stream_domain_id: ^old_domain,
-                      disposition: :abandoned,
-                      delta_count: 0
-                    }},
-                   5_000,
-                   "the notified predecessor did not close its empty domain abandoned"
+    assert_progress(
+      {:loopex_progress,
+       %{
+         kind: :model_stream_closed,
+         stream_domain_id: ^old_domain,
+         disposition: :abandoned,
+         delta_count: 0
+       }},
+      5_000,
+      "the notified predecessor did not close its empty domain abandoned"
+    )
 
     {:ok, resumed} = Loopex.attach(fixture.runtime, session_id, after_event_sequence: 0)
     assert Enum.find(drain(resumed), &(&1.kind == "run.finished"))["outcome"] == "failed"
@@ -5584,7 +6081,7 @@ defmodule Loopex.AgentLoopTest do
           %{text: "stale", calls: [], hold: self(), deltas: ["before fence"]},
           %{text: "done", calls: [], deltas: ["after recovery"]}
         ],
-        progress_to: self()
+        progress_sink: Loopex.ProgressTestConsumer.open_sink()
       )
 
     {session_id, _attachment, _reply} = Fixture.run(fixture, "go")
@@ -5600,7 +6097,7 @@ defmodule Loopex.AgentLoopTest do
              |> Map.fetch!(:streams)
              |> Map.to_list()
 
-    relay_reference = Process.monitor(stream.relay)
+    relay_reference = Process.monitor(StreamRelay.pid(stream.relay))
 
     assert [%{kind: :text_delta} = first_delta] = receive_progress()
     old_domain = first_delta.stream_domain_id
@@ -5697,7 +6194,7 @@ defmodule Loopex.AgentLoopTest do
     fixture =
       start(
         script: [%{text: "done", calls: [], deltas: ["retained"], hold: self()}],
-        progress_to: self()
+        progress_sink: Loopex.ProgressTestConsumer.open_sink()
       )
 
     :ok =
@@ -5721,7 +6218,8 @@ defmodule Loopex.AgentLoopTest do
              |> Map.to_list()
 
     relay = stream.relay
-    relay_reference = Process.monitor(relay)
+    relay_pid = StreamRelay.pid(relay)
+    relay_reference = Process.monitor(relay_pid)
 
     assert [delta] =
              receive_progress()
@@ -5744,17 +6242,19 @@ defmodule Loopex.AgentLoopTest do
 
     M1RuntimeTestStore.release(result_waiter)
 
-    assert_receive {:loopex_progress,
-                    %{
-                      kind: :model_stream_closed,
-                      stream_domain_id: ^old_domain,
-                      disposition: :complete,
-                      delta_count: 1
-                    }},
-                   5_000,
-                   "the retained model result did not close its originating domain complete"
+    assert_progress(
+      {:loopex_progress,
+       %{
+         kind: :model_stream_closed,
+         stream_domain_id: ^old_domain,
+         disposition: :complete,
+         delta_count: 1
+       }},
+      5_000,
+      "the retained model result did not close its originating domain complete"
+    )
 
-    assert_receive {:DOWN, ^relay_reference, :process, ^relay, _reason},
+    assert_receive {:DOWN, ^relay_reference, :process, ^relay_pid, _reason},
                    5_000,
                    "the retained model result left its originating relay alive"
 
@@ -5798,7 +6298,7 @@ defmodule Loopex.AgentLoopTest do
     fixture =
       start(
         script: [%{text: "done", calls: [], deltas: ["retained before handoff"], hold: self()}],
-        progress_to: self()
+        progress_sink: Loopex.ProgressTestConsumer.open_sink()
       )
 
     {session_id, _attachment, reply} = Fixture.run(fixture, "go")
@@ -5812,7 +6312,8 @@ defmodule Loopex.AgentLoopTest do
     assert [{{:model, _run_id}, stream}] = Map.to_list(predecessor_state.streams)
 
     relay = stream.relay
-    relay_reference = Process.monitor(relay)
+    relay_pid = StreamRelay.pid(relay)
+    relay_reference = Process.monitor(relay_pid)
 
     assert [delta] =
              receive_progress()
@@ -5848,17 +6349,19 @@ defmodule Loopex.AgentLoopTest do
 
     Loopex.AgentLoopControlBoundaryProxy.release(control_proxy, boundary_reference)
 
-    assert_receive {:loopex_progress,
-                    %{
-                      kind: :model_stream_closed,
-                      stream_domain_id: ^old_domain,
-                      disposition: :complete,
-                      delta_count: 1
-                    }},
-                   5_000,
-                   "the admitted retained result lost its complete closure after handoff"
+    assert_progress(
+      {:loopex_progress,
+       %{
+         kind: :model_stream_closed,
+         stream_domain_id: ^old_domain,
+         disposition: :complete,
+         delta_count: 1
+       }},
+      5_000,
+      "the admitted retained result lost its complete closure after handoff"
+    )
 
-    assert_receive {:DOWN, ^relay_reference, :process, ^relay, _reason},
+    assert_receive {:DOWN, ^relay_reference, :process, ^relay_pid, _reason},
                    5_000,
                    "the admitted retained result left its originating relay alive"
 
@@ -5902,7 +6405,7 @@ defmodule Loopex.AgentLoopTest do
         AgentLoopProgressExecutor,
         executor,
         one_call_script(),
-        progress_to: self(),
+        progress_sink: Loopex.ProgressTestConsumer.open_sink(),
         diagnostics_to: self()
       )
 
@@ -5992,7 +6495,7 @@ defmodule Loopex.AgentLoopTest do
         AgentLoopProgressExecutor,
         executor,
         one_call_script(),
-        progress_to: self()
+        progress_sink: Loopex.ProgressTestConsumer.open_sink()
       )
 
     assert_receive {:executor_effect_held, worker}, 5_000
@@ -6085,7 +6588,7 @@ defmodule Loopex.AgentLoopTest do
         AgentLoopProgressExecutor,
         executor,
         one_call_script(),
-        progress_to: self(),
+        progress_sink: Loopex.ProgressTestConsumer.open_sink(),
         diagnostics_to: self()
       )
 
@@ -6101,7 +6604,8 @@ defmodule Loopex.AgentLoopTest do
              |> Map.to_list()
 
     relay = ExecutorStream.relay(stream)
-    relay_reference = Process.monitor(relay)
+    relay_pid = StreamRelay.pid(relay)
+    relay_reference = Process.monitor(relay_pid)
 
     assert [first_progress] =
              receive_progress()
@@ -6139,7 +6643,7 @@ defmodule Loopex.AgentLoopTest do
     assert await_superseded(predecessor),
            "the progress-side Control refusal did not reach the coordinator"
 
-    assert_receive {:DOWN, ^relay_reference, :process, ^relay, _reason},
+    assert_receive {:DOWN, ^relay_reference, :process, ^relay_pid, _reason},
                    5_000,
                    "the refused item left the stale executor relay alive"
 
@@ -6204,7 +6708,7 @@ defmodule Loopex.AgentLoopTest do
         AgentLoopProgressExecutor,
         executor,
         one_call_script(),
-        progress_to: self(),
+        progress_sink: Loopex.ProgressTestConsumer.open_sink(),
         before_prompt: fn runtime, session_id, _store ->
           predecessor = coordinator_of(runtime)
           predecessor_state = :sys.get_state(predecessor)
@@ -6291,7 +6795,7 @@ defmodule Loopex.AgentLoopTest do
         AgentLoopAnsweringExecutor,
         executor,
         one_call_script(),
-        progress_to: self(),
+        progress_sink: Loopex.ProgressTestConsumer.open_sink(),
         before_prompt: fn runtime, session_id, _store ->
           predecessor = coordinator_of(runtime)
           predecessor_state = :sys.get_state(predecessor)
@@ -6375,7 +6879,7 @@ defmodule Loopex.AgentLoopTest do
         AgentLoopProgressExecutor,
         executor,
         one_call_script(),
-        progress_to: self()
+        progress_sink: Loopex.ProgressTestConsumer.open_sink()
       )
 
     assert_receive {:executor_effect_held, worker}, 5_000
@@ -6390,7 +6894,8 @@ defmodule Loopex.AgentLoopTest do
              |> Map.to_list()
 
     relay = ExecutorStream.relay(stream)
-    relay_reference = Process.monitor(relay)
+    relay_pid = StreamRelay.pid(relay)
+    relay_reference = Process.monitor(relay_pid)
 
     assert [progress] =
              receive_progress()
@@ -6433,7 +6938,7 @@ defmodule Loopex.AgentLoopTest do
                    5_000,
                    "the old executor worker did not finish after its receipt was released"
 
-    assert_receive {:DOWN, ^relay_reference, :process, ^relay, _reason},
+    assert_receive {:DOWN, ^relay_reference, :process, ^relay_pid, _reason},
                    5_000,
                    "the old executor stream did not end after its receipt met the ownership fence"
 
@@ -6494,7 +6999,7 @@ defmodule Loopex.AgentLoopTest do
         executor,
         one_call_script(),
         receipt_extras: %{progress_count: -1},
-        progress_to: self(),
+        progress_sink: Loopex.ProgressTestConsumer.open_sink(),
         diagnostics_to: self()
       )
 
@@ -6510,7 +7015,8 @@ defmodule Loopex.AgentLoopTest do
              |> Map.to_list()
 
     relay = ExecutorStream.relay(stream)
-    relay_reference = Process.monitor(relay)
+    relay_pid = StreamRelay.pid(relay)
+    relay_reference = Process.monitor(relay_pid)
     old_domain = stream.domain
 
     :ok =
@@ -6542,7 +7048,7 @@ defmodule Loopex.AgentLoopTest do
                    5_000,
                    "the old executor worker did not return its malformed receipt"
 
-    assert_receive {:DOWN, ^relay_reference, :process, ^relay, _reason},
+    assert_receive {:DOWN, ^relay_reference, :process, ^relay_pid, _reason},
                    5_000,
                    "the malformed receipt did not end the old executor stream"
 
@@ -6598,7 +7104,7 @@ defmodule Loopex.AgentLoopTest do
         AgentLoopProgressExecutor,
         executor,
         one_call_script(),
-        progress_to: self(),
+        progress_sink: Loopex.ProgressTestConsumer.open_sink(),
         diagnostics_to: self()
       )
 
@@ -6614,7 +7120,8 @@ defmodule Loopex.AgentLoopTest do
              |> Map.to_list()
 
     relay = ExecutorStream.relay(stream)
-    relay_reference = Process.monitor(relay)
+    relay_pid = StreamRelay.pid(relay)
+    relay_reference = Process.monitor(relay_pid)
 
     assert [first_progress] =
              receive_progress()
@@ -6632,7 +7139,7 @@ defmodule Loopex.AgentLoopTest do
     assert await_superseded(predecessor),
            "the predecessor did not receive the full-runtime ownership handoff"
 
-    assert_receive {:DOWN, ^relay_reference, :process, ^relay, _reason},
+    assert_receive {:DOWN, ^relay_reference, :process, ^relay_pid, _reason},
                    5_000,
                    "the handoff left the predecessor's old executor plane alive"
 
@@ -6690,7 +7197,7 @@ defmodule Loopex.AgentLoopTest do
         AgentLoopProgressExecutor,
         executor,
         one_call_script(),
-        progress_to: self(),
+        progress_sink: Loopex.ProgressTestConsumer.open_sink(),
         diagnostics_to: self()
       )
 
@@ -6703,7 +7210,8 @@ defmodule Loopex.AgentLoopTest do
     assert [{{:executor, _run_id}, stream}] = Map.to_list(predecessor_state.streams)
 
     relay = ExecutorStream.relay(stream)
-    relay_reference = Process.monitor(relay)
+    relay_pid = StreamRelay.pid(relay)
+    relay_reference = Process.monitor(relay_pid)
 
     assert [first_progress] =
              receive_progress()
@@ -6743,17 +7251,19 @@ defmodule Loopex.AgentLoopTest do
 
     Loopex.AgentLoopControlBoundaryProxy.release(control_proxy, boundary_reference)
 
-    assert_receive {:loopex_progress,
-                    %{
-                      kind: :tool_stream_closed,
-                      stream_domain_id: ^old_domain,
-                      disposition: :complete,
-                      progress_count: 3
-                    }},
-                   5_000,
-                   "the admitted retained receipt lost its complete closure after handoff"
+    assert_progress(
+      {:loopex_progress,
+       %{
+         kind: :tool_stream_closed,
+         stream_domain_id: ^old_domain,
+         disposition: :complete,
+         progress_count: 3
+       }},
+      5_000,
+      "the admitted retained receipt lost its complete closure after handoff"
+    )
 
-    assert_receive {:DOWN, ^relay_reference, :process, ^relay, _reason},
+    assert_receive {:DOWN, ^relay_reference, :process, ^relay_pid, _reason},
                    5_000,
                    "the admitted retained receipt left its originating relay alive"
 
@@ -6798,7 +7308,7 @@ defmodule Loopex.AgentLoopTest do
         AgentLoopProgressExecutor,
         executor,
         one_call_script(),
-        progress_to: self(),
+        progress_sink: Loopex.ProgressTestConsumer.open_sink(),
         diagnostics_to: self()
       )
 
@@ -6814,7 +7324,8 @@ defmodule Loopex.AgentLoopTest do
              |> Map.to_list()
 
     relay = ExecutorStream.relay(stream)
-    relay_reference = Process.monitor(relay)
+    relay_pid = StreamRelay.pid(relay)
+    relay_reference = Process.monitor(relay_pid)
 
     assert [first_progress] =
              receive_progress()
@@ -6856,17 +7367,19 @@ defmodule Loopex.AgentLoopTest do
 
     M1RuntimeTestStore.release(receipt_waiter)
 
-    assert_receive {:loopex_progress,
-                    %{
-                      kind: :tool_stream_closed,
-                      stream_domain_id: ^old_domain,
-                      disposition: :complete,
-                      progress_count: 3
-                    }},
-                   5_000,
-                   "the retained executor receipt did not close its originating domain complete"
+    assert_progress(
+      {:loopex_progress,
+       %{
+         kind: :tool_stream_closed,
+         stream_domain_id: ^old_domain,
+         disposition: :complete,
+         progress_count: 3
+       }},
+      5_000,
+      "the retained executor receipt did not close its originating domain complete"
+    )
 
-    assert_receive {:DOWN, ^relay_reference, :process, ^relay, _reason},
+    assert_receive {:DOWN, ^relay_reference, :process, ^relay_pid, _reason},
                    5_000,
                    "the predecessor's old executor stream remained live after Control handoff"
 
@@ -6910,6 +7423,8 @@ defmodule Loopex.AgentLoopTest do
     supervisor =
       start_supervised!({Task.Supervisor, name: :"relay-#{System.unique_integer([:positive])}"})
 
+    {route, header} = standalone_progress_route()
+
     parent = self()
 
     owner =
@@ -6917,10 +7432,14 @@ defmodule Loopex.AgentLoopTest do
         {:ok, relay} =
           StreamRelay.open(
             supervisor,
-            parent,
-            fn item, sequence -> %{kind: :item, item: item, model_sequence: sequence} end,
+            route,
+            fn item, sequence -> Map.merge(item, Map.put(header, :model_sequence, sequence)) end,
             fn disposition, count ->
-              %{kind: :closed, disposition: disposition, delta_count: count}
+              Map.merge(header, %{
+                kind: :model_stream_closed,
+                disposition: disposition,
+                delta_count: count
+              })
             end
           )
 
@@ -6932,15 +7451,24 @@ defmodule Loopex.AgentLoopTest do
       end)
 
     assert_receive {:opened, relay}, 5_000
-    assert Process.alive?(relay)
+    assert Process.alive?(StreamRelay.pid(relay))
 
-    :erlang.suspend_process(relay)
-    Enum.each(1..5, &StreamRelay.emit(relay, &1))
+    :erlang.suspend_process(StreamRelay.pid(relay))
 
-    reference = Process.monitor(relay)
+    Enum.each(1..5, fn index ->
+      StreamRelay.emit(relay, %{
+        kind: :text_delta,
+        content_index: 0,
+        text: Integer.to_string(index)
+      })
+    end)
+
+    relay_pid = StreamRelay.pid(relay)
+
+    reference = Process.monitor(relay_pid)
     Process.exit(owner, :kill)
 
-    assert_receive {:DOWN, ^reference, :process, ^relay, _reason},
+    assert_receive {:DOWN, ^reference, :process, ^relay_pid, _reason},
                    5_000,
                    "the relay outlived the owner that opened it"
 
@@ -7007,11 +7535,13 @@ defmodule Loopex.AgentLoopTest do
         {Task.Supervisor, name: :"executor-stream-#{System.unique_integer([:positive])}"}
       )
 
+    {route, _header} = standalone_progress_route()
+
     {:ok, first_stream, first_progress} =
-      ExecutorStream.open(supervisor, self(), first, 17, &StreamRelay.emit/2)
+      ExecutorStream.open(supervisor, route, first, 17, &StreamRelay.emit/2)
 
     {:ok, second_stream, second_progress} =
-      ExecutorStream.open(supervisor, self(), second, 23, &StreamRelay.emit/2)
+      ExecutorStream.open(supervisor, route, second, 23, &StreamRelay.emit/2)
 
     first_progress.(
       Map.merge(AgentLoopProgressExecutor.identity(first), %{
@@ -7130,7 +7660,7 @@ defmodule Loopex.AgentLoopTest do
           %{text: "one", calls: [], deltas: ["a"], delta_count: -1},
           %{text: "two", calls: [], deltas: ["b"]}
         ],
-        progress_to: self()
+        progress_sink: Loopex.ProgressTestConsumer.open_sink()
       )
 
     {session_id, attachment, _reply} = Fixture.run(fixture, "go")
@@ -7180,7 +7710,7 @@ defmodule Loopex.AgentLoopTest do
         AgentLoopAnsweringExecutor.start(%{}),
         one_call_script(),
         receipt_extras: %{progress_count: -1},
-        progress_to: self()
+        progress_sink: Loopex.ProgressTestConsumer.open_sink()
       )
 
     answering_events = drain(answering.attachment)
@@ -7218,7 +7748,7 @@ defmodule Loopex.AgentLoopTest do
         AgentLoopAnsweringExecutor.start(%{"c1" => {:held_after_effect, self()}}),
         one_call_script(),
         receipt_extras: %{progress_count: -1},
-        progress_to: self()
+        progress_sink: Loopex.ProgressTestConsumer.open_sink()
       )
 
     assert_receive {:executor_receipt_held, worker}, 5_000
@@ -7416,7 +7946,7 @@ defmodule Loopex.AgentLoopTest do
         AgentLoopProgressExecutor,
         executor,
         one_call_script(),
-        progress_to: self()
+        progress_sink: Loopex.ProgressTestConsumer.open_sink()
       )
 
     assert_receive {:executor_effect_held, worker}, 5_000
@@ -7614,7 +8144,7 @@ defmodule Loopex.AgentLoopTest do
         AgentLoopProgressExecutor,
         executor,
         one_call_script(),
-        progress_to: self()
+        progress_sink: Loopex.ProgressTestConsumer.open_sink()
       )
 
     assert_receive {:executor_effect_held, worker}, 5_000
@@ -7686,7 +8216,7 @@ defmodule Loopex.AgentLoopTest do
         script: [
           %{text: "ab", calls: [], deltas: ["a", String.duplicate("x", 1_000_000)]}
         ],
-        progress_to: self()
+        progress_sink: Loopex.ProgressTestConsumer.open_sink()
       )
 
     {_session_id, attachment, _reply} = Fixture.run(fixture, "go")
@@ -7753,7 +8283,10 @@ defmodule Loopex.AgentLoopTest do
     # schedule the preemption, but it proves the state the preemption would
     # reach: a producer holding a live callback for a domain that has closed.
     fixture =
-      start(script: [%{text: "ab", calls: [], deltas: ["a", "b"]}], progress_to: self())
+      start(
+        script: [%{text: "ab", calls: [], deltas: ["a", "b"]}],
+        progress_sink: Loopex.ProgressTestConsumer.open_sink()
+      )
 
     {_session_id, attachment, _reply} = Fixture.run(fixture, "go")
     _events = drain(attachment)

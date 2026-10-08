@@ -81,7 +81,7 @@ defmodule Loopex.Runtime do
           {:runtime_id, binary()}
           | {:store, Store.t()}
           | {:attachment_capacity, pos_integer()}
-          | {:progress_to, pid() | {:session, pid()} | nil}
+          | {:progress_sink, Loopex.ProgressSink.t() | nil}
           | {:diagnostics_to, pid() | nil}
           | {:model, map() | nil}
           | {:maintenance_model, map() | nil}
@@ -126,9 +126,11 @@ defmodule Loopex.Runtime do
     with {:ok, configuration} <- validate_options(options) do
       token = make_ref()
 
-      case RuntimeSupervisor.start_link(Keyword.put(configuration, :token, token)) do
-        {:ok, supervisor} -> await_ready(%__MODULE__{supervisor: supervisor, token: token})
-        {:error, reason} -> {:error, reason}
+      with :ok <- Loopex.ProgressSink.bind_runtime(configuration[:progress_sink], token) do
+        case RuntimeSupervisor.start_link(Keyword.put(configuration, :token, token)) do
+          {:ok, supervisor} -> await_ready(%__MODULE__{supervisor: supervisor, token: token})
+          {:error, reason} -> {:error, reason}
+        end
       end
     end
   end
@@ -390,10 +392,12 @@ defmodule Loopex.Runtime do
 
   def effect_intents(_, _, _, _), do: {:error, :runtime_unavailable}
 
-  # Concept: native creation shares Control's single responsive custody slot.
+  # Concept: authored and native creation share Control's single responsive custody slot.
   # Technical depth: dispatcher readiness does not grant creation eligibility;
   # startup claim/read/close is finite. Occupied intake refuses immediately and
   # missing current recovery capability never falls back to unreserved creation.
+  # Version-1 authored input uses the same slot and original preparation cutoff;
+  # complete supplied genesis keeps its distinct host-authorized validation.
   @doc false
   @spec create_session(t(), binary(), map()) :: {:ok, binary()} | {:error, term()}
   def create_session(%__MODULE__{} = runtime, command_id, session_options) do
@@ -683,20 +687,6 @@ defmodule Loopex.Runtime do
   end
 
   def attachment_status(_attachment), do: {:error, :attachment_required}
-
-  @doc false
-  @spec progress(Attachment.t(), term()) :: :ok | {:error, term()}
-  def progress(%Attachment{} = attachment, item) do
-    with {:ok, runtime, session_id, attachment_id, incarnation_id} <-
-           Attachment.routing(attachment) do
-      dispatcher_call(
-        runtime,
-        {:progress, runtime.token, session_id, attachment_id, incarnation_id, item}
-      )
-    end
-  end
-
-  def progress(_attachment, _item), do: {:error, :attachment_required}
 
   @doc false
   @spec open_artifact_transfer(Attachment.t(), map()) :: {:ok, map()} | {:error, term()}
@@ -993,7 +983,7 @@ defmodule Loopex.Runtime do
              runtime_id: nil,
              store: nil,
              attachment_capacity: 64,
-             progress_to: nil,
+             progress_sink: nil,
              diagnostics_to: nil,
              model: nil,
              maintenance_model: nil,
@@ -1023,7 +1013,7 @@ defmodule Loopex.Runtime do
            validate_context_token_budget(validated[:context_token_budget]),
          {:ok, %Store{} = store} <- Keyword.fetch(validated, :store),
          {:ok, attachment_capacity} <- validate_capacity(validated[:attachment_capacity]),
-         {:ok, progress_to} <- validate_progress_sink(validated[:progress_to]),
+         {:ok, progress_sink} <- validate_progress_sink(validated[:progress_sink]),
          {:ok, diagnostics_to} <- validate_sink(validated[:diagnostics_to]),
          {:ok, model} <- validate_model(validated[:model]),
          {:ok, maintenance_model} <-
@@ -1065,7 +1055,7 @@ defmodule Loopex.Runtime do
          runtime_id: runtime_id,
          store: store,
          attachment_capacity: attachment_capacity,
-         progress_to: progress_to,
+         progress_sink: progress_sink,
          diagnostics_to: diagnostics_to,
          model: model,
          maintenance_model: maintenance_model,
@@ -1404,14 +1394,13 @@ defmodule Loopex.Runtime do
 
   defp validate_artifact_store(_store), do: {:error, :invalid_artifact_store}
 
-  # Concept: a host serving many sessions asks for progress tagged with its
-  # session, so it can route each item to that session's readers.
-  #
-  # Technical depth: `{:session, pid}` makes every stream relay deliver
-  # `{:loopex_progress, session_id, item}`, the shape attachment progress
-  # already uses; a bare pid keeps the untagged `{:loopex_progress, item}`.
-  defp validate_progress_sink({:session, pid} = sink) when is_pid(pid), do: {:ok, sink}
-  defp validate_progress_sink(sink), do: validate_sink(sink)
+  defp validate_progress_sink(nil), do: {:ok, nil}
+
+  defp validate_progress_sink(sink) do
+    if Loopex.ProgressSink.available?(sink),
+      do: {:ok, sink},
+      else: {:error, :invalid_runtime_options}
+  end
 
   defp validate_sink(nil), do: {:ok, nil}
   defp validate_sink(pid) when is_pid(pid), do: {:ok, pid}

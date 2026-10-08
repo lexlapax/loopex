@@ -391,6 +391,8 @@ defmodule Loopex.ModelConfigurationPreparationTest do
       assert_receive {:DOWN, ^monitor, :process, _pid, _reason}, 5_000
     end)
 
+    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(restarted)
+
     assert {:ok, session} = Loopex.resume_session(restarted, f.session, command_id: "resume")
     assert session == f.session
     assert {:ok, attachment} = Loopex.attach(restarted, session, after_event_sequence: 0)
@@ -1445,6 +1447,8 @@ defmodule Loopex.ModelConfigurationPreparationTest do
         assert_receive {:DOWN, ^monitor, :process, ^actor, _reason}, 1_000
       end
     end)
+
+    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(runtime)
 
     {:ok, session} =
       Loopex.Runtime.create_session_with_genesis(
