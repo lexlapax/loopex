@@ -283,6 +283,7 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
 
     records = admission_records ++ List.flatten(activity_records ++ completions)
     progress = Enum.filter(records, &(&1["type"] == "progress"))
+
     assert length(progress) == 2,
            inspect(Enum.map(progress, &Map.take(&1["progress"], ["kind", "base_event_sequence"])))
 
