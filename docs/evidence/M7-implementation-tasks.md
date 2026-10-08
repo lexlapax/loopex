@@ -14,7 +14,9 @@ Buffer8 and held-ACK proofs remain at their tested bytes and were not repeated.
 No product native handle is live. The next registry seed has2344 rows.
 Successful drained Socket native retirement is next; complete daemon cleanup,
 32-CAS exhaustion, foreground112, restore175 and full integration remain open.
-ADR0063 remains the sole asked unanswered decision. T01-T19 totals remain
+ADR0063 is now accepted at5d77836b; Core and both host gates are being
+implemented in separate worktrees. No approval is pending for that work. T01-T19
+totals remain
 originals **88 done / 85 remaining / 6 retired** and additions **365 done / 24
 remaining**; T00 is separate. No broad checkbox closes for a prerequisite proof.
 The [resume record](M7-resume.md) names exact commits, results and remaining work.
@@ -13903,7 +13905,10 @@ or check was relaxed.
   in the resume record. Held reads/claim/reservation/final/close, overlap, stop,
   original actor joins and actual captured-cutoff cases pass. Authored intake,
   host readiness, complete original caller migration, root/VM-loss and coordinated
-  serving/rejoin remain required. Parent stays open. Original67170's one actual
+  serving/rejoin remain required. Accepted ADR0063 now supplies the exact native
+  startup read and both acquisition gates; separate Core/host source workers are
+  implementing those joins without renewing cutoffs or retrying creation.
+  Parent stays open. Original67170's one actual
   failing fixture case remains failed; explicit two-fault repair retains bounds.
 
 - [x] Prove resumed prepared-startup abandonment after callback refusal, raise, throw and exit, and truthful uncertainty when the activation guard dies before acknowledgement; preserve exact committed records, unread input, zero model/job dispatch, native activation paths and all owned process joins on both supported pairs.

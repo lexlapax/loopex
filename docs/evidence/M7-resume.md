@@ -27,6 +27,31 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+### ADR0063 accepted implementation, 2026-10-08
+
+The maintainer approved the exact recommended pair after the resumed proof.
+Acceptance is committed on primary `m7` at5d77836b and joined into the isolated
+candidate ata930e54b. The [disposition](../developer/agent-context-map.md#disposition-m7-creation-startup-status-2026-10-08)
+binds the unchanged historical pair. This supersedes every pending-ADR0063
+statement below; no host gate or public status implementation is yet qualified.
+
+Two source workers have separate managed worktrees based ond8b40c82. Core owns
+`/Users/spuri/.codex/worktrees/m7-startup-status-core/loopex`; host acquisition owns
+`/Users/spuri/.codex/worktrees/m7-startup-status-hosts/loopex`. Root integrates and
+runs native checks. Core status must bound supervisor resolution and Control
+read within one allowance, retaining the initialization-time startup identity
+and cutoff. Durable and ephemeral acquisition preserve that cutoff and exact
+observer joins; holder callbacks must remain responsive during held reads.
+
+The prior primary checkpoint93c9332d passes `bash scripts/check.sh --docs` once
+as original27909,37.490s, two exact stage joins,13 verified artifacts. Output is
+`M7/checkpoint-docs-check-20261008-v2`; terminal SHA-256
+`0411a7aea7dc180306c28cb7728ba9a9d21554ac3d7a9fc2c86f472e6e4b5987`;
+collection `d7f1e2c95fb28618c8f7bbc1f041f66620e399576e0b3e938bdb3e8643a6a2fe`.
+This is prose-only evidence, not a suite or integration result. Next native
+registry has2346 rows, SHA-256
+`f803c97edc37c2110af70b97f1aec1a405a11bb534a1c5e2e0ba0370848cc325`.
+
 ### Actual producer and Socket custody proof, 2026-10-08
 
 The maintainer resumed M7 again. The active goal continues. This entry
