@@ -29,6 +29,24 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Reboot continuation on 2026-10-07
 
+ADR0058's first implementation unit is assigned in isolated
+`/Users/spuri/.codex/worktrees/m7-progress-sink/loopex`, baseline583f84ec.
+The writer owns only new Core progress_sink.ex and progress_sink_test.exs;
+source, native checks and proof remain pending. Map45f2554a at
+`/private/tmp/m7-adr0058-first-unit-map-20261007-v1.md` partitions later
+runtime/consumer/daemon/Stdio migration and records two unresolved downstream
+qualifications. No new progress kind or upstream Local ownership change is
+authorized. The added T07 sink-only row is open. T01–T19 originals remain
+88 done/85 todo/6 retired; added353 done/23 todo after this decomposition.
+
+Case native preparation6a89fadd is frozen source-only, with independently
+reviewed sourcea276ad8d, whole99 cases and actual predecessor50168. Both
+execution gates remain false. Independent recipe review is running; next-full
+V3 strict case99 producer adaptation proceeds separately. No native case
+result, source integration or row closure is claimed. ADR0059 remains the sole
+asked pending decision. Earlier entries below are historical where superseded.
+
+
 ADR0058 acceptance is committed and pushed at `f6838a27`, after exact-pair
 independent administrative reviewd73ba88b. ADR0059 is now the sole asked
 pending decision, at exact unchanged candidate

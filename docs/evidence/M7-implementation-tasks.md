@@ -13809,6 +13809,8 @@ the still-open real-provider, live protocol, persistent-fault or closure lanes.
 
 ### Added implementation subtasks
 
+- [ ] Implement and prove accepted ADR 0058's standalone ProgressSink arena and owner custody on both toolchains, including finite pre-mailbox admission, conservative retained-byte charges, lease generations, pressure and death races. Sink-only proof does not complete runtime/caller migration or real output qualification.
+
 - [x] Deliver accepted ADR 0054 standalone closed activity schema,185 literal vectors and independent Node decoder with51 byte/descriptor controls; retain both owners and exact opaque/uint64/frame boundaries, preserve12 prior activity tests, and prove all20 activity/owner cases including both actual Node consumers on both supported toolchains. This does not activate foreground/daemon generations or close live transport delivery.
 
 - [x] Implement accepted ADR 0054 native compaction activity: exact closed six-member item, committed actual owner/episode, compaction attempt domain and one positive-permit emission through serialized current-owner bounded routing. Prove automatic/standalone producers, loss/uncertainty/duplicate/privacy cuts and joined constant-state relay lifetimes on both pairs; no closure or successor replay.
