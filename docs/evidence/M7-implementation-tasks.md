@@ -1,37 +1,42 @@
 # M7 Implementation Tasks
 
-Latest checkpoint, 2026-10-08: the active M7 goal continues on `m7`.
-The added T15 special-permission-bits qualification is complete. Original
-36773 at unserved `17205ba8abda609dbcae9e5f99e01e44863fafb5` passes all
-43 current workflow tests, 122 floor IO tests including all three long-bound
-cases, and 43 floor workflow tests. The composite proof reuses only the exact
-unchanged warning-free current IO122 stage at `c45a6f43`, with retained
-source-byte confinement. Duration531.883seconds, nine original stage joins,
-38 verified artifacts and zero exclusions/skips/invalid. Both workflow history
-cases complete all64 physical restores under the accepted aggregate cutoff.
-The original broader restore and operator obligations remain open.
+Latest checkpoint, 2026-10-08: active M7 implementation continues on `m7`.
+One newly tracked added T04 creation-custody restore component is complete.
+Exact unserved candidate `6d0db7f1dc732972eb4e0fb7860b7e42b88f52e7`
+passes all179 current and179 floor restore cases, including all three IO
+long-bound cases and both actual64-restore/65-refusal histories. Original49568
+is terminal PASS in587.277seconds, eight original stage joins,34 verified
+artifacts and zero exclusions/skips/invalid. Runtime creation heads, retained
+candidate capsules and created/cancelled resolutions now participate in the
+complete physical restore audit. Original restore and the broader T04 parent
+remain open for their remaining semantic/integration/activation obligations.
 
-Complete real chat startup selection previously passed all13 cases on each
-supported pair at the same unserved source. Core16/host121/socket195 prior
-qualified bytes remain unchanged. Foreground112, complete restore qualification,
-attempts, helpers, coordinated activation and whole integration remain open.
+Private task attribution also qualifies its complete nine-case selection on
+both pairs at `66c52ee8`, original80550,35.385seconds. Its strict quiet and
+genuine fault evidence does not attribute old untraced reports or close T16.
+The corrected daemon current-create callers and full custody-reference fixture
+are committed and formatted at the new candidate; their native qualification
+and the actual three signal106 failures remain open. The real one-client
+retirement witness is prepared for independent review. Separate writers prepare
+the accepted pure helper run-mutation validator and a shared test-only shutdown
+observer/input-successor witness. Neither pending source unit has native proof.
 
-Immutable `M7/coupled-current-context-20261008-v13/retention.json`, SHA-256
-`a47d6690115c627f211922dc47fe1eaec79cdc30afd00b5709e6042dad70ba3b`,
-chains v12 and retains ten new assets, the completed restore and checkpoint
-native records, and a verified candidate/primary Git bundle. Next source-run
-registry2559, SHA-256
-`f2fe8bb0833302eb94e759d3d8e20e685993a0ade3babef08970effe415421aa`.
-The independently reviewed private task attribution patch remains unjoined
-and unrun; it is the next diagnostic qualification unit.
+Immutable `M7/coupled-current-context-20261008-v14/retention.json`, SHA-256
+`dc4a395a6fd289bde69fd242efb864f4b85ba79569d800cc37d570a83164feea`,
+chains v13, retaining137 assets,12 source commits,12 completed native records
+and a verified candidate/primary Git bundle. Active writer packets are excluded
+until handed off and sealed. Next registry2613, SHA-256
+`5ed10ab760750b221bc4c051155a6d7bdf135eb01a886978fe6ae1c143904fcc`.
+All root native handles in that manifest are terminal and collected once.
 
-Proposed ADR0065 at `b651904a84be33800f3a2bf19cf782940e3fc1fb` still awaits
-its one exact-pair prerequisite decision; no physical attempts writer is
-implemented. No main merge, closure, release, tag or paid campaign is authorized.
-T01-T19 totals are originals **88 done /85 remaining /6 retired** and additions
-**366 done /23 remaining**; T00 is separate. The
-[resume record](M7-resume.md) names exact outputs and the next qualification.
-Older checkpoint paragraphs below are historical.
+Proposed ADR0065 at `b651904a84be33800f3a2bf19cf782940e3fc1fb` awaits
+its existing exact-pair decision. Its physical attempts writer remains unbuilt.
+Coordinated generation activation, whole integration, foreground native output
+accounting/packaging and helper execution remain open. No main merge, closure,
+release, tag or paid campaign is authorized. T01-T19 originals remain
+**88 done /85 remaining /6 retired**; additions are **367 done /23 remaining**.
+T00 is separate. The [resume record](M7-resume.md) names exact proofs and next
+work. Older checkpoint paragraphs below are historical.
 
 Current checkpoint: the complete contract source is staged in isolated,
 unserved candidate `a7a83d22`. The independent Node runner proved both manifests
@@ -13892,6 +13897,18 @@ or check was relaxed.
   Control/carrier, cancellation generations and physical restore stay open.
 
 - [ ] Implement accepted ADR0059's atomic creation heads, complete candidate capsules and exact created/cancelled resolutions in the shipped Stores; prove claim/reservation and final/close races, physical replay and complete current-format backup/restore, with no unreserved fresh-create fallback after coordinated rejoin.
+- [x] Include current runtime creation heads, complete retained candidate capsules and exact created/cancelled resolutions in the physical restore audit; prove pending/reserved/cancelled/created custody, bound workspace and checked-log semantic damage refusal before destination intent, preserving the complete existing restore populations and limits on both supported pairs. This completes only the parent's physical custody/restore component; coordinated Store/Control rejoin and native activation remain open.
+  Complete IO123 plus Workflow56 passes on each supported pair at
+  `6d0db7f1dc732972eb4e0fb7860b7e42b88f52e7`, original49568,
+  duration587.277seconds, eight original stage joins and34 verified artifacts,
+  zero exclusions/skips/invalid. Output `M7/restore-custody-focused-20261008-v3`;
+  terminal SHA-256 `2a23b324faabc4cc70cc97af91e016d656b26a7054c984345d29c86f16449f3e`;
+  collection `4db49c0df5a9a37fb7b4570af365ee81d67143a25de8217c1f0f6ce78e71b273`.
+  Original73515 current166/179 and19929 current176/179 remain failed,
+  with floor unrun in each. Independent row-specific audit
+  `ddea9bd8e3ca61dd87da2d7a38fa32d389fbb6019f006473227af4874f965e1f`
+  prevents this selected proof from closing the broader parent.
+
 - [x] Implement the current-format atomic creation adapter unit: strict frame2 heads/capsules/resolutions, final/close and claim/reservation races, custody-versus-owner-stage exclusion, current OwnerLane scope and cold physical replay. Preserve all48 selected adapter cases and prove both supported pairs; complete Composition backup/restore and Control activation remain in the parent row.
   Whole48 passed per pair at isolated `0d088f1a61f7001f2e3d665416032f8d51df2c18`,
   original9327,31.375seconds, zero failures/exclusions/skips/invalid and warning-free

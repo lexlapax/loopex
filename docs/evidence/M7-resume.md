@@ -27,6 +27,112 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+### Current creation-custody restore qualification, 2026-10-08
+
+Use clean candidate `6d0db7f1dc732972eb4e0fb7860b7e42b88f52e7` in
+`/Users/spuri/.codex/worktrees/m7-coupled-current-contract/loopex`. It is pushed
+on the existing recovery branch and remains unserved. Primary `m7` holds the
+resume/checklist record. Do not discard either checkout's unrelated work.
+The three new source commits are reviewed custody-local digest refresh
+`746bde11`, current create options/full credential Ref comparison `f7e2638c`,
+and non-line-AST-equivalent formatter child `6d0db7f1`.
+
+Original49568 is terminal PASS_RESTORE_CUSTODY_FOCUSED after587.277seconds.
+Complete current179 and floor179 pass, IO123 plus Workflow56 each, zero
+failures/exclusions/skips/invalid. Both actual64-history cases finish and refuse
+65 before physical IO, preserving the accepted600000ms aggregate,10k work,
+1k fixture grace, cleanup and original actor joins. Output
+`M7/restore-custody-focused-20261008-v3`; terminal SHA-256
+`2a23b324faabc4cc70cc97af91e016d656b26a7054c984345d29c86f16449f3e`;
+collection `4db49c0df5a9a37fb7b4570af365ee81d67143a25de8217c1f0f6ce78e71b273`.
+Eight original stage processes joined, all logs reached EOF and34 artifacts
+verified. All14 new creation-custody cases and165 prior cases are retained.
+Only the newly tracked added T04 physical custody/restore component completes.
+The row-specific audit `ddea9bd8e3ca61dd87da2d7a38fa32d389fbb6019f006473227af4874f965e1f`
+retains coordinated Store/Control rejoin and native activation in its parent.
+Complete helper-ledger semantics, original restore/attendance and M7 remain open.
+
+Preserve the earlier failures. Original73515 current166/179 failed the new
+created-final fixture's nonexistent tx_id access; final identity now comes from
+Store.transaction_id/1. Original19929 current176/179 failed three new custody
+cases because the ordinary refresh helper invented receipt-ledger paths. The
+reviewed correction updates only full manifest and declared Store digests,
+leaving the actual empty ledger list and ordinary helper/callers intact.
+Both failed originals are terminal, collected once, with floor unrun.
+
+Original80550 passed complete private shutdown/OwnerGroups/retirement9 on each
+pair at `66c52ee8d90ee9d6f611c3d363c18dab3dfe3349` in35.385seconds,
+eight stage joins and168 verified artifacts. Output
+`M7/private-task-attribution-focused-20261008-v2`; terminal
+`3f652e7ee99ea21254f3e358376ad162b09bb7a1019d4a1b21190e20f49c763d`;
+collection `eff2eabc772addbd2fcc957d7b0d12e6bc87629f830cc6c256ec65703a500c63`.
+Each pair retains66 bounded lifecycle JSON records, exact original monitors,
+strict quiet shutdowns and one genuine owner_workers_stopped:killed fault.
+The first source original90181 remains failed for replacement-runtime readiness;
+the correction carries one captured readiness cutoff through fixture publication
+and the initial create. Neither this current proof nor later quiet witnesses
+attributes old missing/untraced reports or closes broader T16 diagnostics.
+
+Original97902's current daemon command/project20 remains FAIL10/20;
+floor unrun. Output `M7/daemon-provider-command-focused-20261008-v1`;
+terminal `3f36f26203f0b1bd76e835c768868ad7b8b38db4634f07d6ae7a904f9a67596d`;
+collection `c77ecb31d23d4c91c87484737e328bdec94d27eaab8605d179d4c1446d6fdf31`.
+Six actual current-create callers now send the accepted integer version1,
+and the new provider fixture compares complete CredentialCustody.Ref values.
+Both reviewed corrections are committed, with affected complete CLI44 native
+proof outstanding. Three initialized idle-client signal cases reached stopping
+and then exited106; their first retirement failure remains unattributed.
+No source repair or successful native claim is justified for that boundary yet.
+
+Immutable recovery manifest
+`M7/coupled-current-context-20261008-v14/retention.json`, SHA-256
+`dc4a395a6fd289bde69fd242efb864f4b85ba79569d800cc37d570a83164feea`,
+chains v13, with137 sealed assets,12 source commits,12 completed native records
+and a verified candidate/primary bundle. Next registry2613:
+`M7/restore-custody-focused-20261008-v3/stage-attempt-registry.json`, SHA-256
+`5ed10ab760750b221bc4c051155a6d7bdf135eb01a886978fe6ae1c143904fcc`.
+All root native originals covered by v14 are terminal and collected once.
+Formatter-v36 original43131 passed both formatting pairs and equal non-line AST,
+3.577seconds/four stage joins/33 assets. Primary docs-v7 original31961 passed
+once at `9f260d936f2d0631ba09a25b1b736b414af1143d`,36.589seconds/two joins/13 assets;
+do not repeat that same-revision gate. This new prose checkpoint needs its own
+once-only documentation gate from its clean committed identity.
+
+Next private units, all native UNRUN:
+
+- `/root/provider_entrypoint_gap` completed the real one-client SIGTERM retirement
+  witness at `/private/tmp/m7-daemon-retirement-witness-20261008-v1`.
+  Independent review is running in `/root/restore_custody_rejoin_review`.
+  Patch `8c3ac1a787d5f5253b2c7269c713e1f9a140be4eb183510e937f74f801415d51`;
+  new one-case test plus support text driver leave all15 original cases intact.
+  Authenticate, review, join, format, run the new diagnostic and retain the actual
+  first failure before any causal repair; complete original44 proof then follows.
+- `/root/daemon_provider_forwarding_review` prepares pure RunMutation validation
+  for all eight accepted ADR0046/0056 kinds, tests and literal corpus at
+  `/private/tmp/m7-helper-run-mutation-source-20261008-v1`.
+  Its frozen next-unit map is `b5c53cea5449c55a9137c7ef738c4ae1d095fbe1c75cf0688dff8848b584a971`.
+  No physical IO, accounting producer, semantic transition, helper registration
+  or dispatch is authorized by this bounded pure implementation unit.
+- `/root/restore_custody_rejoin` prepares the internal three-path test-support
+  extraction and one held-successor input shutdown witness at
+  `/private/tmp/m7-input-successor-shutdown-source-20261008-v1`.
+  Design `485d4f31b913348b50ba9213cc43f05b1c4af59e29fd077c37e42a9e75fd5386`
+  reuses one observer for two concrete clients. Preserve original case bodies,
+  actual faults/quiet evidence and limits; after review run complete9+12=21
+  on both pairs. Do not reuse original80550 for the changed observer dependency.
+
+The active writer packets were excluded from v14 until final handoff/sealing.
+Only root integrates, mutates Git and runs shared native caches. Root must wait
+for a live original handle to become terminal before changing candidate bytes
+or caches; observation timeout never authorizes restart.
+
+ADR0065 remains exact Proposedb651 with one unanswered question. No physical
+attempts writer, native helper packaging or foreground active-output accounting
+is approved or implemented. Keep the full M7 objective active. T01-T19 counts:
+originals88/85/6; additions367/23; T00 separate. No main merge, formal closure,
+tag, release/publication or paid campaign is authorized. Older sections below
+are historical and their superseded next steps do not govern this checkpoint.
+
 ### Special-mode restore qualification, 2026-10-08
 
 Source candidate `17205ba8abda609dbcae9e5f99e01e44863fafb5` is clean,
