@@ -212,7 +212,13 @@ defmodule Loopex.PrivateTaskShutdownTest do
       for agent <- [fixture.model, fixture.executor], Process.alive?(agent), do: Agent.stop(agent)
     end)
 
-    %{fixture: fixture, owner: owner, owner_monitor: monitor, mode: mode, readiness_cutoff: readiness_cutoff}
+    %{
+      fixture: fixture,
+      owner: owner,
+      owner_monitor: monitor,
+      mode: mode,
+      readiness_cutoff: readiness_cutoff
+    }
   end
 
   # Concept: the replacement runtime is ready before its one original create.
