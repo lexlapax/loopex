@@ -2634,6 +2634,8 @@ defmodule LoopexComposition.RestoreWorkflowTest do
     genesis = Loopex.ConfiguredGenesisFixture.genesis(definitions)
     genesis = %{genesis | "runtime_configuration" => %{"cleanup_grace_ms" => @grace}}
 
+    preparation_cutoff = System.monotonic_time(:millisecond) + 1_000
+
     assert {:ok, runtime} =
              Loopex.start_link(
                runtime_id: @runtime,
@@ -2671,6 +2673,9 @@ defmodule LoopexComposition.RestoreWorkflowTest do
         end
       end
     end)
+
+    readiness_cutoff = await_fixture_creation_ready(runtime, preparation_cutoff)
+    fixture_startup_remaining(readiness_cutoff)
 
     assert {:ok, session} =
              Loopex.create_session(runtime, %{}, command_id: "create", genesis: genesis)
@@ -2899,6 +2904,8 @@ defmodule LoopexComposition.RestoreWorkflowTest do
           ])
       )
 
+    preparation_cutoff = System.monotonic_time(:millisecond) + 1_000
+
     assert {:ok, runtime} =
              Loopex.start_link(
                runtime_id: @runtime,
@@ -2924,6 +2931,8 @@ defmodule LoopexComposition.RestoreWorkflowTest do
              )
 
     runtime_owner = workspace_owner(runtime.supervisor)
+    readiness_cutoff = await_fixture_creation_ready(runtime, preparation_cutoff)
+    fixture_startup_remaining(readiness_cutoff)
 
     assert Loopex.resume_session(runtime, fixture.session, command_id: command_id) ==
              {:ok, fixture.session}
@@ -2955,6 +2964,36 @@ defmodule LoopexComposition.RestoreWorkflowTest do
     assert binary_part(restored_store, 0, byte_size(fixture.store_bytes)) == fixture.store_bytes
     assert workspace_receipt_payloads(restored_store, fixture.session) == receipt_payloads
     history
+  end
+
+  # Concept: direct real-runtime fixtures observe creation readiness before use.
+  # Technical depth: the canonical ConfiguredGenesisFixture already allows one
+  # 1,000 ms startup observation. Capture it before direct start, pin the native
+  # public identity/cutoff, and spend only the smaller original interval. No
+  # Store mutation, create retry, private Control read or new grace is involved.
+  defp await_fixture_creation_ready(runtime, cutoff, pinned \\ nil) do
+    remaining = fixture_startup_remaining(cutoff)
+    assert {:ok, %{state: state, startup_id: id, startup_deadline_ms: core_cutoff} = snapshot} =
+             Loopex.creation_startup_status(runtime, min(1_000, remaining))
+    assert map_size(snapshot) == 3
+    assert is_binary(id) and byte_size(id) == 32 and is_integer(core_cutoff)
+    assert pinned in [nil, {id, core_cutoff}], "original fixture startup identity/cutoff changed"
+    assert state in [:starting, :ready], "original fixture creation startup is unavailable"
+    cutoff = min(cutoff, core_cutoff)
+    remaining = fixture_startup_remaining(cutoff)
+
+    case state do
+      :ready -> cutoff
+      :starting ->
+        Process.sleep(min(10, remaining))
+        await_fixture_creation_ready(runtime, cutoff, {id, core_cutoff})
+    end
+  end
+
+  defp fixture_startup_remaining(cutoff) do
+    remaining = cutoff - System.monotonic_time(:millisecond)
+    assert remaining > 0, "original fixture startup observation cutoff exhausted"
+    remaining
   end
 
   defp workspace_owner(actor) do
