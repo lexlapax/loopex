@@ -22,6 +22,7 @@ defmodule Loopex.CreationStartupStatusTest do
     assert original.creation.action.worker == reader
     assert original.creation.cutoff == original.creation_startup.startup_deadline_ms
     assert original.creation.invocation == original.creation_startup.invocation
+    original_joins = monitor_startup_action(original.creation.action)
     before_store = Fixture.inspect_state(pid)
     workers = Task.Supervisor.children(children.workers)
 
@@ -38,6 +39,7 @@ defmodule Loopex.CreationStartupStatusTest do
     assert {:error, :store_unavailable} = Runtime.create_session(runtime, "no-create", %{})
     assert Fixture.inspect_state(pid).creation_calls == []
     Fixture.release(waiter)
+    assert_startup_action_joins(original_joins)
     snapshot = await_status(runtime, :ready)
     assert_snapshot(snapshot, :ready, original.creation_startup)
     assert :sys.get_state(children.control).creation == nil
@@ -80,6 +82,7 @@ defmodule Loopex.CreationStartupStatusTest do
     assert {:ok, ^initial} = Runtime.creation_startup_status(runtime, 100)
     {:ok, %{control: control, sessions: sessions}} = Runtime.children(runtime)
     original = :sys.get_state(control)
+    original_joins = monitor_startup_action(original.creation.action)
     assert original.creation.phase == :close
     assert original.creation.cutoff == initial.startup_deadline_ms
     calls = Fixture.inspect_state(pid).creation_calls
@@ -87,6 +90,7 @@ defmodule Loopex.CreationStartupStatusTest do
     assert Fixture.inspect_state(pid).creation_calls == calls
     assert DynamicSupervisor.which_children(sessions) == []
     Fixture.release(close_waiter)
+    assert_startup_action_joins(original_joins)
     assert_snapshot(await_status(runtime, :ready), :ready, initial)
     assert :sys.get_state(control).creation == nil
     assert Fixture.inspect_state(pid).sessions == %{}
@@ -100,7 +104,7 @@ defmodule Loopex.CreationStartupStatusTest do
     :ok = Fixture.hold_next_creation_recovery(pid, self())
 
     {:ok, %{start: {Control, :start_link, [options]}}} =
-      Supervisor.get_childspec(runtime.supervisor, Control)
+      :supervisor.get_childspec(runtime.supervisor, Control)
 
     options = Keyword.put(options, :store, store)
 
@@ -544,6 +548,21 @@ defmodule Loopex.CreationStartupStatusTest do
     assert :sys.get_state(control).creation_status == :unavailable
     assert {:error, :store_unavailable} = Runtime.create_session(runtime, "late", %{})
     assert Fixture.inspect_state(pid).sessions == %{}
+  end
+
+  # Concept: positive readiness follows independently observed original actors.
+  # Technical depth: capture exact identities before releasing the held callback;
+  # consume only their own monitors before accepting the ready snapshot.
+  defp monitor_startup_action(action) do
+    for actor <- [action.pid, action.group, action.worker] do
+      {actor, Process.monitor(actor)}
+    end
+  end
+
+  defp assert_startup_action_joins(monitors) do
+    for {actor, monitor} <- monitors do
+      assert_receive {:DOWN, ^monitor, :process, ^actor, _reason}, 1_000
+    end
   end
 
   defp fixture do
