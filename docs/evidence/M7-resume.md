@@ -29,6 +29,43 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Reboot continuation on 2026-10-07
 
+The full-check checkpoint is pushed at `d77b86d1`. Subsequent read-only
+reconciliation closes only added T16's seed406612 guarded CLI lifecycle repair.
+Original56356 at00cf26bb proved cold1/mixed13 on both pairs, with all56 outputs
+authenticated; completione2433951, inventorybbf80b2d. Later original99939 at
+ff784916 has ordinary CLI648 passed/6 designated exclusions; collection
+0fc31e7b, terminalfb0c71a8 and raw CLI logcb9f0496 authenticate. The current
+three fixture bytes match that complete initial NUL projection4929f50f, and
+provider_runtime_isolation hash61de2298 also matches the paired focused proof.
+Original48ca raw failure4c4131e4 remains failed. Root read the complete
+five-row map0b08451d; the other four rows remain open. Map retention is
+`M7/t16-cli-existing-proof-reconciliation-20261007-v1/retention.json`, SHA-256
+`3829423608ca6255a4e79a246fc389909dc15482820ff4c15ad957ff4f62141d`.
+T01–T19 originals remain88 done/85 todo/6 retired; added355 done/22 todo.
+
+ProgressSink native V3a7ea7ff5 is source-blocked before execution: its rich
+authenticator incorrectly compared Hex's mutable metadata cache final contents
+to its admission hash. Independent review6aa90ee2 keeps it disabled. Original
+60564's44 rich artifacts and full pass remain authenticated. Root separately
+captured post-collection observation2faf80bb of23 public cache files: all22
+locked archives preserve admission hashes/bytes; only exact cache.ets differs
+from admission8cc13f05 to observedcfd34e73,4893477 bytes,0644, with stable
+no-follow owner/single-link descriptor and captured device/inode. This is a
+later read-only observation, not an original terminal-time receipt. No original
+output, terminal, admission inventory or registry was changed. V3 binder is
+prepared but UNEXECUTED; do not enable it. A new V4 semantic correction is in
+progress and requires independent recipe/factual binding review before any
+native stage. V3 source, blocker, binder and observation are26 immutable files
+at `M7/progress-sink-v3-blocked-cache-context-20261007-v1/retention.json`,
+SHA-256 `bda873884922f30a00d549974c686d10773f82ed1af0cc699f859c9117a55b8d`.
+
+Continuation native V3 scope correction77c96cdc retains V2's complete128
+selection, exact origin checks and both hardstops; latest-producer authentication
+still requires a semantic revision, all native UNRUN. Its15-file partial context
+is `M7/continuation-native-v3-partial-context-20261007-v1/retention.json`,
+SHA-256 `00b70997ea6ac0934fdcd4b0bfcf5bc0fa7decdc360f41f45eb02087e30ccc7f`.
+Earlier entries below are historical where superseded.
+
 Original60564 is TERMINAL0 and collected PASS_CORRECTED_FULL_FAST_CHECK at
 `d1132591200c78bdc1f3b8dc9b052cd21474e0e8`, tree6b248f61. The current-pair
 canonical check passed all eleven applications:4,924 passed,61 designated
