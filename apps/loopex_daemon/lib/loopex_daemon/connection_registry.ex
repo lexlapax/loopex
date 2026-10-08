@@ -977,7 +977,7 @@ defmodule LoopexDaemon.ConnectionRegistry do
 
   def handle_call({:enqueue_output, incarnation, encoded}, {caller, _tag}, state) do
     case connection_row(state, caller, incarnation) do
-      {token, %{phase: phase} = row} when phase in [:live, :closing] ->
+      {token, %{phase: phase}} when phase in [:live, :closing] ->
         # Concept: transient decoration yields before durable capacity is refused.
         # Technical depth: remove only unclaimed copies, acknowledge their exact
         # identities to each native lease owner, then run the unchanged durable
