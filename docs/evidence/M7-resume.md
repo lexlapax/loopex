@@ -41,31 +41,37 @@ new native snapshot, original identity/cutoff and original-actor assertions;
 physical actor joins after cutoff and complete host/caller integration remain
 separate open obligations.
 
-Host source is joined atf3a99ca1, formatter-only child
-`92cc5d956a7cfb94a6714c2415b121b129522d97`. All ten non-line ASTs match the
-worker source, and both toolchain formatters pass at original27046. The first
-format check30200 remains failed. Current host111-case original99586 FAILS:
-110pass, one actual held-Memory creator-loss cleanup failure, plus warnings in
-generated test cases. Elapsed120.037seconds, four exact stage joins. Output:
-`M7/creation-startup-hosts-focused-20261008-v1`; terminal
-`b4c7410c46ee329320895e8d6441381c0efd276a9caa01b6f5a811c6ffacdfe6`;
-collection `447537fc841eafbf3c361354391aafcab73d4b48ae932f45bc3ea3f286f805fa`.
-The floor host population was not run. Source review also identifies synchronous
-runtime-root/Workers observer admission as an interruption gap under suspended
-supervisors; repair is pending, with no cleanup or host-completion claim.
+The first host111-case run99586 remains failed (110 passed, one creator-loss
+cleanup failure and generated-case warnings). Revised twelve-path host source
+is joined atb606b15f, formatter-only child
+`31e16a0aebcee3ea3dca651c76e83885f5f886e4`. Both formatters pass and all
+non-line ASTs match the frozen raw source. Current-pair native original58771
+compiles without warnings but FAILS115/118 cases: two actual Local/Memory
+Edges acquisitions return unavailable after startup release, and the tracked
+interrupt fixture captures workers before observer admission. Duration133.107s,
+four exact stage joins, zero exclusions/skips/invalid cases. The floor host run
+is UNRUN. Output: `M7/creation-startup-hosts-focused-20261008-v2`; terminal
+SHA-256 `6f7129ff011679851b475528daa2c2a3a0a8de7f6960f031eb4687d6b1aeab66`;
+collection `c3613e4982b1fac97ad379edcb0a1af1cc61a616d8c081b5f44804dad37f348a`.
+The host worker has identified a queued-result/dead-observer receive race;
+its relation to the two real failures is not yet established. Donor v2 bytes
+remain frozen at this checkpoint; the worker owns only StartupGate and its
+acquisition fixture for a bounded correction, with no native or Git authority.
+Preserve the original observation cap, Core cutoff and exact observer joins.
 
 External recovery manifest:
-`M7/coupled-current-context-20261008-v9/retention.json`, SHA-256
-`f5b4712770b32a6b1da05cb795e6b43bf70f40d3acc664630fe6395095533ac6`.
-It chains v8, retains20 assets, seven source commits, eight completed native
-records, a complete candidate patch and verified Git bundle. Its2376-row
-seed precedes adjacent-Core runs retained separately. Original53718 at92cc5d95
-FAILS with54/55 ordinary cases passing and two long-bound exclusions: the old
-RuntimeStart test issued create immediately after dispatcher readiness. Accepted
-ADR0063 requires separate original creation startup observation. The repair
-retains all twenty dispatcher/create/resume/cleanup sequences, pins the public
-identity/cutoff and spends one1,000-ms fixture observation bound before the one
-create. The failure remains failed; no create retry or production wait is added.
+`M7/coupled-current-context-20261008-v10/retention.json`, SHA-256
+`0342f93f15c173fa0a514013dfdcd326c73afdf43d009bd2586e9940a4cb3642`.
+It chains v9, retains53 assets, eight subsequent source commits, eleven
+completed native records, a complete candidate patch and verified Git bundle.
+The candidate is `e1d3860daa3430ec09fb9f6a89e8780d68143b94`. Its next native
+registry has2425 unique rows, SHA-256
+`cc599f1708a59ba4c3b8e8997a212527d9e066f16b4bf150e5ebd908eaeaa111`.
+Original53718 at92cc5d95 remains failed54/55 ordinary Core cases with two
+existing long-bound exclusions: the old RuntimeStart fixture created before
+creation startup readiness. Its repair preserves all twenty dispatcher,
+create/resume/cleanup cycles and one bounded public observation before one
+create; no create retry or production wait is introduced.
 
 Corrected candidate `8e7b8a3efdde268dc8039272c373b4c1466d9b50` passes all55
 adjacent ordinary Core cases on both pairs, with the two existing long-bound
@@ -75,18 +81,35 @@ terminal `7395e510d06341d264983f2be75b94fc301161ca43de3a9ad476abdedc6c0437`;
 collection `ef36afc9ae66471118e4fae1e59082dfd8aaf79751d539dbe221abffeb989c90`.
 Its2392-row registry precedes later formatting attempts.
 
-The drained Socket unit is joined at ee092848, shared formatter-only child
-`9e57686a5d79b9f0d4a8520ad25f704b8667d1fb`. Its three non-line ASTs match the
-frozen source; both toolchain format checks pass at original88882. The first
-floor layout failure remains retained at original89728. Native original98205
-is now running the complete193-case Socket/Registry/Owner population, including
-its existing real long-bound case, on both pairs. No result is claimed while
-that original is live. Its admitted2399-row seed is in
-`M7/candidate-format-preparation-20261008-v13/stage-attempt-registry.json`,
-SHA-256 `47e593334b25be0c98e192bbf4075e6607b882133841ea04aa23cd57bdebcdcf`.
-The candidate is unserved; host repairs remain unfinished.
-Host and Socket workers continue source-only repairs in separate worktrees.
-No whole integration, serving activation or milestone closure occurs.
+The first drained Socket193-case run98205 remains failed180pass/13fail;
+all twelve Socket bodies failed setup before entry, and one Registry fixture
+omitted actual session activation. Its floor run was UNRUN. Complete output
+is retained at `M7/drained-socket-retirement-focused-20261008-v1`. Review also
+found two real blocked-close containment gaps on Registry/control loss.
+The fixture and containment corrections are joined at75233b33, formatter-only
+child `e1d3860daa3430ec09fb9f6a89e8780d68143b94`. Both formatters pass with
+non-line AST equality. Source review clears those two defects; it is ordinary
+engineering review, not milestone acceptance.
+
+Original77159 PASSES all195 Socket14/Registry71/Owner110 cases on both pairs,
+including the existing real memory-pressure case and both new actual
+blocked-close loss cases, with zero exclusions/skips/invalid cases. Duration
+166.376s, eight exact stage joins and34 verified artifacts. Output:
+`M7/drained-socket-retirement-focused-20261008-v2`; terminal SHA-256
+`c98086c93f047401a53f3f8aca3b9ad403657dc925c6354343750e3a3e305a33`;
+collection `e7f8f23f39658ebf7a5eab09aa0f685f79872b73bf9359022974fcc570a8ef39`.
+The original1,000-ms allowance, actual normal-DOWN negative proof, opening
+Socket native-close authority and unchanged Owner-loss branch remain intact.
+This qualifies the narrow drained-close unit, not universal output cleanup,
+served-generation activation or the broader T07/T16 obligations.
+
+Primary checkpointf7e4e9b passes its prose-only check82190 once in38.392s:
+`M7/checkpoint-docs-check-20261008-v3`; terminal
+`c8d05110ee4cdabc85c8daa01e28b6910dc3a5d2322cf2ec7875849e4ca8ffbd`;
+collection `8d396a3f7d71d014688f9c6a27020532421e9dbee143cb68713a73c61a0973fd`.
+All listed original native handles are terminal and collected once. Host repair
+remains source-only work in its donor; the candidate is unserved. No whole
+integration, serving activation or milestone closure occurs.
 
 T01–T19 totals remain originals88 done /85 remaining /6 retired and additions
 365 done /24 remaining. These focused proofs do not close the broader rows.
