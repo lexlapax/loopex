@@ -149,6 +149,26 @@ defmodule Loopex do
   @doc """
   ## Concept
 
+  Observes this runtime's original creation startup without issuing a create.
+
+  ## Technical depth
+
+  The closed snapshot contains state, the original 32-byte startup identity and
+  its signed same-VM monotonic millisecond cutoff. The caller timeout is 1–1,000
+  milliseconds and defaults to 1,000. Invalid timeouts fail before Control is
+  contacted. Read timeout, runtime/token failure or absent capture is
+  runtime_unavailable. Ready proves only the original startup barrier; current
+  creation admission still applies. This delegates to Runtime's pure snapshot.
+  """
+  @spec creation_startup_status(Runtime.t(), integer()) ::
+          {:ok, Runtime.creation_startup_snapshot()}
+          | {:error, :invalid_status_timeout | :runtime_unavailable}
+  def creation_startup_status(runtime, timeout \\ 1_000),
+    do: Runtime.creation_startup_status(runtime, timeout)
+
+  @doc """
+  ## Concept
+
   Read a session's creating-command provenance or a captured runtime creation
   cut without starting recovered work.
 

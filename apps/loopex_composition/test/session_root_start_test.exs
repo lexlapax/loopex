@@ -176,6 +176,7 @@ defmodule LoopexComposition.Ephemeral.SessionRootStartTest do
         Capability.handle(pid)
       end,
       runtime_holder: %{
+        creation_startup_status: &LoopexComposition.StartupStatusFixture.ready/2,
         runtime_start: fn options ->
           send(test, {:runtime_start, options})
           supervisor = spawn_link(fn -> receive do: (:stop -> :ok) end)
@@ -223,6 +224,8 @@ defmodule LoopexComposition.Ephemeral.SessionRootStartTest do
     assert_receive {:phase_ready, ^holder, ^ref, :runtime}, 1_000
 
     send(holder, {:grant, self(), ref, :runtime, [runtime_id: "ephemeral-test"]})
+    assert_receive {:runtime_custody, ^holder, ^ref, runtime}, 1_000
+    send(holder, {:runtime_custody_ack, self(), ref, runtime})
     assert_receive {:phase_result, ^holder, ^ref, :runtime, {:ok, runtime}}, 1_000
     assert_received {:runtime_start, [runtime_id: "ephemeral-test"]}
     assert_receive {:phase_ready, ^root, ^ref, :trace_bind}, 1_000
@@ -256,6 +259,7 @@ defmodule LoopexComposition.Ephemeral.SessionRootStartTest do
 
     {:ok, holder} =
       RuntimeHolder.start_link(self(), self(), ref, deadline, %{
+        creation_startup_status: &LoopexComposition.StartupStatusFixture.ready/2,
         runtime_start: fn options ->
           send(test, {:started, options})
           supervisor = spawn_link(fn -> receive do: (:stop -> :ok) end)
@@ -273,6 +277,8 @@ defmodule LoopexComposition.Ephemeral.SessionRootStartTest do
     send(holder, {:grant, self(), make_ref(), :runtime, []})
     refute_receive {:started, _}, 30
     send(holder, {:grant, self(), ref, :runtime, []})
+    assert_receive {:runtime_custody, ^holder, ^ref, runtime}, 1_000
+    send(holder, {:runtime_custody_ack, self(), ref, runtime})
     assert_receive {:phase_result, ^holder, ^ref, :runtime, {:ok, runtime}}, 1_000
     assert_received {:started, []}
     assert Process.alive?(runtime.supervisor)
@@ -318,6 +324,7 @@ defmodule LoopexComposition.Ephemeral.SessionRootStartTest do
 
         {:ok, holder} =
           RuntimeHolder.start_link(self(), root, ref, deadline, %{
+            creation_startup_status: &LoopexComposition.StartupStatusFixture.ready/2,
             runtime_start: fn _options ->
               supervisor = spawn_link(fn -> receive do: (:finish -> :ok) end)
               send(test, {:runtime_supervisor, supervisor})
@@ -334,6 +341,11 @@ defmodule LoopexComposition.Ephemeral.SessionRootStartTest do
         end
 
         send(holder, {:grant, self(), ref, :runtime, []})
+
+        receive do
+          {:runtime_custody, ^holder, ^ref, runtime} ->
+            send(holder, {:runtime_custody_ack, self(), ref, runtime})
+        end
 
         receive do
           {:phase_result, ^holder, ^ref, :runtime, {:ok, _runtime}} -> :ok

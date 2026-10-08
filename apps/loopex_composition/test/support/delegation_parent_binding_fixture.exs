@@ -2,6 +2,7 @@ Code.require_file("../../../loopex/test/support/configured_genesis_helper.exs", 
 
 defmodule LoopexComposition.DelegationParentBindingFixture do
   @moduledoc false
+  import ExUnit.Assertions
   alias Loopex.Store
   alias LoopexComposition.Delegation.{GenesisCodec, ParentBinding, Tool}
   alias LoopexProtocol.{Frame, ToolDefinition}
@@ -118,6 +119,63 @@ defmodule LoopexComposition.DelegationParentBindingFixture do
       ParentBinding.capture("runtime", command, json(catalog), json(declaration), json(creation))
 
     captured
+  end
+
+  # Concept: history fixtures observe actual startup readiness before their Store baseline.
+  # Technical depth: the shared gate pins Core's original startup identity/cutoff,
+  # joins its owned observer and rechecks that retained cutoff before publication.
+  def await_startup(runtime) do
+    assert {:ok, startup_deadline} = LoopexComposition.StartupGate.await(runtime)
+    assert :ok = LoopexComposition.StartupGate.publication({:ok, startup_deadline})
+    :ok
+  end
+
+  # Concept: both retained-history clients seed creation through the current Store owner.
+  # Technical depth: read and claim the actual head, reserve the original final
+  # genesis, then verify its exact committed identity and retained terminal capsule.
+  def commit_creation(store, capture) do
+    {:ok, final} = Store.create_session(capture.runtime, capture.command, capture.genesis)
+    {:ok, final_id} = Store.transaction_id(final)
+    assert Base.encode16(final.canonical_mutation_digest, case: :lower) ==
+             capture.creation["canonical_create_digest"]
+    assert final.genesis["options"] == capture.options
+    assert {:ok, %{head: head, command: nil}} =
+             Store.creation_recovery(store, %{runtime_id: capture.runtime, command_id: nil})
+    assert head.active_command_id == nil
+    selection = Base.encode16(:crypto.strong_rand_bytes(32), case: :lower)
+    {:ok, claim} = Store.claim_creation_domain(capture.runtime, head.owner_generation, selection)
+    {:ok, claim_id} = Store.transaction_id(claim)
+    assert {:committed, ^claim_id, claimed} = Store.transact(store, claim)
+    assert {:ok, %{head: current, command: nil}} =
+             Store.creation_recovery(store, %{runtime_id: capture.runtime, command_id: nil})
+    assert {current.owner_generation, current.owner_selection, current.domain_version,
+            current.active_command_id} ==
+             {claimed.owner_generation, claimed.owner_selection, claimed.domain_version, nil}
+
+    {:ok, reserve} = Store.reserve_creation(capture.runtime, capture.command,
+      current.owner_generation, current.owner_selection, current.domain_version, final.genesis)
+    {:ok, reserve_id} = Store.transaction_id(reserve)
+    assert reserve.genesis == final.genesis
+    assert {:committed, ^reserve_id, reserved} = Store.transact(store, reserve)
+    assert {:ok, %{command: capsule}} =
+             Store.creation_recovery(store, %{runtime_id: capture.runtime,
+               command_id: capture.command})
+    assert capsule.state == :reserved and capsule.genesis == final.genesis
+    assert capsule.reservation_tx_id == reserve_id
+    assert capsule.reservation_owner_generation == current.owner_generation
+    assert capsule.reservation_owner_selection == current.owner_selection
+    assert capsule.reservation_domain_version == reserved.reservation_domain_version
+    assert capsule.final_resolution == nil and capsule.session_id == nil
+
+    assert {:committed, ^final_id, receipt} = result = Store.transact(store, final)
+    assert {:ok, %{head: terminal, command: created}} =
+             Store.creation_recovery(store, %{runtime_id: capture.runtime,
+               command_id: capture.command})
+    assert terminal.active_command_id == nil
+    assert created.state == :created and created.final_resolution == :committed
+    assert created.genesis == final.genesis and created.session_id == receipt.session_id
+    assert created.reservation_tx_id == reserve_id
+    result
   end
 
   def hash(bytes), do: :crypto.hash(:sha256, bytes) |> Base.encode16(case: :lower)

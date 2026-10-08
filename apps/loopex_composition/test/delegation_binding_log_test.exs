@@ -865,8 +865,7 @@ defmodule LoopexComposition.DelegationBindingLogTest do
     options = if adapter == Local, do: [path: store_path], else: []
     {:ok, first} = adapter.start_link(options)
     {:ok, store} = Store.new(adapter, first)
-    {:ok, transaction} = Store.create_session(capture.runtime, capture.command, capture.genesis)
-    {:committed, _, receipt} = Store.transact(store, transaction)
+    {:committed, _, receipt} = Fixture.commit_creation(store, capture)
 
     store_pid =
       if adapter == Local do
@@ -887,6 +886,7 @@ defmodule LoopexComposition.DelegationBindingLogTest do
       if Process.alive?(store_pid), do: stop_join(store_pid)
     end)
 
+    assert :ok = Fixture.await_startup(runtime)
     {runtime, receipt.session_id, store_pid, store_path}
   end
 

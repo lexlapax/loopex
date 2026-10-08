@@ -187,6 +187,7 @@ defmodule LoopexComposition.Ephemeral.StartupTest do
     configuration =
       configuration(tmp, %{
         runtime_holder: %{
+          creation_startup_status: &LoopexComposition.StartupStatusFixture.ready/2,
           runtime_start: fn options ->
             send(test, {:runtime_options, options})
             {:ok, supervisor} = Supervisor.start_link([], strategy: :one_for_one)
@@ -277,6 +278,151 @@ defmodule LoopexComposition.Ephemeral.StartupTest do
     Process.exit(supervisor, :shutdown)
   end
 
+  test "actual Memory startup stays in holder observation before the single facade create", %{
+    tmp: tmp
+  } do
+    test = self()
+    reads = :atomics.new(1, [])
+
+    configuration =
+      configuration(tmp, %{
+        runtime_holder: %{
+          creation_startup_status: fn runtime, timeout ->
+            send(test, {:startup_observer, self(), runtime})
+            Loopex.creation_startup_status(runtime, timeout)
+          end,
+          runtime_start: fn options ->
+            store = Keyword.fetch!(options, :store)
+            assert store.adapter == Loopex.Store.Memory
+
+            {:ok, held} =
+              Loopex.Store.new(
+                LoopexComposition.StartupAcquisitionTest.HeldStore,
+                %{store: store, test: test, reads: reads}
+              )
+
+            Loopex.Runtime.start_link(Keyword.put(options, :store, held))
+          end
+        }
+      })
+
+    configuration =
+      Map.update!(configuration, :test_seams, &Map.drop(&1, [:group_attest, :group_drain]))
+
+    {:ok, supervisor} = DynamicSupervisor.start_link(strategy: :one_for_one)
+
+    creator =
+      spawn(fn ->
+        {:ok, activation} = OwnerActivation.start(supervisor)
+        owner = OwnerActivation.owner(activation)
+        {:ok, cell} = OwnerActivation.begin(activation)
+        send(test, {:owner, owner, cell})
+        send(test, {:result, SessionOwner.start_session(owner, configuration, 6_000)})
+        receive do: (:finish -> :ok)
+      end)
+
+    on_exit(fn -> if Process.alive?(creator), do: Process.exit(creator, :kill) end)
+    assert_receive {:owner, owner, cell}, 1_000
+    assert_receive {:startup_read, worker, %{command_id: nil}}, 1_000
+    assert_receive {:startup_observer, observer, runtime}, 1_000
+    startup = :sys.get_state(owner).startup
+    holder = startup.registered.runtime_holder
+    held = :sys.get_state(holder)
+    assert held.phase == :observing
+    assert held.runtime == runtime
+    assert held.observer.pid == observer
+    assert startup.expected == :runtime
+    assert startup.granted
+    assert startup.registered.runtime == held.runtime
+    assert startup.facade == nil
+    refute Map.has_key?(startup.registered, :facade_client)
+    assert {:ok, %{state: :starting}} = Loopex.creation_startup_status(held.runtime)
+    refute_receive {:result, _}, 40
+    assert :atomics.get(cell, 1) == 0
+    send(worker, :release_startup)
+    assert_receive {:result, {:ok, :session_ready}}, 2_000
+    ready = :sys.get_state(owner).startup
+    assert ready.session_id != nil
+    assert ready.registered.runtime == held.runtime
+
+    assert {:ok, {:historical, session_id}} =
+             Loopex.lookup_create_result(
+               held.runtime,
+               "create",
+               %{"surface" => "embedded"},
+               configuration.genesis
+             )
+
+    assert session_id == ready.session_id
+    owner_down = Process.monitor(owner)
+    send(creator, :finish)
+    assert_receive {:DOWN, ^owner_down, :process, ^owner, _}, 6_000
+    assert File.ls!(tmp) == []
+    Supervisor.stop(supervisor)
+  end
+
+  test "creator loss during actual held Memory startup cleans the original subtree and root", %{
+    tmp: tmp
+  } do
+    test = self()
+    reads = :atomics.new(1, [])
+
+    configuration =
+      configuration(tmp, %{
+        runtime_holder: %{
+          creation_startup_status: fn runtime, timeout ->
+            send(test, {:startup_observer, self(), runtime})
+            Loopex.creation_startup_status(runtime, timeout)
+          end,
+          runtime_start: fn options ->
+            {:ok, held} =
+              Loopex.Store.new(
+                LoopexComposition.StartupAcquisitionTest.HeldStore,
+                %{store: Keyword.fetch!(options, :store), test: test, reads: reads}
+              )
+
+            Loopex.Runtime.start_link(Keyword.put(options, :store, held))
+          end
+        }
+      })
+
+    configuration =
+      Map.update!(configuration, :test_seams, &Map.drop(&1, [:group_attest, :group_drain]))
+
+    {:ok, supervisor} = DynamicSupervisor.start_link(strategy: :one_for_one)
+
+    creator =
+      spawn(fn ->
+        {:ok, activation} = OwnerActivation.start(supervisor)
+        owner = OwnerActivation.owner(activation)
+        {:ok, cell} = OwnerActivation.begin(activation)
+        send(test, {:owner, owner, cell})
+        SessionOwner.start_session(owner, configuration, 6_000)
+      end)
+
+    assert_receive {:owner, owner, cell}, 1_000
+    assert_receive {:startup_read, _worker, _}, 1_000
+    assert_receive {:startup_observer, observer, runtime}, 1_000
+    startup = :sys.get_state(owner).startup
+    held = :sys.get_state(startup.registered.runtime_holder)
+    assert held.runtime == runtime
+    assert held.phase == :observing
+    assert held.observer.pid == observer
+    assert startup.expected == :runtime
+    assert startup.granted
+    assert startup.registered.runtime == held.runtime
+    runtime_down = Process.monitor(held.runtime.supervisor)
+    observer_down = Process.monitor(held.observer.pid)
+    owner_down = Process.monitor(owner)
+    Process.exit(creator, :kill)
+    assert_receive {:DOWN, ^observer_down, :process, _, _}, 3_000
+    assert_receive {:DOWN, ^runtime_down, :process, _, _}, 3_000
+    assert_receive {:DOWN, ^owner_down, :process, ^owner, _}, 6_000
+    assert File.ls!(tmp) == []
+    assert :atomics.get(cell, 1) == 2
+    Supervisor.stop(supervisor)
+  end
+
   test "cancellation stops a ready session whose startup reply was dropped", %{tmp: tmp} do
     configuration = configuration(tmp, %{})
     {:ok, supervisor} = DynamicSupervisor.start_link(strategy: :one_for_one)
@@ -307,6 +453,7 @@ defmodule LoopexComposition.Ephemeral.StartupTest do
     configuration =
       configuration(tmp, %{
         runtime_holder: %{
+          creation_startup_status: &LoopexComposition.StartupStatusFixture.ready/2,
           runtime_start: fn _options ->
             {:ok, supervisor} = Supervisor.start_link([], strategy: :one_for_one)
             {:ok, %Runtime{supervisor: supervisor, token: %{test: test, manifest: normalized}}}
@@ -366,6 +513,7 @@ defmodule LoopexComposition.Ephemeral.StartupTest do
       configuration =
         configuration(tmp, %{
           runtime_holder: %{
+            creation_startup_status: &LoopexComposition.StartupStatusFixture.ready/2,
             runtime_start: fn _options ->
               {:ok, supervisor} = Supervisor.start_link([], strategy: :one_for_one)
 
@@ -436,6 +584,7 @@ defmodule LoopexComposition.Ephemeral.StartupTest do
     configuration =
       configuration(tmp, %{
         runtime_holder: %{
+          creation_startup_status: &LoopexComposition.StartupStatusFixture.ready/2,
           runtime_start: fn _options ->
             send(test, :runtime_start_attempted)
             {:error, :scripted_failure}
@@ -468,6 +617,7 @@ defmodule LoopexComposition.Ephemeral.StartupTest do
           raise "scripted facade client start failure"
         end,
         runtime_holder: %{
+          creation_startup_status: &LoopexComposition.StartupStatusFixture.ready/2,
           runtime_start: fn _options ->
             send(test, :runtime_started)
             {:ok, runtime_supervisor} = Supervisor.start_link([], strategy: :one_for_one)
@@ -508,6 +658,7 @@ defmodule LoopexComposition.Ephemeral.StartupTest do
       configuration =
         configuration(tmp, %{
           runtime_holder: %{
+            creation_startup_status: &LoopexComposition.StartupStatusFixture.ready/2,
             runtime_start: fn _options ->
               {:ok, supervisor} = Supervisor.start_link([], strategy: :one_for_one)
               {:ok, %Runtime{supervisor: supervisor, token: %{test: test, failure: fault}}}
@@ -536,6 +687,7 @@ defmodule LoopexComposition.Ephemeral.StartupTest do
     configuration =
       configuration(tmp, %{
         runtime_holder: %{
+          creation_startup_status: &LoopexComposition.StartupStatusFixture.ready/2,
           runtime_start: fn _options ->
             send(test, :runtime_start_attempted)
             {:error, :scripted_failure}
@@ -582,6 +734,7 @@ defmodule LoopexComposition.Ephemeral.StartupTest do
           receive do: (:release_store_handle -> Loopex.Store.new(module, pid))
         end,
         runtime_holder: %{
+          creation_startup_status: &LoopexComposition.StartupStatusFixture.ready/2,
           runtime_start: fn _options ->
             send(test, :unexpected_runtime_start)
             {:error, :must_not_start}

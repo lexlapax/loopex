@@ -14,7 +14,8 @@ defmodule LoopexComposition.Edges do
   seam: before each of the Store, transfers, workspace lease,
   executor and runtime it evaluates the host's `interrupt`, and after each
   successful start it records the pid, or the runtime together with its
-  supervisor. Any other start the chain performs passes through unchanged. An
+  supervisor. The same interrupt remains active while observing creation startup.
+  Any other start the chain performs passes through unchanged. An
   interrupt `{:stop, reason}`, an invalid interrupt answer, or an exception in
   an interrupt or edge starter ends composition with the exact partial map;
   exceptions carry only their kind. The host supplies its own credential
@@ -143,9 +144,19 @@ defmodule LoopexComposition.Edges do
   defp run(configuration, interrupt, compose) do
     previous_edge = Process.get(@edge)
     previous_owned = Process.get(@owned)
+    interrupt_key = LoopexComposition.StartupGate.interrupt_key()
+    previous_interrupt = Process.get(interrupt_key)
     observer = previous_edge || (&apply/3)
     Process.put(@owned, [])
     Process.put(@started, %{})
+
+    Process.put(interrupt_key, fn ->
+      case checkpoint(interrupt, :runtime) do
+        :continue -> :ok
+        {:stop, reason} -> {:error, {:stop, reason}}
+        other -> {:error, {:invalid_composition_interrupt_result, other}}
+      end
+    end)
 
     Process.put(@edge, fn module, function, arguments ->
       tracked(interrupt, observer, module, function, arguments)
@@ -153,14 +164,21 @@ defmodule LoopexComposition.Edges do
 
     try do
       case compose.(configuration) do
-        {:ok, _runtime} -> {:ok, Process.get(@started)}
-        {:error, reason} -> {:error, reason, Process.get(@started)}
+        {:ok, _runtime} ->
+          case LoopexComposition.StartupGate.confirm() do
+            :ok -> {:ok, Process.get(@started)}
+            {:error, reason} -> {:error, reason, Process.get(@started)}
+          end
+
+        {:error, reason} ->
+          {:error, reason, Process.get(@started)}
       end
     catch
       {@started, reason} -> {:error, reason, Process.get(@started)}
     after
       restore(@edge, previous_edge)
       restore(@owned, previous_owned)
+      restore(interrupt_key, previous_interrupt)
       Process.delete(@started)
     end
   end

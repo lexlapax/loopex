@@ -461,6 +461,41 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
     {:noreply, %{state | startup: %{startup | early_trace_bind: true}}}
   end
 
+  # Concept: the original runtime is owned before a startup read may block.
+  # Technical depth: an exact granted holder reports custody independently of
+  # readiness. Retain its monitor for rollback without advancing the phase;
+  # late evidence may reconcile a still-unknown grant during bounded abort.
+  def handle_info(
+        {:runtime_custody, holder, reference, %Runtime{} = runtime},
+        %{
+          startup:
+            %{
+              reference: reference,
+              expected: :runtime,
+              granted: true,
+              registered: %{runtime_holder: holder}
+            } = startup,
+          phase: phase
+        } = state
+      )
+      when phase in [:starting, :aborting] do
+    case register_result(startup, :runtime, runtime) do
+      {:ok, retained} ->
+        next = %{state | startup: retained}
+
+        if phase == :aborting do
+          next = put_in(next.abort.unknown_start, false)
+          {:noreply, continue_abort(next)}
+        else
+          send(holder, {:runtime_custody_ack, self(), reference, runtime})
+          {:noreply, next}
+        end
+
+      :error ->
+        {:noreply, state}
+    end
+  end
+
   def handle_info(
         {:phase_result, sender, reference, phase, result},
         %{
@@ -3146,6 +3181,11 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
        when pid == startup.registered.trace_capability,
        do: {:ok, %{startup | registered: Map.put(startup.registered, :trace_handle, value)}}
 
+  defp register_result(%{registered: %{runtime: runtime}} = startup, :runtime, runtime),
+    do: {:ok, startup}
+
+  defp register_result(%{registered: %{runtime: _original}}, :runtime, _other), do: :error
+
   defp register_result(startup, :runtime, %Runtime{supervisor: supervisor} = runtime)
        when is_pid(supervisor) do
     if Process.alive?(supervisor) do
@@ -3366,7 +3406,9 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
     unknown_start =
       startup.expected in @phase_order and
         startup.expected not in [:candidate_prepare, :root_claim] and
-        (startup.granted or
+        ((startup.granted and
+            not (startup.expected == :runtime and
+                   match?(%Runtime{}, Map.get(startup.registered, :runtime)))) or
            (unregistered_granted_result? and ownership == :unknown and
               cause == failure_cause(startup.expected)))
 

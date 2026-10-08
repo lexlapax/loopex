@@ -234,6 +234,302 @@ defmodule LoopexComposition.RestoreWorkflowTest do
     assert manifest(fixture.backup) == fixture.baseline
   end
 
+  for control <- [:preserve, :normalize] do
+    modes = %{
+      "." => 0o3750,
+      "special-empty" => 0o1750,
+      "special-nested" => 0o2750,
+      "special-nested/inner" => 0o4750,
+      "special-nested/inner/all" => 0o7750,
+      "special-setgid" => 0o2750,
+      "special-sticky" => 0o1750
+    }
+
+    # Concept: the negative control starts from a naturally exact native copy.
+    # Technical depth: OTP 29.0.5 unix_prim_file.c:769-780 excludes
+    # S_ISVTX in efile_set_permissions.
+    # Preserve keeps every imported special bit and requires exact copy or
+    # precise refusal; only this control's initial fixture omits sticky.
+    modes =
+      if control == :normalize,
+        do: Map.new(modes, fn {path, mode} -> {path, Bitwise.band(mode, 0o6777)} end),
+        else: modes
+
+    test "public special-mode restore #{control} preserves complete state or refuses before guarded activation",
+         context do
+      fixture = actual_cut(context.root, nil, :without_helpers)
+      control = unquote(control)
+      assert {:ok, old_entries} = RestoreCodec.manifest(fixture.baseline, @total)
+
+      # Concept: special-mode fixtures select an eligible temporary directory group.
+      # Technical depth: group identity is outside the mode manifest; verify the
+      # fresh destination group before its native restore copies any entries.
+      assert {destination_group, 0} =
+               System.cmd("python3", [
+                 "-c",
+                 "import os,sys; p=sys.argv[1]; g=os.getegid(); os.chown(p,-1,g); print(g)",
+                 fixture.destination
+               ])
+
+      assert File.lstat!(fixture.destination).gid ==
+               String.to_integer(String.trim(destination_group))
+
+      modes = unquote(Macro.escape(modes))
+
+      contents = %{
+        "special-nested/inner/all" => :binary.copy(<<0, 255, 1, 2>>, 40_000),
+        "special-setgid" => "retained setgid bytes",
+        "special-sticky" => ""
+      }
+
+      for state_root <- [fixture.source, fixture.backup] do
+        File.mkdir!(Path.join(state_root, "special-empty"))
+        File.mkdir_p!(Path.join(state_root, "special-nested/inner"))
+        for {relative, bytes} <- contents, do: File.write!(Path.join(state_root, relative), bytes)
+
+        for {relative, mode} <- modes do
+          path = if relative == ".", do: state_root, else: Path.join(state_root, relative)
+
+          assert {"", 0} =
+                   System.cmd("python3", [
+                     "-c",
+                     "import os,sys; p=sys.argv[1]; g=os.getegid(); os.chown(p,-1,g); os.lstat(p).st_gid==g or sys.exit(1); os.chmod(p,int(sys.argv[2]))",
+                     path,
+                     Integer.to_string(mode)
+                   ])
+
+          assert Bitwise.band(File.lstat!(path).mode, 0o7777) == mode
+        end
+      end
+
+      paths = Enum.sort(Enum.uniq(Enum.map(old_entries, & &1["path"]) ++ Map.keys(modes)))
+      baseline = special_mode_manifest(fixture.backup, paths)
+      assert special_mode_manifest(fixture.source, paths) == baseline
+      assert {:ok, entries} = RestoreCodec.manifest(baseline, @total)
+      assert manifest(fixture.backup) == baseline
+      assert manifest(fixture.source) == baseline
+      plan = refresh_plan(fixture.plan, baseline, fixture.backup)
+      fixture = %{fixture | baseline: baseline, plan: plan}
+      original_source = placement(fixture.source)
+      original_backup = placement(fixture.backup)
+
+      identities =
+        Map.new([fixture.source, fixture.backup], fn state_root ->
+          {state_root,
+           Map.new(paths, fn relative ->
+             path = if relative == ".", do: state_root, else: Path.join(state_root, relative)
+             {relative, placement(path)}
+           end)}
+        end)
+
+      original_workspace = manifest(fixture.workspace)
+      receipts = workspace_receipts(fixture)
+      receipt_payloads = workspace_receipt_payloads(fixture.store_bytes, fixture.session)
+
+      invocation = %{
+        "work_ms" => 1_000,
+        "cleanup_grace_ms" => 100,
+        "max_total_file_bytes" => @total,
+        "prior_admin_authority" => "none",
+        "prior_admin_evidence_sha256" => nil
+      }
+
+      parent = self()
+      tag = make_ref()
+
+      {caller, caller_monitor} =
+        spawn_monitor(fn ->
+          send(
+            parent,
+            {tag,
+             LoopexComposition.Restore.test_restore(plan, invocation,
+               probe: parent,
+               pause_at: :manifest_stat
+             )}
+          )
+        end)
+
+      assert_receive {:restore_io, guardian, worker, reference,
+                      {:installed, admitted, work_cutoff}},
+                     1_000
+
+      owned = %{
+        caller: caller,
+        caller_monitor: caller_monitor,
+        guardian: guardian,
+        guardian_monitor: Process.monitor(guardian),
+        worker: worker,
+        worker_monitor: Process.monitor(worker),
+        reference: reference,
+        tag: tag,
+        work_cutoff: work_cutoff
+      }
+
+      assert work_cutoff == admitted + 1_000
+      Process.put({:restore_release_monitors, reference}, [])
+
+      on_exit(fn ->
+        for actor <- [caller, guardian, worker] do
+          if Process.alive?(actor) do
+            monitor = Process.monitor(actor)
+            Process.exit(actor, :kill)
+            assert_receive {:DOWN, ^monitor, :process, ^actor, _}, 1_000
+          end
+        end
+      end)
+
+      # Concept: observe the complete copied baseline before the audit.
+      # Technical depth: non-root directories acknowledge initial 0700 and
+      # their final mode; the existing root acknowledges only its final mode.
+      mode_count =
+        Enum.reduce(entries, 0, fn entry, count ->
+          count + if(entry["kind"] == "directory" and entry["path"] == ".", do: 1, else: 2)
+        end)
+
+      {result, events, copied} =
+        special_mode_public_finish(owned, fixture, paths, mode_count, control)
+
+      assert [
+               {:terminal,
+                {:joined, {:ok, %{restore_result: native_result, release_claims: []}}, evidence}}
+             ] =
+               Enum.filter(events, &match?({:terminal, _}, &1))
+
+      assert evidence.opens == evidence.closes and evidence.opens > 0
+      assert evidence.work_cutoff == work_cutoff and evidence.stop == :complete
+      acknowledged = for {:acknowledged, _, kind, status} <- events, do: {kind, status}
+
+      assert Enum.count(acknowledged, fn {kind, status} ->
+               match?({:close, _}, kind) and status == :closed
+             end) == evidence.closes
+
+      assert Enum.count(acknowledged, &(&1 == {:file_sync, :completed})) >= map_size(contents)
+      assert Enum.count(acknowledged, &(&1 == {:directory_sync, :completed})) >= 4
+      assert System.monotonic_time(:millisecond) < evidence.cleanup_cutoff
+      exact_joins(owned)
+      assert System.monotonic_time(:millisecond) < evidence.cleanup_cutoff
+
+      [{:stopping, :complete, stopped, cutoff}] =
+        Enum.filter(events, &match?({:stopping, :complete, _, _}, &1))
+
+      assert cutoff == stopped + 10_000 and cutoff == evidence.cleanup_cutoff
+
+      if copied == baseline do
+        assert {:committed, receipt} = result
+        assert {:committed, ^receipt} = native_result
+        assert receipt["tx_id"] == plan["tx_id"]
+        assert receipt["cut_id"] == plan["cut_id"]
+        assert receipt["baseline_manifest_sha256"] == hash(baseline)
+        assert {:ok, _} = RestoreCodec.encode(:receipt, receipt)
+        assert {:committed, ^receipt} = LoopexComposition.Restore.restore(plan, invocation)
+
+        assert {:committed, %{"receipt" => ^receipt, "view" => "current"}} =
+                 LoopexComposition.Restore.lookup(
+                   fixture.destination,
+                   plan["tx_id"],
+                   Map.take(invocation, ["work_ms", "cleanup_grace_ms"])
+                 )
+
+        assert_complete_copy(fixture)
+        assert Enum.all?(claims(plan), &(File.lstat(&1) == {:error, :enoent}))
+        assert {:error, :source_retired} = RestoreGuard.state(fixture.source)
+        assert Enum.count(events, &match?({:terminal_release_installed, _}, &1)) == 1
+        reopen_workspace_history(fixture, "special-mode-reopen", receipts, receipt_payloads)
+
+        for {relative, mode} <- modes do
+          path =
+            if relative == ".",
+              do: fixture.destination,
+              else: Path.join(fixture.destination, relative)
+
+          assert Bitwise.band(File.lstat!(path).mode, 0o7777) == mode
+        end
+      else
+        assert {:not_committed, refusal} = result
+        assert {:not_committed, "inventory_mismatch"} = native_result
+        assert refusal["code"] == "inventory_mismatch"
+        assert refusal["cleanup"] == "joined" and refusal["claim"] == "retained"
+        assert {:ok, _} = RestoreCodec.encode(:refusal, refusal)
+        assert evidence.restore.intent == false and evidence.claim_count == 2
+        assert {:error, :restore_incomplete} = RestoreGuard.state(fixture.destination)
+
+        assert {:error, :restore_incomplete} =
+                 LoopexComposition.TestHost.start(
+                   runtime_id: @runtime,
+                   state_root: fixture.destination,
+                   workspace: fixture.workspace,
+                   model: "openai:test",
+                   policy: Policy,
+                   policy_identity: @policy,
+                   artifact_transfers: true,
+                   active_tools: ~w(loopex.read loopex.bash)
+                 )
+
+        assert File.lstat(Path.join(fixture.destination, ".loopex-restore")) == {:error, :enoent}
+        assert Enum.all?(claims(plan), &File.dir?/1)
+
+        refute Enum.any?(
+                 events,
+                 &match?({:issued, _, {:restore_phase, "destination_intent"}}, &1)
+               )
+
+        assert Enum.count(events, &match?({:terminal_release_installed, _}, &1)) == 0
+        assert special_mode_manifest(fixture.source, paths) == baseline
+        assert special_mode_manifest(fixture.destination, paths) == copied
+      end
+
+      assert manifest(fixture.backup) == baseline
+      assert placement(fixture.source) == original_source
+      assert placement(fixture.backup) == original_backup
+      assert manifest(fixture.workspace) == original_workspace
+
+      for state_root <- [fixture.source, fixture.backup], relative <- paths do
+        path = if relative == ".", do: state_root, else: Path.join(state_root, relative)
+        assert placement(path) == identities[state_root][relative]
+      end
+
+      if copied == baseline do
+        source_additions =
+          ~w(.loopex-restore .loopex-restore/lineage .loopex-restore/lineage/00000001) ++
+            Enum.map(
+              ~w(intent source-retirement),
+              &Path.join(".loopex-restore/lineage/00000001", &1)
+            ) ++
+            Enum.flat_map(plan["ledgers"], fn declaration ->
+              relative = declaration["relative_root"]
+
+              [
+                Path.join(relative, "restore-lineage"),
+                Path.join([relative, "restore-lineage", "00000001"])
+              ] ++
+                Enum.map(
+                  ~w(intent source-retired),
+                  &Path.join([relative, "restore-lineage", "00000001", &1])
+                )
+            end)
+
+        full_source = special_mode_manifest(fixture.source, Enum.sort(paths ++ source_additions))
+        assert {:ok, source_entries} = RestoreCodec.manifest(full_source, @total)
+        index = Map.new(source_entries, &{&1["path"], &1})
+        for entry <- entries, do: assert(index[entry["path"]] == entry)
+
+        for entry <- source_entries, entry["path"] in source_additions do
+          assert entry["mode"] == if(entry["kind"] == "directory", do: 0o700, else: 0o600)
+        end
+      end
+
+      for {relative, mode} <- modes do
+        path = if relative == ".", do: fixture.source, else: Path.join(fixture.source, relative)
+        assert Bitwise.band(File.lstat!(path).mode, 0o7777) == mode
+      end
+
+      for {relative, bytes} <- contents do
+        assert File.read!(Path.join(fixture.source, relative)) == bytes
+        assert File.read!(Path.join(fixture.backup, relative)) == bytes
+      end
+    end
+  end
+
   test "one owned first transition preserves real histories and reopens both guarded compositions",
        context do
     fixture = actual_cut(context.root)
@@ -627,6 +923,96 @@ defmodule LoopexComposition.RestoreWorkflowTest do
 
     for {actor, monitor} <- actors,
         do: assert_receive({:DOWN, ^monitor, :process, ^actor, :normal}, 1_000)
+  end
+
+  for {first_status, second_status} <- [{:available, :available}, {:lost, :lost}] do
+    test "physical custody #{first_status}/#{second_status} restore retains all five namespaces and exact finals",
+         context do
+      first = context.root |> custody_cut() |> with_source_status(unquote(first_status))
+      assert restore_joined(first)["ordinal"] == 1
+      assert_successive_copy(first)
+      assert_custody_history(first)
+      second = next_cut(first, context.root, []) |> with_source_status(unquote(second_status))
+      assert restore_joined(second)["ordinal"] == 2
+      assert_successive_copy(second)
+      assert_custody_history(second)
+      assert manifest(first.backup) == first.baseline
+      assert_second_source_disposition(first, unquote(first_status))
+      assert_second_source_disposition(second, unquote(second_status))
+    end
+  end
+
+  for missing <- [
+        "custody-head",
+        "custody-refusal",
+        "custody-active",
+        "custody-created",
+        "custody-cancelled"
+      ] do
+    test "physical restore refuses omitted #{missing} runtime before intent", context do
+      fixture = custody_cut(context.root)
+      plan = Map.update!(fixture.plan, "runtime_ids", &List.delete(&1, unquote(missing)))
+      assert_custody_refusal(fixture, plan)
+    end
+  end
+
+  test "physical restore refuses an extra runtime namespace before intent", context do
+    fixture = custody_cut(context.root)
+    plan = Map.update!(fixture.plan, "runtime_ids", &Enum.sort(["foreign-runtime" | &1]))
+    assert_custody_refusal(fixture, plan)
+  end
+
+  for runtime <- ["custody-active", "custody-cancelled"] do
+    test "physical restore checks the retained #{runtime} candidate workspace without a session",
+         context do
+      fixture = custody_cut(context.root, {:workspace_mismatch, unquote(runtime)})
+      assert_custody_refusal(fixture, fixture.plan)
+    end
+  end
+
+  for damage <- [:missing_claim, :missing_reservation, :altered_candidate] do
+    test "physical current custody #{damage} refuses a complete checked log before intent",
+         context do
+      fixture = custody_cut(context.root)
+      {:ok, frames, :complete} = Log.decode_bytes(fixture.store_bytes)
+      frames = damage_custody_frames(frames, unquote(damage))
+
+      bytes =
+        Enum.map_join(frames, fn frame ->
+          {:ok, bytes} = Log.encode(frame)
+          bytes
+        end)
+
+      assert {:ok, _, :complete} = Log.decode_bytes(bytes)
+      assert {:error, _} = State.replay(frames)
+
+      for root <- [fixture.source, fixture.backup],
+          do: File.write!(Path.join(root, "store.log"), bytes)
+
+      baseline = manifest(fixture.backup)
+      assert manifest(fixture.source) == baseline
+
+      plan = %{
+        fixture.plan
+        | "manifest_sha256" => hash(baseline),
+          "stores" =>
+            Enum.map(fixture.plan["stores"], fn store ->
+              %{
+                store
+                | "sha256" => hash(File.read!(Path.join(fixture.backup, store["relative_path"])))
+              }
+            end)
+      }
+
+      fixture = %{
+        fixture
+        | baseline: baseline,
+          store_bytes: bytes,
+          plan: plan
+      }
+
+      assert_custody_refusal(fixture, fixture.plan)
+    end
   end
 
   test "lost first transition preserves the captured binding and joins guarded real reopen",
@@ -2243,6 +2629,258 @@ defmodule LoopexComposition.RestoreWorkflowTest do
     File.ln_s!(parent <> "-captured", parent)
   end
 
+  # Concept: custody is physically copied only after the actual Local writer joins.
+  # Technical depth: five distinct runtimes isolate heads, refused scopes, active
+  # candidates and both terminal outcomes. There is no Control or model fallback.
+  defp custody_cut(root, mode \\ :valid) do
+    source = Path.join(root, "custody-source")
+    backup = Path.join(root, "custody-backup")
+    destination = Path.join(root, "custody-destination")
+    workspace = Path.join(root, "custody-workspace")
+    for path <- [source, destination, workspace], do: File.mkdir!(path)
+    {:ok, workspace_ref} = WorkspaceIdentity.reference(workspace)
+    other = Path.join(root, "other-custody-workspace")
+    File.mkdir!(other)
+    {:ok, other_ref} = WorkspaceIdentity.reference(other)
+    path = Path.join(source, "store.log")
+
+    bindings =
+      with_custody_store(path, fn port ->
+        selection = String.duplicate("e", 64)
+        {:ok, claim} = Loopex.Store.claim_creation_domain("custody-head", 0, selection)
+        assert {:committed, _, _} = Loopex.Store.transact(port, claim)
+        {:ok, refusal} = Loopex.Store.claim_creation_domain("custody-refusal", 1, selection)
+        assert {:not_committed, :stale_creation_generation} = Loopex.Store.transact(port, refusal)
+
+        commands =
+          Enum.reduce(
+            [
+              {"custody-active", :reserved},
+              {"custody-created", :created},
+              {"custody-cancelled", :not_committed}
+            ],
+            %{},
+            fn {runtime, outcome}, commands ->
+              captured_workspace =
+                if mode == {:workspace_mismatch, runtime}, do: other_ref, else: workspace_ref
+
+              genesis = Loopex.ConfiguredGenesisFixture.genesis([])
+              genesis = %{genesis | "options" => %{"workspace_ref" => captured_workspace}}
+              {:ok, claim} = Loopex.Store.claim_creation_domain(runtime, 0, selection)
+              assert {:committed, _, claimed} = Loopex.Store.transact(port, claim)
+
+              {:ok, reserve} =
+                Loopex.Store.reserve_creation(
+                  runtime,
+                  "original-command",
+                  claimed.owner_generation,
+                  claimed.owner_selection,
+                  claimed.domain_version,
+                  genesis
+                )
+
+              assert {:committed, _, reserved} = Loopex.Store.transact(port, reserve)
+
+              {:ok, final} =
+                Loopex.Store.create_session(runtime, "original-command", reserve.genesis)
+
+              terminal =
+                case outcome do
+                  :reserved ->
+                    nil
+
+                  :created ->
+                    {:ok, final_tx_id} = Loopex.Store.transaction_id(final)
+
+                    assert {:committed, ^final_tx_id, receipt} =
+                             Loopex.Store.transact(port, final)
+
+                    {:committed, final_tx_id, receipt}
+
+                  :not_committed ->
+                    {:ok, close} =
+                      Loopex.Store.close_creation_reservation(
+                        runtime,
+                        "original-command",
+                        reserved.owner_generation,
+                        reserved.owner_selection,
+                        reserved.domain_version,
+                        reserve.tx_id,
+                        reserved.reservation_domain_version,
+                        final
+                      )
+
+                    assert {:committed, _, _} = Loopex.Store.transact(port, close)
+
+                    assert {:not_committed, :creation_cancelled} =
+                             Loopex.Store.transact(port, final)
+
+                    {:not_committed, :creation_cancelled}
+                end
+
+              {:ok, retained} =
+                Loopex.Store.creation_recovery(port, %{
+                  runtime_id: runtime,
+                  command_id: "original-command"
+                })
+
+              assert retained.command.state == outcome
+              Map.put(commands, runtime, %{final: final, terminal: terminal, retained: retained})
+            end
+          )
+
+        %{commands: commands, refusal: refusal}
+      end)
+
+    bytes = File.read!(path)
+    {:ok, frames, :complete} = Log.decode_bytes(bytes)
+    {:ok, state} = State.replay(frames)
+    assert map_size(state.sessions) == 1
+    assert {:ok, _} = RestoreFixtureCopy.copy(source, backup)
+    baseline = manifest(backup)
+    assert manifest(source) == baseline
+    {:ok, lineage} = RestoreCodec.lineage_digest([])
+    runtimes = Enum.sort(["custody-head", "custody-refusal" | Map.keys(bindings.commands)])
+
+    plan = %{
+      "version" => 1,
+      "tx_id" => hash("custody-restore"),
+      "source_state_root" => source,
+      "source_state_placement" => placement(source),
+      "source_status" => "available",
+      "backup_state_root" => backup,
+      "destination_state_root" => destination,
+      "manifest_sha256" => hash(baseline),
+      "cut_id" => hash("joined-custody-cut"),
+      "prior_restore_count" => 0,
+      "prior_lineage_sha256" => lineage,
+      "runtime_ids" => runtimes,
+      "stores" => [%{"relative_path" => "store.log", "sha256" => hash(bytes)}],
+      "ledgers" => [],
+      "workspace" => %{"root" => workspace, "workspace_ref" => workspace_ref},
+      "host_attestation" => %{
+        "latest_cut" => true,
+        "no_post_cut_activity" => true,
+        "all_other_copies_excluded" => true,
+        "old_authority_termination" => "joined",
+        "host_ledgers_validated" => true,
+        "evidence_sha256" => hash("actual-custody-writer-DOWN")
+      }
+    }
+
+    assert {:ok, _} = RestoreCodec.encode(:plan, plan)
+
+    %{
+      source: source,
+      backup: backup,
+      destination: destination,
+      workspace: workspace,
+      workspace_ref: workspace_ref,
+      baseline: baseline,
+      plan: plan,
+      store_bytes: bytes,
+      custody: bindings,
+      custody_state: state
+    }
+  end
+
+  defp with_custody_store(path, fun) do
+    {:ok, actor} = Store.start_link(path: path)
+    monitor = Process.monitor(actor)
+
+    try do
+      {:ok, port} = Loopex.Store.new(Store, actor)
+      fun.(port)
+    after
+      try do
+        if Process.alive?(actor), do: assert(:ok == GenServer.stop(actor, :normal, @grace))
+      after
+        assert_receive {:DOWN, ^monitor, :process, ^actor, _}, @grace
+      end
+    end
+  end
+
+  defp assert_custody_history(fixture) do
+    path = Path.join(fixture.destination, "store.log")
+    assert File.read!(path) == fixture.store_bytes
+    {:ok, frames, :complete} = Log.decode_bytes(File.read!(path))
+    assert {:ok, state} = State.replay(frames)
+    assert state == fixture.custody_state
+
+    with_custody_store(path, fn port ->
+      assert {:ok, %{head: %{owner_generation: 1, active_command_id: nil}, command: nil}} =
+               Loopex.Store.creation_recovery(port, %{runtime_id: "custody-head", command_id: nil})
+
+      assert {:not_committed, :stale_creation_generation} =
+               Loopex.Store.transact(port, fixture.custody.refusal)
+
+      for {runtime, expected} <- fixture.custody.commands do
+        assert Loopex.Store.creation_recovery(port, %{
+                 runtime_id: runtime,
+                 command_id: "original-command"
+               }) ==
+                 {:ok, expected.retained}
+
+        assert expected.retained.command.genesis == expected.final.genesis
+
+        if expected.terminal do
+          assert Loopex.Store.transact(port, expected.final) == expected.terminal
+        else
+          assert expected.retained.head.active_command_id == "original-command"
+          assert expected.retained.command.final_resolution == nil
+        end
+      end
+    end)
+
+    assert File.read!(path) == fixture.store_bytes
+  end
+
+  defp assert_custody_refusal(fixture, plan) do
+    owned = launch(plan)
+    {result, _events} = finish(owned)
+
+    assert {:joined,
+            {:ok,
+             %{restore_result: {:not_committed, "invalid_current_history"}, release_claims: []}},
+            evidence} = result
+
+    assert evidence.restore.intent == false and evidence.claim_count == 0
+    assert evidence.opens == evidence.closes
+    assert File.ls!(fixture.destination) == []
+    assert manifest(fixture.source) == fixture.baseline
+    assert manifest(fixture.backup) == fixture.baseline
+    assert Enum.all?(claims(plan), &(File.lstat(&1) == {:error, :enoent}))
+    exact_joins(owned)
+  end
+
+  defp damage_custody_frames(frames, :missing_claim) do
+    Enum.reject(frames, fn frame ->
+      frame.transaction.type == :claim_creation_domain and
+        frame.transaction.runtime_id == "custody-active"
+    end)
+  end
+
+  defp damage_custody_frames(frames, :missing_reservation) do
+    Enum.reject(frames, fn frame ->
+      frame.transaction.type == :reserve_creation and
+        frame.transaction.runtime_id == "custody-cancelled"
+    end)
+  end
+
+  defp damage_custody_frames(frames, :altered_candidate) do
+    Enum.map(frames, fn frame ->
+      if frame.transaction.type == :reserve_creation and
+           frame.transaction.runtime_id == "custody-active" do
+        changed =
+          put_in(frame.transaction.genesis, ["options", "workspace_ref"], "altered-candidate")
+
+        %{frame | transaction: %{frame.transaction | genesis: changed}}
+      else
+        frame
+      end
+    end)
+  end
+
   defp actual_cut(root, source_parent \\ nil, object_mode \\ :with_helpers) do
     assert object_mode in [:with_helpers, :without_helpers]
     source = Path.join(source_parent || root, "source")
@@ -2338,6 +2976,8 @@ defmodule LoopexComposition.RestoreWorkflowTest do
     genesis = Loopex.ConfiguredGenesisFixture.genesis(definitions)
     genesis = %{genesis | "runtime_configuration" => %{"cleanup_grace_ms" => @grace}}
 
+    preparation_cutoff = System.monotonic_time(:millisecond) + 1_000
+
     assert {:ok, runtime} =
              Loopex.start_link(
                runtime_id: @runtime,
@@ -2375,6 +3015,9 @@ defmodule LoopexComposition.RestoreWorkflowTest do
         end
       end
     end)
+
+    readiness_cutoff = await_fixture_creation_ready(runtime, preparation_cutoff)
+    fixture_startup_remaining(readiness_cutoff)
 
     assert {:ok, session} =
              Loopex.create_session(runtime, %{}, command_id: "create", genesis: genesis)
@@ -2603,6 +3246,8 @@ defmodule LoopexComposition.RestoreWorkflowTest do
           ])
       )
 
+    preparation_cutoff = System.monotonic_time(:millisecond) + 1_000
+
     assert {:ok, runtime} =
              Loopex.start_link(
                runtime_id: @runtime,
@@ -2628,6 +3273,8 @@ defmodule LoopexComposition.RestoreWorkflowTest do
              )
 
     runtime_owner = workspace_owner(runtime.supervisor)
+    readiness_cutoff = await_fixture_creation_ready(runtime, preparation_cutoff)
+    fixture_startup_remaining(readiness_cutoff)
 
     assert Loopex.resume_session(runtime, fixture.session, command_id: command_id) ==
              {:ok, fixture.session}
@@ -2659,6 +3306,40 @@ defmodule LoopexComposition.RestoreWorkflowTest do
     assert binary_part(restored_store, 0, byte_size(fixture.store_bytes)) == fixture.store_bytes
     assert workspace_receipt_payloads(restored_store, fixture.session) == receipt_payloads
     history
+  end
+
+  # Concept: direct real-runtime fixtures observe creation readiness before use.
+  # Technical depth: the canonical ConfiguredGenesisFixture already allows one
+  # 1,000 ms startup observation. Capture it before direct start, pin the native
+  # public identity/cutoff, and spend only the smaller original interval. No
+  # Store mutation, create retry, private Control read or new grace is involved.
+  defp await_fixture_creation_ready(runtime, cutoff, pinned \\ nil) do
+    remaining = fixture_startup_remaining(cutoff)
+
+    assert {:ok, %{state: state, startup_id: id, startup_deadline_ms: core_cutoff} = snapshot} =
+             Loopex.creation_startup_status(runtime, min(1_000, remaining))
+
+    assert map_size(snapshot) == 3
+    assert is_binary(id) and byte_size(id) == 32 and is_integer(core_cutoff)
+    assert pinned in [nil, {id, core_cutoff}], "original fixture startup identity/cutoff changed"
+    assert state in [:starting, :ready], "original fixture creation startup is unavailable"
+    cutoff = min(cutoff, core_cutoff)
+    remaining = fixture_startup_remaining(cutoff)
+
+    case state do
+      :ready ->
+        cutoff
+
+      :starting ->
+        Process.sleep(min(10, remaining))
+        await_fixture_creation_ready(runtime, cutoff, {id, core_cutoff})
+    end
+  end
+
+  defp fixture_startup_remaining(cutoff) do
+    remaining = cutoff - System.monotonic_time(:millisecond)
+    assert remaining > 0, "original fixture startup observation cutoff exhausted"
+    remaining
   end
 
   defp workspace_owner(actor) do
@@ -2881,6 +3562,160 @@ defmodule LoopexComposition.RestoreWorkflowTest do
 
     for {actor, monitor} <- actors,
         do: assert_receive({:DOWN, ^monitor, :process, ^actor, :normal}, 1_000)
+  end
+
+  # Concept: the validated facade must compare physically preserved modes.
+  # Technical depth: existing probe permits hold only the original manifest IO;
+  # the final mode acknowledgements identify complete staging, before any intent.
+  # Every receive and terminal-worker join uses the same original cleanup bound.
+  defp special_mode_public_finish(
+         owned,
+         fixture,
+         paths,
+         mode_count,
+         control,
+         events \\ [],
+         phase \\ nil,
+         applied \\ 0,
+         copied \\ nil
+       ) do
+    guardian = owned.guardian
+    reference = owned.reference
+    tag = owned.tag
+
+    receive do
+      {:restore_io, ^guardian, worker, ^reference, event} ->
+        if match?({:terminal_release_installed, _}, event) do
+          assert worker != owned.worker
+          assert Process.alive?(worker)
+          monitors = Process.get({:restore_release_monitors, reference})
+          assert monitors == []
+          Process.put({:restore_release_monitors, reference}, [{worker, Process.monitor(worker)}])
+
+          on_exit(fn ->
+            if Process.alive?(worker) do
+              monitor = Process.monitor(worker)
+              Process.exit(worker, :kill)
+              assert_receive {:DOWN, ^monitor, :process, ^worker, _}, 1_000
+            end
+          end)
+        end
+
+        release_actors = Process.get({:restore_release_monitors, reference})
+        assert worker == owned.worker or Enum.any?(release_actors, &(elem(&1, 0) == worker))
+
+        phase =
+          if match?({:issued, _, {:restore_phase, _}}, event),
+            do: elem(elem(event, 2), 1),
+            else: phase
+
+        applied =
+          if phase == "baseline_copy" and match?({:acknowledged, _, :mode, :completed}, event),
+            do: applied + 1,
+            else: applied
+
+        copied =
+          case event do
+            {:issued, id, :manifest_stat} ->
+              observed =
+                if worker == owned.worker and phase == "baseline_copy" and
+                     applied == mode_count and is_nil(copied) do
+                  assert System.monotonic_time(:millisecond) < owned.work_cutoff
+                  before = special_mode_manifest(fixture.destination, paths)
+
+                  if control == :normalize do
+                    assert before == fixture.baseline
+                    path = Path.join(fixture.destination, "special-nested/inner/all")
+
+                    # Concept: a real changed special bit must fence publication.
+                    # Technical depth: full baseline equality above includes
+                    # this file's 6750; remove setgid only, then let the audit decide.
+                    assert Bitwise.band(File.lstat!(path).mode, 0o7777) == 0o6750
+
+                    assert {"", 0} =
+                             System.cmd("python3", [
+                               "-c",
+                               "import os,sys; p=sys.argv[1]; g=os.getegid(); os.chown(p,-1,g); os.lstat(p).st_gid==g or sys.exit(1); os.chmod(p,0o4750)",
+                               path
+                             ])
+
+                    assert Bitwise.band(File.lstat!(path).mode, 0o7777) == 0o4750
+                  end
+
+                  actual = special_mode_manifest(fixture.destination, paths)
+                  {:ok, expected_entries} = RestoreCodec.manifest(fixture.baseline, @total)
+                  {:ok, actual_entries} = RestoreCodec.manifest(actual, @total)
+
+                  assert Enum.map(actual_entries, &Map.delete(&1, "mode")) ==
+                           Enum.map(expected_entries, &Map.delete(&1, "mode"))
+
+                  assert System.monotonic_time(:millisecond) < owned.work_cutoff
+                  actual
+                else
+                  copied
+                end
+
+              if worker == owned.worker and phase == "destination_intent" do
+                assert observed == fixture.baseline
+                assert special_mode_manifest(fixture.destination, paths) == fixture.baseline
+              end
+
+              send(guardian, {:proceed, reference, id})
+              observed
+
+            _ ->
+              copied
+          end
+
+        special_mode_public_finish(
+          owned,
+          fixture,
+          paths,
+          mode_count,
+          control,
+          [event | events],
+          phase,
+          applied,
+          copied
+        )
+
+      {^tag, result} ->
+        assert not is_nil(copied)
+        assert System.monotonic_time(:millisecond) < owned.work_cutoff + 10_000
+        {result, Enum.reverse(events), copied}
+    after
+      max(0, owned.work_cutoff + 10_000 - System.monotonic_time(:millisecond)) ->
+        flunk("public special-mode restore exceeded its original work/cleanup cutoff")
+    end
+  end
+
+  defp special_mode_manifest(root, paths) do
+    entries =
+      for relative <- paths do
+        path = if relative == ".", do: root, else: Path.join(root, relative)
+        info = File.lstat!(path)
+        assert info.type in [:directory, :regular]
+
+        if info.type == :directory do
+          children =
+            for candidate <- paths,
+                candidate != ".",
+                Path.dirname(candidate) == relative,
+                do: Path.basename(candidate)
+
+          assert Enum.sort(File.ls!(path)) == Enum.sort(children)
+        end
+
+        %{
+          "path" => relative,
+          "kind" => if(info.type == :directory, do: "directory", else: "regular"),
+          "mode" => Bitwise.band(info.mode, 0o7777),
+          "size" => if(info.type == :directory, do: 0, else: info.size),
+          "sha256" => if(info.type == :directory, do: nil, else: hash(File.read!(path)))
+        }
+      end
+
+    :erlang.term_to_binary(["loopex:current-state-manifest:v1", entries], [:deterministic])
   end
 
   defp effect_rows(runtime, session, cursor, rows) do

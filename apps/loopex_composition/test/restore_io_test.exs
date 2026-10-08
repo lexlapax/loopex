@@ -493,6 +493,271 @@ defmodule LoopexComposition.RestoreIOTest do
     end
   end
 
+  for control <- [:preserve, :normalize] do
+    modes = %{
+      "." => 0o3750,
+      "empty" => 0o1750,
+      "nested" => 0o2750,
+      "nested/inner" => 0o4750,
+      "nested/inner/all" => 0o7750,
+      "setgid" => 0o2750,
+      "sticky" => 0o1750
+    }
+
+    # Concept: the negative control starts from a naturally exact native copy.
+    # Technical depth: OTP 29.0.5 unix_prim_file.c:769-780 excludes
+    # S_ISVTX in efile_set_permissions.
+    # Preserve keeps every imported special bit and requires exact copy or
+    # precise refusal; only this control's initial fixture omits sticky.
+    modes =
+      if control == :normalize,
+        do: Map.new(modes, fn {path, mode} -> {path, Bitwise.band(mode, 0o6777)} end),
+        else: modes
+
+    test "real special-mode restore #{control} compares root directories and remaining regular bits before publication",
+         context do
+      control = unquote(control)
+      root = physical_root(context.root)
+      source = Path.join(root, "special-source")
+      backup = Path.join(root, "special-backup")
+      destination = Path.join(root, "special-destination")
+      workspace = Path.join(root, "special-workspace")
+
+      for path <- [source, backup, destination, workspace] do
+        File.mkdir!(path)
+        File.chmod!(path, 0o700)
+      end
+
+      # Concept: special-mode fixtures select an eligible temporary directory group.
+      # Technical depth: group identity is outside the mode manifest; verify the
+      # fresh destination group before its native restore copies any entries.
+      assert {destination_group, 0} =
+               System.cmd("python3", [
+                 "-c",
+                 "import os,sys; p=sys.argv[1]; g=os.getegid(); os.chown(p,-1,g); print(g)",
+                 destination
+               ])
+
+      assert File.lstat!(destination).gid ==
+               String.to_integer(String.trim(destination_group))
+
+      modes = unquote(Macro.escape(modes))
+
+      contents = %{
+        "nested/inner/all" => :binary.copy(<<0, 255, 1, 2>>, 40_000),
+        "setgid" => "retained setgid bytes",
+        "sticky" => ""
+      }
+
+      for state_root <- [source, backup] do
+        File.mkdir!(Path.join(state_root, "empty"))
+        File.mkdir_p!(Path.join(state_root, "nested/inner"))
+        for {relative, bytes} <- contents, do: File.write!(Path.join(state_root, relative), bytes)
+
+        for {relative, mode} <- modes do
+          path = if relative == ".", do: state_root, else: Path.join(state_root, relative)
+
+          assert {"", 0} =
+                   System.cmd("python3", [
+                     "-c",
+                     "import os,sys; p=sys.argv[1]; g=os.getegid(); os.chown(p,-1,g); os.lstat(p).st_gid==g or sys.exit(1); os.chmod(p,int(sys.argv[2]))",
+                     path,
+                     Integer.to_string(mode)
+                   ])
+
+          assert Bitwise.band(File.lstat!(path).mode, 0o7777) == mode
+        end
+      end
+
+      paths = Enum.sort(Map.keys(modes))
+      baseline = special_mode_manifest(backup, paths)
+      assert special_mode_manifest(source, paths) == baseline
+      {:ok, lineage} = RestoreCodec.lineage_digest([])
+
+      placement = fn path ->
+        info = File.lstat!(path)
+        %{"expanded_root" => path, "major_device" => info.major_device, "inode" => info.inode}
+      end
+
+      original =
+        Map.new([source, backup], fn state_root ->
+          {state_root,
+           Map.new(paths, fn relative ->
+             path = if relative == ".", do: state_root, else: Path.join(state_root, relative)
+             {relative, placement.(path)}
+           end)}
+        end)
+
+      workspace_identity = placement.(workspace)
+
+      workspace_ref =
+        LoopexComposition.WorkspaceIdentity.from_verified_root(
+          workspace,
+          {workspace_identity["major_device"], workspace_identity["inode"]}
+        )
+
+      plan = %{
+        "version" => 1,
+        "tx_id" => hash("special-mode-original-restore-#{control}"),
+        "source_state_root" => source,
+        "source_state_placement" => placement.(source),
+        "source_status" => "available",
+        "backup_state_root" => backup,
+        "destination_state_root" => destination,
+        "manifest_sha256" => hash(baseline),
+        "cut_id" => hash("joined-special-mode-cut"),
+        "prior_restore_count" => 0,
+        "prior_lineage_sha256" => lineage,
+        "runtime_ids" => [],
+        "stores" => [],
+        "ledgers" => [],
+        "workspace" => %{"root" => workspace, "workspace_ref" => workspace_ref},
+        "host_attestation" => %{
+          "latest_cut" => true,
+          "no_post_cut_activity" => true,
+          "all_other_copies_excluded" => true,
+          "old_authority_termination" => "joined",
+          "host_ledgers_validated" => true,
+          "evidence_sha256" => hash("exact-mode-fixture-writers-returned")
+        }
+      }
+
+      invocation = %{
+        "work_ms" => 1_000,
+        "cleanup_grace_ms" => 100,
+        "max_total_file_bytes" => 1_048_576,
+        "prior_admin_authority" => "none",
+        "prior_admin_evidence_sha256" => nil
+      }
+
+      assert {:ok, _} = RestoreCodec.encode(:plan, plan)
+      assert {:ok, _} = RestoreCodec.encode(:invocation, invocation)
+      owned = launch({:restore_first, plan, invocation}, :manifest_stat)
+
+      fixture = %{
+        destination: destination,
+        baseline: baseline,
+        paths: paths,
+        modes: modes,
+        contents: contents,
+        control: control,
+        # Concept: observe the complete copied baseline before the audit.
+        # Technical depth: each regular file has two mode acknowledgements;
+        # each directory has its final mode plus initial 0700, except the root.
+        mode_count:
+          2 * map_size(contents) +
+            2 * (map_size(modes) - map_size(contents)) - 1
+      }
+
+      {result, events, release, copied} =
+        drive_special_mode_restore(owned, fixture, owned.work_cutoff + 10_000)
+
+      assert {:joined, {:ok, %{restore_result: outcome, release_claims: []}}, evidence} = result
+      assert evidence.opens == evidence.closes and evidence.opens > 0
+      assert evidence.work_cutoff == owned.work_cutoff and evidence.stop == :complete
+
+      [{_actor, {:stopping, :complete, stopped, cleanup_cutoff}}] =
+        Enum.filter(events, fn {_actor, event} -> match?({:stopping, :complete, _, _}, event) end)
+
+      assert cleanup_cutoff == stopped + 10_000 and cleanup_cutoff == evidence.cleanup_cutoff
+      assert System.monotonic_time(:millisecond) < evidence.cleanup_cutoff
+      joined(owned)
+      assert System.monotonic_time(:millisecond) < evidence.cleanup_cutoff
+
+      if copied == baseline do
+        assert {:committed, receipt} = outcome
+        assert receipt["tx_id"] == plan["tx_id"]
+        assert receipt["baseline_manifest_sha256"] == hash(baseline)
+        assert receipt["cut_id"] == plan["cut_id"]
+        assert receipt["ledger_count"] == 0
+        assert {:ok, _} = RestoreCodec.encode(:receipt, receipt)
+        assert %{worker: actor, monitor: monitor, cleanup_cutoff: cutoff} = release
+        assert cutoff == evidence.cleanup_cutoff
+        assert_receive {:DOWN, ^monitor, :process, ^actor, :normal}, 1_000
+        assert System.monotonic_time(:millisecond) < cutoff
+
+        for state_root <- [source, destination] do
+          {:ok, digest} = RestoreCodec.claim_digest(state_root)
+
+          assert File.lstat(Path.join(root, ".loopex-restore-claim-" <> digest)) ==
+                   {:error, :enoent}
+        end
+      else
+        assert {:not_committed, "inventory_mismatch"} = outcome
+        assert is_nil(release)
+        assert evidence.restore.intent == false and evidence.claim_count == 2
+        assert File.lstat(Path.join(destination, ".loopex-restore")) == {:error, :enoent}
+
+        assert {:error, :restore_incomplete} =
+                 Loopex.Executor.Local.RestoreGuard.state(destination)
+
+        refute Enum.any?(events, fn {_actor, event} ->
+                 match?({:issued, _, {:restore_phase, "destination_intent"}}, event)
+               end)
+      end
+
+      for state_root <- [source, backup] do
+        assert expected_manifest(state_root, paths) == baseline
+
+        for relative <- paths do
+          path = if relative == ".", do: state_root, else: Path.join(state_root, relative)
+          assert placement.(path) == original[state_root][relative]
+
+          destination_path =
+            if relative == ".", do: destination, else: Path.join(destination, relative)
+
+          refute placement.(destination_path) == original[state_root][relative]
+        end
+      end
+
+      assert special_mode_manifest(backup, paths) == baseline
+      acknowledged = for {_actor, {:acknowledged, _, kind, status}} <- events, do: {kind, status}
+
+      assert Enum.count(acknowledged, fn {kind, status} ->
+               match?({:close, _}, kind) and status == :closed
+             end) == evidence.closes
+
+      assert Enum.count(acknowledged, &(&1 == {:file_sync, :completed})) >= map_size(contents)
+      assert Enum.count(acknowledged, &(&1 == {:directory_sync, :completed})) >= 4
+
+      if copied == baseline do
+        administrative =
+          ~w(.loopex-restore .loopex-restore/lineage .loopex-restore/lineage/00000001)
+
+        source_additions =
+          administrative ++
+            Enum.map(
+              ~w(intent source-retirement),
+              &Path.join(".loopex-restore/lineage/00000001", &1)
+            )
+
+        destination_additions =
+          administrative ++
+            Enum.map(
+              ~w(baseline intent source-retirement committed),
+              &Path.join(".loopex-restore/lineage/00000001", &1)
+            )
+
+        for {state_root, additions} <- [
+              {source, source_additions},
+              {destination, destination_additions}
+            ] do
+          full = special_mode_manifest(state_root, Enum.sort(paths ++ additions))
+          assert {:ok, full_entries} = RestoreCodec.manifest(full, 1_048_576)
+
+          for entry <- full_entries, entry["path"] in additions do
+            assert entry["mode"] == if(entry["kind"] == "directory", do: 0o700, else: 0o600)
+          end
+        end
+
+        assert expected_manifest(destination, paths) == baseline
+      else
+        assert special_mode_manifest(source, paths) == baseline
+        assert special_mode_manifest(destination, paths) == copied
+      end
+    end
+  end
+
   test "both regular-file publication paths reapply the full mode after the final payload write",
        context do
     root = physical_root(context.root)
@@ -845,6 +1110,54 @@ defmodule LoopexComposition.RestoreIOTest do
     joined(owned)
   end
 
+  test "physical Store audit retains custody-only and closed namespaces without sessions for pending work",
+       context do
+    fixture = store_fixture(context.root, 0)
+    selection = String.duplicate("d", 64)
+    {:ok, claim} = Store.claim_creation_domain("pending-only", 0, selection)
+    fixture = append_transaction(fixture, claim)
+
+    {:ok, reserve} =
+      Store.reserve_creation(
+        "pending-only",
+        "pending",
+        1,
+        selection,
+        0,
+        ConfiguredGenesisFixture.genesis([])
+      )
+
+    fixture = append_transaction(fixture, reserve)
+    {:ok, refused} = Store.claim_creation_domain("refusal-only", 1, selection)
+
+    assert {:new, state, frame, {:not_committed, :stale_creation_generation}} =
+             State.prepare(fixture.state, refused)
+
+    frames = fixture.frames ++ [frame]
+    bytes = fixture.bytes <> encoded_frame(frame)
+    File.write!(fixture.path, bytes)
+    fixture = %{fixture | state: state, frames: frames, bytes: bytes}
+    fixture = append_created_fixture(fixture, "created", "created")
+    owned = launch(store_operation(fixture), :store_replay)
+    assert {{:joined, {:ok, facts}, evidence}, events} = drive(owned)
+    assert facts.store == fixture.state
+    assert map_size(facts.sessions) == 1
+    assert facts.store.creation_heads["pending-only"].active_command_id == "pending"
+    assert facts.store.creation_capsules[{"pending-only", "pending"}].state == :reserved
+    refute Map.has_key?(facts.store.runtime_commands, "pending-only")
+    refute Map.has_key?(facts.store.creation_heads, "refusal-only")
+
+    assert facts.store.creation_resolutions[
+             {"refusal-only", :claim_creation_domain, refused.tx_id}
+           ].resolution ==
+             %{status: :not_committed, reason: :stale_creation_generation}
+
+    assert evidence.opens == 1 and evidence.closes == 1
+    assert Enum.count(issued_kinds(events), &(&1 == :session_recover)) == 1
+    assert File.read!(fixture.path) == fixture.bytes
+    joined(owned)
+  end
+
   test "an existing empty Store file audits as an empty complete history", context do
     fixture = store_fixture(context.root, 1)
     File.write!(fixture.path, <<>>)
@@ -918,19 +1231,41 @@ defmodule LoopexComposition.RestoreIOTest do
 
   test "Store-valid invalid second-session history refuses after the first session recovers",
        context do
-    fixture = store_fixture(context.root, 1)
-    bad = Map.put(ConfiguredGenesisFixture.genesis([]), :kind, "session_genesis_v2")
-    [first] = fixture.ids
+    fixture = store_fixture(context.root, 2)
+    [first, second] = fixture.ids
+    assert first < second
+    head = fixture.state.sessions[second]
 
-    transaction =
-      Enum.find_value(1..100, fn number ->
-        {:ok, transaction} = Store.create_session("audit-runtime", "create-bad-#{number}", bad)
-        {:new, next, _frame, _outcome} = State.prepare(fixture.state, transaction)
-        [second] = Map.keys(next.sessions) -- [first]
-        if second > first, do: transaction
-      end)
+    {:ok, owner} =
+      Store.advance_owner(
+        second,
+        "owner",
+        "invalid-history-owner",
+        0,
+        head.journal_version,
+        "invalid-history-owner"
+      )
 
-    assert transaction
+    assert {:new, _, _, {:committed, _, _}} = State.prepare(fixture.state, owner)
+    fixture = append_transaction(fixture, owner)
+    head = fixture.state.sessions[second]
+
+    # Concept: Store validity does not establish session-history validity.
+    # Technical depth: a current genesis record is invalid after the real
+    # genesis and owner succession; the correctly fenced Store still commits it.
+    {:ok, transaction} =
+      Store.session_commit(
+        second,
+        "session",
+        "invalid-history",
+        head.owner_epoch,
+        head.owner_incarnation_id,
+        head.journal_version,
+        [%{kind: "session_genesis_v3"}],
+        []
+      )
+
+    assert {:new, _, _, {:committed, _, _}} = State.prepare(fixture.state, transaction)
     fixture = append_transaction(fixture, transaction)
     assert {:ok, replayed} = State.replay(fixture.frames)
     assert replayed == fixture.state
@@ -3341,6 +3676,15 @@ defmodule LoopexComposition.RestoreIOTest do
     end
   end
 
+  defp store_fixture(root, 0) do
+    root = physical_root(root)
+    directory = Path.join(root, "store")
+    File.mkdir!(directory)
+    path = Path.join(directory, "history.log")
+    File.write!(path, <<>>)
+    %{root: root, path: path, state: State.new(), frames: [], bytes: <<>>, ids: []}
+  end
+
   defp store_fixture(root, count) do
     root = physical_root(root)
     directory = Path.join(root, "store")
@@ -3348,6 +3692,8 @@ defmodule LoopexComposition.RestoreIOTest do
     path = Path.join(directory, "history.log")
     File.write!(path, <<>>)
     initial = %{root: root, path: path, state: State.new(), frames: [], bytes: <<>>, ids: []}
+    {:ok, claim} = Store.claim_creation_domain("audit-runtime", 0, String.duplicate("a", 64))
+    initial = append_transaction(initial, claim)
 
     Enum.reduce(1..count, initial, fn number, fixture ->
       {:ok, transaction} =
@@ -3357,12 +3703,63 @@ defmodule LoopexComposition.RestoreIOTest do
           ConfiguredGenesisFixture.genesis([])
         )
 
-      append_transaction(fixture, transaction)
+      head = fixture.state.creation_heads[transaction.runtime_id]
+
+      {:ok, reserve} =
+        Store.reserve_creation(
+          transaction.runtime_id,
+          transaction.command_id,
+          head.owner_generation,
+          head.owner_selection,
+          head.domain_version,
+          transaction.genesis
+        )
+
+      fixture = append_transaction(fixture, reserve)
+      fixture = append_transaction(fixture, transaction)
+      assert map_size(fixture.state.sessions) == number
+      fixture
     end)
   end
 
+  # Concept: every fixture session has current-format custody before final creation.
+  # Technical depth: pure reducers produce the exact frames written by the physical
+  # audit fixture; this is not a live Control dispatch or activation proof.
+  defp fixture_creation_transactions(state, runtime, command) do
+    {:ok, %{head: head}} = State.creation_recovery(state, %{runtime_id: runtime, command_id: nil})
+    selection = String.duplicate("c", 64)
+    {:ok, claim} = Store.claim_creation_domain(runtime, head.owner_generation, selection)
+    {:new, claimed, _frame, {:committed, _, receipt}} = State.prepare(state, claim)
+
+    {:ok, reserve} =
+      Store.reserve_creation(
+        runtime,
+        command,
+        receipt.owner_generation,
+        receipt.owner_selection,
+        receipt.domain_version,
+        ConfiguredGenesisFixture.genesis([])
+      )
+
+    {:new, _reserved, _frame, {:committed, _, _}} = State.prepare(claimed, reserve)
+    {:ok, final} = Store.create_session(runtime, command, reserve.genesis)
+    [claim, reserve, final]
+  end
+
+  defp append_created_fixture(fixture, runtime, command) do
+    fixture_creation_transactions(fixture.state, runtime, command)
+    |> Enum.reduce(fixture, &append_transaction(&2, &1))
+  end
+
   defp append_transaction(fixture, transaction) do
-    {:new, state, frame, _outcome} = State.prepare(fixture.state, transaction)
+    {:new, state, frame, outcome} = State.prepare(fixture.state, transaction)
+
+    # Concept: fixture sessions use the current original creation custody.
+    # Technical depth: a refused final creation must not masquerade as a
+    # populated Store. Preserve ordinary orphan refusals outside these families.
+    if transaction.type in [:claim_creation_domain, :reserve_creation, :create_session],
+      do: assert(match?({:committed, _, _}, outcome))
+
     frames = fixture.frames ++ [frame]
     bytes = fixture.bytes <> encoded_frame(frame)
     File.write!(fixture.path, bytes)
@@ -4359,6 +4756,158 @@ defmodule LoopexComposition.RestoreIOTest do
       max(cutoff - System.monotonic_time(:millisecond), 0) ->
         flunk("original restore did not finish within its captured work/cleanup cutoff")
     end
+  end
+
+  # Concept: the mode gate observes actual complete staging before its audit.
+  # Technical depth: final directory-mode acknowledgements precede this held
+  # manifest primitive. Only measured mode inequality admits inventory_mismatch;
+  # all observations and original actor joins spend the original captured cutoff.
+  defp drive_special_mode_restore(
+         owned,
+         fixture,
+         cutoff,
+         events \\ [],
+         phase \\ nil,
+         modes \\ 0,
+         copied \\ nil,
+         release \\ nil
+       ) do
+    guardian = owned.guardian
+    reference = owned.reference
+    tag = owned.tag
+
+    receive do
+      {:restore_io, ^guardian, worker, ^reference, event} ->
+        release =
+          case event do
+            {:terminal_release_installed, cleanup_cutoff} ->
+              assert is_nil(release) and worker != owned.worker
+              assert Process.alive?(worker)
+              monitor = Process.monitor(worker)
+
+              on_exit(fn ->
+                if Process.alive?(worker) do
+                  cleanup_monitor = Process.monitor(worker)
+                  Process.exit(worker, :kill)
+                  assert_receive {:DOWN, ^cleanup_monitor, :process, ^worker, _}, 1_000
+                end
+              end)
+
+              %{worker: worker, monitor: monitor, cleanup_cutoff: cleanup_cutoff}
+
+            _ ->
+              release
+          end
+
+        assert worker == owned.worker or (release && worker == release.worker)
+
+        phase =
+          if match?({:issued, _, {:restore_phase, _}}, event),
+            do: elem(elem(event, 2), 1),
+            else: phase
+
+        modes =
+          if phase == "baseline_copy" and match?({:acknowledged, _, :mode, :completed}, event),
+            do: modes + 1,
+            else: modes
+
+        copied =
+          case event do
+            {:issued, id, :manifest_stat} ->
+              observed =
+                if worker == owned.worker and phase == "baseline_copy" and
+                     modes == fixture.mode_count and is_nil(copied) do
+                  assert System.monotonic_time(:millisecond) < owned.work_cutoff
+                  before = special_mode_manifest(fixture.destination, fixture.paths)
+
+                  if fixture.control == :normalize do
+                    assert before == fixture.baseline
+                    path = Path.join(fixture.destination, "nested/inner/all")
+
+                    # Concept: a real changed special bit must fence publication.
+                    # Technical depth: full baseline equality above includes
+                    # this file's 6750; remove setgid only, then let the audit decide.
+                    assert Bitwise.band(File.lstat!(path).mode, 0o7777) == 0o6750
+
+                    assert {"", 0} =
+                             System.cmd("python3", [
+                               "-c",
+                               "import os,sys; p=sys.argv[1]; g=os.getegid(); os.chown(p,-1,g); os.lstat(p).st_gid==g or sys.exit(1); os.chmod(p,0o4750)",
+                               path
+                             ])
+
+                    assert Bitwise.band(File.lstat!(path).mode, 0o7777) == 0o4750
+                  end
+
+                  actual = special_mode_manifest(fixture.destination, fixture.paths)
+                  {:ok, expected_entries} = RestoreCodec.manifest(fixture.baseline, 1_048_576)
+                  {:ok, actual_entries} = RestoreCodec.manifest(actual, 1_048_576)
+
+                  assert Enum.map(actual_entries, &Map.delete(&1, "mode")) ==
+                           Enum.map(expected_entries, &Map.delete(&1, "mode"))
+
+                  for {relative, bytes} <- fixture.contents,
+                      do: assert(File.read!(Path.join(fixture.destination, relative)) == bytes)
+
+                  assert System.monotonic_time(:millisecond) < owned.work_cutoff
+                  actual
+                else
+                  copied
+                end
+
+              if worker == owned.worker and phase == "destination_intent" do
+                assert observed == fixture.baseline
+
+                assert special_mode_manifest(fixture.destination, fixture.paths) ==
+                         fixture.baseline
+              end
+
+              send(guardian, {:proceed, reference, id})
+              observed
+
+            _ ->
+              copied
+          end
+
+        drive_special_mode_restore(
+          owned,
+          fixture,
+          cutoff,
+          [{worker, event} | events],
+          phase,
+          modes,
+          copied,
+          release
+        )
+
+      {^tag, result} ->
+        assert not is_nil(copied)
+        assert System.monotonic_time(:millisecond) < cutoff
+        {result, Enum.reverse(events), release, copied}
+    after
+      max(cutoff - System.monotonic_time(:millisecond), 0) ->
+        flunk("special-mode restore exceeded its original work/cleanup cutoff")
+    end
+  end
+
+  defp special_mode_manifest(root, paths) do
+    for relative <- paths do
+      path = if relative == ".", do: root, else: Path.join(root, relative)
+      info = File.lstat!(path)
+      assert info.type in [:directory, :regular]
+
+      if info.type == :directory do
+        children =
+          for candidate <- paths,
+              candidate != ".",
+              Path.dirname(candidate) == relative,
+              do: Path.basename(candidate)
+
+        assert Enum.sort(File.ls!(path)) == Enum.sort(children)
+      end
+    end
+
+    expected_manifest(root, paths)
   end
 
   defp drive(owned, proceed \\ true, events \\ []) do

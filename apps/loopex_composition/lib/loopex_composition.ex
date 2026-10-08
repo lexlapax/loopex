@@ -83,6 +83,11 @@ defmodule LoopexComposition do
   without refreshing its instructions or model facts. Reopened sessions keep
   their committed settings even when the new runtime uses different defaults.
 
+  Successful acquisition requires Core's original creation startup barrier,
+  before its retained cutoff. Composition owns its runtime while observing
+  that barrier, before trace binding or publication. Startup unavailability or
+  expiry uses owned cleanup; it issues no create or recovery request.
+
   `:model` selects a hosted `provider:model` string; Ollama is refused by this
   credential-backed durable profile. `:bounds` accepts positive unsigned-64-bit
   `:max_turns`, `:token_budget` and `:deadline_ms` members. `:sampling` accepts
@@ -128,7 +133,8 @@ defmodule LoopexComposition do
   throws, and exits are reraised with their original stack after cleanup. A
   forced or unconfirmed stop returns `{:error, {:composition_cleanup_unconfirmed,
   details}}` for a normally returning callback. `start/1` retains its existing
-  independent-owner lifecycle.
+  independent-owner lifecycle. The callback begins only after timely creation
+  startup proof; an acquisition refusal never enters it.
   """
   @spec with_runtime(keyword(), (Loopex.Runtime.t() -> result)) ::
           result | {:error, term()}
@@ -152,7 +158,8 @@ defmodule LoopexComposition do
   `:credential_plane` map carrying `:capability` and the credential
   `:model_options`. `lifecycle` accepts only `:interrupt`, a zero-arity
   function evaluated before each of the Store, transfers, workspace
-  lease, executor and runtime; `{:stop, reason}` starts nothing further.
+  lease, executor and runtime, and during creation startup observation;
+  `{:stop, reason}` starts nothing further.
   Returns `{:ok, edges}` or `{:error, reason, partial_edges}` naming exactly
   the edges started, as `LoopexComposition.Edges` describes.
   """
@@ -235,7 +242,9 @@ defmodule LoopexComposition do
                  served_artifacts(options, spill) ++
                  Keyword.take(options, @host_supplied)
              ),
-           :ok <- Loopex.Trace.Capability.bind(credential_plane.capability, runtime) do
+           {:ok, startup_deadline} <- LoopexComposition.StartupGate.await(runtime),
+           :ok <- Loopex.Trace.Capability.bind(credential_plane.capability, runtime),
+           :ok <- LoopexComposition.StartupGate.publication({:ok, startup_deadline}) do
         Logger.debug("reference composition trace capability bound")
         {:ok, runtime}
       end

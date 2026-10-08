@@ -20,6 +20,8 @@ defmodule LoopexComposition.DelegationParentBindingTest do
     @impl Store
     defdelegate runtime_command(reference, command), to: Memory
     @impl Store
+    defdelegate creation_recovery(reference, request), to: Memory
+    @impl Store
     defdelegate ownership_head(reference, session, domain), to: Memory
     @impl Store
     defdelegate load_records(reference, session, after_version, limit), to: Memory
@@ -386,13 +388,13 @@ defmodule LoopexComposition.DelegationParentBindingTest do
     {:ok, store_pid} = Memory.start_link()
     on_exit(fn -> if Process.alive?(store_pid), do: GenServer.stop(store_pid) end)
     {:ok, store} = Store.new(NoHistoryStore, store_pid)
-    {:ok, transaction} = Store.create_session(capture.runtime, capture.command, capture.genesis)
-    assert {:committed, _, _} = Store.transact(store, transaction)
+    assert {:committed, _, _} = Fixture.commit_creation(store, capture)
 
     {:ok, runtime} =
       Loopex.start_link(runtime_id: capture.runtime, context_token_budget: 8_192, store: store)
 
     on_exit(fn -> if Runtime.alive?(runtime), do: Loopex.stop(runtime) end)
+    assert :ok = Fixture.await_startup(runtime)
     before = :sys.get_state(store_pid)
     assert ParentBinding.observe_creation(runtime, capture) == {:ok, :store_unavailable}
     assert before == :sys.get_state(store_pid)
@@ -418,8 +420,7 @@ defmodule LoopexComposition.DelegationParentBindingTest do
       options = if @adapter == Local, do: [path: Path.join(root, "store.log")], else: []
       {:ok, first} = @adapter.start_link(options)
       {:ok, store} = Store.new(@adapter, first)
-      {:ok, transaction} = Store.create_session(capture.runtime, capture.command, capture.genesis)
-      assert {:committed, _, receipt} = Store.transact(store, transaction)
+      assert {:committed, _, receipt} = Fixture.commit_creation(store, capture)
       session = receipt.session_id
 
       store_pid =
@@ -442,6 +443,7 @@ defmodule LoopexComposition.DelegationParentBindingTest do
         )
 
       on_exit(fn -> if Runtime.alive?(runtime), do: Loopex.stop(runtime) end)
+      assert :ok = Fixture.await_startup(runtime)
       {:ok, %{sessions: sessions}} = Runtime.children(runtime)
       assert DynamicSupervisor.which_children(sessions) == []
 
