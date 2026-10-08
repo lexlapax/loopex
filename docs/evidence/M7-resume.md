@@ -27,6 +27,70 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+### Core startup status proof and host repair, 2026-10-08
+
+The accepted ADR0063 Core implementation at
+`b7abd911fd28c31271f340222c5dfb44890413be` passes all15 new cases on both
+supported toolchains, including two real60-second cutoff cases. Original6185
+ended PASS in251.819seconds, with eight exact stage joins and34 verified
+artifacts. Output: `M7/creation-startup-status-core-20261008-v3`; terminal
+SHA-256 `1b2ecebea4e2c27929346eb6fd0fa4599f3cec1e9bd2498adb10103d4fe355cb`;
+collection `93587dca0a954158f1c9aee17ad08fecb8dcf6f148d5547a3f6553e7cf4d7f10`.
+Earlier source/fixture failures remain failed in v1/v2. This proof covers the
+new native snapshot, original identity/cutoff and original-actor assertions;
+physical actor joins after cutoff and complete host/caller integration remain
+separate open obligations.
+
+Host source is joined atf3a99ca1, formatter-only child
+`92cc5d956a7cfb94a6714c2415b121b129522d97`. All ten non-line ASTs match the
+worker source, and both toolchain formatters pass at original27046. The first
+format check30200 remains failed. Current host111-case original99586 FAILS:
+110pass, one actual held-Memory creator-loss cleanup failure, plus warnings in
+generated test cases. Elapsed120.037seconds, four exact stage joins. Output:
+`M7/creation-startup-hosts-focused-20261008-v1`; terminal
+`b4c7410c46ee329320895e8d6441381c0efd276a9caa01b6f5a811c6ffacdfe6`;
+collection `447537fc841eafbf3c361354391aafcab73d4b48ae932f45bc3ea3f286f805fa`.
+The floor host population was not run. Source review also identifies synchronous
+runtime-root/Workers observer admission as an interruption gap under suspended
+supervisors; repair is pending, with no cleanup or host-completion claim.
+
+External recovery manifest:
+`M7/coupled-current-context-20261008-v9/retention.json`, SHA-256
+`f5b4712770b32a6b1da05cb795e6b43bf70f40d3acc664630fe6395095533ac6`.
+It chains v8, retains20 assets, seven source commits, eight completed native
+records, a complete candidate patch and verified Git bundle. Its2376-row
+seed precedes adjacent-Core runs retained separately. Original53718 at92cc5d95
+FAILS with54/55 ordinary cases passing and two long-bound exclusions: the old
+RuntimeStart test issued create immediately after dispatcher readiness. Accepted
+ADR0063 requires separate original creation startup observation. The repair
+retains all twenty dispatcher/create/resume/cleanup sequences, pins the public
+identity/cutoff and spends one1,000-ms fixture observation bound before the one
+create. The failure remains failed; no create retry or production wait is added.
+
+Corrected candidate `8e7b8a3efdde268dc8039272c373b4c1466d9b50` passes all55
+adjacent ordinary Core cases on both pairs, with the two existing long-bound
+exclusions and zero skips/invalid cases. Original62345 passes in49.095seconds with eight exact stage joins and34
+verified artifacts. Output: `M7/creation-startup-core-adjacent-20261008-v2`;
+terminal `7395e510d06341d264983f2be75b94fc301161ca43de3a9ad476abdedc6c0437`;
+collection `ef36afc9ae66471118e4fae1e59082dfd8aaf79751d539dbe221abffeb989c90`.
+Its2392-row registry precedes later formatting attempts.
+
+The drained Socket unit is joined at ee092848, shared formatter-only child
+`9e57686a5d79b9f0d4a8520ad25f704b8667d1fb`. Its three non-line ASTs match the
+frozen source; both toolchain format checks pass at original88882. The first
+floor layout failure remains retained at original89728. Native original98205
+is now running the complete193-case Socket/Registry/Owner population, including
+its existing real long-bound case, on both pairs. No result is claimed while
+that original is live. Its admitted2399-row seed is in
+`M7/candidate-format-preparation-20261008-v13/stage-attempt-registry.json`,
+SHA-256 `47e593334b25be0c98e192bbf4075e6607b882133841ea04aa23cd57bdebcdcf`.
+The candidate is unserved; host repairs remain unfinished.
+Host and Socket workers continue source-only repairs in separate worktrees.
+No whole integration, serving activation or milestone closure occurs.
+
+T01–T19 totals remain originals88 done /85 remaining /6 retired and additions
+365 done /24 remaining. These focused proofs do not close the broader rows.
+
 ### ADR0063 accepted implementation, 2026-10-08
 
 The maintainer approved the exact recommended pair after the resumed proof.
