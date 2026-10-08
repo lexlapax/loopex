@@ -29,6 +29,47 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Reboot continuation on 2026-10-07
 
+Ownership complete74-case proof original50168 is LIVE at isolated
+`3c15f020c8faaa053ab1d5b53aa187d831a91101`, treee032285f. Poll that original
+handle through termination and collect once. Output
+`M7/attempt-ownership-replay-proof-20261007-v2`; enabled runner9bc765e5.
+Factual reviewb5735307 verifies37 actual keys/36 changed assignments and full
+reverse to reviewedf318a4a6. Root changed only the execution gate. Own formatter
+71527 is already collected PASS in10.429 seconds, six joins/38 artifacts:
+collection `64aa19d9e78ca75e889f0d846effefa2d74c8ce7a908e28b98972f7ca3066257`;
+terminal `b790770ce73f2bb7e86ae18ec23f7d06e6e61303e02f0a1ad133945d68ed3ad3`;
+registry1757 `cae7fa87f1915d7f48ad0ca5d137843bc8a54433d223fd9ab1d43d70f8a36f8d`.
+The actual formatted1189-record NUL projection hashese7830ded. Formatter cuts
+remain correctly at raw558d77fc with formatting dirt, not relabeled3c15.
+
+Cleanup proof68155 is integrated and pushed as `9e2c14d90e117511965405e966ec808b6933207e`;
+its worktree is archived with a recoverable snapshot. Ownership prejoinfbdff965
+proves exact original codec reconstruction and all supporting inputs. Only after
+a positive74 collection, integrate the two tested files and close the added
+ordered-ownership row. All10 original T14 rows remain open.
+
+The reviewed ownership/full-check/case-map inputs are retained at
+`M7/ownership-native-and-next-full-context-20261007-v1/retention.json`,
+SHA-256 `5bdd68e3a99c9560ebd1eda67fc4c7c590b1fdc242c49312736bbb9de9a2e9dc`,
+37 files, and `M7/ownership-native-proof-context-20261007-v1/retention.json`,
+SHA-256 `af55c2e9f1877a998655a6c3936f3974da1cc16c5ef431deab208bd026c113a0`,
+44 files. Full current check blueprint1f5935fa/collector95366319 has independent
+source-only review0cf1b33e; future integrated source and latest ownership facts
+remain unset, both gates disabled. Run the canonical full check only after
+actual binding/review, preserving old14854 FAIL.
+
+A separate writer owns only AttemptEvents and its test in isolated
+`/Users/spuri/.codex/worktrees/m7-attempt-case-replay/loopex`, baseline3c15,
+for accepted pure consumed case-history replay. Mapc476fbd5 fixes the slice;
+all original74 cases must be preserved. This is source-only and unproved,
+with no native/Git/registry authority. Same-state or reference choices outside
+the accepted core stay explicit unresolved private histories with originals
+retained, not invented invalid records or replacement truth. Public/persistent
+variants, full manifest/evidence/physical writer and dispatch remain separate.
+Original T01–T19 remain88 done/85 todo/6 retired; added352 done/23 todo after
+adding this implementation row. ADR0058 remains the sole asked pending approval.
+Earlier records below are historical where superseded.
+
 The resumed startup-cleanup repair is proved and literally integrated from
 isolated `2475a387fd953f6c529f78d721c219818b0c1fdc`. Original68155 is
 TERMINAL0 and collected PASS_RESUME_PREPARED_CLEANUP_PROOF:91 cases passed on
