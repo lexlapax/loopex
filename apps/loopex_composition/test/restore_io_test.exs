@@ -1158,19 +1158,28 @@ defmodule LoopexComposition.RestoreIOTest do
 
   test "Store-valid invalid second-session history refuses after the first session recovers",
        context do
-    fixture = store_fixture(context.root, 1)
-    bad = Map.put(ConfiguredGenesisFixture.genesis([]), :kind, "session_genesis_v2")
-    [first] = fixture.ids
+    fixture = store_fixture(context.root, 2)
+    [first, second] = fixture.ids
+    assert first < second
+    head = fixture.state.sessions[second]
 
-    transaction =
-      Enum.find_value(1..100, fn number ->
-        {:ok, transaction} = Store.create_session("audit-runtime", "create-bad-#{number}", bad)
-        {:new, next, _frame, _outcome} = State.prepare(fixture.state, transaction)
-        [second] = Map.keys(next.sessions) -- [first]
-        if second > first, do: transaction
-      end)
+    {:ok, owner} =
+      Store.advance_owner(second, "owner", "invalid-history-owner", 0,
+        head.journal_version, "invalid-history-owner")
 
-    assert transaction
+    assert {:new, _, _, {:committed, _, _}} = State.prepare(fixture.state, owner)
+    fixture = append_transaction(fixture, owner)
+    head = fixture.state.sessions[second]
+
+    # Concept: Store validity does not establish session-history validity.
+    # Technical depth: a current genesis record is invalid after the real
+    # genesis and owner succession; the correctly fenced Store still commits it.
+    {:ok, transaction} =
+      Store.session_commit(second, "session", "invalid-history", head.owner_epoch,
+        head.owner_incarnation_id, head.journal_version,
+        [%{kind: "session_genesis_v3"}], [])
+
+    assert {:new, _, _, {:committed, _, _}} = State.prepare(fixture.state, transaction)
     fixture = append_transaction(fixture, transaction)
     assert {:ok, replayed} = State.replay(fixture.frames)
     assert replayed == fixture.state
@@ -3588,6 +3597,8 @@ defmodule LoopexComposition.RestoreIOTest do
     path = Path.join(directory, "history.log")
     File.write!(path, <<>>)
     initial = %{root: root, path: path, state: State.new(), frames: [], bytes: <<>>, ids: []}
+    {:ok, claim} = Store.claim_creation_domain("audit-runtime", 0, String.duplicate("a", 64))
+    initial = append_transaction(initial, claim)
 
     Enum.reduce(1..count, initial, fn number, fixture ->
       {:ok, transaction} =
@@ -3597,12 +3608,27 @@ defmodule LoopexComposition.RestoreIOTest do
           ConfiguredGenesisFixture.genesis([])
         )
 
-      append_transaction(fixture, transaction)
+      head = fixture.state.creation_heads[transaction.runtime_id]
+
+      {:ok, reserve} =
+        Store.reserve_creation(transaction.runtime_id, transaction.command_id,
+          head.owner_generation, head.owner_selection, head.domain_version, transaction.genesis)
+
+      fixture = append_transaction(fixture, reserve)
+      fixture = append_transaction(fixture, transaction)
+      assert map_size(fixture.state.sessions) == number
+      fixture
     end)
   end
 
   defp append_transaction(fixture, transaction) do
-    {:new, state, frame, _outcome} = State.prepare(fixture.state, transaction)
+    {:new, state, frame, outcome} = State.prepare(fixture.state, transaction)
+
+    # Concept: fixture sessions use the current original creation custody.
+    # Technical depth: a refused final creation must not masquerade as a
+    # populated Store. Preserve ordinary orphan refusals outside these families.
+    if transaction.type in [:claim_creation_domain, :reserve_creation, :create_session],
+      do: assert(match?({:committed, _, _}, outcome))
     frames = fixture.frames ++ [frame]
     bytes = fixture.bytes <> encoded_frame(frame)
     File.write!(fixture.path, bytes)
