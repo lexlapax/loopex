@@ -27,6 +27,132 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+### Paused restart checkpoint, 2026-10-08
+
+The maintainer requested a safe stop for restart. All source agents have stopped
+writing and no product native handle is live. This checkpoint supersedes the
+execution order, worker assignments and registry seed in older entries below.
+Resume the existing M7 goal. Do not create a replacement goal or checklist.
+
+Primary `m7` preserves its last integrated product source and adds this resume
+record. The complete saved, unserved source candidate is `b17bc00a165f0b91873c37c6cc1b829586994d67` in
+`/Users/spuri/.codex/worktrees/m7-coupled-current-contract/loopex`.
+Its recovery ref is `origin/codex/m7-resume-20261008`. Saving that source does
+not activate either transport generation, qualify integration or close M7.
+The latest daemon and Core cleanup changes still need formatting, compilation
+and native tests. Do not describe the whole candidate as passing.
+
+Saved additions since the previous checkpoint are artifact literal-use and
+exact-session validation, native daemon ingress/fanout and Socket lease custody,
+unclaimed transient-first pressure, held-phase loss detection, owner-only bounded
+Core close with an actual normal guardian join and late-observation refusal, and
+the narrow Registry own-arena close stage. Registry retirement retains its
+original close deadline and exact own-guardian monitor; forced transport closure
+still supplies no native cleanup proof. The Registry stage donor is `fef814d579e0ef4a49fb66eedf2e116062cc6fad`;
+Core late-observation donor is `34f089600a0879dd07cd9c926576977ae096ccad`.
+Root also saved the two-expression close timer remainder clamp at
+`b17bc00a165f0b91873c37c6cc1b829586994d67`, preserving the absolute deadline.
+Their authored tests remain unrun. The complete patches, trees, reports and
+reviews are retained with the exact candidate.
+
+Immutable continuation context:
+`M7/coupled-current-context-20261008-v6/retention.json`,
+SHA-256 `745092afa1d1cb928285804799133100105b59cd5f899034e2ef57eb545ef80b`. It chains to v5, retains independent copies of stopped
+reports and runner/collector sources, exact source commits, the complete patch
+from primary2e and a verified Git bundle. Native run outputs stay in their own
+immutable directories. The retained source facts and checklist are the resume
+authority; agent memory and this chat are caches.
+
+Actual native evidence collected once in this continuation:
+
+| Original | Source | Result and scope | Seconds | Output under external M7 evidence |
+| --- | --- | --- | ---: | --- |
+| 53951 | 813cdb73 | Formatter and AST-preservation pass | 2.244 | candidate-format-preparation-20261008-v1 |
+| 27491 | 3859b2e9 | Compile failure at daemon dynamic-range guard; later tests unrun | 50.342 | artifact-protocol-focused-20261008-v1 |
+| 36730 | a6dc5d4b | Compile failure at foreground dynamic-range guard; later tests unrun | 51.223 | artifact-protocol-focused-20261008-v2 |
+| 73806 | a386513a | Formatter and AST-preservation pass | 2.171 | candidate-format-preparation-20261008-v2 |
+| 81444 | 0f987052 | Compile and all 57 selected Protocol cases pass; Local Store 51/61 pass, 10 fail before creation startup is ready | 6.843 | artifact-protocol-focused-20261008-v3 |
+| 8572 | 7aa13b61 | All 61 selected real Local Store artifact cases pass on current pair after fixture readiness correction | 4.463 | artifact-protocol-focused-20261008-v4 |
+| 41202 | 7aa13b61 | Floor compile, all 57 selected Protocol and all 61 selected real Local Store artifact cases pass | 43.436 | artifact-protocol-focused-20261008-v5 |
+
+The Protocol selections include the actual independent Node client. Both passing
+Protocol and artifact selections have zero exclusions, skips or invalid cases.
+The Store fixture observes existing private readiness once before its single
+unchanged create; it implements no public startup gate, retry or timeout increase.
+These are focused proofs. They do not prove complete Core, server, progress,
+cleanup, foreground, restore or milestone populations at the newer candidate.
+Failed originals remain failed and may not be erased or relabelled after a fix.
+Original27491's retained collection had a copied two-join summary despite one
+actual join; its separate correction records one actual join and preserves the
+original file. Correction SHA-256:
+`f4cd2747e525554d4983485c443c13b773a4a80940dfc5c76951494f76bb0ed7`.
+
+The next native stage seeds from the complete 2,266-row registry:
+`M7/artifact-protocol-focused-20261008-v5/stage-attempt-registry.json`,
+SHA-256 `0d410c62dd5e3a2791ddf8f7f8ba67708307b0d2d7c4c363e59f78a4278aa0fb`.
+Original41202's terminal SHA-256 is
+`bbb16a20a7c7863fc089f3677e25e7901379cc3700b14617a21b02be9b39dc93`;
+collection SHA-256 is
+`fae21af9a5f937a1f063e56c22191d25b0548681138cef6d6b3cd1e0b95ac8b6`.
+All original handles have EOF, process wait and process-group absence retained.
+Do not recollect an original or repeat a successful unchanged selection.
+
+Root alone integrates and owns native runners and Git. Reusable native engine
+is the retained `M7/retained-finalization-format-runner-20261006-v1/run.py`,
+SHA-256 `c8834d1c45f7832bad69df20c848b9cd55079dfc66ea2484e31f0333382c93d4`.
+Use the retained v5 wrapper and preparation definitions as mechanics, replace
+its exact source pin and stage grant for the new work, and retain a fresh output
+and unique registry key. Do not invoke an older runner's main on different bytes.
+Exclusive current v2 and floor v5 build/dependency caches may be reused with
+recorded cache inputs, fresh private home/temp roots and source checks. This
+is incremental focused qualification, not fresh-source evidence.
+
+Resume in this order:
+
+1. Verify the pushed checkpoint and recovery ref, clean source worktrees,
+   retained context hash and latest registry. No worker is still writing.
+2. Format the new candidate with exact AST-preservation checks, save the
+   formatting child, then compile warning-free. Run the complete ProgressSink
+   file on both supported pairs, including actual suspended-guardian,
+   reply-before-DOWN and late resumed-owner cases. These cases are unrun.
+3. Run focused actual daemon Buffer, Registry, Owner, Socket and Service proofs
+   for the joined units. The Registry native-close stage requires the joined
+   bounded Core close and late-observation fix. Preserve exact actor joins,
+   original deadlines, pending/active credit and forced-close meanings.
+4. Complete remaining Socket and Service native cleanup, active claimed pressure,
+   actual Service-bound producer-to-socket route, partial/select custody and the
+   honest current-profile encoded-byte obligation before broader daemon lanes.
+   The pure Buffer 512 KiB proof and actual admitted native-byte pressure are
+   narrower than a real Socket encoded 512 KiB population; no waiver is recorded.
+5. Resolve the existing unanswered ADR0063 decision before implementing its
+   public startup read and host acquisition gates. Complete foreground guardian
+   copy/accounting and stopped-writer cleanup, actual 32-CAS exhaustion and
+   artifact open's pre-verification deadline gap. Then prove complete foreground
+   112 and restore175 populations and the remaining integration/closure tasks.
+
+ADR0063 remains Proposed and unanswered at exact candidate
+`16c251ad572f9907fdc7ea3cf14be71622778c28`. It was re-presented as one decision,
+waiting within the original Core startup deadline versus inspection-only cold
+startup refusals. Concept SHA-256
+`a28aa264c9e05186c2f877c6998b07b9d82e1593fb99b34658d7b869ef584064`;
+technical SHA-256
+`751549dcd11b20a7c175a8f3f6380c100eb424c708ff4e4a389c3c8be0131d2b`.
+Do not infer acceptance from unrelated approvals. No new guardian ownership or
+CAS observer seam is accepted.
+
+Automatic approval review rejected the broad combined daemon cleanup rewrite
+before any cleanup source was written because it combined callback dispatch,
+retirement, deadlines, process kills and native acknowledgements. Five private
+cleanup drafts remain unapplied review material. The separately reviewed
+Registry-only stage is saved for qualification; it does not authorize applying
+the five drafts or claim universal cleanup. Retain the exact rejection in the
+second daemon report and preserve source-review limits.
+
+T01-T19 counts remain originals **88 done / 85 remaining / 6 retired** and
+additions **365 done / 24 remaining**. T00 is counted separately by the script.
+No checklist row closes for saved source or prerequisite-only focused proofs.
+No main merge, formal milestone closure, tag, release or publication is authorized.
+
 ### Current contract candidate and client checks — 2026-10-08
 
 This entry supersedes the execution order and registry seed below. Primary was

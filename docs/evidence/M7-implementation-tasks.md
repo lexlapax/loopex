@@ -1,5 +1,21 @@
 # M7 Implementation Tasks
 
+Restart checkpoint: all three source agents are stopped, every final source
+unit is committed, and no product native handle is live. The complete unserved
+candidate is `b17bc00a`, pushed to `origin/codex/m7-resume-20261008`.
+The `m7` branch retains its integrated product source and this handoff. Protocol
+57 and real Local Store artifact61 selections passed on both supported pairs;
+failed originals and fixes remain retained. Latest daemon native progress,
+Core close/late-observation and Registry own-arena cleanup source are unformatted,
+uncompiled and untested. Next run AST-preserving formatting, compile, complete
+ProgressSink on both pairs and focused genuine daemon delivery/cleanup proofs.
+The next registry seed has 2,266 rows. ADR0063 remains the sole asked unanswered
+decision. T01-T19 totals remain originals **88 done / 85 remaining / 6 retired**
+and additions **365 done / 24 remaining**; T00 is separate. No checkbox changed
+for source saving or focused prerequisite proofs. The [resume record](M7-resume.md)
+contains exact source, result, retention and restart instructions. Earlier
+checkpoint paragraphs below remain historical.
+
 Current checkpoint: the complete contract source is staged in isolated,
 unserved candidate `a7a83d22`. The independent Node runner proved both manifests
 and 3,664 payload vectors at `09110861`; after removing a duplicate export,
