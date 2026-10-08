@@ -29,6 +29,26 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Reboot continuation on 2026-10-07
 
+ADR0058 acceptance is committed and pushed at `f6838a27`, after exact-pair
+independent administrative reviewd73ba88b. ADR0059 is now the sole asked
+pending decision, at exact unchanged candidate
+`a550ae337be6d94cea5dfcf9aa07a44ec0a571f7`: choose its Store-owned custody
+and mechanical carrier with temporary read unavailability, or revise for
+additional bounded asynchronous read ownership. No0059 acceptance is inferred.
+
+Case replay is independently source-reviewed and committed raw
+`a276ad8da119d47d8a446421bde05b415672dabc`, treeafc12cfc, in its isolated
+worktree. Source population is99. Reviewd09d519e and rootb1295265 permit
+native formatting and the complete paired proof; neither has run. The complete
+source, reviews and raw1189-entry NUL projection are retained as22 immutable
+files at `M7/case-replay-source-context-20261007-v1/retention.json`, SHA-256
+`89feba5551ca8ebe0376569d4c9b858aad54070408c8e7e0f5f59813d7d24496`.
+The ownership worktree is archived after literal integration; its needed
+source/native records are retained. Native carrier preparation and independent
+review continue. ADR0058 first-unit mapping proceeds independently. No row
+closes and original/added counts remain88/85/6 and353/22.
+
+
 Ownership integration is committed and pushed at `bd0c9a57`. The maintainer
 accepted the exact ADR0058 pair, resolving its previously asked decision;
 [disposition](../developer/agent-context-map.md#disposition-m7-bounded-progress-delivery-2026-10-07)
