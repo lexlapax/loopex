@@ -29,6 +29,30 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Reboot continuation on 2026-10-07
 
+Checkpointfbc8a2f8 is pushed. ProgressSink raw syntax repair is saved in its
+isolated worktree at `aaaef55d836bbc1bf1d6052c7cda26464e88e74b`, tree
+`a1d5a8721652319983a9c6a395c4d3cbbab660e7`, direct child of failedraw6e0aad7d.
+Only two missing do tokens are inserted in receive helpers; all26 case bodies
+remain byte-identical. Actual partial production formatting from82636 is
+preserved. Rawfacts1ba52ba7 and NUL1193/211f48b9 are retained with the source packetd9e82bbf,
+independent source reviewf29a37be, root review154b56f3 and bounded diagnostic scope
+mapb7b9e278 under
+`M7/progress-sink-repaired-source-context-20261007-v1/retention.json`, SHA-256
+`a77ebc92879718ef8009a8e52c44c1b9b887b5d59c9399d23c745ef4d4f89457`,28 files.
+The native recipe review is running, native proof UNRUN. V5 will separately
+authenticate historical richfull60564 and consume actual flatfailed82636's1783
+successor. Do not seed the older1781 registry or retry failedraw6e.
+
+A new added T16 unit is assigned test-only in isolated
+`/Users/spuri/.codex/worktrees/m7-interaction-stop-proof/loopex`, basefbc8a2f8.
+It exercises ordinary public stop during an answered interaction's held real
+policy re-evaluation, with exact owned actor joins and report attribution.
+The reviewed next-unit mapb7b9e278 names its accepted boundary and existing
+1,000-ms fixture-grace observation; no production deadline changes, universal
+quiet claim or broad diagnostic closure is authorized. No native runs occurred
+for it yet. Original T01–T19 counts88 done/85 todo/6 retired; added356 done/22 todo.
+
+
 The CLI reconciliation checkpoint is pushed at `48786946`. The second recovered
 added T16 repair, long temporary paths, also closes without a new native run.
 Original13676 at2826b30b passed paired model28/read-only22/adjacent21+21 and whole

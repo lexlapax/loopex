@@ -14390,6 +14390,9 @@ in the restart checkpoint. Broader restore/decoder/public/helper rows stay open.
 
 ### Added implementation subtasks
 
+- [ ] Prove ordinary public runtime stop while an answered interaction's real policy re-evaluation task is held; capture exact coordinator/private-worker/supervisor lifetimes and attribute actual shutdown reports under one captured approved fixture-grace cutoff. Preserve existing whole-file interaction proofs, run both supported pairs and retain no-dispatch/no-invented-durable-fact oracles. This narrow unit does not close broad historical diagnostic attribution.
+
+
 - [x] Repair the two Core fixtures exposed by exact32b06b9a full integration: retain the current policy ending owner/answer tuple and consume/select actual model invocation lineage while preserving the original wall sample and59,000-ms lower bound. Prove both complete files,35 cases on each supported pair atcb380db4, zero exclusions/skips/invalid, exact joins and unchanged runtime cutoffs; retain original79551 failure. This bounded repair does not close full integration.
 
 - [x] Preserve the initial retained provider result-worker graceful shutdown and its unchanged forced-retirement fallback; prove32 actual held configured owners with zero unexpected ordinary reports, exact608 actor joins, one actual trapping worker through the original10,000-ms window and captured1,000-ms grace, and the coordinator-specific no-window trace oracle. Verify all151 Core and2 Composition cases per supported pair, retain prior45793/38205 failures and private fault witnesses, and integrate literal tested files. Broader Task.Supervised/coordinator diagnostics and full integration remain separate.
