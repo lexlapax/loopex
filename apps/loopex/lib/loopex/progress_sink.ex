@@ -33,6 +33,7 @@ defmodule Loopex.ProgressSink do
   @slots 32
   @bytes 524_288
   @comparisons 32
+  @close_timeout 5_000
   @overhead 8_192
   @uint64 18_446_744_073_709_551_615
   @safe_integer 9_007_199_254_740_991
@@ -195,35 +196,48 @@ defmodule Loopex.ProgressSink do
   Ready items are discarded. Outstanding leases or live unfinished producers
   keep cleanup unproved. The sink remains closed while those holders settle;
   the owner may release its lease and close again. Success joins the guardian.
-  This cannot acknowledge an external output worker's cleanup.
+  Admission closes before waiting for the guardian. The call and exact normal
+  guardian DOWN share the existing five-second call deadline. Exhausting either
+  wait leaves cleanup unproved. This cannot acknowledge an external output
+  worker's cleanup.
   """
   @spec close(t()) :: :ok | {:error, :cleanup_unproved}
   def close(sink) do
-    if valid_sink?(sink) do
-      {guardian, incarnation, _arena} = sink
+    deadline = System.monotonic_time(:millisecond) + @close_timeout
+
+    with true <- valid_sink?(sink),
+         {guardian, incarnation, arena} <- sink,
+         [{:owner, ^incarnation, owner}] <- :ets.lookup(arena, :owner),
+         true <- owner == self(),
+         true <- :ets.update_element(arena, :state, {4, :closed}) do
       monitor = Process.monitor(guardian)
 
       try do
-        case GenServer.call(guardian, {:close, incarnation}) do
+        case GenServer.call(guardian, {:close, incarnation}, close_remaining(deadline)) do
           :ok ->
             receive do
               {:DOWN, ^monitor, :process, ^guardian, :normal} -> :ok
               {:DOWN, ^monitor, :process, ^guardian, _reason} -> {:error, :cleanup_unproved}
+            after
+              close_remaining(deadline) -> {:error, :cleanup_unproved}
             end
 
           _unproved ->
-            Process.demonitor(monitor, [:flush])
             {:error, :cleanup_unproved}
         end
       catch
-        :exit, _reason ->
-          Process.demonitor(monitor, [:flush])
-          {:error, :cleanup_unproved}
+        :exit, _reason -> {:error, :cleanup_unproved}
+      after
+        Process.demonitor(monitor, [:flush])
       end
     else
-      {:error, :cleanup_unproved}
+      _invalid -> {:error, :cleanup_unproved}
     end
+  rescue
+    ArgumentError -> {:error, :cleanup_unproved}
   end
+
+  defp close_remaining(deadline), do: max(deadline - System.monotonic_time(:millisecond), 0)
 
   @doc false
   def available?(sink) do
@@ -603,6 +617,9 @@ defmodule Loopex.ProgressSink do
 
     :ets.insert(arena, [
       {:state, incarnation, owner, :open, 0, List.duplicate(nil, @slots) |> List.to_tuple(), []},
+      # Concept: only the opening host can revoke admission before a guardian call.
+      # Technical depth: this owner row never changes with slot CAS transitions.
+      {:owner, incarnation, owner},
       {:notification, flag},
       {:raw_notification, raw_flag}
     ])
