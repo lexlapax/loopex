@@ -29,6 +29,41 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Reboot continuation on 2026-10-07
 
+The continuation after the next reboot starts from pushed `90d06391`. The repair
+formatter original9541 is collected PASS in11.987 seconds with six original
+joins and38 authenticated artifacts. Output
+`M7/resume-prepared-cleanup-repair-format-20261007-v1`; collection SHA-256
+`aa995744a4ca2d2a65d9feeee9ef325600bf046a988daec36e68e63c7c7dcbca`;
+terminal `7d56ab2a681b8a6e2bc781688ceb3956658ce52044c43cb1aa587cec3310b89e`;
+registry1743 `7a30448d9b2daac3e11ccb2884c4ee4c2c006b82cc067ef1af8aa2b32ad829b8`.
+Its actual clean format-only child is isolated
+`2475a387fd953f6c529f78d721c219818b0c1fdc`, tree32e0c0f8, direct parentb71039b6.
+Complete1187-record NUL projection hashes5aa5dedb. The three original AST
+acknowledgements passed; formatting changed no behavior.
+
+Complete91-case proof original68155 is LIVE, not a PASS. Poll that exact
+original handle through termination, then collect once with the retained flat
+collector and enabled proof runner2b8e1588. Output
+`M7/resume-prepared-cleanup-repair-proof-20261007-v1`. Factual reviewfbb3dbc5
+verifies37 actual keys/36 changed assignments; reverse reproduces46600467 and
+root enabled only its gate. All91 cases, including53 existing driver cases,
+run freshly on both supported pairs. Original16501 remains failed. No cleanup
+source is integrated and no row closes yet. Independent prejoin57a3e549
+confirms exact primary baselines and all14 unchanged supporting inputs.
+
+The exact repair execution inputs are retained outside temporary storage:
+`M7/cleanup-repair-native-execution-context-20261007-v1/retention.json`,
+SHA-256 `05ca3ad05fa9f336b8c594170f5eb82a16ab42984eec2ab9007e45c377d10ef6`
+with15 files, and
+`M7/cleanup-repair-native-proof-context-20261007-v1/retention.json`,
+SHA-256 `f6808eba4e292f7b20c2a483a0b8a5821de1f6333a8f557ab80be9efa634b4f9`
+with23 files. After a positive91 collection, integrate exactly the three tested
+files, close only the added resumed-cleanup row and bind ownership's V3
+formatter to the latest actual registry. Ownership74 and a changed-source full
+repository check remain unrun. ADR0058 remains the sole asked pending approval.
+Original T01–T19 remain88 done/85 todo/6 retired; added351 done/23 todo.
+The following records are historical where superseded above.
+
 Cleanup source repair is committed as isolated raw
 `b71039b6132d956e552ddaec6440155b21a0d485`, treeed5a517e, parent1525158e;
 actual complete1187-record NUL projection hashesaa59d563. Frozen V2 source

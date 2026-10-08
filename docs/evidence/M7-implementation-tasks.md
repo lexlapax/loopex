@@ -1,5 +1,12 @@
 # M7 Implementation Tasks
 
+Repair formatter9541 passed both supported pairs in11.987 seconds; complete91
+proof original68155 is running against frozen isolated2475a387. No task row
+closes before its original terminal collection. Exact execution/context
+references are saved in the [resume record](M7-resume.md). Counts remain
+88 done/85 todo/6 retired originals and351 done/23 todo added for T01–T19.
+Earlier progress below is historical where superseded.
+
 T15 original item6 is reconciled as implemented access prevention and complete
 instructions for the accepted eligible restore profile. Its helper-containing
 all-plane restore outcome remains open in item7. T01–T19 counts are now88 done /
