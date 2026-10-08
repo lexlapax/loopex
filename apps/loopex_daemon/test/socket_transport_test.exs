@@ -1546,9 +1546,16 @@ defmodule LoopexDaemon.SocketTransportTest do
     assert after_stale.progress_leases == held.progress_leases
     assert after_stale.progress_bytes == held.progress_bytes
 
-    for sequence <- 1..31 do
-      assert :ok =
-               Loopex.ProgressSink.try_offer(sink, session, %{item | progress_sequence: sequence})
+    for index <- 1..31 do
+      {:ok, queued_item} =
+        Loopex.CompactionProgress.new(
+          "queued-episode-#{index}",
+          %{"kind" => "compact", "id" => "queued-command-#{index}"},
+          item.progress_domain,
+          cursor
+        )
+
+      assert :ok = Loopex.ProgressSink.try_offer(sink, session, queued_item)
     end
 
     eventually(fn -> map_size(:sys.get_state(connection).progress_leases) == 32 end)
@@ -1556,8 +1563,15 @@ defmodule LoopexDaemon.SocketTransportTest do
     assert saturated.progress_bytes == Enum.sum(Map.values(saturated.progress_leases))
     assert saturated.progress_bytes > held.progress_bytes and saturated.progress_bytes <= 524_288
 
-    assert :dropped =
-             Loopex.ProgressSink.try_offer(sink, session, %{item | progress_sequence: 32})
+    {:ok, overflow_item} =
+      Loopex.CompactionProgress.new(
+        "overflow-episode",
+        %{"kind" => "compact", "id" => "overflow-command"},
+        item.progress_domain,
+        cursor
+      )
+
+    assert :dropped = Loopex.ProgressSink.try_offer(sink, session, overflow_item)
 
     {_guardian, sink_incarnation, arena} = sink
 
