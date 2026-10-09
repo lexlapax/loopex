@@ -29,7 +29,7 @@ defmodule Loopex.AppServer.DeliveryTest do
     [event | _rest] = committed_events()
 
     queue = Delivery.new("s_1", 0)
-    {[record], _drained} = queue |> Delivery.event(event) |> Delivery.take()
+    {[record], _drained} = queue |> Delivery.event(event) |> drain()
 
     assert record["type"] == "event"
     assert {:ok, "s_1"} = Wire.identity(record["session_id"])
@@ -53,6 +53,9 @@ defmodule Loopex.AppServer.DeliveryTest do
     assert Delivery.cursor(queue) == 0
 
     advanced = Delivery.event(queue, event)
+    assert Delivery.cursor(advanced) == 0
+    assert Delivery.pulled_cursor(advanced) == event.event_sequence
+    {[_record], advanced} = drain(advanced)
     assert Delivery.cursor(advanced) == event.event_sequence
 
     unchanged = Delivery.progress(advanced, text_item("x", 0, event.event_sequence))
@@ -79,7 +82,7 @@ defmodule Loopex.AppServer.DeliveryTest do
           event_sequence: 1
         })
 
-      {[record], _} = Delivery.new("session", 0) |> Delivery.event(event) |> Delivery.take()
+      {[record], _} = Delivery.new("session", 0) |> Delivery.event(event) |> drain()
       assert record["event"]["data"] == wire
       assert record["event"]["kind"] == "context.maintenance_changed"
 
@@ -97,7 +100,7 @@ defmodule Loopex.AppServer.DeliveryTest do
         "owner" => %{"kind" => kind, "id" => <<0, 255, 10>>}
       }
 
-      {[record], drained} = Delivery.new("session", 0) |> Delivery.event(event) |> Delivery.take()
+      {[record], drained} = Delivery.new("session", 0) |> Delivery.event(event) |> drain()
       assert record["event"]["data"] == %{"owner" => %{"kind" => kind, "id" => "AP8K"}}
       assert Delivery.cursor(drained) == 1
       assert {:ok, _} = LoopexProtocol.Frame.encode(record)
@@ -121,7 +124,7 @@ defmodule Loopex.AppServer.DeliveryTest do
           event_sequence: 1
         })
 
-      {[record], _} = Delivery.new("session", 0) |> Delivery.event(event) |> Delivery.take()
+      {[record], _} = Delivery.new("session", 0) |> Delivery.event(event) |> drain()
       assert record["event"]["data"] == wire
       assert {:ok, _} = LoopexProtocol.Frame.encode(record)
 
@@ -141,7 +144,7 @@ defmodule Loopex.AppServer.DeliveryTest do
       Delivery.new("s_1", 0)
       |> Delivery.progress(text_item("first offered", 0, 0))
       |> Delivery.event(event)
-      |> Delivery.take()
+      |> drain()
 
     assert Enum.map(records, & &1["type"]) == ["event", "progress"]
   end
@@ -156,10 +159,10 @@ defmodule Loopex.AppServer.DeliveryTest do
 
     assert Delivery.detached?(queue)
 
-    # The cursor is the last one completely queued, not the last one offered.
+    # Queuing has emitted nothing; only a matching join can advance the cursor.
     cursor = Delivery.cursor(queue)
-    assert cursor > 0
-    assert cursor < 100
+    assert cursor == 0
+    assert Delivery.pulled_cursor(queue) == 64
 
     detachment = Delivery.detachment(queue)
     assert detachment["type"] == "error"
@@ -179,7 +182,7 @@ defmodule Loopex.AppServer.DeliveryTest do
 
     refute Delivery.detached?(queue)
 
-    {records, _drained} = Delivery.take(queue)
+    {records, _drained} = drain(queue)
     assert length(records) == 32
     assert Enum.all?(records, &(&1["type"] == "progress"))
   end
@@ -188,7 +191,7 @@ defmodule Loopex.AppServer.DeliveryTest do
     queue =
       Delivery.progress(Delivery.new("s_1", 7), text_item("a delta", 0, 7))
 
-    {[record], _drained} = Delivery.take(queue)
+    {[record], _drained} = drain(queue)
 
     body = record["progress"]
     assert {:ok, "0123456789abcdef0123456789abcdef"} = Wire.identity(body["stream_domain_id"])
@@ -199,8 +202,8 @@ defmodule Loopex.AppServer.DeliveryTest do
   test "taking twice does not deliver the same record twice" do
     [event | _rest] = committed_events()
 
-    {first, drained} = Delivery.new("s_1", 0) |> Delivery.event(event) |> Delivery.take()
-    {second, _again} = Delivery.take(drained)
+    {first, drained} = Delivery.new("s_1", 0) |> Delivery.event(event) |> drain()
+    {second, _again} = drain(drained)
 
     assert length(first) == 1
     assert second == []
@@ -211,7 +214,7 @@ defmodule Loopex.AppServer.DeliveryTest do
       item = compaction_item(kind, base)
 
       {[record], drained} =
-        Delivery.new(<<255, 0>>, base) |> Delivery.progress(item) |> Delivery.take()
+        Delivery.new(<<255, 0>>, base) |> Delivery.progress(item) |> drain()
 
       assert record == compaction_record(kind, base)
       assert Delivery.cursor(drained) == base
@@ -252,12 +255,12 @@ defmodule Loopex.AppServer.DeliveryTest do
 
     refute Delivery.detached?(queue)
     assert Delivery.cursor(queue) == 7
-    {records, _} = Delivery.take(queue)
+    {records, _} = drain(queue)
     assert length(records) == 32
     assert Enum.all?(records, &(&1 == compaction_record("compact", 7)))
 
     event = %{kind: "run.progressed", event_id: "event", event_sequence: 8}
-    {[durable | activity], drained} = queue |> Delivery.event(event) |> Delivery.take()
+    {[durable | activity], drained} = queue |> Delivery.event(event) |> drain()
     assert durable["type"] == "event"
     assert length(activity) == 32
     assert Delivery.cursor(drained) == 8
@@ -278,7 +281,7 @@ defmodule Loopex.AppServer.DeliveryTest do
       end)
 
     refute Delivery.detached?(queue)
-    {records, _} = Delivery.take(queue)
+    {records, _} = drain(queue)
     assert length(records) == 2
 
     sizes =
@@ -499,7 +502,7 @@ defmodule Loopex.AppServer.DeliveryTest do
         Delivery.progress(queue, item)
       end)
 
-    {records, drained} = Delivery.take(queue)
+    {records, drained} = drain(queue)
     assert length(records) == 2
     refute Delivery.detached?(drained)
     assert Delivery.cursor(drained) == 7
@@ -513,7 +516,7 @@ defmodule Loopex.AppServer.DeliveryTest do
     assert Enum.sum(sizes) <= 524_288
     assert Enum.sum(sizes) + hd(sizes) > 524_288
     session = :binary.copy(<<255>>, 256)
-    {[session_record], _} = Delivery.new(session, 0) |> Delivery.progress(tool) |> Delivery.take()
+    {[session_record], _} = Delivery.new(session, 0) |> Delivery.progress(tool) |> drain()
     assert {:ok, ^session} = LoopexProtocol.Wire.session_identity(session_record["session_id"])
 
     assert Delivery.progress(Delivery.new(:binary.copy(<<255>>, 257), 0), tool) ==
@@ -638,7 +641,7 @@ defmodule Loopex.AppServer.DeliveryTest do
 
   defp assert_ordinary_record(item, expected) do
     {[record], drained} =
-      Delivery.new(<<255, 0>>, 7) |> Delivery.progress(item) |> Delivery.take()
+      Delivery.new(<<255, 0>>, 7) |> Delivery.progress(item) |> drain()
 
     assert record == %{"type" => "progress", "session_id" => "_wA", "progress" => expected}
     assert Delivery.cursor(drained) == 7
@@ -719,4 +722,22 @@ defmodule Loopex.AppServer.DeliveryTest do
         :active
     end
   end
+  # Concept: projection assertions simulate successful joins, not OS evidence.
+  # Technical depth: the lifecycle suite separately drives the actual writer.
+  # This helper selects one entry, keeps its charge active, decodes its LF frame,
+  # and explicitly joins before selecting the next entry.
+  defp drain(queue), do: drain(queue, [])
+  defp drain(queue, records) do
+    case Delivery.next(queue) do
+      {:ok, entry} ->
+        reference = make_ref()
+        {:ok, active} = Delivery.activate(queue, entry.token, reference)
+        payload = binary_part(entry.frame, 0, byte_size(entry.frame) - 1)
+        {:ok, record} = LoopexProtocol.Frame.decode(payload, 2_097_152)
+        {:ok, _entry, joined} = Delivery.joined(active, reference)
+        drain(joined, [record | records])
+      :empty -> {Enum.reverse(records), queue}
+    end
+  end
+
 end

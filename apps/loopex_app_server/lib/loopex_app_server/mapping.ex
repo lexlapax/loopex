@@ -207,7 +207,7 @@ defmodule Loopex.AppServer.Mapping do
          {:ok, replace} <- attach_replacement(request),
          :ok <- attachable(context, replace, request),
          {:ok, options} <- attach_options(request) do
-      case Loopex.attach(context.runtime, session_id, options) do
+      case attach_for_holder(context, session_id, options) do
         {:ok, attachment} ->
           # The attachment goes back with the snapshot because the connection,
           # not this call, is what holds it: a later command is admitted through
@@ -620,6 +620,33 @@ defmodule Loopex.AppServer.Mapping do
   end
 
   defp read_projection(resource), do: resource
+
+  # Concept: the transport holder outlives its request worker.
+  # Technical depth: same-session replacement names the exact previous handle.
+  # Cross-session replacement retires that holder before a fresh attach; neither
+  # a worker exit nor an attachment-conflict bypass substitutes for retirement.
+  defp attach_for_holder(context, session_id, options) do
+    holder = Map.get(context, :holder, self())
+    runtime = context.runtime
+    case {Map.get(context, :attachment),
+          Loopex.Attachment.routing(Map.get(context, :attachment))} do
+      {nil, {:error, _reason}} ->
+        Loopex.Runtime.attach_for_holder(runtime, session_id, holder, options)
+      {_old, {:ok, ^runtime, ^session_id, previous, _incarnation}} ->
+        options =
+          case Map.get(context, :emitted_cursor) do
+            {^session_id, cursor} -> Keyword.put_new(options, :after_event_sequence, cursor)
+            _none -> options
+          end
+        Loopex.Runtime.attach_for_holder(runtime, session_id, holder,
+          Keyword.put(options, :replace_attachment_id, previous))
+      {_old, {:ok, ^runtime, _other_session, _previous, _incarnation}} ->
+        with :ok <- Loopex.Runtime.release_holder(runtime, holder) do
+          Loopex.Runtime.attach_for_holder(runtime, session_id, holder, options)
+        end
+      _stale -> {:error, :invalid_attachment}
+    end
+  end
 
   # Concept: the attachment's authoritative snapshot, at its own cursor.
   #

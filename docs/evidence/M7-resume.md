@@ -27,6 +27,54 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+### Reviewed repairs joined, 2026-10-08
+
+Creation readiness and physical custody are committed on `m7` at
+`5b82790cb789f989ee6197c758e1245bfe6091db`. Complete coordinated focused
+verification passed574 cases on each supported toolchain, zero exclusions,
+skips or invalid cases, in1281.342seconds. Retained output:
+`M7/coordinated-creation-focused-20261008-v1`; terminal SHA-256
+`277a334b7027d21ef8ca59dacf2d446a649d0549f2fc314b760866900e76c70f`;
+collection SHA-256
+`ec39114e3bf8a4dbaa783210b7f982b8540919b286ba4110412ec03520134300`.
+
+The subsequent full current-pair fast check at the same source is FAIL:
+4786 passed,462 failed,67 excluded,1650.866seconds. All11 application logs
+and original32486 are terminal and collected. Retained output:
+`M7/coordinated-integration-check-20261008-v1`; terminal SHA-256
+`48cae8dc1ea59336a87c34a9476029c4fc4c5fd21a764a982f4ce2ca8e622abc`;
+collection SHA-256
+`1a414c70fadbfc33bca4185c6bfe60f2ba6c62efc8aae2ecea4de75bacdc055f`.
+Do not rerun or relabel this failed source. Core174 and Composition48 failures
+are separately inventoried; the remaining240 failures have a sealed causal
+inventory, SHA-256
+`7610c566c17e0870667a8f88e13fb504e76424a406487202b17ceb3fab770475`.
+
+Root has joined32 reviewed path changes: eight Composition creation-readiness
+fixtures, three input/shutdown witness paths, ChildCreation and RunLedger
+production/test pairs, sixteen foreground FIFO mutations, and one Bounds
+moduledoc correction. Exact before/final bytes are recorded in
+`/private/tmp/m7-reviewed-fixtures-helper-foreground-join-20261008-v1.json`,
+SHA-256 `9eaae9484f6ecab667f76dfd340e61bd001946c917c6e0b43ba97f27987d1fd3`.
+This source is native UNRUN. Next: commit raw reviewed bytes; format with
+non-line AST equality and both-pair checks; then execute whole Core21,
+Composition55+helper213, AppServer94 and Protocol18 cases on each pair,
+including all four Node subprocess cases. No public generation is activated;
+helpers remain unregistered. CLI native progress migration and remaining Core
+and edge creation fixtures still require implementation/rejoin. Daemon retirement
+has a separate sealed source projection awaiting independent review; the real
+CLI witness scope is43 cases, correcting the older nominal45 source census.
+
+No checkbox closes from these source changes. T01-T19 originals remain
+88 done /85 open /6 retired; additions remain367 done /23 open. T00 is separate.
+ADR0065 remains the existing unanswered exact-pair decision. No main merge,
+closure, release, tag or paid provider campaign is authorized. The next native
+registry is2656 rows at
+`M7/coordinated-integration-check-20261008-v1/stage-attempt-registry.json`,
+SHA-256 `32a03672c7ef28d17df504d53200c30cc906c1093a400113ffdf3e75bd9e0fec`.
+The older v16 recovery manifest remains immutable and is not a retention claim
+for these new source or evidence bytes. Prior failed originals remain failed.
+
 ### Current helper-codec failure and creation rejoin, 2026-10-08
 
 Primary `m7` is pushed at `3d57e8bf3e96188dae716818c9833e0f80d5998c`.

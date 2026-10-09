@@ -29,6 +29,8 @@ defmodule Loopex.AppServer.Connection do
   defstruct state: :uninitialized,
             generation: nil,
             runtime: nil,
+            holder: nil,
+            emitted_cursor: nil,
             attachment: nil,
             in_flight: MapSet.new()
 
@@ -37,6 +39,8 @@ defmodule Loopex.AppServer.Connection do
           generation: binary() | nil,
           runtime: term() | nil,
           attachment: term() | nil,
+          holder: pid() | nil,
+          emitted_cursor: {binary(), non_neg_integer()} | nil,
           in_flight: MapSet.t(binary())
         }
 
@@ -55,7 +59,8 @@ defmodule Loopex.AppServer.Connection do
   """
   @spec new(keyword()) :: t()
   def new(options \\ []) do
-    %__MODULE__{state: :uninitialized, runtime: Keyword.get(options, :runtime)}
+    %__MODULE__{state: :uninitialized, runtime: Keyword.get(options, :runtime),
+                holder: Keyword.get(options, :holder, self())}
   end
 
   @doc """
@@ -86,6 +91,10 @@ defmodule Loopex.AppServer.Connection do
   """
   @spec attachment(t()) :: term() | nil
   def attachment(%__MODULE__{attachment: attachment}), do: attachment
+
+  @doc false
+  def emitted(connection, session_id, cursor),
+    do: %{connection | emitted_cursor: {session_id, cursor}}
 
   @doc """
   ## Concept
@@ -315,7 +324,8 @@ defmodule Loopex.AppServer.Connection do
          connection}
 
       true ->
-        context = %{runtime: connection.runtime, attachment: connection.attachment}
+        context = %{runtime: connection.runtime, attachment: connection.attachment,
+                    holder: connection.holder, emitted_cursor: connection.emitted_cursor}
 
         case Mapping.call(request, context) do
           {:ok, record} ->

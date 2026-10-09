@@ -88,6 +88,7 @@ defmodule LoopexComposition.ProviderCleanupNotificationTest do
     store_monitor = Process.monitor(store_pid)
 
     try do
+      assert :ok = LoopexComposition.StartupGate.publication(LoopexComposition.StartupGate.await(runtime))
       assert {:ok, session} =
                Runtime.create_session_with_genesis(
                  runtime,

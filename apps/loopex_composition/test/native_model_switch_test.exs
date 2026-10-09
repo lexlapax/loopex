@@ -415,6 +415,7 @@ defmodule LoopexComposition.NativeModelSwitchTest do
       assert {:ok, children} = Loopex.Runtime.children(runtime)
       Process.put(custody, Process.get(custody) ++ monitor(Map.values(children)))
       assert :ok = Capability.bind(capability, runtime)
+      assert :ok = LoopexComposition.StartupGate.publication(LoopexComposition.StartupGate.await(runtime))
       fun.(runtime, store, custody)
     after
       # Concept: failed startup still retires every resource it already opened.

@@ -1,3 +1,5 @@
+Code.require_file("support/foreground_output_fixture.txt", __DIR__)
+
 defmodule Loopex.AppServer.StdioProbeTest do
   @moduledoc """
   ## Concept
@@ -112,11 +114,12 @@ defmodule Loopex.AppServer.StdioProbeTest do
     assert refused["code"] == "invalid_frame"
   end
 
-  test "input ending inside a frame is reported before the process stops" do
-    [refused] = run_raw(~s({"method":"initialize"))
-
-    assert refused["code"] == "invalid_frame"
-    assert refused["message"] =~ "ended inside a frame"
+  test "input ending inside a frame starts no output and physically cleans the connection" do
+    # Accepted ADR0058 stops new frames at EOF; retain truncated classification
+    # independently and drive the actual partial-input cleanup over inherited fd0.
+    partial = ~s({"method":"initialize")
+    assert {:error, :truncated} = LoopexProtocol.Frame.decode(partial, 65_536)
+    assert run_raw(partial) == []
   end
 
   test "every line of standard output is exactly one protocol record" do
@@ -148,55 +151,22 @@ defmodule Loopex.AppServer.StdioProbeTest do
 
   defp run_lines(frames), do: frames |> Enum.join("\n") |> Kernel.<>("\n") |> capture()
 
-  # Concept: the server as the operator launches it, fed exact bytes.
-  #
-  # Technical depth: the input is written to a file and piped in, so the bytes
-  # arrive exactly as written with no shell quoting between the case and the
-  # decoder. Standard error is kept separate: a case that merged the two streams
-  # could not tell a protocol record from a diagnostic, which is the very
-  # separation being proved.
+  # Concept: consume complete records before closing the real input FIFO.
+  # Technical depth: regular-file stdin would deliver EOF before an asynchronous
+  # writer could join. This harness preserves exact bytes and actual EOF while
+  # keeping that producer open until every requested LF reply was observed.
   defp capture(input) do
-    directory =
-      Path.join(System.tmp_dir!(), "loopex-stdio-#{System.unique_integer([:positive])}")
-
-    File.mkdir_p!(directory)
-    on_exit(fn -> File.rm_rf(directory) end)
-
-    input_path = Path.join(directory, "input")
-    output_path = Path.join(directory, "output")
-    File.write!(input_path, input)
-
-    script = Path.join(directory, "run.sh")
-
-    File.write!(script, """
-    #!/bin/sh
-    exec "$1" -pa "$2" -pa "$3" -e 'Loopex.AppServer.Stdio.main([])' < "$4" > "$5"
-    """)
-
-    File.chmod!(script, 0o755)
-
-    {_output, 0} =
-      System.cmd(
-        "/bin/sh",
-        [
-          script,
-          System.find_executable("elixir") || flunk("Elixir executable unavailable"),
-          ebin(:loopex_protocol),
-          ebin(:loopex_app_server),
-          input_path,
-          output_path
-        ],
-        # The server owns standard input, so the machine must not.
-        env: [{"ELIXIR_ERL_OPTIONS", "-noinput"}],
-        stderr_to_stdout: false
-      )
-
-    output_path |> File.read!() |> String.split("\n", trim: true)
-  end
-
-  defp ebin(application) do
-    path = Application.app_dir(application, "ebin")
-    assert File.dir?(path)
-    path
+    Loopex.AppServer.ForegroundOutputHarness.with_fixture(:file, :bare, fn fixture ->
+      :ok = :file.write(fixture.input, input)
+      count = length(:binary.matches(input, "\n"))
+      lines = Loopex.AppServer.ForegroundOutputHarness.await_lines(fixture, count)
+      :ok = :file.close(fixture.input)
+      summary = Loopex.AppServer.ForegroundOutputHarness.finished(fixture)
+      assert summary.result == :ok
+      assert summary.owner_joined
+      assert summary.writer_joined
+      assert File.read!(fixture.stderr) == ""
+      lines
+    end)
   end
 end

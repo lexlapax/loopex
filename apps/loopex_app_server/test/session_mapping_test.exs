@@ -507,7 +507,7 @@ defmodule Loopex.AppServer.SessionMappingTest do
 
     refute Delivery.detached?(flooded_progress)
 
-    {progress_records, _drained_progress} = Delivery.take(flooded_progress)
+    {progress_records, _drained_progress} = drain(flooded_progress)
     assert length(progress_records) > 0
     assert length(progress_records) < 32
     assert Enum.all?(progress_records, &(byte_size(&1["progress"]["text"]) == 32_768))
@@ -666,4 +666,22 @@ defmodule Loopex.AppServer.SessionMappingTest do
         :active
     end
   end
+  # Concept: projection assertions simulate successful joins, not OS evidence.
+  # Technical depth: the lifecycle suite separately drives the actual writer.
+  # This helper selects one entry, keeps its charge active, decodes its LF frame,
+  # and explicitly joins before selecting the next entry.
+  defp drain(queue), do: drain(queue, [])
+  defp drain(queue, records) do
+    case Delivery.next(queue) do
+      {:ok, entry} ->
+        reference = make_ref()
+        {:ok, active} = Delivery.activate(queue, entry.token, reference)
+        payload = binary_part(entry.frame, 0, byte_size(entry.frame) - 1)
+        {:ok, record} = LoopexProtocol.Frame.decode(payload, 2_097_152)
+        {:ok, _entry, joined} = Delivery.joined(active, reference)
+        drain(joined, [record | records])
+      :empty -> {Enum.reverse(records), queue}
+    end
+  end
+
 end

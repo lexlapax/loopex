@@ -39,13 +39,12 @@ defmodule Loopex.Bounds do
   nothing left to decide, and letting one win would report a run that finished
   normally as one that was cut off.
 
-  Token accounting prefers what the provider reported and falls back to a
-  conservative repository-owned estimate, recording which source was used. A
-  turn that produced no complete reply — cancelled, deadline-aborted, or failed
-  after dispatch — is charged its request bytes plus that turn's committed
-  output allowance *in full*. That deliberately over-charges, because the
-  alternative makes aborting every turn the cheapest way to stay inside a
-  budget.
+  Run token accounting uses validated provider input and output totals. When
+  dispatched work has no complete reported usage, the session owner charges the
+  run's remaining admitted token allowance and records an estimated charge.
+  Work that was never dispatched consumes no provider tokens. Run-owned
+  automatic maintenance follows the same accounting rules, so incomplete work
+  cannot evade the run's cumulative budget.
   """
 
   @bounds [:max_turns, :token_budget, :deadline]

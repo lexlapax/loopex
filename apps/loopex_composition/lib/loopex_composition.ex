@@ -41,7 +41,7 @@ defmodule LoopexComposition do
 
   # Concept: what the host decides stays the host's to supply; an option the
   # host did not supply is absent rather than a default this module invented.
-  @host_supplied ~w(project_manifest project_decision resource_manifest progress_to diagnostics_to cleanup_grace_ms)a
+  @host_supplied ~w(project_manifest project_decision resource_manifest progress_sink diagnostics_to cleanup_grace_ms)a
   @edge :"$loopex_composition_edge_observer"
   @effect :"$loopex_composition_effect_observer"
   @owned :"$loopex_composition_owned"

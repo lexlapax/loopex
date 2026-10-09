@@ -71,10 +71,16 @@ defmodule Loopex.AppServer.ExternalWorkflowTest do
     assert summary["command_id_returned"] == "client-create"
 
     # It attached and was given the exact snapshot members.
+    assert summary["snapshot_revision"] == 3
     assert summary["snapshot_members"] == [
+             "active_maintenance",
              "active_run_id",
              "active_run_phase",
+             "checkpoint",
+             "configuration",
              "event_sequence",
+             "last_compact",
+             "open_interaction",
              "session_id",
              "snapshot_revision"
            ]
