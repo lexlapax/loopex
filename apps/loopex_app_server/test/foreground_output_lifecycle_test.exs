@@ -144,8 +144,7 @@ defmodule Loopex.AppServer.ForegroundOutputLifecycleTest do
       summary = Harness.finished(fixture)
       assert summary.result == :ok
       assert "wire-created" in summary.command_ids
-      assert summary.holders == 0
-      assert summary.transfers == 0
+      assert_released_custody(summary)
       assert summary.sink_closed
     end)
   end
@@ -203,7 +202,7 @@ defmodule Loopex.AppServer.ForegroundOutputLifecycleTest do
       summary = Harness.finished(fixture)
       assert summary.result == :ok
       assert summary.observed_at < metadata.active.cleanup_cutoff + 1_000
-      assert summary.holders == 0
+      assert_released_custody(summary)
       assert summary.sink_closed
       Harness.assert_group_absent(metadata.active.group)
     end)
@@ -274,7 +273,7 @@ defmodule Loopex.AppServer.ForegroundOutputLifecycleTest do
       :file.close(fixture.input)
       summary = Harness.finished(fixture)
       assert summary.result == :ok
-      assert summary.holders == 0
+      assert_released_custody(summary)
       assert summary.sink_closed
       Harness.assert_group_absent(blocked.active.group)
     end)
@@ -300,7 +299,7 @@ defmodule Loopex.AppServer.ForegroundOutputLifecycleTest do
       assert {:error, reason} = summary.result
       assert reason in [:control_eof, :write_expired]
       assert summary.observed_at < blocked.active.cleanup_cutoff + 1_000
-      assert summary.holders == 0
+      assert_released_custody(summary)
       assert summary.writer_joined
       assert summary.owner_joined
       assert summary.sink_closed
@@ -352,8 +351,9 @@ defmodule Loopex.AppServer.ForegroundOutputLifecycleTest do
       assert summary.result == {:error, :output_pressure}
       refute "must-not-reach-store" in summary.command_ids
       assert summary.command_ids == ["bootstrap"]
-      assert summary.holders == 0
-      assert summary.transfers == 0
+      # One MiB is read and snapshotted at opening; metadata and at most the
+      # three requested chunks add debit. Pressure may stop queued reads.
+      assert_released_custody(summary, 2_097_152..(2_097_152 + 131_073 + 3 * 32_768))
       assert summary.observed_at < metadata.active.cleanup_cutoff + 1_000
       Harness.assert_group_absent(metadata.active.group)
     end)
@@ -380,7 +380,7 @@ defmodule Loopex.AppServer.ForegroundOutputLifecycleTest do
       :file.close(fixture.input)
       summary = Harness.finished(fixture)
       assert summary.result == :ok
-      assert summary.holders == 0
+      assert_released_custody(summary)
 
       records =
         File.read!(fixture.output)
@@ -421,8 +421,7 @@ defmodule Loopex.AppServer.ForegroundOutputLifecycleTest do
       summary = Harness.finished(fixture)
       assert summary.result == {:error, :cleanup_unproved}
       assert summary.observed_at >= cutoff
-      assert summary.holders == 0
-      assert summary.transfers == 0
+      assert_released_custody(summary)
       assert summary.writer_joined
       assert summary.owner_joined
       assert summary.sink_closed
@@ -457,12 +456,32 @@ defmodule Loopex.AppServer.ForegroundOutputLifecycleTest do
       assert summary.original_input_joined
       assert summary.writer_joined
       assert summary.owner_joined
-      assert summary.holders == 0
-      assert summary.transfers == 0
+      assert_released_custody(summary)
       assert summary.sink_closed
       assert summary.command_ids == ["bootstrap"]
       assert length(Harness.await_lines(fixture, 2)) == 2
     end)
+  end
+
+  # Concept: physical custody is empty while the original live caller retains
+  # its connection account.
+  # Technical depth: every custody entry counts, regardless of phase. Retained
+  # reserved credit or a sealed account fails these exact observations.
+  defp assert_released_custody(summary, debit_range \\ 0..0) do
+    assert summary.bindings === %{pending: 0, staged: 0, attached: 0, holder_attached: 0}
+    assert summary.core_artifact_custody === 0
+    assert summary.local_occupancy === %{transfers: 0, jobs: 0}
+    assert summary.caller_survived
+    debit = summary.accounting.debit
+    assert is_integer(debit) and debit in debit_range
+
+    assert summary.accounting === %{
+             retained_rows: 1,
+             original_alive: true,
+             debit: debit,
+             reserved: 0,
+             sealed: false
+           }
   end
 
   defp prepare(fixture) do

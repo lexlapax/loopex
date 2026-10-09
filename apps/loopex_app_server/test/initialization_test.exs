@@ -327,7 +327,7 @@ defmodule Loopex.AppServer.InitializationTest do
 
     arguments =
       ["-pa", ebin(:loopex_protocol), "-pa", ebin(:loopex), "-pa", ebin(:loopex_app_server)] ++
-        ["-pa", ebin(:telemetry)] ++
+        ["-pa", ebin(:loopex_store_local), "-pa", ebin(:telemetry)] ++
         Enum.flat_map(require_paths(), &["-r", &1]) ++
         ["-e", "Loopex.AppServer.Fixture.serve()"]
 

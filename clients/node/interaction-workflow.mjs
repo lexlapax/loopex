@@ -201,14 +201,14 @@ async function run(connection) {
   summary.session_created = true;
   summary.session_id = sessionId;
   summary.question_prompt = question.prompt;
-  summary.choice_ids = (question.choices ?? []).map((choice) => choice.id);
+  summary.choice_ids = (question.choices ?? []).map((choice) => wire.decodeIdentity(choice.id));
   summary.interaction_id = question.interaction_id;
 
   // The client answers with one of the identities the question offered, and
   // nothing else. It does not decide; it relays.
   const answered = await connection.request("session.respond_interaction", {
     command_id: wire.identity("chain-answer"),
-    interaction_id: wire.identity(question.interaction_id),
+    interaction_id: question.interaction_id,
     answer: { choice_id: wire.identity("allow") },
   });
 

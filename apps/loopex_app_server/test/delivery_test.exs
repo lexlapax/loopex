@@ -241,7 +241,11 @@ defmodule Loopex.AppServer.DeliveryTest do
     for kind <- ["run", "compact"] do
       item = compaction_item(kind, 7)
 
-      for session <- [nil, :session, 7, "", :binary.copy(<<255>>, 257)] do
+      for session <- [:session, 7] do
+        assert_raise FunctionClauseError, fn -> Delivery.new(session, 7) end
+      end
+
+      for session <- [nil, "", :binary.copy(<<255>>, 257)] do
         queue = Delivery.new(session, 7)
         assert Delivery.progress(queue, item) == queue
       end

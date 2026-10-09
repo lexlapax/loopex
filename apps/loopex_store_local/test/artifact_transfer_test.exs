@@ -311,6 +311,8 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
     # Replacing the first attachment by name releases what it held; the
     # reference it was using is not readable through either. Attachments under
     # one holder otherwise coexist, so the replacement is explicit.
+    cleanup = observe_replacement_cleanup(runtime, handle, transfer)
+
     {:ok, second} =
       Loopex.Runtime.attach_for_holder(runtime, session_id, self(),
         request_id: "replace-first",
@@ -324,7 +326,7 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
     assert {:error, :stale_attachment} =
              Loopex.read_artifact_chunk(first, transfer.transfer_ref, 8)
 
-    assert [] = Transfers.live(handle.transfers)
+    join_replacement_cleanup(cleanup, handle)
   end
 
   # Concept: a holder's death releases every transfer its attachments held,
@@ -516,6 +518,8 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
 
     # Replacing the first attachment by name releases what it held: the
     # reference is readable through neither.
+    cleanup = observe_replacement_cleanup(runtime, handle, transfer)
+
     {:ok, replacement} =
       Loopex.Runtime.attach_for_holder(runtime, session_id, self(),
         request_id: "replace-holder",
@@ -529,7 +533,7 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
     assert {:error, :stale_attachment} =
              Loopex.read_artifact_chunk(holder, transfer.transfer_ref, 16)
 
-    assert [] = Transfers.live(handle.transfers)
+    join_replacement_cleanup(cleanup, handle)
   end
 
   test "whole first last empty and overrun windows and every distinct refusal reason behave exactly as ADR 0028 specifies" do
@@ -1241,6 +1245,113 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
       open_deadline_ms: context.open_deadline_ms,
       close_deadline_ms: System.monotonic_time(:millisecond) + 5_000
     }
+
+  # Concept: replacement retires the original custody asynchronously in both attachment cases.
+  # Technical depth: this fixture's BEFORE-trigger cutoff is no later than Core's
+  # first C + 5000; it is not an observation of C's selector. All original actors
+  # are live/monitored before replacement, and the process-local debug hook emits
+  # at most two closed labels before removing itself. A serial state fence after
+  # both inputs proves Core consumed its own DOWNs, independently of our monitors.
+  defp observe_replacement_cleanup(runtime, handle, transfer) do
+    fixture_observation_cutoff =
+      System.monotonic_time(:millisecond) + ArtifactStore.transfer_limits().cleanup_deadline_ms
+
+    dispatcher = runtime.artifact_dispatcher
+    id = transfer.transfer_ref
+    state = :sys.get_state(dispatcher, replacement_remaining(fixture_observation_cutoff))
+    original = Map.fetch!(state.artifact_transfers, id)
+    assert original.phase === :live
+    assert original.cleanup === nil
+    assert original.invocation === :idle
+    assert original.read === nil
+    assert original.lost === false
+    assert state.artifact_monitors[original.custodian_monitor] === {id, :custodian, original.custodian}
+    assert state.artifact_monitors[original.observer_monitor] === {id, :observer, original.observer}
+
+    local = :sys.get_state(handle.transfers, replacement_remaining(fixture_observation_cutoff))
+    record = Map.fetch!(local.transfers, id)
+    assert record.status === :live
+    assert record.close_deadline === nil
+    assert record.close_selector_deadline === nil
+    assert record.caller === original.custodian
+
+    actors =
+      for {kind, pid} <- [
+            {:custodian, original.custodian},
+            {:observer, original.observer},
+            {:store_worker, record.worker}
+          ] do
+        assert is_pid(pid)
+        assert Process.alive?(pid)
+        monitor = Process.monitor(pid)
+        assert Process.alive?(pid)
+        {kind, pid, monitor}
+      end
+
+    original_monitors = %{
+      original.custodian_monitor => {original.custodian, :custodian},
+      original.observer_monitor => {original.observer, :observer}
+    }
+
+    observer = self()
+    hook_id = make_ref()
+
+    hook = fn
+      seen, {:in, {:DOWN, monitor, :process, pid, :normal}}, _extra ->
+        case Map.get(original_monitors, monitor) do
+          {^pid, kind} ->
+            unless MapSet.member?(seen, kind),
+              do: send(observer, {:replacement_cleanup_down, hook_id, self(), id, kind})
+
+            seen = MapSet.put(seen, kind)
+            if MapSet.size(seen) === 2, do: :done, else: seen
+
+          _other ->
+            seen
+        end
+
+      seen, _event, _extra ->
+        seen
+    end
+
+    assert :ok =
+             :sys.install(
+               dispatcher,
+               {hook_id, hook, MapSet.new()},
+               replacement_remaining(fixture_observation_cutoff)
+             )
+
+    for {_kind, pid, _monitor} <- actors, do: assert(Process.alive?(pid))
+    assert System.monotonic_time(:millisecond) < fixture_observation_cutoff
+    %{cutoff: fixture_observation_cutoff, dispatcher: dispatcher, id: id, actors: actors, hook_id: hook_id}
+  end
+
+  defp join_replacement_cleanup(cleanup, handle) do
+    for {_kind, pid, monitor} <- cleanup.actors do
+      remaining = replacement_remaining(cleanup.cutoff)
+      assert_receive {:DOWN, ^monitor, :process, ^pid, :normal}, remaining
+      assert System.monotonic_time(:millisecond) < cleanup.cutoff
+    end
+
+    %{dispatcher: dispatcher, id: id, hook_id: hook_id} = cleanup
+
+    for kind <- [:custodian, :observer] do
+      remaining = replacement_remaining(cleanup.cutoff)
+      assert_receive {:replacement_cleanup_down, ^hook_id, ^dispatcher, ^id, ^kind}, remaining
+      assert System.monotonic_time(:millisecond) < cleanup.cutoff
+    end
+
+    state = :sys.get_state(dispatcher, replacement_remaining(cleanup.cutoff))
+    refute Map.has_key?(state.artifact_transfers, id)
+    assert [] = GenServer.call(handle.transfers, :live, replacement_remaining(cleanup.cutoff))
+    assert System.monotonic_time(:millisecond) < cleanup.cutoff
+  end
+
+  defp replacement_remaining(cutoff) do
+    remaining = cutoff - System.monotonic_time(:millisecond)
+    assert remaining > 0
+    remaining
+  end
 
   defp session(artifact_handle, adapter \\ Loopex.Store.Local.Artifacts) do
     path = Path.join(System.tmp_dir!(), "loopex-store-#{:erlang.unique_integer([:positive])}")

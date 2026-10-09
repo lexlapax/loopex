@@ -49,6 +49,7 @@ defmodule Loopex.AppServer.ExternalWorkflowTest do
           ebin(:loopex),
           ebin(:loopex_app_server),
           ebin(:loopex_executor_local),
+          ebin(:loopex_store_local),
           ebin(:telemetry)
         ] ++ require_paths(),
         env: child_environment(),
@@ -134,6 +135,7 @@ defmodule Loopex.AppServer.ExternalWorkflowTest do
           ebin(:loopex),
           ebin(:loopex_app_server),
           ebin(:loopex_executor_local),
+          ebin(:loopex_store_local),
           ebin(:telemetry)
         ] ++ require_paths(),
         env: [{"LOOPEX_WORKSPACE_REF", "workspace-ref"} | child_environment()],
@@ -457,7 +459,7 @@ defmodule Loopex.AppServer.ExternalWorkflowTest do
     open_interaction = await_open_interaction(second, session_id)
 
     assert is_map(open_interaction), "the question did not survive the restart"
-    assert open_interaction["interaction_id"] == encode(interaction["interaction_id"])
+    assert open_interaction["interaction_id"] == interaction["interaction_id"]
     assert open_interaction["status"] == "pending"
 
     Port.close(second)

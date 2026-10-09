@@ -27,6 +27,43 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+### Manifest proof and reviewed fixture repairs, 2026-10-08
+
+Original T05's complete payload-manifest/reproducible-digest subtask is done.
+Independent audit `b2e561569ead1690f82a0a2b5b6bb456cdcb0d3cb34298064cf0728eb0900e89`
+confirms every required closed method, event, progress and nested definition,
+complete canonical bytes and independent Node reproduction. Original49620 at
+`66ef3d9b66e0a6afc464c3c1f213ca9673be8eba` passed all231 Protocol cases on each
+supported pair, including24 genuine Node cases per pair; these source pins
+remain unchanged. Other T05 outcomes and transport workflows remain open.
+
+Original91002 at `bb256f73ca10c60fbdafa6752291626aeb92cdfc` failed17 of152 selected
+AppServer cases after148.716 seconds, with one provider case excluded; floor
+UNRUN. Original63608 at `7a870db98ff7c211034628ff8714867861eb8ee3` failed3 of80
+Local cases after5.740 seconds; floor UNRUN. Both exact failed originals and
+collections remain retained. Latest completed registry2869 SHA-256
+`68a9e96117d5780191e93afe414ab3ff73b48bed88048917ed7d2f2f6a059bc7`.
+
+Ten reviewed source paths now repair child module loading, once-encoded Node
+interaction identity, completed-compact admission observation, constructor
+negative controls and the model-question journal barrier. Local replacement
+proof joins the original three actors and observes Core's original DOWN inputs
+within one conservative pre-trigger accepted5,000ms bound. Foreground fixtures
+separately require empty bindings/Core/Local custody and honest retained live
+caller debit. All original cases, physical joins and cutoffs remain; the stopped
+output leader's failing oracle is unchanged. Formatting and native qualification
+are UNRUN for these joined bytes. The real60-second Core case is unchanged;
+its proposed1,000ms observation-only grace still awaits explicit approval.
+ADR0065 remains Proposed. No full fast/release/closure claim follows.
+
+Immutable133-asset retention:
+`M7/current-source-preparation-20261008-v17/retention.json`, SHA-256
+`538cf297b645cf62c13a1e6c25abb2f4afdb52b2681ae16fd39464cf4b435533`.
+Root next owns formatting/strict AST equality, compilation and whole-file
+qualification. No native handle is live at this source checkpoint.
+T01–T19 original89 done /84 open /6 retired; added371 done /24 open;
+combined460 done /108 open /6 retired. T01, T02 and T10 remain fully complete.
+
 ### Artifact qualification and bounded repairs, 2026-10-08
 
 At tested source `66ef3d9b66e0a6afc464c3c1f213ca9673be8eba`, formatting

@@ -312,11 +312,11 @@ defmodule Loopex.AppServer.CurrentCommandsMappingTest do
       assert record.payload["interaction_id"] == opened["interaction_id"]
       assert settled["run_id"] == opened["run_id"]
       assert settled["tool_call_id"] == "ask-1"
+      await_event(fixture, session, "run.finished")
       before = Fixture.records(fixture, session)
       assert {:ok, retry} = Mapping.call(%{request | "request_id" => "retry"}, context)
       assert retry == %{admitted | "request_id" => "retry"}
       assert Fixture.records(fixture, session) == before
-      await_event(fixture, session, "run.finished")
       assert Loopex.AgentLoopTestExecutor.jobs(fixture.executor) == []
     end
   end
@@ -417,7 +417,7 @@ defmodule Loopex.AppServer.CurrentCommandsMappingTest do
     |> JSON.decode!()
   end
 
-  defp fixture(options \\ []) do
+  defp fixture(options) do
     fixture = Fixture.start(Keyword.put_new(options, :script, [%{text: "done", calls: []}]))
     on_exit(fn -> Fixture.stop(fixture) end)
     fixture

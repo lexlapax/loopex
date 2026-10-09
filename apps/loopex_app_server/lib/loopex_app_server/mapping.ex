@@ -394,6 +394,18 @@ defmodule Loopex.AppServer.Mapping do
         {:accepted, accepted_id} ->
           {:ok, admission(request, accepted_id, "accepted", %{})}
 
+        result when type == :compact and is_map(result) ->
+          # Concept: a completed retry keeps its original admission acknowledgement.
+          # Technical depth: completion data is not an admission oracle. Read the
+          # original command disposition without submitting or dispatching again.
+          case Loopex.command_disposition(context.attachment, command_id) do
+            {:ok, {:committed, :admitted, :accepted, _run_id}} ->
+              {:ok, admission(request, command_id, "accepted", %{})}
+
+            _unavailable_or_unresolved ->
+              {:error, error(request, "admission_unknown", :commit_unknown)}
+          end
+
         {:error, :commit_unknown} ->
           {:error, error(request, "admission_unknown", :commit_unknown)}
 

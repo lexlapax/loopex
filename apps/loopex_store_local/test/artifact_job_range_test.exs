@@ -92,11 +92,23 @@ defmodule Loopex.Store.Local.ArtifactJobRangeTest do
         metadata_read_bytes: 131_073
       }
 
-      assert {:ok, %{transfer_ref: id}} = Artifacts.reserve_transfer(handle, request, context)
-      assert id == context.transfer_ref
-      assert {:ok, %{transfer: transfer}} = Artifacts.open_transfer(handle, request, context)
-      Process.put({:transfer_context, id}, context)
-      {:ok, transfer}
+      case Artifacts.reserve_transfer(handle, request, context) do
+        {:ok, %{transfer_ref: id}} = reserved ->
+          assert reserved === {:ok, %{transfer_ref: context.transfer_ref}}
+          assert id == context.transfer_ref
+          assert {:ok, %{transfer: transfer}} = Artifacts.open_transfer(handle, request, context)
+          Process.put({:transfer_context, id}, context)
+          {:ok, transfer}
+
+        {:error, refusal} ->
+          assert refusal === %{
+                   reason: :transfer_limit_reached,
+                   state: :not_reserved,
+                   transfer_ref: context.transfer_ref
+                 }
+
+          {:error, refusal}
+      end
     end
 
     transfers =
@@ -130,7 +142,7 @@ defmodule Loopex.Store.Local.ArtifactJobRangeTest do
       end)
 
     assert_receive {:reserved, ^holder}
-    assert {:error, :transfer_limit_reached} = open.()
+    assert {:error, %{reason: :transfer_limit_reached, state: :not_reserved}} = open.()
     monitor = Process.monitor(holder)
     send(holder, :release)
     assert_receive {:DOWN, ^monitor, :process, ^holder, :normal}

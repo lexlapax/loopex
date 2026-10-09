@@ -397,11 +397,28 @@ defmodule Loopex.AppServer.ForegroundOutputFixture do
               do: {:caught_exit, cause}, else: exit(reason)
         end
       {:ok, %{dispatcher: dispatcher}} = Loopex.Runtime.Supervisor.children(fixture.runtime.supervisor)
-      holders = :sys.get_state(dispatcher).holders |> map_size()
-      transfers = Loopex.Store.Local.Transfers.live(artifact_owner) |> length()
+      dispatcher_state = :sys.get_state(dispatcher)
+      holder = Map.fetch!(dispatcher_state.holders, self())
+      local_state = :sys.get_state(artifact_owner)
+      # Concept: released custody and the live caller's accounting are separate.
+      # Technical depth: count every binding and occupied record, including
+      # retiring or unproved custody. Sealed mirrors transfer_uncertain; an
+      # empty custody map cannot erase retained debit or reserved credit.
+      bindings = %{pending: Enum.reduce(dispatcher_state.holders, 0,
+        fn {_owner, entry}, count -> count + MapSet.size(entry.pending) end),
+        staged: map_size(dispatcher_state.staged_attachments),
+        attached: map_size(dispatcher_state.attachments),
+        holder_attached: Enum.reduce(dispatcher_state.holders, 0,
+          fn {_owner, entry}, count -> count + MapSet.size(entry.attachments) end)}
+      accounting = %{retained_rows: map_size(dispatcher_state.holders),
+        original_alive: holder.alive, debit: holder.transfer_debit,
+        reserved: holder.transfer_reserved, sealed: holder.transfer_uncertain}
+      local_occupancy = %{transfers: map_size(local_state.transfers), jobs: map_size(local_state.jobs)}
       command_ids = Store.inspect_state(fixture.store).runtime_commands |> Map.keys() |> Enum.map(&elem(&1, 1))
       closed = Loopex.ProgressSink.close(sink)
-      send(observer, {:served, self(), %{result: result, holders: holders, transfers: transfers,
+      send(observer, {:served, self(), %{result: result, bindings: bindings,
+        core_artifact_custody: map_size(dispatcher_state.artifact_transfers),
+        local_occupancy: local_occupancy, accounting: accounting,
         command_ids: command_ids, observed_at: now_ms(), sink_closed: closed == :ok,
         caller_survived: Process.alive?(self())}})
       receive do
