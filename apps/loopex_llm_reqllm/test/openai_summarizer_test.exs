@@ -71,6 +71,8 @@ defmodule Loopex.LLM.ReqLLM.OpenAISummarizerTest do
 
     assert {:ok, result} = ProviderIsolationFixture.complete(fixture, request("none", @none))
     assert result.text == "summary"
+    assert result.completion == "natural"
+    assert result.continuation == nil
     assert [{body, true}] = ProviderIsolationFixture.events(fixture)
 
     # The dependency renders this model through OpenAI's Responses API.
@@ -87,6 +89,16 @@ defmodule Loopex.LLM.ReqLLM.OpenAISummarizerTest do
            }
 
     refute Enum.any?(Map.keys(body), &(&1 =~ "reason" or &1 =~ "thinking"))
+  end
+
+  test "only the registered cell's terminal stop is classified" do
+    for {reason, completion} <- [stop: "natural", length: "limit", incomplete: "unknown"] do
+      assert ModelCapabilities.completion(request("none", @none), %{finish_reason: reason}) ==
+               completion
+    end
+
+    assert ModelCapabilities.completion(request("default", @generic), %{finish_reason: :stop}) ==
+             "unknown"
   end
 
   test "a request whose captured mapping differs refuses before transport" do

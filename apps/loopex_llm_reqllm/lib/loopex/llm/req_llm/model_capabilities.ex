@@ -190,6 +190,31 @@ defmodule Loopex.LLM.ReqLLM.ModelCapabilities do
 
   def verify_captured(_request), do: :ok
 
+  @doc """
+  ## Concept
+
+  Classify a registered OpenAI cell's completion from its terminal stop.
+
+  ## Technical depth
+
+  Only a request whose captured mapping is a registered OpenAI cell, which
+  `verify_captured/1` proved exact before transport, is classified: the
+  Responses `response.completed` terminal is `natural` and an output-limit
+  stop is `limit`. Every other request, including the generic cell, stays
+  `unknown`, so no completion evidence is invented for an unregistered route.
+  """
+  @spec completion(map(), map()) :: String.t()
+  def completion(%{model: "openai:" <> _, sampling: %{"provider_mapping" => mapping}}, metadata)
+      when mapping != @generic do
+    case Map.get(metadata, :finish_reason) do
+      :stop -> "natural"
+      :length -> "limit"
+      _ -> "unknown"
+    end
+  end
+
+  def completion(_request, _metadata), do: "unknown"
+
   defp thinking(@haiku, "default"), do: {%{"mode" => "omitted"}, false}
   defp thinking(@haiku, "none"), do: {%{"mode" => "disabled"}, false}
 
