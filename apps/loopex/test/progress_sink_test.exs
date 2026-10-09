@@ -1525,6 +1525,408 @@ defmodule Loopex.ProgressSinkTest do
     assert :ok = Sink.close(sink)
   end
 
+  for phase <- [:reserve, :publish, :claim] do
+    test "32 genuine native comparisons exhaust #{phase} without a 33rd attempt", %{sink: sink} do
+      forced_comparison_case(sink, unquote(phase))
+    end
+  end
+
+  defp forced_comparison_case(sink, phase) do
+      parent = self()
+      identity = make_ref()
+      deadline = System.monotonic_time(:millisecond) + 5_000
+      {guardian, incarnation, arena} = sink
+      guardian_monitor = Process.monitor(guardian)
+
+      {producer, producer_monitor} =
+        owned_worker(fn ->
+          reference =
+            if phase == :claim do
+              route = raw_route(Loopex.Runtime.ProgressIngress.gate(), self())
+
+              assert {:ok, reference} =
+                       Sink.reserve_raw(sink, "s", %{kind: :text_delta, content_index: 0, text: "prefix"}, route)
+
+              assert Sink.route_stage(sink, reference, :raw_reserved, :control_ready, self())
+              reference
+            end
+
+          send(parent, {:forced_comparison_ready, self(), reference})
+
+          receive do
+            :begin -> :ok
+          end
+
+          Process.put({Sink, :replace_schedule}, {parent, identity, [:before, :after], deadline})
+
+          result =
+            if phase == :claim,
+              do: Sink.claim_stage(sink, reference, :control_ready, :control_owned),
+              else: Sink.try_offer(sink, "s", text("target"))
+
+          send(parent, {:forced_comparison_result, self(), result, System.monotonic_time(:millisecond)})
+
+          receive do
+            :finish -> :ok
+          end
+
+          Process.delete({Sink, :replace_schedule})
+          if phase == :claim, do: assert(:ok = Sink.retire_stage(sink, reference, :control_ready))
+        end)
+
+      cleanup_monitor = Process.monitor(producer)
+
+      with_progress_cleanup(
+        fn ->
+          assert_receive {:forced_comparison_ready, ^producer, reference}, 5_000
+          :ok = :sys.suspend(guardian)
+          initial = state(sink)
+          assert :erlang.trace_pattern({:ets, :select_replace, 2}, [{:_, [], [{:return_trace}]}], [:local]) == 1
+          assert :erlang.trace(producer, true, [:call, {:tracer, parent}]) == 1
+          send(producer, :begin)
+
+          {baseline, lost} =
+            if phase == :publish do
+              {point, ^initial, reserved, nil} =
+                replace_barrier(producer, identity, :before, arena, deadline)
+
+              continue_replace(producer, identity, point)
+              {point, ^initial, ^reserved, 1} =
+                replace_barrier(producer, identity, :after, arena, deadline)
+
+              assert state(sink) == reserved
+              assert {_, :reserved, ^producer, charge} = elem(elem(reserved, 5), 0)
+              assert charge > 0 and occupied(sink) == 1
+              assert :ets.lookup(arena, {:payload, 0}) == []
+              continue_replace(producer, identity, point)
+              {reserved, 31}
+            else
+              {initial, 32}
+            end
+
+          for attempt <- 1..lost do
+            {point, ^baseline, next, nil} =
+              replace_barrier(producer, identity, :before, arena, deadline)
+
+            assert state(sink) == baseline
+            competitor = "competitor-#{attempt}"
+            assert :ok = Sink.try_offer(sink, competitor, text("competing"))
+            assert {:ok, lease, ^competitor, item} = Sink.take(sink)
+            assert item == text("competing")
+            refute state(sink) == baseline
+            continue_replace(producer, identity, point)
+            {point, ^baseline, ^next, 0} =
+              replace_barrier(producer, identity, :after, arena, deadline)
+
+            assert :ok = Sink.release(sink, lease)
+            assert state(sink) == baseline
+            continue_replace(producer, identity, point)
+          end
+
+          expected = if phase == :claim, do: :blocked, else: :dropped
+          remaining = max(deadline - System.monotonic_time(:millisecond), 0)
+          assert_receive {:forced_comparison_result, ^producer, ^expected, finished}, remaining
+          assert finished < deadline and System.monotonic_time(:millisecond) < deadline
+          barrier = :erlang.trace_delivered(producer)
+          results = native_comparison_trace(producer, arena, barrier, deadline, [])
+          assert length(results) == 32
+          assert results == if(phase == :publish, do: [1 | List.duplicate(0, 31)], else: List.duplicate(0, 32))
+          refute_received {:progress_replace_barrier, ^producer, ^identity, _, _, _, _, _, _}
+          assert state(sink) == baseline
+
+          case phase do
+            :reserve ->
+              assert charged(sink) == 0 and occupied(sink) == 0
+              assert :ets.lookup(arena, {:payload, 0}) == []
+              assert :ets.lookup(arena, {:retired, 0}) == []
+
+            :publish ->
+              assert {token, :reserved, ^producer, charge} = slot(sink, 0)
+              assert charge > 0 and charged(sink) == charge
+              assert :ets.lookup(arena, {:payload, 0}) == []
+              assert :ets.lookup(arena, {:retired, 0}) == [{{:retired, 0}, token}]
+
+            :claim ->
+              assert {^incarnation, 0, token} = reference
+              assert {^token, :control_ready, ^producer, charge, _route} = slot(sink, 0)
+              assert charge > 0 and charged(sink) == charge
+              assert [{{:payload, 0}, ^token, "s", %{text: "prefix"}}] = :ets.lookup(arena, {:payload, 0})
+              assert Sink.take(sink) == :empty
+          end
+
+          assert :erlang.trace(producer, false, [:call]) == 1
+          send(producer, :finish)
+          assert_receive {:DOWN, ^producer_monitor, :process, ^producer, :normal}, 5_000
+          :ok = :sys.resume(guardian)
+          wait_until_reclaimed(guardian, sink, 100)
+          assert charged(sink) == 0 and occupied(sink) == 0
+          assert :ok = Sink.close(sink)
+          assert System.monotonic_time(:millisecond) < deadline
+        end,
+        fn cleanup_deadline -> [
+          fn -> send(producer, {:progress_replace_cancel, parent, identity}) end,
+          fn -> if Process.alive?(producer), do: Process.exit(producer, :kill) end,
+          fn -> join_progress_actors([{cleanup_monitor, producer}], cleanup_deadline) end,
+          fn -> if Process.alive?(producer), do: :erlang.trace(producer, false, [:call]) end,
+          fn -> :erlang.trace_pattern({:ets, :select_replace, 2}, false, [:local]) end,
+          fn -> if Process.alive?(guardian), do: :sys.resume(guardian) end,
+          fn -> if Process.alive?(guardian), do: assert(:ok = Sink.close(sink)) end,
+          fn -> join_progress_actors([{guardian_monitor, guardian}], cleanup_deadline) end,
+          fn -> assert :ets.info(arena) == :undefined end
+        ] end
+      )
+  end
+
+  for cut <- [:reserved, :materialized] do
+    test "actual producer death at the #{cut} cut retains credit until joined retirement", %{sink: sink} do
+      physical_producer_cut_case(sink, unquote(cut))
+    end
+  end
+
+  defp physical_producer_cut_case(sink, cut) do
+      parent = self()
+      identity = make_ref()
+      deadline = System.monotonic_time(:millisecond) + 5_000
+      {guardian, _incarnation, arena} = sink
+      guardian_monitor = Process.monitor(guardian)
+
+      {producer, producer_monitor} =
+        owned_worker(fn ->
+          receive do
+            :begin -> :ok
+          end
+
+          phases = if cut == :reserved, do: [:after], else: [:before]
+          Process.put({Sink, :replace_schedule}, {parent, identity, phases, deadline})
+          send(parent, {:unexpected_cut_completion, self(), Sink.try_offer(sink, "s", text("cut"))})
+        end)
+
+      cleanup_monitor = Process.monitor(producer)
+
+      with_progress_cleanup(
+        fn ->
+          :ok = :sys.suspend(guardian)
+          send(producer, :begin)
+
+          if cut == :materialized do
+            {point, _old, _next, nil} =
+              replace_barrier(producer, identity, :before, arena, deadline)
+
+            continue_replace(producer, identity, point)
+          end
+
+          phase = if cut == :reserved, do: :after, else: :before
+          {_point, old, next, changed} = replace_barrier(producer, identity, phase, arena, deadline)
+          reserved = if cut == :reserved, do: next, else: old
+          assert changed == if(cut == :reserved, do: 1, else: nil)
+          assert state(sink) == reserved
+          assert {token, :reserved, ^producer, credit} = slot(sink, 0)
+          assert credit > 0 and charged(sink) == credit and occupied(sink) == 1
+
+          if cut == :reserved do
+            assert :ets.lookup(arena, {:payload, 0}) == []
+          else
+            assert [{{:payload, 0}, ^token, "s", item}] = :ets.lookup(arena, {:payload, 0})
+            assert item == text("cut")
+          end
+
+          assert Sink.take(sink) == :empty
+          refute_received {:loopex_progress_ready, ^sink}
+          :ok = :sys.resume(guardian)
+          assert {:error, :cleanup_unproved} = Sink.close(sink)
+          assert Process.alive?(producer)
+          assert slot(sink, 0) == {token, :reserved, producer, credit}
+          assert charged(sink) == credit and occupied(sink) == 1
+          Process.exit(producer, :kill)
+          assert_receive {:DOWN, ^producer_monitor, :process, ^producer, :killed}, 5_000
+          wait_until_reclaimed(guardian, sink, 100)
+          assert charged(sink) == 0 and occupied(sink) == 0
+          assert :ets.lookup(arena, {:payload, 0}) == []
+          refute_received {:unexpected_cut_completion, ^producer, _}
+          assert :ok = Sink.close(sink)
+          assert System.monotonic_time(:millisecond) < deadline
+        end,
+        fn cleanup_deadline -> [
+          fn -> send(producer, {:progress_replace_cancel, parent, identity}) end,
+          fn -> if Process.alive?(producer), do: Process.exit(producer, :kill) end,
+          fn -> join_progress_actors([{cleanup_monitor, producer}], cleanup_deadline) end,
+          fn -> if Process.alive?(guardian), do: :sys.resume(guardian) end,
+          fn -> if Process.alive?(guardian), do: assert(:ok = Sink.close(sink)) end,
+          fn -> join_progress_actors([{guardian_monitor, guardian}], cleanup_deadline) end,
+          fn -> assert :ets.info(arena) == :undefined end
+        ] end
+      )
+  end
+
+  test "a genuinely retiring lease cannot delete a guardian-freed and reused generation", %{sink: fixture} do
+    parent = self()
+    identity = make_ref()
+    deadline = System.monotonic_time(:millisecond) + 5_000
+    guardian_custody = {__MODULE__, :retiring_guardian, identity}
+
+    {owner, owner_monitor} =
+      owned_worker(fn ->
+        {:ok, sink} = Sink.open()
+        send(parent, {:retiring_owner_ready, self(), sink})
+
+        receive do
+          :prepare -> :ok
+        end
+
+        assert :ok = Sink.try_offer(sink, "s", text("old"))
+        assert {:ok, old, "s", _item} = Sink.take(sink)
+        send(parent, {:retiring_lease_ready, self(), old})
+
+        receive do
+          :release -> :ok
+        end
+
+        Process.put({Sink, :replace_schedule}, {parent, identity, [:after], deadline})
+        result = Sink.release(sink, old)
+        Process.delete({Sink, :replace_schedule})
+        send(parent, {:old_release_finished, self(), result})
+
+        receive do
+          :take_replacement -> :ok
+        end
+
+        credit = charged(sink)
+        assert {:error, :stale_lease} = Sink.release(sink, old)
+        assert charged(sink) == credit and occupied(sink) == 1
+        assert {:ok, fresh, "s", item} = Sink.take(sink)
+        assert item == text("replacement")
+        assert :ok = Sink.release(sink, fresh)
+        assert :ok = Sink.close(sink)
+      end)
+
+    cleanup_owner_monitor = Process.monitor(owner)
+    with_progress_cleanup(
+      fn ->
+        remaining = max(deadline - System.monotonic_time(:millisecond), 0)
+        assert_receive {:retiring_owner_ready, ^owner, {guardian, incarnation, arena} = sink}, remaining
+        guardian_monitor = Process.monitor(guardian)
+        Process.put(guardian_custody, {guardian, guardian_monitor, arena})
+        assert System.monotonic_time(:millisecond) < deadline
+        send(owner, :prepare)
+        assert_receive {:retiring_lease_ready, ^owner, old}, 5_000
+        assert {^incarnation, 0, token} = old
+        :ok = :sys.suspend(guardian)
+        send(owner, :release)
+        {point, leased, retiring, 1} = replace_barrier(owner, identity, :after, arena, deadline)
+        assert {^token, :leased, ^owner, credit} = elem(elem(leased, 5), 0)
+        assert credit > 0 and state(sink) == retiring
+        assert slot(sink, 0) == {token, :retiring, owner, credit}
+        assert [{{:payload, 0}, ^token, "s", item}] = :ets.lookup(arena, {:payload, 0})
+        assert item == text("old")
+        :ok = :sys.resume(guardian)
+        wait_until_reclaimed(guardian, sink, 100)
+        assert charged(sink) == 0 and occupied(sink) == 0
+        assert :ok = Sink.try_offer(sink, "s", text("replacement"))
+        replacement = state(sink)
+        assert {fresh_token, :ready, ^owner, fresh_credit} = slot(sink, 0)
+        refute fresh_token == token
+        assert fresh_credit > 0
+        continue_replace(owner, identity, point)
+        assert_receive {:old_release_finished, ^owner, :ok}, 5_000
+        assert state(sink) == replacement
+        assert [{{:payload, 0}, ^fresh_token, "s", fresh}] = :ets.lookup(arena, {:payload, 0})
+        assert fresh == text("replacement")
+        assert :ets.lookup(arena, {:retired, 0}) == []
+        send(owner, :take_replacement)
+        assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :normal}, 5_000
+        assert :ets.info(arena) == :undefined
+        assert System.monotonic_time(:millisecond) < deadline
+      end,
+      fn cleanup_deadline ->
+        guardian_cleanup =
+          case Process.delete(guardian_custody) do
+            {guardian, guardian_monitor, arena} ->
+              [
+                fn -> if Process.alive?(guardian), do: :sys.resume(guardian) end,
+                fn -> join_progress_actors([{guardian_monitor, guardian}], cleanup_deadline) end,
+                fn -> assert :ets.info(arena) == :undefined end
+              ]
+
+            nil ->
+              []
+          end
+
+        [
+          fn -> send(owner, {:progress_replace_cancel, parent, identity}) end,
+          fn -> if Process.alive?(owner), do: Process.exit(owner, :kill) end,
+          fn -> join_progress_actors([{cleanup_owner_monitor, owner}], cleanup_deadline) end
+        ] ++ guardian_cleanup
+      end
+    )
+
+    assert :ok = Sink.close(fixture)
+  end
+
+  defp replace_barrier(producer, identity, phase, arena, deadline) do
+    remaining = max(deadline - System.monotonic_time(:millisecond), 0)
+
+    assert_receive {:progress_replace_barrier, ^producer, ^identity, point, ^phase, ^arena, old, next, changed}, remaining
+    assert System.monotonic_time(:millisecond) < deadline
+    {point, old, next, changed}
+  end
+
+  defp continue_replace(producer, identity, point),
+    do: send(producer, {:progress_replace_continue, self(), identity, point})
+
+  defp native_comparison_trace(producer, arena, barrier, deadline, results) do
+    remaining = max(deadline - System.monotonic_time(:millisecond), 0)
+
+    receive do
+      {:trace, ^producer, :call, {:ets, :select_replace, [^arena, [{_old, [], [{:const, _next}]}]]}} ->
+        native_comparison_trace(producer, arena, barrier, deadline, [:call | results])
+
+      {:trace, ^producer, :return_from, {:ets, :select_replace, 2}, changed} when changed in [0, 1] ->
+        assert [:call | completed] = results
+        native_comparison_trace(producer, arena, barrier, deadline, [changed | completed])
+
+      {:trace_delivered, ^producer, ^barrier} ->
+        assert System.monotonic_time(:millisecond) < deadline
+        refute :call in results
+        Enum.reverse(results)
+    after
+      remaining -> flunk("missing actual native CAS trace barrier before original cutoff")
+    end
+  end
+
+  defp with_progress_cleanup(body, cleanup) do
+    outcome =
+      try do
+        body.()
+        :ok
+      catch
+        kind, reason -> {:error, kind, reason, __STACKTRACE__}
+      end
+
+    original = fn ->
+      case outcome do
+        :ok -> :ok
+        {:error, kind, reason, stack} -> :erlang.raise(kind, reason, stack)
+      end
+    end
+
+    deadline = System.monotonic_time(:millisecond) + 5_000
+    final = fn -> assert System.monotonic_time(:millisecond) < deadline end
+    finish_custody_cleanup([original | cleanup.(deadline)] ++ [final])
+  end
+
+  defp join_progress_actors(monitors, deadline) do
+    joins =
+      Enum.map(monitors, fn {monitor, pid} ->
+        fn ->
+          remaining = max(deadline - System.monotonic_time(:millisecond), 0)
+          assert_receive {:DOWN, ^monitor, :process, ^pid, _reason}, remaining
+          refute Process.alive?(pid)
+        end
+      end)
+
+    finish_custody_cleanup(joins ++ [fn -> assert System.monotonic_time(:millisecond) < deadline end])
+  end
+
   defp close_owner_fixture(reply_gate \\ nil) do
     observer = self()
 

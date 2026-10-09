@@ -28,6 +28,24 @@ physical restore implementation; it does not waive any full-history proof.
 ### Current work and restart order
 
 
+### Two source-reviewed units joined for handoff qualification, 2026-10-09
+
+The maintainer requests a complete repository handoff, commit/push and pause.
+Native privacy V4 and standalone ProgressSink V2 are joined as exact reviewed
+source. The former adds actual native streaming, trace/diagnostic privacy and
+Executor-created artifact retrieval after physical reopen. The latter preserves
+the original42 cases and adds six genuine CAS/custody/crash witnesses through a
+test-build-only scheduling seam. Both final cleanup corrections passed independent
+source review. Native qualification is UNRUN at this raw source checkpoint.
+
+V4 review SHA-256 `16c8f521692f5a054394482f3a0a4d8083f1c4977d59396a6cc8ae008ba3e52e`;
+V2 review `bba072dc34830827928c9d781ba49d328fb089d74d05f1ff90a7efafe1e58e77`.
+Root next formats with strict non-line AST equality and qualifies all48 ProgressSink,
+all5 native model switch and all14 NativeTransport cases on both supported pairs.
+The production build must prove the test scheduling seam absent. A failure stays
+failed in the handoff; no checklist row closes on source review alone. Current
+T01–T19 counts remain464 done/106 open/6 retired. No native process is live.
+
 ### Buffered privacy proved on both pairs; remaining T08 planes next, 2026-10-09
 
 At `764110c3cbaa320b3cd6af358c0545d62f9c0c57`, original35897 passes all55

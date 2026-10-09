@@ -845,8 +845,62 @@ defmodule Loopex.ProgressSink do
     end
   end
 
-  defp replace(arena, old, next),
-    do: :ets.select_replace(arena, [{old, [], [{:const, next}]}]) == 1
+  if Mix.env() == :test do
+    # Concept: a fixture can schedule genuine contention and physical crash cuts.
+    # Technical depth: the offering actor alone opts into an exact bounded
+    # observer handshake. The observer supplies no CAS result or arena write;
+    # both barriers surround the original native operation and compile out of
+    # production together with their process-dictionary lookup.
+    defp replace(arena, old, next) do
+      replace_schedule(:before, arena, old, next, nil)
+      changed = :ets.select_replace(arena, [{old, [], [{:const, next}]}])
+      replace_schedule(:after, arena, old, next, changed)
+      changed == 1
+    end
+
+    defp replace_schedule(phase, arena, old, next, changed) do
+      case Process.get({__MODULE__, :replace_schedule}) do
+        {observer, identity, phases, deadline}
+        when is_pid(observer) and is_reference(identity) and is_list(phases) and
+               is_integer(deadline) ->
+          if phase in phases do
+            point = make_ref()
+            monitor = Process.monitor(observer)
+            remaining = max(deadline - System.monotonic_time(:millisecond), 0)
+
+            try do
+              send(
+                observer,
+                {:progress_replace_barrier, self(), identity, point, phase, arena, old, next,
+                 changed}
+              )
+
+              receive do
+                {:progress_replace_continue, ^observer, ^identity, ^point} ->
+                  if System.monotonic_time(:millisecond) >= deadline,
+                    do: exit(:progress_replace_fixture_expired)
+
+                {:progress_replace_cancel, ^observer, ^identity} ->
+                  exit(:progress_replace_fixture_cancelled)
+
+                {:DOWN, ^monitor, :process, ^observer, _reason} ->
+                  exit(:progress_replace_fixture_observer_down)
+              after
+                remaining -> exit(:progress_replace_fixture_expired)
+              end
+            after
+              Process.demonitor(monitor, [:flush])
+            end
+          end
+
+        _ ->
+          :ok
+      end
+    end
+  else
+    defp replace(arena, old, next),
+      do: :ets.select_replace(arena, [{old, [], [{:const, next}]}]) == 1
+  end
 
   defp delete_payload(arena, slot, token),
     do: :ets.select_delete(arena, [{{{:payload, slot}, token, :_, :_}, [], [true]}])
