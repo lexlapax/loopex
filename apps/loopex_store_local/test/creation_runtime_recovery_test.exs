@@ -112,6 +112,12 @@ defmodule Loopex.Store.CreationRuntimeRecoveryTest do
 
       assert String.ends_with?(encoded, "\n")
 
+      # Concept: safe decoding admits only atoms this VM already knows.
+      # Technical depth: load the modules declaring the captured creation keys
+      # instead of depending on whichever earlier case happened to load them.
+      for module <- [Loopex.Store.Local.State, Loopex.Runtime.Control, Local.Log],
+          do: {:module, _} = Code.ensure_loaded(module)
+
       original =
         encoded
         |> String.trim_trailing("\n")
