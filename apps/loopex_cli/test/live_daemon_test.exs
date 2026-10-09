@@ -3,6 +3,8 @@ Code.require_file(
   __DIR__
 )
 
+Code.require_file("support/daemon_proxy.exs", __DIR__)
+
 defmodule LoopexCli.LiveDaemonTest do
   use ExUnit.Case, async: false
   @moduletag capture_log: true
@@ -10,6 +12,7 @@ defmodule LoopexCli.LiveDaemonTest do
   import ExUnit.CaptureIO
 
   alias Loopex.LLM.ReqLLM.ProviderIsolationFixture, as: ProviderFixture
+  alias LoopexCli.Test.DaemonProxy
   alias LoopexDaemon.Sentinel
 
   @credential "live-daemon-placeholder"
@@ -270,6 +273,86 @@ defmodule LoopexCli.LiveDaemonTest do
 
     assert observed =~ "second answer"
     stop_daemon(daemon)
+  end
+
+  # Concept: a streamed answer is shown once even when the daemon owner that
+  # forwards the runtime's progress is momentarily late.
+  #
+  # Technical depth: the runtime offers the model stream's closure before it
+  # commits the next durable event, but the daemon Service forwards that
+  # runtime sink on its own schedule. When the proxy first sees the answer's
+  # text delta, a holder suspends the actual Service for 500 ms. Routing waits
+  # for that owner's drain, so the closure crosses the wire before the durable
+  # answer, which the renderer then suppresses. Without that wait the closure
+  # arrived after `run.finished` and the answer printed twice.
+  @tag timeout: 120_000
+  test "a late daemon progress owner still shows the streamed answer once", context do
+    before = daemon_services()
+    daemon = start_daemon(context, launch("held answer", "msg_live_held"))
+    assert [service] = daemon_services() -- before
+    test = self()
+
+    {holder, holder_monitor} =
+      spawn_monitor(fn ->
+        receive do
+          :hold ->
+            true = :erlang.suspend_process(service)
+            send(test, :service_held)
+            Process.sleep(500)
+            true = :erlang.resume_process(service)
+        end
+      end)
+
+    rewrite = fn bytes ->
+      if String.contains?(bytes, ~s("text_delta")), do: send(holder, :hold)
+      bytes
+    end
+
+    proxy =
+      DaemonProxy.start(context.socket, [], rewrite, observe: true, observation_scope: :answer)
+
+    try do
+      output =
+        capture_io(fn ->
+          assert :ok = LoopexCli.dispatch(["run", "--daemon", proxy.path, "go"])
+        end)
+
+      assert_received :service_held
+      assert length(String.split(output, "held answer")) == 2, inspect(output)
+
+      kinds =
+        for %{direction: :forwarded} = record <- DaemonProxy.observations(proxy).records,
+            kind = record.progress["kind"] || record.event["kind"],
+            kind in ["model_stream_closed", "assistant.message_appended"],
+            do: kind
+
+      assert kinds == ["model_stream_closed", "assistant.message_appended"]
+    after
+      assert_receive {:DOWN, ^holder_monitor, :process, ^holder, :normal}, 5_000
+      Process.unlink(proxy.pid)
+      Process.exit(proxy.pid, :kill)
+      stop_daemon(daemon)
+    end
+  end
+
+  defp daemon_services do
+    Enum.filter(Process.list(), fn pid ->
+      case Process.info(pid, :dictionary) do
+        {:dictionary, entries} ->
+          entries[:"$initial_call"] == {LoopexDaemon.Service, :init, 1}
+
+        nil ->
+          false
+      end
+    end)
+  end
+
+  defp launch(text, response_id) do
+    ProviderFixture.new(:reply,
+      credential: @credential,
+      response_bodies: [text_response(text, response_id)]
+    ).options
+    |> Keyword.drop([:credential_token, :credential_registry, :tracing_capability])
   end
 
   @tag timeout: 120_000

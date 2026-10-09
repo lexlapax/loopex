@@ -1436,7 +1436,11 @@ defmodule LoopexDaemon.Owner do
       idle_eviction_ms: Keyword.get(options, :idle_eviction_ms, 600_000)
     }
 
-    registry_options = [owner: self(), connection_context: context]
+    registry_options = [
+      owner: self(),
+      connection_context: context,
+      progress_ingress: Keyword.get(options, :progress_ingress)
+    ]
 
     registry_options =
       case Keyword.fetch(options, :connection_module) do
