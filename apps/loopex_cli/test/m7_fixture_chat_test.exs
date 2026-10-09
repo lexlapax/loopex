@@ -139,7 +139,7 @@ defmodule LoopexCli.M7FixtureChatTest do
        f do
     fixture = fixture(f, "repair")
     {:ok, recipe} = Policy.oracle_runner(fixture.case_id, fixture.workspace, fixture.oracle, %{})
-    changed = put_in(fixture, [:pins, recipe.elixir, :sha256], String.duplicate("0", 64))
+    changed = put_in(fixture, [:pins, recipe.interpreter, :sha256], String.duplicate("0", 64))
     assert_refused(f, changed)
     assert_refused(f, %{fixture | pins: Map.put(fixture.pins, "/bin/echo", pin("/bin/echo"))})
   end
@@ -306,7 +306,7 @@ defmodule LoopexCli.M7FixtureChatTest do
 
     pins =
       Map.new(
-        ["/bin/sh", "/usr/bin/env", recipe.elixir, runner, oracle, manifest.path],
+        ["/bin/sh", "/usr/bin/env", recipe.interpreter, runner, oracle, manifest.path],
         &{&1, pin(&1)}
       )
 

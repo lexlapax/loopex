@@ -17,7 +17,8 @@ defmodule LoopexCli.Policy.M7Fixture do
   refuses file mutations while permitting its pinned test command. The existing Policy port owns
   timeout, durable decisions and grants. Captures perform no execution and do
   not authorize a provider attempt or replace the campaign admission procedure.
-  The shared fixed runner recipe uses the hosting Elixir/OTP paths and an empty
+  The shared fixed runner recipe uses the hosting Elixir/OTP paths (Python 3 for the
+  external task's oracle) and an empty
   child environment with only literal catalog inputs. Its bytes are returned
   without writing or running a command; fixture preparation must compare and
   pin those bytes before using the existing capture boundary.
@@ -28,7 +29,7 @@ defmodule LoopexCli.Policy.M7Fixture do
   alias LoopexComposition.WorkspaceIdentity
   alias LoopexProtocol.{Canonical, ToolDefinition}
 
-  @cases ~w(m7.repair m7.feature m7.review m7.long)
+  @cases ~w(m7.repair m7.feature m7.review m7.long m7.external)
 
   @doc false
   def oracle_runner(case_id, workspace, oracle, environment) do
@@ -36,12 +37,9 @@ defmodule LoopexCli.Policy.M7Fixture do
          true <- text?(workspace) and Path.type(workspace) == :absolute,
          true <- text?(oracle) and Path.type(oracle) == :absolute,
          true <- oracle_environment?(case_id, environment),
-         {:ok, elixir} <-
-           WorkspaceIdentity.resolve_path(
-             Path.expand("../../bin/elixir", List.to_string(:code.lib_dir(:elixir)))
-           ) do
+         {:ok, interpreter} <- interpreter(case_id) do
       path =
-        Path.dirname(elixir) <>
+        Path.dirname(interpreter) <>
           ":" <> Path.join(List.to_string(:code.root_dir()), "bin") <> ":/usr/bin:/bin"
 
       extras =
@@ -56,9 +54,9 @@ defmodule LoopexCli.Policy.M7Fixture do
           extras <>
           " M7_WORKSPACE=" <>
           shell_quote(workspace) <>
-          " " <> shell_quote(elixir) <> " " <> shell_quote(oracle) <> "\n"
+          " " <> shell_quote(interpreter) <> " " <> shell_quote(oracle) <> "\n"
 
-      {:ok, %{bytes: bytes, elixir: elixir}}
+      {:ok, %{bytes: bytes, interpreter: interpreter}}
     else
       _ -> {:error, :fixture_policy_unavailable}
     end
@@ -66,14 +64,30 @@ defmodule LoopexCli.Policy.M7Fixture do
     _ -> {:error, :fixture_policy_unavailable}
   end
 
+  # Concept: the external task's oracle is the harness-owned Python test its
+  # repository's own toolchain runs; every other oracle is an Elixir script.
+  defp interpreter("m7.external") do
+    case System.find_executable("python3") do
+      nil -> {:error, :fixture_policy_unavailable}
+      python -> WorkspaceIdentity.resolve_path(python)
+    end
+  end
+
+  defp interpreter(_case_id),
+    do:
+      WorkspaceIdentity.resolve_path(
+        Path.expand("../../bin/elixir", List.to_string(:code.lib_dir(:elixir)))
+      )
+
   defp oracle_environment?("m7.feature", %{"M7_NIL_DEFAULT" => value} = environment),
     do: map_size(environment) == 1 and value in ["empty", "literal_null"]
 
   defp oracle_environment?("m7.review", %{"M7_FINDING" => value} = environment),
     do: map_size(environment) == 1 and text?(value) and Path.type(value) == :absolute
 
-  defp oracle_environment?(case_id, environment) when case_id in ["m7.repair", "m7.long"],
-    do: environment == %{}
+  defp oracle_environment?(case_id, environment)
+       when case_id in ["m7.repair", "m7.long", "m7.external"],
+       do: environment == %{}
 
   defp oracle_environment?(_, _), do: false
   defp shell_quote(value), do: "'" <> String.replace(value, "'", "'\\''") <> "'"
@@ -195,6 +209,7 @@ defmodule LoopexCli.Policy.M7Fixture do
         "m7.feature" -> ["lib/row_encoder.ex"]
         "m7.long" -> ["release.txt", "batches.txt"]
         "m7.review" -> []
+        "m7.external" -> ["tools/threads.py"]
       end
 
     path in paths

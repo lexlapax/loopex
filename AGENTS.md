@@ -286,7 +286,8 @@ repository's checks are two commands, described in
 - `bash scripts/check-release.sh` — the slow check: the real-provider
   workflows, the independent Node client, the fresh-source archive build, and
   the long-duration bound proofs the fast check excludes. It needs a provider
-  credential in `LOOPEX_PROVIDER_API_KEY`, pinned Node and a clean tree, two of
+  credential in `LOOPEX_PROVIDER_API_KEY`, pinned Node, a clean tree and, for
+  the full matrix, `--attempts-index FILE` naming the retained M7 attempts index; two of
   its tests are attended. Before a provider or credential, wire-protocol, or daemon
   change merges, run the selected unattended lanes the verification guide
   names using `--only`. The full check, including attended cases, runs once

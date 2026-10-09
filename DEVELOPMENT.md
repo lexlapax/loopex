@@ -67,7 +67,10 @@ suite-summary judge, and `mix loopex.status` over the current tree: paired
 documents, directory indexes, local links, and the status
 register), `mix loopex.docs_check`, `mix loopex.m7_evidence` (the M7 evidence
 validator: well-formed, non-conflicting committed `index-head:` lines in the M7
-plan and the intact pinned coding-fixture catalog), the release-runner, escript-inventory,
+plan, the intact pinned coding-fixture catalog, external task and execution
+manifest, the legacy and M7 release case families, and the
+[M7 validation runbook](docs/operator/m7-validation.md)'s matching step
+ownership), the release-runner, escript-inventory,
 archive-manifest, attended-release, floor-lane, and M6 demonstration fixtures,
 `mix loopex.deps_budget`,
 `mix loopex.version_train`, the test build, and the credential-free suite, one
@@ -116,11 +119,14 @@ bash scripts/check-release.sh --attempts-index /absolute/retained/m7-attempts.js
 
 The full matrix requires `--attempts-index FILE`, the retained M7 attempts
 index outside the checkout; `--resume-matrix ID` continues that matrix after a
-pre-dispatch stop. Before staging it runs the M7 evidence validator with
-`--release`, which refuses the indexed M7 lanes (`m7-provider`, `m7-rollback`
-and the attended `m7-operator` block) as unavailable evidence while the M7
-execution manifest is pending; until that manifest pins the campaign and its
-cases, the full matrix therefore refuses with exit 2.
+pre-dispatch stop. Before staging, and again inside the built extraction, it
+runs the M7 evidence validator with `--release`, which refuses an M7 lane
+(`m7-provider`, `m7-rollback`, or the attended `m7-operator` block in the full
+matrix) as unavailable evidence while any of its manifest cases is still
+pending, and the full matrix while any step owner is pending; until those
+drivers exist the full matrix therefore refuses with exit 2. The cases
+themselves run through `scripts/m7-fixture-chat.exs`, described in the
+[M7 validation runbook](docs/operator/m7-validation.md).
 It refuses without the credential, without the pinned Node, or on a dirty tree, and raises its own open-file soft limit toward the hard limit, refusing below 4,096, because the maximum-population case holds both ends of 512 daemon connections in one VM.
 It first stages the candidate as a fresh source archive and builds it there
 (described below), then runs every test lane inside that extraction rather than

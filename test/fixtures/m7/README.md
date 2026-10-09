@@ -22,10 +22,21 @@ The existing `M7FixtureTest` proves seeded failures, bounded repairs, both nil
 defaults, the exact duplicate-fee finding and early-fact file assertions. These
 are deterministic fixture checks. Required model actions must additionally join
 committed runtime facts; long must join automatic/explicit checkpoints, raw
-facts and restart. The source catalog marks the complete V1–V13 execution
-manifest and maintainer-selected external repository as Pending. It authorizes
-no provider attempt; campaign, case specifications, evidence slots, actual
-runner identities and the attempts index still need their retained bindings.
+facts and restart.
+
+`external` pins the maintainer-selected task: the `lapaxworks` repository at
+its base commit, the single allowed path `tools/threads.py` and the
+harness-owned Python oracle `external/oracle_test.py`, which never writes into
+the checkout it judges. The trusted wrapper clones it disposably and never
+pushes.
+
+`execution_manifest` pins the attempts campaign and its genesis digest, the
+three M7 lanes and their ordered cases, and one owner for every V1–V13 step
+and subcase. Cases and owners marked `pending:` name what still blocks them;
+a lane holding one cannot run. The catalog authorizes no provider attempt;
+actual identities and outcomes live in retained execution records and the
+attempts index. The [M7 validation runbook](../../../docs/operator/m7-validation.md)
+shows the same mapping.
 
 `checkpoint-summary.json` is a separate, independently encoded compact UTF-8
 rendering vector. Core pins its exact 325 bytes and SHA-256; the native adapter

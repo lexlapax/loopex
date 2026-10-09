@@ -13,12 +13,17 @@ defmodule Mix.Tasks.Loopex.M7Evidence.FixtureManifest do
   workspace verification visit complete file/directory inventories and refuse
   symlinks or additional paths. Oracle bytes and modes are checked separately
   before and after execution. No file is written and no oracle or model runs.
-  The external target and complete execution manifest remain explicitly pending.
+  The maintainer-selected external task pins its origin, base commit, single
+  allowed path and harness-owned Python oracle; its disposable checkout must
+  sit exactly at that base before execution. `ExecutionManifest` validates
+  the complete execution manifest.
   """
 
   alias LoopexCli.ConfigJson
   alias LoopexProtocol.Canonical
+  alias Mix.Tasks.Loopex.M7Evidence.ExecutionManifest
   @names ~w(repair feature review long)
+  @external_keys ~w(origin base_sha allowed_changed_paths allowed_created_paths oracle invocation run_bounds prompts objective_results required_model_actions)
   @entry_keys ~w(workspace initial_files initial_directories allowed_changed_paths allowed_created_paths oracle invocation run_bounds prompts objective_results required_model_actions)
 
   @doc false
@@ -28,12 +33,18 @@ defmodule Mix.Tasks.Loopex.M7Evidence.FixtureManifest do
     with {:ok, bytes} <- read(path),
          {:ok, catalog} <- ConfigJson.decode(bytes),
          true <- valid_catalog?(catalog),
-         :ok <- verify_sources(catalog, root) do
+         :ok <- verify_sources(catalog, root),
+         :ok <- verify_oracle(catalog["external"], root) do
       {:ok, %{catalog: catalog, bytes: bytes, digest: Canonical.digest_bytes(bytes), path: path}}
     else
       _ -> {:error, :fixture_manifest_unavailable}
     end
   end
+
+  # The catalog entry for a fixture name, including the external task.
+  @doc false
+  def entry(catalog, "external"), do: catalog["external"]
+  def entry(catalog, name), do: get_in(catalog, ["fixtures", name])
 
   @doc false
   def verify_sources(catalog, root) do
@@ -68,6 +79,20 @@ defmodule Mix.Tasks.Loopex.M7Evidence.FixtureManifest do
   end
 
   @doc false
+  def verify_workspace(%{"base_sha" => base}, workspace) do
+    run = fn args -> System.cmd("git", ["-C", workspace | args], stderr_to_stdout: true) end
+
+    case {run.(["rev-parse", "HEAD"]), run.(["status", "--porcelain", "--untracked-files=all"])} do
+      {{head, 0}, {"", 0}} ->
+        if String.trim(head) == base, do: :ok, else: {:error, :fixture_workspace_changed}
+
+      _ ->
+        {:error, :fixture_workspace_changed}
+    end
+  rescue
+    _ -> {:error, :fixture_workspace_changed}
+  end
+
   def verify_workspace(entry, workspace) do
     with {:ok, actual} <- inventory(workspace),
          expected = expected_tree(entry),
@@ -94,9 +119,39 @@ defmodule Mix.Tasks.Loopex.M7Evidence.FixtureManifest do
   defp valid_catalog?(catalog) do
     closed?(catalog, ~w(version fixtures external execution_manifest)) and catalog["version"] == 1 and
       closed?(catalog["fixtures"], @names) and
-      catalog["external"] == %{"status" => "pending_maintainer_selection"} and
-      catalog["execution_manifest"] == %{"status" => "pending", "coverage" => "V1-V13"} and
+      valid_external?(catalog["external"]) and
+      ExecutionManifest.validate(catalog["execution_manifest"]) == :ok and
       Enum.all?(@names, &valid_entry?(&1, catalog["fixtures"][&1]))
+  end
+
+  # Concept: the maintainer-selected external task, pinned before any attempt.
+  # Technical depth: a disposable checkout of the base commit replaces seed
+  # inventories; only the named path may change.
+  defp valid_external?(entry) do
+    closed?(entry, @external_keys) and is_binary(entry["origin"]) and entry["origin"] != "" and
+      is_binary(entry["base_sha"]) and Regex.match?(~r/\A[0-9a-f]{40}\z/, entry["base_sha"]) and
+      entry["allowed_changed_paths"] == ["tools/threads.py"] and
+      entry["allowed_created_paths"] == [] and
+      closed?(entry["oracle"], ~w(path sha256 mode)) and
+      entry["oracle"]["path"] == "external/oracle_test.py" and entry["oracle"]["mode"] == 420 and
+      digest?(entry["oracle"]["sha256"]) and
+      entry["invocation"] == %{
+        "argv" => ["python3", "{oracle}"],
+        "environment" => %{"M7_WORKSPACE" => "{workspace}"},
+        "additional_environment" => []
+      } and
+      entry["run_bounds"] == %{
+        "max_turns" => 16,
+        "deadline_ms" => 600_000,
+        "token_budget" => 1_000_000
+      } and
+      is_list(entry["prompts"]) and length(entry["prompts"]) == 1 and
+      Enum.all?(entry["prompts"], &(is_binary(&1) and String.valid?(&1))) and
+      entry["objective_results"] == %{
+        "Café Society" => "cafe-society",
+        "Naïve Fixes" => "naive-fixes",
+        "check_exit" => 0
+      } and entry["required_model_actions"] == []
   end
 
   defp valid_entry?(name, entry) do

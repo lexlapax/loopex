@@ -1,10 +1,834 @@
 {
   "execution_manifest": {
+    "campaign_id": "m7-closure-1",
+    "cases": {
+      "m7.baseline.ask": {
+        "attended": true,
+        "credential": true,
+        "driver": "demonstration",
+        "lane": "m7-operator",
+        "status": "pending:attended baseline driver",
+        "steps": [
+          "V1.1",
+          "V1.2",
+          "V1.3.ask"
+        ]
+      },
+      "m7.baseline.durable": {
+        "attended": true,
+        "credential": true,
+        "driver": "demonstration",
+        "lane": "m7-operator",
+        "status": "pending:attended baseline driver",
+        "steps": [
+          "V1.3.durable",
+          "V1.4",
+          "V1.5"
+        ]
+      },
+      "m7.cross-provider-maintenance": {
+        "attended": false,
+        "credential": true,
+        "driver": "provider-wrapper",
+        "lane": "m7-provider",
+        "status": "pending:A/B provider pins",
+        "steps": [
+          "V6.7"
+        ]
+      },
+      "m7.daemon-detach": {
+        "attended": false,
+        "credential": true,
+        "driver": "provider-wrapper",
+        "lane": "m7-provider",
+        "status": "pending:daemon host fixture driver",
+        "steps": [
+          "V9.4"
+        ]
+      },
+      "m7.ephemeral-question": {
+        "attended": true,
+        "credential": true,
+        "driver": "demonstration",
+        "lane": "m7-operator",
+        "status": "pending:scripts/m7-ephemeral-question-demo.exs",
+        "steps": [
+          "V5.6.positive"
+        ]
+      },
+      "m7.external": {
+        "attended": true,
+        "credential": true,
+        "driver": "external-chat",
+        "lane": "m7-operator",
+        "status": "ready",
+        "steps": [
+          "V10.1",
+          "V10.2",
+          "V10.3",
+          "V10.4",
+          "V10.5"
+        ]
+      },
+      "m7.feature": {
+        "attended": true,
+        "credential": true,
+        "driver": "fixture-chat",
+        "lane": "m7-operator",
+        "status": "pending:committed-answer oracle branch join",
+        "steps": [
+          "V5.1",
+          "V5.2"
+        ]
+      },
+      "m7.instructions.admitted": {
+        "attended": true,
+        "credential": true,
+        "driver": "demonstration",
+        "lane": "m7-operator",
+        "status": "pending:instruction fixture driver",
+        "steps": [
+          "V3.1",
+          "V3.2"
+        ]
+      },
+      "m7.instructions.changed": {
+        "attended": false,
+        "credential": true,
+        "driver": "provider-wrapper",
+        "lane": "m7-provider",
+        "status": "pending:instruction fixture driver",
+        "steps": [
+          "V3.4"
+        ]
+      },
+      "m7.instructions.declined": {
+        "attended": false,
+        "credential": true,
+        "driver": "provider-wrapper",
+        "lane": "m7-provider",
+        "status": "pending:instruction fixture driver",
+        "steps": [
+          "V3.3"
+        ]
+      },
+      "m7.interrupt": {
+        "attended": true,
+        "credential": true,
+        "driver": "demonstration",
+        "lane": "m7-operator",
+        "status": "pending:FIFO hold runner and observer join",
+        "steps": [
+          "V9.2"
+        ]
+      },
+      "m7.long": {
+        "attended": true,
+        "credential": true,
+        "driver": "fixture-chat",
+        "lane": "m7-operator",
+        "status": "pending:checkpoint and restart join inspection",
+        "steps": [
+          "V6.1",
+          "V6.2.long",
+          "V6.3",
+          "V6.4",
+          "V6.6.positive"
+        ]
+      },
+      "m7.oversized-source": {
+        "attended": true,
+        "credential": true,
+        "driver": "demonstration",
+        "lane": "m7-operator",
+        "status": "pending:oversized-source fixture",
+        "steps": [
+          "V6.5.positive"
+        ]
+      },
+      "m7.pipe-answer": {
+        "attended": false,
+        "credential": true,
+        "driver": "provider-wrapper",
+        "lane": "m7-provider",
+        "status": "pending:bidirectional pipe driver",
+        "steps": [
+          "V2.6.answer",
+          "V2.6.decline"
+        ]
+      },
+      "m7.policy-denial": {
+        "attended": true,
+        "credential": true,
+        "driver": "demonstration",
+        "lane": "m7-operator",
+        "status": "pending:denial fixture driver",
+        "steps": [
+          "V9.1"
+        ]
+      },
+      "m7.provider-switch": {
+        "attended": true,
+        "credential": true,
+        "driver": "demonstration",
+        "lane": "m7-operator",
+        "status": "pending:A/B provider pins",
+        "steps": [
+          "V7.1",
+          "V7.2",
+          "V7.4"
+        ]
+      },
+      "m7.question-restart": {
+        "attended": true,
+        "credential": true,
+        "driver": "demonstration",
+        "lane": "m7-operator",
+        "status": "pending:controlled process-loss driver",
+        "steps": [
+          "V5.3"
+        ]
+      },
+      "m7.repair": {
+        "attended": true,
+        "credential": true,
+        "driver": "fixture-chat",
+        "lane": "m7-operator",
+        "status": "ready",
+        "steps": [
+          "V2.1",
+          "V2.2",
+          "V2.3",
+          "V2.4",
+          "V2.5"
+        ]
+      },
+      "m7.restore": {
+        "attended": true,
+        "credential": false,
+        "driver": "demonstration",
+        "lane": "m7-operator",
+        "status": "pending:attended restore driver",
+        "steps": [
+          "V13.1",
+          "V13.4",
+          "V13.5",
+          "V13.6"
+        ]
+      },
+      "m7.review": {
+        "attended": true,
+        "credential": true,
+        "driver": "fixture-chat",
+        "lane": "m7-operator",
+        "status": "pending:helper flow (T11)",
+        "steps": [
+          "V8.1",
+          "V8.2",
+          "V8.3",
+          "V8.4"
+        ]
+      },
+      "m7.rollback": {
+        "attended": false,
+        "credential": false,
+        "driver": "release-lane",
+        "lane": "m7-rollback",
+        "status": "pending:current-format backup/restore lane",
+        "steps": [
+          "V13.2"
+        ]
+      },
+      "m7.steer-barrier": {
+        "attended": true,
+        "credential": true,
+        "driver": "demonstration",
+        "lane": "m7-operator",
+        "status": "pending:FIFO hold runner and observer join",
+        "steps": [
+          "V4.1",
+          "V4.2",
+          "V4.3",
+          "V4.4"
+        ]
+      },
+      "m7.thinking-bound": {
+        "attended": false,
+        "credential": true,
+        "driver": "provider-wrapper",
+        "lane": "m7-provider",
+        "status": "pending:thinking-cell witness driver",
+        "steps": [
+          "V7.7.bound"
+        ]
+      },
+      "m7.thinking-cancel": {
+        "attended": false,
+        "credential": true,
+        "driver": "provider-wrapper",
+        "lane": "m7-provider",
+        "status": "pending:pre-transport cancellation gate driver",
+        "steps": [
+          "V7.7.cancel"
+        ]
+      },
+      "m7.thinking-rounds": {
+        "attended": true,
+        "credential": true,
+        "driver": "demonstration",
+        "lane": "m7-operator",
+        "status": "pending:thinking-cell witness driver",
+        "steps": [
+          "V7.3.positive"
+        ]
+      },
+      "m7.trace.file": {
+        "attended": true,
+        "credential": true,
+        "driver": "demonstration",
+        "lane": "m7-operator",
+        "status": "pending:attended trace driver",
+        "steps": [
+          "V11.1.file",
+          "V11.2.file",
+          "V11.5.file",
+          "V12.1"
+        ]
+      },
+      "m7.trace.flag": {
+        "attended": true,
+        "credential": true,
+        "driver": "demonstration",
+        "lane": "m7-operator",
+        "status": "pending:attended trace driver",
+        "steps": [
+          "V11.1.flag",
+          "V11.2.flag",
+          "V11.5.flag",
+          "V12.2"
+        ]
+      },
+      "m7.trace.json": {
+        "attended": true,
+        "credential": true,
+        "driver": "demonstration",
+        "lane": "m7-operator",
+        "status": "pending:attended trace driver",
+        "steps": [
+          "V11.5.json"
+        ]
+      }
+    },
     "coverage": "V1-V13",
-    "status": "pending"
+    "genesis_digest": "c610f52419997327f70bcda3a362d10a93f80851e1719496c8690f7a460d1920",
+    "lanes": {
+      "m7-operator": [
+        "m7.baseline.ask",
+        "m7.baseline.durable",
+        "m7.trace.flag",
+        "m7.trace.file",
+        "m7.trace.json",
+        "m7.repair",
+        "m7.instructions.admitted",
+        "m7.steer-barrier",
+        "m7.feature",
+        "m7.question-restart",
+        "m7.ephemeral-question",
+        "m7.long",
+        "m7.oversized-source",
+        "m7.provider-switch",
+        "m7.thinking-rounds",
+        "m7.review",
+        "m7.policy-denial",
+        "m7.interrupt",
+        "m7.external",
+        "m7.restore"
+      ],
+      "m7-provider": [
+        "m7.pipe-answer",
+        "m7.instructions.declined",
+        "m7.instructions.changed",
+        "m7.cross-provider-maintenance",
+        "m7.thinking-bound",
+        "m7.thinking-cancel",
+        "m7.daemon-detach"
+      ],
+      "m7-rollback": [
+        "m7.rollback"
+      ]
+    },
+    "operator_step_evidence": {
+      "V1.1": {
+        "classification": "attended",
+        "owner": "case:m7.baseline.ask"
+      },
+      "V1.2": {
+        "classification": "attended",
+        "owner": "case:m7.baseline.ask"
+      },
+      "V1.3.ask": {
+        "classification": "attended",
+        "owner": "case:m7.baseline.ask"
+      },
+      "V1.3.durable": {
+        "classification": "attended",
+        "owner": "case:m7.baseline.durable"
+      },
+      "V1.4": {
+        "classification": "attended",
+        "owner": "case:m7.baseline.durable"
+      },
+      "V1.5": {
+        "classification": "attended",
+        "owner": "case:m7.baseline.durable"
+      },
+      "V10.1": {
+        "classification": "attended",
+        "owner": "case:m7.external"
+      },
+      "V10.2": {
+        "classification": "attended",
+        "owner": "case:m7.external"
+      },
+      "V10.3": {
+        "classification": "attended",
+        "owner": "case:m7.external"
+      },
+      "V10.4": {
+        "classification": "attended",
+        "owner": "case:m7.external"
+      },
+      "V10.5": {
+        "classification": "attended",
+        "owner": "case:m7.external"
+      },
+      "V11.1.file": {
+        "classification": "attended",
+        "owner": "case:m7.trace.file"
+      },
+      "V11.1.flag": {
+        "classification": "attended",
+        "owner": "case:m7.trace.flag"
+      },
+      "V11.2.file": {
+        "classification": "attended",
+        "owner": "case:m7.trace.file"
+      },
+      "V11.2.flag": {
+        "classification": "attended",
+        "owner": "case:m7.trace.flag"
+      },
+      "V11.3.invalid": {
+        "classification": "automated",
+        "owner": "test:apps/loopex_cli/test/ask_options_test.exs#trace controls reject conflicts, unsupported selectors and limits even when disabled"
+      },
+      "V11.3.override": {
+        "classification": "automated",
+        "owner": "test:apps/loopex_cli/test/chat_workflow_test.exs#no-trace overrides an enabled file through actual chat startup"
+      },
+      "V11.4.json": {
+        "classification": "automated",
+        "owner": "test:apps/loopex_cli/test/ask_integration_test.exs#startup trace reaches stderr while a real command keeps JSON stdout clean"
+      },
+      "V11.5.file": {
+        "classification": "attended",
+        "owner": "case:m7.trace.file"
+      },
+      "V11.5.flag": {
+        "classification": "attended",
+        "owner": "case:m7.trace.flag"
+      },
+      "V11.5.json": {
+        "classification": "attended",
+        "owner": "case:m7.trace.json"
+      },
+      "V12.1": {
+        "classification": "attended",
+        "owner": "case:m7.trace.file"
+      },
+      "V12.2": {
+        "classification": "attended",
+        "owner": "case:m7.trace.flag"
+      },
+      "V12.3": {
+        "classification": "automated",
+        "owner": "test:apps/loopex_cli/test/config_file_test.exs#JSON and authored schema refusals happen before relative resolution"
+      },
+      "V12.4": {
+        "classification": "automated",
+        "owner": "test:apps/loopex_cli/test/chat_resume_configuration_test.exs#restart preserves exact settings and ignores changed file instructions, tools and helper defaults"
+      },
+      "V12.5.in-flight": {
+        "classification": "automated",
+        "owner": "test:apps/loopex/test/session_configuration_admission_test.exs#active work, interactions, aborts and unresolved effects cannot be configured"
+      },
+      "V12.5.legacy-defaults": {
+        "classification": "automated",
+        "owner": "pending:legacy one-shot default and unattended behavior test"
+      },
+      "V13.1": {
+        "classification": "attended",
+        "owner": "case:m7.restore"
+      },
+      "V13.2": {
+        "classification": "automated",
+        "owner": "case:m7.rollback"
+      },
+      "V13.3": {
+        "classification": "retired",
+        "owner": "retired:docs/developer/agent-context-map.md#disposition-pre1-current-contract-2026-10-02"
+      },
+      "V13.4": {
+        "classification": "attended",
+        "owner": "case:m7.restore"
+      },
+      "V13.5": {
+        "classification": "attended",
+        "owner": "case:m7.restore"
+      },
+      "V13.6": {
+        "classification": "attended",
+        "owner": "case:m7.restore"
+      },
+      "V2.1": {
+        "classification": "attended",
+        "owner": "case:m7.repair"
+      },
+      "V2.2": {
+        "classification": "attended",
+        "owner": "case:m7.repair"
+      },
+      "V2.3": {
+        "classification": "attended",
+        "owner": "case:m7.repair"
+      },
+      "V2.4": {
+        "classification": "attended",
+        "owner": "case:m7.repair"
+      },
+      "V2.5": {
+        "classification": "attended",
+        "owner": "case:m7.repair"
+      },
+      "V2.6.answer": {
+        "classification": "automated",
+        "owner": "case:m7.pipe-answer"
+      },
+      "V2.6.decline": {
+        "classification": "automated",
+        "owner": "case:m7.pipe-answer"
+      },
+      "V3.1": {
+        "classification": "attended",
+        "owner": "case:m7.instructions.admitted"
+      },
+      "V3.2": {
+        "classification": "attended",
+        "owner": "case:m7.instructions.admitted"
+      },
+      "V3.3": {
+        "classification": "automated",
+        "owner": "case:m7.instructions.declined"
+      },
+      "V3.4": {
+        "classification": "automated",
+        "owner": "case:m7.instructions.changed"
+      },
+      "V3.5": {
+        "classification": "automated",
+        "owner": "test:apps/loopex/test/configured_session_test.exs#captured host sections cannot replace a denying policy with model-declared permission"
+      },
+      "V4.1": {
+        "classification": "attended",
+        "owner": "case:m7.steer-barrier"
+      },
+      "V4.2": {
+        "classification": "attended",
+        "owner": "case:m7.steer-barrier"
+      },
+      "V4.3": {
+        "classification": "attended",
+        "owner": "case:m7.steer-barrier"
+      },
+      "V4.4": {
+        "classification": "attended",
+        "owner": "case:m7.steer-barrier"
+      },
+      "V4.5": {
+        "classification": "automated",
+        "owner": "test:apps/loopex/test/input_algebra_test.exs#a steer that arrives after its run is terminal commits unapplied with a reason and is never promoted"
+      },
+      "V5.1": {
+        "classification": "attended",
+        "owner": "case:m7.feature"
+      },
+      "V5.2": {
+        "classification": "attended",
+        "owner": "case:m7.feature"
+      },
+      "V5.3": {
+        "classification": "attended",
+        "owner": "case:m7.question-restart"
+      },
+      "V5.4.cancel": {
+        "classification": "automated",
+        "owner": "test:apps/loopex/test/configured_session_test.exs#aborting a pending model question settles its slot and preserves a cancelled result"
+      },
+      "V5.4.decline": {
+        "classification": "automated",
+        "owner": "test:apps/loopex_cli/test/chat_pty_test.exs#terminal declines the actual pending question without dispatching an executor effect"
+      },
+      "V5.4.denied": {
+        "classification": "automated",
+        "owner": "test:apps/loopex/test/configured_session_test.exs#the admitted question generation never dispatches an executor effect"
+      },
+      "V5.4.expiry": {
+        "classification": "automated",
+        "owner": "test:apps/loopex/test/configured_session_test.exs#a live question deadline settles once and rejects a late answer after recovery"
+      },
+      "V5.5.authority": {
+        "classification": "automated",
+        "owner": "test:apps/loopex/test/interaction_lifecycle_test.exs#a committed answer re-enters host policy and only an allow result mints a grant before dispatch"
+      },
+      "V5.5.inactivity": {
+        "classification": "automated",
+        "owner": "test:apps/loopex/test/configured_session_test.exs#model questions settle exact text, choice and decline in one transaction"
+      },
+      "V5.6.absent": {
+        "classification": "automated",
+        "owner": "test:apps/loopex_composition/test/ephemeral_model_integration_test.exs#one-shot questions without a responder deny before waiting and preserve ordinary effects"
+      },
+      "V5.6.cancel": {
+        "classification": "automated",
+        "owner": "test:apps/loopex_composition/test/ephemeral_api_test.exs#stop aborts an unanswered interaction and proves its terminal"
+      },
+      "V5.6.positive": {
+        "classification": "attended",
+        "owner": "case:m7.ephemeral-question"
+      },
+      "V6.1": {
+        "classification": "attended",
+        "owner": "case:m7.long"
+      },
+      "V6.2.long": {
+        "classification": "attended",
+        "owner": "case:m7.long"
+      },
+      "V6.2.range": {
+        "classification": "automated",
+        "owner": "pending:m7.range-read: no >=16 KiB 4 KiB-range through-EOF integration test yet"
+      },
+      "V6.3": {
+        "classification": "attended",
+        "owner": "case:m7.long"
+      },
+      "V6.4": {
+        "classification": "attended",
+        "owner": "case:m7.long"
+      },
+      "V6.5.input-only": {
+        "classification": "automated",
+        "owner": "test:apps/loopex/test/conversation_test.exs#terminal input-only runs keep failed and cancelled prompts eligible"
+      },
+      "V6.5.metadata": {
+        "classification": "automated",
+        "owner": "test:apps/loopex/test/compaction_source_test.exs#an oversized assistant and all its results remain one covered unit"
+      },
+      "V6.5.positive": {
+        "classification": "attended",
+        "owner": "case:m7.oversized-source"
+      },
+      "V6.5.size": {
+        "classification": "automated",
+        "owner": "test:apps/loopex/test/maintenance_episode_recovery_test.exs#an automatic episode with no fitting excerpt ends durably before dispatch"
+      },
+      "V6.6.ambiguous": {
+        "classification": "automated",
+        "owner": "test:apps/loopex/test/maintenance_request_staging_test.exs#only a proven not-dispatched first attempt permits the exact retained retry"
+      },
+      "V6.6.atomic-commit": {
+        "classification": "automated",
+        "owner": "test:apps/loopex/test/maintenance_request_staging_test.exs#checkpoint and event commit together while exact raw facts remain readable"
+      },
+      "V6.6.missing-route": {
+        "classification": "automated",
+        "owner": "test:apps/loopex_composition/test/durable_bindings_startup_test.exs#missing ordinary or maintenance routes and local bindings refuse before consumption"
+      },
+      "V6.6.positive": {
+        "classification": "attended",
+        "owner": "case:m7.long"
+      },
+      "V6.6.summarizer-change": {
+        "classification": "automated",
+        "owner": "test:apps/loopex/test/standalone_compact_projection_test.exs#standalone succession reuses capture before consulting new settings, clock or work"
+      },
+      "V6.7": {
+        "classification": "automated",
+        "owner": "case:m7.cross-provider-maintenance"
+      },
+      "V7.1": {
+        "classification": "attended",
+        "owner": "case:m7.provider-switch"
+      },
+      "V7.2": {
+        "classification": "attended",
+        "owner": "case:m7.provider-switch"
+      },
+      "V7.3.barriers": {
+        "classification": "automated",
+        "owner": "test:apps/loopex_cli/test/chat_workflow_test.exs#actual model progress reaches both channels before settlement without releasing wait"
+      },
+      "V7.3.near-limit": {
+        "classification": "automated",
+        "owner": "test:apps/loopex/test/maintenance_episode_recovery_test.exs#thinking preparation continues past a hard-limit fit until the captured targets fit"
+      },
+      "V7.3.open-exchange-restart": {
+        "classification": "automated",
+        "owner": "test:apps/loopex/test/configured_session_test.exs#owner recovery reuses frozen project content without the original host manifest"
+      },
+      "V7.3.positive": {
+        "classification": "attended",
+        "owner": "case:m7.thinking-rounds"
+      },
+      "V7.3.split-events": {
+        "classification": "automated",
+        "owner": "test:apps/loopex_llm_reqllm/test/native_stream_test.exs#every byte boundary uses the pinned parser and exact native stop establishes completion"
+      },
+      "V7.4": {
+        "classification": "attended",
+        "owner": "case:m7.provider-switch"
+      },
+      "V7.5.in-run-change": {
+        "classification": "automated",
+        "owner": "test:apps/loopex/test/configured_session_test.exs#live configure refusal while a provider is active remains stable after it settles"
+      },
+      "V7.5.missing-binding": {
+        "classification": "automated",
+        "owner": "test:apps/loopex_cli/test/chat_resume_configuration_test.exs#missing retained model route refuses and abandons, without credential reads"
+      },
+      "V7.5.unsupported-level": {
+        "classification": "automated",
+        "owner": "test:apps/loopex_cli/test/chat_configuration_test.exs#configure preparation refuses host metadata, missing routes and unsupported reasoning"
+      },
+      "V7.6.canaries": {
+        "classification": "automated",
+        "owner": "test:apps/loopex_composition/test/native_model_switch_test.exs#native private continuation stays out of a real tool-created artifact across reopen"
+      },
+      "V7.6.conflicting-limits": {
+        "classification": "automated",
+        "owner": "test:apps/loopex_llm_reqllm/test/native_request_test.exs#each manual thinking budget must fit strictly below the committed output limit"
+      },
+      "V7.6.limits": {
+        "classification": "automated",
+        "owner": "test:apps/loopex/test/configured_session_test.exs#aggregate continuation overflow records an unavailable projection before another attempt"
+      },
+      "V7.6.missing-state": {
+        "classification": "automated",
+        "owner": "test:apps/loopex/test/configured_session_test.exs#required continuation refuses v2 and malformed v3 before tools or reported accounting"
+      },
+      "V7.6.open-exchange-compaction": {
+        "classification": "automated",
+        "owner": "test:apps/loopex/test/maintenance_episode_admission_test.exs#no episode overlaps an open exchange, interaction, abort or provider/effect stage"
+      },
+      "V7.6.summary-progress": {
+        "classification": "automated",
+        "owner": "pending:verified-summary progress absent from reopened canonical history"
+      },
+      "V7.7.bound": {
+        "classification": "automated",
+        "owner": "case:m7.thinking-bound"
+      },
+      "V7.7.cancel": {
+        "classification": "automated",
+        "owner": "case:m7.thinking-cancel"
+      },
+      "V8.1": {
+        "classification": "attended",
+        "owner": "case:m7.review"
+      },
+      "V8.2": {
+        "classification": "attended",
+        "owner": "case:m7.review"
+      },
+      "V8.3": {
+        "classification": "attended",
+        "owner": "case:m7.review"
+      },
+      "V8.4": {
+        "classification": "attended",
+        "owner": "case:m7.review"
+      },
+      "V8.5": {
+        "classification": "automated",
+        "owner": "pending:helper child failure, bound exhaustion and parent cancellation (T11)"
+      },
+      "V8.6": {
+        "classification": "automated",
+        "owner": "pending:serial-child delegation allowance exhaustion (T11)"
+      },
+      "V8.7": {
+        "classification": "automated",
+        "owner": "test:apps/loopex_composition/test/delegation_child_creation_test.exs#only authored enabled roles in the retained catalog admit"
+      },
+      "V9.1": {
+        "classification": "attended",
+        "owner": "case:m7.policy-denial"
+      },
+      "V9.2": {
+        "classification": "attended",
+        "owner": "case:m7.interrupt"
+      },
+      "V9.3": {
+        "classification": "automated",
+        "owner": "test:apps/loopex_reference_client/test/end_to_end_recovery_test.exs#every acknowledged fact survives the restart"
+      },
+      "V9.4": {
+        "classification": "automated",
+        "owner": "case:m7.daemon-detach"
+      },
+      "V9.5": {
+        "classification": "automated",
+        "owner": "test:apps/loopex_reference_client/test/end_to_end_recovery_test.exs#an effect without a durable receipt becomes outcome_unknown and is not blindly retried"
+      }
+    },
+    "status": "pinned"
   },
   "external": {
-    "status": "pending_maintainer_selection"
+    "allowed_changed_paths": [
+      "tools/threads.py"
+    ],
+    "allowed_created_paths": [],
+    "base_sha": "30a49d6059b2a69b54e6e97f69a5623ce977b16d",
+    "invocation": {
+      "additional_environment": [],
+      "argv": [
+        "python3",
+        "{oracle}"
+      ],
+      "environment": {
+        "M7_WORKSPACE": "{workspace}"
+      }
+    },
+    "objective_results": {
+      "Café Society": "cafe-society",
+      "Naïve Fixes": "naive-fixes",
+      "check_exit": 0
+    },
+    "oracle": {
+      "mode": 420,
+      "path": "external/oracle_test.py",
+      "sha256": "22598b997f27b80d5a4315ac3533a6b9c3902db5ecd931fd6e99c4a392edb49f"
+    },
+    "origin": "~/projects/lexlapax/lapaxworks",
+    "prompts": [
+      "In tools/threads.py, make slugify transliterate accented Latin letters to ASCII, so \"Café Society\" becomes cafe-society and \"Naïve Fixes\" becomes naive-fixes, without changing any other output. Change only tools/threads.py. Then run the exact approved test invocation supplied by the harness and report its result. The requirements are complete; no clarifying question is needed."
+    ],
+    "required_model_actions": [],
+    "run_bounds": {
+      "deadline_ms": 600000,
+      "max_turns": 16,
+      "token_budget": 1000000
+    }
   },
   "fixtures": {
     "feature": {
