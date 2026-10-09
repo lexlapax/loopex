@@ -502,3 +502,271 @@ defmodule Loopex.Runtime.MaintenanceProviderAttemptTest do
     end
   end
 end
+
+Code.require_file("support/shutdown_witness.exs", __DIR__)
+
+defmodule Loopex.Runtime.MaintenanceShutdownTest do
+  @moduledoc false
+  use ExUnit.Case, async: false
+
+  alias Loopex.AgentLoopFixture, as: Fixture
+  alias Loopex.AgentLoopTestModel
+  alias Loopex.ConfiguredGenesisFixture, as: Genesis
+  alias Loopex.Runtime.{OwnerGroup, ProviderAttempt}
+  alias Loopex.ShutdownWitness
+
+  test "public stop joins the original coordinator and held maintenance attempt without reports" do
+    observer = self()
+    saved = ShutdownWitness.install_logger(:loopex_maintenance_shutdown_witness, observer)
+    cleanup_key = {__MODULE__, make_ref()}
+
+    try do
+      configuration = Genesis.configuration()
+
+      selection = %{
+        "model" => configuration["model"],
+        "reasoning" => "none",
+        "model_capabilities" => %{
+          configuration["model_capabilities"]
+          | "reasoning_levels" => ["none", "default"]
+        },
+        "provider_mapping" => %{configuration["provider_mapping"] | "thinking_disabled" => true}
+      }
+
+      fixture =
+        Fixture.start(
+          script: [
+            %{text: "retain this fact", calls: [], reply_overrides: natural()},
+            %{
+              text:
+                ~s({"summary":"retain this fact","carry_forward":{"files_read":[],"files_changed":[]}}),
+              calls: [],
+              hold: observer,
+              reply_overrides: natural()
+            }
+          ],
+          tools: [],
+          maintenance_model: selection,
+          maintenance_instructions: %{"version" => "summary.v1", "body" => "Keep facts"}
+        )
+
+      with_original_cleanup(
+        [fixture.runtime.supervisor, fixture.model, fixture.executor, fixture.store],
+        cleanup_key,
+        fn ->
+          setup_cutoff = now_ms() + 5_000
+          {:ok, session} = Loopex.create_session(fixture.runtime, %{}, command_id: "create")
+          {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
+
+          assert {:accepted, "history"} =
+                   Loopex.command(attachment, %{
+                     type: :prompt,
+                     command_id: "history",
+                     content: "retain this fact"
+                   })
+
+          await_history(fixture, session, setup_cutoff)
+
+          # Concept: natural callback completion cannot establish this stop result.
+          # Technical depth: the adapter's existing five-second hold starts after
+          # this conservative cutoff is captured, before the actual compact call.
+          hold_cutoff = now_ms() + 5_000
+
+          assert {:accepted, "compact"} =
+                   Loopex.command(attachment, %{
+                     type: :compact,
+                     command_id: "compact",
+                     bounds: %{
+                       "max_attempts" => 4,
+                       "deadline_ms" => 60_000,
+                       "token_budget" => 32_768
+                     }
+                   })
+
+          assert_receive {:holding, callback}, max(setup_cutoff - now_ms(), 0)
+
+          with_original_cleanup([callback], cleanup_key, fn ->
+            assert now_ms() < setup_cutoff
+            assert {:ok, children} = Loopex.Runtime.children(fixture.runtime)
+            [{_, coordinator, _, _}] = Supervisor.which_children(children.sessions)
+            [{_, group, _, _}] = Supervisor.which_children(children.owner_groups)
+            assert {:ok, workers} = OwnerGroup.workers(group)
+            tasks = Task.Supervisor.children(workers)
+
+            {stopper, stopper_monitor} =
+              spawn_monitor(fn ->
+                receive do
+                  :explicit_stop ->
+                    assert :ok == Loopex.stop(fixture.runtime)
+                    send(observer, {:explicit_stop_returned, self()})
+                    receive do: (:stop -> :ok)
+                end
+              end)
+
+            roles =
+              Map.new(children, fn {name, actor} ->
+                {actor, "runtime_" <> Atom.to_string(name)}
+              end)
+              |> Map.merge(Map.new(tasks, &{&1, "task"}))
+              |> Map.merge(%{
+                callback => "callback",
+                workers => "private_supervisor",
+                group => "owner_group",
+                coordinator => "coordinator",
+                children.sessions => "sessions",
+                children.owner_groups => "owner_groups",
+                fixture.runtime.supervisor => "runtime",
+                stopper => "stop_caller"
+              })
+
+            with_original_cleanup(Map.keys(roles), cleanup_key, fn ->
+              assert {:links, links} = Process.info(callback, :links)
+              [guard] = Enum.filter(tasks, &(&1 in links))
+              roles = Map.put(roles, guard, "guard")
+              refute callback in tasks
+              assert callback in elem(Process.info(guard, :links), 1)
+              live = :sys.get_state(coordinator, remaining(setup_cutoff))
+              assert live.owner_workers == workers
+              assert live.durable.active_run_id == nil
+              assert live.durable.pending_compact["command_id"] == "compact"
+
+              [opened] =
+                for %{payload: %{kind: "maintenance_attempt_opened_v1"} = row} <-
+                      Fixture.records(fixture, session),
+                    do: row
+
+              assert {:ok, binding} = ProviderAttempt.binding_from_opened(session, opened)
+              control = :sys.get_state(children.control, remaining(setup_cutoff))
+              assert control.sessions[session].coordinator == coordinator
+              assert {permit_worker, permit_reference} =
+                       Map.fetch!(control.spent_attempts, binding)
+              assert permit_worker in tasks and is_reference(permit_reference)
+              [_, request] = AgentLoopTestModel.dispatched(fixture.model)
+              assert request.staged_request_digest == binding["staged_request_digest"]
+              episode = live.durable.maintenance_episodes[binding["episode_id"]]
+              assert episode["operation_id"] == binding["operation_id"]
+              assert episode["model_attempt"] == binding["attempt"]
+              assert episode["request"].staged_request_digest == request.staged_request_digest
+
+              monitors =
+                Map.new(roles, fn {actor, role} ->
+                  monitor = if actor == stopper, do: stopper_monitor, else: Process.monitor(actor)
+                  assert Process.alive?(actor)
+                  assert observer in elem(Process.info(actor, :monitored_by), 1)
+                  {monitor, {actor, role}}
+                end)
+
+              run = %{
+                fixture: fixture,
+                owner: stopper,
+                owner_monitor: stopper_monitor,
+                workers: workers,
+                group: group,
+                owner_groups: children.owner_groups,
+                sessions: children.sessions,
+                roles: roles,
+                monitors: monitors
+              }
+
+              assert now_ms() < setup_cutoff
+              assert now_ms() + 1_000 < hold_cutoff
+
+              evidence =
+                ShutdownWitness.observe([run], :explicit_stop, "maintenance-held", true, fn _ ->
+                  []
+                end)
+
+              assert now_ms() < hold_cutoff
+              refute Enum.any?(evidence, &(&1["event"] == "supervisor_report"))
+              downs = Enum.filter(evidence, &(&1["event"] == "original_down"))
+              assert length(downs) == map_size(roles)
+              assert length(Enum.uniq_by(downs, & &1["pid"])) == map_size(roles)
+              assert length(Enum.uniq_by(downs, & &1["monitor"])) == map_size(roles)
+
+              for down <- downs do
+                assert down["reason"] in ["normal", "shutdown", "killed"]
+
+                assert Enum.any?(
+                         evidence,
+                         &(&1["event"] == "actor_exit" and &1["pid"] == down["pid"] and
+                             &1["reason"] == down["reason"])
+                       )
+              end
+
+              assert Enum.any?(
+                       evidence,
+                       &(&1["event"] == "explicit_stop_returned" and
+                           &1["pid"] == ShutdownWitness.identity(stopper))
+                     )
+            end)
+          end)
+        end
+      )
+    after
+      Process.delete(cleanup_key)
+      ShutdownWitness.restore_logger(saved)
+    end
+  end
+
+  defp natural, do: %{completion: "natural", continuation: nil}
+
+  defp await_history(fixture, session, cutoff) do
+    remaining(cutoff)
+    finished = Enum.any?(Fixture.events(fixture, session), &(&1.kind == "run.finished"))
+    remaining(cutoff)
+
+    unless finished do
+      receive do
+        :unexpected_maintenance_fixture_message -> flunk("unexpected maintenance fixture message")
+      after
+        min(remaining(cutoff), 1) -> await_history(fixture, session, cutoff)
+      end
+    end
+  end
+
+  # Concept: cleanup keeps its original monitors independently of proof consumption.
+  # Technical depth: nested ownership brackets share the first captured cleanup
+  # cutoff. Every action is attempted under that one fixed allowance;
+  # killing on failure is cleanup only and never becomes a successful stop witness.
+  defp with_original_cleanup(actors, cleanup_key, action) do
+    originals = for actor <- Enum.uniq(actors), do: {actor, Process.monitor(actor)}
+
+    try do
+      action.()
+    after
+      cutoff =
+        case Process.get(cleanup_key) do
+          nil ->
+            cutoff = now_ms() + 1_000
+            Process.put(cleanup_key, cutoff)
+            cutoff
+
+          cutoff ->
+            cutoff
+        end
+
+      ShutdownWitness.cleanup(
+        Enum.map(originals, fn {actor, _monitor} ->
+          fn ->
+            Process.unlink(actor)
+            if Process.alive?(actor), do: Process.exit(actor, :kill)
+          end
+        end) ++
+          Enum.map(originals, fn {actor, monitor} ->
+            fn ->
+              assert_receive {:DOWN, ^monitor, :process, ^actor, _}, max(cutoff - now_ms(), 0)
+              assert now_ms() < cutoff
+            end
+          end)
+      )
+    end
+  end
+
+  defp remaining(cutoff) do
+    remaining = cutoff - now_ms()
+    assert remaining > 0, "original maintenance fixture setup cutoff exhausted"
+    remaining
+  end
+
+  defp now_ms, do: System.monotonic_time(:millisecond)
+end
