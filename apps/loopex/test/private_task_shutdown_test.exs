@@ -123,7 +123,8 @@ defmodule Loopex.PrivateTaskShutdownTest do
              &(&1["event"] == "supervisor_report" and
                  &1["context"] == "child_terminated" and
                  &1["pid"] == identity(run.group) and
-                 &1["reason"] == "owner_workers_stopped:killed")
+                 &1["reason"] == "owner_workers_stopped:killed" and
+                 &1["shutdown"] == "infinity")
            )
 
     assert Enum.any?(

@@ -1,5 +1,22 @@
 # M7 Implementation Tasks
 
+### Exact OwnerGroup shutdown metadata, 2026-10-08
+
+Whole401 original47738 atf21a0ac2 passes warning-free compile and20/21 current
+Core cases, then FAILS only the genuine-fault metadata classifier. The actual
+OwnerGroups child report has its configured literal shutdown=:infinity; the
+shared safe encoder did not represent that known OTP field. Original output
+`M7/reviewed-owner-focused-20261008-v3`,23.349seconds/four joins; terminal
+`d2473dd5efdfd0e6ceb662eb9cb545bd31d036af53a43199369ceffe26d9d795`,
+collection `cae382b629101d4d14e91b56d4e772d03df8b5413b713da8f64d6edc0152bfbc`.
+Add the one closed string encoding infinity and strengthen the actual killed
+OwnerGroup positive control to require it. Unknown fields still refuse;
+1000ms observation,8192 record cap, actor identities, exact joins and all401
+cases remain unchanged. This does not set or enlarge any shutdown timeout.
+Remaining stages/floor were unrun. Next registry2679, SHA-256
+`8a3bdc0801f751c059632dac7c2b203fd3e6c8017c44fffbcd66c8119e54e35b`.
+No checkbox closes; obtain complete both-pair proof on the new source.
+
 ### Supervisor witness classification correction, 2026-10-08
 
 Whole401 original60937 at `2e68506d` passes formatting and warning-free compile,

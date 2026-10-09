@@ -702,6 +702,7 @@ defmodule Loopex.ShutdownWitness do
   defp safe_reason(reason) when reason in @safe_reasons, do: Atom.to_string(reason)
   defp safe_reason(_), do: "other"
   defp safe_shutdown(:brutal_kill), do: "brutal_kill"
+  defp safe_shutdown(:infinity), do: "infinity"
   defp safe_shutdown(value) when is_integer(value) and value >= 0, do: value
   defp safe_shutdown(_), do: "other"
   def identity(value) when is_pid(value), do: List.to_string(:erlang.pid_to_list(value))
