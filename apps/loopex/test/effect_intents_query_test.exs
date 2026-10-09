@@ -146,6 +146,10 @@ defmodule Loopex.EffectIntentsQueryTest do
       Loopex.start_link(runtime_id: runtime_id, context_token_budget: 8_192, store: store)
 
     on_exit(fn -> stop_runtime(runtime) end)
+    # Concept: queries begin after the separate creation startup has settled.
+    # Technical depth: start_link proves dispatcher readiness only (ADR 0063);
+    # a read during the startup recovery episode is history_unavailable.
+    :ok = Loopex.ConfiguredGenesisFixture.await_creation_unavailable(runtime)
 
     [
       fixture: fixture,
