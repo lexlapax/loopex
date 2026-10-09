@@ -26,6 +26,7 @@ defmodule Loopex.AppServer.ForegroundOutputHarness do
         {"", 0} = System.cmd("/usr/bin/mkfifo", [output])
         {:ok, device} = :file.open(String.to_charlist(output), [:read, :write, :raw, :binary])
         own(key, :fifo, device)
+        bound_fifo_capacity(output)
         device
       end
       {:ok, listener} = :gen_tcp.listen(0, [:binary, packet: 4, active: false, ip: {127, 0, 0, 1}])
@@ -105,6 +106,22 @@ defmodule Loopex.AppServer.ForegroundOutputHarness do
   end
 
   defp own(key, name, value), do: Process.put(key, Map.put(Process.get(key), name, value))
+
+  # Concept: a FIFO case blocks a frame larger than the pipe on every host.
+  # Technical depth: Linux FIFOs default to 65,536 bytes, so a 32,768-tab frame
+  # (about 65.8 KB) completes after the cases' 4,096-byte read. Reduce this test
+  # pipe, held open above, to 16,384 bytes with F_SETPIPE_SZ (Darwin's FIFO
+  # size), so the write stays physically blocked as the cases require.
+  defp bound_fifo_capacity(path) do
+    if :os.type() == {:unix, :linux} do
+      script = "import fcntl, os, sys\n" <>
+        "fd = os.open(sys.argv[1], os.O_RDWR | os.O_NONBLOCK)\n" <>
+        "fcntl.fcntl(fd, 1031, 16384)\n" <>
+        "assert fcntl.fcntl(fd, 1032) == 16384\n"
+      {"", 0} = System.cmd("/usr/bin/python3", ["-I", "-c", script, path])
+    end
+    :ok
+  end
   defp join_original_launcher({nil, _monitor, _cutoff}), do: :ok
   defp join_original_launcher({_launcher, nil, _cutoff}), do: :ok
   defp join_original_launcher({launcher, monitor, cutoff}) do

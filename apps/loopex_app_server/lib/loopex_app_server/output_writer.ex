@@ -382,8 +382,34 @@ defmodule Loopex.AppServer.OutputWriter do
 
     active = %{active | frame: nil, phase: :cleaning, reason: reason, retired_sent: true}
     send(self(), {:cleanup, active.reference})
-    send_stop(%{state | active: active, sealed: true})
+    %{state | active: active, sealed: true} |> send_stop() |> resume_leader()
   end
+
+  # Concept: a retired writer lets its own stopped leader run its termination.
+  # Technical depth: a job-control stop is not undone by Linux on the leader's
+  # session-led, already orphaned group, so the leader would never read STOP or
+  # reach its pipe timeout. While the anchored group is observed live with the
+  # leader as its group ID, SIGCONT resumes only that leader; it grants no new
+  # authority, and termination stays the live leader's own group kill (ADR 0058).
+  defp resume_leader(
+         %{active: %{leader: leader, group: leader, port_down: false} = active} = state
+       )
+       when is_integer(leader) and not is_nil(active.port) do
+    with {:ok, pairs} <- group_observation(leader, active.cleanup_cutoff),
+         true <- {leader, leader} in pairs,
+         remaining when remaining > 2 <- active.cleanup_cutoff - now_ms() do
+      _ =
+        Local.answer_within(
+          "/bin/kill",
+          ["-CONT", Integer.to_string(leader)],
+          min(500, remaining)
+        )
+    end
+
+    state
+  end
+
+  defp resume_leader(state), do: state
 
   defp send_stop(%{active: %{stop_sent: false, port: port} = active} = state)
        when not is_nil(port) do
