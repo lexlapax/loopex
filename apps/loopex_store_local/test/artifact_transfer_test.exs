@@ -791,7 +791,7 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
     opened =
       for _index <- 1..limits.per_runtime do
         assert {:ok, transfer} =
-                 open_transfer(handle, reference.use_locator, %{start: 0}, session_id: session_id)
+                 open_transfer(handle, reference.use_locator, %{start: 0})
 
         transfer
       end
