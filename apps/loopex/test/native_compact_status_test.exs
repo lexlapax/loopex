@@ -49,6 +49,10 @@ defmodule Loopex.NativeCompactStatusTest do
     def creation_recovery({store, _}, request), do: TestStore.creation_recovery(store, request)
 
     @impl Store
+    def creation_provenance({store, _}, runtime, selector),
+      do: TestStore.creation_provenance(store, runtime, selector)
+
+    @impl Store
     def transaction_status({store, _}, session, domain, id),
       do: TestStore.transaction_status(store, session, domain, id)
 

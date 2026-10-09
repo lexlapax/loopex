@@ -107,6 +107,10 @@ defmodule Loopex.ContextAdmissionPageOneStore do
     do: M1RuntimeTestStore.creation_recovery(reference.store, request)
 
   @impl Loopex.Store
+  def creation_provenance(reference, runtime, selector),
+    do: M1RuntimeTestStore.creation_provenance(reference.store, runtime, selector)
+
+  @impl Loopex.Store
   def transaction_status(reference, session_id, domain, tx_id),
     do: M1RuntimeTestStore.transaction_status(reference.store, session_id, domain, tx_id)
 

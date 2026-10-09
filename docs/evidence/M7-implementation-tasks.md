@@ -1,5 +1,35 @@
 # M7 Implementation Tasks
 
+### Current creation fixture repair joined, 2026-10-08
+
+All four test Store wrappers now forward creation_provenance through their
+actual backing handles. AdmissionObservationStore also records that callback
+through its existing observer, preserving the no-Control-I/O oracle. Their
+55 original whole cases, status/fault gates, bindings, deadlines, monitor joins
+and cleanup bodies remain unchanged. The normalization repair adds ten cases
+to the combined six-file focused obligation:65 per supported pair.
+Exact join receipt:
+`/private/tmp/m7-reviewed-creation-provenance-fixture-join-20261008-v1.json`,
+SHA-256 `0acee2f5a188afb27d5d958ae8e6fd5127d298a06015ad1d4b8d53cca2381566`.
+Independent source review SHA-256
+`ad7bea211f45eaa90f13e7452692c8165a85a72c9db6efbcde850ed8e0bb06e5`.
+Native/compiler/formatter verification of these four additions is UNRUN.
+
+The sealed complete Core failure census explains all30 failures and the
+four missed generated cases: standalone_compact_owner has60 cases, and the
+whole Core scope is682. Census SHA-256
+`b2fd1c586499f73ab9a7c104f70f029df6b483b50f4f423d3875ec2e1cc86a16`.
+The remaining three whole-state assertions must account only for exact required
+recovery reads while comparing every other field unchanged; their source
+repair is separate. No production preflight move or weakened durable-state
+projection is authorized. Authority triage SHA-256
+`28814dd27c8882128a3971ff512a5ade382f329325c8f796fb658be13fc9dc51`.
+
+A bounded T16 repair subtask is added for the65-case obligation. No checkbox
+closes: T01-T19 original88 done /85 open /6 retired; added367 done /24 open.
+Full Core/application/foreground proof and ADR0065 remain open. No native
+handle is live. Next format the four new additions, then qualify all65 cases.
+
 ### Normalization repair formatting verified, 2026-10-08
 
 The raw reviewed normalization repair is committed at
@@ -15222,6 +15252,8 @@ full restore175, operator attendance, helpers or whole integration.
 - [ ] Independently review integration changes and fix confirmed defects without weakening checks.
 
 ### Added implementation subtasks
+
+- [ ] Repair the two normalization properties and four test Store provenance wrappers exposed by original60633; retain every sample, byte/record/readback/refusal assertion, callback observer, compact/status/binding/fault gate, cutoff and process join. Prove all six whole affected files /65 cases per supported pair, with original652/682 and30 failures retained. Full Core682, other applications and integration remain separate.
 
 - [x] Declare App Server's existing production `:crypto` use in its OTP application dependencies. Preserve the application-declaration checker and verify its complete inventory passes; this repairs the structure failure from original15015 and adds no external package. Whole documentation, foreground and integration checks remain separate.
 

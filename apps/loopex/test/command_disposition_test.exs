@@ -80,6 +80,12 @@ defmodule Loopex.AdmissionObservationStore do
   end
 
   @impl true
+  def creation_provenance(ref, runtime, selector) do
+    observe_call(ref, :creation_provenance)
+    Store.creation_provenance(ref.store, runtime, selector)
+  end
+
+  @impl true
   def transaction_status(ref, session, domain, id) do
     observe_call(ref, :transaction_status)
     Store.transaction_status(ref.store, session, domain, id)

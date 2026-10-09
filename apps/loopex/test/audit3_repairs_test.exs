@@ -33,6 +33,10 @@ defmodule Loopex.Audit3HoldingStore do
   def creation_recovery({store, _holder}, request), do: Store.creation_recovery(store, request)
 
   @impl Store
+  def creation_provenance({store, _holder}, runtime, selector),
+    do: Store.creation_provenance(store, runtime, selector)
+
+  @impl Store
   def transaction_status({store, _holder}, session_id, mutation_domain, tx_id),
     do: Store.transaction_status(store, session_id, mutation_domain, tx_id)
 
