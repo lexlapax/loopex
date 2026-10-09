@@ -23,6 +23,10 @@ defmodule Loopex.Runtime.RunEvidence do
   @doc false
   @spec read(Store.t(), binary(), term(), term()) ::
           {:ok, map()} | {:error, :unknown_run | :runtime_unavailable}
+  # Concept: ADR 0069 closes the answer to a map, unknown_run or runtime_unavailable.
+  # Technical depth: Store unavailability, a gapped page and history the reducer
+  # refuses all mean no evidence can be given, so they share runtime_unavailable;
+  # none is ever reported as an unknown run or as usage.
   def read(store, runtime_id, session_id, run_id) do
     with true <- identifier?(session_id) and is_binary(run_id) and byte_size(run_id) in 1..8_192,
          {:historical, _} <-

@@ -196,7 +196,7 @@ defmodule LoopexComposition.DelegationRuntimeFixture do
     )
 
     Loopex.ConfiguredGenesisFixture.await_creation_ready(runtime)
-    assert :ok = Helper.bind(helper, runtime)
+    assert :ok = Helper.bind(helper, runtime, store)
 
     case Keyword.get(options, :classify, false) do
       true -> Helper.classify(helper)

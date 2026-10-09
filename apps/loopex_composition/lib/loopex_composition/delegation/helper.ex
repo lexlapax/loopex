@@ -62,7 +62,8 @@ defmodule LoopexComposition.Delegation.Helper do
   Identical rebinding is idempotent; a different runtime refuses. Until bound,
   every helper call refuses `router_unavailable`.
   """
-  def bind(helper, runtime), do: GenServer.call(helper, {:bind, runtime}, :infinity)
+  def bind(helper, runtime, store \\ nil),
+    do: GenServer.call(helper, {:bind, runtime, store}, :infinity)
 
   @doc false
   def classification(helper, value),
@@ -141,6 +142,7 @@ defmodule LoopexComposition.Delegation.Helper do
        clock: Keyword.get(options, :clock, fn -> System.system_time(:millisecond) end),
        fault: Keyword.get(options, :fault, fn _step -> :ok end),
        runtime: nil,
+       store: nil,
        classified: Keyword.get(options, :classified, :pending),
        parents: %{},
        children: %{},
@@ -163,13 +165,13 @@ defmodule LoopexComposition.Delegation.Helper do
   end
 
   @impl true
-  def handle_call({:bind, runtime}, _from, %{runtime: nil} = state),
-    do: {:reply, :ok, %{state | runtime: runtime}}
+  def handle_call({:bind, runtime, store}, _from, %{runtime: nil} = state),
+    do: {:reply, :ok, %{state | runtime: runtime, store: store}}
 
-  def handle_call({:bind, runtime}, _from, %{runtime: runtime} = state),
+  def handle_call({:bind, runtime, _store}, _from, %{runtime: runtime} = state),
     do: {:reply, :ok, state}
 
-  def handle_call({:bind, _runtime}, _from, state),
+  def handle_call({:bind, _runtime, _store}, _from, state),
     do: {:reply, {:error, :router_bound}, state}
 
   def handle_call({:classification, value}, _from, state),
@@ -303,6 +305,9 @@ defmodule LoopexComposition.Delegation.Helper do
 
   defp new_parent(state, capture) do
     # Concept: re-presenting an authorized creation first classifies its own log.
+    # Technical depth: until then RetainedObjects fences every mutation of this
+    # owner, not only this parent, because an unclassified log could hold any
+    # parent's obligations; the fence is conservative and lifts on re-presentation.
     # Technical depth: a prepared binding left by a lost owner stays pending until
     # its exact command is presented again; lookup replays it without mutation.
     if MapSet.member?(RetainedObjects.present(state.objects).bindings, capture.key) do
@@ -1423,7 +1428,28 @@ defmodule LoopexComposition.Delegation.Helper do
     end
   end
 
+  # Concept: an unprompted child's terminal is its last owning record.
+  # Technical depth: ADR 0056 binds the failed no-run terminal to the last record
+  # of the complete captured child prefix. The record at the captured version is
+  # read from the host's own Store and named by Core Canonical's digest of its
+  # payload, exactly as every other terminal record digest.
   defp settle_unprompted(state, entry, child, through, token) do
+    case last_record_digest(state, child, through) do
+      {:ok, digest} -> settle_unprompted(state, entry, child, through, token, digest)
+      :error -> {:unresolved, state}
+    end
+  end
+
+  defp last_record_digest(%{store: nil}, _child, _through), do: :error
+
+  defp last_record_digest(state, child, through) do
+    case Loopex.Store.load_records(state.store, child, through - 1, 1) do
+      {:ok, [%{journal_version: ^through, payload: payload}]} -> {:ok, Canonical.digest(payload)}
+      _ -> :error
+    end
+  end
+
+  defp settle_unprompted(state, entry, child, through, token, record_digest) do
     [_, session, run] = entry.ids
     reserved = state.runs[{session, run}].operation.logical["reserved_tokens"]
 
@@ -1432,7 +1458,7 @@ defmodule LoopexComposition.Delegation.Helper do
       "child_session_id" => Base.encode64(child),
       "child_run_id" => nil,
       "journal_version" => through,
-      "terminal_record_sha256" => hash(token),
+      "terminal_record_sha256" => record_digest,
       "cleanup" => "confirmed"
     }
 
@@ -1520,6 +1546,10 @@ defmodule LoopexComposition.Delegation.Helper do
     end
   end
 
+  # Concept: a recovered no-child terminal names the intent that proved absence.
+  # Technical depth: the read-only intent query returns Core's validated job
+  # projection, not the raw record, so the terminal digest is Core Canonical's
+  # digest of that projection; replay recomputes it from the same scan.
   defp settle_recovered(state, entry, %{settled: nil}, intents) do
     intent = hd(intents)
     digest = Canonical.digest(Map.delete(intent.job, :__struct__))
@@ -1651,6 +1681,11 @@ defmodule LoopexComposition.Delegation.Helper do
     end)
   end
 
+  # Concept: ADR 0056's accounting endpoint token comes from Core's own scan.
+  # Technical depth: ADR 0069's run evidence carries no prefix token, so the
+  # child's complete private prefix is paged through effect_intents/4 and the
+  # final page's token names the captured endpoint. Replay later re-proves that
+  # endpoint with the resume form instead of trusting the retained frame.
   @doc false
   def prefix(state, session), do: prefix(state, session, nil, nil)
 

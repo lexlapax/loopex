@@ -78,9 +78,10 @@ defmodule LoopexComposition.Delegation do
   incomplete pass keeps durable admission closed and reports covered and
   enumerated session counts plus any unreadable session.
   """
-  @spec bind(map(), Loopex.Runtime.t(), pos_integer()) :: :ok | {:error, term()}
-  def bind(%{helper: helper}, runtime, budget_ms \\ 60_000) do
-    with :ok <- Helper.bind(helper, runtime), do: Helper.classify(helper, budget_ms)
+  @spec bind(map(), Loopex.Runtime.t(), Loopex.Store.t(), pos_integer()) ::
+          :ok | {:error, term()}
+  def bind(%{helper: helper}, runtime, store, budget_ms \\ 60_000) do
+    with :ok <- Helper.bind(helper, runtime, store), do: Helper.classify(helper, budget_ms)
   end
 
   @doc """
