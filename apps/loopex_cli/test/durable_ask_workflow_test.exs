@@ -643,6 +643,9 @@ defmodule LoopexCli.DurableAskWorkflowTest do
       Loopex.start_link(runtime_id: "ask-genesis", store: store, context_token_budget: 8192)
 
     try do
+      assert {:ok, startup_deadline} = LoopexComposition.StartupGate.await(runtime)
+      assert :ok == LoopexComposition.StartupGate.publication({:ok, startup_deadline})
+
       facade = fn
         Loopex, :create_session, [:runtime, options, create_options] = arguments ->
           assert {:ok, session_id} = Loopex.create_session(runtime, options, create_options)
@@ -683,6 +686,9 @@ defmodule LoopexCli.DurableAskWorkflowTest do
       )
 
     try do
+      assert {:ok, startup_deadline} = LoopexComposition.StartupGate.await(restarted_runtime)
+      assert :ok == LoopexComposition.StartupGate.publication({:ok, startup_deadline})
+
       assert {:ok, [%{payload: ^genesis}]} =
                Loopex.Store.load_records(restarted_store, session_id, 0, 1)
 
