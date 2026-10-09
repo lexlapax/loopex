@@ -1,5 +1,19 @@
 # M7 Implementation Tasks
 
+### Snapshot prerequisite layout verified, 2026-10-08
+
+The reviewed prerequisite is committed at
+`0c47db407a58859df00a09d8b411a47af3d5f763`. Formatter46 original80525 passes
+the lifecycle non-line syntax-tree comparison and both complete changed-source
+format checks,3.665seconds/four original joins. Retained output
+`M7/candidate-format-preparation-20261008-v46`; terminal SHA-256
+`3e4bb1c168ef105c411f08fdf4918fc2be30355b86a687429c0ae44d87d9a5c1`,
+original collection SHA-256
+`4e39bacb45d2ae4814f308b58d189ae94fb3cf7c6f6f0bc66a6b2bfc18692db3`.
+The lifecycle file has the sole syntax-preserving formatting delta. Native
+workflow qualification remains UNRUN; no checkbox closes. Next registry2711,
+SHA-256 `e2bb041c24dd10086dc03111f00e5da5c9b83d75072e17a851683f658a4141ea`.
+
 ### Original snapshot join prerequisite, 2026-10-08
 
 Physical snapshot LF bytes can be visible before the original OutputWriter join

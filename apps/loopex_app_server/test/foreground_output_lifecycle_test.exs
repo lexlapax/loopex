@@ -489,9 +489,13 @@ defmodule Loopex.AppServer.ForegroundOutputLifecycleTest do
     assert {:ok, session} = Wire.identity(snapshot["session_id"])
     assert session == fixture.session
     assert {:ok, cursor} = Wire.u64(snapshot["event_cursor"])
+
     assert {:baseline_joined, ^session, ^cursor} =
-             Harness.command(fixture, {:await_baseline_joined, session, cursor},
-               &match?({:baseline_joined, _, _}, &1))
+             Harness.command(
+               fixture,
+               {:await_baseline_joined, session, cursor},
+               &match?({:baseline_joined, _, _}, &1)
+             )
   end
 
   defp await_credit_empty(fixture) do
