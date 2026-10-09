@@ -148,10 +148,10 @@ defmodule LoopexDaemon.ConfigureCompactSocketTest do
     fixture = fixture()
     daemon = start_daemon(fixture.runtime)
     node = System.find_executable("node") || flunk("Node is required for the daemon workflow")
-    script = Path.expand("../../../clients/node/daemon-maintenance-workflow.mjs", __DIR__)
+    script = Path.expand("../../../clients/node/maintenance-workflow.mjs", __DIR__)
 
     {output, status} =
-      System.cmd(node, [script, daemon.path, "fast-alias"], stderr_to_stdout: true)
+      System.cmd(node, [script, "fast-alias", "--daemon", daemon.path], stderr_to_stdout: true)
 
     assert status == 0, output
 

@@ -117,6 +117,45 @@ defmodule Loopex.AppServer.ExternalWorkflowTest do
     assert summary["survived_refusal"]
   end
 
+  # Concept: the independent client configures and compacts over foreground /3.
+  # Technical depth: the launched host's model prepares authored changes; the
+  # alias resolves once to the canonical model, both public completions decode
+  # independently and exact retries replay their admissions (ADRs 0050, 0053).
+  @tag :node_client
+  test "an independent client configures and compacts the live foreground session" do
+    node_executable = System.find_executable("node") || flunk("Node is required")
+
+    {output, status} =
+      System.cmd(
+        node_executable,
+        [
+          client("maintenance-workflow.mjs"),
+          "fast-alias",
+          System.find_executable("elixir") || flunk("Elixir executable unavailable"),
+          ebin(:loopex_protocol),
+          ebin(:loopex),
+          ebin(:loopex_app_server),
+          ebin(:loopex_executor_local),
+          ebin(:loopex_store_local),
+          ebin(:telemetry)
+        ] ++ require_paths(),
+        env: [{"LOOPEX_WORKFLOW_SCRIPT", "maintenance"} | child_environment()],
+        stderr_to_stdout: true
+      )
+
+    assert status == 0, output
+
+    assert decode(output) == %{
+             "stale" => nil,
+             "model" => "scripted:v1",
+             "max_tokens" => "512",
+             "configure_retry_matches" => true,
+             "disposition" => "unchanged",
+             "compact_retry_matches" => true,
+             "configured_events" => 1
+           }
+  end
+
   @tag :node_client
   test "an independent client selects a skill, answers the question and reads what the tool kept" do
     node_executable = System.find_executable("node")

@@ -132,7 +132,7 @@ defmodule Loopex.AgentLoopFixture do
           progress_sink: Keyword.get(options, :progress_sink),
           diagnostics_to: Keyword.get(options, :diagnostics_to),
           model: %{
-            module: Loopex.AgentLoopTestModel,
+            module: Keyword.get(options, :model_module, Loopex.AgentLoopTestModel),
             model: Keyword.get(options, :model, "scripted:v1"),
             options: [script: model_pid, max_tokens: Keyword.get(options, :max_tokens, 256)]
           },
@@ -397,5 +397,43 @@ defmodule Loopex.AgentLoopFixture do
     M1RuntimeTestStore.inspect_state(fixture.store).sessions
     |> Map.get(session_id, %{records: []})
     |> Map.fetch!(:records)
+  end
+end
+
+defmodule Loopex.AgentLoopPreparingModel do
+  @moduledoc """
+  ## Concept
+
+  The scripted fixture model, plus host-style preparation of authored
+  configuration changes, so transport tests can configure a live session.
+
+  ## Technical depth
+
+  `complete/3` delegates to the scripted model. `prepare_configuration/5`
+  resolves any authored model name to the fixture's canonical `scripted:v1`
+  through the shared configuration updater; it holds no other state.
+  """
+  @behaviour Loopex.Model
+
+  @canonical "scripted:v1"
+
+  @impl true
+  def complete(request, options, progress),
+    do: Loopex.AgentLoopTestModel.complete(request, options, progress)
+
+  @impl true
+  def prepare_configuration(current, authored, definitions, _context, _options) do
+    effective =
+      if Map.has_key?(authored, "model"),
+        do: Map.put(authored, "model", @canonical),
+        else: authored
+
+    Loopex.Runtime.SessionConfiguration.update(
+      current,
+      effective,
+      Map.put(current["model_capabilities"], "model", @canonical),
+      current["provider_mapping"],
+      definitions
+    )
   end
 end

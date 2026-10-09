@@ -71,6 +71,11 @@ defmodule Loopex.AppServer.Fixture do
           end
         end
 
+      # A model that prepares authored configuration, so a client can
+      # configure and compact the live session it creates.
+      "maintenance" ->
+        serve(script: [], model_module: Loopex.AgentLoopPreparingModel)
+
       _plain ->
         serve(script: [%{text: "the task is done", calls: []}])
     end
