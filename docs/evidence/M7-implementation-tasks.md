@@ -1,16 +1,19 @@
 # M7 Implementation Tasks
 
-### Maintenance and durable restart qualification, 2026-10-09
+### Case evidence integrity proved; startup fixture repaired, 2026-10-09
 
-Original 36406 passes 6 maintenance+36 durable-ask cases on both supported pairs
-at 5fd91659 in71.394s. Original 99083 remains FAIL11/12: prompt diagnostic capacity
-exhaustion, quiet create trace with valid prior closure. Reviewed create-only
-observation correction and both-pair strict AST formatting joined through 36daef99;
-final native qualification and production duplicate/rendering repairs remain open.
-The [resume checkpoint](M7-resume.md) binds exact collections and232/72-asset
-retention v32/v33. No native handle is live. Original T01–T19: 89 done/84 open/
-6 retired; added 373 done/23 open; combined 462 done/107 open/6 retired. No checkbox
-changes. ADR 0066 remains Accepted; ADR 0067 exact acceptance remains pending.
+Source `5f2c5065` passes all 136 attempts cases on both supported pairs, original
+57532 in 23.815 seconds. One added T14 integrity subtask is complete; physical
+writer, manifest and runner joins remain open. The demonstration startup repair
+passes five ordinary real-store coding cases on both pairs, original 80421 in
+21.657 seconds; its two existing attended provider exclusions remain owed.
+The complete current CLI file improves to FAIL58/60, original 73600 in 44.374
+seconds; both progress-output failures remain open. The indexed initial closure
+scaffold has only Pending results; T00 still needs final literal inventories.
+The [resume checkpoint](M7-resume.md) binds original collections, reviews and
+retention. Original T01–T19: 89 done/84 open/6 retired; added 374 done/23 open;
+combined 463 done/107 open/6 retired. ADR 0066 remains Accepted; ADR 0067 exact
+acceptance remains the current human question. No original row closes here.
 
 ### Orderly-stop current proof; duplicate-output investigation, 2026-10-09
 
@@ -16130,6 +16133,7 @@ repeating completed provider work.
 ### Added implementation subtasks
 
 - [x] Pin and implement the closed current attempts-event body union, including missing-evidence consumption, retained case identity, writer/handoff/head relations and causal authorization; prove exact independent vectors and all positive/negative body variants on both supported toolchains before ordered replay, physical writer ownership or runner activation. ADR0057 is accepted at `a67dc97e`; codec `99dd199b` passed all54 cases on both supported pairs in original96348; its two tested files integrate literally.
+- [x] Verify every retained case evidence, diagnosis, disposition and authorization reference against caller-supplied complete binary bytes; preserve original errors, unresolved histories, consumed records and verdicts, report missing/corrupt/null evidence as unavailable without retaining content or granting authority, and prove all 136 frame/head/event cases on both supported pairs. Source `5f2c5065498d85a4e528bb9a6e04e8dd33f309ba`, original 57532, collection SHA-256 `1fb8d55479f4e95ef5fe9bdc842d5922e91a8a85b7d41e8febd9e4568cd77c48`; physical dereference, cleanup, manifest and runner admission remain open.
 - [x] Validate ordered attempts ownership with the existing frame and accepted body codecs; prove genesis/designation, optional succession placement, original relinquishment-to-acceptance joins, exact owner tuples and epochs, pending handoff, reused identities and unresolved tails on both supported pairs. Keep this ownership projection distinct from case-state replay, evidence, quiescence, authority and physical dispatch.
 - [x] Project the accepted consumed case-history core through original started, completed, reviewed and authorized-candidate records; preserve immutable execution identities, original mechanical facts and whole record history, propagate exact ownership/framing/anchor errors and retain unapproved same-state or reference choices explicitly unresolved. Prove complete original plus new cases on both supported pairs; no manifest, evidence, authority or physical dispatch claim.
 
