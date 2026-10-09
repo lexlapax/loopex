@@ -1129,12 +1129,56 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
   test "a full 64 MiB object retains exact payload and separately accounted metadata work" do
     bytes = :binary.copy(<<42>>, 67_108_864)
     %{handle: handle, reference: reference} = stored(bytes)
-    assert {:ok, transfer} = open_transfer(handle, reference.use_locator, %{start: 0})
+    request = %{session_id: "transfer-session", use_locator: reference.use_locator, start: 0}
+    context = opening_context(60_000)
+    use_digest = binary_part(reference.use_locator, 4, 64)
+    use_path = Path.join([handle.root, "uses", binary_part(use_digest, 0, 2), use_digest])
+
+    expected_work = %{
+      source_read_bytes: 67_108_864,
+      snapshot_write_debit: 67_108_864,
+      metadata_read_bytes: File.stat!(use_path).size,
+      write_uncertain: false
+    }
+
+    assert {:ok, %{transfer_ref: id}} = Artifacts.reserve_transfer(handle, request, context)
+    assert id == context.transfer_ref
+
+    assert {:ok, %{transfer: transfer, use: use, work: ^expected_work}} =
+             Artifacts.open_transfer(handle, request, context)
+
+    assert System.monotonic_time(:millisecond) < context.open_deadline_ms
+    assert ArtifactStore.valid_transfer_use?(use, request)
+    assert expected_work.source_read_bytes + expected_work.snapshot_write_debit == 134_217_728
+    assert expected_work.metadata_read_bytes in 1..131_073
     assert transfer.total_size == 67_108_864
     assert transfer.object_digest == digest(bytes)
     assert {:ok, chunk} = Artifacts.read_transfer(handle, transfer, 32_768)
     assert chunk.bytes == :binary.copy(<<42>>, 32_768)
-    assert :ok = close_transfer(handle, transfer)
+    worker = :sys.get_state(handle.transfers).transfers[id].worker
+    assert Process.alive?(worker)
+    worker_monitor = Process.monitor(worker)
+    assert Process.alive?(worker)
+    selector = retire_selector(context)
+
+    assert {:retired, %{transfer_ref: ^id, receipt_ref: receipt, work: ^expected_work}} =
+             Artifacts.close_transfer(handle, selector)
+
+    assert System.monotonic_time(:millisecond) < selector.close_deadline_ms
+    assert ArtifactStore.valid_transfer_work?(expected_work)
+    remaining = max(0, selector.close_deadline_ms - System.monotonic_time(:millisecond))
+    assert_receive {:DOWN, ^worker_monitor, :process, ^worker, :normal}, remaining
+    assert System.monotonic_time(:millisecond) < selector.close_deadline_ms
+
+    assert :ok =
+             Artifacts.close_transfer(handle, %{
+               action: :acknowledge,
+               transfer_ref: id,
+               receipt_ref: receipt
+             })
+
+    assert System.monotonic_time(:millisecond) < selector.close_deadline_ms
+    Process.put({:transfer_acknowledged, id}, true)
     assert [] = Transfers.live(handle.transfers)
   end
 
