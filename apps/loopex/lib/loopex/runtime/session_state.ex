@@ -3879,14 +3879,32 @@ defmodule Loopex.Runtime.SessionState do
              payload[:kind] == "prompt_admitted_v3" and payload["run_id"] == run_id and
                payload["admission"] == "accepted"
            end) do
+      # Concept: a reconciled unknown effect ends its run as a terminal too.
+      # Technical depth: outcome_unknown_committed_v2 settles the run's public
+      # terminal in the same transaction, so it is the run's terminal record.
       terminal =
         Enum.find_value(records, fn %{payload: payload} = record ->
-          if payload[:kind] == "run_terminal_committed" and payload["run_id"] == run_id,
-            do: %{
-              state: payload["outcome"],
-              journal_version: record.journal_version,
-              record_digest: Canonical.digest(payload)
-            }
+          cond do
+            payload["run_id"] != run_id ->
+              nil
+
+            payload[:kind] == "run_terminal_committed" ->
+              %{
+                state: payload["outcome"],
+                journal_version: record.journal_version,
+                record_digest: Canonical.digest(payload)
+              }
+
+            payload[:kind] == "outcome_unknown_committed_v2" ->
+              %{
+                state: "outcome_unknown",
+                journal_version: record.journal_version,
+                record_digest: Canonical.digest(payload)
+              }
+
+            true ->
+              nil
+          end
         end)
 
       {:ok,

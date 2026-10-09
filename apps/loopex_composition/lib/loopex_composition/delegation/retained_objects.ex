@@ -82,6 +82,9 @@ defmodule LoopexComposition.Delegation.RetainedObjects do
   def read(owner, digest), do: GenServer.call(owner, {:read, digest}, :infinity)
 
   @doc false
+  def present(owner), do: GenServer.call(owner, :present, :infinity)
+
+  @doc false
   def open_binding(owner, command, objects, runtime \\ nil),
     do: GenServer.call(owner, {:open_binding, command, objects, runtime}, :infinity)
 
@@ -228,6 +231,10 @@ defmodule LoopexComposition.Delegation.RetainedObjects do
     {:reply, result, state}
   end
 
+  def handle_call(:present, _from, state) do
+    {:reply, %{bindings: state.pending_bindings, runs: state.known_runs}, state}
+  end
+
   def handle_call({:read, hash}, _from, state) do
     result =
       with true <- is_binary(hash) and Regex.match?(~r/\A[0-9a-f]{64}\z/, hash),
@@ -268,7 +275,7 @@ defmodule LoopexComposition.Delegation.RetainedObjects do
 
   def handle_call({:read_binding, command, runtime}, _from, state) do
     result =
-      with :ok <- mutation_open(state),
+      with :ok <- binding_readable(state, command),
            {:ok, image} <- binding_image(state, command),
            true <- image.decoded.tail == :complete,
            {:ok, reduced} <- reduce_image(state, command, image, runtime),
@@ -289,6 +296,8 @@ defmodule LoopexComposition.Delegation.RetainedObjects do
   end
 
   def handle_call({:open_run, command, identifiers, runtime, options}, _from, state) do
+    options = Keyword.put(options, :reader, reader(state))
+
     case do_open_run(state, command, identifiers, runtime, options) do
       {:ok, key, next} ->
         {:reply, {:ok, key}, next}
@@ -302,6 +311,8 @@ defmodule LoopexComposition.Delegation.RetainedObjects do
   end
 
   def handle_call({:commit_run, command, identifiers, tx, runtime, options}, _from, state) do
+    options = Keyword.put(options, :reader, reader(state))
+
     case do_commit_run(state, command, identifiers, tx, runtime, options) do
       {:ok, result} ->
         {:reply, {:ok, result}, state}
@@ -315,6 +326,8 @@ defmodule LoopexComposition.Delegation.RetainedObjects do
   end
 
   def handle_call({:lookup_run, command, identifiers, tx_id, runtime, options}, _from, state) do
+    options = Keyword.put(options, :reader, reader(state))
+
     case do_lookup_run(state, command, identifiers, tx_id, runtime, options) do
       {:ok, result, next} ->
         {:reply, {:ok, result}, next}
@@ -325,6 +338,8 @@ defmodule LoopexComposition.Delegation.RetainedObjects do
   end
 
   def handle_call({:read_run, command, identifiers, runtime, options}, _from, state) do
+    options = Keyword.put(options, :reader, reader(state))
+
     result =
       with :ok <- mutation_open(state),
            {:ok, parent} <- run_parent(state, command, identifiers, runtime),
@@ -332,7 +347,7 @@ defmodule LoopexComposition.Delegation.RetainedObjects do
            true <- image.decoded.tail == :complete,
            {:ok, reduced} <- reduce_run(parent, image, options),
            :ok <- confirm_run(state, image) do
-        {:ok, run_view(reduced)}
+        {:ok, if(Keyword.get(options, :full, false), do: reduced, else: run_view(reduced))}
       else
         false -> {:error, :incomplete_run_tail}
         {:error, reason} -> {:error, reason}
@@ -363,6 +378,21 @@ defmodule LoopexComposition.Delegation.RetainedObjects do
         %{caller_monitor: monitor} = state
       ),
       do: {:stop, :normal, state}
+
+  # Concept: replay may read retained objects inside this owner without a call.
+  # Technical depth: the closure runs in the owner process and verifies the
+  # object's address exactly as the public read does.
+  defp reader(state) do
+    fn hash ->
+      with true <- is_binary(hash) and Regex.match?(~r/\A[0-9a-f]{64}\z/, hash),
+           {:ok, bytes} <- read_file(state, Path.join(state.directory, hash)),
+           true <- digest(bytes) == hash do
+        {:ok, bytes}
+      else
+        _ -> :error
+      end
+    end
+  end
 
   defp install_object(state, bytes) do
     with :ok <- valid_bytes(bytes), :ok <- verify(state) do
@@ -403,6 +433,23 @@ defmodule LoopexComposition.Delegation.RetainedObjects do
   end
 
   defp mutation_open(_), do: {:error, :ledger_fenced}
+
+  # Concept: a classified binding may be read while other logs await classification.
+  # Technical depth: only an unfenced owner whose exact binding was already
+  # replayed by lookup reads it; mutations still wait for every present log.
+  defp binding_readable(%{fence: nil} = state, command) do
+    case LedgerCodec.header_key(:binding, [state.runtime_id, command]) do
+      {:ok, key} ->
+        if MapSet.member?(state.pending_bindings, key),
+          do: {:error, :ledger_fenced},
+          else: :ok
+
+      _ ->
+        {:error, :invalid_binding_scope}
+    end
+  end
+
+  defp binding_readable(_, _), do: {:error, :ledger_fenced}
 
   defp binding_unknown(state, command, tx, file_identity) do
     fence = %{kind: :binding, command: command, tx: tx, identity: file_identity}
@@ -773,9 +820,12 @@ defmodule LoopexComposition.Delegation.RetainedObjects do
   # whose inputs cannot be supplied refuses rather than replaying unjoined.
   defp reduce_run(parent, image, options) do
     replay = Keyword.get(options, :replay, fn _tx -> %{} end)
+    reader = Keyword.get(options, :reader, fn _hash -> :error end)
 
     Enum.reduce_while(image.decoded.transactions, {:ok, parent}, fn tx, {:ok, current} ->
-      case RunLedger.admit(current, tx, replay.(tx)) do
+      inputs = if is_function(replay, 2), do: replay.(tx, reader), else: replay.(tx)
+
+      case RunLedger.admit(current, tx, inputs) do
         {:ok, next, _} -> {:cont, {:ok, next}}
         _ -> {:halt, {:error, :invalid_run_log}}
       end

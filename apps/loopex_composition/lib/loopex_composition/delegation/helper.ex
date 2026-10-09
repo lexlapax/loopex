@@ -139,6 +139,7 @@ defmodule LoopexComposition.Delegation.Helper do
        objects: Keyword.fetch!(options, :objects),
        runtime_id: Keyword.fetch!(options, :runtime_id),
        clock: Keyword.get(options, :clock, fn -> System.system_time(:millisecond) end),
+       fault: Keyword.get(options, :fault, fn _step -> :ok end),
        runtime: nil,
        classified: Keyword.get(options, :classified, :pending),
        parents: %{},
@@ -153,7 +154,10 @@ defmodule LoopexComposition.Delegation.Helper do
        fenced: false,
        intents: %{},
        settlements: %{},
-       blobs: %{}
+       blobs: %{},
+       expected: %{},
+       unresolved: MapSet.new(),
+       excess: MapSet.new()
      }}
   end
 
@@ -247,12 +251,28 @@ defmodule LoopexComposition.Delegation.Helper do
     reply =
       cond do
         Map.has_key?(state.receipts, job_id) -> {:ok, state.receipts[job_id]}
+        MapSet.member?(state.unresolved, job_id) -> {:error, :effect_unresolved}
         Map.has_key?(state.jobs, job_id) -> {:error, :effect_in_flight}
         state.classified != :complete -> {:error, :helper_index_pending}
         true -> :not_helper
       end
 
     {:reply, reply, state}
+  end
+
+  def handle_call({:classify, budget}, _from, state) do
+    deadline = System.monotonic_time(:millisecond) + budget
+
+    case classify_root(state, deadline) do
+      {:ok, state} ->
+        {:reply, :ok, %{state | classified: :complete}}
+
+      {:incomplete, covered, enumerated, failed, state} ->
+        value = {:incomplete, covered, enumerated, failed}
+
+        {:reply, {:error, {:helper_classification_incomplete, covered, enumerated, failed}},
+         %{state | classified: value}}
+    end
   end
 
   @impl true
@@ -341,6 +361,14 @@ defmodule LoopexComposition.Delegation.Helper do
   end
 
   defp occupied?(state, session) do
+    MapSet.member?(state.excess, session) or
+      Enum.any?(state.unresolved, fn job_id ->
+        match?(%{session_id: ^session}, state.originals[job_id])
+      end) or
+      ledger_occupied?(state, session)
+  end
+
+  defp ledger_occupied?(state, session) do
     Enum.any?(state.runs, fn {{parent, _run}, run} ->
       parent == session and RunLedger.occupied?(run)
     end)
@@ -388,9 +416,15 @@ defmodule LoopexComposition.Delegation.Helper do
             })
       }
 
+      fault(state, :before_reserve)
+
       case commit(state, ids, tx, %{original_job: job, child_creation: bytes}) do
-        {:ok, state} -> create_child(state, job.job_id, child, cutoff)
-        {:error, state} -> {:unresolved, state}
+        {:ok, state} ->
+          fault(state, :after_reserve)
+          create_child(state, job.job_id, child, cutoff)
+
+        {:error, state} ->
+          {:unresolved, state}
       end
     else
       {:refused, reason, state} -> {:refused, reason, state}
@@ -565,6 +599,7 @@ defmodule LoopexComposition.Delegation.Helper do
              child.options,
              child.genesis
            ),
+         :ok <- fault(state, :after_create),
          {:ok, state} <- created(state, entry, session),
          {:ok, attachment} <- Runtime.attach(state.runtime, session, after_event_sequence: 0),
          {:accepted, _} <-
@@ -578,6 +613,7 @@ defmodule LoopexComposition.Delegation.Helper do
                deadline_at_ms: cutoff
              }
            }),
+         :ok <- fault(state, :after_prompt),
          {:ok, %{run_id: run}} <- disposition(attachment, child.prompt_command_id),
          {:ok, evidence} <- Runtime.run_evidence(state.runtime, session, run),
          {:ok, state} <- prompted(state, entry, session, run, evidence.admission.digest) do
@@ -647,7 +683,7 @@ defmodule LoopexComposition.Delegation.Helper do
   defp commit(state, [_runtime, session, run_id] = ids, tx, inputs) do
     parent = state.parents[session]
     run = state.runs[{session, run_id}]
-    replay = &replay_inputs(state, &1)
+    replay = fn tx, read -> recovery_inputs(state, tx, read) end
 
     case RetainedObjects.commit_run(state.objects, parent.command, ids, tx, state.runtime,
            inputs: inputs,
@@ -663,39 +699,6 @@ defmodule LoopexComposition.Delegation.Helper do
       {:error, _reason} ->
         {:error, state}
     end
-  end
-
-  # Concept: replay rejoins each frame to evidence this owner already validated.
-  defp replay_inputs(state, %{"mutation" => mutation} = _tx) do
-    case mutation["kind"] do
-      kind when kind in ~w(reserve stop) ->
-        job_id = Base.decode64!(mutation["job"]["job_id"])
-        original = state.originals[job_id]
-
-        if kind == "reserve" do
-          %{
-            original_job: original,
-            child_creation: state.blobs[mutation["child_creation_sha256"]]
-          }
-        else
-          %{original_job: original}
-        end
-
-      "child_prompted" ->
-        %{prompt_digest: mutation["prompt_digest"]}
-
-      "settle" ->
-        Map.get(state.settlements, mutation["operation_identity"], %{})
-
-      "bind_receipt" ->
-        job_id = Base.decode64!(mutation["job"]["job_id"])
-        %{receipt: state.blobs[mutation["receipt_sha256"]], original_job: state.originals[job_id]}
-
-      _ ->
-        %{}
-    end
-  rescue
-    _ -> %{}
   end
 
   # Concept: the caller observes the child, never the owner.
@@ -733,6 +736,791 @@ defmodule LoopexComposition.Delegation.Helper do
     end
   end
 
+  @doc """
+  ## Concept
+
+  Classify retained helper history before durable admission opens, and
+  finish what a predecessor left unfinished without creating or re-prompting.
+
+  ## Technical depth
+
+  ADR 0046's startup classification and stop-only recovery. Every committed
+  creation is enumerated; a session whose creating command has a retained
+  binding is a helper parent and its complete intent history is scanned. Task
+  intents with a committed pre-effect refusal are excluded; every other task
+  intent is an expected operation. Retained run logs replay against those
+  intents. Unfinished operations are stopped with `adapter_recovery`, a known
+  child is aborted through a prepared, never activated, owner and conclusive
+  evidence is settled and receipted. An expected operation with no retained
+  reservation whose derived child creation is conclusively absent takes the
+  conservative one-count `recover_uncreated` charge. Anything less conclusive
+  stays unresolved and keeps its parent's slot occupied. The whole pass is
+  bounded by `budget_ms`; exhaustion leaves classification incomplete with the
+  covered and enumerated counts, and admission stays closed.
+  """
+  def classify(helper, budget_ms \\ 60_000),
+    do: GenServer.call(helper, {:classify, budget_ms}, :infinity)
+
+  defp classify_root(%{runtime: nil} = state, _deadline), do: {:incomplete, 0, 0, [], state}
+
+  defp classify_root(state, deadline) do
+    case enumerate(state.runtime, nil, [], deadline) do
+      {:ok, rows} ->
+        present = RetainedObjects.present(state.objects).bindings
+        classify_sessions(state, rows, present, deadline)
+
+      :error ->
+        {:incomplete, 0, 0, [], state}
+    end
+  end
+
+  defp enumerate(runtime, cursor, rows, deadline) do
+    if System.monotonic_time(:millisecond) >= deadline do
+      :error
+    else
+      case Runtime.creation_provenance(runtime, %{kind: :runtime_page, cursor: cursor, limit: 16}) do
+        {:ok, {:page, %{rows: page, next_cursor: nil}}} ->
+          {:ok, rows ++ page}
+
+        {:ok, {:page, %{rows: page, next_cursor: next}}} ->
+          enumerate(runtime, next, rows ++ page, deadline)
+
+        _ ->
+          :error
+      end
+    end
+  end
+
+  defp classify_sessions(state, rows, present, deadline) do
+    total = length(rows)
+
+    result =
+      Enum.reduce_while(rows, {:ok, state, 0}, fn row, {:ok, state, covered} ->
+        cond do
+          System.monotonic_time(:millisecond) >= deadline ->
+            {:halt, {:incomplete, covered, total, [], state}}
+
+          true ->
+            case classify_session(state, row, present, deadline) do
+              {:ok, state} -> {:cont, {:ok, state, covered + 1}}
+              {:failed, state} -> {:halt, {:incomplete, covered, total, [row.session_id], state}}
+              :timeout -> {:halt, {:incomplete, covered, total, [], state}}
+            end
+        end
+      end)
+
+    case result do
+      {:ok, state, _covered} -> recover_all(state, deadline)
+      incomplete -> incomplete
+    end
+  end
+
+  defp classify_session(state, row, present, deadline) do
+    {:ok, key} = LedgerCodec.header_key(:binding, [state.runtime_id, row.command_id])
+
+    if MapSet.member?(present, key) or Map.has_key?(state.parents, row.session_id) do
+      with {:ok, state} <- load_parent(state, row),
+           {:ok, intents} <- session_intents(state, row.session_id, deadline) do
+        {:ok, %{state | expected: Map.put(state.expected, row.session_id, intents)}}
+      else
+        :timeout -> :timeout
+        _ -> {:failed, state}
+      end
+    else
+      {:ok, state}
+    end
+  end
+
+  # Concept: a parent's capture is rebuilt from its own retained object bytes.
+  # Technical depth: the prepare mutation names the three object hashes; the
+  # bind lookup classifies the physical log against Core's creation history.
+  defp load_parent(state, row) do
+    if Map.has_key?(state.parents, row.session_id) do
+      {:ok, state}
+    else
+      with {:ok, view} <- binding_view(state, row),
+           [{prepare, _} | _] <- view.transactions,
+           mutation = prepare["mutation"],
+           {:ok, catalog} <- RetainedObjects.read(state.objects, mutation["catalog_sha256"]),
+           {:ok, declaration} <-
+             RetainedObjects.read(state.objects, mutation["declaration_sha256"]),
+           {:ok, creation} <- RetainedObjects.read(state.objects, mutation["creation_sha256"]),
+           {:ok, capture} <-
+             ParentBinding.capture(
+               state.runtime_id,
+               row.command_id,
+               catalog,
+               declaration,
+               creation
+             ),
+           binding = Enum.map(view.transactions, &elem(&1, 0)),
+           true <- length(binding) == 2 do
+        parent = %{command: row.command_id, capture: capture, binding: binding}
+        {:ok, %{state | parents: Map.put(state.parents, row.session_id, parent)}}
+      else
+        _ -> :error
+      end
+    end
+  end
+
+  # Concept: reopening classifies each present binding before any mutation.
+  # Technical depth: lookup replays and verifies the physical log against Core
+  # history; an unknown transaction ID answers absent without changing it.
+  defp binding_view(state, row) do
+    with {:ok, _result} <-
+           RetainedObjects.lookup_binding(
+             state.objects,
+             row.command_id,
+             String.duplicate("0", 64),
+             state.runtime
+           ) do
+      RetainedObjects.read_binding(state.objects, row.command_id, state.runtime)
+    end
+  end
+
+  # Concept: an intent is expected unless a pre-effect refusal ended it.
+  # Technical depth: terminals join their exact run/tool-call intent; the first
+  # terminal of an intent decides it, so a receipt followed by its tool result
+  # stays a receipt. The run-level unknown joins the run's open intent.
+  defp session_intents(state, session, deadline),
+    do: session_intents(state, session, nil, %{}, [], deadline)
+
+  defp session_intents(state, session, cursor, open, done, deadline) do
+    if System.monotonic_time(:millisecond) >= deadline do
+      :timeout
+    else
+      case Runtime.effect_intents(state.runtime, session, cursor, 16) do
+        {:ok, page} ->
+          {open, done} = Enum.reduce(page.rows, {open, done}, &join_row/2)
+
+          if page.next_cursor,
+            do: session_intents(state, session, page.next_cursor, open, done, deadline),
+            else: {:ok, Enum.sort_by(Map.values(open) ++ done, & &1.journal_version)}
+
+        _ ->
+          :error
+      end
+    end
+  end
+
+  defp join_row(%{kind: "intent", journal_version: version, job: job}, {open, done}) do
+    if job.tool_id == Tool.definition()["tool_id"],
+      do:
+        {Map.put(open, {job.run_id, job.tool_call_id}, %{
+           journal_version: version,
+           job: job,
+           disposition: nil
+         }), done},
+      else: {open, done}
+  end
+
+  defp join_row(
+         %{kind: "terminal", run_id: run, tool_call_id: call, disposition: disposition},
+         {open, done}
+       ) do
+    key =
+      if call,
+        do: {run, call},
+        else: Enum.find(Map.keys(open), fn {open_run, _} -> open_run == run end)
+
+    case key && Map.pop(open, key) do
+      {%{} = intent, open} -> {open, [%{intent | disposition: disposition} | done]}
+      _ -> {open, done}
+    end
+  end
+
+  defp join_row(_row, acc), do: acc
+
+  # Concept: recovery is stop-only and runs operation by operation in journal order.
+  defp recover_all(state, deadline) do
+    state =
+      Enum.reduce(state.expected, state, fn {session, intents}, state ->
+        intents
+        |> Enum.reject(&(&1.disposition == "refused_before_effect"))
+        |> Enum.group_by(& &1.job.run_id)
+        |> Enum.reduce(state, fn {run, run_intents}, state ->
+          recover_run(state, session, run, run_intents, deadline)
+        end)
+      end)
+
+    {:ok, state}
+  end
+
+  defp recover_run(state, session, run, intents, deadline) do
+    parent = state.parents[session]
+    ids = [state.runtime_id, session, run]
+    jobs = Enum.map(intents, &original/1)
+
+    state = %{
+      state
+      | originals: Enum.reduce(jobs, state.originals, &Map.put(&2, &1.job_id, &1)),
+        intents:
+          Enum.reduce(intents, state.intents, &Map.put(&2, &1.job.job_id, &1.journal_version))
+    }
+
+    {:ok, key} = LedgerCodec.header_key(:run, ids)
+
+    state =
+      if MapSet.member?(RetainedObjects.present(state.objects).runs, key) or
+           Map.has_key?(state.runs, {session, run}),
+         do: load_run(state, parent, ids),
+         else: state
+
+    intents
+    |> Enum.group_by(& &1.job.operation_id)
+    |> Enum.sort_by(fn {_op, list} -> hd(list).journal_version end)
+    |> Enum.reduce(state, fn {_op, list}, state ->
+      recover_operation(state, parent, ids, list, deadline)
+    end)
+  end
+
+  defp original(%{job: job}) do
+    {:ok, rebuilt} = Executor.job(job)
+    rebuilt
+  end
+
+  defp load_run(state, parent, [_, session, run] = ids) do
+    replay = fn tx, read -> recovery_inputs(state, tx, read) end
+    zero = String.duplicate("0", 64)
+
+    with {:ok, _} <-
+           RetainedObjects.lookup_run(state.objects, parent.command, ids, zero, state.runtime,
+             replay: replay
+           ),
+         {:ok, folded} <-
+           RetainedObjects.read_run(state.objects, parent.command, ids, state.runtime,
+             replay: replay,
+             full: true
+           ) do
+      %{state | runs: Map.put(state.runs, {session, run}, folded)}
+    else
+      _ -> %{state | excess: MapSet.put(state.excess, session)}
+    end
+  end
+
+  defp recovery_inputs(state, %{"mutation" => mutation}, read) do
+    job = fn -> state.originals[Base.decode64!(mutation["job"]["job_id"])] end
+
+    case mutation["kind"] do
+      "reserve" ->
+        bytes =
+          Map.get_lazy(state.blobs, mutation["child_creation_sha256"], fn ->
+            {:ok, bytes} = read.(mutation["child_creation_sha256"])
+            bytes
+          end)
+
+        %{original_job: job.(), child_creation: bytes}
+
+      "stop" ->
+        %{original_job: job.()}
+
+      "recover_uncreated" ->
+        version = mutation["source_intent"]["journal_version"]
+
+        original =
+          Enum.find_value(state.originals, fn {id, original} ->
+            state.intents[id] == version && original
+          end)
+
+        %{original_job: original}
+
+      "child_prompted" ->
+        %{prompt_digest: mutation["prompt_digest"]}
+
+      "settle" ->
+        Map.get_lazy(state.settlements, mutation["operation_identity"], fn ->
+          settlement_inputs(state, mutation)
+        end)
+
+      "bind_receipt" ->
+        bytes =
+          Map.get_lazy(state.blobs, mutation["receipt_sha256"], fn ->
+            {:ok, bytes} = read.(mutation["receipt_sha256"])
+            bytes
+          end)
+
+        %{receipt: bytes, original_job: job.()}
+
+      _ ->
+        %{}
+    end
+  rescue
+    _ -> %{}
+  end
+
+  # Concept: a retained settlement replays against Core's evidence again.
+  # Technical depth: the accounting map binds the captured child prefix; the
+  # same evidence and token are re-read, never trusted from the frame alone.
+  defp settlement_inputs(state, mutation) do
+    terminal = mutation["terminal"]
+    accounting = mutation["accounting"]
+
+    cond do
+      terminal["state"] == "uncreated" ->
+        %{source_intent_sha256: terminal["terminal_record_sha256"]}
+
+      true ->
+        child = Base.decode64!(terminal["child_session_id"])
+        through = accounting["through_version"]
+        token = Base.decode64!(accounting["prefix_token"])
+
+        # Concept: the retained endpoint is re-proved, not trusted.
+        # Technical depth: Core's resume form re-reads the record at the
+        # retained version and refuses unless its token is identical; the run's
+        # ended evidence cannot change after that endpoint.
+        with :ok <- endpoint(state, child, through, token) do
+          case terminal["child_run_id"] do
+            nil ->
+              %{through_version: through, prefix_token: token}
+
+            encoded ->
+              case Runtime.run_evidence(state.runtime, child, Base.decode64!(encoded)) do
+                {:ok, %{terminal: %{}} = evidence} ->
+                  %{evidence: %{evidence | through_version: through}, prefix_token: token}
+
+                _ ->
+                  %{}
+              end
+          end
+        else
+          _ -> %{}
+        end
+    end
+  end
+
+  defp endpoint(state, session, through, token) do
+    cursor = %{
+      version: 1,
+      runtime_id: state.runtime_id,
+      session_id: session,
+      resume_after_version: through,
+      prefix_token: token
+    }
+
+    case Runtime.effect_intents(state.runtime, session, cursor, 1) do
+      {:ok, _page} -> :ok
+      _ -> :error
+    end
+  end
+
+  defp recover_operation(state, parent, [_, session, run] = ids, intents, deadline) do
+    ledger = state.runs[{session, run}]
+    identity = operation_identity(hd(intents).job)
+
+    cond do
+      ledger && MapSet.member?(ledger.released, identity) ->
+        retain_receipts(state, ledger, intents)
+
+      ledger && ledger.operation && ledger.operation.logical["operation_identity"] == identity ->
+        recover_reserved(state, parent, ids, intents, deadline)
+
+      ledger && Map.has_key?(ledger.recovered, identity) ->
+        finish_recovered(state, ids, identity, intents)
+
+      true ->
+        recover_missing(state, parent, ids, intents)
+    end
+  end
+
+  defp retain_receipts(state, ledger, intents) do
+    Enum.reduce(intents, state, fn intent, state ->
+      case receipt_from_log(state, ledger, intent.job) do
+        {:ok, receipt} -> %{state | receipts: Map.put(state.receipts, intent.job.job_id, receipt)}
+        _ -> state
+      end
+    end)
+  end
+
+  defp receipt_from_log(state, ledger, job) do
+    projected = project(job)
+
+    Enum.find_value(ledger.transactions, :error, fn {tx, _} ->
+      mutation = tx["mutation"]
+
+      if mutation["kind"] == "bind_receipt" and mutation["job"] == projected do
+        with {:ok, bytes} <- RetainedObjects.read(state.objects, mutation["receipt_sha256"]),
+             {:ok, receipt} <-
+               RunLedger.receipt_object(
+                 bytes,
+                 ledger.identifiers,
+                 mutation,
+                 state.originals[job.job_id]
+               ) do
+          {:ok, receipt}
+        else
+          _ -> nil
+        end
+      end
+    end)
+  end
+
+  defp recover_reserved(state, parent, ids, intents, deadline) do
+    job = hd(intents).job
+    [_, session, run] = ids
+    entry = recovery_entry(state, parent, ids, job)
+    state = %{state | jobs: Map.put(state.jobs, job.job_id, entry)}
+    ledger = state.runs[{session, run}]
+    operation = ledger.operation
+
+    state = %{state | children: register_child(state.children, operation, job)}
+
+    with {:ok, state} <- ensure_stopped(state, entry),
+         {:ok, state} <- ensure_created(state, entry),
+         {:ok, state, observation} <- ensure_ended(state, entry, deadline),
+         {:ok, _receipt, state} <- finish_recovery(state, entry, observation) do
+      state
+    else
+      {:unresolved, state} -> mark_unresolved(state, job)
+      _ -> mark_unresolved(state, job)
+    end
+  end
+
+  defp recovery_entry(state, parent, ids, job) do
+    [_, session, run] = ids
+    operation = state.runs[{session, run}].operation
+
+    {:ok, child} =
+      ChildCreation.validate(
+        operation.child_creation,
+        capture_of(parent),
+        operation.logical["reserved_tokens"]
+      )
+
+    %{job: job, ids: ids, operation: operation_identity(job), parent: parent, child: child}
+  end
+
+  defp register_child(children, %{child: child}, job) when is_binary(child),
+    do: Map.put(children, Base.decode64!(child), job.job_id)
+
+  defp register_child(children, _operation, _job), do: children
+
+  defp mark_unresolved(state, job),
+    do: %{state | unresolved: MapSet.put(state.unresolved, job.job_id)}
+
+  defp ensure_stopped(state, entry) do
+    [_, session, run] = entry.ids
+
+    if state.runs[{session, run}].operation.stop,
+      do: {:ok, state},
+      else: commit_stop(state, entry, "adapter_recovery")
+  end
+
+  # Concept: a lost create acknowledgement is resolved by exact history only.
+  defp ensure_created(state, entry) do
+    [_, session, run] = entry.ids
+    operation = state.runs[{session, run}].operation
+
+    if operation.child do
+      {:ok, state}
+    else
+      case Runtime.lookup_create_result(
+             state.runtime,
+             entry.child.command_id,
+             entry.child.options,
+             entry.child.genesis
+           ) do
+        {:ok, {:historical, child}} ->
+          state = %{state | children: Map.put(state.children, child, entry.job.job_id)}
+          created(state, entry, child)
+
+        _ ->
+          {:unresolved, state}
+      end
+    end
+  end
+
+  # Concept: an unfinished child is aborted through a prepared owner that is
+  # never activated; an unprompted child stays unprompted.
+  defp ensure_ended(state, entry, deadline) do
+    [_, session, run] = entry.ids
+    operation = state.runs[{session, run}].operation
+    child = Base.decode64!(operation.child)
+
+    with {:ok, activation} <- prepare(state, child, entry),
+         {:ok, attachment} <- Runtime.attach(state.runtime, child, after_event_sequence: 0) do
+      result =
+        case operation.child_run do
+          nil ->
+            case disposition(attachment, entry.child.prompt_command_id) do
+              {:ok, %{run_id: child_run}} ->
+                recover_prompted(state, entry, attachment, child, child_run, deadline)
+
+              _ ->
+                {:ok, state, {:unprompted, child}}
+            end
+
+          encoded ->
+            await_child(state, attachment, child, Base.decode64!(encoded), deadline)
+        end
+
+      if activation, do: Loopex.abandon_resume(activation)
+      result
+    else
+      _ -> {:unresolved, state}
+    end
+  end
+
+  defp prepare(state, child, entry) do
+    case Loopex.prepare_resume_session(
+           state.runtime,
+           child,
+           "helper-recovery:" <> entry.child.command_id
+         ) do
+      {:ok, {:prepared, activation}} -> {:ok, activation}
+      {:ok, {:replayed, _}} -> {:ok, nil}
+      {:error, :session_already_active} -> {:ok, nil}
+      other -> other
+    end
+  end
+
+  defp recover_prompted(state, entry, attachment, child, run, deadline) do
+    with {:ok, evidence} <- Runtime.run_evidence(state.runtime, child, run),
+         {:ok, state} <- prompted(state, entry, child, run, evidence.admission.digest) do
+      await_child(state, attachment, child, run, deadline)
+    end
+  end
+
+  defp await_child(state, attachment, child, run, deadline) do
+    case Runtime.run_evidence(state.runtime, child, run) do
+      {:ok, %{terminal: %{}} = evidence} ->
+        {:ok, state, {:ended, evidence}}
+
+      {:ok, _live} ->
+        Runtime.command(attachment, %{
+          type: :abort,
+          command_id: "helper-abort:" <> run,
+          run_id: run
+        })
+
+        wait_child(state, child, run, deadline)
+
+      _ ->
+        {:unresolved, state}
+    end
+  end
+
+  defp wait_child(state, child, run, deadline) do
+    case Runtime.run_evidence(state.runtime, child, run) do
+      {:ok, %{terminal: %{}} = evidence} ->
+        {:ok, state, {:ended, evidence}}
+
+      _ ->
+        if System.monotonic_time(:millisecond) >= deadline do
+          {:unresolved, state}
+        else
+          Process.sleep(@poll_ms)
+          wait_child(state, child, run, deadline)
+        end
+    end
+  end
+
+  defp finish_recovery(state, entry, {:ended, evidence}) do
+    [_, session, run] = entry.ids
+    ledger = state.runs[{session, run}]
+    child = Base.decode64!(ledger.operation.child)
+
+    if ledger.operation.settled do
+      bind_receipt(state, entry, evidence)
+    else
+      case finish(state, entry.job.job_id, {:ended, evidence}) do
+        {:ok, receipt, state} ->
+          {:ok, receipt, state}
+
+        {:unresolved, state} ->
+          {:unresolved, %{state | children: Map.put(state.children, child, entry.job.job_id)}}
+      end
+    end
+  end
+
+  defp finish_recovery(state, entry, {:unprompted, child}) do
+    with {:ok, through, token} <- prefix(state, child),
+         {:ok, state} <- settle_unprompted(state, entry, child, through, token),
+         {:ok, receipt, state} <-
+           recovered_receipt(state, entry, "failed", "helper child was never prompted") do
+      {:ok, receipt, state}
+    else
+      _ -> {:unresolved, state}
+    end
+  end
+
+  defp settle_unprompted(state, entry, child, through, token) do
+    [_, session, run] = entry.ids
+    reserved = state.runs[{session, run}].operation.logical["reserved_tokens"]
+
+    terminal = %{
+      "state" => "failed",
+      "child_session_id" => Base.encode64(child),
+      "child_run_id" => nil,
+      "journal_version" => through,
+      "terminal_record_sha256" => hash(token),
+      "cleanup" => "confirmed"
+    }
+
+    accounting = %{
+      "reported_input_tokens" => 0,
+      "reported_output_tokens" => 0,
+      "estimated_tokens" => 0,
+      "unresolved_usage" => false,
+      "charged_tokens" => 0,
+      "through_version" => through,
+      "prefix_token" => Base.encode64(token)
+    }
+
+    {:ok, digest} =
+      domain_value("loopex:helper-accounting-evidence:v1", [entry.operation, terminal, accounting])
+
+    mutation = %{
+      "kind" => "settle",
+      "operation_identity" => entry.operation,
+      "terminal" => terminal,
+      "accounting" => Map.put(accounting, "evidence_sha256", digest),
+      "charge_tokens" => 0,
+      "refund_tokens" => reserved
+    }
+
+    append(state, entry.ids, mutation, %{through_version: through, prefix_token: token})
+  end
+
+  # Concept: a recovered or never-run helper call still owes its parent one
+  # known failed receipt, built and validated exactly like a live one.
+  defp recovered_receipt(state, entry, outcome_text, reason) do
+    {:ok, output} =
+      LedgerCodec.encode_json(
+        %{
+          "role" => entry.job.validated_arguments["role"],
+          "outcome" => outcome_text,
+          "text" => reason
+        },
+        :object
+      )
+
+    with {:ok, receipt} <-
+           Receipt.build(entry.job, :failed, output, :confirmed, System.system_time(:millisecond)),
+         {:ok, bytes} <-
+           Receipt.object(state.runtime_id, entry.operation, project(entry.job), receipt),
+         {:ok, _} <- RetainedObjects.install(state.objects, bytes),
+         state = %{state | blobs: Map.put(state.blobs, hash(bytes), bytes)},
+         {:ok, state} <-
+           append(
+             state,
+             entry.ids,
+             %{
+               "kind" => "bind_receipt",
+               "operation_identity" => entry.operation,
+               "job" => project(entry.job),
+               "receipt_sha256" => hash(bytes)
+             },
+             %{receipt: bytes, original_job: entry.job}
+           ) do
+      state = %{
+        state
+        | receipts: Map.put(state.receipts, entry.job.job_id, receipt),
+          jobs: Map.delete(state.jobs, entry.job.job_id)
+      }
+
+      {:ok, receipt, state}
+    else
+      _ -> {:unresolved, state}
+    end
+  end
+
+  defp finish_recovered(state, ids, identity, intents) do
+    [_, session, run] = ids
+    ledger = state.runs[{session, run}]
+    operation = ledger.recovered[identity]
+    job = hd(intents).job
+    entry = %{job: job, ids: ids, operation: identity, parent: state.parents[session], child: nil}
+
+    with {:ok, state} <- settle_recovered(state, entry, operation, intents),
+         {:ok, _receipt, state} <-
+           recovered_receipt(state, entry, "failed", "helper call was lost before reservation") do
+      state
+    else
+      _ -> mark_unresolved(state, job)
+    end
+  end
+
+  defp settle_recovered(state, entry, %{settled: nil}, intents) do
+    intent = hd(intents)
+    digest = Canonical.digest(Map.delete(intent.job, :__struct__))
+
+    terminal = %{
+      "state" => "uncreated",
+      "child_session_id" => nil,
+      "child_run_id" => nil,
+      "journal_version" => intent.journal_version,
+      "terminal_record_sha256" => digest,
+      "cleanup" => "confirmed"
+    }
+
+    accounting = %{
+      "reported_input_tokens" => 0,
+      "reported_output_tokens" => 0,
+      "estimated_tokens" => 0,
+      "unresolved_usage" => false,
+      "charged_tokens" => 0,
+      "through_version" => 0,
+      "prefix_token" => nil
+    }
+
+    {:ok, evidence} =
+      domain_value("loopex:helper-accounting-evidence:v1", [entry.operation, terminal, accounting])
+
+    append(
+      state,
+      entry.ids,
+      %{
+        "kind" => "settle",
+        "operation_identity" => entry.operation,
+        "terminal" => terminal,
+        "accounting" => Map.put(accounting, "evidence_sha256", evidence),
+        "charge_tokens" => 0,
+        "refund_tokens" => 0
+      },
+      %{source_intent_sha256: digest}
+    )
+  end
+
+  defp settle_recovered(state, _entry, _settled, _intents), do: {:ok, state}
+
+  # Concept: a lost reservation is never a fresh allowance.
+  # Technical depth: only conclusive absence of the derived child creation
+  # admits the conservative charge; an excess beyond the retained count stays
+  # unresolved and keeps the parent slot occupied in every later run.
+  defp recover_missing(state, parent, [_, session, run] = ids, intents) do
+    intent = hd(intents)
+    job = intent.job
+    operation = operation_identity(job)
+    create = command("loopex:helper-create:v1", state.runtime_id, operation)
+
+    with {:ok, :absent} <-
+           Runtime.creation_provenance(state.runtime, %{kind: :command, command_id: create}),
+         {:ok, _ledger, state} <- run_state(state, parent, ids),
+         mutation = %{
+           "kind" => "recover_uncreated",
+           "operation_identity" => operation,
+           "source_intent" => source(job, intent.journal_version),
+           "create_command_id" => Base.encode64(create),
+           "prompt_command_id" =>
+             Base.encode64(command("loopex:helper-prompt:v1", state.runtime_id, operation)),
+           "reservation_state" => "unknown",
+           "reason" => "adapter_recovery",
+           "child_session_id" => nil,
+           "child_run_id" => nil,
+           "reported_child_usage" => 0,
+           "count_charge" => 1,
+           "closing_credit_bytes" => 2 * @frame
+         },
+         {:ok, state} <- append(state, ids, mutation, %{original_job: job}) do
+      finish_recovered(state, ids, operation, intents)
+    else
+      _ ->
+        state = mark_unresolved(state, job)
+        _ = run
+        %{state | excess: MapSet.put(state.excess, session)}
+    end
+  end
+
   @impl true
   def handle_info(_message, state), do: {:noreply, state}
 
@@ -751,7 +1539,9 @@ defmodule LoopexComposition.Delegation.Helper do
          run = state.runs[{session, run_id}],
          child = run.operation.child && Base.decode64!(run.operation.child),
          {:ok, evidence, token} <- captured(state, child, evidence),
+         :ok <- fault(state, :before_settle),
          {:ok, state} <- settle(state, entry, run, evidence, token),
+         :ok <- fault(state, :after_settle),
          {:ok, receipt, state} <- bind_receipt(state, entry, evidence) do
       {:ok, receipt, state}
     else
@@ -844,7 +1634,11 @@ defmodule LoopexComposition.Delegation.Helper do
   defp bind_receipt(state, entry, evidence) do
     [_, session, run_id] = entry.ids
     run = state.runs[{session, run_id}]
-    stopped = run.operation && run.operation.stop != nil
+
+    stopped =
+      run.operation && run.operation.stop != nil &&
+        run.operation.stop["mutation"]["reason"] == "cancel"
+
     {outcome, output} = result(state, entry, run, evidence, stopped)
 
     with {:ok, receipt} <-
@@ -1057,6 +1851,16 @@ defmodule LoopexComposition.Delegation.Helper do
   end
 
   defp abort_child(_state, _operation), do: :ok
+
+  # Concept: fault injection names each durable boundary of the live path.
+  # Technical depth: test hosts supply the hook; a crash here is the same
+  # process loss a real host suffers between two committed facts.
+  defp fault(state, step) do
+    case state.fault.(step) do
+      :crash -> Process.exit(self(), :kill)
+      _ -> :ok
+    end
+  end
 
   defp operation_identity(job),
     do: %{

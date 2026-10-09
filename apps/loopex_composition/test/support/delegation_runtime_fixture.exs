@@ -79,13 +79,28 @@ defmodule LoopexComposition.DelegationRuntimeFixture do
 
     File.mkdir!(root)
     {:ok, lease} = Placement.acquire(root)
-    {:ok, objects} = RetainedObjects.open(root, "helper-runtime", lease)
-    Process.unlink(objects)
-    {:ok, store_pid} = Loopex.Store.Local.start_link(path: Path.join(root, "core.log"))
-    Process.unlink(store_pid)
-    {:ok, store} = Loopex.Store.new(Loopex.Store.Local, store_pid)
-    {:ok, helper} = Helper.start_link(objects: objects, runtime_id: "helper-runtime")
-    Process.unlink(helper)
+    {:ok, owned} = Agent.start(fn -> [] end)
+
+    on_exit(fn ->
+      entries = Agent.get(owned, & &1)
+
+      for {:runtime_ref, runtime, supervisor} <- entries,
+          Process.alive?(supervisor),
+          do: Loopex.stop(runtime)
+
+      for {:pid, kind, pid} <- entries, kind != :runtime, Process.alive?(pid) do
+        try do
+          GenServer.stop(pid, :normal, 5_000)
+        catch
+          :exit, _ -> :ok
+        end
+      end
+
+      Agent.stop(owned)
+
+      Placement.release(lease)
+      File.rm_rf!(root)
+    end)
 
     {model_module, model} =
       if is_function(script, 2),
@@ -94,7 +109,40 @@ defmodule LoopexComposition.DelegationRuntimeFixture do
            LoopexComposition.HelperDeciderModel.start(script)},
         else: {AgentLoopTestModel, AgentLoopTestModel.start(script)}
 
+    boot(
+      %{root: root, lease: lease, owned: owned, model: model, model_module: model_module},
+      options
+    )
+  end
+
+  # Concept: one host incarnation over the retained root and model.
+  def boot(base, options) do
+    {:ok, objects} =
+      RetainedObjects.open(base.root, "helper-runtime", base.lease,
+        recover_stale_writer: Keyword.get(options, :recover_stale_writer, false)
+      )
+
+    Process.unlink(objects)
+
+    {:ok, store_pid} =
+      Loopex.Store.Local.start_link(
+        path: Path.join(base.root, "core.log"),
+        recover_stale_writer: Keyword.get(options, :recover_stale_writer, false)
+      )
+
+    Process.unlink(store_pid)
+    {:ok, store} = Loopex.Store.new(Loopex.Store.Local, store_pid)
+
+    {:ok, helper} =
+      Helper.start_link(
+        objects: objects,
+        runtime_id: "helper-runtime",
+        fault: Keyword.get(options, :fault, fn _ -> :ok end)
+      )
+
+    Process.unlink(helper)
     executor = Loopex.AgentLoopTestExecutor.start(Keyword.get(options, :outcomes, %{}))
+    Process.unlink(executor)
     definitions = read_definitions() ++ [Tool.definition()]
 
     {:ok, runtime} =
@@ -105,9 +153,9 @@ defmodule LoopexComposition.DelegationRuntimeFixture do
         session_creation_defaults:
           AgentLoopFixture.creation_defaults(read_definitions(), model: @model),
         model: %{
-          module: model_module,
+          module: base.model_module,
           model: @model,
-          options: [script: model, max_tokens: 256]
+          options: [script: base.model, max_tokens: 256]
         },
         executor:
           Router.wrap(
@@ -131,30 +179,59 @@ defmodule LoopexComposition.DelegationRuntimeFixture do
         bounds: %{max_turns: 8, token_budget: 1_000_000, deadline_ms: 600_000}
       )
 
+    Process.unlink(runtime.supervisor)
+
+    Agent.update(
+      base.owned,
+      &(&1 ++
+          [
+            {:pid, :runtime, runtime.supervisor},
+            {:runtime_ref, runtime, runtime.supervisor},
+            {:pid, :helper, helper},
+            {:pid, :objects, objects},
+            {:pid, :store, store_pid},
+            {:pid, :executor, executor}
+          ])
+    )
+
     Loopex.ConfiguredGenesisFixture.await_creation_ready(runtime)
     assert :ok = Helper.bind(helper, runtime)
-    assert :ok = Helper.classification(helper, :complete)
 
-    on_exit(fn ->
-      if Loopex.Runtime.alive?(runtime), do: Loopex.stop(runtime)
+    if Keyword.get(options, :classify, false),
+      do: Helper.classify(helper),
+      else: Helper.classification(helper, :complete)
 
-      for pid <- [helper, objects, store_pid], Process.alive?(pid) do
-        GenServer.stop(pid, :normal, 5_000)
-      end
-
-      Placement.release(lease)
-      File.rm_rf!(root)
-    end)
-
-    %{
-      root: root,
+    Map.merge(base, %{
       runtime: runtime,
       helper: helper,
       objects: objects,
-      model: model,
       executor: executor,
-      store: store
-    }
+      store: store,
+      store_pid: store_pid
+    })
+  end
+
+  # Concept: abrupt loss of every host process; durable bytes stay on disk.
+  def crash(fixture) do
+    for pid <- [
+          fixture.helper,
+          fixture.runtime.supervisor,
+          fixture.objects,
+          fixture.store_pid,
+          fixture.executor
+        ],
+        Process.alive?(pid) do
+      ref = Process.monitor(pid)
+      Process.exit(pid, :kill)
+      assert_receive {:DOWN, ^ref, :process, ^pid, _}, 5_000
+    end
+
+    :ok
+  end
+
+  def restart(fixture, options \\ []) do
+    crash(fixture)
+    boot(fixture, Keyword.merge([recover_stale_writer: true, classify: true], options))
   end
 
   def read_definitions do
