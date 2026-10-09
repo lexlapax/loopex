@@ -302,6 +302,7 @@ defmodule LoopexDaemon.ConnectionRegistry do
              :promote,
              :initialize_complete,
              :enqueue_output,
+             :route_ready_progress,
              :enqueue_progress,
              :fence_progress,
              :discard_progress,
@@ -987,6 +988,38 @@ defmodule LoopexDaemon.ConnectionRegistry do
           if state.transport == :serving, do: :initialize_unavailable, else: :transport_closing
 
         {:reply, {:error, reason}, state}
+    end
+  end
+
+  # Concept: one original event first routes the currently available prefix.
+  # Technical depth: caller/incarnation/attachment checks reuse existing custody.
+  # At most 32 takes fan out through destination credit; completion promises no
+  # closure, watermark, delivery or consumption after finite CAS exhaustion.
+  def handle_call(
+        {:route_ready_progress, incarnation, attachment_id},
+        {caller, _tag},
+        state
+      ) do
+    attachment = Map.get(state.attachments, incarnation)
+
+    matching_attachment =
+      match?(%{phase: :installed, attachment_id: ^attachment_id}, attachment) or
+        (match?(%{phase: :pending}, attachment) and
+           Enum.any?(state.activation_promotions, fn {_ref, promotion} ->
+             pending_previous?(promotion, incarnation, attachment_id)
+           end))
+
+    case initialized_connection_row(state, caller, incarnation) do
+      {_token, %{phase: :live, progress_fenced: false}}
+      when state.transport == :serving and state.progress_phase == :open and
+             matching_attachment ->
+        case drain_progress(state, 32) do
+          :ok -> {:reply, :ok, state}
+          :error -> {:stop, :connections_lost, {:error, :output_unavailable}, state}
+        end
+
+      _ ->
+        {:reply, {:error, :output_unavailable}, state}
     end
   end
 

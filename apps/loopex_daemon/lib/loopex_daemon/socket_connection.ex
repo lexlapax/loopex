@@ -88,7 +88,9 @@ defmodule LoopexDaemon.SocketConnection do
   @relay_request_ms 5_000
 
   # Concept: each registry request this connection sends, other than a
-  # create or attach promotion, has its own five-second instant; at it the connection reports the registry to the
+  # create or attach promotion, has its own five-second instant. A durable
+  # event shares that original instant with its finite progress routing; at it
+  # the connection reports the registry to the
   # daemon owner, which names it `connections_lost` while serving. The
   # request stays pending and the daemon's fail-stop ends it.
   @registry_request_ms 5_000
@@ -368,15 +370,7 @@ defmodule LoopexDaemon.SocketConnection do
   # owner to tell; its request simply stays pending.
   def handle_info({:registry_request_unanswered, request}, state)
       when is_map_key(state.exchanges, request) do
-    case state.context do
-      %{owner: owner} when is_pid(owner) ->
-        report = {:connection_registry_unanswered, self(), state.incarnation, state.registry}
-        send(owner, report)
-        Logger.debug("loopex daemon connection registry request unanswered")
-
-      _uncomposed ->
-        :ok
-    end
+    report_registry_unanswered(state)
 
     {:noreply, put_in(state, [:exchanges, request, :timer], nil)}
   end
@@ -1435,26 +1429,117 @@ defmodule LoopexDaemon.SocketConnection do
   defp stop_pump(state), do: state
 
   defp deliver_event(%{attachment: attached} = state, event) do
-    # Concept: malformed durable data ends this attachment before publication.
-    # Technical depth: projection precedes queue admission and cursor labeling;
-    # failure uses the same last completely emitted cursor as output loss.
-    with record when is_map(record) <- WireRecords.event(attached.session_id, event) do
-      state = %{state | last_activity: System.monotonic_time(:millisecond)}
-      held = state.succession != nil
-      kind = {:event, attached.pump}
+    # Concept: route the already available transient prefix before this event.
+    # Technical depth: retain only the original raw event until routing answers.
+    # The pump cannot send a second event before the original admission reply.
+    # Finite routing and admission share one original five-second instant.
+    state = %{state | last_activity: System.monotonic_time(:millisecond)}
 
-      # A sent event lets the pump continue once the registry accepts it; a
-      # held one continues it at once, as it always has.
-      case send_record(state, record, Map.fetch!(event, :event_sequence), kind) do
-        {:ok, state} ->
-          if held, do: LoopexDaemon.AttachmentPump.continue(attached.pump)
-          {:noreply, state}
-
-        {:error, state} ->
-          begin_detach_close(state)
+    if state.succession != nil do
+      with record when is_map(record) <- WireRecords.event(attached.session_id, event),
+           {:ok, state} <-
+             send_record(state, record, Map.fetch!(event, :event_sequence), {:event, attached.pump}) do
+        LoopexDaemon.AttachmentPump.continue(attached.pump)
+        {:noreply, state}
+      else
+        :error -> begin_detach_close(state)
+        {:error, state} -> begin_detach_close(state)
       end
     else
-      :error -> begin_detach_close(state)
+      cutoff = System.monotonic_time(:millisecond) + @registry_request_ms
+
+      request =
+        ConnectionRegistry.connection_request(
+          state.registry,
+          {:route_ready_progress, state.incarnation, attached.attachment_id}
+        )
+
+      label =
+        {:route_progress, attached.pump, attached.attachment_id, event, cutoff}
+
+      {:noreply, await_exchange(state, request, :registry, label, cutoff)}
+    end
+  end
+
+  defp route_progress_answered(
+         state,
+         {:route_progress, pump, attachment_id, event, cutoff},
+         response,
+         report_unanswered
+       ) do
+    cond do
+      state.closing != nil or state.succession != nil or
+          not match?(%{pump: ^pump, attachment_id: ^attachment_id}, state.attachment) ->
+        {:noreply, state}
+
+      System.monotonic_time(:millisecond) >= cutoff ->
+        if report_unanswered, do: report_registry_unanswered(state)
+        {:noreply, state}
+
+      response == {:reply, :ok} ->
+        state = state |> drain_progress(32) |> admit_progress_prefix(cutoff, 32)
+
+        if System.monotonic_time(:millisecond) < cutoff do
+          with record when is_map(record) <- WireRecords.event(state.attachment.session_id, event),
+               {:ok, encoded} <- Frame.encode(record) do
+            if System.monotonic_time(:millisecond) < cutoff do
+              cursor = Map.fetch!(event, :event_sequence)
+              state = enqueue_output(state, encoded, cursor, {:event, pump, cutoff}, cutoff)
+              {:noreply, state}
+            else
+              if report_unanswered, do: report_registry_unanswered(state)
+              {:noreply, state}
+            end
+          else
+            _ -> begin_detach_close(state)
+          end
+        else
+          if report_unanswered, do: report_registry_unanswered(state)
+          {:noreply, state}
+        end
+
+      true ->
+        begin_detach_close(state)
+    end
+  end
+
+  # Concept: already credited progress enters FIFO before the held event.
+  # Technical depth: same-sender requests preserve order without waiting for
+  # output idle or an admission reply. Reserve the last pending position for
+  # durable data; transient pressure releases only the unsubmitted copies.
+  defp admit_progress_prefix(state, _cutoff, 0), do: state
+
+  defp admit_progress_prefix(state, cutoff, remaining) do
+    cond do
+      state.enqueues_pending >= @pending_output_limit - 1 ->
+        discard_local_progress(state)
+
+      System.monotonic_time(:millisecond) >= cutoff ->
+        state
+
+      true ->
+        case :queue.out(state.progress) do
+          {{:value, {lease, encoded}}, queue} ->
+            request =
+              ConnectionRegistry.connection_request(
+                state.registry,
+                {:enqueue_progress, state.incarnation, encoded}
+              )
+
+            state = %{
+              state
+              | progress: queue,
+                enqueue_seq: state.enqueue_seq + 1,
+                enqueues_pending: state.enqueues_pending + 1
+            }
+
+            state
+            |> await_exchange(request, :registry, {:enqueue_progress, lease}, cutoff)
+            |> admit_progress_prefix(cutoff, remaining - 1)
+
+          {:empty, _} ->
+            state
+        end
     end
   end
 
@@ -1563,7 +1648,19 @@ defmodule LoopexDaemon.SocketConnection do
     await_exchange(%{state | ledger: ledger}, request_id, :registry, {:promote, origin, kind})
   end
 
-  defp await_exchange(state, request_id, target, label) do
+  defp report_registry_unanswered(state) do
+    case state.context do
+      %{owner: owner} when is_pid(owner) ->
+        report = {:connection_registry_unanswered, self(), state.incarnation, state.registry}
+        send(owner, report)
+        Logger.debug("loopex daemon connection registry request unanswered")
+
+      _uncomposed ->
+        :ok
+    end
+  end
+
+  defp await_exchange(state, request_id, target, label, cutoff \\ nil) do
     timer =
       case target do
         :relay ->
@@ -1578,7 +1675,10 @@ defmodule LoopexDaemon.SocketConnection do
           Process.send_after(
             self(),
             {:registry_request_unanswered, request_id},
-            @registry_request_ms
+            if(cutoff,
+              do: max(cutoff - System.monotonic_time(:millisecond), 0),
+              else: @registry_request_ms
+            )
           )
 
         _owner ->
@@ -1620,6 +1720,19 @@ defmodule LoopexDaemon.SocketConnection do
       response == :down and exchange.target == :registry ->
         Logger.debug("loopex daemon connection registry lost during an exchange")
         {:stop, :registry_lost, state}
+
+      elem(label, 0) == :route_progress ->
+        route_progress_answered(state, label, response, exchange.timer != nil)
+
+      match?({:enqueue, _, {:event, _, _}}, label) ->
+        {:enqueue, cursor, {:event, pump, cutoff}} = label
+
+        if System.monotonic_time(:millisecond) < cutoff do
+          output_answered(state, {:enqueue, cursor, {:event, pump}}, response)
+        else
+          if exchange.timer, do: report_registry_unanswered(state)
+          output_answered(state, {:enqueue, cursor, {:expired_event, pump}}, response)
+        end
 
       elem(label, 0) in [
         :enqueue,
@@ -2166,26 +2279,26 @@ defmodule LoopexDaemon.SocketConnection do
     end
   end
 
-  defp enqueue_output(state, encoded, cursor, kind) do
+  defp enqueue_output(state, encoded, cursor, kind, cutoff \\ nil) do
     request =
       ConnectionRegistry.connection_request(
         state.registry,
         {:enqueue_output, state.incarnation, encoded}
       )
 
-    track_enqueue(state, request, cursor, kind)
+    track_enqueue(state, request, cursor, kind, cutoff)
   end
 
   # Technical depth: `enqueue_seq` counts every enqueue sent, so a claim
   # answered `:empty` is final only when no enqueue was sent after it.
-  defp track_enqueue(state, request, cursor, kind) do
+  defp track_enqueue(state, request, cursor, kind, cutoff \\ nil) do
     state = %{
       state
       | enqueue_seq: state.enqueue_seq + 1,
         enqueues_pending: state.enqueues_pending + 1
     }
 
-    await_exchange(state, request, :registry, {:enqueue, cursor, kind})
+    await_exchange(state, request, :registry, {:enqueue, cursor, kind}, cutoff)
   end
 
   defp output_step(%{closing: %{owner: nil, retirement: retirement}} = state)
@@ -2366,6 +2479,9 @@ defmodule LoopexDaemon.SocketConnection do
 
         {:noreply, state}
 
+      {:expired_event, _pump} ->
+        {:noreply, state}
+
       {:notice, _session_id, attachment_id, _cursor} ->
         request =
           ConnectionRegistry.connection_request(
@@ -2398,7 +2514,9 @@ defmodule LoopexDaemon.SocketConnection do
           stopped -> stopped
         end
 
-      {:event, pump} ->
+      event when elem(event, 0) in [:event, :expired_event] ->
+        pump = elem(event, 1)
+
         if match?(%{pump: ^pump}, state.attachment),
           do: begin_detach_close(state),
           else: {:stop, :normal, state}

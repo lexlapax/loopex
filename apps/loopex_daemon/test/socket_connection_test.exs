@@ -1044,6 +1044,358 @@ defmodule LoopexDaemon.SocketConnectionTest do
     end
   end
 
+  test "a busy output admits its local text and upstream closure before the original pump event",
+       %{daemon: daemon, runtime: runtime} do
+    records = ordered_pump_records(daemon, runtime, :complete)
+
+    assert [
+             %{"type" => "error", "request_id" => "occupied-output"},
+             %{"type" => "progress", "progress" => text},
+             %{"type" => "progress", "progress" => closure},
+             %{"type" => "event", "event" => event}
+           ] = records
+
+    assert text["kind"] == "text_delta"
+    assert text["text"] == "ordered-prefix"
+    assert text["model_sequence"] == "0"
+    assert closure == %{
+             "kind" => "model_stream_closed",
+             "turn_id" => "b3JkZXJlZA",
+             "stream_domain_id" => "YmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmI",
+             "base_event_sequence" => text["base_event_sequence"],
+             "disposition" => "complete",
+             "delta_count" => "1"
+           }
+
+    assert text["turn_id"] == closure["turn_id"]
+    assert text["stream_domain_id"] == closure["stream_domain_id"]
+    assert event["kind"] == "user.message_appended"
+    assert event["data"]["content_b64"] == "b3JkZXJlZC1ldmVudA"
+    assert length(Enum.uniq(Enum.map(tl(records), & &1["session_id"]))) == 1
+  end
+
+  test "an absent closure never delays the original pump event waiting for progress",
+       %{daemon: daemon, runtime: runtime} do
+    assert [
+             %{"type" => "error", "request_id" => "occupied-output"},
+             %{"type" => "event", "event" => %{"kind" => "user.message_appended"}}
+           ] = ordered_pump_records(daemon, runtime, :absent)
+  end
+
+  test "native closure pressure preserves the admitted prefix and does not wait to end it",
+       %{daemon: daemon, runtime: runtime} do
+    records = ordered_pump_records(daemon, runtime, :dropped)
+    assert hd(records)["request_id"] == "occupied-output"
+    assert List.last(records)["event"]["kind"] == "user.message_appended"
+    progress = records |> tl() |> Enum.drop(-1)
+    assert length(progress) == 32
+    assert Enum.map(progress, & &1["progress"]["model_sequence"]) == Enum.map(0..31, &to_string/1)
+    assert Enum.all?(progress, &(&1["progress"]["kind"] == "text_delta"))
+    refute Enum.any?(records, &match?(%{"progress" => %{"kind" => "model_stream_closed"}}, &1))
+  end
+
+  test "an exact routing response cannot revive a replaced original pump" do
+    state = callback_routing_state()
+
+    try do
+      {state, from, request, _cutoff} = start_callback_routing(state)
+      replacement = %{state.attachment | attachment_id: "replacement"}
+      state = %{state | attachment: replacement}
+      GenServer.reply(from, :ok)
+      assert_receive {[:alias | ^request], :ok} = message, 1_000
+      assert {:noreply, next} = LoopexDaemon.SocketConnection.handle_info(message, state)
+      assert next.attachment == replacement
+      assert next.enqueues_pending == 0
+      assert next.exchanges == %{}
+      refute_receive {:pump_continue, _}, 0
+      refute_receive {:"$gen_call", _, {:enqueue_output, _, _}}, 0
+    after
+      close_callback_routing(state)
+    end
+  end
+
+  @tag timeout: 60_000
+  test "a late exact routing response spends the original five seconds and admits no event" do
+    state = callback_routing_state()
+
+    try do
+      {state, from, request, cutoff} = start_callback_routing(state)
+      assert cutoff - now_ms() <= 5_000
+      wait_until(cutoff)
+      assert_receive {:registry_request_unanswered, ^request} = timer_message, 1_000
+      assert {:noreply, state} = LoopexDaemon.SocketConnection.handle_info(timer_message, state)
+      owner = self()
+      incarnation = state.incarnation
+      assert_receive {:connection_registry_unanswered, ^owner, ^incarnation, ^owner}, 0
+      GenServer.reply(from, :ok)
+      assert_receive {[:alias | ^request], :ok} = message, 1_000
+      assert {:noreply, next} = LoopexDaemon.SocketConnection.handle_info(message, state)
+      assert next.exchanges == %{}
+      assert next.enqueues_pending == 0
+      refute_receive {:connection_registry_unanswered, _, _, _}, 0
+      refute_receive {:pump_continue, _}, 0
+      refute_receive {:"$gen_call", _, {:enqueue_output, _, _}}, 0
+    after
+      close_callback_routing(state)
+    end
+  end
+
+  test "pending capacity drops only the unsubmitted progress and keeps one original event instant" do
+    state = callback_routing_state()
+    state = %{state | output_claim: :claiming, enqueues_pending: 63}
+
+    try do
+      assert :ok = Loopex.ProgressSink.try_offer(state.progress_sink, "session", progress_item(0))
+      sink = state.progress_sink
+      assert_receive {:loopex_progress_ready, ^sink} = ready, 1_000
+      assert {:noreply, state} = LoopexDaemon.SocketConnection.handle_info(ready, state)
+      Process.put({__MODULE__, :routing_leases}, Map.keys(state.progress_leases))
+      assert :queue.len(state.progress) == 1
+      assert map_size(state.progress_leases) == 1
+      {state, from, request, cutoff} = start_callback_routing(state)
+      GenServer.reply(from, :ok)
+      assert_receive {[:alias | ^request], :ok} = message, 1_000
+      assert {:noreply, next} = LoopexDaemon.SocketConnection.handle_info(message, state)
+      for {_request, exchange} <- next.exchanges, do: remember_routing_timer(exchange.timer)
+      assert next.enqueues_pending == 64
+      assert :queue.is_empty(next.progress)
+      assert next.progress_leases == %{}
+      assert next.progress_bytes == 0
+      assert_receive {:"$gen_call", event_from, {:enqueue_output, _, encoded}}, 1_000
+      assert {:ok, %{"event" => %{"kind" => "run.started"}}} =
+               LoopexProtocol.Frame.decode(String.trim_trailing(IO.iodata_to_binary(encoded), "\n"),
+                 LoopexProtocol.Frame.output_record_bytes())
+      [{event_request, exchange}] = Map.to_list(next.exchanges)
+      remember_routing_timer(exchange.timer)
+      assert {:enqueue, 1, {:event, _, ^cutoff}} = exchange.label
+      assert :erlang.read_timer(exchange.timer) <= 5_000
+      GenServer.reply(event_from, :ok)
+      assert_receive {[:alias | ^event_request], :ok} = event_message, 1_000
+      assert {:noreply, final} = LoopexDaemon.SocketConnection.handle_info(event_message, next)
+      assert final.enqueues_pending == 63
+      assert_receive {:pump_continue, _}, 0
+    after
+      close_callback_routing(state)
+    end
+  end
+
+  test "a malformed original pump event detaches at the last emitted cursor",
+       %{daemon: daemon, runtime: runtime} do
+    {client, socket, session, sink} = progress_client(daemon, runtime)
+    attached = :sys.get_state(socket).attachment
+    pump = attached.pump
+    guardian = elem(sink, 0)
+    expected = [{socket, :normal}, {pump, :killed}, {guardian, :normal}]
+    monitors = for {actor, reason} <- expected, do: {actor, Process.monitor(actor), reason}
+    cutoff = now_ms() + 5_000
+
+    try do
+      send(socket, {:attachment_event, pump, %{kind: "run.started", event_id: "malformed"}})
+
+      assert [%{
+               "type" => "error",
+               "code" => "detached",
+               "session_id" => encoded_session,
+               "event_cursor" => encoded_cursor
+             } = record] = receive_records(client, 1, max(cutoff - now_ms(), 0))
+      assert record == %{
+               "type" => "error",
+               "code" => "detached",
+               "message" => "session attachment invalidated; reattach to continue",
+               "session_id" => Wire.encode_identity(session),
+               "event_cursor" => Wire.encode_u64(attached.emitted_cursor || attached.snapshot_cursor)
+             }
+      assert {:ok, ^session} = Wire.identity(encoded_session)
+      assert {:ok, cursor} = Wire.u64(encoded_cursor)
+      assert cursor == (attached.emitted_cursor || attached.snapshot_cursor)
+      assert now_ms() < cutoff
+    after
+      :socket.close(client)
+      joined_by = now_ms() + 5_000
+
+      for {actor, monitor, reason} <- monitors do
+        assert_receive {:DOWN, ^monitor, :process, ^actor, ^reason}, max(joined_by - now_ms(), 0)
+        assert now_ms() < joined_by
+      end
+    end
+  end
+
+  test "Registry loss while routing the original pump event retains the component failure",
+       %{daemon: daemon, runtime: runtime} do
+    {client, socket, _session, sink} = progress_client(daemon, runtime)
+    attached = :sys.get_state(socket).attachment
+    actors = [socket, attached.pump, elem(sink, 0)]
+    monitors = for actor <- actors, do: {actor, Process.monitor(actor)}
+    owner = daemon.owner
+
+    try do
+      :ok = :sys.suspend(daemon.registry)
+      assert {:accepted, "lost-route"} =
+               Loopex.command(attached.attachment, %{
+                 type: :prompt, command_id: "lost-route", content: "lost-route"
+               })
+      eventually(fn ->
+        Enum.any?(:sys.get_state(socket).exchanges, fn {_request, exchange} ->
+          elem(exchange.label, 0) == :route_progress
+        end)
+      end)
+      Process.exit(daemon.registry, :kill)
+      assert_receive {:daemon_component_fatal, ^owner, :connections_lost}, 5_000
+    after
+      resume_actor(daemon.registry)
+      :socket.close(client)
+      cutoff = now_ms() + 5_000
+      for {actor, monitor} <- monitors do
+        assert_receive {:DOWN, ^monitor, :process, ^actor, reason}, max(cutoff - now_ms(), 0)
+        assert reason in [:normal, :registry_lost]
+        assert now_ms() < cutoff
+      end
+    end
+  end
+
+  defp ordered_pump_records(daemon, runtime, mode) do
+    {client, socket, session, sink} = progress_client(daemon, runtime)
+    state = :sys.get_state(socket)
+    pump = state.attachment.pump
+    guardian = elem(sink, 0)
+    monitors = for actor <- [socket, pump, guardian], do: {actor, Process.monitor(actor)}
+    cutoff = now_ms() + 5_000
+
+    try do
+      :ok = :sys.suspend(daemon.registry)
+      :ok = send_frame(client, unsupported("occupied-output"))
+      eventually(fn -> :sys.get_state(socket).enqueues_pending == 1 end)
+
+      prefix_count = if mode == :dropped, do: 32, else: if(mode == :complete, do: 1, else: 0)
+      base = state.attachment.snapshot_cursor
+
+      if prefix_count > 0 do
+        for sequence <- 0..(prefix_count - 1) do
+          assert :ok =
+                   Loopex.ProgressSink.try_offer(sink, session, %{
+                     progress_item(sequence)
+                     | turn_id: "ordered",
+                       stream_domain_id: String.duplicate("b", 32),
+                       text: "ordered-prefix",
+                       base_event_sequence: base
+                   })
+        end
+
+        eventually(fn -> :queue.len(:sys.get_state(socket).progress) == prefix_count end)
+      end
+
+      assert {:accepted, "ordered-event"} =
+               Loopex.command(state.attachment.attachment, %{
+                 type: :prompt,
+                 command_id: "ordered-event",
+                 content: "ordered-event"
+               })
+
+      eventually(fn ->
+        Enum.any?(:sys.get_state(socket).exchanges, fn {_request, exchange} ->
+          elem(exchange.label, 0) == :route_progress
+        end)
+      end)
+
+      closure = %{
+        kind: :model_stream_closed,
+        turn_id: "ordered",
+        stream_domain_id: String.duplicate("b", 32),
+        base_event_sequence: base,
+        disposition: :complete,
+        delta_count: prefix_count
+      }
+
+      case mode do
+        :complete ->
+          assert :ok =
+                   Loopex.ProgressSink.try_offer(daemon.registry_progress_sink, session, closure)
+
+        :dropped ->
+          assert :dropped = Loopex.ProgressSink.try_offer(sink, session, closure)
+
+        :absent ->
+          :ok
+      end
+
+      :ok = :sys.resume(daemon.registry)
+      records = receive_records(client, prefix_count + if(mode == :complete, do: 3, else: 2),
+        max(cutoff - now_ms(), 0))
+      assert now_ms() < cutoff
+      assert Enum.all?(tl(records), &(&1["session_id"] == Wire.encode_identity(session)))
+      records
+    after
+      resume_actor(daemon.registry)
+      :socket.close(client)
+      joined_by = now_ms() + 5_000
+
+      for {actor, monitor} <- monitors do
+        assert_receive {:DOWN, ^monitor, :process, ^actor, :normal}, max(joined_by - now_ms(), 0)
+        assert now_ms() < joined_by
+      end
+    end
+  end
+
+  defp callback_routing_state do
+    assert {:ok, state} =
+             LoopexDaemon.SocketConnection.init(
+               registry: self(),
+               listener: self(),
+               rollback_token: make_ref(),
+               connection_incarnation: make_ref(),
+               initialize_deadline: now_ms() + 5_000,
+               context: %{owner: self()}
+             )
+
+    %{state | attachment: %{pump: self(), attachment_id: "original", session_id: "session"}}
+  end
+
+  defp start_callback_routing(state) do
+    event = %{
+      "command_id" => "command",
+      "run_id" => "run",
+      kind: "run.started",
+      event_id: "event",
+      event_sequence: 1
+    }
+
+    assert {:noreply, state} =
+             LoopexDaemon.SocketConnection.handle_info({:attachment_event, self(), event}, state)
+
+    for {_request, exchange} <- state.exchanges, do: remember_routing_timer(exchange.timer)
+    assert_receive {:"$gen_call", from,
+                    {:route_ready_progress, incarnation, "original"}}, 1_000
+    assert incarnation == state.incarnation
+    [{request, exchange}] = Map.to_list(state.exchanges)
+    {:route_progress, _pump, "original", ^event, cutoff} = exchange.label
+    remaining = :erlang.read_timer(exchange.timer)
+    assert is_integer(remaining) and remaining <= 5_000
+    assert now_ms() < cutoff
+    {state, from, request, cutoff}
+  end
+
+  defp remember_routing_timer(timer) do
+    key = {__MODULE__, :routing_timers}
+    Process.put(key, [timer | Process.get(key, [])])
+  end
+
+  defp close_callback_routing(state) do
+    for timer <- Process.delete({__MODULE__, :routing_timers}) || [] do
+      Process.cancel_timer(timer)
+    end
+
+    for lease <- Process.delete({__MODULE__, :routing_leases}) || [] do
+      Loopex.ProgressSink.release(state.progress_sink, lease)
+    end
+
+    assert :ok = Loopex.ProgressSink.close(state.progress_sink)
+    guardian = elem(state.progress_sink, 0)
+    monitor = state.progress_guardian_monitor
+    assert_receive {:DOWN, ^monitor, :process, ^guardian, :normal}, 1_000
+    Process.demonitor(state.registry_monitor, [:flush])
+    Process.demonitor(state.listener_monitor, [:flush])
+  end
+
   # Concept: retirement proofs begin with public creation/attachment and real credit.
   # Technical depth: the accepted emission reply, not physical send alone, ends
   # external custody. No constructed Socket state or fake native close is used.

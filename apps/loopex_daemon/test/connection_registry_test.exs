@@ -661,6 +661,124 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
     assert native_progress_bytes(fast.progress_sink) == 0
   end
 
+  test "finite progress routing authenticates the original installed attachment and caller" do
+    registry = start_registry(5_000, connection_module: ManualConnection)
+    {relay, _} = bind_scripted_relay(registry)
+    connection = initialized_manual_connection(registry)
+    activate(registry, "session")
+    install_attachment(registry, relay, connection, "session", 0, "attachment")
+
+    route = fn incarnation, attachment ->
+      ConnectionRegistry.connection_request(registry, {:route_ready_progress, incarnation, attachment})
+      |> :gen_server.receive_response(500)
+    end
+
+    assert {:reply, {:error, :output_unavailable}} = route.(connection.incarnation, "attachment")
+
+    assert {:reply, {:error, :output_unavailable}} =
+             manual_registry_call(connection.pid, {:invoke, fn -> route.(make_ref(), "attachment") end})
+
+    assert {:reply, {:error, :output_unavailable}} =
+             manual_registry_call(connection.pid, {:invoke, fn -> route.(connection.incarnation, "stale") end})
+
+    assert {:reply, :ok} =
+             manual_registry_call(connection.pid, {:invoke, fn -> route.(connection.incarnation, "attachment") end})
+
+    assert :ok = manual_registry_call(connection.pid, :fence_progress)
+
+    assert {:reply, {:error, :output_unavailable}} =
+             manual_registry_call(connection.pid, {:invoke, fn -> route.(connection.incarnation, "attachment") end})
+  end
+
+  test "routing retains only the original attachment during an actual pending replacement" do
+    registry = start_registry(5_000, connection_module: ManualConnection)
+    {relay, _} = bind_scripted_relay(registry)
+    connection = initialized_manual_connection(registry)
+    activate(registry, "session")
+    install_attachment(registry, relay, connection, "session", 0, "original")
+    replacement = attach_async(registry, connection, "session", 1, "replacement")
+    assert_receive {:relay_request, ^relay, from, {:promote_ticket, origin, _, _, _}}, 500
+
+    route = fn attachment ->
+      manual_registry_call(connection.pid, {:invoke, fn ->
+        ConnectionRegistry.connection_request(registry,
+          {:route_ready_progress, connection.incarnation, attachment})
+        |> :gen_server.receive_response(500)
+      end})
+    end
+
+    assert %{phase: :pending, attachment_id: nil} =
+             Map.fetch!(:sys.get_state(registry).attachments, connection.incarnation)
+    assert {:reply, :ok} = route.("original")
+    assert {:reply, {:error, :output_unavailable}} = route.("replacement")
+    invalidate(registry, connection, "original")
+    assert_receive {:registry_attachment, ^registry, nil, :closed, "session", _, _, "original"}, 500
+    assert {:reply, {:error, :output_unavailable}} = route.("original")
+
+    GenServer.reply(from, {:error, :ticket_unavailable})
+    assert [{:error, :ticket_unavailable}] = connection_replies(connection, replacement)
+    assert :sys.get_state(registry).activation_promotions == %{}
+    refute Map.has_key?(:sys.get_state(registry).attachments, connection.incarnation)
+  end
+
+  test "an original routing request fans out a full ready arena before its completion reply" do
+    registry = start_registry(5_000, connection_module: ManualConnection)
+    {relay, _} = bind_scripted_relay(registry)
+    connection = initialized_manual_connection(registry)
+    activate(registry, "session")
+    install_attachment(registry, relay, connection, "session", 0, "attachment")
+    assert {:ok, ingress} = ConnectionRegistry.progress_sink(registry)
+    observer = self()
+    reference = make_ref()
+    cutoff = now_ms() + 5_000
+    :ok = :sys.suspend(registry)
+
+    try do
+      send(connection.pid, {:registry_call, self(), reference, {:invoke, fn ->
+        request = ConnectionRegistry.connection_request(registry,
+          {:route_ready_progress, connection.incarnation, "attachment"})
+        send(observer, {:routing_request_sent, reference})
+        :gen_server.receive_response(request, max(cutoff - now_ms(), 0))
+      end}})
+
+      assert_receive {:routing_request_sent, ^reference}, max(cutoff - now_ms(), 0)
+      item = %{
+        kind: :model_stream_closed,
+        turn_id: "original",
+        stream_domain_id: String.duplicate("a", 32),
+        base_event_sequence: 0,
+        disposition: :complete,
+        delta_count: 31
+      }
+
+      for sequence <- 0..30 do
+        assert :ok = Loopex.ProgressSink.try_offer(ingress, "session", %{
+          kind: :text_delta, turn_id: "original", stream_domain_id: String.duplicate("a", 32),
+          base_event_sequence: 0, model_sequence: sequence, content_index: 0, text: "prefix"
+        })
+      end
+
+      assert :ok = Loopex.ProgressSink.try_offer(ingress, "session", item)
+      :ok = :sys.resume(registry)
+      assert_receive {:registry_result, ^reference, {:reply, :ok}}, max(cutoff - now_ms(), 0)
+      assert now_ms() < cutoff
+
+      items = for _ <- 1..32 do
+        assert {:ok, lease, "session", taken} = manual_registry_call(connection.pid, :take_progress)
+        assert :ok = manual_registry_call(connection.pid, {:release_progress, lease})
+        taken
+      end
+
+      assert Enum.map(Enum.take(items, 31), & &1.model_sequence) == Enum.to_list(0..30)
+      assert List.last(items) == item
+      assert :empty = manual_registry_call(connection.pid, :take_progress)
+      assert native_progress_bytes(ingress) == 0
+      assert native_progress_bytes(connection.progress_sink) == 0
+    after
+      :sys.resume(registry)
+    end
+  end
+
   defp progress_item do
     {:ok, item} =
       Loopex.CompactionProgress.new(
