@@ -488,6 +488,7 @@ defmodule LoopexComposition.Ephemeral.AmbientFixture do
         assert is_pid(startup.registered.runtime_holder)
         assert is_pid(startup.registered.memory_store)
         assert File.dir?(startup.owned_root.path)
+
         {:ok, children} =
           Loopex.Runtime.Supervisor.children(startup.registered.runtime.supervisor)
 
@@ -538,7 +539,8 @@ defmodule LoopexComposition.Ephemeral.AmbientFixture do
                 send(server, {:ambient_release, self()})
                 assert {:ok, result} = returned = Task.await(ask, 15_000)
 
-                for {_monitor, pid} <- model_monitors, pid != pending.callback,
+                for {_monitor, pid} <- model_monitors,
+                    pid != pending.callback,
                     do: refute(Process.alive?(pid))
 
                 assert result.outcome == :completed
@@ -565,6 +567,7 @@ defmodule LoopexComposition.Ephemeral.AmbientFixture do
                 assert Ephemeral.last_result(session) == returned
 
                 assert {:ok, history} = Ephemeral.history(session)
+
                 assert history == %{
                          entries: [
                            %{
@@ -577,7 +580,9 @@ defmodule LoopexComposition.Ephemeral.AmbientFixture do
                          truncated: false
                        }
 
-                public = :erlang.term_to_binary({returned, Ephemeral.last_result(session), history})
+                public =
+                  :erlang.term_to_binary({returned, Ephemeral.last_result(session), history})
+
                 for canary <- canaries, do: refute(String.contains?(public, canary))
                 assert_no_provider_key(public, @provider_profiles.anthropic.credential)
                 assert :sys.get_state(owner).model_census.pending == nil
@@ -768,43 +773,43 @@ defmodule LoopexComposition.Ephemeral.AmbientFixture do
     parent = self()
 
     serve = fn ->
-        for body <- bodies do
-          {:ok, socket} = :ssl.transport_accept(listener, 10_000)
-          {:ok, socket} = :ssl.handshake(socket, 10_000)
-          {headers, request} = read_request(socket, <<>>)
+      for body <- bodies do
+        {:ok, socket} = :ssl.transport_accept(listener, 10_000)
+        {:ok, socket} = :ssl.handshake(socket, 10_000)
+        {headers, request} = read_request(socket, <<>>)
 
-          if observe_native do
-            send(
-              parent,
-              {:buffered_native_request, self(), hd(String.split(headers, "\r\n")), request,
-               selected_auth?(headers, auth)}
-            )
-          else
-            send(parent, {:ambient_model_request, self(), request, selected_auth?(headers, auth)})
-          end
-
-          if held do
-            receive do
-              {:ambient_release, ^parent} -> :ok
-            after
-              10_000 -> raise "held provider request was not released"
-            end
-          end
-
-          :ok =
-            :ssl.send(socket, [
-              "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: ",
-              Integer.to_string(byte_size(body)),
-              "\r\nconnection: close\r\n\r\n",
-              body
-            ])
-
-          :ssl.close(socket)
+        if observe_native do
+          send(
+            parent,
+            {:buffered_native_request, self(), hd(String.split(headers, "\r\n")), request,
+             selected_auth?(headers, auth)}
+          )
+        else
+          send(parent, {:ambient_model_request, self(), request, selected_auth?(headers, auth)})
         end
 
-        :ssl.close(listener)
-        send(parent, {:ambient_server_done, self()})
+        if held do
+          receive do
+            {:ambient_release, ^parent} -> :ok
+          after
+            10_000 -> raise "held provider request was not released"
+          end
+        end
+
+        :ok =
+          :ssl.send(socket, [
+            "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: ",
+            Integer.to_string(byte_size(body)),
+            "\r\nconnection: close\r\n\r\n",
+            body
+          ])
+
+        :ssl.close(socket)
       end
+
+      :ssl.close(listener)
+      send(parent, {:ambient_server_done, self()})
+    end
 
     if observe_native do
       {server, monitor} = spawn_monitor(serve)

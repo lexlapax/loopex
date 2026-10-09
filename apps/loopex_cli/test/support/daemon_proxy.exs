@@ -311,49 +311,54 @@ defmodule LoopexCli.Test.DaemonProxy do
         observations = state.observations
 
         if observations.scope == :answer and not answer_observation?(record) do
-          %{state | observations: %{observations |
-            next_order: observations.next_order + 1,
-            omitted_control_records: observations.omitted_control_records + 1}}
-        else
-        event = record["event"]
-        event_data = if is_map(event), do: event["data"]
-
-        metadata = %{
-          order: observations.next_order,
-          connection: observations.connection,
-          direction: direction,
-          envelope:
-            observation_fields(
-              record,
-              ~w(type method request_id session_id command_id status code event_cursor)
-            ),
-          event: observation_fields(record["event"], ~w(kind event_id event_sequence)),
-          event_data: observation_fields(event_data, ~w(run_id turn_id command_id)),
-          progress:
-            observation_fields(
-              record["progress"],
-              ~w(kind turn_id stream_domain_id base_event_sequence model_sequence progress_sequence disposition delta_count progress_count)
-            ),
-          readable: observation_readable(record),
-          content: observation_content(record)
-        }
-
-        records = [metadata | observations.records]
-        bytes = :erlang.external_size(records)
-
-        if length(records) <= @observation_records and bytes <= @observation_bytes do
           %{
             state
             | observations: %{
                 observations
-                | records: records,
-                  bytes: bytes,
-                  next_order: observations.next_order + 1
+                | next_order: observations.next_order + 1,
+                  omitted_control_records: observations.omitted_control_records + 1
               }
           }
         else
-          observation_overflow(state)
-        end
+          event = record["event"]
+          event_data = if is_map(event), do: event["data"]
+
+          metadata = %{
+            order: observations.next_order,
+            connection: observations.connection,
+            direction: direction,
+            envelope:
+              observation_fields(
+                record,
+                ~w(type method request_id session_id command_id status code event_cursor)
+              ),
+            event: observation_fields(record["event"], ~w(kind event_id event_sequence)),
+            event_data: observation_fields(event_data, ~w(run_id turn_id command_id)),
+            progress:
+              observation_fields(
+                record["progress"],
+                ~w(kind turn_id stream_domain_id base_event_sequence model_sequence progress_sequence disposition delta_count progress_count)
+              ),
+            readable: observation_readable(record),
+            content: observation_content(record)
+          }
+
+          records = [metadata | observations.records]
+          bytes = :erlang.external_size(records)
+
+          if length(records) <= @observation_records and bytes <= @observation_bytes do
+            %{
+              state
+              | observations: %{
+                  observations
+                  | records: records,
+                    bytes: bytes,
+                    next_order: observations.next_order + 1
+                }
+            }
+          else
+            observation_overflow(state)
+          end
         end
 
       _invalid ->
