@@ -847,8 +847,9 @@ defmodule LoopexCli.M7CaseRunnerTest do
   end
 
   # Concept: the review case delegates to both pinned roles through the real
-  # helper owner on chat's real composition; the parent's committed final
-  # reply is the oracle's finding.
+  # helper owner on chat's real composition: the parent on provider A, both
+  # helpers on the manifest's provider B; the parent's committed final reply
+  # is the oracle's finding.
   defp review_replies(roles) do
     alias LoopexCli.M7NativeReplies, as: R
     a = "anthropic:claude-haiku-4-5-20251001"
@@ -867,7 +868,7 @@ defmodule LoopexCli.M7CaseRunnerTest do
 
       [
         R.reply(a, [{:tool, "task-#{role}", "task", arguments}], "tool_use"),
-        R.reply(a, [{:text, helper}])
+        R.responses(helper)
       ]
     end) ++ [R.reply(a, [{:text, finding}])]
   end
@@ -886,7 +887,7 @@ defmodule LoopexCli.M7CaseRunnerTest do
   end
 
   @tag timeout: 120_000
-  test "review delegates both roles on the real composition and its finding passes the oracle",
+  test "review delegates both roles to provider B and its committed finding passes the oracle",
        f do
     result =
       passed!(
@@ -903,6 +904,45 @@ defmodule LoopexCli.M7CaseRunnerTest do
              CaseRunner.run_lane(f.writer, "m7-operator", review_context(f, ~w(investigate)))
 
     assert result.mechanical_result == "required_action_absent"
+  end
+
+  test "review fails when a helper ran on the parent's provider or its parent is unknown" do
+    usage = %{
+      "child" => %{"reported_input_tokens" => 9, "reported_output_tokens" => 2},
+      "parent" => %{"tokens" => 10},
+      "combined_tokens" => 21
+    }
+
+    row = fn kind, fields -> %{payload: Map.put(fields, :kind, kind)} end
+
+    rows = fn parent, helper ->
+      [
+        row.("session_genesis_v3", %{"initial_configuration" => %{"model" => parent}}),
+        row.("effect_intent_committed_v2", %{
+          "job" => %{"tool_id" => "loopex.task", "validated_arguments" => %{"role" => "review"}},
+          "grant" => %{"operation_id" => "op"}
+        }),
+        row.("executor_receipt_committed_v2", %{
+          "receipt" => %{
+            "operation_id" => "op",
+            "outcome" => "completed",
+            "tool_id" => "loopex.task",
+            "output" => JSON.encode!(%{"model" => helper, "usage" => usage})
+          }
+        }),
+        row.("model_attempt_settled_v3", %{"result" => %{"reply" => %{"text" => "finding"}}})
+      ]
+    end
+
+    entry = %{"required_model_actions" => [%{"role" => "review"}]}
+    a = "anthropic:claude-haiku-4-5-20251001"
+
+    assert {:ok, _} = CaseRunner.joins("m7.review", rows.(a, "openai:gpt-4.1-mini"), entry, nil)
+
+    for {parent, helper} <- [{a, a}, {nil, "openai:gpt-4.1-mini"}, {a, nil}] do
+      assert CaseRunner.joins("m7.review", rows.(parent, helper), entry, nil) ==
+               {:failed, :helper_provider}
+    end
   end
 
   # Concept: native thinking replies through the real adapter and the local

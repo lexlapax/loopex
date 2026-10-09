@@ -168,18 +168,20 @@ The manifest's `execution_manifest.providers` pins provider A (Anthropic,
 credential variable `LOOPEX_PROVIDER_API_KEY`) and the maintainer-selected
 provider B: OpenAI's `openai:gpt-4.1-mini`, credential variable
 `OPENAI_API_KEY`. B's two cells are the adapter's exact registered mappings:
-the generic `default` cell for the provider switch and the thinking-off `none`
-cell for maintenance. The configuration names each variable only; the
+the generic `default` cell for the provider switch and the review helpers,
+and the thinking-off `none` cell for maintenance. The configuration names each variable only; the
 release check carries exactly these two names into the M7 lanes, and
 `mix loopex.m7_evidence` refuses when its list and the manifest differ.
 
 `m7.provider-switch` moves a session that read a file on A to B, reopens it
 and returns to A. `m7.cross-provider-maintenance` configures the always-on
 thinking Fable model on A and summarizes with B at reasoning `none`; the join
-fails when the summarizer and conversation share a provider. The `m7.review`
-helpers still run on the session's
-provider A model: a helper on B needs Core to admit a child whose model
-differs from the runtime's, which is a pending maintainer decision.
+fails when the summarizer and conversation share a provider. `m7.review`
+keeps the parent on A and runs both helpers on B. Core creates each helper
+child on B only after the host's model preparation reproduces its genesis
+exactly. The join fails when a helper's committed model shares the parent's
+provider. It also fails when a receipt does not report child, parent and
+combined usage separately.
 
 ## Held cases
 

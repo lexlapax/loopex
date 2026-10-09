@@ -365,7 +365,8 @@
       "b": {
         "cases": [
           "m7.provider-switch",
-          "m7.cross-provider-maintenance"
+          "m7.cross-provider-maintenance",
+          "m7.review"
         ],
         "cells": {
           "summarizer": {
