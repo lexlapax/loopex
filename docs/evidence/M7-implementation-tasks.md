@@ -16258,9 +16258,18 @@ Hosted, attended and coordinated transport generation proofs remain separate.
   Proved at merged `4c6804dc`: 18 composition files 310 per pair, Core run
   evidence/maintenance/standalone 131+2 excluded current and 133 floor; see the
   helper merge note above.
-- [ ] Implement bounded startup classification of all committed creates, including helpers-disabled startup.
-- [ ] Guard existing attachments and settled child sessions against ordinary host mutations.
-- [ ] Validate cache coverage, remove refused registrations and handle interrupted publication.
+- [x] Implement bounded startup classification of all committed creates, including helpers-disabled startup.
+  Proved at merged `30f1995f` on both pairs: composition 19 files 315,
+  `helper_route_guard_test` in app server, daemon and CLI, plus
+  `chat_helpers_test` and `config_inspection_test` (`merged-t11c-30f1995f-*`). Classification progress persists through `job-index-v1` coverage.
+- [x] Guard existing attachments and settled child sessions against ordinary host mutations.
+  Proved at merged `30f1995f` on both pairs: composition 19 files 315,
+  `helper_route_guard_test` in app server, daemon and CLI, plus
+  `chat_helpers_test` and `config_inspection_test` (`merged-t11c-30f1995f-*`). Each route refuses every non-read-only command on a helper child with `helper_session_owned` and writes no record (ADR 0069 host-route guard).
+- [x] Validate cache coverage, remove refused registrations and handle interrupted publication.
+  Proved at merged `30f1995f` on both pairs: composition 19 files 315,
+  `helper_route_guard_test` in app server, daemon and CLI, plus
+  `chat_helpers_test` and `config_inspection_test` (`merged-t11c-30f1995f-*`). `delegation_job_index_test` covers resume, forged-entry discard, refused-entry removal and interrupted publication.
 - [x] Recover completed results and stop unfinished helpers; recovery must never create or re-prompt them.
   Proved at merged `4c6804dc`: 18 composition files 310 per pair, Core run
   evidence/maintenance/standalone 131+2 excluded current and 133 floor; see the
@@ -16269,7 +16278,10 @@ Hosted, attended and coordinated transport generation proofs remain separate.
   Proved at merged `4c6804dc`: 18 composition files 310 per pair, Core run
   evidence/maintenance/standalone 131+2 excluded current and 133 floor; see the
   helper merge note above.
-- [ ] Inject faults at every binding, reserve, create, prompt, stop, settlement, receipt and cache boundary.
+- [x] Inject faults at every binding, reserve, create, prompt, stop, settlement, receipt and cache boundary.
+  Proved at merged `30f1995f` on both pairs: composition 19 files 315,
+  `helper_route_guard_test` in app server, daemon and CLI, plus
+  `chat_helpers_test` and `config_inspection_test` (`merged-t11c-30f1995f-*`).
 - [ ] Prove both role demonstrations with unchanged child workspaces and separate/combined usage.
 
 ### Added implementation subtasks
