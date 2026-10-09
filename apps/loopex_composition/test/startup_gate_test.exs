@@ -42,7 +42,7 @@ defmodule LoopexComposition.StartupGateTest do
     {:ok, root} =
       Supervisor.start_link(
         [
-          Supervisor.child_spec({Task.Supervisor, []}, id: Loopex.Runtime.Workers)
+          Supervisor.child_spec({Loopex.Runtime.TaskSupervisor, []}, id: Loopex.Runtime.Workers)
         ],
         strategy: :one_for_one
       )
@@ -172,7 +172,7 @@ defmodule LoopexComposition.StartupGateTest do
     {:ok, root} =
       Supervisor.start_link(
         [
-          Supervisor.child_spec({Task.Supervisor, []}, id: Loopex.Runtime.Workers)
+          Supervisor.child_spec({Loopex.Runtime.TaskSupervisor, []}, id: Loopex.Runtime.Workers)
         ],
         strategy: :one_for_one
       )
