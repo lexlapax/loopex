@@ -357,6 +357,49 @@
         "m7.rollback"
       ]
     },
+    "providers": {
+      "a": {
+        "credential_variable": "LOOPEX_PROVIDER_API_KEY",
+        "provider": "anthropic"
+      },
+      "b": {
+        "cases": [
+          "m7.provider-switch",
+          "m7.cross-provider-maintenance"
+        ],
+        "cells": {
+          "summarizer": {
+            "mapping": {
+              "canonical_terminal_tool_history": false,
+              "continuation_required": false,
+              "mapping_revision": "loopex.openai.gpt41mini.v1",
+              "renderer_revision": "loopex.reqllm.canonical.v1",
+              "thinking": {
+                "mode": "disabled"
+              },
+              "thinking_disabled": true
+            },
+            "reasoning": "none"
+          },
+          "switch": {
+            "mapping": {
+              "canonical_terminal_tool_history": false,
+              "continuation_required": false,
+              "mapping_revision": "loopex.unregistered.default.v1",
+              "renderer_revision": "loopex.reqllm.canonical.v1",
+              "thinking": {
+                "mode": "omitted"
+              },
+              "thinking_disabled": false
+            },
+            "reasoning": "default"
+          }
+        },
+        "credential_variable": "OPENAI_API_KEY",
+        "model": "openai:gpt-4.1-mini",
+        "provider": "openai"
+      }
+    },
     "operator_step_evidence": {
       "V1.1": {
         "classification": "attended",

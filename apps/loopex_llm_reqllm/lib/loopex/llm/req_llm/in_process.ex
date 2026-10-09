@@ -91,6 +91,13 @@ defmodule Loopex.LLM.ReqLLM.InProcess do
     end
   end
 
+  defp native_preflight(request, :openai) do
+    case Loopex.LLM.ReqLLM.ModelCapabilities.verify_captured(request) do
+      :ok -> :ok
+      _ -> @failed
+    end
+  end
+
   defp native_preflight(_, _), do: :ok
 
   defp probe_surface(:ollama, _model, _request, _tools, _address),

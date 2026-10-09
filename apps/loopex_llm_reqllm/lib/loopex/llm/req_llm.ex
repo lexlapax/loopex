@@ -372,7 +372,9 @@ defmodule Loopex.LLM.ReqLLM do
   end
 
   defp prepare_transport(request, _context, options) do
-    with {:ok, identity} <- identity(request.model), do: {:ok, identity, options}
+    with :ok <- Loopex.LLM.ReqLLM.ModelCapabilities.verify_captured(request),
+         {:ok, identity} <- identity(request.model),
+         do: {:ok, identity, options}
   end
 
   @doc """

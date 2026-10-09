@@ -1119,6 +1119,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
     defmodule LoopexProviderFixtureEntry do
     def main(arguments) do
     Application.put_env(:req_llm, :anthropic, [base_url: "http://127.0.0.1:#{port}"])
+    Application.put_env(:req_llm, :openai, [base_url: "http://127.0.0.1:#{port}/v1"])
     Application.put_env(:req_llm, :finch_request_adapter, LoopexProviderFixtureTransport)
     [path | _] = Enum.map(arguments, &List.to_string/1)
     File.write!(#{inspect(Path.join(root, "pid"))}, System.pid())

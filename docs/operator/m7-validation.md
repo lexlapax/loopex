@@ -147,12 +147,6 @@ session. Each cell first compacts the earlier cells, then reads three files in
 three rounds; afterwards the session reopens. A counted round's committed
 request must replay a thinking literal and equal the reply it names.
 
-`m7.cross-provider-maintenance` configures the always-on thinking Fable model
-and summarizes with Haiku at reasoning `none`. The adapter registers Haiku at
-`none` as the only thinking-off summarizer, so both models share the
-Anthropic route. The case therefore proves distinct models, not distinct
-provider routes. Pins `thinking_model` and `summarizer` override the models.
-
 `m7.thinking-bound` cuts each of the nine ADR 0044 cells with a one-turn
 limit after its first tool group commits. `m7.thinking-cancel` instead wraps
 the selected adapter with the trusted pre-transport cancellation gate. The
@@ -163,9 +157,29 @@ last reply must use native thinking exactly when the cell requires
 continuation. The cancel case's pinned cell is Fable at `low`; pin
 `cancel_cell` overrides it.
 
-The wrapper restores the configuration's named credential variables before
-each conversation, because composition consumes them and every case runs in
-one VM.
+The wrapper restores the configuration's and the pinned providers' named
+credential variables before each conversation, because composition consumes
+them and every case runs in one VM. The values stay in the trusted runner's
+memory between conversations and never enter a record.
+
+## Provider B
+
+The manifest's `execution_manifest.providers` pins provider A (Anthropic,
+credential variable `LOOPEX_PROVIDER_API_KEY`) and the maintainer-selected
+provider B: OpenAI's `openai:gpt-4.1-mini`, credential variable
+`OPENAI_API_KEY`. B's two cells are the adapter's exact registered mappings:
+the generic `default` cell for the provider switch and the thinking-off `none`
+cell for maintenance. The configuration names each variable only; the
+release check carries exactly these two names into the M7 lanes, and
+`mix loopex.m7_evidence` refuses when its list and the manifest differ.
+
+`m7.provider-switch` moves a session that read a file on A to B, reopens it
+and returns to A. `m7.cross-provider-maintenance` configures the always-on
+thinking Fable model on A and summarizes with B at reasoning `none`; the join
+fails when the summarizer and conversation share a provider. The `m7.review`
+helpers still run on the session's
+provider A model: a helper on B needs Core to admit a child whose model
+differs from the runtime's, which is a pending maintainer decision.
 
 ## Held cases
 

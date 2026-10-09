@@ -124,6 +124,7 @@ defmodule Mix.Tasks.Loopex.M7Evidence do
          execution = manifest.catalog["execution_manifest"],
          :ok <- ExecutionManifest.verify_owners(execution, root),
          {:ok, legacy} <- legacy_family(root),
+         :ok <- release_credentials(root, execution),
          :ok <- runbook(root, execution),
          :ok <- closure_rows(root, execution) do
       pending = ExecutionManifest.pending(execution)
@@ -177,6 +178,22 @@ defmodule Mix.Tasks.Loopex.M7Evidence do
       if Enum.all?(keys, &MapSet.member?(starts, "| `#{&1}`")),
         do: :ok,
         else: {:error, :m7_closure_rows_missing}
+    end
+  end
+
+  # Concept: the release check carries exactly the manifest's selected
+  # credential names into the M7 lanes, and no others.
+  # Technical depth: the script's `m7_credential_names=(...)` list is read as
+  # text and compared, as a set, with providers A and B.
+  defp release_credentials(root, execution) do
+    with {:ok, script} <-
+           read(Path.join(root, "scripts/check-release.sh"), :m7_credential_names_mismatch),
+         [_, names] <- Regex.run(~r/^m7_credential_names=\(([A-Z_ ]+)\)$/m, script),
+         true <-
+           Enum.sort(String.split(names)) == ExecutionManifest.credential_names(execution) do
+      :ok
+    else
+      _ -> {:error, :m7_credential_names_mismatch}
     end
   end
 

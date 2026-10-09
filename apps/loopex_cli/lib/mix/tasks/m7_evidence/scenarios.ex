@@ -331,11 +331,11 @@ defmodule Mix.Tasks.Loopex.M7Evidence.Scenarios do
     %{
       seed: %{"README.md" => @readme},
       allowed: [],
-      profile: fn profile -> profile end,
+      profile: &with_provider_b/2,
       plan: fn context ->
-        case get_in(context, [:pins, "provider_b"]) do
+        case provider_b(context) do
           %{"model" => b} ->
-            a = get_in(context, [:pins, "provider_a"]) || "anthropic:claude-haiku-4-5-20251001"
+            a = "anthropic:claude-haiku-4-5-20251001"
 
             {:ok,
              [
@@ -363,7 +363,7 @@ defmodule Mix.Tasks.Loopex.M7Evidence.Scenarios do
              ]}
 
           _ ->
-            {:error, :provider_pins_required}
+            {:error, :provider_b_unpinned}
         end
       end,
       joins: fn rows, outcome, _workspace ->
@@ -458,11 +458,10 @@ defmodule Mix.Tasks.Loopex.M7Evidence.Scenarios do
     }
   end
 
-  # V6.7: an always-on thinking conversation model is summarized by a distinct
-  # thinking-off summarizer; the conversation continues on its own model and
-  # the summary's usage is charged once, to its maintenance attempt. The
-  # adapter registers Haiku at `none` as the only thinking-off summarizer and
-  # Fable as the always-on model, so both share the Anthropic route today.
+  # V6.7: an always-on thinking conversation model on provider A is
+  # summarized by provider B's pinned thinking-off summarizer; the
+  # conversation continues on A and the summary's usage is charged once, to
+  # its maintenance attempt.
   def get("m7.cross-provider-maintenance") do
     %{
       seed: %{"README.md" => @readme},
@@ -470,15 +469,14 @@ defmodule Mix.Tasks.Loopex.M7Evidence.Scenarios do
       # The session starts on the dated summarizer model and configures the
       # thinking model before its first prompt, as the thinking cells do.
       profile: fn profile, context ->
-        b = get_in(context, [:pins, "summarizer"]) || @dated
-
         profile
+        |> with_provider_b(context)
         |> put_in(["session", "model"], @dated)
         |> put_in(["session", "tools"], "read-only")
-        |> Map.put("maintenance", %{"model" => b})
+        |> Map.put("maintenance", %{"model" => provider_b(context)["model"]})
       end,
-      plan: fn context ->
-        a = get_in(context, [:pins, "thinking_model"]) || @fable
+      plan: fn _context ->
+        a = @fable
         configure = ~s(/configure {"model":"#{a}","reasoning":"medium"})
 
         session =
@@ -503,7 +501,7 @@ defmodule Mix.Tasks.Loopex.M7Evidence.Scenarios do
         cond do
           is_nil(checkpoint) -> {:missing, :checkpoint}
           is_nil(summarizer) -> {:missing, :maintenance_request}
-          summarizer == conversation -> {:failed, :summarizer_not_distinct}
+          provider(summarizer) == provider(conversation) -> {:failed, :same_provider}
           length(settled) != 1 -> {:failed, :maintenance_usage_not_once}
           later == [] -> {:missing, :continued_run}
           true -> {:ok, nil}
@@ -649,6 +647,28 @@ defmodule Mix.Tasks.Loopex.M7Evidence.Scenarios do
   end
 
   def get(_case_id), do: nil
+
+  # Concept: provider B is the committed manifest's pin, never a test value.
+  @doc false
+  def provider_b(context),
+    do: get_in(context, [:manifest, "execution_manifest", "providers", "b"])
+
+  # The attempt's configuration names B's credential variable for its route.
+  @doc false
+  def with_provider_b(profile, context) do
+    case provider_b(context) do
+      %{"provider" => name, "credential_variable" => variable} ->
+        update_in(profile, ["providers"], fn providers ->
+          Map.put_new(providers || %{}, name, %{"credential" => %{"env" => variable}})
+        end)
+
+      _ ->
+        profile
+    end
+  end
+
+  defp provider(model) when is_binary(model), do: model |> String.split(":") |> hd()
+  defp provider(_), do: nil
 
   @doc false
   def cancel_cell, do: @cancel_cell

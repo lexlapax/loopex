@@ -115,6 +115,30 @@ defmodule LoopexCli.M7ExecutionManifestTest do
     end
   end
 
+  test "providers A and B pin distinct release names and B's exact registered cells", f do
+    assert ExecutionManifest.credential_names(f.manifest) ==
+             ~w(LOOPEX_PROVIDER_API_KEY OPENAI_API_KEY)
+
+    b = ["providers", "b"]
+
+    assert ExecutionManifest.validate(Map.delete(f.manifest, "providers")) ==
+             {:error, :invalid_execution_manifest}
+
+    for changed <- [
+          update_in(f.manifest, ["providers"], &Map.delete(&1, "b")),
+          put_in(f.manifest, b ++ ["credential_variable"], "LOOPEX_PROVIDER_API_KEY"),
+          put_in(f.manifest, b ++ ["credential_variable"], "M7_OTHER_KEY"),
+          put_in(f.manifest, b ++ ["model"], "openai:gpt-4o-mini"),
+          put_in(f.manifest, b ++ ["cells", "summarizer", "reasoning"], "default"),
+          put_in(f.manifest, b ++ ["cells", "summarizer", "mapping", "thinking_disabled"], false),
+          put_in(f.manifest, b ++ ["cells", "switch", "mapping", "mapping_revision"], "other"),
+          put_in(f.manifest, b ++ ["cases"], ["m7.unknown"]),
+          put_in(f.manifest, b ++ ["extra"], true)
+        ] do
+      assert ExecutionManifest.validate(changed) == {:error, :invalid_m7_providers}
+    end
+  end
+
   test "test owners must name a literal test in an application test file", f do
     for owner <- [
           "test:apps/loopex/test/configured_session_test.exs#no such test name",

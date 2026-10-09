@@ -85,6 +85,42 @@ defmodule LoopexCli.M7NativeReplies do
       "event: #{event["type"]}\ndata: #{JSON.encode!(event)}\n\n"
     end)
   end
+
+  # Provider B: one OpenAI Responses stream with a text answer.
+  def responses(text) do
+    events = [
+      %{
+        "type" => "response.created",
+        "response" => %{"id" => "resp_m7", "status" => "in_progress"}
+      },
+      %{
+        "type" => "response.output_text.delta",
+        "item_id" => "msg_m7",
+        "output_index" => 0,
+        "content_index" => 0,
+        "delta" => text
+      },
+      %{
+        "type" => "response.completed",
+        "response" => %{
+          "id" => "resp_m7",
+          "status" => "completed",
+          "model" => "gpt-4.1-mini",
+          "output" => [
+            %{
+              "type" => "message",
+              "id" => "msg_m7",
+              "role" => "assistant",
+              "content" => [%{"type" => "output_text", "text" => text}]
+            }
+          ],
+          "usage" => %{"input_tokens" => 9, "output_tokens" => 2, "total_tokens" => 11}
+        }
+      }
+    ]
+
+    Enum.map_join(events, &("event: #{&1["type"]}\ndata: " <> JSON.encode!(&1) <> "\n\n"))
+  end
 end
 
 defmodule LoopexCli.M7CaseRunnerTest do
@@ -811,81 +847,60 @@ defmodule LoopexCli.M7CaseRunnerTest do
   end
 
   # Concept: the review case delegates to both pinned roles through the real
-  # helper owner; the parent's committed final reply is the oracle's finding.
-  defp review_script(roles) do
+  # helper owner on chat's real composition; the parent's committed final
+  # reply is the oracle's finding.
+  defp review_replies(roles) do
+    alias LoopexCli.M7NativeReplies, as: R
+    a = "anthropic:claude-haiku-4-5-20251001"
+
     finding =
       "file\tfunction\tdefect_code\tcall_chain\n" <>
         "lib/fees.ex\ttotal/2\tduplicate_fee\tCheckout.quote/2>Invoice.total/2>Fees.total/2\n"
 
-    task = fn role, id ->
-      %{
-        text: "delegate #{role}",
-        calls: [
-          %{
-            id: id,
-            name: "task",
-            arguments: %{
-              "role" => role,
-              "description" => role,
-              "prompt" => "Trace Checkout.quote/2."
-            }
-          }
-        ]
-      }
-    end
+    Enum.flat_map(roles, fn role ->
+      arguments = %{"role" => role, "description" => role, "prompt" => "Trace Checkout.quote/2."}
 
-    read = fn path, id ->
-      %{text: "read", calls: [%{id: id, name: "read", arguments: %{"path" => path}}]}
-    end
+      helper =
+        if role == "investigate",
+          do: "Checkout.quote/2>Invoice.total/2>Fees.total/2",
+          else: "lib/fees.ex total/2 duplicate_fee"
 
-    steps =
-      Enum.flat_map(roles, fn
-        "investigate" ->
-          [
-            task.("investigate", "task-investigate"),
-            read.("lib/checkout.ex", "read-checkout"),
-            %{text: "Checkout.quote/2>Invoice.total/2>Fees.total/2", calls: []}
-          ]
-
-        "review" ->
-          [
-            task.("review", "task-review"),
-            read.("lib/fees.ex", "read-fees"),
-            %{text: "lib/fees.ex total/2 duplicate_fee", calls: []}
-          ]
-      end)
-
-    fn _capture, _call -> steps ++ [%{text: finding, calls: []}] end
+      [
+        R.reply(a, [{:tool, "task-#{role}", "task", arguments}], "tool_use"),
+        R.reply(a, [{:text, helper}])
+      ]
+    end) ++ [R.reply(a, [{:text, finding}])]
   end
 
-  defp review_context(f, script) do
+  defp review_context(f, roles) do
+    fixture =
+      Loopex.LLM.ReqLLM.ProviderIsolationFixture.new(:reply,
+        credential: "m7-review-native-synthetic",
+        response_bodies: review_replies(roles)
+      )
+
     Map.merge(f.context, %{
       manifest: lane(f.context.manifest, ["m7.review"]),
-      chat_options: chat_options(f, script, self(), :real)
+      chat_options: native!(f, fixture)
     })
   end
 
-  test "review delegates both roles read-only and its committed finding passes the oracle", f do
+  @tag timeout: 120_000
+  test "review delegates both roles on the real composition and its finding passes the oracle",
+       f do
     result =
       passed!(
-        CaseRunner.run_lane(
-          f.writer,
-          "m7-operator",
-          review_context(f, review_script(["investigate", "review"]))
-        )
+        CaseRunner.run_lane(f.writer, "m7-operator", review_context(f, ~w(investigate review)))
       )
 
     assert File.read!(Path.join(result.root, "records/oracle.txt")) =~ "status=0"
     assert facts(result)["kinds"]["executor_receipt_committed_v2"] >= 2
   end
 
+  @tag timeout: 120_000
   test "review without the review role call is required_action_absent", f do
     assert {:stopped, [{:ok, result}]} =
-             CaseRunner.run_lane(
-               f.writer,
-               "m7-operator",
-               review_context(f, review_script(["investigate"]))
-             )
+             CaseRunner.run_lane(f.writer, "m7-operator", review_context(f, ~w(investigate)))
 
     assert result.mechanical_result == "required_action_absent"
   end
@@ -970,10 +985,9 @@ defmodule LoopexCli.M7CaseRunnerTest do
         response_bodies: [
           R.reply(fable, [think.(0), {:text, "noted"}]),
           R.reply(fable, [think.(1), {:text, "ready"}]),
-          R.reply("anthropic:claude-haiku-4-5-20251001", [
-            {:text,
-             ~s({"summary":"release_prefix=amber, batch_size=3","carry_forward":{"files_read":[],"files_changed":[]}})}
-          ]),
+          R.responses(
+            ~s({"summary":"release_prefix=amber, batch_size=3","carry_forward":{"files_read":[],"files_changed":[]}})
+          ),
           R.reply(fable, [think.(2), {:text, "release_prefix=amber, batch_size=3"}])
         ]
       )
@@ -1085,27 +1099,44 @@ defmodule LoopexCli.M7CaseRunnerTest do
     assert facts(result)["kinds"]["run_terminal_committed"] == 3
   end
 
+  # Concept: provider A is the local Anthropic fixture and provider B the
+  # manifest's pinned OpenAI model on the same local endpoint; the switch,
+  # reopen and return run on chat's real composition and adapter.
   test "provider switch moves A to B, reopens and returns to A with its tool facts", f do
-    profile =
-      put_in(profile(f.root), ["providers", "openai"], %{
-        "credential" => %{"env" => "M7_UNUSED_PROVIDER_B_REFERENCE"}
-      })
+    alias LoopexCli.M7NativeReplies, as: R
+    a = "anthropic:claude-haiku-4-5-20251001"
 
-    File.write!(f.config, :json.encode(profile))
-    pins = %{"provider_b" => %{"model" => "openai:gpt-4o-mini"}}
+    fixture =
+      Loopex.LLM.ReqLLM.ProviderIsolationFixture.new(:reply,
+        credential: "m7-provider-switch-synthetic",
+        response_bodies: [
+          R.reply(a, [{:tool, "read-1", "read", %{"path" => "README.md"}}], "tool_use"),
+          R.reply(a, [{:text, "remembered"}]),
+          R.responses("M7 scenario workspace."),
+          R.reply(a, [{:text, "M7 scenario workspace."}])
+        ]
+      )
 
-    script = fn
-      1 -> [@read, %{text: "remembered", calls: []}, %{text: "M7 scenario workspace.", calls: []}]
-      _ -> [%{text: "M7 scenario workspace.", calls: []}]
-    end
+    result =
+      passed!(
+        scenario!(f, "m7.provider-switch", fn _ -> [] end, %{
+          chat_options: native!(f, fixture)
+        })
+      )
 
-    result = passed!(scenario!(f, "m7.provider-switch", script, %{pins: pins}))
     assert facts(result)["kinds"]["session_configuration_admitted_v2"] == 2
   end
 
-  test "provider switch without its A/B pins refuses before dispatch", f do
+  test "provider switch with no pinned provider B refuses before dispatch", f do
+    manifest =
+      update_in(
+        lane(f.context.manifest, ["m7.provider-switch"]),
+        ["execution_manifest", "providers"],
+        &Map.delete(&1, "b")
+      )
+
     assert {:stopped, [{:ok, refused}]} =
-             scenario!(f, "m7.provider-switch", fn _ -> [] end, %{pins: nil})
+             scenario!(f, "m7.provider-switch", fn _ -> [] end, %{manifest: manifest})
 
     assert refused.mechanical_result == "evidence_incomplete_pre_dispatch"
   end
@@ -1654,14 +1685,16 @@ defmodule LoopexCli.M7CaseRunnerTest do
   @native_variable "M7_NATIVE_FIXTURE_CREDENTIAL"
 
   defp native!(f, fixture, change \\ & &1) do
-    previous = System.get_env(@native_variable)
-    System.put_env(@native_variable, fixture.credential)
+    # Provider A's test variable and provider B's pinned name hold the one
+    # synthetic fixture credential for this test only.
+    for name <- [@native_variable, "OPENAI_API_KEY"] do
+      previous = System.get_env(name)
+      System.put_env(name, fixture.credential)
 
-    on_exit(fn ->
-      if previous,
-        do: System.put_env(@native_variable, previous),
-        else: System.delete_env(@native_variable)
-    end)
+      on_exit(fn ->
+        if previous, do: System.put_env(name, previous), else: System.delete_env(name)
+      end)
+    end
 
     profile =
       profile(f.root)

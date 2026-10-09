@@ -139,15 +139,17 @@ defmodule Loopex.LLM.ReqLLM.Mapping do
   ## Technical depth
 
   Both model edges emit the eleven-field current callback. Generic completion
-  remains unknown with nil continuation; validated native capture replaces
-  those fields using its selected mapping. This shared builder adds no
-  dispatch or session authority and invents no native completion evidence.
+  remains unknown with nil continuation unless the request carries a
+  registered OpenAI cell, whose terminal stop is classified by
+  `ModelCapabilities.completion/2`; validated native capture replaces those
+  fields using its selected mapping. This shared builder adds no dispatch or
+  session authority and invents no native completion evidence.
   """
   def reply(request, identity, metadata, text, calls, deltas) do
     reported = Map.get(metadata, :usage) || %{}
 
     %{
-      completion: "unknown",
+      completion: Loopex.LLM.ReqLLM.ModelCapabilities.completion(request, metadata),
       continuation: nil,
       text: text,
       identity: identity,

@@ -188,6 +188,34 @@ defmodule LoopexCli.M7EvidenceTaskTest do
     assert Task.validate(root, []) == {:error, :legacy_release_family_invalid}
   end
 
+  test "the release check must carry exactly providers A and B's credential names",
+       %{root: root} do
+    concept!(root, [])
+    script = Path.join(root, "scripts/check-release.sh")
+    original = File.read!(script)
+    names = "m7_credential_names=(LOOPEX_PROVIDER_API_KEY OPENAI_API_KEY)"
+
+    for changed <- [
+          "m7_credential_names=(LOOPEX_PROVIDER_API_KEY)",
+          "m7_credential_names=(LOOPEX_PROVIDER_API_KEY OPENAI_API_KEY ANTHROPIC_API_KEY)",
+          "m7_names=(LOOPEX_PROVIDER_API_KEY OPENAI_API_KEY)"
+        ] do
+      File.write!(script, String.replace(original, names, changed))
+      assert Task.validate(root, []) == {:error, :m7_credential_names_mismatch}
+    end
+
+    File.write!(
+      script,
+      String.replace(
+        original,
+        names,
+        "m7_credential_names=(OPENAI_API_KEY LOOPEX_PROVIDER_API_KEY)"
+      )
+    )
+
+    assert {:ok, _} = Task.validate(root, [])
+  end
+
   test "the command reports unavailable evidence with exit status two", %{root: root} do
     concept!(root, [])
     pend!(root, ["m7.thinking-bound"])
