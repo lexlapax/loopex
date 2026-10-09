@@ -1,5 +1,19 @@
 # M7 Implementation Tasks
 
+### Artifact lost-registration component proved, 2026-10-09
+
+Accepted ADR0066's original-owner four-fact branch is joined at `e91ce0c7`,
+strict-AST child `aa4187da`. Original10853 passes all41 complete Local artifact
+cases on both supported pairs in144.495seconds, including the new real60-second
+six-placement barrier and all prior40 Runtime/storage cases. Reviews, exact
+queued-call and original-actor joins, collections and118-asset retention childv39
+are bound in the [resume checkpoint](M7-resume.md). The broader T05 artifact
+opening row remains open for complete Core/physical/transport proof; no
+additional checkbox closes. Counts remain original89 done/84 open/6 retired,
+added375 done/22 open, combined464 done/106 open/6 retired. Next qualify the
+four unchanged remaining T06 ask/foundation whole files.
+
+
 ### Native configuration subtask complete; physical recovery proved, 2026-10-09
 
 Source `ecc14289` proves configuration93 and creation79 cases on both supported
@@ -15567,7 +15581,13 @@ or check was relaxed.
 
 ### Added implementation subtasks
 
-- [ ] Resolve and implement the current full-transfer opening boundary under ADR0028: one original lookup/verification deadline, bounded four-transfer custody and cancel-before-open behavior, honest cleanup/refusal and late reclamation, exact immutable-use identity and complete physical/transport proofs. Obtain acceptance of the concrete port/ownership/work-accounting amendment before dependent implementation; the separately proved artifact-description guard does not complete this obligation.
+- [ ] Resolve and implement the current full-transfer opening boundary under ADR0028: one original lookup/verification deadline, bounded four-transfer custody and cancel-before-open behavior, honest cleanup/refusal and late reclamation, exact immutable-use identity and complete physical/transport proofs. Accepted ADR0066 supplies the port/ownership/work-accounting amendment; the separately proved artifact-description guard does not complete this obligation.
+  Current component: `aa4187da`, original10853, all41 complete Local artifact
+  cases pass on both pairs in144.495seconds, including actual60-second
+  original-owner lost-registration reclamation and its conservative negatives.
+  Collection `16024e7dcdc24ee8b8b4495ae86dd09b2bcb5eecee641a6dce713a2675c87003`.
+  The old Core36 observer cutoff and complete physical-output/transport proofs
+  remain required. No full boundary or parent completion is claimed.
 
 - [x] Qualify the joined Core artifact-description preflight against the accepted complete immutable-use ceiling on both toolchains, preserving all original conformance cases and exact cap/cap-plus-one controls; complete transport opening and publication remain separately owed. Proved by original2716 at e62b5603:211 whole cases per pair, zero failures/exclusions/skips/invalids, complete original process joins; retained evidence is M7/artifact-use-focused-20261008-v1.
 

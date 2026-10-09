@@ -27,6 +27,48 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+### Accepted artifact lost-registration branch qualified, 2026-10-09
+
+Implementation `e91ce0c75c85aa4a90c793b44944936c9d076d0d` and strict-AST
+formatter child `aa4187da82ded1c9b39d5d6ec391765e5d5b22d0` implement accepted
+ADR0066's four-fact original-owner lost-registration route. Actual custodian
+DOWN/loss remains retained; only an original observer invocation begun after
+join/expiry, with no permission ever issued and valid same-owner absence,
+supplies the separate terminal proof. Earlier/blocked observations cannot gain
+eligibility later. Original observer joins precede one prospective capacity
+release; no receipt/ack or retroactive timely success is manufactured.
+
+Original10853 passes all41 complete Local artifact cases on both supported
+pairs in144.495seconds, zero excluded/skipped/invalid,12 original joins.
+The new real60-second case uses six physical placements and exact queued-call
+barriers; all prior40 Runtime/storage cases, full64MiB accounting and original
+capacity/cleanup assertions pass again after the Core change.
+Collection SHA-256 `16024e7dcdc24ee8b8b4495ae86dd09b2bcb5eecee641a6dce713a2675c87003`.
+Formatter71850 passes strict non-line AST equality and both formatting checks
+in2.804seconds. Documentation original40530 passed the earlier `84dfc2e0`
+checkpoint in26.448seconds; it does not validate later documentation.
+
+Retention child `M7/current-source-preparation-20261009-v39/retention.json`,
+SHA-256 `ba49a6ffc87abb8c005188e26006177cb73ae542e87ba74f1de0a17b2db691bd`,
+retains118 assets and authenticates parentv38. All originals are terminal and
+collected once. Latest registry3268 SHA-256
+`a6a1b3637bbdffad33a1141e23828c447a5b642a5730d465daf6f3c44e2df26a`.
+No native handle is live. The earlier v2 source-only disposition is superseded
+by this joined, qualified component proof. The complete Core36 observer-cutoff
+decision and physical-output/transport proofs remain open; no full T05 or
+integration claim follows. Counts stay original89/84/6, added375/22,
+combined464/106/6 for T01–T19.
+
+Next qualify four unchanged remaining ordinary T06 files: CLI
+`ask_integration_test.exs`, `ask_ephemeral_test.exs`, `ask_command_test.exs` and
+`foundation_workflow_test.exs`. An independent inventory confirms those exact
+files still lack paired ordinary proof; embedded47, durable-ask36 and coding5
+need no duplicate run for this inventory. CLI60 FAIL58/60, recovery diagnostic
+and provider/attended obligations remain separate. ADR0067 stays the presented
+unanswered question;0065/0068 and the older Core observer grace remain pending.
+Continue the existing active goal on `m7`.
+
+
 ### Native configuration complete; physical creation recovery proved, 2026-10-09
 
 At `ecc14289907d4ff97af2e111ef66a1acecc3c875`, original99182 proves93 native
