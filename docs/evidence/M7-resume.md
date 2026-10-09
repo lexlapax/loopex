@@ -27,6 +27,21 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+### Proposal status declaration repaired, 2026-10-09
+
+Original36870 documentation gate at `d2a2b108323e593814e99f489b1c9aec8901d24d`
+failed after25.297 seconds. The status checker correctly rejected a capsule
+whose new ADR0067 blocker was missing from the active plan prerequisite section.
+Both plan progress records now declare the discovered dependency and the capsule
+uses the existing exact derivation. No checker or promised outcome changed.
+Original terminal SHA-256
+`c0e5efd76f9940195a21e6406e59ceab164b6b0b3537405f3a8deddc6cbf29b8`;
+collection `8902454bfc164f1fac93c4cf087476a9a4b03219441f8da40af62a3478e3151a`;
+registry3053 `c97f4a3669b54672fcad59aaf50e5731ce2cfbdc90ec5ac2bf045ecdf2ad03da`.
+Two original joins and14 assets verified. This failure remains retained;
+the corrected documentation candidate requires its own one gate.
+ADR0067 pair decision bytes remain unchanged and Proposed.
+
 ### Tool-result projection proposal reviewed, 2026-10-09
 
 ADR 0067 is Proposed and indexed. The exact Concept SHA-256 is

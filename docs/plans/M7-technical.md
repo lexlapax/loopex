@@ -48,6 +48,12 @@ dispositioned before the private physical attempts writer and its dependent
 checks are implemented. This records the missing portable file-lock
 prerequisite; unrelated accepted M7 work continues.
 
+Implementation prerequisite discovered on 2026-10-09: Proposed
+[ADR 0067](../adr/0067-tool-result-event-projections.md#concept) must be
+dispositioned before changing the public tool-result payload, complete manifests
+and clients. This records the existing model-question projection gap; unrelated
+accepted M7 implementation and required proof continue.
+
 Accepted decisions that constrain the work:
 
 | Decision | Constraint on M7 |

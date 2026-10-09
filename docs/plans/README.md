@@ -22,9 +22,9 @@ its last `Closed` row identifies the last closed product baseline.
 | --- | --- |
 | Integrated phase | Closed milestone product baseline |
 | Last closed product checkpoint | `M6` — 2026-09-29 |
-| Blockers | None; `M7` is in progress against its accepted plan pair; `M7` waits on ADRs 0065 and 0067 before their dependent outcomes |
+| Blockers | None; `M7` is in progress against its accepted plan pair; `M7` waits on ADR 0065 and ADR 0067 before the outcomes that depend on them |
 | Authorized work | Implementation inside the accepted `M7` plan pair, landing on `main` in small reviewed changes |
-| Next maintainer decision | Record disposition [ADR 0067](../adr/0067-tool-result-event-projections.md#concept) for tool-result delivery; [ADR 0065](../adr/0065-private-attempts-io-prerequisite.md#concept) remains pending for the physical attempts writer |
+| Next maintainer decision | Record disposition [ADR 0065](../adr/0065-private-attempts-io-prerequisite.md#concept) and [ADR 0067](../adr/0067-tool-result-event-projections.md#concept) now; afterward, none until `M7` is ready for independent review |
 | Next transition | Ensure that `docs/evidence/M7-closure-runs.md` is indexed as a scaffold, map every outcome to evidence in the plan, then make the tested implementation commit by moving `M7` to In review; run the closure matrix and independent review from that exact SHA |
 | Validation | `bash scripts/check-bootstrap.sh` |
 <!-- loopex:current-status:end -->
