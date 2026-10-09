@@ -309,7 +309,7 @@ defmodule LoopexComposition.DelegationRunLogTest do
       armed = :atomics.new(1, [])
       context = bound(context, checkpoint: error_checkpoint(armed, cut))
       tx = initialize(context)
-      header_cut = cut in [:run_header_written, :run_header_synced]
+      header_cut = unquote(cut in [:run_header_written, :run_header_synced])
 
       unless header_cut,
         do:
