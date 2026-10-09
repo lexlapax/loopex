@@ -677,8 +677,7 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
       "#!/bin/sh\nset -eu\nIFS= read -r line < " <>
         shell_quote(fifo) <> "\nprintf '%s\\n' \"$line\"\n"
 
-    with true <- Map.get(context, :dispatch) != :terminal or {:error, :held_case_requires_pipe},
-         :ok <- File.mkdir(workspace),
+    with :ok <- File.mkdir(workspace),
          :ok <- File.write(Path.join(workspace, "README.md"), @readme),
          :ok <- File.mkdir(trusted),
          {_, 0} <- System.cmd("mkfifo", ["-m", "0600", fifo]),
@@ -918,6 +917,22 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
            }
          ]}
 
+      Map.get(context, :dispatch) == :terminal ->
+        {:ok,
+         [
+           %{resume: false, steps: [{:line, prompt}, {:await, ~s("event":"question")}, :lose]},
+           %{
+             resume: true,
+             reanswer: true,
+             steps: [
+               {:answer, :operator},
+               {:line, "/wait"},
+               {:line, "/status"},
+               {:line, "/quit"}
+             ]
+           }
+         ]}
+
       true ->
         {:error, :question_restart_requires_operator}
     end
@@ -1032,6 +1047,9 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
 
       true ->
         known = if conversation[:reanswer], do: [], else: questions(done)
+        # Harness-driven steps need the piped device even under --terminal;
+        # the operator still answers through {:answer, :operator}.
+        mode = if harness_driven?(conversation.steps), do: :pipe, else: mode
         result = chat(staged, context, conversation.steps, mode, extra, n, known)
         result = Map.put(result, :session, session_id(result.output))
 
@@ -1103,7 +1121,15 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
     options = if gate, do: gated_model(options, gate), else: options
     options = if observed or gate, do: observer_runtime(options, self()), else: options
     restore_credentials(context)
-    exit = host(fn -> Chat.run(staged.config_argv ++ extra, options) end, device, gate)
+
+    exit =
+      host(
+        fn -> Chat.run(staged.config_argv ++ extra, options) end,
+        device,
+        gate,
+        Map.get(context, :operator_device, :stdio)
+      )
+
     if gate, do: CancellationGate.stop(gate, System.monotonic_time(:millisecond) + 5_000)
     {_, stderr} = StringIO.contents(diagnostics)
 
@@ -1138,14 +1164,20 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
   # loss can end it abruptly, as an operator's kill would.
   # Technical depth: the host is killed only on its device's request; its
   # linked runtime dies with it and the durable store keeps what committed.
-  defp host(run, device, gate) do
+  defp host(run, device, gate, operator) do
     parent = self()
     {pid, ref} = spawn_monitor(fn -> send(parent, {:conversation_exit, self(), run.()}) end)
+    Process.put({__MODULE__, :operator}, operator)
     await_host(pid, ref, device, nil, gate)
   end
 
   defp await_host(pid, ref, device, runtime, gate) do
     receive do
+      # The operator answers the emitted question on their own terminal.
+      {:conversation_choose, ^device, record} when device != nil ->
+        send(device, {:operator_choice, operator_choice(record)})
+        await_host(pid, ref, device, runtime, gate)
+
       {:conversation_exit, ^pid, exit} ->
         Process.demonitor(ref, [:flush])
         exit
@@ -1181,6 +1213,27 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
       {:DOWN, ^ref, :process, ^pid, _} ->
         1
     end
+  end
+
+  defp harness_driven?(steps),
+    do:
+      Enum.any?(steps, fn step ->
+        step in [:lose, :interrupt, :observe, :await_gate, :release] or
+          match?({:hold, _, _}, step) or step == {:answer, :operator}
+      end)
+
+  # Concept: an attended answer comes from the operator, never the harness.
+  # Technical depth: the question and its numbered choices are shown on the
+  # operator's device; the typed label or number is passed back unchanged.
+  defp operator_choice(record) do
+    device = Process.get({__MODULE__, :operator}, :stdio)
+    IO.puts(device, "question: " <> to_string(record["question"]))
+
+    for {choice, index} <- Enum.with_index(record["choices"] || [], 1),
+        do: IO.puts(device, "  #{index}. #{choice["label"]}")
+
+    IO.write(device, "answer> ")
+    device |> IO.read(:line) |> to_string() |> String.trim()
   end
 
   # Concept: V7.7's trusted pre-transport cancellation gate, the one model

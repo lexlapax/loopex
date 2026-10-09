@@ -71,7 +71,11 @@ For every admitted case, in manifest order, the wrapper:
   case as `started` in the index before the conversation can call a model;
 - runs the conversation: piped prompts with `/wait` barriers by default,
   reopening the recorded session for repair's and long's final prompt, or the
-  operator's terminal with `--terminal`;
+  operator's terminal with `--terminal`. A conversation with a harness-driven
+  step (a hold, the observer, the model gate, an interrupt or a prescribed loss)
+  stays piped under `--terminal`. Where it needs a human answer, as in
+  `m7.question-restart`, the wrapper shows the emitted question on the
+  terminal and sends the operator's typed choice;
 - reruns the pinned oracle independently and checks the workspace against the
   allowed changes;
 - records the case `completed` with its mechanical result and the retained
@@ -180,8 +184,8 @@ tool wall time, releases the runner and records `hold_expired` as a failure.
 After the run, committed facts decide the case. The steer and follow-up must be
 admitted before the held operation's receipt. The steer must be applied to the
 held run, and the follow-up must run separately with the held run's context.
-These cases run in piped mode only; an operator's Ctrl-C under `mix run` would
-end the whole harness rather than reach the chat.
+These cases stay piped even under `--terminal`; an operator's Ctrl-C under
+`mix run` would end the whole harness rather than reach the chat.
 
 ## Step ownership
 

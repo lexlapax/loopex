@@ -1071,12 +1071,11 @@ defmodule LoopexCli.M7CaseRunnerTest do
     assert refused.mechanical_result == "evidence_incomplete_pre_dispatch"
   end
 
-  test "question restart keeps the pending identity through process loss and answers it after reopen",
-       f do
+  defp restart_script(f) do
     [%{"arguments" => question}] =
       f.context.manifest["fixtures"]["feature"]["required_model_actions"]
 
-    script = fn
+    fn
       _capture, 1 ->
         [%{text: "ask", calls: [%{id: "nil-choice", name: "ask", arguments: question}]}]
 
@@ -1105,6 +1104,11 @@ defmodule LoopexCli.M7CaseRunnerTest do
           %{text: "done", calls: []}
         ]
     end
+  end
+
+  test "question restart keeps the pending identity through process loss and answers it after reopen",
+       f do
+    script = restart_script(f)
 
     context =
       Map.merge(f.context, %{
@@ -1115,6 +1119,26 @@ defmodule LoopexCli.M7CaseRunnerTest do
 
     result = passed!(CaseRunner.run_lane(f.writer, "m7-operator", context))
     assert facts(result)["kinds"]["model_question_requested_v1"] == 1
+    assert File.read!(Path.join(result.root, "records/input-1.txt")) =~ "process_loss"
+    assert File.read!(Path.join(result.root, "records/input-2.txt")) =~ "/answer "
+  end
+
+  # Under --terminal the loss stays harness-driven while the operator types
+  # the answer to the emitted question on their own device.
+  test "an attended question restart takes the operator's typed choice after the loss", f do
+    {:ok, operator} = StringIO.open("2\n")
+
+    context =
+      Map.merge(f.context, %{
+        manifest: lane(f.context.manifest, ["m7.question-restart"]),
+        dispatch: :terminal,
+        operator_device: operator,
+        chat_options: chat_options(f, restart_script(f), self())
+      })
+
+    result = passed!(CaseRunner.run_lane(f.writer, "m7-operator", context))
+    {_, shown} = StringIO.contents(operator)
+    assert shown =~ "question: Which default should nil_mode use?" and shown =~ "2. literal_null"
     assert File.read!(Path.join(result.root, "records/input-1.txt")) =~ "process_loss"
     assert File.read!(Path.join(result.root, "records/input-2.txt")) =~ "/answer "
   end
@@ -1179,10 +1203,13 @@ defmodule LoopexCli.M7CaseRunnerTest do
     assert File.read!(Path.join(result.root, "records/input-1.txt")) =~ ":hold_expired"
   end
 
+  # Run as check-release runs the operator lane: under --terminal, whose
+  # harness-driven steps keep the piped device.
   test "an interrupt cancels the held call without releasing it and cleanup is confirmed", f do
     context =
       Map.merge(f.context, %{
         manifest: lane(f.context.manifest, ["m7.interrupt"]),
+        dispatch: :terminal,
         chat_options: chat_options(f, held_script([%{text: "late", calls: []}]), self())
       })
 
