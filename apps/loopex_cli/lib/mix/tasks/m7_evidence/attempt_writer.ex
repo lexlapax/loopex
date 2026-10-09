@@ -358,13 +358,24 @@ defmodule Mix.Tasks.Loopex.M7Evidence.AttemptWriter do
       %{active: nil, pins: [pin | pins]} = plan ->
         expected = Map.merge(plan.scope, Map.take(pin, ~w(case_key subcase_key)))
 
-        if locator == expected and body["manifest_digest"] == plan.manifest and
-             body["specification_digest"] == pin["specification_digest"] do
-          if state == "started",
-            do: {:ok, %{plan | active: locator, pins: pins}},
-            else: {:ok, nil}
-        else
-          {:error, :attempt_case_not_admitted}
+        # A pre-dispatch stop records every remaining pin as not dispatched,
+        # in order, so the suspended lane can continue; nothing starts after it.
+        cond do
+          locator != expected or body["manifest_digest"] != plan.manifest or
+              body["specification_digest"] != pin["specification_digest"] ->
+            {:error, :attempt_case_not_admitted}
+
+          state == "started" and not Map.get(plan, :stopping, false) ->
+            {:ok, %{plan | active: locator, pins: pins}}
+
+          state == "started" ->
+            {:error, :attempt_case_not_admitted}
+
+          pins == [] ->
+            {:ok, nil}
+
+          true ->
+            {:ok, Map.put(%{plan | pins: pins}, :stopping, true)}
         end
 
       _ ->

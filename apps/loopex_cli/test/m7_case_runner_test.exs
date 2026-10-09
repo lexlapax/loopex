@@ -534,6 +534,50 @@ defmodule LoopexCli.M7CaseRunnerTest do
     assert result.mechanical_result == "assertion_failed"
   end
 
+  test "a pre-dispatch stop suspends the whole lane and its continuation dispatches each case once",
+       f do
+    File.write!(f.config, :json.encode(Map.delete(profile(f.root), "paths")))
+    cases = ["m7.policy-denial", "m7.baseline.durable"]
+
+    scripts = fn _, call ->
+      if call == 1,
+        do: [
+          %{
+            text: "rm",
+            calls: [%{id: "rm", name: "bash", arguments: %{"argv" => ["rm", "README.md"]}}]
+          },
+          %{text: "denied", calls: []}
+        ],
+        else: [@read, %{text: "first line", calls: []}]
+    end
+
+    context =
+      Map.merge(f.context, %{
+        manifest: lane(f.context.manifest, cases),
+        chat_options: chat_options(f, scripts, self())
+      })
+
+    assert {:stopped, [{:ok, first}, {:ok, second}]} =
+             CaseRunner.run_lane(f.writer, "m7-operator", context)
+
+    assert first.mechanical_result == "evidence_incomplete_pre_dispatch"
+    assert second.mechanical_result == "evidence_incomplete_pre_dispatch"
+    refute_received {:index_at_dispatch, _, _}
+
+    File.write!(f.config, :json.encode(profile(f.root)))
+    resumed = Map.put(context, :mode, :continue)
+    assert {:ok, results} = CaseRunner.run_lane(f.writer, "m7-operator", resumed)
+    assert Enum.map(results, fn {:ok, r} -> r.mechanical_result end) == ["pass", "pass"]
+
+    started =
+      for r <- records(f.index), r["body"]["state"] == "started", do: r["body"]["case_key"]
+
+    assert started == cases
+
+    assert {:blocked, %{reason: :lane_already_ended}} =
+             CaseRunner.run_lane(f.writer, "m7-operator", resumed)
+  end
+
   test "the wrapper command checks admission without staging and refuses bad arguments", f do
     :ok = AttemptWriter.close(f.writer)
     root = Path.expand("../../..", __DIR__)

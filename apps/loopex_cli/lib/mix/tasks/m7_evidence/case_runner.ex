@@ -238,11 +238,33 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
       {:ok, %{mechanical_result: "pass"}} ->
         run_pins(writer, rest, selection, context, [result | results])
 
+      {:ok, %{mechanical_result: "evidence_incomplete_pre_dispatch", record: stop}} ->
+        suspended = Enum.map(rest, &suspend(writer, &1.pin, selection, stop))
+        {:stopped, Enum.reverse([result | results]) ++ suspended}
+
       {:ok, _stopped} ->
         {:stopped, Enum.reverse([result | results])}
 
       error ->
         {:error, Enum.reverse([error | results])}
+    end
+  end
+
+  # Concept: a pre-dispatch stop suspends the rest of the lane unexecuted.
+  # Technical depth: each later pin is recorded not dispatched with the
+  # stopping record's own preflight evidence, so continuation can find it.
+  defp suspend(writer, pin, selection, stop) do
+    body =
+      stop["body"]
+      |> Map.drop(~w(writer_id host_id ownership_epoch))
+      |> Map.merge(%{
+        "case_key" => pin["case_key"],
+        "specification_digest" => pin["specification_digest"]
+      })
+      |> Map.merge(Map.take(selection, ~w(candidate_sha lane_id logical_matrix_id)))
+
+    with {:ok, record} <- AttemptWriter.append(writer, body) do
+      {:ok, %{mechanical_result: "evidence_incomplete_pre_dispatch", record: record}}
     end
   end
 
