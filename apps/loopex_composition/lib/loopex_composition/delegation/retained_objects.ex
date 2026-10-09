@@ -27,10 +27,13 @@ defmodule LoopexComposition.Delegation.RetainedObjects do
   Binding headers and transactions use LedgerCodec's current JSON framing.
   Objects sync before prepare; full file and directory sync, descriptor close
   and exact readback precede a transaction acknowledgement. Uncertainty gates
-  every binding in this owner. Lookup replays the original transaction and may
-  repair only a strict incomplete final transaction after exclusive stale-writer
-  recovery. Required missing/torn headers remain unavailable. Reopening requires
-  explicit classification of every physically present binding before mutations;
+  every binding and run in this owner. Initialize-only run logs revalidate the
+  actual bound parent and retain zero counts, tokens and completion credit;
+  later lifecycle mutations remain unavailable. Lookup replays the original
+  transaction and may repair only a strict incomplete final transaction after
+  exclusive stale-writer recovery. Required missing/torn headers remain
+  unavailable. Reopening requires explicit classification of every physically
+  present binding and run before mutations;
   this is not complete Core-history startup coverage or helper activation.
   An unresolved owner retains its existing marker on stop so the next acquisition
   must establish that exact writer gone. No marker or persistent schema is added.
@@ -42,9 +45,23 @@ defmodule LoopexComposition.Delegation.RetainedObjects do
 
   alias Loopex.Store.Local.{Log, WriterLock}
   alias LoopexComposition.Placement
-  alias LoopexComposition.Delegation.{LedgerCodec, ParentBinding}
+  alias LoopexComposition.Delegation.{LedgerCodec, ParentBinding, RunLedger, RunMutation}
 
   @cap 1_048_576
+  @run_cap 16_777_216
+  @run_checkpoints %{
+    binding_header_written: :run_header_written,
+    binding_header_synced: :run_header_synced,
+    binding_partial_written: :run_partial_written,
+    binding_written: :run_written,
+    binding_synced: :run_synced,
+    binding_closed: :run_closed,
+    binding_directory_synced: :run_directory_synced,
+    binding_recovered_synced: :run_recovered_synced,
+    binding_before_truncate: :run_before_truncate,
+    binding_truncated: :run_truncated,
+    binding_repair_synced: :run_repair_synced
+  }
 
   @doc false
   def open(root, runtime_id, placement_owner, options \\ []) do
@@ -80,6 +97,22 @@ defmodule LoopexComposition.Delegation.RetainedObjects do
   def read_binding(owner, command, runtime \\ nil),
     do: GenServer.call(owner, {:read_binding, command, runtime}, :infinity)
 
+  @doc false
+  def open_run(owner, command, identifiers, runtime),
+    do: GenServer.call(owner, {:open_run, command, identifiers, runtime}, :infinity)
+
+  @doc false
+  def commit_run(owner, command, identifiers, transaction, runtime),
+    do: GenServer.call(owner, {:commit_run, command, identifiers, transaction, runtime}, :infinity)
+
+  @doc false
+  def lookup_run(owner, command, identifiers, tx_id, runtime),
+    do: GenServer.call(owner, {:lookup_run, command, identifiers, tx_id, runtime}, :infinity)
+
+  @doc false
+  def read_run(owner, command, identifiers, runtime),
+    do: GenServer.call(owner, {:read_run, command, identifiers, runtime}, :infinity)
+
   # Concept: offline readers inspect the same exact bytes without starting an owner.
   # Technical depth: the first header is mandatory; only a strict final transaction
   # fragment is classified incomplete. This function performs no repair or IO.
@@ -100,6 +133,26 @@ defmodule LoopexComposition.Delegation.RetainedObjects do
 
   def decode_binding(_, _, _), do: {:error, :invalid_binding_log}
 
+  # Concept: the current physical run foundation admits initialization only.
+  # Technical depth: validate the mandatory scoped header and the sole closed
+  # transaction before exposing a prefix; a later lifecycle frame is unavailable,
+  # never skipped or repaired into a fresh allowance.
+  @doc false
+  def decode_run(bytes, identifiers) when is_binary(bytes) and byte_size(bytes) <= @run_cap do
+    with {:ok, key} <- LedgerCodec.header_key(:run, identifiers),
+         {:ok, _payload, rest} <- LedgerCodec.decode_frame(bytes),
+         header_size = byte_size(bytes) - byte_size(rest),
+         header = binary_part(bytes, 0, header_size),
+         {:ok, _} <- LedgerCodec.decode_header(header, :run, identifiers, key),
+         {:ok, transactions, complete_size, tail} <- run_frames(rest, identifiers, header_size, []) do
+      {:ok, %{key: key, transactions: transactions, complete_size: complete_size, tail: tail}}
+    else
+      _ -> {:error, :invalid_run_log}
+    end
+  end
+
+  def decode_run(_, _), do: {:error, :invalid_run_log}
+
   @impl true
   def init({caller, root, runtime_id, placement_owner, options}) do
     caller_monitor = Process.monitor(caller)
@@ -119,14 +172,22 @@ defmodule LoopexComposition.Delegation.RetainedObjects do
              Path.join(directory, "objects"),
              Keyword.get(options, :recover_stale_writer, false)
            ) do
-      case binding_namespace(directory) do
-        {:ok, pending, binding_identity} ->
+      with {:ok, pending, binding_identity} <- binding_namespace(directory),
+           {:ok, runs, run_identity} <- ledger_namespace(directory, :run) do
           {:ok,
            %{
              root: root,
              runtime_id: runtime_id,
              pending_bindings: pending,
              binding_identity: binding_identity,
+             pending_runs: runs,
+             known_runs: runs,
+             run_identity: run_identity,
+             recoverable_runs:
+               if(previous_marker and Keyword.get(options, :recover_stale_writer, false),
+                 do: runs,
+                 else: MapSet.new()
+               ),
              recoverable_bindings:
                if(previous_marker and Keyword.get(options, :recover_stale_writer, false),
                  do: pending,
@@ -141,6 +202,7 @@ defmodule LoopexComposition.Delegation.RetainedObjects do
              checkpoint: Keyword.get(options, :checkpoint, fn _ -> :ok end)
            }}
 
+      else
         {:error, reason} ->
           {:stop, reason}
       end
@@ -216,9 +278,60 @@ defmodule LoopexComposition.Delegation.RetainedObjects do
     {:reply, result, next}
   end
 
+  def handle_call({:open_run, command, identifiers, runtime}, _from, state) do
+    case do_open_run(state, command, identifiers, runtime) do
+      {:ok, key, next} -> {:reply, {:ok, key}, next}
+      {:unknown, tx, file_identity, next} ->
+        run_unknown(next, command, identifiers, tx, file_identity)
+      {:error, reason} ->
+        {:reply, {:error, reason}, note_run_unavailable(state, identifiers, reason)}
+    end
+  end
+
+  def handle_call({:commit_run, command, identifiers, tx, runtime}, _from, state) do
+    case do_commit_run(state, command, identifiers, tx, runtime) do
+      {:ok, result} -> {:reply, {:ok, result}, state}
+      {:unknown, file_identity} -> run_unknown(state, command, identifiers, tx, file_identity)
+      {:error, reason} ->
+        {:reply, {:error, reason}, note_run_unavailable(state, identifiers, reason)}
+    end
+  end
+
+  def handle_call({:lookup_run, command, identifiers, tx_id, runtime}, _from, state) do
+    case do_lookup_run(state, command, identifiers, tx_id, runtime) do
+      {:ok, result, next} -> {:reply, {:ok, result}, next}
+      {:error, reason} ->
+        {:reply, {:error, reason}, note_run_unavailable(state, identifiers, reason)}
+    end
+  end
+
+  def handle_call({:read_run, command, identifiers, runtime}, _from, state) do
+    result =
+      with :ok <- mutation_open(state),
+           {:ok, parent} <- run_parent(state, command, identifiers, runtime),
+           {:ok, image} <- ledger_image(state, :run, identifiers),
+           true <- image.decoded.tail == :complete,
+           {:ok, reduced} <- reduce_run(parent, image),
+           :ok <- confirm_run(state, image) do
+        {:ok, run_view(reduced)}
+      else
+        false -> {:error, :incomplete_run_tail}
+        {:error, reason} -> {:error, reason}
+      end
+
+    next =
+      case result do
+        {:error, reason} -> note_run_unavailable(state, identifiers, reason)
+        _ -> state
+      end
+
+    {:reply, result, next}
+  end
+
   @impl true
   def terminate(_reason, %{fence: nil} = state) do
-    if MapSet.size(state.pending_bindings) == 0, do: WriterLock.release(state.lock)
+    if MapSet.size(state.pending_bindings) == 0 and MapSet.size(state.pending_runs) == 0,
+      do: WriterLock.release(state.lock)
     :ok
   end
 
@@ -263,14 +376,16 @@ defmodule LoopexComposition.Delegation.RetainedObjects do
     end
   end
 
-  defp mutation_open(%{fence: nil, pending_bindings: pending}) do
-    if MapSet.size(pending) == 0, do: :ok, else: {:error, :ledger_fenced}
+  defp mutation_open(%{fence: nil, pending_bindings: pending, pending_runs: runs}) do
+    if MapSet.size(pending) == 0 and MapSet.size(runs) == 0,
+      do: :ok,
+      else: {:error, :ledger_fenced}
   end
 
   defp mutation_open(_), do: {:error, :ledger_fenced}
 
   defp binding_unknown(state, command, tx, file_identity) do
-    fence = %{command: command, tx: tx, identity: file_identity}
+    fence = %{kind: :binding, command: command, tx: tx, identity: file_identity}
     {:reply, {:error, {:commit_unknown, tx["tx_id"]}}, %{state | fence: fence}}
   end
 
@@ -393,7 +508,7 @@ defmodule LoopexComposition.Delegation.RetainedObjects do
 
   defp lookup_allowed(%{fence: nil}, _, _), do: :ok
 
-  defp lookup_allowed(%{fence: %{command: command, tx: %{"tx_id" => tx_id}}}, command, tx_id),
+  defp lookup_allowed(%{fence: %{kind: :binding, command: command, tx: %{"tx_id" => tx_id}}}, command, tx_id),
     do: :ok
 
   defp lookup_allowed(_, _, _), do: {:error, :ledger_fenced}
@@ -476,14 +591,225 @@ defmodule LoopexComposition.Delegation.RetainedObjects do
   defp view(reduced),
     do: Map.take(reduced, [:version, :bytes, :credit, :phase, :parent, :transactions])
 
+  defp run_view(reduced),
+    do: Map.take(reduced, [:version, :bytes, :credit, :phase, :count, :reserved_tokens,
+                         :charged_tokens, :transactions])
+
+  defp note_run_unavailable(state, identifiers, reason) do
+    if reason in [:run_unavailable, :invalid_run_log, :incomplete_run_tail,
+                  :binding_unavailable, :invalid_binding_log, :binding_object_unavailable,
+                  :binding_directory_changed, :binding_file_changed, :invalid_parent_capture,
+                  :invalid_binding_prefix, :incomplete_binding_tail,
+                  :creation_history_unavailable] do
+      case LedgerCodec.header_key(:run, identifiers) do
+        {:ok, key} -> %{state | pending_runs: MapSet.put(state.pending_runs, key)}
+        _ -> state
+      end
+    else
+      state
+    end
+  end
+
+  defp run_unknown(state, command, identifiers, tx, file_identity) do
+    fence = %{kind: :run, command: command, identifiers: identifiers, tx: tx,
+              identity: file_identity}
+    {:reply, {:error, {:commit_unknown, tx["tx_id"]}}, %{state | fence: fence}}
+  end
+
+  # Concept: run initialization has the same actual parent provenance as binding.
+  # Technical depth: read the owned physical log and objects, observe Core's
+  # original creation, then rebuild the pure empty run. No caller projection or
+  # nil runtime can supply a bound parent or replace its declaration.
+  defp run_parent(state, command, identifiers, runtime) do
+    with {:ok, image} <- binding_image(state, command),
+         true <- image.decoded.tail == :complete,
+         {:ok, capture} <- image_capture(state, command, image, nil),
+         observed = history(runtime, capture, image.decoded.transactions),
+         {:ok, parent} <- RunLedger.new(identifiers, capture, image.decoded.transactions, observed),
+         :ok <- confirm_run_parent(state, image) do
+      {:ok, parent}
+    else
+      false -> {:error, :incomplete_binding_tail}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp do_open_run(state, command, identifiers, runtime) do
+    with :ok <- mutation_open(state),
+         {:ok, parent} <- run_parent(state, command, identifiers, runtime),
+         {:ok, key} <- LedgerCodec.header_key(:run, identifiers),
+         {:ok, next} <- ledger_directory(state, :run),
+         path = ledger_path(next, :run, key),
+         {:ok, tx} <- RunMutation.transaction(identifiers, 0, RunLedger.initialize_mutation(parent)) do
+      case File.lstat(path) do
+        {:error, :enoent} ->
+          if MapSet.member?(next.known_runs, key) do
+            {:error, :run_unavailable}
+          else
+            next = %{next | known_runs: MapSet.put(next.known_runs, key)}
+            case create_ledger_header(next, path, parent.header, :run) do
+              :ok -> {:ok, key, next}
+              {:unknown, file_identity} -> {:unknown, tx, file_identity, next}
+              {:error, reason} -> {:error, reason}
+            end
+          end
+
+        {:ok, _} ->
+          with {:ok, image} <- ledger_image(next, :run, identifiers),
+               true <- image.decoded.tail == :complete,
+               {:ok, _} <- reduce_run(parent, image),
+               :ok <- confirm_run(next, image) do
+            {:ok, key, next}
+          else
+            false -> {:error, :incomplete_run_tail}
+            {:error, reason} -> {:error, reason}
+          end
+
+        {:error, _} -> {:error, :run_unavailable}
+      end
+    end
+  end
+
+  defp do_commit_run(state, command, identifiers, tx, runtime) do
+    with :ok <- mutation_open(state),
+         {:ok, ^tx} <- RunMutation.validate(identifiers, tx),
+         true <- tx["mutation"]["kind"] == "initialize",
+         {:ok, parent} <- run_parent(state, command, identifiers, runtime),
+         {:ok, image} <- ledger_image(state, :run, identifiers),
+         :ok <- complete_run(image),
+         {:ok, reduced} <- reduce_run(parent, image),
+         {:ok, next, result} <- RunLedger.admit(reduced, tx) do
+      if next.version == reduced.version do
+        case confirm_run(state, image) do
+          :ok -> {:ok, result}
+          {:error, _} -> {:unknown, image.identity}
+        end
+      else
+        with {:ok, payload} <- LedgerCodec.encode_json(tx, :frame),
+             {:ok, frame} <- LedgerCodec.encode_frame(payload) do
+          case append_ledger(state, image, frame, :run) do
+            :ok -> {:ok, result}
+            {:error, _} -> {:unknown, image.identity}
+          end
+        end
+      end
+    else
+      false -> {:error, :invalid_run_prefix}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp complete_run(%{decoded: %{tail: :complete}}), do: :ok
+  defp complete_run(_), do: {:error, :incomplete_run_tail}
+
+  defp confirm_run_parent(state, image) do
+    case confirm_binding(state, image) do
+      :ok -> :ok
+      {:error, _} -> {:error, :binding_unavailable}
+    end
+  end
+
+  defp confirm_run(state, image) do
+    case confirm_ledger(state, image, :run) do
+      :ok -> :ok
+      {:error, _} -> {:error, :run_unavailable}
+    end
+  end
+
+  defp reduce_run(parent, image) do
+    Enum.reduce_while(image.decoded.transactions, {:ok, parent}, fn tx, {:ok, current} ->
+      case RunLedger.admit(current, tx) do
+        {:ok, next, _} -> {:cont, {:ok, next}}
+        _ -> {:halt, {:error, :invalid_run_log}}
+      end
+    end)
+  end
+
+  defp do_lookup_run(state, command, identifiers, tx_id, runtime) do
+    with true <- is_binary(tx_id) and Regex.match?(~r/\A[0-9a-f]{64}\z/, tx_id),
+         :ok <- run_lookup_allowed(state, command, identifiers, tx_id),
+         {:ok, parent} <- run_parent(state, command, identifiers, runtime),
+         {:ok, image} <- ledger_image(state, :run, identifiers),
+         :ok <- original_identity(state, image),
+         {:ok, reduced} <- reduce_run(parent, image),
+         :ok <- recover_run(state, image),
+         {:ok, confirmed} <- ledger_image(state, :run, identifiers),
+         true <- confirmed.decoded.tail == :complete and confirmed.identity == image.identity,
+         {:ok, final} <- reduce_run(parent, confirmed),
+         true <- final.version == reduced.version,
+         :ok <- resolved_original(state, final),
+         :ok <- confirm_run(state, confirmed) do
+      result =
+        case Enum.find(final.transactions, fn {tx, _} -> tx["tx_id"] == tx_id end) do
+          nil -> :absent
+          {_, result} -> result
+        end
+      {:ok, result, %{state | fence: nil,
+                     pending_runs: MapSet.delete(state.pending_runs, confirmed.decoded.key),
+                     recoverable_runs: MapSet.delete(state.recoverable_runs, confirmed.decoded.key)}}
+    else
+      false -> {:error, :run_lookup_unavailable}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp run_lookup_allowed(%{fence: nil}, _, _, _), do: :ok
+  defp run_lookup_allowed(%{fence: %{kind: :run, command: command, identifiers: identifiers,
+                                   tx: %{"tx_id" => tx_id}}}, command, identifiers, tx_id), do: :ok
+  defp run_lookup_allowed(_, _, _, _), do: {:error, :ledger_fenced}
+
+  defp recover_run(_state, %{decoded: %{tail: :complete}}), do: :ok
+  defp recover_run(%{fence: fence}, _) when not is_nil(fence),
+    do: {:error, :run_recovery_unproved}
+  defp recover_run(state, image) do
+    if MapSet.member?(state.recoverable_runs, image.decoded.key),
+      do: repair_ledger(state, image, :run),
+      else: {:error, :run_recovery_unproved}
+  end
+
+  defp run_frames("", _identifiers, offset, transactions),
+    do: {:ok, Enum.reverse(transactions), offset, :complete}
+  defp run_frames(_bytes, _identifiers, _offset, [_]), do: {:error, :invalid_run_prefix}
+  defp run_frames(bytes, identifiers, offset, []) do
+    case LedgerCodec.decode_frame(bytes) do
+      {:ok, payload, rest} ->
+        with {:ok, tx} <- RunMutation.decode(identifiers, payload),
+             true <- tx["expected_version"] == 0 and tx["mutation"]["kind"] == "initialize" do
+          run_frames(rest, identifiers, offset + byte_size(bytes) - byte_size(rest), [tx])
+        else
+          _ -> {:error, :invalid_run_prefix}
+        end
+      {:error, :incomplete_frame} ->
+        if possible_binding_tail?(bytes),
+          do: {:ok, [], offset, :incomplete},
+          else: {:error, :invalid_run_log}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
   defp binding_path(state, key), do: Path.join([state.directory, "bindings", key <> ".log"])
+
+  defp ledger_name(:binding), do: "bindings"
+  defp ledger_name(:run), do: "runs"
+  defp ledger_cap(:binding), do: @cap
+  defp ledger_cap(:run), do: @run_cap
+  defp ledger_path(state, kind, key),
+    do: Path.join([state.directory, ledger_name(kind), key <> ".log"])
+  defp directory_identity(state, :binding), do: state.binding_identity
+  defp directory_identity(state, :run), do: state.run_identity
+  defp put_directory_identity(state, :binding, value), do: %{state | binding_identity: value}
+  defp put_directory_identity(state, :run, value), do: %{state | run_identity: value}
+  defp ledger_checkpoint(state, :binding, step), do: checkpoint(state, step)
+  defp ledger_checkpoint(state, :run, step), do: checkpoint(state, Map.fetch!(@run_checkpoints, step))
 
   # Concept: another parent's recovered file cannot be omitted from this gate.
   # Technical depth: present filenames are only recovery work, not proof of
   # complete Core history. Each must pass original lookup; missing expected logs
   # and startup history coverage remain the host's separate classification gate.
-  defp binding_namespace(directory) do
-    path = Path.join(directory, "bindings")
+  defp binding_namespace(directory), do: ledger_namespace(directory, :binding)
+
+  defp ledger_namespace(directory, kind) do
+    path = Path.join(directory, ledger_name(kind))
 
     case File.lstat(path) do
       {:error, :enoent} ->
@@ -495,46 +821,51 @@ defmodule LoopexComposition.Delegation.RetainedObjects do
              true <- Enum.all?(names, &Regex.match?(~r/\A[0-9a-f]{64}\.log\z/, &1)) do
           {:ok, MapSet.new(Enum.map(names, &String.trim_trailing(&1, ".log"))), identity(stat)}
         else
-          _ -> {:error, :invalid_binding_namespace}
+          _ -> {:error, invalid_namespace(kind)}
         end
 
       _ ->
-        {:error, :invalid_binding_namespace}
+        {:error, invalid_namespace(kind)}
     end
   end
 
-  defp binding_directory(state) do
-    path = Path.join(state.directory, "bindings")
+  defp binding_directory(state), do: ledger_directory(state, :binding)
+
+  defp ledger_directory(state, kind) do
+    path = Path.join(state.directory, ledger_name(kind))
 
     with :ok <- verify(state) do
-      case state.binding_identity do
+      case directory_identity(state, kind) do
         nil ->
           with :ok <- File.mkdir(path),
                :ok <- File.chmod(path, 0o700),
                :ok <- Log.sync_parent(path),
                {:ok, info} <- File.lstat(path) do
-            {:ok, %{state | binding_identity: identity(info)}}
+            {:ok, put_directory_identity(state, kind, identity(info))}
           end
 
         _ ->
-          with :ok <- verify_binding_directory(state), do: {:ok, state}
+          with :ok <- verify_ledger_directory(state, kind), do: {:ok, state}
       end
     end
   end
 
-  defp verify_binding_directory(state) do
+  defp verify_ledger_directory(state, kind) do
     with :ok <- verify(state),
          {:ok, %File.Stat{type: :directory} = info} <-
-           File.lstat(Path.join(state.directory, "bindings")),
+           File.lstat(Path.join(state.directory, ledger_name(kind))),
          true <-
-           identity(info) == state.binding_identity and Bitwise.band(info.mode, 0o7777) == 0o700 do
+           identity(info) == directory_identity(state, kind) and Bitwise.band(info.mode, 0o7777) == 0o700 do
       :ok
     else
       _ -> {:error, :binding_directory_changed}
     end
   end
 
-  defp create_binding_header(state, path, header) do
+  defp create_binding_header(state, path, header),
+    do: create_ledger_header(state, path, header, :binding)
+
+  defp create_ledger_header(state, path, header, kind) do
     case :file.open(String.to_charlist(path), [:write, :binary, :raw, :exclusive]) do
       {:ok, io} ->
         case :file.read_file_info(io) do
@@ -542,12 +873,12 @@ defmodule LoopexComposition.Delegation.RetainedObjects do
             file_identity = identity(File.Stat.from_record(record))
 
             result =
-              ledger_io(state, io, path, file_identity, header, fn ->
+              ledger_io(state, io, path, file_identity, header, kind, fn ->
                 with :ok <- File.chmod(path, 0o600),
                      :ok <- :file.write(io, header),
-                     :ok <- checkpoint(state, :binding_header_written),
+                     :ok <- ledger_checkpoint(state, kind, :binding_header_written),
                      :ok <- :file.sync(io),
-                     :ok <- checkpoint(state, :binding_header_synced),
+                     :ok <- ledger_checkpoint(state, kind, :binding_header_synced),
                      do: :ok
               end)
 
@@ -570,24 +901,26 @@ defmodule LoopexComposition.Delegation.RetainedObjects do
   # Technical depth: the first half is a real physical write, allowing genuine
   # crash cuts. Every acknowledgement follows sync, close, parent sync and exact
   # path/descriptor identity verification under the retained exclusive lease.
-  defp append_binding(state, image, frame) do
-    with :ok <- verify_binding_directory(state),
+  defp append_binding(state, image, frame), do: append_ledger(state, image, frame, :binding)
+
+  defp append_ledger(state, image, frame, kind) do
+    with :ok <- verify_ledger_directory(state, kind),
          :ok <- same_binding_file(image.path, image.identity),
          {:ok, io} <- :file.open(String.to_charlist(image.path), [:read, :write, :binary, :raw]) do
-      ledger_io(state, io, image.path, image.identity, image.bytes <> frame, fn ->
+      ledger_io(state, io, image.path, image.identity, image.bytes <> frame, kind, fn ->
         with {:ok, record} <- :file.read_file_info(io),
              true <- File.Stat.from_record(record).size == byte_size(image.bytes),
-             {:ok, original} <- :file.pread(io, 0, @cap + 1),
+             {:ok, original} <- :file.pread(io, 0, ledger_cap(kind) + 1),
              true <- original == image.bytes,
              {:ok, _} <- :file.position(io, byte_size(image.bytes)),
              half = div(byte_size(frame), 2),
              <<first::binary-size(^half), rest::binary>> = frame,
              :ok <- :file.write(io, first),
-             :ok <- checkpoint(state, :binding_partial_written),
+             :ok <- ledger_checkpoint(state, kind, :binding_partial_written),
              :ok <- :file.write(io, rest),
-             :ok <- checkpoint(state, :binding_written),
+             :ok <- ledger_checkpoint(state, kind, :binding_written),
              :ok <- :file.sync(io),
-             :ok <- checkpoint(state, :binding_synced) do
+             :ok <- ledger_checkpoint(state, kind, :binding_synced) do
           :ok
         else
           false -> {:error, :binding_file_changed}
@@ -597,12 +930,12 @@ defmodule LoopexComposition.Delegation.RetainedObjects do
     end
   end
 
-  defp ledger_io(state, io, path, file_identity, expected_bytes, operation) do
+  defp ledger_io(state, io, path, file_identity, expected_bytes, ledger_kind, operation) do
     result =
       try do
         with {:ok, record} <- :file.read_file_info(io),
              true <- identity(File.Stat.from_record(record)) == file_identity,
-             :ok <- verify_binding_directory(state),
+             :ok <- verify_ledger_directory(state, ledger_kind),
              do: operation.()
       catch
         kind, reason -> {:error, {:binding_io_interrupted, kind, reason}}
@@ -613,13 +946,13 @@ defmodule LoopexComposition.Delegation.RetainedObjects do
     try do
       with :ok <- result,
            :ok <- closed,
-           :ok <- checkpoint(state, :binding_closed),
+           :ok <- ledger_checkpoint(state, ledger_kind, :binding_closed),
            :ok <- same_binding_file(path, file_identity),
            :ok <- Log.sync_parent(path),
-           :ok <- checkpoint(state, :binding_directory_synced),
-           :ok <- verify_binding_directory(state),
+           :ok <- ledger_checkpoint(state, ledger_kind, :binding_directory_synced),
+           :ok <- verify_ledger_directory(state, ledger_kind),
            :ok <- same_binding_file(path, file_identity),
-           :ok <- binding_readback(state, path, file_identity, expected_bytes) do
+           :ok <- ledger_readback(state, path, file_identity, expected_bytes, ledger_kind) do
         :ok
       else
         false -> {:error, :binding_file_changed}
@@ -630,15 +963,15 @@ defmodule LoopexComposition.Delegation.RetainedObjects do
     end
   end
 
-  defp binding_readback(state, path, file_identity, expected) do
+  defp ledger_readback(state, path, file_identity, expected, ledger_kind) do
     with {:ok, io} <- :file.open(String.to_charlist(path), [:read, :binary, :raw]) do
       result =
         try do
           with {:ok, record} <- :file.read_file_info(io),
                true <- identity(File.Stat.from_record(record)) == file_identity,
-               {:ok, bytes} <- :file.read(io, @cap + 1),
+               {:ok, bytes} <- :file.read(io, ledger_cap(ledger_kind) + 1),
                true <- bytes == expected,
-               :ok <- verify_binding_directory(state),
+               :ok <- verify_ledger_directory(state, ledger_kind),
                :ok <- same_binding_file(path, file_identity) do
             :ok
           else
@@ -665,25 +998,29 @@ defmodule LoopexComposition.Delegation.RetainedObjects do
     end
   end
 
-  defp binding_image(state, command) do
-    with {:ok, key} <- LedgerCodec.header_key(:binding, [state.runtime_id, command]),
-         :ok <- verify_binding_directory(state),
-         path = binding_path(state, key),
+  defp binding_image(state, command),
+    do: ledger_image(state, :binding, [state.runtime_id, command])
+
+  defp ledger_image(state, kind, identifiers) do
+    cap = ledger_cap(kind)
+    with {:ok, key} <- LedgerCodec.header_key(kind, identifiers),
+         :ok <- verify_ledger_directory(state, kind),
+         path = ledger_path(state, kind, key),
          {:ok, %File.Stat{type: :regular, links: 1} = info} <- File.lstat(path),
-         true <- info.size in 1..@cap and Bitwise.band(info.mode, 0o7777) == 0o600,
+         true <- info.size in 1..cap and Bitwise.band(info.mode, 0o7777) == 0o600,
          {:ok, io} <- :file.open(String.to_charlist(path), [:read, :binary, :raw]) do
       result =
         try do
           with {:ok, record} <- :file.read_file_info(io),
                true <- identity(File.Stat.from_record(record)) == identity(info),
-               {:ok, bytes} <- :file.read(io, @cap + 1),
+               {:ok, bytes} <- :file.read(io, cap + 1),
                true <- byte_size(bytes) == info.size,
-               :ok <- verify_binding_directory(state),
+               :ok <- verify_ledger_directory(state, kind),
                :ok <- same_binding_file(path, identity(info)),
-               {:ok, decoded} <- decode_binding(bytes, state.runtime_id, command) do
+               {:ok, decoded} <- decode_ledger(bytes, kind, identifiers) do
             {:ok, %{path: path, identity: identity(info), bytes: bytes, decoded: decoded}}
           else
-            _ -> {:error, :invalid_binding_log}
+            _ -> {:error, invalid_log(kind)}
           end
         catch
           kind, reason -> {:error, {:binding_read_interrupted, kind, reason}}
@@ -692,18 +1029,29 @@ defmodule LoopexComposition.Delegation.RetainedObjects do
       closed = :file.close(io)
       with :ok <- closed, do: result
     else
-      _ -> {:error, :binding_unavailable}
+      _ -> {:error, unavailable_log(kind)}
     end
   end
 
-  defp confirm_binding(state, image) do
+  defp decode_ledger(bytes, :binding, [runtime, command]), do: decode_binding(bytes, runtime, command)
+  defp decode_ledger(bytes, :run, identifiers), do: decode_run(bytes, identifiers)
+  defp invalid_log(:binding), do: :invalid_binding_log
+  defp invalid_log(:run), do: :invalid_run_log
+  defp invalid_namespace(:binding), do: :invalid_binding_namespace
+  defp invalid_namespace(:run), do: :invalid_run_namespace
+  defp unavailable_log(:binding), do: :binding_unavailable
+  defp unavailable_log(:run), do: :run_unavailable
+
+  defp confirm_binding(state, image), do: confirm_ledger(state, image, :binding)
+
+  defp confirm_ledger(state, image, kind) do
     with :ok <- same_binding_file(image.path, image.identity),
          {:ok, io} <- :file.open(String.to_charlist(image.path), [:read, :binary, :raw]) do
-      ledger_io(state, io, image.path, image.identity, image.bytes, fn ->
-        with {:ok, bytes} <- :file.read(io, @cap + 1),
+      ledger_io(state, io, image.path, image.identity, image.bytes, kind, fn ->
+        with {:ok, bytes} <- :file.read(io, ledger_cap(kind) + 1),
              true <- bytes == image.bytes,
              :ok <- :file.sync(io),
-             :ok <- checkpoint(state, :binding_recovered_synced) do
+             :ok <- ledger_checkpoint(state, kind, :binding_recovered_synced) do
           :ok
         else
           _ -> {:error, :binding_file_changed}
@@ -729,7 +1077,9 @@ defmodule LoopexComposition.Delegation.RetainedObjects do
       else: {:error, :binding_recovery_unproved}
   end
 
-  defp repair_binding(state, image) do
+  defp repair_binding(state, image), do: repair_ledger(state, image, :binding)
+
+  defp repair_ledger(state, image, kind) do
     with :ok <- same_binding_file(image.path, image.identity),
          {:ok, io} <- :file.open(String.to_charlist(image.path), [:read, :write, :binary, :raw]) do
       ledger_io(
@@ -738,19 +1088,20 @@ defmodule LoopexComposition.Delegation.RetainedObjects do
         image.path,
         image.identity,
         binary_part(image.bytes, 0, image.decoded.complete_size),
+        kind,
         fn ->
-          with {:ok, bytes} <- :file.read(io, @cap + 1),
+          with {:ok, bytes} <- :file.read(io, ledger_cap(kind) + 1),
                true <- bytes == image.bytes,
-               :ok <- checkpoint(state, :binding_before_truncate),
+               :ok <- ledger_checkpoint(state, kind, :binding_before_truncate),
                :ok <- same_binding_file(image.path, image.identity),
-               {:ok, current} <- :file.pread(io, 0, @cap + 1),
+               {:ok, current} <- :file.pread(io, 0, ledger_cap(kind) + 1),
                true <- current == image.bytes,
                {:ok, offset} <- :file.position(io, image.decoded.complete_size),
                true <- offset == image.decoded.complete_size,
                :ok <- :file.truncate(io),
-               :ok <- checkpoint(state, :binding_truncated),
+               :ok <- ledger_checkpoint(state, kind, :binding_truncated),
                :ok <- :file.sync(io),
-               :ok <- checkpoint(state, :binding_repair_synced) do
+               :ok <- ledger_checkpoint(state, kind, :binding_repair_synced) do
             :ok
           else
             _ -> {:error, :binding_file_changed}
