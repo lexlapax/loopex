@@ -1,5 +1,17 @@
 # M7 Implementation Tasks
 
+### Core settlement ordering proved, 2026-10-09
+
+Original39805 at886c9ff9 passed all222 cases in six complete Core files on
+each supported toolchain, warning-free, after149.144 seconds. The original
+relay regression proves retained facts remain unpublished until closure;
+owner-loss and commit-unknown proofs remain intact. All10 original joins and44
+assets authenticated. Daemon routing/admission repair continues privately;
+complete CLI qualification is owed. The [resume checkpoint](M7-resume.md)
+binds exact source, review, original outputs and107-asset retention.
+No checkbox changes: T01–T19 original89 done /84 open /6 retired;
+added373 done /23 open; combined462 done /107 open /6 retired.
+
 ### CLI current adaptation qualified with one remaining failure, 2026-10-09
 
 Original50632 at9037c21a passed the18 new CLI boundary cases and52 of53

@@ -27,6 +27,62 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+### Core settlement ordering proved; daemon admission repair next, 2026-10-09
+
+At `886c9ff96607fca0c16128c306d4c40eeaaf85e0`, original39805 passed all
+222 cases in six complete Core files on each supported toolchain, warning-free,
+after 149.144 seconds overall. Native discovery confirmed AgentLoop113,
+ProviderAttemptProtocol70, SessionLifecycle14, EventDispatcherAvailability5,
+CompactionProgressRuntime17 and ProgressRouting3, with zero exclusions, skips
+or invalid cases. All10 original process joins and44 assets authenticated.
+Terminal SHA-256 `f82b5a8420775685cf7397b9dc005a3f435522d8a5b88aa07fee54fd1a6fc40a`;
+collection `4c00a01a13b21ebcbf456815aa70353743447eb25a27ff560df8b873e4a30e02`.
+Registry2970 SHA-256
+`f8314630b8ab00262af53aa4b105416c3d30870a71e32ea093dbb676b54741d8`.
+
+Commit56068144 restores exact retained receipt, original model closure, then
+Control publication. One deterministic regression holds the original relay
+and proves the actual publication fence; two existing handoff oracles now
+require the accepted order while preserving owner-loss/count/cleanup proofs.
+No public/persistent contract, transaction, deadline or retry changed.
+Raw v1 review found two test cleanup gaps before integration; v2 fixes both.
+Independent v2 source review SHA-256
+`0eb2a35eabfc8f327ded595b4c11af661c6e37cad467d09333e269675bce2ec2`.
+Original86720 formatting passed strict AST equality and both supported checks
+in2.878 seconds; its formatter-only child is886c9ff9. Collection SHA-256
+`2ed2f40c59db7da00deba977222b76a10320a7caf36e26b2b9d0f18e872e3573`.
+
+Immutable107-asset retention:
+`M7/current-source-preparation-20261009-v25/retention.json`, SHA-256
+`c575a6f225c06da6cc1f453f5f71270fe730e7be99eac2ac1d992520dc22cf2f`.
+It retains both completed originals, collections, raw v1/v2 packets, findings,
+source-clear review and diagnoses. Parentv24 retains the CLI70/71 failure.
+No native handle is live. Do not rerun unchanged Core qualification.
+
+Next: isolated daemon writer at
+`/private/tmp/m7-daemon-progress-order-worktree-20261009-v1`, base1ab8ba49,
+owns SocketConnection/ConnectionRegistry and their two existing test files.
+Its bounded private routing exchange submits admitted progress before the
+original held pump event using existing owners, leases, credits and one shared
+5,000-ms unanswered instant. No new actor, public schema, watermark, reliable
+progress, deadline or capacity is authorized. CAS exhaustion means pending
+work, not accounted loss; no unconditional captured-prefix claim is made.
+Sealed diagnosis SHA-256
+`ccc0a9d21fc129e611fa6697e0628ed085b337064fce0727e664a6675787c64d`.
+The draft is not joined or natively proved. Review and qualify it before
+repeating complete Daemon/CLI workflows. Core proof alone does not establish
+resolution of the original CLI duplicate-answer failure.
+
+T11 next-classifier report SHA-256
+`e51b938425a361741e1d6d0b4c9b6868c96e06da5170c2ab34b0fe31c217e3dc`
+is a recommendation only. Non-creating required-log inspection and synchronous
+provenance-reader lifetime are explicit stop conditions before implementation.
+Core artifact observation grace and ADR0065 remain unanswered; stopped-leader
+ownership/accounting remains unaccepted. No full fast/release/closure result
+is claimed. No checkbox changes in this checkpoint: T01–T19 original89 done
+/84 open /6 retired; added373 done /23 open; combined462 done /107 open
+/6 retired. T01, T02 and T10 remain fully complete.
+
 ### CLI adaptation joined; duplicate-answer repair next, 2026-10-09
 
 Reviewed current-wire/native adaptation joined727ca05a and strict-AST formatter
