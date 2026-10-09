@@ -27,7 +27,9 @@ defmodule Loopex.Store.Local.ArtifactRuntimeTransferTest do
     fixture = fixture()
     bytes = :binary.copy("verified snapshot ", 3_000)
     {reference, metadata_bytes} = store_artifact(fixture, bytes)
-    {:ok, attachment} = Loopex.attach(fixture.runtime, fixture.session_id, after_event_sequence: 0)
+
+    {:ok, attachment} =
+      Loopex.attach(fixture.runtime, fixture.session_id, after_event_sequence: 0)
 
     assert {:ok, transfer} =
              Loopex.open_artifact_transfer(attachment, %{
@@ -177,8 +179,15 @@ defmodule Loopex.Store.Local.ArtifactRuntimeTransferTest do
     fixture = fixture()
     bytes = :binary.copy("a", 1_100_000)
     {reference, metadata_bytes} = store_artifact(fixture, bytes)
-    File.write!(object_path(fixture, reference), binary_part(bytes, 0, byte_size(bytes) - 1) <> "!")
-    {:ok, attachment} = Loopex.attach(fixture.runtime, fixture.session_id, after_event_sequence: 0)
+
+    File.write!(
+      object_path(fixture, reference),
+      binary_part(bytes, 0, byte_size(bytes) - 1) <> "!"
+    )
+
+    {:ok, attachment} =
+      Loopex.attach(fixture.runtime, fixture.session_id, after_event_sequence: 0)
+
     owner = fixture.artifacts.transfers
 
     # Concept: failure still retires the actual original Store I/O actor.
@@ -248,6 +257,7 @@ defmodule Loopex.Store.Local.ArtifactRuntimeTransferTest do
         System.tmp_dir!(),
         "loopex-runtime-transfer-#{System.unique_integer([:positive])}"
       )
+
     File.mkdir_p!(root)
     on_exit(fn -> File.rm_rf!(root) end)
     artifact_root = Path.join(root, "artifacts")
@@ -275,6 +285,7 @@ defmodule Loopex.Store.Local.ArtifactRuntimeTransferTest do
     on_exit(fn ->
       stop_fixture_owner(runtime.supervisor, fn -> Loopex.stop(runtime) end)
     end)
+
     :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(runtime)
     {:ok, session_id} = Loopex.create_session(runtime, %{}, command_id: "create")
     {:ok, %{dispatcher: dispatcher}} = Runtime.children(runtime)
@@ -296,7 +307,10 @@ defmodule Loopex.Store.Local.ArtifactRuntimeTransferTest do
 
     {:ok, reference} = Artifacts.put(fixture.artifacts, bytes, use)
     use_digest = binary_part(reference.use_locator, 4, 64)
-    use_path = Path.join([fixture.artifacts.root, "uses", binary_part(use_digest, 0, 2), use_digest])
+
+    use_path =
+      Path.join([fixture.artifacts.root, "uses", binary_part(use_digest, 0, 2), use_digest])
+
     {reference, File.stat!(use_path).size}
   end
 
@@ -372,12 +386,15 @@ defmodule Loopex.Store.Local.ArtifactRuntimeTransferTest do
   end
 
   defp object_path(fixture, reference),
-    do: Path.join([fixture.artifacts.root, binary_part(reference.locator, 0, 2), reference.locator])
+    do:
+      Path.join([fixture.artifacts.root, binary_part(reference.locator, 0, 2), reference.locator])
 
   defp core_state(fixture), do: :sys.get_state(fixture.dispatcher)
   defp core_entry(fixture, id), do: Map.fetch!(core_state(fixture).artifact_transfers, id)
+
   defp store_entry(fixture, id),
     do: Map.fetch!(:sys.get_state(fixture.artifacts.transfers).transfers, id)
+
   defp ledger(fixture, holder), do: Map.fetch!(core_state(fixture).holders, holder)
   defp digest(bytes), do: Base.encode16(:crypto.hash(:sha256, bytes), case: :lower)
   defp now, do: System.monotonic_time(:millisecond)
