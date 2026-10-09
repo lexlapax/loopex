@@ -103,7 +103,8 @@ defmodule LoopexComposition.Delegation.RetainedObjects do
 
   @doc false
   def commit_run(owner, command, identifiers, transaction, runtime),
-    do: GenServer.call(owner, {:commit_run, command, identifiers, transaction, runtime}, :infinity)
+    do:
+      GenServer.call(owner, {:commit_run, command, identifiers, transaction, runtime}, :infinity)
 
   @doc false
   def lookup_run(owner, command, identifiers, tx_id, runtime),
@@ -144,7 +145,8 @@ defmodule LoopexComposition.Delegation.RetainedObjects do
          header_size = byte_size(bytes) - byte_size(rest),
          header = binary_part(bytes, 0, header_size),
          {:ok, _} <- LedgerCodec.decode_header(header, :run, identifiers, key),
-         {:ok, transactions, complete_size, tail} <- run_frames(rest, identifiers, header_size, []) do
+         {:ok, transactions, complete_size, tail} <-
+           run_frames(rest, identifiers, header_size, []) do
       {:ok, %{key: key, transactions: transactions, complete_size: complete_size, tail: tail}}
     else
       _ -> {:error, :invalid_run_log}
@@ -174,34 +176,33 @@ defmodule LoopexComposition.Delegation.RetainedObjects do
            ) do
       with {:ok, pending, binding_identity} <- binding_namespace(directory),
            {:ok, runs, run_identity} <- ledger_namespace(directory, :run) do
-          {:ok,
-           %{
-             root: root,
-             runtime_id: runtime_id,
-             pending_bindings: pending,
-             binding_identity: binding_identity,
-             pending_runs: runs,
-             known_runs: runs,
-             run_identity: run_identity,
-             recoverable_runs:
-               if(previous_marker and Keyword.get(options, :recover_stale_writer, false),
-                 do: runs,
-                 else: MapSet.new()
-               ),
-             recoverable_bindings:
-               if(previous_marker and Keyword.get(options, :recover_stale_writer, false),
-                 do: pending,
-                 else: MapSet.new()
-               ),
-             fence: nil,
-             placement_owner: placement_owner,
-             directory: directory,
-             identities: identities,
-             lock: lock,
-             caller_monitor: caller_monitor,
-             checkpoint: Keyword.get(options, :checkpoint, fn _ -> :ok end)
-           }}
-
+        {:ok,
+         %{
+           root: root,
+           runtime_id: runtime_id,
+           pending_bindings: pending,
+           binding_identity: binding_identity,
+           pending_runs: runs,
+           known_runs: runs,
+           run_identity: run_identity,
+           recoverable_runs:
+             if(previous_marker and Keyword.get(options, :recover_stale_writer, false),
+               do: runs,
+               else: MapSet.new()
+             ),
+           recoverable_bindings:
+             if(previous_marker and Keyword.get(options, :recover_stale_writer, false),
+               do: pending,
+               else: MapSet.new()
+             ),
+           fence: nil,
+           placement_owner: placement_owner,
+           directory: directory,
+           identities: identities,
+           lock: lock,
+           caller_monitor: caller_monitor,
+           checkpoint: Keyword.get(options, :checkpoint, fn _ -> :ok end)
+         }}
       else
         {:error, reason} ->
           {:stop, reason}
@@ -280,9 +281,12 @@ defmodule LoopexComposition.Delegation.RetainedObjects do
 
   def handle_call({:open_run, command, identifiers, runtime}, _from, state) do
     case do_open_run(state, command, identifiers, runtime) do
-      {:ok, key, next} -> {:reply, {:ok, key}, next}
+      {:ok, key, next} ->
+        {:reply, {:ok, key}, next}
+
       {:unknown, tx, file_identity, next} ->
         run_unknown(next, command, identifiers, tx, file_identity)
+
       {:error, reason} ->
         {:reply, {:error, reason}, note_run_unavailable(state, identifiers, reason)}
     end
@@ -290,8 +294,12 @@ defmodule LoopexComposition.Delegation.RetainedObjects do
 
   def handle_call({:commit_run, command, identifiers, tx, runtime}, _from, state) do
     case do_commit_run(state, command, identifiers, tx, runtime) do
-      {:ok, result} -> {:reply, {:ok, result}, state}
-      {:unknown, file_identity} -> run_unknown(state, command, identifiers, tx, file_identity)
+      {:ok, result} ->
+        {:reply, {:ok, result}, state}
+
+      {:unknown, file_identity} ->
+        run_unknown(state, command, identifiers, tx, file_identity)
+
       {:error, reason} ->
         {:reply, {:error, reason}, note_run_unavailable(state, identifiers, reason)}
     end
@@ -299,7 +307,9 @@ defmodule LoopexComposition.Delegation.RetainedObjects do
 
   def handle_call({:lookup_run, command, identifiers, tx_id, runtime}, _from, state) do
     case do_lookup_run(state, command, identifiers, tx_id, runtime) do
-      {:ok, result, next} -> {:reply, {:ok, result}, next}
+      {:ok, result, next} ->
+        {:reply, {:ok, result}, next}
+
       {:error, reason} ->
         {:reply, {:error, reason}, note_run_unavailable(state, identifiers, reason)}
     end
@@ -332,6 +342,7 @@ defmodule LoopexComposition.Delegation.RetainedObjects do
   def terminate(_reason, %{fence: nil} = state) do
     if MapSet.size(state.pending_bindings) == 0 and MapSet.size(state.pending_runs) == 0,
       do: WriterLock.release(state.lock)
+
     :ok
   end
 
@@ -508,8 +519,12 @@ defmodule LoopexComposition.Delegation.RetainedObjects do
 
   defp lookup_allowed(%{fence: nil}, _, _), do: :ok
 
-  defp lookup_allowed(%{fence: %{kind: :binding, command: command, tx: %{"tx_id" => tx_id}}}, command, tx_id),
-    do: :ok
+  defp lookup_allowed(
+         %{fence: %{kind: :binding, command: command, tx: %{"tx_id" => tx_id}}},
+         command,
+         tx_id
+       ),
+       do: :ok
 
   defp lookup_allowed(_, _, _), do: {:error, :ledger_fenced}
 
@@ -592,15 +607,33 @@ defmodule LoopexComposition.Delegation.RetainedObjects do
     do: Map.take(reduced, [:version, :bytes, :credit, :phase, :parent, :transactions])
 
   defp run_view(reduced),
-    do: Map.take(reduced, [:version, :bytes, :credit, :phase, :count, :reserved_tokens,
-                         :charged_tokens, :transactions])
+    do:
+      Map.take(reduced, [
+        :version,
+        :bytes,
+        :credit,
+        :phase,
+        :count,
+        :reserved_tokens,
+        :charged_tokens,
+        :transactions
+      ])
 
   defp note_run_unavailable(state, identifiers, reason) do
-    if reason in [:run_unavailable, :invalid_run_log, :incomplete_run_tail,
-                  :binding_unavailable, :invalid_binding_log, :binding_object_unavailable,
-                  :binding_directory_changed, :binding_file_changed, :invalid_parent_capture,
-                  :invalid_binding_prefix, :incomplete_binding_tail,
-                  :creation_history_unavailable] do
+    if reason in [
+         :run_unavailable,
+         :invalid_run_log,
+         :incomplete_run_tail,
+         :binding_unavailable,
+         :invalid_binding_log,
+         :binding_object_unavailable,
+         :binding_directory_changed,
+         :binding_file_changed,
+         :invalid_parent_capture,
+         :invalid_binding_prefix,
+         :incomplete_binding_tail,
+         :creation_history_unavailable
+       ] do
       case LedgerCodec.header_key(:run, identifiers) do
         {:ok, key} -> %{state | pending_runs: MapSet.put(state.pending_runs, key)}
         _ -> state
@@ -611,8 +644,14 @@ defmodule LoopexComposition.Delegation.RetainedObjects do
   end
 
   defp run_unknown(state, command, identifiers, tx, file_identity) do
-    fence = %{kind: :run, command: command, identifiers: identifiers, tx: tx,
-              identity: file_identity}
+    fence = %{
+      kind: :run,
+      command: command,
+      identifiers: identifiers,
+      tx: tx,
+      identity: file_identity
+    }
+
     {:reply, {:error, {:commit_unknown, tx["tx_id"]}}, %{state | fence: fence}}
   end
 
@@ -625,7 +664,8 @@ defmodule LoopexComposition.Delegation.RetainedObjects do
          true <- image.decoded.tail == :complete,
          {:ok, capture} <- image_capture(state, command, image, nil),
          observed = history(runtime, capture, image.decoded.transactions),
-         {:ok, parent} <- RunLedger.new(identifiers, capture, image.decoded.transactions, observed),
+         {:ok, parent} <-
+           RunLedger.new(identifiers, capture, image.decoded.transactions, observed),
          :ok <- confirm_run_parent(state, image) do
       {:ok, parent}
     else
@@ -640,13 +680,15 @@ defmodule LoopexComposition.Delegation.RetainedObjects do
          {:ok, key} <- LedgerCodec.header_key(:run, identifiers),
          {:ok, next} <- ledger_directory(state, :run),
          path = ledger_path(next, :run, key),
-         {:ok, tx} <- RunMutation.transaction(identifiers, 0, RunLedger.initialize_mutation(parent)) do
+         {:ok, tx} <-
+           RunMutation.transaction(identifiers, 0, RunLedger.initialize_mutation(parent)) do
       case File.lstat(path) do
         {:error, :enoent} ->
           if MapSet.member?(next.known_runs, key) do
             {:error, :run_unavailable}
           else
             next = %{next | known_runs: MapSet.put(next.known_runs, key)}
+
             case create_ledger_header(next, path, parent.header, :run) do
               :ok -> {:ok, key, next}
               {:unknown, file_identity} -> {:unknown, tx, file_identity, next}
@@ -665,7 +707,8 @@ defmodule LoopexComposition.Delegation.RetainedObjects do
             {:error, reason} -> {:error, reason}
           end
 
-        {:error, _} -> {:error, :run_unavailable}
+        {:error, _} ->
+          {:error, :run_unavailable}
       end
     end
   end
@@ -744,9 +787,14 @@ defmodule LoopexComposition.Delegation.RetainedObjects do
           nil -> :absent
           {_, result} -> result
         end
-      {:ok, result, %{state | fence: nil,
-                     pending_runs: MapSet.delete(state.pending_runs, confirmed.decoded.key),
-                     recoverable_runs: MapSet.delete(state.recoverable_runs, confirmed.decoded.key)}}
+
+      {:ok, result,
+       %{
+         state
+         | fence: nil,
+           pending_runs: MapSet.delete(state.pending_runs, confirmed.decoded.key),
+           recoverable_runs: MapSet.delete(state.recoverable_runs, confirmed.decoded.key)
+       }}
     else
       false -> {:error, :run_lookup_unavailable}
       {:error, reason} -> {:error, reason}
@@ -754,13 +802,29 @@ defmodule LoopexComposition.Delegation.RetainedObjects do
   end
 
   defp run_lookup_allowed(%{fence: nil}, _, _, _), do: :ok
-  defp run_lookup_allowed(%{fence: %{kind: :run, command: command, identifiers: identifiers,
-                                   tx: %{"tx_id" => tx_id}}}, command, identifiers, tx_id), do: :ok
+
+  defp run_lookup_allowed(
+         %{
+           fence: %{
+             kind: :run,
+             command: command,
+             identifiers: identifiers,
+             tx: %{"tx_id" => tx_id}
+           }
+         },
+         command,
+         identifiers,
+         tx_id
+       ),
+       do: :ok
+
   defp run_lookup_allowed(_, _, _, _), do: {:error, :ledger_fenced}
 
   defp recover_run(_state, %{decoded: %{tail: :complete}}), do: :ok
+
   defp recover_run(%{fence: fence}, _) when not is_nil(fence),
     do: {:error, :run_recovery_unproved}
+
   defp recover_run(state, image) do
     if MapSet.member?(state.recoverable_runs, image.decoded.key),
       do: repair_ledger(state, image, :run),
@@ -769,7 +833,9 @@ defmodule LoopexComposition.Delegation.RetainedObjects do
 
   defp run_frames("", _identifiers, offset, transactions),
     do: {:ok, Enum.reverse(transactions), offset, :complete}
+
   defp run_frames(_bytes, _identifiers, _offset, [_]), do: {:error, :invalid_run_prefix}
+
   defp run_frames(bytes, identifiers, offset, []) do
     case LedgerCodec.decode_frame(bytes) do
       {:ok, payload, rest} ->
@@ -779,11 +845,14 @@ defmodule LoopexComposition.Delegation.RetainedObjects do
         else
           _ -> {:error, :invalid_run_prefix}
         end
+
       {:error, :incomplete_frame} ->
         if possible_binding_tail?(bytes),
           do: {:ok, [], offset, :incomplete},
           else: {:error, :invalid_run_log}
-      {:error, reason} -> {:error, reason}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -793,14 +862,18 @@ defmodule LoopexComposition.Delegation.RetainedObjects do
   defp ledger_name(:run), do: "runs"
   defp ledger_cap(:binding), do: @cap
   defp ledger_cap(:run), do: @run_cap
+
   defp ledger_path(state, kind, key),
     do: Path.join([state.directory, ledger_name(kind), key <> ".log"])
+
   defp directory_identity(state, :binding), do: state.binding_identity
   defp directory_identity(state, :run), do: state.run_identity
   defp put_directory_identity(state, :binding, value), do: %{state | binding_identity: value}
   defp put_directory_identity(state, :run, value), do: %{state | run_identity: value}
   defp ledger_checkpoint(state, :binding, step), do: checkpoint(state, step)
-  defp ledger_checkpoint(state, :run, step), do: checkpoint(state, Map.fetch!(@run_checkpoints, step))
+
+  defp ledger_checkpoint(state, :run, step),
+    do: checkpoint(state, Map.fetch!(@run_checkpoints, step))
 
   # Concept: another parent's recovered file cannot be omitted from this gate.
   # Technical depth: present filenames are only recovery work, not proof of
@@ -855,7 +928,8 @@ defmodule LoopexComposition.Delegation.RetainedObjects do
          {:ok, %File.Stat{type: :directory} = info} <-
            File.lstat(Path.join(state.directory, ledger_name(kind))),
          true <-
-           identity(info) == directory_identity(state, kind) and Bitwise.band(info.mode, 0o7777) == 0o700 do
+           identity(info) == directory_identity(state, kind) and
+             Bitwise.band(info.mode, 0o7777) == 0o700 do
       :ok
     else
       _ -> {:error, :binding_directory_changed}
@@ -1003,6 +1077,7 @@ defmodule LoopexComposition.Delegation.RetainedObjects do
 
   defp ledger_image(state, kind, identifiers) do
     cap = ledger_cap(kind)
+
     with {:ok, key} <- LedgerCodec.header_key(kind, identifiers),
          :ok <- verify_ledger_directory(state, kind),
          path = ledger_path(state, kind, key),
@@ -1033,7 +1108,9 @@ defmodule LoopexComposition.Delegation.RetainedObjects do
     end
   end
 
-  defp decode_ledger(bytes, :binding, [runtime, command]), do: decode_binding(bytes, runtime, command)
+  defp decode_ledger(bytes, :binding, [runtime, command]),
+    do: decode_binding(bytes, runtime, command)
+
   defp decode_ledger(bytes, :run, identifiers), do: decode_run(bytes, identifiers)
   defp invalid_log(:binding), do: :invalid_binding_log
   defp invalid_log(:run), do: :invalid_run_log
