@@ -103,6 +103,11 @@ defmodule LoopexCli.Policy.M7Fixture do
   defp oracle_environment?("m7.feature", %{"M7_NIL_DEFAULT" => value} = environment),
     do: map_size(environment) == 1 and value in ["empty", "literal_null"]
 
+  # Staging pins review's runner before any finding exists; the independent
+  # rerun after the conversation supplies the committed finding's path.
+  defp oracle_environment?("m7.review", environment) when map_size(environment) == 0,
+    do: true
+
   defp oracle_environment?("m7.review", %{"M7_FINDING" => value} = environment),
     do: map_size(environment) == 1 and text?(value) and Path.type(value) == :absolute
 
@@ -131,9 +136,12 @@ defmodule LoopexCli.Policy.M7Fixture do
       definitions =
         ChatConfiguration.selected_definitions(ChatConfiguration.active_tools(profile))
 
+      # Review delegates read-only helpers through the one task generation.
       definitions =
         if case_id == "m7.review",
-          do: Enum.reject(definitions, &(&1["tool_id"] in ~w(loopex.write loopex.edit))),
+          do:
+            Enum.reject(definitions, &(&1["tool_id"] in ~w(loopex.write loopex.edit))) ++
+              [LoopexComposition.Delegation.Tool.definition()],
           else: definitions
 
       capture = %{

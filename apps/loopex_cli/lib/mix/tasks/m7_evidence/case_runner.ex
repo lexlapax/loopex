@@ -428,6 +428,7 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
           _ -> staged.fixture.environment
         end
 
+      environment = materialize(staged, environment)
       {oracle_status, oracle} = independent_oracle(staged, environment, root)
       {changes, inventory} = inspect_changes(staged, root)
       checks = if staged.capture, do: Policy.check(staged.capture), else: :ok
@@ -468,6 +469,58 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
       end
     end
   end
+
+  # Concept: review enables exactly the two pinned helper roles; every other
+  # fixture case runs the operator's configuration unchanged.
+  # Technical depth: role instructions are written into the trusted tree, so
+  # the workspace and its digests stay untouched; both roles use the session's
+  # model and the catalog bounds the plan fixes.
+  defp fixture_profile("m7.review", trusted) do
+    roles = %{
+      "investigate" =>
+        "Investigate the repository read-only. Trace the requested call chain through the " <>
+          "source and report each module and function it passes through.\n",
+      "review" =>
+        "Review the named code read-only. Identify the single defect on the chain and name " <>
+          "its file, function and a short defect code.\n"
+    }
+
+    written =
+      Enum.reduce_while(roles, :ok, fn {name, text}, :ok ->
+        case File.write(Path.join(trusted, name <> ".md"), text, [:exclusive]) do
+          :ok -> {:cont, :ok}
+          error -> {:halt, error}
+        end
+      end)
+
+    with :ok <- written do
+      {:ok,
+       fn profile ->
+         model = profile["session"]["model"]
+
+         profile
+         |> Map.put(
+           "roles",
+           Map.new(roles, fn {name, _} ->
+             {name, %{"model" => model, "instructions_file" => Path.join(trusted, name <> ".md")}}
+           end)
+         )
+         |> Map.put("delegation", %{
+           "enabled" => true,
+           "roles" => ["investigate", "review"],
+           "max_children" => 4,
+           "token_budget" => 400_000,
+           "child_bounds" => %{
+             "max_turns" => 12,
+             "deadline_ms" => 300_000,
+             "token_budget" => 200_000
+           }
+         })
+       end}
+    end
+  end
+
+  defp fixture_profile(_case_id, _trusted), do: {:ok, & &1}
 
   defp execution_policy(%{capture: nil}), do: "ordinary"
   defp execution_policy(staged), do: Policy.identity(staged.capture)
@@ -517,7 +570,8 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
            pins: pins
          },
          {:ok, conversations} <- plan(case_id, entry, context),
-         {:ok, config_argv} <- attempt_config(context.config_argv, workspace, root),
+         {:ok, transform} <- fixture_profile(case_id, trusted),
+         {:ok, config_argv} <- attempt_config(context.config_argv, workspace, root, transform),
          {:ok, prepared} <-
            M7FixtureChat.prepare(
              config_argv,
@@ -698,7 +752,7 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
   # Concept: the operator's explicit file, aimed at this attempt's fresh roots.
   # Technical depth: only `paths.workspace` and `paths.state_root` change;
   # ordinary validation of every other member still runs in preparation.
-  defp attempt_config(argv, workspace, root, transform \\ & &1)
+  defp attempt_config(argv, workspace, root, transform)
 
   defp attempt_config(["chat", "--config", template | rest], workspace, root, transform) do
     with {:ok, bytes} <- File.read(template),
@@ -840,6 +894,12 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
   end
 
   def plan("m7.external", entry, _context), do: {:ok, [barriers(entry["prompts"])]}
+  # Review omits `/status`: chat refuses a status read when a helper's later
+  # event lands during it (chat_status_unavailable), and the joins need none.
+  def plan("m7.review", entry, _context) do
+    [prompt] = entry["prompts"]
+    {:ok, [%{resume: false, steps: [{:line, prompt}, {:line, "/wait"}, {:line, "/quit"}]}]}
+  end
 
   # The ephemeral case: one public ephemeral call; the operator's line answers.
   def plan("m7.ephemeral-question", _entry, context) do
@@ -1311,7 +1371,74 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
        else: {:missing, :restart}
   end
 
+  # Review: both role calls committed and completed, read-only, and the
+  # parent's final committed reply is the finding the oracle checks.
+  def joins("m7.review", rows, entry, _outcome) do
+    calls =
+      for row <- rows,
+          kind(row) == "effect_intent_committed_v2",
+          row.payload["job"]["tool_id"] == "loopex.task",
+          do:
+            {row.payload["job"]["validated_arguments"]["role"],
+             row.payload["grant"]["operation_id"]}
+
+    completed =
+      for row <- rows,
+          kind(row) == "executor_receipt_committed_v2",
+          row.payload["receipt"]["outcome"] == "completed",
+          do: row.payload["receipt"]["operation_id"]
+
+    # Each helper receipt reports child, parent and combined usage separately.
+    usage =
+      for row <- rows,
+          kind(row) == "executor_receipt_committed_v2",
+          row.payload["receipt"]["tool_id"] == "loopex.task",
+          do: task_usage(row.payload["receipt"]["output"])
+
+    roles = for %{"role" => role} <- entry["required_model_actions"], do: role
+
+    finding =
+      rows
+      |> Enum.filter(&(kind(&1) == "model_attempt_settled_v3"))
+      |> List.last()
+      |> case do
+        nil -> nil
+        row -> get_in(row.payload, ["result", "reply", "text"])
+      end
+
+    cond do
+      Enum.any?(roles, fn role -> not Enum.any?(calls, &(elem(&1, 0) == role)) end) ->
+        {:missing, :role_calls}
+
+      Enum.any?(calls, &(elem(&1, 1) not in completed)) ->
+        {:failed, :role_call_incomplete}
+
+      not Enum.all?(usage, &(&1 == :ok)) ->
+        {:failed, :helper_usage}
+
+      not is_binary(finding) ->
+        {:missing, :finding}
+
+      true ->
+        {:ok, %{"M7_FINDING" => {:text, finding}}}
+    end
+  end
+
   def joins(_case_id, _rows, _entry, _outcome), do: {:ok, nil}
+
+  defp task_usage(output) when is_binary(output) do
+    with {:ok, %{"usage" => %{"child" => child, "parent" => parent} = usage}} <-
+           JSON.decode(output),
+         total when is_integer(total) and total > 0 <-
+           (child["reported_input_tokens"] || 0) + (child["reported_output_tokens"] || 0),
+         true <- usage["combined_tokens"] == parent["tokens"] + total do
+      :ok
+    else
+      _ -> :invalid
+    end
+  end
+
+  defp task_usage(_output), do: :invalid
 
   # Concept: a held case is decided by committed facts ordered around the held
   # operation's receipt, joined to the observation taken before release.
@@ -1507,6 +1634,18 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
         {{:missing, reason}, {:error, reason}}
     end
   end
+
+  # A committed finding becomes a trusted file the oracle reads by path.
+  defp materialize(staged, %{"M7_FINDING" => {:text, text}} = environment) do
+    path = Path.join(staged.trusted, "finding.tsv")
+
+    case File.write(path, text, [:exclusive]) do
+      :ok -> %{environment | "M7_FINDING" => path}
+      _ -> Map.delete(environment, "M7_FINDING")
+    end
+  end
+
+  defp materialize(_staged, environment), do: environment
 
   defp independent_oracle(%{held: _}, _environment, root),
     do: {0, retain_raw(root, "oracle.txt", "no fixture oracle: the committed joins decide\n")}

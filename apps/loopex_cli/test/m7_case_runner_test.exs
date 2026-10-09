@@ -685,6 +685,86 @@ defmodule LoopexCli.M7CaseRunnerTest do
     assert length(Path.wildcard(Path.join(result.root, "records/transcript-*.txt"))) == 2
   end
 
+  # Concept: the review case delegates to both pinned roles through the real
+  # helper owner; the parent's committed final reply is the oracle's finding.
+  defp review_script(roles) do
+    finding =
+      "file\tfunction\tdefect_code\tcall_chain\n" <>
+        "lib/fees.ex\ttotal/2\tduplicate_fee\tCheckout.quote/2>Invoice.total/2>Fees.total/2\n"
+
+    task = fn role, id ->
+      %{
+        text: "delegate #{role}",
+        calls: [
+          %{
+            id: id,
+            name: "task",
+            arguments: %{
+              "role" => role,
+              "description" => role,
+              "prompt" => "Trace Checkout.quote/2."
+            }
+          }
+        ]
+      }
+    end
+
+    read = fn path, id ->
+      %{text: "read", calls: [%{id: id, name: "read", arguments: %{"path" => path}}]}
+    end
+
+    steps =
+      Enum.flat_map(roles, fn
+        "investigate" ->
+          [
+            task.("investigate", "task-investigate"),
+            read.("lib/checkout.ex", "read-checkout"),
+            %{text: "Checkout.quote/2>Invoice.total/2>Fees.total/2", calls: []}
+          ]
+
+        "review" ->
+          [
+            task.("review", "task-review"),
+            read.("lib/fees.ex", "read-fees"),
+            %{text: "lib/fees.ex total/2 duplicate_fee", calls: []}
+          ]
+      end)
+
+    fn _capture, _call -> steps ++ [%{text: finding, calls: []}] end
+  end
+
+  defp review_context(f, script) do
+    Map.merge(f.context, %{
+      manifest: lane(f.context.manifest, ["m7.review"]),
+      chat_options: chat_options(f, script, self(), :real)
+    })
+  end
+
+  test "review delegates both roles read-only and its committed finding passes the oracle", f do
+    result =
+      passed!(
+        CaseRunner.run_lane(
+          f.writer,
+          "m7-operator",
+          review_context(f, review_script(["investigate", "review"]))
+        )
+      )
+
+    assert File.read!(Path.join(result.root, "records/oracle.txt")) =~ "status=0"
+    assert facts(result)["kinds"]["executor_receipt_committed_v2"] >= 2
+  end
+
+  test "review without the review role call is required_action_absent", f do
+    assert {:stopped, [{:ok, result}]} =
+             CaseRunner.run_lane(
+               f.writer,
+               "m7-operator",
+               review_context(f, review_script(["investigate"]))
+             )
+
+    assert result.mechanical_result == "required_action_absent"
+  end
+
   test "provider switch moves A to B, reopens and returns to A with its tool facts", f do
     profile =
       put_in(profile(f.root), ["providers", "openai"], %{
@@ -974,6 +1054,12 @@ defmodule LoopexCli.M7CaseRunnerTest do
     flunk(inspect(%{lane: elem(other, 0), records: retained}, pretty: true, limit: :infinity))
   end
 
+  # A pre-dispatch stop reports its retained refusal.
+  defp passed!({_, [{:ok, %{record: %{"body" => %{"state" => "not_dispatched"} = body}}} | _]}) do
+    refusals = for %{"reference" => path} <- body["evidence"], do: File.read!(path)
+    flunk("not dispatched: " <> Enum.join(refusals, " "))
+  end
+
   defp passed!(other), do: flunk(inspect(other))
 
   defp repair_script(argv, content) do
@@ -997,28 +1083,37 @@ defmodule LoopexCli.M7CaseRunnerTest do
 
   # The composition options are the real chat's, including the reference
   # host's maintenance instructions; only the model and executor are scripted.
-  defp chat_options(_f, scripts, parent) do
+  # A helper parent needs the real placement lock its owner records; other
+  # cases stub placement so a prescribed process loss leaves no lock behind.
+  defp chat_options(_f, scripts, parent, placement \\ :stub) do
     {:ok, calls} = Agent.start_link(fn -> 0 end)
 
-    [
-      provider_launch: fn -> [] end,
-      acquire_placement: fn _, _ -> {:ok, :test_lock} end,
-      release_placement: fn _, _ -> :ok end,
-      placement_id: fn _ -> {:ok, "case-runner-runtime"} end,
-      with_runtime: fn options, callback ->
-        call = Agent.get_and_update(calls, &{&1 + 1, &1 + 1})
-        capture = policy_context(options)
+    stub =
+      if placement == :stub,
+        do: [
+          acquire_placement: fn _, _ -> {:ok, :test_lock} end,
+          release_placement: fn _, _ -> :ok end
+        ],
+        else: []
 
-        index =
-          Path.join([
-            Path.dirname(Path.dirname(Path.dirname(options[:workspace]))),
-            "attempts.jsonl"
-          ])
+    stub ++
+      [
+        provider_launch: fn -> [] end,
+        placement_id: fn _ -> {:ok, "case-runner-runtime"} end,
+        with_runtime: fn options, callback ->
+          call = Agent.get_and_update(calls, &{&1 + 1, &1 + 1})
+          capture = policy_context(options)
 
-        send(parent, {:index_at_dispatch, call, records(index)})
-        with_stack(options, scripts.(capture, call), callback)
-      end
-    ]
+          index =
+            Path.join([
+              Path.dirname(Path.dirname(Path.dirname(options[:workspace]))),
+              "attempts.jsonl"
+            ])
+
+          send(parent, {:index_at_dispatch, call, records(index)})
+          with_stack(options, scripts.(capture, call), callback)
+        end
+      ]
   end
 
   # A fixture case's capture, or nil under the operator's ordinary policy.
@@ -1082,21 +1177,28 @@ defmodule LoopexCli.M7CaseRunnerTest do
         },
         maintenance_model: maintenance_model,
         maintenance_instructions: options[:maintenance_instructions],
-        executor: %{
-          module: Loopex.Executor.Local,
-          reference: executor,
-          identity: "fixture-executor",
-          epoch: 1,
-          fencing_token: 1,
-          workspace_ref: workspace_ref,
-          workspace_lease: "workspace"
-        },
-        tools: ChatConfiguration.selected_definitions(ChatConfiguration.active_tools("coding")),
+        executor:
+          helper_executor(options[:delegation], %{
+            module: Loopex.Executor.Local,
+            reference: executor,
+            identity: "fixture-executor",
+            epoch: 1,
+            fencing_token: 1,
+            workspace_ref: workspace_ref,
+            workspace_lease: "workspace"
+          }),
+        tools:
+          ChatConfiguration.selected_definitions(ChatConfiguration.active_tools("coding")) ++
+            helper_tools(options[:delegation]),
         cleanup_grace_ms: options[:cleanup_grace_ms]
       )
 
     {:ok, startup_deadline} = LoopexComposition.StartupGate.await(runtime)
     :ok = LoopexComposition.StartupGate.publication({:ok, startup_deadline})
+
+    # A helper parent binds its composed helper owner to this runtime and store.
+    if match?(%{enabled: true}, options[:delegation]),
+      do: :ok = LoopexComposition.Delegation.bind(options[:delegation], runtime, store)
 
     try do
       callback.(runtime)
@@ -1111,6 +1213,21 @@ defmodule LoopexCli.M7CaseRunnerTest do
       end
     end
   end
+
+  defp helper_executor(%{enabled: true, helper: helper}, executor),
+    do: LoopexComposition.Delegation.Router.wrap(executor, helper)
+
+  defp helper_executor(_delegation, executor), do: executor
+
+  # Helper children select the read-only profile, so the runtime registers it.
+  defp helper_tools(%{enabled: true}) do
+    coding = ChatConfiguration.active_tools("coding")
+
+    ChatConfiguration.selected_definitions(ChatConfiguration.active_tools("read-only") -- coding) ++
+      [LoopexComposition.Delegation.Tool.definition()]
+  end
+
+  defp helper_tools(_delegation), do: []
 
   defp profile(root) do
     %{

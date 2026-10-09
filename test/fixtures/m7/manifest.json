@@ -221,7 +221,7 @@
         "credential": true,
         "driver": "fixture-chat",
         "lane": "m7-operator",
-        "status": "pending:helper flow (T11)",
+        "status": "ready",
         "steps": [
           "V8.1",
           "V8.2",
