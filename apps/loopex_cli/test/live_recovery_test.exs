@@ -71,10 +71,9 @@ defmodule LoopexCli.LiveRecoveryTest do
   @tag timeout: 120_000
   test "a prompt the daemon never saw is sent again and followed to its answer", context do
     daemon = start_daemon(context, launch("fresh answer", "fresh"))
+
     proxy =
-      DaemonProxy.start(context.socket, [{{:before, "session.prompt"}, 1}], & &1,
-        observe: true
-      )
+      DaemonProxy.start(context.socket, [{{:before, "session.prompt"}, 1}], & &1, observe: true)
 
     with_recovery_observation(proxy, daemon, "before session.prompt", fn ->
       output =
