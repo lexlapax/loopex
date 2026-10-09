@@ -1127,7 +1127,8 @@ defmodule LoopexDaemon.SocketConnectionTest do
       assert {:noreply, state} = LoopexDaemon.SocketConnection.handle_info(timer_message, state)
       owner = self()
       incarnation = state.incarnation
-      assert_receive {:connection_registry_unanswered, ^owner, ^incarnation, ^owner}, 0
+      registry = state.registry
+      assert_receive {:connection_registry_unanswered, ^owner, ^incarnation, ^registry}, 0
       GenServer.reply(from, :ok)
       assert_receive {[:alias | ^request], :ok} = message, 1_000
       assert {:noreply, next} = LoopexDaemon.SocketConnection.handle_info(message, state)
@@ -1359,9 +1360,12 @@ defmodule LoopexDaemon.SocketConnectionTest do
   end
 
   defp callback_routing_state do
+    owner = self()
+    registry = spawn(fn -> callback_registry(owner, Process.monitor(owner)) end)
+
     assert {:ok, state} =
              LoopexDaemon.SocketConnection.init(
-               registry: self(),
+               registry: registry,
                listener: self(),
                rollback_token: make_ref(),
                connection_incarnation: "routing-callback-incarnation",
@@ -1370,6 +1374,20 @@ defmodule LoopexDaemon.SocketConnectionTest do
              )
 
     %{state | attachment: %{pump: self(), attachment_id: "original", session_id: "session"}}
+  end
+
+  defp callback_registry(owner, monitor) do
+    receive do
+      {:"$gen_call", _from, _request} = call ->
+        send(owner, call)
+        callback_registry(owner, monitor)
+
+      :stop ->
+        :ok
+
+      {:DOWN, ^monitor, :process, ^owner, _reason} ->
+        :ok
+    end
   end
 
   defp start_callback_routing(state) do
@@ -1404,20 +1422,30 @@ defmodule LoopexDaemon.SocketConnectionTest do
   end
 
   defp close_callback_routing(state) do
-    for timer <- Process.delete({__MODULE__, :routing_timers}) || [] do
-      Process.cancel_timer(timer)
-    end
+    cutoff = now_ms() + 1_000
 
-    for lease <- Process.delete({__MODULE__, :routing_leases}) || [] do
-      Loopex.ProgressSink.release(state.progress_sink, lease)
-    end
+    try do
+      for timer <- Process.delete({__MODULE__, :routing_timers}) || [] do
+        Process.cancel_timer(timer)
+      end
 
-    assert :ok = Loopex.ProgressSink.close(state.progress_sink)
-    guardian = elem(state.progress_sink, 0)
-    monitor = state.progress_guardian_monitor
-    assert_receive {:DOWN, ^monitor, :process, ^guardian, :normal}, 1_000
-    Process.demonitor(state.registry_monitor, [:flush])
-    Process.demonitor(state.listener_monitor, [:flush])
+      for lease <- Process.delete({__MODULE__, :routing_leases}) || [] do
+        Loopex.ProgressSink.release(state.progress_sink, lease)
+      end
+
+      assert :ok = Loopex.ProgressSink.close(state.progress_sink)
+      guardian = elem(state.progress_sink, 0)
+      monitor = state.progress_guardian_monitor
+      assert_receive {:DOWN, ^monitor, :process, ^guardian, :normal}, max(cutoff - now_ms(), 0)
+      assert now_ms() <= cutoff
+    after
+      registry = state.registry
+      monitor = state.registry_monitor
+      send(registry, :stop)
+      assert_receive {:DOWN, ^monitor, :process, ^registry, :normal}, max(cutoff - now_ms(), 0)
+      assert now_ms() <= cutoff
+      Process.demonitor(state.listener_monitor, [:flush])
+    end
   end
 
   # Concept: retirement proofs begin with public creation/attachment and real credit.
