@@ -27,6 +27,40 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+### Embedded workflows qualified; physical integration work continues, 2026-10-09
+
+Original 85508 at `e98022030a8fb32898f097d87536af485790201c` passes both complete
+Composition files: `ephemeral_api_test.exs` has 19 cases and
+`ephemeral_model_integration_test.exs` has 28. All 47 pass on both supported
+toolchain pairs, with zero excluded, skipped or invalid cases, in 98.792 seconds.
+The original twelve process joins and all 53 output assets were collected once.
+Collection SHA-256 `9cacfd94f1814bdb0a5820b635c6e91a28100ae47b22180504423787b8740604`.
+Retention child `M7/current-source-preparation-20261009-v37/retention.json`,
+SHA-256 `5fa69df8fbd715e27455cc28844354e7c83378a4e035f21957b242607445df19`,
+preserves 56 assets and authenticates parent v36. Its first retention attempt
+stopped before creating output because the original recipe was writable; the
+recipe matched the captured runner exactly and was sealed before v2 retained it.
+No native case was rerun. T06 remains open for the CLI failures, remaining
+ordinary workflows and separate provider/attended proofs. Counts stay unchanged.
+
+ADR 0066's exact approval is reaffirmed. Its lost-registration alternative still
+needs an authenticated original Store-owner absence observation. The current
+opaque handle and `unregistered` reply do not expose that identity generically;
+Local alone pins its Transfers PID. Do not release uncertain custody on an
+arbitrary absence reply or import Local's handle shape into Core. No dependent
+branch was implemented. Retained capacity remains conservative.
+
+Three isolated writers prepare accepted proof work: real Local-backed Runtime
+creation recovery after root/VM loss, reference composition configuration through
+the native daemon route, and real Runtime artifact transfers with exact work and
+capacity assertions. Their worktrees are respectively
+`/private/tmp/m7-creation-runtime-recovery-20261009-v1`,
+`/private/tmp/m7-configure-native-join-20261009-v1`, and
+`/private/tmp/m7-artifact-lost-reservation-20261009-v1`. Root owns integration and
+all native processes. These patches are unjoined and unrun. Original 85508 is
+terminal and collected; no native handle is live at this checkpoint. ADR 0067
+remains the presented decision; do not infer its acceptance from ADR 0066.
+
 ### Case evidence integrity proved; startup eligibility repaired, 2026-10-09
 
 Continue the active goal on `m7`. Source `5f2c5065498d85a4e528bb9a6e04e8dd33f309ba`

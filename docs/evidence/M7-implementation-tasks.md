@@ -1,5 +1,19 @@
 # M7 Implementation Tasks
 
+### Embedded workflow proof; physical integration remaining, 2026-10-09
+
+Original 85508 at `e9802203` passes both complete Composition workflow files,
+47 cases on each supported toolchain pair, zero excluded/skipped/invalid,
+98.792 seconds and twelve original joins. The [resume checkpoint](M7-resume.md)
+binds the collection and 56-asset retention child v37. T06 preservation still
+needs the remaining ordinary workflows and CLI output repairs; separate
+provider/attended proofs remain owed. No original or added checkbox changes.
+T01–T19 counts remain original 89 done/84 open/6 retired, added 374 done/23 open,
+combined 463 done/107 open/6 retired. Three isolated writers prepare real Local
+creation recovery, native reference configuration and artifact-transfer proofs.
+ADR 0066 is accepted; original Store-owner absence authentication remains a
+specific implementation limitation. ADR 0067 remains the presented question.
+
 ### Case evidence integrity proved; startup fixture repaired, 2026-10-09
 
 Source `5f2c5065` passes all 136 attempts cases on both supported pairs, original
@@ -15646,6 +15660,12 @@ original99939 is reused only at literal unchanged Core/CLI/Protocol bytes.
 The bounded source audits and exact collected artifacts are retained in the
 [resume record](M7-resume.md). This closes T06.3 and T06.6; broader floor preservation
 and attended T06.7 remain open.
+
+Preservation evidence on 2026-10-09: original 85508 at `e9802203` passes the
+complete embedded API and local HTTP model files, 19 plus 28 cases on both
+supported pairs, without exclusions/skips/invalid cases. This qualifies the
+embedded portion of T06.5; remaining ordinary CLI and provider proofs keep that
+original item open. The [resume record](M7-resume.md) binds the original output.
 
 ### Added implementation subtasks
 
