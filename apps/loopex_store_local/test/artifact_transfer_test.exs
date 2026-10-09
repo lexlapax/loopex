@@ -1126,6 +1126,57 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
     assert {:ok, []} = File.ls(Path.join(handle.root, "transfers"))
   end
 
+  # Concept: a source that yields fewer bytes than its verified size, or a
+  # snapshot that takes only part of a block, refuses the open honestly and
+  # leaves nothing behind.
+  # Technical depth: ADR 0066 short reads and partial writes. The probe answers
+  # the copy actor's second source read with a real 100-byte prefix, or its
+  # first snapshot write by writing 1,000 real bytes and reporting ENOSPC. Work
+  # counts exactly what was read and debited, a failed write stays uncertain,
+  # retirement still earns a receipt, and the scratch root is empty afterwards.
+  for {name, faults, reason, read, debit, uncertain} <- [
+        {"a short source read", [:continue, :continue, {:short, 100}], :artifact_integrity_failed,
+         65_536 + 100, 65_536, false},
+        {"a partial snapshot write", [:continue, {:partial, 1_000}], :artifact_unreadable, 65_536,
+         65_536, true}
+      ] do
+    test "#{name} refuses the open and retires every descriptor" do
+      faults = unquote(Macro.escape(faults))
+      handle = new_store(fault_probe: self())
+      bytes = :binary.copy("s", 3 * 65_536 + 7)
+      %{reference: reference} = stored(bytes, handle)
+      request = %{session_id: "transfer-session", use_locator: reference.use_locator, start: 0}
+      context = opening_context(60_000)
+
+      opener =
+        Task.async(fn ->
+          assert {:ok, _} = Artifacts.reserve_transfer(handle, request, context)
+          Artifacts.open_transfer(handle, request, context)
+        end)
+
+      points =
+        for action <- faults do
+          assert_receive {:loopex_transfer_fault_point, worker, ref, point}, 5_000
+          send(worker, {:loopex_transfer_fault_action, ref, action})
+          point
+        end
+
+      assert points == Enum.take([:source_read, :snapshot_write, :source_read], length(faults))
+
+      assert {:error, %{reason: unquote(reason), transfer_ref: id, work: work}} =
+               Task.await(opener, 5_000)
+
+      assert id == context.transfer_ref
+      assert work.source_read_bytes == unquote(read)
+      assert work.snapshot_write_debit == unquote(debit)
+      assert work.write_uncertain == unquote(uncertain)
+      refute_received {:loopex_transfer_fault_point, _, _, _}
+      assert :ok = retire_and_ack(handle, context)
+      assert [] = Transfers.live(handle.transfers)
+      assert {:ok, []} = File.ls(Path.join(handle.root, "transfers"))
+    end
+  end
+
   test "a full 64 MiB object retains exact payload and separately accounted metadata work" do
     bytes = :binary.copy(<<42>>, 67_108_864)
     %{handle: handle, reference: reference} = stored(bytes)
@@ -1544,10 +1595,10 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
     %{handle: handle, reference: reference, bytes: bytes, root: handle.root}
   end
 
-  defp new_store do
+  defp new_store(options \\ []) do
     root = Path.join(System.tmp_dir!(), "loopex-transfer-#{:erlang.unique_integer([:positive])}")
     File.mkdir_p!(root)
-    {:ok, owner} = Transfers.start_link(root: root)
+    {:ok, owner} = Transfers.start_link([root: root] ++ options)
 
     on_exit(fn ->
       if Process.alive?(owner), do: GenServer.stop(owner)
