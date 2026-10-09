@@ -236,8 +236,10 @@ answer never stands in for attendance.
 | `V8.2` | attended | `case:m7.review` |
 | `V8.3` | attended | `case:m7.review` |
 | `V8.4` | attended | `case:m7.review` |
-| `V8.5` | automated | `pending:helper child failure, bound exhaustion and parent cancellation (T11)` |
-| `V8.6` | automated | `pending:serial-child delegation allowance exhaustion (T11)` |
+| `V8.5.failure` | automated | `test:apps/loopex_composition/test/delegation_run_ledger_test.exs#a created child never prompted settles failed at zero and refunds its reservation` |
+| `V8.5.bound` | automated | `test:apps/loopex_composition/test/delegation_helper_test.exs#count and token exhaustion refuse before any reservation and a new run reopens` |
+| `V8.5.cancel` | automated | `test:apps/loopex_composition/test/delegation_helper_test.exs#cancelling the parent stops its child and confirms cleanup` |
+| `V8.6` | automated | `test:apps/loopex_composition/test/delegation_recovery_test.exs#an exhausted serial child allowance survives restart and the parent reopens` |
 | `V8.7` | automated | `test:apps/loopex_composition/test/delegation_child_creation_test.exs#only authored enabled roles in the retained catalog admit` |
 | `V9.1` | attended | `case:m7.policy-denial` |
 | `V9.2` | attended | `case:m7.interrupt` |

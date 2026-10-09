@@ -10,7 +10,10 @@ defmodule LoopexCli.ConfigInspectionTest do
 
   setup do
     root =
-      Path.join(System.tmp_dir!(), "m7-config-inspection-#{System.unique_integer([:positive])}")
+      Path.join(
+        System.tmp_dir!(),
+        "m7-config-inspection-#{System.pid()}-#{System.unique_integer([:positive])}"
+      )
 
     File.mkdir_p!(root)
     file = Path.join(root, "profile.json")

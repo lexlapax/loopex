@@ -758,13 +758,21 @@
         "classification": "attended",
         "owner": "case:m7.review"
       },
-      "V8.5": {
+      "V8.5.failure": {
         "classification": "automated",
-        "owner": "pending:helper child failure, bound exhaustion and parent cancellation (T11)"
+        "owner": "test:apps/loopex_composition/test/delegation_run_ledger_test.exs#a created child never prompted settles failed at zero and refunds its reservation"
+      },
+      "V8.5.bound": {
+        "classification": "automated",
+        "owner": "test:apps/loopex_composition/test/delegation_helper_test.exs#count and token exhaustion refuse before any reservation and a new run reopens"
+      },
+      "V8.5.cancel": {
+        "classification": "automated",
+        "owner": "test:apps/loopex_composition/test/delegation_helper_test.exs#cancelling the parent stops its child and confirms cleanup"
       },
       "V8.6": {
         "classification": "automated",
-        "owner": "pending:serial-child delegation allowance exhaustion (T11)"
+        "owner": "test:apps/loopex_composition/test/delegation_recovery_test.exs#an exhausted serial child allowance survives restart and the parent reopens"
       },
       "V8.7": {
         "classification": "automated",
