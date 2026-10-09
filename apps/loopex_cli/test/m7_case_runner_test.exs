@@ -32,7 +32,6 @@ defmodule LoopexCli.M7CaseRunnerTest do
 
   @fixtures Path.expand("../../../test/fixtures/m7", __DIR__)
   @candidate String.duplicate("1", 40)
-  @instructions %{"version" => "m7.fixture.v1", "body" => "Keep exact release facts."}
   @fixed "defmodule Ledger do\n  def total(entries), do: Enum.sum(entries)\nend\n"
 
   setup do
@@ -352,7 +351,7 @@ defmodule LoopexCli.M7CaseRunnerTest do
         CaseRunner.run_lane(
           f.writer,
           "m7-operator",
-          Map.put(context, :chat_options, chat_options(f, script, self(), @instructions))
+          Map.put(context, :chat_options, chat_options(f, script, self()))
         )
       )
 
@@ -369,7 +368,7 @@ defmodule LoopexCli.M7CaseRunnerTest do
              CaseRunner.run_lane(
                f.writer,
                "m7-operator",
-               Map.put(context, :chat_options, chat_options(f, script, self(), @instructions))
+               Map.put(context, :chat_options, chat_options(f, script, self()))
              )
 
     assert result.mechanical_result == "required_action_absent"
@@ -973,11 +972,9 @@ defmodule LoopexCli.M7CaseRunnerTest do
     ]
   end
 
-  # `instructions` stands in for maintenance instructions the runtime needs to
-  # compact. `loopex chat` composes none today, so a real chat refuses every
-  # maintenance episode with `maintenance_instructions_unconfigured`; the long
-  # tests prove the case runner's joins on a runtime that has them.
-  defp chat_options(_f, scripts, parent, instructions \\ nil) do
+  # The composition options are the real chat's, including the reference
+  # host's maintenance instructions; only the model and executor are scripted.
+  defp chat_options(_f, scripts, parent) do
     {:ok, calls} = Agent.start_link(fn -> 0 end)
 
     [
@@ -986,11 +983,6 @@ defmodule LoopexCli.M7CaseRunnerTest do
       release_placement: fn _, _ -> :ok end,
       placement_id: fn _ -> {:ok, "case-runner-runtime"} end,
       with_runtime: fn options, callback ->
-        options =
-          if instructions,
-            do: Keyword.put(options, :maintenance_instructions, instructions),
-            else: options
-
         call = Agent.get_and_update(calls, &{&1 + 1, &1 + 1})
         capture = policy_context(options)
 

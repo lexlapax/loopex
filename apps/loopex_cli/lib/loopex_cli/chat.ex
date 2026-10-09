@@ -208,7 +208,8 @@ defmodule LoopexCli.Chat do
       cleanup_grace_ms: grace(invocation),
       recover_stale_writer: true,
       model: Map.get(configuration, "model", profile["session"]["model"]),
-      maintenance_model: get_in(profile, ["maintenance", "model"])
+      maintenance_model: get_in(profile, ["maintenance", "model"]),
+      maintenance_instructions: LoopexCli.MaintenanceInstructions.reference()
     ]
   end
 
