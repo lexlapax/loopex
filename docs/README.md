@@ -133,6 +133,7 @@ whose path or explicit fragment does not resolve.
 - [M6 minimal runnable Loopex](plans/M6.md#concept) and [technical plan](plans/M6-technical.md#technical-depth) — the embedded ephemeral API, the in-process model adapter and memory store, the standalone command for shells and agents, full Loopex unchanged, and closure tooling in the repository. The [plans register](plans/README.md) carries its current state.
 - M7 is Accepted for implementation: [M7 coding-agent proof](plans/M7.md#concept) ([technical](plans/M7-technical.md#technical-depth)), placed first on 2026-09-29; then the unregistered successor drafts: [M8 installed durable operator](drafts/m8-installed-durable-operator.md#concept) ([technical](drafts/m8-installed-durable-operator-technical.md#technical-depth)), [M9 store engine successor](drafts/m9-store-engine-successor.md#concept) ([technical](drafts/m9-store-engine-successor-technical.md#technical-depth)) and [M10 governed extension runtime](drafts/m10-governed-extension-runtime.md#concept) ([technical](drafts/m10-governed-extension-runtime-technical.md#technical-depth)).
 
+- [M7 closure evidence scaffold](evidence/M7-closure-runs.md) — Pending run, source, outcome and review fields; complete literal manifest inventories remain open.
 - [Development contract](../AGENTS.md) — canonical tool-neutral authority,
   autonomy, documentation, milestone, and enforcement rules.
 - [Plans and current status](plans/README.md) — canonical milestone register,
