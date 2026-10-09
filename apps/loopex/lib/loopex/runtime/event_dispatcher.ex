@@ -2064,8 +2064,16 @@ defmodule Loopex.Runtime.EventDispatcher do
             )
           end
         else
+          # Concept: a success handled at or after D_open answers as the deadline.
+          # Technical depth: ADR 0066 boundary equality; an already retiring entry
+          # keeps its first reason inside retire_artifact/4.
+          reason =
+            if artifact_now() >= entry.context.open_deadline_ms,
+              do: :open_deadline_exhausted,
+              else: :cancelled
+
           state
-          |> retire_artifact(id, :cancelled, artifact_cancel_anchor(entry))
+          |> retire_artifact(id, reason, artifact_cancel_anchor(entry))
           |> advance_artifact_cleanup(id)
         end
 

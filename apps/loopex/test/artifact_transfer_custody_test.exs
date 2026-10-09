@@ -493,6 +493,158 @@ defmodule Loopex.ArtifactTransferCustodyTest do
     assert ledger(fixture).transfer_debit === 940_441_607
   end
 
+  # Concept: a caller that disappears mid-open cancels it; the late open result
+  # never becomes a live transfer.
+  # Technical depth: ADR 0066 cancel-during-open. The original custodian's open
+  # invocation stays outstanding while the original observer retires; the
+  # acknowledgement waits for that invocation to join and the slot releases once.
+  test "caller loss during open retires once and the late success never goes live" do
+    fixture = fixture()
+    data = data(fixture.attachment.session_id)
+    test = self()
+
+    caller =
+      spawn(fn ->
+        send(test, {:opened, Loopex.open_artifact_transfer(fixture.attachment, data.request)})
+      end)
+
+    reserve = callback(:reserve)
+    {_request, context} = reserve.arguments
+    reply(reserve, {:ok, %{transfer_ref: context.transfer_ref}})
+    invocation = callback(:open)
+    Process.exit(caller, :kill)
+    retire = callback(:retire)
+    original = entry(fixture, context.transfer_ref)
+    assert retire.pid === original.observer
+    assert original.reason === :cancelled
+    assert original.invocation === :open
+    assert original.open_from === nil
+    reply(retire, {:retired, receipt(context, data.work)})
+    await(fn -> entry(fixture, context.transfer_ref).receipt !== nil end)
+    refute_received {:artifact_callback, :acknowledge, _, _, _}
+    reply(invocation, {:ok, opened(data, context)})
+    ack = callback(:acknowledge)
+    assert ack.pid === retire.pid
+    attachment = Map.fetch!(state(fixture).attachments, fixture.attachment.attachment_id)
+    refute Map.has_key?(attachment.transfers, context.transfer_ref)
+    assert entry(fixture, context.transfer_ref).phase === :retiring
+    reply(ack, :ok)
+    await_released(fixture, context.transfer_ref)
+    refute_received {:opened, _}
+    refute_received {:artifact_callback, _, _, _, _}
+    assert now() < retire.arguments.close_deadline_ms
+    assert ledger(fixture).transfer_reserved === 0
+  end
+
+  # Concept: a success that is only processed at its opening deadline is refused.
+  # Technical depth: ADR 0066 boundary equality. The custodian's success is
+  # queued before D_open while the Dispatcher is suspended, and handled at or
+  # after D_open: the strict `now < D_open` check refuses adoption, the caller
+  # gets open_deadline_exhausted rather than cancelled, no public transfer
+  # appears, and normal retirement reclaims the slot.
+  test "a success handled at its opening deadline is refused and reclaimed" do
+    fixture = fixture()
+    data = data(fixture.attachment.session_id)
+    attachment = fixture.attachment
+
+    context = %{
+      transfer_ref: String.duplicate("e", 32),
+      open_deadline_ms: now() + 500,
+      object_work_bytes: ArtifactStore.transfer_limits().open_work_bytes,
+      metadata_read_bytes: ArtifactStore.transfer_limits().metadata_read_bytes
+    }
+
+    request = Map.put(data.request, :session_id, attachment.session_id)
+
+    message =
+      {:open_transfer, fixture.runtime.token, attachment.session_id, attachment.attachment_id,
+       attachment.incarnation_id, request, context}
+
+    caller = Task.async(fn -> GenServer.call(fixture.dispatcher, message, 5_000) end)
+    reserve = callback(:reserve)
+    reply(reserve, {:ok, %{transfer_ref: context.transfer_ref}})
+    invocation = callback(:open)
+    :ok = :sys.suspend(fixture.dispatcher)
+    reply(invocation, {:ok, opened(data, context)})
+
+    receive do
+      :unexpected_fixture_message -> flunk("unexpected fixture message")
+    after
+      max(0, context.open_deadline_ms - now()) -> :ok
+    end
+
+    assert now() >= context.open_deadline_ms
+    :ok = :sys.resume(fixture.dispatcher)
+
+    assert {:error, %{reason: :open_deadline_exhausted, cleanup: :unproved}} =
+             Task.await(caller, 1_000)
+
+    retire = callback(:retire)
+    assert retire.arguments.close_deadline_ms === context.open_deadline_ms + 5_000
+    current = Map.fetch!(state(fixture).attachments, attachment.attachment_id)
+    refute Map.has_key?(current.transfers, context.transfer_ref)
+    refute Map.has_key?(current.transfer_progress, context.transfer_ref)
+    reply(retire, {:retired, receipt(context, data.work)})
+    ack = callback(:acknowledge)
+    reply(ack, :ok)
+    await_released(fixture, context.transfer_ref)
+    assert now() < retire.arguments.close_deadline_ms
+  end
+
+  # Concept: a lost acknowledgement proves nothing new; the retained receipt and
+  # the occupied slot remain until the same observer acknowledges it again.
+  # Technical depth: ADR 0066 ack reply loss. The first close expires at its
+  # original D_close, a concurrent close is refused without a second observer,
+  # and a later close re-acknowledges the exact original receipt and reclaims the
+  # single slot prospectively while still reporting the expired cleanup.
+  test "a lost acknowledgement keeps the receipt until the same observer acknowledges again" do
+    fixture = fixture()
+    {context, opened} = open(fixture)
+
+    closer =
+      Task.async(fn ->
+        Loopex.close_artifact_transfer(fixture.attachment, context.transfer_ref)
+      end)
+
+    retire = callback(:retire)
+    receipt = receipt(context, opened.work)
+    reply(retire, {:retired, receipt})
+    lost = callback(:acknowledge)
+    reply(lost, {:error, :transfers_unavailable})
+    await(fn -> entry(fixture, context.transfer_ref).observation === :idle end)
+    retained = entry(fixture, context.transfer_ref)
+    assert retained.receipt === receipt
+    assert retained.acknowledged === false
+    assert retained.observer === retire.pid
+    assert map_size(state(fixture).artifact_transfers) === 1
+
+    assert {:error, :cleanup_unproved} =
+             Loopex.close_artifact_transfer(fixture.attachment, context.transfer_ref)
+
+    refute_received {:artifact_callback, _, _, _, _}
+
+    # The expiry reply can only follow D_close, so prove silence strictly before
+    # it and then wait for it under the case's own ExUnit timeout, with no grace.
+    assert Task.yield(closer, retire.arguments.close_deadline_ms - now() - 1) == nil
+    assert {:error, :cleanup_unproved} = Task.await(closer, :infinity)
+    assert now() >= retire.arguments.close_deadline_ms
+    assert map_size(state(fixture).artifact_transfers) === 1
+
+    late =
+      Task.async(fn ->
+        Loopex.close_artifact_transfer(fixture.attachment, context.transfer_ref)
+      end)
+
+    again = callback(:acknowledge)
+    assert again.pid === retire.pid
+    assert again.arguments === lost.arguments
+    assert again.arguments.receipt_ref === receipt.receipt_ref
+    reply(again, :ok)
+    assert {:error, :cleanup_unproved} = Task.await(late, 1_000)
+    await_released(fixture, context.transfer_ref)
+    refute_received {:artifact_callback, :retire, _, _, _}
+  end
+
   test "original observer loss retains occupied custody and never spawns a successor" do
     fixture = fixture()
     {context, _opened} = open(fixture)
