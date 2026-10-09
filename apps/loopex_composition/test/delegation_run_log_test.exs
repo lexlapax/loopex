@@ -353,18 +353,7 @@ defmodule LoopexComposition.DelegationRunLogTest do
 
       assert lookup(context, String.duplicate("0", 64)) == {:error, :ledger_fenced}
 
-      if cut == :run_partial_written do
-        assert lookup(context, tx["tx_id"]) == {:error, :run_recovery_unproved}
-        stop_join(context.owner)
-        context = %{context | owner: open(context, recover_stale_writer: true)}
-        classify_binding(context)
-        assert lookup(context, tx["tx_id"]) == {:ok, :absent}
-        assert {:ok, _} = commit(context, tx)
-      else
-        {_header, _json, original} = authored_bytes(context)
-        expected = if header_cut, do: :absent, else: original
-        assert lookup(context, tx["tx_id"]) == {:ok, expected}
-      end
+      assert_io_error_recovery(context, tx, cut)
     end
   end
 
@@ -754,15 +743,17 @@ defmodule LoopexComposition.DelegationRunLogTest do
         first
       end
 
+    # Concept: the fixture owns the physical store through its cleanup join.
+    # Technical depth: unlink before runtime startup so test-process exit cannot
+    # race the on_exit callback's explicit original-store stop and DOWN proof.
+    Process.unlink(store_pid)
+    on_exit(fn -> if Process.alive?(store_pid), do: stop_join(store_pid) end)
     {:ok, store} = Store.new(adapter, store_pid)
 
     {:ok, runtime} =
       Loopex.start_link(runtime_id: "runtime", context_token_budget: 8_192, store: store)
 
-    on_exit(fn ->
-      if Runtime.alive?(runtime), do: Loopex.stop(runtime)
-      if Process.alive?(store_pid), do: stop_join(store_pid)
-    end)
+    on_exit(fn -> if Runtime.alive?(runtime), do: Loopex.stop(runtime) end)
 
     assert :ok = Fixture.await_startup(runtime)
     owner = open(context, options)
@@ -900,6 +891,21 @@ defmodule LoopexComposition.DelegationRunLogTest do
   end
 
   defp remaining(deadline), do: max(deadline - System.monotonic_time(:millisecond), 0)
+
+  defp assert_io_error_recovery(context, tx, :run_partial_written) do
+    assert lookup(context, tx["tx_id"]) == {:error, :run_recovery_unproved}
+    stop_join(context.owner)
+    context = %{context | owner: open(context, recover_stale_writer: true)}
+    classify_binding(context)
+    assert lookup(context, tx["tx_id"]) == {:ok, :absent}
+    assert {:ok, _} = commit(context, tx)
+  end
+
+  defp assert_io_error_recovery(context, tx, cut) do
+    {_header, _json, original} = authored_bytes(context)
+    expected = if cut in [:run_header_written, :run_header_synced], do: :absent, else: original
+    assert lookup(context, tx["tx_id"]) == {:ok, expected}
+  end
 
   defp stop_join(pid) do
     monitor = Process.monitor(pid)
