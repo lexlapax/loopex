@@ -920,6 +920,36 @@ defmodule LoopexCli.M7CaseRunnerTest do
     assert facts(result)["join"] =~ "continuation_rounds"
   end
 
+  test "a thinking-off summarizer compacts an always-on thinking conversation once", f do
+    alias LoopexCli.M7NativeReplies, as: R
+    fable = "anthropic:claude-fable-5-1"
+    think = fn n -> {:thinking, "fable step #{n}", "fable-sig-#{n}+/="} end
+
+    fixture =
+      Loopex.LLM.ReqLLM.ProviderIsolationFixture.new(:reply,
+        credential: "m7-cross-maintenance-synthetic",
+        response_bodies: [
+          R.reply(fable, [think.(0), {:text, "noted"}]),
+          R.reply(fable, [think.(1), {:text, "ready"}]),
+          R.reply("anthropic:claude-haiku-4-5-20251001", [
+            {:text,
+             ~s({"summary":"release_prefix=amber, batch_size=3","carry_forward":{"files_read":[],"files_changed":[]}})}
+          ]),
+          R.reply(fable, [think.(2), {:text, "release_prefix=amber, batch_size=3"}])
+        ]
+      )
+
+    result =
+      passed!(
+        scenario!(f, "m7.cross-provider-maintenance", fn _ -> [] end, %{
+          chat_options: native!(f, fixture)
+        })
+      )
+
+    assert facts(result)["kinds"]["maintenance_attempt_settled_v3"] == 1
+    assert facts(result)["kinds"]["standalone_compaction_checkpoint_committed_v1"] == 1
+  end
+
   test "provider switch moves A to B, reopens and returns to A with its tool facts", f do
     profile =
       put_in(profile(f.root), ["providers", "openai"], %{

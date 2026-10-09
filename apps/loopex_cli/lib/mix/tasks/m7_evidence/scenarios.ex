@@ -460,29 +460,33 @@ defmodule Mix.Tasks.Loopex.M7Evidence.Scenarios do
     %{
       seed: %{"README.md" => @readme},
       allowed: [],
+      # The session starts on the dated summarizer model and configures the
+      # thinking model before its first prompt, as the thinking cells do.
       profile: fn profile, context ->
-        a = get_in(context, [:pins, "thinking_model"]) || @fable
         b = get_in(context, [:pins, "summarizer"]) || @dated
 
         profile
-        |> put_in(["session", "model"], a)
-        |> put_in(["session", "reasoning"], "medium")
+        |> put_in(["session", "model"], @dated)
+        |> put_in(["session", "tools"], "read-only")
         |> Map.put("maintenance", %{"model" => b})
       end,
-      plan: fn _context ->
-        {:ok,
-         [
-           conversation([
-             "Remember this release fact exactly: release_prefix=amber, batch_size=3.",
-             "Reply with the word ready.",
-             "/compact",
-             "Without any tool, state the release fact you were given."
-           ])
-         ]}
+      plan: fn context ->
+        a = get_in(context, [:pins, "thinking_model"]) || @fable
+        configure = ~s(/configure {"model":"#{a}","reasoning":"medium"})
+
+        session =
+          conversation([
+            "Remember this release fact exactly: release_prefix=amber, batch_size=3.",
+            "Reply with the word ready.",
+            "/compact",
+            "Without any tool, state the release fact you were given."
+          ])
+
+        {:ok, [%{session | steps: [{:line, configure} | session.steps]}]}
       end,
       joins: fn rows, _outcome, _workspace ->
-        genesis = find(rows, "session_genesis_v3")
-        conversation = genesis && genesis.payload["initial_configuration"]["model"]
+        configured = all(rows, "session_configuration_admitted_v2") |> List.last()
+        conversation = configured && get_in(configured.payload, ["configuration", "model"])
         [request | _] = all(rows, "maintenance_request_committed_v1") ++ [nil]
         summarizer = request && get_in(request.payload, ["request", "model"])
         settled = all(rows, "maintenance_attempt_settled_v3")

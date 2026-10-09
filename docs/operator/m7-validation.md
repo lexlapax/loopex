@@ -131,6 +131,28 @@ as a contextual policy reference, so it admits the same invocations and paths
 as the chat cases. `scripts/m7-ephemeral-question-demo.exs` runs the
 same host outside a lane for rehearsal; its record is not lane evidence.
 
+## Compaction and thinking cases
+
+These cases need maintenance instructions, which chat now composes from the
+reference host's versioned block. `m7.oversized-source` sends a pinned,
+backslash-dense ledger that fits an ordinary run. The ledger forces an
+excerpted summary source, and the case checks that the complete original
+stays in host history. `m7.thinking-rounds` runs each continuation-required
+cell (Haiku low, medium and high; Fable default, low, medium and high) in one
+session. Each cell first compacts the earlier cells, then reads three files in
+three rounds; afterwards the session reopens. A counted round's committed
+request must replay a thinking literal and equal the reply it names.
+
+`m7.cross-provider-maintenance` configures the always-on thinking Fable model
+and summarizes with Haiku at reasoning `none`. The adapter registers Haiku at
+`none` as the only thinking-off summarizer, so both models share the
+Anthropic route. The case therefore proves distinct models, not distinct
+provider routes. Pins `thinking_model` and `summarizer` override the models.
+
+The wrapper restores the configuration's named credential variables before
+each conversation, because composition consumes them and every case runs in
+one VM.
+
 ## Held cases
 
 `m7.steer-barrier` and `m7.interrupt` ask the model to run
@@ -303,7 +325,7 @@ One row per manifest case in lane order; `pending:` names what still blocks it.
 | `m7.pipe-answer` | `m7-provider` | scenario-chat | `ready` |
 | `m7.instructions.declined` | `m7-provider` | scenario-chat | `ready` |
 | `m7.instructions.changed` | `m7-provider` | scenario-chat | `ready` |
-| `m7.cross-provider-maintenance` | `m7-provider` | provider-wrapper | `pending:native always-on thinking transport proof; the adapter registers no second provider with a thinking-off summarizer` |
+| `m7.cross-provider-maintenance` | `m7-provider` | provider-wrapper | `ready` |
 | `m7.thinking-bound` | `m7-provider` | provider-wrapper | `pending:thinking-cell witness driver` |
 | `m7.thinking-cancel` | `m7-provider` | provider-wrapper | `pending:pre-transport cancellation gate driver` |
 | `m7.daemon-detach` | `m7-provider` | provider-wrapper | `pending:daemon host fixture driver` |

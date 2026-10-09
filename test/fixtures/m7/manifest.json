@@ -31,7 +31,7 @@
         "credential": true,
         "driver": "provider-wrapper",
         "lane": "m7-provider",
-        "status": "pending:native always-on thinking transport proof; the adapter registers no second provider with a thinking-off summarizer",
+        "status": "ready",
         "steps": [
           "V6.7"
         ]
