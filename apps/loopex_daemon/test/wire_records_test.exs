@@ -198,6 +198,7 @@ defmodule LoopexDaemon.WireRecordsTest do
       assert record["event"]["data"]["owner"] == %{"kind" => kind, "id" => "AP8K"}
       assert record["event"]["event_sequence"] == "1"
       assert {:ok, encoded} = Frame.encode(record)
+
       assert {:ok, ^record} =
                Frame.decode(
                  IO.iodata_to_binary(encoded) |> String.trim_trailing("\n"),
