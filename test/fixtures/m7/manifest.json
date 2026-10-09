@@ -257,7 +257,7 @@
         "credential": true,
         "driver": "provider-wrapper",
         "lane": "m7-provider",
-        "status": "pending:thinking-cell witness driver",
+        "status": "ready",
         "steps": [
           "V7.7.bound"
         ]

@@ -950,6 +950,78 @@ defmodule LoopexCli.M7CaseRunnerTest do
     assert facts(result)["kinds"]["standalone_compaction_checkpoint_committed_v1"] == 1
   end
 
+  # Per cell: a tool reply cut by the one-turn bound, then two text replies;
+  # thinking appears only where the cell's mapping requires continuation.
+  defp cut_replies(cells, final_thinking? \\ true) do
+    alias LoopexCli.M7NativeReplies, as: R
+
+    summary =
+      R.reply("anthropic:claude-haiku-4-5-20251001", [
+        {:text,
+         ~s({"summary":"cedar","carry_forward":{"files_read":["a.txt"],"files_changed":[]}})}
+      ])
+
+    Enum.flat_map(Enum.with_index(cells), fn {{model, reasoning}, cell} ->
+      {:ok, mapping} = Loopex.LLM.ReqLLM.ModelCapabilities.mapping(model, reasoning, 8_192)
+      required = mapping["continuation_required"]
+
+      think = fn n ->
+        if required, do: [{:thinking, "cut #{cell}.#{n}", "cut-#{cell}-#{n}+/="}], else: []
+      end
+
+      last = if final_thinking?, do: think.(2), else: []
+
+      replies = [
+        R.reply(
+          model,
+          think.(0) ++ [{:tool, "cut-read-#{cell}", "read", %{"path" => "a.txt"}}],
+          "tool_use"
+        ),
+        R.reply(model, think.(1) ++ [{:text, "cedar"}]),
+        R.reply(model, last ++ [{:text, "cedar"}])
+      ]
+
+      if cell == 0, do: replies, else: [summary | replies]
+    end)
+  end
+
+  @tag timeout: 300_000
+  test "thinking bound cuts each cell after its tool group and resumes native thinking", f do
+    cells = Mix.Tasks.Loopex.M7Evidence.Scenarios.bound_cells()
+
+    fixture =
+      Loopex.LLM.ReqLLM.ProviderIsolationFixture.new(:reply,
+        credential: "m7-thinking-bound-synthetic",
+        response_bodies: cut_replies(cells)
+      )
+
+    result =
+      passed!(
+        scenario!(f, "m7.thinking-bound", fn _ -> [] end, %{chat_options: native!(f, fixture)})
+      )
+
+    assert facts(result)["kinds"]["run_terminal_committed"] == 3 * length(cells)
+  end
+
+  @tag timeout: 300_000
+  test "thinking bound without resumed native thinking is required_action_absent", f do
+    cells = Mix.Tasks.Loopex.M7Evidence.Scenarios.bound_cells()
+
+    fixture =
+      Loopex.LLM.ReqLLM.ProviderIsolationFixture.new(:reply,
+        credential: "m7-thinking-bound-synthetic",
+        response_bodies: cut_replies(cells, false)
+      )
+
+    assert {:stopped, [{:ok, result}]} =
+             scenario!(f, "m7.thinking-bound", fn _ -> [] end, %{
+               chat_options: native!(f, fixture)
+             })
+
+    assert result.mechanical_result == "required_action_absent"
+    assert facts(result)["join"] =~ "native_thinking"
+  end
+
   test "provider switch moves A to B, reopens and returns to A with its tool facts", f do
     profile =
       put_in(profile(f.root), ["providers", "openai"], %{
@@ -1233,8 +1305,12 @@ defmodule LoopexCli.M7CaseRunnerTest do
   defp passed!({_, [{:ok, %{root: root}} | _]} = other) do
     records = Path.join(root, "records")
 
+    # The tail of each record holds the conversation's ending and errors.
     retained =
-      for name <- File.ls!(records), into: %{}, do: {name, File.read!(Path.join(records, name))}
+      for name <- File.ls!(records), into: %{} do
+        bytes = File.read!(Path.join(records, name))
+        {name, binary_part(bytes, max(byte_size(bytes) - 2_000, 0), min(byte_size(bytes), 2_000))}
+      end
 
     flunk(inspect(%{lane: elem(other, 0), records: retained}, pretty: true, limit: :infinity))
   end

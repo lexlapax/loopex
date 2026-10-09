@@ -32,6 +32,7 @@ defmodule Mix.Tasks.Loopex.M7Evidence.Scenarios do
     {@fable, "medium"},
     {@fable, "high"}
   ]
+  @bound_cells [{@dated, "default"}, {@dated, "none"} | @thinking_cells]
   @rounds_facts %{"a.txt" => "cedar", "b.txt" => "seven", "c.txt" => "amber"}
   @rounds_files Map.new(@rounds_facts, fn {path, word} -> {path, word <> "\n"} end)
   @rounds_prompt "Read a.txt, then b.txt, then c.txt, one read tool call at a time and in that order. Then reply with the three words you read, in order."
@@ -545,7 +546,148 @@ defmodule Mix.Tasks.Loopex.M7Evidence.Scenarios do
     }
   end
 
+  # V7.7 bound: per ADR 0044 cell, a one-turn limit ends the first run after
+  # its tool group commits; two later prompts on the same model must keep
+  # canonical grouping without old native state, and the last must use the
+  # cell's native thinking (or none, for Haiku default and none).
+  def get("m7.thinking-bound") do
+    %{
+      seed: @rounds_files,
+      allowed: [],
+      profile: fn profile ->
+        profile
+        |> put_in(["session", "model"], @dated)
+        |> put_in(["session", "max_tokens"], 8_192)
+        |> put_in(["session", "tools"], "read-only")
+        |> put_in(["session", "bounds", "max_turns"], 1)
+        |> Map.put("maintenance", %{"model" => @dated})
+      end,
+      plan: fn _context ->
+        {:ok, [%{resume: false, cut: true, steps: cut_steps(@bound_cells)}]}
+      end,
+      joins: fn rows, _outcome, _workspace -> thinking_cut(rows, @bound_cells, "bound") end
+    }
+  end
+
   def get(_case_id), do: nil
+
+  @doc false
+  def bound_cells, do: @bound_cells
+
+  @cut_prompts [
+    "Use the read tool on a.txt, then report its word.",
+    "Without any tool, state the word you read.",
+    "Without any tool, state that word once more."
+  ]
+
+  # Each later cell first checkpoints the earlier cells' native history.
+  defp cut_steps(cells) do
+    cells
+    |> Enum.with_index()
+    |> Enum.flat_map(fn {{model, reasoning}, index} ->
+      compact = if index == 0, do: [], else: [{:line, "/compact"}, {:line, "/wait"}]
+      configure = {:line, ~s(/configure {"model":"#{model}","reasoning":"#{reasoning}"})}
+      compact ++ [configure | Enum.flat_map(@cut_prompts, &[{:line, &1}, {:line, "/wait"}])]
+    end)
+    |> Kernel.++([{:line, "/quit"}])
+  end
+
+  # Concept: each cell's three runs in commit order: the cut run with its
+  # committed tool group, then two completed runs on the same admitted model.
+  # Technical depth: the second run replays no native state from the cut run;
+  # the third run's reply carries a thinking literal exactly when the cell's
+  # mapping requires continuation. Private bytes are compared, never retained.
+  defp thinking_cut(rows, cells, cut) do
+    terminals = Enum.filter(rows, &(&1.payload.kind == "run_terminal_committed"))
+    requests = Enum.group_by(all(rows, "model_request_committed_v2"), & &1.payload["run_id"])
+    settled = Enum.group_by(all(rows, "model_attempt_settled_v3"), & &1.payload["run_id"])
+
+    # A committed tool group: its completed executor receipt in that run.
+    tooled =
+      for row <- all(rows, "executor_receipt_committed_v2"),
+          row.payload["receipt"]["outcome"] == "completed",
+          into: MapSet.new(),
+          do: row.payload["run_id"]
+
+    groups = Enum.chunk_every(terminals, 3)
+
+    results =
+      for {{{model, reasoning}, [first, second, third]}, _index} <-
+            Enum.with_index(Enum.zip(cells, groups)) do
+        required = continuation_required?(model, reasoning)
+        [r1, r2, r3] = Enum.map([first, second, third], & &1.payload["run_id"])
+        reply = settled |> Map.get(r3, []) |> List.last()
+        continuation = reply && get_in(reply.payload, ["result", "reply", "continuation"])
+
+        cond do
+          not cut?(first, cut) ->
+            {:missing, :cut}
+
+          r1 not in tooled ->
+            {:missing, :tool_group_before_cut}
+
+          Enum.any?([second, third], &(&1.payload["outcome"] != "completed")) ->
+            {:failed, :later_prompt}
+
+          resurrected?(Map.get(requests, r2, []), r1, settled) ->
+            {:failed, :resurrected_native_state}
+
+          required and not thinking_literal?(continuation) ->
+            {:missing, :native_thinking}
+
+          not required and not is_nil(continuation) ->
+            {:failed, :unexpected_continuation}
+
+          true ->
+            :ok
+        end
+      end
+
+    cond do
+      length(groups) < length(cells) or Enum.any?(groups, &(length(&1) != 3)) ->
+        {:missing, :cut_subcases}
+
+      (failure = Enum.find(results, &(&1 != :ok))) != nil ->
+        failure
+
+      true ->
+        {:ok, nil}
+    end
+  end
+
+  defp cut?(terminal, "bound"), do: terminal.payload["outcome"] == "bound_reached"
+  defp cut?(terminal, "cancelled"), do: terminal.payload["outcome"] == "cancelled"
+
+  defp continuation_required?(model, reasoning) do
+    case Loopex.LLM.ReqLLM.ModelCapabilities.mapping(model, reasoning, 8_192) do
+      {:ok, mapping} -> mapping["continuation_required"]
+      _ -> true
+    end
+  end
+
+  # A later request may replay only its own run's replies, never the cut run's.
+  defp resurrected?(requests, cut_run, settled) do
+    cut_ops = MapSet.new(Map.get(settled, cut_run, []), & &1.payload["operation_id"])
+
+    Enum.any?(requests, fn row ->
+      with bytes when is_binary(bytes) <-
+             get_in(row.payload, ["request", "canonical_request_bytes"]),
+           request when is_list(request) <- :erlang.binary_to_term(bytes, [:safe]),
+           %{"entries" => entries} <- plain(Keyword.get(request, :continuation)) do
+        Enum.any?(entries, &MapSet.member?(cut_ops, &1["source"]["operation_id"]))
+      else
+        _ -> false
+      end
+    end)
+  end
+
+  defp thinking_literal?(%{"content" => content}) when is_list(content),
+    do:
+      Enum.any?(content, fn block ->
+        block["kind"] == "literal" and block["value"]["type"] in ["thinking", "redacted_thinking"]
+      end)
+
+  defp thinking_literal?(_), do: false
 
   @doc false
   def thinking_cells, do: @thinking_cells

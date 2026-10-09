@@ -1033,6 +1033,13 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
         known = if conversation[:reanswer], do: [], else: questions(done)
         result = chat(staged, context, conversation.steps, mode, extra, n, known)
         result = Map.put(result, :session, session_id(result.output))
+
+        # A prescribed terminal cut ends chat with status 1; the joins decide.
+        result =
+          if conversation[:cut] == true and result.exit == 1,
+            do: %{result | interrupted: true},
+            else: result
+
         session = session || result.session
 
         if result.exit == 0 or (result.exit == :lost and :lose in conversation.steps) or

@@ -326,7 +326,7 @@ One row per manifest case in lane order; `pending:` names what still blocks it.
 | `m7.instructions.declined` | `m7-provider` | scenario-chat | `ready` |
 | `m7.instructions.changed` | `m7-provider` | scenario-chat | `ready` |
 | `m7.cross-provider-maintenance` | `m7-provider` | provider-wrapper | `ready` |
-| `m7.thinking-bound` | `m7-provider` | provider-wrapper | `pending:thinking-cell witness driver` |
+| `m7.thinking-bound` | `m7-provider` | provider-wrapper | `ready` |
 | `m7.thinking-cancel` | `m7-provider` | provider-wrapper | `pending:pre-transport cancellation gate driver` |
 | `m7.daemon-detach` | `m7-provider` | provider-wrapper | `pending:daemon host fixture driver` |
 | `m7.rollback` | `m7-rollback` | release-lane | `ready` |
