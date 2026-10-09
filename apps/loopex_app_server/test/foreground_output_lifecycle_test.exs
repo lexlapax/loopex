@@ -360,6 +360,133 @@ defmodule Loopex.AppServer.ForegroundOutputLifecycleTest do
     end)
   end
 
+  # Concept: a snapshot taken while maintenance is in flight shows the same
+  # active view as the last maintenance change at the same public cursor.
+  # Technical depth: the summary is held by the controller; a replacing attach
+  # takes a fresh snapshot over the real stdio. Its cursor and active view equal
+  # the last `context.maintenance_changed` at or before that cursor, and no
+  # summary text or private delta is ever written.
+  test "a foreground snapshot during maintenance matches the last maintenance change" do
+    Harness.with_fixture(:file, :compaction_held, fn fixture ->
+      prepare(fixture)
+      history(fixture)
+      Harness.send_frame(fixture, compact_request("compact"))
+      assert Harness.command(fixture, :await_hold, &(&1 == :holding)) == :holding
+
+      await_record(fixture, &(get_in(&1, ["event", "kind"]) == "context.maintenance_changed"))
+
+      Harness.send_frame(fixture, %{
+        "method" => "session.attach",
+        "request_id" => "replacement",
+        "session_id" => Wire.encode_identity(fixture.session),
+        "replace" => true
+      })
+
+      snapshot = await_record(fixture, &(&1["request_id"] == "replacement"))
+      assert snapshot["type"] == "snapshot"
+      cursor = String.to_integer(snapshot["event_cursor"])
+      assert snapshot["snapshot"]["event_sequence"] == snapshot["event_cursor"]
+
+      [last | _] =
+        fixture
+        |> output_records()
+        |> Enum.filter(fn record ->
+          get_in(record, ["event", "kind"]) == "context.maintenance_changed" and
+            String.to_integer(record["event"]["event_sequence"]) <= cursor
+        end)
+        |> Enum.reverse()
+
+      assert last["event"]["event_sequence"] == snapshot["event_cursor"]
+      refute is_nil(snapshot["snapshot"]["active_maintenance"])
+
+      assert last["event"]["data"] == %{
+               "active_maintenance" => snapshot["snapshot"]["active_maintenance"]
+             }
+
+      assert Harness.command(fixture, :release_hold, &(&1 == :hold_released)) == :hold_released
+      await_record(fixture, &(get_in(&1, ["event", "kind"]) == "context.compaction_finished"))
+      public = File.read!(fixture.output)
+      refute public =~ "retain this fact"
+      refute public =~ "PRIVATE"
+      :file.close(fixture.input)
+      summary = Harness.finished(fixture)
+      assert summary.result == :ok
+      assert_released_custody(summary)
+    end)
+  end
+
+  # Concept: Store uncertainty on the compact admission never duplicates or
+  # loses a public maintenance change over stdio.
+  # Technical depth: each of the three fault phases is injected on the next
+  # journal commit; the uncertain attempt is retried under its original command
+  # until admitted. Event identities and sequences stay unique and ordered, the
+  # completion appears once and the final maintenance view is inactive.
+  for phase <- [
+        :before_linearization,
+        :after_linearization_before_result,
+        :recovery_representation
+      ] do
+    @phase phase
+    test "#{phase} on the foreground compact admission keeps maintenance changes exact" do
+      Harness.with_fixture(:file, :compaction, fn fixture ->
+        prepare(fixture)
+        history(fixture)
+
+        assert Harness.command(fixture, {:inject, @phase}, &(&1 == :injected)) == :injected
+        Harness.send_frame(fixture, compact_request("uncertain"))
+        settle_compact(fixture, await_record(fixture, &(&1["request_id"] == "uncertain")), 100)
+        await_record(fixture, &(get_in(&1, ["event", "kind"]) == "context.compaction_finished"))
+
+        assert {:observed_faults, observed} =
+                 Harness.command(fixture, :observed_faults, &match?({:observed_faults, _}, &1))
+
+        assert {:session_journal_commit, @phase} in observed
+        events = for %{"type" => "event", "event" => event} <- output_records(fixture), do: event
+        ids = Enum.map(events, & &1["event_id"])
+        sequences = Enum.map(events, &String.to_integer(&1["event_sequence"]))
+        assert ids == Enum.uniq(ids)
+        assert sequences == Enum.sort(Enum.uniq(sequences))
+        changes = Enum.filter(events, &(&1["kind"] == "context.maintenance_changed"))
+        assert List.last(changes)["data"] == %{"active_maintenance" => nil}
+        assert [_once] = Enum.filter(events, &(&1["kind"] == "context.compaction_finished"))
+        refute File.read!(fixture.output) =~ "retain this fact"
+        :file.close(fixture.input)
+        summary = Harness.finished(fixture)
+        assert summary.result == :ok
+      end)
+    end
+  end
+
+  defp history(fixture) do
+    Harness.send_frame(fixture, %{
+      "method" => "session.prompt",
+      "request_id" => "history",
+      "command_id" => Wire.encode_identity("history"),
+      "content_b64" => Wire.encode_bytes(String.duplicate("old ", 2_000))
+    })
+
+    await_record(fixture, &(get_in(&1, ["event", "kind"]) == "session.settled"))
+  end
+
+  defp compact_request(id),
+    do: %{
+      "method" => "session.compact",
+      "request_id" => id,
+      "command_id" => Wire.encode_identity("compact"),
+      "bounds" => %{"max_attempts" => "4", "deadline_ms" => "60000", "token_budget" => "32768"}
+    }
+
+  defp settle_compact(_fixture, %{"type" => "admission"} = reply, _attempts) do
+    assert reply["status"] == "accepted"
+  end
+
+  defp settle_compact(fixture, _unknown, attempts) when attempts > 0 do
+    Process.sleep(20)
+    id = "retry-#{attempts}"
+    Harness.send_frame(fixture, compact_request(id))
+    settle_compact(fixture, await_record(fixture, &(&1["request_id"] == id)), attempts - 1)
+  end
+
   for kind <- [
         :text_delta,
         :reasoning_delta,
