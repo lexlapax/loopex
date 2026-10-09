@@ -31,7 +31,7 @@
         "credential": true,
         "driver": "provider-wrapper",
         "lane": "m7-provider",
-        "status": "pending:loopex chat composes no maintenance instructions, so every compaction refuses maintenance_instructions_unconfigured",
+        "status": "pending:native always-on thinking transport proof; the adapter registers no second provider with a thinking-off summarizer",
         "steps": [
           "V6.7"
         ]
@@ -127,7 +127,7 @@
         "credential": true,
         "driver": "fixture-chat",
         "lane": "m7-operator",
-        "status": "pending:loopex chat composes no maintenance instructions, so every compaction refuses maintenance_instructions_unconfigured",
+        "status": "ready",
         "steps": [
           "V6.1",
           "V6.2.long",
@@ -141,7 +141,7 @@
         "credential": true,
         "driver": "demonstration",
         "lane": "m7-operator",
-        "status": "pending:loopex chat composes no maintenance instructions, so every compaction refuses maintenance_instructions_unconfigured",
+        "status": "ready",
         "steps": [
           "V6.5.positive"
         ]

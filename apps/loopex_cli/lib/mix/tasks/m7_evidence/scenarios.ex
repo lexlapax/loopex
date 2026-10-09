@@ -11,7 +11,8 @@ defmodule Mix.Tasks.Loopex.M7Evidence.Scenarios do
 
   `get/1` returns `nil` or a closed map: `seed` (relative path to bytes),
   `allowed` (paths the case may create or change), `profile` (a function of
-  the operator's decoded configuration), `plan` (a function of the runner
+  the operator's decoded configuration, and optionally of the runner context
+  for pinned values), `plan` (a function of the runner
   context returning conversations of `Conversation` steps) and `joins` (a
   function of the committed rows, the dispatch outcome and the workspace
   returning `{:ok, nil}`, `{:missing, reason}` or `{:failed, reason}`).
@@ -21,8 +22,10 @@ defmodule Mix.Tasks.Loopex.M7Evidence.Scenarios do
   """
 
   @dated "anthropic:claude-haiku-4-5-20251001"
+  @fable "anthropic:claude-fable-5-1"
   @readme "M7 scenario workspace.\n"
   @sentinel "AMBER-SENTINEL"
+  @oversized_sentinel "M7-OVERSIZED-SENTINEL-7F3A"
   @instruction "Project instruction: end every answer with the word AMBER-SENTINEL.\n"
   @instructed_prompt "Use the read tool on README.md and report its first line."
 
@@ -361,7 +364,157 @@ defmodule Mix.Tasks.Loopex.M7Evidence.Scenarios do
     }
   end
 
+  # V6.5: a pinned large prompt becomes old history in a small context; the
+  # summary source must be excerpted, the flag inherited by a later
+  # checkpoint, and the complete original retained in host history. The
+  # sentinel sits in the middle, outside the excerpts, and is never asked for.
+  def get("m7.oversized-source") do
+    %{
+      seed: %{"README.md" => @readme},
+      allowed: [],
+      profile: fn profile ->
+        profile
+        |> put_in(["session", "context_token_budget"], 6_000)
+        |> put_in(["session", "system_class_tokens"], 2_000)
+        |> put_in(["session", "max_tokens"], 1_024)
+        |> Map.put("maintenance", %{"model" => profile["session"]["model"]})
+      end,
+      plan: fn _context ->
+        {:ok,
+         [
+           %{
+             resume: false,
+             steps:
+               Enum.flat_map(
+                 [oversized_prompt(), "Reply with the word ready.", "/compact"],
+                 &[{:line, &1}, {:line, "/wait"}]
+               ) ++
+                 [
+                   {:line, "Reply with the word again."},
+                   {:line, "/wait"},
+                   {:line, "/compact"},
+                   {:line, "/wait"},
+                   {:line, "/status"},
+                   {:line, "/quit"}
+                 ]
+           }
+         ]}
+      end,
+      joins: fn rows, _outcome, _workspace ->
+        checkpoints = all(rows, "standalone_compaction_checkpoint_committed_v1")
+        requests = all(rows, "maintenance_request_committed_v1")
+        original = oversized_prompt()
+
+        excerpted =
+          Enum.filter(requests, & &1.payload["source_excerpted"])
+
+        cond do
+          length(checkpoints) < 2 ->
+            {:missing, :two_checkpoints}
+
+          not Enum.any?(
+            rows,
+            &(&1.payload.kind == "prompt_admitted_v3" and
+                  &1.payload["content"] == original)
+          ) ->
+            {:failed, :original_not_retained}
+
+          excerpted == [] ->
+            {:missing, :excerpted_source}
+
+          Enum.any?(
+            excerpted,
+            &(:binary.match(&1.payload["request"]["canonical_request_bytes"], @oversized_sentinel) !=
+                  :nomatch)
+          ) ->
+            {:failed, :sentinel_inside_excerpt}
+
+          not Enum.all?(checkpoints, &get_in(&1.payload, ["summary", "source_excerpted"])) ->
+            {:failed, :omission_flag_not_inherited}
+
+          true ->
+            {:ok, nil}
+        end
+      end
+    }
+  end
+
+  # V6.7: an always-on thinking conversation model is summarized by a distinct
+  # thinking-off summarizer; the conversation continues on its own model and
+  # the summary's usage is charged once, to its maintenance attempt. The
+  # adapter registers Haiku at `none` as the only thinking-off summarizer and
+  # Fable as the always-on model, so both share the Anthropic route today.
+  def get("m7.cross-provider-maintenance") do
+    %{
+      seed: %{"README.md" => @readme},
+      allowed: [],
+      profile: fn profile, context ->
+        a = get_in(context, [:pins, "thinking_model"]) || @fable
+        b = get_in(context, [:pins, "summarizer"]) || @dated
+
+        profile
+        |> put_in(["session", "model"], a)
+        |> put_in(["session", "reasoning"], "medium")
+        |> Map.put("maintenance", %{"model" => b})
+      end,
+      plan: fn _context ->
+        {:ok,
+         [
+           conversation([
+             "Remember this release fact exactly: release_prefix=amber, batch_size=3.",
+             "Reply with the word ready.",
+             "/compact",
+             "Without any tool, state the release fact you were given."
+           ])
+         ]}
+      end,
+      joins: fn rows, _outcome, _workspace ->
+        genesis = find(rows, "session_genesis_v3")
+        conversation = genesis && genesis.payload["initial_configuration"]["model"]
+        [request | _] = all(rows, "maintenance_request_committed_v1") ++ [nil]
+        summarizer = request && get_in(request.payload, ["request", "model"])
+        settled = all(rows, "maintenance_attempt_settled_v3")
+        checkpoint = find(rows, "standalone_compaction_checkpoint_committed_v1")
+        later = checkpoint && runs_after(rows, checkpoint.journal_version)
+
+        cond do
+          is_nil(checkpoint) -> {:missing, :checkpoint}
+          is_nil(summarizer) -> {:missing, :maintenance_request}
+          summarizer == conversation -> {:failed, :summarizer_not_distinct}
+          length(settled) != 1 -> {:failed, :maintenance_usage_not_once}
+          later == [] -> {:missing, :continued_run}
+          true -> {:ok, nil}
+        end
+      end
+    }
+  end
+
   def get(_case_id), do: nil
+
+  defp runs_after(rows, version),
+    do:
+      for(
+        row <- rows,
+        row.journal_version > version,
+        row.payload.kind == "run_terminal_committed",
+        row.payload["outcome"] == "completed",
+        do: row
+      )
+
+  # Pinned: 160 backslash-dense ledger lines with the sentinel in the middle.
+  # The summary request embeds its source as escaped JSON text, so backslashes
+  # double there while the same prompt still fits an ordinary run.
+  @doc false
+  def oversized_prompt do
+    lines =
+      for n <- 1..160 do
+        if n == 80,
+          do: ~s(line 80: "#{@oversized_sentinel}"),
+          else: "line #{n}: " <> String.duplicate("\\\\", 24)
+      end
+
+    "Read this release ledger and reply only with the word noted. " <> Enum.join(lines, " | ")
+  end
 
   defp append(file), do: ["--append-system-prompt-file", file]
 

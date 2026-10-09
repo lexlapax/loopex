@@ -397,6 +397,29 @@ defmodule LoopexCli.M7CaseRunnerTest do
   defp facts(result),
     do: JSON.decode!(File.read!(Path.join(result.root, "records/facts.json")))
 
+  @oversized_summary %{
+    text: ~s({"summary":"ledger noted","carry_forward":{"files_read":[],"files_changed":[]}}),
+    usage: %{input_tokens: 40, output_tokens: 12},
+    reply_overrides: %{completion: "natural", continuation: nil}
+  }
+
+  test "an oversized source compacts excerpted, keeps its original and inherits the flag", f do
+    script = fn _call ->
+      %{
+        main: [
+          %{text: "noted", calls: []},
+          %{text: "ready", calls: []},
+          %{text: "again", calls: []}
+        ],
+        maintenance: List.duplicate(@oversized_summary, 4)
+      }
+    end
+
+    result = passed!(scenario!(f, "m7.oversized-source", script))
+    assert facts(result)["kinds"]["standalone_compaction_checkpoint_committed_v1"] == 2
+    refute File.read!(Path.join(result.root, "records/facts.json")) =~ "SENTINEL"
+  end
+
   test "baseline durable pins the dated default model and one committed tool round", f do
     result =
       passed!(
@@ -1042,7 +1065,7 @@ defmodule LoopexCli.M7CaseRunnerTest do
     {:ok, maintenance_model} =
       LoopexComposition.ProviderBindings.resolve_maintenance_routes(
         options[:maintenance_model],
-        ["anthropic"]
+        Map.keys(options[:provider_bindings] || %{"anthropic" => nil})
       )
 
     {:ok, runtime} =

@@ -550,11 +550,17 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
     scenario = Scenarios.get(case_id)
     workspace = Path.join(root, "workspace")
 
+    # A profile change may read the case's pins, such as a second provider.
+    transform =
+      if is_function(scenario.profile, 2),
+        do: &scenario.profile.(&1, context),
+        else: scenario.profile
+
     with :ok <- File.mkdir(workspace),
          :ok <- write_seed(workspace, scenario.seed),
          {:ok, conversations} <- scenario.plan.(Map.put(context, :workspace, workspace)),
          {:ok, config_argv} <-
-           attempt_config(context.config_argv, workspace, root, scenario.profile) do
+           attempt_config(context.config_argv, workspace, root, transform) do
       {:ok,
        %{
          name: case_id,
