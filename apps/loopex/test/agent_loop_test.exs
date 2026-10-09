@@ -5738,7 +5738,7 @@ defmodule Loopex.AgentLoopTest do
     assert_receive {:control_boundary_waiting, ^control_proxy, boundary_reference, boundary},
                    5_000
 
-    assert boundary == :post_commit,
+    assert boundary == :close_progress,
            "the model error used #{inspect(boundary)} instead of one atomic close boundary"
 
     resume =
@@ -6178,6 +6178,128 @@ defmodule Loopex.AgentLoopTest do
     assert settlement["next"] == "terminal"
   end
 
+  test "an ordinary retained model settlement closes before its terminal becomes public" do
+    # Concept: retained answer and terminal facts do not bypass their live closure.
+    # Technical depth: hold the original relay, retain the real Store transaction,
+    # then release its original result. The coordinator must reach that relay's
+    # closing send before moving Control's attachment publication watermark.
+    fixture =
+      start(
+        script: [%{text: "retained answer", calls: [], deltas: ["retained answer"], hold: self()}],
+        progress_sink: Loopex.ProgressTestConsumer.open_sink()
+      )
+
+    :ok =
+      M1RuntimeTestStore.delay_after_record(
+        fixture.store,
+        "model_attempt_settled_v3",
+        self()
+      )
+
+    {session_id, attachment, reply} = Fixture.run(fixture, "go")
+    assert reply == {:accepted, "prompt-1"}
+    assert_receive {:holding, model}, 5_000
+    model_reference = Process.monitor(model)
+    coordinator = coordinator_of(fixture.runtime)
+    live = :sys.get_state(coordinator)
+    control = live.control
+    assert [{{:model, run_id}, stream}] = Map.to_list(live.streams)
+    relay_pid = StreamRelay.pid(stream.relay)
+    relay_reference = Process.monitor(relay_pid)
+    {:ok, %{dispatcher: dispatcher}} = Loopex.Runtime.Supervisor.children(fixture.runtime.supervisor)
+    assert [delta] = receive_progress()
+    assert delta.kind == :text_delta and delta.text == "retained answer"
+    assert delta.stream_domain_id == stream.domain
+    assert delta.base_event_sequence == live.durable.event_sequence
+    try do
+      assert true = :erlang.suspend_process(relay_pid)
+      assert {:status, :suspended} = Process.info(relay_pid, :status)
+      :erlang.trace(coordinator, true, [:send])
+      send(model, :release)
+
+      assert_receive {:record_linearized, result_waiter, _store, "model_attempt_settled_v3",
+                      :session_journal_commit, {:committed, tx_id, _receipt}},
+                     5_000
+
+      waiter_reference = Process.monitor(result_waiter)
+
+      retained =
+        try do
+          events = Fixture.events(fixture, session_id)
+          records = Fixture.records(fixture, session_id)
+          assert [%{payload: settlement}] =
+                   Enum.filter(records, &(&1.payload[:kind] == "model_attempt_settled_v3"))
+
+          assert settlement["run_id"] == run_id
+          assert settlement["result"]["reply"]["text"] == "retained answer"
+          assert settlement["result"]["reply"]["delta_count"] == 1
+          assert settlement["next"] == "terminal"
+          assert is_binary(tx_id)
+          assert Enum.count(events, &(&1.kind == "assistant.message_appended")) == 1
+          assert Enum.count(events, &(&1.kind == "run.finished")) == 1
+          events
+        after
+          M1RuntimeTestStore.release(result_waiter)
+          assert_receive {:DOWN, ^waiter_reference, :process, ^result_waiter, :normal}, 5_000
+        end
+
+      # A positive original-process send is the barrier, rather than elapsed
+      # silence. The obsolete order sends post_commit before this close.
+      assert_receive {:trace, ^coordinator, :send,
+                      {:close, ^coordinator, _close_reference, {:complete, 1}}, ^relay_pid},
+                     5_000
+
+      refute_receive {:trace, ^coordinator, :send,
+                      {:"$gen_call", _from,
+                       {:post_commit, ^session_id, _owner, _positions, _receipt}}, ^control},
+                     0
+
+      assert :sys.get_state(control).sessions[session_id].event_sequence ==
+               delta.base_event_sequence
+
+      assert :sys.get_state(dispatcher).acknowledged[session_id] == delta.base_event_sequence
+      refute_progress({:loopex_progress, %{kind: :model_stream_closed}}, 0)
+
+      visible =
+        for _event <- retained,
+            {:ok, event} <- [Loopex.next_event(attachment)],
+            do: event
+
+      refute Enum.any?(visible, &(&1.kind in ["assistant.message_appended", "run.finished"]))
+      assert true = :erlang.resume_process(relay_pid)
+
+      assert_progress(
+        {:loopex_progress,
+         %{
+           kind: :model_stream_closed,
+           stream_domain_id: domain,
+           disposition: :complete,
+           delta_count: 1
+         }},
+        5_000
+      )
+
+      assert domain == delta.stream_domain_id
+      assert_receive {:DOWN, ^relay_reference, :process, ^relay_pid, :normal}, 5_000
+      assert_receive {:DOWN, ^model_reference, :process, ^model, _reason}, 5_000
+      published = drain(attachment)
+      assert Enum.count(published, &(&1.kind == "assistant.message_appended")) == 1
+      assert Enum.count(published, &(&1.kind == "run.finished")) == 1
+      assert Enum.find(published, &(&1.kind == "assistant.message_appended"))["content"] ==
+               "retained answer"
+
+      assert Enum.find(published, &(&1.kind == "run.finished"))["outcome"] == "completed"
+      assert Fixture.events(fixture, session_id) == retained
+      assert length(AgentLoopTestModel.dispatched(fixture.model)) == 1
+      refute Enum.any?(receive_progress(), &(&1.kind == :model_stream_closed))
+    after
+      if Process.info(relay_pid, :status) == {:status, :suspended},
+        do: :erlang.resume_process(relay_pid)
+
+      if Process.alive?(coordinator), do: :erlang.trace(coordinator, false, [:all])
+    end
+  end
+
   test "a retained model result closes complete after Control handoff" do
     # Concept: ownership moving after a model result commits does not make that
     # retained reply untrue. Its originating domain still gets the exact
@@ -6289,12 +6411,11 @@ defmodule Loopex.AgentLoopTest do
     # Concept: once the Store has retained a model result, a later handoff
     # cannot make its complete disposition or producer count untrue.
     #
-    # Technical depth: the forwarding proxy first lets the predecessor's
-    # `post_commit` call update Control successfully, then withholds that `:ok`
-    # reply. A successor takes ownership while the predecessor is paused between
-    # that admitted cache update and its direct close. Releasing the reply must
-    # still produce the retained fact's exact complete closure. Adding a second
-    # ownership gate around that close discards it and fails this case.
+    # Technical depth: the predecessor closes from its retained reply before
+    # `post_commit` updates Control. The forwarding proxy then withholds that
+    # successful `:ok` reply while a successor takes ownership. The original
+    # complete closure is already proved and must remain the only closure after
+    # the predecessor receives its delayed publication result and is reaped.
     fixture =
       start(
         script: [%{text: "done", calls: [], deltas: ["retained before handoff"], hold: self()}],
@@ -6337,8 +6458,17 @@ defmodule Loopex.AgentLoopTest do
            ) == 1,
            "the case reached Control before the model result was durable"
 
-    assert receive_progress() == [],
-           "the old domain closed before the post-commit result returned"
+    assert_progress(
+      {:loopex_progress,
+       %{
+         kind: :model_stream_closed,
+         stream_domain_id: ^old_domain,
+         disposition: :complete,
+         delta_count: 1
+       }},
+      5_000,
+      "the retained result was published before its complete closure"
+    )
 
     assert {:ok, ^session_id} =
              Loopex.resume_session(
@@ -6349,17 +6479,10 @@ defmodule Loopex.AgentLoopTest do
 
     Loopex.AgentLoopControlBoundaryProxy.release(control_proxy, boundary_reference)
 
-    assert_progress(
-      {:loopex_progress,
-       %{
-         kind: :model_stream_closed,
-         stream_domain_id: ^old_domain,
-         disposition: :complete,
-         delta_count: 1
-       }},
-      5_000,
-      "the admitted retained result lost its complete closure after handoff"
-    )
+    refute Enum.any?(receive_progress(), fn item ->
+             item.stream_domain_id == old_domain and item.kind == :model_stream_closed
+           end),
+           "the admitted retained result closed its originating domain twice after handoff"
 
     assert_receive {:DOWN, ^relay_reference, :process, ^relay_pid, _reason},
                    5_000,

@@ -7999,7 +7999,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
         &(&1.kind in ["model_attempt_settled_v3", "maintenance_attempt_settled_v3"])
       )
 
-    case retain_terminal_operation_fact(state, proposal) do
+    case retain_terminal_operation_fact(state, proposal, {run_id, settlement}) do
       {:ok, next} ->
         # Technical depth: this owner was current when the Store fixed the
         # verdict, but `close_current_model_stream/3` reaches Control afterwards
@@ -8013,7 +8013,6 @@ defmodule Loopex.Runtime.SessionCoordinator do
         # session's last generation alive forever, which its `temporary` child
         # spec says never happens. A still-current owner sees `superseded` false
         # and gets the same `{:noreply, state}` it always did.
-        next = close_settled_model_stream(next, run_id, settlement)
         report_evidence_only_settlement(next, run_id, settlement)
         send(self(), :advance_work)
 
@@ -8026,7 +8025,6 @@ defmodule Loopex.Runtime.SessionCoordinator do
         # successor. That retained fact, rather than this stale coordinator's
         # authority, is what makes the closure truthful; the successor never
         # closes or reuses this relay.
-        next = close_settled_model_stream(next, run_id, settlement)
         report_evidence_only_settlement(next, run_id, settlement)
 
         next
@@ -10754,15 +10752,15 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # stream's disposition and producer count. The caller may therefore emit that
   # one truthful closure, but the returned state is marked superseded so it can
   # perform no later run work.
-  defp retain_terminal_operation_fact(state, proposal) do
-    case commit_internal_result(state, proposal) do
+  defp retain_terminal_operation_fact(state, proposal, model_settlement \\ nil) do
+    case commit_internal_result(state, proposal, model_settlement) do
       {:ok, next, :current_owner} -> {:ok, next}
       {:ok, next, {:owner_lost, _reason}} -> {:retained, superseded_owner(next)}
       {:error, reason} -> {:error, reason}
     end
   end
 
-  defp commit_internal_result(state, proposal) do
+  defp commit_internal_result(state, proposal, model_settlement \\ nil) do
     with {:ok, transaction} <-
            Store.session_commit(
              state.session_id,
@@ -10781,6 +10779,18 @@ defmodule Loopex.Runtime.SessionCoordinator do
         {:committed, tx_id, receipt} when tx_id == proposal.tx_id ->
           with {:ok, durable} <- SessionState.commit_proposal(proposal, receipt) do
             next = %{state | durable: durable}
+
+            # Concept: an ordinary model outcome becomes public after its closure.
+            # Technical depth: the exact retained reply fixes the disposition and
+            # count. Close only after applying its committed receipt, before the
+            # publication watermark exposes the same transaction's terminal.
+            # ADR 0014 still permits this originating retained-fact closure when
+            # Control subsequently reports that ownership moved.
+            next =
+              case model_settlement do
+                nil -> next
+                {run_id, settlement} -> close_settled_model_stream(next, run_id, settlement)
+              end
 
             case Control.post_commit(
                    state.control,
