@@ -27,6 +27,88 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+### Daemon fixture ownership and exact monitor repair joined, 2026-10-08
+
+The independently reviewed three-path repair is joined. Successful shared
+fixture Store startup now unlinks the exact adapter before its original
+on_exit registration, preventing test-parent shutdown from racing that stop.
+The T14 trace captures only its original Registry guardian before tracing,
+retaining the same known non-daemon kind after death; unknown targets still
+fail closed. Every47 Service case body, original callback, deadline and
+cleanup assertion remains unchanged. Fixture source review SHA-256
+`e5aceed221444c033aa9cc9ec7d08bb80faf48be90001a69220ab0b48278b282`.
+
+Registry retirement creates its two exact monitors through one fixed ordered
+capture before readiness. Both DOWN reference/PID pins, original cutoff and
+containment remain. This avoids fresh reference creation in the alternative
+receiving function; the actual compiled ReceiveMarker2 guarantee still needs
+native proof on both pairs. Marker source review SHA-256
+`35d7c2e523a810d4c909aa66500adc8bf194af4e22759248be74aadd1956eee6`.
+Formatting, compilation and native qualification of this join are UNRUN.
+
+The corrected whole fixture/marker union is12files137full/134ordinary, not184:
+Service47 is already inside the11-loader135-case inventory. The stronger
+Registry union is16files411full/408ordinary. Both include the original two
+full-population cases that returned106; those remain genuine unresolved
+production failures. No new SHA alone authorizes a passing reroll. Prepare
+bounded test-only observation of the actual native close/disposition branches
+before diagnostic reproduction; retain both original0 outcomes, population,
+cutoffs and strict cleanup. Two cross-UID and one paid-provider obligations
+remain separate, and the genuine Node and original long cases remain.
+
+Artifact-description qualification is complete at tested e62b5603 with211
+whole cases per pair; no native handle is live. Bv3 and Cv3 source reviews are
+clear for their repaired tool_version and content_b64 limits, but full-open
+custody, A/D integration, complete generations and native proof remain open.
+T01-T19 original88 done /85 open /6 retired; added370 done /24 open.
+
+### Artifact-description boundary proved on both toolchains, 2026-10-08
+
+Original2716 at `e62b560349a0d5567a20400c2188dbfcf7b39560` passes all211
+whole cases on each supported pair: Local70, Core18 and physical RestoreIO123.
+There are zero failures, exclusions, skips or invalids; all four original
+long-bound cases remain included on each pair. Both toolchains pass complete
+changed-source formatting and warning-free project compilation; current
+documentation and status pass. The complete291.329-second result retains14
+exact original process joins and55 verified artifacts under
+`M7/artifact-use-focused-20261008-v1`. Terminal SHA-256
+`83fd7352b5b804ba7cabdda1255b8350e3314cecdf8bfdac52f969e739b6fb0e`;
+collection SHA-256
+`bcca3b8ee3f18578f000c7f936944bfeade8f246196553eebd178de5f958d1de`.
+Latest completed registry2785, SHA-256
+`6fab6c088ccfba0973f90586ac3c23e523bac54e1b59954fbc3ddffd0581b9c3`.
+No native handle remains live. This closes only the new T05 artifact-description
+guard qualification, not full-open custody, transport activation or closure.
+
+Immutable25-asset retention includes Bv1, the C v1 blocked review, full-open
+contract map, complete67-failure census and original10084 terminal/collection/
+registry: `M7/current-source-preparation-20261008-v2/retention.json`, SHA-256
+`fd224187c09a035868644d2c47db8659f258a6de888d9e70ffb60c52a57e599b`.
+Original10084 remains failed; its current-only broad stages and all unrun
+successors stay distinct from the new artifact-boundary proof.
+
+Private daemon repairs preserve the original lifecycle proof. The two-path
+fixture packet unlinks successfully opened Stores before their original
+cleanup callbacks and captures the exact preexisting Registry guardian for
+the existing fail-closed trace inventory. Its independent review and native
+qualification are pending. The one-path Registry monitor-capture packet keeps
+both exact DOWN pins, original order and cutoff; independent source review
+SHA-256 `35d7c2e523a810d4c909aa66500adc8bf194af4e22759248be74aadd1956eee6`
+requires the actual compiled ReceiveMarker2 proof on both pairs. Neither unit
+is joined. The two full-population outcomes106 remain unresolved production
+failures; the67-failure diagnosis SHA-256
+`d586ba999cb407517c06e21324ab7ddee6ecff997a2621a90d7d62c2f4cb95e4`
+does not infer a passing native close from row removal or actor death.
+
+Bv2 and Cv2 are blocked by their content_b64 enclosing string limit: raw98304
+bytes encode to131072 accepted characters, while raw98305 encode to131074.
+Both current projections need typed refusal before allocation/emission. Their
+v3 private repairs preserve Core content allowances, original retirement,
+v1/v2 evidence and tool_version controls; do not integrate a superseded v2
+source-clear report. Current complete generation integration remains open.
+ADR0065 and the full-open/provider-custody/helper decisions remain pending.
+T01-T19 original88 done /85 open /6 retired; added370 done /24 open.
+
 ### Broad current run failed at Daemon; artifact guard joined, 2026-10-08
 
 Original10084 at `cfe6188da2329a937cf43bb3d201ce5d685a80b7` is terminal

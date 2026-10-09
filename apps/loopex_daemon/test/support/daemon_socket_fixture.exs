@@ -36,6 +36,11 @@ defmodule LoopexDaemon.Test.DaemonSocketFixture do
     {:ok, adapter} =
       Loopex.Store.Local.start_link(path: Path.join(state, "store.log"))
 
+    # Concept: the fixture owns Store shutdown after the test process exits.
+    # Technical depth: unlink this exact successful startup before the original
+    # on_exit close; test shutdown must not race that owned Store termination.
+    Process.unlink(adapter)
+
     on_exit(fn ->
       if Process.alive?(adapter), do: GenServer.stop(adapter)
     end)
@@ -72,6 +77,8 @@ defmodule LoopexDaemon.Test.DaemonSocketFixture do
     path = Path.join(state, "store.log")
 
     {:ok, adapter} = Loopex.Store.Local.start_link(path: path)
+
+    Process.unlink(adapter)
 
     on_exit(fn ->
       if Process.alive?(adapter), do: GenServer.stop(adapter)

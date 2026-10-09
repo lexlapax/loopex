@@ -3229,8 +3229,11 @@ defmodule LoopexDaemon.ConnectionRegistry do
   # cutoff never changes; only Socket may be killed, and only its actual DOWN
   # ends containment. Registry loss contains Socket too, without a success claim.
   defp socket_retirement_control(registry, socket, token, close_ref, cutoff) do
-    socket_monitor = Process.monitor(socket)
-    registry_monitor = Process.monitor(registry)
+    # Concept: both exact monitors are established before readiness.
+    # Technical depth: the bounded capture creates the fresh references outside
+    # this receiving function, avoiding an unused OTP receive marker when its
+    # alternative DOWN clauses cannot share one reference. Both pins remain.
+    [socket_monitor, registry_monitor] = Enum.map([socket, registry], &Process.monitor/1)
     send(registry, {:socket_retirement_control_ready, self(), token, close_ref, cutoff})
 
     receive do

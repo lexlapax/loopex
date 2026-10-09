@@ -476,6 +476,14 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
     %{collaboration: collaboration, listener: listener} = :sys.get_state(daemon.owner).pids
     %{registry: registry, relay: relay} = :sys.get_state(collaboration)
 
+    %{progress_sink: {registry_progress_guardian, _incarnation, _arena}} =
+      :sys.get_state(registry)
+
+    assert is_pid(registry_progress_guardian)
+
+    # Concept: the trace retains this Registry's original non-daemon guardian.
+    # Technical depth: a queued close-call trace can arrive after that exact
+    # ProgressSink PID has died; only its captured identity keeps the prior kind.
     known =
       Process.list()
       |> Enum.map(&{&1, initial_kind(&1)})
@@ -485,7 +493,8 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
         collaboration => :owner,
         registry => :registry,
         relay => :relay,
-        listener => :other
+        listener => :other,
+        registry_progress_guardian => :other
       })
 
     test_pid = self()
