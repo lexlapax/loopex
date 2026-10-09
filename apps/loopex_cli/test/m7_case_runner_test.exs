@@ -383,6 +383,45 @@ defmodule LoopexCli.M7CaseRunnerTest do
     end
   end
 
+  # Concept: a fixture case on chat's real composition: the pinned fixture
+  # policy reaches durable composition as Core's contextual reference.
+  test "a feature case passes on the real composition under its fixture policy", f do
+    alias LoopexCli.M7NativeReplies, as: R
+    model = "anthropic:claude-haiku-4-5-20251001"
+
+    [%{"arguments" => question}] =
+      f.context.manifest["fixtures"]["feature"]["required_model_actions"]
+
+    fixture =
+      Loopex.LLM.ReqLLM.ProviderIsolationFixture.new(:reply,
+        credential: "m7-feature-native-synthetic",
+        response_bodies: [
+          R.reply(model, [{:tool, "ask-1", "ask", question}], "tool_use"),
+          R.reply(
+            model,
+            [
+              {:tool, "write-1", "write",
+               %{"path" => "lib/row_encoder.ex", "content" => encoder("literal_null")}}
+            ],
+            "tool_use"
+          ),
+          R.reply(model, [{:text, "implemented"}])
+        ]
+      )
+
+    context =
+      Map.merge(f.context, %{
+        manifest: lane(f.context.manifest, ["m7.feature"]),
+        answers: %{"m7.feature" => "choice-2"},
+        chat_options: native!(f, fixture, &put_in(&1, ["session", "model"], model))
+      })
+
+    result = passed!(CaseRunner.run_lane(f.writer, "m7-operator", context))
+    execution = JSON.decode!(File.read!(Path.join(result.root, "records/execution.json")))
+    assert execution["policy"]["id"] =~ "m7.fixture:m7.feature:"
+    assert File.read!(Path.join(result.root, "records/oracle.txt")) =~ "status=0"
+  end
+
   test "feature without the committed question is required_action_absent and no pipe answer is guessed",
        f do
     script = fn _capture, _ ->

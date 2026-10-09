@@ -53,7 +53,8 @@ defmodule LoopexComposition do
 
   ## Technical depth
 
-  `:policy` is required and has no default. `:state_root` and `:workspace` are
+  `:policy` is required; a contextual reference's identity names only its module.
+  `:state_root` and `:workspace` are
   resolved by the caller rather than discovered here, because where an operator's
   data lives is the host's decision.
 
@@ -103,10 +104,6 @@ defmodule LoopexComposition do
   ADR 0043. Validation precedes owned effects, and Core captures its exact bytes
   once for this runtime. Missing or nil remains unconfigured; composition
   supplies no instruction default.
-
-  Optional trusted `:model_adapter` is a one-argument function that wraps the
-  selected `%{module:, model:, options:}` adapter map, for a harness gate that
-  delegates the exact call. It has no configuration grammar.
 
   Optional `:maintenance_model` resolves once against the admitted provider routes
   with the registered thinking-off mapping and fixed maintenance reply allowance.
@@ -228,7 +225,7 @@ defmodule LoopexComposition do
                  [
                    model:
                      LoopexComposition.Model.reference(
-                       model_adapter(options, %{
+                       %{
                          module: ReqLLM,
                          model: Keyword.get(options, :model, ReqLLM.default_model()),
                          options:
@@ -240,7 +237,7 @@ defmodule LoopexComposition do
                                    ReqLLM.credential_variable()
                                  ])
                              ]
-                       }),
+                       },
                        options
                      )
                  ] ++
@@ -256,18 +253,6 @@ defmodule LoopexComposition do
         Logger.debug("reference composition trace capability bound")
         {:ok, runtime}
       end
-    end
-  end
-
-  # Concept: a trusted harness may wrap the selected adapter with a Model-port
-  # gate that delegates the exact call, such as M7's pre-transport
-  # cancellation gate. Ordinary hosts supply none.
-  # Technical depth: the wrapper receives the closed adapter map and returns
-  # one; route admission, credentials and the reference wrapper are unchanged.
-  defp model_adapter(options, adapter) do
-    case Keyword.get(options, :model_adapter) do
-      wrap when is_function(wrap, 1) -> wrap.(adapter)
-      _ -> adapter
     end
   end
 
@@ -308,7 +293,7 @@ defmodule LoopexComposition do
 
   defp policy_identity(options, policy) do
     Keyword.get(options, :policy_identity) ||
-      %{"id" => inspect(policy), "revision" => "0.2.0"}
+      %{"id" => inspect(Loopex.Policy.adapter_module(policy)), "revision" => "0.2.0"}
   end
 
   defp store_options(root, options, credential_plane),

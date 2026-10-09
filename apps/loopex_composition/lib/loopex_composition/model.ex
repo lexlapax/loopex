@@ -19,8 +19,19 @@ defmodule LoopexComposition.Model do
   alias Loopex.Runtime.SessionConfiguration
   alias LoopexComposition.{Edges, ProviderBindings}
 
+  # Concept: a trusted harness may wrap the selected adapter with a Model-port
+  # gate that delegates the exact call, such as M7's pre-transport cancellation
+  # gate; ordinary hosts supply none. Technical depth: the host option
+  # `:model_adapter` receives and returns the closed adapter map before the
+  # reference wrapper; route admission and credentials are unchanged.
   @doc false
-  def reference(%{module: module, model: model, options: original}, host_options) do
+  def reference(adapter, host_options) do
+    %{module: module, model: model, options: original} =
+      case Keyword.get(host_options, :model_adapter) do
+        wrap when is_function(wrap, 1) -> wrap.(adapter)
+        _ -> adapter
+      end
+
     %{
       module: __MODULE__,
       model: model,
