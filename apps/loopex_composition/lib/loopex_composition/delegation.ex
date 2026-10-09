@@ -122,6 +122,13 @@ defmodule LoopexComposition.Delegation do
   ## Concept
 
   Create one helper-enabled parent session from its frozen catalog.
+
+  ## Technical depth
+
+  `Catalog.capture/7` freezes every enabled role into its retained read-only
+  genesis and validates the catalog bytes before the helper owner creates the
+  parent, so the retained objects and the created session cannot drift. Any
+  capture refusal returns before creation.
   """
   def create_parent(
         %{helper: helper, runtime_id: runtime_id},

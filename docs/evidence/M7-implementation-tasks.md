@@ -16732,7 +16732,15 @@ failed, and no broader current-floor or T16 completion is claimed.
 
 - [x] Reproduce and repair quiesce cancellation closure when a fence startup notice has not arrived; accept only Control's DOWN/absence-backed acknowledgement for an unannounced worker, refuse a foreign binding without falsely acknowledging absence, retain independent exact local DOWN for announced workers, prove expired/suspended-worker cases before and after the fix, and verify the complete quiesce file plus the unchanged real production fence cutoff on both supported pairs. Keep combined full integration and the original untraced failure schedule distinct.
 
-- [ ] Investigate and repair the full 520ff308 integration failure in the sixty-three blocked quiesce fences sharing one cutoff with a settled sibling; retain the failed exact-candidate output, establish the cause through bounded runtime observability and actual process lifetimes, preserve the shared cutoff, sibling progress, fence accounting and cleanup assertions, and verify both supported pairs.
+- [x] Investigate and repair the full 520ff308 integration failure in the sixty-three blocked quiesce fences sharing one cutoff with a settled sibling; retain the failed exact-candidate output, establish the cause through bounded runtime observability and actual process lifetimes, preserve the shared cutoff, sibling progress, fence accounting and cleanup assertions, and verify both supported pairs.
+  Cause: under CPU overload the OS wakes the quiesce phase owner 160–270 ms
+  late (measured; `:high` priority did not help), past test reserves of
+  50–100 ms. Resolved under the 2026-10-09 quiesce disposition: test-only
+  reserves of about 1,000 ms keep every assertion's meaning, and a phase owner
+  completing after its outer deadline now returns `runtime_unavailable`, with a
+  deterministic witness that fails without the check (`9dad334a`). Quiesce
+  cases pass in six concurrent combined-load runs, three per pair; outputs are
+  in `claude-20261009/t16-core/`.
 - [x] Repair the nine seed406612 CLI failures from the48ca full check by preparing the genuine provider-runtime lifecycle fixture through existing guarded startup; retain the first failure, preserve all startup/signal/resource/diagnostic/cleanup assertions, prove cold-first and mixed real fixtures on both pairs, then verify ordinary CLI in the next combined integration candidate.
 
 Reconciled on2026-10-07 from existing paired focused00cf26bb/original56356,
@@ -16746,7 +16754,15 @@ Original48ca raw failure remains authenticated and failed. Read-only map
 is claimed.
 - [x] Run the combined chat-progress, command-bounds and native alias-preparation integration candidate's full current-pair fast check once from a clean committed checkout; retain exact SHA, complete output, measured duration and digest. Keep required floor closure, live wire joins and observed T16 task-shutdown diagnostics separate.
 - [x] Document the implemented native chat, retained resume, settled configuration, compaction, durable question answers and one-shot responder workflows in existing operator/developer guides; add README navigation and a factual Unreleased entry. Verify exact examples, reciprocal links and documentation gates without claiming helper execution, new served wire generations, creation custody, foreground activity delivery or M7 closure.
-- [ ] Resolve the exact 0823aa50 full-check pre-fence runtime_unavailable under untraced combined load; retain failed output, establish its phase/cause and exact process lifetimes, preserve the original gate/fence/reap/cleanup/Store assertions, and verify a clean committed integration candidate without relabeling the failed run.
+- [x] Resolve the exact 0823aa50 full-check pre-fence runtime_unavailable under untraced combined load; retain failed output, establish its phase/cause and exact process lifetimes, preserve the original gate/fence/reap/cleanup/Store assertions, and verify a clean committed integration candidate without relabeling the failed run.
+  Cause: under CPU overload the OS wakes the quiesce phase owner 160–270 ms
+  late (measured; `:high` priority did not help), past test reserves of
+  50–100 ms. Resolved under the 2026-10-09 quiesce disposition: test-only
+  reserves of about 1,000 ms keep every assertion's meaning, and a phase owner
+  completing after its outer deadline now returns `runtime_unavailable`, with a
+  deterministic witness that fails without the check (`9dad334a`). Quiesce
+  cases pass in six concurrent combined-load runs, three per pair; outputs are
+  in `claude-20261009/t16-core/`.
 - [x] Prove current quiesce startup-loss and pre-gate cutoff controls with captured original actors: retain the 63-reader/sibling shared cutoff, mixed announced/unannounced cancellation and exact joins, plus held child-resolution and immediate-forward controls under the unchanged initial gate/reap limits. Keep missing historical 520ff308/0823aa50 output and unknown old interleavings separate; current controls do not reconstruct the past.
 
 
@@ -16808,7 +16824,15 @@ is claimed.
 - [x] Diagnose and repair the provider-launcher interrupted-wait namespace-failure terminal observation missing the captured 2,100-ms cutoff on e5; preserve the required bound and retain actual OS lifetime evidence.
 - [x] Resolve the repeated provider-call public-event identity decision; implement the accepted compatibility path and prove old replay, repeated calls, cancellation, reconciliation and mutation uncertainty without rewriting retained events.
 - [x] Adapt the composition authority inventory to the approved contextual question adapter; retain the failed no-callback assertion and verify absent/nil host refusal plus denied bare/contextual decisions for every shipped tool generation on both toolchains.
-- [ ] Investigate Task.Supervisor and OwnerGroup shutdown_error/noproc diagnostics for Task.Supervised and coordinator children in configuration/input/interaction cleanup; retain reproduction and actual task-lifetime evidence, including the coordinator-child report in the maintenance-view full Core run.
+- [x] Investigate Task.Supervisor and OwnerGroup shutdown_error/noproc diagnostics for Task.Supervised and coordinator children in configuration/input/interaction cleanup; retain reproduction and actual task-lifetime evidence, including the coordinator-child report in the maintenance-view full Core run.
+  Cause: Elixir's DynamicSupervisor, which also underlies `Task.Supervisor`,
+  unlinks a child before consuming its EXIT, so intentional shutdowns were
+  reported as `shutdown_error`/`noproc`. Session coordinators now run under an
+  Erlang `simple_one_for_one` supervisor (`def632ca`), and owner and runtime
+  tasks under `Loopex.Runtime.TaskSupervisor`, an Erlang `one_for_one` supervisor
+  (`0c2b6edf`, `abd4b9d2`). Witnesses fail before the change. Whole Core runs
+  at `abd4b9d2` (1611 current, 1627 floor) show only truthful `killed` and
+  intentional fault reports.
 - [x] Prove actual Runtime configuration-preparation startup owner loss before callback acquisition with exact coordinator/OwnerGroup/child/report identities and bounded joins on both supported pairs; retain the controlled schedule without claiming attribution of the six earlier untraced reports or weakening cleanup truth.
 - [x] Investigate and fix the AllowAll notice table ETS-transfer diagnostic emitted to `:init` during host-policy tests; retain a failing-before short-lived caller witness, exact DOWN and concurrent once-per-VM proof on both toolchains.
 
