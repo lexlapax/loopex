@@ -91,6 +91,10 @@ defmodule Loopex.ArtifactTransferCustodyTest do
     chunk = %{offset: 0, bytes: "abc", chunk_digest: digest("abc")}
     reply(read, {:ok, chunk})
     assert {:ok, ^chunk} = Task.await(reader, 1_000)
+    attachment = Map.fetch!(state(fixture).attachments, fixture.attachment.attachment_id)
+    progress = Map.fetch!(attachment.transfer_progress, context.transfer_ref)
+    assert progress.bytes === 3
+    assert progress.chunks === 1
     assert ledger(fixture).transfer_debit === 1_048_579
     assert ledger(fixture).transfer_reserved === 0
 
@@ -114,7 +118,12 @@ defmodule Loopex.ArtifactTransferCustodyTest do
     caller = Task.async(fn -> Loopex.open_artifact_transfer(fixture.attachment, data.request) end)
     reserve = callback(:reserve)
     {_request, context} = reserve.arguments
-    assert :ok = Loopex.detach(fixture.attachment)
+    assert :ok =
+             Loopex.Runtime.EventDispatcher.release_attachment(
+               fixture.dispatcher,
+               fixture.attachment.attachment_id,
+               fixture.attachment.incarnation_id
+             )
     first = callback(:retire)
     original_selector = first.arguments
     assert original_selector.open_deadline_ms === context.open_deadline_ms
@@ -198,7 +207,12 @@ defmodule Loopex.ArtifactTransferCustodyTest do
     reply(retire, {:error, :cleanup_unproved})
     await(fn -> entry(fixture, context.transfer_ref).observation === :idle end)
     original = entry(fixture, context.transfer_ref)
-    assert :ok = Loopex.detach(fixture.attachment)
+    assert :ok =
+             Loopex.Runtime.EventDispatcher.release_attachment(
+               fixture.dispatcher,
+               fixture.attachment.attachment_id,
+               fixture.attachment.incarnation_id
+             )
     observe = callback(:retire)
     assert observe.pid === retire.pid
     assert observe.arguments === retire.arguments
@@ -243,7 +257,12 @@ defmodule Loopex.ArtifactTransferCustodyTest do
     ack = callback(:acknowledge)
     assert ack.pid === retire.pid
     assert entry(fixture, context.transfer_ref).invocation === :idle
+    assert entry(fixture, context.transfer_ref).cursor === 3
     assert map_size(state(fixture).artifact_transfers) === 1
+    attachment = Map.fetch!(state(fixture).attachments, fixture.attachment.attachment_id)
+    refute Map.has_key?(attachment.transfers, context.transfer_ref)
+    refute Map.has_key?(attachment.transfer_progress, context.transfer_ref)
+    assert ledger(fixture).transfer_debit === 1_048_579
     assert {:ok, %{status: :active}} = Loopex.attachment_status(fixture.attachment)
     reply(ack, :ok)
     assert :ok = Task.await(closer, 1_000)

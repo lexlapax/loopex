@@ -27,6 +27,40 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+### Artifact qualification and bounded repairs, 2026-10-08
+
+At tested source `66ef3d9b66e0a6afc464c3c1f213ca9673be8eba`, formatting
+preserved every non-line AST across72 files; warning-free compilation passed on
+both supported toolchains, and current documentation/status checks passed.
+Whole Protocol231 passed on each pair, including24 genuine Node cases per pair.
+Its complete current /3 and /4 manifests, vectors and independent decoders are
+qualified at that source; full transport/integration qualification remains open.
+
+Original94674 Core36 failed four cases after68.516 seconds: two nonexistent
+fixture detach calls, a late read recreating a retired progress key and the
+real60-second caller observation timeout. Original12880 Local failed test
+compilation before cases after1.245 seconds because one fixture references an
+undefined session_id. Both floor runs remain UNRUN. Neither failure is relabeled.
+The reviewed two-path Corev4 repair fixes the first three Core failures and
+preserves the long case unchanged; its source is joined, native qualification
+UNRUN. The Local fixture repair is in progress in an isolated writer worktree.
+
+A separately reviewed proposal requests a fixed1,000ms observation grace for
+that long case while requiring the recorded facade return at or before the
+original60-second cutoff. Production60,000ms, cleanup5,000ms and aggregate70,000ms
+remain unchanged. Explicit approval is pending; dependent test changes are held.
+ADR0065 also remains Proposed. These pending decisions do not stop unrelated work.
+
+Immutable140-asset retention:
+`M7/current-source-preparation-20261008-v16/retention.json`, SHA-256
+`19e2bb9c3b048a12b91ab6e07451134b11ea0ce0dae83578a6481c90637aeb27`.
+It retains all five original runs, completed collections, raw repairs, independent
+reviews, exact timing proposal and complete whole-file scope. Latest completed
+registry2861 SHA-256
+`be1b356e85545eb462516ce399662c347da38dbbd5b1ea76f0d1c96ade71b7a1`.
+No native handle is live. T01–T19 original88 done /85 open /6 retired;
+added371 done /24 open; combined459 done /109 open /6 retired. No checkbox changes.
+
 ### Owned artifact opening and current protocol source joined, 2026-10-08
 
 The coordinated91-path source candidate joins accepted ADR0066's Core port,

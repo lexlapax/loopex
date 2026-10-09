@@ -1668,13 +1668,14 @@ defmodule Loopex.Runtime.EventDispatcher do
   end
 
   defp record_read(attachment, transfer_ref, {:ok, %{bytes: bytes}}) when is_binary(bytes) do
-    update_in(attachment.transfer_progress[transfer_ref], fn
-      nil ->
-        nil
+    case Map.fetch(attachment.transfer_progress, transfer_ref) do
+      {:ok, progress} ->
+        progress = %{progress | bytes: progress.bytes + byte_size(bytes), chunks: progress.chunks + 1}
+        %{attachment | transfer_progress: Map.put(attachment.transfer_progress, transfer_ref, progress)}
 
-      progress ->
-        %{progress | bytes: progress.bytes + byte_size(bytes), chunks: progress.chunks + 1}
-    end)
+      :error ->
+        attachment
+    end
   end
 
   defp record_read(attachment, _transfer_ref, _result), do: attachment
@@ -2104,10 +2105,17 @@ defmodule Loopex.Runtime.EventDispatcher do
 
         state = put_artifact_entry(state, entry)
 
+        # Concept: lifecycle totals count only a chunk admitted to its live caller.
+        # Technical depth: physical work settles above even after retirement, but
+        # an already removed public lifecycle must stay absent through read/ack joins.
         state =
-          case Map.get(state.attachments, entry.attachment_id) do
-            nil -> state
-            attachment -> put_attachment(state, record_read(attachment, id, result))
+          if valid and timely and not is_nil(read.from) do
+            case Map.get(state.attachments, entry.attachment_id) do
+              nil -> state
+              attachment -> put_attachment(state, record_read(attachment, id, result))
+            end
+          else
+            state
           end
 
         if not valid or not timely do
