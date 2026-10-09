@@ -27,6 +27,44 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+### Daemon record and identity repairs joined, 2026-10-09
+
+Original74876 at `2bfb3e554063404778ed6fff34bf45c1bb1e65fa` is terminal
+FAIL after309.939 seconds. Current Socket15 and MaximumPopulation2 passed;
+remaining Daemon525/530 passed with5 failures and3 environment cases excluded.
+Thus542/547 selected Daemon cases passed; CLI and all floor stages are UNRUN.
+Terminal SHA-256 `d58e2b260fe7aa62e667eef3761cdf3adff40f8216b93c9986ce9882c4f207b4`;
+collection `2f79b920de484c9503be28a352eabae7e5296efe17737abe334c5f4cd470ed64`.
+All7 original joins and32 assets were verified; original failures remain.
+
+The reviewed3-file repair at `7da6ccb7` supplies complete literal checkpoint
+payloads, exact whole-event privacy refusal and configure correlation, and
+removes two encodings of already-wire interaction identities in socket tests.
+All24 whole cases, replay/span assertions and original cutoffs remain. Review
+`f053446edf664d53499e5b5ce8254925ca461f3a5605bb80011a5d6a23e8a6d0`
+clears source only; hidden prior error replies remain unretained. Original85336
+formatting passed strict AST equality and both checks after2.411 seconds.
+Registry2903 SHA-256
+`ff24f80c06bd4d9f7541c2b0d329ef247abd4e83421caa797101bf7ac21d93bc`.
+Immutable81-asset retention:
+`M7/current-source-preparation-20261009-v21/retention.json`, SHA-256
+`3d39c3f4f87a6f51404d4fd27d210daf6b56f5d3b6948ad6fd883c6037040395`.
+Root next owns complete600-case Daemon/CLI focused qualification per pair.
+No native handle is live; no full fast/release/closure result is claimed.
+
+One newly explicit T11 foundation subtask is running in registered detached
+worktree `/private/tmp/m7-delegation-initialize-run-log-worktree-20261009-v1`
+at2bfb3e55. It owns only RetainedObjects and a new run-log test: physical
+initialize-only header/append/reopen/original-tx recovery under accepted0046/0056,
+with actual parent joins and the shared binding/run uncertainty fence. No child,
+reserve, accounting API or helper activation is admitted. Native proof is UNRUN.
+Dispatch `d07abcd19475da5a7ef2210e92c89bc0f49e3c6707b97951664631bf5e36cb05`.
+Core observation grace and ADR0065 remain pending; stopped-leader retirement
+ownership still needs a complete governed design and remains unimplemented.
+T01–T19 original89 done /84 open /6 retired; added371 done /25 open;
+combined460 done /109 open /6 retired. The extra open row tracks this existing
+T11 work explicitly; no completed box changed.
+
 ### Daemon current-activity fixture correction, 2026-10-09
 
 Original84684 at `e4171b6d8b238aac939bf4b1ad9b22b180e27cb8` passed
