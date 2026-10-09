@@ -1130,6 +1130,51 @@ defmodule Loopex.Store.Local.ArtifactStoreConformanceTest do
     end
   end
 
+  defmodule DescribeCapture do
+    @moduledoc false
+    def describe(use, _locator), do: {:ok, use}
+  end
+
+  test "Core describe enforces the complete immutable use ceiling independently of adapter decoding" do
+    {_root, handle} = open_local("core-described-use-limit")
+    assert {:ok, seed} = put_artifact(Artifacts, handle, "described boundary")
+
+    for {size, accepted} <- [{131_072, true}, {131_073, false}] do
+      metadata = metadata_for_exact_use_size(seed, size)
+      use = expected_use(seed, metadata)
+      digest = Canonical.digest(["artifact-use-v2", use])
+      reference = %{seed | use_digest: digest, use_locator: "use:" <> digest}
+      assert ArtifactStore.valid_reference?(reference)
+      assert byte_size(Canonical.encode(["artifact-use-v2", use])) == size
+      result = ArtifactStore.describe(%{module: DescribeCapture, handle: use}, reference)
+
+      if accepted do
+        assert {:ok, ^use} = result
+      else
+        assert {:error, :artifact_use_mismatch} = result
+      end
+    end
+
+    use = expected_use(seed, caller_metadata())
+
+    for labels <- [
+          Map.put(use.metadata, "run_id", :binary.copy("r", 131_073)),
+          Map.put(
+            use.metadata,
+            "attempt",
+            :binary.decode_unsigned(:binary.copy(<<255>>, 131_073))
+          ),
+          Map.put(use.metadata, "run_id", self()),
+          Map.put(use.metadata, "private", "PRIVATE_USE_PROVENANCE")
+        ] do
+      assert {:error, :artifact_use_mismatch} =
+               ArtifactStore.describe(
+                 %{module: DescribeCapture, handle: %{use | metadata: labels}},
+                 seed
+               )
+    end
+  end
+
   test "artifact use allocation guard rejects every oversized scalar before adapter access" do
     required = ["session_id", "run_id", "operation_id", "attempt", "tool_call_id"]
     opaque_identifiers = ["session_id", "run_id", "operation_id", "tool_call_id"]

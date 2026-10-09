@@ -27,6 +27,56 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+### Broad current run failed at Daemon; artifact guard joined, 2026-10-08
+
+Original10084 at `cfe6188da2329a937cf43bb3d201ce5d685a80b7` is terminal
+and collected with exit1. Current toolchain, Node22.14, changed-source
+formatting, warning-free compilation, documentation and status pass. Whole
+Core682, Composition389, Store48 and Restore179 cases pass without exclusions,
+skips or invalids. Restore includes all64 physical restores and65th refusal.
+Daemon455/522 selected cases pass;67 fail, with3 environment cases excluded
+and no skipped or invalid cases. CLI43 and the entire floor pair are UNRUN.
+The complete1837.293-second result retains11 exact original process joins
+and44 verified artifacts under `M7/creation-daemon-focused-20261008-v4`.
+Terminal SHA-256
+`4e03250b9be0d6ae89079107f90e4f42fe17f01cc4519ec212a71b97e288a39a`;
+collection SHA-256
+`5aa9b39d759ad075bf7a7d59624d312c3603eef24f7fe4d187d9c78f21046203`.
+The latest completed registry is2771, SHA-256
+`4c1681cb0412084ac563e4fca4c468d2c3bda2faaf6bf432ea221418e4f082e4`.
+No native handle remains live. Never rerun unchanged source/stage or relabel
+this partial run as broad, floor, full-fast or closure proof.
+
+The67-failure census identifies63 GenServer.stop cleanup exits, an unused
+receive marker, one blocking-call trace assertion and two full-population
+shutdown outcomes106 instead of0. Census
+`/private/tmp/m7-current-daemon-terminal-failure-census-20261008-v1.json`,
+SHA-256 `042034479fa237086ab33bbd0a8e8f6ac93acbdcdf912f40a0dbea44c4eb43e5`.
+Their causes are under source/lifetime review; preserve all original actors,
+cutoffs, population, cleanup and marker assertions. A new T16 repair subtask
+retains this complete obligation rather than accepting a filtered pass.
+
+The reviewed two-file Core ArtifactStore description guard is joined. It
+checks closed map cardinalities and scalar lower bounds before canonical
+encoding, then enforces the accepted complete131072-byte use ceiling and
+digest. The30-case Local conformance file preserves all29 original cases and
+adds actual131072/131073-byte, oversized scalar and typed-refusal controls.
+Source review SHA-256
+`269ce607e4feb8661cec4631bcddd582c2601b13d8a451a606b2f772a722bda9`;
+patch SHA-256
+`2c552a39071acf9ebbd11223f12335c730093f146d802e32134cde58409fcc36`.
+Formatting, compilation and native qualification for the joined bytes are
+UNRUN. A new T05 subtask tracks this boundary repair independently of complete
+transport activation; no callback, schema or authority changes.
+
+Foreground B and Daemon C source packets remain unjoined. Both projections
+omit the accepted131072-byte tool_version ceiling; exact-cap/cap-plus-one
+repairs are in private owner worktrees. Artifact full-open deadline/custody,
+daemon pre-resource provider custody and helper whole-run accounting still
+need concrete decisions. ADR0065 remains pending. Current-only contracts,
+original failed evidence and required cleanup remain authoritative.
+T01-T19 original88 done /85 open /6 retired; added369 done /25 open.
+
 ### Retained repair checkpoint and next broad proof, 2026-10-08
 
 Immutable snapshot18 captures the exact clean primary
