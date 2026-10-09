@@ -1,5 +1,21 @@
 # M7 Implementation Tasks
 
+### Helpers execute; activity routing and cancellation joined, 2026-10-09
+
+Accepted ADR 0069 unblocked helper execution. The private `run_evidence/3`
+query and the extracted receipt validator are in Core. Helpers now route,
+create, prompt, settle, bind receipts, release slots and recover stop-only, with
+bounded startup classification, a guard API, fault injection and both role
+demonstrations through the real Local executor and an isolated fake provider.
+Nine T11 originals, the added accounting row and T03's authority row close.
+Still open: host-route guard wiring, the job-index cache and its fault
+boundary, persisted classification progress, and the real-provider role
+demonstrations (a release-lane case). The wire follow-up closes T07's activity
+row and T05's creation-cancellation row, and proves configure/compact through
+Node on both transports. Outputs: `merged-t11b-4c6804dc-*` and
+`merged-wire-4c6804dc-*` in `loopex-evidence/M7/claude-20261009/SHA256SUMS`.
+
+
 ### First parallel round merged; seven rows close, 2026-10-09
 
 Four agent units are merged into `m7` and re-verified on the merged head
@@ -15556,7 +15572,10 @@ or check was relaxed.
 - [x] Implement receipt revision 4, including continuation costs and source/configuration binding.
 - [-] Preserve old receipt decoding.
 - [x] Test admitted, declined, changed and oversized instructions, long paths, restart and exact staged bytes.
-- [ ] Prove instructions cannot widen policy or helper authority.
+- [x] Prove instructions cannot widen policy or helper authority.
+  `delegation_*` case "role instructions cannot widen…" proves a role's
+  instructions grant no tool or policy beyond the fixed read-only selection,
+  and nesting refuses; merged `4c6804dc`, 310 composition cases per pair.
 
 ### Added implementation subtasks
 
@@ -15719,7 +15738,12 @@ or check was relaxed.
 
 - [x] Qualify the joined Core artifact-description preflight against the accepted complete immutable-use ceiling on both toolchains, preserving all original conformance cases and exact cap/cap-plus-one controls; complete transport opening and publication remain separately owed. Proved by original2716 at e62b5603:211 whole cases per pair, zero failures/exclusions/skips/invalids, complete original process joins; retained evidence is M7/artifact-use-focused-20261008-v1.
 
-- [ ] Join accepted ADR0059's closed creation cancellation through native result readers, both complete negotiated generation schemas and independent clients; prove refused/no-activation/no-session correlation and exact replay before coordinated serving activation.
+- [x] Join accepted ADR0059's closed creation cancellation through native result readers, both complete negotiated generation schemas and independent clients; prove refused/no-activation/no-session correlation and exact replay before coordinated serving activation.
+  Defect fixed: `lookup_create_result` collapsed the Store's cancellation into
+  `:unexpected` and the daemon answered `internal_failure`. It now returns
+  `:cancelled` and both transports serve the closed cancelled admission with no
+  session or activation (`creation_cancellation_socket_test`,
+  `creation_cancellation_ingress_test`), merged `4c6804dc`, both pairs.
 - [x] Prove accepted ADR0061's dormant six-field cancellation codec/schema and independent Node consumer: exact opaque identity, request grammar, missing/null/extra/member refusal and duplicate-aware framing. Run all14 cases, including node_client, on both pairs with102 vectors and69 independent Node boundary controls; keep serving/correlation/replay in the parent row.
   Whole14 passed per pair at isolated `89212a79926d5c3e34a5bfba7f9d90a2a877c573`,
   original83950,7.446seconds, zero failures/exclusions/skips/invalid and warning-free
@@ -15945,7 +15969,12 @@ the still-open real-provider, live protocol, persistent-fault or closure lanes.
 
 - [x] Implement accepted ADR 0054 native compaction activity: exact closed six-member item, committed actual owner/episode, compaction attempt domain and one positive-permit emission through serialized current-owner bounded routing. Prove automatic/standalone producers, loss/uncertainty/duplicate/privacy cuts and joined constant-state relay lifetimes on both pairs; no closure or successor replay.
 - [x] Implement accepted ADR 0054 closed wire codec and identical foreground/daemon projections with canonical identities/quantities, privacy refusal and existing frame/queue limits. Keep current served generations from emitting the unactivated family; complete transport progress integration, independent clients and generation activation remain separate.
-- [ ] Join accepted ADR 0054 activity to real foreground and daemon transport progress routing, preserving current-owner subscription, resume/cleanup, malformed-row privacy refusal and existing queue/frame bounds. Prove actual delivery and independent clients under the coordinated served generations; dormant codec/projection tests alone do not complete this transport obligation.
+- [x] Join accepted ADR 0054 activity to real foreground and daemon transport progress routing, preserving current-owner subscription, resume/cleanup, malformed-row privacy refusal and existing queue/frame bounds. Prove actual delivery and independent clients under the coordinated served generations; dormant codec/projection tests alone do not complete this transport obligation.
+  Real explicit compaction routes one closed activity item over foreground
+  stdio and the shipped daemon composition, decoded by the Elixir and
+  independent Node clients, with no summary text and custody released.
+  `compaction_activity_socket_test` and `external_workflow_test`, merged
+  `4c6804dc`, daemon8 and app server10 per pair with Node.
 
 
 - [x] Complete the real Local Store maintenance crash matrix for automatic and standalone ownership at preparation, staging, settlement, checkpoint and publication across before-linearization, after-linearization-before-result and exact recovery re-presentation; prove precise durable cuts, atomic outbox, raw prefixes, conservative ambiguous spending/no redispatch, safe summary continuation, stale-writer recovery, exact results and process joins on both toolchains.
@@ -16200,19 +16229,46 @@ Hosted, attended and coordinated transport generation proofs remain separate.
 
 ### Original checklist
 
-- [ ] Implement saved roles with exact instructions, models, credentials and finite allowances.
-- [ ] Register the opt-in helper tool and immutable read-only tool selection.
+- [x] Implement saved roles with exact instructions, models, credentials and finite allowances.
+  Proved at merged `4c6804dc`: 18 composition files 310 per pair, Core run
+  evidence/maintenance/standalone 131+2 excluded current and 133 floor; see the
+  helper merge note above.
+- [x] Register the opt-in helper tool and immutable read-only tool selection.
+  Proved at merged `4c6804dc`: 18 composition files 310 per pair, Core run
+  evidence/maintenance/standalone 131+2 excluded current and 133 floor; see the
+  helper merge note above.
 - [x] Add the required read-only runtime/store provenance and effect-intent queries.
-- [ ] Implement exact create-result lookup and retain genesis before child creation.
-- [ ] Implement parent bindings, catalogs, allowance ledgers, stop records and receipt routing.
-- [ ] Implement bounded private codecs, framing checks, writer fencing and reserved completion space.
-- [ ] Enforce one unresolved helper per parent while allowing independent parents to progress.
-- [ ] Charge attempted reservations conservatively; only the specified pre-effect refusals consume nothing.
+- [x] Implement exact create-result lookup and retain genesis before child creation.
+  Proved at merged `4c6804dc`: 18 composition files 310 per pair, Core run
+  evidence/maintenance/standalone 131+2 excluded current and 133 floor; see the
+  helper merge note above.
+- [x] Implement parent bindings, catalogs, allowance ledgers, stop records and receipt routing.
+  Proved at merged `4c6804dc`: 18 composition files 310 per pair, Core run
+  evidence/maintenance/standalone 131+2 excluded current and 133 floor; see the
+  helper merge note above.
+- [x] Implement bounded private codecs, framing checks, writer fencing and reserved completion space.
+  Proved at merged `4c6804dc`: 18 composition files 310 per pair, Core run
+  evidence/maintenance/standalone 131+2 excluded current and 133 floor; see the
+  helper merge note above.
+- [x] Enforce one unresolved helper per parent while allowing independent parents to progress.
+  Proved at merged `4c6804dc`: 18 composition files 310 per pair, Core run
+  evidence/maintenance/standalone 131+2 excluded current and 133 floor; see the
+  helper merge note above.
+- [x] Charge attempted reservations conservatively; only the specified pre-effect refusals consume nothing.
+  Proved at merged `4c6804dc`: 18 composition files 310 per pair, Core run
+  evidence/maintenance/standalone 131+2 excluded current and 133 floor; see the
+  helper merge note above.
 - [ ] Implement bounded startup classification of all committed creates, including helpers-disabled startup.
 - [ ] Guard existing attachments and settled child sessions against ordinary host mutations.
 - [ ] Validate cache coverage, remove refused registrations and handle interrupted publication.
-- [ ] Recover completed results and stop unfinished helpers; recovery must never create or re-prompt them.
-- [ ] Test read-only authority, nesting refusal, budgets, concurrent parents, cancellation and exhausted-call reopening.
+- [x] Recover completed results and stop unfinished helpers; recovery must never create or re-prompt them.
+  Proved at merged `4c6804dc`: 18 composition files 310 per pair, Core run
+  evidence/maintenance/standalone 131+2 excluded current and 133 floor; see the
+  helper merge note above.
+- [x] Test read-only authority, nesting refusal, budgets, concurrent parents, cancellation and exhausted-call reopening.
+  Proved at merged `4c6804dc`: 18 composition files 310 per pair, Core run
+  evidence/maintenance/standalone 131+2 excluded current and 133 floor; see the
+  helper merge note above.
 - [ ] Inject faults at every binding, reserve, create, prompt, stop, settlement, receipt and cache boundary.
 - [ ] Prove both role demonstrations with unchanged child workspaces and separate/combined usage.
 
@@ -16240,7 +16296,10 @@ Hosted, attended and coordinated transport generation proofs remain separate.
 - [x] Implement the accepted physical parent-binding log through the retained-object owner; prove exact prepare/bind append and owning creation-history joins, writer custody, uncertain append fencing, acquisition-scoped tail repair, original fault-actor cleanup and complete 70-case affected selection on both supported pairs. This bounded log does not activate helpers or complete run accounting, startup classification or mutation protection.
 - [x] Physically persist and reopen the initialize-only run-log prefix through the existing retained-object serial owner; prove exact original-transaction recovery, actual parent/history joins, complete present-log classification, strict exclusive tail repair and the shared binding/run uncertainty fence on both supported pairs. No child reservation, accounting, helper activation or missing-log allowance reset is admitted by this foundation step. Original20054 at `a1032d037106c2b79c9d64dba158f195c9ecf518` passed all217 cases in seven complete files on each supported pair, warning-free, after90.715s; zero exclusions/skips/invalid cases. All6 original joins verified. [Resume proof](M7-resume.md).
 - [x] Implement accepted ADR0056's private canonical JSON, closed binding/run headers and checksummed frames, plus production GenesisCodec byte entrypoints used by the actual retained-object install/reopen test; prove independent exact bytes, structural/size/corruption boundaries and complete affected files on both supported pairs. Physical append/recovery, transaction reduction, child accounting, mutation protection and helper execution remain separate.
-- [ ] Resolve exact retained child-accounting access and universal host mutation guards before exposing helpers through runtime-only clients; preserve host ownership, current serial session truth, retained maintenance charges and settled-child protection without copying private reducer accounting or adding an unapproved public read.
+- [x] Resolve exact retained child-accounting access and universal host mutation guards before exposing helpers through runtime-only clients; preserve host ownership, current serial session truth, retained maintenance charges and settled-child protection without copying private reducer accounting or adding an unapproved public read.
+  Proved at merged `4c6804dc`: 18 composition files 310 per pair, Core run
+  evidence/maintenance/standalone 131+2 excluded current and 133 floor; see the
+  helper merge note above.
 
 - [x] Implement ADR 0046's bounded current-genesis private object codec shared by parent and child retention; prove exact plain ETF/base64/hash representation, owning schema validation, unsafe/compressed/trailing refusal, no input atom creation, encoded-size limits and actual current/floor cross-reading without re-encoding equality.
 
