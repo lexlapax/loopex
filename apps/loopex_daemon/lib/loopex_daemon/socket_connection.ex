@@ -1448,7 +1448,6 @@ defmodule LoopexDaemon.SocketConnection do
         {:noreply, state}
       else
         :error -> begin_detach_close(state)
-        {:error, state} -> begin_detach_close(state)
       end
     else
       cutoff = System.monotonic_time(:millisecond) + @registry_request_ms
