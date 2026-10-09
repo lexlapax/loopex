@@ -25,6 +25,7 @@ defmodule LoopexComposition.Delegation do
   alias LoopexComposition.{ProviderBindings, SessionInstructions}
 
   @mutating ~w(prompt steer follow_up configure compact interaction_answer abort resume)a
+  @read_only ~w(attach snapshot history artifact status)a
 
   @doc """
   ## Concept
@@ -58,6 +59,46 @@ defmodule LoopexComposition.Delegation do
          enabled: Keyword.get(options, :enabled, false)
        }}
     end
+  end
+
+  @doc """
+  ## Concept
+
+  Open the helper owner when this host can need one.
+
+  ## Technical depth
+
+  A durable host whose root holds no helper ledger and whose configuration
+  enables no helpers has no helper history to classify, so no owner is opened
+  and `nil` is returned; every other case opens the owner. ADR 0046's rule that
+  retained helper history is classified even when delegation is disabled
+  therefore holds whenever any history exists.
+  """
+  @spec host(Path.t(), binary(), term(), boolean()) :: {:ok, map() | nil} | {:error, term()}
+  def host(root, runtime_id, placement, enabled) do
+    if enabled or File.dir?(Path.join(root, "delegation")),
+      do: open(root, runtime_id, placement, enabled: enabled, recover_stale_writer: true),
+      else: {:ok, nil}
+  end
+
+  @doc """
+  ## Concept
+
+  Stop a host's helper owner after its runtime has stopped.
+  """
+  @spec close(map() | nil) :: :ok
+  def close(nil), do: :ok
+
+  def close(%{helper: helper, objects: objects}) do
+    for pid <- [helper, objects], Process.alive?(pid) do
+      try do
+        GenServer.stop(pid, :normal, 5_000)
+      catch
+        :exit, _ -> :ok
+      end
+    end
+
+    :ok
   end
 
   @doc false
@@ -154,7 +195,14 @@ defmodule LoopexComposition.Delegation do
   @spec guard(map() | nil, binary(), atom()) :: :ok | {:error, term()}
   def guard(nil, _session, _command), do: :ok
 
-  def guard(%{helper: helper}, session, command) when command in @mutating do
+  def guard(%Loopex.Runtime{supervisor: supervisor}, session, command) do
+    case Registry.lookup(LoopexComposition.Delegation.Registry, supervisor) do
+      [{helper, _}] -> guard(%{helper: helper}, session, command)
+      [] -> :ok
+    end
+  end
+
+  def guard(%{helper: helper}, session, command) when command not in @read_only do
     case Helper.classify_session(helper, session) do
       {:ok, :helper_child} -> {:error, :helper_session_owned}
       {:ok, _ordinary_or_parent} -> :ok

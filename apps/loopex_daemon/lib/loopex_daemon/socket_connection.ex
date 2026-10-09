@@ -2921,10 +2921,40 @@ defmodule LoopexDaemon.SocketConnection do
     fn -> run_mutation(attachment, command, request_id, method, fatal_recipient) end
   end
 
-  defp run_mutation(nil, _command, request_id, _method, _fatal_recipient),
+  def run_mutation(nil, _command, request_id, _method, _fatal_recipient),
     do: {:refused, WireRecords.request_error(request_id, "control_not_held")}
 
-  defp run_mutation(attachment, command, request_id, method, fatal_recipient) do
+  # Concept: ADR 0069's host-route guard precedes every daemon mutation.
+  # Technical depth: a helper child, or any session while helper classification
+  # is incomplete, refuses before Core admission and records nothing. Public
+  # only so the route refusal can be proved without a socket.
+  @doc false
+  def run_mutation(attachment, command, request_id, method, fatal_recipient) do
+    case route_guard(attachment.runtime, attachment.session_id, command.type) do
+      :ok ->
+        run_admitted_mutation(attachment, command, request_id, method, fatal_recipient)
+
+      {:refused, word} ->
+        {:refused,
+         WireRecords.admission(request_id, method, command.command_id, {:refused, word})}
+    end
+  end
+
+  @doc false
+  def route_guard(runtime, session_id, type) do
+    case LoopexComposition.Delegation.guard(runtime, session_id, type) do
+      :ok ->
+        :ok
+
+      {:error, {:helper_classification_incomplete, _, _, _}} ->
+        {:refused, "helper_classification_incomplete"}
+
+      {:error, reason} ->
+        {:refused, reason_word(reason)}
+    end
+  end
+
+  defp run_admitted_mutation(attachment, command, request_id, method, fatal_recipient) do
     case Loopex.Runtime.command_for_daemon(attachment, command) do
       {:routed, _route, {:accepted, accepted_id}} ->
         {:accepted, WireRecords.admission(request_id, method, accepted_id, :accepted)}
@@ -3039,48 +3069,69 @@ defmodule LoopexDaemon.SocketConnection do
   # Concept: a governed resume activates through the relay task, which
   # classifies both the lease disposition and whether core started a
   # coordinator.
-  defp resume_task(context, request_id, session_id, command_id) do
+  @doc false
+  def resume_task(context, request_id, session_id, command_id) do
     runtime = context.runtime
     fatal_recipient = Map.get(context, :fatal_recipient)
     connection = self()
 
     fn ->
-      case Loopex.Runtime.resume_session_detailed(runtime, session_id, command_id) do
-        {:ok, %{session_id: resumed, disposition: disposition}} ->
-          if disposition == :activated, do: publish_session(context, connection, resumed)
+      case route_guard(runtime, session_id, :resume) do
+        :ok ->
+          resume_admitted(
+            context,
+            request_id,
+            session_id,
+            command_id,
+            fatal_recipient,
+            connection
+          )
 
-          {:accepted, disposition,
-           WireRecords.admission(request_id, "session.resume", command_id, :accepted, resumed)}
-
-        {:error, :runtime_placement_mismatch, %{disposition: disposition}} ->
-          {:refused, disposition, WireRecords.request_error(request_id, "composition_mismatch")}
-
-        {:error, :commit_unknown, %{disposition: disposition}} ->
-          {:admission_unknown, disposition,
-           WireRecords.succession_error(request_id, "admission_unknown")}
-
-        {:error, :recovery_required, %{disposition: disposition}} ->
-          {:refused, disposition, WireRecords.request_error(request_id, "recovery_required")}
-
-        {:error, reason, %{disposition: disposition}} ->
-          refused = {:refused, reason_word(reason)}
-
-          {:refused, disposition,
-           WireRecords.admission(request_id, "session.resume", command_id, refused)}
-
-        {:error, :runtime_unavailable} ->
-          if is_pid(fatal_recipient),
-            do: send(fatal_recipient, {:daemon_component_fatal, self(), :runtime_lost})
-
-          {:admission_unknown, :no_activation,
-           WireRecords.succession_error(request_id, "admission_unknown")}
-
-        _unexpected ->
-          Logger.debug("loopex daemon resume reply outside the typed set")
-
-          {:admission_unknown, :no_activation,
-           WireRecords.succession_error(request_id, "admission_unknown")}
+        {:refused, word} ->
+          {:refused, :no_activation,
+           WireRecords.admission(request_id, "session.resume", command_id, {:refused, word})}
       end
+    end
+  end
+
+  defp resume_admitted(context, request_id, session_id, command_id, fatal_recipient, connection) do
+    runtime = context.runtime
+
+    case Loopex.Runtime.resume_session_detailed(runtime, session_id, command_id) do
+      {:ok, %{session_id: resumed, disposition: disposition}} ->
+        if disposition == :activated, do: publish_session(context, connection, resumed)
+
+        {:accepted, disposition,
+         WireRecords.admission(request_id, "session.resume", command_id, :accepted, resumed)}
+
+      {:error, :runtime_placement_mismatch, %{disposition: disposition}} ->
+        {:refused, disposition, WireRecords.request_error(request_id, "composition_mismatch")}
+
+      {:error, :commit_unknown, %{disposition: disposition}} ->
+        {:admission_unknown, disposition,
+         WireRecords.succession_error(request_id, "admission_unknown")}
+
+      {:error, :recovery_required, %{disposition: disposition}} ->
+        {:refused, disposition, WireRecords.request_error(request_id, "recovery_required")}
+
+      {:error, reason, %{disposition: disposition}} ->
+        refused = {:refused, reason_word(reason)}
+
+        {:refused, disposition,
+         WireRecords.admission(request_id, "session.resume", command_id, refused)}
+
+      {:error, :runtime_unavailable} ->
+        if is_pid(fatal_recipient),
+          do: send(fatal_recipient, {:daemon_component_fatal, self(), :runtime_lost})
+
+        {:admission_unknown, :no_activation,
+         WireRecords.succession_error(request_id, "admission_unknown")}
+
+      _unexpected ->
+        Logger.debug("loopex daemon resume reply outside the typed set")
+
+        {:admission_unknown, :no_activation,
+         WireRecords.succession_error(request_id, "admission_unknown")}
     end
   end
 

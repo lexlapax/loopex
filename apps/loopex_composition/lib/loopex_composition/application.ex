@@ -20,6 +20,7 @@ defmodule LoopexComposition.Application do
   def start(_type, _args) do
     children = [
       {LoopexComposition.ReqLLMStarter, []},
+      {Registry, keys: :unique, name: LoopexComposition.Delegation.Registry},
       {DynamicSupervisor,
        strategy: :one_for_one, name: LoopexComposition.Ephemeral.OwnerSupervisor}
     ]

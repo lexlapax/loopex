@@ -699,7 +699,17 @@ defmodule LoopexCli.ChatDriver do
   # Technical depth: events can lag admission, including on resume. Read the
   # public active run before submission; Core refuses if it changes before
   # admission, rather than putting the input into another run.
-  defp submit_command(attachment, %{type: :steer} = command, state) do
+  # Concept: ADR 0069's host-route guard runs before every chat mutation.
+  # Technical depth: a helper child refuses here, before Core admission, so the
+  # refused command commits nothing; ordinary sessions pass through unchanged.
+  defp submit_command(attachment, command, state) do
+    case LoopexComposition.Delegation.guard(state.runtime, state.session, command.type) do
+      :ok -> submit(attachment, command, state)
+      refusal -> refusal
+    end
+  end
+
+  defp submit(attachment, %{type: :steer} = command, state) do
     case state.facade.(Loopex, :session_status, [state.runtime, state.session]) do
       {:ok, %{active_run_id: run}} when is_binary(run) ->
         state.facade.(Loopex, :command, [attachment, Map.put(command, :run_id, run)])
@@ -712,11 +722,12 @@ defmodule LoopexCli.ChatDriver do
     end
   end
 
-  defp submit_command(attachment, command, state),
+  defp submit(attachment, command, state),
     do: state.facade.(Loopex, :command, [attachment, command])
 
   defp configure(attachment, command, state) do
-    with {:ok, changes, candidate} <-
+    with :ok <- LoopexComposition.Delegation.guard(state.runtime, state.session, :configure),
+         {:ok, changes, candidate} <-
            LoopexCli.ChatConfiguration.update(state.configuration, command.changes) do
       result =
         state.facade.(Loopex, :command_with_configuration, [

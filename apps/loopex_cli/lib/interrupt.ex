@@ -1630,7 +1630,15 @@ defmodule LoopexCli.Interrupt do
 
     {_worker, monitor} =
       spawn_monitor(fn ->
-        result = Loopex.command(attachment, %{type: :abort, command_id: command_id})
+        result =
+          with :ok <-
+                 LoopexComposition.Delegation.guard(
+                   attachment.runtime,
+                   attachment.session_id,
+                   :abort
+                 ),
+               do: Loopex.command(attachment, %{type: :abort, command_id: command_id})
+
         send(manager, {:loopex_interrupt_result, command_id, result})
       end)
 

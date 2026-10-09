@@ -20,8 +20,9 @@ defmodule LoopexCli.ChatConfiguration do
   it. The selected registry policy or independently captured harness policy
   must match a retained policy question, and admitted model identities must
   have configured provider routes. These checks
-  resolve no credential or catalog entry. Activation and enabled delegation
-  remain outer-host integration obligations.
+  resolve no credential or catalog entry. Enabled delegation adds the fixed
+  task generation and the enabled-role facts; `helper_parent/2` later binds the
+  exact catalog digest for the host's runtime identity before creation.
   """
 
   alias LoopexCli.{ConfigFile, ConfigOptions, ConfigSelection}
@@ -60,13 +61,12 @@ defmodule LoopexCli.ChatConfiguration do
          {:ok, file} <- ConfigFile.load(parsed.config, cwd),
          {:ok, selection} <- ConfigSelection.compose(file, parsed, cwd, home),
          :ok <- required_paths(selection.profile),
-         :ok <- delegation(selection.profile),
          {:ok, workspace_ref} <-
            WorkspaceIdentity.reference(selection.profile["paths"]["workspace"]),
          session_options <- session_options(workspace_ref),
          active <- Map.fetch!(@profiles, selection.profile["session"]["tools"]),
-         definitions <- selected_definitions(active),
-         {:ok, instructions} <- capture_instructions(selection.profile),
+         definitions <- selected_definitions(active) ++ helper_definitions(selection.profile),
+         {:ok, instructions} <- capture_instructions(selection.profile, placeholder()),
          {:ok, selection} <-
            ConfigSelection.resolve_session(
              selection,
@@ -86,7 +86,8 @@ defmodule LoopexCli.ChatConfiguration do
          selection: selection,
          active_tools: active,
          session_options: session_options,
-         genesis: genesis
+         genesis: genesis,
+         helpers: helpers?(selection.profile)
        }}
     else
       {:ok, _other_command} -> {:error, :invalid_chat_invocation}
@@ -376,9 +377,6 @@ defmodule LoopexCli.ChatConfiguration do
     ids = Enum.sort(Enum.map(definitions, & &1["tool_id"]))
 
     cond do
-      "loopex.task" in ids ->
-        {:error, :chat_delegation_unavailable}
-
       Map.has_key?(flags, "skill-dir") ->
         {:error, {:chat_resume_immutable_catalog, "/flags/skill-dir"}}
 
@@ -529,10 +527,79 @@ defmodule LoopexCli.ChatConfiguration do
     end)
   end
 
-  defp delegation(%{"delegation" => %{"enabled" => true}}),
-    do: {:error, :chat_delegation_unavailable}
+  defp helpers?(profile), do: get_in(profile, ["delegation", "enabled"]) == true
 
-  defp delegation(_), do: :ok
+  defp helper_definitions(profile),
+    do: if(helpers?(profile), do: [LoopexComposition.Delegation.Tool.definition()], else: [])
+
+  # Concept: the catalog fact has a fixed width before its runtime is known.
+  # Technical depth: load measures the complete parent genesis with this
+  # placeholder; helper_parent/2 replaces it with the exact retained catalog
+  # address. Both spellings have identical byte cost.
+  defp placeholder, do: "sha256:" <> String.duplicate("0", 64)
+
+  @doc """
+  ## Concept
+
+  Bind a helper-enabled chat parent to its exact frozen roles and catalog.
+
+  ## Technical depth
+
+  Each enabled saved role resolves through the composition's read-only role
+  resolver with the delegation reply and context settings. The catalog digest
+  for this runtime identity is captured into the parent's instructions, the
+  selection is resolved again with the fixed task generation and the complete
+  parent genesis is rebuilt. Nothing here reads a credential or creates a
+  session.
+  """
+  @spec helper_parent(map(), binary()) :: {:ok, map()} | {:error, term()}
+  def helper_parent(%{helpers: true, selection: selection} = prepared, runtime_id) do
+    profile = selection.profile
+    delegation = profile["delegation"]
+    providers = profile["providers"]
+    read_only = selected_definitions(~w(loopex.read loopex.grep loopex.find loopex.ls))
+
+    roles =
+      Enum.reduce_while(delegation["roles"], {:ok, %{}}, fn name, {:ok, acc} ->
+        role =
+          profile["roles"][name]
+          |> Map.take(~w(model reasoning instructions_file))
+          |> Map.merge(
+            Map.take(delegation, ~w(max_tokens context_token_budget system_class_tokens))
+          )
+          |> Map.put_new("reasoning", "default")
+
+        case LoopexComposition.Delegation.role(
+               profile["paths"]["workspace"],
+               role,
+               providers,
+               read_only,
+               profile["session"]["cleanup_grace_ms"]
+             ) do
+          {:ok, genesis} -> {:cont, {:ok, Map.put(acc, name, genesis)}}
+          error -> {:halt, error}
+        end
+      end)
+
+    definitions =
+      selected_definitions(prepared.active_tools) ++ helper_definitions(profile)
+
+    with {:ok, roles} <- roles,
+         {:ok, digest} <-
+           LoopexComposition.Delegation.Catalog.digest(runtime_id, providers, roles),
+         {:ok, instructions} <- capture_instructions(profile, digest),
+         {:ok, resolved} <- ConfigSelection.resolve_session(selection, instructions, definitions),
+         {:ok, genesis} <- genesis(resolved, definitions, prepared.session_options) do
+      {:ok,
+       %{
+         providers: providers,
+         roles: roles,
+         limits:
+           Map.take(delegation, ~w(roles max_children token_budget child_bounds max_tokens)),
+         genesis: genesis
+       }}
+    end
+  end
 
   @doc false
   def active_tools(profile), do: Map.fetch!(@profiles, profile)
@@ -550,11 +617,22 @@ defmodule LoopexCli.ChatConfiguration do
     end)
   end
 
-  defp capture_instructions(profile) do
+  defp capture_instructions(profile, digest) do
+    options = Map.get(profile["session"], "instructions", %{})
+
+    options =
+      if helpers?(profile),
+        do:
+          Map.merge(options, %{
+            "enabled_roles" => profile["delegation"]["roles"],
+            "catalog_digest" => digest
+          }),
+        else: options
+
     SessionInstructions.capture(
       profile["paths"]["workspace"],
       profile["session"]["tools"],
-      Map.get(profile["session"], "instructions", %{})
+      options
     )
   end
 

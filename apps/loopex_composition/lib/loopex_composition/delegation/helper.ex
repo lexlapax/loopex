@@ -165,8 +165,13 @@ defmodule LoopexComposition.Delegation.Helper do
   end
 
   @impl true
-  def handle_call({:bind, runtime, store}, _from, %{runtime: nil} = state),
-    do: {:reply, :ok, %{state | runtime: runtime, store: store}}
+  def handle_call({:bind, runtime, store}, _from, %{runtime: nil} = state) do
+    # Concept: host routes find this owner by the exact runtime incarnation.
+    # Technical depth: the registry key is the runtime's supervisor PID, so a
+    # replacement runtime never inherits it and the entry leaves with this owner.
+    {:ok, _} = Registry.register(LoopexComposition.Delegation.Registry, runtime.supervisor, nil)
+    {:reply, :ok, %{state | runtime: runtime, store: store}}
+  end
 
   def handle_call({:bind, runtime, _store}, _from, %{runtime: runtime} = state),
     do: {:reply, :ok, state}
