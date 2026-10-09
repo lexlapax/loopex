@@ -27,6 +27,26 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+### Supervisor witness classification correction, 2026-10-08
+
+Whole401 original60937 at `2e68506d` passes formatting and warning-free compile,
+then FAILS current Core17/21,20.779seconds/four original joins. All four failures
+are the unchanged strict context assertion: the new shared observer admits
+legitimate supervisor startup progress with no errorContext merely because it
+has a supervisor PID. Retained output `M7/reviewed-owner-focused-20261008-v2`,
+terminal `7d582b328420ca3aaf34ba82b9193565fc70d3541a78e0637e0db15371d64501`,
+collection `45b5331fc54e4a7a9fa6a3d7d0b41b01c49f999f95a3484ec80443eae3c908a2`.
+The observer now selects supervisor diagnostics with a non-nil errorContext;
+unknown non-nil contexts remain retained and rejected by the strict classifier.
+The existing genuine-fault case adds same-process zero-wait controls for
+startup non-admission and unknown-context retention. Its actual killed-fault
+positive control, all21 whole Core cases, original1000ms observation cutoff,
+8192 metadata cap, exact actor joins and quiet assertions remain unchanged.
+All other401 stages and floor were UNRUN. This source repair requires a new
+whole401 both-pair proof. Next registry2671, SHA-256
+`2eb6148958e24ae5a8e85fe7ea5ff1ff2fafccbfe86a8c2a20c9fa875bd5955e`.
+No checkbox closes; failed originals remain immutable.
+
 ### Foreground compile correction, 2026-10-08
 
 Portable formatter41 original21474 passes all30 non-line AST comparisons and

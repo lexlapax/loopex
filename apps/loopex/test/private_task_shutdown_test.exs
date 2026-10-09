@@ -82,6 +82,39 @@ defmodule Loopex.PrivateTaskShutdownTest do
   end
 
   test "a genuine private supervisor fault remains visible and joins real provider descendants" do
+    observer = self()
+
+    startup = %{
+      msg:
+        {:report,
+         %{
+           label: {:supervisor, :progress},
+           report: [supervisor: {observer, Supervisor.Default}, started: [pid: observer]]
+         }}
+    }
+
+    assert Loopex.ShutdownWitness.observe_report(startup, observer) == startup
+    refute_receive {:supervisor_report, ^observer, _, _, _, _, _}, 0
+
+    unknown = %{
+      msg:
+        {:report,
+         %{
+           report: [
+             supervisor: {observer, Supervisor.Default},
+             errorContext: :unknown_shutdown_context,
+             reason: :shutdown,
+             offender: [pid: observer, shutdown: 5_000]
+           ]
+         }}
+    }
+
+    assert Loopex.ShutdownWitness.observe_report(unknown, observer) == unknown
+
+    assert_receive {:supervisor_report, ^observer, ^observer, ^observer, :unrecognized,
+                    "shutdown", 5_000},
+                   0
+
     run = start_fixture(:owner_exit, 1) |> hold()
     evidence = observe_shutdown([run], :supervisor_fault, "fault", false)
 

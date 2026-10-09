@@ -79,7 +79,10 @@ defmodule Loopex.ShutdownWitness do
         _ -> nil
       end
 
-    if is_pid(supervisor) or context in [:shutdown_error, :child_terminated] do
+    # Concept: startup progress is visible Logger output, not termination evidence.
+    # Technical depth: errorContext distinguishes actual supervisor diagnostics;
+    # unknown non-nil contexts remain retained and fail the strict classifier.
+    if (is_pid(supervisor) and context != nil) or context in [:shutdown_error, :child_terminated] do
       shutdown = if is_list(offender), do: Keyword.get(offender, :shutdown)
 
       send(
