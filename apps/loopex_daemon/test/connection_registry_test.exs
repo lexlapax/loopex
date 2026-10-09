@@ -705,6 +705,179 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
              )
   end
 
+  test "the admission cut keeps original durable output live after finite progress routing" do
+    registry = start_registry(5_000, connection_module: ManualConnection)
+    registry_monitor = Process.monitor(registry)
+
+    try do
+      assert {:ok, ingress} = ConnectionRegistry.progress_sink(registry)
+      ingress_guardian = elem(ingress, 0)
+      ingress_monitor = Process.monitor(ingress_guardian)
+
+      try do
+        {relay, _} = bind_scripted_relay(registry)
+        relay_monitor = Process.monitor(relay)
+
+        try do
+          connection = start_manual_connection(registry)
+          connection_monitor = Process.monitor(connection.pid)
+          guardian = elem(connection.progress_sink, 0)
+          guardian_monitor = Process.monitor(guardian)
+
+          try do
+            assert :ok = manual_registry_call(connection.pid, :promote)
+            assert :ok = manual_registry_call(connection.pid, :initialize_complete)
+            activate(registry, "session")
+            install_attachment(registry, relay, connection, "session", 0, "attachment")
+
+            route = fn incarnation, attachment ->
+              ConnectionRegistry.connection_request(
+                registry,
+                {:route_ready_progress, incarnation, attachment}
+              )
+              |> :gen_server.receive_response(500)
+            end
+
+            cut_ref = make_ref()
+
+            assert {:ok, ^cut_ref} =
+                     reply_value(ConnectionRegistry.transport_closing(registry, cut_ref))
+
+            assert %{transport: :closing, live: 1, provisional: 0} =
+                     ConnectionRegistry.status(registry)
+
+            assert {:error, :transport_closing} =
+                     ConnectionRegistry.reserve(registry, self(), make_ref(), now_ms())
+
+            assert :ok = Loopex.ProgressSink.try_offer(ingress, "session", progress_item())
+
+            assert {:reply, :ok} =
+                     manual_registry_call(
+                       connection.pid,
+                       {:invoke, fn -> route.(connection.incarnation, "attachment") end}
+                     )
+
+            assert native_progress_bytes(ingress) == 0
+            assert :empty = manual_registry_call(connection.pid, :take_progress)
+            assert native_progress_bytes(connection.progress_sink) == 0
+
+            assert :dropped =
+                     manual_registry_call(connection.pid, {:enqueue_progress, "transient"})
+
+            before = :sys.get_state(registry).output_commitment
+            encoded = "original durable bytes"
+
+            assert :ok = manual_registry_call(connection.pid, {:enqueue_output, encoded})
+            assert :sys.get_state(registry).output_commitment == before + byte_size(encoded)
+
+            assert {:ok, frame_ref, ^encoded} =
+                     manual_registry_call(connection.pid, :claim_output)
+
+            assert :sys.get_state(registry).output_commitment == before + byte_size(encoded)
+            assert :ok = manual_registry_call(connection.pid, {:output_emitted, frame_ref})
+            assert :sys.get_state(registry).output_commitment == before
+            assert :empty = manual_registry_call(connection.pid, :claim_output)
+
+            assert {:reply, {:error, :output_unavailable}} =
+                     route.(connection.incarnation, "attachment")
+
+            for {incarnation, attachment} <- [
+                  {make_ref(), "attachment"},
+                  {connection.incarnation, "stale"}
+                ] do
+              assert {:reply, {:error, :output_unavailable}} =
+                       manual_registry_call(
+                         connection.pid,
+                         {:invoke, fn -> route.(incarnation, attachment) end}
+                       )
+            end
+
+            assert :ok = manual_registry_call(connection.pid, :fence_progress)
+
+            assert {:reply, {:error, :output_unavailable}} =
+                     manual_registry_call(
+                       connection.pid,
+                       {:invoke, fn -> route.(connection.incarnation, "attachment") end}
+                     )
+
+            ref = make_ref()
+            deadline = now_ms() + 5_000
+            stopping = WireRecords.daemon_stopping("operator_stop")
+            send(registry, {:owner_request, self(), ref, {:close_all, stopping, deadline}})
+            assert %{transport: :stopping} = ConnectionRegistry.status(registry)
+
+            assert ^stopping =
+                     manual_registry_call(
+                       connection.pid,
+                       {:invoke,
+                        fn ->
+                          receive do
+                            {:daemon_stopping, record} -> record
+                          after
+                            500 -> :missing_stop_record
+                          end
+                        end}
+                     )
+
+            assert {:reply, {:error, :output_unavailable}} =
+                     manual_registry_call(
+                       connection.pid,
+                       {:invoke, fn -> route.(connection.incarnation, "attachment") end}
+                     )
+
+            assert now_ms() < deadline
+          after
+            cleanup_deadline = now_ms() + 5_000
+            try do
+              Process.exit(connection.pid, :kill)
+
+              assert_receive {:DOWN, ^connection_monitor, :process, connection_pid, _reason},
+                             max(cleanup_deadline - now_ms(), 0)
+
+              assert connection_pid == connection.pid
+              assert now_ms() < cleanup_deadline
+            after
+              assert_receive {:DOWN, ^guardian_monitor, :process, ^guardian, :normal},
+                             max(cleanup_deadline - now_ms(), 0)
+
+              assert now_ms() < cleanup_deadline
+            end
+          end
+        after
+          cleanup_deadline = now_ms() + 5_000
+          Process.exit(relay, :kill)
+
+          assert_receive {:DOWN, ^relay_monitor, :process, ^relay, :killed},
+                         max(cleanup_deadline - now_ms(), 0)
+
+          assert now_ms() < cleanup_deadline
+        end
+      after
+        cleanup_deadline = now_ms() + 5_000
+        try do
+          if Process.alive?(registry),
+            do: GenServer.stop(registry, :normal, max(cleanup_deadline - now_ms(), 0))
+        after
+          assert_receive {:DOWN, ^ingress_monitor, :process, ^ingress_guardian, :normal},
+                         max(cleanup_deadline - now_ms(), 0)
+
+          assert now_ms() < cleanup_deadline
+        end
+      end
+    after
+      cleanup_deadline = now_ms() + 5_000
+      try do
+        if Process.alive?(registry),
+          do: GenServer.stop(registry, :normal, max(cleanup_deadline - now_ms(), 0))
+      after
+        assert_receive {:DOWN, ^registry_monitor, :process, ^registry, :normal},
+                       max(cleanup_deadline - now_ms(), 0)
+
+        assert now_ms() < cleanup_deadline
+      end
+    end
+  end
+
   test "routing retains only the original attachment during an actual pending replacement" do
     registry = start_registry(5_000, connection_module: ManualConnection)
     {relay, _} = bind_scripted_relay(registry)

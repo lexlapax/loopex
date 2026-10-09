@@ -27,6 +27,31 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+### Proposal ready for decision; orderly-stop guard joined, 2026-10-09
+
+Exact Proposed ADR0067 candidate `805df2c2107bee43b81d266f520935c7b9cb4b89`
+is pushed. Original13604 passes its complete documentation gate in27.208
+seconds; two original joins and13 assets verified. Terminal SHA-256
+`d90acdc199a105de13ca3dc3e21743e93b30d94b60e8a4efa2330f64689faf98`;
+collection `d447ba9328f7fb46382838df78c6b8fe4191a5fbee9ba93efd2ee1d9aa05c5b8`;
+registry3055 `40fa67e7cc033d28e746a385f9f4646fdd150b8e614842a90cb79a842bd63e37`.
+Original36870 remains FAIL. Corrected-source recipe delta review
+`ef9583f9583213664c334bf7d30de8bc82820b69272666b99b2886c1176942f3`
+confirms unchanged gate. Retention47 assets:
+`M7/current-source-preparation-20261009-v30/retention.json`, SHA-256
+`cd287b470b5fd048ad24cfa5de946e2f13b56e3ec6df446fbee8e77ec0357f02`.
+The exact pair acceptance question is pending; no public implementation began.
+
+Separate source-clear guardv3 is now joined at its exact retained two after
+images. Its initialized durable output remains admissible during closing,
+with transient progress still discarded and final stopping refusal preserved.
+The added test preserves all74 prior Registry cases and exact original actor
+cleanup. Native qualification is UNRUN. Next perform reviewed formatterv70,
+commit any strict-AST formatting, then run the reviewed169-case per-pair
+Registry/Socket/completeCLI unit. Formatter recipe review
+`f56d59e640a2dd13639f9afe7390a3fa521095026e5e3643977c701fae74810a`.
+Counts remain original89 done/84 open/6 retired; added373 done/23 open.
+
 ### Proposal status declaration repaired, 2026-10-09
 
 Original36870 documentation gate at `d2a2b108323e593814e99f489b1c9aec8901d24d`

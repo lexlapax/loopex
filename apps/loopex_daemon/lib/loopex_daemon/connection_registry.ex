@@ -995,6 +995,8 @@ defmodule LoopexDaemon.ConnectionRegistry do
   # Technical depth: caller/incarnation/attachment checks reuse existing custody.
   # At most 32 takes fan out through destination credit; completion promises no
   # closure, watermark, delivery or consumption after finite CAS exhaustion.
+  # The admission cut keeps initialized durable output live through quiesce;
+  # draining in :closing discards transient ingress without reopening fanout.
   def handle_call(
         {:route_ready_progress, incarnation, attachment_id},
         {caller, _tag},
@@ -1011,7 +1013,7 @@ defmodule LoopexDaemon.ConnectionRegistry do
 
     case initialized_connection_row(state, caller, incarnation) do
       {_token, %{phase: :live, progress_fenced: false}}
-      when state.transport == :serving and state.progress_phase == :open and
+      when state.transport in [:serving, :closing] and state.progress_phase == :open and
              matching_attachment ->
         case drain_progress(state, 32) do
           :ok -> {:reply, :ok, state}
