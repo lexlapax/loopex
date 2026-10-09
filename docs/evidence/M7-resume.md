@@ -27,6 +27,38 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+### Socket close succeeded; terminal result remains missing, 2026-10-08
+
+Original25781 at `55e738439fbaade44c0ade20c9c2ea9bde7c97bb` is
+terminal and collected FAIL after 17.263 seconds, both whole population cases
+exit106, zero exclusions/skips/invalids. Current toolchain/format/compile/docs/
+status pass; floor UNRUN. Six original joins and29 verified artifacts remain.
+Do not restart or recollect original25781. Terminal SHA-256
+`e4f57f2b9689293493ab04a963256b53f519272aead0d86f3fa8fbfc1408bc58`;
+collection `7497bd738580542709639bf70e9db3a20f628e901fe8a2f2f4fcf6b1150e7c2e`.
+Latest completed registry2819 SHA-256
+`9b4ff7ae5e3dfd733fcb49a795431ce7f823bc4ac42afb6408880892aae25b7d`.
+All512/510 captured original Socket sink closes return :ok, no missing or
+unproved close observations; every selected Registry result remains unproved.
+The remaining discriminator covers original cutoff/control, terminal handler/
+submission and Registry result admission. Private writer owns only the
+MaximumPopulation test; independent reader owns only its bounded cause report.
+Preserve both whole workloads, original cutoffs/joins and all failed results.
+No production correction or native handle is live at this checkpoint.
+
+Proposed ADR0066's four reviewed documentation paths are joined with empty
+governance. Concept SHA-256
+`5cba4952170eee24270a8e2ac8481cc7ea4becbbb4ab65e241a756685e05eda3`;
+technical `ea17cac5634f30f5d9d723be972a5d9f02621f0628a4b6ac807b2f87e1300f53`;
+independent review `736975c0f5c8edd3c7a44624a59e50ad9d94b3068f55717f0e6855e09da5daf3`.
+Root must run the real docs gate on the clean exact committed candidate before
+asking acceptance. Its four choices and ADR0065 remain unaccepted; dependent
+transfer API implementation stays paused. Immutable24-asset retention is
+`M7/current-source-preparation-20261008-v10/retention.json`, SHA-256
+`fba6ee248a14809efd40df999c666ba6b3fe00439b796a2d2ef2cae3ed200961`.
+T01–T19 original88 done /85 open /6 retired; added370 done /25 open.
+No completion checkbox changes.
+
 ### Diagnostic incarnation domain corrected, 2026-10-08
 
 Original65944 at `453865e0bfb5ea84202b25e4e0d68c70d2c8f6e8`

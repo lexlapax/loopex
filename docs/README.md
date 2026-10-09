@@ -115,6 +115,7 @@ pairing, link, review, code-documentation, and enforcement contracts.
 | 0061 — creation cancellation admission envelope | [Decision](adr/0061-creation-cancellation-admission-envelope.md#concept) | [Technical depth](adr/0061-creation-cancellation-admission-envelope-technical.md#technical-depth) |
 | 0063 — runtime creation startup status | [Decision](adr/0063-runtime-creation-startup-status.md#concept) | [Technical depth](adr/0063-runtime-creation-startup-status-technical.md#technical-depth) |
 | 0065 — private attempts IO prerequisite | [Decision](adr/0065-private-attempts-io-prerequisite.md#concept) | [Technical depth](adr/0065-private-attempts-io-prerequisite-technical.md#technical-depth) |
+| 0066 — owned artifact transfer opening | [Decision](adr/0066-owned-artifact-transfer-opening.md#concept) | [Technical depth](adr/0066-owned-artifact-transfer-opening-technical.md#technical-depth) |
 
 An ADR pair is one decision. Its status and governance record live in the
 Concept file and bind both files when accepted.

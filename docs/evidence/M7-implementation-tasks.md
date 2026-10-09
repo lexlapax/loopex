@@ -1,5 +1,42 @@
 # M7 Implementation Tasks
 
+### Socket close succeeded; terminal result remains missing, 2026-10-08
+
+Original25781 at `55e738439fbaade44c0ade20c9c2ea9bde7c97bb` is
+collected FAIL after 17.263 seconds. Both complete population cases fail with
+exit106: 0/2 passed, zero exclusions/skips/invalids. Current toolchain,
+formatting, warning-free compilation, documentation and status pass. Floor
+remains UNRUN. Six original process joins and29 verified artifacts are retained
+under `M7/daemon-population-diagnostic-focused-20261008-v5`.
+Terminal SHA-256 `e4f57f2b9689293493ab04a963256b53f519272aead0d86f3fa8fbfc1408bc58`;
+collection SHA-256 `7497bd738580542709639bf70e9db3a20f628e901fe8a2f2f4fcf6b1150e7c2e`.
+Completed registry2819 SHA-256
+`9b4ff7ae5e3dfd733fcb49a795431ce7f823bc4ac42afb6408880892aae25b7d`.
+
+Both diagnostic summaries are complete without overflow. All captured original
+Socket sink closes return :ok: 512/512 in the full case and510/510 in T15,
+whose two earlier owner losses remain part of the original workload. No close
+is unobserved or cleanup_unproved. Registry arena close also returns :ok, but
+every selected retirement still lacks result:ok. This excludes the observed
+Socket sink-close failure branch; cutoff/control lifetime, terminal submission
+and Registry admission remain to distinguish. No production repair or passing
+reinterpretation is claimed. A private test-only writer and independent cause
+reader now cover those remaining branches; no native handle is live.
+
+Proposed [ADR0066](../adr/0066-owned-artifact-transfer-opening.md#concept) and
+its [companion](../adr/0066-owned-artifact-transfer-opening-technical.md#technical-depth)
+are joined with empty governance after independent source review. Pair digests
+are `5cba4952170eee24270a8e2ac8481cc7ea4becbbb4ab65e241a756685e05eda3`
+and `ea17cac5634f30f5d9d723be972a5d9f02621f0628a4b6ac807b2f87e1300f53`;
+review SHA-256 `736975c0f5c8edd3c7a44624a59e50ad9d94b3068f55717f0e6855e09da5daf3`.
+Its real documentation gate remains UNRUN. All four material choices and
+ADR0065 remain unaccepted; no dependent transfer API implementation is allowed.
+Immutable24-asset retention is
+`M7/current-source-preparation-20261008-v10/retention.json`, SHA-256
+`fba6ee248a14809efd40df999c666ba6b3fe00439b796a2d2ef2cae3ed200961`.
+T01–T19 original88 done /85 open /6 retired; added370 done /25 open.
+No completion checkbox changes.
+
 ### Diagnostic incarnation domain corrected, 2026-10-08
 
 Original65944 at `453865e0bfb5ea84202b25e4e0d68c70d2c8f6e8`

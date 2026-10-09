@@ -73,6 +73,7 @@ a decision adds a new record rather than rewriting the old one.
 | 0061 | Creation cancellation admission envelope | Accepted | [Decision](0061-creation-cancellation-admission-envelope.md#concept) | [Technical depth](0061-creation-cancellation-admission-envelope-technical.md#technical-depth) |
 | 0063 | Runtime creation startup status | Accepted | [Decision](0063-runtime-creation-startup-status.md#concept) | [Technical depth](0063-runtime-creation-startup-status-technical.md#technical-depth) |
 | 0065 | Private attempts IO prerequisite | Proposed | [Decision](0065-private-attempts-io-prerequisite.md#concept) | [Technical depth](0065-private-attempts-io-prerequisite-technical.md#technical-depth) |
+| 0066 | Owned artifact transfer opening | Proposed | [Decision](0066-owned-artifact-transfer-opening.md#concept) | [Technical depth](0066-owned-artifact-transfer-opening-technical.md#technical-depth) |
 
 0001 and 0002 were the prerequisites that unblocked the first milestone
 candidate; the [plans register](../plans/README.md) records current status.
