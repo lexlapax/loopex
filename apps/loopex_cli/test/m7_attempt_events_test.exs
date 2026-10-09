@@ -2172,7 +2172,10 @@ defmodule LoopexCli.M7AttemptEventsTest do
 
     for content <- ["abc", "abd"] do
       assert {:unavailable, %{case_history: ^projection, reason: :digest_mismatch}} =
-               Events.verify_case_evidence(bytes, Map.put(supplied, reference["reference"], content))
+               Events.verify_case_evidence(
+                 bytes,
+                 Map.put(supplied, reference["reference"], content)
+               )
     end
   end
 
@@ -2187,7 +2190,10 @@ defmodule LoopexCli.M7AttemptEventsTest do
            "008ffc88d3c96a9f307524eb361e47c5222a887fc45fa0c1fb8d429c5c23b430"}
         ] do
       reference = %{"reference" => path, "sha256" => digest}
-      {bytes, _} = ownership_chain(ownership_prefix() ++ [Map.put(started, "evidence", [reference])])
+
+      {bytes, _} =
+        ownership_chain(ownership_prefix() ++ [Map.put(started, "evidence", [reference])])
+
       assert {:ok, projection} = Events.verify_case_history(bytes)
       assert {:ok, ^projection} = Events.verify_case_evidence(bytes, %{path => content})
     end
@@ -2232,8 +2238,10 @@ defmodule LoopexCli.M7AttemptEventsTest do
     {[started, completed | _], supplied} = evidence_history()
     completed = Map.put(completed, "mechanical_result", "pass")
     reviewed = reviewed_body(completed, "pass")
+
     {bytes, _} =
       ownership_chain(ownership_prefix() ++ [started, completed, reviewed, ownership_body(2)])
+
     assert {:ok, projection} = Events.verify_case_history(bytes)
     assert projection.ownership.pending != nil
     assert {:ok, ^projection} = Events.verify_case_evidence(bytes, supplied)
@@ -2250,7 +2258,9 @@ defmodule LoopexCli.M7AttemptEventsTest do
     diagnosis = reference.("/evidence/m7/diagnosis.json")
 
     disposition =
-      reference.("git:2222222222222222222222222222222222222222:docs/evidence/decision.md#acceptance")
+      reference.(
+        "git:2222222222222222222222222222222222222222:docs/evidence/decision.md#acceptance"
+      )
 
     authorization = reference.("/evidence/m7/authorization.json")
     started = Map.put(case_body("started"), "evidence", [execution])
@@ -2263,7 +2273,10 @@ defmodule LoopexCli.M7AttemptEventsTest do
       |> Map.put("authorization_evidence", authorization)
 
     supplied =
-      Map.new([execution, result, diagnosis, disposition, authorization], &{&1["reference"], "abc"})
+      Map.new(
+        [execution, result, diagnosis, disposition, authorization],
+        &{&1["reference"], "abc"}
+      )
 
     {[started, completed, reviewed, authorized], supplied}
   end
