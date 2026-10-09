@@ -409,19 +409,7 @@ defmodule LoopexCli.Output do
           killed: false
         }
 
-        state = %{state | target: target}
-
-        receive do
-          {^port, {:data, bytes}} ->
-            if bytes == "READY #{nonce} #{leader}\n",
-              do: {:ok, state},
-              else: {:error, :output_target_refused, state}
-
-          {^port, {:exit_status, _}} ->
-            {:error, :output_target_refused, put_in(state.target.exited, true)}
-        after
-          remaining(cutoff) -> {:error, :output_acquisition_expired, state}
-        end
+        await_ready(%{state | target: target}, "READY #{nonce} #{leader}\n", cutoff)
 
       :error ->
         {:error, :output_target_unavailable}
@@ -455,6 +443,32 @@ defmodule LoopexCli.Output do
 
       {:DOWN, _monitor, :process, ^pid, _reason} ->
         {:error, :output_target_unavailable, put_in(state.target.lost, true)}
+    after
+      remaining(cutoff) -> {:error, :output_acquisition_expired, state}
+    end
+  end
+
+  # Concept: the writer is usable only after its exact readiness line.
+  # Technical depth: the line may arrive in pieces; anything else, a longer
+  # line or the writer's exit refuses the target within the original cutoff.
+  defp await_ready(%{target: %{port: port}} = state, expected, cutoff) do
+    receive do
+      {^port, {:data, bytes}} ->
+        control = state.target.control <> bytes
+
+        cond do
+          control == expected ->
+            {:ok, put_in(state.target.control, "")}
+
+          String.starts_with?(expected, control) ->
+            await_ready(put_in(state.target.control, control), expected, cutoff)
+
+          true ->
+            {:error, :output_target_refused, state}
+        end
+
+      {^port, {:exit_status, _}} ->
+        {:error, :output_target_refused, put_in(state.target.exited, true)}
     after
       remaining(cutoff) -> {:error, :output_acquisition_expired, state}
     end
@@ -531,13 +545,20 @@ defmodule LoopexCli.Output do
     do: {:reply, :ok, state |> consume(item, nil) |> dispatch() |> arm()}
 
   defp command({:assistant, sequence, content, rendered, destination}, _from, state)
-       when is_integer(sequence) and is_binary(rendered) and destination in [:stdout, :stderr] do
-    {consumer, candidate} =
-      if state.mode == :chat,
-        do: ProgressConsumer.chat_assistant(state.consumer, sequence, content),
-        else: ProgressConsumer.plain_assistant(state.consumer, sequence, content)
+       when is_binary(rendered) and destination in [:stdout, :stderr] do
+    # Concept: only an answer with a durable position can match a stream.
+    # Technical depth: without a positive sequence it is always written whole.
+    {state, candidate} =
+      if is_integer(sequence) and sequence > 0 do
+        {consumer, candidate} =
+          if state.mode == :chat,
+            do: ProgressConsumer.chat_assistant(state.consumer, sequence, content),
+            else: ProgressConsumer.plain_assistant(state.consumer, sequence, content)
 
-    state = retire_domains(%{state | consumer: consumer}, sequence, candidate)
+        {retire_domains(%{state | consumer: consumer}, sequence, candidate), candidate}
+      else
+        {state, nil}
+      end
 
     case {rendered, admit(state, :text, byte_size(rendered))} do
       {"", {:ok, state}} ->
