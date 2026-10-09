@@ -1,5 +1,23 @@
-Code.require_file("../../loopex/test/support/m1_runtime_helper.exs", __DIR__)
-Code.require_file("../../loopex/test/support/agent_loop_helper.exs", __DIR__)
+# Concept: the shared session fixture loads under an explicit temporary home.
+# Technical depth: its guard runs during require, before case setup. Restore the
+# host environment immediately; the fixture starts no actors while loading.
+fixture_home =
+  Path.join(System.tmp_dir!(), "run-evidence-load-#{System.unique_integer([:positive])}")
+
+File.mkdir_p!(fixture_home)
+prior_home = System.get_env("LOOPEX_HOME")
+System.put_env("LOOPEX_HOME", fixture_home)
+
+try do
+  Code.require_file("../../loopex/test/support/m1_runtime_helper.exs", __DIR__)
+  Code.require_file("../../loopex/test/support/agent_loop_helper.exs", __DIR__)
+after
+  if prior_home,
+    do: System.put_env("LOOPEX_HOME", prior_home),
+    else: System.delete_env("LOOPEX_HOME")
+
+  File.rm_rf!(fixture_home)
+end
 Code.require_file("../../loopex/test/support/configured_genesis_helper.exs", __DIR__)
 
 defmodule LoopexComposition.RunEvidenceRestartTest do
