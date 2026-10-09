@@ -21,6 +21,9 @@ defmodule Mix.Tasks.Loopex.M7Evidence.AttemptEvents do
   original case records through the consumed linear transitions. Repeated
   pre-dispatch observations, additional reviews and changed review evidence
   return an explicit unresolved projection with every original record retained.
+  Case-evidence composition checks caller-supplied complete reference bytes,
+  preserving that projection and reporting unavailable evidence without
+  returning the supplied bytes or granting a reviewed verdict.
   Lane-history verification selects the greatest committed anchor and joins
   consumed-case and post-head barriers before proposing a single-lane
   continuation. Its trusted in-memory selection retains original pass histories
@@ -105,6 +108,86 @@ defmodule Mix.Tasks.Loopex.M7Evidence.AttemptEvents do
     with {:ok, ownership} <- verify_ownership(bytes, committed_head) do
       case_projection(bytes, ownership)
     end
+  end
+
+  @doc false
+  def verify_case_evidence(bytes, reference_bytes) do
+    with {:ok, projection} <- verify_case_history(bytes) do
+      case_evidence(projection, reference_bytes)
+    end
+  end
+
+  @doc false
+  def verify_case_evidence(bytes, committed_head, reference_bytes) do
+    with {:ok, projection} <- verify_case_history(bytes, committed_head) do
+      case_evidence(projection, reference_bytes)
+    end
+  end
+
+  # Concept: matching complete bytes adds no execution or review authority.
+  # Technical depth: check every original case record, including consumed
+  # predecessors, against its own digest. The caller retains byte custody.
+  # Report only the first bounded reference failure beside the original history;
+  # null post-dispatch evidence never inherits an earlier execution-path proof.
+  defp case_evidence(projection, reference_bytes)
+       when is_map(reference_bytes) and not is_struct(reference_bytes) do
+    Enum.reduce_while(projection.records, {:ok, projection}, fn record, result ->
+      body = record["body"]
+
+      if is_nil(body["evidence"]) do
+        {:halt, evidence_unavailable(projection, record, "evidence", nil, :absent_evidence)}
+      else
+        references =
+          Enum.map(body["evidence"], &{"evidence", &1}) ++
+            Enum.flat_map(~w(diagnosis disposition authorization_evidence), fn member ->
+              if is_nil(body[member]), do: [], else: [{member, body[member]}]
+            end)
+
+        unavailable =
+          Enum.find_value(references, fn {member, reference} ->
+            case reference_bytes_status(reference, reference_bytes) do
+              :ok -> nil
+              reason -> {member, reference, reason}
+            end
+          end)
+
+        case unavailable do
+          nil ->
+            {:cont, result}
+
+          {member, reference, reason} ->
+            {:halt, evidence_unavailable(projection, record, member, reference, reason)}
+        end
+      end
+    end)
+  end
+
+  defp case_evidence(projection, _reference_bytes),
+    do: evidence_unavailable(projection, nil, nil, nil, :invalid_reference_bytes)
+
+  defp reference_bytes_status(reference, reference_bytes) do
+    case Map.fetch(reference_bytes, reference["reference"]) do
+      {:ok, bytes} when is_binary(bytes) ->
+        digest = Base.encode16(:crypto.hash(:sha256, bytes), case: :lower)
+        if digest == reference["sha256"], do: :ok, else: :digest_mismatch
+
+      {:ok, _nonbinary} ->
+        :nonbinary_reference_bytes
+
+      :error ->
+        :missing_reference_bytes
+    end
+  end
+
+  defp evidence_unavailable(projection, record, member, reference, reason) do
+    {:unavailable,
+     %{
+       case_history: projection,
+       head: if(is_nil(record), do: nil, else: Map.take(record, ~w(campaign_id sequence digest))),
+       member: member,
+       reference: reference,
+       reason: reason
+     }}
   end
 
   @doc false

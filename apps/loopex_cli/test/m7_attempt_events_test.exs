@@ -2020,6 +2020,254 @@ defmodule LoopexCli.M7AttemptEventsTest do
     end
   end
 
+  @reference_abc "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+
+  test "complete reference bytes preserve every original consumed record without adding authority" do
+    {cases, supplied} = evidence_history()
+    {bytes, records} = ownership_chain(ownership_prefix() ++ cases)
+    assert {:ok, projection} = Events.verify_case_history(bytes)
+    supplied = Map.put(supplied, "/unused", "CALLER_OWNED_BYTES_MUST_NOT_RETURN")
+
+    assert {:ok, ^projection} = Events.verify_case_evidence(bytes, supplied)
+
+    assert {:ok, ^projection} =
+             Events.verify_case_evidence(bytes, projection.ownership.head, supplied)
+
+    assert_case_records(projection, records)
+    [history] = Map.values(projection.histories)
+    assert history.state == "authorized_next_candidate"
+    assert List.last(history.records)["body"]["verdict"] == "environment_failure"
+    refute inspect(projection) =~ "CALLER_OWNED_BYTES_MUST_NOT_RETURN"
+  end
+
+  test "verified bytes leave case-free pre-dispatch and unfinished consumed histories unchanged" do
+    {[started | _], supplied} = evidence_history()
+    observed = Map.put(ownership_body(5), "evidence", started["evidence"])
+
+    for cases <- [[], [observed], [started]] do
+      {bytes, _} = ownership_chain(ownership_prefix() ++ cases)
+      assert {:ok, projection} = Events.verify_case_history(bytes)
+      assert {:ok, ^projection} = Events.verify_case_evidence(bytes, supplied)
+
+      assert {:ok, ^projection} =
+               Events.verify_case_evidence(bytes, projection.ownership.head, supplied)
+    end
+
+    {bytes, _} = ownership_chain(ownership_prefix() ++ [started])
+    assert {:ok, projection} = Events.verify_case_history(bytes)
+
+    for supplied <- [nil, [], :unavailable, MapSet.new()] do
+      assert {:unavailable,
+              %{case_history: ^projection, reference: nil, reason: :invalid_reference_bytes}} =
+               Events.verify_case_evidence(bytes, supplied)
+    end
+  end
+
+  test "each retained reference requires its exact complete binary including LF" do
+    {[started, completed, reviewed, authorized] = cases, supplied} = evidence_history()
+    {bytes, _} = ownership_chain(ownership_prefix() ++ cases)
+    assert {:ok, projection} = Events.verify_case_history(bytes)
+
+    references = [
+      {"evidence", hd(started["evidence"])},
+      {"evidence", hd(completed["evidence"])},
+      {"diagnosis", reviewed["diagnosis"]},
+      {"disposition", authorized["disposition"]},
+      {"authorization_evidence", authorized["authorization_evidence"]}
+    ]
+
+    for {member, reference} <- references do
+      path = reference["reference"]
+
+      mutations = [
+        {Map.delete(supplied, path), :missing_reference_bytes},
+        {Map.put(supplied, path, "abd"), :digest_mismatch},
+        {Map.put(supplied, path, "abc\n"), :digest_mismatch},
+        {Map.put(supplied, path, nil), :nonbinary_reference_bytes},
+        {Map.put(supplied, path, ["abc"]), :nonbinary_reference_bytes}
+      ]
+
+      for {changed, reason} <- mutations do
+        assert {:unavailable, unavailable} = Events.verify_case_evidence(bytes, changed)
+        assert unavailable.case_history == projection
+        assert unavailable.member == member
+        assert unavailable.reference == reference
+        assert unavailable.reason == reason
+        assert unavailable.head in Enum.map(projection.records, &ownership_head/1)
+
+        assert {:unavailable, ^unavailable} =
+                 Events.verify_case_evidence(bytes, projection.ownership.head, changed)
+      end
+    end
+  end
+
+  test "null post-dispatch evidence remains unavailable through review and authorization" do
+    {[started, completed, reviewed, authorized], supplied} = evidence_history()
+
+    completed =
+      Map.merge(completed, %{
+        "evidence" => nil,
+        "mechanical_result" => "evidence_incomplete_post_dispatch"
+      })
+
+    reviewed =
+      reviewed_body(completed, "evidence_unavailable")
+      |> Map.put("diagnosis", reviewed["diagnosis"])
+
+    authorized =
+      authorized_body(reviewed)
+      |> Map.put("disposition", authorized["disposition"])
+      |> Map.put("authorization_evidence", authorized["authorization_evidence"])
+
+    for cases <- [
+          [started, completed],
+          [started, completed, reviewed],
+          [started, completed, reviewed, authorized]
+        ] do
+      {bytes, records} = ownership_chain(ownership_prefix() ++ cases)
+      assert {:ok, projection} = Events.verify_case_history(bytes)
+
+      assert {:unavailable, unavailable} = Events.verify_case_evidence(bytes, supplied)
+
+      assert unavailable.case_history == projection
+      assert unavailable.member == "evidence"
+      assert unavailable.reference == nil
+      assert unavailable.reason == :absent_evidence
+
+      assert {:unavailable, ^unavailable} =
+               Events.verify_case_evidence(bytes, projection.ownership.head, supplied)
+
+      assert_case_records(projection, records)
+      [history] = Map.values(projection.histories)
+      assert history.state == List.last(cases)["state"]
+      assert Enum.all?(Enum.drop(history.records, 1), &is_nil(&1["body"]["evidence"]))
+    end
+  end
+
+  test "repeated references retain their records and conflicting same-path digests cannot share bytes" do
+    {[started, completed, reviewed, authorized], supplied} = evidence_history()
+    reference = hd(started["evidence"])
+    cases = [started, completed, reviewed, authorized]
+    cases = Enum.map(cases, &Map.put(&1, "evidence", [reference, reference]))
+    {bytes, _} = ownership_chain(ownership_prefix() ++ cases)
+    assert {:ok, projection} = Events.verify_case_history(bytes)
+    assert {:ok, ^projection} = Events.verify_case_evidence(bytes, supplied)
+
+    conflicting =
+      Map.put(
+        reference,
+        "sha256",
+        "a52d159f262b2c6ddb724a61840befc36eb30c88877a4030b65cbe86298449c9"
+      )
+
+    cases =
+      Enum.map(cases, fn body ->
+        if body["state"] in ["reviewed", "authorized_next_candidate"],
+          do: Map.put(body, "diagnosis", conflicting),
+          else: body
+      end)
+
+    {bytes, _} = ownership_chain(ownership_prefix() ++ cases)
+    assert {:ok, projection} = Events.verify_case_history(bytes)
+
+    for content <- ["abc", "abd"] do
+      assert {:unavailable, %{case_history: ^projection, reason: :digest_mismatch}} =
+               Events.verify_case_evidence(bytes, Map.put(supplied, reference["reference"], content))
+    end
+  end
+
+  test "evidence bytes admit empty non-UTF8 and above-frame-size binaries without a new cap" do
+    {[started | _], _} = evidence_history()
+    path = hd(started["evidence"])["reference"]
+
+    for {content, digest} <- [
+          {"", "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"},
+          {<<0, 255, 10>>, "712450d3c4a79eea9509e75dc1dacdeff58034df538536cfae2da882bd8a0c50"},
+          {String.duplicate("a", 65_537),
+           "008ffc88d3c96a9f307524eb361e47c5222a887fc45fa0c1fb8d429c5c23b430"}
+        ] do
+      reference = %{"reference" => path, "sha256" => digest}
+      {bytes, _} = ownership_chain(ownership_prefix() ++ [Map.put(started, "evidence", [reference])])
+      assert {:ok, projection} = Events.verify_case_history(bytes)
+      assert {:ok, ^projection} = Events.verify_case_evidence(bytes, %{path => content})
+    end
+  end
+
+  test "history errors anchors incomplete tails and unresolved reviews propagate before byte checks" do
+    {[started, completed, reviewed | _], supplied} = evidence_history()
+    {bytes, records} = ownership_chain(ownership_prefix() ++ [started, completed, reviewed])
+    head = ownership_head(List.last(records))
+
+    {orphan, _} = ownership_chain(ownership_prefix() ++ [completed])
+    {foreign, _} = ownership_chain(ownership_prefix() ++ [Map.put(started, "writer_id", "other")])
+    {invalid_body, _} = framed_ownership_chain(ownership_prefix() ++ [%{}])
+
+    for invalid <- [nil, "", "{", orphan, foreign, invalid_body, bytes <> "{"] do
+      assert Events.verify_case_evidence(invalid, nil) == Events.verify_case_history(invalid)
+
+      assert Events.verify_case_evidence(invalid, head, nil) ==
+               Events.verify_case_history(invalid, head)
+    end
+
+    assert Events.verify_case_evidence(bytes, nil, supplied) ==
+             {:error, :invalid_committed_attempt_head}
+
+    {fork, _} =
+      ownership_chain(ownership_prefix() ++ [Map.put(started, "attempt_id", "other")])
+
+    assert Events.verify_case_evidence(fork, head, supplied) ==
+             {:error, :committed_attempt_head_mismatch}
+
+    {unresolved, _} =
+      ownership_chain(ownership_prefix() ++ [started, completed, reviewed, reviewed])
+
+    assert {:unresolved, projection} = Events.verify_case_history(unresolved)
+    assert {:unresolved, ^projection} = Events.verify_case_evidence(unresolved, %{})
+
+    assert {:unresolved, ^projection} =
+             Events.verify_case_evidence(unresolved, projection.ownership.head, nil)
+  end
+
+  test "matching case bytes leave pending ownership and recorded pass verdicts as existing facts" do
+    {[started, completed | _], supplied} = evidence_history()
+    completed = Map.put(completed, "mechanical_result", "pass")
+    reviewed = reviewed_body(completed, "pass")
+    {bytes, _} =
+      ownership_chain(ownership_prefix() ++ [started, completed, reviewed, ownership_body(2)])
+    assert {:ok, projection} = Events.verify_case_history(bytes)
+    assert projection.ownership.pending != nil
+    assert {:ok, ^projection} = Events.verify_case_evidence(bytes, supplied)
+    [history] = Map.values(projection.histories)
+    assert history.state == "reviewed"
+    assert List.last(history.records)["body"]["verdict"] == "pass"
+    assert List.last(history.records)["body"]["authorized_candidate_sha"] == nil
+  end
+
+  defp evidence_history do
+    reference = fn path -> %{"reference" => path, "sha256" => @reference_abc} end
+    execution = reference.("/evidence/m7/execution-path.json")
+    result = reference.("/evidence/m7/complete.log")
+    diagnosis = reference.("/evidence/m7/diagnosis.json")
+
+    disposition =
+      reference.("git:2222222222222222222222222222222222222222:docs/evidence/decision.md#acceptance")
+
+    authorization = reference.("/evidence/m7/authorization.json")
+    started = Map.put(case_body("started"), "evidence", [execution])
+    completed = Map.put(case_body("completed"), "evidence", [result])
+    reviewed = reviewed_body(completed, "environment_failure") |> Map.put("diagnosis", diagnosis)
+
+    authorized =
+      authorized_body(reviewed)
+      |> Map.put("disposition", disposition)
+      |> Map.put("authorization_evidence", authorization)
+
+    supplied =
+      Map.new([execution, result, diagnosis, disposition, authorization], &{&1["reference"], "abc"})
+
+    {[started, completed, reviewed, authorized], supplied}
+  end
+
   defp lane_started(key) do
     Map.merge(case_body("started"), %{
       "case_key" => key,
