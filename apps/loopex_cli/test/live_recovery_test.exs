@@ -49,9 +49,9 @@ defmodule LoopexCli.LiveRecoveryTest do
           observe: method == "session.create"
         )
 
-      proxy_monitor = Process.monitor(proxy.pid)
+      observation_label = if method == "session.create", do: method
 
-      try do
+      with_recovery_observation(proxy, daemon, observation_label, fn ->
         output =
           capture_io(fn ->
             assert :ok = LoopexCli.dispatch(["run", "--daemon", proxy.path, "go"])
@@ -62,28 +62,7 @@ defmodule LoopexCli.LiveRecoveryTest do
 
         assert Enum.count(DaemonProxy.seen(proxy), &(&1 == method)) == 2
         assert length(listed_sessions(context.socket)) == 1
-      after
-        try do
-          if method == "session.create" do
-            observations = DaemonProxy.observations(proxy)
-
-            IO.puts(
-              :stderr,
-              "proxy observations for #{method}: " <>
-                inspect(observations, limit: :infinity, printable_limit: :infinity)
-            )
-
-            assert observations.overflow == false, "proxy metadata capacity exhausted"
-            assert observations.incomplete == false, "proxy metadata frame was incomplete"
-          end
-        after
-          try do
-            stop_proxy(proxy, proxy_monitor)
-          after
-            stop_daemon(daemon)
-          end
-        end
-      end
+      end)
     end
   end
 
@@ -92,18 +71,22 @@ defmodule LoopexCli.LiveRecoveryTest do
   @tag timeout: 120_000
   test "a prompt the daemon never saw is sent again and followed to its answer", context do
     daemon = start_daemon(context, launch("fresh answer", "fresh"))
-    proxy = DaemonProxy.start(context.socket, [{{:before, "session.prompt"}, 1}])
+    proxy =
+      DaemonProxy.start(context.socket, [{{:before, "session.prompt"}, 1}], & &1,
+        observe: true
+      )
 
-    output =
-      capture_io(fn ->
-        assert :ok = LoopexCli.dispatch(["run", "--daemon", proxy.path, "go"])
-      end)
+    with_recovery_observation(proxy, daemon, "before session.prompt", fn ->
+      output =
+        capture_io(fn ->
+          assert :ok = LoopexCli.dispatch(["run", "--daemon", proxy.path, "go"])
+        end)
 
-    assert length(String.split(output, "fresh answer")) == 2,
-           "expected the answer exactly once: #{inspect(output)}"
+      assert length(String.split(output, "fresh answer")) == 2,
+             "expected the answer exactly once: #{inspect(output)}"
 
-    assert Enum.count(DaemonProxy.seen(proxy), &(&1 == "session.prompt")) == 2
-    stop_daemon(daemon)
+      assert Enum.count(DaemonProxy.seen(proxy), &(&1 == "session.prompt")) == 2
+    end)
   end
 
   # Concept: an admission the daemon cannot settle is never guessed at. The
@@ -574,6 +557,59 @@ defmodule LoopexCli.LiveRecoveryTest do
     assert_receive {:loopex_daemon_sentinel, sentinel, owner_ref, _owner}, 5_000
     await_ready(output, 1_000)
     %{task: task, sentinel: sentinel, owner_ref: owner_ref}
+  end
+
+  # Concept: recovery failures retain their original assertion and fixture evidence.
+  # Technical depth: both reply-loss and pre-dispatch-loss cases attempt observation
+  # and every original cleanup independently, then raise the first failure with its
+  # original stacktrace. Later cleanup failures remain explicit diagnostic facts.
+  defp with_recovery_observation(proxy, daemon, label, body) do
+    monitor = Process.monitor(proxy.pid)
+
+    outcomes =
+      [
+        body: body,
+        observation: fn ->
+          if label do
+            observations = DaemonProxy.observations(proxy)
+
+            IO.puts(
+              :stderr,
+              "proxy observations for #{label}: " <>
+                inspect(observations, limit: :infinity, printable_limit: :infinity)
+            )
+
+            assert observations.overflow == false, "proxy metadata capacity exhausted"
+            assert observations.incomplete == false, "proxy metadata frame was incomplete"
+          end
+        end,
+        proxy_cleanup: fn -> stop_proxy(proxy, monitor) end,
+        daemon_cleanup: fn -> stop_daemon(daemon) end
+      ]
+      |> Enum.map(fn {stage, action} ->
+        try do
+          action.()
+          :ok
+        catch
+          kind, reason -> {:error, stage, kind, reason, __STACKTRACE__}
+        end
+      end)
+
+    case Enum.filter(outcomes, &match?({:error, _, _, _, _}, &1)) do
+      [] ->
+        :ok
+
+      [{:error, _stage, kind, reason, stacktrace} | later] ->
+        for {:error, stage, _, _, _} <- later do
+          try do
+            IO.puts(:stderr, "recovery fixture #{stage} also failed")
+          catch
+            _, _ -> :ok
+          end
+        end
+
+        :erlang.raise(kind, reason, stacktrace)
+    end
   end
 
   defp stop_proxy(proxy, monitor) do

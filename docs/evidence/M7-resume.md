@@ -27,6 +27,30 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+### Fresh-case observation corrected; native qualification next, 2026-10-09
+
+The source-clear v2 diagnostic fixture is joined, native UNRUN. It enables the
+existing bounded observer on the fresh-before-prompt case, preserves the first
+body/observation/cleanup exception with its original stacktrace, and attempts
+both original cleanup paths. Successfully decoded public answer text contributes
+only bounded byte-count/SHA256 metadata under the unchanged caps. All12 cases,
+original assertions and cutoffs remain. The proxy stays linked during the body
+and observation; the reviewed v1 early-unlink mistake was removed before joining.
+Original44759 remains FAIL11/12 and supplies no failed fresh-case wire capture.
+
+Source packet `/private/tmp/m7-fresh-recovery-observation-source-20261009-v2`,
+manifest SHA-256 `0ca14a39a7a8f06ca6c3d36902e8ab7c86242da6b4fec730aefd2c5d645aaf48`.
+Independent v2 source review SHA-256
+`73affe7e5f185208efc68a32367a2030dd7c5112fa3c98b5331e3ec67aa9f5c9`.
+Next root formats with strict AST equality, then qualifies the whole12 file on
+both pairs. A quiet pass would qualify the diagnostic fixture, not repair the
+intermittent duplicate. The isolated T08 V7.6 writer remains in progress.
+Original58167 separately passes documentation at `7734aa86` in26.526seconds,
+collection `99444c5bcab2e1f703046d28391030c082c9f96ec2fcffdff0b090b88b3b6583`.
+Latest registry3293 SHA-256
+`cc0a5fc3b7f97798187ee750f84f1252171ffe320b8dd94e50d5c9472743edda`.
+No native handle is live. Counts and pending decisions remain unchanged.
+
 ### Recovery duplicate retained; two bounded units in progress, 2026-10-09
 
 At `0fc5b96b0665ac0cd6176097f57ffa659f554ca8`, original44759 finishes

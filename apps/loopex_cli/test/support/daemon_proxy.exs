@@ -25,7 +25,9 @@ defmodule LoopexCli.Test.DaemonProxy do
   # Technical depth: the original owner retains only closed public identity and
   # ordering fields, at most 128 records and 65,536 external-term bytes. One bounded
   # public frame is assembled transiently; no content, arguments or chunk bytes
-  # enter retained observations. Exhaustion is reported, never treated as loss
+  # enter retained observations. Decoded public answer text contributes only its
+  # byte count and SHA256, charged to those same caps, to compare stream and record.
+  # Exhaustion is reported, never treated as loss
   # of a model item or as proof that a closure did not exist.
   @observation_records 128
   @observation_bytes 65_536
@@ -319,7 +321,8 @@ defmodule LoopexCli.Test.DaemonProxy do
               record["progress"],
               ~w(kind turn_id stream_domain_id base_event_sequence model_sequence progress_sequence disposition delta_count progress_count)
             ),
-          readable: observation_readable(record)
+          readable: observation_readable(record),
+          content: observation_content(record)
         }
 
         records = [metadata | observations.records]
@@ -363,6 +366,33 @@ defmodule LoopexCli.Test.DaemonProxy do
     do: match?({:ok, _}, LoopexCli.DaemonClient.event(record))
 
   defp observation_readable(_record), do: :not_applicable
+
+  defp observation_content(
+         %{"type" => "progress", "progress" => %{"kind" => "text_delta"}} = record
+       ) do
+    case LoopexCli.DaemonClient.progress(record) do
+      {:ok, %{text: text}} when is_binary(text) -> content_fingerprint(text)
+      _invalid -> nil
+    end
+  end
+
+  defp observation_content(
+         %{"type" => "event", "event" => %{"kind" => "assistant.message_appended"}} = record
+       ) do
+    case LoopexCli.DaemonClient.event(record) do
+      {:ok, %{"content" => text}} when is_binary(text) -> content_fingerprint(text)
+      _invalid -> nil
+    end
+  end
+
+  defp observation_content(_record), do: nil
+
+  defp content_fingerprint(text) do
+    %{
+      bytes: byte_size(text),
+      sha256: Base.encode16(:crypto.hash(:sha256, text), case: :lower)
+    }
+  end
 
   defp observation_overflow(state) do
     %{
