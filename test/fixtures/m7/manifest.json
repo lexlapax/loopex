@@ -84,9 +84,9 @@
       "m7.instructions.admitted": {
         "attended": true,
         "credential": true,
-        "driver": "demonstration",
+        "driver": "scenario-chat",
         "lane": "m7-operator",
-        "status": "pending:instruction fixture driver",
+        "status": "ready",
         "steps": [
           "V3.1",
           "V3.2"
@@ -95,9 +95,9 @@
       "m7.instructions.changed": {
         "attended": false,
         "credential": true,
-        "driver": "provider-wrapper",
+        "driver": "scenario-chat",
         "lane": "m7-provider",
-        "status": "pending:instruction fixture driver",
+        "status": "ready",
         "steps": [
           "V3.4"
         ]
@@ -105,9 +105,9 @@
       "m7.instructions.declined": {
         "attended": false,
         "credential": true,
-        "driver": "provider-wrapper",
+        "driver": "scenario-chat",
         "lane": "m7-provider",
-        "status": "pending:instruction fixture driver",
+        "status": "ready",
         "steps": [
           "V3.3"
         ]
@@ -170,9 +170,9 @@
       "m7.provider-switch": {
         "attended": true,
         "credential": true,
-        "driver": "demonstration",
+        "driver": "scenario-chat",
         "lane": "m7-operator",
-        "status": "pending:A/B provider pins",
+        "status": "ready",
         "steps": [
           "V7.1",
           "V7.2",

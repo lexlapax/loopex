@@ -428,6 +428,7 @@ for m7_lane in m7-operator m7-provider; do
     --operator "$release_operator" --candidate "$commit")
   [ -z "${release_matrix_id:-}" ] || m7_wrapper+=(--matrix "$release_matrix_id")
   [ "$m7_lane" != m7-operator ] || m7_wrapper+=(--terminal)
+  [ -z "$release_pins" ] || m7_wrapper+=(--pins "$release_pins")
   [ -z "${LOOPEX_M7_EXTERNAL_REPOSITORY:-}" ] ||
     m7_wrapper+=(--external-repository "$LOOPEX_M7_EXTERNAL_REPOSITORY")
   printf 'check-release: %s\n' "$m7_lane"

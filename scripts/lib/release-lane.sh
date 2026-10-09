@@ -11,6 +11,7 @@ release_select() {
   release_markers=""
   release_m7_config=""
   release_operator=""
+  release_pins=""
   local usage='check-release: usage: check-release.sh [--only NAME ...] [--attempts-index FILE --writer ID --host ID --markers DIR] [--resume-matrix ID] [--m7-config FILE --operator NAME]'
   while [ "$#" -gt 0 ]; do
     [ "$#" -ge 2 ] && [ -n "$2" ] || { echo "$usage" >&2; return 2; }
@@ -41,9 +42,10 @@ release_select() {
         local variable="release_${1#--}"
         [ -z "${!variable}" ] || { echo "check-release: duplicate $1" >&2; return 2; }
         printf -v "$variable" '%s' "$2" ;;
-      --markers | --m7-config)
+      --markers | --m7-config | --pins)
         local variable=release_markers
         [ "$1" = --m7-config ] && variable=release_m7_config
+        [ "$1" = --pins ] && variable=release_pins
         [ -z "${!variable}" ] || { echo "check-release: duplicate $1" >&2; return 2; }
         case "$2" in
           /*) printf -v "$variable" '%s' "$2" ;;
@@ -82,8 +84,8 @@ release_select() {
   if release_selected m7-provider || release_selected m7-operator; then
     [ -n "$release_m7_config" ] && [ -n "$release_operator" ] ||
       { echo 'check-release: the M7 conversation lanes require --m7-config FILE and --operator NAME' >&2; return 2; }
-  elif [ -n "$release_m7_config$release_operator" ]; then
-    echo 'check-release: --m7-config and --operator apply only to the M7 conversation lanes' >&2
+  elif [ -n "$release_m7_config$release_operator$release_pins" ]; then
+    echo 'check-release: --m7-config, --operator and --pins apply only to the M7 conversation lanes' >&2
     return 2
   fi
 }

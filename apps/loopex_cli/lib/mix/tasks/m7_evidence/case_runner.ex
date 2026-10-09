@@ -68,7 +68,8 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
     continue: :boolean,
     terminal: :boolean,
     check: :boolean,
-    candidate: :string
+    candidate: :string,
+    pins: :string
   ]
 
   @doc """
@@ -81,8 +82,11 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
   The trusted wrapper's command line (`scripts/m7-fixture-chat.exs`):
   `--lane LANE --attempts-index FILE --writer ID --host ID --markers DIR
   --run-root DIR --operator NAME [--create] [--continue] [--matrix ID]
-  [--terminal] [--external-repository DIR] [--check] -- chat --config FILE`.
-  It runs from the clean candidate checkout. `--check` admits the lane and
+  [--terminal] [--external-repository DIR] [--pins FILE] [--candidate SHA]
+  [--check] chat --config FILE`. It runs from the clean candidate checkout, or
+  from its extraction with `--candidate`. `--matrix` joins, continues or skips
+  the lane within that logical matrix by the index alone; `--pins` supplies
+  the immutable A/B provider pins as JSON. `--check` admits the lane and
   reports its plan without staging or dispatch. Returns the exit status: 0
   when every case passed or the check admitted, 1 when a case stopped the
   lane, 2 when evidence is unavailable.
@@ -113,7 +117,8 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
             matrix: opts[:matrix],
             dispatch: if(opts[:terminal], do: :terminal, else: :pipe),
             operator: opts[:operator],
-            external_repository: opts[:external_repository]
+            external_repository: opts[:external_repository],
+            pins: read_pins(opts[:pins])
           },
           Map.drop(overrides, [:root, :candidate, :secrets])
         )
@@ -151,6 +156,20 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
 
       true ->
         run_lane(writer, opts[:lane], context)
+    end
+  end
+
+  # Concept: the immutable A/B provider pins arrive as one retained file,
+  # never as credentials. Technical depth: an unreadable or malformed file
+  # leaves the pins absent, so cases needing them refuse before dispatch.
+  defp read_pins(nil), do: nil
+
+  defp read_pins(path) do
+    with {:ok, bytes} <- File.read(path),
+         {:ok, %{} = pins} <- LoopexCli.ConfigJson.decode(bytes) do
+      pins
+    else
+      _ -> nil
     end
   end
 
@@ -513,7 +532,7 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
 
     with :ok <- File.mkdir(workspace),
          :ok <- write_seed(workspace, scenario.seed),
-         {:ok, conversations} <- scenario.plan.(context),
+         {:ok, conversations} <- scenario.plan.(Map.put(context, :workspace, workspace)),
          {:ok, config_argv} <-
            attempt_config(context.config_argv, workspace, root, scenario.profile) do
       {:ok,
@@ -711,7 +730,8 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
 
       true ->
         result = chat(staged, context, conversation.steps, mode, extra, n, questions(done))
-        session = session || session_id(result.output)
+        result = Map.put(result, :session, session_id(result.output))
+        session = session || result.session
 
         if result.exit == 0,
           do: converse(rest, staged, context, mode, session, [result | done], n + 1),
@@ -724,6 +744,7 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
       exit: if(results != [] and Enum.all?(results, &(&1.exit == 0)), do: 0, else: 1),
       conversations: length(results),
       session: session,
+      sessions: results |> Enum.map(& &1.session) |> Enum.reject(&is_nil/1) |> Enum.uniq(),
       output: Enum.map_join(results, & &1.output),
       diagnostics: Enum.map_join(results, & &1.diagnostics),
       closing: if(results == [], do: "", else: List.last(results).output),

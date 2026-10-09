@@ -250,14 +250,14 @@ One row per manifest case in lane order; `pending:` names what still blocks it.
 | `m7.trace.file` | `m7-operator` | scenario-chat | `ready` |
 | `m7.trace.json` | `m7-operator` | scenario-ask | `ready` |
 | `m7.repair` | `m7-operator` | fixture-chat | `ready` |
-| `m7.instructions.admitted` | `m7-operator` | demonstration | `pending:instruction fixture driver` |
+| `m7.instructions.admitted` | `m7-operator` | scenario-chat | `ready` |
 | `m7.steer-barrier` | `m7-operator` | demonstration | `pending:FIFO hold runner and observer join` |
 | `m7.feature` | `m7-operator` | fixture-chat | `ready` |
 | `m7.question-restart` | `m7-operator` | demonstration | `pending:controlled process-loss driver` |
 | `m7.ephemeral-question` | `m7-operator` | demonstration | `pending:scripts/m7-ephemeral-question-demo.exs` |
 | `m7.long` | `m7-operator` | fixture-chat | `pending:loopex chat composes no maintenance instructions, so every compaction refuses maintenance_instructions_unconfigured` |
 | `m7.oversized-source` | `m7-operator` | demonstration | `pending:oversized-source fixture` |
-| `m7.provider-switch` | `m7-operator` | demonstration | `pending:A/B provider pins` |
+| `m7.provider-switch` | `m7-operator` | scenario-chat | `ready` |
 | `m7.thinking-rounds` | `m7-operator` | demonstration | `pending:thinking-cell witness driver` |
 | `m7.review` | `m7-operator` | fixture-chat | `pending:helper flow (T11)` |
 | `m7.policy-denial` | `m7-operator` | scenario-chat | `ready` |
@@ -265,8 +265,8 @@ One row per manifest case in lane order; `pending:` names what still blocks it.
 | `m7.external` | `m7-operator` | external-chat | `ready` |
 | `m7.restore` | `m7-operator` | demonstration | `pending:attended restore driver` |
 | `m7.pipe-answer` | `m7-provider` | scenario-chat | `ready` |
-| `m7.instructions.declined` | `m7-provider` | provider-wrapper | `pending:instruction fixture driver` |
-| `m7.instructions.changed` | `m7-provider` | provider-wrapper | `pending:instruction fixture driver` |
+| `m7.instructions.declined` | `m7-provider` | scenario-chat | `ready` |
+| `m7.instructions.changed` | `m7-provider` | scenario-chat | `ready` |
 | `m7.cross-provider-maintenance` | `m7-provider` | provider-wrapper | `pending:A/B provider pins` |
 | `m7.thinking-bound` | `m7-provider` | provider-wrapper | `pending:thinking-cell witness driver` |
 | `m7.thinking-cancel` | `m7-provider` | provider-wrapper | `pending:pre-transport cancellation gate driver` |

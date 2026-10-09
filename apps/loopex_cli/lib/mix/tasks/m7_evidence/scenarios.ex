@@ -22,6 +22,9 @@ defmodule Mix.Tasks.Loopex.M7Evidence.Scenarios do
 
   @dated "anthropic:claude-haiku-4-5-20251001"
   @readme "M7 scenario workspace.\n"
+  @sentinel "AMBER-SENTINEL"
+  @instruction "Project instruction: end every answer with the word AMBER-SENTINEL.\n"
+  @instructed_prompt "Use the read tool on README.md and report its first line."
 
   @doc false
   def get("m7.baseline.durable") do
@@ -240,7 +243,159 @@ defmodule Mix.Tasks.Loopex.M7Evidence.Scenarios do
     }
   end
 
+  def get("m7.instructions." <> variant) when variant in ["admitted", "declined", "changed"] do
+    %{
+      seed: %{"README.md" => @readme},
+      allowed: [],
+      profile: & &1,
+      plan: fn context ->
+        root = Path.dirname(context.workspace)
+        file = Path.join(root, "project-instructions.md")
+
+        case variant do
+          "declined" ->
+            {:ok, [conversation([@instructed_prompt])]}
+
+          "admitted" ->
+            File.write!(file, @instruction)
+            {:ok, [Map.put(conversation([@instructed_prompt]), :extra, append(file))]}
+
+          "changed" ->
+            changed = Path.join(root, "project-instructions-changed.md")
+            File.write!(file, @instruction)
+            File.write!(changed, @instruction <> "Also name the file you read.\n")
+
+            {:ok,
+             [
+               Map.put(conversation([@instructed_prompt]), :extra, append(file)),
+               Map.merge(conversation([@instructed_prompt]), %{
+                 extra: append(changed),
+                 fresh: true
+               })
+             ]}
+        end
+      end,
+      joins: fn rows, outcome, workspace ->
+        appendix = appendix(rows)
+        sentinel = String.contains?(outcome.output, @sentinel)
+
+        cond do
+          is_nil(appendix) ->
+            {:missing, :session_genesis}
+
+          variant == "declined" and String.contains?(appendix, @sentinel) ->
+            {:failed, :declined_resource_admitted}
+
+          variant == "declined" ->
+            if sentinel, do: {:failed, :declined_resource_followed}, else: {:ok, nil}
+
+          not String.contains?(appendix, @sentinel) ->
+            {:failed, :resource_not_admitted}
+
+          not sentinel ->
+            {:missing, :instruction_not_followed}
+
+          variant == "changed" ->
+            changed_receipt(rows, outcome, workspace)
+
+          true ->
+            {:ok, nil}
+        end
+      end
+    }
+  end
+
+  def get("m7.provider-switch") do
+    %{
+      seed: %{"README.md" => @readme},
+      allowed: [],
+      profile: fn profile -> profile end,
+      plan: fn context ->
+        case get_in(context, [:pins, "provider_b"]) do
+          %{"model" => b} ->
+            a = get_in(context, [:pins, "provider_a"]) || "anthropic:claude-haiku-4-5-20251001"
+
+            {:ok,
+             [
+               %{
+                 resume: false,
+                 steps: [
+                   {:line, "Use the read tool on README.md and remember its first line."},
+                   {:line, "/wait"},
+                   {:line, ~s(/configure {"model":"#{b}"})},
+                   {:line, "Without reading again, repeat the first line you read earlier."},
+                   {:line, "/wait"},
+                   {:line, "/quit"}
+                 ]
+               },
+               %{
+                 resume: true,
+                 steps: [
+                   {:line, ~s(/configure {"model":"#{a}"})},
+                   {:line, "Without reading again, repeat the first line you read earlier."},
+                   {:line, "/wait"},
+                   {:line, "/status"},
+                   {:line, "/quit"}
+                 ]
+               }
+             ]}
+
+          _ ->
+            {:error, :provider_pins_required}
+        end
+      end,
+      joins: fn rows, outcome, _workspace ->
+        models =
+          for row <- rows,
+              row.payload.kind == "session_configuration_admitted_v2",
+              do: get_in(row.payload, ["configuration", "model"])
+
+        cond do
+          completed_receipts(rows) == [] -> {:missing, :tool_round}
+          length(models) < 2 -> {:missing, :provider_changes}
+          outcome.conversations < 2 -> {:missing, :reopen}
+          Enum.uniq(models) |> length() < 2 -> {:failed, :provider_not_switched}
+          true -> {:ok, nil}
+        end
+      end
+    }
+  end
+
   def get(_case_id), do: nil
+
+  defp append(file), do: ["--append-system-prompt-file", file]
+
+  defp appendix(rows) do
+    case find(rows, "session_genesis_v3") do
+      nil ->
+        nil
+
+      genesis ->
+        get_in(genesis.payload, ["initial_configuration", "instructions", "appendix"]) || ""
+    end
+  end
+
+  # The changed resource runs as a fresh session; its admitted receipt differs.
+  defp changed_receipt(rows, outcome, workspace) do
+    state = Path.join(Path.dirname(workspace), "state")
+
+    with [_, second] <- outcome.sessions,
+         {:ok, later} <- Mix.Tasks.Loopex.M7Evidence.CaseRunner.committed(state, second),
+         first =
+           get_in(find(rows, "session_genesis_v3").payload, [
+             "initial_configuration",
+             "instructions",
+             "digest"
+           ]),
+         %{} = genesis <- find(later, "session_genesis_v3"),
+         changed = get_in(genesis.payload, ["initial_configuration", "instructions", "digest"]),
+         true <- changed != first do
+      {:ok, nil}
+    else
+      false -> {:failed, :receipt_unchanged}
+      _ -> {:missing, :changed_session}
+    end
+  end
 
   # The ask result stream holds exactly one JSON object; diagnostics go to
   # standard error.

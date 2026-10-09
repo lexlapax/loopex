@@ -110,6 +110,10 @@ expect_refusal --only long_bound --writer w
 expect_refusal --only m7-provider "${IDX[@]}"
 expect_refusal --only m7-provider "${IDX[@]}" --m7-config relative --operator x
 expect_refusal --only m7-rollback "${IDX[@]}" "${CONV[@]}"
+expect_refusal --only m7-rollback "${IDX[@]}" --pins /retained/m7/pins.json
+expect_refusal --only m7-provider "${IDX[@]}" "${CONV[@]}" --pins relative.json
+release_select --only m7-provider "${IDX[@]}" "${CONV[@]}" --pins /retained/m7/pins.json
+[ "$release_pins" = /retained/m7/pins.json ] || fail 'pins file was lost' 
 expect_refusal --only m7-provider "${IDX[@]}" "${CONV[@]}" --writer again
 
 # The matrix recorder protocol: a scripted coprocess stands in for

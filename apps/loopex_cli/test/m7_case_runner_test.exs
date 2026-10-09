@@ -623,6 +623,66 @@ defmodule LoopexCli.M7CaseRunnerTest do
              CaseRunner.run_lane(f.writer, "m7-operator", %{context | matrix: "matrix-2"})
   end
 
+  @sentinel_reply %{text: "M7 scenario workspace. AMBER-SENTINEL", calls: []}
+
+  test "admitted project instructions are retained and followed", f do
+    result =
+      passed!(scenario!(f, "m7.instructions.admitted", fn _ -> [@read, @sentinel_reply] end))
+
+    assert File.read!(Path.join(result.root, "project-instructions.md")) =~ "AMBER-SENTINEL"
+  end
+
+  test "a declined resource is never admitted", f do
+    passed!(
+      scenario!(f, "m7.instructions.declined", fn _ ->
+        [@read, %{text: "M7 scenario workspace.", calls: []}]
+      end)
+    )
+  end
+
+  test "admitted text that is not followed is required_action_absent", f do
+    assert {:stopped, [{:ok, missed}]} =
+             scenario!(f, "m7.instructions.admitted", fn _ ->
+               [@read, %{text: "no sentinel", calls: []}]
+             end)
+
+    assert missed.mechanical_result == "required_action_absent"
+  end
+
+  test "a changed resource is admitted with a new receipt in a fresh session", f do
+    result =
+      passed!(scenario!(f, "m7.instructions.changed", fn _ -> [@read, @sentinel_reply] end))
+
+    facts = facts(result)
+    assert facts["join"] == "{:ok, nil}"
+    assert length(Path.wildcard(Path.join(result.root, "records/transcript-*.txt"))) == 2
+  end
+
+  test "provider switch moves A to B, reopens and returns to A with its tool facts", f do
+    profile =
+      put_in(profile(f.root), ["providers", "openai"], %{
+        "credential" => %{"env" => "M7_UNUSED_PROVIDER_B_REFERENCE"}
+      })
+
+    File.write!(f.config, :json.encode(profile))
+    pins = %{"provider_b" => %{"model" => "openai:gpt-4o-mini"}}
+
+    script = fn
+      1 -> [@read, %{text: "remembered", calls: []}, %{text: "M7 scenario workspace.", calls: []}]
+      _ -> [%{text: "M7 scenario workspace.", calls: []}]
+    end
+
+    result = passed!(scenario!(f, "m7.provider-switch", script, %{pins: pins}))
+    assert facts(result)["kinds"]["session_configuration_admitted_v2"] == 2
+  end
+
+  test "provider switch without its A/B pins refuses before dispatch", f do
+    assert {:stopped, [{:ok, refused}]} =
+             scenario!(f, "m7.provider-switch", fn _ -> [] end, %{pins: nil})
+
+    assert refused.mechanical_result == "evidence_incomplete_pre_dispatch"
+  end
+
   test "the wrapper command checks admission without staging and refuses bad arguments", f do
     :ok = AttemptWriter.close(f.writer)
     root = Path.expand("../../..", __DIR__)
