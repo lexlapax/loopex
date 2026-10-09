@@ -50,13 +50,14 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
   alias Mix.Tasks.Loopex.M7Evidence.{
     AttemptWriter,
     Conversation,
+    DaemonDetach,
     EphemeralDemo,
     ExecutionManifest,
     FixtureManifest,
     Scenarios
   }
 
-  @held ~w(m7.steer-barrier m7.interrupt)
+  @held ~w(m7.steer-barrier m7.interrupt m7.daemon-detach)
   @hold_limit_ms 90_000
   @readme "M7 held workspace.\n"
 
@@ -368,7 +369,13 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
   @doc false
   def run_case(writer, pin, selection, context) do
     case_id = pin["case_key"]
-    attempt = case_id <> "-" <> Base.encode16(:crypto.strong_rand_bytes(6), case: :lower)
+    # A test may fix the nonce so a fixed fixture reply can name the runner.
+    nonce =
+      Map.get_lazy(context, :attempt_nonce, fn ->
+        Base.encode16(:crypto.strong_rand_bytes(6), case: :lower)
+      end)
+
+    attempt = case_id <> "-" <> nonce
     root = Path.join(context.run_root, attempt)
 
     base =
@@ -750,6 +757,10 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
   end
 
   # The interrupt is the only release: the runner ends by cancellation.
+  # The daemon case's conversation is the daemon driver's own protocol.
+  defp held_plan("m7.daemon-detach", _fifo, _runner, _limit),
+    do: %{resume: false, daemon: true, steps: []}
+
   defp held_plan("m7.interrupt", fifo, runner, limit) do
     %{
       resume: false,
@@ -981,6 +992,18 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
   # session, so its record decides.
   # Technical depth: the capture reaches the policy only as Core's contextual
   # reference, so the same exact invocations and paths as the chat cases apply.
+  # Concept: V9.4 runs in an in-VM daemon host, not a chat conversation.
+  # Technical depth: the attempt's configuration supplies the model and the
+  # credential variable; the provider launch is the reference host's unless a
+  # test supplies a local fixture's.
+  defp dispatch(%{conversations: [%{daemon: true}]} = staged, context) do
+    ["chat", "--config", path | _] = staged.config_argv
+    {:ok, profile} = path |> File.read!() |> LoopexCli.ConfigJson.decode()
+    restore_credentials(context)
+    launch = Map.get_lazy(context, :daemon_launch, &LoopexCli.ProviderLaunch.options/0)
+    DaemonDetach.run(staged, Map.put(context, :profile, profile), launch)
+  end
+
   defp dispatch(%{conversations: [%{ephemeral: line}]} = staged, context) do
     ["chat", "--config", path | _] = staged.config_argv
     {:ok, profile} = path |> File.read!() |> LoopexCli.ConfigJson.decode()
@@ -1655,6 +1678,34 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
     end
   end
 
+  # Detach is a connection fact: the run completes as if no client had left.
+  defp held_case("m7.daemon-detach", rows, receipt, observation, outcome) do
+    run = observation["run_id"]
+    order = Enum.map(outcome.events, &if(is_tuple(&1), do: elem(&1, 0), else: &1))
+
+    terminal =
+      Enum.find(rows, &(kind(&1) == "run_terminal_committed" and &1.payload["run_id"] == run))
+
+    cond do
+      not ordered?(order, [:held, :driver_closed, :reattached, :observed, :released]) ->
+        {:missing, :detach_reattach_before_release}
+
+      # Shutdown's abort of an idle session is refused; only an accepted one
+      # would have ended the held run.
+      accepted(rows, "abort", run) ->
+        {:failed, :aborted}
+
+      receipt.payload["receipt"]["outcome"] != "completed" ->
+        {:failed, :held_call_not_completed}
+
+      is_nil(terminal) or terminal.payload["outcome"] != "completed" ->
+        {:failed, :run_not_completed}
+
+      true ->
+        {:ok, nil}
+    end
+  end
+
   # The interrupt is the only release: the held call ends by cancellation.
   defp held_case("m7.interrupt", rows, receipt, observation, outcome) do
     terminal =
@@ -1676,6 +1727,9 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
       true -> {:ok, nil}
     end
   end
+
+  defp ordered?(events, expected),
+    do: Enum.filter(events, &(&1 in expected)) |> Enum.dedup() == expected
 
   defp accepted(rows, type, run),
     do:

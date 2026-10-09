@@ -33,7 +33,7 @@ defmodule LoopexCli.Policy.M7Fixture do
   alias LoopexComposition.WorkspaceIdentity
   alias LoopexProtocol.{Canonical, ToolDefinition}
 
-  @cases ~w(m7.repair m7.feature m7.review m7.long m7.external m7.steer-barrier m7.interrupt)
+  @cases ~w(m7.repair m7.feature m7.review m7.long m7.external m7.steer-barrier m7.interrupt m7.daemon-detach)
 
   @doc false
   def oracle_runner(case_id, workspace, oracle, environment) do

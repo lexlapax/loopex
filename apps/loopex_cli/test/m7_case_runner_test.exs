@@ -1258,6 +1258,44 @@ defmodule LoopexCli.M7CaseRunnerTest do
     refute inputs =~ ":released"
   end
 
+  # Concept: the held run lives in an in-VM daemon host under the fixture
+  # policy; its driver's connection closes, it reattaches, an observer joins
+  # the same active run, and only then is the runner released.
+  @tag timeout: 120_000
+  test "a daemon run survives its driver detaching and completes after the observer joins", f do
+    alias LoopexCli.M7NativeReplies, as: R
+    model = "anthropic:claude-haiku-4-5-20251001"
+    runner = Path.join([f.context.run_root, "m7.daemon-detach-d7a1", "trusted", "hold.sh"])
+
+    fixture =
+      Loopex.LLM.ReqLLM.ProviderIsolationFixture.new(:reply,
+        credential: "m7-daemon-detach-synthetic",
+        response_bodies: [
+          R.reply(
+            model,
+            [{:tool, "hold-1", "bash", %{"argv" => ["/bin/sh", runner]}}],
+            "tool_use"
+          ),
+          R.reply(model, [{:text, "released"}])
+        ]
+      )
+
+    options = native!(f, fixture)
+
+    context =
+      Map.merge(f.context, %{
+        manifest: lane(f.context.manifest, ["m7.daemon-detach"]),
+        attempt_nonce: "d7a1",
+        step_deadline_ms: 20_000,
+        daemon_launch: options[:provider_launch].()
+      })
+
+    result = passed!(CaseRunner.run_lane(f.writer, "m7-operator", context))
+    inputs = File.read!(Path.join(result.root, "records/input-1.txt"))
+    assert inputs =~ ":driver_closed" and inputs =~ ":released"
+    assert facts(result)["kinds"]["run_terminal_committed"] == 1
+  end
+
   test "the wrapper command checks admission without staging and refuses bad arguments", f do
     :ok = AttemptWriter.close(f.writer)
     root = Path.expand("../../..", __DIR__)

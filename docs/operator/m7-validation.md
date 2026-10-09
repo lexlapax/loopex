@@ -187,6 +187,18 @@ held run, and the follow-up must run separately with the held run's context.
 These cases stay piped even under `--terminal`; an operator's Ctrl-C under
 `mix run` would end the whole harness rather than reach the chat.
 
+## Daemon detach
+
+`m7.daemon-detach` holds the same pinned FIFO runner inside an in-VM daemon
+host started with the case's fixture policy, the configuration's model and
+credential variable, and the reference provider launch. The driver connection
+creates the session, takes control, attaches and prompts. Once the runner is
+held, the driver closes its connection and reattaches at its cursor. A
+separate observer connection then attaches from sequence zero without
+control. The runner is released only after the reattach snapshot and the
+observer's replay name the same active run and held operation. The run must
+then complete with no accepted abort.
+
 ## Step ownership
 
 Every key below has exactly one owner: `case:` an M7 manifest case run by its
@@ -342,5 +354,5 @@ One row per manifest case in lane order; `pending:` names what still blocks it.
 | `m7.cross-provider-maintenance` | `m7-provider` | provider-wrapper | `ready` |
 | `m7.thinking-bound` | `m7-provider` | provider-wrapper | `ready` |
 | `m7.thinking-cancel` | `m7-provider` | provider-wrapper | `ready` |
-| `m7.daemon-detach` | `m7-provider` | provider-wrapper | `pending:daemon host fixture driver` |
+| `m7.daemon-detach` | `m7-provider` | provider-wrapper | `ready` |
 | `m7.rollback` | `m7-rollback` | release-lane | `ready` |

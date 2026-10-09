@@ -41,7 +41,7 @@
         "credential": true,
         "driver": "provider-wrapper",
         "lane": "m7-provider",
-        "status": "pending:daemon host fixture driver",
+        "status": "ready",
         "steps": [
           "V9.4"
         ]
