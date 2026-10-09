@@ -43,9 +43,14 @@ defmodule Loopex.Store.CreationRuntimeRecoveryTest do
       terminal = @terminal
       target = Fixture.target(terminal)
       probe = Fixture.probe(self(), target)
+      Process.unlink(probe)
       on_exit(fn -> stop_probe(probe) end)
       {local, store} = local(path, fault_probe: probe)
       runtime = runtime(store)
+      # Concept: failed assertions release Store checkpoints before owner teardown.
+      # Technical depth: this last-registered guard disarms the probe before the
+      # runtime and Local callbacks run; the earlier callback stops it afterward.
+      on_exit(fn -> release_probe(probe) end)
       :ok = ConfiguredGenesisFixture.await_creation_ready(runtime)
       observer = self()
 
@@ -58,10 +63,9 @@ defmodule Loopex.Store.CreationRuntimeRecoveryTest do
           )
         end)
 
-      on_exit(fn -> if Process.alive?(caller), do: Process.exit(caller, :kill) end)
+      on_exit(fn -> stop_caller(caller) end)
 
       assert_receive {:creation_checkpoint, ^probe, ^local, reference, ^target}, 1_000
-      on_exit(fn -> send(probe, {:release, reference}) end)
       original = Fixture.capture(runtime, path, terminal)
 
       actors =
@@ -69,7 +73,6 @@ defmodule Loopex.Store.CreationRuntimeRecoveryTest do
           [original.action.pid, original.action.group, original.action.worker]
 
       monitors = Enum.map(Enum.uniq(actors), &{&1, Process.monitor(&1)})
-      Process.unlink(runtime.supervisor)
       cutoff = System.monotonic_time(:millisecond) + 1_000
       Process.exit(runtime.supervisor, :kill)
       join(monitors, cutoff)
@@ -251,6 +254,7 @@ defmodule Loopex.Store.CreationRuntimeRecoveryTest do
 
   defp local(path, options \\ []) do
     {:ok, local} = Local.start_link([path: path] ++ options)
+    Process.unlink(local)
     on_exit(fn -> stop_local(local) end)
     {:ok, store} = Store.new(Local, local)
     {local, store}
@@ -258,8 +262,19 @@ defmodule Loopex.Store.CreationRuntimeRecoveryTest do
 
   defp runtime(store, genesis \\ Fixture.genesis()) do
     {:ok, runtime} = Fixture.start_runtime(store, genesis)
-    on_exit(fn -> if Runtime.alive?(runtime), do: Runtime.stop(runtime) end)
+    Process.unlink(runtime.supervisor)
+    on_exit(fn -> stop_runtime(runtime) end)
     runtime
+  end
+
+  defp stop_runtime(runtime) do
+    if Process.alive?(runtime.supervisor) do
+      cutoff = System.monotonic_time(:millisecond) + 1_000
+      monitor = Process.monitor(runtime.supervisor)
+      assert :ok = Runtime.stop(runtime)
+      root = runtime.supervisor
+      assert_receive {:DOWN, ^monitor, :process, ^root, _}, remaining(cutoff)
+    end
   end
 
   defp stop_local(local) do
@@ -277,6 +292,24 @@ defmodule Loopex.Store.CreationRuntimeRecoveryTest do
       monitor = Process.monitor(probe)
       send(probe, :stop)
       assert_receive {:DOWN, ^monitor, :process, ^probe, _}, remaining(cutoff)
+    end
+  end
+
+  defp release_probe(probe) do
+    if Process.alive?(probe) do
+      cutoff = System.monotonic_time(:millisecond) + 1_000
+      reference = make_ref()
+      send(probe, {:release_all, self(), reference})
+      assert_receive {:creation_probe_released, ^probe, ^reference}, remaining(cutoff)
+    end
+  end
+
+  defp stop_caller(caller) do
+    if Process.alive?(caller) do
+      cutoff = System.monotonic_time(:millisecond) + 1_000
+      monitor = Process.monitor(caller)
+      Process.exit(caller, :kill)
+      assert_receive {:DOWN, ^monitor, :process, ^caller, _}, remaining(cutoff)
     end
   end
 

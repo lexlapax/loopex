@@ -205,9 +205,27 @@ defmodule LoopexDaemon.NativeConfigurationResolutionTest do
     command = configure("during-maintenance", %{"model" => @authored_model})
     assert {:error, :maintenance_active} = native(f, command)
     assert_resolution(f, [])
-    assert recover(f).configuration == f.initial
-    assert [row] = configuration_rows(f)
-    assert row.payload["configuration"] == nil
+    refused = recover(f)
+    assert refused.configuration == f.initial
+    assert configuration_rows(f) == []
+    binding = refused.commands[command.command_id]
+    assert binding.reply == {:error, :maintenance_active}
+    assert binding.run_id == nil
+
+    assert [row] =
+             Enum.filter(
+               Fixture.records(f, f.session),
+               &(&1.payload["command_id"] == command.command_id)
+             )
+
+    assert row.payload == %{
+             :kind => "command_admitted",
+             "command_id" => command.command_id,
+             "command_digest" => binding.digest,
+             "command_type" => "configure",
+             "admission" => "rejected_maintenance_active"
+           }
+
     send(callback, :release)
     assert_receive {:DOWN, ^monitor, :process, ^callback, :normal}, 5_000
     completed = await_settled(f)
@@ -216,8 +234,15 @@ defmodule LoopexDaemon.NativeConfigurationResolutionTest do
     assert completed.commands["compact"].result["cleanup"] == "confirmed"
     assert {:error, :maintenance_active} = native(f, command)
     assert_resolution(f, [])
+    assert recover(f).commands[command.command_id] == binding
+    assert configuration_rows(f) == []
     fitting = configure("after-maintenance", %{"model" => @authored_model})
     assert {:accepted, "after-maintenance"} = native(f, fitting)
+    assert_resolution(f, [fitting.changes])
+    assert [accepted] = configuration_rows(f)
+    assert accepted.payload["command_id"] == fitting.command_id
+    assert {:accepted, "after-maintenance"} = native(f, fitting)
+    assert configuration_rows(f) == [accepted]
     assert_resolution(f, [fitting.changes])
     coordinator = :sys.get_state(owner(f))
     assert coordinator.in_flight == %{}

@@ -46,6 +46,11 @@ defmodule LoopexStoreLocalTest.CreationRuntimeRecovery do
             send(store, {:loopex_store_fault_action, reference, :continue})
             probe_loop(observer, nil)
 
+          {:release_all, caller, release_reference} ->
+            send(store, {:loopex_store_fault_action, reference, :continue})
+            send(caller, {:creation_probe_released, self(), release_reference})
+            probe_loop(observer, nil)
+
           :stop ->
             send(store, {:loopex_store_fault_action, reference, :continue})
         end
@@ -53,6 +58,10 @@ defmodule LoopexStoreLocalTest.CreationRuntimeRecovery do
       {:loopex_store_fault_point, store, reference, _pair} ->
         send(store, {:loopex_store_fault_action, reference, :continue})
         probe_loop(observer, target)
+
+      {:release_all, caller, reference} ->
+        send(caller, {:creation_probe_released, self(), reference})
+        probe_loop(observer, nil)
 
       :stop ->
         :ok
