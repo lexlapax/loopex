@@ -621,14 +621,22 @@ defmodule Loopex.AppServer.ForegroundOutputLifecycleTest do
     Harness.with_fixture(:fifo, :runtime, fn fixture ->
       prepare(fixture)
 
+      # Concept: the write must still be blocked after the 4,096-byte read on
+      # every host. Technical depth: the about 65.8 KB frame alone fits a
+      # Linux FIFO (65,536 bytes) once 4,096 bytes are read. The harness, which
+      # holds the FIFO open, first places 8,192 filler bytes in it, so the frame
+      # cannot fit after that read on Linux or Darwin; closing every reader then
+      # breaks the actual write.
+      filler = :binary.copy("f", 8_192)
+      assert :file.write(fixture.fifo, filler) == :ok
+
       assert {:offered, :ok} =
                Harness.command(fixture, {:offer, :text_delta, 32_768}, &match?({:offered, _}, &1))
 
       blocked = Harness.blocked(fixture)
       assert blocked.credit.slots == 1
       prefix = Harness.read_fifo_chunk(fixture)
-      assert byte_size(prefix) == 4_096
-      refute String.contains?(prefix, "\n")
+      assert prefix == binary_part(filler, 0, 4_096)
       assert :file.close(fixture.fifo) == :ok
       summary = Harness.finished(fixture)
       # The leader waiting for CONTINUE and the writer share the original 5 s
