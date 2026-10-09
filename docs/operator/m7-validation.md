@@ -148,7 +148,7 @@ answer never stands in for attendance.
 | `V5.6.positive` | attended | `case:m7.ephemeral-question` |
 | `V6.1` | attended | `case:m7.long` |
 | `V6.2.long` | attended | `case:m7.long` |
-| `V6.2.range` | automated | `pending:m7.range-read: no >=16 KiB 4 KiB-range through-EOF integration test yet` |
+| `V6.2.range` | automated | `test:apps/loopex_composition/test/artifact_range_executor_test.exs#a mixed source of at least 16 KiB reads exactly through EOF in 4 KiB ranges` |
 | `V6.3` | attended | `case:m7.long` |
 | `V6.4` | attended | `case:m7.long` |
 | `V6.5.input-only` | automated | `test:apps/loopex/test/conversation_test.exs#terminal input-only runs keep failed and cancelled prompts eligible` |
@@ -177,7 +177,7 @@ answer never stands in for attendance.
 | `V7.6.limits` | automated | `test:apps/loopex/test/configured_session_test.exs#aggregate continuation overflow records an unavailable projection before another attempt` |
 | `V7.6.missing-state` | automated | `test:apps/loopex/test/configured_session_test.exs#required continuation refuses v2 and malformed v3 before tools or reported accounting` |
 | `V7.6.open-exchange-compaction` | automated | `test:apps/loopex/test/maintenance_episode_admission_test.exs#no episode overlaps an open exchange, interaction, abort or provider/effect stage` |
-| `V7.6.summary-progress` | automated | `pending:verified-summary progress absent from reopened canonical history` |
+| `V7.6.summary-progress` | automated | `test:apps/loopex_composition/test/native_model_switch_test.exs#verified native summary stays progress and out of the next canonical request after reopen` |
 | `V7.7.bound` | automated | `case:m7.thinking-bound` |
 | `V7.7.cancel` | automated | `case:m7.thinking-cancel` |
 | `V8.1` | attended | `case:m7.review` |
@@ -212,7 +212,7 @@ answer never stands in for attendance.
 | `V12.3` | automated | `test:apps/loopex_cli/test/config_file_test.exs#JSON and authored schema refusals happen before relative resolution` |
 | `V12.4` | automated | `test:apps/loopex_cli/test/chat_resume_configuration_test.exs#restart preserves exact settings and ignores changed file instructions, tools and helper defaults` |
 | `V12.5.in-flight` | automated | `test:apps/loopex/test/session_configuration_admission_test.exs#active work, interactions, aborts and unresolved effects cannot be configured` |
-| `V12.5.legacy-defaults` | automated | `pending:legacy one-shot default and unattended behavior test` |
+| `V12.5.legacy-defaults` | automated | `test:apps/loopex_cli/test/ask_ephemeral_test.exs#legacy one-shot defaults leave model, bounds and questions to the ephemeral profile` |
 | `V13.1` | attended | `case:m7.restore` |
 | `V13.2` | automated | `case:m7.rollback` |
 | `V13.3` | retired | `retired:docs/developer/agent-context-map.md#disposition-pre1-current-contract-2026-10-02` |

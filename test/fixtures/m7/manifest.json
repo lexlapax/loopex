@@ -464,7 +464,7 @@
       },
       "V12.5.legacy-defaults": {
         "classification": "automated",
-        "owner": "pending:legacy one-shot default and unattended behavior test"
+        "owner": "test:apps/loopex_cli/test/ask_ephemeral_test.exs#legacy one-shot defaults leave model, bounds and questions to the ephemeral profile"
       },
       "V13.1": {
         "classification": "attended",
@@ -616,7 +616,7 @@
       },
       "V6.2.range": {
         "classification": "automated",
-        "owner": "pending:m7.range-read: no >=16 KiB 4 KiB-range through-EOF integration test yet"
+        "owner": "test:apps/loopex_composition/test/artifact_range_executor_test.exs#a mixed source of at least 16 KiB reads exactly through EOF in 4 KiB ranges"
       },
       "V6.3": {
         "classification": "attended",
@@ -732,7 +732,7 @@
       },
       "V7.6.summary-progress": {
         "classification": "automated",
-        "owner": "pending:verified-summary progress absent from reopened canonical history"
+        "owner": "test:apps/loopex_composition/test/native_model_switch_test.exs#verified native summary stays progress and out of the next canonical request after reopen"
       },
       "V7.7.bound": {
         "classification": "automated",

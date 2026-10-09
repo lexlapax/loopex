@@ -170,6 +170,6 @@ defmodule LoopexCli.M7ExecutionManifestTest do
              repair["specification_digest"]
 
     assert %{owners: owners} = ExecutionManifest.pending(f.manifest)
-    assert "V6.2.range" in owners
+    assert owners == ["V8.5", "V8.6"]
   end
 end

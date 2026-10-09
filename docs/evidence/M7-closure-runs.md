@@ -232,7 +232,7 @@ cross-version steps are not passes; preserve current-format restore coverage.
 | `V5.6.positive` | `case:m7.ephemeral-question` | Pending | Pending | Pending | Pending | Pending |
 | `V6.1` | `case:m7.long` | Pending | Pending | Pending | Pending | Pending |
 | `V6.2.long` | `case:m7.long` | Pending | Pending | Pending | Pending | Pending |
-| `V6.2.range` | `pending:m7.range-read: no >=16 KiB 4 KiB-range through-EOF integration test yet` | Pending | Pending | Pending | Pending | Pending |
+| `V6.2.range` | `test:apps/loopex_composition/test/artifact_range_executor_test.exs#a mixed source of at least 16 KiB reads exactly through EOF in 4 KiB ranges` | Pending | Pending | Pending | Pending | Pending |
 | `V6.3` | `case:m7.long` | Pending | Pending | Pending | Pending | Pending |
 | `V6.4` | `case:m7.long` | Pending | Pending | Pending | Pending | Pending |
 | `V6.5.input-only` | `test:apps/loopex/test/conversation_test.exs#terminal input-only runs keep failed and cancelled prompts eligible` | Pending | Pending | Pending | Pending | Pending |
@@ -261,7 +261,7 @@ cross-version steps are not passes; preserve current-format restore coverage.
 | `V7.6.limits` | `test:apps/loopex/test/configured_session_test.exs#aggregate continuation overflow records an unavailable projection before another attempt` | Pending | Pending | Pending | Pending | Pending |
 | `V7.6.missing-state` | `test:apps/loopex/test/configured_session_test.exs#required continuation refuses v2 and malformed v3 before tools or reported accounting` | Pending | Pending | Pending | Pending | Pending |
 | `V7.6.open-exchange-compaction` | `test:apps/loopex/test/maintenance_episode_admission_test.exs#no episode overlaps an open exchange, interaction, abort or provider/effect stage` | Pending | Pending | Pending | Pending | Pending |
-| `V7.6.summary-progress` | `pending:verified-summary progress absent from reopened canonical history` | Pending | Pending | Pending | Pending | Pending |
+| `V7.6.summary-progress` | `test:apps/loopex_composition/test/native_model_switch_test.exs#verified native summary stays progress and out of the next canonical request after reopen` | Pending | Pending | Pending | Pending | Pending |
 | `V7.7.bound` | `case:m7.thinking-bound` | Pending | Pending | Pending | Pending | Pending |
 | `V7.7.cancel` | `case:m7.thinking-cancel` | Pending | Pending | Pending | Pending | Pending |
 | `V8.1` | `case:m7.review` | Pending | Pending | Pending | Pending | Pending |
@@ -296,7 +296,7 @@ cross-version steps are not passes; preserve current-format restore coverage.
 | `V12.3` | `test:apps/loopex_cli/test/config_file_test.exs#JSON and authored schema refusals happen before relative resolution` | Pending | Pending | Pending | Pending | Pending |
 | `V12.4` | `test:apps/loopex_cli/test/chat_resume_configuration_test.exs#restart preserves exact settings and ignores changed file instructions, tools and helper defaults` | Pending | Pending | Pending | Pending | Pending |
 | `V12.5.in-flight` | `test:apps/loopex/test/session_configuration_admission_test.exs#active work, interactions, aborts and unresolved effects cannot be configured` | Pending | Pending | Pending | Pending | Pending |
-| `V12.5.legacy-defaults` | `pending:legacy one-shot default and unattended behavior test` | Pending | Pending | Pending | Pending | Pending |
+| `V12.5.legacy-defaults` | `test:apps/loopex_cli/test/ask_ephemeral_test.exs#legacy one-shot defaults leave model, bounds and questions to the ephemeral profile` | Pending | Pending | Pending | Pending | Pending |
 | `V13.1` | `case:m7.restore` | Pending | Pending | Pending | Pending | Pending |
 | `V13.2` | `case:m7.rollback` | Pending | Pending | Pending | Pending | Pending |
 | `V13.3` | `retired:docs/developer/agent-context-map.md#disposition-pre1-current-contract-2026-10-02` | Pending | Pending | Pending | Pending | Pending |
