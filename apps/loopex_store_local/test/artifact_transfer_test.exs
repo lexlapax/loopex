@@ -372,7 +372,7 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
     end
   end
 
-  defmodule LegacyStore do
+  defmodule TransferlessStore do
     @moduledoc false
     @behaviour Loopex.ArtifactStore
 
@@ -391,18 +391,19 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
     def describe(handle, use_locator), do: Artifacts.describe(handle, use_locator)
   end
 
-  test "an adapter without the capability keeps the prior API and refuses only the transfer family" do
-    %{handle: handle, reference: reference, bytes: bytes} = stored("bytes an old adapter holds")
+  test "an adapter without the optional transfer callbacks serves the rest and refuses transfers" do
+    %{handle: handle, reference: reference, bytes: bytes} =
+      stored("bytes a transferless adapter holds")
 
-    # The four callbacks that predate the decision answer exactly as before.
-    refute ArtifactStore.supports_transfer?(LegacyStore)
-    assert {:ok, ^bytes} = LegacyStore.fetch(handle, object(reference))
-    assert {:ok, stat} = LegacyStore.stat(handle, reference.locator)
+    # The four required callbacks answer; only the optional family is absent.
+    refute ArtifactStore.supports_transfer?(TransferlessStore)
+    assert {:ok, ^bytes} = TransferlessStore.fetch(handle, object(reference))
+    assert {:ok, stat} = TransferlessStore.stat(handle, reference.locator)
     assert stat.digest == reference.digest
-    assert {:ok, described} = LegacyStore.describe(handle, reference.use_locator)
+    assert {:ok, described} = TransferlessStore.describe(handle, reference.use_locator)
     assert described.object_locator == reference.locator
 
-    %{runtime: runtime, session_id: session_id} = session(handle, LegacyStore)
+    %{runtime: runtime, session_id: session_id} = session(handle, TransferlessStore)
     reference = for_session(handle, reference, session_id)
     {:ok, attachment} = Loopex.attach(runtime, session_id, after_event_sequence: 0)
 
@@ -687,28 +688,9 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
     assert File.read!(outside) == "not the scratch root's business"
   end
 
-  test "genuine old format artifacts remain readable and removing the transfer capability restores the prior API without rewriting data" do
-    bytes = "an artifact written before transfers existed"
-    %{handle: handle, reference: reference} = stored(bytes)
-
-    # The prior API reads it whole, and describes it, without a transfer.
-    assert {:ok, ^bytes} = Artifacts.fetch(handle, object(reference))
-    assert {:ok, stat} = Artifacts.stat(handle, reference.locator)
-    assert stat.digest == reference.digest
-    assert {:ok, described} = Artifacts.describe(handle, reference.use_locator)
-    assert described.object_locator == reference.locator
-
-    # An adapter without the transfer family keeps exactly that API and reads the
-    # same bytes: nothing was migrated to make transfers possible.
-    refute ArtifactStore.supports_transfer?(LegacyStore)
-    assert {:ok, ^bytes} = LegacyStore.fetch(handle, object(reference))
-    assert {:ok, legacy_stat} = LegacyStore.stat(handle, reference.locator)
-    assert legacy_stat.digest == reference.digest
-  end
-
   test "an unsupported ArtifactStore reports unsupported rather than falling back to a whole object fetch" do
     %{handle: handle, reference: reference} = stored("bytes")
-    %{runtime: runtime, session_id: session_id} = session(handle, LegacyStore)
+    %{runtime: runtime, session_id: session_id} = session(handle, TransferlessStore)
     reference = for_session(handle, reference, session_id)
     {:ok, attachment} = Loopex.attach(runtime, session_id, after_event_sequence: 0)
 
