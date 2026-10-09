@@ -607,9 +607,15 @@ defmodule LoopexCli.Output do
   defp command(_message, _from, state),
     do: {:reply, {:error, :invalid_output}, fail(state, :invalid_output)}
 
+  # Concept: the sink re-notifies only after take has consumed the notification.
+  # Technical depth: ProgressSink.take clears the ready flag only when it
+  # receives the notification itself. Requeueing it before the first take keeps
+  # later items from waiting for the domain's closure.
   @impl true
-  def handle_info({:loopex_progress_ready, sink}, %{sink: sink} = state),
-    do: {:noreply, state |> drain_sink() |> dispatch() |> arm()}
+  def handle_info({:loopex_progress_ready, sink}, %{sink: sink} = state) do
+    send(self(), {:loopex_progress_ready, sink})
+    {:noreply, state |> drain_sink() |> dispatch() |> arm()}
+  end
 
   def handle_info({port, {:data, bytes}}, %{target: %{kind: :stdio, port: port}} = state) do
     control = state.target.control <> bytes
