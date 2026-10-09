@@ -77,6 +77,34 @@ defmodule LoopexCli.AskEphemeralTest do
     end
   end
 
+  # Concept: V12.5 legacy one-shot defaults. Unflagged `ask` and `-p` pass no
+  # model, bounds or question responder, so the ephemeral profile's unchanged
+  # defaults govern and the run stays unattended; prompt words read no stdin.
+  test "legacy one-shot defaults leave model, bounds and questions to the ephemeral profile" do
+    for command <- ["ask", "-p"] do
+      result = Ask.run([command, "--policy", "allow-all", "hello"], seams())
+      assert %{status: 0, stdout: "answer\n"} = result
+      assert_receive {:session_started, selected}
+      assert Enum.sort(Keyword.keys(selected)) == Enum.sort([:policy, :cwd, :tools, :skills])
+      assert selected[:tools] == :coding
+      assert_receive {:question_asked, "hello"}
+    end
+
+    previous = System.get_env("LOOPEX_MODEL")
+    System.delete_env("LOOPEX_MODEL")
+
+    try do
+      assert {:ok, defaults} =
+               LoopexComposition.Ephemeral.Options.parse(policy: LoopexCli.Policy.AllowAll)
+
+      assert defaults.model == "ollama:llama3.2"
+      assert defaults.max_steps == 16 and defaults.deadline_ms == 600_000
+      assert defaults.questions == false and defaults.reasoning == "default"
+    after
+      if previous, do: System.put_env("LOOPEX_MODEL", previous)
+    end
+  end
+
   test "install refusal creates no session or question worker" do
     parent = self()
 

@@ -88,6 +88,24 @@ Continue a lane suspended by a pre-dispatch stop on the same commit with
 `index-head: <campaign_id> <sequence> <sha256>` line to the M7 plan's
 Progress and Evidence section.
 
+## Through the release check
+
+The full closure matrix runs every lane in order and records each in the same
+index under one logical matrix:
+
+```bash
+bash scripts/check-release.sh --attempts-index /retained/m7/attempts.jsonl \
+  --writer maintainer-workstation --host workstation-1 --markers /retained/m7/markers \
+  --m7-config /retained/m7/config.json --operator Maintainer
+```
+
+It prints `check-release: logical matrix ID`. After a pre-dispatch stop, rerun
+on the same commit with `--resume-matrix ID`: completed lanes are skipped and
+named, fresh-source is rebuilt and must reproduce its first archive manifest,
+and only not-dispatched cases run. A lane that started and did not pass ends
+the matrix; it is never resumed. Set `LOOPEX_M7_EXTERNAL_REPOSITORY` to the
+external repository's checkout for the operator lane's external task.
+
 ## External task
 
 The maintainer-selected external task changes `slugify` in
@@ -98,6 +116,40 @@ change. The harness-owned oracle `test/fixtures/m7/external/oracle_test.py`
 checks the slugify cases and that `python3 tools/threads.py --check` exits 0.
 The checkout is disposable and is never pushed; the original repository is
 read only by the clone.
+
+## Ephemeral question case
+
+`m7.ephemeral-question` runs the feature fixture through one public ephemeral
+call instead of a chat session, using the configuration's model and provider
+routes. With `--terminal` the wrapper prints the model's question and numbered
+choices and reads the operator's line: a choice label or number answers,
+`decline` declines. The retained `records/ephemeral.json` names the operator,
+question, typed answer, selected choice and outcome. The independent oracle
+reruns the branch for the selected default, so a run that ignores the answer
+fails. The ephemeral API admits only a context-free policy module, so this case
+runs under the allow-all host policy; the workspace inventory and the oracle
+bound what it may change. `scripts/m7-ephemeral-question-demo.exs` runs the
+same host outside a lane for rehearsal; its record is not lane evidence.
+
+## Held cases
+
+`m7.steer-barrier` and `m7.interrupt` ask the model to run
+`/bin/sh <attempt>/trusted/hold.sh` once. The runner waits on
+`trusted/hold.fifo`, outside the writable workspace, and the fixture policy
+admits only that pinned invocation. The wrapper knows the call is running when
+the runner opens the FIFO. It then prints `/status`. For the steer case it
+also sends `/steer` and `/follow-up`. Next an independent read-only attachment
+to the same runtime confirms the active run and its held operation. The
+wrapper also requires the runtime to have accepted those commands. Only then
+does it write one line to the FIFO. The interrupt case never writes: it
+delivers the terminal interrupt and the run must end by cancellation with
+confirmed cleanup. A hold of 90 seconds without release, below the 120-second
+tool wall time, releases the runner and records `hold_expired` as a failure.
+After the run, committed facts decide the case. The steer and follow-up must be
+admitted before the held operation's receipt. The steer must be applied to the
+held run, and the follow-up must run separately with the held run's context.
+These cases run in piped mode only; an operator's Ctrl-C under `mix run` would
+end the whole harness rather than reach the chat.
 
 ## Step ownership
 
@@ -148,7 +200,7 @@ answer never stands in for attendance.
 | `V5.6.positive` | attended | `case:m7.ephemeral-question` |
 | `V6.1` | attended | `case:m7.long` |
 | `V6.2.long` | attended | `case:m7.long` |
-| `V6.2.range` | automated | `pending:m7.range-read: no >=16 KiB 4 KiB-range through-EOF integration test yet` |
+| `V6.2.range` | automated | `test:apps/loopex_composition/test/artifact_range_executor_test.exs#a mixed source of at least 16 KiB reads exactly through EOF in 4 KiB ranges` |
 | `V6.3` | attended | `case:m7.long` |
 | `V6.4` | attended | `case:m7.long` |
 | `V6.5.input-only` | automated | `test:apps/loopex/test/conversation_test.exs#terminal input-only runs keep failed and cancelled prompts eligible` |
@@ -177,7 +229,7 @@ answer never stands in for attendance.
 | `V7.6.limits` | automated | `test:apps/loopex/test/configured_session_test.exs#aggregate continuation overflow records an unavailable projection before another attempt` |
 | `V7.6.missing-state` | automated | `test:apps/loopex/test/configured_session_test.exs#required continuation refuses v2 and malformed v3 before tools or reported accounting` |
 | `V7.6.open-exchange-compaction` | automated | `test:apps/loopex/test/maintenance_episode_admission_test.exs#no episode overlaps an open exchange, interaction, abort or provider/effect stage` |
-| `V7.6.summary-progress` | automated | `pending:verified-summary progress absent from reopened canonical history` |
+| `V7.6.summary-progress` | automated | `test:apps/loopex_composition/test/native_model_switch_test.exs#verified native summary stays progress and out of the next canonical request after reopen` |
 | `V7.7.bound` | automated | `case:m7.thinking-bound` |
 | `V7.7.cancel` | automated | `case:m7.thinking-cancel` |
 | `V8.1` | attended | `case:m7.review` |
@@ -212,7 +264,7 @@ answer never stands in for attendance.
 | `V12.3` | automated | `test:apps/loopex_cli/test/config_file_test.exs#JSON and authored schema refusals happen before relative resolution` |
 | `V12.4` | automated | `test:apps/loopex_cli/test/chat_resume_configuration_test.exs#restart preserves exact settings and ignores changed file instructions, tools and helper defaults` |
 | `V12.5.in-flight` | automated | `test:apps/loopex/test/session_configuration_admission_test.exs#active work, interactions, aborts and unresolved effects cannot be configured` |
-| `V12.5.legacy-defaults` | automated | `pending:legacy one-shot default and unattended behavior test` |
+| `V12.5.legacy-defaults` | automated | `test:apps/loopex_cli/test/ask_ephemeral_test.exs#legacy one-shot defaults leave model, bounds and questions to the ephemeral profile` |
 | `V13.1` | attended | `case:m7.restore` |
 | `V13.2` | automated | `case:m7.rollback` |
 | `V13.3` | retired | `retired:docs/developer/agent-context-map.md#disposition-pre1-current-contract-2026-10-02` |
@@ -226,31 +278,31 @@ One row per manifest case in lane order; `pending:` names what still blocks it.
 
 | Case | Lane | Driver | Status |
 | --- | --- | --- | --- |
-| `m7.baseline.ask` | `m7-operator` | demonstration | `pending:attended baseline driver` |
-| `m7.baseline.durable` | `m7-operator` | demonstration | `pending:attended baseline driver` |
-| `m7.trace.flag` | `m7-operator` | demonstration | `pending:attended trace driver` |
-| `m7.trace.file` | `m7-operator` | demonstration | `pending:attended trace driver` |
-| `m7.trace.json` | `m7-operator` | demonstration | `pending:attended trace driver` |
+| `m7.baseline.ask` | `m7-operator` | scenario-ask | `ready` |
+| `m7.baseline.durable` | `m7-operator` | scenario-chat | `ready` |
+| `m7.trace.flag` | `m7-operator` | scenario-chat | `ready` |
+| `m7.trace.file` | `m7-operator` | scenario-chat | `ready` |
+| `m7.trace.json` | `m7-operator` | scenario-ask | `ready` |
 | `m7.repair` | `m7-operator` | fixture-chat | `ready` |
-| `m7.instructions.admitted` | `m7-operator` | demonstration | `pending:instruction fixture driver` |
-| `m7.steer-barrier` | `m7-operator` | demonstration | `pending:FIFO hold runner and observer join` |
-| `m7.feature` | `m7-operator` | fixture-chat | `pending:committed-answer oracle branch join` |
-| `m7.question-restart` | `m7-operator` | demonstration | `pending:controlled process-loss driver` |
-| `m7.ephemeral-question` | `m7-operator` | demonstration | `pending:scripts/m7-ephemeral-question-demo.exs` |
-| `m7.long` | `m7-operator` | fixture-chat | `pending:checkpoint and restart join inspection` |
-| `m7.oversized-source` | `m7-operator` | demonstration | `pending:oversized-source fixture` |
-| `m7.provider-switch` | `m7-operator` | demonstration | `pending:A/B provider pins` |
+| `m7.instructions.admitted` | `m7-operator` | scenario-chat | `ready` |
+| `m7.steer-barrier` | `m7-operator` | demonstration | `ready` |
+| `m7.feature` | `m7-operator` | fixture-chat | `ready` |
+| `m7.question-restart` | `m7-operator` | demonstration | `ready` |
+| `m7.ephemeral-question` | `m7-operator` | demonstration | `ready` |
+| `m7.long` | `m7-operator` | fixture-chat | `pending:loopex chat composes no maintenance instructions, so every compaction refuses maintenance_instructions_unconfigured` |
+| `m7.oversized-source` | `m7-operator` | demonstration | `pending:loopex chat composes no maintenance instructions, so every compaction refuses maintenance_instructions_unconfigured` |
+| `m7.provider-switch` | `m7-operator` | scenario-chat | `ready` |
 | `m7.thinking-rounds` | `m7-operator` | demonstration | `pending:thinking-cell witness driver` |
 | `m7.review` | `m7-operator` | fixture-chat | `pending:helper flow (T11)` |
-| `m7.policy-denial` | `m7-operator` | demonstration | `pending:denial fixture driver` |
-| `m7.interrupt` | `m7-operator` | demonstration | `pending:FIFO hold runner and observer join` |
+| `m7.policy-denial` | `m7-operator` | scenario-chat | `ready` |
+| `m7.interrupt` | `m7-operator` | demonstration | `ready` |
 | `m7.external` | `m7-operator` | external-chat | `ready` |
 | `m7.restore` | `m7-operator` | demonstration | `pending:attended restore driver` |
-| `m7.pipe-answer` | `m7-provider` | provider-wrapper | `pending:bidirectional pipe driver` |
-| `m7.instructions.declined` | `m7-provider` | provider-wrapper | `pending:instruction fixture driver` |
-| `m7.instructions.changed` | `m7-provider` | provider-wrapper | `pending:instruction fixture driver` |
-| `m7.cross-provider-maintenance` | `m7-provider` | provider-wrapper | `pending:A/B provider pins` |
+| `m7.pipe-answer` | `m7-provider` | scenario-chat | `ready` |
+| `m7.instructions.declined` | `m7-provider` | scenario-chat | `ready` |
+| `m7.instructions.changed` | `m7-provider` | scenario-chat | `ready` |
+| `m7.cross-provider-maintenance` | `m7-provider` | provider-wrapper | `pending:loopex chat composes no maintenance instructions, so every compaction refuses maintenance_instructions_unconfigured` |
 | `m7.thinking-bound` | `m7-provider` | provider-wrapper | `pending:thinking-cell witness driver` |
 | `m7.thinking-cancel` | `m7-provider` | provider-wrapper | `pending:pre-transport cancellation gate driver` |
 | `m7.daemon-detach` | `m7-provider` | provider-wrapper | `pending:daemon host fixture driver` |
-| `m7.rollback` | `m7-rollback` | release-lane | `pending:current-format backup/restore lane` |
+| `m7.rollback` | `m7-rollback` | release-lane | `ready` |

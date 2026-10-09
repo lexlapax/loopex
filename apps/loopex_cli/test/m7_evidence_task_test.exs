@@ -13,7 +13,12 @@ defmodule LoopexCli.M7EvidenceTaskTest do
   @b String.duplicate("b", 64)
 
   setup do
-    root = Path.join(System.tmp_dir!(), "m7-evidence-#{System.unique_integer([:positive])}")
+    root =
+      Path.join(
+        System.tmp_dir!(),
+        "m7-evidence-#{System.pid()}-#{System.unique_integer([:positive])}"
+      )
+
     File.mkdir_p!(Path.join(root, "docs/plans"))
     File.mkdir_p!(Path.join(root, "test/fixtures"))
     File.cp_r!(Path.join(@repository, "test/fixtures/m7"), Path.join(root, "test/fixtures/m7"))
@@ -21,6 +26,12 @@ defmodule LoopexCli.M7EvidenceTaskTest do
     File.ln_s!(Path.join(@repository, "apps"), Path.join(root, "apps"))
     File.mkdir_p!(Path.join(root, "scripts"))
     File.mkdir_p!(Path.join(root, "docs/operator"))
+    File.mkdir_p!(Path.join(root, "docs/evidence"))
+
+    File.cp!(
+      Path.join(@repository, "docs/evidence/M7-closure-runs.md"),
+      Path.join(root, "docs/evidence/M7-closure-runs.md")
+    )
 
     File.cp!(
       Path.join(@repository, "docs/operator/m7-validation.md"),
@@ -87,7 +98,6 @@ defmodule LoopexCli.M7EvidenceTaskTest do
            :attempts_index_required},
           {[lane: "m7-provider"], :attempts_index_required},
           {[lane: "m7-rollback", resume_matrix: "matrix-1"], :attempts_index_required},
-          {[lane: "m7-rollback"], {:m7_cases_pending, ["m7.rollback"]}},
           {[attempts_index: "relative/index", lane: "m7-provider"],
            :attempts_index_must_be_absolute},
           {[attempts_index: Path.join(root, "index"), lane: "m7-provider"],
@@ -103,7 +113,7 @@ defmodule LoopexCli.M7EvidenceTaskTest do
     assert {:error, {:m7_cases_pending, provider}} =
              Task.validate(root, [release: true, lane: "m7-provider"] ++ index)
 
-    assert "m7.pipe-answer" in provider
+    assert "m7.thinking-bound" in provider and "m7.pipe-answer" not in provider
 
     assert {:error, {:m7_cases_pending, all}} =
              Task.validate(
@@ -131,6 +141,20 @@ defmodule LoopexCli.M7EvidenceTaskTest do
       File.write!(runbook, changed)
       assert Task.validate(root, []) == {:error, :m7_runbook_stale}
     end
+  end
+
+  test "the closure scaffold must reserve a row for every committed key", %{root: root} do
+    concept!(root, [])
+    scaffold = Path.join(root, "docs/evidence/M7-closure-runs.md")
+    original = File.read!(scaffold)
+
+    for key <- ["| `V9.5` |", "| `m7.repair` |"] do
+      File.write!(scaffold, String.replace(original, key, "| `renamed` |"))
+      assert Task.validate(root, []) == {:error, :m7_closure_rows_missing}
+    end
+
+    File.rm!(scaffold)
+    assert Task.validate(root, []) == {:error, :m7_closure_rows_missing}
   end
 
   test "the legacy release family must keep its eleven literal cases", %{root: root} do
@@ -178,12 +202,17 @@ defmodule LoopexCli.M7EvidenceTaskTest do
                "--attempts-index",
                "/retained/index",
                "--lane",
-               "m7-rollback"
+               "m7-provider"
              ])
            ) == {:shutdown, 2}
 
     assert_received {:mix_shell, :error,
-                     ["m7-evidence: evidence unavailable: m7_cases_pending m7.rollback"]}
+                     ["m7-evidence: evidence unavailable: m7_cases_pending " <> pending]}
+
+    assert pending =~ "m7.thinking-bound"
+
+    Task.run(["--root", root, "--release", "--lane", "m7-rollback"])
+    assert_received {:mix_shell, :info, ["m7-evidence: release lanes admitted: m7-rollback"]}
   end
 
   defp concept!(root, lines),

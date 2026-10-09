@@ -11,14 +11,37 @@ defmodule LoopexCli.M7CaseRunnerTest do
   # the production paths.
 
   alias LoopexCli.ChatConfiguration
+
+  # Maintenance requests carry no tools; they read the summarizer script.
+  defmodule PurposeModel do
+    @moduledoc false
+    @behaviour Loopex.Model
+
+    @impl true
+    def complete(request, options, progress) do
+      script =
+        if request.tools == [],
+          do: Keyword.fetch!(options, :maintenance_script),
+          else: Keyword.fetch!(options, :script)
+
+      Loopex.AgentLoopTestModel.complete(request, [script: script], progress)
+    end
+  end
+
   alias Mix.Tasks.Loopex.M7Evidence.{AttemptEvents, AttemptWriter, CaseRunner, FixtureManifest}
 
   @fixtures Path.expand("../../../test/fixtures/m7", __DIR__)
   @candidate String.duplicate("1", 40)
+  @instructions %{"version" => "m7.fixture.v1", "body" => "Keep exact release facts."}
   @fixed "defmodule Ledger do\n  def total(entries), do: Enum.sum(entries)\nend\n"
 
   setup do
-    root = Path.join(System.tmp_dir!(), "m7-case-runner-#{System.unique_integer([:positive])}")
+    root =
+      Path.join(
+        System.tmp_dir!(),
+        "m7-case-runner-#{System.pid()}-#{System.unique_integer([:positive])}"
+      )
+
     File.mkdir_p!(Path.join(root, "runs"))
     File.mkdir_p!(Path.join(root, "markers"))
     on_exit(fn -> File.rm_rf!(root) end)
@@ -227,6 +250,565 @@ defmodule LoopexCli.M7CaseRunnerTest do
     assert File.read!(Path.join(result.root, "workspace/README.md")) == "fixture\n"
   end
 
+  for {choice, default} <- [{"choice-1", "empty"}, {"choice-2", "literal_null"}] do
+    @choice choice
+    @default default
+    test "feature reruns the oracle branch the committed #{@choice} answer selected", f do
+      catalog = f.context.manifest
+      [%{"arguments" => question}] = catalog["fixtures"]["feature"]["required_model_actions"]
+
+      script = fn capture, _ ->
+        [
+          %{text: "ask", calls: [%{id: "nil-choice", name: "ask", arguments: question}]},
+          %{
+            text: "implement",
+            calls: [
+              %{
+                id: "write",
+                name: "write",
+                arguments: %{"path" => "lib/row_encoder.ex", "content" => encoder(@default)}
+              }
+            ]
+          },
+          %{
+            text: "test",
+            calls: [
+              %{id: "oracle", name: "bash", arguments: %{"argv" => capture.argv ++ [@default]}}
+            ]
+          },
+          %{text: "done", calls: []}
+        ]
+      end
+
+      context =
+        Map.merge(f.context, %{
+          manifest: lane(catalog, ["m7.feature"]),
+          answers: %{"m7.feature" => @choice},
+          chat_options: chat_options(f, script, self())
+        })
+
+      result = passed!(CaseRunner.run_lane(f.writer, "m7-operator", context))
+      facts = JSON.decode!(File.read!(Path.join(result.root, "records/facts.json")))
+      assert facts["join"] =~ @default
+      assert facts["kinds"]["model_question_response_admitted_v2"] == 1
+      oracle = File.read!(Path.join(result.root, "records/oracle.txt"))
+      assert oracle =~ "status=0"
+      runner = File.read!(Path.join(result.root, "trusted/independent.sh"))
+      assert runner =~ "M7_NIL_DEFAULT='#{@default}'"
+    end
+  end
+
+  test "feature without the committed question is required_action_absent and no pipe answer is guessed",
+       f do
+    script = fn _capture, _ ->
+      [
+        %{
+          text: "implement",
+          calls: [
+            %{
+              id: "write",
+              name: "write",
+              arguments: %{"path" => "lib/row_encoder.ex", "content" => encoder("empty")}
+            }
+          ]
+        },
+        %{text: "done", calls: []}
+      ]
+    end
+
+    context =
+      Map.merge(f.context, %{
+        manifest: lane(f.context.manifest, ["m7.feature"]),
+        answers: %{"m7.feature" => "choice-1"},
+        step_deadline_ms: 3000,
+        chat_options: chat_options(f, script, self())
+      })
+
+    assert {:stopped, [{:ok, result}]} = CaseRunner.run_lane(f.writer, "m7-operator", context)
+    assert result.mechanical_result == "required_action_absent"
+    transcript = File.read!(Path.join(result.root, "records/transcript-1.txt"))
+    refute transcript =~ "/answer"
+  end
+
+  test "a piped feature run without an operator's answer refuses before dispatch", f do
+    context =
+      Map.merge(f.context, %{
+        manifest: lane(f.context.manifest, ["m7.feature"]),
+        chat_options: chat_options(f, fn _, _ -> [] end, self())
+      })
+
+    assert {:stopped, [{:ok, refused}]} = CaseRunner.run_lane(f.writer, "m7-operator", context)
+    assert refused.mechanical_result == "evidence_incomplete_pre_dispatch"
+    refute_received {:index_at_dispatch, _, _}
+    [preflight] = List.last(records(f.index))["body"]["evidence"]
+    assert File.read!(preflight["reference"]) =~ "feature_answer_requires_operator"
+  end
+
+  test "long joins automatic and explicit checkpoints, raw facts and the restart", f do
+    {context, script} = long_case(f, 3000)
+
+    result =
+      passed!(
+        CaseRunner.run_lane(
+          f.writer,
+          "m7-operator",
+          Map.put(context, :chat_options, chat_options(f, script, self(), @instructions))
+        )
+      )
+
+    facts = JSON.decode!(File.read!(Path.join(result.root, "records/facts.json")))
+    assert facts["kinds"]["compaction_checkpoint_committed_v1"] >= 1
+    assert facts["kinds"]["standalone_compaction_checkpoint_committed_v1"] == 1
+    assert File.read!(Path.join(result.root, "workspace/release.txt")) == "amber\n"
+  end
+
+  test "long without an automatic checkpoint is required_action_absent", f do
+    {context, script} = long_case(f, 10)
+
+    assert {:stopped, [{:ok, result}]} =
+             CaseRunner.run_lane(
+               f.writer,
+               "m7-operator",
+               Map.put(context, :chat_options, chat_options(f, script, self(), @instructions))
+             )
+
+    assert result.mechanical_result == "required_action_absent"
+    facts = JSON.decode!(File.read!(Path.join(result.root, "records/facts.json")))
+    assert facts["join"] =~ "automatic_checkpoint"
+  end
+
+  @read %{text: "read", calls: [%{id: "read", name: "read", arguments: %{"path" => "README.md"}}]}
+
+  defp scenario!(f, case_id, script, extra \\ %{}) do
+    context =
+      Map.merge(
+        f.context,
+        Map.merge(
+          %{
+            manifest: lane(f.context.manifest, [case_id]),
+            chat_options: chat_options(f, fn _, call -> script.(call) end, self())
+          },
+          extra
+        )
+      )
+
+    CaseRunner.run_lane(f.writer, "m7-operator", context)
+  end
+
+  defp facts(result),
+    do: JSON.decode!(File.read!(Path.join(result.root, "records/facts.json")))
+
+  test "baseline durable pins the dated default model and one committed tool round", f do
+    result =
+      passed!(
+        scenario!(f, "m7.baseline.durable", fn _ -> [@read, %{text: "first line", calls: []}] end)
+      )
+
+    assert facts(result)["kinds"]["executor_receipt_committed_v2"] == 1
+    config = JSON.decode!(File.read!(Path.join(result.root, "config.json")))
+    assert config["session"]["model"] == "anthropic:claude-haiku-4-5-20251001"
+  end
+
+  test "baseline durable without its tool round is required_action_absent", f do
+    assert {:stopped, [{:ok, result}]} =
+             scenario!(f, "m7.baseline.durable", fn _ -> [%{text: "no tool", calls: []}] end)
+
+    assert result.mechanical_result == "required_action_absent"
+  end
+
+  test "policy denial commits a denied call with no effect or workspace change", f do
+    rm = %{
+      text: "rm",
+      calls: [%{id: "rm", name: "bash", arguments: %{"argv" => ["rm", "README.md"]}}]
+    }
+
+    result =
+      passed!(scenario!(f, "m7.policy-denial", fn _ -> [rm, %{text: "denied", calls: []}] end))
+
+    assert facts(result)["kinds"]["effect_intent_committed_v2"] == nil
+    assert File.read!(Path.join(result.root, "workspace/README.md")) =~ "M7 scenario"
+  end
+
+  test "policy denial without the denied call is required_action_absent", f do
+    assert {:stopped, [{:ok, missing}]} =
+             scenario!(f, "m7.policy-denial", fn _ -> [@read, %{text: "x", calls: []}] end)
+
+    assert missing.mechanical_result == "required_action_absent"
+  end
+
+  test "pipe answer and decline use the emitted interaction identities", f do
+    ask = fn subcase ->
+      %{
+        text: "ask",
+        calls: [
+          %{
+            id: "ask-#{subcase}",
+            name: "ask",
+            arguments: %{
+              "question" => "Continue the #{subcase} subcase?",
+              "choices" => ["yes", "no"]
+            }
+          }
+        ]
+      }
+    end
+
+    script = fn
+      1 -> [ask.("answer"), %{text: "answered", calls: []}]
+      _ -> [ask.("decline"), %{text: "declined", calls: []}]
+    end
+
+    result = passed!(scenario!(f, "m7.pipe-answer", script, %{step_deadline_ms: 5000}))
+    assert File.read!(Path.join(result.root, "records/input-1.txt")) =~ "/answer "
+    assert File.read!(Path.join(result.root, "records/input-2.txt")) =~ "/decline "
+    assert facts(result)["kinds"]["model_question_response_admitted_v2"] == 2
+  end
+
+  test "pipe answer never invents an identity when no question is emitted", f do
+    assert {:stopped, [{:ok, result}]} =
+             scenario!(f, "m7.pipe-answer", fn _ -> [%{text: "no question", calls: []}] end, %{
+               step_deadline_ms: 2000
+             })
+
+    assert result.mechanical_result == "required_action_absent"
+  end
+
+  for variant <- ["flag", "file"] do
+    @variant variant
+    test "trace #{@variant} startup enables tracing with its origin and confirmed cleanup", f do
+      result =
+        passed!(
+          scenario!(f, "m7.trace.#{@variant}", fn _ -> [@read, %{text: "traced", calls: []}] end)
+        )
+
+      diagnostics = File.read!(Path.join(result.root, "records/diagnostics-1.txt"))
+      assert diagnostics =~ ~s("setting":"/trace/enabled")
+    end
+  end
+
+  # The `ask` command's own host seams stand in only for the ephemeral
+  # provider session; argument handling and rendering are the command's own.
+  defp ask_seams(outcome) do
+    manager = spawn(fn -> receive do: (:release -> :ok) end)
+    on_exit(fn -> Process.exit(manager, :kill) end)
+
+    [
+      discard_credential: fn -> :ok end,
+      quiet_logger: fn -> :ok end,
+      start_session: fn _ -> {:ok, :fixture_session} end,
+      install_interrupt: fn _, _ -> {:ok, manager} end,
+      signal_manager: fn -> manager end,
+      handler_live: fn _, _ -> true end,
+      interrupt_phase: fn _, _ -> :idle end,
+      ask: fn _, _ ->
+        {:ok,
+         %{
+           profile: :ephemeral,
+           outcome: outcome,
+           session_id: "session-1",
+           run_id: "run-1",
+           text: "M7 scenario workspace.",
+           text_truncated: false,
+           tools: [],
+           tools_truncated: false,
+           shadowed_skills: [],
+           details: %{"cleanup_grace_ms" => 5_000}
+         }}
+      end,
+      stop_session: fn _ -> :ok end,
+      finish_interrupt: fn _, _ -> {:ok, :ordinary} end
+    ]
+  end
+
+  for case_id <- ["m7.baseline.ask", "m7.trace.json"] do
+    @ask_case case_id
+    test "#{@ask_case} renders exactly one completed JSON result", f do
+      result =
+        passed!(scenario!(f, @ask_case, fn _ -> [] end, %{ask_seams: ask_seams(:completed)}))
+
+      stdout = File.read!(Path.join(result.root, "records/stdout.txt"))
+      assert [json, ""] = String.split(stdout, "\n")
+      assert JSON.decode!(json)["outcome"] == "completed"
+    end
+  end
+
+  test "a cancelled one-shot ask is assertion_failed", f do
+    assert {:stopped, [{:ok, result}]} =
+             scenario!(f, "m7.baseline.ask", fn _ -> [] end, %{ask_seams: ask_seams(:cancelled)})
+
+    assert result.mechanical_result == "assertion_failed"
+  end
+
+  test "a pre-dispatch stop suspends the whole lane and its continuation dispatches each case once",
+       f do
+    File.write!(f.config, :json.encode(Map.delete(profile(f.root), "paths")))
+    cases = ["m7.policy-denial", "m7.baseline.durable"]
+
+    scripts = fn _, call ->
+      if call == 1,
+        do: [
+          %{
+            text: "rm",
+            calls: [%{id: "rm", name: "bash", arguments: %{"argv" => ["rm", "README.md"]}}]
+          },
+          %{text: "denied", calls: []}
+        ],
+        else: [@read, %{text: "first line", calls: []}]
+    end
+
+    context =
+      Map.merge(f.context, %{
+        manifest: lane(f.context.manifest, cases),
+        chat_options: chat_options(f, scripts, self())
+      })
+
+    assert {:stopped, [{:ok, first}, {:ok, second}]} =
+             CaseRunner.run_lane(f.writer, "m7-operator", context)
+
+    assert first.mechanical_result == "evidence_incomplete_pre_dispatch"
+    assert second.mechanical_result == "evidence_incomplete_pre_dispatch"
+    refute_received {:index_at_dispatch, _, _}
+
+    File.write!(f.config, :json.encode(profile(f.root)))
+    resumed = Map.put(context, :mode, :continue)
+    assert {:ok, results} = CaseRunner.run_lane(f.writer, "m7-operator", resumed)
+    assert Enum.map(results, fn {:ok, r} -> r.mechanical_result end) == ["pass", "pass"]
+
+    started =
+      for r <- records(f.index), r["body"]["state"] == "started", do: r["body"]["case_key"]
+
+    assert started == cases
+
+    assert {:blocked, %{reason: :lane_already_ended}} =
+             CaseRunner.run_lane(f.writer, "m7-operator", resumed)
+  end
+
+  test "matrix lanes start, join and skip by the index alone", f do
+    manifest =
+      f.context.manifest
+      |> lane(["m7.policy-denial"])
+      |> put_in(["execution_manifest", "lanes", "m7-provider"], ["m7.baseline.durable"])
+      |> put_in(["execution_manifest", "cases", "m7.baseline.durable", "status"], "ready")
+
+    scripts = fn _, call ->
+      if call == 1,
+        do: [
+          %{
+            text: "rm",
+            calls: [%{id: "rm", name: "bash", arguments: %{"argv" => ["rm", "README.md"]}}]
+          },
+          %{text: "denied", calls: []}
+        ],
+        else: [@read, %{text: "first line", calls: []}]
+    end
+
+    context =
+      Map.merge(f.context, %{
+        manifest: manifest,
+        matrix: "matrix-1",
+        mode: :auto,
+        chat_options: chat_options(f, scripts, self())
+      })
+
+    assert {:ok, [{:ok, %{mechanical_result: "pass"}}]} =
+             CaseRunner.run_lane(f.writer, "m7-operator", context)
+
+    assert {:ok, [{:ok, %{mechanical_result: "pass"}}]} =
+             CaseRunner.run_lane(f.writer, "m7-provider", context)
+
+    assert {:ok, []} = CaseRunner.run_lane(f.writer, "m7-operator", context)
+    assert {:ok, []} = CaseRunner.run_lane(f.writer, "m7-provider", context)
+
+    matrix =
+      for r <- records(f.index), r["body"]["kind"] == "case", do: r["body"]["logical_matrix_id"]
+
+    assert Enum.uniq(matrix) == ["matrix-1"]
+
+    assert {:blocked, %{reason: :fresh_matrix_already_consumed}} =
+             CaseRunner.run_lane(f.writer, "m7-operator", %{context | matrix: "matrix-2"})
+  end
+
+  @sentinel_reply %{text: "M7 scenario workspace. AMBER-SENTINEL", calls: []}
+
+  test "admitted project instructions are retained and followed", f do
+    result =
+      passed!(scenario!(f, "m7.instructions.admitted", fn _ -> [@read, @sentinel_reply] end))
+
+    assert File.read!(Path.join(result.root, "project-instructions.md")) =~ "AMBER-SENTINEL"
+  end
+
+  test "a declined resource is never admitted", f do
+    passed!(
+      scenario!(f, "m7.instructions.declined", fn _ ->
+        [@read, %{text: "M7 scenario workspace.", calls: []}]
+      end)
+    )
+  end
+
+  test "admitted text that is not followed is required_action_absent", f do
+    assert {:stopped, [{:ok, missed}]} =
+             scenario!(f, "m7.instructions.admitted", fn _ ->
+               [@read, %{text: "no sentinel", calls: []}]
+             end)
+
+    assert missed.mechanical_result == "required_action_absent"
+  end
+
+  test "a changed resource is admitted with a new receipt in a fresh session", f do
+    result =
+      passed!(scenario!(f, "m7.instructions.changed", fn _ -> [@read, @sentinel_reply] end))
+
+    facts = facts(result)
+    assert facts["join"] == "{:ok, nil}"
+    assert length(Path.wildcard(Path.join(result.root, "records/transcript-*.txt"))) == 2
+  end
+
+  test "provider switch moves A to B, reopens and returns to A with its tool facts", f do
+    profile =
+      put_in(profile(f.root), ["providers", "openai"], %{
+        "credential" => %{"env" => "M7_UNUSED_PROVIDER_B_REFERENCE"}
+      })
+
+    File.write!(f.config, :json.encode(profile))
+    pins = %{"provider_b" => %{"model" => "openai:gpt-4o-mini"}}
+
+    script = fn
+      1 -> [@read, %{text: "remembered", calls: []}, %{text: "M7 scenario workspace.", calls: []}]
+      _ -> [%{text: "M7 scenario workspace.", calls: []}]
+    end
+
+    result = passed!(scenario!(f, "m7.provider-switch", script, %{pins: pins}))
+    assert facts(result)["kinds"]["session_configuration_admitted_v2"] == 2
+  end
+
+  test "provider switch without its A/B pins refuses before dispatch", f do
+    assert {:stopped, [{:ok, refused}]} =
+             scenario!(f, "m7.provider-switch", fn _ -> [] end, %{pins: nil})
+
+    assert refused.mechanical_result == "evidence_incomplete_pre_dispatch"
+  end
+
+  test "question restart keeps the pending identity through process loss and answers it after reopen",
+       f do
+    [%{"arguments" => question}] =
+      f.context.manifest["fixtures"]["feature"]["required_model_actions"]
+
+    script = fn
+      _capture, 1 ->
+        [%{text: "ask", calls: [%{id: "nil-choice", name: "ask", arguments: question}]}]
+
+      capture, _ ->
+        [
+          %{
+            text: "implement",
+            calls: [
+              %{
+                id: "write",
+                name: "write",
+                arguments: %{"path" => "lib/row_encoder.ex", "content" => encoder("literal_null")}
+              }
+            ]
+          },
+          %{
+            text: "test",
+            calls: [
+              %{
+                id: "oracle",
+                name: "bash",
+                arguments: %{"argv" => capture.argv ++ ["literal_null"]}
+              }
+            ]
+          },
+          %{text: "done", calls: []}
+        ]
+    end
+
+    context =
+      Map.merge(f.context, %{
+        manifest: lane(f.context.manifest, ["m7.question-restart"]),
+        answers: %{"m7.question-restart" => "choice-2"},
+        chat_options: chat_options(f, script, self())
+      })
+
+    result = passed!(CaseRunner.run_lane(f.writer, "m7-operator", context))
+    assert facts(result)["kinds"]["model_question_requested_v1"] == 1
+    assert File.read!(Path.join(result.root, "records/input-1.txt")) =~ "process_loss"
+    assert File.read!(Path.join(result.root, "records/input-2.txt")) =~ "/answer "
+  end
+
+  # Concept: a held tool call is released only after the observer joins the
+  # active run, its operation and the accepted steer and follow-up.
+  defp held_script(after_release) do
+    fn capture, _call ->
+      [
+        %{
+          text: "hold",
+          calls: [%{id: "hold", name: "bash", arguments: %{"argv" => capture.argv}}]
+        }
+        | after_release
+      ]
+    end
+  end
+
+  test "steer and follow-up are admitted while the held call runs and only then released", f do
+    context =
+      Map.merge(f.context, %{
+        manifest: lane(f.context.manifest, ["m7.steer-barrier"]),
+        chat_options:
+          chat_options(
+            f,
+            held_script([%{text: "STEERED", calls: []}, %{text: "followed", calls: []}]),
+            self()
+          )
+      })
+
+    result = passed!(CaseRunner.run_lane(f.writer, "m7-operator", context))
+    inputs = File.read!(Path.join(result.root, "records/input-1.txt"))
+    [observed, released] = Enum.map([":observed", ":released"], &:binary.match(inputs, &1))
+    assert elem(observed, 0) < elem(released, 0)
+    assert facts(result)["kinds"]["run_terminal_committed"] == 2
+  end
+
+  test "a held call that is never made is required_action_absent and nothing is released", f do
+    context =
+      Map.merge(f.context, %{
+        manifest: lane(f.context.manifest, ["m7.steer-barrier"]),
+        step_deadline_ms: 1_000,
+        chat_options:
+          chat_options(f, fn _capture, _call -> [%{text: "no", calls: []}] end, self())
+      })
+
+    {:stopped, [{:ok, result}]} = CaseRunner.run_lane(f.writer, "m7-operator", context)
+    assert result.mechanical_result == "required_action_absent"
+    refute File.read!(Path.join(result.root, "records/input-1.txt")) =~ ":released"
+  end
+
+  test "an expired hold is a retained failure even though the run then completes", f do
+    context =
+      Map.merge(f.context, %{
+        manifest: lane(f.context.manifest, ["m7.steer-barrier"]),
+        hold_limit_ms: 1,
+        chat_options: chat_options(f, held_script([%{text: "done", calls: []}]), self())
+      })
+
+    {:stopped, [{:ok, result}]} = CaseRunner.run_lane(f.writer, "m7-operator", context)
+    assert result.mechanical_result == "assertion_failed"
+    assert File.read!(Path.join(result.root, "records/input-1.txt")) =~ ":hold_expired"
+  end
+
+  test "an interrupt cancels the held call without releasing it and cleanup is confirmed", f do
+    context =
+      Map.merge(f.context, %{
+        manifest: lane(f.context.manifest, ["m7.interrupt"]),
+        chat_options: chat_options(f, held_script([%{text: "late", calls: []}]), self())
+      })
+
+    result = passed!(CaseRunner.run_lane(f.writer, "m7-operator", context))
+    inputs = File.read!(Path.join(result.root, "records/input-1.txt"))
+    assert inputs =~ ":interrupt"
+    refute inputs =~ ":released"
+  end
+
   test "the wrapper command checks admission without staging and refuses bad arguments", f do
     :ok = AttemptWriter.close(f.writer)
     root = Path.expand("../../..", __DIR__)
@@ -274,6 +856,90 @@ defmodule LoopexCli.M7CaseRunnerTest do
     assert File.read!(script) =~ "CaseRunner.main"
   end
 
+  defp encoder(default) do
+    """
+    defmodule RowEncoder do
+      def encode(values, options \\\\ []) do
+        mode = Keyword.get(options, :nil_mode, :#{default})
+        Enum.map_join(values, ",", &value(&1, mode))
+      end
+
+      defp value(nil, :empty), do: ""
+      defp value(nil, :literal_null), do: "null"
+      defp value(value, _mode), do: to_string(value)
+    end
+    """
+  end
+
+  # The long case's configuration and scripts. `explain_tokens` sets the second
+  # reply's reported output, which decides whether automatic compaction occurs.
+  defp long_case(f, explain_tokens) do
+    profile =
+      profile(f.root)
+      |> put_in(["session", "max_tokens"], 4096)
+      |> put_in(["session", "context_token_budget"], 4000)
+      |> put_in(["session", "system_class_tokens"], 3000)
+      |> Map.put("maintenance", %{"model" => "anthropic:claude-haiku-4-5"})
+
+    File.write!(f.config, :json.encode(profile))
+
+    summary = %{
+      text:
+        ~s({"summary":"release_prefix=amber; batch_size=3","carry_forward":{"files_read":[],"files_changed":[]}}),
+      usage: %{input_tokens: 37, output_tokens: 19},
+      reply_overrides: %{completion: "natural", continuation: nil}
+    }
+
+    script = fn capture, call ->
+      main =
+        if call == 1 do
+          [
+            %{text: "release_prefix=amber; batch_size=3", calls: []},
+            %{
+              text:
+                String.duplicate(
+                  "Keep dependent release steps consistent. ",
+                  div(explain_tokens, 10)
+                ),
+              calls: [],
+              usage: %{input_tokens: 1500, output_tokens: explain_tokens}
+            },
+            %{text: "release_prefix=amber; batch_size=3", calls: []}
+          ]
+        else
+          [
+            %{
+              text: "write retained facts",
+              calls: [
+                %{
+                  id: "release",
+                  name: "write",
+                  arguments: %{"path" => "release.txt", "content" => "amber\n"}
+                },
+                %{
+                  id: "batches",
+                  name: "write",
+                  arguments: %{
+                    "path" => "batches.txt",
+                    "content" => "amber-001\namber-002\namber-003\n"
+                  }
+                }
+              ]
+            },
+            %{
+              text: "verify",
+              calls: [%{id: "oracle", name: "bash", arguments: %{"argv" => capture.argv}}]
+            },
+            %{text: "done", calls: []}
+          ]
+        end
+
+      %{main: main, maintenance: List.duplicate(summary, 8)}
+    end
+
+    {%{f.context | manifest: lane(f.context.manifest, ["m7.long"])}, script}
+  end
+
   # A failed pass expectation reports the retained transcripts and oracle.
   defp passed!({:ok, [{:ok, %{mechanical_result: "pass"} = result}]}), do: result
 
@@ -307,7 +973,11 @@ defmodule LoopexCli.M7CaseRunnerTest do
     ]
   end
 
-  defp chat_options(_f, scripts, parent) do
+  # `instructions` stands in for maintenance instructions the runtime needs to
+  # compact. `loopex chat` composes none today, so a real chat refuses every
+  # maintenance episode with `maintenance_instructions_unconfigured`; the long
+  # tests prove the case runner's joins on a runtime that has them.
+  defp chat_options(_f, scripts, parent, instructions \\ nil) do
     {:ok, calls} = Agent.start_link(fn -> 0 end)
 
     [
@@ -316,12 +986,17 @@ defmodule LoopexCli.M7CaseRunnerTest do
       release_placement: fn _, _ -> :ok end,
       placement_id: fn _ -> {:ok, "case-runner-runtime"} end,
       with_runtime: fn options, callback ->
+        options =
+          if instructions,
+            do: Keyword.put(options, :maintenance_instructions, instructions),
+            else: options
+
         call = Agent.get_and_update(calls, &{&1 + 1, &1 + 1})
-        capture = options[:policy].context
+        capture = policy_context(options)
 
         index =
           Path.join([
-            Path.dirname(Path.dirname(Path.dirname(capture.workspace))),
+            Path.dirname(Path.dirname(Path.dirname(options[:workspace]))),
             "attempts.jsonl"
           ])
 
@@ -331,12 +1006,21 @@ defmodule LoopexCli.M7CaseRunnerTest do
     ]
   end
 
+  # A fixture case's capture, or nil under the operator's ordinary policy.
+  defp policy_context(options) do
+    case options[:policy] do
+      %{context: context} -> context
+      _ -> nil
+    end
+  end
+
   defp with_stack(options, script, callback) do
     state = options[:state_root]
     File.mkdir_p!(state)
     {:ok, adapter} = Loopex.Store.Local.start_link(path: Path.join(state, "store.log"))
     {:ok, store} = Loopex.Store.new(Loopex.Store.Local, adapter)
-    capture = options[:policy].context
+    {:ok, physical} = LoopexComposition.WorkspaceIdentity.resolve_path(options[:workspace])
+    {:ok, workspace_ref} = LoopexComposition.WorkspaceIdentity.reference(physical)
 
     {:ok, lease} =
       Loopex.Executor.Local.WorkspaceLease.start_link(
@@ -354,7 +1038,20 @@ defmodule LoopexCli.M7CaseRunnerTest do
         ledger_root: Path.join(state, "receipts")
       )
 
-    model = Loopex.AgentLoopTestModel.start(script)
+    {main, maintenance} =
+      case script do
+        %{main: main, maintenance: maintenance} -> {main, maintenance}
+        main -> {main, []}
+      end
+
+    model = Loopex.AgentLoopTestModel.start(main)
+    summarizer = Loopex.AgentLoopTestModel.start(maintenance)
+
+    {:ok, maintenance_model} =
+      LoopexComposition.ProviderBindings.resolve_maintenance_routes(
+        options[:maintenance_model],
+        ["anthropic"]
+      )
 
     {:ok, runtime} =
       Loopex.start_link(
@@ -364,17 +1061,19 @@ defmodule LoopexCli.M7CaseRunnerTest do
         policy: options[:policy],
         policy_identity: options[:policy_identity],
         model: %{
-          module: Loopex.AgentLoopTestModel,
+          module: PurposeModel,
           model: options[:model],
-          options: [script: model]
+          options: [script: model, maintenance_script: summarizer]
         },
+        maintenance_model: maintenance_model,
+        maintenance_instructions: options[:maintenance_instructions],
         executor: %{
           module: Loopex.Executor.Local,
           reference: executor,
           identity: "fixture-executor",
           epoch: 1,
           fencing_token: 1,
-          workspace_ref: capture.workspace_ref,
+          workspace_ref: workspace_ref,
           workspace_lease: "workspace"
         },
         tools: ChatConfiguration.selected_definitions(ChatConfiguration.active_tools("coding")),
@@ -391,7 +1090,7 @@ defmodule LoopexCli.M7CaseRunnerTest do
       :ok = Loopex.stop(runtime)
       assert_receive {:DOWN, ^ref, :process, _, _}, 5000
 
-      for pid <- [executor, lease, adapter, model], is_pid(pid) do
+      for pid <- [executor, lease, adapter, model, summarizer], is_pid(pid) do
         Process.unlink(pid)
         if Process.alive?(pid), do: GenServer.stop(pid, :normal, 1000)
       end
