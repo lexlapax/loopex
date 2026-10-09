@@ -32,7 +32,7 @@ defmodule Loopex.ResourceWorkspaceBindingTest do
     end
   end
 
-  test "prepared recovery keeps a retained job's legacy workspace reference and digest" do
+  test "prepared recovery keeps a retained job's original workspace reference and digest" do
     {store_pid, store} = M1RuntimeTestStore.start_store()
     executor = Loopex.AgentLoopTestExecutor.start(%{}, 0, :cleaned, self())
 
