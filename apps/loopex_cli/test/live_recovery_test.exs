@@ -43,19 +43,40 @@ defmodule LoopexCli.LiveRecoveryTest do
     test "a lost #{label} reply is re-presented and applied once", context do
       method = unquote(method)
       daemon = start_daemon(context, launch("#{unquote(label)} answer", unquote(label)))
-      proxy = DaemonProxy.start(context.socket, [{method, 1}])
+      proxy = DaemonProxy.start(context.socket, [{method, 1}], & &1, observe: true)
+      proxy_monitor = Process.monitor(proxy.pid)
 
-      output =
-        capture_io(fn ->
-          assert :ok = LoopexCli.dispatch(["run", "--daemon", proxy.path, "go"])
-        end)
+      try do
+        output =
+          capture_io(fn ->
+            assert :ok = LoopexCli.dispatch(["run", "--daemon", proxy.path, "go"])
+          end)
 
-      assert length(String.split(output, "#{unquote(label)} answer")) == 2,
-             "expected the answer exactly once: #{inspect(output)}"
+        assert length(String.split(output, "#{unquote(label)} answer")) == 2,
+               "expected the answer exactly once: #{inspect(output)}"
 
-      assert Enum.count(DaemonProxy.seen(proxy), &(&1 == method)) == 2
-      assert length(listed_sessions(context.socket)) == 1
-      stop_daemon(daemon)
+        assert Enum.count(DaemonProxy.seen(proxy), &(&1 == method)) == 2
+        assert length(listed_sessions(context.socket)) == 1
+      after
+        try do
+          observations = DaemonProxy.observations(proxy)
+
+          IO.puts(
+            :stderr,
+            "proxy observations for #{method}: " <>
+              inspect(observations, limit: :infinity, printable_limit: :infinity)
+          )
+
+          assert observations.overflow == false, "proxy metadata capacity exhausted"
+          assert observations.incomplete == false, "proxy metadata frame was incomplete"
+        after
+          try do
+            stop_proxy(proxy, proxy_monitor)
+          after
+            stop_daemon(daemon)
+          end
+        end
+      end
     end
   end
 
@@ -546,6 +567,17 @@ defmodule LoopexCli.LiveRecoveryTest do
     assert_receive {:loopex_daemon_sentinel, sentinel, owner_ref, _owner}, 5_000
     await_ready(output, 1_000)
     %{task: task, sentinel: sentinel, owner_ref: owner_ref}
+  end
+
+  defp stop_proxy(proxy, monitor) do
+    Process.unlink(proxy.pid)
+    Process.exit(proxy.pid, :kill)
+
+    receive do
+      {:DOWN, ^monitor, :process, pid, _reason} when pid == proxy.pid -> :ok
+    after
+      5_000 -> flunk("the original proxy did not terminate")
+    end
   end
 
   defp stop_daemon(daemon) do

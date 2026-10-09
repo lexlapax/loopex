@@ -21,7 +21,16 @@ defmodule LoopexCli.Test.DaemonProxy do
   # optional `rewrite` function sees each chunk the daemon sends before the
   # client does, so a test can present a daemon answer it cannot easily cause.
 
-  def start(daemon_path, cuts, rewrite \\ & &1) do
+  # Concept: optional observations identify what actually crossed this proxy.
+  # Technical depth: the original owner retains only closed public identity and
+  # ordering fields, at most 128 records and 65,536 external-term bytes. One bounded
+  # public frame is assembled transiently; no content, arguments or chunk bytes
+  # enter retained observations. Exhaustion is reported, never treated as loss
+  # of a model item or as proof that a closure did not exist.
+  @observation_records 128
+  @observation_bytes 65_536
+
+  def start(daemon_path, cuts, rewrite \\ & &1, options \\ []) do
     # A random name: `unique_integer` restarts in every VM, so a socket a
     # killed run left behind made a later bind fail with `:eaddrinuse`.
     suffix = Base.url_encode64(:crypto.strong_rand_bytes(9), padding: false)
@@ -41,7 +50,8 @@ defmodule LoopexCli.Test.DaemonProxy do
           commands: [],
           counts: %{},
           rewrite: rewrite,
-          parent: parent
+          parent: parent,
+          observations: if(Keyword.get(options, :observe, false), do: new_observations())
         })
       end)
 
@@ -76,6 +86,16 @@ defmodule LoopexCli.Test.DaemonProxy do
     end
   end
 
+  def observations(proxy) do
+    send(proxy.pid, {:observations, self()})
+
+    receive do
+      {:proxy_observations, observations} -> observations
+    after
+      5_000 -> raise "the proxy did not answer"
+    end
+  end
+
   defp accept(listener, daemon_path, state) do
     receive do
       {:seen, caller} ->
@@ -85,6 +105,10 @@ defmodule LoopexCli.Test.DaemonProxy do
       {:commands, caller} ->
         send(caller, {:proxy_commands, state.commands})
         accept(listener, daemon_path, state)
+
+      {:observations, caller} ->
+        send(caller, {:proxy_observations, observation_snapshot(state)})
+        accept(listener, daemon_path, state)
     after
       0 ->
         case :gen_tcp.accept(listener, 50) do
@@ -92,6 +116,7 @@ defmodule LoopexCli.Test.DaemonProxy do
             case :gen_tcp.connect({:local, daemon_path}, 0, [:binary, active: true, packet: :raw]) do
               {:ok, daemon} ->
                 :ok = :inet.setopts(client, active: true, packet: :line, buffer: 4_194_304)
+                state = begin_observed_connection(state)
                 accept(listener, daemon_path, relay(client, daemon, state))
 
               {:error, _no_daemon} ->
@@ -137,12 +162,14 @@ defmodule LoopexCli.Test.DaemonProxy do
         end
 
       {:tcp, ^daemon, bytes} ->
-        :ok = :gen_tcp.send(client, state.rewrite.(bytes))
+        forwarded = state.rewrite.(bytes)
+        state = observe_bytes(state, :forwarded, forwarded)
+        :ok = :gen_tcp.send(client, forwarded)
         relay(client, daemon, state)
 
       {:tcp_closed, _socket} ->
         close(client, daemon)
-        state
+        finish_observed_connection(state)
 
       {:seen, caller} ->
         send(caller, {:proxy_seen, state.seen})
@@ -151,16 +178,21 @@ defmodule LoopexCli.Test.DaemonProxy do
       {:commands, caller} ->
         send(caller, {:proxy_commands, state.commands})
         relay(client, daemon, state)
+
+      {:observations, caller} ->
+        send(caller, {:proxy_observations, observation_snapshot(state)})
+        relay(client, daemon, state)
     end
   end
 
   defp forward(client, daemon, line, method, state) do
+    state = observe_record(state, :request_forwarded, binary_part(line, 0, byte_size(line) - 1))
     :ok = :gen_tcp.send(daemon, line)
 
     case Map.get(state.cuts, method, 0) do
       {:nth, ordinals} ->
         if Map.fetch!(state.counts, method) in ordinals do
-          lose_reply(client, daemon)
+          state = lose_reply(client, daemon, state)
           send(state.parent, {:proxy_lost, method, Map.fetch!(state.counts, method)})
           state
         else
@@ -168,7 +200,7 @@ defmodule LoopexCli.Test.DaemonProxy do
         end
 
       remaining when is_integer(remaining) and remaining > 0 ->
-        lose_reply(client, daemon)
+        state = lose_reply(client, daemon, state)
         send(state.parent, {:proxy_lost, method, Map.fetch!(state.counts, method)})
         %{state | cuts: Map.put(state.cuts, method, remaining - 1)}
 
@@ -179,14 +211,169 @@ defmodule LoopexCli.Test.DaemonProxy do
 
   # The request reached the daemon; its answer, and whatever else the daemon
   # wrote first, never reaches the client.
-  defp lose_reply(client, daemon) do
-    receive do
-      {:tcp, ^daemon, _bytes} -> :ok
-    after
-      10_000 -> :ok
-    end
+  defp lose_reply(client, daemon, state) do
+    state =
+      receive do
+        {:tcp, ^daemon, bytes} -> observe_bytes(state, :discarded_reply, bytes)
+      after
+        10_000 -> state
+      end
 
     close(client, daemon)
+    finish_observed_connection(state)
+  end
+
+  defp new_observations do
+    %{
+      records: [],
+      bytes: 0,
+      connection: 0,
+      next_order: 0,
+      pending: "",
+      pending_direction: nil,
+      incomplete: false,
+      overflow: false
+    }
+  end
+
+  defp begin_observed_connection(%{observations: nil} = state), do: state
+
+  defp begin_observed_connection(state) do
+    state = finish_observed_connection(state)
+    update_in(state.observations.connection, &(&1 + 1))
+  end
+
+  defp finish_observed_connection(%{observations: nil} = state), do: state
+
+  defp finish_observed_connection(state) do
+    observations = state.observations
+
+    %{
+      state
+      | observations: %{
+          observations
+          | pending: "",
+            pending_direction: nil,
+            incomplete: observations.incomplete or observations.pending != ""
+        }
+    }
+  end
+
+  defp observation_snapshot(%{observations: nil}), do: nil
+
+  defp observation_snapshot(%{observations: observations}) do
+    %{
+      records: Enum.reverse(observations.records),
+      overflow: observations.overflow,
+      incomplete: observations.incomplete or observations.pending != ""
+    }
+  end
+
+  defp observe_bytes(%{observations: nil} = state, _direction, _bytes), do: state
+  defp observe_bytes(%{observations: %{overflow: true}} = state, _direction, _bytes), do: state
+
+  defp observe_bytes(state, direction, bytes) when is_binary(bytes) do
+    state =
+      if state.observations.pending != "" and
+           state.observations.pending_direction != direction,
+        do: finish_observed_connection(state),
+        else: state
+
+    pending = state.observations.pending
+
+    if byte_size(pending) + byte_size(bytes) <= LoopexProtocol.Frame.output_record_bytes() do
+      [tail | lines] = Enum.reverse(:binary.split(pending <> bytes, "\n", [:global]))
+      state = put_in(state.observations.pending, :binary.copy(tail))
+      state = put_in(state.observations.pending_direction, direction)
+      Enum.reduce(Enum.reverse(lines), state, &observe_record(&2, direction, &1))
+    else
+      observation_overflow(state)
+    end
+  end
+
+  defp observe_bytes(state, _direction, _bytes), do: observation_overflow(state)
+
+  defp observe_record(%{observations: nil} = state, _direction, _line), do: state
+  defp observe_record(%{observations: %{overflow: true}} = state, _direction, _line), do: state
+
+  defp observe_record(state, direction, line) do
+    case LoopexProtocol.Frame.decode(line, LoopexProtocol.Frame.output_record_bytes()) do
+      {:ok, record} ->
+        observations = state.observations
+        event = record["event"]
+        event_data = if is_map(event), do: event["data"]
+
+        metadata = %{
+          order: observations.next_order,
+          connection: observations.connection,
+          direction: direction,
+          envelope:
+            observation_fields(
+              record,
+              ~w(type method request_id session_id command_id status code event_cursor)
+            ),
+          event: observation_fields(record["event"], ~w(kind event_id event_sequence)),
+          event_data: observation_fields(event_data, ~w(run_id turn_id command_id)),
+          progress:
+            observation_fields(
+              record["progress"],
+              ~w(kind turn_id stream_domain_id base_event_sequence model_sequence progress_sequence disposition delta_count progress_count)
+            ),
+          readable: observation_readable(record)
+        }
+
+        records = [metadata | observations.records]
+        bytes = :erlang.external_size(records)
+
+        if length(records) <= @observation_records and bytes <= @observation_bytes do
+          %{
+            state
+            | observations: %{
+                observations
+                | records: records,
+                  bytes: bytes,
+                  next_order: observations.next_order + 1
+              }
+          }
+        else
+          observation_overflow(state)
+        end
+
+      _invalid ->
+        put_in(state.observations.incomplete, true)
+    end
+  end
+
+  defp observation_fields(record, fields) when is_map(record) do
+    record
+    |> Map.take(fields)
+    |> Map.new(fn
+      {key, value} when is_binary(value) -> {:binary.copy(key), :binary.copy(value)}
+      {key, value} when is_integer(value) or is_nil(value) -> {:binary.copy(key), value}
+      {key, _value} -> {:binary.copy(key), :non_scalar}
+    end)
+  end
+
+  defp observation_fields(_record, _fields), do: %{}
+
+  defp observation_readable(%{"type" => "progress"} = record),
+    do: match?({:ok, _}, LoopexCli.DaemonClient.progress(record))
+
+  defp observation_readable(%{"type" => "event"} = record),
+    do: match?({:ok, _}, LoopexCli.DaemonClient.event(record))
+
+  defp observation_readable(_record), do: :not_applicable
+
+  defp observation_overflow(state) do
+    %{
+      state
+      | observations: %{
+          state.observations
+          | overflow: true,
+            pending: "",
+            pending_direction: nil
+        }
+    }
   end
 
   defp close(client, daemon) do
