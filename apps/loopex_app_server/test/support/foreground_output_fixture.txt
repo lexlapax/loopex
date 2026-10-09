@@ -372,7 +372,9 @@ defmodule Loopex.AppServer.ForegroundOutputFixture do
       command_ids: [], observed_at: now_ms(), sink_closed: true}})
   end
 
-  defp own(observer, mode) when mode in ["runtime", "writer_failure", "question"] do
+  defp own(observer, mode)
+       when mode in ["runtime", "writer_failure", "question_text", "question_choice",
+         "question_decline"] do
     artifacts = Loopex.Store.Local.Artifacts
     root = Path.join(System.fetch_env!("LOOPEX_HOME"), "foreground-artifacts")
     {:ok, handle} = artifacts.open(root)
@@ -452,12 +454,20 @@ defmodule Loopex.AppServer.ForegroundOutputFixture do
     end
   end
 
-  defp script("question"),
-    do: [%{text: "question", calls: [%{id: "ask-1", name: "ask",
-      arguments: %{"question" => "Explain"}}]}, %{text: "done", calls: []}]
+  # Concept: each question mode asks one literal model-question corpus vector.
+  # Technical depth: arguments come from the retained Core corpus by name, so
+  # the stdio proof and the daemon socket proof share the same literals.
+  defp script("question_" <> name) do
+    corpus = Path.expand("../../../loopex/priv/vectors/model_question.v1.json", __DIR__)
+    [vector] = corpus |> File.read!() |> JSON.decode!() |> Map.fetch!("vectors")
+      |> Enum.filter(&(&1["name"] == name))
+    [%{text: "question", calls: [%{id: "ask-1", name: "ask", arguments: vector["arguments"]}]},
+      %{text: "done", calls: []}]
+  end
 
   defp script(_mode), do: [%{text: "done", calls: []}]
-  defp tools("question"), do: [tools: [LoopexProtocol.ToolDefinition.question_definition()]]
+  defp tools("question_" <> _name),
+    do: [tools: [LoopexProtocol.ToolDefinition.question_definition()]]
   defp tools(_mode), do: []
 
   defp cleanup_all(actions) do

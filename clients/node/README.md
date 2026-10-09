@@ -24,6 +24,8 @@ imports anything outside Node's own standard library.
 | `terminal-outcome-vectors.mjs` | Independently check terminal outcome vectors and reference boundaries |
 | `tool-finished.mjs` | Decode both closed `tool.finished` variants: receipt-backed with an operation identity, or operation-less with an optional public reason; both connections validate it |
 | `tool-finished-vectors.mjs` | Independently check the tool terminal literals and identity, reason and size byte boundaries |
+| `public-records.mjs` | Validate every durable event, snapshot and progress record against this client's own closed reading of the current contract; both connections call it before a caller sees a record |
+| `public-records-tests.mjs` | Wrap every retained payload literal in complete records and check the shared validator admits exactly the admitted literals |
 | `compact-result.mjs` | Decode standalone compaction results and completed-command payloads with exact usage, closed failures and opaque identities; both connections validate completion events |
 | `compact-result-vectors.mjs` | Independently check result/completion vectors, accounting and checkpoint/command/episode boundaries |
 | `checkpoint-owner.mjs` | Decode closed run/compact checkpoint owners and opaque identity bytes; both connections validate checkpoint events |

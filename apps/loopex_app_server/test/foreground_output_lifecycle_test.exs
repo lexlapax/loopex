@@ -149,78 +149,143 @@ defmodule Loopex.AppServer.ForegroundOutputLifecycleTest do
     end)
   end
 
-  # Concept: an answered model question finishes its tool on the real stdout.
-  # Technical depth: accepted ADR 0067's seven-member terminal has no operation
-  # identity; it must cross the actual writer between the interaction terminal
-  # and run ending without detachment, then release custody at EOF.
-  test "an actual model question answer crosses stdio as an operation-less tool terminal" do
-    Harness.with_fixture(:file, :question, fn fixture ->
-      prepare(fixture)
+  # Concept: model questions settle through the actual foreground attachment.
+  # Technical depth: each literal answer vector crosses real stdio once. A
+  # malformed union refuses without settlement; accepted ADR 0067's
+  # operation-less tool terminal precedes the interaction terminal without
+  # detachment; an identical retry replays the historical admission and adds no
+  # event. Custody is released at EOF.
+  @question_corpus Path.expand("../../loopex/priv/vectors/model_question.v1.json", __DIR__)
+                   |> File.read!()
+                   |> JSON.decode!()
 
-      Harness.send_frame(fixture, %{
-        "method" => "session.prompt",
-        "request_id" => "prompt",
-        "command_id" => Wire.encode_identity("question-prompt"),
-        "content_b64" => Wire.encode_bytes("go")
-      })
+  for vector <- @question_corpus["vectors"] do
+    @question_vector vector
 
-      requested =
-        await_record(fixture, &(get_in(&1, ["event", "kind"]) == "interaction.requested"))
+    test "an actual model question #{vector["name"]} answer settles once over foreground stdio" do
+      vector = @question_vector
 
-      opened = requested["event"]["data"]
-      assert opened["producer"] == "model_tool"
+      Harness.with_fixture(:file, String.to_atom("question_" <> vector["name"]), fn fixture ->
+        prepare(fixture)
 
-      Harness.send_frame(fixture, %{
-        "method" => "session.respond_interaction",
-        "request_id" => "answer",
-        "command_id" => Wire.encode_identity("question-answer"),
-        "interaction_id" => opened["interaction_id"],
-        "answer" => %{"text" => "exact response 猫\n"}
-      })
+        Harness.send_frame(fixture, %{
+          "method" => "session.prompt",
+          "request_id" => "prompt",
+          "command_id" => Wire.encode_identity("question-prompt"),
+          "content_b64" => Wire.encode_bytes("go")
+        })
 
-      await_record(fixture, &(get_in(&1, ["event", "kind"]) == "run.finished"))
-      records = output_records(fixture)
-      kinds = for %{"type" => "event", "event" => %{"kind" => kind}} <- records, do: kind
-      refute Enum.any?(records, &(&1["type"] in ["detached", "error"]))
+        requested =
+          await_record(fixture, &(get_in(&1, ["event", "kind"]) == "interaction.requested"))
 
-      # The atomic settlement appends the original tool result before the
-      # interaction terminal; the run ends after both.
-      assert Enum.find_index(kinds, &(&1 == "tool.finished")) <
-               Enum.find_index(kinds, &(&1 == "interaction.answered"))
+        opened = requested["event"]["data"]
+        assert opened["producer"] == "model_tool"
+        assert opened["interaction_kind"] == vector["interaction_request"]["kind"]
+        assert opened["status"] == "pending"
 
-      assert Enum.find_index(kinds, &(&1 == "interaction.answered")) <
-               Enum.find_index(kinds, &(&1 == "run.finished"))
+        answer = %{
+          "method" => "session.respond_interaction",
+          "request_id" => "answer",
+          "command_id" => Wire.encode_identity("question-answer"),
+          "interaction_id" => opened["interaction_id"],
+          "answer" => question_wire_answer(vector["answer"])
+        }
 
-      [finished] =
-        for %{"event" => %{"kind" => "tool.finished", "data" => data}} <- records, do: data
+        Harness.send_frame(
+          fixture,
+          answer
+          |> Map.put("request_id", "malformed")
+          |> Map.put("answer", %{"text" => "ambiguous", "disposition" => "declined"})
+        )
 
-      assert finished == %{
-               "run_id" => opened["run_id"],
-               "turn_id" => finished["turn_id"],
-               "tool_call_id" => Wire.encode_identity("ask-1"),
-               "tool_id" => "loopex.ask",
-               "outcome" => "completed",
-               "reason" => nil,
-               "artifacts" => []
-             }
+        malformed = await_record(fixture, &(&1["request_id"] == "malformed"))
+        assert malformed["type"] == "error"
+        assert malformed["code"] == "invalid_request"
+        refute Enum.any?(output_records(fixture), &terminal_question?/1)
 
-      assert {:ok, _turn} = Wire.identity(finished["turn_id"])
-      assert {:ok, native} = LoopexProtocol.Session.ToolFinished.decode_wire(finished)
-      refute Map.has_key?(native, "operation_id")
+        Harness.send_frame(fixture, answer)
+        await_record(fixture, &(get_in(&1, ["event", "kind"]) == "run.finished"))
+        records = output_records(fixture)
+        refute Enum.any?(records, &(&1["code"] == "detached"))
+        kinds = for %{"type" => "event", "event" => %{"kind" => kind}} <- records, do: kind
+        terminal_kind = "interaction." <> vector["disposition"]
 
-      [%{"event" => %{"data" => run}}] =
-        for %{"event" => %{"kind" => "run.finished"}} = record <- records, do: record
+        # The atomic settlement appends the original tool result before the
+        # interaction terminal; the run ends after both.
+        assert Enum.find_index(kinds, &(&1 == "tool.finished")) <
+                 Enum.find_index(kinds, &(&1 == terminal_kind))
 
-      assert run["outcome"] == "completed"
-      [admission] = Enum.filter(records, &(&1["request_id"] == "answer"))
-      assert admission["status"] == "accepted"
-      assert admission["command_id"] == Wire.encode_identity("question-answer")
-      :file.close(fixture.input)
-      summary = Harness.finished(fixture)
-      assert summary.result == :ok
-      assert_released_custody(summary)
-      assert summary.sink_closed
-    end)
+        assert Enum.find_index(kinds, &(&1 == terminal_kind)) <
+                 Enum.find_index(kinds, &(&1 == "run.finished"))
+
+        [finished] =
+          for %{"event" => %{"kind" => "tool.finished", "data" => data}} <- records, do: data
+
+        {outcome, reason} =
+          if vector["disposition"] == "declined",
+            do: {"denied", "question_declined"},
+            else: {"completed", nil}
+
+        assert finished == %{
+                 "run_id" => opened["run_id"],
+                 "turn_id" => finished["turn_id"],
+                 "tool_call_id" => Wire.encode_identity("ask-1"),
+                 "tool_id" => "loopex.ask",
+                 "outcome" => outcome,
+                 "reason" => reason,
+                 "artifacts" => []
+               }
+
+        assert {:ok, _turn} = Wire.identity(finished["turn_id"])
+        assert {:ok, native} = LoopexProtocol.Session.ToolFinished.decode_wire(finished)
+        refute Map.has_key?(native, "operation_id")
+
+        [settled] =
+          for %{"event" => %{"kind" => ^terminal_kind, "data" => data}} <- records, do: data
+
+        assert settled["interaction_id"] == opened["interaction_id"]
+        assert settled["status"] == vector["disposition"]
+        assert settled["command_id"] == Wire.encode_identity("question-answer")
+        assert settled["command_digest"] =~ ~r/\A[0-9a-f]{64}\z/
+
+        assert settled["answer"] ==
+                 (case answer["answer"] do
+                    %{"choice_id" => choice} ->
+                      %{"choice_id" => choice, "label" => "literal_null"}
+
+                    other ->
+                      other
+                  end)
+
+        [%{"event" => %{"data" => run}}] =
+          for %{"event" => %{"kind" => "run.finished"}} = record <- records, do: record
+
+        assert run["outcome"] == "completed"
+        [admission] = Enum.filter(records, &(&1["request_id"] == "answer"))
+
+        assert admission == %{
+                 "type" => "admission",
+                 "request_id" => "answer",
+                 "method" => "session.respond_interaction",
+                 "command_id" => Wire.encode_identity("question-answer"),
+                 "status" => "accepted",
+                 "reason" => nil
+               }
+
+        await_record(fixture, &(get_in(&1, ["event", "kind"]) == "session.settled"))
+        settled_events = for %{"type" => "event"} = record <- output_records(fixture), do: record
+        Harness.send_frame(fixture, Map.put(answer, "request_id", "retry"))
+        retry = await_record(fixture, &(&1["request_id"] == "retry"))
+        assert retry == %{admission | "request_id" => "retry"}
+        after_retry = for %{"type" => "event"} = record <- output_records(fixture), do: record
+        assert after_retry == settled_events
+        :file.close(fixture.input)
+        summary = Harness.finished(fixture)
+        assert summary.result == :ok
+        assert_released_custody(summary)
+        assert summary.sink_closed
+      end)
+    end
   end
 
   for kind <- [
@@ -635,6 +700,15 @@ defmodule Loopex.AppServer.ForegroundOutputLifecycleTest do
       content_index: 0,
       text: text
     }
+
+  defp question_wire_answer(%{"choice_id" => choice}),
+    do: %{"choice_id" => Wire.encode_identity(choice)}
+
+  defp question_wire_answer(answer), do: answer
+
+  defp terminal_question?(record),
+    do:
+      get_in(record, ["event", "kind"]) in ~w(interaction.answered interaction.declined tool.finished)
 
   defp output_records(fixture) do
     bytes = if File.exists?(fixture.output), do: File.read!(fixture.output), else: ""

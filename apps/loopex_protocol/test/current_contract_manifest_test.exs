@@ -207,6 +207,16 @@ defmodule LoopexProtocol.CurrentContractManifestTest do
     assert report["mismatch_session_frames"] == 0
   end
 
+  # Concept: both Node connections admit exactly the current public records.
+  # Technical depth: every retained payload literal is wrapped in a complete
+  # event, snapshot or progress record; the shared validator both connections
+  # call must admit it exactly when the literal is admitted.
+  @tag :node_client
+  test "both Node connections validate every current event snapshot and progress family" do
+    report = run_node("public-records-tests.mjs", [Path.join(@priv, "vectors")])
+    assert report == %{"events" => 1_926, "snapshots" => 77, "progress" => 217}
+  end
+
   defp run_node(script, arguments) do
     node =
       System.find_executable("node") || flunk("Node is required for current contract conformance")
