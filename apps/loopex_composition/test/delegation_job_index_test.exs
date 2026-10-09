@@ -118,7 +118,12 @@ defmodule LoopexComposition.DelegationJobIndexTest do
     test = self()
 
     fault = fn step ->
-      if step == :before_coverage, do: send(test, :publishing) && :crash, else: :ok
+      if step == :before_coverage do
+        send(test, :publishing)
+        :crash
+      else
+        :ok
+      end
     end
 
     catch_exit(Fixture.restart(fixture, fault: fault))
