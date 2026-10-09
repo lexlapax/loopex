@@ -7220,3 +7220,17 @@ rewrite: `5678825a`→`58120864`, `735cbb1f`→`4c099a87`, `0c12f36d`→`11ffb1b
 `a4821ce7`→`def632ca`, `69d51116`→`d1ff2e68`, `9d2b76c4`→`87f6c7ee` (title shortened to 72 characters),
 `cb9bc64b`→`410e1db7`, `86e9c9f9`→`31a93aa2`.
 
+
+<a id="disposition-m7-quiesce-test-reserves-2026-10-09"></a>
+### M7 quiesce test reserves widened; late wakeup made strict, 2026-10-09
+
+Investigation of the 520ff308 and 0823aa50 integration failures established one
+cause: under full-check CPU overload the OS wakes the quiesce phase owner
+160–270 ms late, past test reserves of 50–100 ms, while production follows ADR
+0032's fixed outer deadline. Maintainer override: the quiesce population tests
+may raise their checked fence and termination reserves and initial gate to about
+1,000 ms. Every assertion keeps its meaning (one shared cutoff, sibling progress,
+fence accounting, Store state, cancellation inside the reserve); production
+bounds are unchanged. The maintainer also selected making a phase owner that
+observes its outer deadline already passed return `runtime_unavailable` rather
+than a late success.
