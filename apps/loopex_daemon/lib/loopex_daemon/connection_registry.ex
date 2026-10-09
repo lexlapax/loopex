@@ -1102,8 +1102,7 @@ defmodule LoopexDaemon.ConnectionRegistry do
              outcome: :pending
            } = intent
        } = row} ->
-        if now_ms() < cutoff and (Process.alive?(intent.control) or intent.control_joined) and
-             empty_retirement_output?(row.output) do
+        if now_ms() < cutoff and empty_retirement_output?(row.output) do
           row = %{row | native_retirement: %{intent | result: :ok}}
           state = state |> put_in([:rows, token], row) |> socket_retirement_step(token)
           {:reply, :ok, state}

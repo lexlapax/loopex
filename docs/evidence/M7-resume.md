@@ -27,6 +27,43 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+### Timely result admission correction, 2026-10-08
+
+Original53514 at `e31e71b6b9c6019a6875da950c8469d19dc1ce35` is
+terminal and collected FAIL after 33.699 seconds. The new real-actor regression
+passed both exact queued-original-DOWN and strict original-cutoff preconditions,
+then received `connections_lost` at the expected close-answer assertion. All
+14 original Socket cases passed. Floor remains UNRUN. Retained run:
+`M7/daemon-control-result-order-focused-20261008-v2`; terminal SHA-256
+`1a0062536db475f0bc6ffada6a0450e9221dbfe088825003df712e7bb93c73d2`;
+collection `0fd429e176bb204e4ded9b9d3c324f5d600bf4b3951fd6e85abb89ffae9fc306`.
+Six original joins and29 verified artifacts remain; registry2827 SHA-256
+`f1a9e06e1afe1f64b2808526dcfc5af4766097162753c654f2a3388c6919a5ba`.
+No actor-local handler-time observation or universal population attribution is
+claimed from that failed run.
+
+The one-line Registry correction admits exact timely result evidence while
+its original control DOWN is queued. Final cleanup still requires the unchanged
+normal original Socket, guardian and control joins, empty output and original
+cutoff; abnormal/late/lost evidence and sticky failure remain unchanged.
+Corrected Registry SHA-256
+`30785a692016a0f34d764d3da8f114f5d64bab097a2b916d5920ba0d99f1e5e9`;
+independent source/recipe review
+`34fc731990bd201351f5734aa16509bb124ce06b767a2822efe495b0cfcc9580`.
+Whole Socket15, MaximumPopulation2, remaining Daemon506 and CLI50 run once per
+pair after clean binding: 573 selected cases across45 whole files. Three
+cross-UID/paid-provider cases remain separate UNRUN obligations. Native
+qualification is UNRUN at this checkpoint; no original failed run is relabeled.
+
+The accepted ADR0066 Core port/pure14-test packet is sealed raw and unintegrated;
+Runtime/Dispatcher and Local Store implementation continue in separate private
+writers. Formatter, native qualification and coordinated consumer migration
+remain required. ADR0065 remains Proposed. Immutable55-asset retention:
+`M7/current-source-preparation-20261008-v13/retention.json`, SHA-256
+`32ad3fb20693d83b2b6b782926a2d8142f8a4a018942d16b59f91480ce5e5115`.
+No native handle is live at this checkpoint. T01–T19 original88 done /85 open /
+6 retired; added370 done /25 open. No completion checkbox changes.
+
 ### Real result/control-order regression joined, 2026-10-08
 
 The independently reviewed Socket regression adds one real-actor positive to
