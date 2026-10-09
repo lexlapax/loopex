@@ -637,6 +637,100 @@ defmodule LoopexDaemon.SocketConnectionTest do
     assert_receive {:DOWN, ^again_monitor, :process, ^again, :normal}, 1_000
   end
 
+  # Concept: native evidence can arrive before the Registry consumes its original joins.
+  # Technical depth: the real result is parked before its handler while the
+  # original Socket and control exit normally. Their exact DOWNs remain queued
+  # in the Registry; releasing before the same cutoff must retain the result
+  # until those original joins prove retirement, without consulting a new monitor.
+  test "a timely real Socket result survives its normally exited control's queued original DOWN",
+       %{daemon: daemon, runtime: runtime} do
+    {_client, socket, _session, sink} = progress_client(daemon, runtime)
+    {guardian, _native_incarnation, arena} = sink
+    registry = daemon.registry
+    socket_monitor = Process.monitor(socket)
+    guardian_monitor = Process.monitor(guardian)
+    socket_gate = park_socket_terminal(socket, registry)
+    gate = make_ref()
+    observer = self()
+    on_exit(fn -> send(registry, {:continue_timely_socket_result, gate}) end)
+
+    :ok =
+      :sys.install(
+        registry,
+        {gate,
+         fn
+           :waiting,
+           {:in,
+            {:"$gen_call", {^socket, _},
+             {:socket_native_retirement_result, incarnation, ^sink, ref, cutoff, :ok}}},
+           _extra ->
+             send(observer, {:timely_socket_result_parked, gate, incarnation, ref, cutoff})
+
+             receive do
+               {:continue_timely_socket_result, ^gate} -> :done
+             end
+
+           debug, _event, _extra ->
+             debug
+         end, :waiting}
+      )
+
+    {caller, caller_monitor} = close_connections(daemon)
+    assert_receive {:socket_terminal_parked, ^socket_gate, close_ref}, 1_000
+    {_token, row} = socket_row(registry, socket)
+    intent = row.native_retirement
+    control = intent.control
+    control_monitor = Process.monitor(control)
+    original_control_monitor = intent.control_monitor
+    original_socket_monitor = row.connection_monitor
+    incarnation = row.connection_incarnation
+    cutoff = intent.cutoff
+    assert intent.ready and intent.result == nil and not intent.control_joined
+    assert now_ms() < cutoff
+    send(socket, {:continue_socket_terminal, socket_gate})
+
+    assert_receive {:timely_socket_result_parked, ^gate, ^incarnation, ^close_ref, ^cutoff}, 1_000
+    assert_receive {:DOWN, ^socket_monitor, :process, ^socket, :normal}, 1_000
+    assert_receive {:DOWN, ^control_monitor, :process, ^control, :normal}, 1_000
+    assert_receive {:DOWN, ^guardian_monitor, :process, ^guardian, :normal}, 1_000
+    assert now_ms() < cutoff
+    refute Process.alive?(control)
+
+    eventually(fn ->
+      assert now_ms() < cutoff
+      assert {:messages, queued} = Process.info(registry, :messages)
+
+      joined =
+        {:DOWN, original_control_monitor, :process, control, :normal} in queued and
+          {:DOWN, original_socket_monitor, :process, socket, :normal} in queued
+
+      assert now_ms() < cutoff
+      joined
+    end)
+
+    assert now_ms() < cutoff
+    assert {:messages, messages} = Process.info(registry, :messages)
+    assert {:DOWN, original_control_monitor, :process, control, :normal} in messages
+    assert {:DOWN, original_socket_monitor, :process, socket, :normal} in messages
+    assert now_ms() < cutoff
+    send(registry, {:continue_timely_socket_result, gate})
+
+    assert_receive {:socket_close_answer, ^caller, :ok}, 1_000
+    assert_receive {:DOWN, ^caller_monitor, :process, ^caller, :normal}, 1_000
+    assert :ets.info(arena) == :undefined
+
+    assert %{
+             rows: rows,
+             socket_retirement_controls: controls,
+             progress_phase: :closed,
+             close_all_failed: false
+           } = :sys.get_state(registry)
+
+    assert rows == %{} and controls == %{}
+    refute_received {:daemon_component_fatal, _component, _class}
+    assert now_ms() < cutoff
+  end
+
   test "actual cutoff-control loss supplies no native success from guardian and Socket normal DOWN",
        %{daemon: daemon, runtime: runtime} do
     {_client, socket, _session, sink} = progress_client(daemon, runtime)

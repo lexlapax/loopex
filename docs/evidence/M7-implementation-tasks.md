@@ -1,5 +1,36 @@
 # M7 Implementation Tasks
 
+### Real result/control-order regression joined, 2026-10-08
+
+The independently reviewed Socket regression adds one real-actor positive to
+all14 unchanged original cases. It parks the actual original Socket result at
+Registry entry, joins the original Socket/control/guardian normally, waits for
+both exact original Registry DOWN tuples under the captured native cutoff,
+then releases before that same cutoff and requires real cleanup success.
+A final strict cutoff check covers completed observations. No result, join or
+state is fabricated. This is prospective causal evidence, not a production
+correction or attribution of original25781's population failure.
+
+Final15-case file SHA-256
+`dcaf9d379ea996857bf10cf1b9af435a605b59cbcf9ec3f8dc5f5527b70a64aa`;
+source/recipe review SHA-256
+`c0e309103447a6268fb363d7346ba0a4fab5142e8567535fd7978a7d331b4f0c`.
+V1 was source-blocked and never launched; v2 resolves exactly the queued-message
+and final-elapsed witness gaps. Whole Socket15 native remains UNRUN pending
+clean source binding. Root owns both native caches and original collection;
+first failure leaves floor UNRUN. Optional Max continuation draft is explicitly
+unfinished/unjoinable and is not another acceptance prerequisite.
+
+Human ADR0066 acceptance is recorded at `f5eed83f`, with independent acceptance
+review `3fc1a25ea32a715a82e2046115706446946120eeb979c8ccab4278ba295668dd`.
+Separate private workers now own the accepted ArtifactStore port/pure grammar
+and Local Store custody implementation; neither is integrated or qualified.
+ADR0065 remains Proposed. Immutable51-asset retention is
+`M7/current-source-preparation-20261008-v12/retention.json`, SHA-256
+`5a75a09ca849e23deef5883b175e76099c70d41a61da8058078b4a54548e7cc2`.
+No native handle is live at this checkpoint. T01–T19 original88 done /85 open /
+6 retired; added370 done /25 open. No completion checkbox changes.
+
 ### ADR0066 proposal documentation gate proved, 2026-10-08
 
 Exact Proposed candidate `9ff86133371bce672b46651fe0c2703f1dc2fc80`
