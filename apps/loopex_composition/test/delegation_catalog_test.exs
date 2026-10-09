@@ -35,6 +35,18 @@ defmodule LoopexComposition.DelegationCatalogTest do
              {:ok, capture}
   end
 
+  test "the instruction catalog fact is exactly the retained catalog object address" do
+    roles = %{"inspect" => role()}
+    assert {:ok, capture} = produce(roles, @limits)
+    assert {:ok, digest} = Catalog.digest("runtime", @providers, roles)
+    assert digest == "sha256:" <> capture.creation["catalog_sha256"]
+    assert {:ok, other} = Catalog.digest("other-runtime", @providers, roles)
+    refute other == digest
+
+    assert Catalog.digest("runtime", @providers, %{"inspect" => %{}}) ==
+             {:error, :invalid_parent_capture}
+  end
+
   test "role genesis freezes exact read-only tools, refusal mode and cleanup grace" do
     genesis = role()
     assert genesis["policy_defer_mode"] == "refuse" and genesis["options"] == %{}

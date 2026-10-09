@@ -121,6 +121,38 @@ defmodule LoopexComposition.Delegation.Catalog do
     _ -> {:error, :invalid_parent_capture}
   end
 
+  @doc """
+  ## Concept
+
+  The exact catalog digest a helper parent's instructions name.
+
+  ## Technical depth
+
+  ADR 0042's `catalog_digest` host fact is `sha256:` plus the address of the
+  same canonical catalog object `capture/7` retains, so instructions and the
+  retained catalog cannot disagree. It needs the runtime identity because the
+  catalog binds it.
+  """
+  @spec digest(binary(), map(), map()) :: {:ok, binary()} | {:error, :invalid_parent_capture}
+  def digest(runtime_id, providers, roles) do
+    with {:ok, entries} <- catalog_roles(roles),
+         {:ok, bytes} <-
+           LedgerCodec.encode_json(
+             %{
+               "version" => 1,
+               "kind" => "catalog",
+               "runtime_id" => Base.encode64(runtime_id),
+               "providers" => providers,
+               "roles" => entries
+             },
+             :object
+           ) do
+      {:ok, "sha256:" <> hash(bytes)}
+    else
+      _ -> {:error, :invalid_parent_capture}
+    end
+  end
+
   defp catalog_roles(roles) do
     roles
     |> Enum.sort_by(fn {name, _} -> name end)

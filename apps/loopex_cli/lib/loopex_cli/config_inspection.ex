@@ -161,25 +161,19 @@ defmodule LoopexCli.ConfigInspection do
     end)
   end
 
-  defp parent_instructions(profile, roles) do
+  defp parent_instructions(profile, _roles) do
     options = Map.get(profile["session"], "instructions", %{})
 
     options =
       if profile["delegation"]["enabled"] do
         enabled = profile["delegation"]["roles"]
-        # Concept: inspection accounts for exact saved role facts without creating
-        # a binding or promising a persisted catalog format.
-        # Technical depth: deterministic JSON is only an inspection preview; its
-        # digest has the same bounded representation used by admitted host facts.
-        {:ok, encoded} = Frame.encode(%{"roles" => Map.take(roles, enabled)})
-
-        digest =
-          "sha256:" <>
-            Base.encode16(
-              :crypto.hash(:sha256, IO.iodata_to_binary(encoded) |> String.trim_trailing("\n")),
-              case: :lower
-            )
-
+        # Concept: inspection measures the catalog fact without inventing its value.
+        # Technical depth: the retained catalog digest is ADR 0056's SHA-256 of
+        # the catalog object, which binds the placement-derived runtime identity
+        # that inspection does not acquire. `Catalog.digest/3` produces the
+        # exact value at parent creation; this fixed-width placeholder has the
+        # identical byte cost and is never retained, executed or printed.
+        digest = "sha256:" <> String.duplicate("0", 64)
         Map.merge(options, %{"enabled_roles" => enabled, "catalog_digest" => digest})
       else
         options
