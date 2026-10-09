@@ -7245,3 +7245,14 @@ the tested bytes. B's switching and helper legs may run under ADR 0044's
 generic descriptor at `default`. Pin B's exact models, mappings and credential
 variable name in the committed manifest before any attempt. Paid runs still
 wait for the candidate-time approval.
+
+<a id="disposition-m7-helper-provider-2026-10-09"></a>
+### M7 helper children prepare their own model, 2026-10-09
+
+Core refused to create a child session whose model differs from the runtime's
+model unless the creation was prepared, so helpers could not run on provider B
+as ADR 0046/0048 and plan V8 require. The maintainer selected preparing the
+child genesis: when a supplied genesis names a different model, Core runs it
+through the existing model preparation used by authored creation and accepts
+it only if preparation reproduces the genesis exactly. This clarifies the
+accepted ADRs' per-role provider selection; no other creation rule changes.
