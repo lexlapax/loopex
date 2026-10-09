@@ -90,7 +90,7 @@ defmodule LoopexCli.Demonstration do
             :active_tools,
             ~w(loopex.read loopex.write loopex.edit loopex.bash)
           ),
-        progress_to: Keyword.get(options, :progress_to),
+        progress_sink: Keyword.get(options, :progress_sink),
         session_creation_defaults: defaults
       )
 

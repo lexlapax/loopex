@@ -17,6 +17,7 @@ defmodule LoopexCliTest do
   use ExUnit.Case, async: false
 
   import ExUnit.CaptureIO
+  import Loopex.ProgressTestConsumer, only: [assert_progress: 3]
 
   alias Loopex.AgentLoopFixture
   alias LoopexCli.Demonstration
@@ -1394,10 +1395,12 @@ defmodule LoopexCliTest do
   end
 
   test "tool progress from a running executor job reaches the operator's terminal before the tool finishes" do
+    sink = Loopex.ProgressTestConsumer.open_sink()
+
     fixture =
       fixture(
         script: [%{text: "", calls: [call()]}, %{text: "done"}],
-        progress_to: self(),
+        progress_sink: sink,
         tool_progress_gate: self()
       )
 
@@ -1405,10 +1408,11 @@ defmodule LoopexCliTest do
 
     assert_receive {:tool_progress_emitted, "c1", worker}, 2_000
 
-    assert_receive {:loopex_progress,
-                    %{kind: :tool_progress, tool_call_id: "c1", chunk: "working"}},
-                   2_000,
-                   "no executor progress reached the terminal while the tool was held open"
+    assert_progress(
+      {:loopex_progress, %{kind: :tool_progress, tool_call_id: "c1", chunk: "working"}},
+      2_000,
+      "no native executor progress arrived while the tool was held open"
+    )
 
     # Completion is impossible until this release. The assertion above is thus
     # causal evidence, rather than a comparison of messages from two senders
