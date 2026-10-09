@@ -27,6 +27,30 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+### Full-population daemon diagnostic joined, 2026-10-08
+
+The independently reviewed test-only diagnostic is joined in
+`maximum_population_test.exs`. It traces only the original Registry and
+retains bounded selected-row retirement dispositions, the actual native
+ProgressSink.close result and the final sticky-failure input. Both original
+success assertions,512 connections,8 sessions, T15 timing/distribution,
+original actors/cleanup and600,000/60,000-ms stop allowances remain.
+The trace delivery fence spends that same allowance; no cleanup proof is
+inferred from row disappearance or diagnostic completion.
+
+Exact final test SHA-256
+`78c3d83b21cf8416696826d728d762c785889c99075e150a9f08e51e7827aef4`;
+independent SOURCE_CLEAR review SHA-256
+`1faf7a8b3bd7a78cb9e5c332811fccb150c1c8dc3f5fae0614d0b8cf1abf4621`.
+Source packet: `/private/tmp/m7-daemon-maximum-population-retirement-diagnostic-source-20261008-v1`.
+This prepares a diagnostic reproduction of original10084's retained failures,
+not a passing qualification reroll. Native trace installation and both
+complete cases remain UNRUN. Root must pin the clean commit before launch;
+a first current-pair failure leaves floor stages UNRUN. The two genuine
+production failures are still unresolved. No native handle is live.
+T01-T19 original88 done /85 open /6 retired; added370 done /24 open.
+No checkbox closes from diagnostic source preparation.
+
 ### Daemon causal repair proved on both toolchains, 2026-10-08
 
 Original55961 at tested `781dadf698d516d4e874f144afa736dea171490d`

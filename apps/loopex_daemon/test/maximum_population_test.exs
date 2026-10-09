@@ -63,7 +63,7 @@ defmodule LoopexDaemon.MaximumPopulationTest do
         Sentinel.run(options, output: output, install_signals: false, notify: test)
       end)
 
-    assert_receive {:loopex_daemon_sentinel, sentinel, owner_ref, _owner}, 5_000
+    assert_receive {:loopex_daemon_sentinel, sentinel, owner_ref, service}, 5_000
     await_ready(output, 3_000)
 
     creator = client(socket)
@@ -135,10 +135,17 @@ defmodule LoopexDaemon.MaximumPopulationTest do
         "rss_kib=#{String.trim(rss)} otp=#{System.otp_release()}"
     )
 
+    registry = :sys.get_state(service).registry
+    trace_retirement(registry)
     started = System.monotonic_time(:millisecond)
+    retirement_cutoff = started + 600_000
     send(sentinel, {:daemon_signal, owner_ref, :sigterm})
-    assert Task.await(daemon, 600_000) == 0
+    status = Task.await(daemon, 600_000)
     elapsed = System.monotonic_time(:millisecond) - started
+    retirement = finish_retirement_trace(registry, retirement_cutoff)
+    untrace_retirement(registry)
+    IO.puts("maximum-population native retirement: #{inspect(retirement)}")
+    assert status == 0
 
     IO.puts(
       "maximum-population orderly stop: connections=#{@connections} attachments=#{@connections} " <>
@@ -331,8 +338,14 @@ defmodule LoopexDaemon.MaximumPopulationTest do
     owner_lost? = &(&1["code"] == "control_owner_lost")
     losses = Enum.map(2..3, &reply_matching(holder.(&1), owner_lost?))
 
+    registry = :sys.get_state(service).registry
+    trace_retirement(registry)
+    retirement_cutoff = System.monotonic_time(:millisecond) + 60_000
     send(sentinel, {:daemon_signal, owner_ref, :sigterm})
     status = Task.yield(daemon, 60_000) || Task.shutdown(daemon, :brutal_kill)
+    retirement = finish_retirement_trace(registry, retirement_cutoff)
+    untrace_retirement(registry)
+    IO.puts("maximum-population T15 native retirement: #{inspect(retirement)}")
     untrace_steps()
     send(tracer, {:events, self()})
     assert_receive {:events, events}, 5_000
@@ -391,6 +404,203 @@ defmodule LoopexDaemon.MaximumPopulationTest do
     assert status == {:ok, 0}
 
     Enum.each(clients, &:socket.close/1)
+  end
+
+  # Concept: native retirement diagnostics retain decisions without copying owner state.
+  # Technical depth: only the original Registry PID is traced. Selected tokens
+  # remain private match-spec inputs; messages expose booleans, closed enums and
+  # counts. A row is popped once, so the selected population supplies at most
+  # 512 dispositions, followed by at most one arena result and one finish input.
+  defp trace_retirement(registry) when is_pid(registry) do
+    selected = retirement_get(retirement_get(retirement_get(:"$1", :close_all), :selected), :map)
+    sticky = retirement_get(:"$1", :close_all_failed)
+    intent = retirement_get(:"$3", :native_retirement)
+    selected_guards = [{:is_map, selected}, {:is_map_key, :"$2", selected}, {:is_boolean, sticky}]
+
+    disposition = [
+      {[:"$1", :"$2", :"$3"],
+       selected_guards ++
+         [
+           {:is_map, intent},
+           {:orelse, {:==, retirement_get(intent, :outcome), :proved},
+            {:orelse, {:==, retirement_get(intent, :outcome), :unproved},
+             {:==, retirement_get(intent, :outcome), :pending}}},
+           {:is_boolean, retirement_get(intent, :guardian_joined)},
+           {:is_boolean, retirement_get(intent, :control_joined)}
+         ],
+       [
+         {:message,
+          retirement_tuple([
+            :selected_disposition,
+            retirement_get(intent, :outcome),
+            {:==, retirement_get(intent, :result), :ok},
+            retirement_get(intent, :guardian_joined),
+            retirement_get(intent, :control_joined),
+            sticky
+          ])}
+       ]},
+      {[:"$1", :"$2", :"$3"], selected_guards ++ [{:==, intent, nil}],
+       [{:message, retirement_tuple([:selected_disposition, :missing, false, false, false, sticky])}]},
+      {[:"$1", :"$2", :_], selected_guards,
+       [{:message, retirement_tuple([:selected_disposition, :invalid, false, false, false, sticky])}]}
+    ]
+
+    close = retirement_get(:"$1", :close_all)
+
+    finish =
+      for reply <- [:ok, {:error, :connections_lost}] do
+        label = if reply == :ok, do: :ok, else: :connections_lost
+
+        {[:"$1", reply], [{:is_boolean, sticky}],
+         [
+           {:message,
+            retirement_tuple([
+              :registry_finish,
+              label,
+              sticky,
+              {:==, retirement_get(:"$1", :progress_phase), :closed},
+              {:==, retirement_get(close, :phase), :joining},
+              {:map_size, retirement_get(close, :dispositions)},
+              {:map_size, retirement_get(:"$1", :rows)}
+            ])}
+         ]}
+      end
+
+    on_exit(fn -> untrace_retirement(registry) end)
+
+    assert :erlang.trace_pattern(
+             {LoopexDaemon.ConnectionRegistry, :retain_socket_retirement_disposition, 3},
+             disposition,
+             [:local]
+           ) == 1
+
+    assert :erlang.trace_pattern(
+             {LoopexDaemon.ConnectionRegistry, :finish_registry_progress_close, 2},
+             finish,
+             [:local]
+           ) == 1
+
+    assert :erlang.trace_pattern(
+             {Loopex.ProgressSink, :close, 1},
+             [{:_, [], [{:message, false}, {:return_trace}]}],
+             [:local]
+           ) == 1
+
+    assert :erlang.trace(registry, true, [:call, :arity, {:tracer, self()}]) == 1
+  end
+
+  defp untrace_retirement(registry) do
+    try do
+      :erlang.trace(registry, false, [:call])
+    rescue
+      ArgumentError -> :ok
+    end
+
+    for {module, function, arity} <- [
+          {LoopexDaemon.ConnectionRegistry, :retain_socket_retirement_disposition, 3},
+          {LoopexDaemon.ConnectionRegistry, :finish_registry_progress_close, 2},
+          {Loopex.ProgressSink, :close, 1}
+        ],
+        do: :erlang.trace_pattern({module, function, arity}, false, [:local])
+  end
+
+  defp retirement_get(map, key), do: {:map_get, key, map}
+  defp retirement_tuple(items), do: {List.to_tuple(items)}
+
+  # Concept: the snapshot precedes the original exit-status assertion even on 106.
+  # Technical depth: trace_delivered is a delivery fence, not an actor join.
+  # Collection spends the original stop allowance; pre/post checks cannot accept
+  # a late queued fence. No receive consumes unrelated caller-mailbox evidence.
+  defp finish_retirement_trace(registry, cutoff) do
+    summary = %{
+      dispositions: 0,
+      outcomes: %{proved: 0, unproved: 0, pending: 0, missing: 0, invalid: 0},
+      result_unproved: 0,
+      guardian_unjoined: 0,
+      control_unjoined: 0,
+      sticky_seen: false,
+      arena_result: :not_observed,
+      finish: :not_observed,
+      controls: 0,
+      overflow: false,
+      complete: false
+    }
+
+    if System.monotonic_time(:millisecond) < cutoff do
+      fence = :erlang.trace_delivered(:all)
+      collect_retirement_trace(registry, fence, cutoff, summary)
+    else
+      summary
+    end
+  end
+
+  defp collect_retirement_trace(registry, fence, cutoff, summary) do
+    remaining = max(cutoff - System.monotonic_time(:millisecond), 0)
+
+    if remaining == 0 do
+      summary
+    else
+      receive do
+        {:trace, ^registry, :call,
+         {LoopexDaemon.ConnectionRegistry, :retain_socket_retirement_disposition, 3},
+         {:selected_disposition, outcome, result_ok, guardian_joined, control_joined, sticky}}
+        when outcome in [:proved, :unproved, :pending, :missing, :invalid] and
+               is_boolean(result_ok) and is_boolean(guardian_joined) and
+               is_boolean(control_joined) and is_boolean(sticky) ->
+          summary =
+            if summary.dispositions < @connections do
+              %{
+                summary
+                | dispositions: summary.dispositions + 1,
+                  outcomes: Map.update!(summary.outcomes, outcome, &(&1 + 1)),
+                  result_unproved: summary.result_unproved + if(result_ok, do: 0, else: 1),
+                  guardian_unjoined: summary.guardian_unjoined + if(guardian_joined, do: 0, else: 1),
+                  control_unjoined: summary.control_unjoined + if(control_joined, do: 0, else: 1),
+                  sticky_seen: summary.sticky_seen or sticky
+              }
+            else
+              %{summary | overflow: true}
+            end
+
+          collect_retirement_trace(registry, fence, cutoff, summary)
+
+        {:trace, ^registry, :return_from, {Loopex.ProgressSink, :close, 1}, result}
+        when result == :ok or result == {:error, :cleanup_unproved} ->
+          arena_result = if result == :ok, do: :ok, else: :cleanup_unproved
+          summary = retirement_control(summary, :arena_result, arena_result)
+          collect_retirement_trace(registry, fence, cutoff, summary)
+
+        {:trace, ^registry, :call,
+         {LoopexDaemon.ConnectionRegistry, :finish_registry_progress_close, 2},
+         {:registry_finish, reply, sticky, arena_closed, joining, dispositions, rows}}
+        when reply in [:ok, :connections_lost] and is_boolean(sticky) and
+               is_boolean(arena_closed) and is_boolean(joining) and
+               is_integer(dispositions) and dispositions in 0..@connections and
+               is_integer(rows) and rows in 0..@connections ->
+          finish = %{
+            input: reply,
+            sticky: sticky,
+            arena_closed: arena_closed,
+            joining: joining,
+            dispositions: dispositions,
+            rows: rows
+          }
+
+          summary = retirement_control(summary, :finish, finish)
+          collect_retirement_trace(registry, fence, cutoff, summary)
+
+        {:trace_delivered, :all, ^fence} ->
+          %{summary | complete: System.monotonic_time(:millisecond) < cutoff}
+      after
+        remaining -> summary
+      end
+    end
+  end
+
+  defp retirement_control(summary, key, value) do
+    if summary.controls < 2 and Map.fetch!(summary, key) == :not_observed,
+      do: %{Map.put(summary, key, value) | controls: summary.controls + 1},
+      else: %{summary | overflow: true}
   end
 
   # A send to a connection the daemon closed returns its error instead of
