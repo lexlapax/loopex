@@ -7171,3 +7171,24 @@ The maintainer answered the three pending prerequisite questions on 2026-10-09.
 Acceptance authorizes implementation only. Required proofs, milestone closure,
 merge and publication keep their separate authorization.
 
+
+<a id="disposition-m7-external-task-and-campaign-2026-10-09"></a>
+### M7 external repository task and paid-campaign timing, 2026-10-09
+
+The maintainer selected the external repository for outcome 8 and approved its
+task before any attempt:
+
+- Repository `~/projects/lexlapax/lapaxworks` at
+  `30a49d6059b2a69b54e6e97f69a5623ce977b16d`, run in a disposable checkout and
+  never pushed.
+- Task: `tools/threads.py`'s `slugify` must transliterate accented Latin letters
+  to ASCII ("Café Society" becomes `cafe-society`, "Naïve Fixes" becomes
+  `naive-fixes`) without changing any other output.
+- Allowed change: `tools/threads.py` only.
+- Oracle: a harness-owned Python test of `slugify` cases, plus
+  `python3 tools/threads.py --check` exiting 0, so no generated page changes.
+
+The maintainer also chose to authorize real-provider runs at candidate time:
+the credential-free implementation is finished first, then the exact case list
+and estimated cost are presented for approval, and the maintainer supplies the
+credential themselves. No paid run is authorized before that.
