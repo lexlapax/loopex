@@ -27,6 +27,68 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+### Tool-result projection proposal reviewed, 2026-10-09
+
+ADR 0067 is Proposed and indexed. The exact Concept SHA-256 is
+`fd19c8e175c35abec19a168638146d8f630c3270c23dd01003f788271b6bc995`;
+the Technical depth SHA-256 is
+`b04e5e2706aad4f695e71eada2ac4d0b7c61e729f097301ac02cb868d9417e7f`.
+Independent source review
+`/private/tmp/m7-adr0067-proposal-review-20261009-v1.md`, SHA-256
+`63d7084369b1376473dc9a8ddb5479dc1325f5e5ac9c2849d608e8f590befa66`,
+found no actionable issue. Source clearance permits disposition, not acceptance
+or implementation. The pair projects the existing seven-field tool results
+and strict eight-field receipt results through one bounded public grammar;
+missing operation identity never proves no dispatch or safe retry. Both complete
+current manifests, digest pins, independent clients and actual question
+transports must change and be proved together after exact acceptance.
+The original failed question run remains FAIL. No checkbox changes.
+The exact clean proposal candidate still needs its one documentation gate;
+the separate orderly-stop guard remains unjoined and native UNRUN.
+
+### Provenance containment proved; projection proposal next, 2026-10-09
+
+The independent Core containment unit is complete: original23805 passed its
+current60 Core plus8 Store cases at1c250fc9 before the separate question
+failure; original38472 at `51da1833d31ac2f1a25f66e9441985b4d43b698a` passes
+all68 floor cases after37.287 seconds. The intervening commit changes only
+documentation. Native discovery is9 provenance,29 effect-query,22 creation
+custody and8 real Store conformance cases, zero exclusions/skips/invalids.
+Floor terminal SHA-256
+`62183a6635fe4459b153942d8933b811f4146f7d95a898aa21818166eaa9fe08`;
+collection `9aebb68a4c26506dc58c13198449e483b1a5f4f5d3d7711789b716e54b782719`;
+registry3051 `1b7163b2ada6d06f240c417b5cb0b51445e47c02c0914330a661b6dc23a69489`.
+All6 original joins and31 assets authenticate. This does not complete the
+60-second startup classifier or prove Store-server cancellation. The failed
+100-case question composite remains FAIL; its AppServer/floor stages remain
+UNRUN. T09 audit SHA-256
+`2a5fb11f51fab27e958f2c238f48491f19d20f2e7040a5baa0b4eabb487783b6`
+explicitly keeps that row open and identifies the public tool-result variant.
+
+Orderly-stop guard v3 is independently source-clear, still unjoined/unrun.
+Packet `/private/tmp/m7-daemon-quiesce-progress-source-20261009-v3`, manifest
+`6056e22236a3bad2a619723f92d458e937617ab8f38e042a9c07aa5efe894c0c`;
+review `4b0d4592fdf70d8934a68955da3949c862a9df06037ba7c7aa3368186c861814`.
+Preserve v1's cleanup finding and both corrected packets. All74 original
+Registry cases remain unchanged; native discovery of75 is required. Prepared
+focused recipe `/private/tmp/m7-quiesce-cli-focused-20261009-v1.py` selects
+Registry75, Socket23 and the complete eight-file CLI71 per supported pair,
+including the genuine Node client,169 cases with zero exclusions. Review
+`d7a0a7bbb77d6d447fb67dff47ed3ced6d698438b15e2fdf288fcc2cc9927698`.
+Its future source/formatterv70 pins are not written. This scope leaves known
+T09 failures and full-Daemon floor obligations open.
+
+Newest75-asset retention:
+`M7/current-source-preparation-20261009-v29/retention.json`, SHA-256
+`b41b8dae38c6017b5df4d701d4623236a1b0cccea4d7670a4ff045f23531031f`.
+All original native/push handles are terminal and collected; none is live.
+Next finish the precise Proposed ADR0067 pair, independent review, indexing and
+prose-only gate before seeking exact acceptance. Then join/format the separate
+internal guard and run its169-case qualification while the public decision is
+pending. No dependent public projection implementation is authorized yet.
+No checkbox changes: original89 done/84 open/6 retired; added373 done/23 open;
+combined462 done/107 open/6 retired. Other pending decisions remain below.
+
 ### Question projection and orderly-stop repairs next, 2026-10-09
 
 Reviewed provenance reader and real-socket question tests joined at

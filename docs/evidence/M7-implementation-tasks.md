@@ -1,5 +1,37 @@
 # M7 Implementation Tasks
 
+### Tool-result projection proposal reviewed, 2026-10-09
+
+ADR 0067 is Proposed and indexed. The exact Concept SHA-256 is
+`fd19c8e175c35abec19a168638146d8f630c3270c23dd01003f788271b6bc995`;
+the Technical depth SHA-256 is
+`b04e5e2706aad4f695e71eada2ac4d0b7c61e729f097301ac02cb868d9417e7f`.
+Independent source review
+`/private/tmp/m7-adr0067-proposal-review-20261009-v1.md`, SHA-256
+`63d7084369b1376473dc9a8ddb5479dc1325f5e5ac9c2849d608e8f590befa66`,
+found no actionable issue. Source clearance permits disposition, not acceptance
+or implementation. The pair projects the existing seven-field tool results
+and strict eight-field receipt results through one bounded public grammar;
+missing operation identity never proves no dispatch or safe retry. Both complete
+current manifests, digest pins, independent clients and actual question
+transports must change and be proved together after exact acceptance.
+The original failed question run remains FAIL. No checkbox changes.
+The exact clean proposal candidate still needs its one documentation gate;
+the separate orderly-stop guard remains unjoined and native UNRUN.
+
+### Provenance reader repair proved on both pairs, 2026-10-09
+
+Current Core60/Store8 stages pass in original23805; separate original38472
+passes all68 floor cases after37.287s, with actual discovery and zero excluded,
+skipped or invalid cases. This completes the internal containment/authentication
+repair; startup classification and Store-server cancellation remain unproved.
+The failed question composite remains FAIL. T09 needs an exact public
+seven/eight-field tool-result projection decision and coordinated proof; the
+independent orderly-stop guard v3 is source-clear, unjoined/unrun. The
+[resume checkpoint](M7-resume.md) binds exact hashes and75-assetv29 retention.
+No task-count change: original89 done/84 open/6 retired; added373 done/23 open;
+combined462 done/107 open/6 retired.
+
 ### Question projection and orderly-stop follow-ups, 2026-10-09
 
 Original72324 passes558 selected Daemon cases and70/71 CLI cases: duplicate
@@ -15929,6 +15961,13 @@ Hosted, attended and coordinated transport generation proofs remain separate.
 
 - [x] Implement accepted exact-genesis read-only create-result lookup; preserve the legacy query, refuse sentinel substitution before exact creation, and prove changed defaults, absent current registrations, distinct uncertainty and actual local log reopen through both shipped Stores on both supported pairs.
 - [x] Implement accepted bounded creation-provenance point/page queries and optional Store callback with replay-derived per-runtime ordinals; prove complete captured cuts, later creates, exact/changed repetitions, unsupported history, damaged indexes, closed/duplicate-safe decoding, unavailable callbacks, no activation/writes and local log reopen on both supported pairs.
+  Current containment repair atbbc95226/formatter1c250fc9 reuses the existing
+  bounded read guardian. Current68 stages pass in original23805; floor68 pass
+  in original38472 at documentation child51da1833. Wrong-token positive/negative
+  control, original reader/guardian success/timeout joins, actual Control loss
+  and shipped Store reopen remain proved. The separate question composite is
+  still FAIL; no full classifier or Store-server cancellation follows.
+  [Exact retained proof](M7-resume.md).
 - [x] Decode bounded private effect-intent and terminal projections using existing reducer codecs; prove actual dispatched jobs and owner-created records, closed fields, canonical bytes/digests, scope, receipt-versus-core-refusal disposition, null-call unknowns, historical deadlines and malformed/oversized refusals on both supported pairs. The following subtask implements paging; startup classification remains open.
 
 - [x] Implement accepted bounded stateless effect-intent pages and resume-token verification through Runtime Control; prove captured cuts, literal empty-history tokens, both real Stores and reopen, v3 question histories, distinct refusals, no writes/activation and joined reader cleanup on both supported toolchains.
