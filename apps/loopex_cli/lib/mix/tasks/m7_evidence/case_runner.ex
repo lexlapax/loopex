@@ -264,7 +264,7 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
              Map.get(context, :matrix)
            ),
          {:ok, plan} <- admit(writer, context, selection, Map.get(context, :mode, :new)) do
-      context = Map.put(context, :credentials, credentials(context.config_argv))
+      context = Map.put(context, :credentials, credentials(context.config_argv, manifest))
       run_pins(writer, plan.remaining, selection, context, [])
     else
       {:skip, :lane_already_ended} -> {:ok, []}
@@ -273,26 +273,34 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
   end
 
   # Concept: each conversation starts as a fresh chat process would, with the
-  # configuration's named credential variables present.
+  # configuration's and the pinned providers' named credential variables
+  # present.
   # Technical depth: composition consumes those variables when it loads a
   # route, so the first conversation in this one VM would leave the next
   # without them. The trusted runner captures them once, before any
   # conversation, holds them only in this process and restores them
-  # immediately before each conversation. Values never enter a record.
-  defp credentials(["chat", "--config", path | _]) do
+  # immediately before each conversation; the maintainer accepted this
+  # in-memory capture for M7. Values never enter a record.
+  defp credentials(argv, manifest) do
+    pinned = for {_id, %{"credential_variable" => name}} <- manifest["providers"] || %{}, do: name
+
+    for name <- Enum.uniq(configured_names(argv) ++ pinned),
+        value = System.get_env(name),
+        is_binary(value),
+        do: {name, value}
+  end
+
+  defp configured_names(["chat", "--config", path | _]) do
     with {:ok, bytes} <- File.read(path),
          {:ok, %{"providers" => providers}} when is_map(providers) <-
            LoopexCli.ConfigJson.decode(bytes) do
-      for {_provider, %{"credential" => %{"env" => name}}} <- providers,
-          value = System.get_env(name),
-          is_binary(value),
-          do: {name, value}
+      for {_provider, %{"credential" => %{"env" => name}}} <- providers, do: name
     else
       _ -> []
     end
   end
 
-  defp credentials(_argv), do: []
+  defp configured_names(_argv), do: []
 
   defp restore_credentials(context),
     do:
@@ -514,7 +522,7 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
   # Technical depth: role instructions are written into the trusted tree, so
   # the workspace and its digests stay untouched; both roles use the session's
   # model and the catalog bounds the plan fixes.
-  defp fixture_profile("m7.review", trusted) do
+  defp fixture_profile("m7.review", trusted, _context) do
     roles = %{
       "investigate" =>
         "Investigate the repository read-only. Trace the requested call chain through the " <>
@@ -533,33 +541,39 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
       end)
 
     with :ok <- written do
-      {:ok,
-       fn profile ->
-         model = profile["session"]["model"]
+      {
+        :ok,
+        # Both helpers use the session's provider A model. Plan V8's helpers
+        # on provider B wait on Core admitting a supplied genesis whose model
+        # differs from the runtime's (see the M7 provider B decision).
+        fn profile ->
+          model = profile["session"]["model"]
 
-         profile
-         |> Map.put(
-           "roles",
-           Map.new(roles, fn {name, _} ->
-             {name, %{"model" => model, "instructions_file" => Path.join(trusted, name <> ".md")}}
-           end)
-         )
-         |> Map.put("delegation", %{
-           "enabled" => true,
-           "roles" => ["investigate", "review"],
-           "max_children" => 4,
-           "token_budget" => 400_000,
-           "child_bounds" => %{
-             "max_turns" => 12,
-             "deadline_ms" => 300_000,
-             "token_budget" => 200_000
-           }
-         })
-       end}
+          profile
+          |> Map.put(
+            "roles",
+            Map.new(roles, fn {name, _} ->
+              {name,
+               %{"model" => model, "instructions_file" => Path.join(trusted, name <> ".md")}}
+            end)
+          )
+          |> Map.put("delegation", %{
+            "enabled" => true,
+            "roles" => ["investigate", "review"],
+            "max_children" => 4,
+            "token_budget" => 400_000,
+            "child_bounds" => %{
+              "max_turns" => 12,
+              "deadline_ms" => 300_000,
+              "token_budget" => 200_000
+            }
+          })
+        end
+      }
     end
   end
 
-  defp fixture_profile(_case_id, _trusted), do: {:ok, & &1}
+  defp fixture_profile(_case_id, _trusted, _context), do: {:ok, & &1}
 
   defp execution_policy(%{capture: nil}), do: "ordinary"
   defp execution_policy(staged), do: Policy.identity(staged.capture)
@@ -609,7 +623,7 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
            pins: pins
          },
          {:ok, conversations} <- plan(case_id, entry, context),
-         {:ok, transform} <- fixture_profile(case_id, trusted),
+         {:ok, transform} <- fixture_profile(case_id, trusted, context),
          {:ok, config_argv} <- attempt_config(context.config_argv, workspace, root, transform),
          {:ok, prepared} <-
            M7FixtureChat.prepare(

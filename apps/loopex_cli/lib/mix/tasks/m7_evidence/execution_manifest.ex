@@ -14,7 +14,9 @@ defmodule Mix.Tasks.Loopex.M7Evidence.ExecutionManifest do
   The closed member `execution_manifest` of `test/fixtures/m7/manifest.json`
   holds `status: "pinned"`, `coverage: "V1-V13"`, `campaign_id`,
   `genesis_digest` (the SHA-256 of the campaign's canonical genesis record),
-  `lanes`, `cases` and `operator_step_evidence`.
+  `lanes`, `cases`, `operator_step_evidence` and `providers`: provider A and
+  the selected provider B with credential variable names, B's model, its two
+  exact cells and the cases that use it.
 
   Every numbered step of the accepted scenarios (74 steps) has one or more
   keys `Vn.m` or `Vn.m.<subcase>`; no key names another step. An owner is
@@ -24,7 +26,8 @@ defmodule Mix.Tasks.Loopex.M7Evidence.ExecutionManifest do
   is owned by an `m7-operator` case. Each case lists exactly the keys it owns,
   its lane, attendance, credential need, driver and status; lane lists hold
   exactly their cases in execution order. A case's specification digest is
-  the canonical JSON digest of its entry, which the attempts index pins.
+  the canonical JSON digest of its entry with the provider pins, which the
+  attempts index pins.
   `verify_owners/2` additionally proves each test owner is a literal test in
   its file. Nothing here opens an attempts index or runs a case.
   """
@@ -52,7 +55,8 @@ defmodule Mix.Tasks.Loopex.M7Evidence.ExecutionManifest do
                 V6.6 V7.1 V7.2 V7.3 V7.4 V8.1 V8.2 V8.3 V8.4 V9.1 V9.2 V11.5 V10.1 V10.2
                 V10.3 V10.4 V10.5 V13.1 V13.4 V13.5 V13.6)
   @lanes ~w(m7-operator m7-provider m7-rollback)
-  @keys ~w(status coverage campaign_id genesis_digest lanes cases operator_step_evidence)
+  @keys ~w(status coverage campaign_id genesis_digest lanes cases operator_step_evidence providers)
+  @credential_names ~w(LOOPEX_PROVIDER_API_KEY OPENAI_API_KEY ANTHROPIC_API_KEY OPENROUTER_API_KEY)
   @case_keys ~w(lane attended credential driver status steps)
   @drivers ~w(fixture-chat external-chat scenario-chat scenario-ask demonstration provider-wrapper release-lane)
 
@@ -70,12 +74,55 @@ defmodule Mix.Tasks.Loopex.M7Evidence.ExecutionManifest do
          true <- manifest["coverage"] == "V1-V13" or {:error, :invalid_execution_manifest},
          :ok <- genesis(manifest["campaign_id"], manifest["genesis_digest"]),
          :ok <- cases(manifest["cases"], manifest["lanes"]),
+         :ok <- providers(manifest["providers"], manifest["cases"]),
          :ok <- coverage(manifest["operator_step_evidence"], manifest["cases"]) do
       :ok
     end
   end
 
   def validate(_), do: {:error, :invalid_execution_manifest}
+
+  # Concept: provider A and the maintainer-selected provider B are pinned with
+  # their credential variable names and B's exact cells before any attempt.
+  # Technical depth: each B cell must equal the adapter's registered mapping
+  # for its level, and B's cases must exist; names come from the release set.
+  defp providers(
+         %{
+           "a" => %{"provider" => "anthropic", "credential_variable" => a} = provider_a,
+           "b" =>
+             %{
+               "provider" => "openai",
+               "credential_variable" => b,
+               "model" => "openai:" <> _ = model,
+               "cells" => %{"switch" => switch, "summarizer" => summarizer} = cells,
+               "cases" => cases
+             } = provider_b
+         } = providers,
+         all_cases
+       ) do
+    valid =
+      map_size(providers) == 2 and map_size(provider_a) == 2 and map_size(provider_b) == 5 and
+        map_size(cells) == 2 and a != b and a in @credential_names and b in @credential_names and
+        is_list(cases) and cases != [] and Enum.all?(cases, &Map.has_key?(all_cases, &1)) and
+        Enum.all?([switch, summarizer], &cell?(model, &1)) and
+        summarizer["mapping"]["thinking_disabled"] == true
+
+    if valid, do: :ok, else: {:error, :invalid_m7_providers}
+  end
+
+  defp providers(_, _), do: {:error, :invalid_m7_providers}
+
+  defp cell?(model, %{"reasoning" => level, "mapping" => mapping} = cell) do
+    map_size(cell) == 2 and
+      Loopex.LLM.ReqLLM.ModelCapabilities.mapping(model, level, 4_096) == {:ok, mapping}
+  end
+
+  defp cell?(_, _), do: false
+
+  # The credential variable names an M7 lane carries: provider A's and B's.
+  @doc false
+  def credential_names(manifest),
+    do: Enum.sort(for(id <- ~w(a b), do: manifest["providers"][id]["credential_variable"]))
 
   # Canonical genesis digest of the pinned campaign.
   @doc false
@@ -91,7 +138,14 @@ defmodule Mix.Tasks.Loopex.M7Evidence.ExecutionManifest do
   # The specification digest the attempts index pins for one case.
   @doc false
   def specification_digest(manifest, case_id),
-    do: Canonical.digest_bytes(canonical(Map.put(manifest["cases"][case_id], "id", case_id)))
+    do:
+      Canonical.digest_bytes(
+        canonical(
+          manifest["cases"][case_id]
+          |> Map.put("id", case_id)
+          |> Map.put("providers", manifest["providers"])
+        )
+      )
 
   # The private lane selection AttemptEvents and AttemptWriter admit for a
   # lane on a candidate commit. Pending cases make the lane unavailable.
