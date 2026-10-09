@@ -205,12 +205,12 @@ defmodule Loopex.AuditRepairsTest do
            "record #{label}: preflight #{inspect(refusal(preflight))} != builder #{inspect(refusal(built))}"
 
     case {preflight, built} do
-      {{:ok, normalized, _bytes}, {:ok, transaction}} ->
+      {{:ok, normalized, bytes}, {:ok, transaction}} ->
         assert transaction.genesis == normalized
         assert :ok = Store.validate_transaction(transaction)
 
         assert {:committed, _command_id, _receipt} =
-                 Loopex.ConfiguredGenesisFixture.commit_creation(store, transaction)
+                 Loopex.ConfiguredGenesisFixture.commit_normalized_record(store, transaction, bytes)
 
       _refused ->
         :ok

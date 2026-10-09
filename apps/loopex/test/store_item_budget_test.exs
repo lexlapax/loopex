@@ -166,7 +166,7 @@ defmodule Loopex.StoreItemBudgetTest do
       assert transaction.genesis == normalized
 
       assert {:committed, ^command_id, _receipt} =
-               Loopex.ConfiguredGenesisFixture.commit_creation(store, transaction)
+               Loopex.ConfiguredGenesisFixture.commit_normalized_record(store, transaction, bytes)
     end
 
     for target <- [@max_item_bytes - 1, @max_item_bytes] do
@@ -178,7 +178,7 @@ defmodule Loopex.StoreItemBudgetTest do
       assert transaction.genesis == normalized
 
       assert {:committed, ^command_id, _receipt} =
-               Loopex.ConfiguredGenesisFixture.commit_creation(store, transaction)
+               Loopex.ConfiguredGenesisFixture.commit_normalized_record(store, transaction, target)
     end
 
     oversized_bytes = @max_item_bytes + 1

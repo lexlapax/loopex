@@ -27,6 +27,39 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+### Core qualification failure and normalization repair, 2026-10-08
+
+Original60633 at `f47f7dca9c2765043893748e528511c299c4f475` is terminal
+FAIL: 652 of 682 current Core cases pass; 30 fail, with zero excluded,
+skipped or invalid. The prospective 678-case census missed four cases and
+requires correction. Formatting, warning-free compilation, documentation and
+status pass. All later application stages and the floor stages remain UNRUN.
+The complete 1010.997-second output retains seven original process joins and
+32 artifacts under `M7/creation-daemon-focused-20261008-v3`; terminal SHA-256
+`53f6e7f5af66a0ad5d38591afa30f13f1242c837256bd527366379824f7e2aa7`,
+collection SHA-256
+`8ff7e2a995f39d55cd5d7e47d8cd8026e5fd3235e8f55a58e059ab688e51f9ee`.
+Next completed registry2728 has SHA-256
+`6d9a7f1eeb09f210b79eee326d2ca45bd8dfe4ba3fc137ab8ec68bbff035feb3`.
+No native handle is live; no unchanged-source retry is authorized by this entry.
+
+The reviewed three-path normalization fixture repair is joined. Arbitrary
+normalization samples remain unchanged records, committed and read back under
+the actual owner of a session created with complete current genesis. All ten
+original cases, pure-builder checks, independent byte measurements and refusal
+boundaries remain. The shared fixture uses Kernel matches and adds no ExUnit
+dependency to raw servers. Exact join receipt:
+`/private/tmp/m7-reviewed-normalization-current-record-join-20261008-v1.json`,
+SHA-256 `8da4cf2f5ddf664137614d504d58af6530975b8a744c5a41f2103ea8349b1cc2`.
+Independent v2 source review is SOURCE_CLEAR, SHA-256
+`ded62cc8af68696d4bb718d9ddfe3361175a27742da6bafc5a6c9f5f87c2eeeb`.
+Changed-source formatting, compilation and tests remain UNRUN.
+
+Next repair the two test Store wrappers' missing creation provenance callback,
+triage all remaining failures and correct the source census. The foreground
+stopped-leader defect and ADR0065 decision remain open. No checkbox closes:
+T01-T19 original88 done /85 open /6 retired; added367 done /23 open.
+
 ### Fixture result layout verified, 2026-10-08
 
 Formatter47 original31137 at `092cb9bdd4dbd71562ce21f2246084cb80bfc3c9`

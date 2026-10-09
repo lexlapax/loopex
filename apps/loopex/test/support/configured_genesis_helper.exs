@@ -203,4 +203,67 @@ defmodule Loopex.ConfiguredGenesisFixture do
     true = created.reservation_tx_id == reserve_id
     result
   end
+
+  # Concept: StoreItemBudgetTest's generated admission property and
+  # AuditRepairsTest's item parity property share the same real record proof.
+  # Technical depth: create complete current genesis, claim the observed owner,
+  # then commit and load the unchanged root record with exact stamps and bytes.
+  def commit_normalized_record(store, final, expected_bytes) do
+    :ok = Loopex.Store.validate_transaction(final)
+    command_id = final.command_id
+
+    {:ok, seed} =
+      Loopex.Store.create_session(
+        final.runtime_id,
+        command_id,
+        Loopex.ConfiguredGenesisFixture.genesis([])
+      )
+
+    {:committed, ^command_id, created} =
+      Loopex.ConfiguredGenesisFixture.commit_creation(store, seed)
+
+    session_id = created.session_id
+    {:ok, head} = Loopex.Store.ownership_head(store, session_id, session_id)
+    true = head.journal_version == created.journal_version
+    owner_id = "owner-#{command_id}"
+
+    {:ok, advance} =
+      Loopex.Store.advance_owner(
+        session_id,
+        session_id,
+        owner_id,
+        head.owner_epoch,
+        head.journal_version,
+        owner_id
+      )
+
+    {:committed, ^owner_id, owner} = Loopex.Store.transact(store, advance)
+    true = owner.owner_epoch == head.owner_epoch + 1
+    true = owner.journal_version == head.journal_version + 1
+    true = owner.owner_incarnation_id == owner_id
+
+    {:ok, transaction} =
+      Loopex.Store.session_commit(
+        session_id,
+        session_id,
+        command_id,
+        owner.owner_epoch,
+        owner.owner_incarnation_id,
+        owner.journal_version,
+        [final.genesis],
+        []
+      )
+
+    true = transaction.records == [final.genesis]
+    :ok = Loopex.Store.validate_transaction(transaction)
+    {:committed, ^command_id, receipt} = result = Loopex.Store.transact(store, transaction)
+    {:ok, [stored]} = Loopex.Store.load_records(store, session_id, owner.journal_version, 1)
+    true = stored.journal_version == owner.journal_version + 1
+    true = receipt.journal_versions == %{first: stored.journal_version, last: stored.journal_version}
+    true = stored.owner_epoch == owner.owner_epoch
+    true = stored.owner_incarnation_id == owner.owner_incarnation_id
+    true = stored.payload == final.genesis
+    true = byte_size(:erlang.term_to_binary(stored.payload, [:deterministic])) == expected_bytes
+    result
+  end
 end
