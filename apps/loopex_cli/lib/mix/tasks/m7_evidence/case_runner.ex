@@ -43,19 +43,22 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
 
   alias LoopexCli.{Chat, M7FixtureChat}
   alias LoopexCli.Policy.M7Fixture, as: Policy
+  alias LoopexCli.Model.M7CancellationGate, as: CancellationGate
   alias LoopexComposition.WorkspaceIdentity
   alias LoopexProtocol.Canonical
 
   alias Mix.Tasks.Loopex.M7Evidence.{
     AttemptWriter,
     Conversation,
+    DaemonDetach,
     EphemeralDemo,
+    RestoreCase,
     ExecutionManifest,
     FixtureManifest,
     Scenarios
   }
 
-  @held ~w(m7.steer-barrier m7.interrupt)
+  @held ~w(m7.steer-barrier m7.interrupt m7.daemon-detach)
   @hold_limit_ms 90_000
   @readme "M7 held workspace.\n"
 
@@ -261,12 +264,41 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
              Map.get(context, :matrix)
            ),
          {:ok, plan} <- admit(writer, context, selection, Map.get(context, :mode, :new)) do
+      context = Map.put(context, :credentials, credentials(context.config_argv))
       run_pins(writer, plan.remaining, selection, context, [])
     else
       {:skip, :lane_already_ended} -> {:ok, []}
       other -> other
     end
   end
+
+  # Concept: each conversation starts as a fresh chat process would, with the
+  # configuration's named credential variables present.
+  # Technical depth: composition consumes those variables when it loads a
+  # route, so the first conversation in this one VM would leave the next
+  # without them. The trusted runner captures them once, before any
+  # conversation, holds them only in this process and restores them
+  # immediately before each conversation. Values never enter a record.
+  defp credentials(["chat", "--config", path | _]) do
+    with {:ok, bytes} <- File.read(path),
+         {:ok, %{"providers" => providers}} when is_map(providers) <-
+           LoopexCli.ConfigJson.decode(bytes) do
+      for {_provider, %{"credential" => %{"env" => name}}} <- providers,
+          value = System.get_env(name),
+          is_binary(value),
+          do: {name, value}
+    else
+      _ -> []
+    end
+  end
+
+  defp credentials(_argv), do: []
+
+  defp restore_credentials(context),
+    do:
+      Enum.each(Map.get(context, :credentials, []), fn {name, value} ->
+        System.put_env(name, value)
+      end)
 
   # Concept: one invocation of a logical matrix decides each lane's mode from
   # the index itself: continue a suspended lane, join the matrix this
@@ -338,7 +370,13 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
   @doc false
   def run_case(writer, pin, selection, context) do
     case_id = pin["case_key"]
-    attempt = case_id <> "-" <> Base.encode16(:crypto.strong_rand_bytes(6), case: :lower)
+    # A test may fix the nonce so a fixed fixture reply can name the runner.
+    nonce =
+      Map.get_lazy(context, :attempt_nonce, fn ->
+        Base.encode16(:crypto.strong_rand_bytes(6), case: :lower)
+      end)
+
+    attempt = case_id <> "-" <> nonce
     root = Path.join(context.run_root, attempt)
 
     base =
@@ -362,6 +400,7 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
     with :ok <- File.mkdir(root) do
       staged =
         cond do
+          case_id == "m7.restore" -> stage_restore(case_id, root)
           case_id in @held -> stage_held(case_id, root, context)
           Scenarios.get(case_id) -> stage_scenario(case_id, root, context)
           true -> stage(case_id, root, context)
@@ -428,6 +467,7 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
           _ -> staged.fixture.environment
         end
 
+      environment = materialize(staged, environment)
       {oracle_status, oracle} = independent_oracle(staged, environment, root)
       {changes, inventory} = inspect_changes(staged, root)
       checks = if staged.capture, do: Policy.check(staged.capture), else: :ok
@@ -469,8 +509,57 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
     end
   end
 
-  defp execution_policy(%{case_id: "m7.ephemeral-question"}),
-    do: inspect(LoopexCli.Policy.AllowAll)
+  # Concept: review enables exactly the two pinned helper roles; every other
+  # fixture case runs the operator's configuration unchanged.
+  # Technical depth: role instructions are written into the trusted tree, so
+  # the workspace and its digests stay untouched; both roles use the session's
+  # model and the catalog bounds the plan fixes.
+  defp fixture_profile("m7.review", trusted) do
+    roles = %{
+      "investigate" =>
+        "Investigate the repository read-only. Trace the requested call chain through the " <>
+          "source and report each module and function it passes through.\n",
+      "review" =>
+        "Review the named code read-only. Identify the single defect on the chain and name " <>
+          "its file, function and a short defect code.\n"
+    }
+
+    written =
+      Enum.reduce_while(roles, :ok, fn {name, text}, :ok ->
+        case File.write(Path.join(trusted, name <> ".md"), text, [:exclusive]) do
+          :ok -> {:cont, :ok}
+          error -> {:halt, error}
+        end
+      end)
+
+    with :ok <- written do
+      {:ok,
+       fn profile ->
+         model = profile["session"]["model"]
+
+         profile
+         |> Map.put(
+           "roles",
+           Map.new(roles, fn {name, _} ->
+             {name, %{"model" => model, "instructions_file" => Path.join(trusted, name <> ".md")}}
+           end)
+         )
+         |> Map.put("delegation", %{
+           "enabled" => true,
+           "roles" => ["investigate", "review"],
+           "max_children" => 4,
+           "token_budget" => 400_000,
+           "child_bounds" => %{
+             "max_turns" => 12,
+             "deadline_ms" => 300_000,
+             "token_budget" => 200_000
+           }
+         })
+       end}
+    end
+  end
+
+  defp fixture_profile(_case_id, _trusted), do: {:ok, & &1}
 
   defp execution_policy(%{capture: nil}), do: "ordinary"
   defp execution_policy(staged), do: Policy.identity(staged.capture)
@@ -520,7 +609,8 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
            pins: pins
          },
          {:ok, conversations} <- plan(case_id, entry, context),
-         {:ok, config_argv} <- attempt_config(context.config_argv, workspace, root),
+         {:ok, transform} <- fixture_profile(case_id, trusted),
+         {:ok, config_argv} <- attempt_config(context.config_argv, workspace, root, transform),
          {:ok, prepared} <-
            M7FixtureChat.prepare(
              config_argv,
@@ -553,11 +643,17 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
     scenario = Scenarios.get(case_id)
     workspace = Path.join(root, "workspace")
 
+    # A profile change may read the case's pins, such as a second provider.
+    transform =
+      if is_function(scenario.profile, 2),
+        do: &scenario.profile.(&1, context),
+        else: scenario.profile
+
     with :ok <- File.mkdir(workspace),
          :ok <- write_seed(workspace, scenario.seed),
          {:ok, conversations} <- scenario.plan.(Map.put(context, :workspace, workspace)),
          {:ok, config_argv} <-
-           attempt_config(context.config_argv, workspace, root, scenario.profile) do
+           attempt_config(context.config_argv, workspace, root, transform) do
       {:ok,
        %{
          name: case_id,
@@ -575,6 +671,30 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
     end
   end
 
+  # Concept: the attended restore works only on retained state, never a
+  # conversation; its attempt root holds the fresh source and destination.
+  defp stage_restore(case_id, root) do
+    {:ok,
+     %{
+       name: case_id,
+       case_id: case_id,
+       entry: nil,
+       scenario: nil,
+       capture: nil,
+       trusted: nil,
+       config_argv: nil,
+       conversations: [%{restore: true}],
+       fixture: %{case_id: case_id, workspace: root, pins: %{}, environment: %{}}
+     }}
+  end
+
+  # The rollback lane's restore test leaves its retained execution beside the
+  # run root unless the pins name another directory.
+  defp restore_source(context),
+    do:
+      get_in(context, [:pins, "restore_source"]) ||
+        Path.join(Path.dirname(context.run_root), "m7-restore-source")
+
   # Concept: a held case's tool call waits on a harness FIFO outside the
   # writable workspace until the harness releases it.
   # Technical depth: the runner reads one line from the FIFO and prints it; the
@@ -590,8 +710,7 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
       "#!/bin/sh\nset -eu\nIFS= read -r line < " <>
         shell_quote(fifo) <> "\nprintf '%s\\n' \"$line\"\n"
 
-    with true <- Map.get(context, :dispatch) != :terminal or {:error, :held_case_requires_pipe},
-         :ok <- File.mkdir(workspace),
+    with :ok <- File.mkdir(workspace),
          :ok <- File.write(Path.join(workspace, "README.md"), @readme),
          :ok <- File.mkdir(trusted),
          {_, 0} <- System.cmd("mkfifo", ["-m", "0600", fifo]),
@@ -664,6 +783,10 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
   end
 
   # The interrupt is the only release: the runner ends by cancellation.
+  # The daemon case's conversation is the daemon driver's own protocol.
+  defp held_plan("m7.daemon-detach", _fifo, _runner, _limit),
+    do: %{resume: false, daemon: true, steps: []}
+
   defp held_plan("m7.interrupt", fifo, runner, limit) do
     %{
       resume: false,
@@ -695,7 +818,7 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
   # Concept: the operator's explicit file, aimed at this attempt's fresh roots.
   # Technical depth: only `paths.workspace` and `paths.state_root` change;
   # ordinary validation of every other member still runs in preparation.
-  defp attempt_config(argv, workspace, root, transform \\ & &1)
+  defp attempt_config(argv, workspace, root, transform)
 
   defp attempt_config(["chat", "--config", template | rest], workspace, root, transform) do
     with {:ok, bytes} <- File.read(template),
@@ -831,12 +954,34 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
            }
          ]}
 
+      Map.get(context, :dispatch) == :terminal ->
+        {:ok,
+         [
+           %{resume: false, steps: [{:line, prompt}, {:await, ~s("event":"question")}, :lose]},
+           %{
+             resume: true,
+             reanswer: true,
+             steps: [
+               {:answer, :operator},
+               {:line, "/wait"},
+               {:line, "/status"},
+               {:line, "/quit"}
+             ]
+           }
+         ]}
+
       true ->
         {:error, :question_restart_requires_operator}
     end
   end
 
   def plan("m7.external", entry, _context), do: {:ok, [barriers(entry["prompts"])]}
+  # Review omits `/status`: chat refuses a status read when a helper's later
+  # event lands during it (chat_status_unavailable), and the joins need none.
+  def plan("m7.review", entry, _context) do
+    [prompt] = entry["prompts"]
+    {:ok, [%{resume: false, steps: [{:line, prompt}, {:line, "/wait"}, {:line, "/quit"}]}]}
+  end
 
   # The ephemeral case: one public ephemeral call; the operator's line answers.
   def plan("m7.ephemeral-question", _entry, context) do
@@ -869,10 +1014,53 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
   end
 
   # Concept: the ephemeral host runs under the operator's configured model and
-  # provider routes; there is no durable session, so its record decides.
-  # Technical depth: Ephemeral admits only a context-free policy module, so
-  # this case runs under the allow-all host policy; the workspace inventory
-  # and the independent oracle still bound what it may change.
+  # provider routes and the case's pinned fixture policy; there is no durable
+  # session, so its record decides.
+  # Technical depth: the capture reaches the policy only as Core's contextual
+  # reference, so the same exact invocations and paths as the chat cases apply.
+  # Concept: the named operator confirms the restore summary they were shown.
+  # Technical depth: piped runs take the operator's recorded `confirm` answer;
+  # terminal runs print the summary and read the operator's own line.
+  defp dispatch(%{conversations: [%{restore: true}]} = staged, context) do
+    confirm = fn summary ->
+      case Map.get(context, :dispatch) do
+        :terminal ->
+          device = Map.get(context, :operator_device, :stdio)
+          IO.puts(device, summary)
+          IO.write(device, "type confirm to record your verification> ")
+          device |> IO.read(:line) |> to_string() |> String.trim() == "confirm"
+
+        _ ->
+          get_in(context, [:answers, "m7.restore"]) == "confirm"
+      end
+    end
+
+    result = RestoreCase.run(restore_source(context), staged.fixture.workspace, confirm)
+
+    %{
+      exit: if(Enum.all?(Map.values(result.checks)), do: 0, else: 1),
+      conversations: 1,
+      session: nil,
+      output: JSON.encode!(result.checks),
+      diagnostics: "",
+      closing: result.summary,
+      events: [],
+      transcripts: result.records
+    }
+  end
+
+  # Concept: V9.4 runs in an in-VM daemon host, not a chat conversation.
+  # Technical depth: the attempt's configuration supplies the model and the
+  # credential variable; the provider launch is the reference host's unless a
+  # test supplies a local fixture's.
+  defp dispatch(%{conversations: [%{daemon: true}]} = staged, context) do
+    ["chat", "--config", path | _] = staged.config_argv
+    {:ok, profile} = path |> File.read!() |> LoopexCli.ConfigJson.decode()
+    restore_credentials(context)
+    launch = Map.get_lazy(context, :daemon_launch, &LoopexCli.ProviderLaunch.options/0)
+    DaemonDetach.run(staged, Map.put(context, :profile, profile), launch)
+  end
+
   defp dispatch(%{conversations: [%{ephemeral: line}]} = staged, context) do
     ["chat", "--config", path | _] = staged.config_argv
     {:ok, profile} = path |> File.read!() |> LoopexCli.ConfigJson.decode()
@@ -895,7 +1083,11 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
         ],
         input,
         if(terminal?, do: :stdio, else: output),
-        [provider_bindings: profile["providers"], max_tokens: profile["session"]["max_tokens"]]
+        [
+          policy: %{module: Policy, context: staged.capture},
+          provider_bindings: profile["providers"],
+          max_tokens: profile["session"]["max_tokens"]
+        ]
         |> Enum.reject(&is_nil(elem(&1, 1)))
         |> Keyword.merge(Map.get(context, :ephemeral_options, []))
       )
@@ -935,8 +1127,18 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
 
       true ->
         known = if conversation[:reanswer], do: [], else: questions(done)
+        # Harness-driven steps need the piped device even under --terminal;
+        # the operator still answers through {:answer, :operator}.
+        mode = if harness_driven?(conversation.steps), do: :pipe, else: mode
         result = chat(staged, context, conversation.steps, mode, extra, n, known)
         result = Map.put(result, :session, session_id(result.output))
+
+        # A prescribed terminal cut ends chat with status 1; the joins decide.
+        result =
+          if conversation[:cut] == true and result.exit == 1,
+            do: %{result | interrupted: true},
+            else: result
+
         session = session || result.session
 
         if result.exit == 0 or (result.exit == :lost and :lose in conversation.steps) or
@@ -980,6 +1182,7 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
         else: Conversation.start(steps, step_deadline(context), known, self())
 
     observed = :observe in steps
+    gate = if :await_gate in steps, do: start_gate(), else: nil
 
     {input, output, chat_mode} =
       if mode == :terminal, do: {:stdio, :stdio, :interactive}, else: {device, device, :pipe}
@@ -995,8 +1198,19 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
         fixture_policy: staged.capture
       ] ++ Map.get(context, :chat_options, [])
 
-    options = if observed, do: observer_runtime(options, self()), else: options
-    exit = host(fn -> Chat.run(staged.config_argv ++ extra, options) end, device)
+    options = if gate, do: gated_model(options, gate), else: options
+    options = if observed or gate, do: observer_runtime(options, self()), else: options
+    restore_credentials(context)
+
+    exit =
+      host(
+        fn -> Chat.run(staged.config_argv ++ extra, options) end,
+        device,
+        gate,
+        Map.get(context, :operator_device, :stdio)
+      )
+
+    if gate, do: CancellationGate.stop(gate, System.monotonic_time(:millisecond) + 5_000)
     {_, stderr} = StringIO.contents(diagnostics)
 
     {stdout, events} =
@@ -1030,29 +1244,44 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
   # loss can end it abruptly, as an operator's kill would.
   # Technical depth: the host is killed only on its device's request; its
   # linked runtime dies with it and the durable store keeps what committed.
-  defp host(run, device) do
+  defp host(run, device, gate, operator) do
     parent = self()
     {pid, ref} = spawn_monitor(fn -> send(parent, {:conversation_exit, self(), run.()}) end)
-    await_host(pid, ref, device, nil)
+    Process.put({__MODULE__, :operator}, operator)
+    await_host(pid, ref, device, nil, gate)
   end
 
-  defp await_host(pid, ref, device, runtime) do
+  defp await_host(pid, ref, device, runtime, gate) do
     receive do
+      # The operator answers the emitted question on their own terminal.
+      {:conversation_choose, ^device, record} when device != nil ->
+        send(device, {:operator_choice, operator_choice(record)})
+        await_host(pid, ref, device, runtime, gate)
+
       {:conversation_exit, ^pid, exit} ->
         Process.demonitor(ref, [:flush])
         exit
 
       {:m7_observed_runtime, observed} ->
-        await_host(pid, ref, device, observed)
+        if gate, do: bind_gate(gate, observed)
+        await_host(pid, ref, device, observed, gate)
+
+      # The gate holds the second staged request before transport.
+      {:loopex_m7_gate, :held, ^gate, _callback, _digest, _token} when device != nil ->
+        send(device, :gate_held)
+        await_host(pid, ref, device, runtime, gate)
+
+      {:loopex_m7_gate, :permitted, ^gate, _callback, _digest, _count} ->
+        await_host(pid, ref, device, runtime, gate)
 
       {:conversation_observe, ^device, output} when device != nil ->
         send(device, {:observed, observe(runtime, output)})
-        await_host(pid, ref, device, runtime)
+        await_host(pid, ref, device, runtime, gate)
 
       # The terminal interrupt as the chat's signal holder receives it.
       {:conversation_interrupt, ^device} when device != nil ->
         :gen_event.notify(:erl_signal_server, :sigterm)
-        await_host(pid, ref, device, runtime)
+        await_host(pid, ref, device, runtime, gate)
 
       {:conversation_lose, ^device} when device != nil ->
         Process.exit(pid, :kill)
@@ -1064,6 +1293,59 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
       {:DOWN, ^ref, :process, ^pid, _} ->
         1
     end
+  end
+
+  defp harness_driven?(steps),
+    do:
+      Enum.any?(steps, fn step ->
+        step in [:lose, :interrupt, :observe, :await_gate, :release] or
+          match?({:hold, _, _}, step) or step == {:answer, :operator}
+      end)
+
+  # Concept: an attended answer comes from the operator, never the harness.
+  # Technical depth: the question and its numbered choices are shown on the
+  # operator's device; the typed label or number is passed back unchanged.
+  defp operator_choice(record) do
+    device = Process.get({__MODULE__, :operator}, :stdio)
+    IO.puts(device, "question: " <> to_string(record["question"]))
+
+    for {choice, index} <- Enum.with_index(record["choices"] || [], 1),
+        do: IO.puts(device, "  #{index}. #{choice["label"]}")
+
+    IO.write(device, "answer> ")
+    device |> IO.read(:line) |> to_string() |> String.trim()
+  end
+
+  # Concept: V7.7's trusted pre-transport cancellation gate, the one model
+  # override the plan admits besides the fixture policy.
+  # Technical depth: this runner is the gate's host; composition wraps its
+  # selected adapter with the gate, which delegates the exact call and holds
+  # only the second distinct staged request. It binds to the runtime's control.
+  defp start_gate do
+    {:ok, gate} = CancellationGate.start_link(self())
+    Process.unlink(gate)
+    gate
+  end
+
+  defp gated_model(options, gate) do
+    base = Keyword.get(options, :with_runtime, &LoopexComposition.with_runtime/2)
+
+    wrap = fn adapter ->
+      %{
+        module: CancellationGate,
+        model: adapter.model,
+        options: CancellationGate.options(gate, adapter.module, adapter.options)
+      }
+    end
+
+    Keyword.put(options, :with_runtime, fn composition, callback ->
+      base.(Keyword.put(composition, :model_adapter, wrap), callback)
+    end)
+  end
+
+  defp bind_gate(gate, runtime) do
+    with {:ok, %{control: control}} <- Loopex.Runtime.children(runtime),
+         do: CancellationGate.bind_control(gate, control)
   end
 
   # Concept: the independent observer is a read-only attachment to the same
@@ -1128,7 +1410,7 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
     tool =
       Enum.find(
         events,
-        &(&1[:kind] == "tool.started" and &1["run_id"] == run and &1["tool_id"] == "loopex.bash")
+        &(&1[:kind] == "tool.started" and &1["run_id"] == run)
       )
 
     cond do
@@ -1304,7 +1586,74 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
        else: {:missing, :restart}
   end
 
+  # Review: both role calls committed and completed, read-only, and the
+  # parent's final committed reply is the finding the oracle checks.
+  def joins("m7.review", rows, entry, _outcome) do
+    calls =
+      for row <- rows,
+          kind(row) == "effect_intent_committed_v2",
+          row.payload["job"]["tool_id"] == "loopex.task",
+          do:
+            {row.payload["job"]["validated_arguments"]["role"],
+             row.payload["grant"]["operation_id"]}
+
+    completed =
+      for row <- rows,
+          kind(row) == "executor_receipt_committed_v2",
+          row.payload["receipt"]["outcome"] == "completed",
+          do: row.payload["receipt"]["operation_id"]
+
+    # Each helper receipt reports child, parent and combined usage separately.
+    usage =
+      for row <- rows,
+          kind(row) == "executor_receipt_committed_v2",
+          row.payload["receipt"]["tool_id"] == "loopex.task",
+          do: task_usage(row.payload["receipt"]["output"])
+
+    roles = for %{"role" => role} <- entry["required_model_actions"], do: role
+
+    finding =
+      rows
+      |> Enum.filter(&(kind(&1) == "model_attempt_settled_v3"))
+      |> List.last()
+      |> case do
+        nil -> nil
+        row -> get_in(row.payload, ["result", "reply", "text"])
+      end
+
+    cond do
+      Enum.any?(roles, fn role -> not Enum.any?(calls, &(elem(&1, 0) == role)) end) ->
+        {:missing, :role_calls}
+
+      Enum.any?(calls, &(elem(&1, 1) not in completed)) ->
+        {:failed, :role_call_incomplete}
+
+      not Enum.all?(usage, &(&1 == :ok)) ->
+        {:failed, :helper_usage}
+
+      not is_binary(finding) ->
+        {:missing, :finding}
+
+      true ->
+        {:ok, %{"M7_FINDING" => {:text, finding}}}
+    end
+  end
+
   def joins(_case_id, _rows, _entry, _outcome), do: {:ok, nil}
+
+  defp task_usage(output) when is_binary(output) do
+    with {:ok, %{"usage" => %{"child" => child, "parent" => parent} = usage}} <-
+           JSON.decode(output),
+         total when is_integer(total) and total > 0 <-
+           (child["reported_input_tokens"] || 0) + (child["reported_output_tokens"] || 0),
+         true <- usage["combined_tokens"] == parent["tokens"] + total do
+      :ok
+    else
+      _ -> :invalid
+    end
+  end
+
+  defp task_usage(_output), do: :invalid
 
   # Concept: a held case is decided by committed facts ordered around the held
   # operation's receipt, joined to the observation taken before release.
@@ -1386,6 +1735,34 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
     end
   end
 
+  # Detach is a connection fact: the run completes as if no client had left.
+  defp held_case("m7.daemon-detach", rows, receipt, observation, outcome) do
+    run = observation["run_id"]
+    order = Enum.map(outcome.events, &if(is_tuple(&1), do: elem(&1, 0), else: &1))
+
+    terminal =
+      Enum.find(rows, &(kind(&1) == "run_terminal_committed" and &1.payload["run_id"] == run))
+
+    cond do
+      not ordered?(order, [:held, :driver_closed, :reattached, :observed, :released]) ->
+        {:missing, :detach_reattach_before_release}
+
+      # Shutdown's abort of an idle session is refused; only an accepted one
+      # would have ended the held run.
+      accepted(rows, "abort", run) ->
+        {:failed, :aborted}
+
+      receipt.payload["receipt"]["outcome"] != "completed" ->
+        {:failed, :held_call_not_completed}
+
+      is_nil(terminal) or terminal.payload["outcome"] != "completed" ->
+        {:failed, :run_not_completed}
+
+      true ->
+        {:ok, nil}
+    end
+  end
+
   # The interrupt is the only release: the held call ends by cancellation.
   defp held_case("m7.interrupt", rows, receipt, observation, outcome) do
     terminal =
@@ -1407,6 +1784,9 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
       true -> {:ok, nil}
     end
   end
+
+  defp ordered?(events, expected),
+    do: Enum.filter(events, &(&1 in expected)) |> Enum.dedup() == expected
 
   defp accepted(rows, type, run),
     do:
@@ -1458,6 +1838,20 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
      retain(root, "facts.json", %{"session" => nil, "kinds" => %{}, "join" => inspect(join)})}
   end
 
+  defp inspect_facts(%{case_id: "m7.restore"}, outcome, root) do
+    checks = JSON.decode!(outcome.output)
+
+    join =
+      cond do
+        checks["retained_execution"] != true -> {:missing, :retained_execution}
+        checks["operator_confirmed"] != true -> {:missing, :operator_confirmation}
+        Enum.any?(checks, fn {_name, ok} -> ok != true end) -> {:failed, :restore_check}
+        true -> {:ok, nil}
+      end
+
+    {join, retain(root, "facts.json", %{"checks" => checks, "join" => inspect(join)})}
+  end
+
   defp inspect_facts(%{case_id: "m7.ephemeral-question"}, outcome, root) do
     join =
       case JSON.decode(outcome.output) do
@@ -1500,6 +1894,18 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
         {{:missing, reason}, {:error, reason}}
     end
   end
+
+  # A committed finding becomes a trusted file the oracle reads by path.
+  defp materialize(staged, %{"M7_FINDING" => {:text, text}} = environment) do
+    path = Path.join(staged.trusted, "finding.tsv")
+
+    case File.write(path, text, [:exclusive]) do
+      :ok -> %{environment | "M7_FINDING" => path}
+      _ -> Map.delete(environment, "M7_FINDING")
+    end
+  end
+
+  defp materialize(_staged, environment), do: environment
 
   defp independent_oracle(%{held: _}, _environment, root),
     do: {0, retain_raw(root, "oracle.txt", "no fixture oracle: the committed joins decide\n")}
@@ -1545,6 +1951,10 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
         {{:error, :changes_unavailable}, {:error, :changes_unavailable}}
     end
   end
+
+  defp inspect_changes(%{case_id: "m7.restore"}, root),
+    do:
+      {:ok, retain(root, "changes.json", %{"workspace" => "the retained workspace is only read"})}
 
   defp inspect_changes(%{held: _} = staged, root) do
     workspace = staged.fixture.workspace

@@ -128,6 +128,20 @@ defmodule LoopexCli.M7EphemeralDemoTest do
     end
   end
 
+  test "the pinned fixture policy denies an ephemeral write outside the allowed path", f do
+    result = run_case(f, "choice-1", encoder("empty"), "README.md")
+    assert result.mechanical_result == "assertion_failed"
+    refute File.exists?(Path.join([result.root, "workspace", "README.md"]))
+
+    for _ <- 1..2, do: assert_receive({:model_request, _}, 15_000)
+    assert_receive {:model_request, third}, 15_000
+    [_answer, write] = Enum.filter(body(third)["messages"], &(&1["role"] == "tool"))
+    assert write["content"] =~ "denied"
+
+    execution = JSON.decode!(File.read!(Path.join(result.root, "records/execution.json")))
+    assert execution["policy"]["id"] =~ "m7.fixture:m7.feature:"
+  end
+
   test "an ephemeral answer the implementation ignores fails the independent oracle", f do
     result = run_case(f, "choice-1", encoder("literal_null"))
     assert result.mechanical_result == "assertion_failed"
@@ -139,7 +153,7 @@ defmodule LoopexCli.M7EphemeralDemoTest do
              "evidence_incomplete_pre_dispatch"
   end
 
-  defp run_case(f, answer, content) do
+  defp run_case(f, answer, content, path \\ "lib/row_encoder.ex") do
     fixtures = Path.expand("../../../test/fixtures/m7", __DIR__)
     {:ok, catalog} = FixtureManifest.load(fixtures)
     File.mkdir_p!(Path.join(f.root, "runs"))
@@ -182,7 +196,7 @@ defmodule LoopexCli.M7EphemeralDemoTest do
     port =
       start_server([
         {:tool, "ask", question},
-        {:tool, "write", %{"path" => "lib/row_encoder.ex", "content" => content}},
+        {:tool, "write", %{"path" => path, "content" => content}},
         "implemented"
       ])
 

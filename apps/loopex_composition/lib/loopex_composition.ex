@@ -53,7 +53,8 @@ defmodule LoopexComposition do
 
   ## Technical depth
 
-  `:policy` is required and has no default. `:state_root` and `:workspace` are
+  `:policy` is required; a contextual reference's identity names only its module.
+  `:state_root` and `:workspace` are
   resolved by the caller rather than discovered here, because where an operator's
   data lives is the host's decision.
 
@@ -292,7 +293,7 @@ defmodule LoopexComposition do
 
   defp policy_identity(options, policy) do
     Keyword.get(options, :policy_identity) ||
-      %{"id" => inspect(policy), "revision" => "0.2.0"}
+      %{"id" => inspect(Loopex.Policy.adapter_module(policy)), "revision" => "0.2.0"}
   end
 
   defp store_options(root, options, credential_plane),

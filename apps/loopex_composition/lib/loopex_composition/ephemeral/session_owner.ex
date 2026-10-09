@@ -3309,7 +3309,7 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
       policy: config.policy,
       policy_identity:
         Map.get(config, :policy_identity) ||
-          %{"id" => inspect(config.policy), "revision" => "0.2.0"},
+          %{"id" => inspect(Loopex.Policy.adapter_module(config.policy)), "revision" => "0.2.0"},
       executor: %{
         module: Loopex.Executor.Local,
         reference: Map.fetch!(startup.registered, :executor),

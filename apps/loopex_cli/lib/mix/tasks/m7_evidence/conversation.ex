@@ -19,7 +19,9 @@ defmodule Mix.Tasks.Loopex.M7Evidence.Conversation do
   by the step deadline; expiry records `timeout` and ends input, which the
   conversation sees as end of file. `:lose` asks the
   `owner` process to end the conversation's host abruptly, the prescribed
-  process loss; nothing is written after it. `known` lists interaction IDs an earlier
+  process loss; nothing is written after it. `{:answer, :operator}` asks the
+  `owner` for the operator's typed choice for the next unanswered question,
+  then answers it as above. `known` lists interaction IDs an earlier
   conversation of the same session already settled: a reopened conversation
   replays their records, and they are never answered again. `transcript/1` returns the output and the
   ordered observations without stopping the server.
@@ -32,7 +34,8 @@ defmodule Mix.Tasks.Loopex.M7Evidence.Conversation do
   `owner` for its independent observation and waits for the reply; a refused
   observation ends input. `:release` writes one line to the FIFO, which lets
   the runner finish; nothing else releases it. `:interrupt` asks the owner to
-  deliver the terminal interrupt. Stopping the device closes the holder without
+  deliver the terminal interrupt. `:await_gate` waits until the owner reports
+  that its pre-transport model gate holds a request. Stopping the device closes the holder without
   writing, and an unopened FIFO is unblocked by a reader that discards nothing.
   """
 
@@ -65,6 +68,8 @@ defmodule Mix.Tasks.Loopex.M7Evidence.Conversation do
        held: false,
        released: false,
        observed: nil,
+       gate_held: false,
+       operator_choice: nil,
        events: []
      }}
   end
@@ -88,6 +93,12 @@ defmodule Mix.Tasks.Loopex.M7Evidence.Conversation do
     events = [:released, :hold_expired | state.events]
     {:noreply, serve(%{state | steps: [], released: true, events: events})}
   end
+
+  def handle_info({:operator_choice, choice}, state),
+    do: {:noreply, serve(%{state | operator_choice: {:chosen, choice}})}
+
+  def handle_info(:gate_held, state),
+    do: {:noreply, serve(%{state | gate_held: true, events: [:gate_held | state.events]})}
 
   def handle_info({:observed, result}, state),
     do:
@@ -183,6 +194,41 @@ defmodule Mix.Tasks.Loopex.M7Evidence.Conversation do
     end
   end
 
+  # The operator's typed label or number selects among the emitted choices.
+  defp next({:answer, :operator}, %{operator_choice: {:chosen, typed}} = state) do
+    question(state, fn record ->
+      selected =
+        record["choices"]
+        |> Kernel.||([])
+        |> Enum.with_index(1)
+        |> Enum.find(fn {entry, index} -> typed in [entry["label"], Integer.to_string(index)] end)
+
+      case selected do
+        {entry, _} -> "/answer #{record["interaction_id"]} --choice #{entry["id"]}"
+        nil -> nil
+      end
+    end)
+  end
+
+  defp next({:answer, :operator}, %{operator_choice: nil} = state) do
+    open =
+      for "@loopex " <> json <- String.split(state.output, "\n"),
+          {:ok, %{"event" => "question", "interaction_id" => id} = record} <- [JSON.decode(json)],
+          id not in state.answered,
+          do: record
+
+    case open do
+      [record | _] ->
+        if state.owner, do: send(state.owner, {:conversation_choose, self(), record})
+        {:wait, %{state | operator_choice: :asked}}
+
+      [] ->
+        {:wait, state}
+    end
+  end
+
+  defp next({:answer, :operator}, state), do: {:wait, state}
+
   defp next({:answer, choice}, state) do
     question(state, fn record ->
       selected =
@@ -240,6 +286,9 @@ defmodule Mix.Tasks.Loopex.M7Evidence.Conversation do
     send(pid, :release)
     {:skip, %{state | released: true, events: [:released | state.events]}}
   end
+
+  defp next(:await_gate, %{gate_held: true} = state), do: {:skip, state}
+  defp next(:await_gate, state), do: {:wait, state}
 
   defp next(:interrupt, state) do
     if state.owner, do: send(state.owner, {:conversation_interrupt, self()})

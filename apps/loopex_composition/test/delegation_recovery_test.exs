@@ -127,6 +127,53 @@ defmodule LoopexComposition.DelegationRecoveryTest do
     assert child_prompts == 1
   end
 
+  # V8.6: a serial allowance exhausted in one run survives restart unchanged.
+  # The refused call takes no count, tokens or ledger row, and its committed
+  # pre-effect refusal leaves the parent activatable for a new run.
+  test "an exhausted serial child allowance survives restart and the parent reopens" do
+    decide = fn
+      "parent:" <> _, turn when turn in 0..2 ->
+        %{text: "go", calls: [Fixture.task_call("t-#{turn}", "inspect", "child:#{turn}")]}
+
+      "child:" <> _, _ ->
+        %{text: "finding", calls: []}
+
+      _user, _turns ->
+        %{text: "done", calls: []}
+    end
+
+    fixture = Fixture.start(decide)
+    parent = Fixture.parent(fixture, "parent-create", %{"max_children" => 2})
+    {_attachment, run} = Fixture.prompt(fixture, parent, "parent-prompt", "parent:x")
+    assert Fixture.await_terminal(fixture, parent, run).terminal.state == "completed"
+    {:ok, rows} = Loopex.Store.load_records(fixture.store, parent, 0, 1_000)
+
+    refusals =
+      for %{payload: %{kind: "tool_result_committed_v2"} = result} <- rows,
+          do: {result["tool_call_id"], result["outcome"], result["reason"]}
+
+    assert refusals == [{"t-2", "failed", "delegation_count_exhausted"}]
+    before = Helper.status(fixture.helper).runs[{parent, run}]
+    assert before.count == 2 and before.reserved_tokens == 0
+    assert map_size(Helper.status(fixture.helper).children) == 2
+
+    restarted = Fixture.restart(fixture)
+    status = Helper.status(restarted.helper)
+    assert status.classified == :complete
+    after_restart = status.runs[{parent, run}]
+    assert after_restart.count == before.count
+    assert after_restart.charged_tokens == before.charged_tokens
+    assert after_restart.transactions == before.transactions
+    assert map_size(status.children) == 2
+
+    assert {:ok, ^parent} =
+             Loopex.resume_session(restarted.runtime, parent, command_id: "resume")
+
+    {_attachment, later} = Fixture.prompt(restarted, parent, "later-prompt", "after restart")
+    assert Fixture.await_terminal(restarted, parent, later).terminal.state == "completed"
+    assert Helper.status(restarted.helper).runs[{parent, run}] == after_restart
+  end
+
   test "a lost bind acknowledgement finishes from exact creation history" do
     test = self()
     fixture = Fixture.start(decide(), fault: fault(test, :after_parent_create))

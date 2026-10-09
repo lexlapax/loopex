@@ -268,8 +268,10 @@ cross-version steps are not passes; preserve current-format restore coverage.
 | `V8.2` | `case:m7.review` | Pending | Pending | Pending | Pending | Pending |
 | `V8.3` | `case:m7.review` | Pending | Pending | Pending | Pending | Pending |
 | `V8.4` | `case:m7.review` | Pending | Pending | Pending | Pending | Pending |
-| `V8.5` | `pending:helper child failure, bound exhaustion and parent cancellation (T11)` | Pending | Pending | Pending | Pending | Pending |
-| `V8.6` | `pending:serial-child delegation allowance exhaustion (T11)` | Pending | Pending | Pending | Pending | Pending |
+| `V8.5.failure` | `test:apps/loopex_composition/test/delegation_run_ledger_test.exs#a created child never prompted settles failed at zero and refunds its reservation` | Pending | Pending | Pending | Pending | Pending |
+| `V8.5.bound` | `test:apps/loopex_composition/test/delegation_helper_test.exs#count and token exhaustion refuse before any reservation and a new run reopens` | Pending | Pending | Pending | Pending | Pending |
+| `V8.5.cancel` | `test:apps/loopex_composition/test/delegation_helper_test.exs#cancelling the parent stops its child and confirms cleanup` | Pending | Pending | Pending | Pending | Pending |
+| `V8.6` | `test:apps/loopex_composition/test/delegation_recovery_test.exs#an exhausted serial child allowance survives restart and the parent reopens` | Pending | Pending | Pending | Pending | Pending |
 | `V8.7` | `test:apps/loopex_composition/test/delegation_child_creation_test.exs#only authored enabled roles in the retained catalog admit` | Pending | Pending | Pending | Pending | Pending |
 | `V9.1` | `case:m7.policy-denial` | Pending | Pending | Pending | Pending | Pending |
 | `V9.2` | `case:m7.interrupt` | Pending | Pending | Pending | Pending | Pending |

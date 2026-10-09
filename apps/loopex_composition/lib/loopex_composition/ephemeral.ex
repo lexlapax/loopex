@@ -32,6 +32,10 @@ defmodule LoopexComposition.Ephemeral do
 
   ## Technical depth
 
+  `:policy` is a policy module or Core's contextual `%{module:, context:}`
+  reference; the private context reaches only that module's `decide/2`, and
+  the default policy identity names the module alone.
+
   Grammar and shared dependency checks run before owner activation. One private
   begin token gives a single owner permission to start its temporary subtree.
   Its result is withheld until the facade attachment, selected resources and
@@ -161,7 +165,10 @@ defmodule LoopexComposition.Ephemeral do
 
   defp one_shot_configuration(%{questions: true} = configuration, nil) do
     configuration
-    |> Map.put(:policy_identity, %{"id" => inspect(configuration.policy), "revision" => "0.2.0"})
+    |> Map.put(:policy_identity, %{
+      "id" => inspect(Loopex.Policy.adapter_module(configuration.policy)),
+      "revision" => "0.2.0"
+    })
     |> Map.put(:policy, %{
       module: LoopexComposition.Ephemeral.QuestionPolicy,
       context: configuration.policy

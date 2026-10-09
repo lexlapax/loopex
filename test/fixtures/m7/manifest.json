@@ -31,7 +31,7 @@
         "credential": true,
         "driver": "provider-wrapper",
         "lane": "m7-provider",
-        "status": "pending:loopex chat composes no maintenance instructions, so every compaction refuses maintenance_instructions_unconfigured",
+        "status": "ready",
         "steps": [
           "V6.7"
         ]
@@ -41,7 +41,7 @@
         "credential": true,
         "driver": "provider-wrapper",
         "lane": "m7-provider",
-        "status": "pending:daemon host fixture driver",
+        "status": "ready",
         "steps": [
           "V9.4"
         ]
@@ -127,7 +127,7 @@
         "credential": true,
         "driver": "fixture-chat",
         "lane": "m7-operator",
-        "status": "pending:loopex chat composes no maintenance instructions, so every compaction refuses maintenance_instructions_unconfigured",
+        "status": "ready",
         "steps": [
           "V6.1",
           "V6.2.long",
@@ -141,7 +141,7 @@
         "credential": true,
         "driver": "demonstration",
         "lane": "m7-operator",
-        "status": "pending:loopex chat composes no maintenance instructions, so every compaction refuses maintenance_instructions_unconfigured",
+        "status": "ready",
         "steps": [
           "V6.5.positive"
         ]
@@ -208,7 +208,7 @@
         "credential": false,
         "driver": "demonstration",
         "lane": "m7-operator",
-        "status": "pending:attended restore driver",
+        "status": "ready",
         "steps": [
           "V13.1",
           "V13.4",
@@ -221,7 +221,7 @@
         "credential": true,
         "driver": "fixture-chat",
         "lane": "m7-operator",
-        "status": "pending:helper flow (T11)",
+        "status": "ready",
         "steps": [
           "V8.1",
           "V8.2",
@@ -257,7 +257,7 @@
         "credential": true,
         "driver": "provider-wrapper",
         "lane": "m7-provider",
-        "status": "pending:thinking-cell witness driver",
+        "status": "ready",
         "steps": [
           "V7.7.bound"
         ]
@@ -267,7 +267,7 @@
         "credential": true,
         "driver": "provider-wrapper",
         "lane": "m7-provider",
-        "status": "pending:pre-transport cancellation gate driver",
+        "status": "ready",
         "steps": [
           "V7.7.cancel"
         ]
@@ -277,7 +277,7 @@
         "credential": true,
         "driver": "demonstration",
         "lane": "m7-operator",
-        "status": "pending:thinking-cell witness driver",
+        "status": "ready",
         "steps": [
           "V7.3.positive"
         ]
@@ -758,13 +758,21 @@
         "classification": "attended",
         "owner": "case:m7.review"
       },
-      "V8.5": {
+      "V8.5.failure": {
         "classification": "automated",
-        "owner": "pending:helper child failure, bound exhaustion and parent cancellation (T11)"
+        "owner": "test:apps/loopex_composition/test/delegation_run_ledger_test.exs#a created child never prompted settles failed at zero and refunds its reservation"
+      },
+      "V8.5.bound": {
+        "classification": "automated",
+        "owner": "test:apps/loopex_composition/test/delegation_helper_test.exs#count and token exhaustion refuse before any reservation and a new run reopens"
+      },
+      "V8.5.cancel": {
+        "classification": "automated",
+        "owner": "test:apps/loopex_composition/test/delegation_helper_test.exs#cancelling the parent stops its child and confirms cleanup"
       },
       "V8.6": {
         "classification": "automated",
-        "owner": "pending:serial-child delegation allowance exhaustion (T11)"
+        "owner": "test:apps/loopex_composition/test/delegation_recovery_test.exs#an exhausted serial child allowance survives restart and the parent reopens"
       },
       "V8.7": {
         "classification": "automated",
