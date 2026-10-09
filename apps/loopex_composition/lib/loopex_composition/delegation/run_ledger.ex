@@ -19,12 +19,11 @@ defmodule LoopexComposition.Delegation.RunLedger do
   `operation` is the run's reserved operation; `recovered` holds ADR 0046's
   already-stopped no-child operations, each charged one count slot and no
   tokens. Every retained operation occupies the parent's helper slot until its
-  release (settled, cleanup conclusive, every attempt receipt retained). ADR
-  0056 keeps three transitions closed until their owners exist:
-  `child_prompted` (the Core owning prompt-digest join), a real child's
-  `settle` (the whole-child-run accounting producer) and `bind_receipt` (the
-  Core receipt fact validator). They refuse with named reasons rather than
-  accepting host assertions, so no operation is released yet.
+  release: settled from conclusive evidence and every admitted attempt's
+  receipt bound. ADR 0069 supplies the owning joins: `child_prompted` takes
+  Core's admitted prompt digest, a real `settle` takes Core's run evidence and
+  `bind_receipt` takes Core's executor-receipt validator. The owner passes
+  those as inputs; the fold never accepts a host-computed substitute.
   """
 
   alias LoopexComposition.Delegation.{
@@ -38,6 +37,7 @@ defmodule LoopexComposition.Delegation.RunLedger do
   alias LoopexProtocol.Canonical
 
   @cap 16_777_216
+  @encoding "loopex.ledger.plain_etf.v1.base64"
   @frame 65_614
   @logical ~w(operation_identity role task_digest child_creation_sha256 create_command_id prompt_command_id absolute_cutoff_ms reserved_tokens)
 
@@ -64,6 +64,7 @@ defmodule LoopexComposition.Delegation.RunLedger do
          charged_tokens: 0,
          operation: nil,
          recovered: %{},
+         released: MapSet.new(),
          stop: nil,
          transactions: []
        }}
@@ -184,7 +185,7 @@ defmodule LoopexComposition.Delegation.RunLedger do
     identity = mutation["operation_identity"]
 
     cond do
-      Map.has_key?(state.recovered, identity) ->
+      Map.has_key?(state.recovered, identity) or MapSet.member?(state.released, identity) ->
         {:error, :invalid_run_transition}
 
       state.recovered != %{} or
@@ -218,14 +219,20 @@ defmodule LoopexComposition.Delegation.RunLedger do
     settle(state, tx, size, inputs)
   end
 
-  # Concept: these accepted transitions stay closed until their owners exist.
-  # Technical depth: ADR 0056 forbids a host substitute for the Core prompt
-  # digest and receipt validators, so no caller-supplied claim admits them.
-  defp transition(_state, %{"mutation" => %{"kind" => "child_prompted"}}, _size, _inputs),
-    do: {:error, :helper_prompt_owner_unavailable}
+  defp transition(
+         %{operation: %{child: child, child_run: nil}} = state,
+         %{"mutation" => %{"kind" => "child_prompted"}} = tx,
+         size,
+         inputs
+       )
+       when is_binary(child) do
+    prompted(state, tx, size, inputs)
+  end
 
-  defp transition(_state, %{"mutation" => %{"kind" => "bind_receipt"}}, _size, _inputs),
-    do: {:error, :helper_receipt_validator_unavailable}
+  defp transition(state, %{"mutation" => %{"kind" => "bind_receipt"}} = tx, size, inputs)
+       when state.phase != :empty do
+    receipt(state, tx, size, inputs)
+  end
 
   defp transition(
          %{phase: :reserved} = state,
@@ -303,7 +310,10 @@ defmodule LoopexComposition.Delegation.RunLedger do
             child_creation: bytes,
             attempts: %{mutation["job"]["job_id"] => attempt(mutation)},
             child: nil,
-            stop: nil
+            child_run: nil,
+            stop: nil,
+            settled: nil,
+            receipts: MapSet.new()
           }
 
           next = %{
@@ -377,7 +387,8 @@ defmodule LoopexComposition.Delegation.RunLedger do
               Map.take(mutation, ~w(operation_identity create_command_id prompt_command_id)),
             source_intent: mutation["source_intent"],
             attempts: %{job["job_id"] => %{job: job, source_intent: mutation["source_intent"]}},
-            settled: nil
+            settled: nil,
+            receipts: MapSet.new()
           }
 
           next = %{
@@ -421,42 +432,241 @@ defmodule LoopexComposition.Delegation.RunLedger do
     end
   end
 
-  # Concept: only a conclusive recovered no-child settlement is admitted today.
-  # Technical depth: its terminal binds the source intent's journal version and
-  # the Core digest of that validated intent payload, which the owner supplies
-  # from the read-only intent query. Usage, charge and refund are zero and the
-  # count charge stands. A real child needs the pending accounting producer.
+  # Concept: the original live prompt's admission is recorded once.
+  # Technical depth: the owner supplies Core's own admitted command digest from
+  # ADR 0069 run evidence for the child run; the host never computes it.
+  defp prompted(state, tx, size, inputs) do
+    mutation = tx["mutation"]
+    operation = state.operation
+
+    with %{prompt_digest: digest} <- inputs,
+         true <- mutation["operation_identity"] == operation.logical["operation_identity"],
+         true <- mutation["child_session_id"] == operation.child,
+         true <- mutation["prompt_command_id"] == operation.logical["prompt_command_id"],
+         true <- mutation["prompt_digest"] == digest do
+      next = %{
+        state
+        | credit: state.credit - @frame,
+          operation: %{operation | child_run: mutation["child_run_id"]}
+      }
+
+      install(state, tx, size, next)
+    else
+      _ -> {:error, :child_prompted_mismatch}
+    end
+  end
+
+  # Concept: settle once from conclusive terminal, cleanup and Core accounting.
+  # Technical depth: a real child settles only against ADR 0069 run evidence
+  # for its exact run plus the captured history token; a prompted child's charge
+  # is Q, or max(R, Q) when any usage is unresolved, never clamped. A created
+  # but unprompted child settles a failed terminal at zero usage. A recovered
+  # operation settles its uncreated terminal at zero. The reservation leaves and
+  # the charge enters the allowance exactly once.
   defp settle(state, tx, size, inputs) do
     mutation = tx["mutation"]
     identity = mutation["operation_identity"]
-    terminal = mutation["terminal"]
 
-    case state.recovered do
-      %{^identity => %{settled: nil} = operation} ->
+    case operation(state, identity) do
+      {:recovered, %{settled: nil} = operation} ->
         with %{source_intent_sha256: digest} <- inputs,
-             "uncreated" <- terminal["state"],
+             %{"state" => "uncreated"} = terminal <- mutation["terminal"],
              true <- terminal["journal_version"] == operation.source_intent["journal_version"],
              true <- terminal["terminal_record_sha256"] == digest do
-          next = %{
-            state
-            | credit: state.credit - @frame,
-              recovered: Map.put(state.recovered, identity, %{operation | settled: tx})
-          }
-
-          install(state, tx, size, next)
+          settled(state, tx, size, :recovered, %{operation | settled: tx}, 0, 0)
         else
           _ -> {:error, :settlement_mismatch}
         end
 
-      %{^identity => _settled} ->
-        {:error, :invalid_run_transition}
+      {:reserved, %{settled: nil, child: child} = operation} when is_binary(child) ->
+        reserved = operation.logical["reserved_tokens"]
+
+        case settlement(mutation, operation, inputs, reserved) do
+          :ok ->
+            settled(
+              state,
+              tx,
+              size,
+              :reserved,
+              %{operation | settled: tx},
+              reserved,
+              mutation["charge_tokens"]
+            )
+
+          :error ->
+            {:error, :settlement_mismatch}
+        end
 
       _ ->
-        if state.operation != nil and state.operation.logical["operation_identity"] == identity,
-          do: {:error, :helper_accounting_unavailable},
-          else: {:error, :invalid_run_transition}
+        {:error, :invalid_run_transition}
     end
   end
+
+  defp settlement(mutation, operation, inputs, reserved) do
+    terminal = mutation["terminal"]
+    accounting = mutation["accounting"]
+
+    joined =
+      case {operation.child_run, inputs} do
+        {nil, %{through_version: through, prefix_token: token}} ->
+          terminal["state"] == "failed" and is_nil(terminal["child_run_id"]) and
+            accounting["through_version"] == through and
+            accounting["prefix_token"] == Base.encode64(token)
+
+        {run, %{evidence: %{terminal: %{} = ended, usage: usage} = evidence, prefix_token: token}} ->
+          terminal["child_run_id"] == run and terminal["state"] == ended.state and
+            terminal["journal_version"] == ended.journal_version and
+            terminal["terminal_record_sha256"] == ended.record_digest and
+            accounting["reported_input_tokens"] == usage.reported_input and
+            accounting["reported_output_tokens"] == usage.reported_output and
+            accounting["estimated_tokens"] == usage.estimated and
+            accounting["unresolved_usage"] == usage.unresolved and
+            accounting["through_version"] == evidence.through_version and
+            accounting["prefix_token"] == Base.encode64(token)
+
+        _ ->
+          false
+      end
+
+    usage =
+      accounting["reported_input_tokens"] + accounting["reported_output_tokens"] +
+        accounting["estimated_tokens"]
+
+    charge = if accounting["unresolved_usage"], do: max(reserved, usage), else: usage
+
+    if joined and terminal["child_session_id"] == operation.child and
+         mutation["charge_tokens"] == charge and
+         mutation["refund_tokens"] == max(0, reserved - charge),
+       do: :ok,
+       else: :error
+  end
+
+  defp settled(state, tx, size, kind, operation, reserved, charge) do
+    state = %{
+      state
+      | credit: state.credit - @frame,
+        reserved_tokens: state.reserved_tokens - reserved,
+        charged_tokens: state.charged_tokens + charge
+    }
+
+    install(state, tx, size, release(put_operation(state, kind, operation), kind, operation))
+  end
+
+  # Concept: each admitted attempt binds at most one exact retained receipt.
+  # Technical depth: the receipt object must name this runtime, operation and
+  # stored job, and its envelope must pass Core's own executor-receipt validator
+  # for the original JobRequest. Binding is admitted only after settlement.
+  defp receipt(state, tx, size, inputs) do
+    mutation = tx["mutation"]
+    job_id = mutation["job"]["job_id"]
+
+    with {kind, %{settled: settled} = operation} when not is_nil(settled) <-
+           operation(state, mutation["operation_identity"]),
+         %{job: job} <- Map.get(operation.attempts, job_id),
+         true <- job == mutation["job"] and not MapSet.member?(operation.receipts, job_id),
+         %{receipt: bytes, original_job: original} <- inputs,
+         true <- hash(bytes) == mutation["receipt_sha256"],
+         {:ok, _receipt} <- receipt_object(bytes, state.identifiers, mutation, original) do
+      operation = %{operation | receipts: MapSet.put(operation.receipts, job_id)}
+      state = %{state | credit: state.credit - @frame}
+      install(state, tx, size, release(put_operation(state, kind, operation), kind, operation))
+    else
+      _ -> {:error, :receipt_mismatch}
+    end
+  end
+
+  @doc false
+  def receipt_object(bytes, [runtime | _] = identifiers, mutation, original) do
+    with {:ok, object} <- LedgerCodec.decode_json(bytes, :object),
+         true <- closed?(object, ~w(version kind runtime_id operation_identity job receipt)),
+         true <- object["version"] === 1 and object["kind"] == "receipt",
+         true <- object["runtime_id"] == Base.encode64(runtime),
+         true <- object["operation_identity"] == mutation["operation_identity"],
+         true <- object["job"] == mutation["job"],
+         :ok <-
+           RunMutation.match_job(identifiers, Map.put(mutation, "kind", "bind_receipt"), original),
+         {:ok, plain} <- plain_receipt(object["receipt"]) do
+      Loopex.Runtime.SessionState.validate_executor_receipt(plain, original)
+    else
+      _ -> {:error, :invalid_receipt_object}
+    end
+  end
+
+  defp plain_receipt(
+         %{"encoding" => @encoding, "bytes" => encoded, "sha256" => digest} = envelope
+       )
+       when map_size(envelope) == 3 and is_binary(encoded) and byte_size(encoded) <= 87_384 do
+    with {:ok, bytes} <- Base.decode64(encoded),
+         true <- byte_size(bytes) <= 65_536 and Base.encode64(bytes) == encoded,
+         true <- hash(bytes) == digest,
+         <<131, tag, _::binary>> when tag != 80 <- bytes,
+         {value, used} <- :erlang.binary_to_term(bytes, [:safe, :used]),
+         true <- used == byte_size(bytes) and is_map(value) and not is_struct(value) do
+      {:ok, value}
+    else
+      _ -> :error
+    end
+  rescue
+    ArgumentError -> :error
+  end
+
+  defp plain_receipt(_), do: :error
+
+  # Concept: release frees the parent's slot and unused closing credit.
+  # Technical depth: only a settled operation whose every admitted attempt has
+  # its receipt is released; its unspent create, prompt and stop slots return.
+  defp release(state, kind, operation) do
+    if operation.settled != nil and
+         MapSet.size(operation.receipts) == map_size(operation.attempts) do
+      identity = operation.logical["operation_identity"]
+
+      unspent =
+        if kind == :reserved,
+          do:
+            Enum.count([operation.child, operation.child_run, operation.stop], &is_nil/1) *
+              @frame,
+          else: 0
+
+      state = %{
+        state
+        | credit: state.credit - unspent,
+          released: MapSet.put(state.released, identity)
+      }
+
+      case kind do
+        :reserved -> %{state | operation: nil, phase: :initialized, stop: nil}
+        :recovered -> %{state | recovered: Map.delete(state.recovered, identity)}
+      end
+    else
+      state
+    end
+  end
+
+  defp operation(state, identity) do
+    cond do
+      Map.has_key?(state.recovered, identity) ->
+        {:recovered, state.recovered[identity]}
+
+      state.operation != nil and state.operation.logical["operation_identity"] == identity ->
+        {:reserved, state.operation}
+
+      true ->
+        :none
+    end
+  end
+
+  defp put_operation(state, :reserved, operation), do: %{state | operation: operation}
+
+  defp put_operation(state, :recovered, operation),
+    do: %{
+      state
+      | recovered: Map.put(state.recovered, operation.logical["operation_identity"], operation)
+    }
+
+  defp hash(bytes), do: :crypto.hash(:sha256, bytes) |> Base.encode16(case: :lower)
+
+  defp closed?(value, keys),
+    do: is_map(value) and not is_struct(value) and Enum.sort(Map.keys(value)) == Enum.sort(keys)
 
   defp child_matches?(child, mutation, [runtime, _parent, _run]) do
     child.runtime_id == runtime and child.operation_identity == mutation["operation_identity"] and
