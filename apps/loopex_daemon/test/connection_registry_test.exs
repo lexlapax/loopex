@@ -828,6 +828,7 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
             assert now_ms() < deadline
           after
             cleanup_deadline = now_ms() + 5_000
+
             try do
               Process.exit(connection.pid, :kill)
 
@@ -854,6 +855,7 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
         end
       after
         cleanup_deadline = now_ms() + 5_000
+
         try do
           if Process.alive?(registry),
             do: GenServer.stop(registry, :normal, max(cleanup_deadline - now_ms(), 0))
@@ -866,6 +868,7 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
       end
     after
       cleanup_deadline = now_ms() + 5_000
+
       try do
         if Process.alive?(registry),
           do: GenServer.stop(registry, :normal, max(cleanup_deadline - now_ms(), 0))
