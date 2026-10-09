@@ -1364,7 +1364,7 @@ defmodule LoopexDaemon.SocketConnectionTest do
                registry: self(),
                listener: self(),
                rollback_token: make_ref(),
-               connection_incarnation: make_ref(),
+               connection_incarnation: "routing-callback-incarnation",
                initialize_deadline: now_ms() + 5_000,
                context: %{owner: self()}
              )
