@@ -411,8 +411,12 @@ fi
 # M7's credential-free rollback lane: current-format backup/restore with its
 # complete manifests, and unknown-effect nonredispatch after recovery.
 if release_selected m7-rollback; then
+  # The restore test builds its first fixture in this retained directory, so
+  # m7.restore in the operator lane joins this exact execution.
+  export M7_RESTORE_RETAIN="$retain/m7-restore-source"
   lane m7-rollback-restore loopex_composition nonzero without_credential \
     mix test test/restore_workflow_test.exs
+  unset M7_RESTORE_RETAIN
   lane m7-rollback-nonredispatch loopex_reference_client 1 without_credential \
     mix test test/end_to_end_recovery_test.exs \
     --only "test:test an effect without a durable receipt becomes outcome_unknown and is not blindly retried"

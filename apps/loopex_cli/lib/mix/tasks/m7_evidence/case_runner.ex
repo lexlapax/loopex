@@ -52,6 +52,7 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
     Conversation,
     DaemonDetach,
     EphemeralDemo,
+    RestoreCase,
     ExecutionManifest,
     FixtureManifest,
     Scenarios
@@ -399,6 +400,7 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
     with :ok <- File.mkdir(root) do
       staged =
         cond do
+          case_id == "m7.restore" -> stage_restore(case_id, root)
           case_id in @held -> stage_held(case_id, root, context)
           Scenarios.get(case_id) -> stage_scenario(case_id, root, context)
           true -> stage(case_id, root, context)
@@ -668,6 +670,30 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
       _ -> {:error, :scenario_preparation_unavailable}
     end
   end
+
+  # Concept: the attended restore works only on retained state, never a
+  # conversation; its attempt root holds the fresh source and destination.
+  defp stage_restore(case_id, root) do
+    {:ok,
+     %{
+       name: case_id,
+       case_id: case_id,
+       entry: nil,
+       scenario: nil,
+       capture: nil,
+       trusted: nil,
+       config_argv: nil,
+       conversations: [%{restore: true}],
+       fixture: %{case_id: case_id, workspace: root, pins: %{}, environment: %{}}
+     }}
+  end
+
+  # The rollback lane's restore test leaves its retained execution beside the
+  # run root unless the pins name another directory.
+  defp restore_source(context),
+    do:
+      get_in(context, [:pins, "restore_source"]) ||
+        Path.join(Path.dirname(context.run_root), "m7-restore-source")
 
   # Concept: a held case's tool call waits on a harness FIFO outside the
   # writable workspace until the harness releases it.
@@ -992,6 +1018,37 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
   # session, so its record decides.
   # Technical depth: the capture reaches the policy only as Core's contextual
   # reference, so the same exact invocations and paths as the chat cases apply.
+  # Concept: the named operator confirms the restore summary they were shown.
+  # Technical depth: piped runs take the operator's recorded `confirm` answer;
+  # terminal runs print the summary and read the operator's own line.
+  defp dispatch(%{conversations: [%{restore: true}]} = staged, context) do
+    confirm = fn summary ->
+      case Map.get(context, :dispatch) do
+        :terminal ->
+          device = Map.get(context, :operator_device, :stdio)
+          IO.puts(device, summary)
+          IO.write(device, "type confirm to record your verification> ")
+          device |> IO.read(:line) |> to_string() |> String.trim() == "confirm"
+
+        _ ->
+          get_in(context, [:answers, "m7.restore"]) == "confirm"
+      end
+    end
+
+    result = RestoreCase.run(restore_source(context), staged.fixture.workspace, confirm)
+
+    %{
+      exit: if(Enum.all?(Map.values(result.checks)), do: 0, else: 1),
+      conversations: 1,
+      session: nil,
+      output: JSON.encode!(result.checks),
+      diagnostics: "",
+      closing: result.summary,
+      events: [],
+      transcripts: result.records
+    }
+  end
+
   # Concept: V9.4 runs in an in-VM daemon host, not a chat conversation.
   # Technical depth: the attempt's configuration supplies the model and the
   # credential variable; the provider launch is the reference host's unless a
@@ -1781,6 +1838,20 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
      retain(root, "facts.json", %{"session" => nil, "kinds" => %{}, "join" => inspect(join)})}
   end
 
+  defp inspect_facts(%{case_id: "m7.restore"}, outcome, root) do
+    checks = JSON.decode!(outcome.output)
+
+    join =
+      cond do
+        checks["retained_execution"] != true -> {:missing, :retained_execution}
+        checks["operator_confirmed"] != true -> {:missing, :operator_confirmation}
+        Enum.any?(checks, fn {_name, ok} -> ok != true end) -> {:failed, :restore_check}
+        true -> {:ok, nil}
+      end
+
+    {join, retain(root, "facts.json", %{"checks" => checks, "join" => inspect(join)})}
+  end
+
   defp inspect_facts(%{case_id: "m7.ephemeral-question"}, outcome, root) do
     join =
       case JSON.decode(outcome.output) do
@@ -1880,6 +1951,10 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
         {{:error, :changes_unavailable}, {:error, :changes_unavailable}}
     end
   end
+
+  defp inspect_changes(%{case_id: "m7.restore"}, root),
+    do:
+      {:ok, retain(root, "changes.json", %{"workspace" => "the retained workspace is only read"})}
 
   defp inspect_changes(%{held: _} = staged, root) do
     workspace = staged.fixture.workspace

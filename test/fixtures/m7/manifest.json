@@ -208,7 +208,7 @@
         "credential": false,
         "driver": "demonstration",
         "lane": "m7-operator",
-        "status": "pending:attended restore driver",
+        "status": "ready",
         "steps": [
           "V13.1",
           "V13.4",

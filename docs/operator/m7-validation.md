@@ -199,6 +199,29 @@ control. The runner is released only after the reattach snapshot and the
 observer's replay name the same active run and held operation. The run must
 then complete with no accepted abort.
 
+## Attended restore
+
+The `m7-rollback` lane's restore test builds its first fixture in
+`<retained>/m7-restore-source`. That directory holds the current-format
+backup, its baseline manifest, the physically identified workspace and the
+lane's own restore plan and receipt. `m7.restore` joins that exact execution
+and calls no provider:
+
+- it verifies the retained backup against its recorded manifest (V13.1);
+- it confirms that ordinary opens refuse the lane's retired source, then
+  moves the source aside so its path is absent;
+- it restores the retained backup into a separate empty root through the
+  public current-format restore, as a lost-source transaction (V13.4);
+- it checks complete manifest equality: every baseline entry is exact, ledger
+  generations change only their rebound members, and only restore lineage is
+  added. It also checks the unchanged workspace baseline and the restored
+  session history (V13.5);
+- it retains the plan, result and summary (V13.6).
+
+Under `--terminal` the wrapper prints the summary and the operator types
+`confirm`; otherwise the case is `required_action_absent`. The `restore_source`
+pin names another retained directory.
+
 ## Step ownership
 
 Every key below has exactly one owner: `case:` an M7 manifest case run by its
@@ -347,7 +370,7 @@ One row per manifest case in lane order; `pending:` names what still blocks it.
 | `m7.policy-denial` | `m7-operator` | scenario-chat | `ready` |
 | `m7.interrupt` | `m7-operator` | demonstration | `ready` |
 | `m7.external` | `m7-operator` | external-chat | `ready` |
-| `m7.restore` | `m7-operator` | demonstration | `pending:attended restore driver` |
+| `m7.restore` | `m7-operator` | demonstration | `ready` |
 | `m7.pipe-answer` | `m7-provider` | scenario-chat | `ready` |
 | `m7.instructions.declined` | `m7-provider` | scenario-chat | `ready` |
 | `m7.instructions.changed` | `m7-provider` | scenario-chat | `ready` |

@@ -76,7 +76,8 @@ defmodule LoopexComposition.RestoreWorkflowTest do
 
   test "public runtime restore leaves workspace intact before a separate same-directory content restore",
        context do
-    fixture = actual_cut(context.root, nil, :without_helpers)
+    root = m7_retained_root(context.root)
+    fixture = actual_cut(root, nil, :without_helpers)
     assert File.lstat(Path.join(fixture.source, "delegation")) == {:error, :enoent}
     assert File.lstat(Path.join(fixture.backup, "delegation")) == {:error, :enoent}
     assert File.ls!(fixture.destination) == []
@@ -93,7 +94,7 @@ defmodule LoopexComposition.RestoreWorkflowTest do
     # Technical depth: native lstat checks retain the full 0o7777 comparison domain.
     File.chmod!(Path.join(fixture.workspace, "empty"), 0o750)
     assert Bitwise.band(File.lstat!(Path.join(fixture.workspace, "empty")).mode, 0o7777) == 0o750
-    workspace_backup = Path.join(context.root, "workspace-backup")
+    workspace_backup = Path.join(root, "workspace-backup")
     assert {:ok, _} = RestoreFixtureCopy.copy(fixture.workspace, workspace_backup)
     assert Bitwise.band(File.lstat!(Path.join(workspace_backup, "empty")).mode, 0o7777) == 0o750
     workspace_baseline = manifest(fixture.workspace)
@@ -232,6 +233,7 @@ defmodule LoopexComposition.RestoreWorkflowTest do
     assert placement(fixture.workspace) == original_identity
     assert WorkspaceIdentity.reference(fixture.workspace) == {:ok, original_reference}
     assert manifest(fixture.backup) == fixture.baseline
+    m7_retain(root, fixture, receipt, workspace_baseline)
   end
 
   for control <- [:preserve, :normalize] do
@@ -3801,4 +3803,41 @@ defmodule LoopexComposition.RestoreWorkflowTest do
   end
 
   defp hash(bytes), do: Canonical.digest_bytes(bytes)
+
+  # Concept: M7's attended restore joins this exact execution. When the
+  # rollback lane names a retained directory, the fixture is built there, so
+  # its backup and its physically identified workspace outlive the test.
+  # Technical depth: the directory must not exist yet; nothing else changes.
+  defp m7_retained_root(temporary) do
+    case System.get_env("M7_RESTORE_RETAIN") do
+      nil ->
+        temporary
+
+      retained ->
+        File.mkdir_p!(Path.dirname(retained))
+        File.mkdir!(retained)
+        {:ok, physical} = WorkspaceIdentity.resolve_path(retained)
+        physical
+    end
+  end
+
+  defp m7_retain(root, fixture, receipt, workspace_baseline) do
+    if System.get_env("M7_RESTORE_RETAIN") do
+      retained = %{
+        "version" => 1,
+        "backup" => fixture.backup,
+        "workspace" => fixture.workspace,
+        "workspace_ref" => fixture.workspace_ref,
+        "session_id" => fixture.session,
+        "runtime_ids" => [@runtime],
+        "plan" => fixture.plan,
+        "baseline_manifest_sha256" => hash(fixture.baseline),
+        "workspace_manifest_sha256" => hash(workspace_baseline),
+        "receipt" => receipt
+      }
+
+      File.write!(Path.join(root, "baseline.manifest"), fixture.baseline, [:exclusive])
+      File.write!(Path.join(root, "retained.json"), JSON.encode!(retained), [:exclusive])
+    end
+  end
 end

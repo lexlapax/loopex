@@ -1296,6 +1296,49 @@ defmodule LoopexCli.M7CaseRunnerTest do
     assert facts(result)["kinds"]["run_terminal_committed"] == 1
   end
 
+  # Concept: the attended restore joins the rollback lane's exact retained
+  # execution, produced here by running that lane's own restore test.
+  # Technical depth: the producer runs as the release lane runs it, in its
+  # app with M7_RESTORE_RETAIN naming the directory beside the run root.
+  @tag timeout: 300_000
+  test "the attended restore verifies, restores and inspects the retained rollback execution",
+       f do
+    retained = Path.join(Path.dirname(f.context.run_root), "m7-restore-source")
+    composition = Path.expand("../../loopex_composition", __DIR__)
+
+    {output, status} =
+      System.cmd("mix", ["test", "test/restore_workflow_test.exs:77"],
+        cd: composition,
+        env: [{"M7_RESTORE_RETAIN", retained}, {"MIX_ENV", "test"}],
+        stderr_to_stdout: true
+      )
+
+    assert status == 0, output
+
+    context =
+      Map.merge(f.context, %{
+        manifest: lane(f.context.manifest, ["m7.restore"]),
+        answers: %{"m7.restore" => "confirm"}
+      })
+
+    result = passed!(CaseRunner.run_lane(f.writer, "m7-operator", context))
+    checks = facts(result)["checks"]
+    assert checks["old_root_prevented"] and checks["manifest_complete"]
+    assert checks["restored_history"] and checks["operator_confirmed"]
+  end
+
+  test "a restore without the rollback lane's retained execution is required_action_absent", f do
+    context =
+      Map.merge(f.context, %{
+        manifest: lane(f.context.manifest, ["m7.restore"]),
+        answers: %{"m7.restore" => "confirm"}
+      })
+
+    assert {:stopped, [{:ok, result}]} = CaseRunner.run_lane(f.writer, "m7-operator", context)
+    assert result.mechanical_result == "required_action_absent"
+    assert facts(result)["join"] =~ "retained_execution"
+  end
+
   test "the wrapper command checks admission without staging and refuses bad arguments", f do
     :ok = AttemptWriter.close(f.writer)
     root = Path.expand("../../..", __DIR__)
