@@ -200,7 +200,58 @@ defmodule Mix.Tasks.Loopex.M7Evidence.Scenarios do
     }
   end
 
+  def get("m7.baseline.ask") do
+    %{
+      seed: %{"README.md" => @readme},
+      allowed: [],
+      profile: & &1,
+      ask: fn workspace ->
+        ["ask", "--tools", "read-only", "--policy", "allow-all", "--cwd", workspace] ++
+          ["--output", "json", "Read README.md and report its first line."]
+      end,
+      plan: fn _context -> {:ok, []} end,
+      joins: fn _rows, outcome, _workspace ->
+        case one_json(outcome.output) do
+          %{"outcome" => "completed"} -> {:ok, nil}
+          nil -> {:failed, :result_unavailable}
+          _ -> {:failed, :ask_not_completed}
+        end
+      end
+    }
+  end
+
+  def get("m7.trace.json") do
+    %{
+      seed: %{"README.md" => @readme},
+      allowed: [],
+      profile: & &1,
+      ask: fn workspace ->
+        ["ask", "--policy", "allow-all", "--cwd", workspace, "--output", "json", "--trace"] ++
+          ["--trace-level", "calls", "Read README.md and report its first line."]
+      end,
+      plan: fn _context -> {:ok, []} end,
+      joins: fn _rows, outcome, _workspace ->
+        case one_json(outcome.output) do
+          %{"outcome" => "completed"} -> {:ok, nil}
+          nil -> {:failed, :stdout_not_one_result}
+          _ -> {:failed, :ask_not_completed}
+        end
+      end
+    }
+  end
+
   def get(_case_id), do: nil
+
+  # The ask result stream holds exactly one JSON object; diagnostics go to
+  # standard error.
+  defp one_json(output) do
+    with [line, ""] <- String.split(output, "\n"),
+         {:ok, %{} = result} <- JSON.decode(line) do
+      result
+    else
+      _ -> nil
+    end
+  end
 
   defp ask_prompt(subcase),
     do:

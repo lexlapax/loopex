@@ -54,7 +54,7 @@ defmodule Mix.Tasks.Loopex.M7Evidence.ExecutionManifest do
   @lanes ~w(m7-operator m7-provider m7-rollback)
   @keys ~w(status coverage campaign_id genesis_digest lanes cases operator_step_evidence)
   @case_keys ~w(lane attended credential driver status steps)
-  @drivers ~w(fixture-chat external-chat scenario-chat demonstration provider-wrapper release-lane)
+  @drivers ~w(fixture-chat external-chat scenario-chat scenario-ask demonstration provider-wrapper release-lane)
 
   # The 74 numbered step identities of the accepted V1–V13 scenarios.
   @doc false

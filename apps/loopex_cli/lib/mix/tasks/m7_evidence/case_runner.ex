@@ -614,6 +614,20 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
     %{resume: false, steps: steps ++ [{:line, "/status"}, {:line, "/quit"}]}
   end
 
+  defp dispatch(%{scenario: %{ask: argv}} = staged, context) do
+    result = LoopexCli.Ask.run(argv.(staged.fixture.workspace), Map.get(context, :ask_seams, []))
+
+    %{
+      exit: result.status,
+      conversations: 1,
+      session: nil,
+      output: result.stdout,
+      diagnostics: result.stderr,
+      closing: result.stdout,
+      transcripts: [{"stdout.txt", result.stdout}, {"stderr.txt", result.stderr}]
+    }
+  end
+
   defp dispatch(staged, context) do
     case Map.get(context, :dispatch, :pipe) do
       fun when is_function(fun, 2) -> fun.(staged, context)
@@ -845,6 +859,14 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
   # Concept: the committed session decides the required joins.
   # Technical depth: the retained record names each fact kind's count and the
   # join result; it holds no model text beyond what the session committed.
+  # A one-shot ephemeral ask commits no session; its result stream decides.
+  defp inspect_facts(%{scenario: %{ask: _} = scenario} = staged, outcome, root) do
+    join = scenario.joins.([], outcome, staged.fixture.workspace)
+
+    {join,
+     retain(root, "facts.json", %{"session" => nil, "kinds" => %{}, "join" => inspect(join)})}
+  end
+
   defp inspect_facts(staged, outcome, root) do
     state = Path.join(Path.dirname(staged.fixture.workspace), "state")
 

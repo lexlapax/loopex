@@ -481,6 +481,59 @@ defmodule LoopexCli.M7CaseRunnerTest do
     end
   end
 
+  # The `ask` command's own host seams stand in only for the ephemeral
+  # provider session; argument handling and rendering are the command's own.
+  defp ask_seams(outcome) do
+    manager = spawn(fn -> receive do: (:release -> :ok) end)
+    on_exit(fn -> Process.exit(manager, :kill) end)
+
+    [
+      discard_credential: fn -> :ok end,
+      quiet_logger: fn -> :ok end,
+      start_session: fn _ -> {:ok, :fixture_session} end,
+      install_interrupt: fn _, _ -> {:ok, manager} end,
+      signal_manager: fn -> manager end,
+      handler_live: fn _, _ -> true end,
+      interrupt_phase: fn _, _ -> :idle end,
+      ask: fn _, _ ->
+        {:ok,
+         %{
+           profile: :ephemeral,
+           outcome: outcome,
+           session_id: "session-1",
+           run_id: "run-1",
+           text: "M7 scenario workspace.",
+           text_truncated: false,
+           tools: [],
+           tools_truncated: false,
+           shadowed_skills: [],
+           details: %{"cleanup_grace_ms" => 5_000}
+         }}
+      end,
+      stop_session: fn _ -> :ok end,
+      finish_interrupt: fn _, _ -> {:ok, :ordinary} end
+    ]
+  end
+
+  for case_id <- ["m7.baseline.ask", "m7.trace.json"] do
+    @ask_case case_id
+    test "#{@ask_case} renders exactly one completed JSON result", f do
+      result =
+        passed!(scenario!(f, @ask_case, fn _ -> [] end, %{ask_seams: ask_seams(:completed)}))
+
+      stdout = File.read!(Path.join(result.root, "records/stdout.txt"))
+      assert [json, ""] = String.split(stdout, "\n")
+      assert JSON.decode!(json)["outcome"] == "completed"
+    end
+  end
+
+  test "a cancelled one-shot ask is assertion_failed", f do
+    assert {:stopped, [{:ok, result}]} =
+             scenario!(f, "m7.baseline.ask", fn _ -> [] end, %{ask_seams: ask_seams(:cancelled)})
+
+    assert result.mechanical_result == "assertion_failed"
+  end
+
   test "the wrapper command checks admission without staging and refuses bad arguments", f do
     :ok = AttemptWriter.close(f.writer)
     root = Path.expand("../../..", __DIR__)

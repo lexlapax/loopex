@@ -226,11 +226,11 @@ One row per manifest case in lane order; `pending:` names what still blocks it.
 
 | Case | Lane | Driver | Status |
 | --- | --- | --- | --- |
-| `m7.baseline.ask` | `m7-operator` | demonstration | `pending:attended baseline driver` |
+| `m7.baseline.ask` | `m7-operator` | scenario-ask | `ready` |
 | `m7.baseline.durable` | `m7-operator` | scenario-chat | `ready` |
 | `m7.trace.flag` | `m7-operator` | scenario-chat | `ready` |
 | `m7.trace.file` | `m7-operator` | scenario-chat | `ready` |
-| `m7.trace.json` | `m7-operator` | demonstration | `pending:attended trace driver` |
+| `m7.trace.json` | `m7-operator` | scenario-ask | `ready` |
 | `m7.repair` | `m7-operator` | fixture-chat | `ready` |
 | `m7.instructions.admitted` | `m7-operator` | demonstration | `pending:instruction fixture driver` |
 | `m7.steer-barrier` | `m7-operator` | demonstration | `pending:FIFO hold runner and observer join` |

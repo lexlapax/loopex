@@ -5,9 +5,9 @@
       "m7.baseline.ask": {
         "attended": true,
         "credential": true,
-        "driver": "demonstration",
+        "driver": "scenario-ask",
         "lane": "m7-operator",
-        "status": "pending:attended baseline driver",
+        "status": "ready",
         "steps": [
           "V1.1",
           "V1.2",
@@ -311,9 +311,9 @@
       "m7.trace.json": {
         "attended": true,
         "credential": true,
-        "driver": "demonstration",
+        "driver": "scenario-ask",
         "lane": "m7-operator",
-        "status": "pending:attended trace driver",
+        "status": "ready",
         "steps": [
           "V11.5.json"
         ]
