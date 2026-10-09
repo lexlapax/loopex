@@ -27,6 +27,51 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+### Native configuration complete; physical creation recovery proved, 2026-10-09
+
+At `ecc14289907d4ff97af2e111ef66a1acecc3c875`, original99182 proves93 native
+configuration cases on both supported pairs in195.327seconds. Collection
+`36bff6fb92b95a048a070d6e0ee65fa515abd657da47b3081a82e5c992a85838`.
+Original59208 proves79 creation cases on both pairs in235.739seconds. Collection
+`bf5274d5d99772019afc34d91212319913a005b6d4980e4d3a48486ac6c9e076`.
+Unchanged successful current groups are authenticated reuse: configuration35
+from original9929, creation38 from original84872. Repaired affected files and
+every floor group execute anew. Both failed originals remain retained.
+The reviewed repair owns parent-acquired fixture processes and disarms blocked
+Store probes before teardown; maintenance refusal uses its actual generic
+record and preserves same-ID replay. All original cutoffs and bodies remain.
+
+Original92384 separately proves40 Runtime/Local artifact cases on both pairs at
+`31df194d` in24.582seconds. Strict-AST formatter85562 passes both pairs in
+2.775seconds without changing bytes. Retention child
+`M7/current-source-preparation-20261009-v38/retention.json`, SHA-256
+`5da790f758dec8396b5cbecdfdef985dff11890776b78e8e529f83d1a114abde`,
+retains491 assets and authenticates parentv37. All originals are collected once;
+no native handle is live. Latest registry3250 SHA-256
+`7935add9d6cc32352094d41e71caac400748ac04ebbd2c5df2edfdc1fa451a1b`.
+
+One existing added T08 native host/daemon/checkpoint/maintenance row closes.
+T01–T19: original89 done/84 open/6 retired; added375 done/22 open;
+combined464 done/106 open/6 retired. T08 still has two original rows open.
+T04's literal runtime recovery obligations are proved; complete caller migration
+and coordinated serving remain open in its carried obligations and existing
+T05 rows. No additional recovery subtask is introduced.
+
+ADR0066's accepted trusted-adapter semantics bind the original Store owner
+through the retained opaque handle. No extra public field or new approval is
+needed; this resolves the earlier generic-owner stop diagnosis. Source-clear
+lost-registration v2 packet
+`/private/tmp/m7-artifact-lost-registration-source-20261009-v2`, manifest
+`5e9df6242a873139fbeacc29b038ff4b01ea3429fc9884687c875343ab487ecd`,
+is retained but unjoined/native UNRUN. Its test now proves actual original calls
+queued at the suspended owner and joins surviving original observers before
+test exit. Next integrate its three paths, format with strict AST proof and
+qualify the changed boundary on both pairs. The old Core36 observer cutoff
+remains a separate decision. ADR0067 remains the presented unanswered question;
+0065/0068 remain prerequisites. Continue the active goal on `m7`. No full
+integration, release/provider/attended campaign or milestone closure is claimed.
+
+
 ### Embedded workflows qualified; physical integration work continues, 2026-10-09
 
 Original 85508 at `e98022030a8fb32898f097d87536af485790201c` passes both complete

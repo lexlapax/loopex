@@ -1,5 +1,19 @@
 # M7 Implementation Tasks
 
+### Native configuration subtask complete; physical recovery proved, 2026-10-09
+
+Source `ecc14289` proves configuration93 and creation79 cases on both supported
+pairs. Originals99182/59208 take195.327/235.739seconds. Unchanged successful
+current groups are explicitly authenticated reuse; repaired affected groups and
+all floor groups execute anew. Failed originals9929/84872 remain retained.
+One existing added T08 row closes; broader T04 caller/rejoin obligations remain
+open. The [resume checkpoint](M7-resume.md) binds collections, source reviews and
+491-asset retention childv38. T01–T19 originals:89 done/84 open/6 retired;
+added375 done/22 open; combined464 done/106 open/6 retired. T08 added is29/0;
+its two original rows remain open. ADR0066 lost-registration v2 is reviewed,
+unjoined/native UNRUN. ADR0067 remains the presented human question.
+
+
 ### Embedded workflow proof; physical integration remaining, 2026-10-09
 
 Original 85508 at `e9802203` passes both complete Composition workflow files,
@@ -15473,6 +15487,15 @@ or check was relaxed.
   current-format restore and native responsive lifecycle obligations stay open.
 - [ ] Implement accepted ADR0059's owned Control creation slot, conservative pre-permit fence and mechanical carrier with finite startup/recovery; prove actual held Store stop/status/overlap behavior, occupied-read refusals, original joins/cutoffs, actor/root/VM loss and no historical activation before coordinated rejoin.
 
+  Current audit: paired79 at `ecc14289`, original59208, completes the literal
+  root/VM recovery obligations. Authored intake is already proved in paired490
+  at `9420464c`, original86174, collection
+  `fd03e9f81622a77bcd9b237fbca6216ba6401287edb8ddf3c57a94ac7656f723`;
+  native readiness and both host gates are also proved. Complete caller
+  migration and coordinated serving remain carried obligations in existing
+  T05 rows, so this broader row stays open. The paragraph below records its
+  earlier partial revision, not additional missing recovery work.
+
   Partial native unit proved: isolated52808005, complete22 per supported pair,
   original45191,69.460seconds, eight joins/42 artifacts, no exclusions/skips/invalid.
   Literal seven-path integration and nine tested boundary-context paths are retained
@@ -15880,7 +15903,15 @@ the still-open real-provider, live protocol, persistent-fault or closure lanes.
 - [x] Join prepared ordinary candidates to settled owner admission, exact retained-history preflight, atomic commit and replay.
 - [x] Prove configuration restart, commit-unknown re-presentation and owner crashes before/after linearization through the live runtime.
 - [x] Join host configure resolution to the ordered chat driver through the public prepared facade; retain only confirmed candidates and prove busy/history refusal, exact unknown observation, canonical aliases and changed live model allowances on both toolchains.
-- [ ] Join host resolution and prepared daemon routing; extend configuration preflight to committed checkpoints and maintenance quiescence.
+- [x] Join host resolution and prepared daemon routing; extend configuration preflight to committed checkpoints and maintenance quiescence.
+  Native Core29, Composition6 and Daemon58 are proved on both supported pairs at
+  `ecc14289907d4ff97af2e111ef66a1acecc3c875`, original99182,195.327seconds.
+  Unchanged current Core29/Composition6 successes from original9929 are
+  authenticated reuse; repaired Daemon58 and all floor groups run anew.
+  Collection `36bff6fb92b95a048a070d6e0ee65fa515abd657da47b3081a82e5c992a85838`.
+  Exact native reference alias/canonical capture, duplicate/conflict/recovery,
+  committed summary/tail and maintenance refusal/replay are proved. Live wire
+  activation and independent clients remain separate. Failed original9929 is retained.
 - [x] Validate native configuration against checkpoint-surviving history and exact summary/tail staging; prove actual committed checkpoints, covered/uncovered terminal-tool capability, unchanged refusals/replay/next-request capture, and maintenance refusal before host resolution through work, commitment, cleanup and recovery. Remote configure and coordinated protocol activation remain separate.
 - [x] Capture bounded limits and source bindings from the exact pinned packaged catalog without mutable lookup; preserve unknown limits and the literal accepted alias.
 - [x] Register all nine literal reasoning cells after deterministic native request/response, bound, disclosure and terminal-history conformance; share exact mappings with transport validation.
@@ -16601,7 +16632,7 @@ before a provider demonstration.
 | Context refusals and failures | ADR 0043 | Old context_admission_refused_v1 preserved; v2 configurable ceiling and new failure union | ContextAdmission; SessionState; protocol projections | Ordinary measured numeric v2 and unavailable terminal-history preparation failures implemented; other causes, maintenance/headroom and wire projections pending |
 | Initial session truth | ADRs 0044/0046 | Read v2/v3 genesis; write coordinated closed v3 configuration/tool-selection/policy-defer payload | Runtime.Control; SessionGenesis; SessionState; Store conformance | Pure decoder/replay and host-private v3 creation implemented; reference-host writer and migration proof pending |
 | Exact create and provenance | ADR 0046 | Pure resolve/normalize; exact-genesis create/lookup; read-only creation provenance and stable ordinals | Runtime facade; Control; Store adapters/conformance | Pure helpers, live exact create, exact lookup and provenance queries implemented; helper host integration pending |
-| Atomic configuration | ADR 0044 | Settled configure command; immutable selection; captured version/model/bounds/metadata/mapping | SessionState; SessionCoordinator; composition; protocol | Pure preparation and live ordinary atomic admission/replay, retained-history sizing, restart and commit-boundary faults implemented; host resolution, prepared daemon routing, checkpoint projection and maintenance quiescence pending |
+| Atomic configuration | ADR 0044 | Settled configure command; immutable selection; captured version/model/bounds/metadata/mapping | SessionState; SessionCoordinator; composition; protocol | Native host resolution and prepared daemon routing, committed checkpoint projection and maintenance quiescence proved; live wire generation and independent clients remain pending |
 | Model request | ADR 0044 | Current-only v2 local-reference continuation with generic expansion; retired v1 refuses | Model; SessionState; SessionCoordinator; model adapters | Source-bound staging, bounded expansion, self-consistent retired-version refusal, committed-lineage validation and streamed/buffered native rendering implemented |
 | Model reply and settlement | ADR 0044 | Bounded reply v3; current-only model_attempt_settled_v3; retired v1/v2 readers and cutover state; atomic reply/continuation/accounting | Model; ProviderAttempt; SessionState; adapters | Capsule expansion, native capture, strict callback projection and source-bound v3 readers/writer implemented with migrated callback fixtures; source-bound request envelopes and ordinary expanded accounting implemented; durable and buffered native emission implemented; maintenance accounting pending |
 | Thinking mappings | ADR 0044 | Fixed nine registered cells, native block fidelity, frozen-prefix exchange and canonical conversion | ReqLLM mapping/transport; SessionCoordinator | Nine ordinary adapter mappings registered with both native transports, per-cell streaming/bound/disclosure and canonical terminal-history conformance; host integration, separate summarizer and live witnesses pending |
