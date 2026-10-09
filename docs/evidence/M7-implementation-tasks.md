@@ -1,5 +1,40 @@
 # M7 Implementation Tasks
 
+### Current creation fixture repair proved, 2026-10-08
+
+Original72370 at `c3165b8bc9c7f58a02b20e3c4c09aaab2655a960` passes all65
+whole affected Core cases on each supported toolchain, zero failures,
+exclusions, skips or invalids. Both pairs pass complete changed-source
+formatting and warning-free project compilation; current documentation and
+status pass. The complete189.435-second output retains ten original process
+joins and43 artifacts under `M7/core-fixture-repairs-focused-20261008-v2`.
+Terminal SHA-256
+`d98f2eebaff0384b1eb14cf1725b8e21eaf252b862fe2f2aa4025972d14c222e`;
+collection SHA-256
+`627ba024cd96ba2878f2666e1e715d4456564a3ec1506ce1d343b14722c56bfc`.
+Next completed registry2746, SHA-256
+`dd91e82c7b45f161016d6228c4ac503798aea42cb072bcb91286ba8d44989323`.
+All normalization samples, exact byte/record/readback/refusal checks and four
+Store wrappers' callback/status/binding/fault/deadline/cleanup oracles remain.
+This closes only the added65-case fixture-repair subtask, not full Core682 or
+other application, foreground, integration or closure obligations. Original60633
+remains failed evidence; its three exact-read assertion failures are separate.
+
+Formatter49 original72027 at the same source independently passes all four
+non-line syntax-tree comparisons and both complete changed-source format
+checks, with no source delta. It retains3.615seconds/four original joins and
+34 artifacts under `M7/candidate-format-preparation-20261008-v49`;
+terminal SHA-256
+`2eda1bb98b704c2a447aaf7ef0827b200445993c5b5e6eea7227caff05e103ed`,
+collection SHA-256
+`5cb74fc492c87aaa29ffa38a58d52b46167d9f5efac848ba3f0054a21dbd2d05`.
+
+T01-T19 original88 done /85 open /6 retired; added368 done /23 open.
+T16 added is71 done /4 open. No native handle is live. Next independently
+review and join the two-file exact-read assertion repair, format it and qualify
+all16 whole cases on both supported pairs. ADR0065 remains pending and the
+foreground stopped-leader production defect remains open.
+
 ### Current creation fixture repair joined, 2026-10-08
 
 All four test Store wrappers now forward creation_provenance through their
@@ -15253,7 +15288,7 @@ full restore175, operator attendance, helpers or whole integration.
 
 ### Added implementation subtasks
 
-- [ ] Repair the two normalization properties and four test Store provenance wrappers exposed by original60633; retain every sample, byte/record/readback/refusal assertion, callback observer, compact/status/binding/fault gate, cutoff and process join. Prove all six whole affected files /65 cases per supported pair, with original652/682 and30 failures retained. Full Core682, other applications and integration remain separate.
+- [x] Repair the two normalization properties and four test Store provenance wrappers exposed by original60633; retain every sample, byte/record/readback/refusal assertion, callback observer, compact/status/binding/fault gate, cutoff and process join. Prove all six whole affected files /65 cases per supported pair, with original652/682 and30 failures retained. Full Core682, other applications and integration remain separate.
 
 - [x] Declare App Server's existing production `:crypto` use in its OTP application dependencies. Preserve the application-declaration checker and verify its complete inventory passes; this repairs the structure failure from original15015 and adds no external package. Whole documentation, foreground and integration checks remain separate.
 
