@@ -277,7 +277,7 @@
         "credential": true,
         "driver": "demonstration",
         "lane": "m7-operator",
-        "status": "pending:thinking-cell witness driver",
+        "status": "ready",
         "steps": [
           "V7.3.positive"
         ]

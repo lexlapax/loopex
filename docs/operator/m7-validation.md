@@ -294,7 +294,7 @@ One row per manifest case in lane order; `pending:` names what still blocks it.
 | `m7.long` | `m7-operator` | fixture-chat | `ready` |
 | `m7.oversized-source` | `m7-operator` | demonstration | `ready` |
 | `m7.provider-switch` | `m7-operator` | scenario-chat | `ready` |
-| `m7.thinking-rounds` | `m7-operator` | demonstration | `pending:thinking-cell witness driver` |
+| `m7.thinking-rounds` | `m7-operator` | demonstration | `ready` |
 | `m7.review` | `m7-operator` | fixture-chat | `ready` |
 | `m7.policy-denial` | `m7-operator` | scenario-chat | `ready` |
 | `m7.interrupt` | `m7-operator` | demonstration | `ready` |

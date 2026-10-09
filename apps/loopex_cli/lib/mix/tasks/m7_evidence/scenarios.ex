@@ -23,6 +23,18 @@ defmodule Mix.Tasks.Loopex.M7Evidence.Scenarios do
 
   @dated "anthropic:claude-haiku-4-5-20251001"
   @fable "anthropic:claude-fable-5-1"
+  @thinking_cells [
+    {@dated, "low"},
+    {@dated, "medium"},
+    {@dated, "high"},
+    {@fable, "default"},
+    {@fable, "low"},
+    {@fable, "medium"},
+    {@fable, "high"}
+  ]
+  @rounds_facts %{"a.txt" => "cedar", "b.txt" => "seven", "c.txt" => "amber"}
+  @rounds_files Map.new(@rounds_facts, fn {path, word} -> {path, word <> "\n"} end)
+  @rounds_prompt "Read a.txt, then b.txt, then c.txt, one read tool call at a time and in that order. Then reply with the three words you read, in order."
   @readme "M7 scenario workspace.\n"
   @sentinel "AMBER-SENTINEL"
   @oversized_sentinel "M7-OVERSIZED-SENTINEL-7F3A"
@@ -489,7 +501,123 @@ defmodule Mix.Tasks.Loopex.M7Evidence.Scenarios do
     }
   end
 
+  # V7.3: each continuation-required thinking cell runs the fixed three-file
+  # tool fixture as one subcase of one session, then the session reopens.
+  def get("m7.thinking-rounds") do
+    %{
+      seed: @rounds_files,
+      allowed: [],
+      profile: fn profile ->
+        profile
+        |> put_in(["session", "model"], @dated)
+        |> put_in(["session", "max_tokens"], 8_192)
+        |> put_in(["session", "tools"], "read-only")
+        |> Map.put("maintenance", %{"model" => @dated})
+      end,
+      plan: fn _context ->
+        # Each later cell first checkpoints the earlier cells' native history,
+        # which a thinking change may otherwise refuse as compaction_required.
+        subcases =
+          @thinking_cells
+          |> Enum.with_index()
+          |> Enum.flat_map(fn {{model, reasoning}, index} ->
+            compact = if index == 0, do: [], else: [{:line, "/compact"}, {:line, "/wait"}]
+
+            compact ++
+              [
+                {:line, ~s(/configure {"model":"#{model}","reasoning":"#{reasoning}"})},
+                {:line, @rounds_prompt},
+                {:line, "/wait"}
+              ]
+          end)
+
+        {:ok,
+         [
+           %{resume: false, steps: subcases ++ [{:line, "/quit"}]},
+           %{resume: true, steps: [{:line, "/status"}, {:line, "/quit"}]}
+         ]}
+      end,
+      joins: fn rows, outcome, _workspace -> thinking_rounds(rows, outcome) end
+    }
+  end
+
   def get(_case_id), do: nil
+
+  @doc false
+  def thinking_cells, do: @thinking_cells
+
+  # Per thinking run: at least two continuation requests after committed tool
+  # results, each replaying a retained thinking literal, and a final reply that
+  # names every fixture fact.
+  defp thinking_rounds(rows, outcome) do
+    runs =
+      rows
+      |> Enum.filter(&(&1.payload.kind == "model_request_committed_v2"))
+      |> Enum.group_by(& &1.payload["run_id"])
+
+    replies =
+      for row <- rows,
+          row.payload.kind == "model_attempt_settled_v3",
+          continuation = get_in(row.payload, ["result", "reply", "continuation"]),
+          is_map(continuation),
+          into: %{},
+          do: {row.payload["operation_id"], continuation["content"]}
+
+    counted =
+      for {run, requests} <- runs,
+          continuations = Enum.count(requests, &replays_thinking?(&1, replies)),
+          do: {run, continuations}
+
+    finals =
+      for row <- rows,
+          row.payload.kind == "model_attempt_settled_v3",
+          text = get_in(row.payload, ["result", "reply", "text"]),
+          is_binary(text),
+          Enum.all?(Map.values(@rounds_facts), &String.contains?(text, &1)),
+          do: row.payload["run_id"]
+
+    cond do
+      length(counted) < length(@thinking_cells) -> {:missing, :thinking_subcases}
+      Enum.any?(counted, fn {_run, n} -> n < 2 end) -> {:missing, :continuation_rounds}
+      Enum.any?(counted, fn {run, _} -> run not in finals end) -> {:failed, :fixture_facts}
+      outcome.conversations < 2 -> {:missing, :settled_reopen}
+      true -> {:ok, nil}
+    end
+  end
+
+  # Concept: a counted continuation request replays a retained thinking
+  # literal, and every replayed capsule equals the reply it names.
+  # Technical depth: the committed canonical request bytes carry each entry's
+  # source operation and capsule; the source reply's committed continuation
+  # content must match it exactly once expanded to plain maps.
+  defp replays_thinking?(row, replies) do
+    with bytes when is_binary(bytes) <-
+           get_in(row.payload, ["request", "canonical_request_bytes"]),
+         request when is_list(request) <- :erlang.binary_to_term(bytes, [:safe]),
+         %{"entries" => [_ | _] = entries} <- plain(Keyword.get(request, :continuation)) do
+      thinking? =
+        Enum.any?(entries, fn entry ->
+          Enum.any?(entry["capsule"]["content"], fn block ->
+            block["kind"] == "literal" and
+              block["value"]["type"] in ["thinking", "redacted_thinking"]
+          end)
+        end)
+
+      thinking? and
+        Enum.all?(
+          entries,
+          &(Map.get(replies, &1["source"]["operation_id"]) == &1["capsule"]["content"])
+        )
+    else
+      _ -> false
+    end
+  rescue
+    _ -> false
+  end
+
+  defp plain({:loopex_map, pairs}), do: Map.new(pairs, fn {key, value} -> {key, plain(value)} end)
+  defp plain(list) when is_list(list), do: Enum.map(list, &plain/1)
+  defp plain(value), do: value
 
   defp runs_after(rows, version),
     do:

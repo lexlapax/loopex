@@ -261,12 +261,41 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
              Map.get(context, :matrix)
            ),
          {:ok, plan} <- admit(writer, context, selection, Map.get(context, :mode, :new)) do
+      context = Map.put(context, :credentials, credentials(context.config_argv))
       run_pins(writer, plan.remaining, selection, context, [])
     else
       {:skip, :lane_already_ended} -> {:ok, []}
       other -> other
     end
   end
+
+  # Concept: each conversation starts as a fresh chat process would, with the
+  # configuration's named credential variables present.
+  # Technical depth: composition consumes those variables when it loads a
+  # route, so the first conversation in this one VM would leave the next
+  # without them. The trusted runner captures them once, before any
+  # conversation, holds them only in this process and restores them
+  # immediately before each conversation. Values never enter a record.
+  defp credentials(["chat", "--config", path | _]) do
+    with {:ok, bytes} <- File.read(path),
+         {:ok, %{"providers" => providers}} when is_map(providers) <-
+           LoopexCli.ConfigJson.decode(bytes) do
+      for {_provider, %{"credential" => %{"env" => name}}} <- providers,
+          value = System.get_env(name),
+          is_binary(value),
+          do: {name, value}
+    else
+      _ -> []
+    end
+  end
+
+  defp credentials(_argv), do: []
+
+  defp restore_credentials(context),
+    do:
+      Enum.each(Map.get(context, :credentials, []), fn {name, value} ->
+        System.put_env(name, value)
+      end)
 
   # Concept: one invocation of a logical matrix decides each lane's mode from
   # the index itself: continue a suspended lane, join the matrix this
@@ -1063,6 +1092,7 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
       ] ++ Map.get(context, :chat_options, [])
 
     options = if observed, do: observer_runtime(options, self()), else: options
+    restore_credentials(context)
     exit = host(fn -> Chat.run(staged.config_argv ++ extra, options) end, device)
     {_, stderr} = StringIO.contents(diagnostics)
 

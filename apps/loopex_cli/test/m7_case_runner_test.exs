@@ -1,6 +1,92 @@
 Code.require_file("../../loopex/test/support/m1_runtime_helper.exs", __DIR__)
 Code.require_file("../../loopex/test/support/agent_loop_helper.exs", __DIR__)
 
+# Concept: the native provider fixture loads only under a disposable home.
+# Technical depth: its support guard runs during require, before any setup.
+native_home =
+  Path.join(
+    System.tmp_dir!(),
+    "m7-native-load-#{System.pid()}-#{System.unique_integer([:positive])}"
+  )
+
+File.mkdir_p!(native_home)
+prior_native_home = System.get_env("LOOPEX_HOME")
+System.put_env("LOOPEX_HOME", native_home)
+
+try do
+  Code.require_file(
+    "../../loopex_llm_reqllm/test/support/provider_isolation_fixture.exs",
+    __DIR__
+  )
+after
+  if prior_native_home,
+    do: System.put_env("LOOPEX_HOME", prior_native_home),
+    else: System.delete_env("LOOPEX_HOME")
+
+  File.rm_rf!(native_home)
+end
+
+defmodule LoopexCli.M7NativeReplies do
+  @moduledoc false
+
+  # Concept: Anthropic-native streamed replies for the real adapter, served by
+  # the local isolation fixture; no provider is contacted.
+  # Technical depth: blocks are thinking (with signature), text or tool_use,
+  # streamed as the provider's message events with exact deltas.
+  def reply(model, blocks, stop \\ "end_turn") do
+    start = %{
+      "type" => "message_start",
+      "message" => %{
+        "id" => "m7-native-reply",
+        "type" => "message",
+        "role" => "assistant",
+        "model" => String.replace_prefix(model, "anthropic:", ""),
+        "content" => [],
+        "stop_reason" => nil,
+        "stop_sequence" => nil,
+        "usage" => %{"input_tokens" => 11}
+      }
+    }
+
+    events =
+      Enum.flat_map(Enum.with_index(blocks), fn {block, index} ->
+        {initial, deltas} =
+          case block do
+            {:thinking, text, signature} ->
+              {%{"type" => "thinking", "thinking" => "", "signature" => ""},
+               [
+                 %{"type" => "thinking_delta", "thinking" => text},
+                 %{"type" => "signature_delta", "signature" => signature}
+               ]}
+
+            {:text, text} ->
+              {%{"type" => "text", "text" => ""}, [%{"type" => "text_delta", "text" => text}]}
+
+            {:tool, id, name, arguments} ->
+              {%{"type" => "tool_use", "id" => id, "name" => name, "input" => %{}},
+               [%{"type" => "input_json_delta", "partial_json" => JSON.encode!(arguments)}]}
+          end
+
+        [%{"type" => "content_block_start", "index" => index, "content_block" => initial}] ++
+          Enum.map(deltas, &%{"type" => "content_block_delta", "index" => index, "delta" => &1}) ++
+          [%{"type" => "content_block_stop", "index" => index}]
+      end)
+
+    tail = [
+      %{
+        "type" => "message_delta",
+        "delta" => %{"stop_reason" => stop, "stop_sequence" => nil},
+        "usage" => %{"output_tokens" => 4}
+      },
+      %{"type" => "message_stop"}
+    ]
+
+    Enum.map_join([start] ++ events ++ tail, fn event ->
+      "event: #{event["type"]}\ndata: #{JSON.encode!(event)}\n\n"
+    end)
+  end
+end
+
 defmodule LoopexCli.M7CaseRunnerTest do
   use ExUnit.Case, async: false
   @moduletag capture_log: true
@@ -765,6 +851,75 @@ defmodule LoopexCli.M7CaseRunnerTest do
     assert result.mechanical_result == "required_action_absent"
   end
 
+  # Concept: native thinking replies through the real adapter and the local
+  # fixture: each cell reads the three files in three rounds, then answers.
+  defp rounds_replies(cells, paths \\ ~w(a.txt b.txt c.txt)) do
+    alias LoopexCli.M7NativeReplies, as: R
+
+    # Each later cell first compacts; the thinking-off summarizer answers it.
+    summary =
+      R.reply("anthropic:claude-haiku-4-5-20251001", [
+        {:text,
+         ~s({"summary":"cedar seven amber","carry_forward":{"files_read":["a.txt","b.txt","c.txt"],"files_changed":[]}})}
+      ])
+
+    Enum.flat_map(Enum.with_index(cells), fn {{model, _}, cell} ->
+      think = fn n -> {:thinking, "private step #{cell}.#{n}", "sig-#{cell}-#{n}+/="} end
+
+      rounds =
+        for {path, n} <- Enum.with_index(paths) do
+          R.reply(
+            model,
+            [think.(n), {:tool, "read-#{cell}-#{n}", "read", %{"path" => path}}],
+            "tool_use"
+          )
+        end ++ [R.reply(model, [think.(length(paths)), {:text, "cedar seven amber"}])]
+
+      if cell == 0, do: rounds, else: [summary | rounds]
+    end)
+  end
+
+  # Seven cells of four native calls plus six checkpoints run through the
+  # isolated provider worker; the measured run is about one minute.
+  @tag timeout: 300_000
+  test "thinking rounds replay each cell's thinking across three tool rounds and reopen", f do
+    cells = Mix.Tasks.Loopex.M7Evidence.Scenarios.thinking_cells()
+
+    fixture =
+      Loopex.LLM.ReqLLM.ProviderIsolationFixture.new(:reply,
+        credential: "m7-thinking-rounds-synthetic",
+        response_bodies: rounds_replies(cells)
+      )
+
+    result =
+      passed!(
+        scenario!(f, "m7.thinking-rounds", fn _ -> [] end, %{chat_options: native!(f, fixture)})
+      )
+
+    assert facts(result)["kinds"]["model_request_committed_v2"] == 4 * length(cells)
+    assert facts(result)["kinds"]["standalone_compaction_checkpoint_committed_v1"] == 6
+  end
+
+  # A single tool round per cell leaves one continuation request: not enough.
+  @tag timeout: 300_000
+  test "thinking rounds with one tool round per cell are required_action_absent", f do
+    cells = Mix.Tasks.Loopex.M7Evidence.Scenarios.thinking_cells()
+
+    fixture =
+      Loopex.LLM.ReqLLM.ProviderIsolationFixture.new(:reply,
+        credential: "m7-thinking-rounds-synthetic",
+        response_bodies: rounds_replies(cells, ~w(a.txt))
+      )
+
+    assert {:stopped, [{:ok, result}]} =
+             scenario!(f, "m7.thinking-rounds", fn _ -> [] end, %{
+               chat_options: native!(f, fixture)
+             })
+
+    assert result.mechanical_result == "required_action_absent"
+    assert facts(result)["join"] =~ "continuation_rounds"
+  end
+
   test "provider switch moves A to B, reopens and returns to A with its tool facts", f do
     profile =
       put_in(profile(f.root), ["providers", "openai"], %{
@@ -1214,20 +1369,57 @@ defmodule LoopexCli.M7CaseRunnerTest do
     end
   end
 
+  # Concept: a native case runs chat's real composition, store and executor
+  # with the real adapter; only the provider endpoint is the local fixture.
+  # Technical depth: the fixture's launch options are chat's provider launch,
+  # and its synthetic credential sits in the profile's named variable.
+  @native_variable "M7_NATIVE_FIXTURE_CREDENTIAL"
+
+  defp native!(f, fixture, change \\ & &1) do
+    previous = System.get_env(@native_variable)
+    System.put_env(@native_variable, fixture.credential)
+
+    on_exit(fn ->
+      if previous,
+        do: System.put_env(@native_variable, previous),
+        else: System.delete_env(@native_variable)
+    end)
+
+    profile =
+      profile(f.root)
+      |> put_in(["providers", "anthropic"], %{"credential" => %{"env" => @native_variable}})
+      |> change.()
+
+    File.write!(f.config, :json.encode(profile))
+
+    [
+      provider_launch: fn ->
+        Keyword.drop(fixture.options, [
+          :credential_token,
+          :credential_registry,
+          :tracing_capability
+        ])
+      end,
+      placement_id: fn _ -> {:ok, "case-runner-native"} end
+    ]
+  end
+
   defp helper_executor(%{enabled: true, helper: helper}, executor),
     do: LoopexComposition.Delegation.Router.wrap(executor, helper)
 
   defp helper_executor(_delegation, executor), do: executor
 
-  # Helper children select the read-only profile, so the runtime registers it.
-  defp helper_tools(%{enabled: true}) do
+  # As the real composition does, the runtime registers every profile's tools
+  # (coding, and read-only for scenarios and helper children); sessions select.
+  defp helper_tools(delegation) do
     coding = ChatConfiguration.active_tools("coding")
+    read_only = ChatConfiguration.active_tools("read-only") -- coding
 
-    ChatConfiguration.selected_definitions(ChatConfiguration.active_tools("read-only") -- coding) ++
-      [LoopexComposition.Delegation.Tool.definition()]
+    ChatConfiguration.selected_definitions(read_only) ++
+      if match?(%{enabled: true}, delegation),
+        do: [LoopexComposition.Delegation.Tool.definition()],
+        else: []
   end
-
-  defp helper_tools(_delegation), do: []
 
   defp profile(root) do
     %{
