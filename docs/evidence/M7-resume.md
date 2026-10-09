@@ -27,6 +27,48 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+### Recovery duplicate retained; two bounded units in progress, 2026-10-09
+
+At `0fc5b96b0665ac0cd6176097f57ffa659f554ca8`, original44759 finishes
+FAIL11/12 current CLI recovery cases in332.425seconds, zero excluded/skipped/
+invalid. The existing fresh-before-prompt case prints `fresh answer` twice;
+its exact-once assertion fails. Floor stages remain UNRUN. The original seven
+processes are joined and34 assets authenticated. Collection SHA-256
+`e0ceb1074075939f597c2119aeefce1c442d5df4196db2499ab8c213fe377053`.
+The lost-create case's25-row healthy closure-before-assistant sequence supplies
+no causal evidence for this failed fresh case, whose observer was disabled.
+The failed run remains failed; no production repair is claimed.
+
+Original74323 passes the complete documentation gate at `0fc5b96b` in26.223
+seconds, collection `2cb6fffe7d182c30408c33a0ee08e52fee9a2b0275b5c2de397b143a67fde609`.
+Retention child `M7/current-source-preparation-20261009-v41/retention.json`,
+SHA-256 `3b87630eebc099877e52e73a2303d85959ce52bd14638382a9100d093dccae0c`,
+retains64 assets and authenticates parentv40, including both originals and
+three bounded source audits. Latest registry3291 SHA-256
+`da7b7837a88fab654ca0cc897548e1c23034d8230f2d8f74f488a33700d76acd`.
+All originals are collected exactly once; no native handle is live.
+
+Two text-only writers prepare accepted work in separate detached worktrees.
+`/private/tmp/m7-fresh-recovery-observation-20261009-v1` owns only the existing
+CLI recovery file and DaemonProxy: observe the actual failing case, retain its
+original body error through cleanup, and preserve all12 cases, original cutoffs
+and128-row/65536-byte caps. Source-only diagnosis SHA-256
+`b3e8b1dd7966d0bdbaa0a497fa6f1a86e54dd47646b5a819969c850960db3d40`
+finds no healthy-wire queue-reordering defect and claims no production fix.
+`/private/tmp/m7-native-thinking-privacy-20261009-v1` owns only
+`apps/loopex_composition/test/native_model_switch_test.exs`, adding accepted
+V7.6 local-HTTP permitted/unverified/empty summary and distinct privacy-plane
+observations with physical reopen. Audit SHA-256
+`fe51b881c6c44d6e6d5ed5f8b89974474eb544e304bb7943aa0cf3afa6d75427`
+keeps both original T08 rows open. The seven/nine/cancellation provider campaign
+and buffered ephemeral consumer remain separate obligations. Both source units
+are unjoined/native UNRUN; root owns integration and all native custody.
+
+Counts stay T01–T19 original89 done/84 open/6 retired, added375 done/22 open,
+combined464 done/106 open/6 retired. ADR0067 remains the presented unanswered
+question;0065/0068 and the older Core observer grace remain pending. Continue
+on `m7`. No full integration, provider/attended or closure claim.
+
 ### Remaining ordinary CLI workflows qualified, 2026-10-09
 
 At `3e5f83f30a7bb4ace9f4f6ecd37f9ee353a01873`, original99704 passes

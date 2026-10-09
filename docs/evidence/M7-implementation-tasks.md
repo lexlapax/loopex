@@ -1,5 +1,19 @@
 # M7 Implementation Tasks
 
+### Existing recovery duplicate reproduced; privacy proof in progress, 2026-10-09
+
+Original44759 at `0fc5b96b` remains FAIL11/12 current CLI cases in332.425seconds;
+floor UNRUN. The existing fresh-before-prompt case prints its answer twice.
+Its observer was disabled, so healthy lost-create metadata does not explain it.
+The [resume checkpoint](M7-resume.md) binds the collected failure, successful
+checkpoint documentation gate,64-asset retention childv41 and source audits.
+Two isolated writers prepare bounded existing-case metadata/cleanup and accepted
+T08 V7.6 native summary/privacy observations. Both units are unjoined/native
+UNRUN. No production repair or new checklist row is claimed. Counts remain
+original89 done/84 open/6 retired, added375 done/22 open, combined464 done/106
+open/6 retired for T01–T19. ADR0067 remains the presented unanswered decision.
+
+
 ### Remaining ordinary workflow proof retained, 2026-10-09
 
 Original99704 at `3e5f83f3` passes all38 cases in the four remaining ordinary
