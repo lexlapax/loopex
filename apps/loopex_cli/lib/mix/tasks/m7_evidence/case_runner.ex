@@ -45,9 +45,13 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
   alias LoopexCli.Policy.M7Fixture, as: Policy
   alias LoopexComposition.WorkspaceIdentity
   alias LoopexProtocol.Canonical
-  alias Mix.Tasks.Loopex.M7Evidence.{AttemptWriter, ExecutionManifest, FixtureManifest}
 
-  @reopen %{"m7.repair" => 1, "m7.long" => 1}
+  alias Mix.Tasks.Loopex.M7Evidence.{
+    AttemptWriter,
+    Conversation,
+    ExecutionManifest,
+    FixtureManifest
+  }
 
   @switches [
     lane: :string,
@@ -319,17 +323,29 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
       transcripts =
         Enum.map(outcome.transcripts, fn {name, bytes} -> retain_raw(root, name, bytes) end)
 
-      {oracle_status, oracle} = independent_oracle(staged, outcome, root)
+      {join, facts} = inspect_facts(staged, outcome, root)
+
+      environment =
+        case join do
+          {:ok, %{} = environment} -> environment
+          _ -> staged.fixture.environment
+        end
+
+      {oracle_status, oracle} = independent_oracle(staged, environment, root)
       {changes, inventory} = inspect_changes(staged, root)
       checks = Policy.check(staged.capture)
-      retained = [{:ok, record}, oracle, inventory | transcripts]
+      retained = [{:ok, record}, oracle, inventory, facts | transcripts]
 
       mechanical =
         cond do
           Enum.any?(retained, &(not match?({:ok, _}, &1))) ->
             "evidence_incomplete_post_dispatch"
 
-          outcome.exit != 0 or oracle_status != 0 or changes != :ok or checks != :ok ->
+          match?({:missing, _}, join) ->
+            "required_action_absent"
+
+          outcome.exit != 0 or oracle_status != 0 or changes != :ok or checks != :ok or
+              not match?({:ok, _}, join) ->
             "assertion_failed"
 
           true ->
@@ -394,6 +410,7 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
            environment: environment,
            pins: pins
          },
+         {:ok, conversations} <- plan(case_id, entry, context),
          {:ok, config_argv} <- attempt_config(context.config_argv, workspace, root),
          {:ok, prepared} <-
            M7FixtureChat.prepare(
@@ -409,7 +426,8 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
          fixture: fixture,
          capture: prepared.capture,
          trusted: trusted,
-         config_argv: config_argv
+         config_argv: config_argv,
+         conversations: conversations
        }}
     else
       {:error, reason} -> {:error, reason}
@@ -483,70 +501,148 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
     end)
   end
 
+  # Concept: each fixture case is a fixed list of conversations; a later one
+  # reopens the session the first one recorded.
+  # Technical depth: steps are `Conversation` steps; terminal dispatch hands
+  # every conversation to the operator's own input instead.
+  @doc false
+  def plan("m7.repair", entry, _context) do
+    [first, second, third, reopened] = entry["prompts"]
+
+    {:ok,
+     [
+       barriers([first, second, third]),
+       %{resume: true, steps: barriers([reopened]).steps}
+     ]}
+  end
+
+  def plan("m7.long", entry, _context) do
+    [facts, explain, recall, outputs] = entry["prompts"]
+    first = barriers([facts, explain, recall])
+    compact = [{:line, "/compact"}, {:line, "/wait"}]
+    {status, quit} = Enum.split(first.steps, -2)
+
+    {:ok,
+     [
+       %{first | steps: status ++ compact ++ quit},
+       %{resume: true, steps: barriers([outputs]).steps}
+     ]}
+  end
+
+  def plan("m7.feature", entry, context) do
+    case get_in(context, [:answers, "m7.feature"]) do
+      choice when choice in ["choice-1", "choice-2"] ->
+        [prompt] = entry["prompts"]
+
+        {:ok,
+         [
+           %{
+             resume: false,
+             steps: [
+               {:line, prompt},
+               {:answer, choice},
+               {:line, "/wait"},
+               {:line, "/status"},
+               {:line, "/quit"}
+             ]
+           }
+         ]}
+
+      _ ->
+        if Map.get(context, :dispatch) == :terminal,
+          do: {:ok, [%{resume: false, steps: []}]},
+          else: {:error, :feature_answer_requires_operator}
+    end
+  end
+
+  def plan("m7.external", entry, _context), do: {:ok, [barriers(entry["prompts"])]}
+  def plan(_case_id, _entry, _context), do: {:error, :case_driver_unavailable}
+
+  defp barriers(prompts) do
+    steps = Enum.flat_map(prompts, &[{:line, &1}, {:line, "/wait"}])
+    %{resume: false, steps: steps ++ [{:line, "/status"}, {:line, "/quit"}]}
+  end
+
   defp dispatch(staged, context) do
     case Map.get(context, :dispatch, :pipe) do
-      :pipe -> pipe(staged, context)
-      :terminal -> chat(staged, context, :stdio, [], "transcript-1.txt")
       fun when is_function(fun, 2) -> fun.(staged, context)
+      mode -> converse(staged.conversations, staged, context, mode, nil, [], 1)
     end
   end
 
-  # Concept: a static piped conversation with barriers and a recorded reopen.
-  # Technical depth: the session identity comes from the first conversation's
-  # own status record, never from a guess.
-  defp pipe(staged, context) do
-    prompts = staged.entry["prompts"]
-    reopened = Map.get(@reopen, staged.fixture.case_id, 0)
-    {first, later} = Enum.split(prompts, length(prompts) - reopened)
-    compact = if staged.fixture.case_id == "m7.long", do: ["/compact", "/wait"], else: []
-    input = Enum.flat_map(first, &[&1, "/wait"]) ++ compact ++ ["/status", "/quit"]
-    one = chat(staged, context, input, [], "transcript-1.txt")
+  defp converse([], _staged, _context, _mode, session, done, _n),
+    do: outcome(Enum.reverse(done), session)
 
-    with 0 <- one.exit, [_ | _] <- later, {:ok, session} <- session_id(one) do
-      input = Enum.flat_map(later, &[&1, "/wait"]) ++ ["/status", "/quit"]
-      two = chat(staged, context, input, ["--resume", session], "transcript-2.txt")
-      %{two | transcripts: one.transcripts ++ two.transcripts}
-    else
-      _ -> one
+  defp converse([conversation | rest], staged, context, mode, session, done, n) do
+    extra = if conversation.resume and session, do: ["--resume", session], else: []
+
+    cond do
+      conversation.resume and is_nil(session) ->
+        outcome(Enum.reverse(done), session)
+
+      true ->
+        result = chat(staged, context, conversation.steps, mode, extra, n)
+        session = session || session_id(result.output)
+
+        if result.exit == 0,
+          do: converse(rest, staged, context, mode, session, [result | done], n + 1),
+          else: outcome(Enum.reverse([result | done]), session)
     end
   end
 
-  defp chat(staged, context, input, extra, name) do
-    {:ok, output} = StringIO.open("", encoding: :latin1)
+  defp outcome(results, session) do
+    %{
+      exit: if(results != [] and Enum.all?(results, &(&1.exit == 0)), do: 0, else: 1),
+      conversations: length(results),
+      session: session,
+      transcripts: Enum.flat_map(results, & &1.transcripts)
+    }
+  end
+
+  defp chat(staged, context, steps, mode, extra, n) do
     {:ok, diagnostics} = StringIO.open("", encoding: :latin1)
 
-    {device, mode} =
-      if input == :stdio do
-        {:stdio, :interactive}
-      else
-        {:ok, device} = StringIO.open(Enum.map_join(input, &(&1 <> "\n")), encoding: :latin1)
-        {device, :pipe}
-      end
+    {:ok, device} =
+      if mode == :terminal,
+        do: {:ok, nil},
+        else: Conversation.start(steps, step_deadline(context))
+
+    {input, output, chat_mode} =
+      if mode == :terminal, do: {:stdio, :stdio, :interactive}, else: {device, device, :pipe}
 
     options =
       [
         cwd: context.cwd,
         home: Map.get(context, :home),
-        input: device,
+        input: input,
         output: output,
         diagnostic_device: diagnostics,
-        mode: mode,
+        mode: chat_mode,
         fixture_policy: staged.capture
       ] ++ Map.get(context, :chat_options, [])
 
     exit = Chat.run(staged.config_argv ++ extra, options)
-    {_, stdout} = StringIO.contents(output)
     {_, stderr} = StringIO.contents(diagnostics)
+
+    stdout =
+      if device do
+        transcript = Conversation.transcript(device)
+        Conversation.stop(device)
+        transcript.output
+      else
+        ""
+      end
 
     %{
       exit: exit,
       output: stdout,
-      environment: nil,
-      transcripts: [{name, stdout}, {String.replace(name, "transcript", "diagnostics"), stderr}]
+      transcripts: [{"transcript-#{n}.txt", stdout}, {"diagnostics-#{n}.txt", stderr}]
     }
   end
 
-  defp session_id(%{output: output}) do
+  defp step_deadline(context), do: Map.get(context, :step_deadline_ms, 600_000)
+
+  defp session_id(output) do
     output
     |> String.split("\n")
     |> Enum.flat_map(fn
@@ -562,19 +658,146 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
     |> List.last()
     |> case do
       nil ->
-        {:error, :session_unavailable}
+        nil
 
       encoded ->
-        with(
-          :error <- Base.url_decode64(encoded, padding: false),
-          do: {:error, :session_unavailable}
-        )
+        with({:ok, id} <- Base.url_decode64(encoded, padding: false), do: id, else: (_ -> nil))
     end
   end
 
-  defp independent_oracle(staged, outcome, root) do
-    environment = outcome.environment || staged.fixture.environment
+  # Concept: required runtime facts are read from the committed session, not
+  # from the conversation's prose.
+  # Technical depth: the attempt's own Local Store is opened after every
+  # conversation has closed; rows are read in order and the store is stopped.
+  @doc false
+  def committed(state_root, session) when is_binary(session) do
+    with {:ok, adapter} <- Loopex.Store.Local.start_link(path: Path.join(state_root, "store.log")) do
+      try do
+        {:ok, store} = Loopex.Store.new(Loopex.Store.Local, adapter)
+        page(store, session, 0, [])
+      after
+        Process.unlink(adapter)
+        GenServer.stop(adapter)
+      end
+    else
+      _ -> {:error, :committed_facts_unavailable}
+    end
+  rescue
+    _ -> {:error, :committed_facts_unavailable}
+  end
 
+  def committed(_state_root, _session), do: {:error, :committed_facts_unavailable}
+
+  defp page(store, session, position, rows) do
+    case Loopex.Store.load_records(store, session, position, 500) do
+      {:ok, []} ->
+        {:ok, Enum.reverse(rows)}
+
+      {:ok, page} ->
+        next = List.last(page).journal_version
+        page(store, session, next, Enum.reverse(page, rows))
+
+      _ ->
+        {:error, :committed_facts_unavailable}
+    end
+  end
+
+  # Concept: each case's required model actions and runtime joins.
+  # Technical depth: `{:ok, environment}` selects the independent oracle's
+  # inputs; `{:missing, reason}` is a required action or join that never
+  # committed; `{:failed, reason}` is a committed fact contradicting the case.
+  @doc false
+  def joins("m7.feature", rows, entry, _outcome) do
+    [%{"arguments" => question}] = entry["required_model_actions"]
+    asked = Enum.find(rows, &(kind(&1) == "model_question_requested_v1"))
+    answer = Enum.find(rows, &(kind(&1) == "model_question_response_admitted_v2"))
+    effect = Enum.find(rows, &(kind(&1) == "effect_intent_committed_v2"))
+
+    cond do
+      is_nil(asked) or is_nil(answer) ->
+        {:missing, :committed_question_answer}
+
+      asked.payload["interaction_request"]["prompt"] != question["question"] or
+        Enum.map(asked.payload["interaction_request"]["choices"], & &1["label"]) !=
+          question["choices"] or
+          answer.payload["interaction_id"] != asked.payload["interaction_id"] ->
+        {:failed, :question_changed}
+
+      effect && effect.journal_version < answer.journal_version ->
+        {:failed, :effect_before_answer}
+
+      true ->
+        case entry["objective_results"][answer.payload["answer"]["choice_id"]] do
+          default when default in ["empty", "literal_null"] ->
+            {:ok, %{"M7_NIL_DEFAULT" => default}}
+
+          _ ->
+            {:failed, :unknown_answer_choice}
+        end
+    end
+  end
+
+  def joins("m7.long", rows, entry, outcome) do
+    [facts | _] = entry["prompts"]
+
+    cond do
+      not Enum.any?(rows, &(kind(&1) == "compaction_checkpoint_committed_v1")) ->
+        {:missing, :automatic_checkpoint}
+
+      not Enum.any?(rows, &(kind(&1) == "standalone_compaction_checkpoint_committed_v1")) ->
+        {:missing, :explicit_checkpoint}
+
+      not Enum.any?(rows, &(kind(&1) == "prompt_admitted_v3" and &1.payload["content"] == facts)) ->
+        {:failed, :raw_fact_unavailable}
+
+      outcome.conversations < 2 ->
+        {:missing, :restart}
+
+      true ->
+        {:ok, nil}
+    end
+  end
+
+  def joins("m7.repair", rows, entry, outcome) do
+    reopened = List.last(entry["prompts"])
+
+    if outcome.conversations == 2 and
+         Enum.any?(
+           rows,
+           &(kind(&1) == "prompt_admitted_v3" and &1.payload["content"] == reopened)
+         ),
+       do: {:ok, nil},
+       else: {:missing, :restart}
+  end
+
+  def joins(_case_id, _rows, _entry, _outcome), do: {:ok, nil}
+
+  defp kind(row), do: row.payload.kind
+
+  # Concept: the committed session decides the required joins.
+  # Technical depth: the retained record names each fact kind's count and the
+  # join result; it holds no model text beyond what the session committed.
+  defp inspect_facts(staged, outcome, root) do
+    state = Path.join(Path.dirname(staged.fixture.workspace), "state")
+
+    case committed(state, outcome.session) do
+      {:ok, rows} ->
+        join = joins(staged.fixture.case_id, rows, staged.entry, outcome)
+        kinds = rows |> Enum.map(&kind/1) |> Enum.frequencies()
+
+        {join,
+         retain(root, "facts.json", %{
+           "session" => outcome.session,
+           "kinds" => kinds,
+           "join" => inspect(join)
+         })}
+
+      {:error, reason} ->
+        {{:missing, reason}, {:error, reason}}
+    end
+  end
+
+  defp independent_oracle(staged, environment, root) do
     with {:ok, recipe} <-
            Policy.oracle_runner(
              staged.fixture.case_id,

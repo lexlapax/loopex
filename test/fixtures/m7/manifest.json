@@ -75,7 +75,7 @@
         "credential": true,
         "driver": "fixture-chat",
         "lane": "m7-operator",
-        "status": "pending:committed-answer oracle branch join",
+        "status": "ready",
         "steps": [
           "V5.1",
           "V5.2"
@@ -127,7 +127,7 @@
         "credential": true,
         "driver": "fixture-chat",
         "lane": "m7-operator",
-        "status": "pending:checkpoint and restart join inspection",
+        "status": "pending:loopex chat composes no maintenance instructions, so every compaction refuses maintenance_instructions_unconfigured",
         "steps": [
           "V6.1",
           "V6.2.long",

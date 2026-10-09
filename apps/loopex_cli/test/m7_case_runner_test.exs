@@ -11,10 +11,28 @@ defmodule LoopexCli.M7CaseRunnerTest do
   # the production paths.
 
   alias LoopexCli.ChatConfiguration
+
+  # Maintenance requests carry no tools; they read the summarizer script.
+  defmodule PurposeModel do
+    @moduledoc false
+    @behaviour Loopex.Model
+
+    @impl true
+    def complete(request, options, progress) do
+      script =
+        if request.tools == [],
+          do: Keyword.fetch!(options, :maintenance_script),
+          else: Keyword.fetch!(options, :script)
+
+      Loopex.AgentLoopTestModel.complete(request, [script: script], progress)
+    end
+  end
+
   alias Mix.Tasks.Loopex.M7Evidence.{AttemptEvents, AttemptWriter, CaseRunner, FixtureManifest}
 
   @fixtures Path.expand("../../../test/fixtures/m7", __DIR__)
   @candidate String.duplicate("1", 40)
+  @instructions %{"version" => "m7.fixture.v1", "body" => "Keep exact release facts."}
   @fixed "defmodule Ledger do\n  def total(entries), do: Enum.sum(entries)\nend\n"
 
   setup do
@@ -227,6 +245,133 @@ defmodule LoopexCli.M7CaseRunnerTest do
     assert File.read!(Path.join(result.root, "workspace/README.md")) == "fixture\n"
   end
 
+  for {choice, default} <- [{"choice-1", "empty"}, {"choice-2", "literal_null"}] do
+    @choice choice
+    @default default
+    test "feature reruns the oracle branch the committed #{@choice} answer selected", f do
+      catalog = f.context.manifest
+      [%{"arguments" => question}] = catalog["fixtures"]["feature"]["required_model_actions"]
+
+      script = fn capture, _ ->
+        [
+          %{text: "ask", calls: [%{id: "nil-choice", name: "ask", arguments: question}]},
+          %{
+            text: "implement",
+            calls: [
+              %{
+                id: "write",
+                name: "write",
+                arguments: %{"path" => "lib/row_encoder.ex", "content" => encoder(@default)}
+              }
+            ]
+          },
+          %{
+            text: "test",
+            calls: [
+              %{id: "oracle", name: "bash", arguments: %{"argv" => capture.argv ++ [@default]}}
+            ]
+          },
+          %{text: "done", calls: []}
+        ]
+      end
+
+      context =
+        Map.merge(f.context, %{
+          manifest: lane(catalog, ["m7.feature"]),
+          answers: %{"m7.feature" => @choice},
+          chat_options: chat_options(f, script, self())
+        })
+
+      result = passed!(CaseRunner.run_lane(f.writer, "m7-operator", context))
+      facts = JSON.decode!(File.read!(Path.join(result.root, "records/facts.json")))
+      assert facts["join"] =~ @default
+      assert facts["kinds"]["model_question_response_admitted_v2"] == 1
+      oracle = File.read!(Path.join(result.root, "records/oracle.txt"))
+      assert oracle =~ "status=0"
+      runner = File.read!(Path.join(result.root, "trusted/independent.sh"))
+      assert runner =~ "M7_NIL_DEFAULT='#{@default}'"
+    end
+  end
+
+  test "feature without the committed question is required_action_absent and no pipe answer is guessed",
+       f do
+    script = fn _capture, _ ->
+      [
+        %{
+          text: "implement",
+          calls: [
+            %{
+              id: "write",
+              name: "write",
+              arguments: %{"path" => "lib/row_encoder.ex", "content" => encoder("empty")}
+            }
+          ]
+        },
+        %{text: "done", calls: []}
+      ]
+    end
+
+    context =
+      Map.merge(f.context, %{
+        manifest: lane(f.context.manifest, ["m7.feature"]),
+        answers: %{"m7.feature" => "choice-1"},
+        step_deadline_ms: 3000,
+        chat_options: chat_options(f, script, self())
+      })
+
+    assert {:stopped, [{:ok, result}]} = CaseRunner.run_lane(f.writer, "m7-operator", context)
+    assert result.mechanical_result == "required_action_absent"
+    transcript = File.read!(Path.join(result.root, "records/transcript-1.txt"))
+    refute transcript =~ "/answer"
+  end
+
+  test "a piped feature run without an operator's answer refuses before dispatch", f do
+    context =
+      Map.merge(f.context, %{
+        manifest: lane(f.context.manifest, ["m7.feature"]),
+        chat_options: chat_options(f, fn _, _ -> [] end, self())
+      })
+
+    assert {:stopped, [{:ok, refused}]} = CaseRunner.run_lane(f.writer, "m7-operator", context)
+    assert refused.mechanical_result == "evidence_incomplete_pre_dispatch"
+    refute_received {:index_at_dispatch, _, _}
+    [preflight] = List.last(records(f.index))["body"]["evidence"]
+    assert File.read!(preflight["reference"]) =~ "feature_answer_requires_operator"
+  end
+
+  test "long joins automatic and explicit checkpoints, raw facts and the restart", f do
+    {context, script} = long_case(f, 3000)
+
+    result =
+      passed!(
+        CaseRunner.run_lane(
+          f.writer,
+          "m7-operator",
+          Map.put(context, :chat_options, chat_options(f, script, self(), @instructions))
+        )
+      )
+
+    facts = JSON.decode!(File.read!(Path.join(result.root, "records/facts.json")))
+    assert facts["kinds"]["compaction_checkpoint_committed_v1"] >= 1
+    assert facts["kinds"]["standalone_compaction_checkpoint_committed_v1"] == 1
+    assert File.read!(Path.join(result.root, "workspace/release.txt")) == "amber\n"
+  end
+
+  test "long without an automatic checkpoint is required_action_absent", f do
+    {context, script} = long_case(f, 10)
+
+    assert {:stopped, [{:ok, result}]} =
+             CaseRunner.run_lane(
+               f.writer,
+               "m7-operator",
+               Map.put(context, :chat_options, chat_options(f, script, self(), @instructions))
+             )
+
+    assert result.mechanical_result == "required_action_absent"
+    facts = JSON.decode!(File.read!(Path.join(result.root, "records/facts.json")))
+    assert facts["join"] =~ "automatic_checkpoint"
+  end
+
   test "the wrapper command checks admission without staging and refuses bad arguments", f do
     :ok = AttemptWriter.close(f.writer)
     root = Path.expand("../../..", __DIR__)
@@ -274,6 +419,90 @@ defmodule LoopexCli.M7CaseRunnerTest do
     assert File.read!(script) =~ "CaseRunner.main"
   end
 
+  defp encoder(default) do
+    """
+    defmodule RowEncoder do
+      def encode(values, options \\\\ []) do
+        mode = Keyword.get(options, :nil_mode, :#{default})
+        Enum.map_join(values, ",", &value(&1, mode))
+      end
+
+      defp value(nil, :empty), do: ""
+      defp value(nil, :literal_null), do: "null"
+      defp value(value, _mode), do: to_string(value)
+    end
+    """
+  end
+
+  # The long case's configuration and scripts. `explain_tokens` sets the second
+  # reply's reported output, which decides whether automatic compaction occurs.
+  defp long_case(f, explain_tokens) do
+    profile =
+      profile(f.root)
+      |> put_in(["session", "max_tokens"], 4096)
+      |> put_in(["session", "context_token_budget"], 4000)
+      |> put_in(["session", "system_class_tokens"], 3000)
+      |> Map.put("maintenance", %{"model" => "anthropic:claude-haiku-4-5"})
+
+    File.write!(f.config, :json.encode(profile))
+
+    summary = %{
+      text:
+        ~s({"summary":"release_prefix=amber; batch_size=3","carry_forward":{"files_read":[],"files_changed":[]}}),
+      usage: %{input_tokens: 37, output_tokens: 19},
+      reply_overrides: %{completion: "natural", continuation: nil}
+    }
+
+    script = fn capture, call ->
+      main =
+        if call == 1 do
+          [
+            %{text: "release_prefix=amber; batch_size=3", calls: []},
+            %{
+              text:
+                String.duplicate(
+                  "Keep dependent release steps consistent. ",
+                  div(explain_tokens, 10)
+                ),
+              calls: [],
+              usage: %{input_tokens: 1500, output_tokens: explain_tokens}
+            },
+            %{text: "release_prefix=amber; batch_size=3", calls: []}
+          ]
+        else
+          [
+            %{
+              text: "write retained facts",
+              calls: [
+                %{
+                  id: "release",
+                  name: "write",
+                  arguments: %{"path" => "release.txt", "content" => "amber\n"}
+                },
+                %{
+                  id: "batches",
+                  name: "write",
+                  arguments: %{
+                    "path" => "batches.txt",
+                    "content" => "amber-001\namber-002\namber-003\n"
+                  }
+                }
+              ]
+            },
+            %{
+              text: "verify",
+              calls: [%{id: "oracle", name: "bash", arguments: %{"argv" => capture.argv}}]
+            },
+            %{text: "done", calls: []}
+          ]
+        end
+
+      %{main: main, maintenance: List.duplicate(summary, 8)}
+    end
+
+    {%{f.context | manifest: lane(f.context.manifest, ["m7.long"])}, script}
+  end
+
   # A failed pass expectation reports the retained transcripts and oracle.
   defp passed!({:ok, [{:ok, %{mechanical_result: "pass"} = result}]}), do: result
 
@@ -307,7 +536,11 @@ defmodule LoopexCli.M7CaseRunnerTest do
     ]
   end
 
-  defp chat_options(_f, scripts, parent) do
+  # `instructions` stands in for maintenance instructions the runtime needs to
+  # compact. `loopex chat` composes none today, so a real chat refuses every
+  # maintenance episode with `maintenance_instructions_unconfigured`; the long
+  # tests prove the case runner's joins on a runtime that has them.
+  defp chat_options(_f, scripts, parent, instructions \\ nil) do
     {:ok, calls} = Agent.start_link(fn -> 0 end)
 
     [
@@ -316,6 +549,11 @@ defmodule LoopexCli.M7CaseRunnerTest do
       release_placement: fn _, _ -> :ok end,
       placement_id: fn _ -> {:ok, "case-runner-runtime"} end,
       with_runtime: fn options, callback ->
+        options =
+          if instructions,
+            do: Keyword.put(options, :maintenance_instructions, instructions),
+            else: options
+
         call = Agent.get_and_update(calls, &{&1 + 1, &1 + 1})
         capture = options[:policy].context
 
@@ -354,7 +592,20 @@ defmodule LoopexCli.M7CaseRunnerTest do
         ledger_root: Path.join(state, "receipts")
       )
 
-    model = Loopex.AgentLoopTestModel.start(script)
+    {main, maintenance} =
+      case script do
+        %{main: main, maintenance: maintenance} -> {main, maintenance}
+        main -> {main, []}
+      end
+
+    model = Loopex.AgentLoopTestModel.start(main)
+    summarizer = Loopex.AgentLoopTestModel.start(maintenance)
+
+    {:ok, maintenance_model} =
+      LoopexComposition.ProviderBindings.resolve_maintenance_routes(
+        options[:maintenance_model],
+        ["anthropic"]
+      )
 
     {:ok, runtime} =
       Loopex.start_link(
@@ -364,10 +615,12 @@ defmodule LoopexCli.M7CaseRunnerTest do
         policy: options[:policy],
         policy_identity: options[:policy_identity],
         model: %{
-          module: Loopex.AgentLoopTestModel,
+          module: PurposeModel,
           model: options[:model],
-          options: [script: model]
+          options: [script: model, maintenance_script: summarizer]
         },
+        maintenance_model: maintenance_model,
+        maintenance_instructions: options[:maintenance_instructions],
         executor: %{
           module: Loopex.Executor.Local,
           reference: executor,
@@ -391,7 +644,7 @@ defmodule LoopexCli.M7CaseRunnerTest do
       :ok = Loopex.stop(runtime)
       assert_receive {:DOWN, ^ref, :process, _, _}, 5000
 
-      for pid <- [executor, lease, adapter, model], is_pid(pid) do
+      for pid <- [executor, lease, adapter, model, summarizer], is_pid(pid) do
         Process.unlink(pid)
         if Process.alive?(pid), do: GenServer.stop(pid, :normal, 1000)
       end

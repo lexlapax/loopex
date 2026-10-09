@@ -13,7 +13,9 @@ defmodule LoopexCli.Policy.M7Fixture do
   literal argv, current tool generations and file digests/modes into its policy
   identity. Recheck workspace and files before startup and each decision.
   Only argv-form bash with exactly the captured vector is allowed; shell text,
-  alternate arguments, generations, leases and directories refuse. Review
+  alternate arguments, generations, leases and directories refuse. Feature
+  alone also admits the captured vector plus one catalog default, because its
+  unpinned runner takes the operator's answer as that single argument. Review
   refuses file mutations while permitting its pinned test command. The existing Policy port owns
   timeout, durable decisions and grants. Captures perform no execution and do
   not authorize a provider attempt or replace the campaign admission procedure.
@@ -47,8 +49,11 @@ defmodule LoopexCli.Policy.M7Fixture do
         |> Enum.sort()
         |> Enum.map_join("", fn {name, value} -> " " <> name <> "=" <> shell_quote(value) end)
 
+      {branch, extras} = branch(case_id, environment, extras)
+
       bytes =
         "#!/bin/sh\nset -eu\ntest -z \"${M7_FIXTURE_HOST_SENTINEL:-}\"\n" <>
+          branch <>
           "exec /usr/bin/env -i PATH=" <>
           shell_quote(path) <>
           extras <>
@@ -64,6 +69,17 @@ defmodule LoopexCli.Policy.M7Fixture do
     _ -> {:error, :fixture_policy_unavailable}
   end
 
+  # Concept: before the operator answers, the feature runner cannot know the
+  # selected default; its one approved argument selects the branch instead.
+  # Technical depth: only the two catalog values pass, so the argument cannot
+  # change the oracle, workspace or environment beyond that one variable.
+  defp branch("m7.feature", environment, extras) when map_size(environment) == 0 do
+    {"case \"${1:-}\" in empty|literal_null) ;; *) echo 'unselected nil default' >&2; exit 64 ;; esac\n",
+     extras <> " M7_NIL_DEFAULT=\"$1\""}
+  end
+
+  defp branch(_case_id, _environment, extras), do: {"", extras}
+
   # Concept: the external task's oracle is the harness-owned Python test its
   # repository's own toolchain runs; every other oracle is an Elixir script.
   defp interpreter("m7.external") do
@@ -78,6 +94,9 @@ defmodule LoopexCli.Policy.M7Fixture do
       WorkspaceIdentity.resolve_path(
         Path.expand("../../bin/elixir", List.to_string(:code.lib_dir(:elixir)))
       )
+
+  defp oracle_environment?("m7.feature", environment) when map_size(environment) == 0,
+    do: true
 
   defp oracle_environment?("m7.feature", %{"M7_NIL_DEFAULT" => value} = environment),
     do: map_size(environment) == 1 and value in ["empty", "literal_null"]
@@ -198,8 +217,14 @@ defmodule LoopexCli.Policy.M7Fixture do
     _ -> {:deny, :policy_unavailable}
   end
 
-  defp approved_arguments?(%{generation: {"loopex.bash", _, _}, arguments: args}, capture),
-    do: args == %{"argv" => capture.argv}
+  defp approved_arguments?(%{generation: {"loopex.bash", _, _}, arguments: args}, capture) do
+    args == %{"argv" => capture.argv} or
+      (capture.case_id == "m7.feature" and
+         args in [
+           %{"argv" => capture.argv ++ ["empty"]},
+           %{"argv" => capture.argv ++ ["literal_null"]}
+         ])
+  end
 
   defp approved_arguments?(%{generation: {id, _, _}, arguments: %{"path" => path}}, capture)
        when id in ["loopex.write", "loopex.edit"] do

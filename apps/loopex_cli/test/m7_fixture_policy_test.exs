@@ -83,6 +83,39 @@ defmodule LoopexCli.M7FixturePolicyTest do
     }
   end
 
+  test "the feature runner takes only a catalog default as its one approved argument", f do
+    {:ok, recipe} = Policy.oracle_runner("m7.feature", f.workspace, f.oracle, %{})
+    assert recipe.bytes =~ ~s(case "${1:-}" in empty|literal_null)
+    assert recipe.bytes =~ ~s(M7_NIL_DEFAULT="$1")
+
+    {:ok, pinned} =
+      Policy.oracle_runner("m7.feature", f.workspace, f.oracle, %{"M7_NIL_DEFAULT" => "empty"})
+
+    refute pinned.bytes =~ "$1"
+    assert {:ok, feature} = Policy.prepare("m7.feature", f.digest, f.workspace, f.argv, f.pins)
+
+    for branch <- ["empty", "literal_null"] do
+      assert Policy.decide(request("loopex.bash", %{"argv" => f.argv ++ [branch]}), feature) ==
+               {:allow, nil}
+
+      assert Policy.decide(request("loopex.bash", %{"argv" => f.argv ++ [branch]}), f.capture) ==
+               {:deny, :policy_denied}
+    end
+
+    for argv <- [f.argv ++ ["null"], f.argv ++ ["empty", "empty"], ["/bin/sh", "-c", "true"]] do
+      assert Policy.decide(request("loopex.bash", %{"argv" => argv}), feature) ==
+               {:deny, :policy_denied}
+    end
+
+    File.write!(f.runner, recipe.bytes)
+
+    for {branch, status} <- [{"empty", 2}, {"literal_null", 2}, {"other", 64}, {nil, 64}] do
+      args = if branch, do: [f.runner, branch], else: [f.runner]
+      {_, code} = System.cmd("/bin/sh", args, stderr_to_stdout: true)
+      assert code == status
+    end
+  end
+
   test "only exact argv, current generations and the selected lease permit dispatch", f do
     request = request("loopex.bash", %{"argv" => f.argv})
     assert Policy.decide(request, f.capture) == {:allow, nil}
