@@ -5008,6 +5008,9 @@ defmodule Loopex.ProviderAttemptProtocolTest do
 
     if loss == :control_death do
       _new_control = await_restarted_control(fixture.runtime, attempt.control)
+      # A restarted Control refuses resume as store_unavailable until its own
+      # creation startup is ready; observe that instead of racing it.
+      :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(fixture.runtime)
     end
 
     if is_pid(provider_callback) and is_nil(held_guard),
