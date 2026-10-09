@@ -27,6 +27,42 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+### Daemon causal repair proved on both toolchains, 2026-10-08
+
+Original55961 at tested `781dadf698d516d4e874f144afa736dea171490d`
+passes all126 whole cases on each supported pair, with zero failures,
+exclusions, skips or invalids. This includes both compiled receive-marker
+cases and the original long SocketTransport case. Both pairs pass complete
+changed-source formatting and warning-free project compilation; current
+documentation and status pass. The435.560-second run retains10 exact original
+process joins and43 verified artifacts under
+`M7/daemon-causal-repair-focused-20261008-v1`. Terminal SHA-256
+`8640f0dad288b957f0eb46b184b15438beb6e46c73ff58c22f02f7cf9d351916`;
+collection SHA-256
+`5f5c0238b08954300d0a01caf8caf7b6e17bfee6f6c1cf9dee192a65b82a58af`.
+The latest completed registry has2795 entries, SHA-256
+`28ee82558a22e57e41235195e61576b4faff5a591761cdd679a15f38ac5773fd`.
+No native handle remains live.
+
+This proves the bounded fixture, trace inventory and exact monitor repair.
+It does not close the original67-failure repair obligation: both original
+full-population daemon failures remain unresolved, and the full fixture and
+Registry unions, complete transport generations, full check, Linux stress
+and closure remain separately owed. Preserve original10084's failure.
+The bounded population diagnostic packet is sealed but awaits independent
+review before native diagnostic reproduction; its original assertions,
+512 connections,8 sessions and cutoffs remain unchanged.
+
+Immutable256-asset source/review retention is
+`M7/current-source-preparation-20261008-v3/retention.json`, SHA-256
+`2556cc6549a3957f24159535f77192036c339b8ea0bcaaaa3c7ac6bdb1200b49`.
+The Bv3/Cv3 transport repairs have source review only; complete opening
+custody, coordinated integration and native transport proofs remain open.
+The artifact-opening proposal still needs a complete reviewed contract and
+maintainer decision. ADR0065 remains the existing unanswered decision.
+T01-T19 original88 done /85 open /6 retired; added370 done /24 open.
+No checkbox closes from this bounded repair proof.
+
 ### Daemon fixture ownership and exact monitor repair joined, 2026-10-08
 
 The independently reviewed three-path repair is joined. Successful shared
