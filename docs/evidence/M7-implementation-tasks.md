@@ -1,5 +1,40 @@
 # M7 Implementation Tasks
 
+### First parallel round merged; seven rows close, 2026-10-09
+
+Four agent units are merged into `m7` and re-verified on the merged head
+`3fe77807` under both pairs. Outputs and SHA-256 are in
+`loopex-evidence/M7/claude-20261009/SHA256SUMS` (`merged-*`), with each agent's
+own outputs in its subfolder:
+
+- **T14** (`031d96c5`): Elixir `AttemptWriter`, lock record plus exclusive
+  loopback listener, replay-before-append, sync-before-acknowledge, pinned
+  dispatch gating, ADR 0057 relinquish/accept handoff, enforced prior-failure
+  authorization and `mix loopex.m7_evidence` in both check commands. The
+  writer tests use real independent VMs for contention, writer kill, VM kill
+  and an unrelated port holder. Merged rerun: five attempts files, 168 per
+  pair. Six original rows close. Two-machine handoff, full-matrix resume
+  joins and M7 lane cases remain open with T13's runner.
+- **T05/T09** (`d1ff2e68`, `87f6c7ee`, `410e1db7`): shared `ToolFinished`
+  codec, literal schema and 196 independently generated vectors, new /3
+  digest `3503e92d…` and /4 digest `9a4a735d…`, independent Node validators for
+  every public record, and daemon configure/compact over the controller socket.
+  T09's join row closes. The fresh-source archive case first failed because
+  of an uncommitted local edit (evidence unavailable, retained) and passed on
+  the clean tree.
+- **T16** (`def632ca`): session coordinators now run under an Erlang
+  `simple_one_for_one` supervisor, which removes the DynamicSupervisor
+  `shutdown_error`/`noproc` coordinator reports; a witness fails before the fix.
+  Whole Core suite: 1610 current and 1626 floor pass. The quiesce failures are
+  OS wakeup lateness under overload (see the quiesce disposition);
+  `Task.Supervisor` reports remain open.
+- **T11** (`a8891847`): retained role catalogs and the one-slot/conservative
+  run-ledger fold; 258 delegation cases per pair. No T11 row closes yet; ADR
+  0069 now unblocks execution.
+
+`m7` history was rewritten to drop `b8aa9457`; see the context-map disposition
+for old-to-new identities.
+
 ### Native privacy repaired; standalone sink row closed, 2026-10-09
 
 Takeover on Linux. Both original18775 native failures were reproduced at
@@ -16089,7 +16124,13 @@ the still-open real-provider, live protocol, persistent-fault or closure lanes.
 - [x] Pin independent pending/response identity and digest preimages and reject all missing, extra, substituted and consistently rehashed malformed records through real-owner replay on both supported pairs.
 - [x] Pin pending/response decoder vectors and public question event schemas.
 - [x] Pin the shared closed answer schema/union and independent Elixir/Node payload vectors.
-- [ ] Join that answer schema and decoder to the complete M7 /3-/4 contracts and both authorized mutation paths.
+- [x] Join that answer schema and decoder to the complete M7 /3-/4 contracts and both authorized mutation paths.
+  ADR 0067's two closed `tool.finished` variants (`d1ff2e68`) and the stdio
+  settlement proof (`87f6c7ee`) settle text, choice and decline exactly once
+  over the real daemon controller socket and the real foreground stdio, with
+  malformed refusal, exact replay and independent Node decoding. Merged-head
+  `3fe77807` reruns: protocol242 (Node included), daemon identity/configure7,
+  app server delivery/external16 per pair; see the takeover note below.
 
 ## T10 — Complete chat controls, pipes and tracing
 
@@ -16294,14 +16335,26 @@ repeating completed provider work.
 
 ### Original checklist
 
-- [ ] Implement the canonical, hash-chained attempts index and fsync-before-dispatch.
+- [x] Implement the canonical, hash-chained attempts index and fsync-before-dispatch.
+  Proved by the Elixir loopback-locked `AttemptWriter` (accepted ADR 0065) at
+  `031d96c5`; see the T14 evidence note below.
 - [ ] Implement single-writer ownership and safe evidence handoff between machines.
-- [ ] Implement all attempt states, verdict classes and legal transitions.
-- [ ] Handle missing, corrupted or incomplete evidence as unavailable.
+- [x] Implement all attempt states, verdict classes and legal transitions.
+  Proved by the Elixir loopback-locked `AttemptWriter` (accepted ADR 0065) at
+  `031d96c5`; see the T14 evidence note below.
+- [x] Handle missing, corrupted or incomplete evidence as unavailable.
+  Proved by the Elixir loopback-locked `AttemptWriter` (accepted ADR 0065) at
+  `031d96c5`; see the T14 evidence note below.
 - [ ] Implement pre-dispatch-only continuation without redispatching completed work.
-- [ ] Implement suspended-lane abandonment and committed index-head barriers.
-- [ ] Enforce causal corrections and independent outage review; a new SHA alone permits no reroll.
-- [ ] Add the M7 evidence validator to the existing two check commands.
+- [x] Implement suspended-lane abandonment and committed index-head barriers.
+  Proved by the Elixir loopback-locked `AttemptWriter` (accepted ADR 0065) at
+  `031d96c5`; see the T14 evidence note below.
+- [x] Enforce causal corrections and independent outage review; a new SHA alone permits no reroll.
+  Proved by the Elixir loopback-locked `AttemptWriter` (accepted ADR 0065) at
+  `031d96c5`; see the T14 evidence note below.
+- [x] Add the M7 evidence validator to the existing two check commands.
+  Proved by the Elixir loopback-locked `AttemptWriter` (accepted ADR 0065) at
+  `031d96c5`; see the T14 evidence note below.
 - [ ] Implement M7 lane selectors while preserving all legacy cases.
 - [ ] Test truncation, forks, duplicate writers, interrupted handoff, resume, abandonment, redaction and every verdict route.
 
