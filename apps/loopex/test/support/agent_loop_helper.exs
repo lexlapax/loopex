@@ -45,6 +45,38 @@ defmodule Loopex.AgentLoopFixture do
   # Technical depth: this adapter reads canonical typed history directly. Its
   # captured renderer supports terminal tool history without provider-native
   # continuation, and each session retains the declared reply and cleanup bounds.
+  # Concept: a host maintenance selection and one valid scripted summary, so a
+  # transport fixture can run a real explicit compaction.
+  # Technical depth: the selection disables thinking under the captured scripted
+  # configuration; the summary's text never reaches a public projection.
+  @doc false
+  def maintenance_options do
+    configuration = Loopex.ConfiguredGenesisFixture.configuration()
+
+    [
+      maintenance_model: %{
+        "model" => configuration["model"],
+        "reasoning" => "none",
+        "model_capabilities" => %{
+          configuration["model_capabilities"]
+          | "reasoning_levels" => ["none", "default"]
+        },
+        "provider_mapping" => %{configuration["provider_mapping"] | "thinking_disabled" => true}
+      },
+      maintenance_instructions: %{"version" => "summary.v1", "body" => "Keep facts"}
+    ]
+  end
+
+  @doc false
+  def summary_reply do
+    %{
+      text:
+        ~s({"summary":"retain this fact","carry_forward":{"files_read":[],"files_changed":[]}}),
+      reply_overrides: %{completion: "natural", continuation: nil},
+      usage: %{input_tokens: 37, output_tokens: 19}
+    }
+  end
+
   def creation_defaults(definitions, options \\ []) do
     model_id = Keyword.get(options, :model, "scripted:v1")
 
@@ -132,7 +164,7 @@ defmodule Loopex.AgentLoopFixture do
           progress_sink: Keyword.get(options, :progress_sink),
           diagnostics_to: Keyword.get(options, :diagnostics_to),
           model: %{
-            module: Loopex.AgentLoopTestModel,
+            module: Keyword.get(options, :model_module, Loopex.AgentLoopTestModel),
             model: Keyword.get(options, :model, "scripted:v1"),
             options: [script: model_pid, max_tokens: Keyword.get(options, :max_tokens, 256)]
           },
@@ -397,5 +429,43 @@ defmodule Loopex.AgentLoopFixture do
     M1RuntimeTestStore.inspect_state(fixture.store).sessions
     |> Map.get(session_id, %{records: []})
     |> Map.fetch!(:records)
+  end
+end
+
+defmodule Loopex.AgentLoopPreparingModel do
+  @moduledoc """
+  ## Concept
+
+  The scripted fixture model, plus host-style preparation of authored
+  configuration changes, so transport tests can configure a live session.
+
+  ## Technical depth
+
+  `complete/3` delegates to the scripted model. `prepare_configuration/5`
+  resolves any authored model name to the fixture's canonical `scripted:v1`
+  through the shared configuration updater; it holds no other state.
+  """
+  @behaviour Loopex.Model
+
+  @canonical "scripted:v1"
+
+  @impl true
+  def complete(request, options, progress),
+    do: Loopex.AgentLoopTestModel.complete(request, options, progress)
+
+  @impl true
+  def prepare_configuration(current, authored, definitions, _context, _options) do
+    effective =
+      if Map.has_key?(authored, "model"),
+        do: Map.put(authored, "model", @canonical),
+        else: authored
+
+    Loopex.Runtime.SessionConfiguration.update(
+      current,
+      effective,
+      Map.put(current["model_capabilities"], "model", @canonical),
+      current["provider_mapping"],
+      definitions
+    )
   end
 end

@@ -373,7 +373,7 @@ defmodule Loopex.AppServer.ForegroundOutputFixture do
   end
 
   defp own(observer, mode)
-       when mode in ["runtime", "writer_failure", "question_text", "question_choice",
+       when mode in ["runtime", "writer_failure", "compaction", "question_text", "question_choice",
          "question_decline"] do
     artifacts = Loopex.Store.Local.Artifacts
     root = Path.join(System.fetch_env!("LOOPEX_HOME"), "foreground-artifacts")
@@ -465,9 +465,16 @@ defmodule Loopex.AppServer.ForegroundOutputFixture do
       %{text: "done", calls: []}]
   end
 
+  # Concept: compaction mode answers one prompt, then summarizes it for an
+  # explicit compact under the host's maintenance selection.
+  # Technical depth: the permitted summary attempt emits real ADR 0054 activity
+  # through the same sink Stdio routes; the summary text itself stays private.
+  defp script("compaction"), do: [%{text: "done", calls: []}, Fixture.summary_reply()]
+
   defp script(_mode), do: [%{text: "done", calls: []}]
   defp tools("question_" <> _name),
     do: [tools: [LoopexProtocol.ToolDefinition.question_definition()]]
+  defp tools("compaction"), do: [tools: []] ++ Fixture.maintenance_options()
   defp tools(_mode), do: []
 
   defp cleanup_all(actions) do

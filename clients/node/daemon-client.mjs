@@ -30,6 +30,7 @@ export class DaemonConnection {
   #pending = new Map();
   #events = [];
   #notices = [];
+  #progress = [];
   #waiters = [];
   #closed = false;
   #nextRequest = 0;
@@ -132,6 +133,10 @@ export class DaemonConnection {
     return [...this.#events];
   }
 
+  progress() {
+    return [...this.#progress];
+  }
+
   notices() {
     return [...this.#notices];
   }
@@ -171,7 +176,8 @@ export class DaemonConnection {
       return;
     }
 
-    if (record.type !== "progress") this.#notices.push(record);
+    if (record.type === "progress") this.#progress.push(record.progress);
+    else this.#notices.push(record);
   }
 
   #release() {

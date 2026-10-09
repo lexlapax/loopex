@@ -12,9 +12,11 @@ defmodule LoopexDaemon.SuccessionCapacity do
   The maximal request identity uses ADR 0023's 64-byte request alphabet. Input
   mutations use the 65,536-byte raw command-identity limit; resume and resource
   mutations use their tighter 256-byte raw limits. The candidate set contains
-  accepted admission and every closed durable refusal for all nine
-  lease-authorized mutation methods, including dormant configure, plus the four
-  succession error forms. This inventory does not activate a wire generation.
+  accepted admission and every closed durable refusal for all ten
+  lease-authorized mutation methods, plus the four succession error forms.
+  Input mutations other than abort are also refused while a standalone
+  compaction is pending (`maintenance_active`), and an elapsed authored
+  deadline refuses a prompt or follow-up (`deadline_elapsed`).
   Each candidate is encoded by `LoopexProtocol.Frame`; the largest complete frame is
   the serial reply slot and its sum with the maximal detached frame is the
   delivery reserve.
@@ -36,14 +38,24 @@ defmodule LoopexDaemon.SuccessionCapacity do
        "configuration_not_settled",
        "configuration_not_prepared",
        "invalid_session_configuration",
-       "compaction_required"
+       "compaction_required",
+       "maintenance_active"
      ]},
-    {"session.prompt", @input_command_id, ["run_active"]},
-    {"session.steer", @input_command_id, ["run_mismatch", "steer_pending", "no_active_run"]},
-    {"session.follow_up", @input_command_id, ["follow_up_pending", "no_active_run"]},
+    {"session.compact", @input_command_id, ["run_active", "maintenance_active"]},
+    {"session.prompt", @input_command_id,
+     ["run_active", "deadline_elapsed", "maintenance_active"]},
+    {"session.steer", @input_command_id,
+     ["run_mismatch", "steer_pending", "no_active_run", "maintenance_active"]},
+    {"session.follow_up", @input_command_id,
+     ["follow_up_pending", "no_active_run", "deadline_elapsed", "maintenance_active"]},
     {"session.abort", @input_command_id, ["no_active_run"]},
     {"session.respond_interaction", @input_command_id,
-     ["interaction_absent", "interaction_resolved", "invalid_interaction_answer"]},
+     [
+       "interaction_absent",
+       "interaction_resolved",
+       "invalid_interaction_answer",
+       "maintenance_active"
+     ]},
     {"session.admit_resources", @bounded_command_id,
      [
        "run_active",

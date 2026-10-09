@@ -371,10 +371,17 @@ defmodule Loopex.Runtime do
   Control rebuilds the canonical create transaction from the supplied session
   options and this runtime's creation configuration. The Store compares that
   exact binding with the retained command row, so changed options and reuse by
-  another command kind are conflicts rather than historical success.
+  another command kind are conflicts rather than historical success. A known
+  cancelled creation returns `:cancelled` (accepted ADR 0059).
   """
   @spec lookup_create_result(t(), binary(), map()) ::
-          {:ok, {:historical, binary()} | :absent | :conflict | :store_unavailable | :unexpected}
+          {:ok,
+           {:historical, binary()}
+           | :absent
+           | :cancelled
+           | :conflict
+           | :store_unavailable
+           | :unexpected}
           | {:error, :runtime_unavailable}
   def lookup_create_result(%__MODULE__{} = runtime, command_id, session_options) do
     control_call(
@@ -402,7 +409,13 @@ defmodule Loopex.Runtime do
   provider route, coordinator activation or mutation is needed for this read.
   """
   @spec lookup_create_result(t(), binary(), map(), map()) ::
-          {:ok, {:historical, binary()} | :absent | :conflict | :store_unavailable | :unexpected}
+          {:ok,
+           {:historical, binary()}
+           | :absent
+           | :cancelled
+           | :conflict
+           | :store_unavailable
+           | :unexpected}
           | {:error, :runtime_unavailable}
   def lookup_create_result(%__MODULE__{} = runtime, command_id, session_options, genesis) do
     control_call(

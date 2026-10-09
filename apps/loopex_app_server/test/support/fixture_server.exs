@@ -71,6 +71,20 @@ defmodule Loopex.AppServer.Fixture do
           end
         end
 
+      # A model that prepares authored configuration, so a client can
+      # configure and compact the live session it creates.
+      "maintenance" ->
+        serve(script: [], model_module: Loopex.AgentLoopPreparingModel)
+
+      # One answered prompt, then a real summary for an explicit compact.
+      "compaction" ->
+        fixture = Loopex.AgentLoopFixture
+
+        serve(
+          [script: [%{text: "done", calls: []}, fixture.summary_reply()], tools: []] ++
+            fixture.maintenance_options()
+        )
+
       _plain ->
         serve(script: [%{text: "the task is done", calls: []}])
     end
@@ -79,10 +93,16 @@ defmodule Loopex.AppServer.Fixture do
   defp serve(options) do
     store = durable_store()
 
+    # Like the shipped host, the runtime's transient progress is routed to the
+    # one Stdio connection through a sink this process owns.
+    {:ok, sink} = Loopex.ProgressSink.open()
+
     try do
-      fixture = Loopex.AgentLoopFixture.start(options ++ store)
-      :ok = Loopex.AppServer.Stdio.serve(fixture.runtime)
+      fixture = Loopex.AgentLoopFixture.start(options ++ store ++ [progress_sink: sink])
+      :ok = Loopex.AppServer.Stdio.serve(fixture.runtime, sink)
     after
+      Loopex.ProgressSink.close(sink)
+
       # Ending input ends the process, and a virtual machine that simply halts runs
       # no `terminate/2`. A durable Store would then keep its writer marker and
       # refuse the next process, so the shutdown is orderly here rather than
