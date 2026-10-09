@@ -853,8 +853,7 @@ defmodule Loopex.Runtime.ProviderAttempt do
   # A reply's accounting is `reported` exactly when the reply carries complete
   # reported usage, which combination 1 fixes and `reported_matches?/2` then
   # ties to the exact figures. ADR 0021 additionally ties a compact reply's
-  # accounting to its retained usage. Legacy unreadable reported pairs reach
-  # their specific ambiguity refusal only after the old cell is validated.
+  # accounting to its retained usage.
   defp settlement_cell(attempt, "not_dispatched", termination, %{
          "kind" => "error",
          "category" => "model_call_failed"
