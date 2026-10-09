@@ -1,5 +1,17 @@
 # M7 Implementation Tasks
 
+### Current daemon proved and CLI repair running, 2026-10-09
+
+Original53536 atc487580e passed all547 selected current Daemon cases, then
+passed38/53 CLI cases with15 failures after787.787 seconds; floor UNRUN.
+The complete original output and8 process joins are retained. Current wire
+event/progress adaptation is being repaired in an isolated CLI writer;
+T11's initialize-only physical run-log unit is sealed for independent source
+review, native UNRUN. See the [resume checkpoint](M7-resume.md) for exact
+source, collection and46-asset retention identities. No completion checkbox
+changed: T01–T19 original89 done /84 open /6 retired;
+added371 done /25 open; combined460 done /109 open /6 retired.
+
 ### Current daemon repairs and helper foundation, 2026-10-09
 
 Original74876 passed542/547 selected current Daemon cases with5 failures;

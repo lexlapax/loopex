@@ -27,6 +27,47 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+### Current daemon proved; CLI adaptation repair running, 2026-10-09
+
+Original53536 at `c487580e12af497281444ab9f09d636b88247278` is terminal
+FAIL after787.787 seconds. All547 selected current Daemon cases passed,
+including Socket15, MaximumPopulation2 and remaining530; three environment
+cases remain excluded and owed. Current CLI passed38/53 with15 failures;
+all floor stages are UNRUN. Complete output, all8 original process joins and35
+assets were authenticated. Terminal SHA-256
+`35a1a25db41c585bd3600dc23a3ea6b4137137c097d16c97edff1fa49134eba0`;
+collection `1663905e101efc4eaef5a02c781b68c2ea54e06731379708408e80127ac1a6db`.
+Registry2911 SHA-256
+`d3de3331d43828f12912fcd8a512acd736c15bae7b95a45769aff7547886a2be`.
+
+CLI diagnosis `dcd2540c869291e22d71d1703bceaeae3527161cf19e015baa50aa6e7e4a0a06`
+establishes the current wire/native adaptation defect: message content remains
+encoded while Render reads native bytes. Expanded event/progress adaptation
+is running in `/private/tmp/m7-cli-current-event-adaptation-worktree-20261009-v1`
+atc487580e, owning DaemonClient, its new boundary test and one superseded
+LiveDaemon progress fixture. Existing literal-answer assertions remain.
+No correction or all15-failure resolution is claimed yet.
+
+T11's initialize-only physical run-log raw unit is sealed and unjoined at
+`/private/tmp/m7-delegation-initialize-run-log-raw-20261009-v1`.
+Manifest SHA-256 `2498e38554bb4250693a1a89edbf65a4a77b54252da75b403267ec121df728d5`;
+patch `131884d3783aebcc3b87c806773eaf010296c60923dd5526d62fa7cd0d08af15`.
+Its36 authored cases are a static census; all native checks are UNRUN.
+Independent source review is running. The sandbox-restricted reviewer role
+declined without inspection; a separate default agent performs the read-only
+source review. No independent native or closure verdict is implied.
+
+Immutable46-asset retention:
+`M7/current-source-preparation-20261009-v22/retention.json`, SHA-256
+`24579cb8880dc9a0d41d7552e53cf4edd47a49b4af160d46715c5d53a34f67f4`.
+No native handle is live. Root next reviews and qualifies the current CLI
+adapter and T11 unit separately, without repeating unchanged current Daemon
+coverage. Core observation grace and ADR0065 remain pending; stopped-leader
+ownership still needs a complete governed design. No full fast/release/closure
+result is claimed. T01–T19 original89 done /84 open /6 retired;
+added371 done /25 open; combined460 done /109 open /6 retired.
+No checkbox changed.
+
 ### Daemon record and identity repairs joined, 2026-10-09
 
 Original74876 at `2bfb3e554063404778ed6fff34bf45c1bb1e65fa` is terminal
