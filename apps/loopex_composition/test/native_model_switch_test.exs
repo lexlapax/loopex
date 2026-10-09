@@ -294,6 +294,13 @@ defmodule LoopexComposition.NativeModelSwitchTest do
     end
   end
 
+  defmodule Policy do
+    @moduledoc false
+    @behaviour Loopex.Policy
+    @impl true
+    def decide(_request), do: {:allow, nil}
+  end
+
   for {variant, reasoning, thinking, disclosed} <- [
         {:verified, "low", "PERMITTED_SUMMARY_CANARY", true},
         {:empty, "low", "", false},
@@ -670,7 +677,7 @@ defmodule LoopexComposition.NativeModelSwitchTest do
                   second_request,
                   receipt,
                   reference,
-                  job["tool_call_id"]
+                  job["artifact_policy"]["projection"]["normalized_call_id"]
                 )
 
               assert receipt["output"] =~ artifact_control
@@ -876,7 +883,7 @@ defmodule LoopexComposition.NativeModelSwitchTest do
       Fixture.new(:delayed_entry,
         http_custody: {self(), make_ref()},
         credential: @key,
-        response_bodies: bodies
+        response_bodies: Enum.map(bodies, &{:paced, &1})
       )
 
     {:links, after_links} = Process.info(self(), :links)
@@ -1441,6 +1448,8 @@ defmodule LoopexComposition.NativeModelSwitchTest do
                        workspace_ref: workspace_ref,
                        workspace_lease: "native-switch-workspace"
                      },
+                     policy: Policy,
+                     policy_identity: %{"id" => "native-switch-policy", "revision" => "1"},
                      grant_decision: {:host_policy, :allow},
                      tools: definitions,
                      active_tools: Enum.map(definitions, & &1["tool_id"])

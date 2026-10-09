@@ -293,9 +293,9 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
   defp response_plan!(_mode, _root, options) do
     case Keyword.fetch(options, :response_bodies) do
       {:ok, bodies} when is_list(bodies) and bodies != [] ->
-        if Enum.all?(bodies, &is_binary/1),
+        if Enum.all?(bodies, &(is_binary(&1) or match?({:paced, body} when is_binary(body), &1))),
           do: {:sequence, bodies},
-          else: raise(ArgumentError, "response_bodies must contain only binaries")
+          else: raise(ArgumentError, "response_bodies must contain binaries or {:paced, binary}")
 
       {:ok, _invalid} ->
         raise ArgumentError, "response_bodies must be a non-empty list"
@@ -1387,7 +1387,10 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
           :ok
 
         _ ->
-          respond(socket, "200 OK", "text/event-stream", response_body || stream_body())
+          case response_body do
+            {:paced, body} -> respond_paced(socket, body)
+            body -> respond(socket, "200 OK", "text/event-stream", body || stream_body())
+          end
       end
     end
 
@@ -1475,6 +1478,30 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
           await_stream_release(socket, reader, root, parts, events)
         end
     end
+  end
+
+  # Concept: a paced stream lets each SSE event cross the provider channel alone.
+  # Technical depth: the provider worker and bridge keep a one-delta progress
+  # slot and drop a delta while it is occupied, by design. Writing one event per
+  # send with a fixed gap keeps a test's exact progress expectation from
+  # depending on how many events one HTTP read happens to batch.
+  @event_gap_ms 25
+
+  defp respond_paced(socket, body) do
+    events = for event <- String.split(body, "\n\n", trim: true), do: event <> "\n\n"
+
+    :ok =
+      :gen_tcp.send(
+        socket,
+        "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: #{IO.iodata_length(events)}\r\nrequest-id: req-fixture-001\r\nconnection: close\r\n\r\n"
+      )
+
+    for event <- events do
+      Process.sleep(@event_gap_ms)
+      :ok = :gen_tcp.send(socket, event)
+    end
+
+    :ok
   end
 
   defp respond(socket, status, type, body),
