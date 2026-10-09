@@ -150,6 +150,14 @@ without_credential() (
   unset LOOPEX_PROVIDER_API_KEY OPENAI_API_KEY ANTHROPIC_API_KEY OPENROUTER_API_KEY
   "$@"
 )
+# M7's selected credential names: provider A's release key and provider B's.
+# `mix loopex.m7_evidence` requires this list to equal the manifest's pins.
+m7_credential_names=(LOOPEX_PROVIDER_API_KEY OPENAI_API_KEY)
+with_m7_credentials() (
+  unset ANTHROPIC_API_KEY OPENROUTER_API_KEY
+  export "${m7_credential_names[@]}"
+  "$@"
+)
 # The wrapper self-check plants a synthetic value and reports only whether each
 # wrapper's child sees the name, never a value.
 (
@@ -174,10 +182,18 @@ without_credential() (
     else
       echo invalid
     fi')
+  m7=$(with_m7_credentials sh -c '
+    if [ "$LOOPEX_PROVIDER_API_KEY" = release-self-check-synthetic ] &&
+       [ "$OPENAI_API_KEY" = release-self-check-synthetic ] &&
+       [ -z "${ANTHROPIC_API_KEY+set}${OPENROUTER_API_KEY+set}" ]; then
+      echo selected
+    else
+      echo invalid
+    fi')
   unseen=$(without_credential sh -c "$probe")
-  printf 'check-release: credential self-check: helper=%s durable=%s ephemeral=%s other=%s\n' \
-    "$unwrapped" "$seen" "$hosted" "$unseen"
-  [ "$unwrapped" = absent ] && [ "$seen" = selected ] &&
+  printf 'check-release: credential self-check: helper=%s durable=%s ephemeral=%s m7=%s other=%s\n' \
+    "$unwrapped" "$seen" "$hosted" "$m7" "$unseen"
+  [ "$unwrapped" = absent ] && [ "$seen" = selected ] && [ "$m7" = selected ] &&
     [ "$hosted" = selected ] && [ "$unseen" = absent ]
 ) || { echo 'check-release: credential wrapper self-check RED' >&2; exit 1; }
 
@@ -436,7 +452,7 @@ for m7_lane in m7-operator m7-provider; do
   [ -z "${LOOPEX_M7_EXTERNAL_REPOSITORY:-}" ] ||
     m7_wrapper+=(--external-repository "$LOOPEX_M7_EXTERNAL_REPOSITORY")
   printf 'check-release: %s\n' "$m7_lane"
-  (cd "$tree" && with_credential mix run --no-start scripts/m7-fixture-chat.exs -- \
+  (cd "$tree" && with_m7_credentials mix run --no-start scripts/m7-fixture-chat.exs -- \
     "${m7_wrapper[@]}" chat --config "$release_m7_config") ||
     { printf 'check-release: %s RED\n' "$m7_lane" >&2; exit 1; }
 done

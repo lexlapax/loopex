@@ -200,10 +200,11 @@ if [ "$automatic" -eq 1 ]; then
 fi
 
 script_command() (
-  # The terminal launcher carries only the selected key into check-release;
-  # the three ambient provider names remain absent from that process tree.
-  unset OPENAI_API_KEY ANTHROPIC_API_KEY OPENROUTER_API_KEY
-  export LOOPEX_PROVIDER_API_KEY
+  # The terminal launcher carries only the selected keys into check-release:
+  # provider A's release key and M7's provider B key. The two other provider
+  # names stay absent from that process tree; the redactors cover all four.
+  unset ANTHROPIC_API_KEY OPENROUTER_API_KEY
+  export LOOPEX_PROVIDER_API_KEY OPENAI_API_KEY
   if [ "$platform" = Darwin ]; then
     script -q -e -F /dev/null bash "$script_dir/check-release.sh"
   else

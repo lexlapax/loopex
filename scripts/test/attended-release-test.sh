@@ -33,7 +33,7 @@ ancestor=$(git -C "$repo" rev-parse HEAD)
 cat >"$repo/scripts/check-release.sh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-if [ -n "${OPENAI_API_KEY+set}${ANTHROPIC_API_KEY+set}${OPENROUTER_API_KEY+set}" ]; then
+if [ -n "${ANTHROPIC_API_KEY+set}${OPENROUTER_API_KEY+set}" ]; then
   printf 'ambient provider credential reached the release check\n'
   exit 63
 fi
