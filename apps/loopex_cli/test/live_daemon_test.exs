@@ -583,23 +583,22 @@ defmodule LoopexCli.LiveDaemonTest do
   test "wire progress rebuilds the renderer's item from closed tables only" do
     record = %{
       "type" => "progress",
-      "session_id" => LoopexProtocol.Wire.encode_identity("s"),
+      "session_id" => "cw",
       "progress" => %{
         "kind" => "text_delta",
-        "stream_domain_id" => LoopexProtocol.Wire.encode_identity("domain"),
+        "stream_domain_id" => "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
         "base_event_sequence" => "4",
-        "turn_id" => "turn",
-        "model_sequence" => 0,
+        "turn_id" => "dHVybg",
+        "model_sequence" => "0",
         "content_index" => 0,
-        "text" => "hi",
-        "unexpected" => "ignored"
+        "text" => "hi"
       }
     }
 
     assert {:ok,
             %{
               kind: :text_delta,
-              stream_domain_id: "domain",
+              stream_domain_id: "0123456789abcdef0123456789abcdef",
               base_event_sequence: 4,
               turn_id: "turn",
               model_sequence: 0,

@@ -149,25 +149,133 @@ defmodule LoopexCli.DaemonClient do
   @doc """
   ## Concept
 
-  Rebuilds the runtime-shaped event a durable wire event record carries, so a
-  daemon session renders exactly as an embedded one does.
+  Rebuilds the native event from the daemon's complete current wire record.
 
   ## Technical depth
 
-  The envelope's identity and sequence return to their atom keys and the event
-  data's members are restored beside them unchanged.
+  Shared payload codecs restore opaque bytes and exact quantities. Ordinary
+  fields restore their native representation before the existing daemon builder
+  checks the complete envelope and payload by exact re-encoding. The CLI already
+  depends on that builder's application; no alternate schema or fallback is
+  introduced. Missing, extra, noncanonical or private members refuse whole.
   """
   @spec event(map()) :: {:ok, map()} | :error
-  def event(%{"type" => "event", "event" => %{"kind" => kind, "data" => data} = event}) do
-    with {:ok, event_id} <- Wire.identity(Map.get(event, "event_id")),
-         {:ok, sequence} <- Wire.u64(Map.get(event, "event_sequence")) do
-      {:ok, Map.merge(data, %{kind: kind, event_id: event_id, event_sequence: sequence})}
+  def event(%{
+        "type" => "event",
+        "session_id" => session,
+        "event" => %{"kind" => kind, "data" => data} = event
+      } = record)
+      when is_binary(kind) and is_map(data) and not is_struct(data) do
+    with {:ok, session} <- Wire.session_identity(session),
+         {:ok, event_id} <- Wire.identity(event["event_id"]),
+         {:ok, sequence} <- Wire.u64(event["event_sequence"]),
+         {:ok, data} <- event_data(kind, data),
+         native = Map.merge(data, %{kind: kind, event_id: event_id, event_sequence: sequence}),
+         true <- LoopexDaemon.WireRecords.event(session, native) === record do
+      {:ok, native}
     else
       _invalid -> :error
     end
   end
 
   def event(_record), do: :error
+
+  defp event_data("session.configured", data),
+    do: LoopexProtocol.Session.Configuration.decode_change(data)
+
+  defp event_data("context.compacted", data),
+    do: LoopexProtocol.Session.Checkpoint.decode_wire(data)
+
+  defp event_data("context.maintenance_changed", data),
+    do: LoopexProtocol.Session.MaintenanceView.decode_wire(data)
+
+  defp event_data("context.compaction_finished", data),
+    do: LoopexProtocol.Session.CompactResult.decode_completion(data)
+
+  defp event_data(kind, data)
+       when kind in ~w(interaction.requested interaction.answer_admitted interaction.resolved interaction.expired interaction.cancelled interaction.answered interaction.declined),
+       do: LoopexProtocol.Session.InteractionEvent.decode(kind, data)
+
+  defp event_data("run.finished", data) do
+    extra =
+      case data["outcome"] do
+        "bound_reached" -> ~w(bound observed declared_limit accounting_source)
+        "failed" -> if Map.has_key?(data, "failure"), do: ["failure"], else: ["reason"]
+        _other -> []
+      end
+
+    details = Map.take(data, ["cleanup_grace_ms" | extra])
+
+    details =
+      case data["outcome"] do
+        "failed" -> Map.merge(%{"reason" => nil, "failure" => nil}, details)
+        "outcome_unknown" -> Map.put(details, "reconciliation_ref", data["reconciliation_ref"])
+        _other -> details
+      end
+
+    with {:ok, fields} <- event_fields(data),
+         {:ok, outcome} <-
+           LoopexProtocol.Session.Outcome.decode_wire(%{
+             "outcome" => data["outcome"],
+             "details" => details
+           }) do
+      {:ok, Map.merge(fields, Map.take(outcome.details, Map.keys(data)))}
+    else
+      _invalid -> :error
+    end
+  end
+
+  defp event_data(kind, data)
+       when kind in ~w(user.message_appended assistant.message_appended run.started session.settled tool.started tool.finished steer.resolved follow_up.resolved),
+       do: event_fields(data)
+
+  defp event_data(_kind, _data), do: :error
+
+  defp event_fields(data) do
+    Enum.reduce_while(data, {:ok, %{}}, fn {key, value}, {:ok, fields} ->
+      case event_field(key, value) do
+        {:ok, native_key, native} -> {:cont, {:ok, Map.put(fields, native_key, native)}}
+        :error -> {:halt, :error}
+      end
+    end)
+  end
+
+  defp event_field(key, nil) when key in ~w(command_id reconciliation_ref),
+    do: {:ok, key, nil}
+
+  defp event_field(key, value)
+       when key in ~w(command_id run_id turn_id tool_call_id operation_id reconciliation_ref) do
+    case Wire.identity(value) do
+      {:ok, native} -> {:ok, key, native}
+      :error -> :error
+    end
+  end
+
+  defp event_field("content_b64", value) do
+    case Wire.bytes(value, 98_304) do
+      {:ok, native} -> {:ok, "content", native}
+      :error -> :error
+    end
+  end
+
+  defp event_field("artifacts", values) when is_list(values) do
+    Enum.reduce_while(values, {:ok, []}, fn
+      %{"size" => size} = artifact, {:ok, artifacts} ->
+        case Wire.u64(size) do
+          {:ok, native} -> {:cont, {:ok, [Map.put(artifact, "size", native) | artifacts]}}
+          :error -> {:halt, :error}
+        end
+
+      _invalid, _acc ->
+        {:halt, :error}
+    end)
+    |> case do
+      {:ok, artifacts} -> {:ok, "artifacts", Enum.reverse(artifacts)}
+      :error -> :error
+    end
+  end
+
+  defp event_field(key, value), do: {:ok, key, value}
 
   @progress_kinds %{
     "text_delta" => :text_delta,
@@ -179,6 +287,8 @@ defmodule LoopexCli.DaemonClient do
   }
   @progress_keys %{
     "turn_id" => :turn_id,
+    "stream_domain_id" => :stream_domain_id,
+    "base_event_sequence" => :base_event_sequence,
     "model_sequence" => :model_sequence,
     "progress_sequence" => :progress_sequence,
     "tool_call_id" => :tool_call_id,
@@ -187,51 +297,80 @@ defmodule LoopexCli.DaemonClient do
     "call_index" => :call_index,
     "name" => :name,
     "arguments_fragment" => :arguments_fragment,
-    "chunk" => :chunk,
+    "stream" => :stream,
+    "byte_offset" => :byte_offset,
+    "chunk_b64" => :chunk,
     "delta_count" => :delta_count,
-    "progress_count" => :progress_count
+    "progress_count" => :progress_count,
+    "disposition" => :disposition
   }
   @dispositions %{"complete" => :complete, "abandoned" => :abandoned}
 
   @doc """
   ## Concept
 
-  Rebuilds the transient progress item a wire progress record carries, so a
-  daemon session's answer appears as it is produced, exactly as an embedded
-  one does.
+  Restores current transient progress to the renderer's native item.
 
   ## Technical depth
 
-  Keys, kinds and dispositions come only from closed tables, so untrusted
-  input never creates an atom; the stream domain and base sequence return to
-  bytes and an integer. Any other shape is `:error` and is simply not shown.
+  Closed tables name ordinary kinds, keys and dispositions without creating
+  atoms. Identities, quantities and raw chunks decode before the existing daemon
+  builder checks the complete record. Compaction activity uses its shared codec.
+  A refused transient item is not shown and cannot authorize durable suppression.
   """
   @spec progress(map()) :: {:ok, map()} | :error
-  def progress(%{"type" => "progress", "progress" => %{"kind" => kind} = item}) do
-    with {:ok, kind} <- Map.fetch(@progress_kinds, kind),
-         {:ok, domain} <- Wire.identity(Map.get(item, "stream_domain_id")),
-         {:ok, base} <- Wire.u64(Map.get(item, "base_event_sequence")) do
-      fields =
-        for {key, atom} <- @progress_keys, Map.has_key?(item, key), into: %{} do
-          {atom, Map.fetch!(item, key)}
-        end
-
-      fields =
-        case Map.fetch(item, "disposition") do
-          {:ok, word} when is_map_key(@dispositions, word) ->
-            Map.put(fields, :disposition, Map.fetch!(@dispositions, word))
-
-          _absent ->
-            fields
-        end
-
-      {:ok, Map.merge(fields, %{kind: kind, stream_domain_id: domain, base_event_sequence: base})}
+  def progress(%{"type" => "progress", "session_id" => session, "progress" => item} = record)
+      when is_map(item) and not is_struct(item) do
+    with {:ok, session} <- Wire.session_identity(session),
+         {:ok, native} <- progress_item(item),
+         true <- LoopexDaemon.WireRecords.progress(session, native) === record do
+      {:ok, native}
     else
       _invalid -> :error
     end
   end
 
   def progress(_record), do: :error
+
+  defp progress_item(%{"kind" => "context.compaction_progress"} = item),
+    do: LoopexProtocol.Session.CompactionProgress.decode_wire(item)
+
+  defp progress_item(%{"kind" => kind} = item) do
+    with {:ok, native_kind} <- Map.fetch(@progress_kinds, kind) do
+      item
+      |> Map.delete("kind")
+      |> Enum.reduce_while({:ok, %{kind: native_kind}}, fn {key, value}, {:ok, fields} ->
+        with {:ok, atom} <- Map.fetch(@progress_keys, key),
+             {:ok, native} <- progress_field(atom, value) do
+          {:cont, {:ok, Map.put(fields, atom, native)}}
+        else
+          _invalid -> {:halt, :error}
+        end
+      end)
+    end
+  end
+
+  defp progress_item(_item), do: :error
+
+  defp progress_field(:tool_call_id, nil), do: {:ok, nil}
+
+  defp progress_field(key, value) when key in [:turn_id, :tool_call_id, :stream_domain_id],
+    do: Wire.identity(value)
+
+  defp progress_field(key, value)
+       when key in [
+              :base_event_sequence,
+              :model_sequence,
+              :progress_sequence,
+              :byte_offset,
+              :delta_count,
+              :progress_count
+            ],
+       do: Wire.u64(value)
+
+  defp progress_field(:chunk, value), do: Wire.bytes(value, 65_536)
+  defp progress_field(:disposition, value), do: Map.fetch(@dispositions, value)
+  defp progress_field(_key, value), do: {:ok, value}
 
   defp send_frame(%__MODULE__{socket: socket}, frame) do
     with {:ok, encoded} <- Frame.encode(frame) do
