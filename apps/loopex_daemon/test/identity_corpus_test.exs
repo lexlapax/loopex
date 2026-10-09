@@ -308,8 +308,12 @@ defmodule LoopexDaemon.IdentityCorpusTest do
           "writer_epoch" => epoch
         })
 
-      opened_records = question_records_until(client, &question_event?(&1, "interaction.requested"))
-      [%{"event" => %{"data" => opened}}] = question_events(opened_records, "interaction.requested")
+      opened_records =
+        question_records_until(client, &question_event?(&1, "interaction.requested"))
+
+      [%{"event" => %{"data" => opened}}] =
+        question_events(opened_records, "interaction.requested")
+
       [pending] = question_rows(fixture, session, "model_question_requested_v1")
 
       expected_open = %{
@@ -353,6 +357,7 @@ defmodule LoopexDaemon.IdentityCorpusTest do
       stale = request |> Map.put("request_id", "stale") |> Map.put("writer_epoch", "c3RhbGU")
       :ok = send_frame(client, stale)
       stale_records = question_records_until(client, &question_reply?(&1, "stale"))
+
       assert [%{"type" => "error", "code" => "control_not_held"}] =
                question_replies(stale_records, "stale")
 
@@ -366,6 +371,7 @@ defmodule LoopexDaemon.IdentityCorpusTest do
 
       :ok = send_frame(client, malformed)
       malformed_records = question_records_until(client, &question_reply?(&1, "malformed"))
+
       assert [%{"type" => "error", "code" => "invalid_request"}] =
                question_replies(malformed_records, "malformed")
 
