@@ -283,6 +283,101 @@ defmodule Loopex.AppServer.CurrentDeliveryRecordsTest do
     end
   end
 
+  # Concept: every Core producer of an operation-less tool terminal reaches the
+  # foreground writer with its committed outcome and public reason.
+  # Technical depth: accepted ADR 0067's seven-member variant advances the pulled
+  # cursor; malformed shapes detach at the emitted cursor with active credit kept.
+  test "operation-less tool terminals from each Core producer cross and malformed ones detach" do
+    producers = [
+      {"completed", nil, "loopex.ask"},
+      {"denied", "question_declined", "loopex.ask"},
+      {"denied", "question_expired", "loopex.ask"},
+      {"cancelled", nil, "loopex.ask"},
+      {"denied", "policy_denied", "loopex.write"},
+      {"denied", "effect_class_not_permitted", "loopex.write"},
+      {"denied", "workspace_not_permitted", "loopex.write"},
+      {"denied", "interaction_unsupported", "loopex.write"},
+      {"denied", "policy_unavailable", "loopex.write"},
+      {"denied", "interaction_expired", "loopex.write"},
+      {"failed", "unknown tool: Not A Tool!", nil},
+      {"failed", "", "loopex.read"},
+      {"cancelled", "the run deadline passed before dispatch", "loopex.exec"},
+      {"outcome_unknown", "reconcile-ref", "loopex.exec"},
+      {"failed", String.duplicate("é", 65_536), "loopex.read"}
+    ]
+
+    native = fn outcome, reason, tool_id ->
+      %{
+        "run_id" => <<0, 255, 10>>,
+        "turn_id" => "turn",
+        "tool_call_id" => "call",
+        "tool_id" => tool_id,
+        "outcome" => outcome,
+        "reason" => reason,
+        "artifacts" => []
+      }
+    end
+
+    for {outcome, reason, tool_id} <- producers do
+      queue =
+        Delivery.event(
+          Delivery.new("session", 7),
+          event("tool.finished", native.(outcome, reason, tool_id), 8)
+        )
+
+      refute Delivery.detached?(queue)
+      assert Delivery.pulled_cursor(queue) == 8
+      {:ok, entry} = Delivery.next(queue)
+      assert byte_size(entry.frame) <= Frame.output_record_bytes()
+
+      assert decode(entry.frame)["event"]["data"] == %{
+               "run_id" => "AP8K",
+               "turn_id" => "dHVybg",
+               "tool_call_id" => "Y2FsbA",
+               "tool_id" => tool_id,
+               "outcome" => outcome,
+               "reason" => reason,
+               "artifacts" => []
+             }
+    end
+
+    valid = native.("failed", nil, "loopex.read")
+    queue = Delivery.new("session", 7) |> Delivery.event(event("tool.finished", valid, 8))
+    {:ok, entry} = Delivery.next(queue)
+    reference = make_ref()
+    {:ok, active} = Delivery.activate(queue, entry.token, reference)
+
+    artifact = %{
+      "digest" => String.duplicate("a", 64),
+      "size" => 1,
+      "locator" => "object:opaque",
+      "media_type" => "text/plain",
+      "role" => "tool_output",
+      "use_canonicalization_version" => "loopex.canonical.v1",
+      "use_digest" => String.duplicate("b", 64),
+      "use_locator" => "use:" <> String.duplicate("b", 64)
+    }
+
+    for invalid <- [
+          Map.put(valid, "artifacts", [artifact]),
+          Map.put(valid, "operation_id", nil),
+          Map.put(valid, "private_reason", "PRIVATE_REASON"),
+          Map.put(valid, "reason", <<255>>),
+          Map.put(valid, "reason", String.duplicate("a", 131_073)),
+          Map.put(valid, "tool_id", "Not A Tool"),
+          valid |> Map.put("operation_id", "operation") |> Map.put("reason", "PRIVATE_REASON")
+        ] do
+      rejected = Delivery.event(active, event("tool.finished", invalid, 9))
+      assert Delivery.detached?(rejected)
+      assert Delivery.cursor(rejected) == 7
+      assert Delivery.usage(rejected) == Delivery.usage(active)
+      assert rejected.active == active.active
+      {:ok, _entry, joined} = Delivery.joined(rejected, reference)
+      assert Delivery.cursor(joined) == 8
+      assert Delivery.next(joined) == :empty
+    end
+  end
+
   test "tool version at the enclosing string cap decodes and cap plus one refuses without releasing active credit" do
     at_cap = String.duplicate("1", 131_068) <> ".0.0"
     above_cap = String.duplicate("1", 131_069) <> ".0.0"

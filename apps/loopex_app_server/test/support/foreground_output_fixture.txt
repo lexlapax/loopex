@@ -148,6 +148,10 @@ defmodule Loopex.AppServer.ForegroundOutputHarness do
         record
       nil ->
         assert {:ok, bytes} = :gen_tcp.recv(fixture.socket, 0, remaining(fixture.cutoff))
+        # Concept: the child's ready record names an actual artifact reference.
+        # Technical depth: safe decoding admits only existing atoms; load the
+        # module declaring the reference keys rather than relying on test order.
+        {:module, _} = Code.ensure_loaded(Loopex.ArtifactStore)
         record = :erlang.binary_to_term(bytes, [:safe])
         assert length(records) < 64
         Process.put(key, records ++ [record])
@@ -368,7 +372,9 @@ defmodule Loopex.AppServer.ForegroundOutputFixture do
       command_ids: [], observed_at: now_ms(), sink_closed: true}})
   end
 
-  defp own(observer, mode) when mode in ["runtime", "writer_failure"] do
+  defp own(observer, mode)
+       when mode in ["runtime", "writer_failure", "question_text", "question_choice",
+         "question_decline"] do
     artifacts = Loopex.Store.Local.Artifacts
     root = Path.join(System.fetch_env!("LOOPEX_HOME"), "foreground-artifacts")
     {:ok, handle} = artifacts.open(root)
@@ -378,8 +384,11 @@ defmodule Loopex.AppServer.ForegroundOutputFixture do
     try do
     {:ok, sink} = Loopex.ProgressSink.open()
     try do
-    fixture = Fixture.start(script: [%{text: "done", calls: []}],
-      progress_sink: sink, artifact_store: %{module: artifacts, handle: artifact})
+    # Concept: question mode lets the actual model ask through the real stdio.
+    # Technical depth: ADR 0067's operation-less terminal then crosses the same
+    # writer, cursor and custody path as every other foreground record.
+    fixture = Fixture.start([script: script(mode),
+      progress_sink: sink, artifact_store: %{module: artifacts, handle: artifact}] ++ tools(mode))
     try do
       await_ready(fixture.runtime, now_ms() + 1_000)
       {:ok, session} = Loopex.create_session(fixture.runtime, %{}, command_id: "bootstrap")
@@ -444,6 +453,22 @@ defmodule Loopex.AppServer.ForegroundOutputFixture do
       end
     end
   end
+
+  # Concept: each question mode asks one literal model-question corpus vector.
+  # Technical depth: arguments come from the retained Core corpus by name, so
+  # the stdio proof and the daemon socket proof share the same literals.
+  defp script("question_" <> name) do
+    corpus = Path.expand("../../../loopex/priv/vectors/model_question.v1.json", __DIR__)
+    [vector] = corpus |> File.read!() |> JSON.decode!() |> Map.fetch!("vectors")
+      |> Enum.filter(&(&1["name"] == name))
+    [%{text: "question", calls: [%{id: "ask-1", name: "ask", arguments: vector["arguments"]}]},
+      %{text: "done", calls: []}]
+  end
+
+  defp script(_mode), do: [%{text: "done", calls: []}]
+  defp tools("question_" <> _name),
+    do: [tools: [LoopexProtocol.ToolDefinition.question_definition()]]
+  defp tools(_mode), do: []
 
   defp cleanup_all(actions) do
     first = Enum.reduce(actions, nil, fn action, first ->

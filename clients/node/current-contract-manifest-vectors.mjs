@@ -26,6 +26,7 @@ import { decodeModelQuestionRequested, decodeModelQuestionTerminal } from "./mod
 import { decodePolicyRequested, decodePolicyTerminal } from "./policy-interaction-event.mjs";
 import { decodeCreationCancellation } from "./creation-cancellation.mjs";
 import { decodeTerminalOutcome } from "./terminal-outcome.mjs";
+import { decodeToolFinished } from "./tool-finished.mjs";
 
 // Concept: admitted opening cleanup is a closed six-field variant; ordinary
 // read/close/pre-admission refusals retain a separate five-field form.
@@ -134,6 +135,8 @@ for (const [index, vector] of fixture.manifests.entries()) {
   assert.equal(nested.session_snapshot.required.length, 10);
   assert.equal(nested.inspection.required.length, 11);
   assert.deepEqual(nested.compaction_progress.owner, nested.checkpoint_owner);
+  assert.deepEqual(nested.tool_finished, parseSchemaJson(readFileSync(resolve(dirname(path), "../schema/tool-finished.v1.json"))));
+  assert.deepEqual(manifest.payload_definitions.records.event.event_data_by_kind["tool.finished"], { definition_ref: "tool_finished" });
   for (const key of Object.keys(nested)) {
     const retained = nested[key];
     delete nested[key];
@@ -180,6 +183,7 @@ const decoders = {
   "creation-cancelled-admission.v1.json": v => decodeCreationCancellation(v.input),
   "chat-terminal-outcome.v1.json": v => decodeTerminalOutcome(v.input),
   "chat-terminal-context-failure.v2.json": v => decodeTerminalOutcome(v.input),
+  "tool-finished.v1.json": v => decodeToolFinished(v.input),
 };
 let payloadVectors = 0;
 for (const [name, decode] of Object.entries(decoders)) {

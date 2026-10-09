@@ -159,8 +159,8 @@ export function matchesContractIdentity(reply, expected) {
 // Technical depth: these literal identities are checked against complete canonical
 // preimages by current-contract-manifest-vectors.mjs before transport qualification.
 export const CURRENT_CONTRACTS = Object.freeze({
-  foreground: Object.freeze({ generation: "loopex.experimental/3", schemaDigest: "2becc338d4ca5de3afa84e9d6adb038ee65b0690a3233947c93dd05e7049f237" }),
-  daemon: Object.freeze({ generation: "loopex.experimental/4", schemaDigest: "9306e4aeb2ffb9aab3cf4dac94db5a1e4699f09d3f58cc57e2fa79a7e63ef7b9" }),
+  foreground: Object.freeze({ generation: "loopex.experimental/3", schemaDigest: "3503e92df274eb5f998960823d9ae6cc4b55c72a5cb249c4ffecf56cfcbc1cc0" }),
+  daemon: Object.freeze({ generation: "loopex.experimental/4", schemaDigest: "9a4a735d1a8a59237f3e063fa0fce21fd2d69e7a11785eee743c10311228b02c" }),
 });
 
 // Concept: the complete current manifest has one closed top-level recipe.

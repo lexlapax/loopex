@@ -19,9 +19,7 @@
 
 import net from "node:net";
 import { wire } from "./loopex-client.mjs";
-import { decodeCheckpointOwner } from "./checkpoint-owner.mjs";
-import { decodeMaintenanceView } from "./maintenance-view.mjs";
-import { decodeCompactCompletion } from "./compact-result.mjs";
+import { validateEvent, validateProgress, validateSnapshot } from "./public-records.mjs";
 import { CURRENT_CONTRACTS, matchesContractIdentity } from "./contract-manifest.mjs";
 
 export const GENERATION = CURRENT_CONTRACTS.daemon.generation;
@@ -155,15 +153,12 @@ export class DaemonConnection {
   }
 
   #deliver(record) {
+    // Every durable, snapshot and activity record crosses this client's own
+    // closed reading of the current contract before any caller sees it.
+    if (record.type === "snapshot") validateSnapshot(record);
+    if (record.type === "progress") validateProgress(record);
     if (record.type === "event") {
-      if (record.event.kind === "context.compacted" &&
-          (decodeCheckpointOwner(record.event.data?.owner) === null ||
-           Object.hasOwn(record.event.data, "run_id"))) throw new Error("invalid checkpoint owner");
-      if (record.event.kind === "context.maintenance_changed" &&
-          decodeMaintenanceView(record.event.data) === null) throw new Error("invalid maintenance view");
-      if (record.event.kind === "context.compaction_finished" &&
-          decodeCompactCompletion(record.event.data) === null) throw new Error("invalid compact completion");
-      this.#events.push(record.event);
+      this.#events.push(validateEvent(record));
       this.#release();
       return;
     }

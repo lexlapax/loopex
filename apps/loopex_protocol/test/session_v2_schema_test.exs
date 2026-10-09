@@ -130,7 +130,7 @@ defmodule LoopexProtocol.Session.V2Test do
 
   test "the current daemon digest is a pinned distinct contract identity" do
     assert V2.schema_digest() ==
-             "9306e4aeb2ffb9aab3cf4dac94db5a1e4699f09d3f58cc57e2fa79a7e63ef7b9"
+             "9a4a735d1a8a59237f3e063fa0fce21fd2d69e7a11785eee743c10311228b02c"
 
     refute V2.schema_digest() == Session.schema_digest()
   end

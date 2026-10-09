@@ -117,7 +117,7 @@ defmodule LoopexProtocol.SessionTest do
 
     # The vector. A change to any method, family, code or maximum changes this
     # and must be a deliberate change to the contract.
-    assert digest == "2becc338d4ca5de3afa84e9d6adb038ee65b0690a3233947c93dd05e7049f237"
+    assert digest == "3503e92df274eb5f998960823d9ae6cc4b55c72a5cb249c4ffecf56cfcbc1cc0"
 
     assert Session.schema_digest() == digest
   end

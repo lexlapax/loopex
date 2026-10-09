@@ -23,7 +23,7 @@ defmodule LoopexCli.LiveDaemonTest do
   end
 
   @daemon_generation "loopex.experimental/4"
-  @daemon_schema_digest "9306e4aeb2ffb9aab3cf4dac94db5a1e4699f09d3f58cc57e2fa79a7e63ef7b9"
+  @daemon_schema_digest "9a4a735d1a8a59237f3e063fa0fce21fd2d69e7a11785eee743c10311228b02c"
 
   test "the daemon client verifies the pinned contract before sending session work", context do
     assert LoopexProtocol.Session.V2.generation() == @daemon_generation
@@ -48,7 +48,7 @@ defmodule LoopexCli.LiveDaemonTest do
   test "the daemon client closes on a wrong canonical digest without session work", context do
     for digest <- [
           String.duplicate("0", 64),
-          "73d68233c49dea9c37562f30a3e4525c42e75ce9ae37139bdb051fbeffb500a3",
+          "30a47e9744c885f80afba50bef4aa78ed8c6cc68fb33b44d453b12bf68720670",
           String.upcase(@daemon_schema_digest),
           nil,
           7

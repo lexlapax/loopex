@@ -167,6 +167,15 @@ closed `data`. Its twenty kinds are `user.message_appended`, `run.started`,
 check configuration, checkpoint, maintenance and interaction DTOs. Standalone
 compact can finish checkpointed, unchanged or failed; its completion is distinct
 from a checkpoint event. Known event kinds never authorize private-map pass-through.
+`tool.finished` has two closed variants selected by exact member set
+([ADR 0067](../adr/0067-tool-result-event-projections-technical.md#technical-adr-0067-decision)):
+an eight-member receipt-backed result with `operation_id`, a resolved `tool_id`,
+`reason: null` and artifact-use references; and a seven-member result without
+`operation_id`, with `artifacts: []`, a resolved `tool_id` or null and a null or
+exact UTF-8 reason of at most 131,072 bytes. Answered model questions, policy
+refusals, unresolved tools and unproved executor results use the second. Its
+missing operation identity grants nothing and proves neither absence of an
+operation nor that nothing ran. One shared codec serves both transports.
 
 Progress has seven closed families: `text_delta`, `reasoning_delta`,
 `tool_call_delta`, `tool_progress`, `model_stream_closed`, `tool_stream_closed`,

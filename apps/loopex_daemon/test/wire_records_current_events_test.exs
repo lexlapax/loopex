@@ -262,6 +262,52 @@ defmodule LoopexDaemon.WireRecordsCurrentEventsTest do
     end
   end
 
+  # Concept: every Core producer of an operation-less tool terminal reaches the
+  # daemon socket with its committed outcome and public reason.
+  # Technical depth: accepted ADR 0067's seven-member variant; malformed shapes
+  # and the receipt-backed reason refusal remain whole-event refusals.
+  test "operation-less tool terminals from each Core producer project exactly" do
+    for {outcome, reason, tool_id} <- operation_less_producers() do
+      native = operation_less(outcome, reason, tool_id)
+      record = WireRecords.event("session", event("tool.finished", native, 9))
+
+      assert record["event"]["data"] == %{
+               "run_id" => "AP8K",
+               "turn_id" => "dHVybg",
+               "tool_call_id" => "Y2FsbA",
+               "tool_id" => tool_id,
+               "outcome" => outcome,
+               "reason" => reason,
+               "artifacts" => []
+             }
+
+      assert byte_size(frame(record)) <= Frame.output_record_bytes()
+    end
+
+    native = operation_less("failed", nil, "loopex.read")
+
+    for invalid <- [
+          Map.put(native, "artifacts", [artifact()]),
+          Map.put(native, "operation_id", nil),
+          Map.put(native, "operation_id", ""),
+          Map.put(native, "private_reason", "PRIVATE_REASON"),
+          Map.put(native, "reason", <<255>>),
+          Map.put(native, "reason", String.duplicate("a", 131_073)),
+          Map.put(native, "tool_id", "Not A Tool"),
+          Map.delete(native, "reason"),
+          Map.put(native, "outcome", "bound_reached")
+        ] do
+      assert :error = WireRecords.event("session", event("tool.finished", invalid, 9))
+    end
+
+    receipt =
+      native
+      |> Map.put("operation_id", "operation")
+      |> Map.put("reason", "PRIVATE_REASON")
+
+    assert :error = WireRecords.event("session", event("tool.finished", receipt, 9))
+  end
+
   test "steer reason retains null empty UTF-8 and the exact inherited byte ceiling" do
     native = %{
       "command_id" => "command",
@@ -340,6 +386,40 @@ defmodule LoopexDaemon.WireRecordsCurrentEventsTest do
       {kind, native, expected}
     end
   end
+
+  # The producer table of accepted ADR 0067: model question answer, decline,
+  # expiry and cancellation; host policy refusals; unresolved tools; deadline
+  # before dispatch; and an executor result lacking proof.
+  defp operation_less_producers do
+    [
+      {"completed", nil, "loopex.ask"},
+      {"denied", "question_declined", "loopex.ask"},
+      {"denied", "question_expired", "loopex.ask"},
+      {"cancelled", nil, "loopex.ask"},
+      {"denied", "policy_denied", "loopex.write"},
+      {"denied", "effect_class_not_permitted", "loopex.write"},
+      {"denied", "workspace_not_permitted", "loopex.write"},
+      {"denied", "interaction_unsupported", "loopex.write"},
+      {"denied", "policy_unavailable", "loopex.write"},
+      {"denied", "interaction_expired", "loopex.write"},
+      {"failed", "unknown tool: Not A Tool!", nil},
+      {"failed", "", "loopex.read"},
+      {"cancelled", "the run deadline passed before dispatch", "loopex.exec"},
+      {"outcome_unknown", "reconcile-ref", "loopex.exec"},
+      {"failed", String.duplicate("é", 65_536), "loopex.read"}
+    ]
+  end
+
+  defp operation_less(outcome, reason, tool_id),
+    do: %{
+      "run_id" => <<0, 255, 10>>,
+      "turn_id" => "turn",
+      "tool_call_id" => "call",
+      "tool_id" => tool_id,
+      "outcome" => outcome,
+      "reason" => reason,
+      "artifacts" => []
+    }
 
   defp artifact do
     %{

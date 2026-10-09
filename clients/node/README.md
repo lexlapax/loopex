@@ -18,10 +18,15 @@ imports anything outside Node's own standard library.
 | `interaction-workflow.mjs` | The chain: find and select an admitted skill, submit a task, answer the host policy's question, watch the tool run, read the artifact it kept |
 | `daemon-client.mjs` | The generation-2 connection to a running daemon over its Unix-domain socket, sharing the wire helpers above |
 | `daemon-takeover.mjs` | The cross-process takeover: observe a session another client controls, wait for that controller's lease to lapse, take control with a fresh epoch, abort the running work and release |
+| `daemon-maintenance-workflow.mjs` | The controller maintenance workflow: a stale epoch is refused, an authored model alias resolves once, the configuration change and compaction completion are decoded independently, and exact retries replay their admissions |
 | `question-answer.mjs` | Decode the closed M7 choice/text/decline answer payload; preparation for the coordinated generation-3/4 switch |
 | `question-answer-vectors.mjs` | Independently check literal answer vectors and UTF-8/identity byte boundaries |
 | `terminal-outcome.mjs` | Decode chat's closed terminal run objects with exact BigInt counts and opaque references |
 | `terminal-outcome-vectors.mjs` | Independently check terminal outcome vectors and reference boundaries |
+| `tool-finished.mjs` | Decode both closed `tool.finished` variants: receipt-backed with an operation identity, or operation-less with an optional public reason; both connections validate it |
+| `tool-finished-vectors.mjs` | Independently check the tool terminal literals and identity, reason and size byte boundaries |
+| `public-records.mjs` | Validate every durable event, snapshot and progress record against this client's own closed reading of the current contract; both connections call it before a caller sees a record |
+| `public-records-tests.mjs` | Wrap every retained payload literal in complete records and check the shared validator admits exactly the admitted literals |
 | `compact-result.mjs` | Decode standalone compaction results and completed-command payloads with exact usage, closed failures and opaque identities; both connections validate completion events |
 | `compact-result-vectors.mjs` | Independently check result/completion vectors, accounting and checkpoint/command/episode boundaries |
 | `checkpoint-owner.mjs` | Decode closed run/compact checkpoint owners and opaque identity bytes; both connections validate checkpoint events |
@@ -42,6 +47,7 @@ Run the M7 answer payload checks with the pinned Node interpreter:
 ```bash
 node clients/node/question-answer-vectors.mjs apps/loopex_protocol/priv/vectors/question-answer.v1.json
 node clients/node/compact-result-vectors.mjs apps/loopex_protocol/priv/vectors/standalone-compact-result.v1.json apps/loopex_protocol/priv/vectors/standalone-compact-completion.v1.json
+node clients/node/tool-finished-vectors.mjs apps/loopex_protocol/priv/vectors/tool-finished.v1.json apps/loopex_protocol/priv/schema/tool-finished.v1.json
 node clients/node/checkpoint-owner-vectors.mjs apps/loopex_protocol/priv/vectors/checkpoint-owner.v1.json
 node clients/node/maintenance-view-vectors.mjs apps/loopex_protocol/priv/vectors/maintenance-view.v1.json
 node clients/node/snapshot-payload-vectors.mjs apps/loopex_protocol/priv/vectors/configuration-projection.v1.json apps/loopex_protocol/priv/vectors/checkpoint-projection.v1.json
