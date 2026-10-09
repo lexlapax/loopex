@@ -43,7 +43,12 @@ defmodule LoopexCli.LiveRecoveryTest do
     test "a lost #{label} reply is re-presented and applied once", context do
       method = unquote(method)
       daemon = start_daemon(context, launch("#{unquote(label)} answer", unquote(label)))
-      proxy = DaemonProxy.start(context.socket, [{method, 1}], & &1, observe: method == "session.create")
+
+      proxy =
+        DaemonProxy.start(context.socket, [{method, 1}], & &1,
+          observe: method == "session.create"
+        )
+
       proxy_monitor = Process.monitor(proxy.pid)
 
       try do
