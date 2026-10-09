@@ -138,6 +138,16 @@ defmodule LoopexComposition.ProviderBindings do
     end
   end
 
+  # Concept: evidence reads a model's continuation requirement from the
+  # composition's own capability mapping rather than the provider adapter.
+  @doc false
+  def continuation_required?(model, reasoning, max_tokens) do
+    case ModelCapabilities.mapping(model, reasoning, max_tokens) do
+      {:ok, mapping} -> mapping["continuation_required"]
+      _ -> true
+    end
+  end
+
   defp resolve_selection(model, level, max_tokens, bindings) do
     with {:ok, _validated} <- validate(bindings),
          do: resolve_selection_routes(model, level, max_tokens, Map.keys(bindings))

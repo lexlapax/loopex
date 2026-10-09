@@ -89,6 +89,16 @@ defmodule LoopexComposition.Restore do
           | {:commit_unknown, map()}
   def restore(plan, invocation), do: restore_validated(plan, invocation, [])
 
+  # Concept: evidence oracles read restore artifacts through the composition.
+  # Technical depth: read-only delegations to the shipped codec and guard, so a
+  # host-side checker names no executor implementation.
+  @doc false
+  def manifest(bytes, max_total), do: RestoreCodec.manifest(bytes, max_total)
+  @doc false
+  def generation(bytes), do: RestoreCodec.decode(:generation, bytes)
+  @doc false
+  def source_state(root), do: Loopex.Executor.Local.RestoreGuard.state(root)
+
   # Concept: trusted fixtures exercise the same validated facade outcome flow.
   # Technical depth: options reach only the existing native IO probe gates; the
   # public plan and invocation grammar have no scheduling or fixture members.

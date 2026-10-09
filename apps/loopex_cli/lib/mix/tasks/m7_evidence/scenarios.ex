@@ -741,12 +741,8 @@ defmodule Mix.Tasks.Loopex.M7Evidence.Scenarios do
   defp cut?(terminal, "bound"), do: terminal.payload["outcome"] == "bound_reached"
   defp cut?(terminal, "cancelled"), do: terminal.payload["outcome"] == "cancelled"
 
-  defp continuation_required?(model, reasoning) do
-    case Loopex.LLM.ReqLLM.ModelCapabilities.mapping(model, reasoning, 8_192) do
-      {:ok, mapping} -> mapping["continuation_required"]
-      _ -> true
-    end
-  end
+  defp continuation_required?(model, reasoning),
+    do: LoopexComposition.ProviderBindings.continuation_required?(model, reasoning, 8_192)
 
   # A later request may replay only its own run's replies, never the cut run's.
   defp resurrected?(requests, cut_run, settled) do
