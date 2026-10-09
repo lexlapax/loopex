@@ -2298,6 +2298,14 @@ defmodule Loopex.Runtime.EventDispatcher do
 
         state = state |> put_artifact_entry(entry) |> remove_artifact_public_transfer(entry)
 
+        # Concept: an opening that fails answers at once, before its cleanup runs.
+        # Technical depth: ADR 0066 reports `cleanup: :proved` on an early opening
+        # refusal only when its terminal branch already finished. Retirement starts
+        # here, so no branch has finished and the reply is always `:unproved`; the
+        # entry stays owned until the later joins release its slot, and the
+        # release in maybe_release_artifact/2 answers only an explicit close.
+        # Core therefore never reports a proved opening refusal, which the ADR's
+        # "only if already finished" wording permits.
         state =
           reply_artifact_open(state, id, {:error, %{reason: entry.reason, cleanup: :unproved}})
 
@@ -2507,7 +2515,6 @@ defmodule Loopex.Runtime.EventDispatcher do
       cancel_artifact_timer(entry.open_timer)
       cancel_artifact_timer(entry.close_timer)
       cancel_artifact_timer(entry.lifetime_timer)
-      if entry.open_from, do: Process.demonitor(entry.caller_monitor, [:flush])
 
       monitors =
         state.artifact_monitors
@@ -2524,16 +2531,8 @@ defmodule Loopex.Runtime.EventDispatcher do
       state = forget_dead_artifact_holder(state, entry.holder)
 
       # Sample after actual original joins and the one serial capacity release.
-      # Each outstanding reply gets its own strict final check, never renewed time.
-      if entry.open_from do
-        timely = artifact_cleanup_timely?(entry, artifact_now())
-
-        GenServer.reply(
-          entry.open_from,
-          {:error, %{reason: entry.reason, cleanup: if(timely, do: :proved, else: :unproved)}}
-        )
-      end
-
+      # The outstanding close gets a strict final check, never renewed time; the
+      # opening was already answered when retirement began.
       if entry.close_from do
         timely = artifact_cleanup_timely?(entry, artifact_now())
         GenServer.reply(entry.close_from, if(timely, do: :ok, else: {:error, :cleanup_unproved}))

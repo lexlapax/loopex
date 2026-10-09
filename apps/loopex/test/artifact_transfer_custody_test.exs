@@ -679,9 +679,17 @@ defmodule Loopex.ArtifactTransferCustodyTest do
     reserve = callback(:reserve)
     {_request, context} = reserve.arguments
 
-    assert {:error, %{reason: :open_deadline_exhausted, cleanup: :unproved}} =
-             Task.await(caller, 60_000)
+    # Concept: the opening answers at its own deadline, never before it.
+    # Technical depth: the dispatcher's timer fires at D_open and the reply can only
+    # arrive after it, so a 60-second await started after the reservation races
+    # that reply by a millisecond. Observe it against the ADR 0066 clock instead:
+    # silence strictly before D_open, then the answer below D_close = D_open + 5000.
+    assert Task.yield(caller, context.open_deadline_ms - now() - 1) == nil
 
+    assert {:ok, {:error, %{reason: :open_deadline_exhausted, cleanup: :unproved}}} =
+             Task.yield(caller, max(0, context.open_deadline_ms + 5_000 - now()))
+
+    assert now() >= context.open_deadline_ms
     retire = callback(:retire)
     assert retire.arguments.close_deadline_ms === context.open_deadline_ms + 5_000
     assert entry(fixture, context.transfer_ref).invocation === :reserve
