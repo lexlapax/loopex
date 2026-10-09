@@ -64,7 +64,7 @@ defmodule Loopex.AppServer.ExternalWorkflowTest do
     # It negotiated the contract it was written against, by digest.
     assert summary["generation"] == LoopexProtocol.Session.generation()
     assert summary["schema_digest"] == LoopexProtocol.Session.schema_digest()
-    assert summary["method_count"] == 16
+    assert summary["method_count"] == 18
     assert summary["frame_bytes"] == 1_048_576
 
     # It created a session and received back the identity it sent.
@@ -96,9 +96,13 @@ defmodule Loopex.AppServer.ExternalWorkflowTest do
 
     # It read the session back and saw the public projection only.
     assert summary["inspect_members"] == [
+             "active_bounds",
              "active_context_token_budget",
+             "active_maintenance",
              "active_run_id",
+             "checkpoint",
              "cleanup_grace_ms",
+             "configuration",
              "event_sequence",
              "open_interaction",
              "pending_work_ids",
@@ -189,6 +193,8 @@ defmodule Loopex.AppServer.ExternalWorkflowTest do
     assert summary["chunk_bytes"] == 23
     assert summary["chunk_has_digest"]
     assert summary["transfer_closed"]
+    assert summary["invalid_window_refused"]
+    assert summary["invalid_window_cleanup"] in ["proved", "unproved"]
 
     # The request came before the resolution, and the tool after both.
     kinds = summary["event_kinds"]
@@ -283,6 +289,8 @@ defmodule Loopex.AppServer.ExternalWorkflowTest do
     assert summary["transfer_opened"]
     assert summary["chunk_has_digest"]
     assert summary["transfer_closed"]
+    assert summary["invalid_window_refused"]
+    assert summary["invalid_window_cleanup"] in ["proved", "unproved"]
 
     # And then the server was killed rather than closed. What the successor
     # reports survived because it was already durable when the first process
@@ -561,6 +569,7 @@ defmodule Loopex.AppServer.ExternalWorkflowTest do
   defp create_and_prompt(port) do
     created =
       request(port, %{
+        "session_options" => %{"version" => 1},
         "method" => "session.create",
         "request_id" => "c1",
         "command_id" => encode("cs")

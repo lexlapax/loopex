@@ -86,6 +86,29 @@ defmodule Loopex.ArtifactStore do
   @opaque_use_labels ["operation_id", "run_id", "session_id", "tool_call_id"]
   @unsafe_reference_codepoints ~r/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u
   @hex_digest ~r/^[0-9a-f]{64}$/
+  @hex_transfer_ref ~r/^[0-9a-f]{32}$/
+  @max_transfer_object_bytes 67_108_864
+  @object_work_bytes 134_217_728
+  @metadata_read_bytes 131_073
+  @transfer_reasons [
+    :invalid_artifact_request,
+    :invalid_open_context,
+    :reservation_required,
+    :reservation_conflict,
+    :unknown_artifact_use,
+    :artifact_use_mismatch,
+    :artifact_integrity_failed,
+    :artifact_digest_mismatch,
+    :unknown_artifact,
+    :artifact_too_large,
+    :invalid_window,
+    :open_deadline_exhausted,
+    :open_work_budget_exhausted,
+    :transfer_limit_reached,
+    :transfers_unavailable,
+    :artifact_unreadable,
+    :cancelled
+  ]
 
   @typedoc """
   ## Concept
@@ -235,6 +258,167 @@ defmodule Loopex.ArtifactStore do
           required(:chunk_digest) => binary()
         }
 
+  @typedoc """
+  ## Concept
+
+  An authorized use and immutable requested window.
+
+  ## Technical depth
+
+  Closed request; session identity is lossless Store-owned binary data. Length may be absent, never nil.
+  """
+  @type transfer_request :: %{
+          required(:session_id) => binary(),
+          required(:use_locator) => binary(),
+          required(:start) => non_neg_integer(),
+          optional(:length) => non_neg_integer()
+        }
+
+  @typedoc """
+  ## Concept
+
+  The original opening identity, originating-VM cutoff and declared work.
+
+  ## Technical depth
+
+  Reserve and open share this exact record; pure validation does not decide timeliness or caller authority.
+  """
+  @type open_context :: %{
+          required(:transfer_ref) => binary(),
+          required(:open_deadline_ms) => integer(),
+          required(:object_work_bytes) => 134_217_728,
+          required(:metadata_read_bytes) => 131_073
+        }
+
+  @typedoc """
+  ## Concept
+
+  Conservative work retained for one opening, including failure.
+
+  ## Technical depth
+
+  Payload work and separately bounded metadata are distinct; unavailable accounting is never a zero record.
+  """
+  @type transfer_work :: %{
+          required(:source_read_bytes) => non_neg_integer(),
+          required(:snapshot_write_debit) => non_neg_integer(),
+          required(:metadata_read_bytes) => non_neg_integer(),
+          required(:write_uncertain) => boolean()
+        }
+
+  @typedoc """
+  ## Concept
+
+  The closed reason for a current admitted transfer refusal.
+
+  ## Technical depth
+
+  Private exceptions and malformed producer results remain uncertainty, outside this result grammar.
+  """
+  @type transfer_reason ::
+          :invalid_artifact_request
+          | :invalid_open_context
+          | :reservation_required
+          | :reservation_conflict
+          | :unknown_artifact_use
+          | :artifact_use_mismatch
+          | :artifact_integrity_failed
+          | :artifact_digest_mismatch
+          | :unknown_artifact
+          | :artifact_too_large
+          | :invalid_window
+          | :open_deadline_exhausted
+          | :open_work_budget_exhausted
+          | :transfer_limit_reached
+          | :transfers_unavailable
+          | :artifact_unreadable
+          | :cancelled
+
+  @typedoc """
+  ## Concept
+
+  Retire original custody or acknowledge its retained physical proof.
+
+  ## Technical depth
+
+  Selectors are closed. Receipt correlation cannot itself prove retirement or grant authority.
+  """
+  @type close_context ::
+          %{
+            required(:action) => :retire,
+            required(:transfer_ref) => binary(),
+            required(:open_deadline_ms) => integer(),
+            required(:close_deadline_ms) => integer()
+          }
+          | %{
+              required(:action) => :acknowledge,
+              required(:transfer_ref) => binary(),
+              required(:receipt_ref) => binary()
+            }
+
+  @typedoc """
+  ## Concept
+
+  The bounded non-I/O reservation reply.
+
+  ## Technical depth
+
+  A valid not_reserved refusal proves no admitted entry remains; exceptions do not.
+  """
+  @type reserve_result ::
+          {:ok, %{required(:transfer_ref) => binary()}}
+          | {:error,
+             %{
+               required(:reason) => transfer_reason(),
+               required(:transfer_ref) => binary(),
+               required(:state) => :not_reserved
+             }}
+
+  @typedoc """
+  ## Concept
+
+  Verified opening evidence or retained retiring work.
+
+  ## Technical depth
+
+  Core must still validate authority, original clocks, adoption and exact custody; grammar alone proves none of them.
+  """
+  @type open_result ::
+          {:ok,
+           %{
+             required(:transfer) => transfer(),
+             required(:use) => artifact_use(),
+             required(:work) => transfer_work()
+           }}
+          | {:error,
+             %{
+               required(:reason) => transfer_reason(),
+               required(:transfer_ref) => binary(),
+               required(:work) => transfer_work(),
+               required(:state) => :retiring | :retired
+             }}
+
+  @typedoc """
+  ## Concept
+
+  Physical retirement evidence retained until its exact acknowledgement.
+
+  ## Technical depth
+
+  Unregistered is absence information, not cleanup proof. A retired record may explicitly lack accounting.
+  """
+  @type close_result ::
+          {:retired,
+           %{
+             required(:transfer_ref) => binary(),
+             required(:receipt_ref) => binary(),
+             required(:work) => transfer_work() | :unavailable
+           }}
+          | {:unregistered, %{required(:transfer_ref) => binary()}}
+          | :ok
+          | {:error,
+             :cleanup_unproved | :invalid_close_context | :retirement_receipt_mismatch}
+
   @callback put(handle :: term(), bytes :: binary(), normalized_use()) ::
               {:ok, artifact_reference()} | {:error, term()}
 
@@ -247,20 +431,31 @@ defmodule Loopex.ArtifactStore do
   @callback describe(handle :: term(), use_locator :: binary()) ::
               {:ok, artifact_use()} | {:error, term()}
 
-  @callback open_transfer(
-              handle :: term(),
-              artifact_object(),
-              use_locator :: binary(),
-              window :: %{
-                required(:start) => non_neg_integer(),
-                optional(:length) => non_neg_integer()
-              }
-            ) :: {:ok, transfer()} | {:error, term()}
+  # Concept: admission precedes storage and remains responsive to cancellation.
+  # Technical depth: reserve does no I/O; only the same original caller and
+  # acknowledged request/context can open once. ADR 0066 owns their lifetimes.
+  @callback reserve_transfer(handle :: term(), transfer_request(), open_context()) ::
+              reserve_result()
+              | {:error,
+                 :invalid_artifact_request
+                 | :invalid_open_context
+                 | :reservation_conflict
+                 | :reservation_required
+                 | :transfers_unavailable}
+
+  @callback open_transfer(handle :: term(), transfer_request(), open_context()) ::
+              open_result()
+              | {:error,
+                 :invalid_artifact_request
+                 | :invalid_open_context
+                 | :reservation_conflict
+                 | :reservation_required
+                 | :transfers_unavailable}
 
   @callback read_transfer(handle :: term(), transfer(), length :: pos_integer()) ::
               {:ok, chunk()} | {:ok, :complete} | {:error, term()}
 
-  @callback close_transfer(handle :: term(), transfer()) :: :ok | {:error, term()}
+  @callback close_transfer(handle :: term(), close_context()) :: close_result()
 
   # Concept: an approved job retrieves one verified range without an attachment.
   # Technical depth: the executor validates its grant before this optional call.
@@ -273,13 +468,14 @@ defmodule Loopex.ArtifactStore do
   @callback read_job_range(handle :: term(), Loopex.Executor.JobRequest.t()) ::
               {:ok, binary()} | {:error, term()}
 
-  # Concept: the transfer triple is a capability, not a requirement.
-  #
-  # Technical depth: accepted ADR 0028 narrowly extends ADR 0015's callback
-  # inventory rather than replacing it, so an adapter written before this
-  # decision stays conformant and the facade refuses the query family as
-  # unsupported rather than crashing on a missing function.
-  @optional_callbacks open_transfer: 4, read_transfer: 3, close_transfer: 2, read_job_range: 2
+  # Concept: a store may omit the whole bounded attachment-transfer capability.
+  # Technical depth: current capability requires all four callbacks together.
+  # Unsupported stores refuse boundedly; no fetch fallback or mixed generation.
+  @optional_callbacks reserve_transfer: 3,
+                      open_transfer: 3,
+                      read_transfer: 3,
+                      close_transfer: 2,
+                      read_job_range: 2
 
   @doc """
   ## Concept
@@ -319,14 +515,12 @@ defmodule Loopex.ArtifactStore do
 
   ## Technical depth
 
-  The maintainer selected this profile on 2026-09-13 and accepted ADR 0028
-  carries it: an object above `object_bytes` refuses before any transfer
-  exists; an open has `open_deadline_ms` and `open_work_bytes` of storage work
-  counting source reads and snapshot writes; a read emits at most `chunk_bytes`
-  of object bytes under `read_deadline_ms`; a transfer expires
-  `lifetime_ms` after a successful open; and at most `per_attachment` transfers
-  are live on one attachment and `per_runtime` on one runtime. They are safety
-  ceilings rather than a measured service-level promise.
+  Accepted ADRs 0028 and 0066 retain the object, payload-work, read, lifetime
+  and capacity ceilings. Opening spends one original 60-second deadline;
+  `metadata_read_bytes` is explicitly additional to `open_work_bytes`.
+  Cleanup observation spends one first-anchored `cleanup_deadline_ms` without
+  extending opening. Pending, live, retiring and unacknowledged proof retain
+  capacity. These are safety ceilings, not measured service-level promises.
   """
   @spec transfer_limits() :: %{atom() => pos_integer()}
   def transfer_limits do
@@ -334,6 +528,8 @@ defmodule Loopex.ArtifactStore do
       object_bytes: 67_108_864,
       open_deadline_ms: 60_000,
       open_work_bytes: 134_217_728,
+      metadata_read_bytes: 131_073,
+      cleanup_deadline_ms: 5_000,
       chunk_bytes: 32_768,
       read_deadline_ms: 5_000,
       lifetime_ms: 600_000,
@@ -345,25 +541,292 @@ defmodule Loopex.ArtifactStore do
   @doc """
   ## Concept
 
-  Whether a composed store implements the bounded transfer triple.
+  Whether a composed store implements the whole current transfer capability.
 
   ## Technical depth
 
-  Asked of the module rather than assumed, because a legacy adapter that
-  predates accepted ADR 0028 is still conformant; the facade turns a missing
-  capability into a bounded refusal instead of a crash. All three callbacks
-  must be present: an adapter that opened a transfer it could not read or
-  release would strand a descriptor for its lifetime.
+  All four current callbacks must be present. The facade refuses an omitted
+  capability without storage fallback; a partial callback set cannot reserve
+  custody it cannot open, read and retire.
   """
   @spec supports_transfer?(module()) :: boolean()
   def supports_transfer?(module) when is_atom(module) do
     Code.ensure_loaded?(module) and
-      function_exported?(module, :open_transfer, 4) and
+      function_exported?(module, :reserve_transfer, 3) and
+      function_exported?(module, :open_transfer, 3) and
       function_exported?(module, :read_transfer, 3) and
       function_exported?(module, :close_transfer, 2)
   end
 
   def supports_transfer?(_module), do: false
+
+  @doc """
+  ## Concept
+
+  Whether an opening request is closed and bounded.
+
+  ## Technical depth
+
+  Lossless session identity obeys Store’s existing 256-byte limit. Window integers are unsigned64; absence alone selects remaining length.
+  """
+  @spec valid_transfer_request?(term()) :: boolean()
+  def valid_transfer_request?(request) do
+    closed =
+      closed_transfer_map?(request, [:session_id, :use_locator, :start]) or
+        closed_transfer_map?(request, [:session_id, :use_locator, :start, :length])
+
+    closed and is_binary(request.session_id) and byte_size(request.session_id) in 1..256 and
+      valid_transfer_use_locator?(request.use_locator) and valid_size?(request.start) and
+      (not Map.has_key?(request, :length) or valid_size?(request.length))
+  end
+
+  @doc """
+  ## Concept
+
+  Whether the original opening context has the accepted shape.
+
+  ## Technical depth
+
+  Signed monotonic deadlines belong to the originating VM. This pure check neither reads a clock nor authorizes opening.
+  """
+  @spec valid_open_context?(term()) :: boolean()
+  def valid_open_context?(context) do
+    closed_transfer_map?(context, [
+      :transfer_ref,
+      :open_deadline_ms,
+      :object_work_bytes,
+      :metadata_read_bytes
+    ]) and valid_transfer_ref?(context.transfer_ref) and is_integer(context.open_deadline_ms) and
+      context.object_work_bytes === @object_work_bytes and
+      context.metadata_read_bytes === @metadata_read_bytes
+  end
+
+  @doc """
+  ## Concept
+
+  Whether a retirement or proof acknowledgement selector is closed.
+
+  ## Technical depth
+
+  Selectors retain original identities and signed cutoffs. Clock order, proof and caller custody are enforced by their owners.
+  """
+  @spec valid_close_context?(term()) :: boolean()
+  def valid_close_context?(context) do
+    cond do
+      closed_transfer_map?(context, [
+        :action,
+        :transfer_ref,
+        :open_deadline_ms,
+        :close_deadline_ms
+      ]) ->
+        context.action == :retire and valid_transfer_ref?(context.transfer_ref) and
+          is_integer(context.open_deadline_ms) and is_integer(context.close_deadline_ms)
+
+      closed_transfer_map?(context, [:action, :transfer_ref, :receipt_ref]) ->
+        context.action == :acknowledge and valid_transfer_ref?(context.transfer_ref) and
+          valid_transfer_ref?(context.receipt_ref)
+
+      true ->
+        false
+    end
+  end
+
+  @doc """
+  ## Concept
+
+  Whether returned use evidence exactly matches the authorized request.
+
+  ## Technical depth
+
+  Local opening and Core adoption share the existing scalar/canonical/digest check. No live describe or I/O occurs; valid provenance never grants authority.
+  """
+  @spec valid_transfer_use?(term(), term()) :: boolean()
+  def valid_transfer_use?(use, request) do
+    valid_transfer_request?(request) and well_shaped_use?(use) and
+      use.object_size <= @max_transfer_object_bytes and
+      use.metadata["session_id"] == request.session_id and
+      validate_described_use(use, %{
+        digest: use.object_digest,
+        size: use.object_size,
+        locator: use.object_locator,
+        media_type: use.media_type,
+        role: use.role,
+        use_canonicalization_version: Canonical.version(),
+        use_digest: binary_part(request.use_locator, 4, 64)
+      }) == {:ok, use}
+  end
+
+  @doc """
+  ## Concept
+
+  Whether reported opening work obeys the accepted closed accounting grammar.
+
+  ## Technical depth
+
+  Source and attempted snapshot writes are payload work; metadata is additional. Unavailable accounting is not accepted as a zero map.
+  """
+  @spec valid_transfer_work?(term()) :: boolean()
+  def valid_transfer_work?(work) do
+    closed_transfer_map?(work, [
+      :source_read_bytes,
+      :snapshot_write_debit,
+      :metadata_read_bytes,
+      :write_uncertain
+    ]) and is_integer(work.source_read_bytes) and
+      work.source_read_bytes in 0..@max_transfer_object_bytes and
+      is_integer(work.snapshot_write_debit) and
+      work.snapshot_write_debit in 0..@max_transfer_object_bytes and
+      work.source_read_bytes + work.snapshot_write_debit <= @object_work_bytes and
+      is_integer(work.metadata_read_bytes) and work.metadata_read_bytes in 0..@metadata_read_bytes and
+      is_boolean(work.write_uncertain)
+  end
+
+  @doc """
+  ## Concept
+
+  Whether a transfer projection retains the exact original request and context.
+
+  ## Technical depth
+
+  Whole-object facts remain bounded; the requested window is exact and never clamped. This shape check does not prove stored bytes or adoption.
+  """
+  @spec valid_transfer?(term(), term(), term()) :: boolean()
+  def valid_transfer?(transfer, request, context) do
+    valid_transfer_request?(request) and valid_open_context?(context) and
+      closed_transfer_map?(transfer, [
+        :transfer_ref,
+        :object,
+        :use_locator,
+        :total_size,
+        :window_start,
+        :window_length,
+        :object_digest
+      ]) and valid_object?(transfer.object) and
+      transfer.object.size <= @max_transfer_object_bytes and
+      transfer.transfer_ref == context.transfer_ref and
+      transfer.use_locator == request.use_locator and
+      transfer.total_size === transfer.object.size and
+      transfer.object_digest == transfer.object.digest and request.start <= transfer.total_size and
+      transfer.window_start === request.start and
+      transfer.window_length == Map.get(request, :length, transfer.total_size - request.start) and
+      valid_size?(transfer.window_length) and
+      transfer.window_length <= transfer.total_size - request.start
+  end
+
+  @doc """
+  ## Concept
+
+  Whether a reservation reply has the exact original identity.
+
+  ## Technical depth
+
+  A not_reserved refusal is closed evidence, not a replacement for original callback completion and joins.
+  """
+  @spec valid_reserve_result?(term(), term()) :: boolean()
+  def valid_reserve_result?(result, context) do
+    valid_open_context?(context) and
+      case result do
+        {:ok, reservation} ->
+          closed_transfer_map?(reservation, [:transfer_ref]) and
+            reservation.transfer_ref == context.transfer_ref
+
+        {:error, refusal} ->
+          closed_transfer_map?(refusal, [:reason, :transfer_ref, :state]) and
+            refusal.reason in @transfer_reasons and refusal.transfer_ref == context.transfer_ref and
+            refusal.state == :not_reserved
+
+        _ ->
+          false
+      end
+  end
+
+  @doc """
+  ## Concept
+
+  Whether an opening reply retains exact use, object, window and work evidence.
+
+  ## Technical depth
+
+  Only the existing pure ArtifactStore checks validate use bytes. Admitted failure retains bounded work; exceptions remain uncertainty.
+  """
+  @spec valid_open_result?(term(), term(), term()) :: boolean()
+  def valid_open_result?(result, request, context) do
+    valid_transfer_request?(request) and valid_open_context?(context) and
+      case result do
+        {:ok, opened} ->
+          closed_transfer_map?(opened, [:transfer, :use, :work]) and
+            valid_transfer_use?(opened.use, request) and
+            valid_transfer?(opened.transfer, request, context) and
+            opened.transfer.object == %{
+              digest: opened.use.object_digest,
+              size: opened.use.object_size,
+              locator: opened.use.object_locator
+            } and valid_transfer_work?(opened.work) and
+            opened.work.source_read_bytes == opened.transfer.object.size and
+            opened.work.snapshot_write_debit == opened.transfer.object.size and
+            opened.work.write_uncertain == false
+
+        {:error, refusal} ->
+          closed_transfer_map?(refusal, [:reason, :transfer_ref, :work, :state]) and
+            refusal.reason in @transfer_reasons and refusal.transfer_ref == context.transfer_ref and
+            refusal.state in [:retiring, :retired] and valid_transfer_work?(refusal.work)
+
+        _ ->
+          false
+      end
+  end
+
+  @doc """
+  ## Concept
+
+  Whether close evidence matches the original retire or acknowledgement selector.
+
+  ## Technical depth
+
+  A retired record binds its Store receipt and bounded or explicitly unavailable work. Unregistered and ack success alone do not prove cleanup.
+  """
+  @spec valid_close_result?(term(), term()) :: boolean()
+  def valid_close_result?(result, context) do
+    valid_close_context?(context) and
+      case {context.action, result} do
+        {:retire, {:retired, retired}} ->
+          closed_transfer_map?(retired, [:transfer_ref, :receipt_ref, :work]) and
+            retired.transfer_ref == context.transfer_ref and valid_transfer_ref?(retired.receipt_ref) and
+            (retired.work == :unavailable or valid_transfer_work?(retired.work))
+
+        {:retire, {:unregistered, absent}} ->
+          closed_transfer_map?(absent, [:transfer_ref]) and absent.transfer_ref == context.transfer_ref
+
+        {:retire, {:error, reason}} ->
+          reason in [:cleanup_unproved, :invalid_close_context]
+
+        {:acknowledge, :ok} ->
+          true
+
+        {:acknowledge, {:error, reason}} ->
+          reason in [:retirement_receipt_mismatch, :invalid_close_context]
+
+        _ ->
+          false
+      end
+  end
+
+  @doc """
+  ## Concept
+
+  Whether a public admitted failure has the closed reason and cleanup disposition.
+
+  ## Technical depth
+
+  Private work, receipts and identities cannot leak through this facade projection. Proved cleanup still requires original owner evidence.
+  """
+  @spec valid_transfer_failure?(term()) :: boolean()
+  def valid_transfer_failure?({:error, refusal}) do
+    closed_transfer_map?(refusal, [:reason, :cleanup]) and
+      refusal.reason in @transfer_reasons and refusal.cleanup in [:proved, :unproved]
+  end
+
+  def valid_transfer_failure?(_result), do: false
 
   @doc """
   ## Concept
@@ -823,6 +1286,21 @@ defmodule Loopex.ArtifactStore do
   end
 
   defp well_shaped_use?(_use), do: false
+
+  # Concept: each transfer record has one exact plain-data grammar.
+  # Technical depth: count bounds key sorting; each value is checked by its
+  # owning scalar or ArtifactStore validator before it is inspected further.
+  defp closed_transfer_map?(value, keys) do
+    is_map(value) and not is_struct(value) and map_size(value) == length(keys) and
+      Enum.sort(Map.keys(value)) == Enum.sort(keys)
+  end
+
+  defp valid_transfer_ref?(value) do
+    is_binary(value) and byte_size(value) == 32 and String.match?(value, @hex_transfer_ref)
+  end
+
+  defp valid_transfer_use_locator?("use:" <> digest), do: valid_digest?(digest)
+  defp valid_transfer_use_locator?(_value), do: false
 
   defp valid_digest?(digest) when is_binary(digest) do
     byte_size(digest) == 64 and String.valid?(digest) and String.match?(digest, @hex_digest)

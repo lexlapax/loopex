@@ -440,15 +440,22 @@ defmodule Loopex do
 
   ## Technical depth
 
-  The request names the compact artifact reference a caller already holds, a
-  non-negative start offset and an optional window length. The store verifies
-  the whole object once before any chunk exists and the response carries the
-  window bounds, the total size, the object digest and an opaque transfer
-  reference. That reference belongs to this attachment: another attachment,
-  session or runtime does not know it, and detaching or being replaced releases
-  every transfer this attachment opened. A runtime composed without an artifact
-  store, or with an adapter that predates the capability, refuses here rather
-  than reaching for a default.
+  The closed request names `use_locator`, an unsigned start offset and an
+  optional unsigned length; null length refuses. The actual routed session
+  binds the Store request. A caller-selected object is not accepted. One
+  original 60-second clock covers reservation, verified provenance, snapshot
+  creation and adoption. Success carries only the compact transfer/window
+  projection. Admitted failure is `{:error, %{reason: reason, cleanup:
+  :proved | :unproved}}`; work, receipts and native custody remain private.
+
+  The original connection holder owns the cumulative 1 GiB allowance across
+  attachment replacement and detach. Failed and cancelled opens debit at least
+  1 MiB, actual verification and metadata work are charged once, and returned
+  snapshot bytes are additional. Uncertain work retains conservative credit.
+  Two entries per original connection and four per runtime include pending,
+  live, retiring and unacknowledged custody. Detach revokes access immediately;
+  capacity returns only after Store proof, receipt acknowledgement and exact
+  original actor joins. Unsupported stores refuse without a fetch fallback.
   """
   @spec open_artifact_transfer(Attachment.t(), map()) :: {:ok, map()} | {:error, term()}
   def open_artifact_transfer(attachment, request),
@@ -478,10 +485,18 @@ defmodule Loopex do
 
   ## Technical depth
 
-  The close names the transfer rather than the artifact, so releasing one open
-  window never disturbs another the same attachment holds. It is addressed
-  through the attachment that opened it, which is what bounds a close to the
-  session entitled to perform it.
+  The close names the transfer through its original attachment. Its first
+  cleanup anchor starts one 5-second observation, separate from the opening
+  response. Success requires actual Store retirement, the exact receipt ack
+  and original custodian/observer joins within that same cutoff. Repeated close
+  does not renew it. Unproved cleanup retains custody and capacity; later exact
+  proof may reclaim capacity prospectively without changing an earlier failure.
+  The opaque Store handle supplies no actual minimum lifetime or earlier
+  failure timestamp. Core therefore requires final proof below five seconds
+  after its original opening permission as well as the first close cutoff;
+  a longer-lived transfer can return `{:error, :cleanup_unproved}` while exact
+  retirement, ack and original joins reclaim its capacity prospectively. This
+  proof restriction changes neither the 600-second lifetime nor the close timer.
   """
   @spec close_artifact_transfer(Attachment.t(), binary()) :: :ok | {:error, term()}
   def close_artifact_transfer(attachment, transfer_ref),

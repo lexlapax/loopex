@@ -1,158 +1,3 @@
-defmodule Loopex.AppServer.WorkflowArtifacts do
-  @moduledoc """
-  ## Concept
-
-  The smallest artifact store that can serve a verified transfer: it keeps the
-  bytes it was given, hands back the compact reference a client later presents,
-  and reads that object in bounded windows.
-
-  ## Technical depth
-
-  It exists so outcome 5's artifact leg is a real crossing rather than a shape.
-  Accepted ADR 0028's transfer triple is implemented here in full, so what a
-  client opens, reads and closes is the same path a production store serves; a
-  fixture that stopped at `put` would prove the wire and not the transfer.
-  """
-
-  @behaviour Loopex.ArtifactStore
-
-  alias LoopexProtocol.Canonical
-
-  def start, do: Agent.start_link(fn -> %{objects: %{}, uses: %{}, transfers: %{}} end)
-
-  @impl Loopex.ArtifactStore
-  def put(pid, bytes, %{media_type: media_type, role: role, metadata: metadata}) do
-    digest = Canonical.digest_bytes(bytes)
-    object = %{digest: digest, size: byte_size(bytes), locator: "workflow:" <> digest}
-
-    use_record = %{
-      canonicalization_version: Canonical.version(),
-      object_digest: object.digest,
-      object_size: object.size,
-      object_locator: object.locator,
-      media_type: media_type,
-      role: role,
-      metadata: metadata
-    }
-
-    use_digest = Canonical.digest(["artifact-use-v2", use_record])
-
-    reference =
-      Map.merge(object, %{
-        media_type: media_type,
-        role: role,
-        use_canonicalization_version: Canonical.version(),
-        use_digest: use_digest,
-        use_locator: "use:" <> use_digest
-      })
-
-    Agent.update(pid, fn state ->
-      %{
-        state
-        | objects: Map.put(state.objects, object.locator, {object, bytes}),
-          uses: Map.put(state.uses, reference.use_locator, use_record)
-      }
-    end)
-
-    {:ok, reference}
-  end
-
-  @impl Loopex.ArtifactStore
-  def fetch(pid, object) do
-    case Agent.get(pid, &Map.fetch(&1.objects, object.locator)) do
-      {:ok, {_object, bytes}} -> {:ok, bytes}
-      :error -> {:error, :unknown_artifact}
-    end
-  end
-
-  @impl Loopex.ArtifactStore
-  def stat(pid, locator) do
-    case Agent.get(pid, &Map.fetch(&1.objects, locator)) do
-      {:ok, {object, _bytes}} -> {:ok, object}
-      :error -> {:error, :unknown_artifact}
-    end
-  end
-
-  @impl Loopex.ArtifactStore
-  def describe(pid, use_locator) do
-    case Agent.get(pid, &Map.fetch(&1.uses, use_locator)) do
-      {:ok, use_record} -> {:ok, use_record}
-      :error -> {:error, :unknown_artifact}
-    end
-  end
-
-  @impl Loopex.ArtifactStore
-  def open_transfer(pid, object, use_locator, window) do
-    case Agent.get(pid, &Map.fetch(&1.objects, object.locator)) do
-      {:ok, {stored, bytes}} ->
-        start = Map.get(window, :start, 0)
-        length = Map.get(window, :length, stored.size - start)
-
-        if start > stored.size or start + length > stored.size do
-          {:error, :invalid_window}
-        else
-          ref = "workflow-transfer-" <> Integer.to_string(System.unique_integer([:positive]))
-
-          transfer = %{
-            transfer_ref: ref,
-            object: stored,
-            use_locator: use_locator,
-            total_size: stored.size,
-            window_start: start,
-            window_length: length,
-            object_digest: stored.digest
-          }
-
-          Agent.update(pid, fn state ->
-            %{state | transfers: Map.put(state.transfers, ref, {transfer, bytes, start})}
-          end)
-
-          {:ok, transfer}
-        end
-
-      :error ->
-        {:error, :object_missing}
-    end
-  end
-
-  @impl Loopex.ArtifactStore
-  def read_transfer(pid, transfer, length) do
-    case Agent.get(pid, &Map.fetch(&1.transfers, transfer.transfer_ref)) do
-      {:ok, {held, bytes, position}} ->
-        remaining = held.window_start + held.window_length - position
-
-        if remaining <= 0 do
-          {:ok, :complete}
-        else
-          take = min(length, remaining)
-          chunk = binary_part(bytes, position, take)
-
-          Agent.update(pid, fn state ->
-            %{
-              state
-              | transfers:
-                  Map.put(state.transfers, held.transfer_ref, {held, bytes, position + take})
-            }
-          end)
-
-          {:ok, %{offset: position, bytes: chunk, chunk_digest: Canonical.digest_bytes(chunk)}}
-        end
-
-      :error ->
-        {:error, :transfer_unknown}
-    end
-  end
-
-  @impl Loopex.ArtifactStore
-  def close_transfer(pid, transfer) do
-    Agent.update(pid, fn state ->
-      %{state | transfers: Map.delete(state.transfers, transfer.transfer_ref)}
-    end)
-
-    :ok
-  end
-end
-
 defmodule Loopex.AppServer.Fixture do
   @moduledoc """
   ## Concept
@@ -194,16 +39,47 @@ defmodule Loopex.AppServer.Fixture do
   """
   @spec serve() :: :ok
   def serve do
-    options =
-      case System.get_env("LOOPEX_WORKFLOW_SCRIPT") do
-        "tool" -> tool_options()
-        _plain -> [script: [%{text: "the task is done", calls: []}]]
-      end
+    case System.get_env("LOOPEX_WORKFLOW_SCRIPT") do
+      "tool" ->
+        # The launching fixture owns this temporary home across server restarts.
+        # Its retained objects must survive the predecessor's normal shutdown.
+        root = Path.join(System.fetch_env!("LOOPEX_HOME"), "workflow-artifacts")
+        {:ok, handle} = Loopex.Store.Local.Artifacts.open(root)
+        {:ok, owner} = Loopex.Store.Local.Transfers.start_link(root: root)
+        monitor = Process.monitor(owner)
 
+        try do
+          artifact_store = %{
+            module: Loopex.Store.Local.Artifacts,
+            handle: Map.put(handle, :transfers, owner)
+          }
+
+          serve(tool_options(artifact_store))
+        after
+          cutoff = System.monotonic_time(:millisecond) + 5_000
+          :ok =
+            GenServer.stop(owner, :normal, max(cutoff - System.monotonic_time(:millisecond), 0))
+
+          receive do
+            {:DOWN, ^monitor, :process, ^owner, :normal} ->
+              if System.monotonic_time(:millisecond) >= cutoff,
+                do: raise("original transfer owner cleanup exceeded its observation bound")
+          after
+            max(cutoff - System.monotonic_time(:millisecond), 0) ->
+              raise "original transfer owner cleanup was not joined"
+          end
+        end
+
+      _plain ->
+        serve(script: [%{text: "the task is done", calls: []}])
+    end
+  end
+
+  defp serve(options) do
     store = durable_store()
-    fixture = Loopex.AgentLoopFixture.start(options ++ store)
 
     try do
+      fixture = Loopex.AgentLoopFixture.start(options ++ store)
       :ok = Loopex.AppServer.Stdio.serve(fixture.runtime)
     after
       # Ending input ends the process, and a virtual machine that simply halts runs
@@ -224,19 +100,25 @@ defmodule Loopex.AppServer.Fixture do
   # a retained artifact reference for it. That gives a client every leg of the
   # chain to observe: the question, its answer, the committed authorization, the
   # tool finishing, and an artifact it can open a transfer against.
-  defp tool_options do
-    {:ok, artifacts} = Loopex.AppServer.WorkflowArtifacts.start()
+  defp tool_options(artifact_store) do
+    producer = fn job ->
+      {:ok, reference} =
+        Loopex.ArtifactStore.put(artifact_store, "the file the tool wrote", %{
+          "media_type" => "text/plain",
+          "role" => "tool_output",
+          "session_id" => job.session_id,
+          "run_id" => job.run_id,
+          "operation_id" => job.operation_id,
+          "attempt" => job.attempt,
+          "tool_call_id" => job.tool_call_id
+        })
 
-    {:ok, reference} =
-      Loopex.AppServer.WorkflowArtifacts.put(artifacts, "the file the tool wrote", %{
-        media_type: "text/plain",
-        role: "tool_output",
-        metadata: %{}
-      })
+      [reference]
+    end
 
     [
-      artifact_store: %{module: Loopex.AppServer.WorkflowArtifacts, handle: artifacts},
-      artifacts: %{"workflow-call" => [reference]},
+      artifact_store: artifact_store,
+      artifacts: %{"workflow-call" => producer},
       resource_manifest: skill_manifest(),
       script: [
         %{

@@ -2,7 +2,7 @@ defmodule LoopexProtocol.Session.V2Test do
   @moduledoc """
   ## Concept
 
-  Generation two is one exact daemon protocol, not a partial extension selected
+  The current daemon generation is one exact daemon protocol, not a partial extension selected
   piecemeal. Its metadata tells an independent client the complete contract it
   is about to speak.
 
@@ -10,7 +10,7 @@ defmodule LoopexProtocol.Session.V2Test do
 
   These assertions are literal vectors. They pin ordering and the digest rather
   than deriving expectations from the module under test. They also compare the
-  inherited prefix with generation one so a daemon addition cannot silently
+  inherited prefix with the foreground contract so a daemon addition cannot silently
   edit the foreground contract.
   """
 
@@ -20,8 +20,8 @@ defmodule LoopexProtocol.Session.V2Test do
   alias LoopexProtocol.Session
   alias LoopexProtocol.Session.V2
 
-  test "the daemon generation and its twenty ordered methods are exact" do
-    assert V2.generation() == "loopex.experimental/2"
+  test "the daemon generation and its twenty-two ordered methods are exact" do
+    assert V2.generation() == "loopex.experimental/4"
 
     assert V2.methods() == [
              "session.create",
@@ -43,13 +43,16 @@ defmodule LoopexProtocol.Session.V2Test do
              "session.list",
              "daemon.status",
              "session.acquire_control",
-             "session.release_control"
+             "session.release_control",
+             "session.configure",
+             "session.compact"
            ]
 
-    assert Enum.take(V2.methods(), 16) == Session.methods()
+    assert Enum.take(V2.methods(), 16) == Enum.take(Session.methods(), 16)
+    assert Enum.take(V2.methods(), -2) == Enum.take(Session.methods(), -2)
   end
 
-  test "the two daemon notification families extend generation one" do
+  test "the two daemon notification families extend the foreground contract" do
     assert V2.record_families() == [
              "initialized",
              "result",
@@ -110,7 +113,7 @@ defmodule LoopexProtocol.Session.V2Test do
     end
   end
 
-  test "generation two retains every generation-one limit and adds exactly seven" do
+  test "generation four retains every foreground limit and adds exactly seven" do
     additions = %{
       "connections_per_daemon" => 512,
       "initialize_deadline_ms" => 30_000,
@@ -125,14 +128,14 @@ defmodule LoopexProtocol.Session.V2Test do
     assert map_size(V2.limits()) == map_size(Session.limits()) + 7
   end
 
-  test "the generation-two digest is a pinned distinct contract identity" do
+  test "the current daemon digest is a pinned distinct contract identity" do
     assert V2.schema_digest() ==
-             "332626803532893558852b6f81bb7ba4b2cc39fd679ba7a4ff3e8145d3eb5f55"
+             "9306e4aeb2ffb9aab3cf4dac94db5a1e4699f09d3f58cc57e2fa79a7e63ef7b9"
 
     refute V2.schema_digest() == Session.schema_digest()
   end
 
-  test "the daemon selects only generation two" do
+  test "the daemon selects only generation four" do
     assert {:ok, reply} =
              V2.negotiate([Session.generation(), V2.generation()], ["future.capability"])
 
@@ -152,16 +155,15 @@ defmodule LoopexProtocol.Session.V2Test do
              V2.negotiate(["loopex.session.v1-experimental"], [])
   end
 
-  test "the generation-two manifest carries the module's exact inventories" do
+  test "the current daemon manifest carries the module's exact inventories" do
     manifest = contract_file("schema")
 
     assert manifest["generation"] == V2.generation()
-    assert manifest["methods_declared"] == V2.methods()
-    assert manifest["server_record_type_enum"] == V2.record_families()
-    assert manifest["server_records"]["error"]["code_enum"] == V2.error_codes()
+    assert manifest["methods"] == V2.methods()
+    assert manifest["record_families"] == V2.record_families()
+    assert manifest["error_codes"] == V2.error_codes()
 
-    additions = manifest["initialize_limits"]["generation_two_additions"]
-    assert Map.take(V2.limits(), Map.keys(additions)) == additions
+    assert manifest["limits"] == V2.limits()
 
     writer_methods = [
       "session.resume",
@@ -172,14 +174,27 @@ defmodule LoopexProtocol.Session.V2Test do
       "session.respond_interaction",
       "session.admit_resources",
       "session.activate_skill",
-      "session.release_control"
+      "session.release_control",
+      "session.configure",
+      "session.compact"
     ]
 
-    request_methods = manifest["request_contract"]["methods"]
+    request_methods = manifest["payload_definitions"]["requests"]["methods"]
 
     for method <- writer_methods do
-      assert request_methods[method]["required"]["writer_epoch"] ==
-               "identity_original_max_64_bytes"
+      identity = request_methods[method]["required"]["writer_epoch"]
+
+      if method == "session.configure" do
+        assert identity ==
+                 manifest["payload_definitions"]["nested"]["configure_request"]["writer_epoch"]
+      else
+        assert identity == %{
+                 "encoding" => "unpadded_base64url_of_original_opaque_bytes",
+                 "original_min_bytes" => 1,
+                 "original_max_bytes" => 64,
+                 "wire_max_bytes" => 86
+               }
+      end
     end
 
     for method <- V2.methods() -- writer_methods do
@@ -187,7 +202,7 @@ defmodule LoopexProtocol.Session.V2Test do
     end
   end
 
-  test "literal vectors cover every generation-two addition and both owner-loss shapes" do
+  test "literal vectors cover every current daemon addition and both owner-loss shapes" do
     vectors = contract_file("vectors")
     assert vectors["generation"] == V2.generation()
 
@@ -261,7 +276,7 @@ defmodule LoopexProtocol.Session.V2Test do
 
   defp contract_file(directory) do
     :loopex_protocol
-    |> Application.app_dir(Path.join(["priv", directory, "loopex-experimental-2.json"]))
+    |> Application.app_dir(Path.join(["priv", directory, "loopex-experimental-4.json"]))
     |> File.read!()
     |> JSON.decode!()
   end

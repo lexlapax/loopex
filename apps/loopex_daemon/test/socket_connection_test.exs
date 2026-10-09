@@ -152,7 +152,7 @@ defmodule LoopexDaemon.SocketConnectionTest do
         "method" => "session.create",
         "request_id" => "create-progress",
         "command_id" => Wire.encode_identity("create-progress"),
-        "session_options" => %{"purpose" => "current-progress-gate"}
+        "session_options" => %{"version" => 1}
       })
 
     assert [
@@ -1030,7 +1030,7 @@ defmodule LoopexDaemon.SocketConnectionTest do
         "method" => "session.create",
         "request_id" => "close-create",
         "command_id" => Wire.encode_identity("close-create"),
-        "session_options" => %{"purpose" => "retirement-proof"}
+        "session_options" => %{"version" => 1}
       })
 
     assert [%{"type" => "admission", "status" => "accepted", "session_id" => encoded}] =

@@ -19,7 +19,7 @@ defmodule LoopexDaemon.SocketTransportTest do
        %{daemon: daemon, runtime: runtime} do
     client = initialized_client(daemon)
 
-    :ok = send_frame(client, create("c1", "create-a", %{"purpose" => "socket"}))
+    :ok = send_frame(client, create("c1", "create-a", %{"version" => 1}))
 
     assert [
              %{
@@ -37,14 +37,14 @@ defmodule LoopexDaemon.SocketTransportTest do
     assert {:ok, :present} = Loopex.Runtime.session_existence(runtime, session_id)
     assert %{activations_used: 1, active_sessions: 1} = ConnectionRegistry.status(daemon.registry)
 
-    :ok = send_frame(client, create("c2", "create-a", %{"purpose" => "socket"}))
+    :ok = send_frame(client, create("c2", "create-a", %{"version" => 1}))
 
     assert [%{"request_id" => "c2", "status" => "accepted", "session_id" => ^encoded}] =
              receive_records(client, 1)
 
     assert %{activations_used: 1} = ConnectionRegistry.status(daemon.registry)
 
-    :ok = send_frame(client, create("c3", "create-a", %{"purpose" => "changed"}))
+    :ok = send_frame(client, create("c3", "create-a", %{"version" => 1, "tools" => []}))
 
     assert [
              %{
@@ -66,7 +66,7 @@ defmodule LoopexDaemon.SocketTransportTest do
 
     first =
       for index <- 1..64 do
-        :ok = send_frame(client, create("c#{index}", "create-#{index}", %{"n" => index}))
+        :ok = send_frame(client, create("c#{index}", "create-#{index}", %{"version" => 1}))
 
         assert [%{"request_id" => request_id, "status" => "accepted", "session_id" => encoded}] =
                  receive_records(client, 1, 5_000)
@@ -78,7 +78,7 @@ defmodule LoopexDaemon.SocketTransportTest do
 
     assert %{activations_used: 64} = ConnectionRegistry.status(daemon.registry)
 
-    :ok = send_frame(client, create("c65", "create-65", %{"n" => 65}))
+    :ok = send_frame(client, create("c65", "create-65", %{"version" => 1}))
 
     assert [
              %{
@@ -88,7 +88,7 @@ defmodule LoopexDaemon.SocketTransportTest do
              }
            ] = receive_records(client, 1)
 
-    :ok = send_frame(client, create("replay", "create-1", %{"n" => 1}))
+    :ok = send_frame(client, create("replay", "create-1", %{"version" => 1}))
 
     assert [%{"request_id" => "replay", "status" => "accepted", "session_id" => ^first}] =
              receive_records(client, 1)
@@ -107,7 +107,7 @@ defmodule LoopexDaemon.SocketTransportTest do
     filler = initialized_client(daemon)
 
     for index <- 1..63 do
-      :ok = send_frame(filler, create("f#{index}", "race-fill-#{index}", %{"n" => index}))
+      :ok = send_frame(filler, create("f#{index}", "race-fill-#{index}", %{"version" => 1}))
       assert [%{"status" => "accepted"}] = receive_records(filler, 1, 5_000)
     end
 
@@ -117,7 +117,7 @@ defmodule LoopexDaemon.SocketTransportTest do
     assert [%{"result" => %{"writer_epoch" => encoded_epoch}}] = receive_records(resumer, 1)
     {:ok, epoch} = Wire.identity(encoded_epoch)
 
-    :ok = send_frame(creator, create("race-create", "race-create", %{"n" => 64}))
+    :ok = send_frame(creator, create("race-create", "race-create", %{"version" => 1}))
     :ok = send_frame(resumer, resume("race-resume", dormant, "race-resume", epoch))
     [created] = receive_records(creator, 1, 10_000)
     [resumed] = receive_records(resumer, 1, 10_000)
@@ -477,7 +477,7 @@ defmodule LoopexDaemon.SocketTransportTest do
     File.write!(Path.join([state, "daemon", "session-index-v1.next"]), "planted")
     client = initialized_client(daemon)
 
-    :ok = send_frame(client, create("create", "notice-create", %{}))
+    :ok = send_frame(client, create("create", "notice-create", %{"version" => 1}))
 
     # The notice is written while the session activates, so it may precede the
     # admission; both name the same session.
@@ -988,12 +988,17 @@ defmodule LoopexDaemon.SocketTransportTest do
     refute Enum.any?(attached, &closed?(&1, 10))
   end
 
-  # Concept: a client that offers only an older generation — the released
-  # `0.1.0` name or generation one — is refused at initialize, and nothing it
-  # sends afterwards creates anything.
+  # Concept: old-only and foreground-only clients are refused at initialize.
+  # Technical depth: the released name and generations one/two stay refused;
+  # the current foreground generation also cannot create a daemon session.
   test "an older generation is refused and creates nothing", %{daemon: daemon} do
     for {offer, index} <-
-          Enum.with_index(["loopex.session.v1-experimental", "loopex.experimental/1"]) do
+          Enum.with_index([
+            "loopex.session.v1-experimental",
+            "loopex.experimental/1",
+            "loopex.experimental/2",
+            "loopex.experimental/3"
+          ]) do
       client = connect(daemon)
 
       :ok =
@@ -1005,7 +1010,7 @@ defmodule LoopexDaemon.SocketTransportTest do
         })
 
       assert [%{"code" => "unsupported_generation"}] = receive_records(client, 1)
-      :ok = send_frame(client, create("late-#{index}", "late-create-#{index}", %{}))
+      :ok = send_frame(client, create("late-#{index}", "late-create-#{index}", %{"version" => 1}))
       assert [%{"request_id" => "late-" <> _}] = receive_records(client, 1)
     end
 
@@ -1041,13 +1046,7 @@ defmodule LoopexDaemon.SocketTransportTest do
 
     assert [%{"request_id" => "read", "type" => "error"}] = receive_records(client, 1)
 
-    reference =
-      Wire.encode_reference(%{
-        digest: String.duplicate("a", 64),
-        size: 9,
-        locator: "no-such-artifact",
-        use_locator: "use:" <> String.duplicate("a", 64)
-      })
+    reference = "use:" <> String.duplicate("a", 64)
 
     open = %{
       "method" => "artifact.open_transfer",
@@ -1182,7 +1181,7 @@ defmodule LoopexDaemon.SocketTransportTest do
       &match?({:"$gen_call", _from, {:bind_ticket_worker, _, _, _}}, &1)
     )
 
-    :ok = send_frame(client, create("held", "held-create", %{"purpose" => "held"}))
+    :ok = send_frame(client, create("held", "held-create", %{"version" => 1}))
     assert_receive :relay_parked, 1_000
 
     eventually(fn ->
@@ -1222,8 +1221,8 @@ defmodule LoopexDaemon.SocketTransportTest do
     )
 
     :ok = :sys.suspend(daemon.registry)
-    :ok = send_frame(first, create("first", "slow-first", %{"purpose" => "first"}))
-    :ok = send_frame(second, create("second", "slow-second", %{"purpose" => "second"}))
+    :ok = send_frame(first, create("first", "slow-first", %{"version" => 1}))
+    :ok = send_frame(second, create("second", "slow-second", %{"version" => 1}))
 
     eventually(fn ->
       Enum.all?(connections, fn connection -> ledger_phase?(connection, :promoting) end)
@@ -1304,7 +1303,7 @@ defmodule LoopexDaemon.SocketTransportTest do
        %{daemon: daemon, runtime: runtime} do
     client = initialized_client(daemon)
     park_after_promotion(daemon.relay)
-    options = %{"purpose" => "lost"}
+    options = %{"version" => 1}
 
     :ok = send_frame(client, create("lost", "lost-create", options))
     assert_receive :promotion_parked, 2_000
@@ -1337,7 +1336,7 @@ defmodule LoopexDaemon.SocketTransportTest do
       &match?({:"$gen_call", _from, {:bind_ticket_worker, _, _, _}}, &1)
     )
 
-    :ok = send_frame(client, create("cancelled", "cancel-create", %{"purpose" => "cancel"}))
+    :ok = send_frame(client, create("cancelled", "cancel-create", %{"version" => 1}))
     assert_receive :relay_parked, 1_000
     {origin, entry} = ledger_entry(connection, :binding)
 
@@ -1428,7 +1427,7 @@ defmodule LoopexDaemon.SocketTransportTest do
     connection = initialized_connection(daemon)
     incarnation = :sys.get_state(connection).incarnation
     monitor = Process.monitor(connection)
-    options = %{"purpose" => "closing"}
+    options = %{"version" => 1}
     {:ok, children} = Loopex.Runtime.children(runtime)
     watch_relay(daemon.relay, &match?({:"$gen_call", _from, {:promote_ticket, _, _, _, _}}, &1))
 
@@ -2065,7 +2064,7 @@ defmodule LoopexDaemon.SocketTransportTest do
     do: %{"method" => "session.list", "request_id" => request_id, "limit" => limit}
 
   defp create_session(client, command_id) do
-    :ok = send_frame(client, create(command_id, command_id, %{"purpose" => command_id}))
+    :ok = send_frame(client, create(command_id, command_id, %{"version" => 1}))
     assert [%{"status" => "accepted", "session_id" => encoded}] = receive_records(client, 1)
     {:ok, session_id} = Wire.identity(encoded)
     session_id

@@ -2,21 +2,41 @@ defmodule LoopexDaemon.WireRecords do
   @moduledoc """
   ## Concept
 
-  The daemon renders generation-two attachment succession with the same stable
+  The daemon renders attachment succession with the same stable
   records it will use while serving a client. Keeping those records in one pure
   boundary prevents the capacity reservation from measuring a shape different
   from the one a connection later emits.
 
   ## Technical depth
 
-  These constructors accept only already-validated internal values. Identity
-  bytes are encoded here exactly once, unsigned cursors use the protocol's
-  canonical decimal representation, and the four succession error messages are
+  Durable events and transient progress validate complete closed sources before
+  serialization. Identity bytes are encoded here exactly once, unsigned cursors
+  use the protocol's canonical decimal representation, and succession errors use
   fixed server-authored text. No process, credential, path, exception or
   arbitrary reason reaches a record through this module.
   """
 
   alias LoopexProtocol.Wire
+  alias LoopexProtocol.Session.{Inspection, Snapshot}
+
+  @artifact_transfer_atom_reasons [
+    :attachment_required,
+    :invalid_attachment,
+    :stale_attachment,
+    :invalid_artifact_request,
+    :artifact_transfer_unsupported,
+    :transfer_limit_reached,
+    :open_work_budget_exhausted,
+    :transfers_unavailable,
+    :unknown_transfer,
+    :invalid_chunk_length,
+    :read_deadline_exhausted,
+    :artifact_unreadable,
+    :runtime_unavailable,
+    :cleanup_unproved
+  ]
+
+  @inspection_fields ~w(status event_sequence active_run_id cleanup_grace_ms active_context_token_budget pending_work_ids open_interaction configuration active_bounds checkpoint active_maintenance)a
 
   @ordinary_progress_fields %{
     text_delta: [
@@ -269,28 +289,23 @@ defmodule LoopexDaemon.WireRecords do
 
   ## Technical depth
 
+  The complete revision-3 snapshot passes through the closed Snapshot codec.
   The cursor and the snapshot's event sequence are one number reported twice;
-  the open interaction is projected at that same cursor by core.
+  the envelope repeats that snapshot's own encoded interaction. Malformed or
+  incomplete captures fail before record construction, without defaults.
   """
-  @spec snapshot(binary(), map(), map() | nil) :: map()
-  def snapshot(request_id, snapshot, open_interaction)
-      when is_binary(request_id) and is_map(snapshot) do
-    cursor = Map.get(snapshot, :event_sequence, 0)
-    session_id = Map.fetch!(snapshot, :session_id)
+  @spec snapshot(binary(), map()) :: map()
+  def snapshot(request_id, captured_snapshot)
+      when is_binary(request_id) and is_map(captured_snapshot) do
+    {:ok, snapshot} = Snapshot.encode_wire(captured_snapshot)
 
     %{
       "type" => "snapshot",
       "request_id" => request_id,
-      "session_id" => Wire.encode_identity(session_id),
-      "event_cursor" => Wire.encode_u64(cursor),
-      "snapshot" => %{
-        "snapshot_revision" => Map.fetch!(snapshot, :snapshot_revision),
-        "session_id" => Wire.encode_identity(session_id),
-        "event_sequence" => Wire.encode_u64(cursor),
-        "active_run_id" => optional_identity(Map.get(snapshot, :active_run_id)),
-        "active_run_phase" => optional_word(Map.get(snapshot, :active_run_phase))
-      },
-      "open_interaction" => open_interaction
+      "session_id" => snapshot["session_id"],
+      "event_cursor" => snapshot["event_sequence"],
+      "snapshot" => snapshot,
+      "open_interaction" => snapshot["open_interaction"]
     }
   end
 
@@ -322,61 +337,258 @@ defmodule LoopexDaemon.WireRecords do
   @doc """
   ## Concept
 
-  One durable event, with only the members its kind carries.
+  One durable event carrying its complete closed public projection.
 
   ## Technical depth
 
-  The event's identity and sequence move into the envelope. Maintenance views,
-  compact completions and checkpoint owners use their closed codecs; other data
-  keeps its native members.
+  Validate the native envelope and every accepted event family before any
+  member reaches a frame. Existing session codecs preserve exact quantities,
+  identities, interaction producers and terminal failures. Ordinary events
+  carry only their closed public fields. Malformed or private data refuses
+  whole; the connection owns detachment at its last completely emitted cursor.
   """
-  @spec event(binary(), map()) :: map()
-  def event(session_id, event) when is_binary(session_id) and is_map(event) do
-    data = Map.drop(event, [:kind, :event_id, :event_sequence])
-
-    data =
-      case event.kind do
-        "context.compacted" ->
-          {:ok, owner} =
-            LoopexProtocol.Session.CheckpointOwner.encode_wire(Map.fetch!(data, "owner"))
-
-          Map.put(data, "owner", owner)
-
-        "context.maintenance_changed" ->
-          {:ok, view} = LoopexProtocol.Session.MaintenanceView.encode_wire(data)
-          view
-
-        "context.compaction_finished" ->
-          {:ok, completion} = LoopexProtocol.Session.CompactResult.encode_completion(data)
-          completion
-
-        _ ->
-          data
-      end
-
-    %{
-      "type" => "event",
-      "session_id" => Wire.encode_identity(session_id),
-      "event" => %{
-        "kind" => Map.fetch!(event, :kind),
-        "event_id" => Wire.encode_identity(Map.fetch!(event, :event_id)),
-        "event_sequence" => Wire.encode_u64(Map.fetch!(event, :event_sequence)),
-        "data" => data
+  @spec event(term(), term()) :: map() | :error
+  def event(session_id, event) when is_map(event) and not is_struct(event) do
+    with {:ok, session} <- event_identity(session_id, 256),
+         {:ok, id} <- event_identity(Map.get(event, :event_id)),
+         sequence
+         when is_integer(sequence) and sequence >= 0 and
+                sequence <= 18_446_744_073_709_551_615 <- Map.get(event, :event_sequence),
+         kind when is_binary(kind) <- Map.get(event, :kind),
+         {:ok, data} <- event_data(kind, Map.drop(event, [:kind, :event_id, :event_sequence])) do
+      %{
+        "type" => "event",
+        "session_id" => session,
+        "event" => %{
+          "kind" => kind,
+          "event_id" => id,
+          "event_sequence" => Wire.encode_u64(sequence),
+          "data" => data
+        }
       }
-    }
+    else
+      _invalid -> :error
+    end
   end
 
-  defp compaction_progress(session_id, item) do
-    case LoopexProtocol.Session.CompactionProgress.encode_wire(item) do
-      {:ok, progress} ->
-        %{
-          "type" => "progress",
-          "session_id" => Wire.encode_identity(session_id),
-          "progress" => progress
-        }
+  def event(_session_id, _event), do: :error
 
-      :error ->
-        :error
+  defp event_data("session.configured", data),
+    do: LoopexProtocol.Session.Configuration.encode_change(data)
+
+  defp event_data("context.compacted", data),
+    do: LoopexProtocol.Session.Checkpoint.encode_wire(data)
+
+  defp event_data("context.maintenance_changed", data),
+    do: LoopexProtocol.Session.MaintenanceView.encode_wire(data)
+
+  defp event_data("context.compaction_finished", data),
+    do: LoopexProtocol.Session.CompactResult.encode_completion(data)
+
+  defp event_data(kind, data)
+       when kind in ~w(interaction.requested interaction.answer_admitted interaction.resolved interaction.expired interaction.cancelled interaction.answered interaction.declined),
+       do: LoopexProtocol.Session.InteractionEvent.encode(kind, data)
+
+  defp event_data("user.message_appended", data),
+    do: ordinary_event(data, ~w(command_id run_id content))
+
+  defp event_data("assistant.message_appended", data),
+    do: ordinary_event(data, ~w(run_id turn_id content))
+
+  defp event_data("run.started", data), do: ordinary_event(data, ~w(command_id run_id))
+  defp event_data("session.settled", data), do: ordinary_event(data, ~w(run_id))
+
+  defp event_data("tool.started", data),
+    do: ordinary_event(data, ~w(run_id turn_id tool_call_id operation_id tool_id tool_version))
+
+  defp event_data("tool.finished", data) do
+    with true <-
+           data["outcome"] in ~w(completed failed denied cancelled outcome_unknown cancelled_workspace_lease_lost),
+         true <- data["reason"] == nil do
+      ordinary_event(
+        data,
+        ~w(run_id turn_id tool_call_id operation_id tool_id outcome reason artifacts)
+      )
+    else
+      _invalid -> :error
+    end
+  end
+
+  defp event_data("steer.resolved", data) do
+    with true <- data["disposition"] in ~w(applied unapplied cancelled) do
+      ordinary_event(data, ~w(command_id run_id disposition reason))
+    else
+      _invalid -> :error
+    end
+  end
+
+  defp event_data("follow_up.resolved", data) do
+    with "cancelled" <- data["disposition"], "aborted" <- data["reason"] do
+      ordinary_event(data, ~w(command_id run_id disposition reason))
+    else
+      _invalid -> :error
+    end
+  end
+
+  # Concept: run endings preserve their flat event contract and shared algebra.
+  # Technical depth: adapt only the fixed outcome spellings to Outcome, whose
+  # codec owns bound precision and context-failure validation. Null envelope
+  # references stay explicit; failure and reason never both appear on the wire.
+  defp event_data("run.finished", data) do
+    base = ~w(run_id outcome reconciliation_ref cleanup_grace_ms command_id)
+
+    outcome =
+      Enum.find(
+        [:completed, :cancelled, :failed, :bound_reached, :outcome_unknown],
+        &(Atom.to_string(&1) == data["outcome"])
+      )
+
+    extra =
+      case outcome do
+        :bound_reached -> ~w(bound observed declared_limit accounting_source)
+        :failed -> if Map.has_key?(data, "failure"), do: ["failure"], else: ["reason"]
+        _ -> []
+      end
+
+    details = Map.take(data, ["cleanup_grace_ms" | extra])
+
+    details =
+      case outcome do
+        :failed -> Map.merge(%{"reason" => nil, "failure" => nil}, details)
+        :outcome_unknown -> Map.put(details, "reconciliation_ref", data["reconciliation_ref"])
+        _ -> details
+      end
+
+    with true <- event_closed?(data, base ++ extra),
+         {:ok, run} <- event_identity(data["run_id"]),
+         {:ok, command} <- event_optional_identity(data["command_id"]),
+         {:ok, ref} <- event_optional_identity(data["reconciliation_ref"]),
+         {:ok, encoded} <-
+           LoopexProtocol.Session.Outcome.encode_wire(%{outcome: outcome, details: details}) do
+      payload = Map.merge(data, Map.take(encoded["details"], ["cleanup_grace_ms" | extra]))
+
+      {:ok,
+       Map.merge(payload, %{"run_id" => run, "command_id" => command, "reconciliation_ref" => ref})}
+    else
+      _invalid -> :error
+    end
+  end
+
+  defp event_data(_kind, _data), do: :error
+
+  defp ordinary_event(data, fields) do
+    if event_closed?(data, fields) do
+      Enum.reduce_while(fields, {:ok, %{}}, fn field, {:ok, payload} ->
+        case event_member(field, data[field]) do
+          {:ok, encoded} ->
+            key = if field == "content", do: "content_b64", else: field
+            {:cont, {:ok, Map.put(payload, key, encoded)}}
+
+          :error ->
+            {:halt, :error}
+        end
+      end)
+    else
+      :error
+    end
+  end
+
+  defp event_member(field, value)
+       when field in ~w(command_id run_id turn_id tool_call_id operation_id),
+       do: event_identity(value)
+
+  # Concept: conversation bytes fit the enclosing public JSON string before emission.
+  # Technical depth: unpadded base64url expands three raw bytes into four wire
+  # bytes; the existing 131,072-byte Frame string ceiling admits at most 98,304
+  # raw bytes here. Oversized content refuses without changing Core's allowance.
+  defp event_member("content", value)
+       when is_binary(value) and byte_size(value) <= div(131_072 * 3, 4),
+       do: {:ok, Wire.encode_bytes(value)}
+
+  defp event_member("tool_id", value) when is_binary(value) and byte_size(value) in 1..128 do
+    if Regex.match?(~r/\A[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*\z/, value),
+      do: {:ok, value},
+      else: :error
+  end
+
+  defp event_member("tool_version", value)
+       when is_binary(value) and byte_size(value) <= 131_072 do
+    if Regex.match?(~r/\A[0-9]+\.[0-9]+\.[0-9]+\z/, value), do: {:ok, value}, else: :error
+  end
+
+  defp event_member("reason", nil), do: {:ok, nil}
+
+  defp event_member("reason", value) do
+    if is_binary(value) and byte_size(value) in 0..131_072 and String.valid?(value),
+      do: {:ok, value},
+      else: :error
+  end
+
+  defp event_member(field, value) when field in ~w(outcome disposition), do: {:ok, value}
+
+  defp event_member("artifacts", value) when is_list(value) do
+    Enum.reduce_while(value, {:ok, []}, fn artifact, {:ok, artifacts} ->
+      case event_artifact(artifact) do
+        {:ok, encoded} -> {:cont, {:ok, [encoded | artifacts]}}
+        :error -> {:halt, :error}
+      end
+    end)
+    |> case do
+      {:ok, artifacts} -> {:ok, Enum.reverse(artifacts)}
+      :error -> :error
+    end
+  end
+
+  defp event_member(_field, _value), do: :error
+
+  defp event_artifact(value) do
+    with true <-
+           event_closed?(
+             value,
+             ~w(digest size locator media_type role use_canonicalization_version use_digest use_locator)
+           ),
+         {:ok, _} <- Wire.digest(value["digest"]),
+         {:ok, _} <- Wire.digest(value["use_digest"]),
+         size when is_integer(size) and size >= 0 and size <= 18_446_744_073_709_551_615 <-
+           value["size"],
+         true <- event_safe_text?(value["locator"], 1_024),
+         true <- event_safe_text?(value["media_type"], 255),
+         "tool_output" <- value["role"],
+         "loopex.canonical.v1" <- value["use_canonicalization_version"],
+         true <- value["use_locator"] == "use:" <> value["use_digest"] do
+      {:ok, Map.put(value, "size", Wire.encode_u64(size))}
+    else
+      _invalid -> :error
+    end
+  end
+
+  defp event_safe_text?(value, ceiling),
+    do:
+      is_binary(value) and byte_size(value) in 1..ceiling and String.valid?(value) and
+        not Regex.match?(~r/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u, value)
+
+  defp event_identity(value, ceiling \\ 65_536)
+
+  defp event_identity(value, ceiling) when is_binary(value) and byte_size(value) in 1..ceiling//1,
+    do: {:ok, Wire.encode_identity(value)}
+
+  defp event_identity(_value, _ceiling), do: :error
+  defp event_optional_identity(nil), do: {:ok, nil}
+  defp event_optional_identity(value), do: event_identity(value)
+
+  defp event_closed?(data, fields),
+    do: is_map(data) and not is_struct(data) and Enum.sort(Map.keys(data)) == Enum.sort(fields)
+
+  defp compaction_progress(session_id, item) do
+    with {:ok, session} <- event_identity(session_id, 256),
+         {:ok, progress} <- LoopexProtocol.Session.CompactionProgress.encode_wire(item) do
+      %{
+        "type" => "progress",
+        "session_id" => session,
+        "progress" => progress
+      }
+    else
+      _invalid -> :error
     end
   end
 
@@ -498,13 +710,6 @@ defmodule LoopexDaemon.WireRecords do
 
   defp model_payload_bounded?(_item), do: true
 
-  defp optional_identity(nil), do: nil
-  defp optional_identity(value) when is_binary(value), do: Wire.encode_identity(value)
-
-  defp optional_word(nil), do: nil
-  defp optional_word(value) when is_atom(value), do: Atom.to_string(value)
-  defp optional_word(value) when is_binary(value), do: value
-
   @doc false
   @spec result(binary(), binary(), map()) :: map()
   def result(request_id, method, body)
@@ -519,22 +724,15 @@ defmodule LoopexDaemon.WireRecords do
 
   ## Technical depth
 
-  ADR 0023 names the exact members; owner epoch, journal version, handles and
-  attachment state never cross.
+  Select the eleven approved M7 fields from one captured owner observation,
+  then validate their exact native shapes through Inspection. Owner epoch,
+  journal version, compact_pending, handles and attachment state never cross.
+  Missing or malformed public data refuses without defaults.
   """
   @spec session_status(map()) :: map()
   def session_status(status) when is_map(status) do
-    %{
-      "status" => to_string(Map.get(status, :status)),
-      "event_sequence" => Wire.encode_u64(Map.get(status, :event_sequence, 0)),
-      "active_run_id" => optional_identity(Map.get(status, :active_run_id)),
-      "cleanup_grace_ms" => Wire.encode_u64(Map.get(status, :cleanup_grace_ms, 0)),
-      "active_context_token_budget" =>
-        optional_u64(Map.get(status, :active_context_token_budget)),
-      "pending_work_ids" =>
-        status |> Map.get(:pending_work_ids, []) |> Enum.map(&Wire.encode_identity/1),
-      "open_interaction" => Map.get(status, :open_interaction)
-    }
+    {:ok, inspection} = status |> Map.take(@inspection_fields) |> Inspection.encode_wire()
+    inspection
   end
 
   @doc false
@@ -571,11 +769,28 @@ defmodule LoopexDaemon.WireRecords do
 
   ## Technical depth
 
-  A reason outside core's closed atom set collapses to `internal_failure`
-  rather than serializing an arbitrary term.
+  Accepted ADR 0066 admitted maps carry only the closed reason and cleanup.
+  Other refusals use the current pre-admission/read/close atom branches.
+  Unknown and superseded causes collapse to `internal_failure`.
   """
   @spec transfer_refused(binary(), term()) :: map()
-  def transfer_refused(request_id, reason) when is_binary(request_id) and is_atom(reason) do
+  def transfer_refused(request_id, failure) when is_binary(request_id) and is_map(failure) do
+    if Loopex.ArtifactStore.valid_transfer_failure?({:error, failure}) do
+      request_id
+      |> transfer_refusal_record(failure.reason)
+      |> Map.put("cleanup", Atom.to_string(failure.cleanup))
+    else
+      request_error(request_id, "internal_failure")
+    end
+  end
+
+  def transfer_refused(request_id, reason)
+      when is_binary(request_id) and reason in @artifact_transfer_atom_reasons,
+      do: transfer_refusal_record(request_id, reason)
+
+  def transfer_refused(request_id, _reason), do: request_error(request_id, "internal_failure")
+
+  defp transfer_refusal_record(request_id, reason) do
     %{
       "type" => "error",
       "request_id" => request_id,
@@ -585,12 +800,19 @@ defmodule LoopexDaemon.WireRecords do
     }
   end
 
-  def transfer_refused(request_id, _reason), do: request_error(request_id, "internal_failure")
+  defp transfer_reference(reference) do
+    Map.new(reference, fn
+      {:size, size} -> {"size", Wire.encode_u64(size)}
+      {key, value} -> {Atom.to_string(key), value}
+    end)
+  end
 
   @doc false
   @spec transfer_opened(map()) :: map()
   def transfer_opened(transfer) when is_map(transfer) do
     %{
+      "object_reference" => transfer_reference(Map.fetch!(transfer, :object_reference)),
+      "use_reference" => transfer_reference(Map.fetch!(transfer, :use_reference)),
       "transfer_ref" => Wire.encode_identity(Map.fetch!(transfer, :transfer_ref)),
       "total_size" => Wire.encode_u64(Map.fetch!(transfer, :total_size)),
       "window_start" => Wire.encode_u64(Map.fetch!(transfer, :window_start)),
@@ -626,9 +848,6 @@ defmodule LoopexDaemon.WireRecords do
   end
 
   def resource_read(resource) when is_map(resource), do: resource
-
-  defp optional_u64(nil), do: nil
-  defp optional_u64(value) when is_integer(value), do: Wire.encode_u64(value)
 
   @doc """
   ## Concept

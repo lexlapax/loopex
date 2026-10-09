@@ -446,7 +446,7 @@ defmodule LoopexDaemon.TelemetryParityTest do
         "method" => "session.create",
         "request_id" => "create",
         "command_id" => Wire.encode_identity("parity-create"),
-        "session_options" => %{}
+        "session_options" => %{"version" => 1}
       })
 
     [%{"status" => "accepted", "session_id" => encoded}] = receive_records(socket, 1)

@@ -92,16 +92,20 @@ defmodule Loopex.AppServer.DeliveryTest do
   end
 
   test "both checkpoint owner kinds preserve opaque bytes in the foreground envelope" do
+    path = Path.join(:code.priv_dir(:loopex_protocol), "vectors/checkpoint-projection.v1.json")
+    cases = JSON.decode!(File.read!(path))["cases"]
+
     for kind <- ["run", "compact"] do
-      event = %{
-        :kind => "context.compacted",
-        :event_id => "event",
-        :event_sequence => 1,
-        "owner" => %{"kind" => kind, "id" => <<0, 255, 10>>}
-      }
+      vector = Enum.find(cases, &(is_nil(&1["error"]) and &1["input"]["owner"]["kind"] == kind))
+      wire = put_in(vector["input"], ["owner", "id"], "AP8K")
+      assert {:ok, native} = LoopexProtocol.Session.Checkpoint.decode_wire(wire)
+
+      event =
+        Map.merge(native, %{kind: "context.compacted", event_id: "event", event_sequence: 1})
 
       {[record], drained} = Delivery.new("session", 0) |> Delivery.event(event) |> drain()
-      assert record["event"]["data"] == %{"owner" => %{"kind" => kind, "id" => "AP8K"}}
+      assert record["event"]["data"] == wire
+      assert record["event"]["data"]["owner"] == %{"kind" => kind, "id" => "AP8K"}
       assert Delivery.cursor(drained) == 1
       assert {:ok, _} = LoopexProtocol.Frame.encode(record)
     end
@@ -128,12 +132,19 @@ defmodule Loopex.AppServer.DeliveryTest do
       assert record["event"]["data"] == wire
       assert {:ok, _} = LoopexProtocol.Frame.encode(record)
 
-      assert_raise MatchError, fn ->
+      rejected =
         Delivery.event(
           Delivery.new("session", 0),
           Map.put(event, "source", "PRIVATE_COMPLETION_CANARY")
         )
-      end
+
+      assert Delivery.detached?(rejected)
+      assert Delivery.cursor(rejected) == 0
+      assert Delivery.pulled_cursor(rejected) == 0
+      assert Delivery.usage(rejected).durable == {0, 0}
+      assert Delivery.next(rejected) == :empty
+      {records, _} = drain(rejected)
+      assert records == []
     end
   end
 
@@ -226,6 +237,23 @@ defmodule Loopex.AppServer.DeliveryTest do
     end
   end
 
+  test "compaction activity applies the session identity boundary before encoding" do
+    for kind <- ["run", "compact"] do
+      item = compaction_item(kind, 7)
+
+      for session <- [nil, :session, 7, "", :binary.copy(<<255>>, 257)] do
+        queue = Delivery.new(session, 7)
+        assert Delivery.progress(queue, item) == queue
+      end
+
+      session = :binary.copy(<<255>>, 256)
+      {[record], drained} = Delivery.new(session, 7) |> Delivery.progress(item) |> drain()
+      assert {:ok, ^session} = LoopexProtocol.Wire.identity(record["session_id"])
+      assert Delivery.cursor(drained) == 7
+      assert Delivery.usage(drained).progress == {0, 0}
+    end
+  end
+
   test "malformed compaction activity drops whole before private values can reach encoding" do
     item = compaction_item("run", 0)
     queue = Delivery.new("session", 0)
@@ -259,7 +287,7 @@ defmodule Loopex.AppServer.DeliveryTest do
     assert length(records) == 32
     assert Enum.all?(records, &(&1 == compaction_record("compact", 7)))
 
-    event = %{kind: "run.progressed", event_id: "event", event_sequence: 8}
+    event = %{"run_id" => "run", kind: "session.settled", event_id: "event", event_sequence: 8}
     {[durable | activity], drained} = queue |> Delivery.event(event) |> drain()
     assert durable["type"] == "event"
     assert length(activity) == 32

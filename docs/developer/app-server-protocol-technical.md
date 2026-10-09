@@ -5,12 +5,12 @@
 
 Concept: [App server protocol](app-server-protocol.md#concept).
 
-This companion is the normative wire reference: the generations, the methods,
-the record families, the error codes, the identities and their encodings, the
-exact limits, and where the schemas, the vectors, and the evidence live. The
-inventories are data in `LoopexProtocol.Session` (generation 1) and
-`LoopexProtocol.Session.V2` (generation 2), and each generation's schema and
-vectors are files in `apps/loopex_protocol/priv/`.
+This companion projects the accepted current M7 wire contract and prepared
+implementation candidate. It names required evidence, not completed
+qualification or closure. Complete manifests supply the inventories consumed by
+`LoopexProtocol.Session` for foreground /3 and `LoopexProtocol.Session.V2`
+for daemon /4. Schemas and literal vectors live in `apps/loopex_protocol/priv/`;
+no partial manifest independently activates serving.
 
 <a id="technical-protocol-generation"></a>
 ## Generation and Negotiation
@@ -19,44 +19,64 @@ Concept: [Experimental is in the name on purpose](app-server-protocol.md#concept
 
 | Generation | Served by | Module | Schema and vectors |
 | --- | --- | --- | --- |
-| `loopex.experimental/1` | the app server, over standard input and output | `LoopexProtocol.Session` | `priv/schema/loopex-experimental-1.json`, `priv/vectors/loopex-experimental-1.json` |
-| `loopex.experimental/2` | the daemon, over its Unix-domain socket | `LoopexProtocol.Session.V2` | `priv/schema/loopex-experimental-2.json`, `priv/vectors/loopex-experimental-2.json` |
+| `loopex.experimental/3` | the app server, over standard input and output | `LoopexProtocol.Session` | `priv/schema/loopex-experimental-3.json`, `priv/vectors/loopex-experimental-3.json` |
+| `loopex.experimental/4` | the daemon, over its Unix-domain socket | `LoopexProtocol.Session.V2` | `priv/schema/loopex-experimental-4.json`, `priv/vectors/loopex-experimental-4.json` |
 
-Each server selects only its own literal: the daemon refuses a client that
-offers only generation 1 at initialize, and never downgrades. Generation 1 was
-previously named `loopex.session.v1-experimental`; the generation string is one
-of the schema digest's inputs, so the rename changed only that digest, and
-`apps/loopex_protocol/test/public_schema_conformance_test.exs` proves the
-methods, record families, error codes, limits, schema manifest, and vector
-bytes are otherwise the same. The schema and vectors change only with the
-generation they describe.
+Each server selects only its own literal. Old-only /1 or /2 offers and the
+other current server's /3 or /4 offer refuse before session authority. A mixed
+offer succeeds only for that server's literal. Clients verify generation and
+independently pinned exact schema digest before session work, and close on
+mismatch without downgrade or mutation replay.
+
+`LoopexProtocol.Canonical.digest/1` uses revision `loopex.canonical.v1` over
+exactly seven members: `generation`, `canonicalization_revision`, `methods`,
+`record_families`, `error_codes`, `limits`, `payload_definitions`. Definitions
+include every request, result, event/snapshot and referenced nested union,
+including artifact refusal branches. List order is part of the preimage.
+Unknown manifest keys, duplicate JSON keys and non-integer schema numbers
+refuse. JSON file serialization is not the digest recipe.
+`current-contract-manifests.v1.json` pins both complete canonical preimages and
+literal digests for the independent Node consumer.
+
+Historical generation 1 was named `loopex.session.v1-experimental` before its
+rename. That rename changed its metadata digest while the original methods,
+families, codes, limits, manifest and vectors stayed the same, as recorded by
+the public-schema conformance test at that revision. Historical /1 and /2
+identities remain evidence at their original tested revisions. The before-1.0
+candidate removes their product schemas/vectors after caller migration; it
+keeps no compatibility decoder or old-client promise.
 
 Every request is one object carrying `method` and a `request_id`. The first must
 be `initialize`:
 
 ```json
-{"method":"initialize","request_id":"c1","generations":["loopex.experimental/1"],"capabilities":[]}
+{"method":"initialize","request_id":"c1","generations":["loopex.experimental/3"],"capabilities":[]}
 ```
 
 Initialization happens exactly once per connection; a second attempt is refused
 with `already_initialized`, and any other method before it with
 `not_initialized`. The server selects the first offered generation it knows or
 refuses with `unsupported_generation`, and a connection refused that way is
-still uninitialized. The `initialized` record carries `selected_generation`,
+still uninitialized, but its valid negotiation attempt is spent. A later
+initialize returns `already_initialized`; other methods return
+`not_initialized`. Malformed initialization does not spend the valid attempt.
+Foreground keeps its bounded loop until EOF/host failure; daemon keeps its
+original accept-time initialization deadline. The `initialized` record carries `selected_generation`,
 `exact_schema_sha256`, `supported_methods`, `record_families`, and `limits`, so
 a client can verify the contract it is about to speak rather than assume it.
 
 <a id="technical-protocol-methods"></a>
-## The Sixteen Methods
+## The eighteen foreground methods
 
 Concept: [One contract, not a second loop](app-server-protocol.md#concept-protocol-one-contract).
 
-Besides `initialize`, generation 1 has sixteen methods:
+Besides `initialize`, the foreground candidate has eighteen methods:
 
 | Group | Methods |
 | --- | --- |
 | Lifecycle | `session.create`, `session.resume`, `session.inspect`, `session.attach` |
 | Driving a run | `session.prompt`, `session.steer`, `session.follow_up`, `session.abort` |
+| Settled configuration and maintenance | `session.configure`, `session.compact` |
 | Interactions | `session.respond_interaction` |
 | Resources and skills | `resources.catalog`, `resources.read`, `session.admit_resources`, `session.activate_skill` |
 | Artifacts | `artifact.open_transfer`, `artifact.read_chunk`, `artifact.close_transfer` |
@@ -65,18 +85,56 @@ A method the generation does not name is refused with `unsupported_method`, and
 that check precedes every other one, so a runtime-nil guard cannot mask an
 unimplemented method and report the wrong reason. Unknown fields are refused.
 
-`session.create` takes a `command_id` and `session_options`; `session.attach`
-takes a `session_id` and an optional `after_event_sequence` and answers with a
-`snapshot`. The connection, not the caller, holds the attachment, because later
-commands are admitted through it and the transport delivers what it publishes.
-So `session.prompt`, `session.steer`, `session.follow_up`, `session.abort`, and
-`session.respond_interaction` name no session: they act on the connection's
-attachment and are refused `not_attached` without one. A prompt carries its
-text as unpadded base64url in `content_b64`; an interaction answer carries
-`interaction_id` and `answer: {"choice_id": ...}`. A connection holds at most
-one attachment: a further `session.attach` is refused `attachment_conflict`,
-for any session, unless it carries `replace: true`, which replaces the
-connection's own attachment. Generation 1 does not list sessions.
+`session.create` carries command identity and closed `session_options` with
+required JSON integer `version: 1`. The only optional members are nonempty
+`configuration` and ordered unique `tools`. Omission selects the host-captured
+tools; `[]` selects none. Explicit tools contain zero through 1,024 unique names
+matching `^[a-z][a-z0-9_]{0,63}$` in authored order. Configuration permits only `model`, `reasoning`, raw
+four-section `instructions`, `max_tokens`, `context_token_budget` and
+`system_class_tokens`. Its three numeric ceilings are positive uint64 decimal
+strings. Supplied-member presence, authored bytes and tool order are retained.
+Host routes, credentials, definitions, capabilities, paths, helper roles and
+cleanup settings refuse. See
+[ADR 0055's grammar](../adr/0055-remote-session-creation-options-technical.md#technical-options).
+
+`session.attach` takes `session_id`, optional `after_event_sequence` and optional
+`replace`, and returns a snapshot. The connection owns the attachment. Prompt,
+steer, follow-up, abort, answer, configure, compact and artifact work use it and
+refuse `not_attached` without one. Another attach refuses `attachment_conflict`
+unless `replace: true` replaces that connection's own attachment. Foreground
+has no session-list method.
+
+`session.configure` carries command identity and nonempty closed `changes` over
+the same six mutable configuration members. It requires the owning settled
+boundary and cannot change immutable tools or host maintenance inputs.
+`session.compact` carries command identity and complete explicit `bounds`:
+`max_attempts`, `deadline_ms`, `token_budget`, as decimal strings in 1 through 4,
+1 through 60,000 and 1 through 32,768 respectively. Admission, unknown outcome
+and completion remain distinct.
+
+Prompt text is unpadded base64url `content_b64`. Optional prompt bounds retain
+partial ordinary overrides and optional `deadline_at_ms`; follow-up bounds
+permit only `deadline_at_ms`; steer has no bounds. Turns/tokens retain arbitrary
+positive-integer decimal domains, relative deadline is positive uint64, and the
+authored absolute deadline is a positive safe JSON integer. Omission and empty
+bounds remain distinct command inputs. No decoder rounds through floats.
+
+An answer carries `interaction_id`, command identity and exactly one `answer`
+branch: `{choice_id}`, `{text}` or `{disposition: "declined"}`. Choice identity
+is opaque; text is 1 through 8,192 UTF-8 bytes; decline has no extra member.
+The owning question validates the branch. Policy-defer keeps only its choice
+branch, and an answer or identity grants no authority.
+
+Inspection has exactly eleven required public fields: `status`,
+`event_sequence`, `active_run_id`, `cleanup_grace_ms`,
+`active_context_token_budget`, `pending_work_ids`, `open_interaction`,
+`configuration`, `active_bounds`, `checkpoint`, `active_maintenance`.
+Configuration exposes its arbitrary positive-integer committed version as a
+canonical decimal string, exact model/reasoning, effective
+reply/context/system ceilings and instruction version/digest. Active bounds
+and maintenance use captured closed DTOs. Raw instructions, private
+continuation, provider capability/mapping envelopes, credentials, owner epochs
+and internals are absent.
 
 <a id="technical-protocol-records"></a>
 ## Seven Record Families
@@ -84,21 +142,44 @@ connection's own attachment. Generation 1 does not list sessions.
 `initialized`, `result`, `snapshot`, `admission`, `error`, `event`, `progress`.
 
 An `admission` carries `status` `accepted` or `refused` with a stable `reason`,
-and for `session.create` and `session.resume` the `session_id`. It says a
-command was accepted and journaled; it is not completion.
+and a session identity on successful create/resume. Retained creation
+cancellation is exactly `{type, request_id, method, command_id, status, reason}`
+with method `session.create`, status `refused`, reason `creation_cancelled`;
+`session_id` and `disposition`, including null forms, are absent. Decoding the
+envelope does not prove cancellation. See
+[ADR 0061](../adr/0061-creation-cancellation-admission-envelope-technical.md#technical-adr-0061-decision).
+Admission is not completion.
 
 A `snapshot` is anchored to an exact durable `event_sequence`. It is not a live
-process-state read and does not advance as events are consumed.
+process-state read and does not advance as events are consumed. Snapshot
+revision 3 retains configuration, checkpoint, active maintenance, open
+interaction and last standalone compact result at that cursor. It accumulates
+neither raw private configuration nor every historical question.
 
-An `event` carries one committed public event: `kind`, `event_id`,
-`event_sequence`, and `data`. The kinds are `user.message_appended`,
-`run.started`, `assistant.message_appended`, `tool.started`, `tool.finished`,
-`run.finished`, `steer.resolved`, `follow_up.resolved`, `session.settled`,
-`interaction.requested`, `interaction.resolved`, `interaction.expired`, and
-`interaction.cancelled`. A `progress` record carries one transient item —
-`text_delta`, `reasoning_delta`, `tool_call_delta`, `tool_progress`,
-`model_stream_closed`, or `tool_stream_closed` — with its `stream_domain_id`
-and `base_event_sequence`.
+An `event` carries `kind`, `event_id`, `event_sequence` and kind-specific
+closed `data`. Its twenty kinds are `user.message_appended`, `run.started`,
+`assistant.message_appended`, `tool.started`, `tool.finished`, `run.finished`,
+`steer.resolved`, `follow_up.resolved`, `session.settled`,
+`interaction.requested`, `interaction.answer_admitted`, `interaction.resolved`,
+`interaction.expired`, `interaction.cancelled`, `interaction.answered`,
+`interaction.declined`, `session.configured`, `context.compacted`,
+`context.maintenance_changed`, `context.compaction_finished`. Shared codecs
+check configuration, checkpoint, maintenance and interaction DTOs. Standalone
+compact can finish checkpointed, unchanged or failed; its completion is distinct
+from a checkpoint event. Known event kinds never authorize private-map pass-through.
+
+Progress has seven closed families: `text_delta`, `reasoning_delta`,
+`tool_call_delta`, `tool_progress`, `model_stream_closed`, `tool_stream_closed`,
+`context.compaction_progress`. Ordinary families keep owning identities,
+sequences, counts and closure dispositions. Compaction activity contains only
+`kind`, `episode_id`, exact `{kind, id}` owner, `stream_domain_id`,
+`progress_sequence: "0"`, `base_event_sequence`. It has no closing companion,
+never proves completion and never advances the event cursor. Frame/queue limits
+apply in addition to member limits. Base64 content must fit the enclosing
+131,072-byte string ceiling: 98,304 raw bytes fit, 98,305 refuse before emission.
+This projection does not shrink Core's independent content allowance. Tool
+versions likewise retain their semantic-version grammar and enclosing 131,072-byte
+string ceiling; passing a field regex alone cannot authorize an oversized frame.
 
 <a id="technical-protocol-errors"></a>
 ## Fifteen Error Codes
@@ -116,6 +197,75 @@ request happens to be in flight. A `detached` error carries the `session_id`
 and the `event_cursor` to reattach from. A `transfer_refused` error carries a
 `reason` from a closed list.
 
+<a id="technical-protocol-artifacts"></a>
+## Artifact opening and refusal branches
+
+Concept: [Verified artifacts and truthful cleanup](app-server-protocol.md#concept-protocol-artifacts).
+
+`artifact.open_transfer` takes literal `use_ref` equal to `use:` plus 64
+lowercase hex characters, canonical uint64 `start_offset`, and optional
+`window_length` in the same decimal-string domain. It decodes to the actual use
+locator; null length refuses and omission means the remaining window. The actual
+attachment supplies session/holder binding. No object argument or base64
+reference-envelope fallback is accepted.
+
+Success keeps seven compact result fields: `object_reference`, `use_reference`,
+`transfer_ref`, `total_size`, `window_start`, `window_end_exclusive`,
+`object_digest`. Object reference is the closed digest/size/locator triple; use
+reference also retains verified media type, role, canonicalization revision,
+use digest and locator. Size/window quantities are decimal strings. Paths and
+private session/run/operation provenance are excluded.
+
+Admitted opening refusal is exactly six keys: `type`, `request_id`, `code`,
+`message`, `reason`, `cleanup`. Type is `error`, code `transfer_refused`, message
+bounded redacted server text, cleanup `proved` or `unproved`. Its seventeen
+reasons are `invalid_artifact_request`, `invalid_open_context`,
+`reservation_required`, `reservation_conflict`, `unknown_artifact_use`,
+`artifact_use_mismatch`, `artifact_integrity_failed`, `artifact_digest_mismatch`,
+`unknown_artifact`, `artifact_too_large`, `invalid_window`,
+`open_deadline_exhausted`, `open_work_budget_exhausted`, `transfer_limit_reached`,
+`transfers_unavailable`, `artifact_unreadable`, `cancelled`.
+
+Ordinary pre-admission, read and close refusals have exactly the same five keys
+without `cleanup`. A missing cleanup cannot represent admitted opening. Their
+closed reason sets are operation-specific:
+
+| Branch | Reasons |
+| --- | --- |
+| Open before admission | `attachment_required`, `invalid_attachment`, `stale_attachment`, `invalid_artifact_request`, `artifact_transfer_unsupported`, `transfer_limit_reached`, `open_work_budget_exhausted`, `transfers_unavailable` |
+| Read | `attachment_required`, `invalid_attachment`, `stale_attachment`, `unknown_transfer`, `invalid_chunk_length`, `open_work_budget_exhausted`, `transfers_unavailable`, `read_deadline_exhausted`, `artifact_unreadable`, `runtime_unavailable` |
+| Close | `attachment_required`, `invalid_attachment`, `stale_attachment`, `unknown_transfer`, `cleanup_unproved` |
+
+This ordinary union has fourteen names and authorizes no arbitrary adapter atom.
+Unknown adapter results use `internal_failure`. Neither branch exports private
+receipt/work/pending identity, PID, handle or adapter details. A decoded cleanup
+label supplies no physical proof.
+
+Accepted [ADR 0066](../adr/0066-owned-artifact-transfer-opening-technical.md#technical-adr-0066-custody)
+requires non-I/O reservation then one-use opening under the original custodian.
+Use resolution, canonical/session checks, complete object verification, response
+validation and adoption share one original 60,000 ms opening cutoff. Early failure
+responds immediately; expiry responds independently of blocked callbacks.
+Cleanup has one separately anchored 5,000 ms observation, with no response
+extension, renewed timeout or extra join grace. Reserved/adopted retirement
+requires Store physical proof, original invocation completion, matching receipt
+ack and original custody joins before release. A conclusively never-reserved
+branch needs no receipt/ack, but all acquired original joins. Lost registration
+additionally needs expired original opening cutoff, no permission and exact
+original Store-owner confirmation. Late proof reclaims prospectively only;
+it never rewrites a refusal or supplies timely success.
+
+Object size remains 67,108,864 bytes; verification reserves 134,217,728 payload-work
+bytes for source reads plus conservative attempted snapshot writes. At most
+131,073 returned metadata bytes are additional. Failed/cancelled work charges
+once with no refund; unknown accounting retains conservative reservation or
+unavailable state. The actual connection charges
+`max(1,048,576, source_read + snapshot_write_debit + metadata_read)` per opening,
+plus emitted snapshot reads once, within 1,073,741,824 bytes. Pending, live,
+retiring and unacknowledged entries retain two connection/attachment slots and
+four runtime slots; genuine job reservations share Store headroom. These are
+required invariants, not proof established by this documentation.
+
 <a id="technical-protocol-wire"></a>
 ## Wire Representations
 
@@ -127,11 +277,12 @@ and the `event_cursor` to reattach from. A `transfer_refused` error carries a
 | Quantity (`u64`) | Canonical decimal **string** — no sign, no leading zero except zero itself, no whitespace. A JSON number is refused even when it would fit |
 | Digest | 64 lowercase hex characters |
 | Bytes | Unpadded base64url |
-| Artifact reference | Base64url of the sorted-member JSON object `{digest, locator, size, use_locator}`, with `size` as a decimal string |
+| Artifact opening use reference | Literal `use:` plus 64 lowercase hex characters; no base64 envelope |
+| Artifact result references | Closed object/use DTOs; quantities are canonical decimal strings |
 
 A quantity is a string because the contract admits exactly one representation.
-The reference is opaque and compared by bytes, so a client building one must
-sort members exactly as the server encodes them.
+Opaque identities compare by original bytes. A use locator identifies retained
+provenance; it is not a path or an authority grant.
 
 <a id="technical-protocol-framing"></a>
 ## Framing and Decoding
@@ -169,47 +320,64 @@ Concept: [Two delivery planes, bounded separately](app-server-protocol.md#concep
 | `raw_chunk_bytes` | 32,768 |
 | `reply_wait_ms` | 30,000 |
 | `writer_detach_ms` | 5,000 |
+| Artifact object / verification buffer bytes | 67,108,864 / 65,536 |
+| Artifact opening response / cleanup observation ms | 60,000 / 5,000 |
+| Artifact opening payload / returned metadata work bytes | 134,217,728 / 131,073 |
+| Artifact read deadline / successful-open lifetime ms | 5,000 / 600,000 |
+| Artifact connection work / minimum opening debit bytes | 1,073,741,824 / 1,048,576 |
+| Artifact slots per connection/attachment / runtime | 2 / 4 |
 
 Both delivery dimensions are checked **before** a record is queued; checking
 afterwards makes the bound "whatever arrived, plus one", which for a 4 MiB
 budget is not a bound. Durable overflow detaches at the cursor; progress
-overflow drops.
+overflow drops. General reply/queue ceilings never extend the artifact opening
+or cleanup clock. A host may refuse earlier; an earlier transport response is
+not evidence that original storage custody completed within its own cutoff.
 
 <a id="technical-protocol-transport"></a>
 ## The Transport Process
 
 Concept: [Foreground, not a daemon](app-server-protocol.md#concept-protocol-foreground).
 
-`Loopex.AppServer.Stdio.serve/1` takes a runtime the host composed and is one
-process that reads, answers, pulls durable events, and is the only writer.
-`Loopex.AppServer.Host.serve/0` is the shipped host: it reads its launch inputs
-from the environment, composes the reference stack inside
-`LoopexComposition.with_runtime/2`, and serves one connection until input ends.
+`Loopex.AppServer.Stdio.serve/2` receives the composed runtime and optional
+host-owned native progress sink; the one-argument form uses the default sink.
+Stdio owns the raw input port, serial dispatcher, attachment holder and bounded
+output FIFO. One request worker may block in a runtime call while Stdio receives
+input and exact cleanup controls. An independent `OutputWriter` owns physical
+stdout work. Stdio retains active-record/native lease charges through exact
+writer completion; queued progress drops only through its owning discard and
+credit-release path.
 
-Input arrives as port messages from
-`Port.open({:fd, 0, 1}, [:in, :binary, :stream, :eof])`, opened in the reading
-process, which owns it. A read that asks a pipe for a block returns only when
-the block fills or the writer closes, so a server built on blocking reads would
-answer a client's first frame only after the client had given up. The transport
-reads raw bytes rather than lines, because the input device's own line reading
-strips a carriage return before the newline and this contract makes CRLF an
-error.
+`Loopex.AppServer.Host.serve/0` composes launch inputs through
+`LoopexComposition.with_runtime/2` and serves until input ends. Input arrives
+through `Port.open({:fd, 0, 1}, [:in, :binary, :stream, :eof])`, opened by its
+actual owning reader. Raw bytes retain CR for strict CRLF refusal; blocking
+line/block reads would lose that property or responsiveness. **Start with
+`-noinput`** so the port exclusively owns stdin; serve warns on stderr otherwise.
 
-**The VM must be started with `-noinput`**, or it owns standard input for its
-own shell; `serve/1` warns on standard error rather than stalling silently.
+OutputWriter owns an OS proxy and exact stdout worker with private control
+pipes. Successful write requires physical write and exact worker/process-group
+joins; actor DOWN or timer alone is not physical completion. Each write keeps
+its original 5,000 ms write cutoff and following 5,000 ms cleanup cutoff. A retired
+writer closes the connection rather than treating a partial frame as success.
+Replies reserve FIFO capacity before facade dispatch; queued/active records
+retain charges and native progress follows its exact acknowledgement path.
 
-Standard output carries protocol records only. Every complete frame in a chunk
-is answered before the next chunk is read, so a client writing several frames
-at once receives its answers in order. Input ending mid-frame produces an
-`invalid_frame` record rather than silence.
+Stdout contains protocol frames only; diagnostics use separately bounded stderr.
+The selective loop preserves unrelated host messages while checking actual
+actor/incarnation/request references for its controls. EOF retires input,
+request and writer custody through the original cleanup path and releases the
+actual holder without aborting the durable session. Truncated input produces
+`invalid_frame` when output is available. Cleanup timeout/unjoined physical
+custody remains uncertainty, never success inferred from a disappeared PID.
 
 <a id="technical-protocol-generation-two"></a>
 ## The Daemon's Generation
 
 Concept: [What the daemon's generation adds](app-server-protocol.md#concept-protocol-daemon).
 
-Generation 2 carries every generation-1 method, record family, error code, and
-limit, and adds:
+The daemon candidate carries the foreground methods, families, codes and limits,
+for twenty-two methods after initialization, and adds:
 
 | Addition | Members |
 | --- | --- |
@@ -221,8 +389,9 @@ limit, and adds:
 `session.acquire_control` answers with a `writer_epoch` and `expires_in_ms`. The
 holder renews by calling it again before the term lapses, and the result then
 carries `renewed: true`. Every mutation of an existing session —
-`session.resume`, `session.prompt`, `session.steer`, `session.follow_up`,
-`session.abort`, `session.respond_interaction`, `session.admit_resources`,
+`session.resume`, `session.configure`, `session.compact`, `session.prompt`,
+`session.steer`, `session.follow_up`, `session.abort`,
+`session.respond_interaction`, `session.admit_resources`,
 `session.activate_skill`, and `session.release_control` — carries that
 `writer_epoch`. A second client asking for control while it is held receives
 `control_held` or `control_pending` and asks again; it is never granted control
@@ -232,19 +401,22 @@ leases, connections, and output bounded is in
 [the daemon pair](daemon-technical.md#technical-depth).
 
 <a id="technical-protocol-evidence"></a>
-## Evidence
+## Required evidence
 
 | Claim | Where |
 | --- | --- |
-| Canonical positive and negative vectors, with distinct refusal reasons | `apps/loopex_protocol/test/public_schema_conformance_test.exs` |
-| Method and record shapes against the generation-1 schema | `apps/loopex_protocol/test/session_schema_test.exs` |
-| Method and record shapes against the generation-2 schema | `apps/loopex_protocol/test/session_v2_schema_test.exs` |
+| Complete canonical preimages, literal digests and positive/negative vectors | `apps/loopex_protocol/test/current_contract_manifest_test.exs`, `apps/loopex_protocol/test/public_schema_conformance_test.exs`, `clients/node/current-contract-manifest-vectors.mjs`, `clients/node/contract-negotiation-tests.mjs` |
+| Method and record shapes against the foreground /3 schema | `apps/loopex_protocol/test/session_schema_test.exs` |
+| Method and record shapes against the daemon /4 schema | `apps/loopex_protocol/test/session_v2_schema_test.exs` |
 | Framing and decoding refusals | `apps/loopex_protocol/test/frame_test.exs`, `apps/loopex_protocol/test/wire_test.exs` |
 | Facade and wire agree on identities and meaning | `apps/loopex_app_server/test/session_mapping_test.exs` |
 | Mapping negatives and real effects | `apps/loopex_app_server/test/foundation_mapping_test.exs` |
 | Delivery bounds and slow readers | `apps/loopex_app_server/test/delivery_bounds_test.exs` |
 | An independent client drives a whole session, and the skill, interaction, and artifact chain, over a real process | `apps/loopex_app_server/test/external_workflow_test.exs` |
 | An independent client observes and takes over a session over the daemon's socket | `apps/loopex_daemon/test/external_socket_workflow_test.exs` |
+
+These paths name required proof, not a passing run. Coordinated integration,
+both supported pairs and the independent/real-provider lanes remain necessary.
 
 The vectors are literal byte strings with literal verdicts, not values generated
 from the implementation they check. A generated vector proves only that this

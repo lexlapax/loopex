@@ -369,11 +369,13 @@ defmodule Loopex.AppServer.ForegroundOutputFixture do
   end
 
   defp own(observer, mode) when mode in ["runtime", "writer_failure"] do
-    artifacts = Loopex.AppServer.WorkflowArtifacts
-    {:ok, artifact} = artifacts.start()
+    artifacts = Loopex.Store.Local.Artifacts
+    root = Path.join(System.fetch_env!("LOOPEX_HOME"), "foreground-artifacts")
+    {:ok, handle} = artifacts.open(root)
+    {:ok, artifact_owner} = Loopex.Store.Local.Transfers.start_link(root: root)
+    artifact_monitor = Process.monitor(artifact_owner)
+    artifact = Map.put(handle, :transfers, artifact_owner)
     try do
-    {:ok, reference} = artifacts.put(artifact, :binary.copy("a", 1_048_576),
-      %{media_type: "text/plain", role: "tool_output", metadata: %{}})
     {:ok, sink} = Loopex.ProgressSink.open()
     try do
     fixture = Fixture.start(script: [%{text: "done", calls: []}],
@@ -381,6 +383,10 @@ defmodule Loopex.AppServer.ForegroundOutputFixture do
     try do
       await_ready(fixture.runtime, now_ms() + 1_000)
       {:ok, session} = Loopex.create_session(fixture.runtime, %{}, command_id: "bootstrap")
+      {:ok, reference} = Loopex.ArtifactStore.put(%{module: artifacts, handle: artifact},
+        :binary.copy("a", 1_048_576), %{"media_type" => "text/plain", "role" => "tool_output",
+          "session_id" => session, "run_id" => "foreground-run",
+          "operation_id" => "foreground-operation", "attempt" => 1, "tool_call_id" => "foreground-call"})
       send(observer, {:fixture_ready, self(), fixture, sink, session, reference, artifact})
       result =
         try do
@@ -392,7 +398,7 @@ defmodule Loopex.AppServer.ForegroundOutputFixture do
         end
       {:ok, %{dispatcher: dispatcher}} = Loopex.Runtime.Supervisor.children(fixture.runtime.supervisor)
       holders = :sys.get_state(dispatcher).holders |> map_size()
-      transfers = Agent.get(artifact, &map_size(&1.transfers))
+      transfers = Loopex.Store.Local.Transfers.live(artifact_owner) |> length()
       command_ids = Store.inspect_state(fixture.store).runtime_commands |> Map.keys() |> Enum.map(&elem(&1, 1))
       closed = Loopex.ProgressSink.close(sink)
       send(observer, {:served, self(), %{result: result, holders: holders, transfers: transfers,
@@ -411,7 +417,14 @@ defmodule Loopex.AppServer.ForegroundOutputFixture do
       Loopex.ProgressSink.close(sink)
     end
     after
-      Agent.stop(artifact)
+      cutoff = now_ms() + 5_000
+      :ok = GenServer.stop(artifact_owner, :normal, max(cutoff - now_ms(), 0))
+      receive do
+        {:DOWN, ^artifact_monitor, :process, ^artifact_owner, :normal} ->
+          if now_ms() >= cutoff, do: exit(:fixture_artifact_owner_join_late)
+      after
+        max(cutoff - now_ms(), 0) -> exit(:fixture_artifact_owner_not_joined)
+      end
     end
   end
 

@@ -34,7 +34,7 @@ defmodule Loopex.AppServer.InitializationTest do
   end
 
   test "initializing on a shared generation settles the connection and returns the contract" do
-    assert {:ok, reply, connection} = initialize(["loopex.experimental/1"])
+    assert {:ok, reply, connection} = initialize(["loopex.experimental/3"])
 
     assert reply["type"] == "initialized"
     assert reply["request_id"] == "r1"
@@ -131,6 +131,7 @@ defmodule Loopex.AppServer.InitializationTest do
 
     assert {:error, refusal, _connection} =
              Connection.dispatch(connection, %{
+               "session_options" => %{"version" => 1},
                "method" => "session.create",
                "request_id" => "r2",
                "command_id" => "Y18x"
@@ -144,23 +145,54 @@ defmodule Loopex.AppServer.InitializationTest do
     connection = Connection.new()
 
     for bad <- [
-          %{"generations" => [Session.generation()], "capabilities" => []},
-          %{"request_id" => "", "generations" => [Session.generation()], "capabilities" => []},
           %{
+            "method" => "initialize",
+            "generations" => [Session.generation()],
+            "capabilities" => []
+          },
+          %{
+            "method" => "initialize",
+            "request_id" => "",
+            "generations" => [Session.generation()],
+            "capabilities" => []
+          },
+          %{
+            "method" => "initialize",
             "request_id" => String.duplicate("r", 65),
             "generations" => [Session.generation()],
             "capabilities" => []
           },
           %{
+            "method" => "initialize",
             "request_id" => "has space",
             "generations" => [Session.generation()],
             "capabilities" => []
           },
-          %{"request_id" => "r1", "generations" => [], "capabilities" => []},
-          %{"request_id" => "r1", "generations" => "not-an-array", "capabilities" => []},
-          %{"request_id" => "r1", "generations" => [1], "capabilities" => []},
-          %{"request_id" => "r1", "generations" => [Session.generation()]},
           %{
+            "method" => "initialize",
+            "request_id" => "r1",
+            "generations" => [],
+            "capabilities" => []
+          },
+          %{
+            "method" => "initialize",
+            "request_id" => "r1",
+            "generations" => "not-an-array",
+            "capabilities" => []
+          },
+          %{
+            "method" => "initialize",
+            "request_id" => "r1",
+            "generations" => [1],
+            "capabilities" => []
+          },
+          %{
+            "method" => "initialize",
+            "request_id" => "r1",
+            "generations" => [Session.generation()]
+          },
+          %{
+            "method" => "initialize",
             "request_id" => "r1",
             "generations" => [Session.generation()],
             "capabilities" => [1]
@@ -180,6 +212,7 @@ defmodule Loopex.AppServer.InitializationTest do
 
     assert {:error, refusal, _unchanged} =
              Connection.initialize(connection, %{
+               "method" => "initialize",
                "request_id" => "not a valid id",
                "generations" => [Session.generation()],
                "capabilities" => []
@@ -232,7 +265,7 @@ defmodule Loopex.AppServer.InitializationTest do
     assert {:ok, request} = Frame.decode(String.trim_trailing(frame, "\n"), @frame_limit)
     assert {:ok, reply, connection} = Connection.initialize(Connection.new(), request)
 
-    assert reply["selected_generation"] == "loopex.experimental/1"
+    assert reply["selected_generation"] == "loopex.experimental/3"
     assert reply["exact_schema_sha256"] == Session.schema_digest()
     assert reply["limits"] == Session.limits()
 
@@ -352,9 +385,9 @@ defmodule Loopex.AppServer.InitializationTest do
              "framing admitted #{inspect(bad)}"
     end
 
-    # The inventory is exact in both directions: the generation names sixteen
+    # The inventory is exact in both directions: the generation names eighteen
     # methods and this build answers every one of them.
-    assert length(Session.methods()) == 16
+    assert length(Session.methods()) == 18
 
     for method <- Session.methods() do
       assert Loopex.AppServer.Mapping.implemented?(method),
@@ -476,6 +509,7 @@ defmodule Loopex.AppServer.InitializationTest do
 
   defp initialize(generations) do
     Connection.initialize(Connection.new(), %{
+      "method" => "initialize",
       "request_id" => "r1",
       "generations" => generations,
       "capabilities" => []
@@ -484,6 +518,7 @@ defmodule Loopex.AppServer.InitializationTest do
 
   defp request(request_id \\ "r1") do
     %{
+      "method" => "initialize",
       "request_id" => request_id,
       "generations" => [Session.generation()],
       "capabilities" => []

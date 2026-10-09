@@ -2,16 +2,16 @@ defmodule LoopexDaemon.Request do
   @moduledoc """
   ## Concept
 
-  A generation-two request becomes bounded plain daemon input before it can
+  A current request becomes bounded plain daemon input before it can
   reach a lease, attachment, runtime, Store, or host resource. The wire method
   selects one fixed operation; client data never selects an atom or executable
   value.
 
   ## Technical depth
 
-  The parser enforces the exact outer field set for all twenty generation-two
-  methods, decodes every wire primitive through `LoopexProtocol.Wire`, and
-  applies the M3 resource validators that the schema names. Optional fields are
+  The parser enforces each method's exact outer field set, decodes wire
+  primitives through `LoopexProtocol.Wire` and the shared current command codecs,
+  and applies the M3 resource validators that the schema names. Optional fields are
   absent or valid: `null` is refused unless the contract explicitly admits it.
   The result contains only compile-time operation atoms and decoded plain data.
   It performs no IO, starts no process, and calls no runtime boundary.
@@ -19,6 +19,7 @@ defmodule LoopexDaemon.Request do
 
   alias Loopex.ResourcePack
   alias LoopexProtocol.{Session.V2, Wire}
+  alias LoopexProtocol.Session.{Answer, CommandBounds, CreationOptions}
 
   @content_bytes 1_048_576
   @max_json_depth 16
@@ -41,6 +42,8 @@ defmodule LoopexDaemon.Request do
     "session.resume" => :session_resume,
     "session.inspect" => :session_inspect,
     "session.attach" => :session_attach,
+    "session.configure" => :session_configure,
+    "session.compact" => :session_compact,
     "session.prompt" => :session_prompt,
     "session.steer" => :session_steer,
     "session.follow_up" => :session_follow_up,
@@ -68,6 +71,8 @@ defmodule LoopexDaemon.Request do
           | :session_resume
           | :session_inspect
           | :session_attach
+          | :session_configure
+          | :session_compact
           | :session_prompt
           | :session_steer
           | :session_follow_up
@@ -93,7 +98,7 @@ defmodule LoopexDaemon.Request do
           fields: map()
         }
 
-  # Concept: current configure decoding prepares authored input without serving a route.
+  # Concept: configure decoding prepares authored input for ordinary admission.
   # Technical depth: the shared pure grammar supplies exact integers and opaque
   # identities. Existing capture and whole-update validation remain the native
   # boundary; authority, central preparation and generation activation follow.
@@ -176,7 +181,8 @@ defmodule LoopexDaemon.Request do
   defp parse_method("session.create", request) do
     with :ok <- exact_fields(request, ["command_id", "session_options"]),
          {:ok, command_id} <- identity(request, "command_id", @create_command_bytes),
-         {:ok, options} <- plain_object(request, "session_options") do
+         {:ok, options} <- plain_object(request, "session_options"),
+         {:ok, options} <- CreationOptions.decode_wire(options) do
       {:ok, %{command_id: command_id, session_options: options}}
     end
   end
@@ -206,12 +212,27 @@ defmodule LoopexDaemon.Request do
     end
   end
 
+  defp parse_method("session.configure", request) do
+    with {:ok, prepared} <- prepare_configuration_request(request) do
+      {:ok, Map.delete(prepared, :request_id)}
+    end
+  end
+
+  defp parse_method("session.compact", request) do
+    with :ok <- exact_fields(request, ["command_id", "bounds", "writer_epoch"]),
+         {:ok, command_id} <- identity(request, "command_id"),
+         {:ok, bounds} <- CommandBounds.decode_wire(request["bounds"], :compact),
+         {:ok, writer_epoch} <- writer_epoch(request) do
+      {:ok, %{command_id: command_id, bounds: bounds, writer_epoch: writer_epoch}}
+    end
+  end
+
   defp parse_method("session.prompt", request) do
-    content_mutation(request, "session.prompt")
+    content_mutation(request, :prompt)
   end
 
   defp parse_method("session.follow_up", request) do
-    content_mutation(request, "session.follow_up")
+    content_mutation(request, :follow_up)
   end
 
   defp parse_method("session.steer", request) do
@@ -238,13 +259,13 @@ defmodule LoopexDaemon.Request do
            exact_fields(request, ["command_id", "interaction_id", "answer", "writer_epoch"]),
          {:ok, command_id} <- identity(request, "command_id"),
          {:ok, interaction_id} <- identity(request, "interaction_id"),
-         {:ok, choice_id} <- interaction_answer(request),
+         {:ok, answer} <- field(request, "answer", &Answer.decode_wire/1),
          {:ok, writer_epoch} <- writer_epoch(request) do
       {:ok,
        %{
          command_id: command_id,
          interaction_id: interaction_id,
-         choice_id: choice_id,
+         answer: answer,
          writer_epoch: writer_epoch
        }}
     end
@@ -326,10 +347,10 @@ defmodule LoopexDaemon.Request do
 
   defp parse_method("artifact.open_transfer", request) do
     with :ok <- exact_fields(request, ["use_ref", "start_offset"], ["window_length"]),
-         {:ok, reference} <- field(request, "use_ref", &Wire.reference/1),
+         {:ok, use_locator} <- field(request, "use_ref", &use_locator/1),
          {:ok, start_offset} <- u64(request, "start_offset"),
          {:ok, window_length} <- optional_u64(request, "window_length") do
-      {:ok, %{reference: reference, start_offset: start_offset, window_length: window_length}}
+      {:ok, %{use_locator: use_locator, start_offset: start_offset, window_length: window_length}}
     end
   end
 
@@ -382,17 +403,38 @@ defmodule LoopexDaemon.Request do
     end
   end
 
-  defp content_mutation(request, method) do
-    with :ok <- exact_fields(request, ["command_id", "content_b64", "writer_epoch"]),
-         true <- Map.get(request, "method") == method,
+  defp content_mutation(request, kind) do
+    with :ok <- exact_fields(request, ["command_id", "content_b64", "writer_epoch"], ["bounds"]),
          {:ok, command_id} <- identity(request, "command_id"),
          {:ok, content} <- nonempty_bytes(request, "content_b64", @content_bytes),
-         {:ok, writer_epoch} <- writer_epoch(request) do
-      {:ok, %{command_id: command_id, content: content, writer_epoch: writer_epoch}}
+         {:ok, writer_epoch} <- writer_epoch(request),
+         {:ok, authored} <- authored_bounds(request, kind) do
+      {:ok,
+       Map.merge(
+         %{command_id: command_id, content: content, writer_epoch: writer_epoch},
+         authored
+       )}
     else
       _invalid -> :error
     end
   end
+
+  defp authored_bounds(request, kind) do
+    case Map.fetch(request, "bounds") do
+      :error ->
+        {:ok, %{}}
+
+      {:ok, bounds} ->
+        with {:ok, decoded} <- CommandBounds.decode_wire(bounds, kind),
+             do: {:ok, %{bounds: decoded}}
+    end
+  end
+
+  defp use_locator("use:" <> digest = locator) do
+    with {:ok, _digest} <- Wire.digest(digest), do: {:ok, locator}
+  end
+
+  defp use_locator(_locator), do: :error
 
   defp exact_fields(request, required, optional \\ []) do
     allowed = ["method", "request_id" | required ++ optional]
@@ -458,16 +500,6 @@ defmodule LoopexDaemon.Request do
     case Map.get(request, name) do
       value when is_map(value) and not is_struct(value) ->
         if plain_json?(value, 1), do: {:ok, value}, else: :error
-
-      _invalid ->
-        :error
-    end
-  end
-
-  defp interaction_answer(request) do
-    case Map.get(request, "answer") do
-      %{"choice_id" => choice_id} = answer when map_size(answer) == 1 ->
-        Wire.identity(choice_id)
 
       _invalid ->
         :error
@@ -562,6 +594,6 @@ defmodule LoopexDaemon.Request do
   end
 
   if Map.keys(@operations) |> Enum.sort() != V2.methods() |> Enum.sort() do
-    raise "generation-two request parser method inventory drift"
+    raise "current daemon request parser method inventory drift"
   end
 end

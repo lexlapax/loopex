@@ -56,7 +56,7 @@ defmodule LoopexDaemon.IdentityCorpusTest do
         "method" => "session.create",
         "request_id" => "create",
         "command_id" => Wire.encode_identity("cs"),
-        "session_options" => %{}
+        "session_options" => %{"version" => 1}
       })
 
     assert [%{"status" => "accepted", "session_id" => encoded}] = receive_records(client, 1)
@@ -125,7 +125,7 @@ defmodule LoopexDaemon.IdentityCorpusTest do
         "method" => "session.create",
         "request_id" => "create",
         "command_id" => Wire.encode_identity("disconnect-create"),
-        "session_options" => %{}
+        "session_options" => %{"version" => 1}
       })
 
     assert [%{"status" => "accepted", "session_id" => encoded}] = receive_records(client, 1)

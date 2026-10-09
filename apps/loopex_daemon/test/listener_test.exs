@@ -173,7 +173,7 @@ defmodule LoopexDaemon.ListenerTest do
     assert malformed == %{
              "type" => "error",
              "code" => "invalid_request",
-             "message" => "request does not match the generation-two contract",
+             "message" => "request does not match the current daemon contract",
              "request_id" => "r3"
            }
 

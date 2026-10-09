@@ -23,8 +23,9 @@ import { spawn } from "node:child_process";
 import { decodeCheckpointOwner } from "./checkpoint-owner.mjs";
 import { decodeMaintenanceView } from "./maintenance-view.mjs";
 import { decodeCompactCompletion } from "./compact-result.mjs";
+import { CURRENT_CONTRACTS, matchesContractIdentity } from "./contract-manifest.mjs";
 
-const GENERATION = "loopex.experimental/1";
+export const GENERATION = CURRENT_CONTRACTS.foreground.generation;
 
 // Concept: the connection to one server process.
 //
@@ -40,6 +41,7 @@ export class Connection {
   #waiters = [];
   #closed = false;
   #nextRequest = 0;
+  #initialization = "uninitialized";
 
   constructor(command, args, options = {}) {
     this.#child = spawn(command, args, {
@@ -67,18 +69,44 @@ export class Connection {
   // identity are not answers and are queued for whoever asked to read them.
   async request(method, fields = {}) {
     if (this.#closed) throw new Error("the connection is closed");
+    if (Object.hasOwn(fields, "method") || Object.hasOwn(fields, "request_id")) {
+      throw new Error("request envelope fields cannot be overridden");
+    }
+    if (method !== "initialize" && this.#initialization !== "verified") {
+      throw new Error("session requests require verified initialization");
+    }
+    if (method === "initialize" && this.#initialization === "negotiating") {
+      throw new Error("initialization is already in flight");
+    }
 
     const requestId = `c${this.#nextRequest++}`;
-    const frame = JSON.stringify({ method, request_id: requestId, ...fields });
-
+    const frame = JSON.stringify({ ...fields, method, request_id: requestId });
     if (frame.includes("\n")) throw new Error("a frame may not contain a newline");
 
+    const prior = this.#initialization;
+    if (method === "initialize") this.#initialization = "negotiating";
     const answer = new Promise((resolve, reject) => {
       this.#pending.set(requestId, { resolve, reject });
     });
-
     this.#child.stdin.write(frame + "\n");
-    return answer;
+    const reply = await answer;
+    if (method === "initialize") {
+      if (reply.type === "initialized") {
+        if (!matchesContractIdentity(reply, CURRENT_CONTRACTS.foreground)) {
+          this.#initialization = "refused";
+          this.close();
+          throw new Error("the server contract identity does not match this client");
+        }
+        this.#initialization = "verified";
+        this.limits = reply.limits;
+        this.schemaDigest = reply.exact_schema_sha256;
+        this.methods = reply.supported_methods;
+      } else {
+        this.#initialization = reply.code === "invalid_request" || reply.code === "already_initialized"
+          ? prior : "refused";
+      }
+    }
+    return reply;
   }
 
   async initialize(capabilities = []) {
@@ -86,18 +114,9 @@ export class Connection {
       generations: [GENERATION],
       capabilities,
     });
-
     if (reply.type !== "initialized") {
       throw new Error(`initialization refused: ${reply.code ?? "unknown"}`);
     }
-
-    if (reply.selected_generation !== GENERATION) {
-      throw new Error("the server selected a generation this client did not offer");
-    }
-
-    this.limits = reply.limits;
-    this.schemaDigest = reply.exact_schema_sha256;
-    this.methods = reply.supported_methods;
     return reply;
   }
 
@@ -238,23 +257,4 @@ export const wire = {
   decodeU64(value) {
     return BigInt(value);
   },
-
-  reference(compact) {
-    const members = {
-      digest: compact.digest,
-      locator: compact.locator,
-      size: String(compact.size),
-      use_locator: compact.use_locator,
-    };
-
-    return Buffer.from(JSON.stringify(sorted(members)), "utf8").toString("base64url");
-  },
 };
-
-// The server encodes object members in sorted order and compares bytes, so a
-// client building an opaque value has to sort too.
-function sorted(object) {
-  return Object.fromEntries(Object.keys(object).sort().map((key) => [key, object[key]]));
-}
-
-export { GENERATION };

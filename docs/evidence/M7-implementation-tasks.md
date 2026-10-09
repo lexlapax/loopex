@@ -1,5 +1,36 @@
 # M7 Implementation Tasks
 
+### Owned artifact opening and current protocol source joined, 2026-10-08
+
+The coordinated91-path source candidate joins accepted ADR0066's Core port,
+Runtime/Dispatcher custody, Local storage, foreground/daemon projections,
+complete /3-/4 manifests, independent Node clients, CLI identity verification
+and current whole-file fixtures. Superseded /1-/2 product schemas/vectors and
+reference-envelope helpers are removed. The final CLI helper correction
+preserves original body errors separately from cleanup failures under the same
+captured cutoff. Independent unit and assembly reviews are source-clear;
+formatting, compilation and native qualification remain UNRUN for these bytes.
+No opening elapsed-time, physical cleanup, serving qualification or closure
+PASS is claimed. Original stopped-output and other integration failures remain.
+
+Source projection SHA-256
+`a40d8ae10fb84d9f203eb2adb08748f8821736a6abbe791c9c8971adcd70f72e`;
+complete patch `342a90e8d53d0d1255f3cf98d3c3c2f3ab736681b49b2e60d662b5c53dde4d84`.
+Immutable preparation retention:
+`M7/current-source-preparation-20261008-v15/retention.json`, SHA-256
+`0fd97f45c3470c0d51e204c53bfb6294f14b86bf23f5532cacfaab078d2ab77e`. This retains the raw source units, independent reviews,
+blocked predecessors and actual original33358 documentation gate. That gate
+passed at916f after25.011 seconds; it proves the prior checkpoint only.
+Completed registry2845 SHA-256
+`e2f6a4f56c2ee4206fc4836896fcdef82597b4005e512cbc8cb2db79ac4ff091`.
+
+Root owns the next recorded formatting/strict non-line AST check and both
+supported toolchain checks, followed by whole-file native qualification.
+No native handle is live at source binding. ADR0065 remains Proposed and its
+physical-writer dependency is paused. T01–T19 original88 done /85 open /6 retired;
+added371 done /24 open. Combined459 done /109 open /6 retired. No completion
+checkbox changes.
+
 ### Complete daemon repair qualified on both toolchains, 2026-10-08
 
 Original49724 is terminal and collected PASS at tested implementation

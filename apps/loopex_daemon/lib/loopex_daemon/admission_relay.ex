@@ -71,6 +71,7 @@ defmodule LoopexDaemon.AdmissionRelay do
     :session_resume,
     :session_attach,
     :session_configure,
+    :session_compact,
     :session_prompt,
     :session_steer,
     :session_follow_up,
@@ -107,6 +108,7 @@ defmodule LoopexDaemon.AdmissionRelay do
           | :session_resume
           | :session_attach
           | :session_configure
+          | :session_compact
           | :session_prompt
           | :session_steer
           | :session_follow_up

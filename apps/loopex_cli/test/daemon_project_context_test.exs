@@ -142,7 +142,7 @@ defmodule LoopexCli.DaemonProjectContextTest do
       {:ok, %{"session_id" => session}, client} =
         LoopexCli.DaemonClient.request(client, "session.create", %{
           "command_id" => LoopexProtocol.Wire.encode_identity("catalog-create"),
-          "session_options" => %{}
+          "session_options" => %{"version" => 1}
         })
 
       {:ok, %{"type" => "result", "result" => result}, _client} =

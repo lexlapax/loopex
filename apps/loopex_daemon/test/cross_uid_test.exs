@@ -25,7 +25,7 @@ defmodule LoopexDaemon.CrossUidTest do
   except OSError as error:
       print("connect-refused", error.errno)
       sys.exit(0)
-  s.sendall(b'{"method":"initialize","request_id":"x","generations":["loopex.experimental/2"],"capabilities":[]}\n')
+  s.sendall(b'{"method":"initialize","request_id":"x","generations":["loopex.experimental/4"],"capabilities":[]}\n')
   data = b""
   try:
       while True:

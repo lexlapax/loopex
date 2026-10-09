@@ -14,18 +14,26 @@ by two servers:
 
 - **The app server** (`loopex_app_server`) is a foreground process that serves
   one connection over its standard input and output and speaks generation
-  `loopex.experimental/1`.
+  `loopex.experimental/3`.
 - **The daemon** (`loopex_daemon`) is a long-lived host that serves many
   connections over a Unix-domain socket and speaks generation
-  `loopex.experimental/2`: everything in generation 1 plus session listing,
+  `loopex.experimental/4`: the foreground methods plus session listing,
   daemon status, and controller leases. See [the daemon](daemon.md#concept).
 
-This pair is the normative reference for what the protocol is, what it is not,
-and which constraints a change to it must respect. The founding decision is
+This pair documents the coordinated M7 implementation candidate. Accepted ADRs
+and the active plan govern its contracts; this projection does not record a
+passing qualification, milestone closure or partial-generation activation.
+The founding decision is
 accepted [ADR 0023](../adr/0023-experimental-public-session-protocol.md#concept);
 the daemon's additions rest on
 [ADR 0032](../adr/0032-daemon-attachment-residency-and-replay.md#concept) and
 [ADR 0033](../adr/0033-collaboration-controller-lease-and-takeover.md#concept).
+The current generation replacement is owned by
+[ADR 0044](../adr/0044-run-model-and-reasoning-configuration.md#concept), with
+[closed creation options](../adr/0055-remote-session-creation-options.md#concept),
+[compaction activity](../adr/0054-compaction-activity-progress.md#concept),
+[creation cancellation](../adr/0061-creation-cancellation-admission-envelope.md#concept)
+and [owned artifact opening](../adr/0066-owned-artifact-transfer-opening.md#concept).
 An independent consumer written in plain JavaScript lives in
 [`clients/node`](../../clients/node/README.md), and the operator's view is in
 [App server operations](../operator/app-server.md#concept).
@@ -43,12 +51,18 @@ process translate and validate; they do not decide, do not hold session state
 the coordinator owns, and do not reach a coordinator or a Store directly. A
 method that needed to would be a design error, not a mapping problem.
 
-This is why the protocol has no method for configuring a runtime. Store, model,
-executor, tools, policy, and skill manifest are launch inputs chosen by the
-host. A client drives a session; it does not compose one, and no frame can
-replace an immutable launch input. An `admission` reply means a command was
-accepted and journaled, never that the run has done anything; what the run then
-does arrives as events.
+A client can author session creation options and change supported session
+configuration between settled runs. The host still chooses runtime composition,
+provider routes, credentials, available tool definitions, policy and maintenance
+settings. A frame cannot replace those launch inputs or turn an identity into
+a grant. Configuration commits its effective public view, while raw instructions
+and private provider data stay outside public records.
+
+The foreground candidate has eighteen methods after initialization; the daemon
+has twenty-two. Both include configure, standalone compact and the closed
+choice/text/declined answer union. An `admission` reply means a command was
+accepted and journaled, never that the run has completed; completion arrives as
+committed events.
 
 Technical depth: [The methods](app-server-protocol-technical.md#technical-protocol-methods).
 
@@ -66,9 +80,12 @@ the exact schema, so a client verifies the contract it is about to speak rather
 than assuming it.
 
 Public compatibility in this repository is behavioural and requires schemas,
-vectors, independent consumers, migrations, and upgrade evidence. Each
-generation has schemas, vectors, and an independent consumer; none has a
-migration path or a freeze, and any may change. See
+vectors, independent consumers, migrations, and upgrade evidence. The
+current candidate pins each complete payload manifest and its independent
+consumer. Before 1.0, clients and servers move together to the current contract;
+old-only and wrong-server offers refuse, with no compatibility fallback. Earlier
+generation identities remain historical evidence at their tested revisions.
+Serving changes only with the complete coordinated generation. See
 [Compatibility surfaces](compatibility-surfaces.md#concept).
 
 Technical depth: [Generation and negotiation](app-server-protocol-technical.md#technical-protocol-generation).
@@ -117,6 +134,23 @@ than one shared budget.
 
 Technical depth: [Exact limits](app-server-protocol-technical.md#technical-protocol-limits).
 
+<a id="concept-protocol-artifacts"></a>
+## Verified artifacts and truthful cleanup
+
+An artifact open names the literal use locator retained by a real tool result.
+The connection's actual attachment supplies the session binding. The server
+verifies the use and complete object before adopting a bounded snapshot reader;
+a client cannot select a path, inject provenance or nominate an object instead.
+
+Opening and cleanup have separate clocks. An admitted opening refusal reports
+its reason and whether original custody cleanup was proved. An unproved result
+keeps capacity occupied until actual original proof permits reclamation. Late
+cleanup never rewrites the earlier refusal into timely success. Payload work,
+metadata work and later reads all count against the actual connection's budget;
+private receipts and work records stay off the wire.
+
+Technical depth: [Artifact requests, refusal branches and custody](app-server-protocol-technical.md#technical-protocol-artifacts).
+
 <a id="concept-protocol-foreground"></a>
 ## Foreground, Not a Daemon
 
@@ -127,22 +161,25 @@ second `session.attach` on it is refused `attachment_conflict` unless it sets
 `replace`, which replaces the connection's own attachment.
 
 Ending input is not cancelling. Clean EOF and abrupt death both leave a pending
-interaction pending; `session.abort` is the only deliberate cancellation. A
-transport that blurred those would make a client's disconnection into a silent
-cancellation, which is precisely the failure mode durable interactions exist to
-avoid.
+interaction pending; `session.abort` is the explicit session cancellation
+command. Connection cleanup retires its own holders and artifact readers without
+inventing a durable session cancellation. The input owner remains responsive
+while one request worker calls the runtime and an independent output writer
+owns physical stdout completion.
 
 Technical depth: [The transport process](app-server-protocol-technical.md#technical-protocol-transport).
 
 <a id="concept-protocol-daemon"></a>
 ## What the Daemon's Generation Adds
 
-Generation 2 keeps generation 1's framing, records, codes, and limits, and adds
+The daemon candidate keeps the foreground framing, records, codes and limits,
+and adds
 what several clients sharing one daemon need. A client can list the sessions a
 root holds and ask for the daemon's status. Any number of connections may observe
 a session, but only the connection holding the session's controller lease may
 change it: a client acquires control, receives a writer epoch, presents that
-epoch on every mutation of an existing session, and renews the lease before its
+epoch on every mutation of an existing session, including configure and compact,
+and renews the lease before its
 term lapses. Takeover waits for the holder to release or for the lease to
 lapse; nothing forces a live holder off. The daemon can also tell every client
 it is stopping, and why.
@@ -152,7 +189,7 @@ Technical depth: [The daemon's generation](app-server-protocol-technical.md#tech
 ## Related
 
 - [Architecture](architecture.md#concept) — where these applications sit and which way they depend.
-- [The daemon](daemon.md#concept) — the host that serves generation 2.
+- [The daemon](daemon.md#concept) — the host for the daemon generation.
 - [Compatibility surfaces](compatibility-surfaces.md#concept) — what "experimental" commits to.
 - [Observability](observability.md#concept) — the diagnostics plane this never writes to.
 - [Getting started](getting-started.md#concept) — a first protocol client.

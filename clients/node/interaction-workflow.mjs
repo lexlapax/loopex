@@ -26,6 +26,7 @@
 //
 // Usage: LOOPEX_WORKSPACE_REF=<ref> node interaction-workflow.mjs <elixir> <path>...
 
+import { createHash } from "node:crypto";
 import { Connection, wire } from "./loopex-client.mjs";
 
 const [elixir, ...paths] = process.argv.slice(2);
@@ -89,6 +90,7 @@ async function run(connection) {
 
   const created = await connection.request("session.create", {
     command_id: wire.identity("chain-create"),
+    session_options: { version: 1 },
   });
 
   assert(created.status === "accepted", `creation was ${created.status}`);
@@ -236,11 +238,19 @@ async function run(connection) {
 
   if (artifact) {
     const opened = await connection.request("artifact.open_transfer", {
-      use_ref: wire.reference(artifact),
+      use_ref: artifact.use_locator,
       start_offset: wire.u64(0),
     });
 
     if (opened.type === "result") {
+      const use = opened.result.use_reference;
+      assert(Object.keys(use).length === Object.keys(artifact).length &&
+        Object.entries(artifact).every(([key, value]) => use[key] === value),
+        "the transfer did not resolve the exact published use reference");
+      const object = opened.result.object_reference;
+      assert(Object.keys(object).length === 3 && object.digest === artifact.digest && object.size === artifact.size &&
+        object.locator === artifact.locator, "the transfer resolved a different object");
+      assert(opened.result.object_digest === artifact.digest, "the transfer named a different digest");
       summary.transfer_opened = true;
       summary.total_size = opened.result.total_size;
 
@@ -250,7 +260,10 @@ async function run(connection) {
       });
 
       if (chunk.type === "result" && !chunk.result.eof) {
-        summary.chunk_bytes = wire.decodeBytes(chunk.result.bytes_b64).length;
+        const bytes = wire.decodeBytes(chunk.result.bytes_b64);
+        assert(createHash("sha256").update(bytes).digest("hex") === chunk.result.chunk_digest,
+          "the artifact chunk digest did not cover its exact bytes");
+        summary.chunk_bytes = bytes.length;
         summary.chunk_has_digest = typeof chunk.result.chunk_digest === "string";
       }
 
@@ -259,6 +272,15 @@ async function run(connection) {
       });
 
       summary.transfer_closed = closed.type === "result";
+
+      const refused = await connection.request("artifact.open_transfer", {
+        use_ref: artifact.use_locator,
+        start_offset: wire.u64(wire.decodeU64(opened.result.total_size) + 1n),
+      });
+
+      assertAdmittedRefusal(refused, "invalid_window");
+      summary.invalid_window_refused = true;
+      summary.invalid_window_cleanup = refused.cleanup;
     } else {
       summary.transfer_refused = opened.reason ?? opened.code;
     }
@@ -272,6 +294,29 @@ async function run(connection) {
   }
 
   return summary;
+}
+
+// Concept: a refused opening reports its cause and cleanup observation.
+//
+// Technical depth: the complete public envelope is closed. Receipt, accounting,
+// actor and adapter fields cannot cross as extra members. Correlation was
+// already checked by Connection's pending-request lookup.
+function assertAdmittedRefusal(record, reason) {
+  const keys = ["cleanup", "code", "message", "reason", "request_id", "type"];
+  assert(
+    JSON.stringify(Object.keys(record).sort()) === JSON.stringify(keys),
+    "the admitted transfer refusal has unexpected fields",
+  );
+  assert(record.type === "error", "expected a transfer error");
+  assert(record.code === "transfer_refused", "expected a transfer refusal");
+  assert(record.reason === reason, `expected refusal reason ${reason}`);
+  assert(
+    record.cleanup === "proved" || record.cleanup === "unproved",
+    "the refusal has no valid cleanup observation",
+  );
+  assert(typeof record.request_id === "string" && record.request_id.length > 0,
+    "the refusal has no request identity");
+  assert(record.message === "the transfer was refused", "unexpected refusal message");
 }
 
 // Concept: the session outlives the process that was serving it.

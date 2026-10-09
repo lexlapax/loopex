@@ -12,10 +12,9 @@ defmodule Loopex.AppServer.DeliveryBoundsTest do
   ## Technical depth
 
   Accepted ADR 0028 owns the transfer itself and accepted ADR 0023 owns how it
-  is spoken. These cases drive a real store through the real runtime, so what is
-  proved is the whole path rather than a mapping talking to itself. The store is
-  deliberately small: it implements the port and nothing else, which keeps the
-  case about the crossing.
+  is spoken. Accepted ADR 0066 owns current reservation and retirement custody.
+  These cases drive the actual local artifact store and its transfer owner
+  through the real runtime, including physical verification and retained proof.
 
   The refusals matter as much as the reads. A transfer reference belongs to the
   attachment that opened it, a refusal names a cause from the closed set, and no
@@ -27,146 +26,13 @@ defmodule Loopex.AppServer.DeliveryBoundsTest do
   alias Loopex.AgentLoopFixture, as: Fixture
   alias Loopex.AppServer.Connection
   alias Loopex.AppServer.Delivery
+  alias Loopex.Store.Local.{Artifacts, Transfers}
   alias LoopexProtocol.Frame
   alias LoopexProtocol.Canonical
   alias LoopexProtocol.Session
   alias LoopexProtocol.Wire
 
   @content "the artifact bytes a client will read back in pieces"
-
-  defmodule TransferStore do
-    @moduledoc false
-    @behaviour Loopex.ArtifactStore
-
-    alias LoopexProtocol.Canonical
-
-    def start, do: Agent.start_link(fn -> %{objects: %{}, uses: %{}, transfers: %{}} end)
-
-    def put(pid, bytes, %{media_type: media_type, role: role, metadata: metadata}) do
-      digest = Canonical.digest_bytes(bytes)
-      object = %{digest: digest, size: byte_size(bytes), locator: "wire:" <> digest}
-
-      use_record = %{
-        canonicalization_version: Canonical.version(),
-        object_digest: object.digest,
-        object_size: object.size,
-        object_locator: object.locator,
-        media_type: media_type,
-        role: role,
-        metadata: metadata
-      }
-
-      use_digest = Canonical.digest(["artifact-use-v2", use_record])
-
-      reference =
-        Map.merge(object, %{
-          media_type: media_type,
-          role: role,
-          use_canonicalization_version: Canonical.version(),
-          use_digest: use_digest,
-          use_locator: "use:" <> use_digest
-        })
-
-      Agent.update(pid, fn state ->
-        %{
-          state
-          | objects: Map.put(state.objects, object.locator, {object, bytes}),
-            uses: Map.put(state.uses, reference.use_locator, use_record)
-        }
-      end)
-
-      {:ok, reference}
-    end
-
-    def fetch(pid, object) do
-      case Agent.get(pid, &Map.fetch(&1.objects, object.locator)) do
-        {:ok, {_object, bytes}} -> {:ok, bytes}
-        :error -> {:error, :unknown_artifact}
-      end
-    end
-
-    def stat(pid, locator) do
-      case Agent.get(pid, &Map.fetch(&1.objects, locator)) do
-        {:ok, {object, _bytes}} -> {:ok, object}
-        :error -> {:error, :unknown_artifact}
-      end
-    end
-
-    def describe(pid, use_locator) do
-      case Agent.get(pid, &Map.fetch(&1.uses, use_locator)) do
-        {:ok, use_record} -> {:ok, use_record}
-        :error -> {:error, :unknown_artifact}
-      end
-    end
-
-    def open_transfer(pid, object, use_locator, window) do
-      case Agent.get(pid, &Map.fetch(&1.objects, object.locator)) do
-        {:ok, {stored, bytes}} ->
-          start = Map.get(window, :start, 0)
-          length = Map.get(window, :length, stored.size - start)
-
-          if start > stored.size or start + length > stored.size do
-            {:error, :invalid_window}
-          else
-            ref = "transfer-" <> Integer.to_string(System.unique_integer([:positive]))
-
-            transfer = %{
-              transfer_ref: ref,
-              object: stored,
-              use_locator: use_locator,
-              total_size: stored.size,
-              window_start: start,
-              window_length: length,
-              object_digest: stored.digest
-            }
-
-            Agent.update(pid, fn state ->
-              %{state | transfers: Map.put(state.transfers, ref, {transfer, bytes, start})}
-            end)
-
-            {:ok, transfer}
-          end
-
-        :error ->
-          {:error, :object_missing}
-      end
-    end
-
-    def read_transfer(pid, transfer, length) do
-      case Agent.get(pid, &Map.fetch(&1.transfers, transfer.transfer_ref)) do
-        {:ok, {held, bytes, position}} ->
-          remaining = held.window_start + held.window_length - position
-
-          if remaining <= 0 do
-            {:ok, :complete}
-          else
-            take = min(length, remaining)
-            chunk = binary_part(bytes, position, take)
-
-            Agent.update(pid, fn state ->
-              %{
-                state
-                | transfers:
-                    Map.put(state.transfers, held.transfer_ref, {held, bytes, position + take})
-              }
-            end)
-
-            {:ok, %{offset: position, bytes: chunk, chunk_digest: Canonical.digest_bytes(chunk)}}
-          end
-
-        :error ->
-          {:error, :transfer_unknown}
-      end
-    end
-
-    def close_transfer(pid, transfer) do
-      Agent.update(pid, fn state ->
-        %{state | transfers: Map.delete(state.transfers, transfer.transfer_ref)}
-      end)
-
-      :ok
-    end
-  end
 
   test "an artifact crosses the wire in verified chunks and the transfer closes" do
     %{connection: connection, reference: reference} = opened()
@@ -175,7 +41,7 @@ defmodule Loopex.AppServer.DeliveryBoundsTest do
       Connection.dispatch(connection, %{
         "method" => "artifact.open_transfer",
         "request_id" => "t1",
-        "use_ref" => Wire.encode_reference(reference),
+        "use_ref" => reference.use_locator,
         "start_offset" => "0"
       })
 
@@ -188,10 +54,23 @@ defmodule Loopex.AppServer.DeliveryBoundsTest do
     assert {:ok, transfer_ref} = Wire.identity(opened["transfer_ref"])
     assert is_binary(transfer_ref)
 
-    # Where the bytes live never crosses with them.
+    assert Enum.sort(Map.keys(opened)) ==
+             ~w(object_digest object_reference total_size transfer_ref use_reference window_end_exclusive window_start)
+
+    assert opened["object_reference"] ==
+             Map.take(reference_members(reference), ~w(digest size locator))
+
+    assert opened["use_reference"] ==
+             Map.new(reference, fn
+               {:size, size} -> {"size", Integer.to_string(size)}
+               {key, value} -> {Atom.to_string(key), value}
+             end)
+
     rendered = inspect(opened, limit: :infinity)
-    refute rendered =~ "/"
-    refute rendered =~ "wire:"
+    refute rendered =~ "PRIVATE_ARTIFACT_PROVENANCE"
+    refute rendered =~ System.fetch_env!("LOOPEX_HOME")
+    refute rendered =~ "metadata"
+    refute Map.has_key?(opened, "path")
 
     {collected, connection} = read_all(connection, opened["transfer_ref"], "")
     assert collected == @content
@@ -213,7 +92,7 @@ defmodule Loopex.AppServer.DeliveryBoundsTest do
       Connection.dispatch(connection, %{
         "method" => "artifact.open_transfer",
         "request_id" => "t1",
-        "use_ref" => Wire.encode_reference(reference),
+        "use_ref" => reference.use_locator,
         "start_offset" => "0"
       })
 
@@ -241,12 +120,19 @@ defmodule Loopex.AppServer.DeliveryBoundsTest do
       Connection.dispatch(connection, %{
         "method" => "artifact.open_transfer",
         "request_id" => "t1",
-        "use_ref" => Wire.encode_reference(reference),
+        "use_ref" => reference.use_locator,
         "start_offset" => Wire.encode_u64(byte_size(@content) + 10)
       })
 
     assert refusal["code"] == "transfer_refused"
     assert refusal["reason"] == "invalid_window"
+    assert refusal["cleanup"] in ["proved", "unproved"]
+
+    assert Enum.sort(Map.keys(refusal)) ==
+             ~w(cleanup code message reason request_id type)
+
+    assert Enum.all?(Map.values(refusal), &is_binary/1)
+    assert refusal["request_id"] == "t1"
     refute refusal["message"] =~ "/"
   end
 
@@ -265,16 +151,23 @@ defmodule Loopex.AppServer.DeliveryBoundsTest do
     assert refusal["reason"] == "unknown_transfer"
   end
 
-  test "an opaque reference that is not a whole reference is refused before the store" do
+  test "only the exact literal use locator reaches the store" do
     %{connection: connection, reference: reference} = opened()
 
-    partial =
-      reference
-      |> reference_members()
-      |> Map.delete("use_locator")
-      |> Wire.encode_reference()
+    old_envelope = Wire.encode_bytes(JSON.encode!(reference_members(reference)))
 
-    for bad <- [partial, Wire.encode_identity("not a reference"), "not base64url!", 7] do
+    for bad <- [
+          old_envelope,
+          Wire.encode_identity("not a reference"),
+          "not base64url!",
+          "use:",
+          "use:" <> String.duplicate("A", 64),
+          "use:" <> String.duplicate("g", 64),
+          reference.use_locator <> "x",
+          "use:" <> String.duplicate("a", 63),
+          nil,
+          7
+        ] do
       assert {:error, refusal, _connection} =
                Connection.dispatch(connection, %{
                  "method" => "artifact.open_transfer",
@@ -294,7 +187,7 @@ defmodule Loopex.AppServer.DeliveryBoundsTest do
       Connection.dispatch(connection, %{
         "method" => "artifact.open_transfer",
         "request_id" => "t1",
-        "use_ref" => Wire.encode_reference(reference),
+        "use_ref" => reference.use_locator,
         "start_offset" => "0"
       })
 
@@ -359,14 +252,18 @@ defmodule Loopex.AppServer.DeliveryBoundsTest do
     flooded =
       Enum.reduce(1..(Map.fetch!(limits, "durable_queue_records") * 4), queue, fn index, queue ->
         Delivery.event(queue, %{
+          "command_id" => "pressure-command",
+          "run_id" => "pressure-run",
+          "content" => String.duplicate("e", 4_096),
           event_id: "event-#{index}",
-          kind: "run.progressed",
-          event_sequence: index,
-          payload: %{"bytes" => String.duplicate("e", 4_096)}
+          kind: "user.message_appended",
+          event_sequence: index
         })
       end)
 
     assert Delivery.detached?(flooded)
+    assert elem(Delivery.usage(flooded).durable, 0) == Map.fetch!(limits, "durable_queue_records")
+    assert Delivery.pulled_cursor(flooded) == Map.fetch!(limits, "durable_queue_records")
 
     detachment = Delivery.detachment(flooded)
     assert detachment["code"] == "detached"
@@ -389,15 +286,23 @@ defmodule Loopex.AppServer.DeliveryBoundsTest do
     detached =
       Enum.reduce(1..256, queue, fn index, queue ->
         Delivery.event(queue, %{
+          "command_id" => "pressure-command",
+          "run_id" => "pressure-run",
+          "content" => String.duplicate("e", 65_536),
           event_id: "event-#{index}",
-          kind: "run.progressed",
-          event_sequence: index,
-          payload: %{"bytes" => String.duplicate("e", 65_536)}
+          kind: "user.message_appended",
+          event_sequence: index
         })
       end)
 
     assert Delivery.detached?(detached)
-    {_pending, drained} = drain(detached)
+    {count, bytes} = Delivery.usage(detached).durable
+    assert count > 0 and count < 64
+    assert bytes <= Session.limits()["durable_queue_bytes"]
+    assert bytes + Frame.output_record_bytes() > Session.limits()["durable_queue_bytes"]
+    assert Delivery.pulled_cursor(detached) == count
+    {pending, drained} = drain(detached)
+    assert length(pending) == count
 
     # Progress arriving after the detachment is dropped rather than queued: the
     # reader is gone, and holding a rendering aid for it would be holding memory
@@ -428,7 +333,7 @@ defmodule Loopex.AppServer.DeliveryBoundsTest do
       Connection.dispatch(connection, %{
         "method" => "artifact.open_transfer",
         "request_id" => "t1",
-        "use_ref" => Wire.encode_reference(reference_members(reference)),
+        "use_ref" => reference.use_locator,
         "start_offset" => Wire.encode_u64(0)
       })
 
@@ -486,20 +391,39 @@ defmodule Loopex.AppServer.DeliveryBoundsTest do
   end
 
   defp opened do
-    {:ok, store} = TransferStore.start()
-    on_exit(fn -> if Process.alive?(store), do: Agent.stop(store) end)
+    root =
+      Path.join(
+        System.fetch_env!("LOOPEX_HOME"),
+        "delivery-artifacts-#{System.unique_integer([:positive])}"
+      )
 
-    {:ok, reference} =
-      TransferStore.put(store, @content, %{
-        media_type: "text/plain",
-        role: "tool_output",
-        metadata: %{}
-      })
+    on_exit(fn -> File.rm_rf!(root) end)
+    {:ok, handle} = Artifacts.open(root)
+    {:ok, owner} = Transfers.start_link(root: root)
+
+    on_exit(fn ->
+      cutoff = System.monotonic_time(:millisecond) + 5_000
+      monitor = Process.monitor(owner)
+
+      try do
+        :ok = GenServer.stop(owner, :normal, max(cutoff - System.monotonic_time(:millisecond), 0))
+
+        assert_receive {:DOWN, ^monitor, :process, ^owner, :normal},
+                       max(cutoff - System.monotonic_time(:millisecond), 0)
+
+        assert System.monotonic_time(:millisecond) < cutoff
+      after
+        Process.demonitor(monitor, [:flush])
+      end
+    end)
+
+    Process.unlink(owner)
+    artifact_store = %{module: Artifacts, handle: Map.put(handle, :transfers, owner)}
 
     fixture =
       Fixture.start(
         script: [%{text: "done", calls: []}],
-        artifact_store: %{module: TransferStore, handle: store}
+        artifact_store: artifact_store
       )
 
     on_exit(fn -> Fixture.stop(fixture) end)
@@ -508,6 +432,7 @@ defmodule Loopex.AppServer.DeliveryBoundsTest do
 
     {:ok, _reply, connection} =
       Connection.initialize(connection, %{
+        "method" => "initialize",
         "request_id" => "r0",
         "generations" => [Session.generation()],
         "capabilities" => []
@@ -515,12 +440,25 @@ defmodule Loopex.AppServer.DeliveryBoundsTest do
 
     {:ok, created, connection} =
       Connection.dispatch(connection, %{
+        "session_options" => %{"version" => 1},
         "method" => "session.create",
         "request_id" => "r1",
         "command_id" => Wire.encode_identity("cs")
       })
 
     {:ok, session_id} = Wire.identity(created["session_id"])
+
+    {:ok, reference} =
+      Loopex.ArtifactStore.put(artifact_store, @content, %{
+        "media_type" => "text/plain",
+        "role" => "tool_output",
+        "session_id" => session_id,
+        "run_id" => "delivery-run",
+        "operation_id" => "delivery-operation",
+        "attempt" => 1,
+        "tool_call_id" => "PRIVATE_ARTIFACT_PROVENANCE"
+      })
+
     {:ok, attachment} = Loopex.attach(fixture.runtime, session_id, after_event_sequence: 0)
 
     %{connection: Connection.attach(connection, attachment), reference: reference}

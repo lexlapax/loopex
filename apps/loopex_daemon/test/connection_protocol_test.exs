@@ -4,7 +4,7 @@ defmodule LoopexDaemon.ConnectionProtocolTest do
   alias LoopexDaemon.ConnectionProtocol
   alias LoopexProtocol.Session.V2
 
-  test "generation two initializes exactly once" do
+  test "current daemon generation initializes exactly once" do
     assert {:ok, reply, initialized, :initialized} =
              ConnectionProtocol.handle(ConnectionProtocol.new(), initialize())
 
@@ -23,17 +23,19 @@ defmodule LoopexDaemon.ConnectionProtocolTest do
   end
 
   test "generation one is refused and spends the negotiation attempt" do
-    request = initialize("r1", ["loopex.experimental/1"])
+    for generation <- ["loopex.experimental/1", "loopex.experimental/2", "loopex.experimental/3"] do
+      request = initialize("r1", [generation])
 
-    assert {:error, refusal, refused, :none} =
-             ConnectionProtocol.handle(ConnectionProtocol.new(), request)
+      assert {:error, refusal, refused, :none} =
+               ConnectionProtocol.handle(ConnectionProtocol.new(), request)
 
-    assert refusal["code"] == "unsupported_generation"
+      assert refusal["code"] == "unsupported_generation"
 
-    assert {:error, second, ^refused, :none} =
-             ConnectionProtocol.handle(refused, initialize("r2"))
+      assert {:error, second, ^refused, :none} =
+               ConnectionProtocol.handle(refused, initialize("r2"))
 
-    assert second["code"] == "already_initialized"
+      assert second["code"] == "already_initialized"
+    end
   end
 
   test "malformed negotiation does not spend the attempt or echo unsafe identity" do
@@ -95,7 +97,7 @@ defmodule LoopexDaemon.ConnectionProtocolTest do
     assert unknown["code"] == "unsupported_method"
   end
 
-  test "named methods cross strict generation-two parsing before serving" do
+  test "named methods cross strict current parsing before serving" do
     assert {:ok, _reply, initialized, :initialized} =
              ConnectionProtocol.handle(ConnectionProtocol.new(), initialize())
 
@@ -123,7 +125,7 @@ defmodule LoopexDaemon.ConnectionProtocolTest do
     end
   end
 
-  test "native configure tickets stay dormant under current generation negotiation" do
+  test "configure and compact requests require negotiation and retain exact parsed fields" do
     protocol = ConnectionProtocol.new()
 
     request = %{
@@ -140,15 +142,44 @@ defmodule LoopexDaemon.ConnectionProtocolTest do
     assert {:ok, reply, initialized, :initialized} =
              ConnectionProtocol.handle(protocol, initialize())
 
-    refute "session.configure" in reply["supported_methods"]
-    refute "session.configure" in V2.methods()
+    assert "session.configure" in reply["supported_methods"]
+    assert "session.compact" in reply["supported_methods"]
+    assert reply["supported_methods"] == V2.methods()
 
-    assert {:error, refusal, ^initialized, :none} =
+    assert {:request, configured, ^initialized} =
              ConnectionProtocol.handle(initialized, request)
 
-    assert refusal["code"] == "unsupported_method"
-    assert refusal["request_id"] == "configure"
-    refute Map.has_key?(refusal, "status")
+    assert configured.operation == :session_configure
+    assert configured.request_id == "configure"
+
+    assert configured.fields == %{
+             command_id: "configure",
+             writer_epoch: "epoch",
+             changes: %{"max_tokens" => 512}
+           }
+
+    compact = %{
+      "method" => "session.compact",
+      "request_id" => "compact",
+      "command_id" => "Y29tcGFjdA",
+      "writer_epoch" => "ZXBvY2g",
+      "bounds" => %{
+        "max_attempts" => "4",
+        "deadline_ms" => "60000",
+        "token_budget" => "32768"
+      }
+    }
+
+    assert {:error, refused, ^protocol, :none} = ConnectionProtocol.handle(protocol, compact)
+    assert refused["code"] == "not_initialized"
+    assert {:request, parsed, ^initialized} = ConnectionProtocol.handle(initialized, compact)
+    assert parsed.operation == :session_compact
+
+    assert parsed.fields == %{
+             command_id: "compact",
+             writer_epoch: "epoch",
+             bounds: %{"max_attempts" => 4, "deadline_ms" => 60_000, "token_budget" => 32_768}
+           }
   end
 
   defp initialize(request_id \\ "r1", generations \\ [V2.generation()]) do

@@ -79,7 +79,7 @@ async function run(connection) {
 
   const created = await connection.request("session.create", {
     command_id: wire.identity("client-create"),
-    session_options: {},
+    session_options: { version: 1 },
   });
 
   assert(created.type === "admission", `expected an admission, received ${created.type}`);

@@ -2,7 +2,7 @@ defmodule LoopexProtocol.Session do
   @moduledoc """
   ## Concept
 
-  The generation-one experimental public session protocol: which generation a
+  The current foreground experimental public session protocol: which generation a
   client and server agree on, exactly which methods and record families that
   generation admits, the limits the server enforces, and the digest that names
   the whole contract. A client negotiates against these values before it may
@@ -10,97 +10,33 @@ defmodule LoopexProtocol.Session do
 
   ## Technical depth
 
-  Accepted ADR 0023 fixes this contract. The module is data and validation
-  only: it holds no connection, performs no effect, and knows nothing about a
+  Accepted ADR 0044 coordinates this replacement of ADR 0023. The module is
+  data and validation only: it holds no connection, performs no effect, and knows nothing about a
   runtime, a transport or a facade. That is what lets the same values identify
   the contract in a server, in a client written in another language, and in a
   conformance vector.
 
   The digest is taken over the schema rather than over one server's
-  configuration. Methods, record families, error codes and the schema maxima
-  are the contract; a server may report limits no larger than the maxima and
+  configuration. Its seven keys bind closed payload definitions, methods, record
+  families, error codes and schema maxima. A server may report smaller limits and
   still speak this generation, which is why `limits/0` is the ceiling a
   conforming server stays within rather than a promise about one process.
 
   Ordering is part of the identity. The method and family lists are written in
-  the order accepted ADR 0023 states them and are digested in that order, so a
-  reordering is a different contract and says so.
+  the retained order, with configure and compact appended. Canonical encoding
+  preserves list order, so a reordering changes the identity.
   """
 
   alias LoopexProtocol.Canonical
 
-  @generation "loopex.experimental/1"
-
-  @methods [
-    "session.create",
-    "session.resume",
-    "session.inspect",
-    "session.attach",
-    "session.prompt",
-    "session.steer",
-    "session.follow_up",
-    "session.abort",
-    "session.respond_interaction",
-    "resources.catalog",
-    "resources.read",
-    "session.admit_resources",
-    "session.activate_skill",
-    "artifact.open_transfer",
-    "artifact.read_chunk",
-    "artifact.close_transfer"
-  ]
-
-  @record_families [
-    "initialized",
-    "result",
-    "snapshot",
-    "admission",
-    "error",
-    "event",
-    "progress"
-  ]
-
-  @error_codes [
-    "invalid_frame",
-    "invalid_request",
-    "not_initialized",
-    "already_initialized",
-    "unsupported_generation",
-    "unsupported_method",
-    "not_attached",
-    "attachment_conflict",
-    "capacity_exceeded",
-    "facade_unavailable",
-    "recovery_required",
-    "admission_unknown",
-    "transfer_refused",
-    "detached",
-    "internal_failure"
-  ]
-
-  @limits %{
-    "frame_bytes_before_initialization" => 65_536,
-    "frame_bytes" => 1_048_576,
-    "output_record_bytes" => 2_097_152,
-    "max_depth" => 16,
-    "max_members" => 1_024,
-    "max_string_bytes" => 131_072,
-    "max_identity_bytes" => 65_536,
-    "max_identity_wire_bytes" => 87_382,
-    "max_session_identity_bytes" => 256,
-    "integer_min" => -9_007_199_254_740_991,
-    "integer_max" => 9_007_199_254_740_991,
-    "max_requests_in_flight" => 32,
-    "durable_queue_records" => 64,
-    "durable_queue_bytes" => 4_194_304,
-    "progress_queue_records" => 32,
-    "progress_queue_bytes" => 524_288,
-    "diagnostics_lines" => 64,
-    "diagnostics_bytes" => 65_536,
-    "raw_chunk_bytes" => 32_768,
-    "reply_wait_ms" => 30_000,
-    "writer_detach_ms" => 5_000
-  }
+  @manifest_path Path.expand("../../priv/schema/loopex-experimental-3.json", __DIR__)
+  @external_resource @manifest_path
+  @manifest LoopexProtocol.Session.Manifest.read!(@manifest_path)
+  @generation @manifest["generation"]
+  @methods @manifest["methods"]
+  @record_families @manifest["record_families"]
+  @error_codes @manifest["error_codes"]
+  @limits @manifest["limits"]
 
   @doc """
   ## Concept
@@ -182,22 +118,27 @@ defmodule LoopexProtocol.Session do
 
   ## Technical depth
 
-  Taken over the generation, the ordered methods, the ordered record families,
-  the ordered error codes and the schema maxima, through the repository's
-  deterministic encoding, so two builds agree byte for byte and any change to
-  any of them produces a different digest. It is lowercase hexadecimal, which is
+  Taken over the complete seven-key manifest through loopex.canonical.v1.
+  Closed request, record and nested payload definitions participate alongside
+  the generation, ordered inventories and maxima; changing any leaf changes
+  the identity. It is lowercase hexadecimal, which is
   the form the wire carries.
   """
   @spec schema_digest() :: binary()
-  def schema_digest do
-    Canonical.digest(%{
-      "generation" => @generation,
-      "methods" => @methods,
-      "record_families" => @record_families,
-      "error_codes" => @error_codes,
-      "limits" => @limits
-    })
-  end
+  def schema_digest, do: Canonical.digest(@manifest)
+
+  @doc """
+  ## Concept
+
+  The complete current contract an independent consumer pins before requests.
+
+  ## Technical depth
+
+  Exactly seven keys bind ordered inventories and all closed payload definitions.
+  The canonicalization revision and nested data participate in the same digest.
+  """
+  @spec manifest() :: map()
+  def manifest, do: @manifest
 
   @doc """
   ## Concept

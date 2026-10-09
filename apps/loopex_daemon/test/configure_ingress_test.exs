@@ -77,12 +77,15 @@ defmodule LoopexDaemon.ConfigureIngressTest do
     assert Adapter.prepare_configuration_request(request) == {:error, :invalid_request}
   end
 
-  test "duplicate-aware Frame and served generation stay unchanged by this prerequisite" do
+  test "duplicate-aware Frame and current configure parsing retain exact prepared values" do
     for vector <- vectors()["frame_cases"] do
       assert Frame.decode(vector["json"], 2_097_152) == {:error, :duplicate_member}
     end
 
-    assert Adapter.parse(request()) == {:error, :unsupported_method}
+    assert {:ok, prepared} = Adapter.prepare_configuration_request(request())
+    assert {:ok, parsed} = Adapter.parse(request())
+    assert parsed.operation == :session_configure
+    assert parsed.fields == prepared
   end
 
   defp request do

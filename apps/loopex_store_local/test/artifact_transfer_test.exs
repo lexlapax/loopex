@@ -24,13 +24,16 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
   alias Loopex.Store.Local.Artifacts
   alias Loopex.Store.Local.Transfers
 
-  @use %{media_type: "text/plain", role: "tool_output", metadata: %{}}
+  @use %{media_type: "text/plain", role: "tool_output", metadata: %{
+    "session_id" => "transfer-session", "run_id" => "transfer-run",
+    "operation_id" => "transfer-operation", "attempt" => 1, "tool_call_id" => "transfer-call"
+  }}
 
   test "a whole-object transfer verifies once and emits digested chunks in order" do
     %{handle: handle, reference: reference, bytes: bytes} = stored(:binary.copy("ab", 5_000))
 
     assert {:ok, transfer} =
-             Artifacts.open_transfer(handle, object(reference), reference.use_locator, %{start: 0})
+             open_transfer(handle, reference.use_locator, %{start: 0})
 
     assert transfer.total_size == byte_size(bytes)
     assert transfer.window_start == 0
@@ -54,14 +57,14 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
            end)
 
     refute Enum.any?(chunks, &(&1.chunk_digest == transfer.object_digest))
-    assert :ok = Artifacts.close_transfer(handle, transfer)
+    assert :ok = close_transfer(handle, transfer)
   end
 
   test "a chunk never crosses the window and a window at the end is empty" do
     %{handle: handle, reference: reference, bytes: bytes} = stored("0123456789")
 
     assert {:ok, first} =
-             Artifacts.open_transfer(handle, object(reference), reference.use_locator, %{
+             open_transfer(handle, reference.use_locator, %{
                start: 0,
                length: 4
              })
@@ -69,34 +72,34 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
     assert first.window_length == 4
     assert [chunk] = drain(handle, first, 1_000)
     assert chunk.bytes == binary_part(bytes, 0, 4)
-    assert :ok = Artifacts.close_transfer(handle, first)
+    assert :ok = close_transfer(handle, first)
 
     assert {:ok, last} =
-             Artifacts.open_transfer(handle, object(reference), reference.use_locator, %{start: 6})
+             open_transfer(handle, reference.use_locator, %{start: 6})
 
     assert last.window_start == 6
     assert last.window_length == 4
     assert IO.iodata_to_binary(Enum.map(drain(handle, last, 2), & &1.bytes)) == "6789"
-    assert :ok = Artifacts.close_transfer(handle, last)
+    assert :ok = close_transfer(handle, last)
 
     # A window that starts exactly at the end is an empty transfer; one that
     # starts past it names bytes that never existed.
     assert {:ok, empty} =
-             Artifacts.open_transfer(handle, object(reference), reference.use_locator, %{
+             open_transfer(handle, reference.use_locator, %{
                start: byte_size(bytes)
              })
 
     assert empty.window_length == 0
     assert {:ok, :complete} = Artifacts.read_transfer(handle, empty, 16)
-    assert :ok = Artifacts.close_transfer(handle, empty)
+    assert :ok = close_transfer(handle, empty)
 
     assert {:error, :invalid_window} =
-             Artifacts.open_transfer(handle, object(reference), reference.use_locator, %{
+             open_transfer(handle, reference.use_locator, %{
                start: byte_size(bytes) + 1
              })
 
     assert {:error, :invalid_window} =
-             Artifacts.open_transfer(handle, object(reference), reference.use_locator, %{
+             open_transfer(handle, reference.use_locator, %{
                start: 0,
                length: byte_size(bytes) + 1
              })
@@ -106,7 +109,7 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
     %{handle: handle, reference: reference, root: root, bytes: bytes} = stored("original-bytes")
 
     assert {:ok, transfer} =
-             Artifacts.open_transfer(handle, object(reference), reference.use_locator, %{start: 0})
+             open_transfer(handle, reference.use_locator, %{start: 0})
 
     # Same path, same size, different bytes: the snapshot the transfer reads
     # from was taken during verification, so the chunks are still the verified
@@ -115,21 +118,18 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
     File.write!(path, String.replace(bytes, "original", "REWRITTEN"))
 
     assert IO.iodata_to_binary(Enum.map(drain(handle, transfer, 64), & &1.bytes)) == bytes
-    assert :ok = Artifacts.close_transfer(handle, transfer)
+    assert :ok = close_transfer(handle, transfer)
   end
 
   test "a use that names another object refuses before anything is opened" do
-    %{handle: handle, reference: first} = stored("first object")
+    %{handle: handle} = stored("first object")
     %{reference: second} = stored("second object", handle)
 
     assert {:error, :artifact_use_mismatch} =
-             Artifacts.open_transfer(handle, object(first), second.use_locator, %{start: 0})
+             open_transfer(handle, second.use_locator, %{start: 0}, session_id: "wrong-session")
 
     assert {:error, :unknown_artifact_use} =
-             Artifacts.open_transfer(
-               handle,
-               object(first),
-               "use:" <> String.duplicate("a", 64),
+             open_transfer(handle, "use:" <> String.duplicate("a", 64),
                %{
                  start: 0
                }
@@ -140,14 +140,14 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
     %{handle: handle, reference: reference} = stored("bytes to release")
 
     assert {:ok, transfer} =
-             Artifacts.open_transfer(handle, object(reference), reference.use_locator, %{start: 0})
+             open_transfer(handle, reference.use_locator, %{start: 0})
 
     assert [_live] = Transfers.live(handle.transfers)
-    assert :ok = Artifacts.close_transfer(handle, transfer)
+    assert :ok = close_transfer(handle, transfer)
     assert [] = Transfers.live(handle.transfers)
 
     assert {:error, :unknown_transfer} = Artifacts.read_transfer(handle, transfer, 16)
-    assert :ok = Artifacts.close_transfer(handle, transfer)
+    assert :ok = close_transfer(handle, transfer)
   end
 
   test "a store without a transfer owner refuses the family rather than crashing" do
@@ -155,7 +155,7 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
     plain = Map.delete(handle, :transfers)
 
     assert {:error, :transfers_unavailable} =
-             Artifacts.open_transfer(plain, object(reference), reference.use_locator, %{start: 0})
+             open_transfer(plain, reference.use_locator, %{start: 0})
 
     assert ArtifactStore.supports_transfer?(Artifacts)
   end
@@ -171,7 +171,7 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
     File.write!(path, binary_part(bytes, 0, byte_size(bytes) - 1) <> "!")
 
     assert {:error, :artifact_digest_mismatch} =
-             Artifacts.open_transfer(handle, object(reference), reference.use_locator, %{
+             open_transfer(handle, reference.use_locator, %{
                start: 0,
                length: 16
              })
@@ -180,7 +180,7 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
     File.write!(path, binary_part(bytes, 0, 128))
 
     assert {:error, :artifact_digest_mismatch} =
-             Artifacts.open_transfer(handle, object(reference), reference.use_locator, %{start: 0})
+             open_transfer(handle, reference.use_locator, %{start: 0})
 
     assert [] = Transfers.live(handle.transfers)
   end
@@ -188,23 +188,12 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
   test "an open that exhausts its deadline or its work budget refuses" do
     %{handle: handle, reference: reference} = stored(:binary.copy("w", 200_000))
 
+    constrained = budget_store(handle, 1_024)
     assert {:error, :open_work_budget_exhausted} =
-             Transfers.open(
-               handle.transfers,
-               object(reference),
-               reference.use_locator,
-               %{start: 0},
-               open_work_bytes: 1_024
-             )
+             open_transfer(constrained, reference.use_locator, %{start: 0})
 
     assert {:error, :open_deadline_exhausted} =
-             Transfers.open(
-               handle.transfers,
-               object(reference),
-               reference.use_locator,
-               %{start: 0},
-               open_deadline_ms: -1
-             )
+             open_transfer(handle, reference.use_locator, %{start: 0}, open_deadline_ms: -1)
 
     # Neither left a transfer behind, so neither spent a slot of the ceiling.
     assert [] = Transfers.live(handle.transfers)
@@ -217,7 +206,7 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
     opened =
       for _index <- 1..limits.per_runtime do
         assert {:ok, transfer} =
-                 Artifacts.open_transfer(handle, object(reference), reference.use_locator, %{
+                 open_transfer(handle, reference.use_locator, %{
                    start: 0
                  })
 
@@ -227,18 +216,18 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
     assert length(Transfers.live(handle.transfers)) == limits.per_runtime
 
     assert {:error, :transfer_limit_reached} =
-             Artifacts.open_transfer(handle, object(reference), reference.use_locator, %{start: 0})
+             open_transfer(handle, reference.use_locator, %{start: 0})
 
     # Closing one makes room for exactly one more.
-    assert :ok = Artifacts.close_transfer(handle, hd(opened))
+    assert :ok = close_transfer(handle, hd(opened))
 
     assert {:ok, replacement} =
-             Artifacts.open_transfer(handle, object(reference), reference.use_locator, %{start: 0})
+             open_transfer(handle, reference.use_locator, %{start: 0})
 
     assert {:error, :transfer_limit_reached} =
-             Artifacts.open_transfer(handle, object(reference), reference.use_locator, %{start: 0})
+             open_transfer(handle, reference.use_locator, %{start: 0})
 
-    Enum.each([replacement | tl(opened)], &Artifacts.close_transfer(handle, &1))
+    Enum.each([replacement | tl(opened)], &close_transfer(handle, &1))
     assert [] = Transfers.live(handle.transfers)
   end
 
@@ -253,13 +242,16 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
     {:ok, reference} = Artifacts.put(handle, "bytes that outlive nothing", @use)
 
     assert {:ok, transfer} =
-             Artifacts.open_transfer(handle, object(reference), reference.use_locator, %{start: 0})
+             open_transfer(handle, reference.use_locator, %{start: 0})
 
     assert [_live] = Transfers.live(owner)
     Process.sleep(300)
 
-    assert [] = Transfers.live(owner)
+    assert [id] = Transfers.live(owner)
+    assert id == transfer.transfer_ref
     assert {:error, :unknown_transfer} = Artifacts.read_transfer(handle, transfer, 8)
+    assert :ok = close_transfer(handle, transfer)
+    assert [] = Transfers.live(owner)
 
     # The snapshot was unlinked at open, so nothing of it is left to find.
     assert {:ok, []} = File.ls(Path.join(root, "transfers"))
@@ -293,10 +285,11 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
   test "a transfer belongs to the attachment that opened it and is released with it" do
     %{handle: handle, reference: reference, bytes: bytes} = stored("bytes for one attachment")
     %{runtime: runtime, session_id: session_id} = session(handle)
+    reference = for_session(handle, reference, session_id)
 
     {:ok, first} = Loopex.attach(runtime, session_id, after_event_sequence: 0)
 
-    request = %{object: object(reference), use_locator: reference.use_locator, start: 0}
+    request = %{use_locator: reference.use_locator, start: 0}
     assert {:ok, transfer} = Loopex.open_artifact_transfer(first, request)
     assert transfer.total_size == byte_size(bytes)
     assert transfer.object_digest == reference.digest
@@ -337,7 +330,8 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
   test "a holder's death releases all of that holder's transfers and only them" do
     %{handle: handle, reference: reference} = stored("bytes for two holders")
     %{runtime: runtime, session_id: session_id} = session(handle)
-    request = %{object: object(reference), use_locator: reference.use_locator, start: 0}
+    reference = for_session(handle, reference, session_id)
+    request = %{use_locator: reference.use_locator, start: 0}
     doomed = spawn(fn -> Process.sleep(:infinity) end)
     survivor = spawn(fn -> Process.sleep(:infinity) end)
     on_exit(fn -> Process.exit(survivor, :kill) end)
@@ -401,11 +395,11 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
     assert described.object_locator == reference.locator
 
     %{runtime: runtime, session_id: session_id} = session(handle, LegacyStore)
+    reference = for_session(handle, reference, session_id)
     {:ok, attachment} = Loopex.attach(runtime, session_id, after_event_sequence: 0)
 
     assert {:error, :artifact_transfer_unsupported} =
              Loopex.open_artifact_transfer(attachment, %{
-               object: object(reference),
                use_locator: reference.use_locator,
                start: 0
              })
@@ -414,9 +408,10 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
   test "one attachment may hold only its share of the live transfers" do
     %{handle: handle, reference: reference} = stored("bytes for two at a time")
     %{runtime: runtime, session_id: session_id} = session(handle)
+    reference = for_session(handle, reference, session_id)
     {:ok, attachment} = Loopex.attach(runtime, session_id, after_event_sequence: 0)
 
-    request = %{object: object(reference), use_locator: reference.use_locator, start: 0}
+    request = %{use_locator: reference.use_locator, start: 0}
     limits = ArtifactStore.transfer_limits()
 
     opened =
@@ -440,7 +435,6 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
 
     assert {:error, :artifact_transfer_unsupported} =
              Loopex.open_artifact_transfer(attachment, %{
-               object: object(reference),
                use_locator: reference.use_locator,
                start: 0
              })
@@ -460,7 +454,7 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
     %{handle: handle, reference: reference, root: root} = stored(bytes)
 
     assert {:ok, transfer} =
-             Artifacts.open_transfer(handle, object(reference), reference.use_locator, %{start: 0})
+             open_transfer(handle, reference.use_locator, %{start: 0})
 
     # The object's digest is settled at open, before any chunk exists.
     assert transfer.object_digest == reference.digest
@@ -473,7 +467,7 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
     # Each chunk names its own bytes and none of them names the object's.
     assert Enum.all?(chunks, &(&1.chunk_digest == digest(&1.bytes)))
     refute Enum.any?(chunks, &(&1.chunk_digest == transfer.object_digest))
-    assert :ok = Artifacts.close_transfer(handle, transfer)
+    assert :ok = close_transfer(handle, transfer)
 
     # Verification is per transfer rather than per chunk, which is why a corrupt
     # object is caught at open and no number of reads is what catches it.
@@ -481,7 +475,7 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
     File.write!(path, binary_part(bytes, 0, byte_size(bytes) - 1) <> "!")
 
     assert {:error, :artifact_digest_mismatch} =
-             Artifacts.open_transfer(handle, object(reference), reference.use_locator, %{start: 0})
+             open_transfer(handle, reference.use_locator, %{start: 0})
 
     assert [] = Transfers.live(handle.transfers)
   end
@@ -489,9 +483,10 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
   test "the attachment owned open read close API refuses another attachment session or runtime and discloses no path" do
     %{handle: handle, reference: reference} = stored("bytes for one attachment")
     %{runtime: runtime, session_id: session_id} = session(handle)
+    reference = for_session(handle, reference, session_id)
 
     {:ok, holder} = Loopex.attach(runtime, session_id, after_event_sequence: 0)
-    request = %{object: object(reference), use_locator: reference.use_locator, start: 0}
+    request = %{use_locator: reference.use_locator, start: 0}
 
     assert {:ok, transfer} = Loopex.open_artifact_transfer(holder, request)
 
@@ -542,18 +537,18 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
           {%{start: 10, length: 0}, ""}
         ] do
       assert {:ok, transfer} =
-               Artifacts.open_transfer(handle, object(reference), reference.use_locator, window)
+               open_transfer(handle, reference.use_locator, window)
 
       read = handle |> drain(transfer, 4) |> Enum.map(& &1.bytes) |> IO.iodata_to_binary()
       assert read == expected, "window #{inspect(window)} read #{inspect(read)}"
-      assert :ok = Artifacts.close_transfer(handle, transfer)
+      assert :ok = close_transfer(handle, transfer)
     end
 
     # A window reaching past the object is refused rather than clamped: clamping
     # would return fewer bytes than asked for with no way to tell.
     for overrun <- [%{start: 11}, %{start: 0, length: 11}, %{start: 9, length: 2}] do
       assert {:error, :invalid_window} =
-               Artifacts.open_transfer(handle, object(reference), reference.use_locator, overrun),
+               open_transfer(handle, reference.use_locator, overrun),
              "overrun #{inspect(overrun)} was admitted"
     end
 
@@ -561,18 +556,15 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
     %{reference: other} = stored("another object", handle)
 
     reasons = [
-      elem(Artifacts.open_transfer(handle, object(reference), other.use_locator, %{start: 0}), 1),
+      elem(open_transfer(handle, other.use_locator, %{start: 0}, session_id: "wrong-session"), 1),
       elem(
-        Artifacts.open_transfer(
-          handle,
-          object(reference),
-          "use:" <> String.duplicate("a", 64),
+        open_transfer(handle, "use:" <> String.duplicate("a", 64),
           %{start: 0}
         ),
         1
       ),
       elem(
-        Artifacts.open_transfer(handle, object(reference), reference.use_locator, %{start: 11}),
+        open_transfer(handle, reference.use_locator, %{start: 11}),
         1
       ),
       elem(Artifacts.read_transfer(handle, %{transfer_ref: "never-opened"}, 4), 1)
@@ -584,23 +576,16 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
   test "an open that exceeds its deadline or work budget refuses before any snapshot bytes are retained" do
     %{handle: handle, reference: reference} = stored(:binary.copy("w", 200_000))
 
-    for {budget, expected} <- [
-          {[open_work_bytes: 1_024], :open_work_budget_exhausted},
-          {[open_deadline_ms: -1], :open_deadline_exhausted}
+    constrained = budget_store(handle, 1_024)
+
+    for {placement, options, expected} <- [
+          {constrained, [], :open_work_budget_exhausted},
+          {handle, [open_deadline_ms: -1], :open_deadline_exhausted}
         ] do
       assert {:error, ^expected} =
-               Transfers.open(
-                 handle.transfers,
-                 object(reference),
-                 reference.use_locator,
-                 %{start: 0},
-                 budget
-               ),
-             "#{inspect(budget)} was admitted"
+               open_transfer(placement, reference.use_locator, %{start: 0}, options)
 
-      # A refused open retains nothing: the point of refusing before the snapshot
-      # is that there is no snapshot to clean up, and no slot was spent.
-      assert [] = Transfers.live(handle.transfers)
+      assert [] = Transfers.live(placement.transfers)
       assert {:ok, []} = File.ls(Path.join(handle.root, "transfers"))
     end
   end
@@ -614,8 +599,9 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
 
     %{handle: handle, reference: reference} = stored("shared object")
     %{runtime: runtime, session_id: session_id} = session(handle)
+    reference = for_session(handle, reference, session_id)
     {:ok, attachment} = Loopex.attach(runtime, session_id, after_event_sequence: 0)
-    request = %{object: object(reference), use_locator: reference.use_locator, start: 0}
+    request = %{use_locator: reference.use_locator, start: 0}
 
     held =
       for _index <- 1..limits.per_attachment do
@@ -634,21 +620,16 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
     direct =
       for _index <- 1..(limits.per_runtime - limits.per_attachment) do
         assert {:ok, transfer} =
-                 Artifacts.open_transfer(
-                   handle,
-                   object(reference),
-                   reference.use_locator,
-                   %{start: 0}
-                 )
+                 open_transfer(handle, reference.use_locator, %{start: 0}, session_id: session_id)
 
         transfer
       end
 
     assert {:error, :transfer_limit_reached} =
-             Artifacts.open_transfer(handle, object(reference), reference.use_locator, %{start: 0})
+             open_transfer(handle, reference.use_locator, %{start: 0})
 
-    Enum.each(direct, &Artifacts.close_transfer(handle, &1))
-    Enum.each(held, &Artifacts.close_transfer(handle, &1))
+    Enum.each(direct, &close_transfer(handle, &1))
+    Enum.each(held, &Loopex.close_artifact_transfer(attachment, &1.transfer_ref))
     assert [] = Transfers.live(handle.transfers)
   end
 
@@ -657,7 +638,7 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
     %{handle: handle, reference: reference} = stored(bytes)
 
     assert {:ok, transfer} =
-             Artifacts.open_transfer(handle, object(reference), reference.use_locator, %{start: 0})
+             open_transfer(handle, reference.use_locator, %{start: 0})
 
     # A megabyte read in small pieces never holds a megabyte: each read returns
     # its own chunk and nothing accumulates between them.
@@ -674,7 +655,7 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
 
     assert total == byte_size(bytes)
     assert peak <= 4_096
-    assert :ok = Artifacts.close_transfer(handle, transfer)
+    assert :ok = close_transfer(handle, transfer)
 
     # Scavenging at startup owns the regular files in its own scratch root and
     # nothing else. A link is not followed, because following one would let a
@@ -720,9 +701,10 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
   test "an unsupported ArtifactStore reports unsupported rather than falling back to a whole object fetch" do
     %{handle: handle, reference: reference} = stored("bytes")
     %{runtime: runtime, session_id: session_id} = session(handle, LegacyStore)
+    reference = for_session(handle, reference, session_id)
     {:ok, attachment} = Loopex.attach(runtime, session_id, after_event_sequence: 0)
 
-    request = %{object: object(reference), use_locator: reference.use_locator, start: 0}
+    request = %{use_locator: reference.use_locator, start: 0}
 
     # The refusal names the missing capability. A fallback that quietly fetched
     # the whole object would defeat the bound the family exists for.
@@ -734,18 +716,20 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
     %{handle: handle, reference: first} = stored("first object")
     %{reference: second} = stored("second object", handle)
 
-    # The pair is checked, not each half on its own.
+    # The routed session is checked against the actual immutable use.
     assert {:error, :artifact_use_mismatch} =
-             Artifacts.open_transfer(handle, object(first), second.use_locator, %{start: 0})
+             open_transfer(handle, second.use_locator, %{start: 0}, session_id: "wrong-session")
 
     assert {:error, :artifact_use_mismatch} =
-             Artifacts.open_transfer(handle, object(second), first.use_locator, %{start: 0})
+             open_transfer(handle, first.use_locator, %{start: 0}, session_id: "wrong-session")
+
+    assert {:ok, selected} = open_transfer(handle, second.use_locator, %{start: 0})
+    assert selected.object_digest == second.digest
+    assert IO.iodata_to_binary(Enum.map(drain(handle, selected, 16), & &1.bytes)) == "second object"
+    assert :ok = close_transfer(handle, selected)
 
     assert {:error, :unknown_artifact_use} =
-             Artifacts.open_transfer(
-               handle,
-               object(first),
-               "use:" <> String.duplicate("a", 64),
+             open_transfer(handle, "use:" <> String.duplicate("a", 64),
                %{start: 0}
              )
 
@@ -758,7 +742,7 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
     File.write!(path, binary_part(bytes, 0, byte_size(bytes) - 1) <> "!")
 
     assert {:error, :artifact_digest_mismatch} =
-             Artifacts.open_transfer(corrupt, object(reference), reference.use_locator, %{
+             open_transfer(corrupt, reference.use_locator, %{
                start: 0,
                length: 16
              })
@@ -772,7 +756,7 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
     %{handle: handle, reference: reference, root: root} = stored(bytes)
 
     assert {:ok, transfer} =
-             Artifacts.open_transfer(handle, object(reference), reference.use_locator, %{start: 0})
+             open_transfer(handle, reference.use_locator, %{start: 0})
 
     # Same path, same size, different bytes. Only a snapshot taken at open
     # survives this, which is exactly why one is taken.
@@ -791,7 +775,7 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
     assert read == bytes
     assert digest(read) == transfer.object_digest
     assert Enum.all?(chunks, &(&1.chunk_digest == digest(&1.bytes)))
-    assert :ok = Artifacts.close_transfer(handle, transfer)
+    assert :ok = close_transfer(handle, transfer)
   end
 
   test "concurrent transfer and connection work exhaustion refuse and close cancellation loss and expiry release every descriptor" do
@@ -802,22 +786,17 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
     opened =
       for _index <- 1..limits.per_runtime do
         assert {:ok, transfer} =
-                 Artifacts.open_transfer(
-                   handle,
-                   object(reference),
-                   reference.use_locator,
-                   %{start: 0}
-                 )
+                 open_transfer(handle, reference.use_locator, %{start: 0}, session_id: session_id)
 
         transfer
       end
 
     assert {:error, :transfer_limit_reached} =
-             Artifacts.open_transfer(handle, object(reference), reference.use_locator, %{start: 0})
+             open_transfer(handle, reference.use_locator, %{start: 0})
 
     # Closing releases: every way a transfer ends gives back what it held, so the
     # ceiling counts live transfers rather than transfers ever opened.
-    Enum.each(opened, &Artifacts.close_transfer(handle, &1))
+    Enum.each(opened, &close_transfer(handle, &1))
     assert [] = Transfers.live(handle.transfers)
     assert {:ok, []} = File.ls(Path.join(handle.root, "transfers"))
 
@@ -832,17 +811,17 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
     {:ok, expiring_reference} = Artifacts.put(short, "bytes that outlive nothing", @use)
 
     assert {:ok, expired} =
-             Artifacts.open_transfer(
-               short,
-               object(expiring_reference),
-               expiring_reference.use_locator,
+             open_transfer(short, expiring_reference.use_locator,
                %{start: 0}
              )
 
     Process.sleep(300)
 
-    assert [] = Transfers.live(owner)
+    assert [id] = Transfers.live(owner)
+    assert id == expired.transfer_ref
     assert {:error, :unknown_transfer} = Artifacts.read_transfer(short, expired, 8)
+    assert :ok = close_transfer(short, expired)
+    assert [] = Transfers.live(owner)
     assert {:ok, []} = File.ls(Path.join(root, "transfers"))
   end
 
@@ -859,20 +838,57 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
       {:ok, reference} = Artifacts.put(handle, bytes, @use)
 
       assert {:ok, transfer} =
-               Artifacts.open_transfer(handle, object(reference), reference.use_locator, %{
+               open_transfer(handle, reference.use_locator, %{
                  start: 0
                })
 
       assert {:ok, _chunk} = Artifacts.read_transfer(handle, transfer, 16)
 
-      # Killed rather than closed: a snapshot's cleanup cannot depend on the
-      # owner getting the chance to ask for it. The snapshot is unlinked at open,
-      # so the kernel releases it when the owner dies, and the next startup
-      # scavenges whatever a crash did leave.
-      Process.unlink(owner)
+      # The unlinked snapshot belongs to the original I/O actor. Owner DOWN
+      # and an empty scratch directory alone cannot prove that reader retired.
+      record = :sys.get_state(owner).transfers[transfer.transfer_ref]
+      worker = record.worker
+      assert is_pid(worker)
+      worker_monitor = Process.monitor(worker)
       ref = Process.monitor(owner)
-      Process.exit(owner, :kill)
-      assert_receive {:DOWN, ^ref, :process, ^owner, _reason}, 2_000
+      key = {__MODULE__, :original_kill_joins, make_ref()}
+      Process.put(key, %{owner: false, worker: false})
+      actors = [{:owner, owner, ref}, {:worker, worker, worker_monitor}]
+      Process.unlink(owner)
+      cutoff = System.monotonic_time(:millisecond) + 2_000
+
+      try do
+        Process.exit(owner, :kill)
+        assert System.monotonic_time(:millisecond) < cutoff
+
+        assert_receive {:DOWN, ^ref, :process, ^owner, :killed},
+                       max(cutoff - System.monotonic_time(:millisecond), 0)
+
+        Process.put(key, %{Process.get(key) | owner: true})
+        assert System.monotonic_time(:millisecond) < cutoff
+
+        assert_receive {:DOWN, ^worker_monitor, :process, ^worker, :normal},
+                       max(cutoff - System.monotonic_time(:millisecond), 0)
+
+        Process.put(key, %{Process.get(key) | worker: true})
+        assert System.monotonic_time(:millisecond) < cutoff
+      after
+        joined = Process.delete(key)
+        pending = Enum.reject(actors, fn {kind, _pid, _monitor} -> Map.fetch!(joined, kind) end)
+        Enum.each(pending, fn {_kind, pid, _monitor} -> Process.exit(pid, :kill) end)
+
+        cleanup =
+          Enum.map(pending, fn {_kind, pid, monitor} ->
+            receive do
+              {:DOWN, ^monitor, :process, ^pid, _reason} -> :joined
+            after
+              max(cutoff - System.monotonic_time(:millisecond), 0) -> :unproved
+            end
+          end)
+
+        Enum.each(actors, fn {_kind, _pid, monitor} -> Process.demonitor(monitor, [:flush]) end)
+        refute :unproved in cleanup
+      end
     end
 
     {:ok, restarted} = Transfers.start_link(root: root)
@@ -887,7 +903,7 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
     %{handle: handle, reference: reference} = stored(bytes)
 
     assert {:ok, transfer} =
-             Artifacts.open_transfer(handle, object(reference), reference.use_locator, %{start: 0})
+             open_transfer(handle, reference.use_locator, %{start: 0})
 
     # A read asking for more than the chunk ceiling is bounded to it rather than
     # served: a caller cannot widen the bound by asking for more.
@@ -905,8 +921,229 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
     # The object was verified once, at open. Reading again does not re-verify:
     # the digest reported at open is the one every chunk is measured against.
     assert transfer.object_digest == reference.digest
-    assert :ok = Artifacts.close_transfer(handle, transfer)
+    assert :ok = close_transfer(handle, transfer)
   end
+
+  test "reservation does no I/O and binds one original caller request context and one open" do
+    %{handle: handle, reference: reference} = stored("reserved bytes")
+    request = %{session_id: "transfer-session", use_locator: reference.use_locator, start: 0}
+    context = opening_context(60_000)
+    assert {:ok, %{transfer_ref: id}} = Artifacts.reserve_transfer(handle, request, context)
+    assert id == context.transfer_ref
+    record = :sys.get_state(handle.transfers).transfers[id]
+    assert record.status == :reserved
+    assert record.worker == nil
+    assert record.work == %{source_read_bytes: 0, snapshot_write_debit: 0,
+                            metadata_read_bytes: 0, write_uncertain: false}
+    assert {:error, :reservation_conflict} = Artifacts.reserve_transfer(handle, request, context)
+    other = Task.async(fn -> Artifacts.open_transfer(handle, request, context) end)
+    assert {:error, :reservation_conflict} = Task.await(other)
+    assert {:error, :reservation_conflict} = Artifacts.open_transfer(handle, %{request | start: 1}, context)
+    changed = %{context | open_deadline_ms: context.open_deadline_ms + 1}
+    assert {:error, :reservation_conflict} = Artifacts.open_transfer(handle, request, changed)
+    assert {:ok, %{transfer: transfer}} = Artifacts.open_transfer(handle, request, context)
+    assert Process.alive?(:sys.get_state(handle.transfers).transfers[id].worker)
+    assert {:error, :reservation_conflict} = Artifacts.open_transfer(handle, request, context)
+    assert :ok = retire_and_ack(handle, context)
+    assert {:error, :unknown_transfer} = Artifacts.read_transfer(handle, transfer, 1)
+    assert [] = Transfers.live(handle.transfers)
+  end
+
+  test "retired proof keeps shared capacity until the exact receipt acknowledgement" do
+    %{handle: handle, reference: reference} = stored("proof capacity")
+    request = %{session_id: "transfer-session", use_locator: reference.use_locator, start: 0}
+    contexts = for _ <- 1..4 do
+      context = opening_context(60_000)
+      assert {:ok, %{transfer_ref: id}} = Artifacts.reserve_transfer(handle, request, context)
+      assert id == context.transfer_ref
+      context
+    end
+    extra = opening_context(60_000)
+    assert {:error, %{reason: :transfer_limit_reached, state: :not_reserved}} =
+             Artifacts.reserve_transfer(handle, request, extra)
+    assert {:error, :transfer_limit_reached} = Transfers.reserve_job(handle.transfers, extra.open_deadline_ms)
+    [first | rest] = contexts
+    selector = retire_selector(first)
+    assert {:retired, %{transfer_ref: id, receipt_ref: receipt, work: work}} =
+             Artifacts.close_transfer(handle, selector)
+    assert id == first.transfer_ref
+    assert work.source_read_bytes == 0
+    assert work.snapshot_write_debit == 0
+    assert work.metadata_read_bytes == 0
+    assert length(Transfers.live(handle.transfers)) == 4
+    wrong_receipt = %{action: :acknowledge, transfer_ref: id, receipt_ref: String.duplicate("0", 32)}
+    assert {:error, :retirement_receipt_mismatch} = Artifacts.close_transfer(handle, wrong_receipt)
+    assert {:error, %{reason: :transfer_limit_reached}} = Artifacts.reserve_transfer(handle, request, extra)
+    assert {:retired, %{receipt_ref: ^receipt}} = Artifacts.close_transfer(handle, selector)
+    assert :ok = Artifacts.close_transfer(handle, %{action: :acknowledge, transfer_ref: id, receipt_ref: receipt})
+    assert :ok = Artifacts.close_transfer(handle, %{action: :acknowledge, transfer_ref: id, receipt_ref: receipt})
+    assert {:ok, %{transfer_ref: extra_id}} = Artifacts.reserve_transfer(handle, request, extra)
+    assert extra_id == extra.transfer_ref
+    Enum.each([extra | rest], &retire_and_ack(handle, &1))
+    assert [] = Transfers.live(handle.transfers)
+  end
+
+  test "expired and malformed original contexts refuse reservation without allocating custody" do
+    %{handle: handle, reference: reference} = stored("expired reservation")
+    request = %{session_id: "transfer-session", use_locator: reference.use_locator, start: 0}
+    expired = opening_context(-1)
+    assert {:error, %{reason: :open_deadline_exhausted, state: :not_reserved}} =
+             Artifacts.reserve_transfer(handle, request, expired)
+    assert {:error, :invalid_open_context} =
+             Artifacts.reserve_transfer(handle, request, %{expired | object_work_bytes: 1_024})
+    assert {:error, :invalid_artifact_request} =
+             Artifacts.reserve_transfer(handle, Map.put(request, :object, object(reference)), opening_context(60_000))
+    assert {:error, :invalid_artifact_request} =
+             Artifacts.reserve_transfer(handle, Map.put(request, :length, nil), opening_context(60_000))
+    assert {:error, :reservation_required} = Artifacts.open_transfer(handle, request, opening_context(60_000))
+    assert [] = Transfers.live(handle.transfers)
+    assert {:ok, []} = File.ls(Path.join(handle.root, "transfers"))
+  end
+
+  test "actual metadata corruption and session mismatch refuse before source bytes are read" do
+    %{handle: handle, reference: reference} = stored("metadata first")
+    assert {:error, :artifact_use_mismatch} =
+             open_transfer(handle, reference.use_locator, %{start: 0}, session_id: "different-session")
+    digest = binary_part(reference.use_locator, 4, 64)
+    path = Path.join([handle.root, "uses", binary_part(digest, 0, 2), digest])
+    File.write!(path, File.read!(path) <> <<0>>)
+    File.rm!(Path.join([handle.root, binary_part(reference.locator, 0, 2), reference.locator]))
+    request = %{session_id: "transfer-session", use_locator: reference.use_locator, start: 0}
+    context = opening_context(60_000)
+    assert {:ok, _} = Artifacts.reserve_transfer(handle, request, context)
+    assert {:error, %{reason: :artifact_integrity_failed, state: :retired, work: work}} =
+             Artifacts.open_transfer(handle, request, context)
+    assert work.source_read_bytes == 0
+    assert work.snapshot_write_debit == 0
+    assert work.metadata_read_bytes > 0
+    assert :ok = retire_and_ack(handle, context)
+  end
+
+  test "original caller loss retires its actual reader and retains proof until acknowledgement" do
+    %{handle: handle, reference: reference} = stored("original custody")
+    request = %{session_id: "transfer-session", use_locator: reference.use_locator, start: 0}
+    context = opening_context(60_000)
+    parent = self()
+    {caller, caller_monitor} = spawn_monitor(fn ->
+      assert {:ok, _} = Artifacts.reserve_transfer(handle, request, context)
+      assert {:ok, %{transfer: transfer}} = Artifacts.open_transfer(handle, request, context)
+      send(parent, {:adopted, self(), transfer})
+      receive do
+        :complete -> :ok
+      end
+    end)
+    on_exit(fn -> if Process.alive?(caller), do: Process.exit(caller, :kill) end)
+    assert_receive {:adopted, ^caller, transfer}, 5_000
+    record = :sys.get_state(handle.transfers).transfers[context.transfer_ref]
+    worker = record.worker
+    worker_monitor = Process.monitor(worker)
+    assert Process.alive?(caller)
+    assert Process.alive?(worker)
+    cleanup_deadline = System.monotonic_time(:millisecond) + 5_000
+    send(caller, :complete)
+    remaining = max(0, cleanup_deadline - System.monotonic_time(:millisecond))
+    assert_receive {:DOWN, ^caller_monitor, :process, ^caller, :normal}, remaining
+    assert System.monotonic_time(:millisecond) < cleanup_deadline
+    assert :ok = retire_and_ack(handle, context, cleanup_deadline)
+    remaining = max(0, cleanup_deadline - System.monotonic_time(:millisecond))
+    assert_receive {:DOWN, ^worker_monitor, :process, ^worker, :normal}, remaining
+    assert System.monotonic_time(:millisecond) < cleanup_deadline
+    assert {:error, :unknown_transfer} = Artifacts.read_transfer(handle, transfer, 1)
+    assert [] = Transfers.live(handle.transfers)
+    assert {:ok, []} = File.ls(Path.join(handle.root, "transfers"))
+  end
+
+  test "a full 64 MiB object retains exact payload and separately accounted metadata work" do
+    bytes = :binary.copy(<<42>>, 67_108_864)
+    %{handle: handle, reference: reference} = stored(bytes)
+    assert {:ok, transfer} = open_transfer(handle, reference.use_locator, %{start: 0})
+    assert transfer.total_size == 67_108_864
+    assert transfer.object_digest == digest(bytes)
+    assert {:ok, chunk} = Artifacts.read_transfer(handle, transfer, 32_768)
+    assert chunk.bytes == :binary.copy(<<42>>, 32_768)
+    assert :ok = close_transfer(handle, transfer)
+    assert [] = Transfers.live(handle.transfers)
+  end
+
+  test "a blocked original retirement reuses one actor slot and one pending close" do
+    %{handle: handle, reference: reference} = stored("blocked retirement")
+    request = %{session_id: "transfer-session", use_locator: reference.use_locator, start: 0}
+    context = opening_context(60_000)
+    assert {:ok, _} = Artifacts.reserve_transfer(handle, request, context)
+    assert {:ok, _} = Artifacts.open_transfer(handle, request, context)
+    worker = :sys.get_state(handle.transfers).transfers[context.transfer_ref].worker
+    monitor = Process.monitor(worker)
+    selector = retire_selector(context)
+    true = :erlang.suspend_process(worker)
+
+    try do
+      task = Task.async(fn -> Artifacts.close_transfer(handle, selector) end)
+      # Synchronize actual admission through the responsive original owner rather
+      # than assuming the Task's send has already been handled.
+      eventually(fn ->
+        :sys.get_state(handle.transfers).transfers[context.transfer_ref].close_from != nil
+      end)
+      before = :sys.get_state(handle.transfers).transfers[context.transfer_ref]
+      assert before.worker == worker
+      assert {:error, :cleanup_unproved} = Artifacts.close_transfer(handle, selector)
+      after_close = :sys.get_state(handle.transfers).transfers[context.transfer_ref]
+      assert after_close.worker == worker
+      assert after_close.worker_monitor == before.worker_monitor
+      assert after_close.close_from == before.close_from
+      assert after_close.close_deadline == before.close_deadline
+      assert length(Transfers.live(handle.transfers)) == 1
+      true = :erlang.resume_process(worker)
+      assert System.monotonic_time(:millisecond) < selector.close_deadline_ms
+      assert {:retired, %{receipt_ref: receipt}} =
+               Task.await(task, max(1, selector.close_deadline_ms - System.monotonic_time(:millisecond)))
+      assert System.monotonic_time(:millisecond) < selector.close_deadline_ms
+      remaining = max(0, selector.close_deadline_ms - System.monotonic_time(:millisecond))
+      assert_receive {:DOWN, ^monitor, :process, ^worker, :normal}, remaining
+      assert System.monotonic_time(:millisecond) < selector.close_deadline_ms
+      assert :ok = Artifacts.close_transfer(handle, %{action: :acknowledge,
+        transfer_ref: context.transfer_ref, receipt_ref: receipt})
+      assert System.monotonic_time(:millisecond) < selector.close_deadline_ms
+      assert [] = Transfers.live(handle.transfers)
+    after
+      if Process.alive?(worker) do
+        try do
+          :erlang.resume_process(worker)
+        catch
+          :error, :badarg -> :ok
+        end
+      end
+    end
+  end
+
+  test "original I/O actor loss retains unavailable accounting and occupied capacity" do
+    %{handle: handle, reference: reference} = stored("lost accounting")
+    request = %{session_id: "transfer-session", use_locator: reference.use_locator, start: 0}
+    context = opening_context(60_000)
+    assert {:ok, _} = Artifacts.reserve_transfer(handle, request, context)
+    assert {:ok, _} = Artifacts.open_transfer(handle, request, context)
+    worker = :sys.get_state(handle.transfers).transfers[context.transfer_ref].worker
+    monitor = Process.monitor(worker)
+    Process.exit(worker, :kill)
+    assert_receive {:DOWN, ^monitor, :process, ^worker, :killed}, 2_000
+    eventually(fn ->
+      :sys.get_state(handle.transfers).transfers[context.transfer_ref].worker_joined
+    end)
+    record = :sys.get_state(handle.transfers).transfers[context.transfer_ref]
+    assert record.work == :unavailable
+    assert record.proof == false
+    assert record.receipt == nil
+    assert [id] = Transfers.live(handle.transfers)
+    assert id == context.transfer_ref
+    selector = %{retire_selector(context) | close_deadline_ms: System.monotonic_time(:millisecond)}
+    assert {:error, :cleanup_unproved} = Artifacts.close_transfer(handle, selector)
+    assert {:error, :retirement_receipt_mismatch} = Artifacts.close_transfer(handle,
+      %{action: :acknowledge, transfer_ref: id, receipt_ref: String.duplicate("0", 32)})
+    assert [^id] = Transfers.live(handle.transfers)
+  end
+
+  defp retire_selector(context), do: %{action: :retire, transfer_ref: context.transfer_ref,
+    open_deadline_ms: context.open_deadline_ms,
+    close_deadline_ms: System.monotonic_time(:millisecond) + 5_000}
 
   defp session(artifact_handle, adapter \\ Loopex.Store.Local.Artifacts) do
     path = Path.join(System.tmp_dir!(), "loopex-store-#{:erlang.unique_integer([:positive])}")
@@ -942,6 +1179,85 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
     :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(runtime)
     {:ok, session_id} = Loopex.create_session(runtime, %{}, command_id: "create")
     %{runtime: runtime, session_id: session_id}
+  end
+
+  defp open_transfer(handle, use_locator, window, options \\ []) do
+    request = Map.merge(window, %{
+      session_id: Keyword.get(options, :session_id, "transfer-session"), use_locator: use_locator
+    })
+    context = opening_context(Keyword.get(options, :open_deadline_ms, 60_000))
+
+    with {:ok, %{transfer_ref: id}} <- Artifacts.reserve_transfer(handle, request, context) do
+      assert id == context.transfer_ref
+
+      case Artifacts.open_transfer(handle, request, context) do
+        {:ok, %{transfer: transfer, use: use, work: work}} ->
+          assert System.monotonic_time(:millisecond) < context.open_deadline_ms
+          assert ArtifactStore.valid_transfer_use?(use, request)
+          assert work.source_read_bytes == transfer.total_size
+          assert work.snapshot_write_debit == transfer.total_size
+          assert work.metadata_read_bytes > 0
+          assert work.write_uncertain == false
+          Process.put({:transfer_context, transfer.transfer_ref}, context)
+          {:ok, transfer}
+
+        {:error, %{reason: reason, transfer_ref: ^id}} ->
+          assert :ok = retire_and_ack(handle, context)
+          {:error, reason}
+      end
+    else
+      {:error, %{reason: reason, state: :not_reserved}} -> {:error, reason}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp opening_context(allowance) do
+    %{transfer_ref: Base.encode16(:crypto.strong_rand_bytes(16), case: :lower),
+      open_deadline_ms: System.monotonic_time(:millisecond) + allowance,
+      object_work_bytes: 134_217_728, metadata_read_bytes: 131_073}
+  end
+
+  defp close_transfer(handle, transfer) do
+    context = Process.get({:transfer_context, transfer.transfer_ref})
+    retire_and_ack(handle, context)
+  end
+
+  defp retire_and_ack(handle, context, deadline \\ nil) do
+    deadline = deadline || System.monotonic_time(:millisecond) + 5_000
+    selector = %{action: :retire, transfer_ref: context.transfer_ref,
+      open_deadline_ms: context.open_deadline_ms,
+      close_deadline_ms: deadline}
+
+    case Artifacts.close_transfer(handle, selector) do
+      {:retired, %{transfer_ref: id, receipt_ref: receipt, work: work}} ->
+        assert id == context.transfer_ref
+        assert System.monotonic_time(:millisecond) < selector.close_deadline_ms
+        assert ArtifactStore.valid_transfer_work?(work)
+        assert :ok = Artifacts.close_transfer(handle, %{
+          action: :acknowledge, transfer_ref: id, receipt_ref: receipt
+        })
+        assert System.monotonic_time(:millisecond) < selector.close_deadline_ms
+        Process.put({:transfer_acknowledged, id}, true)
+        :ok
+
+      {:unregistered, %{transfer_ref: id}} ->
+        assert id == context.transfer_ref
+        assert Process.get({:transfer_acknowledged, id}) == true
+        :ok
+    end
+  end
+
+  defp budget_store(handle, budget) do
+    limits = Map.put(ArtifactStore.transfer_limits(), :open_work_bytes, budget)
+    owner = start_supervised!({Transfers, root: handle.root, limits: limits}, id: make_ref())
+    %{handle | transfers: owner}
+  end
+
+  defp for_session(handle, reference, session_id) do
+    assert {:ok, bytes} = Artifacts.fetch(handle, object(reference))
+    use = put_in(@use, [:metadata, "session_id"], session_id)
+    assert {:ok, bound} = Artifacts.put(handle, bytes, use)
+    bound
   end
 
   defp stored(bytes, handle \\ nil) do

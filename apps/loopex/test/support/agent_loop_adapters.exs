@@ -244,6 +244,12 @@ defmodule Loopex.AgentLoopTestExecutor do
         :ok
     end
 
+    # Concept: a fixture can retain an artifact for this actual dispatched job.
+    # Technical depth: existing list values remain unchanged. A unary producer
+    # runs in the original executor invocation with its captured JobRequest,
+    # after the progress gate and before the result is returned.
+    artifacts = if is_function(artifacts, 1), do: artifacts.(job), else: artifacts
+
     {:ok,
      %{
        protocol_version: 1,

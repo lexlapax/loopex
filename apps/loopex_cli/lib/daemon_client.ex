@@ -3,17 +3,19 @@ defmodule LoopexCli.DaemonClient do
   ## Concept
 
   The reference CLI's connection to a running daemon: one socket, one
-  generation-two session, requests answered by their own identity and
+  current negotiated session, requests answered by their own identity and
   everything else — events, notices and the daemon's own stop record — kept in
   arrival order for whoever is following the session.
 
   ## Technical depth
 
   `connect/2` opens the Unix-domain socket, starts one linked reader that
-  decodes each complete JSONL frame under the generation-two output ceiling and
+  decodes each complete JSONL frame under the current output ceiling and
   sends it to the caller as `{:loopex_daemon_record, reader, record}`, and
   performs the initialize exchange within `:timeout` milliseconds, 30 000 by
-  default; any failure closes the socket. `request/4` sends one frame with a fresh
+  default. The reply must select the independently pinned current daemon
+  generation and canonical schema digest; a mismatch closes the socket without
+  downgrade or replay. `request/4` sends one frame with a fresh
   request identity and selectively receives only the record correlated to it,
   leaving every other record in the mailbox. Transport loss arrives as
   `{:loopex_daemon_closed, reader}`. A `{:loopex_live_signal, signal}` message
@@ -23,13 +25,18 @@ defmodule LoopexCli.DaemonClient do
 
   require Logger
 
-  alias LoopexProtocol.{Frame, Session.V2, Wire}
+  alias LoopexProtocol.{Frame, Wire}
 
   @enforce_keys [:socket, :reader]
   defstruct [:socket, :reader, sequence: 0]
 
   @type t :: %__MODULE__{socket: :socket.socket(), reader: pid(), sequence: non_neg_integer()}
 
+  # Concept: the bundled client verifies the independently pinned daemon contract.
+  # Technical depth: ADR 0044 requires exact generation and canonical schema
+  # identity before session work; a mismatch uses the original close path.
+  @generation "loopex.experimental/4"
+  @schema_digest "9306e4aeb2ffb9aab3cf4dac94db5a1e4699f09d3f58cc57e2fa79a7e63ef7b9"
   @initialize_timeout_ms 30_000
 
   @doc false
@@ -62,10 +69,15 @@ defmodule LoopexCli.DaemonClient do
     case request(
            client,
            "initialize",
-           %{"generations" => [V2.generation()], "capabilities" => []},
+           %{"generations" => [@generation], "capabilities" => []},
            timeout
          ) do
-      {:ok, %{"type" => "initialized"}, client} ->
+      {:ok,
+       %{
+         "type" => "initialized",
+         "selected_generation" => @generation,
+         "exact_schema_sha256" => @schema_digest
+       }, client} ->
         Logger.debug("loopex live client initialized")
         {:ok, client}
 

@@ -253,7 +253,7 @@ defmodule LoopexDaemon.CollaborationTest do
         "method" => "session.create",
         "request_id" => command_id,
         "command_id" => Wire.encode_identity(command_id),
-        "session_options" => %{"purpose" => command_id}
+        "session_options" => %{"version" => 1}
       })
 
     assert [%{"status" => "accepted", "session_id" => encoded}] = receive_records(client, 1)

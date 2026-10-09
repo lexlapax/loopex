@@ -174,6 +174,8 @@ defmodule Loopex.AppServer.ExternalWorkflowRealTest do
     assert summary["chunk_bytes"] == 64
     assert summary["chunk_has_digest"]
     assert summary["transfer_closed"]
+    assert summary["invalid_window_refused"]
+    assert summary["invalid_window_cleanup"] in ["proved", "unproved"]
 
     # And then the server was killed rather than closed. What the successor
     # reports survived because it was already durable when the first process

@@ -232,26 +232,36 @@ defmodule Loopex.Store.Local.Artifacts do
   def read_job_range(handle, job), do: Loopex.Store.Local.JobRange.read(handle, job)
 
   @impl Loopex.ArtifactStore
-  @spec open_transfer(handle(), ArtifactStore.artifact_object(), binary(), map()) ::
-          {:ok, ArtifactStore.transfer()} | {:error, term()}
-  def open_transfer(handle, object, use_locator, window) do
-    # Concept: a transfer is opened against an object a use actually names.
-    #
-    # Technical depth: the use record carries the object it was written for, so
-    # a caller that pairs one object's locator with another's use is refused
-    # here rather than being handed bytes the use never described. The digest
-    # and size are compared too: a use that names this locator but different
-    # bytes is a mismatch, not a hit.
-    with {:ok, owner} <- transfer_owner(handle),
-         true <- ArtifactStore.valid_object?(object) and mine?(object.locator),
-         {:ok, use_record} <- describe(handle, use_locator),
-         true <- use_record.object_locator == object.locator,
-         true <- use_record.object_digest == object.digest,
-         true <- use_record.object_size == object.size do
-      Transfers.open(owner, object, use_locator, window)
-    else
-      false -> {:error, :artifact_use_mismatch}
-      {:error, reason} -> {:error, reason}
+  @spec reserve_transfer(handle(), map(), map()) :: {:ok, map()} | {:error, term()}
+  def reserve_transfer(handle, request, context) do
+    cond do
+      not ArtifactStore.valid_transfer_request?(request) ->
+        {:error, :invalid_artifact_request}
+
+      not ArtifactStore.valid_open_context?(context) ->
+        {:error, :invalid_open_context}
+
+      true ->
+        with {:ok, owner} <- transfer_owner(handle) do
+          Transfers.reserve(owner, request, context)
+        end
+    end
+  end
+
+  @impl Loopex.ArtifactStore
+  @spec open_transfer(handle(), map(), map()) :: {:ok, map()} | {:error, term()}
+  def open_transfer(handle, request, context) do
+    cond do
+      not ArtifactStore.valid_transfer_request?(request) ->
+        {:error, :invalid_artifact_request}
+
+      not ArtifactStore.valid_open_context?(context) ->
+        {:error, :invalid_open_context}
+
+      true ->
+        with {:ok, owner} <- transfer_owner(handle) do
+          Transfers.open(owner, request, context)
+        end
     end
   end
 
@@ -267,14 +277,16 @@ defmodule Loopex.Store.Local.Artifacts do
   def read_transfer(_handle, _transfer, _length), do: {:error, :unknown_transfer}
 
   @impl Loopex.ArtifactStore
-  @spec close_transfer(handle(), ArtifactStore.transfer()) :: :ok | {:error, term()}
-  def close_transfer(handle, %{transfer_ref: transfer_ref}) do
-    with {:ok, owner} <- transfer_owner(handle) do
-      Transfers.close(owner, transfer_ref)
+  @spec close_transfer(handle(), map()) :: term()
+  def close_transfer(handle, selector) do
+    with true <- ArtifactStore.valid_close_context?(selector),
+         {:ok, owner} <- transfer_owner(handle) do
+      Transfers.close(owner, selector)
+    else
+      false -> {:error, :invalid_close_context}
+      {:error, reason} -> {:error, reason}
     end
   end
-
-  def close_transfer(_handle, _transfer), do: {:error, :unknown_transfer}
 
   # Concept: transfers are a capability this placement carries, not a global.
   #

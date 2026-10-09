@@ -75,7 +75,7 @@ defmodule LoopexDaemon.MaximumPopulationTest do
             "method" => "session.create",
             "request_id" => "create-#{index}",
             "command_id" => Wire.encode_identity("population-#{index}"),
-            "session_options" => %{}
+            "session_options" => %{"version" => 1}
           })
 
         [%{"status" => "accepted", "session_id" => encoded}] = receive_records(creator, 1, 30_000)
@@ -230,7 +230,7 @@ defmodule LoopexDaemon.MaximumPopulationTest do
             "method" => "session.create",
             "request_id" => "create-#{index}",
             "command_id" => Wire.encode_identity("steps-#{index}"),
-            "session_options" => %{}
+            "session_options" => %{"version" => 1}
           })
 
         [%{"status" => "accepted", "session_id" => encoded}] = receive_records(creator, 1, 30_000)

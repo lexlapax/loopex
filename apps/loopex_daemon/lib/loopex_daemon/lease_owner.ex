@@ -68,6 +68,7 @@ defmodule LoopexDaemon.LeaseOwner do
 
   @direct_mutation_classes [
     :session_configure,
+    :session_compact,
     :session_prompt,
     :session_steer,
     :session_follow_up,

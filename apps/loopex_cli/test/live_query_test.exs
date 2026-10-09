@@ -262,7 +262,7 @@ defmodule LoopexCli.LiveQueryTest do
       {:ok, %{"status" => "accepted", "session_id" => encoded}, _client} =
         DaemonClient.request(client, "session.create", %{
           "command_id" => Wire.encode_identity(label),
-          "session_options" => %{"label" => label}
+          "session_options" => %{"version" => 1}
         })
 
       {:ok, session_id} = Wire.identity(encoded)

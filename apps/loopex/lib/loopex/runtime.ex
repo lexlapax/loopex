@@ -9,11 +9,13 @@ defmodule Loopex.Runtime do
 
   ## Technical depth
 
-  The opaque reference contains only the root supervisor pid and an unforgeable
-  runtime-local token. Every operation resolves the current unnamed child from
-  that supervisor and presents the token to runtime control. This lets a
-  supervised child restart without turning a stale child pid into the public
-  instance identity.
+  The opaque reference contains the root supervisor pid, an unforgeable
+  runtime-local token and the original artifact Dispatcher pid. Session
+  operations resolve the current unnamed child from that supervisor and present
+  the token to runtime control. Artifact operations additionally require their
+  original Dispatcher: a replacement cannot reconstruct lost slots or debit.
+  Session delivery can restart without turning a stale child pid into the
+  public instance identity.
 
   The root uses `:rest_for_one`: losing runtime control also removes every
   session and attachment process; losing the session supervisor removes the
@@ -44,11 +46,11 @@ defmodule Loopex.Runtime do
 
   ## Technical depth
 
-  The pid and reference token are transient BEAM values. They never enter a
-  Store transaction, public event, snapshot, progress item, or diagnostic.
+  The supervisor, original artifact Dispatcher and reference token are
+  transient BEAM values. They never enter a Store transaction, public event, snapshot, progress item, or diagnostic.
   """
-  @opaque t :: %__MODULE__{supervisor: pid(), token: reference()}
-  defstruct [:supervisor, :token]
+  @opaque t :: %__MODULE__{supervisor: pid(), token: reference(), artifact_dispatcher: pid() | nil}
+  defstruct [:supervisor, :token, :artifact_dispatcher]
 
   @typedoc """
   ## Concept
@@ -142,7 +144,12 @@ defmodule Loopex.Runtime do
   defp await_ready(runtime) do
     case control_call(runtime, {:await_dispatcher_ready, runtime.token}, :infinity) do
       :ok ->
-        {:ok, runtime}
+        case RuntimeSupervisor.children(runtime.supervisor) do
+          {:ok, %{dispatcher: dispatcher}} -> {:ok, %{runtime | artifact_dispatcher: dispatcher}}
+          _unavailable ->
+            _ = stop(runtime)
+            {:error, :runtime_unavailable}
+        end
 
       _unavailable ->
         _ = stop(runtime)
@@ -761,13 +768,33 @@ defmodule Loopex.Runtime do
   @doc false
   @spec open_artifact_transfer(Attachment.t(), map()) :: {:ok, map()} | {:error, term()}
   def open_artifact_transfer(%Attachment{} = attachment, request) when is_map(request) do
+    # Concept: attachment routing and storage work share the original caller clock.
+    # Technical depth: capture before supervisor or dispatcher queuing; a late
+    # response only triggers same-identity cancellation, never renewed admission.
+    opened_at = monotonic_now()
+    limits = Loopex.ArtifactStore.transfer_limits()
+
+    context = %{
+      transfer_ref: Base.encode16(:crypto.strong_rand_bytes(16), case: :lower),
+      open_deadline_ms: opened_at + limits.open_deadline_ms,
+      object_work_bytes: limits.open_work_bytes,
+      metadata_read_bytes: limits.metadata_read_bytes
+    }
+
     with {:ok, runtime, session_id, attachment_id, incarnation_id} <-
-           Attachment.routing(attachment) do
-      dispatcher_call(
+           Attachment.routing(attachment),
+         true <- Map.get(request, :session_id, session_id) === session_id,
+         routed_request = Map.put(request, :session_id, session_id),
+         true <- Loopex.ArtifactStore.valid_transfer_request?(routed_request) do
+      artifact_open_call(
         runtime,
-        {:open_transfer, runtime.token, session_id, attachment_id, incarnation_id, request},
-        :infinity
+        {:open_transfer, runtime.token, session_id, attachment_id, incarnation_id,
+         routed_request, context},
+        context
       )
+    else
+      false -> {:error, :invalid_artifact_request}
+      error -> error
     end
   end
 
@@ -780,11 +807,14 @@ defmodule Loopex.Runtime do
       when is_binary(transfer_ref) do
     with {:ok, runtime, session_id, attachment_id, incarnation_id} <-
            Attachment.routing(attachment) do
-      dispatcher_call(
+      deadline = monotonic_now() + Loopex.ArtifactStore.transfer_limits().read_deadline_ms
+      artifact_operation_call(
         runtime,
         {:read_transfer, runtime.token, session_id, attachment_id, incarnation_id, transfer_ref,
-         length},
-        :infinity
+         length, deadline},
+        deadline,
+        {:error, :read_deadline_exhausted},
+        {:error, :runtime_unavailable}
       )
     end
   end
@@ -797,10 +827,14 @@ defmodule Loopex.Runtime do
       when is_binary(transfer_ref) do
     with {:ok, runtime, session_id, attachment_id, incarnation_id} <-
            Attachment.routing(attachment) do
-      dispatcher_call(
+      anchor = monotonic_now()
+      artifact_operation_call(
         runtime,
-        {:close_transfer, runtime.token, session_id, attachment_id, incarnation_id, transfer_ref},
-        :infinity
+        {:close_transfer, runtime.token, session_id, attachment_id, incarnation_id, transfer_ref,
+         anchor},
+        anchor + Loopex.ArtifactStore.transfer_limits().cleanup_deadline_ms,
+        {:error, :cleanup_unproved},
+        {:error, :cleanup_unproved}
       )
     end
   end
@@ -981,6 +1015,85 @@ defmodule Loopex.Runtime do
       _other -> {:error, :runtime_unavailable}
     end
   end
+
+  # Concept: resolve one original dispatcher within the opening clock.
+  # Technical depth: this is the same bounded :which_children mechanism used by
+  # creation startup observation. No lookup worker, successor follow or timeout
+  # renewal is admitted. An unresolved owner supplies no cleanup proof.
+  defp artifact_open_call(%__MODULE__{supervisor: supervisor, artifact_dispatcher: original}, message, context) do
+    deadline = context.open_deadline_ms
+
+    with remaining when remaining > 0 <- deadline - monotonic_now(),
+         children when is_list(children) <- safe_call(supervisor, :which_children, remaining),
+         true <- monotonic_now() < deadline,
+         {EventDispatcher, dispatcher, _type, _modules} when is_pid(dispatcher) <-
+           List.keyfind(children, EventDispatcher, 0),
+         true <- dispatcher === original,
+         remaining when remaining > 0 <- deadline - monotonic_now() do
+      result = safe_call(dispatcher, message, remaining)
+
+      cond do
+        monotonic_now() >= deadline ->
+          cancel_artifact_open(dispatcher, message, context)
+          {:error, %{reason: :open_deadline_exhausted, cleanup: :unproved}}
+
+        result == {:error, :runtime_unavailable} ->
+          cancel_artifact_open(dispatcher, message, context)
+          {:error, %{reason: :transfers_unavailable, cleanup: :unproved}}
+
+        true ->
+          result
+      end
+    else
+      _other ->
+        reason =
+          if monotonic_now() >= deadline,
+            do: :open_deadline_exhausted,
+            else: :transfers_unavailable
+
+        {:error, %{reason: reason, cleanup: :unproved}}
+    end
+  end
+
+  defp cancel_artifact_open(
+         dispatcher,
+         {:open_transfer, token, session, attachment, incarnation, _request, context},
+         context
+       ) do
+    GenServer.cast(
+      dispatcher,
+      {:cancel_artifact_open, token, session, attachment, incarnation, context}
+    )
+  end
+
+  defp artifact_operation_call(%__MODULE__{supervisor: supervisor, artifact_dispatcher: original}, message, deadline, expired, unavailable) do
+    with remaining when remaining > 0 <- deadline - monotonic_now(),
+         children when is_list(children) <- safe_call(supervisor, :which_children, remaining),
+         true <- monotonic_now() < deadline,
+         {EventDispatcher, dispatcher, _type, _modules} when is_pid(dispatcher) <-
+           List.keyfind(children, EventDispatcher, 0),
+         true <- dispatcher === original,
+         remaining when remaining > 0 <- deadline - monotonic_now() do
+      result = safe_call(dispatcher, message, remaining)
+
+      if monotonic_now() < deadline and result != {:error, :runtime_unavailable} do
+        result
+      else
+        cancel_artifact_operation(dispatcher, message)
+        if monotonic_now() >= deadline, do: expired, else: unavailable
+      end
+    else
+      _other -> if monotonic_now() >= deadline, do: expired, else: unavailable
+    end
+  end
+
+  defp cancel_artifact_operation(
+         dispatcher,
+         {:read_transfer, token, session, attachment, incarnation, id, _length, deadline}
+       ),
+       do: GenServer.cast(dispatcher, {:cancel_artifact_read, token, session, attachment, incarnation, id, deadline})
+
+  defp cancel_artifact_operation(_dispatcher, _message), do: :ok
 
   # Concept: concurrent readers wait without accumulating in the dispatcher.
   # Technical depth: this private response never crosses the facade. The read

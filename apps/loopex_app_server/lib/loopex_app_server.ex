@@ -29,10 +29,10 @@ defmodule Loopex.AppServer do
 
   ## Technical depth
 
-  Named here rather than derived, so a caller negotiating against it is matched
-  against a value this application declares rather than one inferred from
-  whatever schema happens to be on disk.
+  Read from the same complete protocol manifest used by initialization. The
+  application entry point and the connection therefore declare one generation
+  and cannot drift independently during a coordinated contract change.
   """
   @spec generation() :: binary()
-  def generation, do: "loopex.experimental/1"
+  def generation, do: LoopexProtocol.Session.generation()
 end

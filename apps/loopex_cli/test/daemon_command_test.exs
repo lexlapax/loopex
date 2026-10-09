@@ -474,7 +474,7 @@ defmodule LoopexCli.DaemonCommandTest do
         "method" => "session.create",
         "request_id" => "create",
         "command_id" => LoopexProtocol.Wire.encode_identity("abrupt-create"),
-        "session_options" => %{}
+        "session_options" => %{"version" => 1}
       })
 
     assert [%{"status" => "accepted", "session_id" => encoded}] = receive_records(client, 1)
@@ -648,7 +648,7 @@ defmodule LoopexCli.DaemonCommandTest do
         "method" => "session.create",
         "request_id" => "create",
         "command_id" => LoopexProtocol.Wire.encode_identity("signal-create"),
-        "session_options" => %{}
+        "session_options" => %{"version" => 1}
       })
 
     assert [%{"status" => "accepted", "session_id" => encoded}] = receive_records(holder, 1)

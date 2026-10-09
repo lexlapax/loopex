@@ -22,6 +22,37 @@ defmodule LoopexCli.LiveDaemonTest do
     %{root: root, workspace: workspace, socket: Path.join([root, "s", "daemon", "d.sock"])}
   end
 
+  @daemon_generation "loopex.experimental/4"
+  @daemon_schema_digest "9306e4aeb2ffb9aab3cf4dac94db5a1e4699f09d3f58cc57e2fa79a7e63ef7b9"
+
+  test "the daemon client verifies the pinned contract before sending session work", context do
+    assert LoopexProtocol.Session.V2.generation() == @daemon_generation
+    assert LoopexProtocol.Session.V2.schema_digest() == @daemon_schema_digest
+    negotiation_peer(context, fn reply -> reply end, :accepted)
+  end
+
+  test "the daemon client closes on a wrong selected generation without downgrade", context do
+    for generation <- ["loopex.experimental/2", "loopex.experimental/3", "loopex.experimental/4 ", nil, 4] do
+      negotiation_peer(context, &Map.put(&1, "selected_generation", generation), :refused)
+    end
+
+    negotiation_peer(context, &Map.delete(&1, "selected_generation"), :refused)
+  end
+
+  test "the daemon client closes on a wrong canonical digest without session work", context do
+    for digest <- [
+          String.duplicate("0", 64),
+          "73d68233c49dea9c37562f30a3e4525c42e75ce9ae37139bdb051fbeffb500a3",
+          String.upcase(@daemon_schema_digest),
+          nil,
+          7
+        ] do
+      negotiation_peer(context, &Map.put(&1, "exact_schema_sha256", digest), :refused)
+    end
+
+    negotiation_peer(context, &Map.delete(&1, "exact_schema_sha256"), :refused)
+  end
+
   test "every refused live form names its reason and never dials", %{socket: socket} do
     refused = [
       {"run", ["--daemon", socket, "--policy", "allow-all", "p"], "unrecognised option"},
@@ -496,7 +527,7 @@ defmodule LoopexCli.LiveDaemonTest do
     {:ok, %{"session_id" => encoded}, _client} =
       LoopexCli.DaemonClient.request(client, "session.create", %{
         "command_id" => LoopexProtocol.Wire.encode_identity("dormant-take-over"),
-        "session_options" => %{}
+        "session_options" => %{"version" => 1}
       })
 
     LoopexCli.DaemonClient.close(client)
@@ -599,6 +630,214 @@ defmodule LoopexCli.LiveDaemonTest do
 
     assert message =~ "refused" or message =~ "dormant"
     stop_daemon(daemon)
+  end
+
+  # Concept: these peers exercise the actual client socket and original reader.
+  # Technical depth: mutate one member of the current producer's valid reply,
+  # monitor both original actors before replying, and join them under one
+  # captured 1,000 ms fixture cutoff. Body and cleanup errors remain separate.
+  defp negotiation_peer(context, change_reply, expected) do
+    {:ok, reply} = LoopexProtocol.Session.V2.negotiate([@daemon_generation], [])
+    assert reply["selected_generation"] == @daemon_generation
+    assert reply["exact_schema_sha256"] == @daemon_schema_digest
+    File.mkdir_p!(Path.dirname(context.socket))
+    cutoff = System.monotonic_time(:millisecond) + 1_000
+
+    {:ok, listener} =
+      :gen_tcp.listen(0, [
+        :binary,
+        {:ifaddr, {:local, context.socket}},
+        {:packet, :line},
+        {:active, false}
+      ])
+
+    parent = self()
+
+    {caller, caller_monitor} =
+      case negotiation_capture(fn ->
+             spawn_monitor(fn -> negotiation_client(parent, context.socket, cutoff) end)
+           end) do
+        {:ok, actors} ->
+          actors
+
+        {:error, _error} = body ->
+          listener_cleanup = negotiation_capture(fn -> assert :ok = :gen_tcp.close(listener) end)
+          path_cleanup = negotiation_capture(fn -> assert :ok = File.rm(context.socket) end)
+          negotiation_finish(body, [listener_cleanup, path_cleanup])
+      end
+
+    body =
+      negotiation_capture(fn ->
+        {:ok, peer} = :gen_tcp.accept(listener, negotiation_remaining(cutoff))
+
+        body =
+          negotiation_capture(fn ->
+            request = negotiation_record(peer, cutoff)
+
+            assert request == %{
+                     "method" => "initialize",
+                     "request_id" => "c1",
+                     "generations" => [@daemon_generation],
+                     "capabilities" => []
+                   }
+
+            {:links, [reader]} = Process.info(caller, :links)
+            assert is_pid(reader)
+            reader_monitor = Process.monitor(reader)
+
+            body =
+              negotiation_capture(fn ->
+                response = reply |> Map.put("request_id", request["request_id"]) |> change_reply.()
+                {:ok, encoded} = LoopexProtocol.Frame.encode(response)
+                assert :ok = :gen_tcp.send(peer, encoded)
+
+                assert_receive {:negotiation_result, ^caller, result},
+                               negotiation_remaining(cutoff)
+
+                case expected do
+                  :accepted ->
+                    assert {:ok, client} = result
+                    assert client.reader == reader
+                    send(caller, {:status, self()})
+                    status_request = negotiation_record(peer, cutoff)
+
+                    assert status_request == %{"method" => "daemon.status", "request_id" => "c2"}
+
+                    assert_receive {:negotiation_status, ^caller, {:ok, "c2", _client}},
+                                   negotiation_remaining(cutoff)
+
+                  :refused ->
+                    assert result == {:error, :daemon_unreachable}
+                    assert :gen_tcp.recv(peer, 0, negotiation_remaining(cutoff)) == {:error, :closed}
+                end
+
+                assert System.monotonic_time(:millisecond) < cutoff
+              end)
+
+            send(caller, :finish)
+
+            cleanup =
+              negotiation_capture(fn ->
+                before_join = System.monotonic_time(:millisecond)
+
+                assert_receive {:DOWN, ^reader_monitor, :process, ^reader, :killed},
+                               max(cutoff - before_join, 0)
+
+                after_join = System.monotonic_time(:millisecond)
+
+                assert before_join < cutoff and after_join < cutoff,
+                       "original reader DOWN/killed was consumed outside the original cutoff"
+              end)
+
+            Process.exit(reader, :kill)
+            negotiation_finish(body, [cleanup])
+          end)
+
+        cleanup = negotiation_capture(fn -> assert :ok = :gen_tcp.close(peer) end)
+        negotiation_finish(body, [cleanup])
+      end)
+
+    send(caller, :finish)
+
+    caller_cleanup =
+      negotiation_capture(fn ->
+        before_join = System.monotonic_time(:millisecond)
+
+        assert_receive {:DOWN, ^caller_monitor, :process, ^caller, :normal},
+                       max(cutoff - before_join, 0)
+
+        after_join = System.monotonic_time(:millisecond)
+
+        assert before_join < cutoff and after_join < cutoff,
+               "original caller DOWN/normal was consumed outside the original cutoff"
+      end)
+
+    Process.exit(caller, :kill)
+    listener_cleanup = negotiation_capture(fn -> assert :ok = :gen_tcp.close(listener) end)
+    path_cleanup = negotiation_capture(fn -> assert :ok = File.rm(context.socket) end)
+
+    timely_cleanup =
+      negotiation_capture(fn ->
+        assert System.monotonic_time(:millisecond) < cutoff,
+               "original negotiation cleanup completed outside the original cutoff"
+      end)
+
+    negotiation_finish(body, [caller_cleanup, listener_cleanup, path_cleanup, timely_cleanup])
+  end
+
+  defp negotiation_capture(fun) do
+    {:ok, fun.()}
+  catch
+    kind, reason -> {:error, {kind, reason, __STACKTRACE__}}
+  end
+
+  defp negotiation_finish(body, cleanup) do
+    case for({:error, error} <- [body | cleanup], do: error) do
+      [] ->
+        {:ok, value} = body
+        value
+
+      [{kind, reason, stack}] ->
+        :erlang.raise(kind, reason, stack)
+
+      errors ->
+        raise ExUnit.MultiError, errors: errors
+    end
+  end
+
+  defp negotiation_client(parent, socket, cutoff) do
+    result =
+      LoopexCli.DaemonClient.connect(socket,
+        timeout: negotiation_remaining(cutoff)
+      )
+
+    send(parent, {:negotiation_result, self(), result})
+
+    try do
+      negotiation_client_wait(parent, result, cutoff)
+    after
+      case result do
+        {:ok, client} -> LoopexCli.DaemonClient.close(client)
+        {:error, :daemon_unreachable} -> :ok
+      end
+    end
+  end
+
+  defp negotiation_client_wait(parent, result, cutoff) do
+    receive do
+      {:status, ^parent} ->
+        {:ok, client} = result
+
+        status =
+          LoopexCli.DaemonClient.send_request(client, "daemon.status", %{})
+
+        send(parent, {:negotiation_status, self(), status})
+        negotiation_client_wait(parent, result, cutoff)
+
+      :finish ->
+        :ok
+    after
+      negotiation_remaining(cutoff) -> flunk("the original negotiation peer did not finish")
+    end
+  end
+
+  defp negotiation_record(peer, cutoff) do
+    {:ok, line} = :gen_tcp.recv(peer, 0, negotiation_remaining(cutoff))
+    assert System.monotonic_time(:millisecond) < cutoff
+
+    assert {:ok, record} =
+             LoopexProtocol.Frame.decode(
+               String.trim_trailing(line, "\n"),
+               LoopexProtocol.Frame.output_record_bytes()
+             )
+
+    record
+  end
+
+  defp negotiation_remaining(cutoff) do
+    remaining = cutoff - System.monotonic_time(:millisecond)
+    assert remaining > 0
+    remaining
   end
 
   defp eventually_observed(socket, session_id, text) do

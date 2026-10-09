@@ -504,6 +504,21 @@ defmodule Loopex.AppServer.Stdio do
     })
   end
 
+  # Concept: intentional retirement is distinct from unexpected actor loss.
+  # Technical depth: keep owner-loss linkage until the original kill is dispatched.
+  # Unlink prevents future linked exits; drain only an already queued killed exit
+  # for this exact job. Its original monitor still proves DOWN before cleanup.
+  defp cancel_job(pid) do
+    Process.exit(pid, :kill)
+    Process.unlink(pid)
+
+    receive do
+      {:EXIT, ^pid, :killed} -> :ok
+    after
+      0 -> :ok
+    end
+  end
+
   defp complete_job(state, _job, :request_expired), do: close(state, :request_expired)
 
   defp complete_job(
@@ -691,7 +706,7 @@ defmodule Loopex.AppServer.Stdio do
         begin_holder_cleanup(%{state | job: nil})
 
       %{pid: pid} ->
-        Process.exit(pid, :kill)
+        cancel_job(pid)
         state
     end
   end
@@ -775,7 +790,7 @@ defmodule Loopex.AppServer.Stdio do
     state = retain(%{state | failure: :cleanup_unproved})
 
     case state.job do
-      %{pid: pid} -> Process.exit(pid, :kill)
+      %{pid: pid} -> cancel_job(pid)
       _other -> :ok
     end
 
@@ -816,7 +831,7 @@ defmodule Loopex.AppServer.Stdio do
       # another original actor merely because one operation failed.
       state = Process.get(state.owned_key, state)
       _ = close_input(state.port)
-      if match?(%{pid: _}, state.job), do: Process.exit(state.job.pid, :kill)
+      if match?(%{pid: _}, state.job), do: cancel_job(state.job.pid)
       state = state |> close(:cleanup_unproved) |> request_writer_stop() |> retain()
       state = if is_nil(state.job), do: begin_holder_cleanup(state), else: state
       cleanup_loop(%{state | failure: :cleanup_unproved})

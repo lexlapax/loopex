@@ -77,6 +77,7 @@ defmodule LoopexDaemon.SocketConnection do
   }
 
   alias LoopexProtocol.{Frame, Session.V2, Wire}
+  alias LoopexProtocol.Session.CompactResult
   alias Loopex.ProgressSink
 
   @owner_loss_close_ms 1_000
@@ -93,6 +94,8 @@ defmodule LoopexDaemon.SocketConnection do
   @registry_request_ms 5_000
 
   @mutation_operations [
+    :session_configure,
+    :session_compact,
     :session_prompt,
     :session_steer,
     :session_follow_up,
@@ -1290,8 +1293,7 @@ defmodule LoopexDaemon.SocketConnection do
           {:installed, attachment_id,
            WireRecords.snapshot(
              request_id,
-             Loopex.Attachment.snapshot(attachment),
-             Loopex.Attachment.open_interaction(attachment)
+             Loopex.Attachment.snapshot(attachment)
            )}
 
         {:error, :runtime_unavailable} ->
@@ -1433,20 +1435,26 @@ defmodule LoopexDaemon.SocketConnection do
   defp stop_pump(state), do: state
 
   defp deliver_event(%{attachment: attached} = state, event) do
-    state = %{state | last_activity: System.monotonic_time(:millisecond)}
-    record = WireRecords.event(attached.session_id, event)
-    held = state.succession != nil
-    kind = {:event, attached.pump}
+    # Concept: malformed durable data ends this attachment before publication.
+    # Technical depth: projection precedes queue admission and cursor labeling;
+    # failure uses the same last completely emitted cursor as output loss.
+    with record when is_map(record) <- WireRecords.event(attached.session_id, event) do
+      state = %{state | last_activity: System.monotonic_time(:millisecond)}
+      held = state.succession != nil
+      kind = {:event, attached.pump}
 
-    # A sent event lets the pump continue once the registry accepts it; a
-    # held one continues it at once, as it always has.
-    case send_record(state, record, Map.fetch!(event, :event_sequence), kind) do
-      {:ok, state} ->
-        if held, do: LoopexDaemon.AttachmentPump.continue(attached.pump)
-        {:noreply, state}
+      # A sent event lets the pump continue once the registry accepts it; a
+      # held one continues it at once, as it always has.
+      case send_record(state, record, Map.fetch!(event, :event_sequence), kind) do
+        {:ok, state} ->
+          if held, do: LoopexDaemon.AttachmentPump.continue(attached.pump)
+          {:noreply, state}
 
-      {:error, state} ->
-        begin_detach_close(state)
+        {:error, state} ->
+          begin_detach_close(state)
+      end
+    else
+      :error -> begin_detach_close(state)
     end
   end
 
@@ -1503,6 +1511,9 @@ defmodule LoopexDaemon.SocketConnection do
             do: send(fatal_recipient, {:daemon_component_fatal, self(), :runtime_lost})
 
           {:no_activation, nil, WireRecords.request_error(request_id, "internal_failure")}
+
+        {:error, :commit_unknown, %{disposition: disposition}} ->
+          {disposition, nil, WireRecords.succession_error(request_id, "admission_unknown")}
 
         {:error, reason, %{disposition: disposition}} ->
           {disposition, nil, create_admission(request_id, command_id, {:refused, reason})}
@@ -2559,13 +2570,7 @@ defmodule LoopexDaemon.SocketConnection do
         state =
           case state do
             %{attachment: %{session_id: ^session_id}, closing: nil, succession: nil} ->
-              # Concept: current generation two does not serve compaction activity.
-              # Technical depth: reject either native key shape before serialization;
-              # the existing refusal branch releases this exact credited lease.
-              with false <-
-                     match?(%{kind: "context.compaction_progress"}, item) or
-                       match?(%{"kind" => "context.compaction_progress"}, item),
-                   record when is_map(record) <- WireRecords.progress(session_id, item),
+              with record when is_map(record) <- WireRecords.progress(session_id, item),
                    {:ok, encoded} <- Frame.encode(record) do
                 queue_progress(state, lease, IO.iodata_to_binary(encoded))
               else
@@ -2800,6 +2805,18 @@ defmodule LoopexDaemon.SocketConnection do
       {:routed, _route, {:accepted, accepted_id}} ->
         {:accepted, WireRecords.admission(request_id, method, accepted_id, :accepted)}
 
+      # Concept: a completed compact retry acknowledges its retained admission.
+      # Technical depth: the checked result proves a completed native branch;
+      # completion remains only in its committed event and snapshot projection.
+      {:routed, _route, result} when method == "session.compact" and is_map(result) ->
+        case CompactResult.encode_wire(result) do
+          {:ok, _completed} ->
+            {:accepted, WireRecords.admission(request_id, method, command.command_id, :accepted)}
+
+          :error ->
+            {:admission_unknown, WireRecords.succession_error(request_id, "admission_unknown")}
+        end
+
       {:routed, _route, {:error, :commit_unknown}} ->
         {:admission_unknown, WireRecords.succession_error(request_id, "admission_unknown")}
 
@@ -2834,11 +2851,25 @@ defmodule LoopexDaemon.SocketConnection do
     end
   end
 
+  defp command_for(:session_configure, fields),
+    do: %{type: :configure, command_id: fields.command_id, changes: fields.changes}
+
+  defp command_for(:session_compact, fields),
+    do: %{type: :compact, command_id: fields.command_id, bounds: fields.bounds}
+
   defp command_for(:session_prompt, fields),
-    do: %{type: :prompt, command_id: fields.command_id, content: fields.content}
+    do:
+      Map.merge(
+        %{type: :prompt, command_id: fields.command_id, content: fields.content},
+        Map.take(fields, [:bounds])
+      )
 
   defp command_for(:session_follow_up, fields),
-    do: %{type: :follow_up, command_id: fields.command_id, content: fields.content}
+    do:
+      Map.merge(
+        %{type: :follow_up, command_id: fields.command_id, content: fields.content},
+        Map.take(fields, [:bounds])
+      )
 
   defp command_for(:session_steer, fields) do
     %{
@@ -2856,7 +2887,7 @@ defmodule LoopexDaemon.SocketConnection do
       type: :interaction_answer,
       command_id: fields.command_id,
       interaction_id: fields.interaction_id,
-      choice_id: fields.choice_id
+      answer: fields.answer
     }
   end
 
@@ -3054,12 +3085,10 @@ defmodule LoopexDaemon.SocketConnection do
 
   defp transfer_fun(attachment, %Request{operation: :artifact_open_transfer} = request) do
     %{request_id: request_id, method: method, fields: fields} = request
-    reference = fields.reference
 
     open =
       %{
-        object: %{digest: reference.digest, size: reference.size, locator: reference.locator},
-        use_locator: reference.use_locator,
+        use_locator: fields.use_locator,
         start: fields.start_offset
       }
       |> then(fn open ->

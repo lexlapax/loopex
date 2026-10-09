@@ -9,7 +9,7 @@ defmodule LoopexDaemon.WireRecordsTest do
   test "every daemon.stopping vector is exactly the record the daemon writes" do
     vectors =
       :loopex_protocol
-      |> Application.app_dir("priv/vectors/loopex-experimental-2.json")
+      |> Application.app_dir("priv/vectors/loopex-experimental-4.json")
       |> File.read!()
       |> JSON.decode!()
       |> Map.fetch!("cases")
@@ -24,7 +24,7 @@ defmodule LoopexDaemon.WireRecordsTest do
     end
   end
 
-  test "control records match the generation-two vectors exactly" do
+  test "control records match the current daemon vectors exactly" do
     epoch = "epoch"
 
     assert encode(WireRecords.control_acquired("acquire-1", epoch, 30_000, false)) ==
@@ -44,6 +44,101 @@ defmodule LoopexDaemon.WireRecordsTest do
 
     assert encode(WireRecords.control_error("error-1", "control_pending")) ==
              ~s({"code":"control_pending","message":"control pending.","request_id":"error-1","type":"error"}\n)
+  end
+
+  test "admitted artifact failures preserve only the closed reason and cleanup" do
+    for reason <- [
+          :invalid_artifact_request,
+          :invalid_open_context,
+          :reservation_required,
+          :reservation_conflict,
+          :unknown_artifact_use,
+          :artifact_use_mismatch,
+          :artifact_integrity_failed,
+          :artifact_digest_mismatch,
+          :unknown_artifact,
+          :artifact_too_large,
+          :invalid_window,
+          :open_deadline_exhausted,
+          :open_work_budget_exhausted,
+          :transfer_limit_reached,
+          :transfers_unavailable,
+          :artifact_unreadable,
+          :cancelled
+        ],
+        cleanup <- [:proved, :unproved] do
+      assert WireRecords.transfer_refused("artifact-open", %{reason: reason, cleanup: cleanup}) == %{
+               "type" => "error",
+               "request_id" => "artifact-open",
+               "code" => "transfer_refused",
+               "reason" => Atom.to_string(reason),
+               "cleanup" => Atom.to_string(cleanup),
+               "message" => "the transfer was refused"
+             }
+    end
+  end
+
+  test "malformed artifact failure maps cannot publish cleanup or private evidence" do
+    valid = %{reason: :cancelled, cleanup: :unproved}
+
+    for failure <- [
+          Map.delete(valid, :reason),
+          Map.delete(valid, :cleanup),
+          %{valid | reason: :private_adapter_exception},
+          %{valid | cleanup: "proved"},
+          %{valid | cleanup: nil},
+          Map.put(valid, :receipt_ref, "private-receipt"),
+          Map.put(valid, :work, %{source_read_bytes: 0}),
+          Map.put(valid, :owner, self()),
+          Map.put(valid, :__struct__, __MODULE__)
+        ] do
+      assert WireRecords.transfer_refused("artifact-open", failure) ==
+               WireRecords.request_error("artifact-open", "internal_failure")
+    end
+  end
+
+  test "non-admitted artifact refusals emit only current owning atom causes" do
+    for reason <- [
+          :attachment_required,
+          :invalid_attachment,
+          :stale_attachment,
+          :invalid_artifact_request,
+          :artifact_transfer_unsupported,
+          :transfer_limit_reached,
+          :open_work_budget_exhausted,
+          :transfers_unavailable,
+          :unknown_transfer,
+          :invalid_chunk_length,
+          :read_deadline_exhausted,
+          :artifact_unreadable,
+          :runtime_unavailable,
+          :cleanup_unproved
+        ] do
+      assert WireRecords.transfer_refused("artifact-operation", reason) == %{
+               "type" => "error",
+               "request_id" => "artifact-operation",
+               "code" => "transfer_refused",
+               "reason" => Atom.to_string(reason),
+               "message" => "the transfer was refused"
+             }
+    end
+  end
+
+  test "unknown superseded or admitted-only atom causes cannot cross the wire" do
+    for reason <- [
+          :cancelled,
+          :open_deadline_exhausted,
+          :artifact_integrity_failed,
+          :object_missing,
+          :open_deadline_exceeded,
+          :private_adapter_exception,
+          "cancelled",
+          nil,
+          self()
+        ] do
+      assert WireRecords.transfer_refused("artifact-operation", reason) ==
+               WireRecords.request_error("artifact-operation", "internal_failure")
+    end
   end
 
   defp encode(record) do

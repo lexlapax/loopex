@@ -126,6 +126,7 @@ defmodule Loopex.AppServer.ForegroundOutputLifecycleTest do
       prepare(fixture)
 
       Harness.send_frame(fixture, %{
+        "session_options" => %{"version" => 1},
         "method" => "session.create",
         "request_id" => "create",
         "command_id" => Wire.encode_identity("wire-created")
@@ -314,7 +315,7 @@ defmodule Loopex.AppServer.ForegroundOutputLifecycleTest do
       Harness.send_frame(fixture, %{
         "method" => "artifact.open_transfer",
         "request_id" => "open",
-        "use_ref" => Wire.encode_reference(fixture.reference),
+        "use_ref" => fixture.reference.use_locator,
         "start_offset" => "0"
       })
 
@@ -341,6 +342,7 @@ defmodule Loopex.AppServer.ForegroundOutputLifecycleTest do
       end
 
       Harness.send_frame(fixture, %{
+        "session_options" => %{"version" => 1},
         "method" => "session.create",
         "request_id" => "denied",
         "command_id" => Wire.encode_identity("must-not-reach-store")
@@ -365,6 +367,7 @@ defmodule Loopex.AppServer.ForegroundOutputLifecycleTest do
                :holding_next_create
 
       Harness.send_frame(fixture, %{
+        "session_options" => %{"version" => 1},
         "method" => "session.create",
         "request_id" => "held",
         "command_id" => Wire.encode_identity("held-original")
@@ -522,7 +525,12 @@ defmodule Loopex.AppServer.ForegroundOutputLifecycleTest do
   end
 
   defp event(sequence),
-    do: %{kind: "run.progressed", event_id: "event#{sequence}", event_sequence: sequence}
+    do: %{
+      "run_id" => "run",
+      kind: "session.settled",
+      event_id: "event#{sequence}",
+      event_sequence: sequence
+    }
 
   defp text_item(text),
     do: %{
