@@ -1834,16 +1834,19 @@ defmodule Loopex.Runtime.EventDispatcher do
       invocation: :reserve,
       invocation_started_at: invocation_started_at,
       observation: :idle,
+      observation_proof: nil,
       permission: false,
       permission_issued_at: nil,
       failure_proof_deadline: nil,
       not_reserved: false,
+      no_reservation_proof: nil,
       reserved: false,
       receipt: nil,
       acknowledged: false,
       custodian_down: nil,
       observer_down: nil,
       lost: false,
+      loss_kind: nil,
       cleanup: nil,
       reason: nil,
       open_timer: timer,
@@ -1986,7 +1989,12 @@ defmodule Loopex.Runtime.EventDispatcher do
 
       ArtifactStore.valid_reserve_result?(result, entry.context) ->
         {:error, failure} = result
-        entry = %{entry | not_reserved: true, reason: failure.reason}
+        entry = %{
+          entry
+          | not_reserved: true,
+            no_reservation_proof: :reply,
+            reason: failure.reason
+        }
         state = state |> put_artifact_entry(entry) |> settle_never_reserved(id)
 
         state
@@ -2317,8 +2325,13 @@ defmodule Loopex.Runtime.EventDispatcher do
         advance_artifact_cleanup(state, id)
 
       entry.observation == :idle and is_nil(entry.observer_down) ->
+        proof =
+          if artifact_lost_registration_candidate?(entry, artifact_now()),
+            do: :lost_registration,
+            else: nil
+
         send(entry.observer, {:artifact_observe, self(), id, :retire, entry.cleanup})
-        put_artifact_entry(state, %{entry | observation: :retire})
+        put_artifact_entry(state, %{entry | observation: :retire, observation_proof: proof})
 
       true ->
         state
@@ -2328,26 +2341,49 @@ defmodule Loopex.Runtime.EventDispatcher do
   defp artifact_observation_result(state, id, :retire, result) do
     entry = Map.fetch!(state.artifact_transfers, id)
 
-    if ArtifactStore.valid_close_result?(result, entry.cleanup) and match?({:retired, _}, result) do
-      {:retired, receipt} = result
-      state = settle_opening_work(state, id, receipt.work)
-      entry = Map.fetch!(state.artifact_transfers, id)
-      entry = if entry.not_reserved, do: %{entry | lost: true}, else: entry
-      state |> put_artifact_entry(%{entry | receipt: receipt}) |> advance_artifact_cleanup(id)
-    else
-      # Unregistered, malformed and unproved results supply no Store proof.
-      # A conclusive original never-reserved reply instead requires this
-      # invocation to finish and both original actors to join.
-      if entry.not_reserved do
+    valid = ArtifactStore.valid_close_result?(result, entry.cleanup)
+
+    cond do
+      valid and match?({:retired, _}, result) ->
+        {:retired, receipt} = result
+        state = settle_opening_work(state, id, receipt.work)
+        entry = Map.fetch!(state.artifact_transfers, id)
+        entry = if entry.not_reserved, do: artifact_loss(entry, :other), else: entry
+        state |> put_artifact_entry(%{entry | receipt: receipt}) |> advance_artifact_cleanup(id)
+
+      valid and match?({:unregistered, _}, result) and
+          entry.observation_proof === :lost_registration and
+          artifact_lost_registration_candidate?(entry, artifact_now()) ->
+        # Concept: original absence can settle a lost registration prospectively.
+        # Technical depth: eligibility was captured before this sole original
+        # observer invocation, after the original custodian join and D_open.
+        # The trusted retained handle pins the same Store owner. Keep the actual
+        # custodian DOWN and sticky loss; no receipt, acknowledgement or invented
+        # callback result substitutes for this separate terminal proof.
+        entry = %{
+          entry
+          | not_reserved: true,
+            no_reservation_proof: :lost_registration,
+            invocation: :joined
+        }
+
+        state
+        |> put_artifact_entry(entry)
+        |> settle_never_reserved(id)
+        |> finish_artifact_actors(id)
+
+      entry.not_reserved ->
         finish_artifact_actors(state, id)
-      else
+
+      true ->
+        # Earlier absence, malformed replies and unavailable owners cannot be
+        # promoted when a later clock observation or original join arrives.
         state =
           reply_artifact_open(state, id, {:error, %{reason: entry.reason, cleanup: :unproved}})
 
         entry = Map.fetch!(state.artifact_transfers, id)
         if entry.close_from, do: GenServer.reply(entry.close_from, {:error, :cleanup_unproved})
         put_artifact_entry(state, %{entry | close_from: nil})
-      end
     end
   end
 
@@ -2360,6 +2396,18 @@ defmodule Loopex.Runtime.EventDispatcher do
     else
       state
     end
+  end
+
+  defp artifact_lost_registration_candidate?(entry, observed_at) do
+    entry.loss_kind === :custodian and entry.custodian_down != nil and
+      is_nil(entry.observer_down) and not entry.permission and not entry.reserved and
+      not entry.not_reserved and is_nil(entry.receipt) and not entry.acknowledged and
+      entry.invocation === :reserve and observed_at >= entry.context.open_deadline_ms
+  end
+
+  defp artifact_loss(entry, kind) do
+    loss_kind = if kind === :custodian and is_nil(entry.loss_kind), do: :custodian, else: :other
+    %{entry | lost: true, loss_kind: loss_kind}
   end
 
   defp advance_artifact_cleanup(state, id) do
@@ -2391,9 +2439,13 @@ defmodule Loopex.Runtime.EventDispatcher do
   defp finish_artifact_actors(state, id) do
     entry = Map.fetch!(state.artifact_transfers, id)
 
-    if not entry.stopping and entry.invocation == :idle and entry.observation == :idle and
+    invocation_joined =
+      entry.invocation === :idle or
+        (entry.no_reservation_proof === :lost_registration and entry.invocation === :joined)
+
+    if not entry.stopping and invocation_joined and entry.observation == :idle and
          (entry.not_reserved or entry.acknowledged) do
-      send(entry.custodian, {:artifact_finish, self(), id})
+      if is_nil(entry.custodian_down), do: send(entry.custodian, {:artifact_finish, self(), id})
       send(entry.observer, {:artifact_finish, self(), id})
       put_artifact_entry(state, %{entry | stopping: true})
     else
@@ -2421,7 +2473,7 @@ defmodule Loopex.Runtime.EventDispatcher do
         evidence = %{reason: reason, at: artifact_now()}
         key = if kind == :custodian, do: :custodian_down, else: :observer_down
         entry = Map.put(entry, key, evidence)
-        entry = if entry.stopping and reason === :normal, do: entry, else: %{entry | lost: true}
+        entry = if entry.stopping and reason === :normal, do: entry, else: artifact_loss(entry, kind)
         state = put_artifact_entry(state, entry)
 
         if entry.stopping do
@@ -2435,9 +2487,18 @@ defmodule Loopex.Runtime.EventDispatcher do
   defp maybe_release_artifact(state, id) do
     entry = Map.fetch!(state.artifact_transfers, id)
 
-    if not entry.lost and match?(%{reason: :normal}, entry.custodian_down) and
-         match?(%{reason: :normal}, entry.observer_down) and
-         (entry.not_reserved or entry.acknowledged) do
+    normal_cleanup =
+      not entry.lost and match?(%{reason: :normal}, entry.custodian_down) and
+        (entry.not_reserved or entry.acknowledged)
+
+    lost_registration =
+      entry.no_reservation_proof === :lost_registration and entry.loss_kind === :custodian and
+        entry.custodian_down != nil and entry.invocation === :joined and entry.not_reserved and
+        not entry.permission and not entry.reserved and is_nil(entry.receipt) and
+        not entry.acknowledged
+
+    if (normal_cleanup or lost_registration) and
+         match?(%{reason: :normal}, entry.observer_down) do
       cancel_artifact_timer(entry.open_timer)
       cancel_artifact_timer(entry.close_timer)
       cancel_artifact_timer(entry.lifetime_timer)

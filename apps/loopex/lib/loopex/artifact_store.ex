@@ -454,6 +454,22 @@ defmodule Loopex.ArtifactStore do
   @callback read_transfer(handle :: term(), transfer(), length :: pos_integer()) ::
               {:ok, chunk()} | {:ok, :complete} | {:error, term()}
 
+  @doc """
+  ## Concept
+
+  Observe retirement or acknowledge proof from the original composed Store owner.
+
+  ## Technical depth
+
+  Accepted ADR0066 requires the trusted adapter to retain the original owner in
+  its private handle across reservation, opening and every retirement observation.
+  Owner loss refuses or reports uncertainty; resolving a replacement process or
+  name cannot produce original retirement or absence evidence. Core uses the
+  same retained handle and exact original selector. An unregistered result alone
+  proves no cleanup: lost registration additionally requires original custodian
+  join, no permission ever issued, expired original opening deadline and a new
+  original-owner absence observation begun after those facts were established.
+  """
   @callback close_transfer(handle :: term(), close_context()) :: close_result()
 
   # Concept: an approved job retrieves one verified range without an attachment.
