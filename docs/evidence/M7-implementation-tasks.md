@@ -1,5 +1,42 @@
 # M7 Implementation Tasks
 
+### Full-population diagnostic isolates missing Socket result, 2026-10-08
+
+Original30030 at `a6df8f2b9bb57b254928b7d8ded483481814912f`
+is collected FAIL: both complete current-pair population cases retain exit106,
+zero exclusions/skips/invalids. Actual AST equality, complete changed-source
+formatting, warning-free compilation, documentation and status pass before
+the workload. Floor remains UNRUN after this first failed stage. The17.209-
+second run retains7 exact original process joins and32 verified artifacts
+under `M7/daemon-population-diagnostic-focused-20261008-v2`. Terminal SHA-256
+`a9d5c8563762659336449164401b897bce08614cf459407f5e08993ed130bee2`;
+collection SHA-256
+`2c86f065968c8969d4f3420b6ee10f81c04625ee5b1c03fb51f4ae3e9828f103`.
+Latest completed registry2804, SHA-256
+`f1dbaa807b9fef3145ff2c75d90c3a1f4bb641533b11861e6a1de286ba744938`.
+
+Both closed diagnostic observations are complete without overflow. Registry's
+actual native arena close returns:ok and final input is:ok/arena_closed:true,
+but selected-row failure is sticky. First-case512 and T15 remaining510 rows
+all retain unproved native results; every observed guardian/control join flag
+is true. This rules out the observed Registry arena-close failure branch.
+It does not prove each Socket's own close returned:ok or explain why its
+result was not admitted. Trace that exact close/report/admission path before
+correcting production; neither normal guardian DOWN nor empty rows supplies
+missing owner-close proof. Original10084 and both new failures stay retained.
+
+Reviewed layout/admission and original31875 failure are immutable under
+`M7/current-source-preparation-20261008-v5/retention.json`, SHA-256
+`00f468786a88c19f7971e55c6067a458efd897b9849c70c058aad3cc62930c1f`.
+The bounded pre-fence cause map SHA-256
+`f49b95241d78d9d5513da1cfa3cbca5110a776cfb3df862690a3a16bdfb25add`
+reconfirms prior historical0823 attribution is unproved: its original raw
+output/actor evidence is unavailable and no new production defect is shown.
+Recover original external evidence before any attempt to discharge that row;
+current controls are not rerun merely to manufacture historical attribution.
+No native handle remains live. T01-T19 original88 done /85 open /6 retired;
+added370 done /24 open. No checkbox closes from failed diagnostic evidence.
+
 ### Population diagnostic layout corrected before execution, 2026-10-08
 
 Original31875 at `6441c8a61f65e043cb23310dd67c1a2334e11dcf`
