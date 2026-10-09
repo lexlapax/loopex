@@ -27,6 +27,45 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+### CLI adaptation joined; duplicate-answer repair next, 2026-10-09
+
+Reviewed current-wire/native adaptation joined727ca05a and strict-AST formatter
+child9037c21a. Original69941 formatting passed both supported pairs after2.431s;
+collection SHA-256 `401c582df41b6d1b5c44f0bea362aa34d5c47af9bc63a99b866c998613c99528`.
+Original50632 at `9037c21a77f3208be90fa0521942605efa853ad1` is terminal
+FAIL after474.352 seconds. Current new18 boundary cases all pass; the original
+seven-file53 workflow selection passes52 and fails one LiveRecovery case,
+which prints fresh answer twice. Zero exclusions, skips or invalid cases.
+Floor stages remain UNRUN. All7 original joins and32 assets authenticated.
+Terminal SHA-256 `84c46eff95f71f8f32bb95f9e022e795a108ab47e8edc9a01605616e1e1f1625`;
+collection `023fbe109cbd32f69589dbd75bb0cbea598470f0b74395d443a81a697d473785`.
+Registry2956 SHA-256
+`299e8293ab85a479a3ab1188b9bf891f8df6802049266c064520a85e5d5dc486`.
+Do not rerun unchanged9037c21a. Source diagnosis and production ordering repair
+are next; no all-prior-failure or floor qualification claim is made.
+
+Independent T11 audit at
+`/private/tmp/m7-t11-ledger-recipe-completion-audit-20261009-v1.md`, SHA-256
+`50fd5b64157ed5590391bd3a49a5408863b57415c45e9248abecfaaf85b807e8`,
+closes only the added complete-recipe prerequisite. Accepted0056 pins all
+persisted grammars. The audit authenticates original20054 and literal Git-blob
+matches for relevant unchanged source/tests/vectors. Its seven-file both-pair
+217 proof covers codec/mutation refusal; GenesisCodec and ParentBinding tests
+are source-only in this audit. Trusted accounting access, lifecycle reduction,
+startup coverage, mutation protection, restore and helper activation stay open.
+
+Immutable63-asset retention:
+`M7/current-source-preparation-20261009-v24/retention.json`, SHA-256
+`6b8f12d194a00c5722a0b0285898dd3e43f0a356270955586da045b9a7720493`.
+It retains both completed originals, collections and the sealed audit; its
+parentv23 retains source and prior failures. No native handle is live.
+Core observation grace and ADR0065 remain unanswered. The stopped-leader
+ownership/accounting proposal remains unaccepted. ADR0066 was already accepted;
+its latest repeated approval does not change implementation scope.
+No full fast/release/closure result is claimed.
+T01–T19 original89 done /84 open /6 retired; added373 done /23 open;
+combined462 done /107 open /6 retired.
+
 ### Physical run-log initialization proved; CLI repair next, 2026-10-09
 
 Original20054 at `a1032d037106c2b79c9d64dba158f195c9ecf518` passed all217
