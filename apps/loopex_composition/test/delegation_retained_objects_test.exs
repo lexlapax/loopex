@@ -8,7 +8,7 @@ defmodule LoopexComposition.DelegationRetainedObjectsTest do
 
   setup do
     root =
-      Path.join("/private/tmp", "loopex-retained-#{Base.encode16(:crypto.strong_rand_bytes(12))}")
+      Path.join(physical_tmp(), "loopex-retained-#{Base.encode16(:crypto.strong_rand_bytes(12))}")
 
     File.mkdir!(root)
     {:ok, lease} = Placement.acquire(root)
@@ -316,4 +316,9 @@ defmodule LoopexComposition.DelegationRetainedObjectsTest do
   defp hash(bytes), do: :crypto.hash(:sha256, bytes) |> Base.encode16(case: :lower)
   defp recovered_at(:renamed), do: {:ok, "{}"}
   defp recovered_at(:temporary_synced), do: {:error, :enoent}
+
+  # Concept: physical roots must not traverse a symlinked temporary directory.
+  # Technical depth: macOS /tmp is a symlink to /private/tmp, which the owner
+  # refuses; other hosts use their ordinary non-symlinked /tmp.
+  defp physical_tmp, do: if(File.dir?("/private/tmp"), do: "/private/tmp", else: "/tmp")
 end
