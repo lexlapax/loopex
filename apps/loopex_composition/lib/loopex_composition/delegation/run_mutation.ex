@@ -112,6 +112,34 @@ defmodule LoopexComposition.Delegation.RunMutation do
     end
   end
 
+  @doc false
+  # Concept: a recovered operation names its source intent, not a job row.
+  # Technical depth: the original validated JobRequest from that captured
+  # intent must carry the same task generation, operation, run, session and
+  # request digest. The result is that attempt's stored job projection.
+  def match_source(identifiers, mutation, original) do
+    with {:ok, _} <- transaction(identifiers, 0, mutation),
+         "recover_uncreated" <- mutation["kind"],
+         :ok <- Executor.validate_job(original),
+         definition = Tool.definition(),
+         true <-
+           original.tool_id == definition["tool_id"] and
+             original.tool_version == definition["tool_version"] and
+             original.effect_class == definition["effect_class"] and
+             original.idempotency_class == definition["idempotency_class"],
+         job = project_job(original),
+         true <- job["operation_id"] == mutation["operation_identity"]["operation_id"],
+         true <- job["run_id"] == mutation["operation_identity"]["parent_run_id"],
+         true <- job["session_id"] == mutation["source_intent"]["session_id"],
+         true <-
+           job["canonical_request_digest"] ==
+             mutation["source_intent"]["canonical_request_digest"] do
+      {:ok, job}
+    else
+      _ -> {:error, :original_source_mismatch}
+    end
+  end
+
   defp mutation?(%{"kind" => "initialize"} = value, _ids) do
     closed?(value, ~w(kind binding_key catalog_sha256 declaration_sha256 limits)) and
       hashes?(value, ~w(binding_key catalog_sha256 declaration_sha256)) and

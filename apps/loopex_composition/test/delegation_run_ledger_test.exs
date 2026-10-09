@@ -379,7 +379,15 @@ defmodule LoopexComposition.DelegationRunLedgerTest do
       changed = transaction(state, mutation)
       assert :ok = Executor.validate_job(original)
       assert :ok = RunMutation.match_job(context.ids, mutation, original)
-      assert RunLedger.admit(state, changed, inputs) == {:error, :operation_binding_conflict}
+
+      # Concept: another operation is the parent's occupied slot, not a relabel.
+      # Technical depth: changed members under the retained identity conflict.
+      expected =
+        if @field == "operation_identity",
+          do: :helper_slot_occupied,
+          else: :operation_binding_conflict
+
+      assert RunLedger.admit(state, changed, inputs) == {:error, expected}
     end
   end
 
@@ -490,22 +498,214 @@ defmodule LoopexComposition.DelegationRunLedgerTest do
     assert empty.phase == :empty and empty.count == 0 and empty.credit == 0
   end
 
-  test "accepted later lifecycle maps remain closed to prelaunch admission" do
+  test "prompt, real settlement and receipt transitions stay closed until their owners exist" do
     context = fixture()
-    {state, _tx, _inputs} = first_reserved(context)
+    {state, _tx, inputs} = first_reserved(context)
+    operation = state.operation.logical["operation_identity"]
 
-    mutation = %{
-      "kind" => "child_created",
-      "operation_identity" => state.operation.logical["operation_identity"],
+    prompted = %{
+      "kind" => "child_prompted",
+      "operation_identity" => operation,
       "child_session_id" => Base.encode64("child"),
-      "child_creation_sha256" => state.operation.logical["child_creation_sha256"],
-      "configuration_digest" => String.duplicate("1", 64),
-      "tool_selection_sha256" => String.duplicate("2", 64),
-      "policy_defer_mode" => "refuse"
+      "child_run_id" => Base.encode64("child-run"),
+      "prompt_command_id" => state.operation.logical["prompt_command_id"],
+      "prompt_digest" => String.duplicate("1", 64)
     }
 
-    tx = transaction(state, mutation)
-    assert RunLedger.admit(state, tx) == {:error, :invalid_run_transition}
+    receipt = %{
+      "kind" => "bind_receipt",
+      "operation_identity" => operation,
+      "job" => project(inputs.original_job),
+      "receipt_sha256" => String.duplicate("2", 64)
+    }
+
+    terminal = %{
+      "state" => "completed",
+      "child_session_id" => Base.encode64("child"),
+      "child_run_id" => Base.encode64("child-run"),
+      "journal_version" => 9,
+      "terminal_record_sha256" => String.duplicate("3", 64),
+      "cleanup" => "confirmed"
+    }
+
+    accounting = %{
+      "reported_input_tokens" => 10,
+      "reported_output_tokens" => 5,
+      "estimated_tokens" => 0,
+      "unresolved_usage" => false,
+      "charged_tokens" => 15,
+      "through_version" => 9,
+      "prefix_token" => Base.encode64(String.duplicate("t", 32))
+    }
+
+    settle = settlement(operation, terminal, accounting, 15, 0)
+
+    for {mutation, reason} <- [
+          {prompted, :helper_prompt_owner_unavailable},
+          {receipt, :helper_receipt_validator_unavailable},
+          {settle, :helper_accounting_unavailable}
+        ] do
+      tx = transaction(state, mutation)
+      assert RunLedger.admit(state, tx, inputs) == {:error, reason}
+      assert RunLedger.occupied?(state)
+    end
+  end
+
+  test "known child creation joins retained genesis digests and survives a later stop" do
+    context = fixture()
+    {state, _tx, inputs} = first_reserved(context)
+    tx = created_transaction(state, "child")
+    assert {:ok, created, result} = RunLedger.admit(state, tx)
+    assert created.operation.child == Base.encode64("child")
+    assert created.credit == state.credit - @frame and created.phase == :reserved
+    assert RunLedger.admit(created, tx) == {:ok, created, result}
+
+    assert RunLedger.admit(created, created_transaction(created, "other")) ==
+             {:error, :run_transaction_conflict}
+
+    for field <- ~w(configuration_digest tool_selection_sha256 child_creation_sha256) do
+      changed = transaction(state, Map.put(tx["mutation"], field, String.duplicate("0", 64)))
+      assert RunLedger.admit(state, changed) == {:error, :child_created_mismatch}
+    end
+
+    {ready, _} = initialized(context)
+
+    assert RunLedger.admit(ready, transaction(ready, tx["mutation"])) ==
+             {:error, :invalid_run_transition}
+
+    # Concept: a launch that won before the stop is accounted for, not erased.
+    # Technical depth: stop spends S, the late known creation spends only C.
+    stop = stop_transaction(state, inputs.original_job, "cancel")
+    assert {:ok, stopped, _} = RunLedger.admit(state, stop, %{original_job: inputs.original_job})
+    assert {:ok, late, _} = RunLedger.admit(stopped, created_transaction(stopped, "child"))
+    assert late.phase == :stopped and late.credit == state.credit - 2 * @frame
+    assert late.operation.child == Base.encode64("child")
+
+    {_ready, initialize} = initialized(context)
+    reserve = Enum.at(state.transactions, 1) |> elem(0)
+    entries = [{initialize, %{}}, {reserve, inputs}, {stop, %{original_job: inputs.original_job}}]
+
+    assert {:ok, ^late} =
+             replay(context, entries ++ [{created_transaction(stopped, "child"), %{}}])
+  end
+
+  test "one retained operation occupies the parent slot across operations and runs" do
+    context = fixture()
+    {ready, _} = initialized(context)
+    refute RunLedger.occupied?(ready)
+    {state, _tx, _inputs} = first_reserved(context)
+    assert RunLedger.occupied?(state)
+
+    {other, other_inputs} = reservation(context, state, job(context, 2, operation_id: "other"))
+    assert RunLedger.admit(state, other, other_inputs) == {:error, :helper_slot_occupied}
+
+    later = fixture(Fixture.valid_capture(), "session", nil, "later-run")
+    {later_ready, _} = initialized(later)
+    runs = [state, later_ready]
+    assert Enum.any?(runs, &RunLedger.occupied?/1)
+    refute RunLedger.occupied?(later_ready)
+  end
+
+  test "recovered missing reservations charge one count, no tokens and stay stopped" do
+    context = fixture()
+    {ready, initialize} = initialized(context)
+    original = job(context, 1, operation_id: "lost")
+    {tx, inputs} = recovery(context, ready, original, 7)
+    assert {:ok, state, result} = RunLedger.admit(ready, tx, inputs)
+    assert state.count == 1 and state.reserved_tokens == 0 and state.charged_tokens == 0
+    assert state.credit == 2 * @frame and state.phase == :initialized
+    assert RunLedger.occupied?(state) and RunLedger.first_stop(state) == :absent
+    assert RunLedger.admit(state, tx, inputs) == {:ok, state, result}
+
+    # Concept: recovery never becomes a later reservation or a fresh allowance.
+    # Technical depth: the same identity cannot reserve; any other operation
+    # finds the parent's slot occupied by the unreleased recovered operation.
+    {same, same_inputs} = reservation(context, state, original)
+    assert RunLedger.admit(state, same, same_inputs) == {:error, :invalid_run_transition}
+    {other, other_inputs} = reservation(context, state, job(context, 2))
+    assert RunLedger.admit(state, other, other_inputs) == {:error, :helper_slot_occupied}
+
+    {second, second_inputs} = recovery(context, state, job(context, 3, operation_id: "lost-2"), 9)
+    assert {:ok, full, _} = RunLedger.admit(state, second, second_inputs)
+    assert full.count == 2 and full.credit == 4 * @frame and map_size(full.recovered) == 2
+
+    # Concept: an excess operation is never clamped into the retained count.
+    {excess, excess_inputs} = recovery(context, full, job(context, 4, operation_id: "lost-3"), 11)
+    assert RunLedger.admit(full, excess, excess_inputs) == {:error, :delegation_count_exhausted}
+
+    entries = [{initialize, %{}}, {tx, inputs}, {second, second_inputs}]
+    assert {:ok, ^full} = replay(context, entries)
+  end
+
+  test "recovery joins its exact source attempt, credit and unreserved identity" do
+    context = fixture()
+    {ready, _} = initialized(context)
+    original = job(context, 1, operation_id: "lost")
+    {tx, inputs} = recovery(context, ready, original, 7)
+
+    assert RunLedger.admit(ready, tx, %{}) == {:error, :original_source_mismatch}
+
+    for other <- [
+          job(context, 1, operation_id: "elsewhere"),
+          job(context, 1, operation_id: "lost", prompt: "changed")
+        ] do
+      assert RunLedger.admit(ready, tx, %{original_job: other}) ==
+               {:error, :original_source_mismatch}
+    end
+
+    changed = transaction(ready, Map.put(tx["mutation"], "closing_credit_bytes", @frame))
+    assert RunLedger.admit(ready, changed, inputs) == {:error, :reservation_mismatch}
+
+    assert RunLedger.admit(context.state, transaction(context.state, tx["mutation"]), inputs) ==
+             {:error, :invalid_run_transition}
+
+    {state, _tx, reserved_inputs} = first_reserved(context)
+    {own, own_inputs} = recovery(context, state, reserved_inputs.original_job, 5)
+    assert RunLedger.admit(state, own, own_inputs) == {:error, :invalid_run_transition}
+
+    # Concept: a reserved operation and an independently lost one both count.
+    {lost, lost_inputs} = recovery(context, state, original, 7)
+    assert {:ok, both, _} = RunLedger.admit(state, lost, lost_inputs)
+    assert both.count == 2 and both.reserved_tokens == state.reserved_tokens
+    assert both.credit == state.credit + 2 * @frame
+  end
+
+  test "recovered no-child settlement is exact, write-once and charges no tokens" do
+    context = fixture()
+    {ready, _} = initialized(context)
+    {tx, inputs} = recovery(context, ready, job(context, 1, operation_id: "lost"), 7)
+    assert {:ok, state, _} = RunLedger.admit(ready, tx, inputs)
+    identity = tx["mutation"]["operation_identity"]
+    digest = String.duplicate("a", 64)
+    settle = transaction(state, uncreated_settlement(identity, 7, digest))
+
+    assert {:ok, settled, result} =
+             RunLedger.admit(state, settle, %{source_intent_sha256: digest})
+
+    assert settled.credit == @frame and settled.count == 1 and settled.charged_tokens == 0
+    assert RunLedger.occupied?(settled)
+    assert RunLedger.admit(settled, settle) == {:ok, settled, result}
+
+    for {mutation, settle_inputs} <- [
+          {uncreated_settlement(identity, 8, digest), %{source_intent_sha256: digest}},
+          {uncreated_settlement(identity, 7, digest),
+           %{source_intent_sha256: String.duplicate("b", 64)}},
+          {uncreated_settlement(identity, 7, digest), %{}}
+        ] do
+      assert RunLedger.admit(state, transaction(state, mutation), settle_inputs) ==
+               {:error, :settlement_mismatch}
+    end
+
+    other = uncreated_settlement(operation(context, "never"), 7, digest)
+
+    assert RunLedger.admit(state, transaction(state, other), %{source_intent_sha256: digest}) ==
+             {:error, :invalid_run_transition}
+
+    assert RunLedger.admit(
+             settled,
+             transaction(settled, uncreated_settlement(identity, 8, digest)),
+             %{source_intent_sha256: digest}
+           ) == {:error, :run_transaction_conflict}
   end
 
   test "actual complete prefix frames fill the exact cap and the next byte refuses" do
@@ -586,7 +786,88 @@ defmodule LoopexComposition.DelegationRunLedgerTest do
     end
   end
 
-  defp fixture(capture \\ Fixture.valid_capture(), session \\ "session", history \\ nil) do
+  defp created_transaction(state, child) do
+    {:ok, object} = LedgerCodec.decode_json(state.operation.child_creation, :object)
+    {:ok, genesis} = GenesisCodec.decode(object["genesis"])
+
+    transaction(state, %{
+      "kind" => "child_created",
+      "operation_identity" => state.operation.logical["operation_identity"],
+      "child_session_id" => Base.encode64(child),
+      "child_creation_sha256" => state.operation.logical["child_creation_sha256"],
+      "configuration_digest" => Canonical.digest(genesis["initial_configuration"]),
+      "tool_selection_sha256" => Canonical.digest(genesis["tool_selection"]),
+      "policy_defer_mode" => "refuse"
+    })
+  end
+
+  defp recovery(context, state, original, journal_version) do
+    operation = operation(context, original.operation_id)
+
+    mutation = %{
+      "kind" => "recover_uncreated",
+      "operation_identity" => operation,
+      "source_intent" => %{
+        "session_id" => Base.encode64(original.session_id),
+        "journal_version" => journal_version,
+        "canonical_request_digest" => original.canonical_request_digest
+      },
+      "create_command_id" => Base.encode64(command(context, operation, "create")),
+      "prompt_command_id" => Base.encode64(command(context, operation, "prompt")),
+      "reservation_state" => "unknown",
+      "reason" => "adapter_recovery",
+      "child_session_id" => nil,
+      "child_run_id" => nil,
+      "reported_child_usage" => 0,
+      "count_charge" => 1,
+      "closing_credit_bytes" => 2 * @frame
+    }
+
+    {transaction(state, mutation), %{original_job: original}}
+  end
+
+  defp uncreated_settlement(identity, journal_version, digest) do
+    terminal = %{
+      "state" => "uncreated",
+      "child_session_id" => nil,
+      "child_run_id" => nil,
+      "journal_version" => journal_version,
+      "terminal_record_sha256" => digest,
+      "cleanup" => "confirmed"
+    }
+
+    accounting = %{
+      "reported_input_tokens" => 0,
+      "reported_output_tokens" => 0,
+      "estimated_tokens" => 0,
+      "unresolved_usage" => false,
+      "charged_tokens" => 0,
+      "through_version" => 0,
+      "prefix_token" => nil
+    }
+
+    settlement(identity, terminal, accounting, 0, 0)
+  end
+
+  defp settlement(identity, terminal, accounting, charge, refund) do
+    evidence = domain("loopex:helper-accounting-evidence:v1", [identity, terminal, accounting])
+
+    %{
+      "kind" => "settle",
+      "operation_identity" => identity,
+      "terminal" => terminal,
+      "accounting" => Map.put(accounting, "evidence_sha256", evidence),
+      "charge_tokens" => charge,
+      "refund_tokens" => refund
+    }
+  end
+
+  defp fixture(
+         capture \\ Fixture.valid_capture(),
+         session \\ "session",
+         history \\ nil,
+         run \\ "run"
+       ) do
     # Concept: pure rows validate shape without authenticating a history producer.
     # Technical depth: the separate real Store cases obtain owning observations;
     # none of these inputs establishes a live source, grant or cross-run slot.
@@ -608,7 +889,7 @@ defmodule LoopexComposition.DelegationRunLedgerTest do
     {:ok, bind} =
       ParentBinding.transaction(capture.key, 1, ParentBinding.bind_mutation(capture, session))
 
-    ids = [capture.runtime, session, "run"]
+    ids = [capture.runtime, session, run]
     binding = [prepare, bind]
     assert {:ok, state} = RunLedger.new(ids, capture, binding, history)
     %{capture: capture, ids: ids, binding: binding, history: history, state: state}
