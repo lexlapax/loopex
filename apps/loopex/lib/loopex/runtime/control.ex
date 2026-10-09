@@ -16,7 +16,7 @@ defmodule Loopex.Runtime.Control do
   readiness. Missing recovery capability leaves creation unavailable. Authored
   input is compared before owned preparation; replay uses original captured facts.
   Session creation does not cache a mapping before the transaction is terminal. Starting or resuming
-  a coordinator is serialized here; the DynamicSupervisor child completes
+  a coordinator is serialized here; the SessionSupervisor child completes
   `advance_owner` before this process marks it active.
 
   `current_owner_post_commit_fence/3` is the single production gate after every
@@ -42,6 +42,7 @@ defmodule Loopex.Runtime.Control do
   alias Loopex.Runtime.ProviderAttempt
   alias Loopex.Runtime.SessionCoordinator
   alias Loopex.Runtime.SessionState
+  alias Loopex.Runtime.SessionSupervisor
   alias Loopex.Runtime.SessionGenesis
   alias Loopex.Runtime.SessionConfiguration
   alias Loopex.Runtime.Instructions
@@ -4086,7 +4087,7 @@ defmodule Loopex.Runtime.Control do
           prepared: prepared
         ]
 
-        case DynamicSupervisor.start_child(session_supervisor, {SessionCoordinator, options}) do
+        case SessionSupervisor.start_coordinator(session_supervisor, options) do
           {:ok, coordinator} ->
             state = record_writer_domain(state, session_id)
 
@@ -4105,7 +4106,7 @@ defmodule Loopex.Runtime.Control do
                 )
 
               {:error, reason} ->
-                _ = DynamicSupervisor.terminate_child(session_supervisor, coordinator)
+                _ = SessionSupervisor.terminate_coordinator(session_supervisor, coordinator)
                 _ = :supervisor.terminate_child(owner_groups, owner_group)
 
                 unavailable_owner(
@@ -4223,7 +4224,7 @@ defmodule Loopex.Runtime.Control do
   # ever started a serial writer, including one that failed before readiness.
   #
   # Technical depth: membership is recorded in the same Control callback that
-  # receives `DynamicSupervisor.start_child/2` success and is never removed.
+  # receives `SessionSupervisor.start_coordinator/2` success and is never removed.
   # `begin_quiesce/1` therefore freezes a monotonic writer-domain set without
   # inferring writer history from an entry's later status.
   defp record_writer_domain(state, session_id) do

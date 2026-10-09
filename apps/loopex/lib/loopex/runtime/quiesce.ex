@@ -6,6 +6,7 @@ defmodule Loopex.Runtime.Quiesce do
   alias Loopex.Executor
   alias Loopex.Runtime.Control
   alias Loopex.Runtime.SessionCoordinator
+  alias Loopex.Runtime.SessionSupervisor
   alias Loopex.Runtime.Supervisor, as: RuntimeSupervisor
 
   @default_bounds %{
@@ -482,7 +483,7 @@ defmodule Loopex.Runtime.Quiesce do
   #
   # Technical depth: the second projection reads the same frozen writer-domain
   # keys from the captured Control. Every current coordinator is monitored
-  # before all DynamicSupervisor termination calls are issued together. At the
+  # before all SessionSupervisor termination calls are issued together. At the
   # shared work cutoff, direct untrappable kills end both surviving coordinators
   # and workers blocked in the serialized supervisor. The final reserve admits
   # only their exact DOWN/EXIT signals.
@@ -564,7 +565,7 @@ defmodule Loopex.Runtime.Quiesce do
 
   defp safe_terminate_child(session_supervisor, coordinator) do
     try do
-      DynamicSupervisor.terminate_child(session_supervisor, coordinator)
+      SessionSupervisor.terminate_coordinator(session_supervisor, coordinator)
     catch
       :exit, _reason -> {:error, :runtime_unavailable}
     end

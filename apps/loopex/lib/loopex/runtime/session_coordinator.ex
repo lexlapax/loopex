@@ -8,7 +8,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
   ## Technical depth
 
-  A coordinator is an unnamed temporary DynamicSupervisor child. Startup uses
+  A coordinator is an unnamed temporary SessionSupervisor child. Startup uses
   transaction status, the non-authorizing ownership head, and one fresh
   compare-and-set succession. Each command is proposed by the pure
   `Loopex.Runtime.SessionState`, committed through `Store.OwnerLane`, and then
@@ -133,18 +133,6 @@ defmodule Loopex.Runtime.SessionCoordinator do
   """
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(options) when is_list(options), do: GenServer.start_link(__MODULE__, options)
-
-  @doc false
-  @spec child_spec(keyword()) :: Supervisor.child_spec()
-  def child_spec(options) do
-    %{
-      id: {__MODULE__, Keyword.fetch!(options, :generation)},
-      start: {__MODULE__, :start_link, [options]},
-      restart: :temporary,
-      shutdown: 5_000,
-      type: :worker
-    }
-  end
 
   @doc false
   @spec start_quiesce_fence(

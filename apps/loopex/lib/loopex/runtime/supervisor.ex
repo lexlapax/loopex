@@ -29,6 +29,7 @@ defmodule Loopex.Runtime.Supervisor do
   alias Loopex.Runtime.Control
   alias Loopex.Runtime.EventDispatcher
   alias Loopex.Runtime.ResourceSnapshot
+  alias Loopex.Runtime.SessionSupervisor
   alias Loopex.ToolRegistry
   alias Loopex.Trace
 
@@ -36,7 +37,7 @@ defmodule Loopex.Runtime.Supervisor do
   @control_id Loopex.Runtime.Control
   @workers_id Loopex.Runtime.Workers
   @owner_groups_id Loopex.Runtime.OwnerGroups
-  @sessions_id Loopex.Runtime.SessionSupervisor
+  @sessions_id SessionSupervisor
   @dispatcher_id Loopex.Runtime.EventDispatcher
   @trace_id Loopex.Trace
 
@@ -77,10 +78,7 @@ defmodule Loopex.Runtime.Supervisor do
       },
       Supervisor.child_spec({Task.Supervisor, []}, id: @workers_id),
       {Loopex.Runtime.OwnerGroups, []},
-      Supervisor.child_spec(
-        {DynamicSupervisor, strategy: :one_for_one},
-        id: @sessions_id
-      ),
+      {SessionSupervisor, []},
       %{
         id: @dispatcher_id,
         start: {EventDispatcher, :start_link, [[root: root] ++ options]}
