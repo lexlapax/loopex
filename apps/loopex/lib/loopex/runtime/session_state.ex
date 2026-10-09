@@ -3306,7 +3306,7 @@ defmodule Loopex.Runtime.SessionState do
         "transformer_revision" => nil,
         "selector_identity" => nil,
         "selector_revision" => nil,
-        "token_estimator" => "loopex.context_bytes.v2",
+        "token_estimator" => Bounds.estimator(),
         "descriptor_canonicalization_version" => @descriptor_canonicalization_version,
         "blocks" => blocks,
         "totals" => totals,
@@ -4318,7 +4318,7 @@ defmodule Loopex.Runtime.SessionState do
     |> Map.merge(%{
       :kind => "context_admission_refused_v2",
       "failure" => failure,
-      "token_estimator" => "loopex.context_bytes.v2",
+      "token_estimator" => Bounds.estimator(),
       "configuration_version" => version,
       "episode_id" => nil,
       "targets" => Map.get(measurement, "targets"),
@@ -12286,7 +12286,7 @@ defmodule Loopex.Runtime.SessionState do
          true <- receipt["transformer_revision"] == nil,
          true <- receipt["selector_identity"] == nil,
          true <- receipt["selector_revision"] == nil,
-         true <- receipt["token_estimator"] == "loopex.context_bytes.v2",
+         true <- receipt["token_estimator"] == Bounds.estimator(),
          true <-
            receipt["descriptor_canonicalization_version"] ==
              @descriptor_canonicalization_version,
@@ -12584,7 +12584,7 @@ defmodule Loopex.Runtime.SessionState do
          true <- Map.get(receipt, "transformer_revision") == nil,
          true <- Map.get(receipt, "selector_identity") == nil,
          true <- Map.get(receipt, "selector_revision") == nil,
-         true <- Map.get(receipt, "token_estimator") == "loopex.context_bytes.v2",
+         true <- Map.get(receipt, "token_estimator") == Bounds.estimator(),
          true <-
            Map.get(receipt, "descriptor_canonicalization_version") ==
              @descriptor_canonicalization_version,
@@ -13138,7 +13138,7 @@ defmodule Loopex.Runtime.SessionState do
         "measurement_scope" => nil,
         "cause" => cause
       },
-      "token_estimator" => "loopex.context_bytes.v2",
+      "token_estimator" => Bounds.estimator(),
       "descriptor_canonicalization_version" => @descriptor_canonicalization_version,
       "project_disposition" => "not_evaluated_required_failure",
       "system_message_count" => nil,
@@ -13340,7 +13340,7 @@ defmodule Loopex.Runtime.SessionState do
          true <- refusal["configuration_version"] == configuration["configuration_version"],
          true <- refusal["context_token_budget"] == configuration["context_token_budget"],
          true <- refusal["context_record_byte_ceiling"] == Store.max_item_bytes(),
-         true <- refusal["token_estimator"] == "loopex.context_bytes.v2",
+         true <- refusal["token_estimator"] == Bounds.estimator(),
          true <-
            refusal["descriptor_canonicalization_version"] == @descriptor_canonicalization_version,
          true <- refusal["project_disposition"] == "not_evaluated_required_failure",
@@ -13404,7 +13404,7 @@ defmodule Loopex.Runtime.SessionState do
          true <-
            refusal["projection_state"] == "measured" and
              refusal["measurement_scope"] == "ordinary",
-         true <- refusal["token_estimator"] == "loopex.context_bytes.v2",
+         true <- refusal["token_estimator"] == Bounds.estimator(),
          true <-
            is_map(failure) and
              Enum.sort(Map.keys(failure)) ==
