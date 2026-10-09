@@ -206,7 +206,8 @@ defmodule LoopexComposition do
            ),
          {:ok, store} <- Store.new(Store.Local, adapter),
          {:ok, spill} <- artifact_placement(root, options),
-         {:ok, executor} <- open_executor(root, workspace, options, spill, credential_plane) do
+         {:ok, executor} <- open_executor(root, workspace, options, spill, credential_plane),
+         executor = delegated_executor(options, executor) do
       with {:ok, runtime} <-
              start_edge(
                Loopex,
@@ -216,7 +217,9 @@ defmodule LoopexComposition do
                  policy: policy,
                  policy_identity: policy_identity(options, policy),
                  executor: executor,
-                 tools: DurableOptions.definitions(options)
+                 tools:
+                   DurableOptions.definitions(options) ++
+                     LoopexComposition.Delegation.definitions(options[:delegation])
                ] ++
                  [
                    model:
@@ -243,11 +246,35 @@ defmodule LoopexComposition do
                  Keyword.take(options, @host_supplied)
              ),
            {:ok, startup_deadline} <- LoopexComposition.StartupGate.await(runtime),
+           :ok <- bind_delegation(options[:delegation], runtime),
            :ok <- Loopex.Trace.Capability.bind(credential_plane.capability, runtime),
            :ok <- LoopexComposition.StartupGate.publication({:ok, startup_deadline}) do
         Logger.debug("reference composition trace capability bound")
         {:ok, runtime}
       end
+    end
+  end
+
+  # Concept: a helper-capable host routes its executor through the helper owner.
+  # Technical depth: ADR 0046's router wraps the opened local executor before the
+  # runtime starts; local requests and receipts pass through unchanged.
+  defp delegated_executor(options, executor) do
+    case options[:delegation] do
+      %{helper: _} = handle -> LoopexComposition.Delegation.wrap(handle, executor)
+      _ -> executor
+    end
+  end
+
+  # Concept: classification precedes durable admission but not read-only use.
+  # Technical depth: an incomplete bounded pass returns the runtime with every
+  # helper and mutating route closed by the guard; a binding refusal fails start.
+  defp bind_delegation(nil, _runtime), do: :ok
+
+  defp bind_delegation(handle, runtime) do
+    case LoopexComposition.Delegation.bind(handle, runtime) do
+      :ok -> :ok
+      {:error, {:helper_classification_incomplete, _, _, _}} -> :ok
+      {:error, reason} -> {:error, {:delegation_unavailable, reason}}
     end
   end
 

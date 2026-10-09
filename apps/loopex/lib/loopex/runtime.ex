@@ -475,6 +475,29 @@ defmodule Loopex.Runtime do
 
   def effect_intents(_, _, _, _), do: {:error, :runtime_unavailable}
 
+  @doc """
+  ## Concept
+
+  Reads one run's admission, ending and usage without activating its session.
+
+  ## Technical depth
+
+  ADR 0069's private host query, owned by Control under its bounded Store-read
+  guardian like `effect_intents/4`. The answer has exactly `admission`,
+  `terminal`, `usage` and `through_version`, computed by the session reducer
+  over the complete captured prefix, so restart returns the same map. A session
+  this runtime did not create, or a run without an accepted prompt admission,
+  is `:unknown_run`; Control loss or unavailable history is
+  `:runtime_unavailable`. It grants no command or effect authority and is
+  never projected onto a wire.
+  """
+  @spec run_evidence(t(), binary(), binary()) ::
+          {:ok, map()} | {:error, :unknown_run | :runtime_unavailable}
+  def run_evidence(%__MODULE__{} = runtime, session_id, run_id),
+    do: control_call(runtime, {:run_evidence, runtime.token, session_id, run_id})
+
+  def run_evidence(_, _, _), do: {:error, :runtime_unavailable}
+
   # Concept: authored and native creation share Control's single responsive custody slot.
   # Technical depth: dispatcher readiness does not grant creation eligibility;
   # startup claim/read/close is finite. Occupied intake refuses immediately and

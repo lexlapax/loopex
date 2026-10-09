@@ -229,6 +229,7 @@ defmodule Loopex.Runtime.SessionState do
           resources: map() | nil,
           run_resources: map(),
           charged: map(),
+          run_usage: map(),
           interactions: map(),
           open_interaction: binary() | nil,
           expected_events: [map()]
@@ -300,6 +301,7 @@ defmodule Loopex.Runtime.SessionState do
             resources: nil,
             run_resources: %{},
             charged: %{},
+            run_usage: %{},
             # ADRs 0021/0044 permit monotonic v1, v2, then v3 cutovers. This is
             # reconstructed from settled rows, never from runtime configuration.
             # The cleanup period this session declares, which ADR 0009 makes a
@@ -3855,6 +3857,82 @@ defmodule Loopex.Runtime.SessionState do
   @doc """
   ## Concept
 
+  One run's admission, ending and usage, as this reducer derives them.
+
+  ## Technical depth
+
+  ADR 0069's private run evidence. The complete Store-stamped private prefix is
+  replayed through the ordinary reducer, so usage is the same split that run
+  accounting folds live and after restart: reported input/output, estimated
+  charges and whether any attempt's usage is unresolved. Run-owned maintenance
+  is included; standalone compaction charges no run. Admission is the accepted
+  prompt record that opened the run; terminal is the run's terminal record with
+  its journal version and Canonical digest, or nil while the run is live.
+  """
+  @spec run_evidence(binary(), [map()], binary()) ::
+          {:ok, map()} | {:error, :unknown_run | :invalid_history}
+  def run_evidence(session_id, records, run_id)
+      when is_binary(session_id) and is_list(records) and is_binary(run_id) do
+    with {:ok, state} <- replay_records(%__MODULE__{session_id: session_id}, records),
+         %{payload: admitted} <-
+           Enum.find(records, fn %{payload: payload} ->
+             payload[:kind] == "prompt_admitted_v3" and payload["run_id"] == run_id and
+               payload["admission"] == "accepted"
+           end) do
+      # Concept: a reconciled unknown effect ends its run as a terminal too.
+      # Technical depth: outcome_unknown_committed_v2 settles the run's public
+      # terminal in the same transaction, so it is the run's terminal record.
+      terminal =
+        Enum.find_value(records, fn %{payload: payload} = record ->
+          cond do
+            payload["run_id"] != run_id ->
+              nil
+
+            payload[:kind] == "run_terminal_committed" ->
+              %{
+                state: payload["outcome"],
+                journal_version: record.journal_version,
+                record_digest: Canonical.digest(payload)
+              }
+
+            payload[:kind] == "outcome_unknown_committed_v2" ->
+              %{
+                state: "outcome_unknown",
+                journal_version: record.journal_version,
+                record_digest: Canonical.digest(payload)
+              }
+
+            true ->
+              nil
+          end
+        end)
+
+      {:ok,
+       %{
+         admission: %{
+           command_id: admitted["command_id"],
+           revision: admitted["command_revision"],
+           digest: admitted["command_digest"]
+         },
+         terminal: terminal,
+         usage:
+           Map.get(state.run_usage, run_id, %{
+             reported_input: 0,
+             reported_output: 0,
+             estimated: 0,
+             unresolved: false
+           }),
+         through_version: state.journal_version
+       }}
+    else
+      nil -> {:error, :unknown_run}
+      {:error, _reason} -> {:error, :invalid_history}
+    end
+  end
+
+  @doc """
+  ## Concept
+
   The steer waiting to join this run, if one is queued.
 
   ## Technical depth
@@ -5234,6 +5312,26 @@ defmodule Loopex.Runtime.SessionState do
   end
 
   defp history_identity?(value), do: is_binary(value) and byte_size(value) in 1..8_192
+
+  @doc """
+  ## Concept
+
+  Whether a receipt is a valid executor fact for one original job.
+
+  ## Technical depth
+
+  ADR 0069 extracts the exact check the reducer applies before committing an
+  executor fact, so a host retaining a helper receipt uses the same closed
+  plain schema, Store item bounds and job identity tuple rather than a copy.
+  It is pure: no state, Store or clock. The result is the canonical decoded
+  receipt; any other input is `:invalid_executor_receipt`.
+  """
+  @spec validate_executor_receipt(term(), term()) ::
+          {:ok, map()} | {:error, :invalid_executor_receipt}
+  def validate_executor_receipt(receipt, job) when is_map(receipt) and is_map(job),
+    do: canonical_executor_receipt(receipt, job)
+
+  def validate_executor_receipt(_receipt, _job), do: {:error, :invalid_executor_receipt}
 
   @doc false
   @spec propose_executor_fact(t(), binary(), map()) :: {:ok, proposal()} | {:error, term()}
@@ -9879,13 +9977,42 @@ defmodule Loopex.Runtime.SessionState do
          "source" => "reported",
          "input_tokens" => input,
          "output_tokens" => output
-       }),
-       do: charge_run(state, run_id, input + output, :reported)
+       }) do
+    state
+    |> charge_run(run_id, input + output, :reported)
+    |> record_run_usage(run_id, %{reported_input: input, reported_output: output})
+  end
 
   defp apply_attempt_accounting(state, run_id, %{"source" => "estimated"}) do
     budget = state.bounds |> Map.get(run_id, %{}) |> Map.get(:token_budget, 0)
     charged = Map.get(state.charged, run_id, %{tokens: 0, source: nil})
-    charge_run(state, run_id, max(budget - charged.tokens, 0), :estimated)
+    charge = max(budget - charged.tokens, 0)
+
+    state
+    |> charge_run(run_id, charge, :estimated)
+    |> record_run_usage(run_id, %{estimated: charge, unresolved: true})
+  end
+
+  # Concept: the same fold that charges a run keeps its usage split by source.
+  # Technical depth: ADR 0069's private run evidence reads this derived split.
+  # It is rebuilt by replay, never stored, and every ordinary or run-owned
+  # maintenance attempt passes through apply_attempt_accounting/3 exactly once.
+  defp record_run_usage(state, run_id, delta) do
+    usage =
+      Map.get(state.run_usage, run_id, %{
+        reported_input: 0,
+        reported_output: 0,
+        estimated: 0,
+        unresolved: false
+      })
+
+    usage =
+      Enum.reduce(delta, usage, fn
+        {:unresolved, value}, acc -> %{acc | unresolved: acc.unresolved or value}
+        {key, value}, acc -> Map.update!(acc, key, &(&1 + value))
+      end)
+
+    %{state | run_usage: Map.put(state.run_usage, run_id, usage)}
   end
 
   # Concept: turn one is turn one; every settled turn moves to the next.

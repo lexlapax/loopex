@@ -18,7 +18,8 @@ defmodule LoopexComposition.MixProject do
         "test/support/ephemeral_ambient_fixture.ex",
         "test/support/restore_fixture_copy.ex",
         "test/support/delegation_genesis_fixture.exs",
-        "test/support/delegation_parent_binding_fixture.exs"
+        "test/support/delegation_parent_binding_fixture.exs",
+        "test/support/delegation_runtime_fixture.exs"
       ],
       start_permanent: Mix.env() == :prod,
       deps: deps()
