@@ -240,7 +240,6 @@ defmodule LoopexCli.ProviderRuntimeIsolationTest do
         runtime_id: id,
         store: store,
         cleanup_grace_ms: 2_000,
-        sampling: %{"max_tokens" => 64},
         model: %{module: Adapter, model: @haiku, options: options},
         executor: %{
           module: AgentLoopTestExecutor,

@@ -62,7 +62,11 @@ defmodule LoopexCli.OfflineProviderBindingsTest do
         assert_receive {:runtime_options, options}
         model = options[:model]
         assert model.model == "openai:test"
-        assert options[:sampling] == %{"max_tokens" => 2048}
+        refute Keyword.has_key?(options, :sampling)
+
+        assert options[:session_creation_defaults]["initial_configuration"]["max_tokens"] ==
+                 2048
+
         assert options[:active_tools] == []
         assert options[:maintenance_model]["reasoning"] == "none"
         assert model.module == LoopexComposition.Model

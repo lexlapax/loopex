@@ -269,7 +269,6 @@ defmodule LoopexComposition.DurableOptions do
     [active_tools: active] ++
       for key <- [
             :bounds,
-            :sampling,
             :maintenance_instructions,
             :maintenance_model,
             :session_creation_defaults

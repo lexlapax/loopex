@@ -69,7 +69,8 @@ defmodule LoopexDaemon.ProviderBindingsTest do
     control = :sys.get_state(children.control)
     assert control.model.model == "openai:test"
     assert control.active_tools == []
-    assert control.sampling == %{"max_tokens" => 2048}
+    refute Map.has_key?(control, :sampling)
+    assert control.session_creation_defaults["initial_configuration"]["max_tokens"] == 2048
     assert control.bounds.max_turns == 3
     defaults = control.session_creation_defaults
     assert defaults == state.options[:session_creation_defaults]
