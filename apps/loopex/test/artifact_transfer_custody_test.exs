@@ -118,12 +118,14 @@ defmodule Loopex.ArtifactTransferCustodyTest do
     caller = Task.async(fn -> Loopex.open_artifact_transfer(fixture.attachment, data.request) end)
     reserve = callback(:reserve)
     {_request, context} = reserve.arguments
+
     assert :ok =
              Loopex.Runtime.EventDispatcher.release_attachment(
                fixture.dispatcher,
                fixture.attachment.attachment_id,
                fixture.attachment.incarnation_id
              )
+
     first = callback(:retire)
     original_selector = first.arguments
     assert original_selector.open_deadline_ms === context.open_deadline_ms
@@ -207,12 +209,14 @@ defmodule Loopex.ArtifactTransferCustodyTest do
     reply(retire, {:error, :cleanup_unproved})
     await(fn -> entry(fixture, context.transfer_ref).observation === :idle end)
     original = entry(fixture, context.transfer_ref)
+
     assert :ok =
              Loopex.Runtime.EventDispatcher.release_attachment(
                fixture.dispatcher,
                fixture.attachment.attachment_id,
                fixture.attachment.incarnation_id
              )
+
     observe = callback(:retire)
     assert observe.pid === retire.pid
     assert observe.arguments === retire.arguments

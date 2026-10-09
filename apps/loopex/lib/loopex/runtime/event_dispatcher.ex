@@ -1670,8 +1670,16 @@ defmodule Loopex.Runtime.EventDispatcher do
   defp record_read(attachment, transfer_ref, {:ok, %{bytes: bytes}}) when is_binary(bytes) do
     case Map.fetch(attachment.transfer_progress, transfer_ref) do
       {:ok, progress} ->
-        progress = %{progress | bytes: progress.bytes + byte_size(bytes), chunks: progress.chunks + 1}
-        %{attachment | transfer_progress: Map.put(attachment.transfer_progress, transfer_ref, progress)}
+        progress = %{
+          progress
+          | bytes: progress.bytes + byte_size(bytes),
+            chunks: progress.chunks + 1
+        }
+
+        %{
+          attachment
+          | transfer_progress: Map.put(attachment.transfer_progress, transfer_ref, progress)
+        }
 
       :error ->
         attachment
