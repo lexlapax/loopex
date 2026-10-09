@@ -67,7 +67,8 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
     create: :boolean,
     continue: :boolean,
     terminal: :boolean,
-    check: :boolean
+    check: :boolean,
+    candidate: :string
   ]
 
   @doc """
@@ -94,7 +95,8 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
          root = Map.get(overrides, :root, File.cwd!()),
          {:ok, catalog} <- FixtureManifest.load(Path.join(root, "test/fixtures/m7")),
          {:ok, concept} <- File.read(Path.join(root, "docs/plans/M7.md")),
-         {:ok, candidate} <- candidate(root, overrides),
+         {:ok, candidate} <-
+           candidate(root, Map.merge(Map.new(Keyword.take(opts, [:candidate])), overrides)),
          {:ok, writer} <- writer(opts, catalog.catalog["execution_manifest"], overrides) do
       context =
         Map.merge(
@@ -107,7 +109,7 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
             concept: concept,
             config_argv: config_argv,
             cwd: root,
-            mode: if(opts[:continue], do: :continue, else: :new),
+            mode: mode(opts),
             matrix: opts[:matrix],
             dispatch: if(opts[:terminal], do: :terminal, else: :pipe),
             operator: opts[:operator],
@@ -149,6 +151,14 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
 
       true ->
         run_lane(writer, opts[:lane], context)
+    end
+  end
+
+  defp mode(opts) do
+    cond do
+      opts[:continue] -> :continue
+      opts[:matrix] -> :auto
+      true -> :new
     end
   end
 
@@ -223,11 +233,41 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
              context.candidate,
              Map.get(context, :matrix)
            ),
-         {:ok, plan} <-
-           AttemptWriter.admit(writer, context.concept, selection, Map.get(context, :mode, :new)) do
+         {:ok, plan} <- admit(writer, context, selection, Map.get(context, :mode, :new)) do
       run_pins(writer, plan.remaining, selection, context, [])
+    else
+      {:skip, :lane_already_ended} -> {:ok, []}
+      other -> other
     end
   end
+
+  # Concept: one invocation of a logical matrix decides each lane's mode from
+  # the index itself: continue a suspended lane, join the matrix this
+  # invocation began, or start fresh; an ended lane is skipped, never rerun.
+  defp admit(writer, context, selection, :auto) do
+    case AttemptWriter.admit(writer, context.concept, selection, :continue) do
+      {:blocked, %{reason: :lane_already_ended}} ->
+        {:skip, :lane_already_ended}
+
+      {:unresolved, %{reason: :lane_history_unavailable}} when is_binary(context.matrix) ->
+        case AttemptWriter.admit(writer, context.concept, selection, :join) do
+          {:blocked, %{reason: :matrix_join_unavailable}} ->
+            AttemptWriter.admit(writer, context.concept, selection, :new)
+
+          other ->
+            other
+        end
+
+      {:unresolved, %{reason: :lane_history_unavailable}} ->
+        AttemptWriter.admit(writer, context.concept, selection, :new)
+
+      other ->
+        other
+    end
+  end
+
+  defp admit(writer, context, selection, mode),
+    do: AttemptWriter.admit(writer, context.concept, selection, mode)
 
   defp run_pins(_writer, [], _selection, _context, results), do: {:ok, Enum.reverse(results)}
 

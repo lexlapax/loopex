@@ -578,6 +578,51 @@ defmodule LoopexCli.M7CaseRunnerTest do
              CaseRunner.run_lane(f.writer, "m7-operator", resumed)
   end
 
+  test "matrix lanes start, join and skip by the index alone", f do
+    manifest =
+      f.context.manifest
+      |> lane(["m7.policy-denial"])
+      |> put_in(["execution_manifest", "lanes", "m7-provider"], ["m7.baseline.durable"])
+      |> put_in(["execution_manifest", "cases", "m7.baseline.durable", "status"], "ready")
+
+    scripts = fn _, call ->
+      if call == 1,
+        do: [
+          %{
+            text: "rm",
+            calls: [%{id: "rm", name: "bash", arguments: %{"argv" => ["rm", "README.md"]}}]
+          },
+          %{text: "denied", calls: []}
+        ],
+        else: [@read, %{text: "first line", calls: []}]
+    end
+
+    context =
+      Map.merge(f.context, %{
+        manifest: manifest,
+        matrix: "matrix-1",
+        mode: :auto,
+        chat_options: chat_options(f, scripts, self())
+      })
+
+    assert {:ok, [{:ok, %{mechanical_result: "pass"}}]} =
+             CaseRunner.run_lane(f.writer, "m7-operator", context)
+
+    assert {:ok, [{:ok, %{mechanical_result: "pass"}}]} =
+             CaseRunner.run_lane(f.writer, "m7-provider", context)
+
+    assert {:ok, []} = CaseRunner.run_lane(f.writer, "m7-operator", context)
+    assert {:ok, []} = CaseRunner.run_lane(f.writer, "m7-provider", context)
+
+    matrix =
+      for r <- records(f.index), r["body"]["kind"] == "case", do: r["body"]["logical_matrix_id"]
+
+    assert Enum.uniq(matrix) == ["matrix-1"]
+
+    assert {:blocked, %{reason: :fresh_matrix_already_consumed}} =
+             CaseRunner.run_lane(f.writer, "m7-operator", %{context | matrix: "matrix-2"})
+  end
+
   test "the wrapper command checks admission without staging and refuses bad arguments", f do
     :ok = AttemptWriter.close(f.writer)
     root = Path.expand("../../..", __DIR__)
