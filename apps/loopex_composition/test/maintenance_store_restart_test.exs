@@ -120,13 +120,16 @@ defmodule LoopexComposition.MaintenanceStoreRestartTest do
       # Concept: the successor uses only the persisted log and the current host adapters.
       # Technical depth: every Store, runtime and fixture actor is new. No reducer
       # state or summary result is passed to the successor, whose script contains
-      # only the next ordinary reply. Raw log bytes must survive reopening exactly.
-      second = start(path, configuration, [ordinary("resumed finished")])
-      assert File.read!(path) == bytes
+      # only the next ordinary reply. Check exact log bytes at Local reopening,
+      # before the new runtime makes its required creation-domain owner claim.
+      second = start(path, configuration, [ordinary("resumed finished")], [], bytes)
+      startup_bytes = File.read!(path)
+      assert binary_part(startup_bytes, 0, byte_size(bytes)) == bytes
       {reopened_records, reopened_events, reopened} = retained(second.store, session)
       assert reopened_records == records
       assert reopened_events == events
       assert reopened == before
+      assert File.read!(path) == startup_bytes
 
       assert {:ok, ^session} =
                Loopex.resume_session(second.runtime, session, command_id: "resume")
@@ -458,8 +461,17 @@ defmodule LoopexComposition.MaintenanceStoreRestartTest do
     end
   end
 
-  defp start(path, configuration, script, store_options \\ []) do
+  defp start(path, configuration, script, store_options \\ [], reopen_bytes \\ nil) do
     {:ok, store_pid} = Local.start_link(Keyword.put(store_options, :path, path))
+
+    if is_binary(reopen_bytes) do
+      on_exit(fn ->
+        if Process.alive?(store_pid), do: GenServer.stop(store_pid)
+      end)
+
+      assert File.read!(path) == reopen_bytes
+    end
+
     {:ok, store} = Loopex.Store.new(Local, store_pid)
     model = Model.start(script)
     executor = Executor.start()

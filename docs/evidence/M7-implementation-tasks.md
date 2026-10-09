@@ -1,5 +1,25 @@
 # M7 Implementation Tasks
 
+### Physical reopen byte oracle preserved, 2026-10-08
+
+Whole401 original44627 at2574d06a passes current Core21/21 and Composition53/55,
+then FAILS the two physical-reopen raw-byte assertions.44.169seconds/five joins,
+retained `M7/reviewed-owner-focused-20261008-v4`; terminal
+`6cedc5ef1b5c46584537e612c036633f1edf4882a433c1e824e439c5cce4b8c0`,
+collection `47caf9f8a1bf201aa5ccf6b460ea7deb022cddf0b822e18cd63568b845a87229`.
+The assertion ran after acquiring a new Runtime, which now performs the
+accepted creation-domain owner claim. Preserve the exact original Local-reopen
+byte equality immediately after actual Local.start_link and before Runtime
+acquisition, with Store cleanup registered before that assertion. Also require
+the old bytes as an exact prefix after startup, unchanged complete session
+records/events/reducer state, and byte equality around the later read-only
+projection. All32 maintenance cases, original actors, summary nonredispatch,
+actual fault schedules and cutoffs remain required. This changes no production
+format or startup behavior and introduces no fallback. Complete401/floor proof
+remains required on the corrected committed source. Next registry2684, SHA-256
+`2538aa60511cb5fa361f97308c32b1e1f2bdd0353d93c04d47ebedaaf8d8d70f`.
+No checklist row closes. Helpers/AppServer/Protocol and floor were unrun.
+
 ### Exact OwnerGroup shutdown metadata, 2026-10-08
 
 Whole401 original47738 atf21a0ac2 passes warning-free compile and20/21 current
