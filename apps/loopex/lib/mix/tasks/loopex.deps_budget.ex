@@ -211,17 +211,11 @@ defmodule Loopex.Checks.DepsBudget do
         |> Enum.reject(&is_nil(&1.app))
         |> Map.new(&{&1.app, &1.role})
 
-      complete_planned_inventory? =
-        Enum.all?(Map.keys(@planned_roles), &Map.has_key?(roles, &1))
-
       reasons =
         duplicate_app_reasons(records) ++
           required_app_reasons(roles) ++
           planned_inventory_reasons(records) ++
-          Enum.flat_map(
-            records,
-            &repository_record_reasons(&1, roles, complete_planned_inventory?)
-          ) ++
+          Enum.flat_map(records, &record_reasons(&1, roles)) ++
           external_dependency_reasons(records, roles) ++
           external_lock_reasons(root, records, roles) ++
           Enum.flat_map(records, &source_root_reasons(root, &1)) ++
@@ -1605,36 +1599,6 @@ defmodule Loopex.Checks.DepsBudget do
           ]
       end
     end)
-  end
-
-  defp repository_record_reasons(
-         %{app: :loopex_llm_reqllm, role: :edge} = record,
-         roles,
-         false
-       ) do
-    legacy_reqllm_reasons(record, roles)
-  end
-
-  defp repository_record_reasons(record, roles, _complete_planned_inventory?),
-    do: record_reasons(record, roles)
-
-  defp legacy_reqllm_reasons(record, roles) do
-    {known, unknown} = split_internal(record.dependencies, roles)
-
-    cond do
-      unknown != [] ->
-        unknown_reasons(record, unknown)
-
-      match?([{@contract_app, nil, _options}], known) and
-          production_internal?(known |> List.first() |> elem(2)) ->
-        []
-
-      true ->
-        [
-          "#{record.path}: incomplete ReqLLM edge must depend internally only on the " <>
-            "production protocol application"
-        ]
-    end
   end
 
   defp external_lock_reasons(root, records, roles) do
