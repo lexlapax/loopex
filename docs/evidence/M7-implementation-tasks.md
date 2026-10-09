@@ -1,5 +1,35 @@
 # M7 Implementation Tasks
 
+### Local artifact proof and foreground remaining failures, 2026-10-09
+
+At source `343fcf1c2070b1e9794bcdef21fc4e7d2de96b71`, original74262
+formatting passed with strict non-line AST equality on both toolchains after
+2.466 seconds. Original36485 passed all80 Local artifact cases on each
+supported pair after10.944 seconds, with zero exclusions, skips or invalid
+cases. This covers actual storage, capacity, owner loss and original cleanup
+controls; the broader T05 opening obligation remains open.
+
+Original13893 passed149 of152 selected AppServer cases after151.186 seconds.
+Three failures remain: a child stdout line that did not decode as a protocol
+object, a terminal choice-answer fixture expecting no label, and cleanup of
+the real stopped output leader. The offending stdout bytes were not retained;
+no exact-byte cause is claimed. One provider case is excluded and floor is
+UNRUN. Original91002 and63608 failures remain retained without relabeling.
+All original13893 process joins and16 assets were verified. Terminal SHA-256
+`5048bb48a0c23d4518535034808779972c14eefcfe413fdd211bb89347f6b38b`;
+collection `d2df69a44600120c805655d52106ac2247ae8f2fc079e4b3f7b1eee2d9561058`.
+Completed registry2877 SHA-256
+`83ae21e984ff934ab8a2c8d6fbddbad055fb260b4037c0d91cd5611f08b6f7bf`.
+
+Immutable66-asset retention:
+`M7/current-source-preparation-20261009-v18/retention.json`, SHA-256
+`8f58c8772a4e55dcbb172f30a1b7de9942838347b8d931b7746f86cb7792b4d1`.
+Root is investigating the three foreground failures. Core's proposed1,000ms
+observation-only grace and ADR0065 remain pending; dependent work stays held.
+No native handle is live. No full fast/release/closure result is claimed.
+T01–T19 original89 done /84 open /6 retired; added371 done /24 open;
+combined460 done /108 open /6 retired. No checkbox changes.
+
 ### Manifest proof and reviewed fixture repairs, 2026-10-08
 
 Original T05's complete payload-manifest/reproducible-digest subtask is done.
