@@ -165,7 +165,10 @@ defmodule Loopex.TraceSessionTest do
 
     {:ok, %{workers: workers}} = Runtime.children(runtime)
     parent = self()
-    {:ok, worker} = Task.Supervisor.start_child(workers, fn -> module.call(parent) end)
+
+    {:ok, worker} =
+      Loopex.Runtime.TaskSupervisor.start_child(workers, fn -> module.call(parent) end)
+
     assert_receive {:unloaded_called, ^worker}
 
     entry = await_entry("trace_call")
@@ -290,7 +293,7 @@ defmodule Loopex.TraceSessionTest do
     parent = self()
 
     {:ok, calls_task} =
-      Task.Supervisor.start_child(calls_workers, fn -> PendingCall.block(parent) end)
+      Loopex.Runtime.TaskSupervisor.start_child(calls_workers, fn -> PendingCall.block(parent) end)
 
     assert_receive {:pending_trace_call, ^calls_task}
     assert %{calls: %{}, call_monitors: %{}} = :sys.get_state(calls_tracer)
@@ -301,7 +304,9 @@ defmodule Loopex.TraceSessionTest do
     {:ok, %{tracer: returns_tracer, workers: returns_workers}} = Runtime.children(returns)
 
     {:ok, returns_task} =
-      Task.Supervisor.start_child(returns_workers, fn -> PendingCall.block(parent) end)
+      Loopex.Runtime.TaskSupervisor.start_child(returns_workers, fn ->
+        PendingCall.block(parent)
+      end)
 
     assert_receive {:pending_trace_call, ^returns_task}
 
@@ -353,7 +358,7 @@ defmodule Loopex.TraceSessionTest do
     parent = self()
 
     {:ok, sender} =
-      Task.Supervisor.start_child(workers, fn ->
+      Loopex.Runtime.TaskSupervisor.start_child(workers, fn ->
         ExclusionProbe.before(parent)
 
         result =
@@ -404,7 +409,7 @@ defmodule Loopex.TraceSessionTest do
                    50
 
     {:ok, control_task} =
-      Task.Supervisor.start_child(workers, fn -> ExclusionProbe.control(parent) end)
+      Loopex.Runtime.TaskSupervisor.start_child(workers, fn -> ExclusionProbe.control(parent) end)
 
     assert_receive {:exclusion_probe, ^control_task, :control}
 
@@ -416,7 +421,7 @@ defmodule Loopex.TraceSessionTest do
     assert control_entry["pid"] == inspect(control_task)
 
     {:ok, globally_cleared} =
-      Task.Supervisor.start_child(workers, fn -> SensitiveProbe.carry(parent) end)
+      Loopex.Runtime.TaskSupervisor.start_child(workers, fn -> SensitiveProbe.carry(parent) end)
 
     assert_receive {:sensitive_probe, ^globally_cleared}
     Process.sleep(50)
@@ -432,7 +437,9 @@ defmodule Loopex.TraceSessionTest do
              state.trace_excluded == %{} and state.trace_mfa_counts == %{}
            end)
 
-    {:ok, restored} = Task.Supervisor.start_child(workers, fn -> SensitiveProbe.carry(parent) end)
+    {:ok, restored} =
+      Loopex.Runtime.TaskSupervisor.start_child(workers, fn -> SensitiveProbe.carry(parent) end)
+
     assert_receive {:sensitive_probe, ^restored}
 
     restored_entry =
@@ -472,7 +479,7 @@ defmodule Loopex.TraceSessionTest do
     parent = self()
 
     {:ok, sender} =
-      Task.Supervisor.start_child(workers, fn ->
+      Loopex.Runtime.TaskSupervisor.start_child(workers, fn ->
         send(
           parent,
           {:proportional_exclusion, self(), Trace.exclude_self(capability, functions: functions)}

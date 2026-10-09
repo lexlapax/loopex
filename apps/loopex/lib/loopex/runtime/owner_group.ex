@@ -1,6 +1,8 @@
 defmodule Loopex.Runtime.OwnerGroup do
   @moduledoc false
 
+  alias Loopex.Runtime.TaskSupervisor
+
   use GenServer
 
   @timer_slice_ms 3_600_000
@@ -98,11 +100,11 @@ defmodule Loopex.Runtime.OwnerGroup do
     # Concept: model and policy work share the lifetime of the session owner
     # incarnation that started them.
     #
-    # Technical depth: the private Task.Supervisor is linked to this group, not
+    # Technical depth: the private TaskSupervisor is linked to this group, not
     # to Runtime.Workers. Executor and cleanup tasks stay on Runtime.Workers, so
     # ending this group cannot terminate evidence-producing effectful work.
     Process.flag(:trap_exit, true)
-    {:ok, workers} = Task.Supervisor.start_link()
+    {:ok, workers} = TaskSupervisor.start_link()
     {:ok, %{workers: workers, coordinator: nil, monitor: nil, providers: %{}}}
   end
 
@@ -232,7 +234,7 @@ defmodule Loopex.Runtime.OwnerGroup do
 
     if Process.alive?(workers) do
       # Concept: registered resources stay alive while their guards prove cleanup.
-      # Technical depth: bulk Task.Supervisor termination kills resource siblings
+      # Technical depth: bulk TaskSupervisor termination kills resource siblings
       # before waiting for guards. Spend each invocation's original window first;
       # the unchanged subtree stop remains the final owner/successor barrier.
       providers = begin_provider_cleanup(state.providers)

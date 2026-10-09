@@ -877,7 +877,7 @@ defmodule Loopex.RuntimeQuiesceTest do
     {_control, session_ids, coordinators} =
       install_probe_entries(fixture.runtime, 64, :block_admission)
 
-    bounds = fast_bounds(%{admission_ms: 500, worker_reap_ms: 100})
+    bounds = fast_bounds(%{})
     started_at = System.monotonic_time(:millisecond)
 
     assert {:ok, result} =
@@ -891,8 +891,42 @@ defmodule Loopex.RuntimeQuiesceTest do
     assert result.settled == []
     assert result.absent == []
     assert elapsed_ms >= bounds.admission_ms - bounds.worker_reap_ms
-    assert elapsed_ms < 3_000
+    assert elapsed_ms < 10_000
     assert Enum.all?(coordinators, &(not Process.alive?(&1)))
+  end
+
+  # Concept: a late phase owner cannot turn an overrun into success.
+  # Technical depth: the owner is suspended while its one admission worker
+  # answers and exits, and resumed only after the absolute admission deadline.
+  # Its exact join is already queued, yet the phase did not finish in bound.
+  test "a phase owner woken after its outer deadline refuses its queued joins" do
+    fixture = fixture("quiesce-late-owner")
+
+    {_control, [session_id], [coordinator]} =
+      install_probe_entries(fixture.runtime, 1, :held_admission)
+
+    bounds = fast_bounds(%{})
+
+    quiesce =
+      Task.async(fn -> Quiesce.run(fixture.runtime.supervisor, fixture.runtime.token, bounds) end)
+
+    assert_receive {:quiesce_probe_held, ^session_id, worker, phase_owner}, 5_000
+    held_at = System.monotonic_time(:millisecond)
+    worker_monitor = Process.monitor(worker)
+    true = :erlang.suspend_process(phase_owner)
+    send(coordinator, :release_admission)
+
+    assert_receive {:DOWN, ^worker_monitor, :process, ^worker,
+                    {:loopex_quiesce_worker_result, _operation, ^session_id,
+                     :rejected_no_active_run}},
+                   5_000
+
+    # The owner started before it called the probe, so its admission deadline
+    # is no later than held_at plus the admission bound.
+    Process.sleep(max(held_at + bounds.admission_ms + 1 - System.monotonic_time(:millisecond), 0))
+    true = :erlang.resume_process(phase_owner)
+
+    assert {:error, :runtime_unavailable} = Task.await(quiesce, 10_000)
   end
 
   @tag :long_bound
@@ -927,14 +961,10 @@ defmodule Loopex.RuntimeQuiesceTest do
     bounds =
       fast_bounds(%{
         admission_ms: 4_000,
-        initial_gate_ms: 2_000,
-        worker_reap_ms: 500,
         status_census_ms: 10_000,
         status_work_ms: 300,
         coordinator_termination_ms: 4_000,
-        termination_projection_ms: 2_000,
-        fence_budget_ms: 4_000,
-        fence_reap_ms: 500
+        fence_budget_ms: 4_000
       })
 
     quiesce =
@@ -995,17 +1025,7 @@ defmodule Loopex.RuntimeQuiesceTest do
     # validates, so a loaded machine cannot end the drain on a bound this case
     # does not examine.
     bounds =
-      fast_bounds(%{
-        admission_ms: 4_000,
-        initial_gate_ms: 2_000,
-        status_census_ms: 2_000,
-        status_work_ms: 1_000,
-        fence_budget_ms: 2_000,
-        fence_reap_ms: 100,
-        coordinator_termination_ms: 500,
-        termination_projection_ms: 50,
-        worker_reap_ms: 100
-      })
+      fast_bounds(%{admission_ms: 4_000, fence_budget_ms: 2_000})
 
     started_at = System.monotonic_time(:millisecond)
 
@@ -1068,17 +1088,7 @@ defmodule Loopex.RuntimeQuiesceTest do
     # bound of seconds, within the relations `Quiesce` validates, so a loaded
     # machine cannot end the drain on a bound this case does not examine.
     bounds =
-      fast_bounds(%{
-        admission_ms: 4_000,
-        initial_gate_ms: 2_000,
-        worker_reap_ms: 500,
-        status_census_ms: 2_000,
-        status_work_ms: 1_000,
-        coordinator_termination_ms: 4_000,
-        termination_projection_ms: 2_000,
-        fence_budget_ms: 500,
-        fence_reap_ms: 100
-      })
+      fast_bounds(%{admission_ms: 4_000, coordinator_termination_ms: 4_000})
 
     started_at = System.monotonic_time(:millisecond)
 
@@ -1127,17 +1137,7 @@ defmodule Loopex.RuntimeQuiesceTest do
       M1RuntimeTestStore.delay_ownership_heads(fixture.store_pid, blocked_ids, waiter_custodian)
 
     bounds =
-      fast_bounds(%{
-        admission_ms: 4_000,
-        initial_gate_ms: 2_000,
-        worker_reap_ms: 500,
-        status_census_ms: 2_000,
-        status_work_ms: 1_000,
-        coordinator_termination_ms: 4_000,
-        termination_projection_ms: 2_000,
-        fence_budget_ms: 500,
-        fence_reap_ms: 100
-      })
+      fast_bounds(%{admission_ms: 4_000, coordinator_termination_ms: 4_000})
 
     observations = :ets.new(:mixed_fence_observations, [:ordered_set, :public])
     :ets.insert(observations, {:count, 0})
@@ -1175,7 +1175,7 @@ defmodule Loopex.RuntimeQuiesceTest do
     assert result.unsettled == blocked_ids
     assert result.absent == []
     assert result.fences[sibling_id] == :committed
-    assert result.fence_budget_ms == 500
+    assert result.fence_budget_ms == bounds.fence_budget_ms
     assert elapsed_ms >= bounds.fence_budget_ms - bounds.fence_reap_ms
     assert elapsed_ms < 10_000
     assert :ets.info(operations, :size) == 64
@@ -1481,14 +1481,14 @@ defmodule Loopex.RuntimeQuiesceTest do
       fixture = fixture("quiesce-late-fence-start-#{@fence_start_mode}")
       session = create_session(fixture.runtime, "create-late-fence")
       mode = @fence_start_mode
-      bounds = fast_bounds(%{fence_budget_ms: 500, fence_reap_ms: 100})
+      bounds = fast_bounds(%{})
       observations = :ets.new(:fence_start_observations, [:ordered_set, :public])
       :ets.insert(observations, {:count, 0})
 
       # Concept: the measured fence witness starts with its fixture transports ready.
       # Technical depth: readiness is observed before Quiesce captures its
-      # existing 50-ms initial gate. It does not prove that resolution and gate
-      # installation finish inside that deadline. The 500-ms fence and 100-ms
+      # injected 1,000-ms initial gate. It does not prove that resolution and gate
+      # installation finish inside that deadline. The 500-ms fence work and 1,000-ms
       # reap cutoffs remain unchanged.
       projection = start_fence_projection(fixture, observations, mode, bounds.fence_reap_ms)
       %{control: control, relay: relay, root: root} = projection
@@ -1589,10 +1589,13 @@ defmodule Loopex.RuntimeQuiesceTest do
     test "the original child-resolution actors join with #{@child_resolution_delivery} delivery" do
       fixture = fixture("quiesce-child-resolution-#{@child_resolution_delivery}")
       session = create_session(fixture.runtime, "create-child-resolution")
-      bounds = fast_bounds(%{fence_budget_ms: 500, fence_reap_ms: 100})
+      bounds = fast_bounds(%{})
       observations = :ets.new(:child_resolution_observations, [:ordered_set, :public])
       :ets.insert(observations, {:count, 0})
-      projection = start_fence_projection(fixture, observations, :forward_start, 100)
+
+      projection =
+        start_fence_projection(fixture, observations, :forward_start, bounds.fence_reap_ms)
+
       root = projection.root
       send(root, {:capture_child_resolution, self(), @child_resolution_delivery})
       assert_receive {:child_resolution_capture_ready, ^root}, 1_000
@@ -1622,7 +1625,7 @@ defmodule Loopex.RuntimeQuiesceTest do
 
         # Concept: an expired resolution never installs the runtime gate.
         # Technical depth: release the original reply only after both original
-        # actors join. The unchanged 50-ms gate killed the actual linked worker;
+        # actors join. The injected 1,000-ms gate killed the actual linked worker;
         # forwarding its late reply cannot create a fence or mutate the Store.
         send(root, {:release_child_resolution, worker})
         assert Supervisor.which_children(root) != []
@@ -1643,7 +1646,7 @@ defmodule Loopex.RuntimeQuiesceTest do
         assert result.settled == [session]
         assert result.unsettled == []
         assert result.fences == %{session => :committed}
-        assert result.fence_budget_ms == 500
+        assert result.fence_budget_ms == bounds.fence_budget_ms
         current = M1RuntimeTestStore.inspect_state(fixture.store_pid).sessions[session]
         previous = before.sessions[session]
         assert current.owner_epoch == previous.owner_epoch + 1
@@ -1897,7 +1900,7 @@ defmodule Loopex.RuntimeQuiesceTest do
   # Concept: the expiry witness still requires Control's real cancellation acknowledgement.
   # Technical depth: this single-session relay retains failed/closed notices until
   # the observer's normal DOWN join and actual cancellation acknowledgement. Both
-  # selective receives spend the original work deadline plus its 100-ms reap bound.
+  # selective receives spend the original work deadline plus its reap bound.
   defp cancel_expired_fence(control, token, drain, operation, fence, observations, reap_ms) do
     cutoff = fence.deadline + reap_ms
     worker = fence.worker
@@ -2231,18 +2234,23 @@ defmodule Loopex.RuntimeQuiesceTest do
     session_id
   end
 
+  # Concept: injected bounds shorten the production clocks without racing the OS.
+  # Technical depth: under full-check CPU overload the phase owner was observed
+  # waking 160-270 ms after a deadline. Every reserve and the initial gate is
+  # therefore 1,000 ms, while each case's examined work cutoff stays short; see
+  # the 2026-10-09 quiesce test-reserve disposition in the agent context map.
   defp fast_bounds(overrides) do
     Quiesce.bounds()
     |> Map.merge(%{
-      admission_ms: 300,
-      initial_gate_ms: 50,
-      worker_reap_ms: 50,
-      status_census_ms: 200,
-      status_work_ms: 100,
-      coordinator_termination_ms: 150,
-      termination_projection_ms: 50,
-      fence_budget_ms: 150,
-      fence_reap_ms: 50
+      admission_ms: 2_000,
+      initial_gate_ms: 1_000,
+      worker_reap_ms: 1_000,
+      status_census_ms: 2_000,
+      status_work_ms: 1_000,
+      coordinator_termination_ms: 1_500,
+      termination_projection_ms: 500,
+      fence_budget_ms: 1_500,
+      fence_reap_ms: 1_000
     })
     |> Map.merge(overrides)
   end
@@ -2297,7 +2305,15 @@ defmodule Loopex.RuntimeQuiesceTest do
       {:"$gen_call", from, {:admit_quiesce_abort, _owner, drain_id, phase_owner}} ->
         send(observer, {:quiesce_probe_call, :admit, session_id, elem(from, 0)})
 
-        unless mode == :block_admission do
+        if mode == :held_admission do
+          send(observer, {:quiesce_probe_held, session_id, elem(from, 0), phase_owner})
+
+          receive do
+            :release_admission -> GenServer.reply(from, :rejected_no_active_run)
+          end
+        end
+
+        unless mode in [:block_admission, :held_admission] do
           GenServer.reply(
             from,
             {:admitted,

@@ -577,11 +577,11 @@ defmodule Loopex.Runtime.Quiesce do
          monitors,
          workers,
          _work_deadline,
-         _outer_deadline,
+         outer_deadline,
          _cutoff?
        )
        when map_size(monitors) == 0 and map_size(workers) == 0,
-       do: :ok
+       do: within_outer(:ok, outer_deadline)
 
   defp await_termination(
          context,
@@ -797,10 +797,13 @@ defmodule Loopex.Runtime.Quiesce do
 
   defp await_fences(context, token, drain_id, operations, work_deadline, outer_deadline, cutoff?) do
     if fences_complete?(operations) do
-      {:ok,
-       Map.new(operations, fn {_operation_ref, operation} ->
-         {operation.session_id, operation.result}
-       end)}
+      within_outer(
+        {:ok,
+         Map.new(operations, fn {_operation_ref, operation} ->
+           {operation.session_id, operation.result}
+         end)},
+        outer_deadline
+      )
     else
       deadline = if cutoff?, do: outer_deadline, else: work_deadline
 
@@ -1179,9 +1182,9 @@ defmodule Loopex.Runtime.Quiesce do
     collect_workers(context, workers, results, work_deadline, outer_deadline, false)
   end
 
-  defp collect_workers(_context, workers, results, _work_deadline, _outer_deadline, _killed?)
+  defp collect_workers(_context, workers, results, _work_deadline, outer_deadline, _killed?)
        when map_size(workers) == 0,
-       do: {:ok, results}
+       do: within_outer({:ok, results}, outer_deadline)
 
   defp collect_workers(context, workers, results, work_deadline, outer_deadline, killed?) do
     deadline = if killed?, do: outer_deadline, else: work_deadline
@@ -1259,6 +1262,15 @@ defmodule Loopex.Runtime.Quiesce do
           )
         end
     end
+  end
+
+  # Concept: a phase finished only after its outer deadline did not meet its bound.
+  # Technical depth: a phase owner woken late by the scheduler can still find
+  # every exact join already queued. Those joins do not prove the pids were gone
+  # by the absolute outer instant, so completion observed after it is
+  # `runtime_unavailable`, the same as a reap that expires with a survivor.
+  defp within_outer(result, outer_deadline) do
+    if now_ms() > outer_deadline, do: {:error, :runtime_unavailable}, else: result
   end
 
   defp kill_workers(workers) do

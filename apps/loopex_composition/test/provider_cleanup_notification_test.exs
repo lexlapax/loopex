@@ -188,7 +188,7 @@ defmodule LoopexComposition.ProviderCleanupNotificationTest do
       worker = actor(workers, observer, :worker, group, reference)
 
       {:ok, caretaker} =
-        Task.Supervisor.start_child(workers, fn ->
+        Loopex.Runtime.TaskSupervisor.start_child(workers, fn ->
           :ok = OwnerGroup.retain_provider(group, guard, reference, 1, bound)
           :ok = OwnerGroup.bind_provider(group, reference, worker, bound)
           send(observer, {:caretaker_ready, self()})
@@ -236,7 +236,7 @@ defmodule LoopexComposition.ProviderCleanupNotificationTest do
 
   defp actor(workers, observer, role, group, reference) do
     {:ok, pid} =
-      Task.Supervisor.start_child(workers, fn ->
+      Loopex.Runtime.TaskSupervisor.start_child(workers, fn ->
         receive do
           {:loopex_provider_cleanup_window, ^group, ^reference, window} ->
             send(observer, {:window_received, role, self(), window})

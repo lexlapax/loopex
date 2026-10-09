@@ -26,6 +26,7 @@ defmodule Loopex.Runtime.Supervisor do
 
   use Supervisor
 
+  alias Loopex.Runtime.TaskSupervisor
   alias Loopex.Runtime.Control
   alias Loopex.Runtime.EventDispatcher
   alias Loopex.Runtime.ResourceSnapshot
@@ -76,7 +77,7 @@ defmodule Loopex.Runtime.Supervisor do
         id: @control_id,
         start: {Control, :start_link, [[root: root] ++ options]}
       },
-      Supervisor.child_spec({Task.Supervisor, []}, id: @workers_id),
+      Supervisor.child_spec({TaskSupervisor, []}, id: @workers_id),
       {Loopex.Runtime.OwnerGroups, []},
       {SessionSupervisor, []},
       %{

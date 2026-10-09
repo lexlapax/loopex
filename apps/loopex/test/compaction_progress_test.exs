@@ -89,7 +89,7 @@ defmodule Loopex.CompactionProgressTest do
   end
 
   test "activity relay sends closed items without a closure and ends with its owner" do
-    supervisor = start_supervised!({Task.Supervisor, []})
+    supervisor = start_supervised!({Loopex.Runtime.TaskSupervisor, []})
     observer = self()
     fixture = Loopex.AgentLoopFixture.start(script: [], tools: [], progress_sink: open_sink())
     on_exit(fn -> Loopex.AgentLoopFixture.stop(fixture) end)
@@ -126,7 +126,7 @@ defmodule Loopex.CompactionProgressTest do
   end
 
   test "normal owner termination also joins its activity relay without a closure" do
-    supervisor = start_supervised!({Task.Supervisor, []})
+    supervisor = start_supervised!({Loopex.Runtime.TaskSupervisor, []})
     observer = self()
     fixture = Loopex.AgentLoopFixture.start(script: [], tools: [], progress_sink: open_sink())
     on_exit(fn -> Loopex.AgentLoopFixture.stop(fixture) end)
@@ -150,7 +150,7 @@ defmodule Loopex.CompactionProgressTest do
   end
 
   test "normal owner death prevents a suspended relay draining its earlier queued activity" do
-    supervisor = start_supervised!({Task.Supervisor, []})
+    supervisor = start_supervised!({Loopex.Runtime.TaskSupervisor, []})
     observer = self()
     fixture = Loopex.AgentLoopFixture.start(script: [], tools: [], progress_sink: open_sink())
     on_exit(fn -> Loopex.AgentLoopFixture.stop(fixture) end)

@@ -566,15 +566,11 @@ defmodule Loopex.Runtime.OwnerGroupRetirementTest do
   end
 
   defp start_actor(workers, fun, cutoff) do
-    # The installed current/floor start_child/3 writers use this exact native
-    # Task.Supervisor request. A timed fixture call preserves the same child
-    # implementation/spec without its public helper's infinite setup wait.
-    owner = {node(), self(), self()}
-    args = [owner, [self()], {:erlang, :apply, [fun, []]}]
-
-    {:ok, pid} =
-      GenServer.call(workers, {:start_task, args, :temporary, :brutal_kill}, left(cutoff))
-
+    # The installed start_child/3 writers use this exact native supervisor
+    # request. A timed fixture call preserves the same child implementation/spec
+    # without its public helper's infinite setup wait.
+    spec = Loopex.Runtime.TaskSupervisor.task_spec(fun, :brutal_kill)
+    {:ok, pid} = GenServer.call(workers, {:start_child, spec}, left(cutoff))
     pid
   end
 
@@ -789,7 +785,7 @@ defmodule Loopex.Runtime.OwnerGroupRetirementTest do
                )
 
         assert Enum.all?(members, fn
-                 {:undefined, pid, :worker, [Task.Supervised]} -> pid in actors
+                 {_id, pid, :worker, [Loopex.Runtime.TaskSupervisor]} -> pid in actors
                  _unexpected -> false
                end)
 

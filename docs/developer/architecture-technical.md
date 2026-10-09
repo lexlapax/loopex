@@ -102,14 +102,17 @@ Concept: [One serial session owner](architecture.md#concept-arch-session-owner).
 
 `Loopex.Runtime.Supervisor` is the unnamed root of one runtime instance. Its
 seven children start under `:rest_for_one` in this order: the tool registry
-(`Loopex.ToolRegistry`), runtime control (`Loopex.Runtime.Control`), a
-`Task.Supervisor` for workers, a `DynamicSupervisor` for owner groups, a
-`DynamicSupervisor` for session coordinators, the event dispatcher
+(`Loopex.ToolRegistry`), runtime control (`Loopex.Runtime.Control`), the runtime task supervisor
+(`Loopex.Runtime.TaskSupervisor`) for workers, owner groups
+(`Loopex.Runtime.OwnerGroups`), session coordinators
+(`Loopex.Runtime.SessionSupervisor`), the event dispatcher
 (`Loopex.Runtime.EventDispatcher`), and the trace-session owner
 (`Loopex.Trace`). The order encodes what must reset together — control and
 every coordinator resolve tools through the registry, while a dispatcher
 failure leaves coordinators alive because committed events can be re-read from
-the durable outbox, and a tracer failure disturbs nothing before it.
+the durable outbox, and a tracer failure disturbs nothing before it. The three
+dynamic parents use Erlang supervisor shutdown, so a temporary child that exits
+on its own while its parent stops is not reported as a shutdown failure.
 `Loopex.Runtime` hands callers an opaque reference holding the root pid and an
 unforgeable runtime-local token, so a supervised restart never turns a stale
 child pid into the public identity.

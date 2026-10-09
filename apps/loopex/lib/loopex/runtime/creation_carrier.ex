@@ -2,10 +2,11 @@ defmodule Loopex.Runtime.CreationCarrier do
   @moduledoc false
 
   # Concept: Control owns each decision; this guardian owns one permitted call's lifetime.
-  # Technical depth: the private Task.Supervisor, worker and guardian have original
+  # Technical depth: the private TaskSupervisor, worker and guardian have original
   # monitors before permit. Only their original DOWN signals prove retirement.
   # A retired RPC can still be queued in Store and never proves Store cancellation.
   alias Loopex.Executor
+  alias Loopex.Runtime.TaskSupervisor
   alias Loopex.Store
   alias __MODULE__.PreparationGroup
 
@@ -24,7 +25,7 @@ defmodule Loopex.Runtime.CreationCarrier do
         grace,
         cleanup
       ) do
-    Task.Supervisor.start_child(
+    TaskSupervisor.start_child(
       workers,
       fn ->
         if match?({:prepare_configuration, _, _, _, _, _}, action) do
@@ -53,11 +54,11 @@ defmodule Loopex.Runtime.CreationCarrier do
     owner_monitor = Process.monitor(control)
     guardian = self()
     await_ownership(control, owner_monitor, incarnation, invocation, permit, cutoff)
-    {:ok, group} = Task.Supervisor.start_link()
+    {:ok, group} = TaskSupervisor.start_link()
     group_monitor = Process.monitor(group)
 
     {:ok, worker} =
-      Task.Supervisor.start_child(
+      TaskSupervisor.start_child(
         group,
         fn ->
           work(control, guardian, incarnation, invocation, permit, store, action, cutoff)
@@ -811,12 +812,13 @@ defmodule Loopex.Runtime.CreationCarrier.PreparationGroup do
   @moduledoc false
   use GenServer
   alias Loopex.Executor
+  alias Loopex.Runtime.TaskSupervisor
 
   # Concept: preparation resources have a second owner if their guardian dies.
   # Technical depth: this invocation-local group retains original monitors before
   # starter/registration acknowledgement and never owns session or Store truth.
   def start(runtime_workers, guardian, control, identity, cutoff, grace, cleanup) do
-    Task.Supervisor.start_child(
+    TaskSupervisor.start_child(
       runtime_workers,
       fn ->
         {:ok, state} =
@@ -852,7 +854,7 @@ defmodule Loopex.Runtime.CreationCarrier.PreparationGroup do
   @impl true
   def init({runtime_workers, guardian, control, identity, cutoff, grace, cleanup}) do
     Process.flag(:trap_exit, true)
-    {:ok, workers} = Task.Supervisor.start_link()
+    {:ok, workers} = TaskSupervisor.start_link()
 
     inventory =
       :ets.new(__MODULE__, [:set, :public, {:heir, guardian, :creation_preparation_resource}])
@@ -894,7 +896,7 @@ defmodule Loopex.Runtime.CreationCarrier.PreparationGroup do
       request = make_ref()
 
       result =
-        Task.Supervisor.start_child(
+        TaskSupervisor.start_child(
           state.workers,
           fn ->
             owner = Process.monitor(group)
