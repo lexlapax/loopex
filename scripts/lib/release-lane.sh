@@ -4,23 +4,55 @@
 release_select() {
   release_mode=full
   release_selectors=""
+  release_attempts_index=""
+  release_resume_matrix=""
+  local usage='check-release: usage: check-release.sh [--only NAME ...] [--attempts-index FILE] [--resume-matrix ID]'
   while [ "$#" -gt 0 ]; do
-    [ "$1" = --only ] && [ "$#" -ge 2 ] ||
-      { echo 'check-release: usage: check-release.sh [--only NAME ...]' >&2; return 2; }
-    case "$2" in
-      real_provider | node_client | long_bound | cross_uid | real-provider-[3-9] | real-provider-10 | real-provider-11) ;;
-      real-provider-1 | real-provider-2)
-        echo 'check-release: attended rows cannot be selected; run the full closure matrix' >&2
-        return 2 ;;
-      *) echo 'check-release: unknown selector' >&2; return 2 ;;
+    [ "$#" -ge 2 ] && [ -n "$2" ] || { echo "$usage" >&2; return 2; }
+    case "$1" in
+      --only)
+        case "$2" in
+          real_provider | node_client | long_bound | cross_uid | real-provider-[3-9] | real-provider-10 | real-provider-11 | m7-provider | m7-rollback) ;;
+          real-provider-1 | real-provider-2 | m7-operator)
+            echo 'check-release: attended rows cannot be selected; run the full closure matrix' >&2
+            return 2 ;;
+          *) echo 'check-release: unknown selector' >&2; return 2 ;;
+        esac
+        case " $release_selectors " in
+          *" $2 "*) echo 'check-release: duplicate selector' >&2; return 2 ;;
+        esac
+        release_selectors="${release_selectors:+$release_selectors }$2"
+        release_mode=selection-only ;;
+      --attempts-index)
+        [ -z "$release_attempts_index" ] || { echo 'check-release: duplicate --attempts-index' >&2; return 2; }
+        case "$2" in
+          /*) release_attempts_index=$2 ;;
+          *) echo 'check-release: --attempts-index must be an absolute retained path' >&2; return 2 ;;
+        esac ;;
+      --resume-matrix)
+        [ -z "$release_resume_matrix" ] || { echo 'check-release: duplicate --resume-matrix' >&2; return 2; }
+        release_resume_matrix=$2 ;;
+      *) echo "$usage" >&2; return 2 ;;
     esac
-    case " $release_selectors " in
-      *" $2 "*) echo 'check-release: duplicate selector' >&2; return 2 ;;
-    esac
-    release_selectors="${release_selectors:+$release_selectors }$2"
-    release_mode=selection-only
     shift 2
   done
+  # Concept: every full-matrix case and every paid M7 lane is recorded in the
+  # retained attempts index; legacy selections stay unindexed.
+  if [ "$release_mode" = full ]; then
+    [ -n "$release_attempts_index" ] ||
+      { echo 'check-release: the full closure matrix requires --attempts-index FILE' >&2; return 2; }
+  else
+    [ -z "$release_resume_matrix" ] ||
+      { echo 'check-release: --resume-matrix resumes only the full closure matrix' >&2; return 2; }
+    if release_selected m7-provider && [ -z "$release_attempts_index" ]; then
+      echo 'check-release: m7-provider requires --attempts-index FILE' >&2
+      return 2
+    fi
+    if [ -n "$release_attempts_index" ] && ! release_needs_m7; then
+      echo 'check-release: --attempts-index applies only to the indexed M7 lanes' >&2
+      return 2
+    fi
+  fi
 }
 
 release_selected() {
@@ -38,7 +70,11 @@ release_needs_provider() {
   for row in 1 2 3 4 5 6 7 8 9 11; do
     release_selected "real-provider-$row" && return 0
   done
-  return 1
+  release_selected m7-provider
+}
+
+release_needs_m7() {
+  release_selected m7-provider || release_selected m7-rollback
 }
 
 release_needs_ollama() {

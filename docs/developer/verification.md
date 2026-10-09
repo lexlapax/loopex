@@ -108,7 +108,17 @@ credential or pinned Node only when the selected cases need it. A selected
 `cross_uid` lane requires Linux and refuses elsewhere. A successful selection
 says `selection-only`, never full closure PASS. Each executed test lane retains
 its complete redacted output and final status record with a SHA-256 digest,
-including failed lanes. No options still run the complete closure matrix.
+including failed lanes. Without `--only` the command runs the complete closure
+matrix, which records every case in the retained M7 attempts index named by
+`--attempts-index FILE`.
+
+M7 adds two pre-merge lanes: `m7-provider`, paid and recorded in the attempts
+index, and the credential-free `m7-rollback`. The attended `m7-operator`
+block runs only in the full matrix. Both check commands run the M7 evidence
+validator; the release check refuses its indexed M7 lanes before staging while
+their evidence is unavailable, as it is while the M7 execution manifest is
+pending. A refused lane is not PASS, and a new candidate SHA alone never
+authorizes repeating a failed case.
 
 Hosted CI's green run on the candidate is fast-check evidence for that merge.
 A local run counts instead only when its complete output and the exact clean

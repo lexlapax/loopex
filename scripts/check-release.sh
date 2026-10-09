@@ -13,7 +13,10 @@
 # and, on Linux, a second unprivileged user named in LOOPEX_CROSS_UID_USER that
 # the current user may run a command as with `sudo -n`. Output streams as it
 # happens. Repeated --only selectors run unattended pre-merge lanes, not the
-# full closure matrix. Invalid selections refuse before staging or builds.
+# full closure matrix. Invalid selections refuse before staging or builds. The
+# full matrix and the paid m7-provider lane take --attempts-index FILE, an
+# absolute retained M7 attempts index; the M7 evidence validator refuses those
+# lanes before staging while their evidence is unavailable.
 set -euo pipefail
 # A caller's xtrace or Bash startup hook is not an evidence channel. Startup
 # code that ran before this script remains host-owned, but child Bash shells do
@@ -85,6 +88,22 @@ if [ "$release_mode" = selection-only ] && release_selected cross_uid && [ "$pla
 fi
 [ -z "$(git status --porcelain)" ] ||
   { echo 'check-release: the tree must be the committed candidate' >&2; exit 2; }
+
+# The M7 evidence validator: the committed index heads, the pinned fixture
+# catalog and the indexed lanes' prerequisites, run from the clean candidate
+# checkout. Unavailable evidence refuses before staging; it is never a pass.
+if release_needs_m7; then
+  m7_args=(--release)
+  [ -z "$release_attempts_index" ] || m7_args+=(--attempts-index "$release_attempts_index")
+  [ -z "$release_resume_matrix" ] || m7_args+=(--resume-matrix "$release_resume_matrix")
+  for m7_lane in m7-provider m7-rollback; do
+    if release_selected "$m7_lane"; then m7_args+=(--lane "$m7_lane"); fi
+  done
+  (
+    unset LOOPEX_PROVIDER_API_KEY OPENAI_API_KEY ANTHROPIC_API_KEY OPENROUTER_API_KEY
+    mix loopex.m7_evidence "${m7_args[@]}" </dev/null
+  ) || { echo 'check-release: M7 evidence unavailable; the indexed lanes cannot run' >&2; exit 2; }
+fi
 
 started=$SECONDS
 commit=$(git rev-parse HEAD)

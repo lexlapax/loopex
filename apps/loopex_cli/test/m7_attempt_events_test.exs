@@ -1974,15 +1974,23 @@ defmodule LoopexCli.M7AttemptEventsTest do
     selection =
       Map.put(lane_selection(["first"]), "candidate_sha", authorized["authorized_candidate_sha"])
 
-    assert {:unresolved, plan} =
+    assert {:ok, plan} =
              Events.verify_lane_history(bytes, head_line(head), "m7-vector", selection, :new)
 
-    assert plan.reason == :prior_failure_authority_join_required
+    assert plan.authorizations == [List.last(records)]
     assert plan.case_history.records == Enum.drop(records, 2)
-    assert plan.reused == [] and plan.remaining == []
+    assert plan.reused == [] and length(plan.remaining) == 1
+
+    assert {:unavailable, %{member: "evidence", reason: :missing_reference_bytes}} =
+             Events.record_evidence(plan.authorizations, %{})
+
+    unauthorized = Map.put(selection, "candidate_sha", String.duplicate("3", 40))
+
+    assert {:blocked, %{reason: :prior_failure_unauthorized, remaining: []}} =
+             Events.verify_lane_history(bytes, head_line(head), "m7-vector", unauthorized, :new)
   end
 
-  test "a head-recorded pre-dispatch row cannot establish continuation or old-host abandonment discovery" do
+  test "a head-recorded suspended lane is abandoned and never continues" do
     bodies =
       ownership_prefix() ++
         [lane_started("first"), lane_completed("first"), lane_pending("second")]
@@ -1990,7 +1998,7 @@ defmodule LoopexCli.M7AttemptEventsTest do
     {bytes, records} = ownership_chain(bodies)
     head = ownership_head(List.last(records))
 
-    assert {:unresolved, plan} =
+    assert {:blocked, plan} =
              Events.verify_lane_history(
                bytes,
                head_line(head),
@@ -1999,8 +2007,23 @@ defmodule LoopexCli.M7AttemptEventsTest do
                :continue
              )
 
-    assert plan.reason == :head_recorded_lane_join_required
+    assert plan.reason == :lane_abandoned
     assert plan.case_history.records == Enum.drop(records, 2)
+    assert plan.reused == [] and plan.remaining == []
+  end
+
+  test "a later lane on another commit abandons a suspended lane without a committed head" do
+    later = &Map.put(&1, "candidate_sha", String.duplicate("2", 40))
+
+    bodies =
+      ownership_prefix() ++
+        [lane_started("first"), lane_completed("first"), lane_pending("second")] ++
+        [later.(lane_started("first")), later.(lane_completed("first"))]
+
+    assert {{:blocked, plan}, _} =
+             lane_call(bodies, lane_selection(["first", "second"]), :continue)
+
+    assert plan.reason == :lane_abandoned
     assert plan.reused == [] and plan.remaining == []
   end
 

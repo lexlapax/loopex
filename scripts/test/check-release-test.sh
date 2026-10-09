@@ -31,10 +31,29 @@ expect_refusal() {
   (release_select "$@") >"$work/parser-output" 2>&1 || status=$?
   [ "$status" -eq 2 ] || fail "selector refusal returned $status"
 }
-release_select
+release_select --attempts-index /retained/m7/attempts.jsonl
 for row in 1 2 3 4 5 6 7 8 9 10 11; do release_selected "real-provider-$row" || fail "full omitted row $row"; done
 release_selected node_client && release_selected long_bound && release_selected cross_uid ||
   fail 'full omitted a group'
+release_selected m7-provider && release_selected m7-rollback && release_needs_m7 ||
+  fail 'full omitted the M7 lanes'
+[ "$release_attempts_index" = /retained/m7/attempts.jsonl ] || fail 'full lost its attempts index'
+release_select --attempts-index /retained/m7/attempts.jsonl --resume-matrix matrix-1
+[ "$release_mode" = full ] && [ "$release_resume_matrix" = matrix-1 ] ||
+  fail 'full resume lost its matrix identity'
+# The M7 lanes: indexed paid work names its retained index, the attended lane
+# refuses, and legacy selections stay unindexed.
+release_select --only m7-provider --attempts-index /retained/m7/attempts.jsonl
+release_needs_m7 && release_needs_provider || fail 'm7-provider omitted its preflights'
+if release_selected real-provider-3 || release_selected m7-rollback; then fail 'm7-provider expanded'; fi
+release_select --only m7-rollback
+release_needs_m7 || fail 'm7-rollback omitted the M7 validator'
+if release_needs_provider || release_needs_node; then fail 'm7-rollback has unrelated preflights'; fi
+release_select --only m7-rollback --attempts-index /retained/m7/attempts.jsonl --only long_bound
+[ "$release_selectors" = 'm7-rollback long_bound' ] || fail 'indexed rollback selection changed'
+release_select --only real_provider
+if release_needs_m7; then fail 'legacy provider rows require the M7 validator'; fi
+[ -z "$release_attempts_index" ] || fail 'a legacy selection kept an attempts index'
 release_select --only real_provider --only real-provider-5 --only long_bound
 count=0
 for row in 1 2 3 4 5 6 7 8 9 10 11; do
@@ -65,6 +84,19 @@ expect_refusal --only real-provider-2
 expect_refusal --only real-provider-12
 expect_refusal --only node_client --only node_client
 expect_refusal --help
+expect_refusal
+expect_refusal --resume-matrix matrix-1
+expect_refusal --attempts-index relative/attempts.jsonl
+expect_refusal --attempts-index
+expect_refusal --attempts-index ''
+expect_refusal --attempts-index /a --attempts-index /b
+expect_refusal --attempts-index /a --resume-matrix m --resume-matrix m
+expect_refusal --only m7-operator --attempts-index /retained/m7/attempts.jsonl
+expect_refusal --only m7-provider
+expect_refusal --only m7-provider --only m7-provider --attempts-index /a
+expect_refusal --only m7-rollback --resume-matrix matrix-1 --attempts-index /a
+expect_refusal --only long_bound --attempts-index /retained/m7/attempts.jsonl
+expect_refusal --only m7-provider --attempts-index /a --resume-matrix matrix-1
 
 # The actual manifest census rejects a duplicated case even with the right
 # number of rows. It checks every definition before any provider lane can run.
@@ -420,7 +452,17 @@ if [ -n "${LOOPEX_PROVIDER_API_KEY+set}${OPENAI_API_KEY+set}${ANTHROPIC_API_KEY+
 fi
 exec "$RELEASE_TEST_REAL_GIT" "$@"
 EOF
-chmod +x "$work/bin/node" "$work/bin/mktemp" "$work/bin/uname" "$work/bin/git"
+cat >"$work/bin/mix" <<'EOF'
+#!/usr/bin/env bash
+if [ -n "${LOOPEX_PROVIDER_API_KEY+set}${OPENAI_API_KEY+set}${ANTHROPIC_API_KEY+set}${OPENROUTER_API_KEY+set}" ]; then
+  printf 'credential-in-m7-evidence\n' >>"$RELEASE_TEST_MARKER"
+  exit 78
+fi
+printf 'm7-evidence\n' >>"$RELEASE_TEST_MARKER"
+printf '%s\n' "$*" >"$RELEASE_TEST_MARKER.m7-args"
+exit "${RELEASE_TEST_M7_STATUS:-2}"
+EOF
+chmod +x "$work/bin/node" "$work/bin/mktemp" "$work/bin/uname" "$work/bin/git" "$work/bin/mix"
 export RELEASE_TEST_REAL_GIT
 RELEASE_TEST_REAL_GIT=$(command -v git)
 export RELEASE_TEST_MARKER="$work/preflight-marker"
@@ -506,8 +548,35 @@ preflight 77 --only real-provider-9
 [ "$(cat "$RELEASE_TEST_MARKER")" = "$(printf 'node\nstaging')" ] || fail 'provider row 9 omitted Node'
 preflight 77 --only real-provider-11
 [ "$(cat "$RELEASE_TEST_MARKER")" = staging ] || fail 'hosted ephemeral row spuriously queried Node'
-preflight 77
-[ "$(cat "$RELEASE_TEST_MARKER")" = "$(printf 'node\nstaging')" ] || fail 'full preflight changed'
+preflight 2
+grep -q 'full closure matrix requires --attempts-index' "$work/preflight-output" ||
+  fail 'unindexed full matrix was admitted'
+[ ! -s "$RELEASE_TEST_MARKER" ] || fail 'unindexed full matrix reached preflight helpers'
+preflight 2 --attempts-index /retained/m7/attempts.jsonl
+[ "$(cat "$RELEASE_TEST_MARKER")" = "$(printf 'node\nm7-evidence')" ] ||
+  fail 'unavailable M7 evidence did not refuse the full matrix before staging'
+grep -q 'M7 evidence unavailable' "$work/preflight-output" || fail 'M7 refusal was not reported'
+[ "$(cat "$RELEASE_TEST_MARKER.m7-args")" = \
+  'loopex.m7_evidence --release --attempts-index /retained/m7/attempts.jsonl --lane m7-provider --lane m7-rollback' ] ||
+  fail 'full matrix passed the wrong M7 validator arguments'
+export RELEASE_TEST_M7_STATUS=0
+preflight 77 --attempts-index /retained/m7/attempts.jsonl --resume-matrix matrix-1
+[ "$(cat "$RELEASE_TEST_MARKER")" = "$(printf 'node\nm7-evidence\nstaging')" ] || fail 'full preflight changed'
+grep -q -- '--resume-matrix matrix-1' "$RELEASE_TEST_MARKER.m7-args" || fail 'resume identity was not validated'
+preflight 77 --only m7-provider --attempts-index /retained/m7/attempts.jsonl
+[ "$(cat "$RELEASE_TEST_MARKER")" = "$(printf 'm7-evidence\nstaging')" ] ||
+  fail 'm7-provider preflight selection is wrong'
+preflight 77 --only m7-rollback
+[ "$(cat "$RELEASE_TEST_MARKER.m7-args")" = 'loopex.m7_evidence --release --lane m7-rollback' ] ||
+  fail 'unindexed m7-rollback passed the wrong M7 validator arguments'
+unset RELEASE_TEST_M7_STATUS
+preflight 2 --only m7-provider --attempts-index /retained/m7/attempts.jsonl
+[ "$(cat "$RELEASE_TEST_MARKER")" = m7-evidence ] || fail 'unavailable M7 evidence reached staging'
+for selection in '--only m7-operator' '--only m7-provider' '--attempts-index relative'; do
+  # shellcheck disable=SC2086
+  preflight 2 $selection
+  [ ! -s "$RELEASE_TEST_MARKER" ] || fail "invalid M7 selection reached preflight helpers: $selection"
+done
 unset RELEASE_TEST_CREDENTIAL
 unset RELEASE_TEST_OLLAMA_MODEL
 RELEASE_TEST_NODE=wrong

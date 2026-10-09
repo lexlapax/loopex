@@ -192,6 +192,7 @@ step "warning-free compilation" mix compile --warnings-as-errors
 step "formatting" mix format --check-formatted
 step "repository structure" bash scripts/check-bootstrap.sh
 step "documentation ordering" mix loopex.docs_check
+step "M7 evidence" mix loopex.m7_evidence
 if [ "$mode" = --docs ]; then
   printf 'check: PASS (documentation only) total=%ss\n' "$((SECONDS - started))"
   exit 0
