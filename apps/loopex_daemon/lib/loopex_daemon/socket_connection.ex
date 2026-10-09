@@ -1165,6 +1165,12 @@ defmodule LoopexDaemon.SocketConnection do
           record = create_admission(request_id, command_id, {:refused, :runtime_command_conflict})
           {:historical, fn -> {:no_activation, nil, record} end}
 
+        # Accepted ADRs 0059/0061: a durably cancelled creation is answered with
+        # its closed cancelled admission, no session and no activation.
+        {:ok, :cancelled} ->
+          record = create_admission(request_id, command_id, {:refused, :creation_cancelled})
+          {:historical, fn -> {:no_activation, nil, record} end}
+
         {:ok, :store_unavailable} ->
           record = WireRecords.request_error(request_id, "store_unavailable")
           {:historical, fn -> {:no_activation, nil, record} end}

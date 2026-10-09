@@ -3894,6 +3894,11 @@ defmodule Loopex.Runtime.Control do
         {:error, :runtime_command_conflict} ->
           :conflict
 
+        # Accepted ADR 0059: a known cancelled capture keeps its outcome; it is
+        # neither absence nor a successful create.
+        {:not_committed, :creation_cancelled} ->
+          :cancelled
+
         :unavailable ->
           :store_unavailable
 

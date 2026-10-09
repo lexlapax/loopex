@@ -135,13 +135,19 @@ defmodule Loopex do
 
   The complete genesis must match the normalized original session options.
   The runtime reads the Store's canonical command binding: changed genesis is
-  `conflict`, malformed input is `unexpected`, and unavailable Store evidence
-  is `store_unavailable`. Runtime loss remains `runtime_unavailable`. This
+  `conflict`, a known cancelled creation is `cancelled`, malformed input is
+  `unexpected`, and unavailable Store evidence is `store_unavailable`. Runtime loss remains `runtime_unavailable`. This
   read creates no owner, changes no durable state and resolves no provider,
   tool registry or credential. It grants no mutation authority.
   """
   @spec lookup_create_result(Runtime.t(), binary(), map(), map()) ::
-          {:ok, {:historical, binary()} | :absent | :conflict | :store_unavailable | :unexpected}
+          {:ok,
+           {:historical, binary()}
+           | :absent
+           | :cancelled
+           | :conflict
+           | :store_unavailable
+           | :unexpected}
           | {:error, :runtime_unavailable}
   def lookup_create_result(runtime, command_id, session_options, genesis),
     do: Runtime.lookup_create_result(runtime, command_id, session_options, genesis)
