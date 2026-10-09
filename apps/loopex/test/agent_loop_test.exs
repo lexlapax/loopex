@@ -6206,11 +6206,15 @@ defmodule Loopex.AgentLoopTest do
     assert [{{:model, run_id}, stream}] = Map.to_list(live.streams)
     relay_pid = StreamRelay.pid(stream.relay)
     relay_reference = Process.monitor(relay_pid)
-    {:ok, %{dispatcher: dispatcher}} = Loopex.Runtime.Supervisor.children(fixture.runtime.supervisor)
+
+    {:ok, %{dispatcher: dispatcher}} =
+      Loopex.Runtime.Supervisor.children(fixture.runtime.supervisor)
+
     assert [delta] = receive_progress()
     assert delta.kind == :text_delta and delta.text == "retained answer"
     assert delta.stream_domain_id == stream.domain
     assert delta.base_event_sequence == live.durable.event_sequence
+
     try do
       assert true = :erlang.suspend_process(relay_pid)
       assert {:status, :suspended} = Process.info(relay_pid, :status)
@@ -6227,6 +6231,7 @@ defmodule Loopex.AgentLoopTest do
         try do
           events = Fixture.events(fixture, session_id)
           records = Fixture.records(fixture, session_id)
+
           assert [%{payload: settlement}] =
                    Enum.filter(records, &(&1.payload[:kind] == "model_attempt_settled_v3"))
 
@@ -6285,6 +6290,7 @@ defmodule Loopex.AgentLoopTest do
       published = drain(attachment)
       assert Enum.count(published, &(&1.kind == "assistant.message_appended")) == 1
       assert Enum.count(published, &(&1.kind == "run.finished")) == 1
+
       assert Enum.find(published, &(&1.kind == "assistant.message_appended"))["content"] ==
                "retained answer"
 
