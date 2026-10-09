@@ -189,7 +189,9 @@ defmodule Loopex.ReferenceClientRuntimeFixture do
       fault_to: Keyword.get(options, :fault_to)
     ]
 
-    runtime_options = runtime_options ++ sampling_options
+    runtime_options =
+      runtime_options ++ sampling_options ++ Keyword.take(options, [:artifact_store])
+
     {:ok, client} = ReferenceClient.start(runtime_options)
 
     case Keyword.get(model_options, :tracing_capability) do

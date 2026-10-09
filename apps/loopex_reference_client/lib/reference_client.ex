@@ -169,6 +169,59 @@ defmodule Loopex.ReferenceClient do
   @doc """
   ## Concept
 
+  Reads the whole of one retained artifact use through an owned transfer.
+
+  ## Technical depth
+
+  Accepted ADRs 0028 and 0066. One transfer opens the whole window, chunks are
+  read until the runtime reports completion, and the transfer is always closed.
+  Each chunk digest and the joined bytes' object digest are checked here, so a
+  wrong byte refuses rather than reaching the caller. An opening refusal is
+  returned unchanged with its reason and cleanup fields.
+  """
+  @spec read_artifact(t(), binary()) :: {:ok, binary()} | {:error, term()}
+  def read_artifact(%__MODULE__{attachment: attachment}, use_locator)
+      when is_binary(use_locator) do
+    request = %{use_locator: use_locator, start: 0}
+
+    with {:ok, %{transfer_ref: ref, object_digest: digest}} <-
+           Loopex.open_artifact_transfer(attachment, request) do
+      read = read_chunks(attachment, ref, [])
+      closed = Loopex.close_artifact_transfer(attachment, ref)
+
+      case {read, closed} do
+        {{:ok, bytes}, :ok} ->
+          if sha256(bytes) == digest, do: {:ok, bytes}, else: {:error, :artifact_digest_mismatch}
+
+        {{:ok, _bytes}, error} ->
+          error
+
+        {error, _closed} ->
+          error
+      end
+    end
+  end
+
+  defp read_chunks(attachment, ref, chunks) do
+    case Loopex.read_artifact_chunk(attachment, ref, 32_768) do
+      {:ok, :complete} ->
+        {:ok, chunks |> Enum.reverse() |> IO.iodata_to_binary()}
+
+      {:ok, %{bytes: bytes, chunk_digest: digest}} ->
+        if sha256(bytes) == digest,
+          do: read_chunks(attachment, ref, [bytes | chunks]),
+          else: {:error, :chunk_digest_mismatch}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp sha256(bytes), do: :sha256 |> :crypto.hash(bytes) |> Base.encode16(case: :lower)
+
+  @doc """
+  ## Concept
+
   Opens the runtime's current solicited recovery query.
 
   ## Technical depth

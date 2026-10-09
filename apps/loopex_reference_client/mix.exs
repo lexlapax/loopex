@@ -19,7 +19,7 @@ defmodule Loopex.ReferenceClient.MixProject do
     ]
   end
 
-  def application, do: [extra_applications: []]
+  def application, do: [extra_applications: [:crypto]]
 
   # Concept: production client code may drive only the embedded core facade.
   # Concrete edges are available solely to the Workstream D composition tests.
