@@ -3159,27 +3159,58 @@ defmodule Loopex.Runtime.Control do
     end
   end
 
+  defp creation_step(%{creation: %{kind: :authored}} = state, :prepared_configuration, {:ok, c}),
+    do: creation_authored_final(state, c, true)
+
   defp creation_step(state, :prepared_configuration, {:ok, candidate}) do
-    creation_authored_final(state, candidate, true)
+    genesis = state.creation.baseline
+    current = genesis["initial_configuration"]
+    changes = %{"model" => current["model"]}
+    definitions = genesis["tool_selection"]["definitions"]
+
+    if candidate["configuration_version"] == 2 and
+         Map.put(candidate, "configuration_version", 1) == current and
+         SessionConfiguration.validate_candidate(current, changes, candidate, definitions) == :ok,
+       do: creation_supplied_final(state, genesis, true),
+       else:
+         creation_finish(state, {:error, :invalid_session_creation}, not state.creation.stopped)
   end
 
   defp creation_step(state, :prepared_configuration, _result),
     do: creation_finish(state, {:error, :invalid_session_creation}, not state.creation.stopped)
 
+  # Concept: a supplied genesis naming another model than the runtime's is
+  # accepted only when the host's model preparation reproduces it exactly.
+  # Technical depth: preparation of the genesis's own model from its own
+  # configuration must return that configuration as version 2; no Store work
+  # happens before the exact match. Replay compares retained bytes instead.
   defp creation_step(state, :provenance, :absent) do
     entry = state.creation
 
     with false <- entry.stopped,
-         {:ok, genesis} <- creation_genesis(entry.options, entry.defaults, entry.supplied),
-         :ok <- validate_fresh_selection(state, genesis),
-         {:ok, final} <- Store.create_session(state.runtime_id, entry.command_id, genesis) do
-      state = %{state | creation: %{entry | final: final}}
+         {:ok, genesis} <- creation_genesis(entry.options, entry.defaults, entry.supplied) do
+      case {state.model, genesis["initial_configuration"]} do
+        {%{module: module, model: runtime_model} = model, %{"model" => selected} = current}
+        when runtime_model != selected ->
+          if Code.ensure_loaded?(module) and function_exported?(module, :prepare_configuration, 5) do
+            context = %{
+              deadline_monotonic_ms: entry.cutoff,
+              cleanup_grace_ms: state.cleanup_grace_ms
+            }
 
-      creation_call(
-        state,
-        :history_probe,
-        {:runtime_command, create_command(state.runtime_id, entry.command_id, final)}
-      )
+            creation_call(
+              %{state | creation: %{entry | baseline: genesis}},
+              :prepared_configuration,
+              {:prepare_configuration, model, current, %{"model" => selected},
+               genesis["tool_selection"]["definitions"], context}
+            )
+          else
+            creation_finish(state, {:error, :invalid_session_creation}, true)
+          end
+
+        _ ->
+          creation_supplied_final(state, genesis, false)
+      end
     else
       {:error, :session_configuration_too_large} ->
         creation_finish(state, {:error, :session_configuration_too_large}, true)
@@ -3390,6 +3421,26 @@ defmodule Loopex.Runtime.Control do
             creation_finish(state, {:error, :invalid_session_creation}, true)
         end
       end
+    else
+      {:error, :session_configuration_too_large} ->
+        creation_finish(state, {:error, :session_configuration_too_large}, true)
+
+      _ ->
+        creation_finish(state, {:error, :invalid_session_creation}, not entry.stopped)
+    end
+  end
+
+  defp creation_supplied_final(state, genesis, prepared) do
+    entry = state.creation
+
+    with false <- entry.stopped,
+         :ok <- validate_fresh_selection(state, genesis, prepared),
+         {:ok, final} <- Store.create_session(state.runtime_id, entry.command_id, genesis) do
+      creation_call(
+        %{state | creation: %{entry | final: final}},
+        :history_probe,
+        {:runtime_command, create_command(state.runtime_id, entry.command_id, final)}
+      )
     else
       {:error, :session_configuration_too_large} ->
         creation_finish(state, {:error, :session_configuration_too_large}, true)
@@ -3860,8 +3911,6 @@ defmodule Loopex.Runtime.Control do
   # Technical depth: only a proved fresh create checks the runtime's admitted
   # definitions and model route. The transaction binds complete captured genesis
   # and its normalized original options, never current cleanup defaults.
-  defp validate_fresh_selection(state, genesis, prepared \\ false)
-
   defp validate_fresh_selection(state, %{kind: "session_genesis_v3"} = genesis, prepared) do
     definitions = genesis["tool_selection"]["definitions"]
     configuration = genesis["initial_configuration"]

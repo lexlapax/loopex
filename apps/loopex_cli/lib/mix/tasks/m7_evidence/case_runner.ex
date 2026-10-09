@@ -522,7 +522,7 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
   # Technical depth: role instructions are written into the trusted tree, so
   # the workspace and its digests stay untouched; both roles use the session's
   # model and the catalog bounds the plan fixes.
-  defp fixture_profile("m7.review", trusted, _context) do
+  defp fixture_profile("m7.review", trusted, context) do
     roles = %{
       "investigate" =>
         "Investigate the repository read-only. Trace the requested call chain through the " <>
@@ -543,13 +543,13 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
     with :ok <- written do
       {
         :ok,
-        # Both helpers use the session's provider A model. Plan V8's helpers
-        # on provider B wait on Core admitting a supplied genesis whose model
-        # differs from the runtime's (see the M7 provider B decision).
+        # Plan V8: the parent stays on provider A; both helpers run on the
+        # pinned provider B at its generic default cell.
         fn profile ->
-          model = profile["session"]["model"]
+          model = Scenarios.provider_b(context)["model"]
 
           profile
+          |> Scenarios.with_provider_b(context)
           |> Map.put(
             "roles",
             Map.new(roles, fn {name, _} ->
@@ -1600,8 +1600,9 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
        else: {:missing, :restart}
   end
 
-  # Review: both role calls committed and completed, read-only, and the
-  # parent's final committed reply is the finding the oracle checks.
+  # Review: both role calls committed and completed, read-only, each helper on
+  # another provider than the parent, and the parent's final committed reply
+  # is the finding the oracle checks.
   def joins("m7.review", rows, entry, _outcome) do
     calls =
       for row <- rows,
@@ -1624,6 +1625,15 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
           row.payload["receipt"]["tool_id"] == "loopex.task",
           do: task_usage(row.payload["receipt"]["output"])
 
+    parent =
+      Enum.find_value(rows, &get_in(&1.payload, ["initial_configuration", "model"]))
+
+    helpers =
+      for row <- rows,
+          kind(row) == "executor_receipt_committed_v2",
+          row.payload["receipt"]["tool_id"] == "loopex.task",
+          do: task_model(row.payload["receipt"]["output"])
+
     roles = for %{"role" => role} <- entry["required_model_actions"], do: role
 
     finding =
@@ -1644,6 +1654,9 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
 
       not Enum.all?(usage, &(&1 == :ok)) ->
         {:failed, :helper_usage}
+
+      is_nil(provider(parent)) or Enum.any?(helpers, &(provider(&1) in [nil, provider(parent)])) ->
+        {:failed, :helper_provider}
 
       not is_binary(finding) ->
         {:missing, :finding}
@@ -1668,6 +1681,16 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
   end
 
   defp task_usage(_output), do: :invalid
+
+  defp task_model(output) do
+    case JSON.decode(output) do
+      {:ok, %{"model" => model}} -> model
+      _ -> nil
+    end
+  end
+
+  defp provider(model) when is_binary(model), do: hd(String.split(model, ":"))
+  defp provider(_model), do: nil
 
   # Concept: a held case is decided by committed facts ordered around the held
   # operation's receipt, joined to the observation taken before release.

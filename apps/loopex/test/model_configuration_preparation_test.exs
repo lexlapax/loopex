@@ -1315,6 +1315,109 @@ defmodule Loopex.ModelConfigurationPreparationTest do
     end
   end
 
+  # Concept: a supplied genesis on another model than the runtime's (a helper
+  # child on its own provider) is created only when the host's preparation of
+  # that model reproduces its configuration exactly.
+  defp foreign_genesis(model) do
+    {:ok, candidate} =
+      Conformance.candidate(
+        Loopex.ConfiguredGenesisFixture.configuration(),
+        %{"model" => model},
+        [],
+        model
+      )
+
+    Loopex.ConfiguredGenesisFixture.genesis([], Map.put(candidate, "configuration_version", 1))
+  end
+
+  defp prepare_as(f, model), do: Agent.update(f.controller, &%{&1 | model: model})
+
+  test "a supplied genesis on another model is created only after exact preparation" do
+    f = fixture()
+    # The same-model creation in the fixture needed no preparation.
+    assert Agent.get(f.controller, & &1.calls) == 0
+    genesis = foreign_genesis("scripted:v2")
+    prepare_as(f, "scripted:v2")
+
+    assert {:ok, child} =
+             Loopex.Runtime.create_session_with_genesis(f.runtime, "child", %{}, genesis)
+
+    assert_receive {:preparing, _, current, %{"model" => "scripted:v2"}, [], _, _}, 1_000
+    assert current == genesis["initial_configuration"]
+    assert {:ok, status} = Loopex.session_status(f.runtime, child)
+    assert status.configuration["model"] == "scripted:v2"
+
+    # An identical replay reads the retained creation without preparing again.
+    assert {:ok, ^child} =
+             Loopex.Runtime.create_session_with_genesis(f.runtime, "child", %{}, genesis)
+
+    assert Agent.get(f.controller, & &1.calls) == 1
+
+    # After restart, on a model with no preparation callback, replay still
+    # returns the created child and its committed model.
+    assert :ok = Loopex.stop(f.runtime)
+    model = %{module: Loopex.AgentLoopTestModel, model: "scripted:v1", options: f.options}
+    assert {:ok, restarted} = Loopex.start_link(Keyword.put(f.runtime_options, :model, model))
+
+    on_exit(fn ->
+      monitor = Process.monitor(restarted.supervisor)
+      if Process.alive?(restarted.supervisor), do: Loopex.stop(restarted)
+      assert_receive {:DOWN, ^monitor, :process, _pid, _reason}, 5_000
+    end)
+
+    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(restarted)
+
+    assert {:ok, ^child} =
+             Loopex.Runtime.create_session_with_genesis(restarted, "child", %{}, genesis)
+
+    assert [%{payload: committed} | _] = Fixture.records(f, child)
+    assert committed["initial_configuration"] == genesis["initial_configuration"]
+    assert Agent.get(f.controller, & &1.calls) == 1
+    assert Loopex.AgentLoopTestModel.dispatched(f.model) == []
+  end
+
+  test "a supplied genesis that preparation does not reproduce is refused without a mutation" do
+    f = fixture()
+    genesis = foreign_genesis("scripted:v2")
+
+    # Preparation resolves a different model, then refuses outright.
+    prepare_as(f, "scripted:v3")
+
+    assert {:error, :invalid_session_creation} =
+             Loopex.Runtime.create_session_with_genesis(f.runtime, "child", %{}, genesis)
+
+    Agent.update(f.controller, &%{&1 | mode: :refuse})
+
+    assert {:error, :invalid_session_creation} =
+             Loopex.Runtime.create_session_with_genesis(f.runtime, "child", %{}, genesis)
+
+    assert Agent.get(f.controller, & &1.calls) == 2
+
+    # Nothing was retained under the command: the same command creates once
+    # preparation reproduces the genesis.
+    Agent.update(f.controller, &%{&1 | mode: :normal, model: "scripted:v2"})
+
+    assert {:ok, child} =
+             Loopex.Runtime.create_session_with_genesis(f.runtime, "child", %{}, genesis)
+
+    assert child != f.session
+    assert Agent.get(f.controller, & &1.calls) == 3
+  end
+
+  test "a runtime model without preparation refuses another model's supplied genesis" do
+    f = fixture(adapter: Loopex.AgentLoopTestModel)
+
+    assert {:error, :invalid_session_creation} =
+             Loopex.Runtime.create_session_with_genesis(
+               f.runtime,
+               "child",
+               %{},
+               foreign_genesis("scripted:v2")
+             )
+
+    assert Agent.get(f.controller, & &1.calls) == 0
+  end
+
   defp configure(id),
     do: %{
       type: :configure,

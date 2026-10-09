@@ -516,7 +516,9 @@ defmodule Loopex.Runtime do
   # startup claim/read/close is finite. Occupied intake refuses immediately and
   # missing current recovery capability never falls back to unreserved creation.
   # Version-1 authored input uses the same slot and original preparation cutoff;
-  # complete supplied genesis keeps its distinct host-authorized validation.
+  # complete supplied genesis keeps its distinct host-authorized validation, and
+  # one naming another model than the runtime's is admitted only when that
+  # model's preparation reproduces its configuration exactly.
   @doc false
   @spec create_session(t(), binary(), map()) :: {:ok, binary()} | {:error, term()}
   def create_session(%__MODULE__{} = runtime, command_id, session_options) do
