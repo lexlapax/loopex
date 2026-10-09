@@ -156,6 +156,41 @@ defmodule Loopex.AppServer.ExternalWorkflowTest do
            }
   end
 
+  # Concept: the independent client observes a real compaction's activity on /3.
+  # Technical depth: accepted ADR 0054. The launched host routes the runtime's
+  # transient progress through its owned sink; the client validates the one
+  # closed item and joins it to the completion's own episode.
+  @tag :node_client
+  test "an independent client observes a real compaction's activity over foreground stdio" do
+    node_executable = System.find_executable("node") || flunk("Node is required")
+
+    {output, status} =
+      System.cmd(
+        node_executable,
+        [
+          client("compaction-activity-workflow.mjs"),
+          System.find_executable("elixir") || flunk("Elixir executable unavailable"),
+          ebin(:loopex_protocol),
+          ebin(:loopex),
+          ebin(:loopex_app_server),
+          ebin(:loopex_executor_local),
+          ebin(:loopex_store_local),
+          ebin(:telemetry)
+        ] ++ require_paths(),
+        env: [{"LOOPEX_WORKFLOW_SCRIPT", "compaction"} | child_environment()],
+        stderr_to_stdout: true
+      )
+
+    assert status == 0, output
+
+    assert decode(output) == %{
+             "activities" => 1,
+             "owner" => %{"kind" => "compact", "id" => "node-compact"},
+             "same_episode" => true,
+             "disposition" => "checkpointed"
+           }
+  end
+
   @tag :node_client
   test "an independent client selects a skill, answers the question and reads what the tool kept" do
     node_executable = System.find_executable("node")

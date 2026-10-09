@@ -288,6 +288,78 @@ defmodule Loopex.AppServer.ForegroundOutputLifecycleTest do
     end
   end
 
+  # Concept: a real explicit compaction's activity reaches the foreground client.
+  # Technical depth: accepted ADR 0054. The permitted summary attempt's single
+  # closed activity item crosses the actual Stdio sink route. Durable output is
+  # served ahead of queued transient frames, so the item is located by its own
+  # base cursor rather than by arrival order. It names the compact owner and the
+  # completion's episode, carries no summary text, and custody is released.
+  test "an actual explicit compaction routes its activity over foreground stdio" do
+    Harness.with_fixture(:file, :compaction, fn fixture ->
+      prepare(fixture)
+
+      Harness.send_frame(fixture, %{
+        "method" => "session.prompt",
+        "request_id" => "prompt",
+        "command_id" => Wire.encode_identity("history"),
+        "content_b64" => Wire.encode_bytes(String.duplicate("old ", 2_000))
+      })
+
+      await_record(fixture, &(get_in(&1, ["event", "kind"]) == "session.settled"))
+
+      Harness.send_frame(fixture, %{
+        "method" => "session.compact",
+        "request_id" => "compact",
+        "command_id" => Wire.encode_identity("compact"),
+        "bounds" => %{"max_attempts" => "4", "deadline_ms" => "60000", "token_budget" => "32768"}
+      })
+
+      await_record(fixture, &(get_in(&1, ["event", "kind"]) == "context.compaction_finished"))
+
+      activity =
+        await_record(
+          fixture,
+          &(get_in(&1, ["progress", "kind"]) == "context.compaction_progress")
+        )
+
+      records = output_records(fixture)
+      refute Enum.any?(records, &(&1["code"] == "detached"))
+
+      assert [^activity] =
+               Enum.filter(
+                 records,
+                 &(get_in(&1, ["progress", "kind"]) == "context.compaction_progress")
+               )
+
+      assert {:ok, item} =
+               LoopexProtocol.Session.CompactionProgress.decode_wire(activity["progress"])
+
+      assert item.owner == %{"kind" => "compact", "id" => "compact"}
+      assert activity["session_id"] == Wire.encode_identity(fixture.session)
+
+      [%{"event" => %{"data" => finished}}] =
+        for %{"event" => %{"kind" => "context.compaction_finished"}} = record <- records,
+            do: record
+
+      assert finished["result"]["disposition"] == "checkpointed"
+      assert {:ok, completion} = LoopexProtocol.Session.CompactResult.decode_completion(finished)
+      assert completion["episode_id"] == item.episode_id
+
+      # The activity is anchored at the committed cursor before the checkpoint.
+      [compacted] =
+        for %{"event" => %{"kind" => "context.compacted"} = event} <- records, do: event
+
+      assert item.base_event_sequence < String.to_integer(compacted["event_sequence"])
+      refute Enum.any?(records, &(inspect(&1) =~ "retain this fact"))
+
+      :file.close(fixture.input)
+      summary = Harness.finished(fixture)
+      assert summary.result == :ok
+      assert_released_custody(summary)
+      assert summary.sink_closed
+    end)
+  end
+
   for kind <- [
         :text_delta,
         :reasoning_delta,

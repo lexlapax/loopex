@@ -45,6 +45,38 @@ defmodule Loopex.AgentLoopFixture do
   # Technical depth: this adapter reads canonical typed history directly. Its
   # captured renderer supports terminal tool history without provider-native
   # continuation, and each session retains the declared reply and cleanup bounds.
+  # Concept: a host maintenance selection and one valid scripted summary, so a
+  # transport fixture can run a real explicit compaction.
+  # Technical depth: the selection disables thinking under the captured scripted
+  # configuration; the summary's text never reaches a public projection.
+  @doc false
+  def maintenance_options do
+    configuration = Loopex.ConfiguredGenesisFixture.configuration()
+
+    [
+      maintenance_model: %{
+        "model" => configuration["model"],
+        "reasoning" => "none",
+        "model_capabilities" => %{
+          configuration["model_capabilities"]
+          | "reasoning_levels" => ["none", "default"]
+        },
+        "provider_mapping" => %{configuration["provider_mapping"] | "thinking_disabled" => true}
+      },
+      maintenance_instructions: %{"version" => "summary.v1", "body" => "Keep facts"}
+    ]
+  end
+
+  @doc false
+  def summary_reply do
+    %{
+      text:
+        ~s({"summary":"retain this fact","carry_forward":{"files_read":[],"files_changed":[]}}),
+      reply_overrides: %{completion: "natural", continuation: nil},
+      usage: %{input_tokens: 37, output_tokens: 19}
+    }
+  end
+
   def creation_defaults(definitions, options \\ []) do
     model_id = Keyword.get(options, :model, "scripted:v1")
 
