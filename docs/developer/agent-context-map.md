@@ -7163,7 +7163,7 @@ The maintainer answered the three pending prerequisite questions on 2026-10-09.
   maintainer asked for the lock helper in Elixir to minimize external
   dependencies, with Python only if that is impossible. The pair is rewritten
   to the selected Elixir loopback-listener lock at candidate
-  `5678825a607e3f105ca8284af18a8c1fe57afe52` (concept SHA-256
+  `581208645afa92fcde1e1ee7d81aa6a10d8658c9` (concept SHA-256
   `d39401de2eee633e94e1b7867b39f174d2a3dbe0418b3d338d44422ef55ac553`, technical
   `bab7499c2d295aab6a3a232e55ad3d4f327d4f04f92953d345cdb5fdad7cce76`) and
   accepted in that form; the Python option is recorded as not selected.
@@ -7192,3 +7192,31 @@ The maintainer also chose to authorize real-provider runs at candidate time:
 the credential-free implementation is finished first, then the exact case list
 and estimated cost are presented for approval, and the maintainer supplies the
 credential themselves. No paid run is authorized before that.
+
+<a id="disposition-m7-adr-0069-2026-10-09"></a>
+### M7 helper run evidence and route guard accepted, 2026-10-09
+
+The helper implementation found ADR 0056's open child-accounting and mutation
+protection prerequisites undecided. The maintainer selected "Private Core
+query" and "Host routes only", recorded as
+[ADR0069](../adr/0069-helper-run-evidence-and-route-guard.md#concept) and
+[Technical depth](../adr/0069-helper-run-evidence-and-route-guard-technical.md#technical-depth)
+at candidate `31a93aa2aa26f7ac78724f21461741fa1d56b823` (concept SHA-256
+`a810b514c38872cc7eb4d537d8435bffa92a7ba878948ea161b557aaed7abf37`, technical
+`c0097fa7f95121041da84c1abd9782413789dfe56a94fc848a721ceaa0f94f01`). Only Status
+and the Acceptance row changed. Acceptance authorizes implementation only.
+
+<a id="disposition-m7-history-rewrite-2026-10-09"></a>
+### M7 branch history rewritten to drop the handoff prompt, 2026-10-09
+
+Commit `b8aa9457` ("temp prompt to pass from codex to claude for m7") failed
+the commit-title rule and carried the takeover prompt in `scratchpad.txt`. The
+maintainer selected removing it. `m7` was rebased with that commit dropped and
+force-pushed; every later commit changed only by the restored three-line
+`scratchpad.txt`. Old to new identities, for evidence recorded before the
+rewrite: `5678825a`→`58120864`, `735cbb1f`→`4c099a87`, `0c12f36d`→`11ffb1ba`,
+`211b2dd8`→`3c85a695`, `eb90ff6d`→`23346d1f`, `958e883e`→`b4cd0b77`,
+`21475fc8`→`3c912097`, `b010371e`→`a8891847`, `d47060c2`→`031d96c5`,
+`a4821ce7`→`def632ca`, `69d51116`→`d1ff2e68`, `9d2b76c4`→`6a7161ee`,
+`cb9bc64b`→`d085201a`, `86e9c9f9`→`31a93aa2`.
+
