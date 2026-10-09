@@ -1,5 +1,38 @@
 # M7 Implementation Tasks
 
+### Foreground fixture corrections proved, 2026-10-09
+
+At source `c49e237796643ddb5dfc9e5639ba21094b571c5a`, original2962
+passed all27 cases in the complete Initialization and CurrentCommands files on
+each supported toolchain after7.486 seconds. No cases were excluded, skipped or
+invalid. The default node_client/real_provider exclusions select no cases in
+these two files. The real child now loads the existing Local executor, and the
+terminal answer requires its exact literal offered label; admitted answer,
+command digest, identities, retries and original cutoffs remain unchanged.
+The prior invalid stdout bytes remain unavailable, so exact-byte crash
+attribution is not claimed. Original29125 formatting passed strict non-line AST
+equality and both supported formatting checks after2.357 seconds.
+
+The independent two-path source review is
+`05c17013bfd635edaa7926ab920b58ddd75003319878e408127708b10177f785`.
+Original2962 terminal SHA-256
+`1cf6954e1a8fd11c22ef78597307c5b173e2dbd4c220c6b99c361ff56ee9d9ca`;
+collection `38542345c650f81702d17fbd668e51b1c0b6f1109e7bb0cf9f05899a7bbfbe5a`.
+Completed registry2883 SHA-256
+`d0eee193ffac387e5d5b6b2b4e64a16b36cd378a36c6a314f00d417412b2f545`.
+Immutable57-asset retention:
+`M7/current-source-preparation-20261009-v19/retention.json`, SHA-256
+`2e6d806d60be71d89cbd3e76217a4d6eb2ee369a2f7bbbb9922e50df206f2128`.
+The answer diagnosis initially had writable mode despite a sealed report;
+root authenticated its unchanged bytes and froze it before retention.
+
+The complete152-case foreground obligation remains open: actual stopped-leader
+cleanup still fails, and full floor coverage is owed. Core observation grace
+and ADR0065 remain pending. No native handle is live at this checkpoint; no
+full fast/release/closure result or new checkbox completion is claimed.
+T01–T19 original89 done /84 open /6 retired; added371 done /24 open;
+combined460 done /108 open /6 retired.
+
 ### Local artifact proof and foreground remaining failures, 2026-10-09
 
 At source `343fcf1c2070b1e9794bcdef21fc4e7d2de96b71`, original74262
