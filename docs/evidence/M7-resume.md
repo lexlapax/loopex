@@ -27,6 +27,60 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+### Orderly-stop current proof; duplicate-output investigation, 2026-10-09
+
+Reviewed guardv3 joined at `5a521b2c01c1c565cbff1447d2237210237fc2d9`;
+strict-AST formatter child `abe6798671e07a613a932410359fa9ec1eabc779`.
+Original17168 formatting passes both pairs in2.918 seconds, four original
+joins/26 assets. Collection SHA-256
+`20686efdae8aeef6b8d2bfc8e651ace83b207441f8059774ebf75c0c54daadab`.
+
+Original5122 atabe67986 is terminal FAIL after522.961 seconds. Current
+Registry75+Socket23 all pass; CLI70/71 pass. The unchanged operator-stop case
+now passes. The lost-create-reply case instead prints its answer twice;
+it passed in72324, so its intermittence remains an unresolved defect, not a
+retry pass. All floor stages remain UNRUN. Nine original joins and41 assets
+verified; terminal SHA-256
+`ac04e22b483e2eabba8c7ef54a1b2d50168be3d53138ae72b62a90845798c083`;
+collection `3c1aa7ad4f20524913853643936355f77f24eba7087e095ef9688706711ef9a9`;
+registry3068 `f3a769c58bfaeb85bbf2d2a047777653b66219af2c3b853f71cd0893969ea737`.
+Retention78 assets: `M7/current-source-preparation-20261009-v31/retention.json`,
+SHA-256 `10eb9c9dfcd44dd417e43343003a8a176b8b1b4d940f0f1787c746247431d48f`.
+
+Bounded diagnosis `/private/tmp/m7-cli-lost-create-duplicate-diagnosis-20261009-v1.md`,
+SHA-256 `db14bccf5855ad63e0ff357de24d099a3c48eab6e20e34dbe5bafcf6d8e5939c`,
+identifies streamed text followed by durable fallback. The exact wire closure
+sequence was not retained; dropped/late/invalid-domain explanations remain
+unresolved. No second run or duplicated durable event is established. The
+isolated writer at `/private/tmp/m7-cli-create-progress-worktree-20261009-v1`
+owns only LiveRecoveryTest and its existing DaemonProxy for bounded actual
+identity/order/closure capture, preserving all original cut/oracles/bounds.
+Instrumentation is not a production repair or permission to reinterpret closure.
+
+Independent T03 audit `4f9afffdd4d3e1d1a210f578fe78cd41a6116cb749edff422a567823e8dea51b`
+keeps authority proof open for the actual helper join. T06 audit
+`bb759f01bb3a11e1d83424eba9ec1561cd1cf983636594cf0e11489f7ee25f48`
+maps eight unchanged existing ordinary workflow files; their changed runtime
+dependencies need current/floor proof. Its source-only recipe is awaiting review
+and actual source/seed pins. Separate provider/attended proofs remain required.
+
+The current maintenance-stop regression packet at
+`/private/tmp/m7-maintenance-shutdown-source-20261009-v1`, manifest
+`a582b076670e589b3b019f48946359a6ff9a111cdb8ac702d9631bb9ef0d3211`,
+is unjoined/native UNRUN and undergoing independent review. It preserves all
+five original cases and adds one actual held-summary/public-stop witness.
+Historical T16 raw maintenance log was not recovered; audit
+`2929a243d754d31cf9efcae6d87c4cd30a425357dba1b9e1b439ae97d36bdf94`
+and location addendum `05d62ce836b7bfa20f4cdf5d1b693bfde4b2512055656f009750c06d15e6a057`
+retain that limitation. Neither a quiet new schedule nor source review can
+retroactively establish its unknown original causal trace.
+
+No native handle is live. ADR0067 exact acceptance is pending. Next qualify
+T06's separate ordinary workflow unit, then integrate/review/format the current
+maintenance witness and diagnostic capture before their focused native runs.
+No checkbox changes: original89 done/84 open/6 retired; added373 done/23 open;
+combined462 done/107 open/6 retired. No full integration or closure claim.
+
 ### Proposal ready for decision; orderly-stop guard joined, 2026-10-09
 
 Exact Proposed ADR0067 candidate `805df2c2107bee43b81d266f520935c7b9cb4b89`
