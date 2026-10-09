@@ -85,6 +85,12 @@ defmodule LoopexComposition.Delegation do
   ## Concept
 
   Stop a host's helper owner after its runtime has stopped.
+
+  ## Technical depth
+
+  Stops the helper owner and its retained-object writer, each with a bounded
+  5,000 ms `GenServer.stop`. An owner that already exited is skipped; `nil`
+  means the host never opened helpers.
   """
   @spec close(map() | nil) :: :ok
   def close(nil), do: :ok
