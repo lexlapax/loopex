@@ -12,9 +12,7 @@ defmodule Loopex do
   Every operation delegates to `Loopex.Runtime` or the runtime embedded in an
   opaque `Loopex.Attachment`. No application callback creates a default
   instance, and no application environment, registered name, persistent term,
-  or Store implementation is selected here. M0 feasibility modules remain
-  separately callable for their retained evidence but are not the M1 runtime
-  path.
+  or Store implementation is selected here.
   """
 
   alias Loopex.Attachment

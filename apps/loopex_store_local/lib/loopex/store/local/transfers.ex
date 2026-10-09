@@ -40,6 +40,10 @@ defmodule Loopex.Store.Local.Transfers do
   the scratch root, deleting only regular files it owns and never following
   links, which is the bounded defence for a platform or crash that left a
   snapshot behind before it could be unlinked.
+
+  `:fault_probe` is optional runtime-local test evidence: a pid that each copy
+  actor asks before its source reads and snapshot writes, which answers
+  `:continue`, `{:short, bytes}` or `{:partial, bytes}`.
   """
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(options) when is_list(options), do: GenServer.start_link(__MODULE__, options)
@@ -135,6 +139,7 @@ defmodule Loopex.Store.Local.Transfers do
        root: root,
        scratch: scratch,
        limits: Keyword.get(options, :limits, ArtifactStore.transfer_limits()),
+       fault_probe: Keyword.get(options, :fault_probe),
        transfers: %{},
        jobs: %{}
      }}
@@ -232,7 +237,7 @@ defmodule Loopex.Store.Local.Transfers do
          true <- record.status == :reserved do
       if timely?(context.open_deadline_ms) and Process.alive?(caller) do
         owner = self()
-        placement = Map.take(state, [:root, :scratch, :limits])
+        placement = Map.take(state, [:root, :scratch, :limits, :fault_probe])
 
         {worker, monitor} =
           spawn_monitor(fn -> transfer_io(owner, placement, request, context) end)
@@ -757,6 +762,7 @@ defmodule Loopex.Store.Local.Transfers do
     Process.put(:transfer_deadline, context.open_deadline_ms)
     Process.put(:transfer_proof, true)
     Process.put(:transfer_owner, {owner, context.transfer_ref, monitor})
+    Process.put(:transfer_fault_probe, placement.fault_probe)
 
     outcome =
       try do
@@ -990,7 +996,7 @@ defmodule Loopex.Store.Local.Transfers do
       {:ok, hash |> :crypto.hash_final() |> Base.encode16(case: :lower)}
     else
       wanted = min(left, @verify_block)
-      result = :file.read(reader, wanted)
+      result = source_read(reader, wanted)
       charge_transfer_read(result, :source_read_bytes)
       check_io!(context.open_deadline_ms)
 
@@ -999,7 +1005,7 @@ defmodule Loopex.Store.Local.Transfers do
           charge_transfer(:snapshot_write_debit, wanted)
           publish_work(Map.put(Process.get(:transfer_work), :write_uncertain, true))
 
-          case :file.write(snapshot, bytes) do
+          case snapshot_write(snapshot, bytes) do
             :ok ->
               publish_work(Map.put(Process.get(:transfer_work), :write_uncertain, false))
               check_io!(context.open_deadline_ms)
@@ -1021,6 +1027,49 @@ defmodule Loopex.Store.Local.Transfers do
         _ ->
           {:error, :artifact_integrity_failed}
       end
+    end
+  end
+
+  # Concept: the two physical copy points a conformance fixture may perturb.
+  # Technical depth: `:fault_probe` is runtime-local test evidence, as for the
+  # Local journal. Without one both calls are plain I/O. A short read returns a
+  # real prefix of what the filesystem gave; a partial write really writes its
+  # prefix into the private snapshot before reporting the filesystem's
+  # out-of-space error, so the failure path runs over actual bytes.
+  defp source_read(reader, wanted) do
+    result = :file.read(reader, wanted)
+
+    case {fault_action(:source_read), result} do
+      {{:short, keep}, {:ok, bytes}} when keep < byte_size(bytes) ->
+        {:ok, binary_part(bytes, 0, keep)}
+
+      _continue ->
+        result
+    end
+  end
+
+  defp snapshot_write(snapshot, bytes) do
+    case fault_action(:snapshot_write) do
+      {:partial, keep} when keep < byte_size(bytes) ->
+        with :ok <- :file.write(snapshot, binary_part(bytes, 0, keep)), do: {:error, :enospc}
+
+      _continue ->
+        :file.write(snapshot, bytes)
+    end
+  end
+
+  defp fault_action(point) do
+    case Process.get(:transfer_fault_probe) do
+      nil ->
+        :continue
+
+      probe ->
+        reference = make_ref()
+        send(probe, {:loopex_transfer_fault_point, self(), reference, point})
+
+        receive do
+          {:loopex_transfer_fault_action, ^reference, action} -> action
+        end
     end
   end
 

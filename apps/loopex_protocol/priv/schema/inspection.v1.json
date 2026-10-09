@@ -1,7 +1,7 @@
 {
   "format": "loopex.experimental.payload-contract/1",
   "contract": "inspection",
-  "integration": "standalone preparation; coordinated M7 foreground /3 and daemon /4 not independently served",
+  "integration": "served by foreground loopex.experimental/3 and daemon loopex.experimental/4",
   "closed": true,
   "required": [
     "status",
@@ -57,7 +57,7 @@
       "format": "loopex.experimental.payload-contract/1",
       "contract": "open_interaction",
       "authority": "approved M7 inspection/policy-answer disposition; ADRs 0023/0024/0045",
-      "integration": "M7 coordinated foreground /3 and daemon /4; not independently served",
+      "integration": "served by foreground loopex.experimental/3 and daemon loopex.experimental/4",
       "closed": true,
       "interaction_id": {
         "encoding": "canonical_unpadded_base64url",

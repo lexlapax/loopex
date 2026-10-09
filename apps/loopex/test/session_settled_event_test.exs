@@ -114,7 +114,7 @@ defmodule Loopex.SessionSettledEventTest do
     assert Enum.all?(between, &(&1.kind != "session.settled"))
   end
 
-  test "a session recorded before the settled fact existed still recovers" do
+  test "recovery reads only the exact current history, settled fact included" do
     fixture = start(script: [%{text: "done", calls: []}])
     {session_id, attachment} = session(fixture)
 
@@ -126,16 +126,16 @@ defmodule Loopex.SessionSettledEventTest do
     records = Fixture.records(fixture, session_id)
     events = Fixture.events(fixture, session_id)
     assert Enum.any?(events, &(&1.kind == "session.settled"))
+    assert {:ok, recovered} = SessionState.recover(session_id, records, events)
+    assert recovered.event_sequence == List.last(events).event_sequence
 
-    # An older history is exactly this one without the fact core never used to
-    # publish. Recovery must read it, because those rows are immutable and no
-    # migration can add a fact that was never written.
+    # Before 1.0 there is no older history to read: a missing settled fact is
+    # refused like any other mismatch, and so is an invented event.
     older = Enum.reject(events, &(&1.kind == "session.settled"))
-    assert {:ok, recovered} = SessionState.recover(session_id, records, older)
-    assert recovered.event_sequence == List.last(older).event_sequence
 
-    # What a reader may not do is invent history: an event replay does not
-    # expect is still refused.
+    assert {:error, :private_public_projection_mismatch} =
+             SessionState.recover(session_id, records, older)
+
     last = List.last(older)
 
     invented =

@@ -87,7 +87,7 @@ defmodule LoopexProtocol.OpenInteractionTest do
 
     for {file, digest} <- [
           {"schema/open-interaction.v1.json",
-           "3b764fe133c8cabf59418d02d890edcb82a5eac764c28e13a41638742e910721"},
+           "bd20c3c66895cc6672f02fb88bd956afdfa8cb8914b0789f986987b831b75705"},
           {"schema/policy-answer-admitted.v1.json",
            "34f0d1b76b7823c7747afae43f915b381d699a9b99ddb9386f6a8f3957755a6c"},
           {"vectors/open-interaction.v1.json",

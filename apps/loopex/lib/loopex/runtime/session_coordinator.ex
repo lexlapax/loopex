@@ -11220,7 +11220,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
   # Concept: a field the answer does not carry is a mismatch, not a pass.
   #
-  # Technical depth: this is `Loopex.Effect.match_fields/3`'s rule applied to the
+  # Technical depth: this is the live-result identity rule applied to the
   # solicited reconciliation answer. `Map.get/2` reads an absent key as `nil`,
   # so any expected value that is legitimately `nil` -- a job with no tool call
   # or no tool version, among others -- was satisfied by an answer that simply

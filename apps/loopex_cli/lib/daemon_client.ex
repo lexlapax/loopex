@@ -36,7 +36,7 @@ defmodule LoopexCli.DaemonClient do
   # Technical depth: ADR 0044 requires exact generation and canonical schema
   # identity before session work; a mismatch uses the original close path.
   @generation "loopex.experimental/4"
-  @schema_digest "9a4a735d1a8a59237f3e063fa0fce21fd2d69e7a11785eee743c10311228b02c"
+  @schema_digest "bc3749d89204e1b4d5ad3b183058c650e17622750b84d39a4f53efe745ea0718"
   @initialize_timeout_ms 30_000
 
   @doc false

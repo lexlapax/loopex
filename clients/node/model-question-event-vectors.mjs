@@ -15,8 +15,8 @@ const schemaBytes = readFileSync(schemaPath);
 const fixture = JSON.parse(vectorBytes.toString("utf8"));
 const schema = JSON.parse(schemaBytes.toString("utf8"));
 const pins = {
-  model_question_requested: ["04ea6b8ebe77217fef3fcc30875973cb447761c9e89af7b7ec6b34aa18e861cf", "e91c864a7ae2db429243f2ec874667ab3adcb521a94b9d404fb81f1ab1a67fc6"],
-  model_question_terminal: ["747a893c1417f57dfe95da6a5d02ae69165683edb477a5e748c5e26a96e89b44", "b24f406ea74a623a918ddc396958c4af1e6c9f5b80696a6103d333a37491253c"]
+  model_question_requested: ["04ea6b8ebe77217fef3fcc30875973cb447761c9e89af7b7ec6b34aa18e861cf", "fbaa077e006bed444e3b2bb8fe53f1eafe060aec9d4357b3e79da6883aabcab2"],
+  model_question_terminal: ["747a893c1417f57dfe95da6a5d02ae69165683edb477a5e748c5e26a96e89b44", "6bb84c9594bef5532a463f664ee43463a92e881f94267cf4356143af5ebb4563"]
 };
 assert.ok(Object.hasOwn(pins, fixture.contract), "Unsupported vector contract");
 assert.equal(createHash("sha256").update(vectorBytes).digest("hex"), pins[fixture.contract][0]);
