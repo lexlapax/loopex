@@ -124,7 +124,8 @@ defmodule Mix.Tasks.Loopex.M7Evidence do
          execution = manifest.catalog["execution_manifest"],
          :ok <- ExecutionManifest.verify_owners(execution, root),
          {:ok, legacy} <- legacy_family(root),
-         :ok <- runbook(root, execution) do
+         :ok <- runbook(root, execution),
+         :ok <- closure_rows(root, execution) do
       pending = ExecutionManifest.pending(execution)
 
       {:ok,
@@ -159,6 +160,23 @@ defmodule Mix.Tasks.Loopex.M7Evidence do
       if Enum.all?(steps ++ cases, &MapSet.member?(lines, &1)),
         do: :ok,
         else: {:error, :m7_runbook_stale}
+    end
+  end
+
+  # Concept: the closure scaffold reserves one row per committed key.
+  # Technical depth: rows start with the backquoted step or case key.
+  defp closure_rows(root, execution) do
+    with {:ok, text} <-
+           read(Path.join(root, "docs/evidence/M7-closure-runs.md"), :m7_closure_rows_missing) do
+      starts = text |> String.split("\n") |> Enum.map(&hd(String.split(&1, " |", parts: 2)))
+      starts = MapSet.new(starts)
+
+      keys =
+        Map.keys(execution["operator_step_evidence"]) ++ Map.keys(execution["cases"])
+
+      if Enum.all?(keys, &MapSet.member?(starts, "| `#{&1}`")),
+        do: :ok,
+        else: {:error, :m7_closure_rows_missing}
     end
   end
 

@@ -21,6 +21,12 @@ defmodule LoopexCli.M7EvidenceTaskTest do
     File.ln_s!(Path.join(@repository, "apps"), Path.join(root, "apps"))
     File.mkdir_p!(Path.join(root, "scripts"))
     File.mkdir_p!(Path.join(root, "docs/operator"))
+    File.mkdir_p!(Path.join(root, "docs/evidence"))
+
+    File.cp!(
+      Path.join(@repository, "docs/evidence/M7-closure-runs.md"),
+      Path.join(root, "docs/evidence/M7-closure-runs.md")
+    )
 
     File.cp!(
       Path.join(@repository, "docs/operator/m7-validation.md"),
@@ -131,6 +137,20 @@ defmodule LoopexCli.M7EvidenceTaskTest do
       File.write!(runbook, changed)
       assert Task.validate(root, []) == {:error, :m7_runbook_stale}
     end
+  end
+
+  test "the closure scaffold must reserve a row for every committed key", %{root: root} do
+    concept!(root, [])
+    scaffold = Path.join(root, "docs/evidence/M7-closure-runs.md")
+    original = File.read!(scaffold)
+
+    for key <- ["| `V9.5` |", "| `m7.repair` |"] do
+      File.write!(scaffold, String.replace(original, key, "| `renamed` |"))
+      assert Task.validate(root, []) == {:error, :m7_closure_rows_missing}
+    end
+
+    File.rm!(scaffold)
+    assert Task.validate(root, []) == {:error, :m7_closure_rows_missing}
   end
 
   test "the legacy release family must keep its eleven literal cases", %{root: root} do

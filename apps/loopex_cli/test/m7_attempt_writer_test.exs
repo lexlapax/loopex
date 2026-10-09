@@ -540,6 +540,74 @@ defmodule LoopexCli.M7AttemptWriterTest do
              {:error, :attempt_handoff_pending}
   end
 
+  # Concept: the closest available stand-in for two machines. Technical depth:
+  # each host is its own operating-system VM with its own host identity,
+  # marker directory and index copy; only bytes move between them. Both VMs
+  # share this machine's loopback port and filesystem namespace, so this does
+  # not prove exclusion or evidence paths across real machines.
+  test "two OS-process hosts hand off through transferred bytes only", %{dir: dir} do
+    a = Path.join(dir, "host-a")
+    b = Path.join(dir, "host-b")
+    for root <- [a, b], do: File.mkdir_p!(Path.join(root, "markers"))
+
+    host_a = %{
+      "writer_id" => "writer-a",
+      "host_id" => "host-a",
+      "marker_dir" => Path.join(a, "markers")
+    }
+
+    host_b = %{
+      "writer_id" => "writer-b",
+      "host_id" => "host-b",
+      "marker_dir" => Path.join(b, "markers")
+    }
+
+    index_a = Path.join(a, "attempts.jsonl")
+    index_b = Path.join(b, "attempts.jsonl")
+    selection = selection(["a"], @first)
+
+    source =
+      vm("""
+      #{prelude()}
+      {:ok, w} = Writer.create(#{lit(index_a)}, #{lit(@campaign)}, #{lit(host_a)})
+      {:ok, %{marker: marker}} = Writer.relinquish(w, "writer-b", "host-b", "handoff-ab", #{lit(Path.join(a, "quiescence"))})
+      IO.puts("MARKER " <> marker)
+      """)
+
+    "MARKER " <> marker = line!(source)
+    assert_receive {^source, {:exit_status, 0}}, 30_000
+
+    # The transfer: exact bytes of the index, its lock record and the marker.
+    File.write!(index_b, File.read!(index_a))
+    File.write!(index_b <> ".lock", File.read!(index_a <> ".lock"))
+    File.write!(Path.join(b, "revocation"), File.read!(marker))
+    File.write!(Path.join(b, "transfer"), File.read!(index_a))
+
+    destination =
+      vm("""
+      #{prelude()}
+      {:ok, w} = Writer.open(#{lit(index_b)}, #{lit(host_b)})
+      {:ok, accepted} = Writer.accept(w, #{lit(Path.join(b, "revocation"))}, #{lit(Path.join(b, "transfer"))})
+      IO.puts("EPOCH " <> Integer.to_string(accepted["body"]["ownership_epoch"]))
+      IO.puts("ADMIT " <> inspect(Writer.admit(w, "", #{lit(selection)}, :new)))
+      """)
+
+    assert line!(destination) == "EPOCH 2"
+    assert line!(destination) == "ADMIT {:error, :committed_attempt_head_unavailable}"
+    assert_receive {^destination, {:exit_status, 0}}, 30_000
+
+    stale =
+      vm("""
+      #{prelude()}
+      {:ok, w} = Writer.open(#{lit(index_a)}, #{lit(host_a)})
+      IO.puts("ADMIT " <> inspect(Writer.admit(w, "", #{lit(selection)}, :new)))
+      """)
+
+    assert line!(stale) == "ADMIT {:error, :attempt_handoff_pending}"
+    assert_receive {^stale, {:exit_status, 0}}, 30_000
+    refute File.read!(index_a) == File.read!(index_b)
+  end
+
   test "an interrupted or unverifiable handoff fences both hosts until it resolves",
        %{dir: dir, index: index} do
     {writer, _} = created!(dir, index)
