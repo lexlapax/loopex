@@ -208,6 +208,7 @@ defmodule Loopex.AuditRepairsTest do
       {{:ok, normalized, _bytes}, {:ok, transaction}} ->
         assert transaction.genesis == normalized
         assert :ok = Store.validate_transaction(transaction)
+
         assert {:committed, _command_id, _receipt} =
                  Loopex.ConfiguredGenesisFixture.commit_creation(store, transaction)
 

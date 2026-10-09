@@ -229,9 +229,11 @@ defmodule LoopexDaemon.SocketConnectionTest do
 
     eventually(fn ->
       state = :sys.get_state(connection)
+
       map_size(state.progress_leases) == 0 and map_size(state.progress_frames) == 0 and
         state.progress_bytes == 0
     end)
+
     assert progress["kind"] == "text_delta"
     assert progress["text"] == "ordinary-barrier"
     assert progress["base_event_sequence"] == Integer.to_string(cursor)

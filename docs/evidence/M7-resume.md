@@ -27,6 +27,21 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+### Both-toolchain layout verified, 2026-10-08
+
+The50-path reviewed join is committed and pushed at
+`592505e6a0bc3438a69441018bf7cc9f52a3a60a`. Formatter44 original42583
+passes all49 non-line syntax-tree comparisons and complete changed-source
+format checks on both toolchains,4.274seconds/four joins. Retained output
+`M7/candidate-format-preparation-20261008-v44`; terminal SHA-256
+`8b390b2ff901bc80225b94bd08e872465e7239e62f69af50b91c4d708b8d9818`,
+collection SHA-256
+`4bc3d405925b9b7cf83aa1e4d4f9f3002d33b3092ed5d7fbb59d94e5bb863be9`.
+Five files have syntax-preserving formatting changes. No native test or checklist
+completion is claimed. Foreground production/fixture repairs remain in isolated
+source review. Next registry2699, SHA-256
+`73406ada94797ef5bc1e47cc127a1ec452ce52ff098a4413817e5514c1910795`.
+
 ### Reviewed creation and daemon fixtures joined, 2026-10-08
 
 Original64183 at `f8b0bd30` is terminal FAIL: current Core21/21,

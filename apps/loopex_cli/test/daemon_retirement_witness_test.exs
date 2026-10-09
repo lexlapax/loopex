@@ -31,10 +31,14 @@ defmodule LoopexCli.DaemonRetirementWitnessTest do
 
     evidence_root = System.get_env("M7_DAEMON_RETIREMENT_EVIDENCE_DIR") || System.tmp_dir!()
     File.mkdir_p!(evidence_root)
-    evidence = Path.join(evidence_root, "daemon-retirement-#{System.unique_integer([:positive])}.json")
+
+    evidence =
+      Path.join(evidence_root, "daemon-retirement-#{System.unique_integer([:positive])}.json")
+
     refute File.exists?(evidence)
 
     driver = Path.join(__DIR__, "support/daemon_retirement_witness_driver.txt")
+
     arguments = [
       "--state-root",
       state_root,
@@ -61,17 +65,23 @@ defmodule LoopexCli.DaemonRetirementWitnessTest do
     executable = System.find_executable("elixir") || flunk("elixir executable unavailable")
 
     child =
-      start_command(executable, [
-        :binary,
-        :exit_status,
-        :use_stdio,
-        :hide,
-        {:line, 65_536},
-        env: [{~c"LOOPEX_PROVIDER_API_KEY", ~c"daemon-command-placeholder"}],
-        args:
-          Enum.flat_map(:code.get_path(), fn path -> ["-pa", List.to_string(path)] end) ++
-            ["-e", code]
-      ], root, evidence, cleanup)
+      start_command(
+        executable,
+        [
+          :binary,
+          :exit_status,
+          :use_stdio,
+          :hide,
+          {:line, 65_536},
+          env: [{~c"LOOPEX_PROVIDER_API_KEY", ~c"daemon-command-placeholder"}],
+          args:
+            Enum.flat_map(:code.get_path(), fn path -> ["-pa", List.to_string(path)] end) ++
+              ["-e", code]
+        ],
+        root,
+        evidence,
+        cleanup
+      )
 
     port = child.port
     line = await_line(child, 60_000)
@@ -175,9 +185,16 @@ defmodule LoopexCli.DaemonRetirementWitnessTest do
           send(test, {:command_opened, self(), port, monitor, os_pid})
 
           command_loop(%{
-            test: test, test_down: test_down, port: port, monitor: monitor,
-            os_pid: os_pid, status: nil, down: nil, joined_at: nil,
-            cancel_cutoff: nil, stdout_records: 0
+            test: test,
+            test_down: test_down,
+            port: port,
+            monitor: monitor,
+            os_pid: os_pid,
+            status: nil,
+            down: nil,
+            joined_at: nil,
+            cancel_cutoff: nil,
+            stdout_records: 0
           })
         else
           retire_idle(System.monotonic_time(:millisecond) + 5_000)
@@ -290,21 +307,34 @@ defmodule LoopexCli.DaemonRetirementWitnessTest do
     else
       case Port.info(state.port, :os_pid) do
         {:os_pid, pid} when pid == state.os_pid ->
-          {_output, status} = System.cmd("/bin/kill", [signal, Integer.to_string(pid)], stderr_to_stdout: true)
-          if System.monotonic_time(:millisecond) < cutoff, do: {:ok, status}, else: {:error, :signal_observation_expired}
+          {_output, status} =
+            System.cmd("/bin/kill", [signal, Integer.to_string(pid)], stderr_to_stdout: true)
 
-        nil -> {:error, :original_port_unavailable}
-        _other -> {:error, :original_port_identity_mismatch}
+          if System.monotonic_time(:millisecond) < cutoff,
+            do: {:ok, status},
+            else: {:error, :signal_observation_expired}
+
+        nil ->
+          {:error, :original_port_unavailable}
+
+        _other ->
+          {:error, :original_port_identity_mismatch}
       end
     end
   end
 
   defp retain_command(state) do
     receive do
-      {:retire, caller, reference, cutoff} -> dispose_command(state, caller, reference, cutoff)
-      {:EXIT, port, _} when port == state.port -> retain_command(state)
+      {:retire, caller, reference, cutoff} ->
+        dispose_command(state, caller, reference, cutoff)
+
+      {:EXIT, port, _} when port == state.port ->
+        retain_command(state)
+
       {:DOWN, monitor, :process, test, _}
-      when monitor == state.test_down and test == state.test -> retain_command(state)
+      when monitor == state.test_down and test == state.test ->
+        retain_command(state)
+
       {:term, caller, reference, _} ->
         send(caller, {:command_signaled, reference, {:error, :original_already_exited}})
         retain_command(state)
@@ -318,7 +348,9 @@ defmodule LoopexCli.DaemonRetirementWitnessTest do
   end
 
   defp cancel_original(state, requested \\ nil)
-  defp cancel_original(%{joined_at: observed} = state, _requested) when not is_nil(observed), do: state
+
+  defp cancel_original(%{joined_at: observed} = state, _requested) when not is_nil(observed),
+    do: state
 
   defp cancel_original(state, requested) do
     cutoff = state.cancel_cutoff || System.monotonic_time(:millisecond) + 5_000
@@ -375,13 +407,20 @@ defmodule LoopexCli.DaemonRetirementWitnessTest do
         assert original == completed.monitor and port == completed.port
         assert_receive {:DOWN, ^monitor, :process, ^owner, :normal}, remaining(cutoff)
         remaining(cutoff)
+
         %{
-          "format" => "m7-daemon-parent-custody/2", "custodian" => inspect(owner),
-          "custodian_monitor" => inspect(monitor), "custodian_down" => "normal",
-          "port" => inspect(port), "port_monitor" => inspect(original),
-          "port_down_reason" => if(is_atom(reason), do: Atom.to_string(reason), else: "unavailable_reason_shape"),
-          "os_pid" => completed.os_pid, "exit_status" => completed.status,
-          "joined_at_ms" => completed.joined_at, "retirement_cutoff_ms" => cutoff,
+          "format" => "m7-daemon-parent-custody/2",
+          "custodian" => inspect(owner),
+          "custodian_monitor" => inspect(monitor),
+          "custodian_down" => "normal",
+          "port" => inspect(port),
+          "port_monitor" => inspect(original),
+          "port_down_reason" =>
+            if(is_atom(reason), do: Atom.to_string(reason), else: "unavailable_reason_shape"),
+          "os_pid" => completed.os_pid,
+          "exit_status" => completed.status,
+          "joined_at_ms" => completed.joined_at,
+          "retirement_cutoff_ms" => cutoff,
           "stdout_records" => completed.stdout_records
         }
 
@@ -404,8 +443,13 @@ defmodule LoopexCli.DaemonRetirementWitnessTest do
     send(child.owner, {:term, self(), reference, cutoff})
 
     receive do
-      {:command_signaled, ^reference, {:ok, 0}} -> remaining(cutoff); :ok
-      {:command_signaled, ^reference, refused} -> flunk("original daemon signal refused: #{inspect(refused)}")
+      {:command_signaled, ^reference, {:ok, 0}} ->
+        remaining(cutoff)
+        :ok
+
+      {:command_signaled, ^reference, refused} ->
+        flunk("original daemon signal refused: #{inspect(refused)}")
+
       {:DOWN, monitor, :process, owner, reason}
       when monitor == child.owner_down and owner == child.owner ->
         flunk("daemon custody lost before SIGTERM: #{inspect(reason)}")
@@ -419,11 +463,16 @@ defmodule LoopexCli.DaemonRetirementWitnessTest do
     port = child.port
 
     receive do
-      {^port, {:data, {:eol, line}}} -> remaining(cutoff); line
+      {^port, {:data, {:eol, line}}} ->
+        remaining(cutoff)
+        line
+
       {:command_complete, owner, completed} when owner == child.owner ->
         flunk("daemon exited #{completed.status} before readiness")
+
       {:command_failed, owner, reason} when owner == child.owner ->
         flunk("daemon custody failed before readiness: #{inspect(reason)}")
+
       {:DOWN, monitor, :process, owner, reason}
       when monitor == child.owner_down and owner == child.owner ->
         flunk("daemon custody lost before readiness: #{inspect(reason)}")
@@ -437,15 +486,19 @@ defmodule LoopexCli.DaemonRetirementWitnessTest do
     port = child.port
 
     receive do
-      {^port, {:data, _line}} -> flunk("daemon wrote a second stdout line")
+      {^port, {:data, _line}} ->
+        flunk("daemon wrote a second stdout line")
+
       {:command_complete, owner, completed} when owner == child.owner ->
         remaining(cutoff)
         assert completed.port == child.port and completed.monitor == child.monitor
         assert completed.os_pid == child.os_pid and completed.joined_at < cutoff
         assert completed.down == {:DOWN, child.monitor, :port, child.port, :normal}
         completed.status
+
       {:command_failed, owner, reason} when owner == child.owner ->
         flunk("daemon custody failed before exit: #{inspect(reason)}")
+
       {:DOWN, monitor, :process, owner, reason}
       when monitor == child.owner_down and owner == child.owner ->
         flunk("daemon custody lost before exit: #{inspect(reason)}")

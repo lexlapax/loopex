@@ -161,6 +161,7 @@ defmodule Loopex.TelemetryBoundaryTest do
     assert_receive {:span, [:loopex, :store, :transact, :stop], measurements,
                     %{type: :create_session} = metadata},
                    2_000
+
     assert is_integer(measurements.duration)
     assert metadata.type == :create_session
     assert metadata.records == 1

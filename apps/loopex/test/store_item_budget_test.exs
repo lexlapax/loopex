@@ -164,6 +164,7 @@ defmodule Loopex.StoreItemBudgetTest do
       command_id = "generated-#{index}"
       assert {:ok, transaction} = Store.create_session("runtime-#{index}", command_id, record)
       assert transaction.genesis == normalized
+
       assert {:committed, ^command_id, _receipt} =
                Loopex.ConfiguredGenesisFixture.commit_creation(store, transaction)
     end
@@ -175,6 +176,7 @@ defmodule Loopex.StoreItemBudgetTest do
       assert {:ok, normalized, ^target} = normalize(:record, record)
       assert {:ok, transaction} = Store.create_session("runtime-#{target}", command_id, record)
       assert transaction.genesis == normalized
+
       assert {:committed, ^command_id, _receipt} =
                Loopex.ConfiguredGenesisFixture.commit_creation(store, transaction)
     end
