@@ -416,8 +416,7 @@ defmodule Loopex.ArtifactStore do
            }}
           | {:unregistered, %{required(:transfer_ref) => binary()}}
           | :ok
-          | {:error,
-             :cleanup_unproved | :invalid_close_context | :retirement_receipt_mismatch}
+          | {:error, :cleanup_unproved | :invalid_close_context | :retirement_receipt_mismatch}
 
   @callback put(handle :: term(), bytes :: binary(), normalized_use()) ::
               {:ok, artifact_reference()} | {:error, term()}
@@ -791,11 +790,13 @@ defmodule Loopex.ArtifactStore do
       case {context.action, result} do
         {:retire, {:retired, retired}} ->
           closed_transfer_map?(retired, [:transfer_ref, :receipt_ref, :work]) and
-            retired.transfer_ref == context.transfer_ref and valid_transfer_ref?(retired.receipt_ref) and
+            retired.transfer_ref == context.transfer_ref and
+            valid_transfer_ref?(retired.receipt_ref) and
             (retired.work == :unavailable or valid_transfer_work?(retired.work))
 
         {:retire, {:unregistered, absent}} ->
-          closed_transfer_map?(absent, [:transfer_ref]) and absent.transfer_ref == context.transfer_ref
+          closed_transfer_map?(absent, [:transfer_ref]) and
+            absent.transfer_ref == context.transfer_ref
 
         {:retire, {:error, reason}} ->
           reason in [:cleanup_unproved, :invalid_close_context]

@@ -67,14 +67,15 @@ defmodule LoopexDaemon.WireRecordsTest do
           :cancelled
         ],
         cleanup <- [:proved, :unproved] do
-      assert WireRecords.transfer_refused("artifact-open", %{reason: reason, cleanup: cleanup}) == %{
-               "type" => "error",
-               "request_id" => "artifact-open",
-               "code" => "transfer_refused",
-               "reason" => Atom.to_string(reason),
-               "cleanup" => Atom.to_string(cleanup),
-               "message" => "the transfer was refused"
-             }
+      assert WireRecords.transfer_refused("artifact-open", %{reason: reason, cleanup: cleanup}) ==
+               %{
+                 "type" => "error",
+                 "request_id" => "artifact-open",
+                 "code" => "transfer_refused",
+                 "reason" => Atom.to_string(reason),
+                 "cleanup" => Atom.to_string(cleanup),
+                 "message" => "the transfer was refused"
+               }
     end
   end
 

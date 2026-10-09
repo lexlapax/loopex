@@ -107,12 +107,16 @@ defmodule LoopexProtocol.CurrentContractManifestTest do
   end
 
   test "owned artifact opening failure variants and the two added limits are exact" do
-    admitted_reasons = ~w(invalid_artifact_request invalid_open_context reservation_required reservation_conflict unknown_artifact_use artifact_use_mismatch artifact_integrity_failed artifact_digest_mismatch unknown_artifact artifact_too_large invalid_window open_deadline_exhausted open_work_budget_exhausted transfer_limit_reached transfers_unavailable artifact_unreadable cancelled)
+    admitted_reasons =
+      ~w(invalid_artifact_request invalid_open_context reservation_required reservation_conflict unknown_artifact_use artifact_use_mismatch artifact_integrity_failed artifact_digest_mismatch unknown_artifact artifact_too_large invalid_window open_deadline_exhausted open_work_budget_exhausted transfer_limit_reached transfers_unavailable artifact_unreadable cancelled)
 
     ordinary_reasons = %{
-      "open_preadmission" => ~w(attachment_required invalid_attachment stale_attachment invalid_artifact_request artifact_transfer_unsupported transfer_limit_reached open_work_budget_exhausted transfers_unavailable),
-      "read" => ~w(attachment_required invalid_attachment stale_attachment unknown_transfer invalid_chunk_length open_work_budget_exhausted transfers_unavailable read_deadline_exhausted artifact_unreadable runtime_unavailable),
-      "close" => ~w(attachment_required invalid_attachment stale_attachment unknown_transfer cleanup_unproved)
+      "open_preadmission" =>
+        ~w(attachment_required invalid_attachment stale_attachment invalid_artifact_request artifact_transfer_unsupported transfer_limit_reached open_work_budget_exhausted transfers_unavailable),
+      "read" =>
+        ~w(attachment_required invalid_attachment stale_attachment unknown_transfer invalid_chunk_length open_work_budget_exhausted transfers_unavailable read_deadline_exhausted artifact_unreadable runtime_unavailable),
+      "close" =>
+        ~w(attachment_required invalid_attachment stale_attachment unknown_transfer cleanup_unproved)
     }
 
     for {contract, generation} <- [{Session, 3}, {V2, 4}] do

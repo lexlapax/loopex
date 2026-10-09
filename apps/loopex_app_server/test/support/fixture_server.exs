@@ -57,6 +57,7 @@ defmodule Loopex.AppServer.Fixture do
           serve(tool_options(artifact_store))
         after
           cutoff = System.monotonic_time(:millisecond) + 5_000
+
           :ok =
             GenServer.stop(owner, :normal, max(cutoff - System.monotonic_time(:millisecond), 0))
 

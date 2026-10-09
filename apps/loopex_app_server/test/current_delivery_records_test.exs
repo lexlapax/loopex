@@ -295,7 +295,10 @@ defmodule Loopex.AppServer.CurrentDeliveryRecordsTest do
              Frame.decode("{\"tool_version\":\"" <> at_cap <> "\"}", Frame.output_record_bytes())
 
     assert {:error, :string_too_large} =
-             Frame.decode("{\"tool_version\":\"" <> above_cap <> "\"}", Frame.output_record_bytes())
+             Frame.decode(
+               "{\"tool_version\":\"" <> above_cap <> "\"}",
+               Frame.output_record_bytes()
+             )
 
     payload = %{
       "run_id" => "run",

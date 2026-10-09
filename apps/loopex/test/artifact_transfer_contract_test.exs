@@ -49,9 +49,16 @@ defmodule Loopex.ArtifactTransferContractTest do
   test "request preserves opaque session bytes and exact unsigned64 boundaries" do
     %{request: request} = fixture()
     assert ArtifactStore.valid_transfer_request?(request)
-    assert ArtifactStore.valid_transfer_request?(Map.put(request, :session_id, :binary.copy(<<255>>, 256)))
+
+    assert ArtifactStore.valid_transfer_request?(
+             Map.put(request, :session_id, :binary.copy(<<255>>, 256))
+           )
+
     assert ArtifactStore.valid_transfer_request?(%{request | start: 18_446_744_073_709_551_615})
-    assert ArtifactStore.valid_transfer_request?(Map.put(request, :length, 18_446_744_073_709_551_615))
+
+    assert ArtifactStore.valid_transfer_request?(
+             Map.put(request, :length, 18_446_744_073_709_551_615)
+           )
 
     for invalid <- [
           %{request | session_id: ""},
@@ -86,6 +93,7 @@ defmodule Loopex.ArtifactTransferContractTest do
       refute ArtifactStore.valid_reserve_result?(reservation, float_context)
       refute ArtifactStore.valid_open_result?(opened, request, float_context)
     end
+
     for clock <- [-9_223_372_036_854_775_808, -1, 0, 9_223_372_036_854_775_807] do
       assert ArtifactStore.valid_open_context?(%{context | open_deadline_ms: clock})
     end
@@ -109,7 +117,13 @@ defmodule Loopex.ArtifactTransferContractTest do
   test "retire and acknowledgement selectors have separate closed identities" do
     %{context: context} = fixture()
     retire = retire(context)
-    ack = %{action: :acknowledge, transfer_ref: context.transfer_ref, receipt_ref: String.duplicate("b", 32)}
+
+    ack = %{
+      action: :acknowledge,
+      transfer_ref: context.transfer_ref,
+      receipt_ref: String.duplicate("b", 32)
+    }
+
     assert ArtifactStore.valid_close_context?(retire)
     assert ArtifactStore.valid_close_context?(ack)
 
@@ -133,13 +147,27 @@ defmodule Loopex.ArtifactTransferContractTest do
     assert ArtifactStore.valid_transfer_use?(use, request)
     assert use.metadata["session_id"] == <<0, 255>>
     other_session = %{use | metadata: %{use.metadata | "session_id" => "other"}}
-    other_request = %{request | use_locator: "use:" <> digest(independent_use_bytes(other_session))}
+
+    other_request = %{
+      request
+      | use_locator: "use:" <> digest(independent_use_bytes(other_session))
+    }
+
     assert ArtifactStore.valid_transfer_request?(other_request)
+
     assert ArtifactStore.valid_transfer_use?(other_session, %{other_request | session_id: "other"})
+
     refute ArtifactStore.valid_transfer_use?(other_session, other_request)
 
-    for extra_use <- [Map.put(use, :path, "/private"), %{use | metadata: Map.put(use.metadata, "note", "unknown")}] do
-      extra_request = %{request | use_locator: "use:" <> digest(Canonical.encode(["artifact-use-v2", extra_use]))}
+    for extra_use <- [
+          Map.put(use, :path, "/private"),
+          %{use | metadata: Map.put(use.metadata, "note", "unknown")}
+        ] do
+      extra_request = %{
+        request
+        | use_locator: "use:" <> digest(Canonical.encode(["artifact-use-v2", extra_use]))
+      }
+
       assert ArtifactStore.valid_transfer_request?(extra_request)
       refute ArtifactStore.valid_transfer_use?(extra_use, extra_request)
     end
@@ -166,7 +194,12 @@ defmodule Loopex.ArtifactTransferContractTest do
     empty = %{use | metadata: %{use.metadata | "tool_call_id" => ""}}
     padding = 131_072 - byte_size(independent_use_bytes(empty))
     exact = %{use | metadata: %{use.metadata | "tool_call_id" => String.duplicate("x", padding)}}
-    over = %{exact | metadata: %{exact.metadata | "tool_call_id" => exact.metadata["tool_call_id"] <> "x"}}
+
+    over = %{
+      exact
+      | metadata: %{exact.metadata | "tool_call_id" => exact.metadata["tool_call_id"] <> "x"}
+    }
+
     assert byte_size(independent_use_bytes(exact)) == 131_072
     assert byte_size(independent_use_bytes(over)) == 131_073
     assert Canonical.encode(["artifact-use-v2", exact]) == independent_use_bytes(exact)
@@ -182,9 +215,19 @@ defmodule Loopex.ArtifactTransferContractTest do
 
   test "oversized opaque scalars and arbitrary positive attempts refuse bounded use admission" do
     %{use: use, request: request} = fixture()
-    oversized = %{use | metadata: %{use.metadata | "tool_call_id" => :binary.copy(<<255>>, 131_073)}}
+
+    oversized = %{
+      use
+      | metadata: %{use.metadata | "tool_call_id" => :binary.copy(<<255>>, 131_073)}
+    }
+
     huge_attempt = %{use | metadata: %{use.metadata | "attempt" => Integer.pow(2, 1_048_584)}}
-    oversized_request = %{request | use_locator: "use:" <> digest(independent_use_bytes(oversized))}
+
+    oversized_request = %{
+      request
+      | use_locator: "use:" <> digest(independent_use_bytes(oversized))
+    }
+
     huge_request = %{request | use_locator: "use:" <> digest(independent_use_bytes(huge_attempt))}
     assert ArtifactStore.valid_transfer_request?(oversized_request)
     assert ArtifactStore.valid_transfer_request?(huge_request)
@@ -193,16 +236,34 @@ defmodule Loopex.ArtifactTransferContractTest do
     refute ArtifactStore.valid_transfer_use?(oversized, oversized_request)
     refute ArtifactStore.valid_transfer_use?(huge_attempt, huge_request)
     small_attempt = %{use | metadata: %{use.metadata | "attempt" => 256}}
-    small_request = %{request | use_locator: "use:" <> digest(independent_use_bytes(small_attempt))}
+
+    small_request = %{
+      request
+      | use_locator: "use:" <> digest(independent_use_bytes(small_attempt))
+    }
+
     assert ArtifactStore.valid_transfer_use?(small_attempt, small_request)
   end
 
   test "full object payload and additional metadata work retain exact separate caps" do
     %{work: work} = fixture()
-    full = %{work | source_read_bytes: 67_108_864, snapshot_write_debit: 67_108_864, metadata_read_bytes: 131_073}
+
+    full = %{
+      work
+      | source_read_bytes: 67_108_864,
+        snapshot_write_debit: 67_108_864,
+        metadata_read_bytes: 131_073
+    }
+
     assert ArtifactStore.valid_transfer_work?(full)
     assert ArtifactStore.valid_transfer_work?(%{full | write_uncertain: true})
-    assert ArtifactStore.valid_transfer_work?(%{work | source_read_bytes: 0, snapshot_write_debit: 0, metadata_read_bytes: 0})
+
+    assert ArtifactStore.valid_transfer_work?(%{
+             work
+             | source_read_bytes: 0,
+               snapshot_write_debit: 0,
+               metadata_read_bytes: 0
+           })
 
     for invalid <- [
           %{full | source_read_bytes: 67_108_865},
@@ -223,7 +284,12 @@ defmodule Loopex.ArtifactTransferContractTest do
     assert ArtifactStore.valid_transfer?(transfer, request, context)
     zero = %{transfer | window_start: 3, window_length: 0}
     assert ArtifactStore.valid_transfer?(zero, %{request | start: 3}, context)
-    assert ArtifactStore.valid_transfer?(zero, Map.put(%{request | start: 3}, :length, 0), context)
+
+    assert ArtifactStore.valid_transfer?(
+             zero,
+             Map.put(%{request | start: 3}, :length, 0),
+             context
+           )
 
     for changed <- [
           %{transfer | transfer_ref: String.duplicate("b", 32)},
@@ -237,31 +303,90 @@ defmodule Loopex.ArtifactTransferContractTest do
           Map.put(transfer, :reader, self())
         ] do
       refute ArtifactStore.valid_transfer?(changed, request, context)
-      refute ArtifactStore.valid_open_result?({:ok, %{transfer: changed, use: use, work: work}}, request, context)
+
+      refute ArtifactStore.valid_open_result?(
+               {:ok, %{transfer: changed, use: use, work: work}},
+               request,
+               context
+             )
     end
 
     refute ArtifactStore.valid_transfer?(transfer, Map.put(request, :length, 4), context)
     refute ArtifactStore.valid_transfer?(zero, %{request | start: 4}, context)
-    full = %{transfer | object: %{transfer.object | size: 67_108_864}, total_size: 67_108_864, window_length: 67_108_864}
+
+    full = %{
+      transfer
+      | object: %{transfer.object | size: 67_108_864},
+        total_size: 67_108_864,
+        window_length: 67_108_864
+    }
+
     assert ArtifactStore.valid_transfer?(full, request, context)
-    refute ArtifactStore.valid_transfer?(%{full | object: %{full.object | size: 67_108_865}, total_size: 67_108_865, window_length: 67_108_865}, request, context)
+
+    refute ArtifactStore.valid_transfer?(
+             %{
+               full
+               | object: %{full.object | size: 67_108_865},
+                 total_size: 67_108_865,
+                 window_length: 67_108_865
+             },
+             request,
+             context
+           )
   end
 
   test "reservation and admitted refusal grammar cannot echo extra or mismatched identities" do
     %{context: context, request: request, work: work} = fixture()
     reservation = {:ok, %{transfer_ref: context.transfer_ref}}
-    absent = {:error, %{reason: :cancelled, transfer_ref: context.transfer_ref, state: :not_reserved}}
+
+    absent =
+      {:error, %{reason: :cancelled, transfer_ref: context.transfer_ref, state: :not_reserved}}
+
     assert ArtifactStore.valid_reserve_result?(reservation, context)
     assert ArtifactStore.valid_reserve_result?(absent, context)
-    refute ArtifactStore.valid_reserve_result?({:ok, %{transfer_ref: String.duplicate("b", 32)}}, context)
-    refute ArtifactStore.valid_reserve_result?({:ok, %{transfer_ref: context.transfer_ref, path: "/private"}}, context)
+
+    refute ArtifactStore.valid_reserve_result?(
+             {:ok, %{transfer_ref: String.duplicate("b", 32)}},
+             context
+           )
+
+    refute ArtifactStore.valid_reserve_result?(
+             {:ok, %{transfer_ref: context.transfer_ref, path: "/private"}},
+             context
+           )
 
     for state <- [:retiring, :retired] do
-      assert ArtifactStore.valid_open_result?({:error, %{reason: :cancelled, transfer_ref: context.transfer_ref, work: work, state: state}}, request, context)
+      assert ArtifactStore.valid_open_result?(
+               {:error,
+                %{
+                  reason: :cancelled,
+                  transfer_ref: context.transfer_ref,
+                  work: work,
+                  state: state
+                }},
+               request,
+               context
+             )
     end
 
-    refute ArtifactStore.valid_open_result?({:error, %{reason: :cancelled, transfer_ref: context.transfer_ref, work: :unavailable, state: :retired}}, request, context)
-    refute ArtifactStore.valid_reserve_result?({:error, %{reason: :unknown, transfer_ref: context.transfer_ref, state: :not_reserved}}, context)
+    refute ArtifactStore.valid_open_result?(
+             {:error,
+              %{
+                reason: :cancelled,
+                transfer_ref: context.transfer_ref,
+                work: :unavailable,
+                state: :retired
+              }},
+             request,
+             context
+           )
+
+    refute ArtifactStore.valid_reserve_result?(
+             {:error,
+              %{reason: :unknown, transfer_ref: context.transfer_ref, state: :not_reserved}},
+             context
+           )
+
     refute ArtifactStore.valid_reserve_result?({:error, :cancelled}, context)
 
     for reason <- [:reservation_conflict, :reservation_required, :transfers_unavailable] do
@@ -283,13 +408,33 @@ defmodule Loopex.ArtifactTransferContractTest do
           %{work | write_uncertain: true}
         ] do
       assert ArtifactStore.valid_transfer_work?(changed_work)
-      refute ArtifactStore.valid_open_result?({:ok, %{opened | work: changed_work}}, request, context)
+
+      refute ArtifactStore.valid_open_result?(
+               {:ok, %{opened | work: changed_work}},
+               request,
+               context
+             )
     end
 
     other_object = %{transfer.object | locator: "other-object"}
-    refute ArtifactStore.valid_open_result?({:ok, %{opened | transfer: %{transfer | object: other_object}}}, request, context)
-    refute ArtifactStore.valid_open_result?({:ok, Map.put(opened, :handle, self())}, request, context)
-    refute ArtifactStore.valid_open_result?({:ok, %{opened | use: %{use | metadata: %{use.metadata | "session_id" => "other"}}}}, request, context)
+
+    refute ArtifactStore.valid_open_result?(
+             {:ok, %{opened | transfer: %{transfer | object: other_object}}},
+             request,
+             context
+           )
+
+    refute ArtifactStore.valid_open_result?(
+             {:ok, Map.put(opened, :handle, self())},
+             request,
+             context
+           )
+
+    refute ArtifactStore.valid_open_result?(
+             {:ok, %{opened | use: %{use | metadata: %{use.metadata | "session_id" => "other"}}}},
+             request,
+             context
+           )
   end
 
   test "retirement receipts and acknowledgements stay separate from unavailable accounting" do
@@ -300,22 +445,48 @@ defmodule Loopex.ArtifactTransferContractTest do
     ack = %{action: :acknowledge, transfer_ref: context.transfer_ref, receipt_ref: receipt}
     assert ArtifactStore.valid_close_result?({:retired, retired}, retire)
     assert ArtifactStore.valid_close_result?({:retired, %{retired | work: :unavailable}}, retire)
-    assert ArtifactStore.valid_close_result?({:unregistered, %{transfer_ref: context.transfer_ref}}, retire)
+
+    assert ArtifactStore.valid_close_result?(
+             {:unregistered, %{transfer_ref: context.transfer_ref}},
+             retire
+           )
+
     assert ArtifactStore.valid_close_result?({:error, :cleanup_unproved}, retire)
     assert ArtifactStore.valid_close_result?(:ok, ack)
     assert ArtifactStore.valid_close_result?({:error, :retirement_receipt_mismatch}, ack)
     refute ArtifactStore.valid_close_result?(:ok, retire)
     refute ArtifactStore.valid_close_result?({:retired, retired}, ack)
-    refute ArtifactStore.valid_close_result?({:retired, %{retired | receipt_ref: String.duplicate("B", 32)}}, retire)
-    refute ArtifactStore.valid_close_result?({:retired, Map.put(retired, :reader, self())}, retire)
+
+    refute ArtifactStore.valid_close_result?(
+             {:retired, %{retired | receipt_ref: String.duplicate("B", 32)}},
+             retire
+           )
+
+    refute ArtifactStore.valid_close_result?(
+             {:retired, Map.put(retired, :reader, self())},
+             retire
+           )
   end
 
   test "public admitted failures contain only closed reason and cleanup fields" do
-    assert ArtifactStore.valid_transfer_failure?({:error, %{reason: :cancelled, cleanup: :proved}})
-    assert ArtifactStore.valid_transfer_failure?({:error, %{reason: :open_deadline_exhausted, cleanup: :unproved}})
+    assert ArtifactStore.valid_transfer_failure?(
+             {:error, %{reason: :cancelled, cleanup: :proved}}
+           )
+
+    assert ArtifactStore.valid_transfer_failure?(
+             {:error, %{reason: :open_deadline_exhausted, cleanup: :unproved}}
+           )
+
     refute ArtifactStore.valid_transfer_failure?({:error, %{reason: :unknown, cleanup: :proved}})
-    refute ArtifactStore.valid_transfer_failure?({:error, %{reason: :cancelled, cleanup: :unknown}})
-    refute ArtifactStore.valid_transfer_failure?({:error, %{reason: :cancelled, cleanup: :proved, work: %{}}})
+
+    refute ArtifactStore.valid_transfer_failure?(
+             {:error, %{reason: :cancelled, cleanup: :unknown}}
+           )
+
+    refute ArtifactStore.valid_transfer_failure?(
+             {:error, %{reason: :cancelled, cleanup: :proved, work: %{}}}
+           )
+
     refute ArtifactStore.valid_transfer_failure?({:error, :cancelled})
   end
 
@@ -351,15 +522,46 @@ defmodule Loopex.ArtifactTransferContractTest do
       }
     }
 
-    request = %{session_id: <<0, 255>>, use_locator: "use:" <> digest(independent_use_bytes(use)), start: 0}
-    context = %{transfer_ref: String.duplicate("a", 32), open_deadline_ms: -1, object_work_bytes: 134_217_728, metadata_read_bytes: 131_073}
-    transfer = %{transfer_ref: context.transfer_ref, object: %{digest: use.object_digest, size: 3, locator: use.object_locator}, use_locator: request.use_locator, total_size: 3, window_start: 0, window_length: 3, object_digest: use.object_digest}
-    work = %{source_read_bytes: 3, snapshot_write_debit: 3, metadata_read_bytes: byte_size(independent_use_bytes(use)), write_uncertain: false}
+    request = %{
+      session_id: <<0, 255>>,
+      use_locator: "use:" <> digest(independent_use_bytes(use)),
+      start: 0
+    }
+
+    context = %{
+      transfer_ref: String.duplicate("a", 32),
+      open_deadline_ms: -1,
+      object_work_bytes: 134_217_728,
+      metadata_read_bytes: 131_073
+    }
+
+    transfer = %{
+      transfer_ref: context.transfer_ref,
+      object: %{digest: use.object_digest, size: 3, locator: use.object_locator},
+      use_locator: request.use_locator,
+      total_size: 3,
+      window_start: 0,
+      window_length: 3,
+      object_digest: use.object_digest
+    }
+
+    work = %{
+      source_read_bytes: 3,
+      snapshot_write_debit: 3,
+      metadata_read_bytes: byte_size(independent_use_bytes(use)),
+      write_uncertain: false
+    }
+
     %{request: request, context: context, use: use, transfer: transfer, work: work}
   end
 
   defp retire(context) do
-    %{action: :retire, transfer_ref: context.transfer_ref, open_deadline_ms: context.open_deadline_ms, close_deadline_ms: 4_999}
+    %{
+      action: :retire,
+      transfer_ref: context.transfer_ref,
+      open_deadline_ms: context.open_deadline_ms,
+      close_deadline_ms: 4_999
+    }
   end
 
   # Concept: expected use bytes are independent of the production ordering walk.

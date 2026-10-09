@@ -49,7 +49,11 @@ defmodule Loopex.Runtime do
   The supervisor, original artifact Dispatcher and reference token are
   transient BEAM values. They never enter a Store transaction, public event, snapshot, progress item, or diagnostic.
   """
-  @opaque t :: %__MODULE__{supervisor: pid(), token: reference(), artifact_dispatcher: pid() | nil}
+  @opaque t :: %__MODULE__{
+            supervisor: pid(),
+            token: reference(),
+            artifact_dispatcher: pid() | nil
+          }
   defstruct [:supervisor, :token, :artifact_dispatcher]
 
   @typedoc """
@@ -145,7 +149,9 @@ defmodule Loopex.Runtime do
     case control_call(runtime, {:await_dispatcher_ready, runtime.token}, :infinity) do
       :ok ->
         case RuntimeSupervisor.children(runtime.supervisor) do
-          {:ok, %{dispatcher: dispatcher}} -> {:ok, %{runtime | artifact_dispatcher: dispatcher}}
+          {:ok, %{dispatcher: dispatcher}} ->
+            {:ok, %{runtime | artifact_dispatcher: dispatcher}}
+
           _unavailable ->
             _ = stop(runtime)
             {:error, :runtime_unavailable}
@@ -788,8 +794,8 @@ defmodule Loopex.Runtime do
          true <- Loopex.ArtifactStore.valid_transfer_request?(routed_request) do
       artifact_open_call(
         runtime,
-        {:open_transfer, runtime.token, session_id, attachment_id, incarnation_id,
-         routed_request, context},
+        {:open_transfer, runtime.token, session_id, attachment_id, incarnation_id, routed_request,
+         context},
         context
       )
     else
@@ -808,6 +814,7 @@ defmodule Loopex.Runtime do
     with {:ok, runtime, session_id, attachment_id, incarnation_id} <-
            Attachment.routing(attachment) do
       deadline = monotonic_now() + Loopex.ArtifactStore.transfer_limits().read_deadline_ms
+
       artifact_operation_call(
         runtime,
         {:read_transfer, runtime.token, session_id, attachment_id, incarnation_id, transfer_ref,
@@ -828,6 +835,7 @@ defmodule Loopex.Runtime do
     with {:ok, runtime, session_id, attachment_id, incarnation_id} <-
            Attachment.routing(attachment) do
       anchor = monotonic_now()
+
       artifact_operation_call(
         runtime,
         {:close_transfer, runtime.token, session_id, attachment_id, incarnation_id, transfer_ref,
@@ -1020,7 +1028,11 @@ defmodule Loopex.Runtime do
   # Technical depth: this is the same bounded :which_children mechanism used by
   # creation startup observation. No lookup worker, successor follow or timeout
   # renewal is admitted. An unresolved owner supplies no cleanup proof.
-  defp artifact_open_call(%__MODULE__{supervisor: supervisor, artifact_dispatcher: original}, message, context) do
+  defp artifact_open_call(
+         %__MODULE__{supervisor: supervisor, artifact_dispatcher: original},
+         message,
+         context
+       ) do
     deadline = context.open_deadline_ms
 
     with remaining when remaining > 0 <- deadline - monotonic_now(),
@@ -1066,7 +1078,13 @@ defmodule Loopex.Runtime do
     )
   end
 
-  defp artifact_operation_call(%__MODULE__{supervisor: supervisor, artifact_dispatcher: original}, message, deadline, expired, unavailable) do
+  defp artifact_operation_call(
+         %__MODULE__{supervisor: supervisor, artifact_dispatcher: original},
+         message,
+         deadline,
+         expired,
+         unavailable
+       ) do
     with remaining when remaining > 0 <- deadline - monotonic_now(),
          children when is_list(children) <- safe_call(supervisor, :which_children, remaining),
          true <- monotonic_now() < deadline,
@@ -1091,7 +1109,11 @@ defmodule Loopex.Runtime do
          dispatcher,
          {:read_transfer, token, session, attachment, incarnation, id, _length, deadline}
        ),
-       do: GenServer.cast(dispatcher, {:cancel_artifact_read, token, session, attachment, incarnation, id, deadline})
+       do:
+         GenServer.cast(
+           dispatcher,
+           {:cancel_artifact_read, token, session, attachment, incarnation, id, deadline}
+         )
 
   defp cancel_artifact_operation(_dispatcher, _message), do: :ok
 

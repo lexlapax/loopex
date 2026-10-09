@@ -81,11 +81,17 @@ defmodule Loopex.Store.Local.ArtifactJobRangeTest do
 
   test "attachment and job reads share the runtime transfer ceiling" do
     {handle, reference} = stored("capacity")
+
     open = fn ->
       request = %{session_id: "session", use_locator: reference.use_locator, start: 0}
-      context = %{transfer_ref: Base.encode16(:crypto.strong_rand_bytes(16), case: :lower),
+
+      context = %{
+        transfer_ref: Base.encode16(:crypto.strong_rand_bytes(16), case: :lower),
         open_deadline_ms: System.monotonic_time(:millisecond) + 60_000,
-        object_work_bytes: 134_217_728, metadata_read_bytes: 131_073}
+        object_work_bytes: 134_217_728,
+        metadata_read_bytes: 131_073
+      }
+
       assert {:ok, %{transfer_ref: id}} = Artifacts.reserve_transfer(handle, request, context)
       assert id == context.transfer_ref
       assert {:ok, %{transfer: transfer}} = Artifacts.open_transfer(handle, request, context)
@@ -311,12 +317,23 @@ defmodule Loopex.Store.Local.ArtifactJobRangeTest do
 
   defp close_transfer(handle, transfer) do
     context = Process.get({:transfer_context, transfer.transfer_ref})
-    selector = %{action: :retire, transfer_ref: transfer.transfer_ref,
+
+    selector = %{
+      action: :retire,
+      transfer_ref: transfer.transfer_ref,
       open_deadline_ms: context.open_deadline_ms,
-      close_deadline_ms: System.monotonic_time(:millisecond) + 5_000}
+      close_deadline_ms: System.monotonic_time(:millisecond) + 5_000
+    }
+
     assert {:retired, %{receipt_ref: receipt}} = Artifacts.close_transfer(handle, selector)
-    assert :ok = Artifacts.close_transfer(handle, %{action: :acknowledge,
-      transfer_ref: transfer.transfer_ref, receipt_ref: receipt})
+
+    assert :ok =
+             Artifacts.close_transfer(handle, %{
+               action: :acknowledge,
+               transfer_ref: transfer.transfer_ref,
+               receipt_ref: receipt
+             })
+
     :ok
   end
 

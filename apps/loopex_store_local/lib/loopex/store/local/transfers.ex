@@ -227,16 +227,29 @@ defmodule Loopex.Store.Local.Transfers do
     with true <- ArtifactStore.valid_transfer_request?(request),
          true <- ArtifactStore.valid_open_context?(context),
          {:ok, record} <- Map.fetch(state.transfers, context.transfer_ref),
-         true <- record.request == request and record.context == context and record.caller == caller,
+         true <-
+           record.request == request and record.context == context and record.caller == caller,
          true <- record.status == :reserved do
       if timely?(context.open_deadline_ms) and Process.alive?(caller) do
         owner = self()
         placement = Map.take(state, [:root, :scratch, :limits])
-        {worker, monitor} = spawn_monitor(fn -> transfer_io(owner, placement, request, context) end)
-        record = %{record | status: :verifying, worker: worker, worker_monitor: monitor, open_from: from}
+
+        {worker, monitor} =
+          spawn_monitor(fn -> transfer_io(owner, placement, request, context) end)
+
+        record = %{
+          record
+          | status: :verifying,
+            worker: worker,
+            worker_monitor: monitor,
+            open_from: from
+        }
+
         {:noreply, put_record(state, context.transfer_ref, record)}
       else
-        record = record |> Map.put(:outcome, {:error, :open_deadline_exhausted}) |> retire_reserved()
+        record =
+          record |> Map.put(:outcome, {:error, :open_deadline_exhausted}) |> retire_reserved()
+
         {:reply, open_failure(record), put_record(state, context.transfer_ref, record)}
       end
     else
@@ -250,7 +263,10 @@ defmodule Loopex.Store.Local.Transfers do
       {:ok, %{status: :live, read_from: nil} = record}
       when is_integer(length) and length > 0 ->
         deadline = System.monotonic_time(:millisecond) + state.limits.read_deadline_ms
-        timer = Process.send_after(self(), {:read_expired, id, deadline}, state.limits.read_deadline_ms)
+
+        timer =
+          Process.send_after(self(), {:read_expired, id, deadline}, state.limits.read_deadline_ms)
+
         send(record.worker, {:transfer_read, self(), id, length, deadline})
         record = %{record | read_from: from, read_deadline: deadline, read_timer: timer}
         {:noreply, put_record(state, id, record)}
@@ -291,8 +307,16 @@ defmodule Loopex.Store.Local.Transfers do
           GenServer.reply(record.open_from, {:ok, %{transfer: transfer, use: use, work: work}})
           deadline = System.monotonic_time(:millisecond) + state.limits.lifetime_ms
           timer = Process.send_after(self(), {:expire, id}, state.limits.lifetime_ms)
-          record = %{record | status: :live, work: work, open_from: nil, timer: timer,
-                              lifetime_deadline: deadline}
+
+          record = %{
+            record
+            | status: :live,
+              work: work,
+              open_from: nil,
+              timer: timer,
+              lifetime_deadline: deadline
+          }
+
           {:noreply, put_record(state, id, record)}
         else
           record = %{record | outcome: {:error, :open_deadline_exhausted}, work: work}
@@ -312,7 +336,10 @@ defmodule Loopex.Store.Local.Transfers do
     case Map.fetch(state.transfers, id) do
       {:ok, %{worker: ^worker, status: :live, read_from: from} = record} when not is_nil(from) ->
         cancel_timer(record.read_timer)
-        reply = if timely?(record.read_deadline), do: result, else: {:error, :read_deadline_exhausted}
+
+        reply =
+          if timely?(record.read_deadline), do: result, else: {:error, :read_deadline_exhausted}
+
         GenServer.reply(from, reply)
         deadline = record.read_deadline
         record = %{record | read_from: nil, read_timer: nil, read_deadline: nil}
@@ -421,7 +448,8 @@ defmodule Loopex.Store.Local.Transfers do
       :error ->
         {:reply, :ok, state}
 
-      {:ok, %{status: :retired, receipt: receipt} = record} when receipt == selector.receipt_ref ->
+      {:ok, %{status: :retired, receipt: receipt} = record}
+      when receipt == selector.receipt_ref ->
         Process.demonitor(record.caller_monitor, [:flush])
         cancel_timer(record.timer)
         cancel_timer(record.close_timer)
@@ -444,7 +472,8 @@ defmodule Loopex.Store.Local.Transfers do
           record.context.open_deadline_ms != selector.open_deadline_ms ->
             {:reply, {:error, :invalid_close_context}, state}
 
-          record.close_selector_deadline != nil and record.close_selector_deadline != selector.close_deadline_ms ->
+          record.close_selector_deadline != nil and
+              record.close_selector_deadline != selector.close_deadline_ms ->
             {:reply, {:error, :invalid_close_context}, state}
 
           record.status == :retired ->
@@ -474,8 +503,12 @@ defmodule Loopex.Store.Local.Transfers do
 
     record =
       cond do
-        record.status == :retired -> record
-        record.worker == nil -> retire_reserved(record)
+        record.status == :retired ->
+          record
+
+        record.worker == nil ->
+          retire_reserved(record)
+
         true ->
           send(record.worker, {:transfer_retire, self(), id})
           %{record | status: :retiring, outcome: record.outcome || {:error, :cancelled}}
@@ -483,8 +516,12 @@ defmodule Loopex.Store.Local.Transfers do
 
     timer =
       record.close_timer ||
-        Process.send_after(self(), {:close_expired, id, deadline},
-          max(0, deadline - System.monotonic_time(:millisecond)))
+        Process.send_after(
+          self(),
+          {:close_expired, id, deadline},
+          max(0, deadline - System.monotonic_time(:millisecond))
+        )
+
     put_record(state, id, %{record | close_deadline: deadline, close_timer: timer})
   end
 
@@ -495,9 +532,13 @@ defmodule Loopex.Store.Local.Transfers do
     cancel_timer(record.close_timer)
     cancel_timer(record.read_timer)
     if record.open_from, do: GenServer.reply(record.open_from, open_failure(record))
+
     if record.read_from do
-      reason = if record.outcome == {:error, :read_deadline_exhausted},
-        do: :read_deadline_exhausted, else: :unknown_transfer
+      reason =
+        if record.outcome == {:error, :read_deadline_exhausted},
+          do: :read_deadline_exhausted,
+          else: :unknown_transfer
+
       GenServer.reply(record.read_from, {:error, reason})
     end
 
@@ -514,27 +555,47 @@ defmodule Loopex.Store.Local.Transfers do
   defp open_failure(%{work: :unavailable}), do: {:error, :transfers_unavailable}
 
   defp open_failure(record) do
-    reason = case record.outcome do
-      {:error, reason} -> reason
-      _ -> :cancelled
-    end
+    reason =
+      case record.outcome do
+        {:error, reason} -> reason
+        _ -> :cancelled
+      end
 
-    {:error, %{reason: reason, transfer_ref: record.context.transfer_ref, work: record.work, state: record.status}}
+    {:error,
+     %{
+       reason: reason,
+       transfer_ref: record.context.transfer_ref,
+       work: record.work,
+       state: record.status
+     }}
   end
 
   defp retired_reply(record),
-    do: {:retired, %{transfer_ref: record.context.transfer_ref, receipt_ref: record.receipt, work: record.work}}
+    do:
+      {:retired,
+       %{
+         transfer_ref: record.context.transfer_ref,
+         receipt_ref: record.receipt,
+         work: record.work
+       }}
 
   defp not_reserved(context, reason),
     do: {:error, %{reason: reason, transfer_ref: context.transfer_ref, state: :not_reserved}}
 
-  defp put_record(state, id, record), do: %{state | transfers: Map.put(state.transfers, id, record)}
+  defp put_record(state, id, record),
+    do: %{state | transfers: Map.put(state.transfers, id, record)}
+
   defp timely?(deadline), do: System.monotonic_time(:millisecond) < deadline
   defp cancel_timer(nil), do: :ok
   defp cancel_timer(timer), do: Process.cancel_timer(timer)
 
   defp empty_work,
-    do: %{source_read_bytes: 0, snapshot_write_debit: 0, metadata_read_bytes: 0, write_uncertain: false}
+    do: %{
+      source_read_bytes: 0,
+      snapshot_write_debit: 0,
+      metadata_read_bytes: 0,
+      write_uncertain: false
+    }
 
   defp emit(record, length, limits) do
     remaining = record.window_start + record.window_length - record.cursor
@@ -706,7 +767,12 @@ defmodule Loopex.Store.Local.Transfers do
         with {:ok, bytes} <- transfer_use_bytes(path, context),
              {:ok, use} <- Loopex.Store.Local.Artifacts.decode_use_bytes(bytes, digest),
              true <- ArtifactStore.valid_transfer_use?(use, request) do
-          object = %{digest: use.object_digest, size: use.object_size, locator: use.object_locator}
+          object = %{
+            digest: use.object_digest,
+            size: use.object_size,
+            locator: use.object_locator
+          }
+
           transfer_source(owner, placement, request, context, object, use)
         else
           false -> {:error, :artifact_use_mismatch}
@@ -718,8 +784,12 @@ defmodule Loopex.Store.Local.Transfers do
         :throw, {:transfer_refused, reason} -> {:error, reason}
       end
 
-    send(owner, {:transfer_retired, context.transfer_ref, self(), outcome,
-                 Process.get(:transfer_work), Process.get(:transfer_proof)})
+    send(
+      owner,
+      {:transfer_retired, context.transfer_ref, self(), outcome, Process.get(:transfer_work),
+       Process.get(:transfer_proof)}
+    )
+
     Process.demonitor(monitor, [:flush])
   end
 
@@ -746,8 +816,11 @@ defmodule Loopex.Store.Local.Transfers do
           close_device(device)
         end
 
-      {:error, :enoent} -> {:error, :unknown_artifact_use}
-      {:error, _} -> {:error, :artifact_unreadable}
+      {:error, :enoent} ->
+        {:error, :unknown_artifact_use}
+
+      {:error, _} ->
+        {:error, :artifact_unreadable}
     end
   end
 
@@ -756,7 +829,11 @@ defmodule Loopex.Store.Local.Transfers do
 
     with {:ok, path} <- object_path(placement, object),
          true <- object.size <= placement.limits.object_bytes,
-         :ok <- reserve_open_work(object.size, min(context.object_work_bytes, placement.limits.open_work_bytes)),
+         :ok <-
+           reserve_open_work(
+             object.size,
+             min(context.object_work_bytes, placement.limits.open_work_bytes)
+           ),
          {:ok, bounds} <- window_bounds(Map.take(request, [:start, :length]), object.size) do
       result =
         case File.open(path, [:read, :binary, :raw]) do
@@ -768,8 +845,11 @@ defmodule Loopex.Store.Local.Transfers do
               close_device(reader)
             end
 
-          {:error, :enoent} -> {:error, :unknown_artifact}
-          {:error, _} -> {:error, :artifact_unreadable}
+          {:error, :enoent} ->
+            {:error, :unknown_artifact}
+
+          {:error, _} ->
+            {:error, :artifact_unreadable}
         end
 
       case result do
@@ -778,10 +858,22 @@ defmodule Loopex.Store.Local.Transfers do
             check_io!(context.open_deadline_ms)
 
             if Process.get(:transfer_proof) do
-              transfer = %{transfer_ref: context.transfer_ref, object: object,
-                use_locator: request.use_locator, total_size: object.size,
-                window_start: bounds.start, window_length: bounds.length, object_digest: digest}
-              send(owner, {:transfer_opened, context.transfer_ref, self(), transfer, use, Process.get(:transfer_work)})
+              transfer = %{
+                transfer_ref: context.transfer_ref,
+                object: object,
+                use_locator: request.use_locator,
+                total_size: object.size,
+                window_start: bounds.start,
+                window_length: bounds.length,
+                object_digest: digest
+              }
+
+              send(
+                owner,
+                {:transfer_opened, context.transfer_ref, self(), transfer, use,
+                 Process.get(:transfer_work)}
+              )
+
               record = Map.merge(transfer, %{device: snapshot, cursor: bounds.start})
               transfer_reader(owner, context.transfer_ref, record, placement.limits)
             else
@@ -791,7 +883,8 @@ defmodule Loopex.Store.Local.Transfers do
             close_device(snapshot)
           end
 
-        {:error, reason} -> {:error, reason}
+        {:error, reason} ->
+          {:error, reason}
       end
     else
       false -> {:error, :artifact_too_large}
@@ -807,7 +900,8 @@ defmodule Loopex.Store.Local.Transfers do
         try do
           check_io!(context.open_deadline_ms)
 
-          with {:ok, digest} <- transfer_copy(reader, snapshot, :crypto.hash_init(:sha256), object.size, context),
+          with {:ok, digest} <-
+                 transfer_copy(reader, snapshot, :crypto.hash_init(:sha256), object.size, context),
                {:ok, after_info} <- :file.read_file_info(reader),
                true <- stable_source?(before, after_info),
                true <- digest == object.digest do
@@ -828,7 +922,9 @@ defmodule Loopex.Store.Local.Transfers do
         end
 
       case result do
-        {:ok, ^snapshot, _digest} -> result
+        {:ok, ^snapshot, _digest} ->
+          result
+
         {:error, _reason} ->
           close_device(snapshot)
           result
@@ -870,7 +966,8 @@ defmodule Loopex.Store.Local.Transfers do
             :erlang.raise(kind, reason, __STACKTRACE__)
         end
 
-      {:error, _reason} -> {:error, :artifact_unreadable}
+      {:error, _reason} ->
+        {:error, :artifact_unreadable}
     end
   end
 
@@ -906,7 +1003,14 @@ defmodule Loopex.Store.Local.Transfers do
             :ok ->
               publish_work(Map.put(Process.get(:transfer_work), :write_uncertain, false))
               check_io!(context.open_deadline_ms)
-              transfer_copy(reader, snapshot, :crypto.hash_update(hash, bytes), left - wanted, context)
+
+              transfer_copy(
+                reader,
+                snapshot,
+                :crypto.hash_update(hash, bytes),
+                left - wanted,
+                context
+              )
 
             {:error, _} ->
               work = Process.get(:transfer_work) |> Map.put(:write_uncertain, true)
@@ -914,7 +1018,8 @@ defmodule Loopex.Store.Local.Transfers do
               {:error, :artifact_unreadable}
           end
 
-        _ -> {:error, :artifact_integrity_failed}
+        _ ->
+          {:error, :artifact_integrity_failed}
       end
     end
   end
@@ -975,10 +1080,21 @@ defmodule Loopex.Store.Local.Transfers do
     send(owner, {:transfer_work, id, self(), work})
   end
 
-  defp closed_io_reason(reason) when reason in [:unknown_artifact_use, :artifact_use_mismatch,
-       :artifact_integrity_failed, :artifact_digest_mismatch, :unknown_artifact,
-       :artifact_too_large, :invalid_window, :open_deadline_exhausted,
-       :open_work_budget_exhausted, :cancelled], do: reason
+  defp closed_io_reason(reason)
+       when reason in [
+              :unknown_artifact_use,
+              :artifact_use_mismatch,
+              :artifact_integrity_failed,
+              :artifact_digest_mismatch,
+              :unknown_artifact,
+              :artifact_too_large,
+              :invalid_window,
+              :open_deadline_exhausted,
+              :open_work_budget_exhausted,
+              :cancelled
+            ],
+       do: reason
+
   defp closed_io_reason(_reason), do: :artifact_unreadable
 
   defp scavenge(scratch) do

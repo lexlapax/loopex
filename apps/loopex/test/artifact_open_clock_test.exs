@@ -23,7 +23,10 @@ defmodule Loopex.ArtifactOpenClockTest do
     GenServer.reply(lookup_from, [{EventDispatcher, dispatcher, :worker, [EventDispatcher]}])
 
     assert_receive {:open, ^dispatcher, message, from}, 1_000
-    assert {:open_transfer, token, "session", "attachment", "incarnation", routed, context} = message
+
+    assert {:open_transfer, token, "session", "attachment", "incarnation", routed, context} =
+             message
+
     assert token === attachment.runtime.token
     assert routed === Map.put(request, :session_id, "session")
     assert ArtifactStore.valid_transfer_request?(routed)
@@ -87,7 +90,10 @@ defmodule Loopex.ArtifactOpenClockTest do
     caller = Task.async(fn -> Runtime.open_artifact_transfer(attachment, request) end)
     assert_receive {:lookup, ^supervisor, lookup_from}, 1_000
     GenServer.reply(lookup_from, [{EventDispatcher, replacement, :worker, [EventDispatcher]}])
-    assert {:error, %{reason: :transfers_unavailable, cleanup: :unproved}} = Task.await(caller, 1_000)
+
+    assert {:error, %{reason: :transfers_unavailable, cleanup: :unproved}} =
+             Task.await(caller, 1_000)
+
     refute_received {:open, _, _, _}
     assert Process.alive?(original)
   end
@@ -101,12 +107,15 @@ defmodule Loopex.ArtifactOpenClockTest do
 
     for operation <- [:read, :close] do
       before_call = System.monotonic_time(:millisecond)
-      caller = Task.async(fn ->
-        case operation do
-          :read -> Runtime.read_artifact_chunk(attachment, id, 3)
-          :close -> Runtime.close_artifact_transfer(attachment, id)
-        end
-      end)
+
+      caller =
+        Task.async(fn ->
+          case operation do
+            :read -> Runtime.read_artifact_chunk(attachment, id, 3)
+            :close -> Runtime.close_artifact_transfer(attachment, id)
+          end
+        end)
+
       assert_receive {:lookup, ^supervisor, lookup_from}, 1_000
       queued_at = System.monotonic_time(:millisecond)
       Process.sleep(2)
@@ -117,7 +126,9 @@ defmodule Loopex.ArtifactOpenClockTest do
 
       case operation do
         :read ->
-          assert {:read_transfer, token, "session", "attachment", "incarnation", ^id, 3, deadline} = message
+          assert {:read_transfer, token, "session", "attachment", "incarnation", ^id, 3, deadline} =
+                   message
+
           assert token === attachment.runtime.token
           assert deadline >= before_call + 5_000
           assert deadline <= queued_at + 5_000
@@ -125,7 +136,9 @@ defmodule Loopex.ArtifactOpenClockTest do
           assert {:ok, :complete} = Task.await(caller, 1_000)
 
         :close ->
-          assert {:close_transfer, token, "session", "attachment", "incarnation", ^id, anchor} = message
+          assert {:close_transfer, token, "session", "attachment", "incarnation", ^id, anchor} =
+                   message
+
           assert token === attachment.runtime.token
           assert anchor >= before_call
           assert anchor <= queued_at
@@ -147,6 +160,7 @@ defmodule Loopex.ArtifactOpenClockTest do
 
   defp owned(function) do
     pid = spawn(function)
+
     on_exit(fn ->
       monitor = Process.monitor(pid)
       if Process.alive?(pid), do: Process.exit(pid, :kill)
@@ -163,7 +177,7 @@ defmodule Loopex.ArtifactOpenClockTest do
 
   defp supervisor(test, _dispatcher) do
     receive do
-      {:'$gen_call', from, :which_children} ->
+      {:"$gen_call", from, :which_children} ->
         send(test, {:lookup, self(), from})
         supervisor(test, nil)
     end
@@ -171,10 +185,11 @@ defmodule Loopex.ArtifactOpenClockTest do
 
   defp dispatcher(test) do
     receive do
-      {:'$gen_call', from, message} ->
+      {:"$gen_call", from, message} ->
         send(test, {:open, self(), message, from})
         dispatcher(test)
-      {:'$gen_cast', message} ->
+
+      {:"$gen_cast", message} ->
         send(test, {:cancel, self(), message})
         dispatcher(test)
     end

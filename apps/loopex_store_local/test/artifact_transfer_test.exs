@@ -24,10 +24,17 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
   alias Loopex.Store.Local.Artifacts
   alias Loopex.Store.Local.Transfers
 
-  @use %{media_type: "text/plain", role: "tool_output", metadata: %{
-    "session_id" => "transfer-session", "run_id" => "transfer-run",
-    "operation_id" => "transfer-operation", "attempt" => 1, "tool_call_id" => "transfer-call"
-  }}
+  @use %{
+    media_type: "text/plain",
+    role: "tool_output",
+    metadata: %{
+      "session_id" => "transfer-session",
+      "run_id" => "transfer-run",
+      "operation_id" => "transfer-operation",
+      "attempt" => 1,
+      "tool_call_id" => "transfer-call"
+    }
+  }
 
   test "a whole-object transfer verifies once and emits digested chunks in order" do
     %{handle: handle, reference: reference, bytes: bytes} = stored(:binary.copy("ab", 5_000))
@@ -129,11 +136,9 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
              open_transfer(handle, second.use_locator, %{start: 0}, session_id: "wrong-session")
 
     assert {:error, :unknown_artifact_use} =
-             open_transfer(handle, "use:" <> String.duplicate("a", 64),
-               %{
-                 start: 0
-               }
-             )
+             open_transfer(handle, "use:" <> String.duplicate("a", 64), %{
+               start: 0
+             })
   end
 
   test "an unknown or closed transfer refuses and releases its descriptor" do
@@ -189,6 +194,7 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
     %{handle: handle, reference: reference} = stored(:binary.copy("w", 200_000))
 
     constrained = budget_store(handle, 1_024)
+
     assert {:error, :open_work_budget_exhausted} =
              open_transfer(constrained, reference.use_locator, %{start: 0})
 
@@ -558,9 +564,7 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
     reasons = [
       elem(open_transfer(handle, other.use_locator, %{start: 0}, session_id: "wrong-session"), 1),
       elem(
-        open_transfer(handle, "use:" <> String.duplicate("a", 64),
-          %{start: 0}
-        ),
+        open_transfer(handle, "use:" <> String.duplicate("a", 64), %{start: 0}),
         1
       ),
       elem(
@@ -725,13 +729,14 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
 
     assert {:ok, selected} = open_transfer(handle, second.use_locator, %{start: 0})
     assert selected.object_digest == second.digest
-    assert IO.iodata_to_binary(Enum.map(drain(handle, selected, 16), & &1.bytes)) == "second object"
+
+    assert IO.iodata_to_binary(Enum.map(drain(handle, selected, 16), & &1.bytes)) ==
+             "second object"
+
     assert :ok = close_transfer(handle, selected)
 
     assert {:error, :unknown_artifact_use} =
-             open_transfer(handle, "use:" <> String.duplicate("a", 64),
-               %{start: 0}
-             )
+             open_transfer(handle, "use:" <> String.duplicate("a", 64), %{start: 0})
 
     # Corruption outside the requested window still refuses, because the open
     # verifies the object rather than the part a caller asked for.
@@ -811,9 +816,7 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
     {:ok, expiring_reference} = Artifacts.put(short, "bytes that outlive nothing", @use)
 
     assert {:ok, expired} =
-             open_transfer(short, expiring_reference.use_locator,
-               %{start: 0}
-             )
+             open_transfer(short, expiring_reference.use_locator, %{start: 0})
 
     Process.sleep(300)
 
@@ -933,12 +936,21 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
     record = :sys.get_state(handle.transfers).transfers[id]
     assert record.status == :reserved
     assert record.worker == nil
-    assert record.work == %{source_read_bytes: 0, snapshot_write_debit: 0,
-                            metadata_read_bytes: 0, write_uncertain: false}
+
+    assert record.work == %{
+             source_read_bytes: 0,
+             snapshot_write_debit: 0,
+             metadata_read_bytes: 0,
+             write_uncertain: false
+           }
+
     assert {:error, :reservation_conflict} = Artifacts.reserve_transfer(handle, request, context)
     other = Task.async(fn -> Artifacts.open_transfer(handle, request, context) end)
     assert {:error, :reservation_conflict} = Task.await(other)
-    assert {:error, :reservation_conflict} = Artifacts.open_transfer(handle, %{request | start: 1}, context)
+
+    assert {:error, :reservation_conflict} =
+             Artifacts.open_transfer(handle, %{request | start: 1}, context)
+
     changed = %{context | open_deadline_ms: context.open_deadline_ms + 1}
     assert {:error, :reservation_conflict} = Artifacts.open_transfer(handle, request, changed)
     assert {:ok, %{transfer: transfer}} = Artifacts.open_transfer(handle, request, context)
@@ -952,31 +964,63 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
   test "retired proof keeps shared capacity until the exact receipt acknowledgement" do
     %{handle: handle, reference: reference} = stored("proof capacity")
     request = %{session_id: "transfer-session", use_locator: reference.use_locator, start: 0}
-    contexts = for _ <- 1..4 do
-      context = opening_context(60_000)
-      assert {:ok, %{transfer_ref: id}} = Artifacts.reserve_transfer(handle, request, context)
-      assert id == context.transfer_ref
-      context
-    end
+
+    contexts =
+      for _ <- 1..4 do
+        context = opening_context(60_000)
+        assert {:ok, %{transfer_ref: id}} = Artifacts.reserve_transfer(handle, request, context)
+        assert id == context.transfer_ref
+        context
+      end
+
     extra = opening_context(60_000)
+
     assert {:error, %{reason: :transfer_limit_reached, state: :not_reserved}} =
              Artifacts.reserve_transfer(handle, request, extra)
-    assert {:error, :transfer_limit_reached} = Transfers.reserve_job(handle.transfers, extra.open_deadline_ms)
+
+    assert {:error, :transfer_limit_reached} =
+             Transfers.reserve_job(handle.transfers, extra.open_deadline_ms)
+
     [first | rest] = contexts
     selector = retire_selector(first)
+
     assert {:retired, %{transfer_ref: id, receipt_ref: receipt, work: work}} =
              Artifacts.close_transfer(handle, selector)
+
     assert id == first.transfer_ref
     assert work.source_read_bytes == 0
     assert work.snapshot_write_debit == 0
     assert work.metadata_read_bytes == 0
     assert length(Transfers.live(handle.transfers)) == 4
-    wrong_receipt = %{action: :acknowledge, transfer_ref: id, receipt_ref: String.duplicate("0", 32)}
-    assert {:error, :retirement_receipt_mismatch} = Artifacts.close_transfer(handle, wrong_receipt)
-    assert {:error, %{reason: :transfer_limit_reached}} = Artifacts.reserve_transfer(handle, request, extra)
+
+    wrong_receipt = %{
+      action: :acknowledge,
+      transfer_ref: id,
+      receipt_ref: String.duplicate("0", 32)
+    }
+
+    assert {:error, :retirement_receipt_mismatch} =
+             Artifacts.close_transfer(handle, wrong_receipt)
+
+    assert {:error, %{reason: :transfer_limit_reached}} =
+             Artifacts.reserve_transfer(handle, request, extra)
+
     assert {:retired, %{receipt_ref: ^receipt}} = Artifacts.close_transfer(handle, selector)
-    assert :ok = Artifacts.close_transfer(handle, %{action: :acknowledge, transfer_ref: id, receipt_ref: receipt})
-    assert :ok = Artifacts.close_transfer(handle, %{action: :acknowledge, transfer_ref: id, receipt_ref: receipt})
+
+    assert :ok =
+             Artifacts.close_transfer(handle, %{
+               action: :acknowledge,
+               transfer_ref: id,
+               receipt_ref: receipt
+             })
+
+    assert :ok =
+             Artifacts.close_transfer(handle, %{
+               action: :acknowledge,
+               transfer_ref: id,
+               receipt_ref: receipt
+             })
+
     assert {:ok, %{transfer_ref: extra_id}} = Artifacts.reserve_transfer(handle, request, extra)
     assert extra_id == extra.transfer_ref
     Enum.each([extra | rest], &retire_and_ack(handle, &1))
@@ -987,23 +1031,42 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
     %{handle: handle, reference: reference} = stored("expired reservation")
     request = %{session_id: "transfer-session", use_locator: reference.use_locator, start: 0}
     expired = opening_context(-1)
+
     assert {:error, %{reason: :open_deadline_exhausted, state: :not_reserved}} =
              Artifacts.reserve_transfer(handle, request, expired)
+
     assert {:error, :invalid_open_context} =
              Artifacts.reserve_transfer(handle, request, %{expired | object_work_bytes: 1_024})
+
     assert {:error, :invalid_artifact_request} =
-             Artifacts.reserve_transfer(handle, Map.put(request, :object, object(reference)), opening_context(60_000))
+             Artifacts.reserve_transfer(
+               handle,
+               Map.put(request, :object, object(reference)),
+               opening_context(60_000)
+             )
+
     assert {:error, :invalid_artifact_request} =
-             Artifacts.reserve_transfer(handle, Map.put(request, :length, nil), opening_context(60_000))
-    assert {:error, :reservation_required} = Artifacts.open_transfer(handle, request, opening_context(60_000))
+             Artifacts.reserve_transfer(
+               handle,
+               Map.put(request, :length, nil),
+               opening_context(60_000)
+             )
+
+    assert {:error, :reservation_required} =
+             Artifacts.open_transfer(handle, request, opening_context(60_000))
+
     assert [] = Transfers.live(handle.transfers)
     assert {:ok, []} = File.ls(Path.join(handle.root, "transfers"))
   end
 
   test "actual metadata corruption and session mismatch refuse before source bytes are read" do
     %{handle: handle, reference: reference} = stored("metadata first")
+
     assert {:error, :artifact_use_mismatch} =
-             open_transfer(handle, reference.use_locator, %{start: 0}, session_id: "different-session")
+             open_transfer(handle, reference.use_locator, %{start: 0},
+               session_id: "different-session"
+             )
+
     digest = binary_part(reference.use_locator, 4, 64)
     path = Path.join([handle.root, "uses", binary_part(digest, 0, 2), digest])
     File.write!(path, File.read!(path) <> <<0>>)
@@ -1011,8 +1074,10 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
     request = %{session_id: "transfer-session", use_locator: reference.use_locator, start: 0}
     context = opening_context(60_000)
     assert {:ok, _} = Artifacts.reserve_transfer(handle, request, context)
+
     assert {:error, %{reason: :artifact_integrity_failed, state: :retired, work: work}} =
              Artifacts.open_transfer(handle, request, context)
+
     assert work.source_read_bytes == 0
     assert work.snapshot_write_debit == 0
     assert work.metadata_read_bytes > 0
@@ -1024,14 +1089,18 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
     request = %{session_id: "transfer-session", use_locator: reference.use_locator, start: 0}
     context = opening_context(60_000)
     parent = self()
-    {caller, caller_monitor} = spawn_monitor(fn ->
-      assert {:ok, _} = Artifacts.reserve_transfer(handle, request, context)
-      assert {:ok, %{transfer: transfer}} = Artifacts.open_transfer(handle, request, context)
-      send(parent, {:adopted, self(), transfer})
-      receive do
-        :complete -> :ok
-      end
-    end)
+
+    {caller, caller_monitor} =
+      spawn_monitor(fn ->
+        assert {:ok, _} = Artifacts.reserve_transfer(handle, request, context)
+        assert {:ok, %{transfer: transfer}} = Artifacts.open_transfer(handle, request, context)
+        send(parent, {:adopted, self(), transfer})
+
+        receive do
+          :complete -> :ok
+        end
+      end)
+
     on_exit(fn -> if Process.alive?(caller), do: Process.exit(caller, :kill) end)
     assert_receive {:adopted, ^caller, transfer}, 5_000
     record = :sys.get_state(handle.transfers).transfers[context.transfer_ref]
@@ -1083,6 +1152,7 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
       eventually(fn ->
         :sys.get_state(handle.transfers).transfers[context.transfer_ref].close_from != nil
       end)
+
       before = :sys.get_state(handle.transfers).transfers[context.transfer_ref]
       assert before.worker == worker
       assert {:error, :cleanup_unproved} = Artifacts.close_transfer(handle, selector)
@@ -1094,14 +1164,25 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
       assert length(Transfers.live(handle.transfers)) == 1
       true = :erlang.resume_process(worker)
       assert System.monotonic_time(:millisecond) < selector.close_deadline_ms
+
       assert {:retired, %{receipt_ref: receipt}} =
-               Task.await(task, max(1, selector.close_deadline_ms - System.monotonic_time(:millisecond)))
+               Task.await(
+                 task,
+                 max(1, selector.close_deadline_ms - System.monotonic_time(:millisecond))
+               )
+
       assert System.monotonic_time(:millisecond) < selector.close_deadline_ms
       remaining = max(0, selector.close_deadline_ms - System.monotonic_time(:millisecond))
       assert_receive {:DOWN, ^monitor, :process, ^worker, :normal}, remaining
       assert System.monotonic_time(:millisecond) < selector.close_deadline_ms
-      assert :ok = Artifacts.close_transfer(handle, %{action: :acknowledge,
-        transfer_ref: context.transfer_ref, receipt_ref: receipt})
+
+      assert :ok =
+               Artifacts.close_transfer(handle, %{
+                 action: :acknowledge,
+                 transfer_ref: context.transfer_ref,
+                 receipt_ref: receipt
+               })
+
       assert System.monotonic_time(:millisecond) < selector.close_deadline_ms
       assert [] = Transfers.live(handle.transfers)
     after
@@ -1125,25 +1206,41 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
     monitor = Process.monitor(worker)
     Process.exit(worker, :kill)
     assert_receive {:DOWN, ^monitor, :process, ^worker, :killed}, 2_000
+
     eventually(fn ->
       :sys.get_state(handle.transfers).transfers[context.transfer_ref].worker_joined
     end)
+
     record = :sys.get_state(handle.transfers).transfers[context.transfer_ref]
     assert record.work == :unavailable
     assert record.proof == false
     assert record.receipt == nil
     assert [id] = Transfers.live(handle.transfers)
     assert id == context.transfer_ref
-    selector = %{retire_selector(context) | close_deadline_ms: System.monotonic_time(:millisecond)}
+
+    selector = %{
+      retire_selector(context)
+      | close_deadline_ms: System.monotonic_time(:millisecond)
+    }
+
     assert {:error, :cleanup_unproved} = Artifacts.close_transfer(handle, selector)
-    assert {:error, :retirement_receipt_mismatch} = Artifacts.close_transfer(handle,
-      %{action: :acknowledge, transfer_ref: id, receipt_ref: String.duplicate("0", 32)})
+
+    assert {:error, :retirement_receipt_mismatch} =
+             Artifacts.close_transfer(
+               handle,
+               %{action: :acknowledge, transfer_ref: id, receipt_ref: String.duplicate("0", 32)}
+             )
+
     assert [^id] = Transfers.live(handle.transfers)
   end
 
-  defp retire_selector(context), do: %{action: :retire, transfer_ref: context.transfer_ref,
-    open_deadline_ms: context.open_deadline_ms,
-    close_deadline_ms: System.monotonic_time(:millisecond) + 5_000}
+  defp retire_selector(context),
+    do: %{
+      action: :retire,
+      transfer_ref: context.transfer_ref,
+      open_deadline_ms: context.open_deadline_ms,
+      close_deadline_ms: System.monotonic_time(:millisecond) + 5_000
+    }
 
   defp session(artifact_handle, adapter \\ Loopex.Store.Local.Artifacts) do
     path = Path.join(System.tmp_dir!(), "loopex-store-#{:erlang.unique_integer([:positive])}")
@@ -1182,9 +1279,12 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
   end
 
   defp open_transfer(handle, use_locator, window, options \\ []) do
-    request = Map.merge(window, %{
-      session_id: Keyword.get(options, :session_id, "transfer-session"), use_locator: use_locator
-    })
+    request =
+      Map.merge(window, %{
+        session_id: Keyword.get(options, :session_id, "transfer-session"),
+        use_locator: use_locator
+      })
+
     context = opening_context(Keyword.get(options, :open_deadline_ms, 60_000))
 
     with {:ok, %{transfer_ref: id}} <- Artifacts.reserve_transfer(handle, request, context) do
@@ -1212,9 +1312,12 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
   end
 
   defp opening_context(allowance) do
-    %{transfer_ref: Base.encode16(:crypto.strong_rand_bytes(16), case: :lower),
+    %{
+      transfer_ref: Base.encode16(:crypto.strong_rand_bytes(16), case: :lower),
       open_deadline_ms: System.monotonic_time(:millisecond) + allowance,
-      object_work_bytes: 134_217_728, metadata_read_bytes: 131_073}
+      object_work_bytes: 134_217_728,
+      metadata_read_bytes: 131_073
+    }
   end
 
   defp close_transfer(handle, transfer) do
@@ -1224,18 +1327,27 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
 
   defp retire_and_ack(handle, context, deadline \\ nil) do
     deadline = deadline || System.monotonic_time(:millisecond) + 5_000
-    selector = %{action: :retire, transfer_ref: context.transfer_ref,
+
+    selector = %{
+      action: :retire,
+      transfer_ref: context.transfer_ref,
       open_deadline_ms: context.open_deadline_ms,
-      close_deadline_ms: deadline}
+      close_deadline_ms: deadline
+    }
 
     case Artifacts.close_transfer(handle, selector) do
       {:retired, %{transfer_ref: id, receipt_ref: receipt, work: work}} ->
         assert id == context.transfer_ref
         assert System.monotonic_time(:millisecond) < selector.close_deadline_ms
         assert ArtifactStore.valid_transfer_work?(work)
-        assert :ok = Artifacts.close_transfer(handle, %{
-          action: :acknowledge, transfer_ref: id, receipt_ref: receipt
-        })
+
+        assert :ok =
+                 Artifacts.close_transfer(handle, %{
+                   action: :acknowledge,
+                   transfer_ref: id,
+                   receipt_ref: receipt
+                 })
+
         assert System.monotonic_time(:millisecond) < selector.close_deadline_ms
         Process.put({:transfer_acknowledged, id}, true)
         :ok

@@ -32,7 +32,13 @@ defmodule LoopexCli.LiveDaemonTest do
   end
 
   test "the daemon client closes on a wrong selected generation without downgrade", context do
-    for generation <- ["loopex.experimental/2", "loopex.experimental/3", "loopex.experimental/4 ", nil, 4] do
+    for generation <- [
+          "loopex.experimental/2",
+          "loopex.experimental/3",
+          "loopex.experimental/4 ",
+          nil,
+          4
+        ] do
       negotiation_peer(context, &Map.put(&1, "selected_generation", generation), :refused)
     end
 
@@ -687,7 +693,9 @@ defmodule LoopexCli.LiveDaemonTest do
 
             body =
               negotiation_capture(fn ->
-                response = reply |> Map.put("request_id", request["request_id"]) |> change_reply.()
+                response =
+                  reply |> Map.put("request_id", request["request_id"]) |> change_reply.()
+
                 {:ok, encoded} = LoopexProtocol.Frame.encode(response)
                 assert :ok = :gen_tcp.send(peer, encoded)
 
@@ -708,7 +716,9 @@ defmodule LoopexCli.LiveDaemonTest do
 
                   :refused ->
                     assert result == {:error, :daemon_unreachable}
-                    assert :gen_tcp.recv(peer, 0, negotiation_remaining(cutoff)) == {:error, :closed}
+
+                    assert :gen_tcp.recv(peer, 0, negotiation_remaining(cutoff)) ==
+                             {:error, :closed}
                 end
 
                 assert System.monotonic_time(:millisecond) < cutoff

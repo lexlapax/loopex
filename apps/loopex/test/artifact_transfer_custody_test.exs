@@ -47,16 +47,30 @@ defmodule Loopex.ArtifactTransferCustodyTest do
     opened = opened(data, context)
     reply(open, {:ok, opened})
     assert {:ok, compact} = Task.await(caller, 1_000)
+
     assert compact === %{
-      transfer_ref: context.transfer_ref, total_size: 3, window_start: 0, window_length: 3,
-      object_digest: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
-      object_reference: %{digest: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
-        size: 3, locator: "object:fixture"},
-      use_reference: %{digest: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
-        size: 3, locator: "object:fixture", media_type: "application/octet-stream", role: "tool_output",
-        use_canonicalization_version: "loopex.canonical.v1",
-        use_digest: binary_part(data.request.use_locator, 4, 64), use_locator: data.request.use_locator}
-    }
+             transfer_ref: context.transfer_ref,
+             total_size: 3,
+             window_start: 0,
+             window_length: 3,
+             object_digest: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+             object_reference: %{
+               digest: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+               size: 3,
+               locator: "object:fixture"
+             },
+             use_reference: %{
+               digest: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+               size: 3,
+               locator: "object:fixture",
+               media_type: "application/octet-stream",
+               role: "tool_output",
+               use_canonicalization_version: "loopex.canonical.v1",
+               use_digest: binary_part(data.request.use_locator, 4, 64),
+               use_locator: data.request.use_locator
+             }
+           }
+
     refute Map.has_key?(compact, :work)
     refute Map.has_key?(compact, :use)
     refute Map.has_key?(compact.use_reference, :metadata)
@@ -66,7 +80,11 @@ defmodule Loopex.ArtifactTransferCustodyTest do
     assert Process.alive?(entry.observer)
     assert entry.invocation === :idle
 
-    reader = Task.async(fn -> Loopex.read_artifact_chunk(fixture.attachment, context.transfer_ref, 100_000) end)
+    reader =
+      Task.async(fn ->
+        Loopex.read_artifact_chunk(fixture.attachment, context.transfer_ref, 100_000)
+      end)
+
     read = callback(:read)
     assert read.pid === reserve.pid
     assert read.arguments === {opened.transfer, 100_000}
@@ -76,7 +94,11 @@ defmodule Loopex.ArtifactTransferCustodyTest do
     assert ledger(fixture).transfer_debit === 1_048_579
     assert ledger(fixture).transfer_reserved === 0
 
-    complete = Task.async(fn -> Loopex.read_artifact_chunk(fixture.attachment, context.transfer_ref, 1) end)
+    complete =
+      Task.async(fn ->
+        Loopex.read_artifact_chunk(fixture.attachment, context.transfer_ref, 1)
+      end)
+
     read = callback(:read)
     reply(read, {:ok, :complete})
     assert {:ok, :complete} = Task.await(complete, 1_000)
@@ -111,7 +133,13 @@ defmodule Loopex.ArtifactTransferCustodyTest do
     reply(second, {:retired, receipt})
     ack = callback(:acknowledge)
     assert ack.pid === first.pid
-    assert ack.arguments === %{action: :acknowledge, transfer_ref: context.transfer_ref, receipt_ref: receipt.receipt_ref}
+
+    assert ack.arguments === %{
+             action: :acknowledge,
+             transfer_ref: context.transfer_ref,
+             receipt_ref: receipt.receipt_ref
+           }
+
     reply(ack, :ok)
     await_released(fixture, context.transfer_ref)
     assert now() < original_selector.close_deadline_ms
@@ -128,8 +156,20 @@ defmodule Loopex.ArtifactTransferCustodyTest do
     original = entry(fixture, context.transfer_ref)
     custodian_monitor = Process.monitor(original.custodian)
     observer_monitor = Process.monitor(original.observer)
-    reply(reserve, {:error, %{reason: :transfer_limit_reached, transfer_ref: context.transfer_ref, state: :not_reserved}})
-    assert {:error, %{reason: :transfer_limit_reached, cleanup: :unproved}} = Task.await(caller, 1_000)
+
+    reply(
+      reserve,
+      {:error,
+       %{
+         reason: :transfer_limit_reached,
+         transfer_ref: context.transfer_ref,
+         state: :not_reserved
+       }}
+    )
+
+    assert {:error, %{reason: :transfer_limit_reached, cleanup: :unproved}} =
+             Task.await(caller, 1_000)
+
     assert_receive {:DOWN, ^custodian_monitor, :process, _, :normal}, 1_000
     assert_receive {:DOWN, ^observer_monitor, :process, _, :normal}, 1_000
     await_released(fixture, context.transfer_ref)
@@ -150,7 +190,10 @@ defmodule Loopex.ArtifactTransferCustodyTest do
     retire = callback(:retire)
     assert entry(fixture, context.transfer_ref).not_reserved === false
     assert ledger(fixture).transfer_reserved === 134_348_801
-    assert {:error, %{reason: :transfers_unavailable, cleanup: :unproved}} = Task.await(caller, 1_000)
+
+    assert {:error, %{reason: :transfers_unavailable, cleanup: :unproved}} =
+             Task.await(caller, 1_000)
+
     assert entry(fixture, context.transfer_ref).observation === :retire
     reply(retire, {:error, :cleanup_unproved})
     await(fn -> entry(fixture, context.transfer_ref).observation === :idle end)
@@ -166,7 +209,10 @@ defmodule Loopex.ArtifactTransferCustodyTest do
     assert original.observer === observe.pid
     assert ledger(fixture).transfer_debit === 0
     assert ledger(fixture).transfer_reserved === 134_348_801
-    {:ok, replacement} = Loopex.attach(fixture.runtime, fixture.attachment.session_id, after_event_sequence: 0)
+
+    {:ok, replacement} =
+      Loopex.attach(fixture.runtime, fixture.attachment.session_id, after_event_sequence: 0)
+
     assert ledger(fixture).transfer_reserved === 134_348_801
     assert replacement.attachment_id !== fixture.attachment.attachment_id
   end
@@ -174,9 +220,19 @@ defmodule Loopex.ArtifactTransferCustodyTest do
   test "receipt cannot be acknowledged before the original read invocation finishes" do
     fixture = fixture()
     {context, opened} = open(fixture)
-    reader = Task.async(fn -> Loopex.read_artifact_chunk(fixture.attachment, context.transfer_ref, 3) end)
+
+    reader =
+      Task.async(fn ->
+        Loopex.read_artifact_chunk(fixture.attachment, context.transfer_ref, 3)
+      end)
+
     read = callback(:read)
-    closer = Task.async(fn -> Loopex.close_artifact_transfer(fixture.attachment, context.transfer_ref) end)
+
+    closer =
+      Task.async(fn ->
+        Loopex.close_artifact_transfer(fixture.attachment, context.transfer_ref)
+      end)
+
     retire = callback(:retire)
     reply(retire, {:retired, receipt(context, opened.work)})
     assert {:error, :unknown_transfer} = Task.await(reader, 1_000)
@@ -199,13 +255,23 @@ defmodule Loopex.ArtifactTransferCustodyTest do
   test "repeated close reuses the original observer and the first cleanup cutoff" do
     fixture = fixture()
     {context, opened} = open(fixture)
-    closer = Task.async(fn -> Loopex.close_artifact_transfer(fixture.attachment, context.transfer_ref) end)
+
+    closer =
+      Task.async(fn ->
+        Loopex.close_artifact_transfer(fixture.attachment, context.transfer_ref)
+      end)
+
     first = callback(:retire)
     reply(first, {:error, :cleanup_unproved})
     assert {:error, :cleanup_unproved} = Task.await(closer, 1_000)
     original = entry(fixture, context.transfer_ref)
     assert Process.alive?(original.observer)
-    closer = Task.async(fn -> Loopex.close_artifact_transfer(fixture.attachment, context.transfer_ref) end)
+
+    closer =
+      Task.async(fn ->
+        Loopex.close_artifact_transfer(fixture.attachment, context.transfer_ref)
+      end)
+
     second = callback(:retire)
     assert second.pid === first.pid
     assert second.arguments === first.arguments
@@ -221,27 +287,61 @@ defmodule Loopex.ArtifactTransferCustodyTest do
   test "pending entries consume original connection and runtime headroom before any I/O" do
     fixture = fixture()
     data = data(fixture.attachment.session_id)
-    callers = for _ <- 1..2, do: Task.async(fn -> Loopex.open_artifact_transfer(fixture.attachment, data.request) end)
+
+    callers =
+      for _ <- 1..2,
+          do:
+            Task.async(fn -> Loopex.open_artifact_transfer(fixture.attachment, data.request) end)
+
     held = for _ <- 1..2, do: callback(:reserve)
-    assert {:error, :transfer_limit_reached} = Loopex.open_artifact_transfer(fixture.attachment, data.request)
+
+    assert {:error, :transfer_limit_reached} =
+             Loopex.open_artifact_transfer(fixture.attachment, data.request)
+
     assert map_size(state(fixture).artifact_transfers) === 2
-    {holder, holder_monitor} = spawn_monitor(fn -> receive do :finish -> :ok end end)
+
+    {holder, holder_monitor} =
+      spawn_monitor(fn ->
+        receive do
+          :finish -> :ok
+        end
+      end)
 
     try do
-      {:ok, other} = Runtime.attach_for_holder(fixture.runtime, fixture.attachment.session_id, holder, after_event_sequence: 0)
-      others = for _ <- 1..2, do: Task.async(fn -> Loopex.open_artifact_transfer(other, data.request) end)
-      held = held ++ (for _ <- 1..2, do: callback(:reserve))
+      {:ok, other} =
+        Runtime.attach_for_holder(fixture.runtime, fixture.attachment.session_id, holder,
+          after_event_sequence: 0
+        )
+
+      others =
+        for _ <- 1..2,
+            do: Task.async(fn -> Loopex.open_artifact_transfer(other, data.request) end)
+
+      held = held ++ for _ <- 1..2, do: callback(:reserve)
       assert map_size(state(fixture).artifact_transfers) === 4
-      assert {:error, :transfer_limit_reached} = Loopex.open_artifact_transfer(other, data.request)
+
+      assert {:error, :transfer_limit_reached} =
+               Loopex.open_artifact_transfer(other, data.request)
+
       refute_received {:artifact_callback, :open, _, _, _}
 
       for reserve <- held do
         {_request, context} = reserve.arguments
-        reply(reserve, {:error, %{reason: :transfer_limit_reached, transfer_ref: context.transfer_ref, state: :not_reserved}})
+
+        reply(
+          reserve,
+          {:error,
+           %{
+             reason: :transfer_limit_reached,
+             transfer_ref: context.transfer_ref,
+             state: :not_reserved
+           }}
+        )
       end
 
       for caller <- callers ++ others do
-        assert {:error, %{reason: :transfer_limit_reached, cleanup: :unproved}} = Task.await(caller, 1_000)
+        assert {:error, %{reason: :transfer_limit_reached, cleanup: :unproved}} =
+                 Task.await(caller, 1_000)
       end
 
       await(fn -> state(fixture).artifact_transfers === %{} end)
@@ -261,7 +361,10 @@ defmodule Loopex.ArtifactTransferCustodyTest do
     caller = Task.async(fn -> Loopex.open_artifact_transfer(fixture.attachment, data.request) end)
     reserve = callback(:reserve)
     {request, context} = reserve.arguments
-    assert request.use_locator === "use:" <> Canonical.digest_bytes(Canonical.encode(["artifact-use-v2", data.use]))
+
+    assert request.use_locator ===
+             "use:" <> Canonical.digest_bytes(Canonical.encode(["artifact-use-v2", data.use]))
+
     assert request.session_id === fixture.attachment.session_id
     refute ArtifactStore.valid_transfer_use?(data.use, request)
     reply(reserve, {:ok, %{transfer_ref: context.transfer_ref}})
@@ -274,7 +377,10 @@ defmodule Loopex.ArtifactTransferCustodyTest do
     reply(retire, {:retired, receipt(context, opened.work)})
     ack = callback(:acknowledge)
     reply(ack, :ok)
-    assert {:error, %{reason: :transfers_unavailable, cleanup: :unproved}} = Task.await(caller, 1_000)
+
+    assert {:error, %{reason: :transfers_unavailable, cleanup: :unproved}} =
+             Task.await(caller, 1_000)
+
     await_released(fixture, context.transfer_ref)
     assert state(fixture).artifact_transfers === %{}
   end
@@ -304,7 +410,10 @@ defmodule Loopex.ArtifactTransferCustodyTest do
     assert ledger(fixture).transfer_uncertain === true
     assert state(fixture).artifact_transfers === %{}
     request = data(fixture.attachment.session_id).request
-    assert {:error, :transfers_unavailable} = Loopex.open_artifact_transfer(fixture.attachment, request)
+
+    assert {:error, :transfers_unavailable} =
+             Loopex.open_artifact_transfer(fixture.attachment, request)
+
     refute_received {:artifact_callback, :reserve, _, _, _}
   end
 
@@ -314,8 +423,13 @@ defmodule Loopex.ArtifactTransferCustodyTest do
     use = %{small.use | object_size: 67_108_864}
     encoded = Canonical.encode(["artifact-use-v2", use])
     request = %{use_locator: "use:" <> Canonical.digest_bytes(encoded), start: 0}
-    work = %{source_read_bytes: 67_108_864, snapshot_write_debit: 67_108_864,
-      metadata_read_bytes: 131_073, write_uncertain: false}
+
+    work = %{
+      source_read_bytes: 67_108_864,
+      snapshot_write_debit: 67_108_864,
+      metadata_read_bytes: 131_073,
+      write_uncertain: false
+    }
 
     for _ <- 1..7 do
       caller = Task.async(fn -> Loopex.open_artifact_transfer(fixture.attachment, request) end)
@@ -324,8 +438,17 @@ defmodule Loopex.ArtifactTransferCustodyTest do
       reply(reserve, {:ok, %{transfer_ref: context.transfer_ref}})
       invocation = callback(:open)
       object = %{digest: use.object_digest, size: use.object_size, locator: use.object_locator}
-      transfer = %{transfer_ref: context.transfer_ref, object: object, use_locator: request.use_locator,
-        total_size: 67_108_864, window_start: 0, window_length: 67_108_864, object_digest: use.object_digest}
+
+      transfer = %{
+        transfer_ref: context.transfer_ref,
+        object: object,
+        use_locator: request.use_locator,
+        total_size: 67_108_864,
+        window_start: 0,
+        window_length: 67_108_864,
+        object_digest: use.object_digest
+      }
+
       opened = %{transfer: transfer, use: use, work: work}
       assert ArtifactStore.valid_open_result?({:ok, opened}, elem(reserve.arguments, 0), context)
       reply(invocation, {:ok, opened})
@@ -339,7 +462,10 @@ defmodule Loopex.ArtifactTransferCustodyTest do
     assert 1_073_741_824 - ledger(fixture).transfer_debit === 133_300_217
     assert ledger(fixture).transfer_reserved === 0
     assert state(fixture).artifact_transfers === %{}
-    assert {:error, :open_work_budget_exhausted} = Loopex.open_artifact_transfer(fixture.attachment, small.request)
+
+    assert {:error, :open_work_budget_exhausted} =
+             Loopex.open_artifact_transfer(fixture.attachment, small.request)
+
     refute_received {:artifact_callback, :reserve, _, _, _}
     assert ledger(fixture).transfer_debit === 940_441_607
   end
@@ -381,15 +507,23 @@ defmodule Loopex.ArtifactTransferCustodyTest do
         _other -> false
       end
     end)
-    {:ok, %{control: control, dispatcher: replacement_dispatcher}} = Runtime.children(fixture.runtime)
+
+    {:ok, %{control: control, dispatcher: replacement_dispatcher}} =
+      Runtime.children(fixture.runtime)
+
     assert :ok = GenServer.call(control, {:await_dispatcher_ready, fixture.runtime.token}, 1_000)
-    {:ok, replacement} = Loopex.attach(fixture.runtime, fixture.attachment.session_id, after_event_sequence: 0)
+
+    {:ok, replacement} =
+      Loopex.attach(fixture.runtime, fixture.attachment.session_id, after_event_sequence: 0)
+
     assert {:ok, %{status: :active}} = Loopex.attachment_status(replacement)
     assert replacement_dispatcher !== fixture.runtime.artifact_dispatcher
     assert replacement.runtime.artifact_dispatcher === fixture.dispatcher
     request = data(fixture.attachment.session_id).request
+
     assert {:error, %{reason: :transfers_unavailable, cleanup: :unproved}} =
              Loopex.open_artifact_transfer(replacement, request)
+
     refute_received {:artifact_callback, :reserve, _, _, _}
     refute_received {:artifact_callback, :open, _, _, _}
     # Abnormal original DOWNs establish loss, never Store retirement or a
@@ -404,10 +538,27 @@ defmodule Loopex.ArtifactTransferCustodyTest do
     {_request, context} = reserve.arguments
     reply(reserve, {:ok, %{transfer_ref: context.transfer_ref}})
     invocation = callback(:open)
-    work = %{source_read_bytes: 1_048_576, snapshot_write_debit: 1,
-      metadata_read_bytes: 17, write_uncertain: false}
-    failure = %{reason: :artifact_unreadable, transfer_ref: context.transfer_ref, work: work, state: :retiring}
-    assert ArtifactStore.valid_open_result?({:error, failure}, elem(reserve.arguments, 0), context)
+
+    work = %{
+      source_read_bytes: 1_048_576,
+      snapshot_write_debit: 1,
+      metadata_read_bytes: 17,
+      write_uncertain: false
+    }
+
+    failure = %{
+      reason: :artifact_unreadable,
+      transfer_ref: context.transfer_ref,
+      work: work,
+      state: :retiring
+    }
+
+    assert ArtifactStore.valid_open_result?(
+             {:error, failure},
+             elem(reserve.arguments, 0),
+             context
+           )
+
     reply(invocation, {:error, failure})
     retire = callback(:retire)
     original = entry(fixture, context.transfer_ref)
@@ -415,7 +566,10 @@ defmodule Loopex.ArtifactTransferCustodyTest do
     assert original.opening_work === work
     assert ledger(fixture).transfer_debit === 1_048_594
     assert ledger(fixture).transfer_reserved === 0
-    assert {:error, %{reason: :artifact_unreadable, cleanup: :unproved}} = Task.await(caller, 1_000)
+
+    assert {:error, %{reason: :artifact_unreadable, cleanup: :unproved}} =
+             Task.await(caller, 1_000)
+
     assert Process.alive?(retire.pid)
     assert map_size(state(fixture).artifact_transfers) === 1
     refute_received {:artifact_callback, :acknowledge, _, _, _}
@@ -439,7 +593,10 @@ defmodule Loopex.ArtifactTransferCustodyTest do
     invocation = callback(:open)
     reply(invocation, {:error, :transfers_unavailable})
     retire = callback(:retire)
-    assert {:error, %{reason: :transfers_unavailable, cleanup: :unproved}} = Task.await(caller, 1_000)
+
+    assert {:error, %{reason: :transfers_unavailable, cleanup: :unproved}} =
+             Task.await(caller, 1_000)
+
     assert entry(fixture, context.transfer_ref).observer === retire.pid
     assert ledger(fixture).transfer_reserved === 134_348_801
     reply(retire, {:retired, receipt(context, :unavailable)})
@@ -470,7 +627,12 @@ defmodule Loopex.ArtifactTransferCustodyTest do
     assert now() < original.lifetime_deadline
     custodian_monitor = Process.monitor(original.custodian)
     observer_monitor = Process.monitor(original.observer)
-    closer = Task.async(fn -> Loopex.close_artifact_transfer(fixture.attachment, context.transfer_ref) end)
+
+    closer =
+      Task.async(fn ->
+        Loopex.close_artifact_transfer(fixture.attachment, context.transfer_ref)
+      end)
+
     retire = callback(:retire)
     assert retire.pid === original.observer
     assert retire.arguments.close_deadline_ms > proof_ceiling
@@ -493,7 +655,10 @@ defmodule Loopex.ArtifactTransferCustodyTest do
     caller = Task.async(fn -> Loopex.open_artifact_transfer(fixture.attachment, data.request) end)
     reserve = callback(:reserve)
     {_request, context} = reserve.arguments
-    assert {:error, %{reason: :open_deadline_exhausted, cleanup: :unproved}} = Task.await(caller, 60_000)
+
+    assert {:error, %{reason: :open_deadline_exhausted, cleanup: :unproved}} =
+             Task.await(caller, 60_000)
+
     retire = callback(:retire)
     assert retire.arguments.close_deadline_ms === context.open_deadline_ms + 5_000
     assert entry(fixture, context.transfer_ref).invocation === :reserve
@@ -513,13 +678,17 @@ defmodule Loopex.ArtifactTransferCustodyTest do
 
   defp fixture do
     {store_pid, store} = TestStore.start_store()
-    {:ok, runtime} = Loopex.start_link(
-      context_token_budget: 8_192,
-      session_creation_defaults: Loopex.ConfiguredGenesisFixture.genesis([]) |> Map.drop([:kind, "options"]),
-      runtime_id: "artifact-custody",
-      store: store,
-      artifact_store: %{module: ControlledArtifacts, handle: self()}
-    )
+
+    {:ok, runtime} =
+      Loopex.start_link(
+        context_token_budget: 8_192,
+        session_creation_defaults:
+          Loopex.ConfiguredGenesisFixture.genesis([]) |> Map.drop([:kind, "options"]),
+        runtime_id: "artifact-custody",
+        store: store,
+        artifact_store: %{module: ControlledArtifacts, handle: self()}
+      )
+
     Process.unlink(runtime.supervisor)
 
     on_exit(fn ->
@@ -536,20 +705,48 @@ defmodule Loopex.ArtifactTransferCustodyTest do
 
   defp data(session_id) do
     use = %{
-      canonicalization_version: Canonical.version(), object_digest: digest("abc"),
-      object_size: 3, object_locator: "object:fixture", media_type: "application/octet-stream",
-      role: "tool_output", metadata: %{"session_id" => session_id, "run_id" => "run",
-        "operation_id" => "operation", "attempt" => 1, "tool_call_id" => "tool"}
+      canonicalization_version: Canonical.version(),
+      object_digest: digest("abc"),
+      object_size: 3,
+      object_locator: "object:fixture",
+      media_type: "application/octet-stream",
+      role: "tool_output",
+      metadata: %{
+        "session_id" => session_id,
+        "run_id" => "run",
+        "operation_id" => "operation",
+        "attempt" => 1,
+        "tool_call_id" => "tool"
+      }
     }
+
     bytes = Canonical.encode(["artifact-use-v2", use])
-    %{use: use, request: %{use_locator: "use:" <> Canonical.digest_bytes(bytes), start: 0},
-      work: %{source_read_bytes: 3, snapshot_write_debit: 3, metadata_read_bytes: byte_size(bytes), write_uncertain: false}}
+
+    %{
+      use: use,
+      request: %{use_locator: "use:" <> Canonical.digest_bytes(bytes), start: 0},
+      work: %{
+        source_read_bytes: 3,
+        snapshot_write_debit: 3,
+        metadata_read_bytes: byte_size(bytes),
+        write_uncertain: false
+      }
+    }
   end
 
   defp opened(data, context) do
     object = %{digest: data.use.object_digest, size: 3, locator: data.use.object_locator}
-    transfer = %{transfer_ref: context.transfer_ref, object: object, use_locator: data.request.use_locator,
-      total_size: 3, window_start: 0, window_length: 3, object_digest: object.digest}
+
+    transfer = %{
+      transfer_ref: context.transfer_ref,
+      object: object,
+      use_locator: data.request.use_locator,
+      total_size: 3,
+      window_start: 0,
+      window_length: 3,
+      object_digest: object.digest
+    }
+
     %{transfer: transfer, use: data.use, work: data.work}
   end
 
@@ -571,7 +768,12 @@ defmodule Loopex.ArtifactTransferCustodyTest do
     original = entry(fixture, context.transfer_ref)
     custodian_monitor = Process.monitor(original.custodian)
     observer_monitor = Process.monitor(original.observer)
-    closer = Task.async(fn -> Loopex.close_artifact_transfer(fixture.attachment, context.transfer_ref) end)
+
+    closer =
+      Task.async(fn ->
+        Loopex.close_artifact_transfer(fixture.attachment, context.transfer_ref)
+      end)
+
     retire = callback(:retire)
     assert retire.pid === original.observer
     reply(retire, {:retired, receipt(context, work)})
@@ -590,15 +792,28 @@ defmodule Loopex.ArtifactTransferCustodyTest do
     %{pid: pid, ref: ref, arguments: arguments}
   end
 
-  defp reply(callback, result), do: send(callback.pid, {:artifact_callback_reply, callback.ref, result})
-  defp receipt(context, work), do: %{transfer_ref: context.transfer_ref, receipt_ref: String.duplicate("d", 32), work: work}
-  defp zero_work, do: %{source_read_bytes: 0, snapshot_write_debit: 0, metadata_read_bytes: 0, write_uncertain: false}
+  defp reply(callback, result),
+    do: send(callback.pid, {:artifact_callback_reply, callback.ref, result})
+
+  defp receipt(context, work),
+    do: %{transfer_ref: context.transfer_ref, receipt_ref: String.duplicate("d", 32), work: work}
+
+  defp zero_work,
+    do: %{
+      source_read_bytes: 0,
+      snapshot_write_debit: 0,
+      metadata_read_bytes: 0,
+      write_uncertain: false
+    }
+
   defp digest(bytes), do: Base.encode16(:crypto.hash(:sha256, bytes), case: :lower)
   defp now, do: System.monotonic_time(:millisecond)
   defp state(fixture), do: :sys.get_state(fixture.dispatcher)
   defp entry(fixture, id), do: Map.fetch!(state(fixture).artifact_transfers, id)
   defp ledger(fixture), do: Map.fetch!(state(fixture).holders, fixture.holder)
-  defp await_released(fixture, id), do: await(fn -> not Map.has_key?(state(fixture).artifact_transfers, id) end)
+
+  defp await_released(fixture, id),
+    do: await(fn -> not Map.has_key?(state(fixture).artifact_transfers, id) end)
 
   defp await(predicate) do
     cutoff = now() + 1_000
