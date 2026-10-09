@@ -309,21 +309,7 @@ defmodule LoopexComposition.DelegationRunLogTest do
       armed = :atomics.new(1, [])
       context = bound(context, checkpoint: error_checkpoint(armed, cut))
       tx = initialize(context)
-      header_cut = unquote(cut in [:run_header_written, :run_header_synced])
-
-      unless header_cut,
-        do:
-          assert(
-            {:ok, _} =
-              RetainedObjects.open_run(context.owner, "create", context.ids, context.runtime)
-          )
-
-      :atomics.put(armed, 1, 1)
-
-      result =
-        if header_cut,
-          do: RetainedObjects.open_run(context.owner, "create", context.ids, context.runtime),
-          else: commit(context, tx)
+      result = fault_run_io(context, tx, cut, armed)
 
       assert result == {:error, {:commit_unknown, tx["tx_id"]}}
       assert RetainedObjects.install(context.owner, "{}") == {:error, :ledger_fenced}
@@ -891,6 +877,20 @@ defmodule LoopexComposition.DelegationRunLogTest do
   end
 
   defp remaining(deadline), do: max(deadline - System.monotonic_time(:millisecond), 0)
+
+  defp fault_run_io(context, _tx, cut, armed)
+       when cut in [:run_header_written, :run_header_synced] do
+    :atomics.put(armed, 1, 1)
+    RetainedObjects.open_run(context.owner, "create", context.ids, context.runtime)
+  end
+
+  defp fault_run_io(context, tx, _cut, armed) do
+    assert {:ok, _} =
+             RetainedObjects.open_run(context.owner, "create", context.ids, context.runtime)
+
+    :atomics.put(armed, 1, 1)
+    commit(context, tx)
+  end
 
   defp assert_io_error_recovery(context, tx, :run_partial_written) do
     assert lookup(context, tx["tx_id"]) == {:error, :run_recovery_unproved}
