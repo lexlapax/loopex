@@ -259,7 +259,10 @@ defmodule Loopex.ConfiguredGenesisFixture do
     {:committed, ^command_id, receipt} = result = Loopex.Store.transact(store, transaction)
     {:ok, [stored]} = Loopex.Store.load_records(store, session_id, owner.journal_version, 1)
     true = stored.journal_version == owner.journal_version + 1
-    true = receipt.journal_versions == %{first: stored.journal_version, last: stored.journal_version}
+
+    true =
+      receipt.journal_versions == %{first: stored.journal_version, last: stored.journal_version}
+
     true = stored.owner_epoch == owner.owner_epoch
     true = stored.owner_incarnation_id == owner.owner_incarnation_id
     true = stored.payload == final.genesis

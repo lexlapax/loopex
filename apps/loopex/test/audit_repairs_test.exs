@@ -210,7 +210,11 @@ defmodule Loopex.AuditRepairsTest do
         assert :ok = Store.validate_transaction(transaction)
 
         assert {:committed, _command_id, _receipt} =
-                 Loopex.ConfiguredGenesisFixture.commit_normalized_record(store, transaction, bytes)
+                 Loopex.ConfiguredGenesisFixture.commit_normalized_record(
+                   store,
+                   transaction,
+                   bytes
+                 )
 
       _refused ->
         :ok

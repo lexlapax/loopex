@@ -1,5 +1,24 @@
 # M7 Implementation Tasks
 
+### Normalization repair formatting verified, 2026-10-08
+
+The raw reviewed normalization repair is committed at
+`ce00e7597350486afa1c5abf812592b39f6afa76`. Formatter48 original5898 passes
+all three non-line syntax-tree comparisons and complete changed-source format
+checks on both supported toolchains. Its syntax-preserving layout changes are
+retained with the complete 3.674-second run, four original process joins and
+34 artifacts under `M7/candidate-format-preparation-20261008-v48`.
+Terminal SHA-256
+`34fb85cfea4f8db7bbff973558999885c2fb20ec752c978f56d088209c4e0fe7`;
+collection SHA-256
+`474460f10ec3d90c920c793521918dd1d8d370914524e0acd28386fec02b343f`.
+Next completed registry2732, SHA-256
+`589cb3d4e3c4a46c8b06df5db32868e8c515fc4f7bebcc3f3fb7c8fa73f6102a`.
+Native test qualification remains UNRUN. No native handle is live and no
+checkbox closes; T01-T19 original88 done /85 open /6 retired, added367 done
+/23 open. Integrate the independently reviewed Store-wrapper delegates before
+qualifying the whole affected files; retain the 30-failure full Core result.
+
 ### Core qualification failure and normalization repair, 2026-10-08
 
 Original60633 at `f47f7dca9c2765043893748e528511c299c4f475` is terminal
