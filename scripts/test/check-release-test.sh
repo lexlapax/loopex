@@ -557,7 +557,7 @@ preflight 2 --attempts-index /retained/m7/attempts.jsonl
   fail 'unavailable M7 evidence did not refuse the full matrix before staging'
 grep -q 'M7 evidence unavailable' "$work/preflight-output" || fail 'M7 refusal was not reported'
 [ "$(cat "$RELEASE_TEST_MARKER.m7-args")" = \
-  'loopex.m7_evidence --release --attempts-index /retained/m7/attempts.jsonl --lane m7-provider --lane m7-rollback' ] ||
+  'loopex.m7_evidence --release --attempts-index /retained/m7/attempts.jsonl --lane m7-operator --lane m7-provider --lane m7-rollback' ] ||
   fail 'full matrix passed the wrong M7 validator arguments'
 export RELEASE_TEST_M7_STATUS=0
 preflight 77 --attempts-index /retained/m7/attempts.jsonl --resume-matrix matrix-1

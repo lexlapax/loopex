@@ -6,10 +6,13 @@ defmodule Mix.Tasks.Loopex.M7Evidence do
 
   The M7 evidence validator both check commands run. The fast check proves the
   committed `index-head:` lines in the M7 Concept plan are well formed and do
-  not conflict, and that the pinned coding-fixture catalog and its oracles are
-  intact. The release check adds the indexed lanes' prerequisites: an absolute
-  retained attempts index outside the checkout and a pinned execution manifest.
-  Any missing prerequisite is unavailable evidence, never a pass.
+  not conflict, that the pinned coding-fixture catalog, external task and
+  execution manifest are intact and complete, and that the two release case
+  families agree: the eleven legacy cases and the M7 cases. It reports every
+  case and step owner still pending. The release check adds the selected
+  lanes' prerequisites: an absolute retained attempts index outside the
+  checkout and no pending case in a selected lane, or anywhere for the full
+  matrix. Any missing prerequisite is unavailable evidence, never a pass.
 
   ## Technical depth
 
@@ -17,21 +20,22 @@ defmodule Mix.Tasks.Loopex.M7Evidence do
   `index-head:` against the exact `index-head: <campaign_id> <sequence>
   <sha256>` form, then selects each campaign's greatest head through
   `AttemptHeads`, refusing conflicting digests at one sequence. It loads
-  `test/fixtures/m7/manifest.json` through `FixtureManifest`, which verifies
-  every workspace inventory and oracle digest.
+  `test/fixtures/m7/manifest.json` through `FixtureManifest` and
+  `ExecutionManifest`, proves every test owner is a literal test, and reads the
+  legacy family from the release script's own manifest rows.
 
-  `--release [--attempts-index FILE] [--resume-matrix ID] [--lane LANE ...]`
-  also requires FILE, except for an unindexed `m7-rollback` selection, to be
-  absolute and outside the root, and the execution manifest to pin the M7
-  campaign and its lane cases. While the catalog records that manifest as
-  pending, indexed lanes refuse before staging with exit status 2. Nothing here
-  opens, creates or writes an index; `AttemptWriter` is the only writer.
+  `--release [--attempts-index FILE] [--resume-matrix ID] --lane LANE ...`
+  names the selected M7 lanes; the full matrix names all three. FILE is
+  required except for an unindexed `m7-rollback` selection. Pending cases in a
+  selected lane, or pending step owners in the full matrix, exit with status 2.
+  Nothing here opens, creates or writes an index; `AttemptWriter` is the only
+  writer.
   """
 
   use Mix.Task
 
   alias Mix.Tasks.Loopex.M7Evidence.AttemptHeads
-  alias Mix.Tasks.Loopex.M7Evidence.FixtureManifest
+  alias Mix.Tasks.Loopex.M7Evidence.{ExecutionManifest, FixtureManifest}
 
   @requirements ["compile"]
   @line ~r/\Aindex-head: (\S+) [1-9][0-9]* [0-9a-f]{64}\z/u
@@ -63,7 +67,7 @@ defmodule Mix.Tasks.Loopex.M7Evidence do
         Enum.each(lines, &Mix.shell().info("m7-evidence: " <> &1))
 
       {:error, reason} ->
-        Mix.shell().error("m7-evidence: evidence unavailable: #{reason}")
+        Mix.shell().error("m7-evidence: evidence unavailable: #{format(reason)}")
         exit({:shutdown, 2})
     end
   end
@@ -71,9 +75,9 @@ defmodule Mix.Tasks.Loopex.M7Evidence do
   @doc false
   def validate(root, opts) do
     with {:ok, heads} <- heads(Path.join(root, "docs/plans/M7.md")),
-         {:ok, fixtures} <- fixtures(root),
-         {:ok, release} <- release(root, opts) do
-      {:ok, [heads, fixtures | release]}
+         {:ok, [catalog, families, pending_line, execution, pending]} <- fixtures(root),
+         {:ok, release} <- release(root, opts, execution, pending) do
+      {:ok, [heads, catalog, families, pending_line | release]}
     end
   end
 
@@ -116,22 +120,87 @@ defmodule Mix.Tasks.Loopex.M7Evidence do
   end
 
   defp fixtures(root) do
-    case FixtureManifest.load(Path.join(root, "test/fixtures/m7")) do
-      {:ok, manifest} ->
-        {:ok, "fixture catalog #{manifest.digest}; execution manifest pending"}
+    with {:ok, manifest} <- FixtureManifest.load(Path.join(root, "test/fixtures/m7")),
+         execution = manifest.catalog["execution_manifest"],
+         :ok <- ExecutionManifest.verify_owners(execution, root),
+         {:ok, legacy} <- legacy_family(root),
+         :ok <- runbook(root, execution) do
+      pending = ExecutionManifest.pending(execution)
 
-      {:error, reason} ->
-        {:error, reason}
+      {:ok,
+       [
+         "fixture catalog #{manifest.digest}; campaign #{execution["campaign_id"]} " <>
+           "genesis #{execution["genesis_digest"]}",
+         "families: #{legacy} legacy release cases, #{map_size(execution["cases"])} M7 cases, " <>
+           "#{map_size(execution["operator_step_evidence"])} operator step keys",
+         "pending: #{length(pending.cases)} cases, #{length(pending.owners)} step owners",
+         execution,
+         pending
+       ]}
     end
   end
 
-  defp release(root, opts) do
+  # Concept: the operator runbook shows exactly the committed ownership.
+  # Technical depth: every step key and case row appears literally.
+  defp runbook(root, execution) do
+    with {:ok, text} <- read(Path.join(root, "docs/operator/m7-validation.md"), :m7_runbook_stale) do
+      lines = MapSet.new(String.split(text, "\n"))
+
+      steps =
+        for {key, entry} <- execution["operator_step_evidence"],
+            do: "| `#{key}` | #{entry["classification"]} | `#{entry["owner"]}` |"
+
+      cases =
+        for {lane, ids} <- execution["lanes"], id <- ids do
+          entry = execution["cases"][id]
+          "| `#{id}` | `#{lane}` | #{entry["driver"]} | `#{entry["status"]}` |"
+        end
+
+      if Enum.all?(steps ++ cases, &MapSet.member?(lines, &1)),
+        do: :ok,
+        else: {:error, :m7_runbook_stale}
+    end
+  end
+
+  # Concept: the eleven legacy release cases stay one exact family beside M7's.
+  # Technical depth: the runner's manifest rows are read from the release
+  # script itself; each names a literal test in its file.
+  defp legacy_family(root) do
+    with {:ok, script} <-
+           read(Path.join(root, "scripts/check-release.sh"), :legacy_release_family_invalid),
+         [_, rows] <- Regex.run(~r/cat >"\$manifest" <<'EOF'\n(.*?)\nEOF\n/s, script),
+         rows = String.split(rows, "\n"),
+         11 <- length(Enum.uniq(rows)),
+         true <- Enum.all?(rows, &legacy_row?(root, &1)) do
+      {:ok, 11}
+    else
+      _ -> {:error, :legacy_release_family_invalid}
+    end
+  end
+
+  defp legacy_row?(root, row) do
+    with [app, file, name] <- String.split(row, "|"),
+         {:ok, source} <- File.read(Path.join([root, "apps", app, file])) do
+      String.contains?(source, inspect(name))
+    else
+      _ -> false
+    end
+  end
+
+  defp release(root, opts, execution, pending) do
     if Keyword.get(opts, :release, false) do
       index = Keyword.get(opts, :attempts_index)
       lanes = Keyword.get_values(opts, :lane)
+      full = Enum.sort(lanes) == ~w(m7-operator m7-provider m7-rollback)
+
+      blocked =
+        lanes
+        |> Enum.flat_map(&Map.get(execution["lanes"], &1, []))
+        |> Enum.filter(&(&1 in pending.cases))
 
       cond do
-        lanes -- ["m7-provider", "m7-rollback"] != [] ->
+        lanes == [] or lanes -- ~w(m7-provider m7-rollback m7-operator) != [] or
+            ("m7-operator" in lanes and not full) ->
           {:error, :unknown_m7_lane}
 
         is_nil(index) and (lanes != ["m7-rollback"] or opts[:resume_matrix]) ->
@@ -143,13 +212,23 @@ defmodule Mix.Tasks.Loopex.M7Evidence do
         not is_nil(index) and String.starts_with?(Path.expand(index) <> "/", root <> "/") ->
           {:error, :attempts_index_inside_checkout}
 
+        blocked != [] ->
+          {:error, {:m7_cases_pending, blocked}}
+
+        full and pending.owners != [] ->
+          {:error, {:m7_step_owners_pending, pending.owners}}
+
         true ->
-          {:error, :m7_execution_manifest_pending}
+          {:ok, ["release lanes admitted: " <> Enum.join(lanes, " ")]}
       end
     else
       {:ok, []}
     end
   end
+
+  defp format(reason) when is_atom(reason), do: Atom.to_string(reason)
+  defp format({reason, items}) when is_list(items), do: "#{reason} #{Enum.join(items, " ")}"
+  defp format(reason), do: inspect(reason)
 
   defp read(path, reason) do
     case File.read(path) do

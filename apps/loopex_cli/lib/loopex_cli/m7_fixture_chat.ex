@@ -24,7 +24,7 @@ defmodule LoopexCli.M7FixtureChat do
   alias Mix.Tasks.Loopex.M7Evidence.FixtureManifest
 
   @keys [:case_id, :catalog_root, :workspace, :runner, :oracle, :environment, :pins]
-  @cases ~w(m7.repair m7.feature m7.review m7.long)
+  @cases ~w(m7.repair m7.feature m7.review m7.long m7.external)
 
   @doc false
   def prepare(argv, cwd, home, fixture) do
@@ -62,7 +62,7 @@ defmodule LoopexCli.M7FixtureChat do
          {:ok, oracle} <- WorkspaceIdentity.resolve_path(fixture.oracle),
          {:ok, catalog} <- FixtureManifest.load(fixture.catalog_root),
          name = String.replace_prefix(fixture.case_id, "m7.", ""),
-         entry = catalog.catalog["fixtures"][name],
+         entry = FixtureManifest.entry(catalog.catalog, name),
          :ok <- FixtureManifest.verify_workspace(entry, workspace),
          :ok <- FixtureManifest.verify_oracle(entry, fixture.catalog_root),
          {:ok, recipe} <-
@@ -90,7 +90,7 @@ defmodule LoopexCli.M7FixtureChat do
     paths = [
       "/bin/sh",
       "/usr/bin/env",
-      recipe.elixir,
+      recipe.interpreter,
       fixture.runner,
       fixture.oracle,
       catalog.path

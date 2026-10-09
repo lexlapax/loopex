@@ -156,11 +156,26 @@ closure-incomplete result.
 over the current tree: every `index-head: <campaign_id> <sequence> <sha256>`
 line in `docs/plans/M7.md` is exact, each campaign's greatest head is selected
 and conflicting digests at one sequence refuse, and the pinned
-`test/fixtures/m7` catalog and oracle digests verify. When the full matrix or
-an M7 lane is selected, the release check runs it with `--release` from the
-clean checkout before staging; it also requires the index to be absolute and
-outside the checkout and the execution manifest to pin the campaign and lane
-cases. While that manifest is pending, it exits 2 and the runner refuses.
+`test/fixtures/m7` catalog, external task and oracle digests verify. Its
+`execution_manifest` pins the campaign and genesis digest, the three lanes and
+their ordered cases, and exactly one owner per V1–V13 step key: all 74
+numbered steps are covered, every mandatory attended step has an attended key
+owned by an `m7-operator` case, each case lists exactly its keys, and each
+`test:` owner is a literal test. The eleven legacy release rows are read from
+the release script as a second family, and the operator runbook must show the
+same step and case rows. When the full matrix or an M7 lane is selected, the
+release check runs it with `--release` from the clean checkout before staging
+and again inside the built extraction; it also requires the index to be
+absolute and outside the checkout, and refuses any selected lane with a
+pending case and the full matrix with a pending step owner.
+
+`scripts/m7-fixture-chat.exs` is the trusted wrapper and `CaseRunner` its
+dispatching entrypoint: it admits the lane through `AttemptWriter`, stages a
+fresh workspace and trusted tree per attempt, records `started` before the
+conversation, reruns the pinned oracle independently, inspects allowed
+changes, and records the mechanical result with retained evidence. Its tests
+in `apps/loopex_cli/test/m7_case_runner_test.exs` drive the real chat,
+executor, policy and oracle with a scripted model in place of the provider.
 
 The attempts index has one writer, `AttemptWriter` in `loopex_cli`, under
 [ADR 0065](../adr/0065-private-attempts-io-prerequisite.md#concept): an

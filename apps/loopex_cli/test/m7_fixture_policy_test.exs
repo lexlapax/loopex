@@ -45,7 +45,7 @@ defmodule LoopexCli.M7FixturePolicyTest do
     runner = Path.join(trusted, "run.sh")
     {:ok, recipe} = Policy.oracle_runner("m7.repair", workspace, oracle, %{})
     File.write!(runner, recipe.bytes)
-    elixir = recipe.elixir
+    elixir = recipe.interpreter
 
     argv = ["/bin/sh", runner]
     pins = Map.new(["/bin/sh", runner, oracle, elixir], &{&1, pin(&1)})
@@ -773,6 +773,11 @@ defmodule LoopexCli.M7FixturePolicyTest do
         tools: ChatConfiguration.selected_definitions(ChatConfiguration.active_tools("coding")),
         cleanup_grace_ms: options[:cleanup_grace_ms]
       )
+
+    # The real composition publishes its creation startup gate before any
+    # session; this hand-built stack does the same.
+    {:ok, startup_deadline} = LoopexComposition.StartupGate.await(runtime)
+    :ok = LoopexComposition.StartupGate.publication({:ok, startup_deadline})
 
     %{
       runtime: runtime,

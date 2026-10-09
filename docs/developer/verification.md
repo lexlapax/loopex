@@ -115,10 +115,12 @@ matrix, which records every case in the retained M7 attempts index named by
 M7 adds two pre-merge lanes: `m7-provider`, paid and recorded in the attempts
 index, and the credential-free `m7-rollback`. The attended `m7-operator`
 block runs only in the full matrix. Both check commands run the M7 evidence
-validator; the release check refuses its indexed M7 lanes before staging while
-their evidence is unavailable, as it is while the M7 execution manifest is
-pending. A refused lane is not PASS, and a new candidate SHA alone never
-authorizes repeating a failed case.
+validator; the release check refuses an M7 lane before staging while any of
+its committed cases is still pending, and the full matrix while any V1–V13
+step owner is. A refused lane is not PASS, and a new candidate SHA alone never
+authorizes repeating a failed case. The
+[M7 validation runbook](../operator/m7-validation.md) lists every case and
+step owner.
 
 Hosted CI's green run on the candidate is fast-check evidence for that merge.
 A local run counts instead only when its complete output and the exact clean

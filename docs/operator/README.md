@@ -20,6 +20,7 @@ watches and stops a durable session before using the daemon.
 | [The daemon](daemon.md#concept) | Running one daemon per state root, importing an existing root with `prepare-index`, driving, listing, observing and taking over sessions from separate processes, reconnection, signals, the orderly stop, limits and exit statuses. |
 | [App server operations](app-server.md#concept) | The foreground server on standard input and output: its launch inputs, the Node consumer, what a client sees at each stage, skills and trust, the difference between end of input, abrupt death and `session.abort`, answering a question after a restart, artifact transfers and frame limits. |
 | [Observability](observability.md#concept) | Runtime-scoped trace sessions and telemetry events: how a host starts and stops tracing, what each level shows, what redaction removes, the ceilings, and the telemetry inventory. |
+| [M7 validation runbook](m7-validation.md) | Creating the retained M7 attempts index, running each validation lane through the trusted fixture wrapper, the external repository task, and the owner of every V1–V13 scenario step and case. |
 | [Runtime operations](runtime.md#concept) | The durable and ephemeral profiles a host composes, their lifecycle and trust limits, durable crash recovery and receipt reconciliation, and complete offline current-format backup/restore with host exclusion and separate workspace recovery. |
 
 Loopex is built from source and is not packaged or published. These runbooks

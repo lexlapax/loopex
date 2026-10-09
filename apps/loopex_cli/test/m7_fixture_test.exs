@@ -97,8 +97,11 @@ defmodule LoopexCli.M7FixtureTest do
     assert bytes == File.read!(path)
     assert digest == LoopexProtocol.Canonical.digest_bytes(bytes)
     assert Enum.sort(Map.keys(catalog["fixtures"])) == ~w(feature long repair review)
-    assert catalog["external"] == %{"status" => "pending_maintainer_selection"}
-    assert catalog["execution_manifest"]["status"] == "pending"
+    assert catalog["external"]["origin"] == "~/projects/lexlapax/lapaxworks"
+    assert catalog["external"]["base_sha"] == "30a49d6059b2a69b54e6e97f69a5623ce977b16d"
+    assert catalog["external"]["allowed_changed_paths"] == ["tools/threads.py"]
+    assert :ok = FixtureManifest.verify_oracle(catalog["external"], @fixtures)
+    assert catalog["execution_manifest"]["status"] == "pinned"
 
     for {_name, entry} <- catalog["fixtures"] do
       assert entry["run_bounds"] == %{
@@ -144,7 +147,13 @@ defmodule LoopexCli.M7FixtureTest do
         catalog,
         ["fixtures", "long", "initial_files", "WORKSPACE.md", "sha256"],
         String.duplicate("0", 64)
-      )
+      ),
+      put_in(catalog, ["external", "allowed_changed_paths"], ["tools/threads.py", "README.md"]),
+      put_in(catalog, ["external", "base_sha"], "main"),
+      put_in(catalog, ["external", "oracle", "sha256"], String.duplicate("0", 64)),
+      put_in(catalog, ["external", "objective_results", "check_exit"], 1),
+      put_in(catalog, ["execution_manifest", "status"], "pending"),
+      put_in(catalog, ["execution_manifest", "campaign_id"], "m7-other")
     ]
 
     for changed <- mutations do
@@ -159,6 +168,15 @@ defmodule LoopexCli.M7FixtureTest do
 
     assert {:error, :fixture_manifest_unavailable} = FixtureManifest.load(copied)
     File.write!(Path.join(copied, "manifest.json"), original)
+    assert {:ok, _} = FixtureManifest.load(copied)
+    File.write!(Path.join(copied, "external/oracle_test.py"), "print('pass')\n")
+    assert {:error, :fixture_manifest_unavailable} = FixtureManifest.load(copied)
+
+    File.cp!(
+      Path.join(@fixtures, "external/oracle_test.py"),
+      Path.join(copied, "external/oracle_test.py")
+    )
+
     assert {:ok, _} = FixtureManifest.load(copied)
     File.write!(Path.join(copied, "repair/oracle.exs"), "IO.puts(:pass)\n")
     assert {:error, :fixture_manifest_unavailable} = FixtureManifest.load(copied)

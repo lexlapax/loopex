@@ -96,7 +96,7 @@ if release_needs_m7; then
   m7_args=(--release)
   [ -z "$release_attempts_index" ] || m7_args+=(--attempts-index "$release_attempts_index")
   [ -z "$release_resume_matrix" ] || m7_args+=(--resume-matrix "$release_resume_matrix")
-  for m7_lane in m7-provider m7-rollback; do
+  for m7_lane in m7-operator m7-provider m7-rollback; do
     if release_selected "$m7_lane"; then m7_args+=(--lane "$m7_lane"); fi
   done
   (
@@ -272,6 +272,11 @@ for retained in source-archive-manifest source-inventory; do
   release_retain_identity "$retain/$retained"
 done
 printf 'check-release: fresh-source elapsed=%ss\n' "$((SECONDS - fresh_started))"
+# The same validator runs again inside the built extraction, before any lane.
+if release_needs_m7; then
+  (cd "$tree" && MIX_ENV=prod without_credential mix loopex.m7_evidence "${m7_args[@]}" </dev/null) ||
+    { echo 'check-release: M7 evidence unavailable in the extraction' >&2; exit 2; }
+fi
 
 # The real-provider manifest: application, test file and exact case name. Each
 # name must be a fully rooted ExUnit test defined exactly once. The source
