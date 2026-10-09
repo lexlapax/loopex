@@ -18,6 +18,7 @@ after
 
   File.rm_rf!(fixture_home)
 end
+
 Code.require_file("../../loopex/test/support/configured_genesis_helper.exs", __DIR__)
 
 defmodule LoopexComposition.RunEvidenceRestartTest do
