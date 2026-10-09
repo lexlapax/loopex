@@ -28,7 +28,22 @@ defmodule Loopex.LLM.ReqLLM.ModelCapabilities do
   @uint64 18_446_744_073_709_551_615
   @haiku "anthropic:claude-haiku-4-5-20251001"
   @fable "anthropic:claude-fable-5-1"
-  @levels %{@haiku => ~w(default none low medium high), @fable => ~w(default low medium high)}
+  # M7's provider B summarizer: a non-reasoning OpenAI model. `default` is the
+  # generic descriptor; `none` is its registered thinking-off cell.
+  @gpt "openai:gpt-4.1-mini"
+  @levels %{
+    @haiku => ~w(default none low medium high),
+    @fable => ~w(default low medium high),
+    @gpt => ~w(default none)
+  }
+  @gpt_none %{
+    "mapping_revision" => "loopex.openai.gpt41mini.v1",
+    "renderer_revision" => "loopex.reqllm.canonical.v1",
+    "continuation_required" => false,
+    "canonical_terminal_tool_history" => false,
+    "thinking_disabled" => true,
+    "thinking" => %{"mode" => "disabled"}
+  }
   @generic %{
     "mapping_revision" => "loopex.unregistered.default.v1",
     "renderer_revision" => "loopex.reqllm.canonical.v1",
@@ -104,6 +119,13 @@ defmodule Loopex.LLM.ReqLLM.ModelCapabilities do
         :error when level == "default" ->
           {:ok, @generic}
 
+        {:ok, _levels} when model == @gpt ->
+          case level do
+            "default" -> {:ok, @generic}
+            "none" -> {:ok, @gpt_none}
+            _ -> {:error, :invalid_model_mapping}
+          end
+
         {:ok, levels} ->
           if level in levels do
             {thinking, required} = thinking(model, level)
@@ -138,6 +160,35 @@ defmodule Loopex.LLM.ReqLLM.ModelCapabilities do
   end
 
   def mapping(_, _, _), do: {:error, :invalid_model_mapping}
+
+  @doc """
+  ## Concept
+
+  Refuse an OpenAI request whose captured mapping is not exactly its cell.
+
+  ## Technical depth
+
+  The generic dependency renders OpenAI requests and sends no reasoning
+  control, so the captured mapping must equal the registered or generic cell
+  for its model, level and reply limit. Other providers keep their own checks.
+  """
+  @spec verify_captured(map()) :: :ok | {:error, :invalid_model_mapping}
+  def verify_captured(%{model: "openai:" <> _ = model, sampling: sampling} = request)
+      when is_map(sampling) do
+    level = Map.get(sampling, "reasoning", "default")
+
+    case mapping(model, level, Loopex.Model.max_tokens(request)) do
+      {:ok, expected} ->
+        if Map.get(sampling, "provider_mapping", @generic) == expected,
+          do: :ok,
+          else: {:error, :invalid_model_mapping}
+
+      error ->
+        error
+    end
+  end
+
+  def verify_captured(_request), do: :ok
 
   defp thinking(@haiku, "default"), do: {%{"mode" => "omitted"}, false}
   defp thinking(@haiku, "none"), do: {%{"mode" => "disabled"}, false}
