@@ -118,6 +118,7 @@ pairing, link, review, code-documentation, and enforcement contracts.
 | 0066 — owned artifact transfer opening | [Decision](adr/0066-owned-artifact-transfer-opening.md#concept) | [Technical depth](adr/0066-owned-artifact-transfer-opening-technical.md#technical-depth) |
 | 0067 — tool-result event projections | [Decision](adr/0067-tool-result-event-projections.md#concept) | [Technical depth](adr/0067-tool-result-event-projections-technical.md#technical-depth) |
 | 0068 — CLI-owned output | [Decision](adr/0068-cli-owned-output.md#concept) | [Technical depth](adr/0068-cli-owned-output-technical.md#technical-depth) |
+| 0069 — Helper run evidence and route guard | [Decision](adr/0069-helper-run-evidence-and-route-guard.md#concept) | [Technical depth](adr/0069-helper-run-evidence-and-route-guard-technical.md#technical-depth) |
 
 An ADR pair is one decision. Its status and governance record live in the
 Concept file and bind both files when accepted.

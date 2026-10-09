@@ -76,6 +76,7 @@ a decision adds a new record rather than rewriting the old one.
 | 0066 | Owned artifact transfer opening | Accepted | [Decision](0066-owned-artifact-transfer-opening.md#concept) | [Technical depth](0066-owned-artifact-transfer-opening-technical.md#technical-depth) |
 | 0067 | Tool-result event projections | Accepted | [Decision](0067-tool-result-event-projections.md#concept) | [Technical depth](0067-tool-result-event-projections-technical.md#technical-depth) |
 | 0068 | CLI-owned output | Accepted | [Decision](0068-cli-owned-output.md#concept) | [Technical depth](0068-cli-owned-output-technical.md#technical-depth) |
+| 0069 | Helper run evidence and route guard | Proposed | [Decision](0069-helper-run-evidence-and-route-guard.md#concept) | [Technical depth](0069-helper-run-evidence-and-route-guard-technical.md#technical-depth) |
 
 0001 and 0002 were the prerequisites that unblocked the first milestone
 candidate; the [plans register](../plans/README.md) records current status.
