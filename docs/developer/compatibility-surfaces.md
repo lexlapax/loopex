@@ -261,9 +261,10 @@ domains.
 
 **Public events.** The event kinds are listed in the same place. `tool.started`
 carries `tool_id` and `tool_version` and `tool.finished` carries `tool_id` and
-the outcome; a call whose name resolved to no active tool carries no tool
+the outcome; a call whose name resolved to no active tool carries a null tool
 identity, because publishing the model-supplied string would read as a name the
-runtime accepted. A `run.finished` that ends `failed` carries a `failure`
+runtime accepted. A receipt-backed `tool.finished` names its `operation_id`; a
+result committed without one omits that member and may carry a public reason. A `run.finished` that ends `failed` carries a `failure`
 projection only where a context refusal was admitted and a `reason` only where
 one exists. Delivery is fenced by resolution as well as commit; cursors,
 sequences, and gap semantics are otherwise plain. Progress items and

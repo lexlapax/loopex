@@ -296,13 +296,13 @@ defmodule LoopexProtocol.PublicSchemaConformanceTest do
     # exact value, so a change to any covered input fails here
     # rather than silently renaming what clients are agreeing to.
     assert Session.schema_digest() ==
-             "2becc338d4ca5de3afa84e9d6adb038ee65b0690a3233947c93dd05e7049f237"
+             "3503e92df274eb5f998960823d9ae6cc4b55c72a5cb249c4ffecf56cfcbc1cc0"
 
     # The schema and vector files an independent client reads are identified by
     # their own bytes, which are the digests the gate binds. A conformance
     # result therefore names files a reader can fetch and verify.
     for {directory, expected} <- [
-          {"schema", "9ffeb3a33d7bdcf97e0c69be40962ac0a3c1d85a59426ef6a0a2993d30e9eec2"},
+          {"schema", "add12eb6659851ccd0440d322d686dac7880d89c30b9b8611ffba561d669ced8"},
           {"vectors", "ff194487d76ddd83bd1b2ff646682d9d2f548cd95bbe58826510cf1d2549a88b"}
         ] do
       path =
@@ -358,12 +358,12 @@ defmodule LoopexProtocol.PublicSchemaConformanceTest do
 
   test "the schema digest is the value an independent implementation checks against" do
     assert Session.schema_digest() ==
-             "2becc338d4ca5de3afa84e9d6adb038ee65b0690a3233947c93dd05e7049f237"
+             "3503e92df274eb5f998960823d9ae6cc4b55c72a5cb249c4ffecf56cfcbc1cc0"
   end
 
   test "current daemon schema and vector files have pinned identities" do
     for {directory, expected} <- [
-          {"schema", "73d68233c49dea9c37562f30a3e4525c42e75ce9ae37139bdb051fbeffb500a3"},
+          {"schema", "30a47e9744c885f80afba50bef4aa78ed8c6cc68fb33b44d453b12bf68720670"},
           {"vectors", "cb99af8c28dd9f46876db2369063f4e28600adee14424d8f1611a4dffb57d3f5"}
         ] do
       path =

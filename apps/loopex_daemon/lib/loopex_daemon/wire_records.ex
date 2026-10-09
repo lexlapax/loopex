@@ -401,18 +401,11 @@ defmodule LoopexDaemon.WireRecords do
   defp event_data("tool.started", data),
     do: ordinary_event(data, ~w(run_id turn_id tool_call_id operation_id tool_id tool_version))
 
-  defp event_data("tool.finished", data) do
-    with true <-
-           data["outcome"] in ~w(completed failed denied cancelled outcome_unknown cancelled_workspace_lease_lost),
-         true <- data["reason"] == nil do
-      ordinary_event(
-        data,
-        ~w(run_id turn_id tool_call_id operation_id tool_id outcome reason artifacts)
-      )
-    else
-      _invalid -> :error
-    end
-  end
+  # Concept: a tool terminal crosses as the variant the session committed.
+  # Technical depth: accepted ADR 0067 shares one closed receipt-backed /
+  # operation-less payload codec between both transports; refusal is whole.
+  defp event_data("tool.finished", data),
+    do: LoopexProtocol.Session.ToolFinished.encode_wire(data)
 
   defp event_data("steer.resolved", data) do
     with true <- data["disposition"] in ~w(applied unapplied cancelled) do
@@ -524,48 +517,9 @@ defmodule LoopexDaemon.WireRecords do
       else: :error
   end
 
-  defp event_member(field, value) when field in ~w(outcome disposition), do: {:ok, value}
-
-  defp event_member("artifacts", value) when is_list(value) do
-    Enum.reduce_while(value, {:ok, []}, fn artifact, {:ok, artifacts} ->
-      case event_artifact(artifact) do
-        {:ok, encoded} -> {:cont, {:ok, [encoded | artifacts]}}
-        :error -> {:halt, :error}
-      end
-    end)
-    |> case do
-      {:ok, artifacts} -> {:ok, Enum.reverse(artifacts)}
-      :error -> :error
-    end
-  end
+  defp event_member("disposition", value), do: {:ok, value}
 
   defp event_member(_field, _value), do: :error
-
-  defp event_artifact(value) do
-    with true <-
-           event_closed?(
-             value,
-             ~w(digest size locator media_type role use_canonicalization_version use_digest use_locator)
-           ),
-         {:ok, _} <- Wire.digest(value["digest"]),
-         {:ok, _} <- Wire.digest(value["use_digest"]),
-         size when is_integer(size) and size >= 0 and size <= 18_446_744_073_709_551_615 <-
-           value["size"],
-         true <- event_safe_text?(value["locator"], 1_024),
-         true <- event_safe_text?(value["media_type"], 255),
-         "tool_output" <- value["role"],
-         "loopex.canonical.v1" <- value["use_canonicalization_version"],
-         true <- value["use_locator"] == "use:" <> value["use_digest"] do
-      {:ok, Map.put(value, "size", Wire.encode_u64(size))}
-    else
-      _invalid -> :error
-    end
-  end
-
-  defp event_safe_text?(value, ceiling),
-    do:
-      is_binary(value) and byte_size(value) in 1..ceiling and String.valid?(value) and
-        not Regex.match?(~r/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u, value)
 
   defp event_identity(value, ceiling \\ 65_536)
 

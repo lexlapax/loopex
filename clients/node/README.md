@@ -22,6 +22,8 @@ imports anything outside Node's own standard library.
 | `question-answer-vectors.mjs` | Independently check literal answer vectors and UTF-8/identity byte boundaries |
 | `terminal-outcome.mjs` | Decode chat's closed terminal run objects with exact BigInt counts and opaque references |
 | `terminal-outcome-vectors.mjs` | Independently check terminal outcome vectors and reference boundaries |
+| `tool-finished.mjs` | Decode both closed `tool.finished` variants: receipt-backed with an operation identity, or operation-less with an optional public reason; both connections validate it |
+| `tool-finished-vectors.mjs` | Independently check the tool terminal literals and identity, reason and size byte boundaries |
 | `compact-result.mjs` | Decode standalone compaction results and completed-command payloads with exact usage, closed failures and opaque identities; both connections validate completion events |
 | `compact-result-vectors.mjs` | Independently check result/completion vectors, accounting and checkpoint/command/episode boundaries |
 | `checkpoint-owner.mjs` | Decode closed run/compact checkpoint owners and opaque identity bytes; both connections validate checkpoint events |
@@ -42,6 +44,7 @@ Run the M7 answer payload checks with the pinned Node interpreter:
 ```bash
 node clients/node/question-answer-vectors.mjs apps/loopex_protocol/priv/vectors/question-answer.v1.json
 node clients/node/compact-result-vectors.mjs apps/loopex_protocol/priv/vectors/standalone-compact-result.v1.json apps/loopex_protocol/priv/vectors/standalone-compact-completion.v1.json
+node clients/node/tool-finished-vectors.mjs apps/loopex_protocol/priv/vectors/tool-finished.v1.json apps/loopex_protocol/priv/schema/tool-finished.v1.json
 node clients/node/checkpoint-owner-vectors.mjs apps/loopex_protocol/priv/vectors/checkpoint-owner.v1.json
 node clients/node/maintenance-view-vectors.mjs apps/loopex_protocol/priv/vectors/maintenance-view.v1.json
 node clients/node/snapshot-payload-vectors.mjs apps/loopex_protocol/priv/vectors/configuration-projection.v1.json apps/loopex_protocol/priv/vectors/checkpoint-projection.v1.json

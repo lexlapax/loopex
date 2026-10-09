@@ -23,6 +23,7 @@ import { spawn } from "node:child_process";
 import { decodeCheckpointOwner } from "./checkpoint-owner.mjs";
 import { decodeMaintenanceView } from "./maintenance-view.mjs";
 import { decodeCompactCompletion } from "./compact-result.mjs";
+import { decodeToolFinished } from "./tool-finished.mjs";
 import { CURRENT_CONTRACTS, matchesContractIdentity } from "./contract-manifest.mjs";
 
 export const GENERATION = CURRENT_CONTRACTS.foreground.generation;
@@ -190,6 +191,8 @@ export class Connection {
           decodeMaintenanceView(record.event.data) === null) throw new Error("invalid maintenance view");
       if (record.event.kind === "context.compaction_finished" &&
           decodeCompactCompletion(record.event.data) === null) throw new Error("invalid compact completion");
+      if (record.event.kind === "tool.finished" &&
+          decodeToolFinished(record.event.data) === null) throw new Error("invalid tool terminal");
       this.#events.push(record.event);
       this.#release();
       return;

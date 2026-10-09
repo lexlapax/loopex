@@ -1,0 +1,90 @@
+{
+  "contract": "tool_finished",
+  "revision": 1,
+  "event_kind": "tool.finished",
+  "closed": true,
+  "selection": "exact_member_key_set_without_fallback",
+  "native_keys": "binary strings",
+  "variants": {
+    "receipt_backed": {
+      "required": [
+        "run_id",
+        "turn_id",
+        "tool_call_id",
+        "operation_id",
+        "tool_id",
+        "outcome",
+        "reason",
+        "artifacts"
+      ],
+      "identity_fields": [
+        "run_id",
+        "turn_id",
+        "tool_call_id",
+        "operation_id"
+      ],
+      "operation_id": "identity",
+      "tool_id": "resolved_tool_id",
+      "reason": null,
+      "artifacts": {
+        "type": "array",
+        "member": {
+          "definition_ref": "artifact_use_reference"
+        }
+      },
+      "additional_members": "refuse"
+    },
+    "operation_less": {
+      "required": [
+        "run_id",
+        "turn_id",
+        "tool_call_id",
+        "tool_id",
+        "outcome",
+        "reason",
+        "artifacts"
+      ],
+      "identity_fields": [
+        "run_id",
+        "turn_id",
+        "tool_call_id"
+      ],
+      "operation_id": "absent_never_null_or_synthesized",
+      "tool_id": "resolved_tool_id_or_null",
+      "reason": {
+        "nullable": true,
+        "encoding": "utf8",
+        "minimum_bytes": 0,
+        "maximum_bytes": 131072,
+        "normalization": "none"
+      },
+      "artifacts": {
+        "type": "array",
+        "exact": []
+      },
+      "additional_members": "refuse"
+    }
+  },
+  "identity": {
+    "encoding": "canonical_unpadded_base64url_of_original_opaque_bytes",
+    "original_min_bytes": 1,
+    "original_max_bytes": 65536
+  },
+  "resolved_tool_id": {
+    "encoding": "ascii",
+    "minimum_bytes": 1,
+    "maximum_bytes": 128,
+    "pattern": "[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*"
+  },
+  "outcome_enum": [
+    "completed",
+    "failed",
+    "denied",
+    "cancelled",
+    "outcome_unknown",
+    "cancelled_workspace_lease_lost"
+  ],
+  "operation_absence": "reports_no_operation_identity_in_this_event; proves_neither_absence_of_an_operation_nor_that_nothing_ran",
+  "authority": "none; no retry, grant, job, receipt, artifact or operation identity is created",
+  "framing": "existing enclosing event envelope and output record limits apply to the whole frame"
+}

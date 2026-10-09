@@ -241,7 +241,7 @@ defmodule LoopexDaemon.IdentityCorpusTest do
         assert initialized["selected_generation"] == "loopex.experimental/4"
 
         assert initialized["exact_schema_sha256"] ==
-                 "9306e4aeb2ffb9aab3cf4dac94db5a1e4699f09d3f58cc57e2fa79a7e63ef7b9"
+                 "9a4a735d1a8a59237f3e063fa0fce21fd2d69e7a11785eee743c10311228b02c"
 
         [row] = daemon.registry |> :sys.get_state() |> Map.fetch!(:rows) |> Map.values()
         connection = row.connection_pid
@@ -435,6 +435,33 @@ defmodule LoopexDaemon.IdentityCorpusTest do
       records = Fixture.records(fixture, session)
       events = Fixture.events(fixture, session)
 
+      # Concept: the original tool terminal reaches the controller socket.
+      # Technical depth: accepted ADR 0067's operation-less variant crosses with
+      # the committed outcome and public reason, before the interaction terminal.
+      [native_finished] = Enum.filter(events, &(&1.kind == "tool.finished"))
+      refute Map.has_key?(native_finished, "operation_id")
+      {outcome_name, reason} = question_tool_terminal(vector["answer"])
+      assert native_finished["outcome"] == outcome_name
+      assert native_finished["reason"] == reason
+
+      [%{"event" => %{"data" => wire_finished}}] =
+        question_events(settled_records, "tool.finished")
+
+      assert wire_finished == %{
+               "run_id" => opened["run_id"],
+               "turn_id" => Wire.encode_identity(native_finished["turn_id"]),
+               "tool_call_id" => "YXNrLTE",
+               "tool_id" => "loopex.ask",
+               "outcome" => outcome_name,
+               "reason" => reason,
+               "artifacts" => []
+             }
+
+      kinds = Enum.map(settled_records, &get_in(&1, ["event", "kind"]))
+
+      assert Enum.find_index(kinds, &(&1 == "tool.finished")) <
+               Enum.find_index(kinds, &(&1 == "interaction." <> vector["disposition"]))
+
       [terminal_event] =
         Enum.filter(events, &(&1.kind == "interaction." <> vector["disposition"]))
 
@@ -524,6 +551,9 @@ defmodule LoopexDaemon.IdentityCorpusTest do
     do: Map.put(terminal, "choice_id", "Y2hvaWNlLTI")
 
   defp question_terminal_choice(terminal, _answer), do: terminal
+
+  defp question_tool_terminal(%{"disposition" => "declined"}), do: {"denied", "question_declined"}
+  defp question_tool_terminal(_answer), do: {"completed", nil}
 
   defp question_tool_result(%{"text" => text}), do: {:completed, text}
   defp question_tool_result(%{"choice_id" => "choice-2"}), do: {:completed, "literal_null"}

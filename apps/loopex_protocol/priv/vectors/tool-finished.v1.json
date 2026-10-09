@@ -1,0 +1,3679 @@
+{
+  "format": "loopex.experimental.payload-vectors/1",
+  "contract": "tool_finished",
+  "cases": [
+    {
+      "name": "r8-completed",
+      "variant": "receipt_backed",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      },
+      "decoded": {
+        "run_id": {
+          "opaque_hex": "00ff0a"
+        },
+        "turn_id": {
+          "opaque_hex": "7475726e80"
+        },
+        "tool_call_id": {
+          "opaque_hex": "61736b2d31"
+        },
+        "operation_id": {
+          "opaque_hex": "fe006f70"
+        },
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      }
+    },
+    {
+      "name": "t7-completed-null-reason",
+      "variant": "operation_less",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "tool_id": "loopex.ask",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      },
+      "decoded": {
+        "run_id": {
+          "opaque_hex": "00ff0a"
+        },
+        "turn_id": {
+          "opaque_hex": "7475726e80"
+        },
+        "tool_call_id": {
+          "opaque_hex": "61736b2d31"
+        },
+        "tool_id": "loopex.ask",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      }
+    },
+    {
+      "name": "r8-failed",
+      "variant": "receipt_backed",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "failed",
+        "reason": null,
+        "artifacts": []
+      },
+      "decoded": {
+        "run_id": {
+          "opaque_hex": "00ff0a"
+        },
+        "turn_id": {
+          "opaque_hex": "7475726e80"
+        },
+        "tool_call_id": {
+          "opaque_hex": "61736b2d31"
+        },
+        "operation_id": {
+          "opaque_hex": "fe006f70"
+        },
+        "tool_id": "loopex.read",
+        "outcome": "failed",
+        "reason": null,
+        "artifacts": []
+      }
+    },
+    {
+      "name": "t7-failed-null-reason",
+      "variant": "operation_less",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "tool_id": "loopex.ask",
+        "outcome": "failed",
+        "reason": null,
+        "artifacts": []
+      },
+      "decoded": {
+        "run_id": {
+          "opaque_hex": "00ff0a"
+        },
+        "turn_id": {
+          "opaque_hex": "7475726e80"
+        },
+        "tool_call_id": {
+          "opaque_hex": "61736b2d31"
+        },
+        "tool_id": "loopex.ask",
+        "outcome": "failed",
+        "reason": null,
+        "artifacts": []
+      }
+    },
+    {
+      "name": "r8-denied",
+      "variant": "receipt_backed",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "denied",
+        "reason": null,
+        "artifacts": []
+      },
+      "decoded": {
+        "run_id": {
+          "opaque_hex": "00ff0a"
+        },
+        "turn_id": {
+          "opaque_hex": "7475726e80"
+        },
+        "tool_call_id": {
+          "opaque_hex": "61736b2d31"
+        },
+        "operation_id": {
+          "opaque_hex": "fe006f70"
+        },
+        "tool_id": "loopex.read",
+        "outcome": "denied",
+        "reason": null,
+        "artifacts": []
+      }
+    },
+    {
+      "name": "t7-denied-null-reason",
+      "variant": "operation_less",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "tool_id": "loopex.ask",
+        "outcome": "denied",
+        "reason": null,
+        "artifacts": []
+      },
+      "decoded": {
+        "run_id": {
+          "opaque_hex": "00ff0a"
+        },
+        "turn_id": {
+          "opaque_hex": "7475726e80"
+        },
+        "tool_call_id": {
+          "opaque_hex": "61736b2d31"
+        },
+        "tool_id": "loopex.ask",
+        "outcome": "denied",
+        "reason": null,
+        "artifacts": []
+      }
+    },
+    {
+      "name": "r8-cancelled",
+      "variant": "receipt_backed",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "cancelled",
+        "reason": null,
+        "artifacts": []
+      },
+      "decoded": {
+        "run_id": {
+          "opaque_hex": "00ff0a"
+        },
+        "turn_id": {
+          "opaque_hex": "7475726e80"
+        },
+        "tool_call_id": {
+          "opaque_hex": "61736b2d31"
+        },
+        "operation_id": {
+          "opaque_hex": "fe006f70"
+        },
+        "tool_id": "loopex.read",
+        "outcome": "cancelled",
+        "reason": null,
+        "artifacts": []
+      }
+    },
+    {
+      "name": "t7-cancelled-null-reason",
+      "variant": "operation_less",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "tool_id": "loopex.ask",
+        "outcome": "cancelled",
+        "reason": null,
+        "artifacts": []
+      },
+      "decoded": {
+        "run_id": {
+          "opaque_hex": "00ff0a"
+        },
+        "turn_id": {
+          "opaque_hex": "7475726e80"
+        },
+        "tool_call_id": {
+          "opaque_hex": "61736b2d31"
+        },
+        "tool_id": "loopex.ask",
+        "outcome": "cancelled",
+        "reason": null,
+        "artifacts": []
+      }
+    },
+    {
+      "name": "r8-outcome_unknown",
+      "variant": "receipt_backed",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "outcome_unknown",
+        "reason": null,
+        "artifacts": []
+      },
+      "decoded": {
+        "run_id": {
+          "opaque_hex": "00ff0a"
+        },
+        "turn_id": {
+          "opaque_hex": "7475726e80"
+        },
+        "tool_call_id": {
+          "opaque_hex": "61736b2d31"
+        },
+        "operation_id": {
+          "opaque_hex": "fe006f70"
+        },
+        "tool_id": "loopex.read",
+        "outcome": "outcome_unknown",
+        "reason": null,
+        "artifacts": []
+      }
+    },
+    {
+      "name": "t7-outcome_unknown-null-reason",
+      "variant": "operation_less",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "tool_id": "loopex.ask",
+        "outcome": "outcome_unknown",
+        "reason": null,
+        "artifacts": []
+      },
+      "decoded": {
+        "run_id": {
+          "opaque_hex": "00ff0a"
+        },
+        "turn_id": {
+          "opaque_hex": "7475726e80"
+        },
+        "tool_call_id": {
+          "opaque_hex": "61736b2d31"
+        },
+        "tool_id": "loopex.ask",
+        "outcome": "outcome_unknown",
+        "reason": null,
+        "artifacts": []
+      }
+    },
+    {
+      "name": "r8-cancelled_workspace_lease_lost",
+      "variant": "receipt_backed",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "cancelled_workspace_lease_lost",
+        "reason": null,
+        "artifacts": []
+      },
+      "decoded": {
+        "run_id": {
+          "opaque_hex": "00ff0a"
+        },
+        "turn_id": {
+          "opaque_hex": "7475726e80"
+        },
+        "tool_call_id": {
+          "opaque_hex": "61736b2d31"
+        },
+        "operation_id": {
+          "opaque_hex": "fe006f70"
+        },
+        "tool_id": "loopex.read",
+        "outcome": "cancelled_workspace_lease_lost",
+        "reason": null,
+        "artifacts": []
+      }
+    },
+    {
+      "name": "t7-cancelled_workspace_lease_lost-null-reason",
+      "variant": "operation_less",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "tool_id": "loopex.ask",
+        "outcome": "cancelled_workspace_lease_lost",
+        "reason": null,
+        "artifacts": []
+      },
+      "decoded": {
+        "run_id": {
+          "opaque_hex": "00ff0a"
+        },
+        "turn_id": {
+          "opaque_hex": "7475726e80"
+        },
+        "tool_call_id": {
+          "opaque_hex": "61736b2d31"
+        },
+        "tool_id": "loopex.ask",
+        "outcome": "cancelled_workspace_lease_lost",
+        "reason": null,
+        "artifacts": []
+      }
+    },
+    {
+      "name": "r8-one-artifact-size-zero",
+      "variant": "receipt_backed",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [
+          {
+            "digest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "size": "0",
+            "locator": "artifact:1",
+            "media_type": "text/plain",
+            "role": "tool_output",
+            "use_canonicalization_version": "loopex.canonical.v1",
+            "use_digest": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+            "use_locator": "use:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+          }
+        ]
+      },
+      "decoded": {
+        "run_id": {
+          "opaque_hex": "00ff0a"
+        },
+        "turn_id": {
+          "opaque_hex": "7475726e80"
+        },
+        "tool_call_id": {
+          "opaque_hex": "61736b2d31"
+        },
+        "operation_id": {
+          "opaque_hex": "fe006f70"
+        },
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [
+          {
+            "digest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "size": "0",
+            "locator": "artifact:1",
+            "media_type": "text/plain",
+            "role": "tool_output",
+            "use_canonicalization_version": "loopex.canonical.v1",
+            "use_digest": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+            "use_locator": "use:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+          }
+        ]
+      }
+    },
+    {
+      "name": "r8-one-artifact-size-u64-max",
+      "variant": "receipt_backed",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [
+          {
+            "digest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "size": "18446744073709551615",
+            "locator": "artifact:1",
+            "media_type": "text/plain",
+            "role": "tool_output",
+            "use_canonicalization_version": "loopex.canonical.v1",
+            "use_digest": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+            "use_locator": "use:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+          }
+        ]
+      },
+      "decoded": {
+        "run_id": {
+          "opaque_hex": "00ff0a"
+        },
+        "turn_id": {
+          "opaque_hex": "7475726e80"
+        },
+        "tool_call_id": {
+          "opaque_hex": "61736b2d31"
+        },
+        "operation_id": {
+          "opaque_hex": "fe006f70"
+        },
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [
+          {
+            "digest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "size": "18446744073709551615",
+            "locator": "artifact:1",
+            "media_type": "text/plain",
+            "role": "tool_output",
+            "use_canonicalization_version": "loopex.canonical.v1",
+            "use_digest": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+            "use_locator": "use:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+          }
+        ]
+      }
+    },
+    {
+      "name": "r8-two-artifacts-ordered",
+      "variant": "receipt_backed",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [
+          {
+            "digest": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+            "size": "7",
+            "locator": "artifact:2",
+            "media_type": "application/json",
+            "role": "tool_output",
+            "use_canonicalization_version": "loopex.canonical.v1",
+            "use_digest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "use_locator": "use:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+          },
+          {
+            "digest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "size": "1",
+            "locator": "artifact:1",
+            "media_type": "text/plain",
+            "role": "tool_output",
+            "use_canonicalization_version": "loopex.canonical.v1",
+            "use_digest": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+            "use_locator": "use:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+          }
+        ]
+      },
+      "decoded": {
+        "run_id": {
+          "opaque_hex": "00ff0a"
+        },
+        "turn_id": {
+          "opaque_hex": "7475726e80"
+        },
+        "tool_call_id": {
+          "opaque_hex": "61736b2d31"
+        },
+        "operation_id": {
+          "opaque_hex": "fe006f70"
+        },
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [
+          {
+            "digest": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+            "size": "7",
+            "locator": "artifact:2",
+            "media_type": "application/json",
+            "role": "tool_output",
+            "use_canonicalization_version": "loopex.canonical.v1",
+            "use_digest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "use_locator": "use:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+          },
+          {
+            "digest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "size": "1",
+            "locator": "artifact:1",
+            "media_type": "text/plain",
+            "role": "tool_output",
+            "use_canonicalization_version": "loopex.canonical.v1",
+            "use_digest": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+            "use_locator": "use:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+          }
+        ]
+      }
+    },
+    {
+      "name": "r8-one-byte-identities",
+      "variant": "receipt_backed",
+      "input": {
+        "run_id": "AA",
+        "turn_id": "_w",
+        "tool_call_id": "YQ",
+        "operation_id": "gA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      },
+      "decoded": {
+        "run_id": {
+          "opaque_hex": "00"
+        },
+        "turn_id": {
+          "opaque_hex": "ff"
+        },
+        "tool_call_id": {
+          "opaque_hex": "61"
+        },
+        "operation_id": {
+          "opaque_hex": "80"
+        },
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      }
+    },
+    {
+      "name": "r8-single-segment-tool-id",
+      "variant": "receipt_backed",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "a",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      },
+      "decoded": {
+        "run_id": {
+          "opaque_hex": "00ff0a"
+        },
+        "turn_id": {
+          "opaque_hex": "7475726e80"
+        },
+        "tool_call_id": {
+          "opaque_hex": "61736b2d31"
+        },
+        "operation_id": {
+          "opaque_hex": "fe006f70"
+        },
+        "tool_id": "a",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      }
+    },
+    {
+      "name": "r8-maximum-tool-id",
+      "variant": "receipt_backed",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      },
+      "decoded": {
+        "run_id": {
+          "opaque_hex": "00ff0a"
+        },
+        "turn_id": {
+          "opaque_hex": "7475726e80"
+        },
+        "tool_call_id": {
+          "opaque_hex": "61736b2d31"
+        },
+        "operation_id": {
+          "opaque_hex": "fe006f70"
+        },
+        "tool_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      }
+    },
+    {
+      "name": "t7-question-answer-text",
+      "variant": "operation_less",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "tool_id": "loopex.ask",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      },
+      "decoded": {
+        "run_id": {
+          "opaque_hex": "00ff0a"
+        },
+        "turn_id": {
+          "opaque_hex": "7475726e80"
+        },
+        "tool_call_id": {
+          "opaque_hex": "61736b2d31"
+        },
+        "tool_id": "loopex.ask",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      }
+    },
+    {
+      "name": "t7-question-declined",
+      "variant": "operation_less",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "tool_id": "loopex.ask",
+        "outcome": "denied",
+        "reason": "question_declined",
+        "artifacts": []
+      },
+      "decoded": {
+        "run_id": {
+          "opaque_hex": "00ff0a"
+        },
+        "turn_id": {
+          "opaque_hex": "7475726e80"
+        },
+        "tool_call_id": {
+          "opaque_hex": "61736b2d31"
+        },
+        "tool_id": "loopex.ask",
+        "outcome": "denied",
+        "reason": "question_declined",
+        "artifacts": []
+      }
+    },
+    {
+      "name": "t7-question-expired",
+      "variant": "operation_less",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "tool_id": "loopex.ask",
+        "outcome": "denied",
+        "reason": "question_expired",
+        "artifacts": []
+      },
+      "decoded": {
+        "run_id": {
+          "opaque_hex": "00ff0a"
+        },
+        "turn_id": {
+          "opaque_hex": "7475726e80"
+        },
+        "tool_call_id": {
+          "opaque_hex": "61736b2d31"
+        },
+        "tool_id": "loopex.ask",
+        "outcome": "denied",
+        "reason": "question_expired",
+        "artifacts": []
+      }
+    },
+    {
+      "name": "t7-question-cancelled",
+      "variant": "operation_less",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "tool_id": "loopex.ask",
+        "outcome": "cancelled",
+        "reason": null,
+        "artifacts": []
+      },
+      "decoded": {
+        "run_id": {
+          "opaque_hex": "00ff0a"
+        },
+        "turn_id": {
+          "opaque_hex": "7475726e80"
+        },
+        "tool_call_id": {
+          "opaque_hex": "61736b2d31"
+        },
+        "tool_id": "loopex.ask",
+        "outcome": "cancelled",
+        "reason": null,
+        "artifacts": []
+      }
+    },
+    {
+      "name": "t7-policy-denied",
+      "variant": "operation_less",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "tool_id": "loopex.write",
+        "outcome": "denied",
+        "reason": "policy_denied",
+        "artifacts": []
+      },
+      "decoded": {
+        "run_id": {
+          "opaque_hex": "00ff0a"
+        },
+        "turn_id": {
+          "opaque_hex": "7475726e80"
+        },
+        "tool_call_id": {
+          "opaque_hex": "61736b2d31"
+        },
+        "tool_id": "loopex.write",
+        "outcome": "denied",
+        "reason": "policy_denied",
+        "artifacts": []
+      }
+    },
+    {
+      "name": "t7-unresolved-tool-null-id",
+      "variant": "operation_less",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "tool_id": null,
+        "outcome": "failed",
+        "reason": "unknown tool: Not A Tool!",
+        "artifacts": []
+      },
+      "decoded": {
+        "run_id": {
+          "opaque_hex": "00ff0a"
+        },
+        "turn_id": {
+          "opaque_hex": "7475726e80"
+        },
+        "tool_call_id": {
+          "opaque_hex": "61736b2d31"
+        },
+        "tool_id": null,
+        "outcome": "failed",
+        "reason": "unknown tool: Not A Tool!",
+        "artifacts": []
+      }
+    },
+    {
+      "name": "t7-empty-reason",
+      "variant": "operation_less",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "tool_id": "loopex.ask",
+        "outcome": "failed",
+        "reason": "",
+        "artifacts": []
+      },
+      "decoded": {
+        "run_id": {
+          "opaque_hex": "00ff0a"
+        },
+        "turn_id": {
+          "opaque_hex": "7475726e80"
+        },
+        "tool_call_id": {
+          "opaque_hex": "61736b2d31"
+        },
+        "tool_id": "loopex.ask",
+        "outcome": "failed",
+        "reason": "",
+        "artifacts": []
+      }
+    },
+    {
+      "name": "t7-unicode-reason",
+      "variant": "operation_less",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "tool_id": "loopex.ask",
+        "outcome": "failed",
+        "reason": "café ☃ 😀",
+        "artifacts": []
+      },
+      "decoded": {
+        "run_id": {
+          "opaque_hex": "00ff0a"
+        },
+        "turn_id": {
+          "opaque_hex": "7475726e80"
+        },
+        "tool_call_id": {
+          "opaque_hex": "61736b2d31"
+        },
+        "tool_id": "loopex.ask",
+        "outcome": "failed",
+        "reason": "café ☃ 😀",
+        "artifacts": []
+      }
+    },
+    {
+      "name": "t7-deadline-before-dispatch",
+      "variant": "operation_less",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "tool_id": "loopex.exec",
+        "outcome": "cancelled",
+        "reason": "the run deadline passed before dispatch",
+        "artifacts": []
+      },
+      "decoded": {
+        "run_id": {
+          "opaque_hex": "00ff0a"
+        },
+        "turn_id": {
+          "opaque_hex": "7475726e80"
+        },
+        "tool_call_id": {
+          "opaque_hex": "61736b2d31"
+        },
+        "tool_id": "loopex.exec",
+        "outcome": "cancelled",
+        "reason": "the run deadline passed before dispatch",
+        "artifacts": []
+      }
+    },
+    {
+      "name": "t7-unproved-reconciliation",
+      "variant": "operation_less",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "tool_id": "loopex.exec",
+        "outcome": "outcome_unknown",
+        "reason": "reconcile:abc",
+        "artifacts": []
+      },
+      "decoded": {
+        "run_id": {
+          "opaque_hex": "00ff0a"
+        },
+        "turn_id": {
+          "opaque_hex": "7475726e80"
+        },
+        "tool_call_id": {
+          "opaque_hex": "61736b2d31"
+        },
+        "tool_id": "loopex.exec",
+        "outcome": "outcome_unknown",
+        "reason": "reconcile:abc",
+        "artifacts": []
+      }
+    },
+    {
+      "name": "t7-receipt-shape-without-operation-is-operation-less",
+      "variant": "operation_less",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      },
+      "decoded": {
+        "run_id": {
+          "opaque_hex": "00ff0a"
+        },
+        "turn_id": {
+          "opaque_hex": "7475726e80"
+        },
+        "tool_call_id": {
+          "opaque_hex": "61736b2d31"
+        },
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      }
+    },
+    {
+      "name": "r8-missing-run_id",
+      "input": {
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [
+          {
+            "digest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "size": "1",
+            "locator": "artifact:1",
+            "media_type": "text/plain",
+            "role": "tool_output",
+            "use_canonicalization_version": "loopex.canonical.v1",
+            "use_digest": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+            "use_locator": "use:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+          }
+        ]
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-missing-turn_id",
+      "input": {
+        "run_id": "AP8K",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [
+          {
+            "digest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "size": "1",
+            "locator": "artifact:1",
+            "media_type": "text/plain",
+            "role": "tool_output",
+            "use_canonicalization_version": "loopex.canonical.v1",
+            "use_digest": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+            "use_locator": "use:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+          }
+        ]
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-missing-tool_call_id",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [
+          {
+            "digest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "size": "1",
+            "locator": "artifact:1",
+            "media_type": "text/plain",
+            "role": "tool_output",
+            "use_canonicalization_version": "loopex.canonical.v1",
+            "use_digest": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+            "use_locator": "use:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+          }
+        ]
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-missing-operation_id",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [
+          {
+            "digest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "size": "1",
+            "locator": "artifact:1",
+            "media_type": "text/plain",
+            "role": "tool_output",
+            "use_canonicalization_version": "loopex.canonical.v1",
+            "use_digest": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+            "use_locator": "use:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+          }
+        ]
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-missing-tool_id",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [
+          {
+            "digest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "size": "1",
+            "locator": "artifact:1",
+            "media_type": "text/plain",
+            "role": "tool_output",
+            "use_canonicalization_version": "loopex.canonical.v1",
+            "use_digest": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+            "use_locator": "use:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+          }
+        ]
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-missing-outcome",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "reason": null,
+        "artifacts": [
+          {
+            "digest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "size": "1",
+            "locator": "artifact:1",
+            "media_type": "text/plain",
+            "role": "tool_output",
+            "use_canonicalization_version": "loopex.canonical.v1",
+            "use_digest": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+            "use_locator": "use:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+          }
+        ]
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-missing-reason",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "artifacts": [
+          {
+            "digest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "size": "1",
+            "locator": "artifact:1",
+            "media_type": "text/plain",
+            "role": "tool_output",
+            "use_canonicalization_version": "loopex.canonical.v1",
+            "use_digest": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+            "use_locator": "use:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+          }
+        ]
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-missing-artifacts",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "t7-missing-run_id",
+      "input": {
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "tool_id": "loopex.ask",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "t7-missing-turn_id",
+      "input": {
+        "run_id": "AP8K",
+        "tool_call_id": "YXNrLTE",
+        "tool_id": "loopex.ask",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "t7-missing-tool_call_id",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_id": "loopex.ask",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "t7-missing-tool_id",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "t7-missing-outcome",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "tool_id": "loopex.ask",
+        "reason": null,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "t7-missing-reason",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "tool_id": "loopex.ask",
+        "outcome": "completed",
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "t7-missing-artifacts",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "tool_id": "loopex.ask",
+        "outcome": "completed",
+        "reason": null
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-extra-private_reason",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [],
+        "private_reason": "PRIVATE_CANARY"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "t7-extra-private_reason",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "tool_id": "loopex.ask",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [],
+        "private_reason": "PRIVATE_CANARY"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-extra-diagnostic",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [],
+        "diagnostic": "PRIVATE_CANARY"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "t7-extra-diagnostic",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "tool_id": "loopex.ask",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [],
+        "diagnostic": "PRIVATE_CANARY"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-extra-credentials",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [],
+        "credentials": "PRIVATE_CANARY"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "t7-extra-credentials",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "tool_id": "loopex.ask",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [],
+        "credentials": "PRIVATE_CANARY"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-extra-thinking",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [],
+        "thinking": "PRIVATE_CANARY"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "t7-extra-thinking",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "tool_id": "loopex.ask",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [],
+        "thinking": "PRIVATE_CANARY"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-extra-operation",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [],
+        "operation": "PRIVATE_CANARY"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "t7-extra-operation",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "tool_id": "loopex.ask",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [],
+        "operation": "PRIVATE_CANARY"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-extra-job",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [],
+        "job": "PRIVATE_CANARY"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "t7-extra-job",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "tool_id": "loopex.ask",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [],
+        "job": "PRIVATE_CANARY"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-extra-grant",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [],
+        "grant": "PRIVATE_CANARY"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "t7-extra-grant",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "tool_id": "loopex.ask",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [],
+        "grant": "PRIVATE_CANARY"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-extra-tool_version",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [],
+        "tool_version": "PRIVATE_CANARY"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "t7-extra-tool_version",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "tool_id": "loopex.ask",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [],
+        "tool_version": "PRIVATE_CANARY"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-extra-receipt",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [],
+        "receipt": "PRIVATE_CANARY"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "t7-extra-receipt",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "tool_id": "loopex.ask",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [],
+        "receipt": "PRIVATE_CANARY"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-operation-id-null",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": null,
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "t7-plus-operation-id-null",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "tool_id": "loopex.ask",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [],
+        "operation_id": null
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-operation-id-empty",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "t7-plus-operation-id-empty",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "tool_id": "loopex.ask",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [],
+        "operation_id": ""
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-operation-id-padded",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "AA==",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "t7-plus-operation-id-padded",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "tool_id": "loopex.ask",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [],
+        "operation_id": "AA=="
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-operation-id-standard-alphabet",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "+/8",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "t7-plus-operation-id-standard-alphabet",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "tool_id": "loopex.ask",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [],
+        "operation_id": "+/8"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-operation-id-noncanonical-bits",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "AB",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "t7-plus-operation-id-noncanonical-bits",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "tool_id": "loopex.ask",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [],
+        "operation_id": "AB"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-operation-id-number",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": 1,
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "t7-plus-operation-id-number",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "tool_id": "loopex.ask",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [],
+        "operation_id": 1
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-operation-id-object",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": {},
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "t7-plus-operation-id-object",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "tool_id": "loopex.ask",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [],
+        "operation_id": {}
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-operation-id-whitespace",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": " AA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "t7-plus-operation-id-whitespace",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "tool_id": "loopex.ask",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [],
+        "operation_id": " AA"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-run_id-null",
+      "input": {
+        "run_id": null,
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "t7-run_id-null",
+      "input": {
+        "run_id": null,
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "tool_id": "loopex.ask",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-run_id-empty",
+      "input": {
+        "run_id": "",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "t7-run_id-empty",
+      "input": {
+        "run_id": "",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "tool_id": "loopex.ask",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-run_id-padded",
+      "input": {
+        "run_id": "AA==",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "t7-run_id-padded",
+      "input": {
+        "run_id": "AA==",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "tool_id": "loopex.ask",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-run_id-noncanonical-bits",
+      "input": {
+        "run_id": "AB",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "t7-run_id-noncanonical-bits",
+      "input": {
+        "run_id": "AB",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "tool_id": "loopex.ask",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-run_id-number",
+      "input": {
+        "run_id": 0,
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "t7-run_id-number",
+      "input": {
+        "run_id": 0,
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "tool_id": "loopex.ask",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-turn_id-null",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": null,
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "t7-turn_id-null",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": null,
+        "tool_call_id": "YXNrLTE",
+        "tool_id": "loopex.ask",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-turn_id-empty",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "t7-turn_id-empty",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "",
+        "tool_call_id": "YXNrLTE",
+        "tool_id": "loopex.ask",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-turn_id-padded",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "AA==",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "t7-turn_id-padded",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "AA==",
+        "tool_call_id": "YXNrLTE",
+        "tool_id": "loopex.ask",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-turn_id-noncanonical-bits",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "AB",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "t7-turn_id-noncanonical-bits",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "AB",
+        "tool_call_id": "YXNrLTE",
+        "tool_id": "loopex.ask",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-turn_id-number",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": 0,
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "t7-turn_id-number",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": 0,
+        "tool_call_id": "YXNrLTE",
+        "tool_id": "loopex.ask",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-tool_call_id-null",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": null,
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "t7-tool_call_id-null",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": null,
+        "tool_id": "loopex.ask",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-tool_call_id-empty",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "t7-tool_call_id-empty",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "",
+        "tool_id": "loopex.ask",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-tool_call_id-padded",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "AA==",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "t7-tool_call_id-padded",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "AA==",
+        "tool_id": "loopex.ask",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-tool_call_id-noncanonical-bits",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "AB",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "t7-tool_call_id-noncanonical-bits",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "AB",
+        "tool_id": "loopex.ask",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-tool_call_id-number",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": 0,
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "t7-tool_call_id-number",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": 0,
+        "tool_id": "loopex.ask",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-reason-private-canary",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": "PRIVATE_REASON",
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-reason-empty",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": "",
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-reason-text",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": "denied",
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-reason-number",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": 1,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "t7-reason-number",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "tool_id": "loopex.ask",
+        "outcome": "completed",
+        "reason": 1,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-reason-object",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": {},
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "t7-reason-object",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "tool_id": "loopex.ask",
+        "outcome": "completed",
+        "reason": {},
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-reason-list",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": [],
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "t7-reason-list",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "tool_id": "loopex.ask",
+        "outcome": "completed",
+        "reason": [],
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-reason-boolean",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": false,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "t7-reason-boolean",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "tool_id": "loopex.ask",
+        "outcome": "completed",
+        "reason": false,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-tool-id-null",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": null,
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-tool-id-empty",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "t7-tool-id-empty",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "tool_id": "",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-tool-id-uppercase",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "Loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "t7-tool-id-uppercase",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "tool_id": "Loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-tool-id-double-dot",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex..read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "t7-tool-id-double-dot",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "tool_id": "loopex..read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-tool-id-leading-digit",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "1abc",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "t7-tool-id-leading-digit",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "tool_id": "1abc",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-tool-id-trailing-dot",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "t7-tool-id-trailing-dot",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "tool_id": "loopex.",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-tool-id-hyphen",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex-read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "t7-tool-id-hyphen",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "tool_id": "loopex-read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-tool-id-too-long",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "t7-tool-id-too-long",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "tool_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-tool-id-number",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": 7,
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "t7-tool-id-number",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "tool_id": 7,
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-tool-id-list",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": [
+          "loopex.read"
+        ],
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "t7-tool-id-list",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "tool_id": [
+          "loopex.read"
+        ],
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-outcome-unknown",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "unknown",
+        "reason": null,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "t7-outcome-unknown",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "tool_id": "loopex.ask",
+        "outcome": "unknown",
+        "reason": null,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-outcome-uppercase",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "COMPLETED",
+        "reason": null,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "t7-outcome-uppercase",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "tool_id": "loopex.ask",
+        "outcome": "COMPLETED",
+        "reason": null,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-outcome-null",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": null,
+        "reason": null,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "t7-outcome-null",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "tool_id": "loopex.ask",
+        "outcome": null,
+        "reason": null,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-outcome-run-outcome",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "bound_reached",
+        "reason": null,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "t7-outcome-run-outcome",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "tool_id": "loopex.ask",
+        "outcome": "bound_reached",
+        "reason": null,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-outcome-number",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": 0,
+        "reason": null,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "t7-outcome-number",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "tool_id": "loopex.ask",
+        "outcome": 0,
+        "reason": null,
+        "artifacts": []
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "t7-nonempty-artifacts",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "tool_id": "loopex.ask",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [
+          {
+            "digest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "size": "1",
+            "locator": "artifact:1",
+            "media_type": "text/plain",
+            "role": "tool_output",
+            "use_canonicalization_version": "loopex.canonical.v1",
+            "use_digest": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+            "use_locator": "use:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+          }
+        ]
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-artifacts-null",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": null
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "t7-artifacts-null",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "tool_id": "loopex.ask",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": null
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-artifacts-object",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": {}
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "t7-artifacts-object",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "tool_id": "loopex.ask",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": {}
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-artifacts-string",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": ""
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "t7-artifacts-string",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "tool_id": "loopex.ask",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": ""
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-artifact-missing-digest",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [
+          {
+            "size": "1",
+            "locator": "artifact:1",
+            "media_type": "text/plain",
+            "role": "tool_output",
+            "use_canonicalization_version": "loopex.canonical.v1",
+            "use_digest": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+            "use_locator": "use:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+          }
+        ]
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-artifact-missing-size",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [
+          {
+            "digest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "locator": "artifact:1",
+            "media_type": "text/plain",
+            "role": "tool_output",
+            "use_canonicalization_version": "loopex.canonical.v1",
+            "use_digest": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+            "use_locator": "use:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+          }
+        ]
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-artifact-missing-locator",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [
+          {
+            "digest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "size": "1",
+            "media_type": "text/plain",
+            "role": "tool_output",
+            "use_canonicalization_version": "loopex.canonical.v1",
+            "use_digest": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+            "use_locator": "use:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+          }
+        ]
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-artifact-missing-media_type",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [
+          {
+            "digest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "size": "1",
+            "locator": "artifact:1",
+            "role": "tool_output",
+            "use_canonicalization_version": "loopex.canonical.v1",
+            "use_digest": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+            "use_locator": "use:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+          }
+        ]
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-artifact-missing-role",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [
+          {
+            "digest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "size": "1",
+            "locator": "artifact:1",
+            "media_type": "text/plain",
+            "use_canonicalization_version": "loopex.canonical.v1",
+            "use_digest": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+            "use_locator": "use:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+          }
+        ]
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-artifact-missing-use_canonicalization_version",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [
+          {
+            "digest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "size": "1",
+            "locator": "artifact:1",
+            "media_type": "text/plain",
+            "role": "tool_output",
+            "use_digest": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+            "use_locator": "use:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+          }
+        ]
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-artifact-missing-use_digest",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [
+          {
+            "digest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "size": "1",
+            "locator": "artifact:1",
+            "media_type": "text/plain",
+            "role": "tool_output",
+            "use_canonicalization_version": "loopex.canonical.v1",
+            "use_locator": "use:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+          }
+        ]
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-artifact-missing-use_locator",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [
+          {
+            "digest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "size": "1",
+            "locator": "artifact:1",
+            "media_type": "text/plain",
+            "role": "tool_output",
+            "use_canonicalization_version": "loopex.canonical.v1",
+            "use_digest": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+          }
+        ]
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-artifact-extra-path",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [
+          {
+            "digest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "size": "1",
+            "locator": "artifact:1",
+            "media_type": "text/plain",
+            "role": "tool_output",
+            "use_canonicalization_version": "loopex.canonical.v1",
+            "use_digest": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+            "use_locator": "use:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+            "path": "PRIVATE_CANARY"
+          }
+        ]
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-artifact-extra-provenance",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [
+          {
+            "digest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "size": "1",
+            "locator": "artifact:1",
+            "media_type": "text/plain",
+            "role": "tool_output",
+            "use_canonicalization_version": "loopex.canonical.v1",
+            "use_digest": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+            "use_locator": "use:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+            "provenance": "PRIVATE_CANARY"
+          }
+        ]
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-artifact-extra-handle",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [
+          {
+            "digest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "size": "1",
+            "locator": "artifact:1",
+            "media_type": "text/plain",
+            "role": "tool_output",
+            "use_canonicalization_version": "loopex.canonical.v1",
+            "use_digest": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+            "use_locator": "use:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+            "handle": "PRIVATE_CANARY"
+          }
+        ]
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-artifact-extra-operation_id",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [
+          {
+            "digest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "size": "1",
+            "locator": "artifact:1",
+            "media_type": "text/plain",
+            "role": "tool_output",
+            "use_canonicalization_version": "loopex.canonical.v1",
+            "use_digest": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+            "use_locator": "use:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+            "operation_id": "PRIVATE_CANARY"
+          }
+        ]
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-artifact-size-number",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [
+          {
+            "digest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "size": 0,
+            "locator": "artifact:1",
+            "media_type": "text/plain",
+            "role": "tool_output",
+            "use_canonicalization_version": "loopex.canonical.v1",
+            "use_digest": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+            "use_locator": "use:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+          }
+        ]
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-artifact-size-leading-zero",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [
+          {
+            "digest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "size": "01",
+            "locator": "artifact:1",
+            "media_type": "text/plain",
+            "role": "tool_output",
+            "use_canonicalization_version": "loopex.canonical.v1",
+            "use_digest": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+            "use_locator": "use:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+          }
+        ]
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-artifact-size-negative",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [
+          {
+            "digest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "size": "-1",
+            "locator": "artifact:1",
+            "media_type": "text/plain",
+            "role": "tool_output",
+            "use_canonicalization_version": "loopex.canonical.v1",
+            "use_digest": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+            "use_locator": "use:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+          }
+        ]
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-artifact-size-u64-plus-one",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [
+          {
+            "digest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "size": "18446744073709551616",
+            "locator": "artifact:1",
+            "media_type": "text/plain",
+            "role": "tool_output",
+            "use_canonicalization_version": "loopex.canonical.v1",
+            "use_digest": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+            "use_locator": "use:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+          }
+        ]
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-artifact-size-empty",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [
+          {
+            "digest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "size": "",
+            "locator": "artifact:1",
+            "media_type": "text/plain",
+            "role": "tool_output",
+            "use_canonicalization_version": "loopex.canonical.v1",
+            "use_digest": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+            "use_locator": "use:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+          }
+        ]
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-artifact-size-null",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [
+          {
+            "digest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "size": null,
+            "locator": "artifact:1",
+            "media_type": "text/plain",
+            "role": "tool_output",
+            "use_canonicalization_version": "loopex.canonical.v1",
+            "use_digest": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+            "use_locator": "use:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+          }
+        ]
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-artifact-digest-uppercase",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [
+          {
+            "digest": "0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF",
+            "size": "1",
+            "locator": "artifact:1",
+            "media_type": "text/plain",
+            "role": "tool_output",
+            "use_canonicalization_version": "loopex.canonical.v1",
+            "use_digest": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+            "use_locator": "use:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+          }
+        ]
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-artifact-digest-short",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [
+          {
+            "digest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcde",
+            "size": "1",
+            "locator": "artifact:1",
+            "media_type": "text/plain",
+            "role": "tool_output",
+            "use_canonicalization_version": "loopex.canonical.v1",
+            "use_digest": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+            "use_locator": "use:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+          }
+        ]
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-artifact-use-digest-long",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [
+          {
+            "digest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "size": "1",
+            "locator": "artifact:1",
+            "media_type": "text/plain",
+            "role": "tool_output",
+            "use_canonicalization_version": "loopex.canonical.v1",
+            "use_digest": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba98765432100",
+            "use_locator": "use:fedcba9876543210fedcba9876543210fedcba9876543210fedcba98765432100"
+          }
+        ]
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-artifact-role-other",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [
+          {
+            "digest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "size": "1",
+            "locator": "artifact:1",
+            "media_type": "text/plain",
+            "role": "tool_input",
+            "use_canonicalization_version": "loopex.canonical.v1",
+            "use_digest": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+            "use_locator": "use:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+          }
+        ]
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-artifact-canonicalization-other",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [
+          {
+            "digest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "size": "1",
+            "locator": "artifact:1",
+            "media_type": "text/plain",
+            "role": "tool_output",
+            "use_canonicalization_version": "loopex.canonical.v2",
+            "use_digest": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+            "use_locator": "use:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+          }
+        ]
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-artifact-use-locator-mismatch",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [
+          {
+            "digest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "size": "1",
+            "locator": "artifact:1",
+            "media_type": "text/plain",
+            "role": "tool_output",
+            "use_canonicalization_version": "loopex.canonical.v1",
+            "use_digest": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+            "use_locator": "use:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+          }
+        ]
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-artifact-use-locator-prefix",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [
+          {
+            "digest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "size": "1",
+            "locator": "artifact:1",
+            "media_type": "text/plain",
+            "role": "tool_output",
+            "use_canonicalization_version": "loopex.canonical.v1",
+            "use_digest": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+            "use_locator": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+          }
+        ]
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-artifact-locator-empty",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [
+          {
+            "digest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "size": "1",
+            "locator": "",
+            "media_type": "text/plain",
+            "role": "tool_output",
+            "use_canonicalization_version": "loopex.canonical.v1",
+            "use_digest": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+            "use_locator": "use:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+          }
+        ]
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-artifact-locator-control",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [
+          {
+            "digest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "size": "1",
+            "locator": "a\u0007b",
+            "media_type": "text/plain",
+            "role": "tool_output",
+            "use_canonicalization_version": "loopex.canonical.v1",
+            "use_digest": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+            "use_locator": "use:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+          }
+        ]
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-artifact-locator-format-char",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [
+          {
+            "digest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "size": "1",
+            "locator": "a​b",
+            "media_type": "text/plain",
+            "role": "tool_output",
+            "use_canonicalization_version": "loopex.canonical.v1",
+            "use_digest": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+            "use_locator": "use:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+          }
+        ]
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-artifact-locator-line-separator",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [
+          {
+            "digest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "size": "1",
+            "locator": "a b",
+            "media_type": "text/plain",
+            "role": "tool_output",
+            "use_canonicalization_version": "loopex.canonical.v1",
+            "use_digest": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+            "use_locator": "use:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+          }
+        ]
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-artifact-locator-too-long",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [
+          {
+            "digest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "size": "1",
+            "locator": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            "media_type": "text/plain",
+            "role": "tool_output",
+            "use_canonicalization_version": "loopex.canonical.v1",
+            "use_digest": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+            "use_locator": "use:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+          }
+        ]
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-artifact-media-type-empty",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [
+          {
+            "digest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "size": "1",
+            "locator": "artifact:1",
+            "media_type": "",
+            "role": "tool_output",
+            "use_canonicalization_version": "loopex.canonical.v1",
+            "use_digest": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+            "use_locator": "use:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+          }
+        ]
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-artifact-media-type-too-long",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [
+          {
+            "digest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "size": "1",
+            "locator": "artifact:1",
+            "media_type": "mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm",
+            "role": "tool_output",
+            "use_canonicalization_version": "loopex.canonical.v1",
+            "use_digest": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+            "use_locator": "use:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+          }
+        ]
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-artifact-media-type-number",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [
+          {
+            "digest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "size": "1",
+            "locator": "artifact:1",
+            "media_type": 1,
+            "role": "tool_output",
+            "use_canonicalization_version": "loopex.canonical.v1",
+            "use_digest": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+            "use_locator": "use:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+          }
+        ]
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-artifact-not-object",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [
+          "artifact:1"
+        ]
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "r8-artifact-second-invalid",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [
+          {
+            "digest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "size": "1",
+            "locator": "artifact:1",
+            "media_type": "text/plain",
+            "role": "tool_output",
+            "use_canonicalization_version": "loopex.canonical.v1",
+            "use_digest": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+            "use_locator": "use:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+          },
+          {
+            "digest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "size": "1",
+            "locator": "artifact:1",
+            "media_type": "text/plain",
+            "role": "x",
+            "use_canonicalization_version": "loopex.canonical.v1",
+            "use_digest": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+            "use_locator": "use:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+          }
+        ]
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "whole-null",
+      "input": null,
+      "error": "refuse"
+    },
+    {
+      "name": "whole-list",
+      "input": [],
+      "error": "refuse"
+    },
+    {
+      "name": "whole-string",
+      "input": "tool.finished",
+      "error": "refuse"
+    },
+    {
+      "name": "whole-empty-object",
+      "input": {},
+      "error": "refuse"
+    },
+    {
+      "name": "r8-with-envelope-kind",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "operation_id": "_gBvcA",
+        "tool_id": "loopex.read",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [],
+        "kind": "tool.finished"
+      },
+      "error": "refuse"
+    },
+    {
+      "name": "t7-with-event-sequence",
+      "input": {
+        "run_id": "AP8K",
+        "turn_id": "dHVyboA",
+        "tool_call_id": "YXNrLTE",
+        "tool_id": "loopex.ask",
+        "outcome": "completed",
+        "reason": null,
+        "artifacts": [],
+        "event_sequence": "1"
+      },
+      "error": "refuse"
+    }
+  ]
+}

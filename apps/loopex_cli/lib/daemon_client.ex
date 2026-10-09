@@ -36,7 +36,7 @@ defmodule LoopexCli.DaemonClient do
   # Technical depth: ADR 0044 requires exact generation and canonical schema
   # identity before session work; a mismatch uses the original close path.
   @generation "loopex.experimental/4"
-  @schema_digest "9306e4aeb2ffb9aab3cf4dac94db5a1e4699f09d3f58cc57e2fa79a7e63ef7b9"
+  @schema_digest "9a4a735d1a8a59237f3e063fa0fce21fd2d69e7a11785eee743c10311228b02c"
   @initialize_timeout_ms 30_000
 
   @doc false
@@ -227,8 +227,11 @@ defmodule LoopexCli.DaemonClient do
     end
   end
 
+  defp event_data("tool.finished", data),
+    do: LoopexProtocol.Session.ToolFinished.decode_wire(data)
+
   defp event_data(kind, data)
-       when kind in ~w(user.message_appended assistant.message_appended run.started session.settled tool.started tool.finished steer.resolved follow_up.resolved),
+       when kind in ~w(user.message_appended assistant.message_appended run.started session.settled tool.started steer.resolved follow_up.resolved),
        do: event_fields(data)
 
   defp event_data(_kind, _data), do: :error
@@ -256,23 +259,6 @@ defmodule LoopexCli.DaemonClient do
   defp event_field("content_b64", value) do
     case Wire.bytes(value, 98_304) do
       {:ok, native} -> {:ok, "content", native}
-      :error -> :error
-    end
-  end
-
-  defp event_field("artifacts", values) when is_list(values) do
-    Enum.reduce_while(values, {:ok, []}, fn
-      %{"size" => size} = artifact, {:ok, artifacts} ->
-        case Wire.u64(size) do
-          {:ok, native} -> {:cont, {:ok, [Map.put(artifact, "size", native) | artifacts]}}
-          :error -> {:halt, :error}
-        end
-
-      _invalid, _acc ->
-        {:halt, :error}
-    end)
-    |> case do
-      {:ok, artifacts} -> {:ok, "artifacts", Enum.reverse(artifacts)}
       :error -> :error
     end
   end

@@ -149,6 +149,80 @@ defmodule Loopex.AppServer.ForegroundOutputLifecycleTest do
     end)
   end
 
+  # Concept: an answered model question finishes its tool on the real stdout.
+  # Technical depth: accepted ADR 0067's seven-member terminal has no operation
+  # identity; it must cross the actual writer between the interaction terminal
+  # and run ending without detachment, then release custody at EOF.
+  test "an actual model question answer crosses stdio as an operation-less tool terminal" do
+    Harness.with_fixture(:file, :question, fn fixture ->
+      prepare(fixture)
+
+      Harness.send_frame(fixture, %{
+        "method" => "session.prompt",
+        "request_id" => "prompt",
+        "command_id" => Wire.encode_identity("question-prompt"),
+        "content_b64" => Wire.encode_bytes("go")
+      })
+
+      requested =
+        await_record(fixture, &(get_in(&1, ["event", "kind"]) == "interaction.requested"))
+
+      opened = requested["event"]["data"]
+      assert opened["producer"] == "model_tool"
+
+      Harness.send_frame(fixture, %{
+        "method" => "session.respond_interaction",
+        "request_id" => "answer",
+        "command_id" => Wire.encode_identity("question-answer"),
+        "interaction_id" => opened["interaction_id"],
+        "answer" => %{"text" => "exact response 猫\n"}
+      })
+
+      await_record(fixture, &(get_in(&1, ["event", "kind"]) == "run.finished"))
+      records = output_records(fixture)
+      kinds = for %{"type" => "event", "event" => %{"kind" => kind}} <- records, do: kind
+      refute Enum.any?(records, &(&1["type"] in ["detached", "error"]))
+
+      # The atomic settlement appends the original tool result before the
+      # interaction terminal; the run ends after both.
+      assert Enum.find_index(kinds, &(&1 == "tool.finished")) <
+               Enum.find_index(kinds, &(&1 == "interaction.answered"))
+
+      assert Enum.find_index(kinds, &(&1 == "interaction.answered")) <
+               Enum.find_index(kinds, &(&1 == "run.finished"))
+
+      [finished] =
+        for %{"event" => %{"kind" => "tool.finished", "data" => data}} <- records, do: data
+
+      assert finished == %{
+               "run_id" => opened["run_id"],
+               "turn_id" => finished["turn_id"],
+               "tool_call_id" => Wire.encode_identity("ask-1"),
+               "tool_id" => "loopex.ask",
+               "outcome" => "completed",
+               "reason" => nil,
+               "artifacts" => []
+             }
+
+      assert {:ok, _turn} = Wire.identity(finished["turn_id"])
+      assert {:ok, native} = LoopexProtocol.Session.ToolFinished.decode_wire(finished)
+      refute Map.has_key?(native, "operation_id")
+
+      [%{"event" => %{"data" => run}}] =
+        for %{"event" => %{"kind" => "run.finished"}} = record <- records, do: record
+
+      assert run["outcome"] == "completed"
+      [admission] = Enum.filter(records, &(&1["request_id"] == "answer"))
+      assert admission["status"] == "accepted"
+      assert admission["command_id"] == Wire.encode_identity("question-answer")
+      :file.close(fixture.input)
+      summary = Harness.finished(fixture)
+      assert summary.result == :ok
+      assert_released_custody(summary)
+      assert summary.sink_closed
+    end)
+  end
+
   for kind <- [
         :text_delta,
         :reasoning_delta,
@@ -561,6 +635,26 @@ defmodule Loopex.AppServer.ForegroundOutputLifecycleTest do
       content_index: 0,
       text: text
     }
+
+  defp output_records(fixture) do
+    bytes = if File.exists?(fixture.output), do: File.read!(fixture.output), else: ""
+    bytes |> String.split("\n") |> Enum.drop(-1) |> Enum.map(&decode_payload/1)
+  end
+
+  # Concept: wait for one record on the actual stdout within the original cutoff.
+  # Technical depth: only complete newline-terminated lines are decoded; the
+  # fixture's existing 30 s request deadline bounds the poll.
+  defp await_record(fixture, predicate) do
+    case Enum.find(output_records(fixture), predicate) do
+      nil ->
+        assert System.monotonic_time(:millisecond) < fixture.cutoff
+        Process.sleep(10)
+        await_record(fixture, predicate)
+
+      record ->
+        record
+    end
+  end
 
   defp decode(frame), do: frame |> String.trim_trailing("\n") |> decode_payload()
 
