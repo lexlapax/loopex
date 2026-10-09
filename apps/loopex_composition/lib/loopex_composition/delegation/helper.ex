@@ -1865,6 +1865,7 @@ defmodule LoopexComposition.Delegation.Helper do
         if operation.stop == nil do
           case commit_stop(state, entry, reason) do
             {:ok, state} ->
+              fault(state, :after_stop)
               abort_child(state, operation)
               state
 

@@ -119,7 +119,8 @@ defmodule LoopexComposition.DelegationRuntimeFixture do
   def boot(base, options) do
     {:ok, objects} =
       RetainedObjects.open(base.root, "helper-runtime", base.lease,
-        recover_stale_writer: Keyword.get(options, :recover_stale_writer, false)
+        recover_stale_writer: Keyword.get(options, :recover_stale_writer, false),
+        checkpoint: Keyword.get(options, :checkpoint, fn _ -> :ok end)
       )
 
     Process.unlink(objects)

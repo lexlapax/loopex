@@ -144,6 +144,86 @@ defmodule LoopexComposition.DelegationRecoveryTest do
     assert map_size(Helper.status(restarted.helper).receipts) == 1
   end
 
+  test "loss right after a committed cancel stop never re-prompts and keeps the first stop" do
+    test = self()
+
+    decide = fn
+      "parent:" <> _, 0 -> %{text: "go", calls: [Fixture.task_call("t-1", "inspect", "child:x")]}
+      "child:" <> _, 0 -> %{text: "late", calls: [], hold: test, hold_timeout_ms: 60_000}
+      _user, _turns -> %{text: "done", calls: []}
+    end
+
+    fixture = Fixture.start(decide, fault: fault(test, :after_stop))
+    parent = Fixture.parent(fixture, "parent-create")
+    {attachment, run} = Fixture.prompt(fixture, parent, "parent-prompt", "parent:x")
+    assert_receive {:holding, "child:x", _worker}, 10_000
+
+    Task.start(fn ->
+      Loopex.command(attachment, %{type: :abort, command_id: "abort", run_id: run})
+    end)
+
+    assert_receive {:fault, :after_stop}, 10_000
+    restarted = Fixture.restart(fixture)
+    ledger = Helper.status(restarted.helper).runs[{parent, run}]
+    stops = for {tx, _} <- ledger.transactions, tx["mutation"]["kind"] == "stop", do: tx
+    assert [stop] = stops
+    assert stop["mutation"]["reason"] == "cancel"
+
+    child_prompts =
+      restarted.model
+      |> HelperDeciderModel.dispatched()
+      |> Enum.count(fn request ->
+        Enum.any?(request.messages, &(&1["role"] == "user" and &1["content"] == "child:x"))
+      end)
+
+    assert child_prompts == 1
+    assert map_size(Helper.status(restarted.helper).children) == 1
+  end
+
+  test "sync uncertainty in one parent fences the whole adapter until restart resolves it" do
+    synced = :counters.new(1, [])
+
+    checkpoint = fn step ->
+      if step == :run_synced do
+        :counters.add(synced, 1, 1)
+        if :counters.get(synced, 1) == 2, do: {:error, :physical_cut}, else: :ok
+      else
+        :ok
+      end
+    end
+
+    fixture =
+      Fixture.start(
+        [
+          %{text: "a", calls: [Fixture.task_call("call-a")]},
+          %{text: "b", calls: [Fixture.task_call("call-b")]},
+          %{text: "b done", calls: []}
+        ],
+        checkpoint: checkpoint
+      )
+
+    a = Fixture.parent(fixture, "create-a")
+    b = Fixture.parent(fixture, "create-b")
+    {_attachment, run_a} = Fixture.prompt(fixture, a, "prompt-a", "a")
+    assert Fixture.await_terminal(fixture, a, run_a).terminal.state == "outcome_unknown"
+    assert Helper.status(fixture.helper).fenced
+    {_attachment, run_b} = Fixture.prompt(fixture, b, "prompt-b", "b")
+    assert Fixture.await_terminal(fixture, b, run_b).terminal.state == "completed"
+    {:ok, rows} = Loopex.Store.load_records(fixture.store, b, 0, 1_000)
+
+    assert [{"call-b", "failed", "ledger_fenced"}] =
+             for(
+               %{payload: %{kind: "tool_result_committed_v2"} = p} <- rows,
+               do: {p["tool_call_id"], p["outcome"], p["reason"]}
+             )
+
+    assert Helper.status(fixture.helper).children == %{}
+    restarted = Fixture.restart(fixture)
+    status = Helper.status(restarted.helper)
+    assert status.classified == :complete and not status.fenced
+    assert RunLedger.occupied?(status.runs[{a, run_a}])
+  end
+
   defp decide do
     fn
       "parent:" <> _, 0 ->
