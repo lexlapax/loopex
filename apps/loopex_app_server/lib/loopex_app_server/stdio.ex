@@ -165,7 +165,8 @@ defmodule Loopex.AppServer.Stdio do
           message when foreground_message(message, state.port) ->
             state |> receive_message(message) |> loop()
 
-          {[:alias | request], _reply} = message when is_reference(request) and request == state.stop_request ->
+          {[:alias | request], _reply} = message
+          when is_reference(request) and request == state.stop_request ->
             state |> receive_message(message) |> loop()
         after
           @idle_ms -> %{state | poll_due: true} |> wake() |> loop()
@@ -866,7 +867,8 @@ defmodule Loopex.AppServer.Stdio do
           message when foreground_message(message, state.port) ->
             state |> receive_message(message) |> cleanup_loop()
 
-          {[:alias | request], _reply} = message when is_reference(request) and request == state.stop_request ->
+          {[:alias | request], _reply} = message
+          when is_reference(request) and request == state.stop_request ->
             state |> receive_message(message) |> cleanup_loop()
         after
           @idle_ms -> cleanup_loop(state)

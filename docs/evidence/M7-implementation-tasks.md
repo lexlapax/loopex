@@ -1,5 +1,19 @@
 # M7 Implementation Tasks
 
+### Foreground repair layout verified, 2026-10-08
+
+The four reviewed repairs are committed at
+`cbfb5852d8343f9ffe3e727ed78b50dc665f2ff9`. Formatter45 original3011
+passes all three non-line syntax-tree comparisons and both complete changed-source
+format checks,3.577seconds/four joins. Retained output
+`M7/candidate-format-preparation-20261008-v45`; terminal SHA-256
+`c8264ef53594040a8a9b9b3e434c671dfdbb1d91987c3cdf98d69e890e9344b1`,
+collection SHA-256
+`607dfe1c3bc6da6f2d5f86308d41b794c412ccdf8b6ef2e50bf4184325546122`.
+Stdio has the sole syntax-preserving layout delta. The446-case component scope
+and broader integration remain UNRUN; no checkbox closes. Next registry2703,
+SHA-256 `56f1285ca7da76c153994f423debe6e74516399449b4004a3b0541fcc1fb6aae`.
+
 ### Foreground failures repaired in reviewed source, 2026-10-08
 
 Four reviewed paths repair the original64183 failure causes: retain unrelated
