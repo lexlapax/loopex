@@ -315,6 +315,72 @@ defmodule LoopexDaemon.ConfigureCompactSocketTest do
     :socket.close(client)
   end
 
+  # Concept: a daemon client creates a session with authored remote options.
+  # Technical depth: accepted ADR 0055 over /4. Raw instructions and exact
+  # decimals cross once through central native preparation; the authored alias
+  # is retained in the private genesis; an exact retry replays the admission;
+  # changed options under the same command are a runtime command conflict; no
+  # public record carries the private instruction text.
+  test "remote creation options cross the socket once through central preparation" do
+    fixture = fixture()
+    daemon = start_daemon(fixture.runtime)
+    client = initialized_client(daemon)
+
+    options = %{
+      "version" => 1,
+      "tools" => [],
+      "configuration" => %{
+        "model" => " alias/model ",
+        "instructions" => %{
+          "version" => "current.v1",
+          "base" => "SOCKET_PRIVATE_INSTRUCTIONS 猫\n",
+          "environment" => "",
+          "appendix" => "tail"
+        },
+        "max_tokens" => "512"
+      }
+    }
+
+    create = %{
+      "method" => "session.create",
+      "request_id" => "create",
+      "command_id" => Wire.encode_identity(<<0, 255, 1, 128>>),
+      "session_options" => options
+    }
+
+    :ok = send_frame(client, create)
+    admitted = reply(client, "create")
+    assert admitted["status"] == "accepted"
+    assert Agent.get(fixture.controller, & &1) == 1
+    {:ok, session} = Wire.identity(admitted["session_id"])
+    [genesis | _] = Fixture.records(fixture, session)
+    assert genesis.payload["options"]["configuration"]["model"] == " alias/model "
+    assert genesis.payload["initial_configuration"]["max_tokens"] == 512
+    assert genesis.payload["initial_configuration"]["model"] == "scripted:v1"
+
+    :ok = send_frame(client, %{create | "request_id" => "retry"})
+    assert reply(client, "retry") == %{admitted | "request_id" => "retry"}
+    assert Agent.get(fixture.controller, & &1) == 1
+
+    changed = put_in(options, ["configuration", "max_tokens"], "256")
+    :ok = send_frame(client, %{create | "request_id" => "changed", "session_options" => changed})
+    conflict = reply(client, "changed")
+    assert conflict["status"] == "refused"
+    assert conflict["reason"] == "runtime_command_conflict"
+
+    :ok =
+      send_frame(client, %{
+        "method" => "session.inspect",
+        "request_id" => "inspect",
+        "session_id" => admitted["session_id"]
+      })
+
+    inspected = reply(client, "inspect")
+    assert inspected["result"]["configuration"]["max_tokens"] == "512"
+    refute inspect([admitted, conflict, inspected]) =~ "SOCKET_PRIVATE_INSTRUCTIONS"
+    :socket.close(client)
+  end
+
   defp reply(client, id) do
     [reply] =
       client

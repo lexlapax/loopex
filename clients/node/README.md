@@ -28,6 +28,8 @@ imports anything outside Node's own standard library.
 | `tool-finished-vectors.mjs` | Independently check the tool terminal literals and identity, reason and size byte boundaries |
 | `public-records.mjs` | Validate every durable event, snapshot and progress record against this client's own closed reading of the current contract; both connections call it before a caller sees a record |
 | `public-records-tests.mjs` | Wrap every retained payload literal in complete records and check the shared validator admits exactly the admitted literals |
+| `contract-identity-vectors.mjs` | Check literal initialize replies, including mismatched digests, against both clients' pinned contract identities |
+| `real-negotiation-workflow.mjs` | Negotiate against a real server: local refusal before verification and after an old-only refusal, then the exact pinned identity |
 | `compact-result.mjs` | Decode standalone compaction results and completed-command payloads with exact usage, closed failures and opaque identities; both connections validate completion events |
 | `compact-result-vectors.mjs` | Independently check result/completion vectors, accounting and checkpoint/command/episode boundaries |
 | `checkpoint-owner.mjs` | Decode closed run/compact checkpoint owners and opaque identity bytes; both connections validate checkpoint events |

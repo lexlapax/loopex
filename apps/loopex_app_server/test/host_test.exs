@@ -223,6 +223,138 @@ defmodule Loopex.AppServer.HostTest do
     end
   end
 
+  describe "configuring across real routes" do
+    # Concept: a foreground client configures across real host routes without
+    # learning them. Technical depth: accepted ADR 0050 over /3 with two bound
+    # provider routes in the shipped host. An authored alias resolves to the
+    # bound provider's canonical model, an unbound provider refuses, and no
+    # record on stdout carries a route, binding, credential or host option.
+    test "stdio configure resolves real bound routes without disclosing host-only data" do
+      entry = """
+      :ok = Loopex.AppServer.Host.serve(
+        provider_bindings: #{inspect(bindings())},
+        model: "openai:test",
+        active_tools: [])
+      """
+
+      port =
+        Port.open({:spawn_executable, System.find_executable("elixir")}, [
+          :binary,
+          :exit_status,
+          {:line, 4_194_304},
+          {:args, Enum.flat_map(applications(), &["-pa", ebin(&1)]) ++ ["-e", entry]},
+          {:env,
+           for(
+             {name, value} <-
+               environment(%{
+                 "M7_SERVER_A" => "server-first-canary",
+                 "M7_SERVER_B" => "server-second-canary"
+               }),
+             do: {String.to_charlist(name), String.to_charlist(value)}
+           )}
+        ])
+
+      ask = fn request ->
+        true = Port.command(port, JSON.encode!(request) <> "\n")
+        await_reply(port, request["request_id"], [])
+      end
+
+      init = %{
+        "method" => "initialize",
+        "request_id" => "init",
+        "generations" => ["loopex.experimental/3"],
+        "capabilities" => []
+      }
+
+      replies = ask.(init)
+
+      created =
+        ask.(%{
+          "method" => "session.create",
+          "request_id" => "create",
+          "command_id" => "Y3JlYXRl",
+          "session_options" => %{"version" => 1}
+        })
+
+      session = reply_to(created, "create")["session_id"]
+
+      attached =
+        ask.(%{"method" => "session.attach", "request_id" => "attach", "session_id" => session})
+
+      assert reply_to(attached, "attach")["type"] == "snapshot"
+
+      unbound =
+        ask.(%{
+          "method" => "session.configure",
+          "request_id" => "unbound",
+          "command_id" => "dW5ib3VuZA",
+          "changes" => %{"model" => "google:gemini-unbound"}
+        })
+
+      assert reply_to(unbound, "unbound")["status"] == "refused"
+
+      bound =
+        ask.(%{
+          "method" => "session.configure",
+          "request_id" => "bound",
+          "command_id" => "Ym91bmQ",
+          "changes" => %{"model" => "anthropic:claude-haiku-4-5"}
+        })
+
+      assert reply_to(bound, "bound")["status"] == "accepted"
+
+      inspected =
+        ask.(%{"method" => "session.inspect", "request_id" => "inspect", "session_id" => session})
+
+      assert reply_to(inspected, "inspect")["type"] == "result"
+      Port.close(port)
+
+      records = replies ++ created ++ attached ++ unbound ++ bound ++ inspected
+
+      [change | _] =
+        for %{"event" => %{"kind" => "session.configured", "data" => data}} <- records, do: data
+
+      assert change["configuration"]["model"] == "anthropic:claude-haiku-4-5-20251001"
+      public = inspect(records, limit: :infinity)
+
+      for private <-
+            ~w(M7_SERVER canary credential provider_mapping model_capabilities provider_bindings) do
+        refute public =~ private, private
+      end
+    end
+  end
+
+  defp reply_to(records, id), do: Enum.find(records, &(&1["request_id"] == id))
+
+  defp await_reply(port, id, records) do
+    receive do
+      {^port, {:data, {:eol, line}}} ->
+        assert {:ok, record} = LoopexProtocol.Frame.decode(line, 4_194_304)
+        records = records ++ [record]
+
+        if record["request_id"] == id and record["type"] != "progress",
+          do: drain_events(port, records),
+          else: await_reply(port, id, records)
+
+      {^port, {:exit_status, status}} ->
+        flunk("the host exited #{status} before #{id}: #{inspect(records)}")
+    after
+      15_000 -> flunk("no reply to #{id}: #{inspect(records)}")
+    end
+  end
+
+  # Events committed by a request may follow its reply; collect what arrives
+  # within a short quiet window so the privacy scan sees them too.
+  defp drain_events(port, records) do
+    receive do
+      {^port, {:data, {:eol, line}}} ->
+        assert {:ok, record} = LoopexProtocol.Frame.decode(line, 4_194_304)
+        drain_events(port, records ++ [record])
+    after
+      300 -> records
+    end
+  end
+
   defp bindings,
     do: %{
       "openai" => %{"credential" => %{"env" => "M7_SERVER_A"}},
