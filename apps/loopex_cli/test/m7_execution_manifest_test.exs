@@ -139,7 +139,7 @@ defmodule LoopexCli.M7ExecutionManifestTest do
                nil
              )
 
-    assert "m7.pipe-answer" in pending
+    assert "m7.thinking-bound" in pending and "m7.pipe-answer" not in pending
 
     assert {:error, :unknown_m7_lane} =
              ExecutionManifest.selection(f.manifest, f.digest, "m7-x", "a", nil)

@@ -227,9 +227,9 @@ One row per manifest case in lane order; `pending:` names what still blocks it.
 | Case | Lane | Driver | Status |
 | --- | --- | --- | --- |
 | `m7.baseline.ask` | `m7-operator` | demonstration | `pending:attended baseline driver` |
-| `m7.baseline.durable` | `m7-operator` | demonstration | `pending:attended baseline driver` |
-| `m7.trace.flag` | `m7-operator` | demonstration | `pending:attended trace driver` |
-| `m7.trace.file` | `m7-operator` | demonstration | `pending:attended trace driver` |
+| `m7.baseline.durable` | `m7-operator` | scenario-chat | `ready` |
+| `m7.trace.flag` | `m7-operator` | scenario-chat | `ready` |
+| `m7.trace.file` | `m7-operator` | scenario-chat | `ready` |
 | `m7.trace.json` | `m7-operator` | demonstration | `pending:attended trace driver` |
 | `m7.repair` | `m7-operator` | fixture-chat | `ready` |
 | `m7.instructions.admitted` | `m7-operator` | demonstration | `pending:instruction fixture driver` |
@@ -242,11 +242,11 @@ One row per manifest case in lane order; `pending:` names what still blocks it.
 | `m7.provider-switch` | `m7-operator` | demonstration | `pending:A/B provider pins` |
 | `m7.thinking-rounds` | `m7-operator` | demonstration | `pending:thinking-cell witness driver` |
 | `m7.review` | `m7-operator` | fixture-chat | `pending:helper flow (T11)` |
-| `m7.policy-denial` | `m7-operator` | demonstration | `pending:denial fixture driver` |
+| `m7.policy-denial` | `m7-operator` | scenario-chat | `ready` |
 | `m7.interrupt` | `m7-operator` | demonstration | `pending:FIFO hold runner and observer join` |
 | `m7.external` | `m7-operator` | external-chat | `ready` |
 | `m7.restore` | `m7-operator` | demonstration | `pending:attended restore driver` |
-| `m7.pipe-answer` | `m7-provider` | provider-wrapper | `pending:bidirectional pipe driver` |
+| `m7.pipe-answer` | `m7-provider` | scenario-chat | `ready` |
 | `m7.instructions.declined` | `m7-provider` | provider-wrapper | `pending:instruction fixture driver` |
 | `m7.instructions.changed` | `m7-provider` | provider-wrapper | `pending:instruction fixture driver` |
 | `m7.cross-provider-maintenance` | `m7-provider` | provider-wrapper | `pending:A/B provider pins` |

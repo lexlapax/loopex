@@ -17,9 +17,9 @@
       "m7.baseline.durable": {
         "attended": true,
         "credential": true,
-        "driver": "demonstration",
+        "driver": "scenario-chat",
         "lane": "m7-operator",
-        "status": "pending:attended baseline driver",
+        "status": "ready",
         "steps": [
           "V1.3.durable",
           "V1.4",
@@ -149,9 +149,9 @@
       "m7.pipe-answer": {
         "attended": false,
         "credential": true,
-        "driver": "provider-wrapper",
+        "driver": "scenario-chat",
         "lane": "m7-provider",
-        "status": "pending:bidirectional pipe driver",
+        "status": "ready",
         "steps": [
           "V2.6.answer",
           "V2.6.decline"
@@ -160,9 +160,9 @@
       "m7.policy-denial": {
         "attended": true,
         "credential": true,
-        "driver": "demonstration",
+        "driver": "scenario-chat",
         "lane": "m7-operator",
-        "status": "pending:denial fixture driver",
+        "status": "ready",
         "steps": [
           "V9.1"
         ]
@@ -285,9 +285,9 @@
       "m7.trace.file": {
         "attended": true,
         "credential": true,
-        "driver": "demonstration",
+        "driver": "scenario-chat",
         "lane": "m7-operator",
-        "status": "pending:attended trace driver",
+        "status": "ready",
         "steps": [
           "V11.1.file",
           "V11.2.file",
@@ -298,9 +298,9 @@
       "m7.trace.flag": {
         "attended": true,
         "credential": true,
-        "driver": "demonstration",
+        "driver": "scenario-chat",
         "lane": "m7-operator",
-        "status": "pending:attended trace driver",
+        "status": "ready",
         "steps": [
           "V11.1.flag",
           "V11.2.flag",

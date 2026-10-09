@@ -17,15 +17,17 @@ defmodule Mix.Tasks.Loopex.M7Evidence.Conversation do
   or `/decline ID` with that record's exact printed identities; `choice`
   names a choice by its label or decoded identity. Every wait is bounded
   by the step deadline; expiry records `timeout` and ends input, which the
-  conversation sees as end of file. `transcript/1` returns the output and the
+  conversation sees as end of file. `known` lists interaction IDs an earlier
+  conversation of the same session already settled: a reopened conversation
+  replays their records, and they are never answered again. `transcript/1` returns the output and the
   ordered observations without stopping the server.
   """
 
   use GenServer
 
   @doc false
-  def start(steps, deadline_ms \\ 120_000),
-    do: GenServer.start(__MODULE__, {steps, deadline_ms})
+  def start(steps, deadline_ms \\ 120_000, known \\ []),
+    do: GenServer.start(__MODULE__, {steps, deadline_ms, known})
 
   @doc false
   def transcript(device), do: GenServer.call(device, :transcript)
@@ -34,14 +36,14 @@ defmodule Mix.Tasks.Loopex.M7Evidence.Conversation do
   def stop(device), do: GenServer.stop(device)
 
   @impl true
-  def init({steps, deadline}) do
+  def init({steps, deadline, known}) do
     {:ok,
      %{
        steps: steps,
        deadline: deadline,
        output: "",
        mark: 0,
-       answered: [],
+       answered: known,
        pending: "",
        reader: nil,
        timer: nil,
@@ -72,7 +74,8 @@ defmodule Mix.Tasks.Loopex.M7Evidence.Conversation do
     do: io({:put_chars, :latin1, apply(module, function, args)}, client, state)
 
   defp io({:get_chars, _encoding, _prompt, count}, client, state),
-    do: serve(%{state | reader: {client, {:chars, count}}})
+    do:
+      serve(%{state | reader: {client, {:chars, count}}, events: [{:read, count} | state.events]})
 
   defp io({:get_line, _encoding, _prompt}, client, state),
     do: serve(%{state | reader: {client, :line}})

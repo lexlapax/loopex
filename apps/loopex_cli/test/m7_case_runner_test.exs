@@ -372,6 +372,115 @@ defmodule LoopexCli.M7CaseRunnerTest do
     assert facts["join"] =~ "automatic_checkpoint"
   end
 
+  @read %{text: "read", calls: [%{id: "read", name: "read", arguments: %{"path" => "README.md"}}]}
+
+  defp scenario!(f, case_id, script, extra \\ %{}) do
+    context =
+      Map.merge(
+        f.context,
+        Map.merge(
+          %{
+            manifest: lane(f.context.manifest, [case_id]),
+            chat_options: chat_options(f, fn _, call -> script.(call) end, self())
+          },
+          extra
+        )
+      )
+
+    CaseRunner.run_lane(f.writer, "m7-operator", context)
+  end
+
+  defp facts(result),
+    do: JSON.decode!(File.read!(Path.join(result.root, "records/facts.json")))
+
+  test "baseline durable pins the dated default model and one committed tool round", f do
+    result =
+      passed!(
+        scenario!(f, "m7.baseline.durable", fn _ -> [@read, %{text: "first line", calls: []}] end)
+      )
+
+    assert facts(result)["kinds"]["executor_receipt_committed_v2"] == 1
+    config = JSON.decode!(File.read!(Path.join(result.root, "config.json")))
+    assert config["session"]["model"] == "anthropic:claude-haiku-4-5-20251001"
+  end
+
+  test "baseline durable without its tool round is required_action_absent", f do
+    assert {:stopped, [{:ok, result}]} =
+             scenario!(f, "m7.baseline.durable", fn _ -> [%{text: "no tool", calls: []}] end)
+
+    assert result.mechanical_result == "required_action_absent"
+  end
+
+  test "policy denial commits a denied call with no effect or workspace change", f do
+    rm = %{
+      text: "rm",
+      calls: [%{id: "rm", name: "bash", arguments: %{"argv" => ["rm", "README.md"]}}]
+    }
+
+    result =
+      passed!(scenario!(f, "m7.policy-denial", fn _ -> [rm, %{text: "denied", calls: []}] end))
+
+    assert facts(result)["kinds"]["effect_intent_committed_v2"] == nil
+    assert File.read!(Path.join(result.root, "workspace/README.md")) =~ "M7 scenario"
+  end
+
+  test "policy denial without the denied call is required_action_absent", f do
+    assert {:stopped, [{:ok, missing}]} =
+             scenario!(f, "m7.policy-denial", fn _ -> [@read, %{text: "x", calls: []}] end)
+
+    assert missing.mechanical_result == "required_action_absent"
+  end
+
+  test "pipe answer and decline use the emitted interaction identities", f do
+    ask = fn subcase ->
+      %{
+        text: "ask",
+        calls: [
+          %{
+            id: "ask-#{subcase}",
+            name: "ask",
+            arguments: %{
+              "question" => "Continue the #{subcase} subcase?",
+              "choices" => ["yes", "no"]
+            }
+          }
+        ]
+      }
+    end
+
+    script = fn
+      1 -> [ask.("answer"), %{text: "answered", calls: []}]
+      _ -> [ask.("decline"), %{text: "declined", calls: []}]
+    end
+
+    result = passed!(scenario!(f, "m7.pipe-answer", script, %{step_deadline_ms: 5000}))
+    assert File.read!(Path.join(result.root, "records/input-1.txt")) =~ "/answer "
+    assert File.read!(Path.join(result.root, "records/input-2.txt")) =~ "/decline "
+    assert facts(result)["kinds"]["model_question_response_admitted_v2"] == 2
+  end
+
+  test "pipe answer never invents an identity when no question is emitted", f do
+    assert {:stopped, [{:ok, result}]} =
+             scenario!(f, "m7.pipe-answer", fn _ -> [%{text: "no question", calls: []}] end, %{
+               step_deadline_ms: 2000
+             })
+
+    assert result.mechanical_result == "required_action_absent"
+  end
+
+  for variant <- ["flag", "file"] do
+    @variant variant
+    test "trace #{@variant} startup enables tracing with its origin and confirmed cleanup", f do
+      result =
+        passed!(
+          scenario!(f, "m7.trace.#{@variant}", fn _ -> [@read, %{text: "traced", calls: []}] end)
+        )
+
+      diagnostics = File.read!(Path.join(result.root, "records/diagnostics-1.txt"))
+      assert diagnostics =~ ~s("setting":"/trace/enabled")
+    end
+  end
+
   test "the wrapper command checks admission without staging and refuses bad arguments", f do
     :ok = AttemptWriter.close(f.writer)
     root = Path.expand("../../..", __DIR__)
@@ -555,11 +664,11 @@ defmodule LoopexCli.M7CaseRunnerTest do
             else: options
 
         call = Agent.get_and_update(calls, &{&1 + 1, &1 + 1})
-        capture = options[:policy].context
+        capture = policy_context(options)
 
         index =
           Path.join([
-            Path.dirname(Path.dirname(Path.dirname(capture.workspace))),
+            Path.dirname(Path.dirname(Path.dirname(options[:workspace]))),
             "attempts.jsonl"
           ])
 
@@ -569,12 +678,21 @@ defmodule LoopexCli.M7CaseRunnerTest do
     ]
   end
 
+  # A fixture case's capture, or nil under the operator's ordinary policy.
+  defp policy_context(options) do
+    case options[:policy] do
+      %{context: context} -> context
+      _ -> nil
+    end
+  end
+
   defp with_stack(options, script, callback) do
     state = options[:state_root]
     File.mkdir_p!(state)
     {:ok, adapter} = Loopex.Store.Local.start_link(path: Path.join(state, "store.log"))
     {:ok, store} = Loopex.Store.new(Loopex.Store.Local, adapter)
-    capture = options[:policy].context
+    {:ok, physical} = LoopexComposition.WorkspaceIdentity.resolve_path(options[:workspace])
+    {:ok, workspace_ref} = LoopexComposition.WorkspaceIdentity.reference(physical)
 
     {:ok, lease} =
       Loopex.Executor.Local.WorkspaceLease.start_link(
@@ -627,7 +745,7 @@ defmodule LoopexCli.M7CaseRunnerTest do
           identity: "fixture-executor",
           epoch: 1,
           fencing_token: 1,
-          workspace_ref: capture.workspace_ref,
+          workspace_ref: workspace_ref,
           workspace_lease: "workspace"
         },
         tools: ChatConfiguration.selected_definitions(ChatConfiguration.active_tools("coding")),

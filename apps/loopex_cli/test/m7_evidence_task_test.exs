@@ -109,7 +109,7 @@ defmodule LoopexCli.M7EvidenceTaskTest do
     assert {:error, {:m7_cases_pending, provider}} =
              Task.validate(root, [release: true, lane: "m7-provider"] ++ index)
 
-    assert "m7.pipe-answer" in provider
+    assert "m7.thinking-bound" in provider and "m7.pipe-answer" not in provider
 
     assert {:error, {:m7_cases_pending, all}} =
              Task.validate(

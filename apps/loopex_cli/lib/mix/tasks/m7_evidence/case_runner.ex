@@ -50,7 +50,8 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
     AttemptWriter,
     Conversation,
     ExecutionManifest,
-    FixtureManifest
+    FixtureManifest,
+    Scenarios
   }
 
   @switches [
@@ -270,7 +271,12 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
       )
 
     with :ok <- File.mkdir(root) do
-      case stage(case_id, root, context) do
+      staged =
+        if Scenarios.get(case_id),
+          do: stage_scenario(case_id, root, context),
+          else: stage(case_id, root, context)
+
+      case staged do
         {:ok, staged} -> dispatch_case(writer, base, attempt, root, staged, context)
         {:error, reason} -> not_dispatched(writer, base, root, reason)
       end
@@ -303,7 +309,7 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
       "candidate_sha" => base["candidate_sha"],
       "operator" => Map.get(context, :operator),
       "workspace" => staged.fixture.workspace,
-      "policy" => Policy.identity(staged.capture),
+      "policy" => if(staged.capture, do: Policy.identity(staged.capture), else: "ordinary"),
       "pins" => Map.new(staged.fixture.pins, fn {path, pin} -> {path, pin.sha256} end)
     }
 
@@ -333,7 +339,7 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
 
       {oracle_status, oracle} = independent_oracle(staged, environment, root)
       {changes, inventory} = inspect_changes(staged, root)
-      checks = Policy.check(staged.capture)
+      checks = if staged.capture, do: Policy.check(staged.capture), else: :ok
       retained = [{:ok, record}, oracle, inventory, facts | transcripts]
 
       mechanical =
@@ -427,7 +433,8 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
          capture: prepared.capture,
          trusted: trusted,
          config_argv: config_argv,
-         conversations: conversations
+         conversations: conversations,
+         scenario: nil
        }}
     else
       {:error, reason} -> {:error, reason}
@@ -435,13 +442,57 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
     end
   end
 
+  # Concept: a non-coding case runs under the operator's own policy.
+  # Technical depth: the scenario seeds a fresh workspace and changes only the
+  # configuration member it exercises; no fixture policy is injected.
+  defp stage_scenario(case_id, root, context) do
+    scenario = Scenarios.get(case_id)
+    workspace = Path.join(root, "workspace")
+
+    with :ok <- File.mkdir(workspace),
+         :ok <- write_seed(workspace, scenario.seed),
+         {:ok, conversations} <- scenario.plan.(context),
+         {:ok, config_argv} <-
+           attempt_config(context.config_argv, workspace, root, scenario.profile) do
+      {:ok,
+       %{
+         name: case_id,
+         entry: nil,
+         scenario: scenario,
+         capture: nil,
+         trusted: nil,
+         config_argv: config_argv,
+         conversations: conversations,
+         fixture: %{case_id: case_id, workspace: workspace, pins: %{}, environment: %{}}
+       }}
+    else
+      {:error, reason} -> {:error, reason}
+      _ -> {:error, :scenario_preparation_unavailable}
+    end
+  end
+
+  defp write_seed(workspace, seed) do
+    Enum.reduce_while(seed, :ok, fn {path, bytes}, :ok ->
+      target = Path.join(workspace, path)
+
+      with :ok <- File.mkdir_p(Path.dirname(target)), :ok <- File.write(target, bytes) do
+        {:cont, :ok}
+      else
+        _ -> {:halt, {:error, :scenario_seed_unavailable}}
+      end
+    end)
+  end
+
   # Concept: the operator's explicit file, aimed at this attempt's fresh roots.
   # Technical depth: only `paths.workspace` and `paths.state_root` change;
   # ordinary validation of every other member still runs in preparation.
-  defp attempt_config(["chat", "--config", template | rest], workspace, root) do
+  defp attempt_config(argv, workspace, root, transform \\ & &1)
+
+  defp attempt_config(["chat", "--config", template | rest], workspace, root, transform) do
     with {:ok, bytes} <- File.read(template),
          {:ok, profile} <- LoopexCli.ConfigJson.decode(bytes),
          true <- is_map(profile["paths"]) or {:error, :invalid_m7_config},
+         profile = transform.(profile),
          profile =
            put_in(profile, ["paths"], %{
              profile["paths"]
@@ -458,7 +509,7 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
     _ -> {:error, :invalid_m7_config}
   end
 
-  defp attempt_config(_argv, _workspace, _root), do: {:error, :invalid_m7_config}
+  defp attempt_config(_argv, _workspace, _root, _transform), do: {:error, :invalid_m7_config}
 
   defp seed("external", entry, workspace, context) do
     repository = Map.get(context, :external_repository)
@@ -574,14 +625,16 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
     do: outcome(Enum.reverse(done), session)
 
   defp converse([conversation | rest], staged, context, mode, session, done, n) do
-    extra = if conversation.resume and session, do: ["--resume", session], else: []
+    extra =
+      Map.get(conversation, :extra, []) ++
+        if(conversation.resume and session, do: ["--resume", session], else: [])
 
     cond do
       conversation.resume and is_nil(session) ->
         outcome(Enum.reverse(done), session)
 
       true ->
-        result = chat(staged, context, conversation.steps, mode, extra, n)
+        result = chat(staged, context, conversation.steps, mode, extra, n, questions(done))
         session = session || session_id(result.output)
 
         if result.exit == 0,
@@ -595,17 +648,27 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
       exit: if(results != [] and Enum.all?(results, &(&1.exit == 0)), do: 0, else: 1),
       conversations: length(results),
       session: session,
+      output: Enum.map_join(results, & &1.output),
+      diagnostics: Enum.map_join(results, & &1.diagnostics),
+      closing: if(results == [], do: "", else: List.last(results).output),
       transcripts: Enum.flat_map(results, & &1.transcripts)
     }
   end
 
-  defp chat(staged, context, steps, mode, extra, n) do
+  defp questions(results) do
+    for result <- results,
+        "@loopex " <> json <- String.split(result.output, "\n"),
+        {:ok, %{"event" => "question", "interaction_id" => id}} <- [JSON.decode(json)],
+        do: id
+  end
+
+  defp chat(staged, context, steps, mode, extra, n, known) do
     {:ok, diagnostics} = StringIO.open("", encoding: :latin1)
 
     {:ok, device} =
       if mode == :terminal,
         do: {:ok, nil},
-        else: Conversation.start(steps, step_deadline(context))
+        else: Conversation.start(steps, step_deadline(context), known)
 
     {input, output, chat_mode} =
       if mode == :terminal, do: {:stdio, :stdio, :interactive}, else: {device, device, :pipe}
@@ -624,19 +687,24 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
     exit = Chat.run(staged.config_argv ++ extra, options)
     {_, stderr} = StringIO.contents(diagnostics)
 
-    stdout =
+    {stdout, inputs} =
       if device do
         transcript = Conversation.transcript(device)
         Conversation.stop(device)
-        transcript.output
+        {transcript.output, Enum.map_join(transcript.events, &(inspect(&1) <> "\n"))}
       else
-        ""
+        {"", "operator terminal\n"}
       end
 
     %{
       exit: exit,
       output: stdout,
-      transcripts: [{"transcript-#{n}.txt", stdout}, {"diagnostics-#{n}.txt", stderr}]
+      diagnostics: stderr,
+      transcripts: [
+        {"transcript-#{n}.txt", stdout},
+        {"diagnostics-#{n}.txt", stderr},
+        {"input-#{n}.txt", inputs}
+      ]
     }
   end
 
@@ -782,7 +850,11 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
 
     case committed(state, outcome.session) do
       {:ok, rows} ->
-        join = joins(staged.fixture.case_id, rows, staged.entry, outcome)
+        join =
+          if staged.scenario,
+            do: staged.scenario.joins.(rows, outcome, staged.fixture.workspace),
+            else: joins(staged.fixture.case_id, rows, staged.entry, outcome)
+
         kinds = rows |> Enum.map(&kind/1) |> Enum.frequencies()
 
         {join,
@@ -796,6 +868,9 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
         {{:missing, reason}, {:error, reason}}
     end
   end
+
+  defp independent_oracle(%{capture: nil}, _environment, root),
+    do: {0, retain_raw(root, "oracle.txt", "no fixture oracle: the committed joins decide\n")}
 
   defp independent_oracle(staged, environment, root) do
     with {:ok, recipe} <-
@@ -834,6 +909,32 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
       _ ->
         {{:error, :changes_unavailable}, {:error, :changes_unavailable}}
     end
+  end
+
+  defp inspect_changes(%{scenario: %{} = scenario} = staged, root) do
+    workspace = staged.fixture.workspace
+
+    changed =
+      for path <- Path.wildcard(Path.join(workspace, "**"), match_dot: true),
+          File.regular?(path),
+          relative = Path.relative_to(path, workspace),
+          File.read!(path) != Map.get(scenario.seed, relative),
+          do: relative
+
+    removed =
+      for {path, _} <- scenario.seed, not File.exists?(Path.join(workspace, path)), do: path
+
+    result =
+      if (changed ++ removed) -- scenario.allowed == [],
+        do: :ok,
+        else: {:error, :disallowed_change}
+
+    {result,
+     retain(root, "changes.json", %{
+       "changed" => changed,
+       "removed" => removed,
+       "allowed" => scenario.allowed
+     })}
   end
 
   defp inspect_changes(staged, root) do
