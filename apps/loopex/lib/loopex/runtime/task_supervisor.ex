@@ -50,7 +50,7 @@ defmodule Loopex.Runtime.TaskSupervisor do
   @doc false
   @spec terminate_child(pid(), pid()) :: :ok | {:error, :not_found}
   def terminate_child(supervisor, pid) when is_pid(pid) do
-    case child_id(pid) do
+    case child_id(pid) || listed_id(supervisor, pid) do
       nil -> {:error, :not_found}
       id -> :supervisor.terminate_child(supervisor, id)
     end
@@ -58,8 +58,9 @@ defmodule Loopex.Runtime.TaskSupervisor do
 
   # Concept: a task is stopped by one request naming it, as with a pid-addressed child.
   # Technical depth: Erlang's one_for_one supervisor terminates by child ID. The
-  # ID is stored in the child before its start acknowledgement, so it is readable
-  # from the moment `start_child` returns; a gone child yields `nil`.
+  # child stores its ID as its first act, so a running or exited-but-unreaped child
+  # needs no supervisor query; only a child not yet scheduled falls back to the
+  # supervisor's own child list. A gone child yields `nil`.
   @doc false
   @spec child_id(pid()) :: reference() | nil
   def child_id(pid) when is_pid(pid) do
@@ -67,6 +68,13 @@ defmodule Loopex.Runtime.TaskSupervisor do
       {{:dictionary, @id_key}, id} when is_reference(id) -> id
       _gone_or_foreign -> nil
     end
+  end
+
+  defp listed_id(supervisor, pid) do
+    Enum.find_value(:supervisor.which_children(supervisor), fn
+      {id, ^pid, _type, _modules} -> id
+      _other -> nil
+    end)
   end
 
   @doc false
@@ -78,12 +86,11 @@ defmodule Loopex.Runtime.TaskSupervisor do
   end
 
   @doc false
-  def start_task(id, work), do: :proc_lib.start_link(__MODULE__, :init_task, [id, work])
+  def start_task(id, work), do: {:ok, :proc_lib.spawn_link(__MODULE__, :init_task, [id, work])}
 
   @doc false
   def init_task(id, work) do
     Process.put(@id_key, id)
-    :proc_lib.init_ack({:ok, self()})
     run(work)
   end
 
