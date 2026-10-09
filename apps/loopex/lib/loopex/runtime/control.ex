@@ -38,6 +38,7 @@ defmodule Loopex.Runtime.Control do
   alias Loopex.Runtime.DaemonRoute
   alias Loopex.Runtime.EventDispatcher
   alias Loopex.Runtime.EffectIntents
+  alias Loopex.Runtime.RunEvidence
   alias Loopex.Runtime.OwnerGroup
   alias Loopex.Runtime.ProviderAttempt
   alias Loopex.Runtime.SessionCoordinator
@@ -726,6 +727,27 @@ defmodule Loopex.Runtime.Control do
         end
       else
         {:error, :runtime_unavailable}
+      end
+
+    {:reply, reply, state}
+  end
+
+  def handle_call({:run_evidence, token, session_id, run_id}, _from, state) do
+    reply =
+      cond do
+        token != state.token ->
+          {:error, :runtime_unavailable}
+
+        state.creation ->
+          {:error, :runtime_unavailable}
+
+        true ->
+          case bounded_store_read(fn ->
+                 RunEvidence.read(state.store, state.runtime_id, session_id, run_id)
+               end) do
+            :unavailable -> {:error, :runtime_unavailable}
+            result -> result
+          end
       end
 
     {:reply, reply, state}

@@ -97,6 +97,14 @@ defmodule Loopex.Runtime.MaintenanceEpisodeRecoveryTest do
 
     assert Enum.count(rows, &(&1.payload.kind == "compaction_checkpoint_committed_v1")) == 2
 
+    # Concept: ADR 0069 run evidence includes this run's own maintenance.
+    # Technical depth: two summary attempts report 37/19 each and the ordinary
+    # continuation reports the scripted 1/1, all charged to this run.
+    assert {:ok, %{usage: usage, terminal: %{state: "completed"}}} =
+             SessionState.run_evidence(session, rows, run_id)
+
+    assert usage == %{reported_input: 75, reported_output: 39, estimated: 0, unresolved: false}
+
     [first_checkpoint, _] =
       Enum.filter(rows, &(&1.payload.kind == "compaction_checkpoint_committed_v1"))
 

@@ -719,6 +719,8 @@ defmodule Loopex.Runtime.StandaloneCompactOwnerTest do
     assert completed.conversation == before.conversation
     assert completed.run_order == before.run_order
     assert completed.charged == before.charged
+    # Concept: ADR 0069 run evidence excludes standalone compaction usage.
+    assert completed.run_usage == before.run_usage
     assert completed.deadlines == before.deadlines
     assert completed.active_run_id == nil
     assert completed.pending_work == %{}
