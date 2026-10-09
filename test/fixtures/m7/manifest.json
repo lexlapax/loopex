@@ -51,7 +51,7 @@
         "credential": true,
         "driver": "demonstration",
         "lane": "m7-operator",
-        "status": "pending:scripts/m7-ephemeral-question-demo.exs",
+        "status": "ready",
         "steps": [
           "V5.6.positive"
         ]

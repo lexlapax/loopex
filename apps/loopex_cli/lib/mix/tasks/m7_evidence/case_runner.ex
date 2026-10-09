@@ -49,6 +49,7 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
   alias Mix.Tasks.Loopex.M7Evidence.{
     AttemptWriter,
     Conversation,
+    EphemeralDemo,
     ExecutionManifest,
     FixtureManifest,
     Scenarios
@@ -393,7 +394,7 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
       "candidate_sha" => base["candidate_sha"],
       "operator" => Map.get(context, :operator),
       "workspace" => staged.fixture.workspace,
-      "policy" => if(staged.capture, do: Policy.identity(staged.capture), else: "ordinary"),
+      "policy" => execution_policy(staged),
       "pins" => Map.new(staged.fixture.pins, fn {path, pin} -> {path, pin.sha256} end)
     }
 
@@ -462,13 +463,19 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
     end
   end
 
+  defp execution_policy(%{case_id: "m7.ephemeral-question"}),
+    do: inspect(LoopexCli.Policy.AllowAll)
+
+  defp execution_policy(%{capture: nil}), do: "ordinary"
+  defp execution_policy(staged), do: Policy.identity(staged.capture)
+
   # Concept: a fresh disposable workspace and a trusted tree per attempt.
   # Technical depth: the runner and oracle live outside the workspace and are
   # pinned with the shell, env, interpreter and catalog before preparation.
   defp stage(case_id, root, context) do
-    # The question-restart case reuses the feature fixture and its policy.
+    # The question-restart and ephemeral cases reuse the feature fixture.
     name =
-      if case_id == "m7.question-restart",
+      if case_id in ["m7.question-restart", "m7.ephemeral-question"],
         do: "feature",
         else: String.replace_prefix(case_id, "m7.", "")
 
@@ -719,6 +726,16 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
   end
 
   def plan("m7.external", entry, _context), do: {:ok, [barriers(entry["prompts"])]}
+
+  # The ephemeral case: one public ephemeral call; the operator's line answers.
+  def plan("m7.ephemeral-question", _entry, context) do
+    case {get_in(context, [:answers, "m7.ephemeral-question"]), Map.get(context, :dispatch)} do
+      {"choice-" <> n, _} when n in ["1", "2"] -> {:ok, [%{ephemeral: n <> "\n"}]}
+      {nil, :terminal} -> {:ok, [%{ephemeral: :terminal}]}
+      _ -> {:error, :ephemeral_answer_requires_operator}
+    end
+  end
+
   def plan(_case_id, _entry, _context), do: {:error, :case_driver_unavailable}
 
   defp barriers(prompts) do
@@ -737,6 +754,52 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
       diagnostics: result.stderr,
       closing: result.stdout,
       transcripts: [{"stdout.txt", result.stdout}, {"stderr.txt", result.stderr}]
+    }
+  end
+
+  # Concept: the ephemeral host runs under the operator's configured model and
+  # provider routes; there is no durable session, so its record decides.
+  # Technical depth: Ephemeral admits only a context-free policy module, so
+  # this case runs under the allow-all host policy; the workspace inventory
+  # and the independent oracle still bound what it may change.
+  defp dispatch(%{conversations: [%{ephemeral: line}]} = staged, context) do
+    ["chat", "--config", path | _] = staged.config_argv
+    {:ok, profile} = path |> File.read!() |> LoopexCli.ConfigJson.decode()
+    record = Path.join(Path.dirname(staged.fixture.workspace), "ephemeral.json")
+    {:ok, output} = StringIO.open("")
+    terminal? = line == :terminal
+    input = if terminal?, do: :stdio, else: elem(StringIO.open(line), 1)
+
+    status =
+      EphemeralDemo.run(
+        [
+          "--workspace",
+          staged.fixture.workspace,
+          "--operator",
+          to_string(Map.get(context, :operator)),
+          "--record",
+          record,
+          "--model",
+          profile["session"]["model"]
+        ],
+        input,
+        if(terminal?, do: :stdio, else: output),
+        [provider_bindings: profile["providers"], max_tokens: profile["session"]["max_tokens"]]
+        |> Enum.reject(&is_nil(elem(&1, 1)))
+        |> Keyword.merge(Map.get(context, :ephemeral_options, []))
+      )
+
+    {_, shown} = StringIO.contents(output)
+    retained = if File.exists?(record), do: File.read!(record), else: ""
+
+    %{
+      exit: status,
+      conversations: 1,
+      session: nil,
+      output: retained,
+      diagnostics: "",
+      closing: shown,
+      transcripts: [{"transcript-1.txt", shown}, {"ephemeral.json", retained}]
     }
   end
 
@@ -1020,6 +1083,23 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
 
     {join,
      retain(root, "facts.json", %{"session" => nil, "kinds" => %{}, "join" => inspect(join)})}
+  end
+
+  defp inspect_facts(%{case_id: "m7.ephemeral-question"}, outcome, root) do
+    join =
+      case JSON.decode(outcome.output) do
+        {:ok, %{"outcome" => "completed", "question" => %{"choice" => default}}}
+        when default in ["empty", "literal_null"] ->
+          {:ok, %{"M7_NIL_DEFAULT" => default}}
+
+        {:ok, %{"question" => nil}} ->
+          {:missing, :operator_answer}
+
+        _ ->
+          {:failed, :ephemeral_answer_not_applied}
+      end
+
+    {join, retain(root, "facts.json", %{"session" => nil, "join" => inspect(join)})}
   end
 
   defp inspect_facts(staged, outcome, root) do

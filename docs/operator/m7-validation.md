@@ -117,6 +117,20 @@ checks the slugify cases and that `python3 tools/threads.py --check` exits 0.
 The checkout is disposable and is never pushed; the original repository is
 read only by the clone.
 
+## Ephemeral question case
+
+`m7.ephemeral-question` runs the feature fixture through one public ephemeral
+call instead of a chat session, using the configuration's model and provider
+routes. With `--terminal` the wrapper prints the model's question and numbered
+choices and reads the operator's line: a choice label or number answers,
+`decline` declines. The retained `records/ephemeral.json` names the operator,
+question, typed answer, selected choice and outcome. The independent oracle
+reruns the branch for the selected default, so a run that ignores the answer
+fails. The ephemeral API admits only a context-free policy module, so this case
+runs under the allow-all host policy; the workspace inventory and the oracle
+bound what it may change. `scripts/m7-ephemeral-question-demo.exs` runs the
+same host outside a lane for rehearsal; its record is not lane evidence.
+
 ## Step ownership
 
 Every key below has exactly one owner: `case:` an M7 manifest case run by its
@@ -254,7 +268,7 @@ One row per manifest case in lane order; `pending:` names what still blocks it.
 | `m7.steer-barrier` | `m7-operator` | demonstration | `pending:FIFO hold runner and observer join` |
 | `m7.feature` | `m7-operator` | fixture-chat | `ready` |
 | `m7.question-restart` | `m7-operator` | demonstration | `ready` |
-| `m7.ephemeral-question` | `m7-operator` | demonstration | `pending:scripts/m7-ephemeral-question-demo.exs` |
+| `m7.ephemeral-question` | `m7-operator` | demonstration | `ready` |
 | `m7.long` | `m7-operator` | fixture-chat | `pending:loopex chat composes no maintenance instructions, so every compaction refuses maintenance_instructions_unconfigured` |
 | `m7.oversized-source` | `m7-operator` | demonstration | `pending:oversized-source fixture` |
 | `m7.provider-switch` | `m7-operator` | scenario-chat | `ready` |
