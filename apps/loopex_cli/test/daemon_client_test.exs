@@ -37,7 +37,13 @@ defmodule LoopexCli.DaemonClientTest do
       assert :error = DaemonClient.event(assistant(content))
     end
 
-    raw = event("assistant.message_appended", %{"run_id" => "_w", "turn_id" => "AP8K", "content" => "answer"})
+    raw =
+      event("assistant.message_appended", %{
+        "run_id" => "_w",
+        "turn_id" => "AP8K",
+        "content" => "answer"
+      })
+
     assert :error = DaemonClient.event(raw)
     assert :error = DaemonClient.event(put_in(assistant("YQ"), ["event", "data", "content"], "a"))
   end
@@ -72,9 +78,19 @@ defmodule LoopexCli.DaemonClientTest do
   end
 
   test "native conversation rendering prints the model answer and safely escapes raw controls" do
-    assert {:ok, user} = DaemonClient.event(event("user.message_appended", %{
-      "command_id" => "AP8K", "run_id" => "_w", "content_b64" => "cHJvbXB0"
-    }, "1"))
+    assert {:ok, user} =
+             DaemonClient.event(
+               event(
+                 "user.message_appended",
+                 %{
+                   "command_id" => "AP8K",
+                   "run_id" => "_w",
+                   "content_b64" => "cHJvbXB0"
+                 },
+                 "1"
+               )
+             )
+
     assert {:ok, answer} = DaemonClient.event(assistant("bW9kZWwgYW5zd2Vy"))
     assert render([user, answer]) === {"> prompt\n\nmodel answer\n", ""}
 
@@ -86,46 +102,97 @@ defmodule LoopexCli.DaemonClientTest do
   end
 
   test "tool events restore opaque call identities and full-range artifact sizes" do
-    assert {:ok, started} = DaemonClient.event(event("tool.started", %{
-      "run_id" => "_w", "turn_id" => "AP8K", "tool_call_id" => "Y2FsbA",
-      "operation_id" => "b3A", "tool_id" => "loopex.read", "tool_version" => "1.2.3"
-    }))
+    assert {:ok, started} =
+             DaemonClient.event(
+               event("tool.started", %{
+                 "run_id" => "_w",
+                 "turn_id" => "AP8K",
+                 "tool_call_id" => "Y2FsbA",
+                 "operation_id" => "b3A",
+                 "tool_id" => "loopex.read",
+                 "tool_version" => "1.2.3"
+               })
+             )
+
     assert started["tool_call_id"] === "call"
     assert started["operation_id"] === "op"
     version = String.duplicate("1", 131_068) <> ".0.0"
-    version_record = event("tool.started", %{
-      "run_id" => "_w", "turn_id" => "AP8K", "tool_call_id" => "Y2FsbA",
-      "operation_id" => "b3A", "tool_id" => "loopex.read", "tool_version" => version
-    })
+
+    version_record =
+      event("tool.started", %{
+        "run_id" => "_w",
+        "turn_id" => "AP8K",
+        "tool_call_id" => "Y2FsbA",
+        "operation_id" => "b3A",
+        "tool_id" => "loopex.read",
+        "tool_version" => version
+      })
+
     assert {:ok, versioned} = DaemonClient.event(framed(version_record))
     assert versioned["tool_version"] === version
-    assert :error = DaemonClient.event(put_in(version_record, ["event", "data", "tool_version"], "1" <> version))
+
+    assert :error =
+             DaemonClient.event(
+               put_in(version_record, ["event", "data", "tool_version"], "1" <> version)
+             )
 
     artifact = %{
-      "digest" => String.duplicate("a", 64), "size" => "18446744073709551615",
-      "locator" => "sha256:object", "media_type" => "text/plain", "role" => "tool_output",
+      "digest" => String.duplicate("a", 64),
+      "size" => "18446744073709551615",
+      "locator" => "sha256:object",
+      "media_type" => "text/plain",
+      "role" => "tool_output",
       "use_canonicalization_version" => "loopex.canonical.v1",
-      "use_digest" => String.duplicate("b", 64), "use_locator" => "use:" <> String.duplicate("b", 64)
+      "use_digest" => String.duplicate("b", 64),
+      "use_locator" => "use:" <> String.duplicate("b", 64)
     }
-    record = event("tool.finished", %{
-      "run_id" => "_w", "turn_id" => "AP8K", "tool_call_id" => "Y2FsbA",
-      "operation_id" => "b3A", "tool_id" => "loopex.read", "outcome" => "completed",
-      "reason" => nil, "artifacts" => [artifact]
-    })
+
+    record =
+      event("tool.finished", %{
+        "run_id" => "_w",
+        "turn_id" => "AP8K",
+        "tool_call_id" => "Y2FsbA",
+        "operation_id" => "b3A",
+        "tool_id" => "loopex.read",
+        "outcome" => "completed",
+        "reason" => nil,
+        "artifacts" => [artifact]
+      })
+
     assert {:ok, finished} = DaemonClient.event(framed(record))
     assert hd(finished["artifacts"])["size"] === 18_446_744_073_709_551_615
     {"", stderr} = render([started, finished])
     assert stderr =~ "loopex.read (call)"
     assert stderr =~ "18446744073709551615 bytes"
-    assert :error = DaemonClient.event(put_in(record, ["event", "data", "artifacts"], [Map.put(artifact, "private", "CANARY")]))
-    assert :error = DaemonClient.event(put_in(record, ["event", "data", "tool_version"], "PRIVATE"))
+
+    assert :error =
+             DaemonClient.event(
+               put_in(record, ["event", "data", "artifacts"], [
+                 Map.put(artifact, "private", "CANARY")
+               ])
+             )
+
+    assert :error =
+             DaemonClient.event(put_in(record, ["event", "data", "tool_version"], "PRIVATE"))
   end
 
   test "settlement and queued input resolutions restore exact original command and run bytes" do
     for {kind, data} <- [
           {"session.settled", %{"run_id" => "AP8K"}},
-          {"steer.resolved", %{"command_id" => "_w", "run_id" => "AP8K", "disposition" => "applied", "reason" => nil}},
-          {"follow_up.resolved", %{"command_id" => "_w", "run_id" => "AP8K", "disposition" => "cancelled", "reason" => "aborted"}}
+          {"steer.resolved",
+           %{
+             "command_id" => "_w",
+             "run_id" => "AP8K",
+             "disposition" => "applied",
+             "reason" => nil
+           }},
+          {"follow_up.resolved",
+           %{
+             "command_id" => "_w",
+             "run_id" => "AP8K",
+             "disposition" => "cancelled",
+             "reason" => "aborted"
+           }}
         ] do
       assert {:ok, decoded} = DaemonClient.event(event(kind, data))
       assert decoded["run_id"] === <<0, 255, 10>>
@@ -141,22 +208,35 @@ defmodule LoopexCli.DaemonClientTest do
       assert decoded["command_id"] === nil
       assert decoded["reconciliation_ref"] === nil
       {"", stderr} = render([decoded])
-      assert stderr === if(outcome == "completed", do: "\nloopex: done\n", else: "\nloopex: cancelled\n")
+
+      assert stderr ===
+               if(outcome == "completed", do: "\nloopex: done\n", else: "\nloopex: cancelled\n")
     end
   end
 
   test "terminal bounds and context failures retain quantities beyond JSON integer precision" do
     huge = 1_267_650_600_228_229_401_496_703_205_376
-    record = terminal("bound_reached", %{
-      "bound" => "token_budget", "observed" => "1267650600228229401496703205376",
-      "declared_limit" => "1267650600228229401496703205375", "accounting_source" => "reported"
-    })
+
+    record =
+      terminal("bound_reached", %{
+        "bound" => "token_budget",
+        "observed" => "1267650600228229401496703205376",
+        "declared_limit" => "1267650600228229401496703205375",
+        "accounting_source" => "reported"
+      })
+
     assert {:ok, decoded} = DaemonClient.event(record)
     assert decoded["observed"] === huge
     assert decoded["declared_limit"] === huge - 1
 
-    failure = %{"category" => "context_budget_exceeded", "retryable" => false,
-      "dimension" => "context_tokens", "observed" => "9007199254740993", "limit" => "9007199254740992"}
+    failure = %{
+      "category" => "context_budget_exceeded",
+      "retryable" => false,
+      "dimension" => "context_tokens",
+      "observed" => "9007199254740993",
+      "limit" => "9007199254740992"
+    }
+
     assert {:ok, failed} = DaemonClient.event(terminal("failed", %{"failure" => failure}))
     assert failed["failure"]["observed"] === 9_007_199_254_740_993
     assert failed["failure"]["limit"] === 9_007_199_254_740_992
@@ -169,7 +249,10 @@ defmodule LoopexCli.DaemonClientTest do
     assert {:ok, decoded} = DaemonClient.event(record)
     assert decoded["reconciliation_ref"] === <<0, 255, 10>>
     assert decoded["outcome"] === "outcome_unknown"
-    assert {:ok, failed} = DaemonClient.event(terminal("failed", %{"reason" => "model_call_failed"}))
+
+    assert {:ok, failed} =
+             DaemonClient.event(terminal("failed", %{"reason" => "model_call_failed"}))
+
     assert failed["reason"] === "model_call_failed"
     refute Map.has_key?(failed, "failure")
     assert :error = DaemonClient.event(terminal("completed", %{"private" => "CANARY"}))
@@ -181,7 +264,8 @@ defmodule LoopexCli.DaemonClientTest do
           {"checkpoint-projection.v1.json", "context.compacted"},
           {"maintenance-view.v1.json", "context.maintenance_changed"},
           {"standalone-compact-completion.v1.json", "context.compaction_finished"}
-        ], vector <- vectors(file) do
+        ],
+        vector <- vectors(file) do
       {wire, expected} =
         if file == "configuration-projection.v1.json" and vector["scope"] == "configuration" do
           {%{"command_id" => "AP8K", "configuration" => vector["input"]},
@@ -192,7 +276,9 @@ defmodule LoopexCli.DaemonClientTest do
 
       if Map.has_key?(vector, "decoded") do
         assert {:ok, decoded} = DaemonClient.event(event(kind, wire)), vector["name"]
-        assert retained(Map.drop(decoded, [:kind, :event_id, :event_sequence]), expected) === expected
+
+        assert retained(Map.drop(decoded, [:kind, :event_id, :event_sequence]), expected) ===
+                 expected
       else
         assert :error = DaemonClient.event(event(kind, wire)), vector["name"]
       end
@@ -206,11 +292,19 @@ defmodule LoopexCli.DaemonClientTest do
           {"policy-requested.v1.json", "interaction.requested"},
           {"policy-answer-admitted.v1.json", "interaction.answer_admitted"},
           {"policy-terminal.v1.json", nil}
-        ], vector <- vectors(file), Map.has_key?(vector, "decoded") do
-      kind = vector["event_kind"] || default_kind || "interaction." <> vector["input"]["disposition"]
+        ],
+        vector <- vectors(file),
+        Map.has_key?(vector, "decoded") do
+      kind =
+        vector["event_kind"] || default_kind || "interaction." <> vector["input"]["disposition"]
+
       assert {:ok, decoded} = DaemonClient.event(event(kind, vector["input"])), vector["name"]
-      assert retained(Map.drop(decoded, [:kind, :event_id, :event_sequence]), vector["decoded"]) === vector["decoded"]
-      assert :error = DaemonClient.event(event(kind, Map.put(vector["input"], "private", "CANARY")))
+
+      assert retained(Map.drop(decoded, [:kind, :event_id, :event_sequence]), vector["decoded"]) ===
+               vector["decoded"]
+
+      assert :error =
+               DaemonClient.event(event(kind, Map.put(vector["input"], "private", "CANARY")))
     end
   end
 
@@ -240,34 +334,83 @@ defmodule LoopexCli.DaemonClientTest do
       assert stdout === text <> "\nanswer\n"
     end
 
-    assert {:ok, delta} = DaemonClient.progress(progress(Map.put(model_delta("answer"), "model_sequence", "1")))
+    assert {:ok, delta} =
+             DaemonClient.progress(
+               progress(Map.put(model_delta("answer"), "model_sequence", "1"))
+             )
+
     assert {:ok, closed} = DaemonClient.progress(progress(model_closed("2")))
     assert {:ok, answer} = DaemonClient.event(assistant("YW5zd2Vy"))
     assert render([answer], [delta, closed]) === {"\nanswer\n", ""}
   end
 
   test "reasoning tool call and tool byte progress restore every ordinary native field" do
-    assert {:ok, reasoning} = DaemonClient.progress(progress(Map.put(model_delta("reason"), "kind", "reasoning_delta")))
+    assert {:ok, reasoning} =
+             DaemonClient.progress(
+               progress(Map.put(model_delta("reason"), "kind", "reasoning_delta"))
+             )
+
     assert reasoning.kind === :reasoning_delta
-    call = %{"kind" => "tool_call_delta", "turn_id" => "AP8K", "stream_domain_id" => @domain,
-      "model_sequence" => "18446744073709551615", "base_event_sequence" => "1", "call_index" => 0,
-      "tool_call_id" => nil, "name" => nil, "arguments_fragment" => nil}
+
+    call = %{
+      "kind" => "tool_call_delta",
+      "turn_id" => "AP8K",
+      "stream_domain_id" => @domain,
+      "model_sequence" => "18446744073709551615",
+      "base_event_sequence" => "1",
+      "call_index" => 0,
+      "tool_call_id" => nil,
+      "name" => nil,
+      "arguments_fragment" => nil
+    }
+
     assert {:ok, decoded_call} = DaemonClient.progress(progress(call))
     assert decoded_call.model_sequence === 18_446_744_073_709_551_615
     assert decoded_call.tool_call_id === nil
-    assert {:ok, named} = DaemonClient.progress(progress(Map.merge(call, %{"tool_call_id" => "_w", "name" => "read", "arguments_fragment" => "{}"})))
+
+    assert {:ok, named} =
+             DaemonClient.progress(
+               progress(
+                 Map.merge(call, %{
+                   "tool_call_id" => "_w",
+                   "name" => "read",
+                   "arguments_fragment" => "{}"
+                 })
+               )
+             )
+
     assert named.tool_call_id === <<255>>
 
-    tool = %{"kind" => "tool_progress", "turn_id" => "AP8K", "stream_domain_id" => @domain,
-      "tool_call_id" => "Y2FsbA", "progress_sequence" => "0", "base_event_sequence" => "1",
-      "stream" => "stderr", "byte_offset" => "9007199254740993", "chunk_b64" => "aMOpbGxvCg"}
+    tool = %{
+      "kind" => "tool_progress",
+      "turn_id" => "AP8K",
+      "stream_domain_id" => @domain,
+      "tool_call_id" => "Y2FsbA",
+      "progress_sequence" => "0",
+      "base_event_sequence" => "1",
+      "stream" => "stderr",
+      "byte_offset" => "9007199254740993",
+      "chunk_b64" => "aMOpbGxvCg"
+    }
+
     assert {:ok, decoded_tool} = DaemonClient.progress(progress(tool))
     assert decoded_tool.byte_offset === 9_007_199_254_740_993
     assert decoded_tool.chunk === "héllo\n"
     assert decoded_tool.stream === "stderr"
-    assert {state, [{:stderr, "héllo\n"}]} = ProgressConsumer.consume(ProgressConsumer.new(), decoded_tool)
-    closure = %{"kind" => "tool_stream_closed", "turn_id" => "AP8K", "stream_domain_id" => @domain,
-      "tool_call_id" => "Y2FsbA", "base_event_sequence" => "1", "disposition" => "complete", "progress_count" => "1"}
+
+    assert {state, [{:stderr, "héllo\n"}]} =
+             ProgressConsumer.consume(ProgressConsumer.new(), decoded_tool)
+
+    closure = %{
+      "kind" => "tool_stream_closed",
+      "turn_id" => "AP8K",
+      "stream_domain_id" => @domain,
+      "tool_call_id" => "Y2FsbA",
+      "base_event_sequence" => "1",
+      "disposition" => "complete",
+      "progress_count" => "1"
+    }
+
     assert {:ok, closed} = DaemonClient.progress(progress(closure))
     assert closed.progress_count === 1
     assert {state, []} = ProgressConsumer.consume(state, closed)
@@ -276,6 +419,7 @@ defmodule LoopexCli.DaemonClientTest do
 
   test "ordinary progress refuses extras old numeric shapes unsafe text and alternate byte encodings" do
     valid = progress(model_delta("answer"))
+
     for invalid <- [
           Map.put(valid, "private", "CANARY"),
           put_in(valid, ["progress", "private"], "CANARY"),
@@ -291,21 +435,41 @@ defmodule LoopexCli.DaemonClientTest do
       assert :error = DaemonClient.progress(invalid)
     end
 
-    tool = %{"kind" => "tool_progress", "turn_id" => "AP8K", "stream_domain_id" => @domain,
-      "tool_call_id" => "Y2FsbA", "progress_sequence" => "0", "base_event_sequence" => "1",
-      "stream" => "stdout", "byte_offset" => "0", "chunk_b64" => "YQ"}
+    tool = %{
+      "kind" => "tool_progress",
+      "turn_id" => "AP8K",
+      "stream_domain_id" => @domain,
+      "tool_call_id" => "Y2FsbA",
+      "progress_sequence" => "0",
+      "base_event_sequence" => "1",
+      "stream" => "stdout",
+      "byte_offset" => "0",
+      "chunk_b64" => "YQ"
+    }
+
     assert {:ok, %{chunk: "a"}} = DaemonClient.progress(progress(tool))
-    for invalid <- [Map.put(tool, "chunk_b64", "YQ="), Map.put(tool, "chunk_b64", "YR"),
-                    Map.put(tool, "chunk_b64", "Gw"), Map.put(tool, "chunk", "a")] do
+
+    for invalid <- [
+          Map.put(tool, "chunk_b64", "YQ="),
+          Map.put(tool, "chunk_b64", "YR"),
+          Map.put(tool, "chunk_b64", "Gw"),
+          Map.put(tool, "chunk", "a")
+        ] do
       assert :error = DaemonClient.progress(progress(invalid))
     end
   end
 
   test "compaction activity preserves both owner kinds and never suppresses conversation" do
     for kind <- ["run", "compact"] do
-      item = %{"kind" => "context.compaction_progress", "episode_id" => "AP8K",
-        "owner" => %{"kind" => kind, "id" => "_wCA"}, "stream_domain_id" => @domain,
-        "progress_sequence" => "0", "base_event_sequence" => "18446744073709551615"}
+      item = %{
+        "kind" => "context.compaction_progress",
+        "episode_id" => "AP8K",
+        "owner" => %{"kind" => kind, "id" => "_wCA"},
+        "stream_domain_id" => @domain,
+        "progress_sequence" => "0",
+        "base_event_sequence" => "18446744073709551615"
+      }
+
       assert {:ok, native} = DaemonClient.progress(progress(item))
       assert native.episode_id === <<0, 255, 10>>
       assert native.owner === %{"kind" => kind, "id" => <<255, 0, 128>>}
@@ -319,32 +483,75 @@ defmodule LoopexCli.DaemonClientTest do
   end
 
   defp event(kind, data, sequence \\ "2"),
-    do: %{"type" => "event", "session_id" => "cw", "event" => %{
-      "kind" => kind, "event_id" => "ZXZlbnQ", "event_sequence" => sequence, "data" => data
-    }}
+    do: %{
+      "type" => "event",
+      "session_id" => "cw",
+      "event" => %{
+        "kind" => kind,
+        "event_id" => "ZXZlbnQ",
+        "event_sequence" => sequence,
+        "data" => data
+      }
+    }
 
   defp assistant(content),
-    do: event("assistant.message_appended", %{"run_id" => "_w", "turn_id" => "AP8K", "content_b64" => content})
+    do:
+      event("assistant.message_appended", %{
+        "run_id" => "_w",
+        "turn_id" => "AP8K",
+        "content_b64" => content
+      })
 
   defp terminal(outcome, extra \\ %{}),
-    do: event("run.finished", Map.merge(%{"run_id" => "_w", "command_id" => nil,
-      "reconciliation_ref" => nil, "cleanup_grace_ms" => "1000", "outcome" => outcome}, extra))
+    do:
+      event(
+        "run.finished",
+        Map.merge(
+          %{
+            "run_id" => "_w",
+            "command_id" => nil,
+            "reconciliation_ref" => nil,
+            "cleanup_grace_ms" => "1000",
+            "outcome" => outcome
+          },
+          extra
+        )
+      )
 
   defp progress(item), do: %{"type" => "progress", "session_id" => "cw", "progress" => item}
 
   defp model_delta(text),
-    do: %{"kind" => "text_delta", "turn_id" => "AP8K", "stream_domain_id" => @domain,
-      "model_sequence" => "0", "base_event_sequence" => "1", "content_index" => 0, "text" => text}
+    do: %{
+      "kind" => "text_delta",
+      "turn_id" => "AP8K",
+      "stream_domain_id" => @domain,
+      "model_sequence" => "0",
+      "base_event_sequence" => "1",
+      "content_index" => 0,
+      "text" => text
+    }
 
   defp model_closed(count),
-    do: %{"kind" => "model_stream_closed", "turn_id" => "AP8K", "stream_domain_id" => @domain,
-      "base_event_sequence" => "1", "disposition" => "complete", "delta_count" => count}
+    do: %{
+      "kind" => "model_stream_closed",
+      "turn_id" => "AP8K",
+      "stream_domain_id" => @domain,
+      "base_event_sequence" => "1",
+      "disposition" => "complete",
+      "delta_count" => count
+    }
 
   defp framed(record) do
     assert {:ok, encoded} = Frame.encode(record)
     bytes = IO.iodata_to_binary(encoded)
     assert binary_part(bytes, byte_size(bytes) - 1, 1) === "\n"
-    assert {:ok, decoded} = Frame.decode(binary_part(bytes, 0, byte_size(bytes) - 1), Frame.output_record_bytes())
+
+    assert {:ok, decoded} =
+             Frame.decode(
+               binary_part(bytes, 0, byte_size(bytes) - 1),
+               Frame.output_record_bytes()
+             )
+
     decoded
   end
 
@@ -386,24 +593,29 @@ defmodule LoopexCli.DaemonClientTest do
     owner = self()
 
     try do
-      stdout = capture_io(fn ->
-        stderr = capture_io(:stderr, fn ->
-          assert :ok = Render.stream(nil,
-            next_event: fn _ ->
-              case Process.get(key) do
-                [event | rest] ->
-                  Process.put(key, rest)
-                  {:ok, event}
+      stdout =
+        capture_io(fn ->
+          stderr =
+            capture_io(:stderr, fn ->
+              assert :ok =
+                       Render.stream(nil,
+                         next_event: fn _ ->
+                           case Process.get(key) do
+                             [event | rest] ->
+                               Process.put(key, rest)
+                               {:ok, event}
 
-                [] ->
-                  :stop
-              end
-            end,
-            on_run_started: on_run_started
-          )
+                             [] ->
+                               :stop
+                           end
+                         end,
+                         on_run_started: on_run_started
+                       )
+            end)
+
+          send(owner, {key, stderr})
         end)
-        send(owner, {key, stderr})
-      end)
+
       assert_receive {^key, stderr}
       {stdout, stderr}
     after

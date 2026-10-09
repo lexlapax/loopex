@@ -160,11 +160,13 @@ defmodule LoopexCli.DaemonClient do
   introduced. Missing, extra, noncanonical or private members refuse whole.
   """
   @spec event(map()) :: {:ok, map()} | :error
-  def event(%{
-        "type" => "event",
-        "session_id" => session,
-        "event" => %{"kind" => kind, "data" => data} = event
-      } = record)
+  def event(
+        %{
+          "type" => "event",
+          "session_id" => session,
+          "event" => %{"kind" => kind, "data" => data} = event
+        } = record
+      )
       when is_binary(kind) and is_map(data) and not is_struct(data) do
     with {:ok, session} <- Wire.session_identity(session),
          {:ok, event_id} <- Wire.identity(event["event_id"]),
