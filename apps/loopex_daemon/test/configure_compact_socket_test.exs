@@ -169,6 +169,177 @@ defmodule LoopexDaemon.ConfigureCompactSocketTest do
     assert Loopex.AgentLoopTestModel.dispatched(fixture.model) == []
   end
 
+  # Concept: an uncertain configure commit is reported unknown, never refused,
+  # and its exact retry settles the original command once.
+  # Technical depth: accepted ADR 0050 over /4. The Store commits after
+  # linearization but loses the result; the controller is told
+  # `admission_unknown`. The retry returns the accepted admission, preparation
+  # ran once, and one configuration record and one public change exist.
+  test "an uncertain configure commit answers admission_unknown and its retry settles once" do
+    fixture = fixture()
+    daemon = start_daemon(fixture.runtime)
+    client = initialized_client(daemon)
+    {_encoded, session, epoch} = controlled(client)
+
+    configure = %{
+      "method" => "session.configure",
+      "request_id" => "configure",
+      "command_id" => Wire.encode_identity("uncertain-configure"),
+      "changes" => %{"model" => "fast-alias", "max_tokens" => "512"},
+      "writer_epoch" => epoch
+    }
+
+    assert :ok =
+             Loopex.M1RuntimeTestStore.inject(
+               fixture.store,
+               {:session_journal_commit, :after_linearization_before_result}
+             )
+
+    :ok = send_frame(client, configure)
+
+    records =
+      records_until(client, &Enum.any?(&1, fn record -> record["request_id"] == "configure" end))
+
+    [unknown] = Enum.filter(records, &(&1["request_id"] == "configure"))
+    assert %{"type" => "error", "code" => "admission_unknown"} = unknown
+    refute Map.has_key?(unknown, "status")
+
+    retry =
+      eventually_admitted(client, %{configure | "request_id" => "retry"}, "retry", 50)
+
+    assert retry["status"] == "accepted"
+    assert retry["command_id"] == configure["command_id"]
+    assert Agent.get(fixture.controller, & &1) == 1
+
+    assert [_one] =
+             fixture
+             |> Fixture.records(session)
+             |> Enum.filter(&(&1.payload.kind == "session_configuration_admitted_v2"))
+
+    assert [_change] =
+             Enum.filter(Fixture.events(fixture, session), &(&1.kind == "session.configured"))
+
+    :socket.close(client)
+  end
+
+  # Concept: one command identity names one command over the controller socket.
+  # Technical depth: exact prompt retries replay their admission without new
+  # records; a changed prompt, configure or compact under a used identity is
+  # refused without mutation; a stale epoch cannot compact.
+  test "duplicate and changed commands under one identity replay or refuse without mutation" do
+    fixture = fixture()
+    daemon = start_daemon(fixture.runtime)
+    client = initialized_client(daemon)
+    {_encoded, session, epoch} = controlled(client)
+
+    prompt = %{
+      "method" => "session.prompt",
+      "request_id" => "prompt",
+      "command_id" => Wire.encode_identity("prompt-once"),
+      "content_b64" => Wire.encode_bytes("go"),
+      "writer_epoch" => epoch
+    }
+
+    :ok = send_frame(client, prompt)
+    records = records_until(client, &event?(&1, "session.settled"))
+    [admitted] = Enum.filter(records, &(&1["request_id"] == "prompt"))
+    assert admitted["status"] == "accepted"
+    settled = Fixture.records(fixture, session)
+
+    :ok = send_frame(client, %{prompt | "request_id" => "prompt-retry"})
+    retry = reply(client, "prompt-retry")
+    assert retry == %{admitted | "request_id" => "prompt-retry"}
+
+    changed_prompt = %{
+      prompt
+      | "request_id" => "prompt-changed",
+        "content_b64" => Wire.encode_bytes("other")
+    }
+
+    configure = %{
+      "method" => "session.configure",
+      "request_id" => "configure",
+      "command_id" => Wire.encode_identity("configure-once"),
+      "changes" => %{"max_tokens" => "512"},
+      "writer_epoch" => epoch
+    }
+
+    compact = %{
+      "method" => "session.compact",
+      "request_id" => "compact",
+      "command_id" => Wire.encode_identity("compact-once"),
+      "bounds" => %{"max_attempts" => "4", "deadline_ms" => "60000", "token_budget" => "32768"},
+      "writer_epoch" => epoch
+    }
+
+    :ok = send_frame(client, configure)
+    records_until(client, &event?(&1, "session.configured"))
+    :ok = send_frame(client, compact)
+    records_until(client, &event?(&1, "context.compaction_finished"))
+    settled = Fixture.records(fixture, session) |> tap(&assert(length(&1) > length(settled)))
+
+    for changed <- [
+          changed_prompt,
+          %{
+            configure
+            | "request_id" => "configure-changed",
+              "changes" => %{"max_tokens" => "256"}
+          },
+          %{
+            compact
+            | "request_id" => "compact-changed",
+              "bounds" => %{
+                "max_attempts" => "3",
+                "deadline_ms" => "60000",
+                "token_budget" => "32768"
+              }
+          }
+        ] do
+      :ok = send_frame(client, changed)
+      refused = reply(client, changed["request_id"])
+      assert refused["request_id"] == changed["request_id"]
+      assert refused["status"] == "refused"
+      assert refused["reason"] == "idempotency_conflict"
+    end
+
+    :ok =
+      send_frame(client, %{
+        compact
+        | "request_id" => "compact-stale",
+          "command_id" => Wire.encode_identity("compact-stale"),
+          "writer_epoch" => Wire.encode_identity("stale")
+      })
+
+    assert %{"type" => "error", "code" => "control_not_held"} = reply(client, "compact-stale")
+    assert Fixture.records(fixture, session) == settled
+    :socket.close(client)
+  end
+
+  defp reply(client, id) do
+    [reply] =
+      client
+      |> records_until(&Enum.any?(&1, fn record -> record["request_id"] == id end))
+      |> Enum.filter(&(&1["request_id"] == id))
+
+    reply
+  end
+
+  defp eventually_admitted(client, request, id, attempts) do
+    :ok = send_frame(client, request)
+
+    [reply] =
+      Enum.filter(
+        records_until(client, &Enum.any?(&1, fn r -> r["request_id"] == id end)),
+        &(&1["request_id"] == id)
+      )
+
+    cond do
+      reply["type"] == "admission" -> reply
+      attempts > 0 -> Process.sleep(20) && eventually_admitted(client, request, id, attempts - 1)
+      true -> flunk("the uncertain configure never resolved: #{inspect(reply)}")
+    end
+  end
+
   defp controlled(client) do
     :ok =
       send_frame(client, %{
