@@ -1,5 +1,33 @@
 # M7 Implementation Tasks
 
+### Native privacy repaired; standalone sink row closed, 2026-10-09
+
+Takeover on Linux. Both original18775 native failures were reproduced at
+`b8aa9457` and repaired in test-only source at `0c12f36d`:
+
+- Missing deltas: the provider worker and bridge keep a one-delta progress slot
+  and drop a delta while it is occupied, by design. Temporary instrumentation
+  showed tool-call deltas never reached `ProgressIngress`. The fixture wrote a
+  whole SSE body in one burst, so delivery depended on read batching. The
+  provider fixture now offers `{:paced, body}`, one event per write 25 ms
+  apart; the exact progress assertions are unchanged.
+- Artifact startup: the fixture now supplies the host policy a tool runtime
+  requires, and compares the staged tool message with the job's
+  `normalized_call_id` rather than the raw model call ID.
+
+Both pairs pass native_model_switch5, native_transport14 and progress_sink48;
+the buffered groups (model integration29, ambient2, API19, CallerWire5) were
+requalified because the sink changed and pass 55 per pair. Production builds
+on both pairs omit the sink scheduling seam. All outputs and SHA-256 are in
+`loopex-evidence/M7/claude-20261009/SHA256SUMS`; the two first
+production-absence logs are failed invocations (shell quoting), retained.
+T07's standalone sink row closes. T08's privacy row stays open until the
+integration candidate's full check proves its switching/crash/cancellation/
+malformed/overflow/accounting files.
+
+Decisions 2026-10-09: ADR0065 (Elixir loopback lock), ADR0067 and ADR0068 (5,000 ms)
+accepted; see the context-map disposition.
+
 ### Handoff source committed; two new privacy failures retained, 2026-10-09
 
 The [takeover runbook](M7-handoff.md) preserves the complete remaining task and
@@ -15837,7 +15865,18 @@ the still-open real-provider, live protocol, persistent-fault or closure lanes.
 
 ### Added implementation subtasks
 
-- [ ] Implement and prove accepted ADR 0058's standalone ProgressSink arena and owner custody on both toolchains, including finite pre-mailbox admission, conservative retained-byte charges, lease generations, pressure and death races. Sink-only proof does not complete runtime/caller migration or real output qualification.
+- [x] Implement and prove accepted ADR 0058's standalone ProgressSink arena and owner custody on both toolchains, including finite pre-mailbox admission, conservative retained-byte charges, lease generations, pressure and death races. Sink-only proof does not complete runtime/caller migration or real output qualification.
+  Whole progress_sink_test48 passes per supported pair at `0c12f36d`, including
+  the six physical CAS/cut witnesses (32-slot CAS exhaustion, shared budget,
+  blocked claim, producer death after reserve and after materialization, stale
+  generation). Production builds on both pairs contain `replace/3` but no
+  `*schedule*` function and no barrier atom. Outputs under
+  `loopex-evidence/M7/claude-20261009/`: current48
+  `aa8e918249f155f9d22c17c830c6ab3d39cf9da93180f556e894008c92d36abf`, floor48
+  `1078da1088376f1f9031ffd5827a2f17770943358636dcb4ef1b295095971438`, production
+  current `a87fd083af761339a671ba186ebead75ea2c50b7a76d6d9ab498d47701148eab`, floor
+  `080d497ba1cf5bd9fd4621e40d55aab4dc103fada45b7f9c1c574748699980ff`. Real
+  transport/activity/caller routing stays in the separate ADR 0054 row.
 - [x] Prove physical ProgressSink custody at actual opening-owner death with all32 slots leased, and actual producer death after publication before notification. Preserve credit through genuine take/release, guardian/arena retirement and fresh-token/incarnation refusal; keep all26 earlier library cases, production and deadlines unchanged.
   Whole28 passed per pair at isolated `03a03b21b02badfd539f0c31ff9fa2819d70b5f3`,
   original26848,19.937seconds, zero failures/exclusions/skips/invalid and warning-free
