@@ -27,6 +27,39 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+### Original snapshot join prerequisite, 2026-10-08
+
+Physical snapshot LF bytes can be visible before the original OutputWriter join
+installs Delivery's baseline. An immediate manual progress offer may therefore
+be released while the attachment is not ready. The fixture now observes the
+same Stdio ownership key, writer/native monitor, runtime, holder and attachment
+incarnation, plus the physically observed session/cursor and joined baseline,
+before offering progress. Pre/post cutoff checks use the original30-second
+fixture cutoff; no budget is renewed. The observed writer-not-DOWN flag is an
+owner observation, not an independent liveness proof; later physical output and
+exact writer/owner/group joins remain required.
+
+The two-path source delta adds only that prerequisite. All29 literal test
+bodies remain unchanged;16 existing prepare consumers gain the observation.
+Physical LF/type assertions, pressure, credit/cursor accounting, caps and cleanup
+joins remain required. The complete original36184 output proves70/94 passes
+and24 failures, but its cleanup stacks mask bodies; this source race does not
+establish each prior timeout's native cause. Triage is retained at
+`/private/tmp/m7-appserver-foreground-lifecycle-timeout-triage-20261008-v1.md`,
+SHA-256 `86a56a5846370a493efe4eca4d9613ed65c72f159a8b8de6a480ed2fcd8fc14a`.
+
+Independent source review is SOURCE_CLEAR at
+`/private/tmp/m7-appserver-foreground-fixture-repair-engineering-review-20261008-v3.md`,
+SHA-256 `482144bc08c3a77b6a45f268ca6f17155c98d7f57923f07fc1b2a9751a6a6956`.
+Exact two-path identities are retained in
+`/private/tmp/m7-reviewed-foreground-baseline-join-20261008-v1.json`; corrected
+source remains native UNRUN. Next: preserve the lifecycle non-line syntax tree through
+formatting, then verify all446 component cases per supported pair. No checkbox
+closes; original88 done /85 open /6 retired, added367 done /23 open. Helpers
+remain unregistered; new protocol generations and M7 closure remain unserved
+and open respectively. Broader Core creation, daemon and shared-helper scopes
+still require their complete verification.
+
 ### Foreground verification failed, 2026-10-08
 
 Original36184 at `7084b40da0a36fbd3ac2fbb85322e1a8e490d141` is terminal

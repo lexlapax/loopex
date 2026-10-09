@@ -494,6 +494,37 @@ defmodule Loopex.AppServer.ForegroundOutputFixture do
   end
   defp finish_joined_or_loop(state), do: loop(state)
 
+  # Concept: physical snapshot bytes precede their original writer's join.
+  # Technical depth: manual offers wait for that same Stdio capture, writer and
+  # attachment incarnation to install the observed baseline inside its cutoff.
+  defp command(state, {:await_baseline_joined, session, cursor}) do
+    require_time(state.cutoff)
+    true = session == state.session
+    original = await_owned(state.owner, &(&1.writer == state.writer), state.cutoff)
+    require_time(state.cutoff)
+    true = original.connection.holder == state.owner
+    true = original.connection.runtime == state.fixture.runtime
+    true = is_reference(original.writer_monitor)
+    attachment = Loopex.AppServer.Connection.attachment(original.connection)
+    {:ok, runtime, ^session, attachment_id, incarnation_id} = Loopex.Attachment.routing(attachment)
+    true = runtime == state.fixture.runtime
+    key = original.owned_key
+    writer_monitor = original.writer_monitor
+    incarnation = {attachment_id, incarnation_id}
+    await_owned(state.owner, fn owned ->
+      owned.owned_key == key and owned.writer == state.writer and
+        owned.writer_monitor == writer_monitor and owned.connection.holder == state.owner and
+        owned.connection.runtime == runtime and
+        Loopex.AppServer.Connection.attachment(owned.connection) == attachment and
+        owned.delivery.session_id == session and owned.delivery.incarnation == incarnation and
+        owned.delivery.cursor == cursor and not owned.closing and not owned.writer_down and
+        Loopex.AppServer.Delivery.ready?(owned.delivery)
+    end, state.cutoff)
+    require_time(state.cutoff)
+    send_record(state.socket, {:baseline_joined, session, cursor})
+    state
+  end
+
   defp command(state, :metadata) do
     observer = self()
     tag = make_ref()
