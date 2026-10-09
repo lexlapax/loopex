@@ -2737,6 +2737,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
 
       case Loopex.start_link(fresh_runtime_options) do
         {:ok, runtime} = started ->
+          :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(runtime)
           send(parent, {:fresh_recovery_runtime, runtime})
           started
 
@@ -3086,8 +3087,6 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     {:ok, render_attachment} =
       Loopex.attach(fixture.runtime, fixture.session_id, after_event_sequence: 0)
 
-    parent = self()
-
     {_, stdout, stderr} =
       OutputCapture.capture(fn _ ->
         assert :ok = Render.stream(render_attachment, idle_limit_ms: 1_000)
@@ -3153,8 +3152,6 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
                command_id: "render-raw-error",
                content: "render only bounded provider failure"
              })
-
-    parent = self()
 
     {_, stdout, stderr} =
       OutputCapture.capture(fn _ ->
@@ -3481,6 +3478,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
       ]
 
     {:ok, runtime} = Loopex.start_link(runtime_options)
+    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(runtime)
 
     on_exit(fn ->
       stop_runtime(runtime)

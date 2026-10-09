@@ -178,8 +178,6 @@ defmodule LoopexCli.ContextBudgetCommandsTest do
       end)
     end
 
-    parent = self()
-
     {_, stdout, stderr} =
       OutputCapture.capture(fn _ ->
         assert :ok = Render.stream(:context_failure, next_event: next_event)
@@ -360,6 +358,7 @@ defmodule LoopexCli.ContextBudgetCommandsTest do
           |> Keyword.put(:context_token_budget, configured)
           |> Loopex.start_link()
 
+        :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(replacement)
         send(test, {:settled_replacement_runtime, command, label, replacement})
         {:ok, replacement}
       end
@@ -560,6 +559,7 @@ defmodule LoopexCli.ContextBudgetCommandsTest do
       ]
 
     {:ok, runtime} = Loopex.start_link(runtime_options)
+    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(runtime)
 
     {:ok, session_id} =
       Loopex.create_session(runtime, %{"surface" => "context-cli"}, command_id: "create-#{label}")

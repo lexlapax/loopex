@@ -512,7 +512,8 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
   end
 
   defp chat(staged, context, input, extra, name) do
-    {:ok, output} = StringIO.open("", encoding: :latin1)
+    # Concept: the chat command acquires this owned target as its output.
+    {:ok, output} = LoopexCli.Output.Memory.start()
     {:ok, diagnostics} = StringIO.open("", encoding: :latin1)
 
     {device, mode} =
@@ -528,14 +529,15 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
         cwd: context.cwd,
         home: Map.get(context, :home),
         input: device,
-        output: output,
+        output: LoopexCli.Output.Memory.target(output),
         diagnostic_device: diagnostics,
         mode: mode,
         fixture_policy: staged.capture
       ] ++ Map.get(context, :chat_options, [])
 
     exit = Chat.run(staged.config_argv ++ extra, options)
-    {_, stdout} = StringIO.contents(output)
+    {stdout, _} = LoopexCli.Output.Memory.contents(output)
+    LoopexCli.Output.Memory.stop(output)
     {_, stderr} = StringIO.contents(diagnostics)
 
     %{

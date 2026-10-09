@@ -86,6 +86,7 @@ defmodule LoopexCli.ProviderAccountingIntegrationTest do
         if Process.alive?(executor), do: Agent.stop(executor)
       end)
 
+      :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(runtime)
       {:ok, session_id} = Loopex.create_session(runtime, %{}, command_id: "create-accounting")
       {:ok, attachment} = Loopex.attach(runtime, session_id, after_event_sequence: 0)
       {:ok, %{control: control}} = Runtime.children(runtime)

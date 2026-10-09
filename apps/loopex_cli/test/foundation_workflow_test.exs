@@ -665,6 +665,10 @@ defmodule LoopexCli.FoundationWorkflowTest do
       quote do
         defmodule unquote(module) do
           def main(arguments) do
+            # The product entry point starts the application graph, including
+            # composition's helper registry, before any command runs.
+            {:ok, _applications} = Application.ensure_all_started(:loopex_cli)
+
             result =
               LoopexCli.dispatch(arguments,
                 resource_decision: unquote(Macro.escape(decision)),
