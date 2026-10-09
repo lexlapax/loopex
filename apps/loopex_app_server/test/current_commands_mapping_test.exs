@@ -304,6 +304,7 @@ defmodule Loopex.AppServer.CurrentCommandsMappingTest do
       assert {:ok, admitted} = Mapping.call(request, context)
       assert admitted["status"] == "accepted"
       settled = await_event(fixture, session, "interaction." <> vector["disposition"])
+
       expected_terminal_answer =
         case answer do
           %{"choice_id" => id} ->
