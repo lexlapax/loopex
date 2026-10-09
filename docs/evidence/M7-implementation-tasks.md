@@ -1,5 +1,19 @@
 # M7 Implementation Tasks
 
+### Question projection and orderly-stop follow-ups, 2026-10-09
+
+Original72324 passes558 selected Daemon cases and70/71 CLI cases: duplicate
+answer recovery passes, operator stop fails. Floor UNRUN. Original23805 passes
+current Core60 and Store8, then fails all three new question socket schedules;
+AppServer/floor UNRUN. Core emits a tool-result shape the current transport
+schema does not project. Keep the new question oracles; a narrow public
+projection proposal and an independent internal closing-phase Registry repair
+are next. Both failed originals, formatter proof and source reviews remain
+retained through77-assetv28; the [resume checkpoint](M7-resume.md) binds exact
+revisions, hashes and isolated ownership. No native handle is live. No checkbox
+changes: T01–T19 original89 done/84 open/6 retired; added373 done/23 open;
+combined462 done/107 open/6 retired. T01, T02 and T10 are fully complete.
+
 ### Daemon ordering qualification remains open, 2026-10-09
 
 Reviewed daemon ordering source and fixture corrections are joined through

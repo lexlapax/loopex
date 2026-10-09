@@ -27,6 +27,62 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+### Question projection and orderly-stop repairs next, 2026-10-09
+
+Reviewed provenance reader and real-socket question tests joined at
+`bbc952264ac38878e7f5f2468bf9c404b2d55b43`; strict-AST formatter child
+`1c250fc977c7baf9b98438ca8e893e294c864f23` changes only formatting.
+Original82502 format preparation passed both pairs in2.721 seconds. Collection
+SHA-256 `495a1e22a44a3ad8b43709f3db6a782699e2206aab3ae9d37568afa4f43b3d16`.
+
+Original72324 at39fc4718 is terminal FAIL after823.436 seconds. All558
+selected Daemon cases passed, with three existing environment exclusions;
+CLI70/71 passed. The old duplicate-answer recovery case now passes, but the
+unchanged operator-stop workflow loses its attachment before the shutdown
+notice. Floor stages remain UNRUN. All12 original joins and51 assets
+verified; collection SHA-256
+`e494aadffed726cd3fb0c5db264e2c5572452b42ffa361607f9cf05da4768ca9`.
+Diagnosis SHA-256 `11d12cd2991d7f9f7d4f2d7db77381ac93fb76250b5578b08e501d679a1d1f1e`
+identifies a feasible exact source chain: the new progress-prefix gate refuses
+transport closing although existing durable output remains admissible there.
+The retained trace proves early detachment, not the exact rejected event.
+An isolated writer owns only Registry and its tests at
+`/private/tmp/m7-daemon-quiesce-progress-worktree-20261009-v1`; its internal
+serving-or-closing guard repair must preserve final stopping refusal and every
+existing identity, capacity, transient-drop and cleanup check.
+
+Original23805 at1c250fc9 is terminal FAIL after52.991 seconds. Current Core60
+and LocalStore8 pass. Daemon2/5 passes: all three new model-question schedules
+lose their socket during valid settlement. AppServer and every floor stage
+remain UNRUN. All10 original joins and45 assets verified; collection SHA-256
+`f482bdd23de06767dcb863501911adda711ac005d3d356f0620ab28873340e52`.
+The earlier parse-error-direct-close attribution was withdrawn after source
+review. Malformed refusal and unchanged-history assertions already pass.
+Source investigation instead finds Core tool-result events without an executor
+receipt operation ID rejected by both transports' executor-only tool.finished
+schema. Keep the tests intact; do not invent an operation/grant or hide the
+rejected event. A precise current public projection proposal is being prepared;
+no dependent contract implementation or T09 completion is authorized yet.
+The test author uses isolated
+`/private/tmp/m7-daemon-model-question-worktree-20261009-v2`; preserve its old
+v1 source packet and review. No fixture correction is currently justified.
+
+Immutable parentv27 retention has117 assets, SHA-256
+`0be8cf7fc130c6ead7dc624fd0d777750cbcb20a7ac4ccd09db87468b7a5db11`.
+Newest77-asset retention is
+`M7/current-source-preparation-20261009-v28/retention.json`, SHA-256
+`d1f416d17c23c2964512390bd925941637455ded6c2c17995b469066ee6c7790`.
+It preserves both new originals, the recipe review and the stopped-output
+accounting-scope report. Guardian fit and its metric remain unaccepted/unproved;
+report SHA-256 `9d06edbfb1b1aaae87c726851e005e20eb44c5a9411627893d7982a0df950684`.
+No native handle is live at this checkpoint; all originals were collected once.
+A separate four-file Core/Store floor recipe is prepared, not run, to finish
+only the contained-reader unit. The failed100-case composite stays FAIL; no
+transport/classifier/Store-cancellation/helper or closure proof is inferred.
+ADR0066 remains accepted. ADR0065 and Core artifact observation grace remain
+unanswered. No checkbox changes: T01–T19 original89 done/84 open/6 retired;
+added373 done/23 open; combined462 done/107 open/6 retired.
+
 ### Daemon source joined; callback peer qualification next, 2026-10-09
 
 Reviewed daemon v2 joined at `cf1eea15`; formatting and narrow compiler/fixture
