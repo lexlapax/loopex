@@ -1,5 +1,29 @@
 # M7 Implementation Tasks
 
+### Artifact-opening obligation tracked explicitly, 2026-10-08
+
+A bounded added T05 row now tracks complete full-transfer opening separately
+from the proved description guard. Current lookup precedes the original open
+clock and Store cancellation/custody needs a governed current-only boundary;
+this was previously carried inside the broader transport integration work.
+The proposal is not accepted and authorizes no dependent API implementation.
+V2 proposal SHA-256
+`cd729cfe8bdd79f8bf7a5bb0f5efb109d9df399ad3e2b02672535f9534b7a14d`
+is under independent review. Its newly proposed cleanup window and reservation
+handshake remain decisions, not existing accepted limits or ownership.
+
+Immutable10-asset retention includes actual30030 terminal/collection/registry,
+complete population raw output, both closed observations and causal review,
+historical pre-fence cause map and unaccepted artifact proposal:
+`M7/current-source-preparation-20261008-v6/retention.json`, SHA-256
+`30edbfe1a022cbd5d2a8d192e37640d5808e41399c8441a3891a8b777b01bf2c`.
+The next test-only diagnostic records actual original Socket-owner close
+returns without assuming success from guardian death. Its private source
+writer is active; do not classify that unfinished packet as complete.
+No native handle is live. T01-T19 original88 done /85 open /6 retired;
+added370 done /25 open, including the one explicit opening obligation.
+No completion checkbox changes.
+
 ### Full-population diagnostic isolates missing Socket result, 2026-10-08
 
 Original30030 at `a6df8f2b9bb57b254928b7d8ded483481814912f`
@@ -14875,6 +14899,8 @@ or check was relaxed.
 - [ ] Run the required independent-client workflows.
 
 ### Added implementation subtasks
+
+- [ ] Resolve and implement the current full-transfer opening boundary under ADR0028: one original lookup/verification deadline, bounded four-transfer custody and cancel-before-open behavior, honest cleanup/refusal and late reclamation, exact immutable-use identity and complete physical/transport proofs. Obtain acceptance of the concrete port/ownership/work-accounting amendment before dependent implementation; the separately proved artifact-description guard does not complete this obligation.
 
 - [x] Qualify the joined Core artifact-description preflight against the accepted complete immutable-use ceiling on both toolchains, preserving all original conformance cases and exact cap/cap-plus-one controls; complete transport opening and publication remain separately owed. Proved by original2716 at e62b5603:211 whole cases per pair, zero failures/exclusions/skips/invalids, complete original process joins; retained evidence is M7/artifact-use-focused-20261008-v1.
 
