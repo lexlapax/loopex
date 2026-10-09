@@ -194,6 +194,8 @@ defmodule Loopex.Runtime.MaintenanceConfigurationTest do
         if Process.alive?(store_pid), do: GenServer.stop(store_pid)
       end)
 
+      :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(runtime)
+
       assert {:ok, session} = Loopex.create_session(runtime, %{}, command_id: "create")
       assert {:ok, children} = Loopex.Runtime.children(runtime)
       assert {:ok, captured} = MaintenanceConfiguration.capture_instructions(instructions)

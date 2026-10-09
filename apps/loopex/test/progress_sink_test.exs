@@ -302,6 +302,193 @@ defmodule Loopex.ProgressSinkTest do
     assert :ok = Sink.close(sink)
   end
 
+  # Concept: close's existing five-second budget includes both native waits.
+  # Technical depth: the 15 s fixture budget allows observation and exact cleanup
+  # joins around that unchanged 5,000 ms runtime cutoff; it never changes it.
+  @tag timeout: 15_000
+  test "owner closes admission before a suspended guardian handles or times out the call", %{
+    sink: setup_sink
+  } do
+    %{owner: owner, owner_monitor: owner_monitor, sink: sink} = close_owner_fixture()
+    {guardian, incarnation, arena} = sink
+    monitor = Process.monitor(guardian)
+    assert :ok = :sys.suspend(guardian)
+    assert :ok = Sink.try_offer(sink, "s", text("resident"))
+    before = state(sink)
+
+    # This caller holds the native handle but is not its opening owner.
+    assert {:error, :cleanup_unproved} = Sink.close(sink)
+    assert state(sink) == before
+
+    reference = make_ref()
+    send(owner, {:close, reference})
+    assert_receive {:close_started, ^reference, started}, 1_000
+    wait_for_close_call(guardian, owner, incarnation, started + 1_000)
+    assert state(sink) == put_elem(before, 3, :closed)
+    assert :dropped = Sink.try_offer(sink, "s", text("late"))
+    assert state(sink) == put_elem(before, 3, :closed)
+
+    assert_receive {:close_result, ^reference, {:error, :cleanup_unproved}, ^started, finished},
+                   6_000
+
+    assert (finished - started) in 5_000..6_000
+    assert Process.alive?(guardian)
+    assert state(sink) == put_elem(before, 3, :closed)
+
+    assert :ok = :sys.resume(guardian)
+    assert_receive {:DOWN, ^monitor, :process, ^guardian, :normal}, 5_000
+    assert :ets.info(arena) == :undefined
+    send(owner, :finish)
+    assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :normal}, 5_000
+    assert :ok = Sink.close(setup_sink)
+  end
+
+  @tag timeout: 15_000
+  test "actual stop reply cannot restart the close deadline or prove an unjoined guardian", %{
+    sink: setup_sink
+  } do
+    gate = make_ref()
+    %{owner: owner, owner_monitor: owner_monitor, sink: sink} = close_owner_fixture(gate)
+    {guardian, incarnation, arena} = sink
+    monitor = Process.monitor(guardian)
+    observer = self()
+
+    # Concept: hold the actual OTP stop-reply path after the reply was sent.
+    # Technical depth: installed OTP 27.3.4 and 29.0.5 gen_server.reply/5 call
+    # reply/2 before sys.handle_debug({out, Reply, From, State}). This hook sends
+    # no reply of its own and returns done on release, removing itself.
+    hook = fn
+      _debug, {:out, :ok, {^owner, _call_tag}, %{incarnation: ^incarnation}}, _extra ->
+        send(observer, {:after_close_reply, gate, self(), System.monotonic_time(:millisecond)})
+
+        receive do
+          {:release_close_reply, ^gate} -> :done
+        end
+
+      debug, _event, _extra ->
+        debug
+    end
+
+    assert :ok = :sys.install(guardian, {gate, hook, :waiting})
+    assert :ok = :sys.suspend(guardian)
+    reference = make_ref()
+    send(owner, {:close, reference})
+    assert_receive {:close_started, ^reference, started}, 1_000
+    wait_for_close_call(guardian, owner, incarnation, started + 1_000)
+
+    # Spend two seconds of the original call budget before the real reply.
+    # The remaining join budget must be about three seconds, never a fresh five.
+    receive do
+    after
+      max(started + 2_000 - System.monotonic_time(:millisecond), 0) -> :ok
+    end
+
+    assert :ok = :sys.resume(guardian)
+    assert_receive {:after_close_reply, ^gate, ^guardian, replied}, 1_000
+    assert (replied - started) in 2_000..3_000
+    assert Process.alive?(guardian)
+    assert elem(state(sink), 3) == :closed
+
+    assert_receive {:close_result, ^reference, {:error, :cleanup_unproved}, ^started, finished},
+                   6_000
+
+    assert (finished - started) in 5_000..6_000
+    assert finished - replied < 4_000
+    assert Process.alive?(guardian)
+    refute_receive {:DOWN, ^monitor, :process, ^guardian, _reason}, 0
+    assert :dropped = Sink.try_offer(sink, "s", text("after actual reply"))
+
+    send(guardian, {:release_close_reply, gate})
+    assert_receive {:DOWN, ^monitor, :process, ^guardian, :normal}, 5_000
+    assert :ets.info(arena) == :undefined
+    send(owner, :finish)
+    assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :normal}, 5_000
+    assert :ok = Sink.close(setup_sink)
+  end
+
+  # Concept: scheduling delay cannot turn a late native join into timely cleanup.
+  # Technical depth: this 15 s fixture includes an actual caller suspension and
+  # cleanup observation; the production close cutoff remains exactly 5,000 ms.
+  @tag timeout: 15_000
+  test "a genuine normal DOWN queued to a late resumed owner leaves cleanup unproved", %{
+    sink: setup_sink
+  } do
+    gate = make_ref()
+    %{owner: owner, owner_monitor: owner_monitor, sink: sink} = close_owner_fixture(gate)
+    {guardian, incarnation, arena} = sink
+    guardian_monitor = Process.monitor(guardian)
+    observer = self()
+
+    # This is the same installed OTP after-reply cut as the prior join test.
+    # The original guardian sends its real reply; the hook sends no reply.
+    hook = fn
+      _debug, {:out, :ok, {^owner, _call_tag}, %{incarnation: ^incarnation}}, _extra ->
+        send(observer, {:after_close_reply, gate, self(), System.monotonic_time(:millisecond)})
+
+        receive do
+          {:release_close_reply, ^gate} -> :done
+        end
+
+      debug, _event, _extra ->
+        debug
+    end
+
+    assert :ok = :sys.install(guardian, {gate, hook, :waiting})
+    reference = make_ref()
+    send(owner, {:close, reference})
+    assert_receive {:close_started, ^reference, started}, 1_000
+    assert_receive {:after_close_reply, ^gate, ^guardian, replied}, 1_000
+    assert replied >= started
+    assert Process.alive?(guardian)
+
+    try do
+      assert :erlang.suspend_process(owner)
+      assert {:status, :suspended} = Process.info(owner, :status)
+      refute_receive {:close_result, ^reference, _result, _started, _finished}, 0
+
+      send(guardian, {:release_close_reply, gate})
+      assert_receive {:DOWN, ^guardian_monitor, :process, ^guardian, :normal}, 5_000
+      assert :ets.info(arena) == :undefined
+
+      close_monitor =
+        wait_for_close_down(owner, guardian, System.monotonic_time(:millisecond) + 1_000)
+
+      assert is_reference(close_monitor)
+
+      # The real reply observation follows the close capture. Waiting until
+      # that observation plus 5,100 ms therefore passes the original cutoff,
+      # without guessing when the owner executed its internal capture.
+      resume_after = replied + 5_100
+
+      receive do
+      after
+        max(resume_after - System.monotonic_time(:millisecond), 0) -> :ok
+      end
+
+      assert System.monotonic_time(:millisecond) >= resume_after
+      assert {:status, :suspended} = Process.info(owner, :status)
+      assert :erlang.resume_process(owner)
+
+      assert_receive {:close_result, ^reference, {:error, :cleanup_unproved}, ^started, finished},
+                     1_000
+
+      assert finished >= resume_after
+      send(owner, :finish)
+      assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :normal}, 5_000
+    after
+      # resume_process belongs to the actual suspender. On assertion failure
+      # resume here before the fixture's independent exact actor joins. OTP
+      # also drops this suspend count if the suspending test process is killed.
+      if Process.info(owner, :status) == {:status, :suspended} do
+        assert :erlang.resume_process(owner)
+      end
+
+      send(guardian, {:release_close_reply, gate})
+    end
+
+    assert :ok = Sink.close(setup_sink)
+  end
+
   test "guardian suspension does not queue reservation requests or payloads", %{sink: sink} do
     {guardian, _incarnation, _arena} = sink
     :ok = :sys.suspend(guardian)
@@ -1336,6 +1523,104 @@ defmodule Loopex.ProgressSinkTest do
     release_transport_ready(sink)
     wait_until_reclaimed(elem(sink, 0), sink, 100)
     assert :ok = Sink.close(sink)
+  end
+
+  defp close_owner_fixture(reply_gate \\ nil) do
+    observer = self()
+
+    {owner, owner_monitor} =
+      spawn_monitor(fn ->
+        {:ok, sink} = Sink.open()
+        send(observer, {:close_sink_ready, self(), sink})
+
+        receive do
+          {:close, reference} ->
+            started = System.monotonic_time(:millisecond)
+            send(observer, {:close_started, reference, started})
+            result = Sink.close(sink)
+            finished = System.monotonic_time(:millisecond)
+            send(observer, {:close_result, reference, result, started, finished})
+        end
+
+        receive do
+          :finish -> :ok
+        end
+      end)
+
+    assert_receive {:close_sink_ready, ^owner, sink}, 5_000
+    {guardian, _incarnation, arena} = sink
+
+    on_exit(fn ->
+      guardian_monitor = Process.monitor(guardian)
+      cleanup_owner_monitor = Process.monitor(owner)
+
+      finish_custody_cleanup([
+        fn -> if reply_gate, do: send(guardian, {:release_close_reply, reply_gate}) end,
+        fn ->
+          if Process.alive?(guardian) do
+            try do
+              :sys.resume(guardian)
+            catch
+              :exit, _reason -> :ok
+            end
+          end
+        end,
+        fn -> if Process.alive?(owner), do: Process.exit(owner, :kill) end,
+        fn ->
+          assert_receive {:DOWN, ^cleanup_owner_monitor, :process, ^owner, _reason}, 5_000
+        end,
+        fn ->
+          assert_receive {:DOWN, ^guardian_monitor, :process, ^guardian, _reason}, 5_000
+          assert :ets.info(arena) == :undefined
+        end
+      ])
+    end)
+
+    %{owner: owner, owner_monitor: owner_monitor, sink: sink}
+  end
+
+  defp wait_for_close_call(guardian, owner, incarnation, cutoff) do
+    assert {:messages, messages} = Process.info(guardian, :messages)
+
+    if Enum.any?(messages, fn
+         {:"$gen_call", {^owner, _tag}, {:close, ^incarnation}} -> true
+         _other -> false
+       end) do
+      :ok
+    else
+      assert System.monotonic_time(:millisecond) < cutoff, "missing actual queued close call"
+
+      receive do
+      after
+        1 -> :ok
+      end
+
+      wait_for_close_call(guardian, owner, incarnation, cutoff)
+    end
+  end
+
+  defp wait_for_close_down(owner, guardian, cutoff) do
+    assert {:status, :suspended} = Process.info(owner, :status)
+    assert {:messages, messages} = Process.info(owner, :messages)
+
+    case Enum.find(messages, fn
+           {:DOWN, monitor, :process, ^guardian, :normal} -> is_reference(monitor)
+           _other -> false
+         end) do
+      {:DOWN, monitor, :process, ^guardian, :normal} ->
+        monitor
+
+      nil ->
+        assert System.monotonic_time(:millisecond) < cutoff,
+               "missing original guardian normal DOWN in suspended owner's mailbox"
+
+        receive do
+        after
+          1 -> :ok
+        end
+
+        wait_for_close_down(owner, guardian, cutoff)
+    end
   end
 
   defp finite_claim_trace(holder, arena, barrier, {comparisons, lost}) do

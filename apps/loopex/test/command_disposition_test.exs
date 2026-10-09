@@ -74,6 +74,12 @@ defmodule Loopex.AdmissionObservationStore do
   end
 
   @impl true
+  def creation_recovery(ref, request) do
+    observe_call(ref, :creation_recovery)
+    Store.creation_recovery(ref.store, request)
+  end
+
+  @impl true
   def transaction_status(ref, session, domain, id) do
     observe_call(ref, :transaction_status)
     Store.transaction_status(ref.store, session, domain, id)

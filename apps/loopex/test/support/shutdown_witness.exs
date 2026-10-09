@@ -66,7 +66,7 @@ defmodule Loopex.ShutdownWitness do
   # Concept: this observer preserves the original Logger event and its visibility.
   # Technical depth: the primary filter copies only fixed supervisor metadata;
   # no offender start function, options, request or formatted report is retained.
-  def observe_report(%{msg: {:report, %{report: report}}} = event, observer)
+  def observe_report(%{msg: {:report, %{report: report} = envelope}} = event, observer)
       when is_list(report) do
     offender = Keyword.get(report, :offender, [])
     context = Keyword.get(report, :errorContext)
@@ -79,10 +79,19 @@ defmodule Loopex.ShutdownWitness do
         _ -> nil
       end
 
-    # Concept: startup progress is visible Logger output, not termination evidence.
-    # Technical depth: errorContext distinguishes actual supervisor diagnostics;
-    # unknown non-nil contexts remain retained and fail the strict classifier.
-    if (is_pid(supervisor) and context != nil) or context in [:shutdown_error, :child_terminated] do
+    # Concept: only the complete supervisor startup shape is excluded from termination evidence.
+    # Technical depth: the original label, two report members and started PID
+    # identify startup progress. Missing or unknown contexts on every other
+    # supervisor report remain retained and fail the strict classifier.
+    started = Keyword.get(report, :started)
+
+    startup_progress =
+      envelope[:label] == {:supervisor, :progress} and is_pid(supervisor) and
+        Enum.sort(Keyword.keys(report)) == [:started, :supervisor] and
+        is_list(started) and Keyword.keyword?(started) and is_pid(Keyword.get(started, :pid))
+
+    if (is_pid(supervisor) or context in [:shutdown_error, :child_terminated]) and
+         not startup_progress do
       shutdown = if is_list(offender), do: Keyword.get(offender, :shutdown)
 
       send(

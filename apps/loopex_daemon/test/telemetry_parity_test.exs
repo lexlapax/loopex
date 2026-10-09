@@ -188,10 +188,21 @@ defmodule LoopexDaemon.TelemetryParityTest do
     {:ok, session_id} = Wire.identity(encoded)
     {:ok, placement} = Loopex.runtime_placement_id(Path.join(root, "s"))
     {:ok, adapter} = Loopex.Store.Local.start_link(path: Path.join([root, "s", "store.log"]))
+
+    on_exit(fn ->
+      if Process.alive?(adapter), do: GenServer.stop(adapter)
+    end)
+
     {:ok, store} = Loopex.Store.new(Loopex.Store.Local, adapter)
 
     {:ok, runtime} =
       Loopex.start_link(runtime_id: placement, store: store, context_token_budget: 8_192)
+
+    on_exit(fn ->
+      if Process.alive?(runtime.supervisor), do: Loopex.stop(runtime)
+    end)
+
+    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(runtime)
 
     {:ok, _resumed} = Loopex.resume_session(runtime, session_id, command_id: "replay-resume")
     {:ok, attachment} = Loopex.attach(runtime, session_id, after_event_sequence: 0)

@@ -230,13 +230,18 @@ defmodule Loopex.SessionDetailedResultsTest do
   end
 
   defp start_runtime(runtime_id, store) do
-    Loopex.start_link(
-      context_token_budget: 8_192,
-      session_creation_defaults:
-        Loopex.ConfiguredGenesisFixture.genesis([]) |> Map.drop([:kind, "options"]),
-      runtime_id: runtime_id,
-      store: store
-    )
+    {:ok, runtime} =
+      Loopex.start_link(
+        context_token_budget: 8_192,
+        session_creation_defaults:
+          Loopex.ConfiguredGenesisFixture.genesis([]) |> Map.drop([:kind, "options"]),
+        runtime_id: runtime_id,
+        store: store
+      )
+
+    on_exit(fn -> if Runtime.alive?(runtime), do: Loopex.stop(runtime) end)
+    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(runtime)
+    {:ok, runtime}
   end
 
   defp create_session(runtime, command_id) do

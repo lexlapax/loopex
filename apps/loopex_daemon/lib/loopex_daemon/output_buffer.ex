@@ -23,6 +23,8 @@ defmodule LoopexDaemon.OutputBuffer do
   defstruct max_bytes: nil,
             frames: :queue.new(),
             bytes: 0,
+            progress_items: 0,
+            progress_bytes: 0,
             claim: nil,
             succession: :none
 
@@ -45,8 +47,10 @@ defmodule LoopexDaemon.OutputBuffer do
   @typedoc false
   @type t :: %__MODULE__{
           max_bytes: pos_integer(),
-          frames: :queue.queue({frame_ref(), binary(), :ordinary | :notice | :reply}),
+          frames: :queue.queue({frame_ref(), binary(), :ordinary | :progress | :notice | :reply}),
           bytes: non_neg_integer(),
+          progress_items: non_neg_integer(),
+          progress_bytes: non_neg_integer(),
           claim: frame_ref() | nil,
           succession: succession()
         }
@@ -63,6 +67,86 @@ defmodule LoopexDaemon.OutputBuffer do
          :ok <- ordinary_admissible(buffer, byte_size(bytes)) do
       {:ok, push(buffer, bytes, :ordinary)}
     end
+  end
+
+  @doc """
+  ## Concept
+
+  Retain one credited transient frame in the same output FIFO as durable data.
+
+  ## Technical depth
+
+  Return its exact frame identity. Resident progress includes the claimed frame
+  and stays within 32 items and 524,288 bytes; succession allowance remains
+  reserved. Refusal never removes another frame or changes the buffer.
+  """
+  @spec enqueue_progress(t(), iodata()) :: {:ok, frame_ref(), t()} | {:error, atom()}
+  def enqueue_progress(%__MODULE__{} = buffer, encoded) do
+    with {:ok, bytes} <- encoded_binary(encoded),
+         true <-
+           buffer.progress_items < 32 and buffer.progress_bytes + byte_size(bytes) <= 524_288,
+         :ok <- ordinary_admissible(buffer, byte_size(bytes)) do
+      {frame_ref, buffer} = push_with_ref(buffer, bytes, :progress)
+      {:ok, frame_ref, buffer}
+    else
+      false -> {:error, :capacity_exceeded}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @doc """
+  ## Concept
+
+  Discard only explicitly named transient frames whose output has not started.
+
+  ## Technical depth
+
+  Exact unique references must all name resident progress frames. A claimed
+  frame is still an active writer copy and refuses the whole discard. Durable
+  frames, succession reservations and FIFO order are preserved. The caller
+  separately fences late admission before treating this as release evidence.
+  """
+  @spec discard_progress(t(), [frame_ref()]) :: {:ok, t()} | {:error, atom()}
+  def discard_progress(%__MODULE__{} = buffer, refs) when is_list(refs) and length(refs) <= 32 do
+    requested = MapSet.new(refs)
+    frames = :queue.to_list(buffer.frames)
+    present = MapSet.new(for {ref, _bytes, :progress} <- frames, do: ref)
+
+    cond do
+      MapSet.size(requested) != length(refs) or not Enum.all?(refs, &is_reference/1) or
+          not MapSet.subset?(requested, present) ->
+        {:error, :frame_mismatch}
+
+      MapSet.member?(requested, buffer.claim) ->
+        {:error, :claimed}
+
+      true ->
+        {discarded, kept} =
+          Enum.split_with(frames, fn {ref, _, _} -> MapSet.member?(requested, ref) end)
+
+        bytes = Enum.reduce(discarded, 0, fn {_, bytes, _}, total -> total + byte_size(bytes) end)
+
+        {:ok,
+         %{
+           buffer
+           | frames: :queue.from_list(kept),
+             bytes: buffer.bytes - bytes,
+             progress_items: buffer.progress_items - length(discarded),
+             progress_bytes: buffer.progress_bytes - bytes
+         }}
+    end
+  end
+
+  def discard_progress(%__MODULE__{}, _refs), do: {:error, :frame_mismatch}
+
+  @doc false
+  @spec discard_unclaimed_progress(t()) :: {[frame_ref()], t()}
+  def discard_unclaimed_progress(%__MODULE__{} = buffer) do
+    refs =
+      for {ref, _bytes, :progress} <- :queue.to_list(buffer.frames), ref != buffer.claim, do: ref
+
+    {:ok, output} = discard_progress(buffer, refs)
+    {refs, output}
   end
 
   @doc false
@@ -181,6 +265,15 @@ defmodule LoopexDaemon.OutputBuffer do
             claim: nil
         }
 
+        buffer =
+          if kind == :progress,
+            do: %{
+              buffer
+              | progress_items: buffer.progress_items - 1,
+                progress_bytes: buffer.progress_bytes - byte_size(bytes)
+            },
+            else: buffer
+
         {:ok, advance_succession(buffer, kind, frame_ref)}
 
       _other ->
@@ -270,7 +363,18 @@ defmodule LoopexDaemon.OutputBuffer do
   defp push_with_ref(buffer, bytes, kind) do
     frame_ref = make_ref()
     frames = :queue.in({frame_ref, bytes, kind}, buffer.frames)
-    {frame_ref, %{buffer | frames: frames, bytes: buffer.bytes + byte_size(bytes)}}
+    buffer = %{buffer | frames: frames, bytes: buffer.bytes + byte_size(bytes)}
+
+    buffer =
+      if kind == :progress,
+        do: %{
+          buffer
+          | progress_items: buffer.progress_items + 1,
+            progress_bytes: buffer.progress_bytes + byte_size(bytes)
+        },
+        else: buffer
+
+    {frame_ref, buffer}
   end
 
   defp advance_succession(

@@ -1,4 +1,5 @@
 Code.require_file("support/m1_runtime_helper.exs", __DIR__)
+Code.require_file("support/configured_genesis_helper.exs", __DIR__)
 Code.require_file("support/agent_loop_helper.exs", __DIR__)
 
 defmodule Loopex.CancellationObservationContractTest.CancelObserver do
@@ -563,6 +564,8 @@ defmodule Loopex.CancellationObservationContractTest do
 
     on_exit(fn -> stop_runtime(runtime) end)
 
+    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(runtime)
+
     before = M1RuntimeTestStore.inspect_state(store_pid)
 
     assert Loopex.create_session(
@@ -640,6 +643,8 @@ defmodule Loopex.CancellationObservationContractTest do
 
     on_exit(fn -> stop_runtime(runtime) end)
 
+    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(runtime)
+
     assert {:ok, _session_id} =
              Loopex.create_session(runtime, at_limit_options, command_id: "genesis-at-limit")
 
@@ -704,6 +709,8 @@ defmodule Loopex.CancellationObservationContractTest do
       stop_process(model)
       stop_process(executor)
     end)
+
+    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(runtime)
 
     %{runtime: runtime, store_pid: store_pid, executor: executor}
   end

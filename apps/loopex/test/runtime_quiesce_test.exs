@@ -534,6 +534,8 @@ defmodule Loopex.RuntimeQuiesceTest do
 
     on_exit(fn -> if Runtime.alive?(restarted), do: Loopex.stop(restarted) end)
 
+    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(restarted)
+
     assert {:ok, ^session_id} =
              Runtime.resume_session(restarted, session_id, "resume-after-drain")
 
@@ -611,6 +613,8 @@ defmodule Loopex.RuntimeQuiesceTest do
 
     on_exit(fn -> if Runtime.alive?(restarted), do: Loopex.stop(restarted) end)
 
+    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(restarted)
+
     assert {:ok, ^session_id} =
              Runtime.resume_session(restarted, session_id, "resume-lost-fence")
 
@@ -656,6 +660,8 @@ defmodule Loopex.RuntimeQuiesceTest do
       )
 
     on_exit(fn -> if Runtime.alive?(restarted), do: Loopex.stop(restarted) end)
+
+    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(restarted)
 
     assert {:ok, ^session_id} =
              Runtime.resume_session(restarted, session_id, "resume-lost-abort")
@@ -713,6 +719,8 @@ defmodule Loopex.RuntimeQuiesceTest do
       )
 
     on_exit(fn -> if Runtime.alive?(restarted), do: Loopex.stop(restarted) end)
+
+    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(restarted)
 
     assert {:ok, ^abort_session} =
              Runtime.resume_session(restarted, abort_session, "resume-abort-collision")
@@ -2212,6 +2220,8 @@ defmodule Loopex.RuntimeQuiesceTest do
       if Runtime.alive?(runtime), do: Loopex.stop(runtime)
       if Process.alive?(store_pid), do: GenServer.stop(store_pid)
     end)
+
+    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(runtime)
 
     %{runtime: runtime, runtime_id: runtime_id, store: store, store_pid: store_pid}
   end

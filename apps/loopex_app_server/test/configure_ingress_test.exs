@@ -1,4 +1,5 @@
 Code.require_file("../../loopex/test/support/m1_runtime_helper.exs", __DIR__)
+Code.require_file("../../loopex/test/support/configured_genesis_helper.exs", __DIR__)
 Code.require_file("../../loopex/test/support/agent_loop_helper.exs", __DIR__)
 Code.require_file("../../loopex/test/support/model_preparation_conformance.exs", __DIR__)
 
@@ -703,6 +704,8 @@ defmodule Loopex.AppServer.ConfigureIngressTest do
       if Process.alive?(runtime.supervisor), do: Loopex.stop(runtime)
       assert_receive {:DOWN, ^runtime_monitor, :process, _supervisor, _reason}, 5_000
     end)
+
+    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(runtime)
 
     assert {:ok, session} = Loopex.create_session(runtime, %{}, command_id: "create")
     assert {:ok, attachment} = Loopex.attach(runtime, session, after_event_sequence: 0)

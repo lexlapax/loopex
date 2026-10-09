@@ -1,4 +1,5 @@
 Code.require_file("support/m1_runtime_helper.exs", __DIR__)
+Code.require_file("support/configured_genesis_helper.exs", __DIR__)
 Code.require_file("support/agent_loop_helper.exs", __DIR__)
 
 defmodule Loopex.Audit3HoldingStore do
@@ -27,6 +28,9 @@ defmodule Loopex.Audit3HoldingStore do
 
   @impl Store
   def transact({store, _holder}, transaction), do: Store.transact(store, transaction)
+
+  @impl Store
+  def creation_recovery({store, _holder}, request), do: Store.creation_recovery(store, request)
 
   @impl Store
   def transaction_status({store, _holder}, session_id, mutation_domain, tx_id),
@@ -507,6 +511,8 @@ defmodule Loopex.Audit3RepairsTest do
 
     fixture = %{fixture | runtime: runtime}
     on_exit(fn -> Fixture.stop(fixture) end)
+
+    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(runtime)
 
     {fixture, holder}
   end

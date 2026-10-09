@@ -55,7 +55,7 @@ defmodule Loopex.CreateHistoryQueryTest do
     before_conflict = M1RuntimeTestStore.inspect_state(fixture.store)
     changed = put_in(genesis, ["runtime_configuration", "cleanup_grace_ms"], 1_501)
 
-    assert {:error, :tx_id_conflict} =
+    assert {:error, :runtime_command_conflict} =
              Loopex.create_session(fixture.runtime, options,
                command_id: "exact",
                genesis: changed
@@ -89,6 +89,8 @@ defmodule Loopex.CreateHistoryQueryTest do
       )
 
     on_exit(fn -> stop_runtime(successor) end)
+    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(successor)
+
     {:ok, %{sessions: supervisor}} = Runtime.children(successor)
     assert DynamicSupervisor.which_children(supervisor) == []
     before = M1RuntimeTestStore.inspect_state(fixture.store)
@@ -226,6 +228,12 @@ defmodule Loopex.CreateHistoryQueryTest do
         store: store,
         session_creation_defaults: Map.drop(current_genesis(), [:kind, "options"])
       )
+
+    if store.adapter == M5QueryFaultStore do
+      :ok = Loopex.ConfiguredGenesisFixture.await_creation_unavailable(runtime)
+    else
+      :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(runtime)
+    end
 
     runtime
   end

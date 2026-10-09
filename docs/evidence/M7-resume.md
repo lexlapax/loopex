@@ -27,6 +27,37 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+### Reviewed creation and daemon fixtures joined, 2026-10-08
+
+Original64183 at `f8b0bd30` is terminal FAIL: current Core21/21,
+Composition55/55 and helper213/213 pass; App Server64/94 passes with30 failures.
+The remaining protocol and floor stages were unrun. The669.366-second run,
+seven original joins and29 artifacts are retained under
+`M7/reviewed-owner-focused-20261008-v5`; terminal SHA-256
+`18e95e5955ff0a7ee5ebfe08af3dc610ee8c819c283627174ce748c8ab5a4b28`,
+collection SHA-256
+`6b7cbf4c7bc1c161cc95825cd827097b37c5343310e043b61d067bbd812a2f92`.
+No failed result is relabeled or repeated unchanged.
+
+Root joined50 independently reviewed source paths: current Core creation
+fixtures, daemon retirement and readiness fixtures, four edge fixtures, and
+the exact supervisor startup-report exclusion. The newer private shutdown
+fixture is preserved; malformed nil-context reports remain strictly observable.
+Original case populations, physical fault schedules, cutoffs and joins remain
+required. Exact layered identities are retained in
+`/private/tmp/m7-reviewed-creation-daemon-shutdown-join-20261008-v1.json`.
+The prospective App Server census is165, including21 foreground lifecycle
+cases;144 describes the historical source. These joins are native UNRUN.
+No new protocol generation is served and helpers remain unregistered.
+
+Next: correct the actual foreground cleanup Boolean and blocking FIFO reader,
+restore the missing executor launch dependency, and preserve unrelated host
+mailbox messages in Stdio. Then commit and qualify complete affected scopes
+on both toolchains. No checklist box closes: T01-T19 original88 done /85 open
+/6 retired, added367 done /23 open. ADR0065 remains pending. No native handle
+is live. Next registry2695, SHA-256
+`4e8090f99e8f984735debcad2fd2ef920e0d61ad6737f4cc7aebd1bf56b0c417`.
+
 ### Physical reopen byte oracle preserved, 2026-10-08
 
 Whole401 original44627 at2574d06a passes current Core21/21 and Composition53/55,

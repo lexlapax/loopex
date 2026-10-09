@@ -654,6 +654,8 @@ defmodule Loopex.TraceSessionTest do
       if Process.alive?(store_pid), do: GenServer.stop(store_pid)
     end)
 
+    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(runtime)
+
     runtime
   end
 

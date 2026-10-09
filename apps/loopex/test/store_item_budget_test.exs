@@ -1,4 +1,5 @@
 Code.require_file("support/m1_runtime_helper.exs", __DIR__)
+Code.require_file("support/configured_genesis_helper.exs", __DIR__)
 
 defmodule Loopex.StoreItemBudgetTest do
   @moduledoc false
@@ -163,7 +164,8 @@ defmodule Loopex.StoreItemBudgetTest do
       command_id = "generated-#{index}"
       assert {:ok, transaction} = Store.create_session("runtime-#{index}", command_id, record)
       assert transaction.genesis == normalized
-      assert {:committed, ^command_id, _receipt} = Store.transact(store, transaction)
+      assert {:committed, ^command_id, _receipt} =
+               Loopex.ConfiguredGenesisFixture.commit_creation(store, transaction)
     end
 
     for target <- [@max_item_bytes - 1, @max_item_bytes] do
@@ -173,7 +175,8 @@ defmodule Loopex.StoreItemBudgetTest do
       assert {:ok, normalized, ^target} = normalize(:record, record)
       assert {:ok, transaction} = Store.create_session("runtime-#{target}", command_id, record)
       assert transaction.genesis == normalized
-      assert {:committed, ^command_id, _receipt} = Store.transact(store, transaction)
+      assert {:committed, ^command_id, _receipt} =
+               Loopex.ConfiguredGenesisFixture.commit_creation(store, transaction)
     end
 
     oversized_bytes = @max_item_bytes + 1

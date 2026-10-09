@@ -152,12 +152,15 @@ defmodule Loopex.TelemetryBoundaryTest do
     {:ok, session_id} = Loopex.create_session(runtime, %{}, command_id: "instrumented")
     {:ok, _attachment} = Loopex.attach(runtime, session_id, after_event_sequence: 0)
 
-    assert_receive {:span, [:loopex, :store, :transact, :start], start_measurements, _metadata},
+    assert_receive {:span, [:loopex, :store, :transact, :start], start_measurements,
+                    %{type: :create_session}},
                    2_000
 
     assert is_integer(start_measurements.monotonic_time)
 
-    assert_receive {:span, [:loopex, :store, :transact, :stop], measurements, metadata}, 2_000
+    assert_receive {:span, [:loopex, :store, :transact, :stop], measurements,
+                    %{type: :create_session} = metadata},
+                   2_000
     assert is_integer(measurements.duration)
     assert metadata.type == :create_session
     assert metadata.records == 1
@@ -538,6 +541,8 @@ defmodule Loopex.TelemetryBoundaryTest do
       if Runtime.alive?(runtime), do: Loopex.stop(runtime)
       if Process.alive?(store_pid), do: GenServer.stop(store_pid)
     end)
+
+    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(runtime)
 
     %{runtime: runtime, dispatcher: dispatcher, admission: admission}
   end

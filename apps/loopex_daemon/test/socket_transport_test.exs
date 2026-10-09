@@ -437,6 +437,11 @@ defmodule LoopexDaemon.SocketTransportTest do
   defp runtime_with_adapter(root) do
     {:ok, adapter} = Loopex.Store.Local.start_link(path: Path.join(root, "store.log"))
     Process.unlink(adapter)
+
+    on_exit(fn ->
+      if Process.alive?(adapter), do: GenServer.stop(adapter)
+    end)
+
     {:ok, store} = Loopex.Store.new(Loopex.Store.Local, adapter)
 
     {:ok, runtime} =
@@ -446,6 +451,12 @@ defmodule LoopexDaemon.SocketTransportTest do
         session_creation_defaults: creation_defaults(),
         context_token_budget: 8_192
       )
+
+    on_exit(fn ->
+      if Process.alive?(runtime.supervisor), do: Loopex.stop(runtime)
+    end)
+
+    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(runtime)
 
     {runtime, adapter}
   end
@@ -559,6 +570,11 @@ defmodule LoopexDaemon.SocketTransportTest do
 
     # A previous lifetime completed resume command `resume-seen`.
     {:ok, adapter} = Loopex.Store.Local.start_link(path: Path.join([root, "state", "store.log"]))
+
+    on_exit(fn ->
+      if Process.alive?(adapter), do: GenServer.stop(adapter)
+    end)
+
     {:ok, store} = Loopex.Store.new(Loopex.Store.Local, adapter)
 
     {:ok, previous} =
@@ -567,6 +583,12 @@ defmodule LoopexDaemon.SocketTransportTest do
         store: store,
         context_token_budget: 8_192
       )
+
+    on_exit(fn ->
+      if Process.alive?(previous.supervisor), do: Loopex.stop(previous)
+    end)
+
+    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(previous)
 
     {:ok, ^session_id} = Loopex.resume_session(previous, session_id, command_id: "resume-seen")
     :ok = Loopex.stop(previous)

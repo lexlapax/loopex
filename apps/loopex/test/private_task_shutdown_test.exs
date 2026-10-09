@@ -115,6 +115,27 @@ defmodule Loopex.PrivateTaskShutdownTest do
                     "shutdown", 5_000},
                    0
 
+    for label <- [nil, {:supervisor, :progress}] do
+      malformed = %{
+        msg:
+          {:report,
+           %{
+             label: label,
+             report: [
+               supervisor: {observer, Supervisor.Default},
+               reason: :shutdown,
+               offender: [pid: observer, shutdown: 5_000]
+             ]
+           }}
+      }
+
+      assert Loopex.ShutdownWitness.observe_report(malformed, observer) == malformed
+
+      assert_receive {:supervisor_report, ^observer, ^observer, ^observer, :unrecognized,
+                      "shutdown", 5_000},
+                     0
+    end
+
     run = start_fixture(:owner_exit, 1) |> hold()
     evidence = observe_shutdown([run], :supervisor_fault, "fault", false)
 

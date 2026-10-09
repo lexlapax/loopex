@@ -4,12 +4,29 @@ defmodule LoopexDaemon.OwnerTest do
 
   alias LoopexDaemon.{AdmissionRelay, ConnectionRegistry, LeaseOwner, Owner, WireRecords}
 
+  test "startup caches the exact Registry progress capability without a serving-time Registry call" do
+    owner = start_owner()
+    components = Owner.components(owner)
+    assert components.registry_progress_sink == :sys.get_state(components.registry).progress_sink
+    assert {:error, :owner_mismatch} = ConnectionRegistry.progress_sink(components.registry)
+    :ok = :sys.suspend(components.registry)
+
+    on_exit(fn ->
+      if Process.alive?(components.registry), do: :sys.resume(components.registry)
+    end)
+
+    assert GenServer.call(owner, :components, 250) == components
+    :ok = :sys.resume(components.registry)
+  end
+
   defmodule ManualConnection do
     def start_link(options) do
       listener = Keyword.fetch!(options, :listener)
 
       pid =
         spawn_link(fn ->
+          {:ok, sink} = Loopex.ProgressSink.open()
+          options = Keyword.put(options, :progress_sink, sink)
           send(listener, {:manual_connection_started, self(), options})
           loop(listener, options)
         end)
@@ -43,7 +60,8 @@ defmodule LoopexDaemon.OwnerTest do
             ConnectionRegistry.promote(
               Keyword.fetch!(options, :registry),
               Keyword.fetch!(options, :rollback_token),
-              Keyword.fetch!(options, :connection_incarnation)
+              Keyword.fetch!(options, :connection_incarnation),
+              Keyword.fetch!(options, :progress_sink)
             )
 
           send(caller, {:manual_result, reference, result})
@@ -3502,6 +3520,123 @@ defmodule LoopexDaemon.OwnerTest do
     refute_receive {:daemon_component_fatal, _reporter, _class}, 300
     assert Process.alive?(components.relay)
     assert %{fatal_teardown: false} = :sys.get_state(owner)
+  end
+
+  test "repeated empty-row Owner closes share one actual Registry native join" do
+    owner = start_owner()
+    components = Owner.components(owner)
+    registry = components.registry
+    {guardian, incarnation, arena} = components.registry_progress_sink
+    guardian_monitor = Process.monitor(guardian)
+    gate = make_ref()
+    observer = self()
+
+    :ok =
+      :sys.install(
+        guardian,
+        {gate,
+         fn
+           :waiting, {:out, :ok, {^registry, _tag}, %{incarnation: ^incarnation}}, _extra ->
+             send(observer, {:owner_native_close_replied, gate})
+
+             receive do
+               {:continue_owner_native_close, ^gate} -> :done
+             end
+
+           debug, _event, _extra ->
+             debug
+         end, :waiting}
+      )
+
+    on_exit(fn -> send(guardian, {:continue_owner_native_close, gate}) end)
+    deadline = now_ms() + 5_000
+    record = WireRecords.daemon_stopping("operator_stop")
+    first = Task.async(fn -> Owner.close_connections(owner, record, deadline) end)
+    assert_receive {:owner_native_close_replied, ^gate}, 1_000
+    assert Process.alive?(guardian) and :ets.info(arena) != :undefined
+    refute Task.yield(first, 0)
+    second = Task.async(fn -> Owner.close_connections(owner, record, deadline) end)
+    eventually_true(fn -> length(:sys.get_state(owner).close.froms) == 2 end)
+    send(guardian, {:continue_owner_native_close, gate})
+    assert_receive {:DOWN, ^guardian_monitor, :process, ^guardian, :normal}, 1_000
+    assert :ets.info(arena) == :undefined
+    assert :ok = Task.await(first, 1_000)
+    assert :ok = Task.await(second, 1_000)
+    assert now_ms() < deadline
+    assert Process.alive?(registry)
+    assert %{progress_phase: :closed, progress_guardian_monitor: nil} = :sys.get_state(registry)
+    assert :ok = Owner.close_connections(owner, record, deadline)
+  end
+
+  for cut <- [:before_close, :after_reply] do
+    @registry_native_close_cut cut
+    test "original Owner deadline contains the actual Registry guardian held #{@registry_native_close_cut}" do
+      owner = start_owner()
+      components = Owner.components(owner)
+      registry = components.registry
+      {guardian, incarnation, arena} = components.registry_progress_sink
+      registry_monitor = Process.monitor(registry)
+      guardian_monitor = Process.monitor(guardian)
+      gate = make_ref()
+      observer = self()
+      cut = @registry_native_close_cut
+
+      :ok =
+        :sys.install(
+          guardian,
+          {gate,
+           fn
+             :waiting, event, _extra ->
+               matched = registry_native_close_event?(cut, event, registry, incarnation)
+
+               if matched do
+                 send(observer, {:registry_guardian_held, gate, cut})
+
+                 receive do
+                   {:continue_registry_guardian, ^gate} -> :done
+                 end
+               else
+                 :waiting
+               end
+
+             debug, _event, _extra ->
+               debug
+           end, :waiting}
+        )
+
+      on_exit(fn -> send(guardian, {:continue_registry_guardian, gate}) end)
+      deadline = now_ms() + 300
+
+      close =
+        Task.async(fn ->
+          Owner.close_connections(owner, WireRecords.daemon_stopping("operator_stop"), deadline)
+        end)
+
+      assert_receive {:registry_guardian_held, ^gate, ^cut}, 1_000
+      assert Process.alive?(guardian) and :ets.info(arena) != :undefined
+      assert {:error, :connections_lost} = Task.await(close, 2_000)
+      assert now_ms() >= deadline + 500
+      assert_receive {:DOWN, ^registry_monitor, :process, ^registry, :killed}, 1_000
+      assert Process.alive?(guardian) and :ets.info(arena) != :undefined
+      refute_receive {:DOWN, ^guardian_monitor, :process, ^guardian, _reason}, 0
+      send(guardian, {:continue_registry_guardian, gate})
+      assert_receive {:DOWN, ^guardian_monitor, :process, ^guardian, :normal}, 1_000
+      assert :ets.info(arena) == :undefined
+      # This late physical guardian retirement never changes the Owner verdict.
+    end
+  end
+
+  defp registry_native_close_event?(cut, event, registry, incarnation) do
+    case {cut, event} do
+      {:before_close, {:in, {:"$gen_call", {^registry, _tag}, {:close, ^incarnation}}}} ->
+        true
+
+      {:after_reply, {:out, :ok, {^registry, _tag}, %{incarnation: ^incarnation}}} ->
+        true
+
+      _ ->
+        false
+    end
   end
 
   # Concept (E8): a second final close while one is in flight joins it: the

@@ -5,7 +5,7 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
   @moduletag capture_log: true
 
   import LoopexDaemon.Test.DaemonSocketFixture,
-    only: [send_frame: 2, receive_records: 2, receive_records: 3]
+    only: [send_frame: 2, receive_records: 2, receive_records: 3, eventually: 1]
 
   alias LoopexComposition.Placement
   alias LoopexDaemon.Sentinel
@@ -17,6 +17,75 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
 
     @impl Loopex.Policy
     def decide(_request), do: {:deny, :policy_denied}
+  end
+
+  test "actual Service ingress binds Runtime and drains credited Registry routing with coalesced readiness",
+       %{options: options} do
+    daemon = start_daemon(options)
+    _ = await_ready(daemon.output)
+    state = :sys.get_state(daemon.owner)
+    {:ok, %{control: control}} = Loopex.Runtime.children(state.edges.runtime)
+    assert :sys.get_state(control).progress_sink == state.progress_sink
+
+    assert LoopexDaemon.Owner.components(state.pids.collaboration).registry_progress_sink ==
+             state.registry_progress_sink
+
+    {:ok, item} =
+      Loopex.CompactionProgress.new(
+        "episode",
+        %{"kind" => "compact", "id" => "command"},
+        String.duplicate("a", 32),
+        0
+      )
+
+    :ok = :sys.suspend(daemon.owner)
+    :ok = :sys.suspend(state.registry)
+
+    on_exit(fn ->
+      for pid <- [daemon.owner, state.registry], Process.alive?(pid), do: :sys.resume(pid)
+    end)
+
+    for _ <- 1..32,
+        do: assert(:ok = Loopex.ProgressSink.try_offer(state.progress_sink, "session", item))
+
+    assert :dropped = Loopex.ProgressSink.try_offer(state.progress_sink, "session", item)
+
+    eventually(fn ->
+      {:messages, messages} = Process.info(daemon.owner, :messages)
+      Enum.count(messages, &(&1 == {:loopex_progress_ready, state.progress_sink})) == 1
+    end)
+
+    :ok = :sys.resume(daemon.owner)
+    eventually(fn -> native_progress_bytes(state.progress_sink) == 0 end)
+    assert native_progress_bytes(state.registry_progress_sink) > 0
+    assert :dropped = Loopex.ProgressSink.try_offer(state.registry_progress_sink, "session", item)
+
+    eventually(fn ->
+      {:messages, messages} = Process.info(state.registry, :messages)
+      Enum.count(messages, &(&1 == {:loopex_progress_ready, state.registry_progress_sink})) == 1
+    end)
+
+    :ok = :sys.resume(state.registry)
+    eventually(fn -> native_progress_bytes(state.registry_progress_sink) == 0 end)
+
+    for _ <- 1..32 do
+      assert :ok = Loopex.ProgressSink.try_offer(state.progress_sink, "session", item)
+
+      eventually(fn ->
+        native_progress_bytes(state.progress_sink) == 0 and
+          native_progress_bytes(state.registry_progress_sink) == 0
+      end)
+    end
+
+    # Existing transport teardown status is not a native close acknowledgement.
+    # Native close/guardian/downstream joins remain a separate integration unit.
+    send(daemon.sentinel, {:daemon_signal, daemon.owner_ref, :sigterm})
+    assert Task.await(daemon.task, 60_000) == 0
+  end
+
+  defp native_progress_bytes({_guardian, incarnation, arena}) do
+    [{:state, ^incarnation, _owner, _status, bytes, _slots, _ready}] = :ets.lookup(arena, :state)
+    bytes
   end
 
   setup do
@@ -178,11 +247,22 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
     assert Placement.live_owner(state_root) == :none
 
     {:ok, adapter} = Loopex.Store.Local.start_link(path: Path.join(state_root, "store.log"))
+
+    on_exit(fn ->
+      if Process.alive?(adapter), do: GenServer.stop(adapter)
+    end)
+
     {:ok, store} = Loopex.Store.new(Loopex.Store.Local, adapter)
     {:ok, placement} = Loopex.runtime_placement_id(state_root)
 
     {:ok, runtime} =
       Loopex.start_link(runtime_id: placement, store: store, context_token_budget: 8_192)
+
+    on_exit(fn ->
+      if Process.alive?(runtime.supervisor), do: Loopex.stop(runtime)
+    end)
+
+    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(runtime)
 
     assert {:ok, :present} = Loopex.Runtime.session_existence(runtime, session_id)
     :ok = Loopex.stop(runtime)
@@ -1592,6 +1672,51 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
 
     {:ok, store_lost} = LoopexDaemon.ExitStatus.fetch(:store_lost)
     assert Task.await(daemon.task, 60_000) == store_lost
+    assert System.monotonic_time(:millisecond) - started < 4_000
+  end
+
+  @tag timeout: 90_000
+  test "the actual ingress guardian lost during held freeze is immediately connections_lost",
+       %{options: options} do
+    daemon = start_daemon(options)
+    _ready = await_ready(daemon.output)
+    _client = initialized(options[:socket_path])
+
+    owner_state = :sys.get_state(daemon.owner)
+    collaboration = owner_state.pids.collaboration
+    test_pid = self()
+
+    :ok =
+      :sys.install(
+        collaboration,
+        {fn
+           :waiting,
+           {:in, {:"$gen_call", _from, {:relay_barrier, {:freeze_lease_ops, _}, _}}},
+           _state ->
+             send(test_pid, :freeze_parked)
+
+             receive do
+               :continue_freeze -> :done
+             end
+
+           :waiting, _event, _state ->
+             :waiting
+         end, :waiting}
+      )
+
+    on_exit(fn ->
+      send(collaboration, :continue_freeze)
+      Process.exit(collaboration, :kill)
+    end)
+
+    send(daemon.sentinel, {:daemon_signal, daemon.owner_ref, :sigterm})
+    assert_receive :freeze_parked, 10_000
+
+    started = System.monotonic_time(:millisecond)
+    Process.exit(elem(owner_state.progress_sink, 0), :kill)
+
+    {:ok, connections_lost} = LoopexDaemon.ExitStatus.fetch(:connections_lost)
+    assert Task.await(daemon.task, 60_000) == connections_lost
     assert System.monotonic_time(:millisecond) - started < 4_000
   end
 

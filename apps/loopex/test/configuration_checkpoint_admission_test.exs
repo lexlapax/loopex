@@ -1,4 +1,5 @@
 Code.require_file("support/m1_runtime_helper.exs", __DIR__)
+Code.require_file("support/configured_genesis_helper.exs", __DIR__)
 Code.require_file("support/agent_loop_helper.exs", __DIR__)
 
 defmodule Loopex.ConfigurationCheckpointAdmissionTest do
@@ -405,6 +406,8 @@ defmodule Loopex.ConfigurationCheckpointAdmissionTest do
         assert_receive {:DOWN, ^monitor, :process, ^actor, _}, 1_000
       end
     end)
+
+    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(runtime)
 
     {:ok, session} =
       Loopex.create_session(runtime, %{},

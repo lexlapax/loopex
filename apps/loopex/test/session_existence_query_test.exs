@@ -64,6 +64,12 @@ defmodule Loopex.SessionExistenceQueryTest do
         store: store
       )
 
+    if store.adapter == M5QueryFaultStore do
+      :ok = Loopex.ConfiguredGenesisFixture.await_creation_unavailable(runtime)
+    else
+      :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(runtime)
+    end
+
     runtime
   end
 

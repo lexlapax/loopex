@@ -1,4 +1,5 @@
 Code.require_file("support/m1_runtime_helper.exs", __DIR__)
+Code.require_file("support/configured_genesis_helper.exs", __DIR__)
 Code.require_file("support/agent_loop_helper.exs", __DIR__)
 
 defmodule Loopex.ContextAdmissionTestModel do
@@ -100,6 +101,10 @@ defmodule Loopex.ContextAdmissionPageOneStore do
   @impl Loopex.Store
   def transact(reference, transaction),
     do: M1RuntimeTestStore.transact(reference.store, transaction)
+
+  @impl Loopex.Store
+  def creation_recovery(reference, request),
+    do: M1RuntimeTestStore.creation_recovery(reference.store, request)
 
   @impl Loopex.Store
   def transaction_status(reference, session_id, domain, tx_id),
@@ -3208,6 +3213,8 @@ defmodule Loopex.ContextAdmissionTest do
   defp start_runtime(options, context_token_budget) do
     with_context = Keyword.put(options, :context_token_budget, context_token_budget)
     {:ok, runtime} = Loopex.start_link(with_context)
+    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(runtime)
+
     runtime
   end
 

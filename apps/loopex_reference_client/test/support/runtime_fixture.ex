@@ -1,4 +1,5 @@
 Code.require_file("../../../loopex_llm_reqllm/test/support/provider_build_fixture.exs", __DIR__)
+Code.require_file("../../../loopex/test/support/configured_genesis_helper.exs", __DIR__)
 
 defmodule Loopex.ReferenceClientTestModel do
   @behaviour Loopex.Model
@@ -196,7 +197,7 @@ defmodule Loopex.ReferenceClientRuntimeFixture do
       capability -> :ok = Loopex.Trace.Capability.bind(capability, client.runtime)
     end
 
-    %{
+    fixture = %{
       root: root,
       workspace: workspace,
       ledger: ledger,
@@ -208,6 +209,16 @@ defmodule Loopex.ReferenceClientRuntimeFixture do
       client: client,
       runtime_options: runtime_options
     }
+
+    try do
+      :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(client.runtime)
+      fixture
+    catch
+      kind, reason ->
+        stacktrace = __STACKTRACE__
+        stop(fixture, not Keyword.has_key?(options, :root))
+        :erlang.raise(kind, reason, stacktrace)
+    end
   end
 
   def create(fixture, label) do

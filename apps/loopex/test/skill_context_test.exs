@@ -585,6 +585,8 @@ defmodule Loopex.SkillContextTest do
 
     on_exit(fn -> Loopex.stop(replacement) end)
 
+    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(replacement)
+
     assert {:ok, context.session} ==
              Loopex.resume_session(replacement, context.session, command_id: "resume")
 
@@ -812,6 +814,8 @@ defmodule Loopex.SkillContextTest do
         policy_identity: %{"id" => "loopex.test.policy", "revision" => "1"},
         grant_decision: {:host_policy, :allow}
       )
+
+    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(runtime)
 
     %{
       runtime: runtime,

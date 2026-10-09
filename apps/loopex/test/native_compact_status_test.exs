@@ -46,6 +46,9 @@ defmodule Loopex.NativeCompactStatusTest do
     end
 
     @impl Store
+    def creation_recovery({store, _}, request), do: TestStore.creation_recovery(store, request)
+
+    @impl Store
     def transaction_status({store, _}, session, domain, id),
       do: TestStore.transaction_status(store, session, domain, id)
 
@@ -244,6 +247,8 @@ defmodule Loopex.NativeCompactStatusTest do
 
     grace = Keyword.get(options, :cleanup_grace_ms, 5_000)
     genesis = Genesis.genesis([]) |> put_in(["runtime_configuration", "cleanup_grace_ms"], grace)
+    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(runtime)
+
     {:ok, session} = Loopex.create_session(runtime, %{}, command_id: "create", genesis: genesis)
     {:ok, attachment} = Loopex.attach(runtime, session, after_event_sequence: 0)
     {fixture, session, attachment}

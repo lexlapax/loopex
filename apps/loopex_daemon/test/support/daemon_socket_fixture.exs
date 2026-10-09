@@ -36,6 +36,10 @@ defmodule LoopexDaemon.Test.DaemonSocketFixture do
     {:ok, adapter} =
       Loopex.Store.Local.start_link(path: Path.join(state, "store.log"))
 
+    on_exit(fn ->
+      if Process.alive?(adapter), do: GenServer.stop(adapter)
+    end)
+
     {:ok, store} = Loopex.Store.new(Loopex.Store.Local, adapter)
 
     {:ok, runtime} =
@@ -45,6 +49,12 @@ defmodule LoopexDaemon.Test.DaemonSocketFixture do
         session_creation_defaults: creation_defaults(),
         context_token_budget: 8_192
       )
+
+    on_exit(fn ->
+      if Process.alive?(runtime.supervisor), do: Loopex.stop(runtime)
+    end)
+
+    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(runtime)
 
     runtime
   end
@@ -62,6 +72,11 @@ defmodule LoopexDaemon.Test.DaemonSocketFixture do
     path = Path.join(state, "store.log")
 
     {:ok, adapter} = Loopex.Store.Local.start_link(path: path)
+
+    on_exit(fn ->
+      if Process.alive?(adapter), do: GenServer.stop(adapter)
+    end)
+
     {:ok, store} = Loopex.Store.new(Loopex.Store.Local, adapter)
 
     {:ok, previous} =
@@ -71,6 +86,12 @@ defmodule LoopexDaemon.Test.DaemonSocketFixture do
         session_creation_defaults: creation_defaults(),
         context_token_budget: 8_192
       )
+
+    on_exit(fn ->
+      if Process.alive?(previous.supervisor), do: Loopex.stop(previous)
+    end)
+
+    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(previous)
 
     sessions =
       for index <- 1..count do
@@ -120,6 +141,7 @@ defmodule LoopexDaemon.Test.DaemonSocketFixture do
       })
 
     components = Owner.components(owner)
+    assert components.registry_progress_sink == :sys.get_state(components.registry).progress_sink
     {:ok, socket} = ListenerSocket.open_parked(path, uid)
     startup_ref = make_ref()
 

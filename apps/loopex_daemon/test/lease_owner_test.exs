@@ -3385,6 +3385,8 @@ defmodule LoopexDaemon.LeaseOwnerTest do
       assert_receive {:DOWN, ^monitor, :process, _supervisor, _reason}, 5_000
     end)
 
+    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(runtime)
+
     assert {:ok, session} = Loopex.create_session(runtime, %{}, command_id: "create-configure")
     assert {:ok, attachment} = Loopex.attach(runtime, session, after_event_sequence: 0)
 

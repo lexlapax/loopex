@@ -254,6 +254,11 @@ defmodule LoopexDaemon.LeaseLifecycleTest do
     root = temporary_directory("loopex-store-unavailable")
     {:ok, adapter} = Loopex.Store.Local.start_link(path: Path.join(root, "store.log"))
     Process.unlink(adapter)
+
+    on_exit(fn ->
+      if Process.alive?(adapter), do: GenServer.stop(adapter)
+    end)
+
     {:ok, store} = Loopex.Store.new(Loopex.Store.Local, adapter)
 
     {:ok, runtime} =
@@ -264,6 +269,12 @@ defmodule LoopexDaemon.LeaseLifecycleTest do
         context_token_budget: 8_192
       )
 
+    on_exit(fn ->
+      if Process.alive?(runtime.supervisor), do: Loopex.stop(runtime)
+    end)
+
+    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(runtime)
+
     {:ok, session_id} = Loopex.create_session(runtime, %{}, command_id: "unavailable-create")
     :ok = Loopex.stop(runtime)
 
@@ -273,6 +284,12 @@ defmodule LoopexDaemon.LeaseLifecycleTest do
         store: store,
         context_token_budget: 8_192
       )
+
+    on_exit(fn ->
+      if Process.alive?(runtime.supervisor), do: Loopex.stop(runtime)
+    end)
+
+    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(runtime)
 
     daemon = start_daemon(runtime)
     client = initialized_client(daemon)

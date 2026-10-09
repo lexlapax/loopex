@@ -1,4 +1,5 @@
 Code.require_file("support/m5_query_fault_store.exs", __DIR__)
+Code.require_file("support/configured_genesis_helper.exs", __DIR__)
 
 defmodule Loopex.CreationProvenanceTest do
   use ExUnit.Case, async: false
@@ -216,6 +217,7 @@ defmodule Loopex.CreationProvenanceTest do
       Loopex.start_link(runtime_id: "runtime", context_token_budget: 8_192, store: store)
 
     on_exit(fn -> if Runtime.alive?(runtime), do: Loopex.stop(runtime) end)
+    :ok = Loopex.ConfiguredGenesisFixture.await_creation_unavailable(runtime)
     runtime
   end
 end

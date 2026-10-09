@@ -932,7 +932,6 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
       end)
 
     {:ok, runtime} = Loopex.start_link(options)
-    {:ok, session_id} = Loopex.create_session(runtime, %{}, command_id: "create")
 
     on_exit(fn ->
       if Loopex.Runtime.alive?(runtime), do: Loopex.stop(runtime)
@@ -940,6 +939,8 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
       File.rm_rf(path)
     end)
 
+    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(runtime)
+    {:ok, session_id} = Loopex.create_session(runtime, %{}, command_id: "create")
     %{runtime: runtime, session_id: session_id}
   end
 

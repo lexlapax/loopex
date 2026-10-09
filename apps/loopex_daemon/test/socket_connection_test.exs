@@ -7,10 +7,12 @@ defmodule LoopexDaemon.SocketConnectionTest do
   import LoopexDaemon.Test.DaemonSocketFixture
 
   alias LoopexProtocol.Wire
+  alias LoopexDaemon.{ConnectionRegistry, Owner, WireRecords}
 
   setup do
     root = temporary_directory("loopex-socket-connection")
     runtime = start_runtime(root)
+    await_creation_startup(runtime)
 
     {:ok, session_id} =
       Loopex.create_session(runtime, %{"purpose" => "stalled-registry"}, command_id: "create-1")
@@ -137,7 +139,7 @@ defmodule LoopexDaemon.SocketConnectionTest do
     end
   end
 
-  test "the current negotiated socket drops compaction activity while ordinary progress still arrives",
+  test "the current negotiated socket drops compaction activity through credited ingress",
        %{daemon: daemon, runtime: runtime} do
     client = initialized_client(daemon)
     [connection] = initialized_connections(daemon)
@@ -196,7 +198,10 @@ defmodule LoopexDaemon.SocketConnectionTest do
           Map.put(activity, :episode_id, :binary.copy(<<255>>, 65_537)),
           %{"kind" => "context.compaction_progress", "summary" => fn -> :private end}
         ] do
-      send(connection, {:daemon_progress, session_id, item})
+      result =
+        Loopex.ProgressSink.try_offer(:sys.get_state(connection).progress_sink, session_id, item)
+
+      assert result == if(item == activity, do: :ok, else: :dropped)
     end
 
     ordinary = %{
@@ -209,12 +214,24 @@ defmodule LoopexDaemon.SocketConnectionTest do
       base_event_sequence: cursor
     }
 
-    # Concept: the observed ordinary item proves the prior same-sender items
-    # crossed the actual handler, without interpreting a quiet interval.
-    # Technical depth: all injected messages share this sender's FIFO ordering;
-    # any leaked activity would be the first returned progress record.
-    send(connection, {:daemon_progress, session_id, ordinary})
+    # Concept: current serving still drops compaction activity before serialization.
+    # Technical depth: the actual arena admits the valid native activity, refuses
+    # private/oversized variants, and gives the following ordinary barrier credit.
+    # Observing that barrier first proves prior activity was released, not emitted.
+    :ok =
+      Loopex.ProgressSink.try_offer(
+        :sys.get_state(connection).progress_sink,
+        session_id,
+        ordinary
+      )
+
     assert [%{"type" => "progress", "progress" => progress}] = receive_records(client, 1)
+
+    eventually(fn ->
+      state = :sys.get_state(connection)
+      map_size(state.progress_leases) == 0 and map_size(state.progress_frames) == 0 and
+        state.progress_bytes == 0
+    end)
     assert progress["kind"] == "text_delta"
     assert progress["text"] == "ordinary-barrier"
     assert progress["base_event_sequence"] == Integer.to_string(cursor)
@@ -224,8 +241,529 @@ defmodule LoopexDaemon.SocketConnectionTest do
     assert {:ok, %{event_sequence: ^cursor}} = Loopex.session_status(runtime, session_id)
   end
 
-  test "current ordinary daemon progress retains record byte and frame drop bounds" do
+  test "drained Socket close joins its own arena while guardian DOWN awaits the terminal result",
+       %{daemon: daemon, runtime: runtime} do
+    {client, socket, _session, sink} = progress_client(daemon, runtime)
+    {guardian, native_incarnation, arena} = sink
+    registry = daemon.registry
+    registry_sink = :sys.get_state(registry).progress_sink
+    {registry_guardian, registry_incarnation, registry_arena} = registry_sink
+    socket_monitor = Process.monitor(socket)
+    guardian_monitor = Process.monitor(guardian)
+    registry_guardian_monitor = Process.monitor(registry_guardian)
+    1 = :erlang.trace(guardian, true, [:receive])
+    1 = :erlang.trace(registry_guardian, true, [:receive])
+    1 = :erlang.trace(registry, true, [:receive])
+    gate = park_socket_terminal(socket, registry)
+    {caller, caller_monitor} = close_connections(daemon)
+    assert_receive {:socket_terminal_parked, ^gate, close_ref}, 1_000
+    {token, row} = socket_row(registry, socket)
+    intent = row.native_retirement
+    assert intent.close_ref == close_ref and intent.ready
+    assert row.progress_fenced
+    assert row.output.bytes == 0 and row.output.claim == nil
+    assert intent.sink == sink
+    assert now_ms() < intent.cutoff
+    control = intent.control
+    control_monitor = Process.monitor(control)
+
+    assert_receive {:trace, ^guardian, :receive,
+                    {:"$gen_call", {^socket, _}, {:close, ^native_incarnation}}},
+                   1_000
+
+    assert_receive {:DOWN, ^guardian_monitor, :process, ^guardian, :normal}, 1_000
+    assert :ets.info(arena) == :undefined
+    eventually(fn -> elem(socket_row(registry, socket), 1).native_retirement.guardian_joined end)
+
+    assert %{native_retirement: %{result: nil, outcome: :pending}, connection_down: false} =
+             elem(socket_row(registry, socket), 1)
+
+    assert ConnectionRegistry.status(registry).live == 0
+    refute_receive {:socket_close_answer, ^caller, :ok}, 0
+    assert [%{"type" => "daemon.stopping"}] = receive_records(client, 1)
+    assert closed?(client)
+    send(socket, {:continue_socket_terminal, gate})
+
+    assert_receive {:trace, ^registry, :receive,
+                    {:"$gen_call", {^socket, _},
+                     {:socket_native_retirement_result, incarnation, ^sink, ^close_ref, cutoff,
+                      :ok}}},
+                   1_000
+
+    assert incarnation == row.connection_incarnation and cutoff == intent.cutoff
+    assert_receive {:DOWN, ^socket_monitor, :process, ^socket, :normal}, 1_000
+    assert_receive {:DOWN, ^control_monitor, :process, ^control, :normal}, 1_000
+    assert now_ms() < intent.cutoff
+    assert_receive {:trace, ^registry, :receive, {:holder_cleanup_result, _, ^token, :ok}}, 1_000
+
+    assert_receive {:trace, ^registry, :receive,
+                    {:relay_connection_retired, relay, ^incarnation}},
+                   1_000
+
+    assert relay == daemon.relay
+
+    assert_receive {:trace, ^registry_guardian, :receive,
+                    {:"$gen_call", {^registry, _}, {:close, ^registry_incarnation}}},
+                   1_000
+
+    assert_receive {:DOWN, ^registry_guardian_monitor, :process, ^registry_guardian, :normal},
+                   1_000
+
+    assert :ets.info(registry_arena) == :undefined
+    assert_receive {:socket_close_answer, ^caller, :ok}, 1_000
+    assert_receive {:DOWN, ^caller_monitor, :process, ^caller, :normal}, 1_000
+
+    assert %{
+             rows: rows,
+             socket_retirement_controls: controls,
+             progress_phase: :closed,
+             close_all_failed: false
+           } = :sys.get_state(registry)
+
+    assert rows == %{} and controls == %{}
+    refute_received {:daemon_component_fatal, _component, _class}
+  end
+
+  test "a blocked Socket native close is contained by its original cutoff without cleanup success",
+       %{daemon: daemon, runtime: runtime} do
+    {client, socket, _session, sink} = progress_client(daemon, runtime)
+    {guardian, native_incarnation, arena} = sink
+    socket_monitor = Process.monitor(socket)
+    guardian_monitor = Process.monitor(guardian)
+    :ok = :sys.suspend(guardian)
+    on_exit(fn -> resume_actor(guardian) end)
+    {caller, caller_monitor} = close_connections(daemon)
+
+    eventually(fn ->
+      case socket_row(daemon.registry, socket) do
+        {_token, %{native_retirement: %{ready: true}}} -> true
+        _ -> false
+      end
+    end)
+
+    {_token, row} = socket_row(daemon.registry, socket)
+    intent = row.native_retirement
+    control_monitor = Process.monitor(intent.control)
+
+    eventually(fn ->
+      Enum.any?(elem(Process.info(guardian, :messages), 1), fn
+        {:"$gen_call", {^socket, _}, {:close, ^native_incarnation}} -> true
+        _ -> false
+      end)
+    end)
+
+    assert :ets.info(arena) != :undefined
+    assert intent.result == nil and intent.outcome == :pending
+    assert [%{"type" => "daemon.stopping"}] = receive_records(client, 1)
+    assert closed?(client)
+    assert is_map(ConnectionRegistry.status(daemon.registry))
+    assert_receive {:DOWN, ^socket_monitor, :process, ^socket, :killed}, 2_000
+    assert now_ms() >= intent.cutoff
+    assert_receive {:DOWN, ^control_monitor, :process, control, :normal}, 1_000
+    assert control == intent.control
+    assert Process.alive?(guardian) and :ets.info(arena) != :undefined
+    assert_receive {:socket_close_answer, ^caller, {:error, :connections_lost}}, 1_000
+    assert_receive {:DOWN, ^caller_monitor, :process, ^caller, :normal}, 1_000
+    assert :sys.get_state(daemon.registry).close_all_failed
+    resume_actor(guardian)
+    assert_receive {:DOWN, ^guardian_monitor, :process, ^guardian, :normal}, 1_000
+    assert :ets.info(arena) == :undefined
+    refute_receive {:socket_close_answer, ^caller, :ok}, 0
+  end
+
+  test "Registry loss contains the actual Socket blocked in native close before its original cutoff",
+       %{daemon: daemon, runtime: runtime} do
+    {_client, socket, _session, sink} = progress_client(daemon, runtime)
+    {guardian, native_incarnation, arena} = sink
+    registry = daemon.registry
+    socket_monitor = Process.monitor(socket)
+    registry_monitor = Process.monitor(registry)
+    guardian_monitor = Process.monitor(guardian)
+    :ok = :sys.suspend(guardian)
+    on_exit(fn -> resume_actor(guardian) end)
+    {caller, caller_monitor} = close_connections(daemon)
+
+    eventually(fn ->
+      case socket_row(registry, socket) do
+        {_token, %{native_retirement: %{ready: true}}} -> true
+        _ -> false
+      end
+    end)
+
+    {_token, row} = socket_row(registry, socket)
+    intent = row.native_retirement
+    control = intent.control
+    control_monitor = Process.monitor(control)
+
+    eventually(fn ->
+      Enum.any?(elem(Process.info(guardian, :messages), 1), fn
+        {:"$gen_call", {^socket, _}, {:close, ^native_incarnation}} -> true
+        _ -> false
+      end)
+    end)
+
+    assert intent.result == nil and intent.outcome == :pending
+    assert Process.alive?(guardian) and :ets.info(arena) != :undefined
+
+    # Concept: the retirement control contains Registry loss independently.
+    # Technical depth: holding the actual Owner excludes its broader fail-stop
+    # from this Socket kill; only the retained control can spend this interval.
+    refute registry in elem(Process.info(socket, :links), 1)
+    :ok = :sys.suspend(daemon.owner)
+    on_exit(fn -> resume_actor(daemon.owner) end)
+    remaining = intent.cutoff - now_ms()
+    assert remaining > 0
+    Process.exit(registry, :kill)
+    assert_receive {:DOWN, ^registry_monitor, :process, ^registry, :killed}, remaining
+
+    assert_receive {:DOWN, ^socket_monitor, :process, ^socket, :killed},
+                   max(intent.cutoff - now_ms(), 0)
+
+    assert now_ms() < intent.cutoff
+
+    assert_receive {:DOWN, ^control_monitor, :process, ^control, :normal},
+                   max(intent.cutoff - now_ms(), 0)
+
+    assert now_ms() < intent.cutoff
+    refute Process.alive?(socket)
+    assert Process.alive?(guardian) and :ets.info(arena) != :undefined
+    refute_receive {:socket_close_answer, ^caller, :ok}, 0
+    resume_actor(daemon.owner)
+    assert_receive {:socket_close_answer, ^caller, {:error, :connections_lost}}, 1_000
+    assert_receive {:DOWN, ^caller_monitor, :process, ^caller, :normal}, 1_000
+    resume_actor(guardian)
+    assert_receive {:DOWN, ^guardian_monitor, :process, ^guardian, :normal}, 1_000
+    assert :ets.info(arena) == :undefined
+    refute_receive {:socket_close_answer, ^caller, :ok}, 0
+  end
+
+  test "control loss contains the actual Socket blocked in native close before its original cutoff",
+       %{daemon: daemon, runtime: runtime} do
+    {_client, socket, _session, sink} = progress_client(daemon, runtime)
+    {guardian, native_incarnation, arena} = sink
+    registry = daemon.registry
+    socket_monitor = Process.monitor(socket)
+    guardian_monitor = Process.monitor(guardian)
+    :ok = :sys.suspend(guardian)
+    on_exit(fn -> resume_actor(guardian) end)
+    {caller, caller_monitor} = close_connections(daemon)
+
+    eventually(fn ->
+      case socket_row(registry, socket) do
+        {_token, %{native_retirement: %{ready: true}}} -> true
+        _ -> false
+      end
+    end)
+
+    {_token, row} = socket_row(registry, socket)
+    intent = row.native_retirement
+    control = intent.control
+    control_monitor = Process.monitor(control)
+
+    eventually(fn ->
+      Enum.any?(elem(Process.info(guardian, :messages), 1), fn
+        {:"$gen_call", {^socket, _}, {:close, ^native_incarnation}} -> true
+        _ -> false
+      end)
+    end)
+
+    assert intent.result == nil and intent.outcome == :pending
+    assert Process.alive?(guardian) and :ets.info(arena) != :undefined
+    remaining = intent.cutoff - now_ms()
+    assert remaining > 0
+    Process.exit(control, :kill)
+    assert_receive {:DOWN, ^control_monitor, :process, ^control, :killed}, remaining
+
+    assert_receive {:DOWN, ^socket_monitor, :process, ^socket, :killed},
+                   max(intent.cutoff - now_ms(), 0)
+
+    assert now_ms() < intent.cutoff
+    refute Process.alive?(socket)
+    assert Process.alive?(guardian) and :ets.info(arena) != :undefined
+    assert Process.alive?(registry)
+    assert_receive {:socket_close_answer, ^caller, {:error, :connections_lost}}, 1_000
+    assert_receive {:DOWN, ^caller_monitor, :process, ^caller, :normal}, 1_000
+    assert :sys.get_state(registry).close_all_failed
+    assert :sys.get_state(registry).rows == %{}
+    assert :sys.get_state(registry).socket_retirement_controls == %{}
+    resume_actor(guardian)
+    assert_receive {:DOWN, ^guardian_monitor, :process, ^guardian, :normal}, 1_000
+    assert :ets.info(arena) == :undefined
+    refute_receive {:socket_close_answer, ^caller, :ok}, 0
+  end
+
+  test "a genuine Socket native reply without its guardian join stays unproved at the original cutoff",
+       %{daemon: daemon, runtime: runtime} do
+    {_client, socket, _session, sink} = progress_client(daemon, runtime)
+    {guardian, incarnation, arena} = sink
+    gate = make_ref()
+    observer = self()
+    socket_monitor = Process.monitor(socket)
+    guardian_monitor = Process.monitor(guardian)
+
+    :ok =
+      :sys.install(
+        guardian,
+        {gate,
+         fn
+           :waiting, {:out, :ok, {^socket, _}, %{incarnation: ^incarnation}}, _extra ->
+             send(observer, {:socket_native_reply_parked, gate})
+
+             receive do
+               {:continue_socket_native_reply, ^gate} -> :done
+             end
+
+           debug, _event, _extra ->
+             debug
+         end, :waiting}
+      )
+
+    on_exit(fn -> send(guardian, {:continue_socket_native_reply, gate}) end)
+    {caller, caller_monitor} = close_connections(daemon)
+    assert_receive {:socket_native_reply_parked, ^gate}, 1_000
+    {_token, row} = socket_row(daemon.registry, socket)
+    control = row.native_retirement.control
+    control_monitor = Process.monitor(control)
+    assert row.native_retirement.result == nil
+    assert Process.alive?(guardian) and :ets.info(arena) != :undefined
+    assert_receive {:DOWN, ^socket_monitor, :process, ^socket, :killed}, 2_000
+    assert now_ms() >= row.native_retirement.cutoff
+    assert_receive {:DOWN, ^control_monitor, :process, ^control, :normal}, 1_000
+    assert_receive {:socket_close_answer, ^caller, {:error, :connections_lost}}, 1_000
+    assert_receive {:DOWN, ^caller_monitor, :process, ^caller, :normal}, 1_000
+    send(guardian, {:continue_socket_native_reply, gate})
+    assert_receive {:DOWN, ^guardian_monitor, :process, ^guardian, :normal}, 1_000
+    assert :ets.info(arena) == :undefined
+    assert :sys.get_state(daemon.registry).close_all_failed
+  end
+
+  test "private Socket retirement rejects missing intent and stale exact correlations",
+       %{daemon: daemon, runtime: runtime} do
+    {_client, socket, _session, sink} = progress_client(daemon, runtime)
+    registry = daemon.registry
+    incarnation = :sys.get_state(socket).incarnation
+
+    missing =
+      {:socket_native_retirement_result, incarnation, sink, make_ref(), now_ms() + 1_000, :ok}
+
+    assert {:error, :output_unavailable} = probe_socket_request(socket, registry, missing)
+    gate = park_socket_terminal(socket, registry)
+    socket_monitor = Process.monitor(socket)
+    {caller, caller_monitor} = close_connections(daemon)
+    assert_receive {:socket_terminal_parked, ^gate, close_ref}, 1_000
+    {_token, row} = socket_row(registry, socket)
+    cutoff = row.native_retirement.cutoff
+    control = row.native_retirement.control
+    control_monitor = Process.monitor(control)
+    {guardian, _sink_incarnation, arena} = sink
+
+    requests = [
+      {:socket_native_retirement_result, incarnation, sink, make_ref(), cutoff, :ok},
+      {:socket_native_retirement_result, "wrong", sink, close_ref, cutoff, :ok},
+      {:socket_native_retirement_result, incarnation, {guardian, make_ref(), arena}, close_ref,
+       cutoff, :ok},
+      {:socket_native_retirement_result, incarnation, sink, close_ref, cutoff + 1, :ok}
+    ]
+
+    send(socket, {:probe_socket_terminal, gate, requests, self()})
+    assert_receive {:socket_terminal_probe, ^gate, results}, 1_000
+    assert Enum.all?(results, &(&1 == {:error, :output_unavailable}))
+    exact = {:socket_native_retirement_result, incarnation, sink, close_ref, cutoff, :ok}
+    assert {:error, :output_unavailable} = GenServer.call(registry, exact)
+
+    assert %{native_retirement: %{result: nil, outcome: :pending}} =
+             elem(socket_row(registry, socket), 1)
+
+    send(socket, {:continue_socket_terminal, gate})
+    assert_receive {:DOWN, ^socket_monitor, :process, ^socket, :normal}, 1_000
+    assert_receive {:DOWN, ^control_monitor, :process, ^control, :normal}, 1_000
+    assert_receive {:socket_close_answer, ^caller, :ok}, 1_000
+    assert_receive {:DOWN, ^caller_monitor, :process, ^caller, :normal}, 1_000
+    assert {:error, :output_unavailable} = GenServer.call(registry, exact)
+    assert :sys.get_state(registry).rows == %{}
+    refute_receive {:socket_close_answer, ^caller, _duplicate}, 0
+  end
+
+  test "a real terminal Socket result observed after its retained cutoff cannot repair cleanup",
+       %{daemon: daemon, runtime: runtime} do
+    {_client, socket, _session, sink} = progress_client(daemon, runtime)
+    registry = daemon.registry
+    socket_monitor = Process.monitor(socket)
+    socket_gate = park_socket_terminal(socket, registry)
+    gate = make_ref()
+    observer = self()
+
+    :ok =
+      :sys.install(
+        registry,
+        {gate,
+         fn
+           :waiting,
+           {:in,
+            {:"$gen_call", {^socket, _},
+             {:socket_native_retirement_result, _, ^sink, ref, cutoff, :ok}}},
+           _extra ->
+             send(observer, {:late_socket_result_parked, gate, ref, cutoff})
+
+             receive do
+               {:continue_late_socket_result, ^gate} -> :done
+             end
+
+           debug, _event, _extra ->
+             debug
+         end, :waiting}
+      )
+
+    on_exit(fn -> send(registry, {:continue_late_socket_result, gate}) end)
+    {caller, caller_monitor} = close_connections(daemon)
+    assert_receive {:socket_terminal_parked, ^socket_gate, _close_ref}, 1_000
+    {_token, row} = socket_row(registry, socket)
+    control = row.native_retirement.control
+    control_monitor = Process.monitor(control)
+    send(socket, {:continue_socket_terminal, socket_gate})
+    assert_receive {:late_socket_result_parked, ^gate, _ref, cutoff}, 1_000
+    assert_receive {:DOWN, ^socket_monitor, :process, ^socket, :normal}, 1_000
+    assert_receive {:DOWN, ^control_monitor, :process, ^control, :normal}, 1_000
+    wait_until(cutoff + 1)
+    send(registry, {:continue_late_socket_result, gate})
+    assert_receive {:socket_close_answer, ^caller, {:error, :connections_lost}}, 1_000
+    assert_receive {:DOWN, ^caller_monitor, :process, ^caller, :normal}, 1_000
+    assert :sys.get_state(registry).close_all_failed
+    assert :sys.get_state(registry).rows == %{}
+    {again, again_monitor} = close_connections(daemon)
+    assert_receive {:socket_close_answer, ^again, {:error, :connections_lost}}, 1_000
+    assert_receive {:DOWN, ^again_monitor, :process, ^again, :normal}, 1_000
+  end
+
+  test "actual cutoff-control loss supplies no native success from guardian and Socket normal DOWN",
+       %{daemon: daemon, runtime: runtime} do
+    {_client, socket, _session, sink} = progress_client(daemon, runtime)
+    {guardian, _native_incarnation, arena} = sink
+    registry = daemon.registry
+    gate = park_socket_terminal(socket, registry)
+    socket_monitor = Process.monitor(socket)
+    guardian_monitor = Process.monitor(guardian)
+    {caller, caller_monitor} = close_connections(daemon)
+    assert_receive {:socket_terminal_parked, ^gate, _close_ref}, 1_000
+    assert_receive {:DOWN, ^guardian_monitor, :process, ^guardian, :normal}, 1_000
+    assert :ets.info(arena) == :undefined
+    eventually(fn -> elem(socket_row(registry, socket), 1).native_retirement.guardian_joined end)
+    {_token, row} = socket_row(registry, socket)
+    control = row.native_retirement.control
+    control_registry_monitor = row.native_retirement.control_monitor
+    cutoff = row.native_retirement.cutoff
+    assert row.native_retirement.result == nil
+    registry_gate = make_ref()
+    observer = self()
+
+    :ok =
+      :sys.install(
+        registry,
+        {registry_gate,
+         fn
+           :waiting,
+           {:in, {:DOWN, ^control_registry_monitor, :process, ^control, :killed}},
+           _extra ->
+             send(observer, {:socket_control_down_parked, registry_gate})
+
+             receive do
+               {:continue_socket_control_down, ^registry_gate} -> :done
+             end
+
+           debug, _event, _extra ->
+             debug
+         end, :waiting}
+      )
+
+    on_exit(fn -> send(registry, {:continue_socket_control_down, registry_gate}) end)
+    monitor = Process.monitor(control)
+    Process.exit(control, :kill)
+    assert_receive {:DOWN, ^monitor, :process, ^control, :killed}, 1_000
+    assert_receive {:socket_control_down_parked, ^registry_gate}, max(cutoff - now_ms(), 0)
+    send(socket, {:continue_socket_terminal, gate})
+    assert_receive {:DOWN, ^socket_monitor, :process, ^socket, :normal}, max(cutoff - now_ms(), 0)
+    assert now_ms() < cutoff
+    send(registry, {:continue_socket_control_down, registry_gate})
+    assert_receive {:socket_close_answer, ^caller, {:error, :connections_lost}}, 1_000
+    assert_receive {:DOWN, ^caller_monitor, :process, ^caller, :normal}, 1_000
+    assert :sys.get_state(registry).close_all_failed
+  end
+
+  test "an actual progress emission ACK pending cannot qualify by clearing native custody",
+       %{daemon: daemon, runtime: runtime} do
+    {client, socket, session, sink} = progress_client(daemon, runtime)
+    registry = daemon.registry
+    incarnation = :sys.get_state(socket).incarnation
+    {guardian, _, _arena} = sink
+    gate = make_ref()
+    observer = self()
+    1 = :erlang.trace(guardian, true, [:receive])
+    socket_monitor = Process.monitor(socket)
+
+    :ok =
+      :sys.install(
+        registry,
+        {gate,
+         fn
+           :waiting,
+           {:in, {:"$gen_call", {^socket, _}, {:output_emitted, ^incarnation, frame_ref}}},
+           _extra ->
+             send(observer, {:socket_emission_held, gate, frame_ref})
+
+             receive do
+               {:continue_socket_emission, ^gate} -> :done
+             end
+
+           debug, _event, _extra ->
+             debug
+         end, :waiting}
+      )
+
+    on_exit(fn -> send(registry, {:continue_socket_emission, gate}) end)
+    :ok = Loopex.ProgressSink.try_offer(sink, session, progress_item(1))
+    assert [%{"type" => "progress"}] = receive_records(client, 1)
+    assert_receive {:socket_emission_held, ^gate, frame_ref}, 1_000
+    before_close = :sys.get_state(socket)
+    assert Map.has_key?(before_close.progress_frames, frame_ref)
+    assert map_size(before_close.progress_leases) == 1
+    assert before_close.progress_bytes > 0
+    {caller, caller_monitor} = close_connections(daemon)
+    owner = daemon.owner
+
+    eventually(fn ->
+      Enum.any?(elem(Process.info(registry, :messages), 1), fn
+        {:owner_request, ^owner, _, {:close_all, _, _}} -> true
+        _ -> false
+      end)
+    end)
+
+    send(socket, {:daemon_stopping, WireRecords.daemon_stopping("operator_stop")})
+    eventually(fn -> :sys.get_state(socket).closing != nil end)
+    closing = :sys.get_state(socket)
+    assert closing.closing.owner == nil and closing.closing.retirement == nil
+    assert closing.progress_frames == before_close.progress_frames
+    assert closing.progress_leases == before_close.progress_leases
+    assert closing.progress_bytes == before_close.progress_bytes
+    cutoff = closing.closing.cutoff
+    assert_receive {:DOWN, ^socket_monitor, :process, ^socket, :normal}, 2_000
+    assert now_ms() >= cutoff
+    refute_received {:trace, ^guardian, :receive, {:"$gen_call", {^socket, _}, {:close, _}}}
+    send(registry, {:continue_socket_emission, gate})
+    assert_receive {:socket_close_answer, ^caller, {:error, :connections_lost}}, 1_000
+    assert_receive {:DOWN, ^caller_monitor, :process, ^caller, :normal}, 1_000
+    assert :sys.get_state(registry).close_all_failed
+    assert :sys.get_state(registry).socket_retirement_controls == %{}
+  end
+
+  test "credited ordinary Socket progress retains32 leases and refuses native byte pressure" do
+    {:ok, sink} = Loopex.ProgressSink.open()
+
     state = %{
+      progress_sink: sink,
+      progress_leases: %{},
+      progress_frames: %{},
+      closing: nil,
+      succession: nil,
       attachment: %{session_id: "session"},
       progress: :queue.new(),
       progress_bytes: 0,
@@ -246,18 +784,26 @@ defmodule LoopexDaemon.SocketConnectionTest do
           content_index: 0
         }
 
-        assert {:noreply, next} =
-                 LoopexDaemon.SocketConnection.handle_info(
-                   {:daemon_progress, "session", item},
-                   state
-                 )
+        if index <= 32 do
+          assert :ok = Loopex.ProgressSink.try_offer(sink, "session", item)
+          assert_receive {:loopex_progress_ready, ^sink}, 1_000
 
-        next
+          assert {:noreply, next} =
+                   LoopexDaemon.SocketConnection.handle_info(
+                     {:loopex_progress_ready, sink},
+                     state
+                   )
+
+          next
+        else
+          assert :dropped = Loopex.ProgressSink.try_offer(sink, "session", item)
+          state
+        end
       end)
 
     assert :queue.len(queued.progress) == 32
     assert queued.progress_bytes <= 524_288
-    [first | _] = :queue.to_list(queued.progress)
+    [{_lease, first} | _] = :queue.to_list(queued.progress)
 
     assert {:ok, first_record} =
              LoopexProtocol.Frame.decode(
@@ -265,7 +811,12 @@ defmodule LoopexDaemon.SocketConnectionTest do
                LoopexProtocol.Frame.output_record_bytes()
              )
 
-    assert first_record["progress"]["text"] == "item-2"
+    assert first_record["progress"]["text"] == "item-1"
+
+    assert map_size(queued.progress_leases) == 32
+
+    for {lease, _} <- :queue.to_list(queued.progress),
+        do: assert(:ok == Loopex.ProgressSink.release(sink, lease))
 
     large = %{
       kind: :text_delta,
@@ -278,16 +829,12 @@ defmodule LoopexDaemon.SocketConnectionTest do
     }
 
     for _ <- 1..2 do
-      assert {:noreply, ^state} =
-               LoopexDaemon.SocketConnection.handle_info(
-                 {:daemon_progress, "session", large},
-                 state
-               )
+      assert :dropped = Loopex.ProgressSink.try_offer(sink, "session", large)
     end
 
-    # Concept: valid byte pressure still drops progress without detaching.
-    # Technical depth: each encoded identity and chunk fits its native ceiling;
-    # two complete records exceed the existing 512 KiB transient byte budget.
+    # Concept: native credit refuses oversized backing before encoded copies.
+    # Technical depth: the accepted native charge is stricter than the encoded
+    # ceiling; real byte pressure cannot be manufactured by bypassing admission.
     bytes = :binary.copy(<<255>>, 65_536)
 
     byte_pressure = %{
@@ -302,39 +849,32 @@ defmodule LoopexDaemon.SocketConnectionTest do
       chunk: String.duplicate("x", 65_536)
     }
 
+    assert :dropped = Loopex.ProgressSink.try_offer(sink, "session", byte_pressure)
+    fitting = %{large | text: String.duplicate("x", 30_000)}
+    assert :ok = Loopex.ProgressSink.try_offer(sink, "session", fitting)
+    assert_receive {:loopex_progress_ready, ^sink}, 1_000
+
     assert {:noreply, one} =
-             LoopexDaemon.SocketConnection.handle_info(
-               {:daemon_progress, "session", byte_pressure},
-               state
-             )
+             LoopexDaemon.SocketConnection.handle_info({:loopex_progress_ready, sink}, state)
 
     assert :queue.len(one.progress) == 1
-    assert one.progress_bytes > 262_144
-    [first_encoded] = :queue.to_list(one.progress)
-    assert byte_size(first_encoded) == one.progress_bytes
-    assert byte_size(first_encoded) <= LoopexProtocol.Frame.output_record_bytes()
+    assert map_size(one.progress_leases) == 1
+    [{lease, encoded}] = :queue.to_list(one.progress)
+    assert byte_size(encoded) == one.progress_bytes
+    assert one.progress_bytes > 30_000 and one.progress_bytes <= 524_288
+    {_guardian, native_incarnation, arena} = sink
 
-    assert {:ok, first_byte_record} =
-             LoopexProtocol.Frame.decode(
-               String.trim_trailing(first_encoded, "\n"),
-               LoopexProtocol.Frame.output_record_bytes()
-             )
+    [{:state, ^native_incarnation, owner, _status, native_bytes, slots, _ready}] =
+      :ets.lookup(arena, :state)
 
-    assert first_byte_record["progress"]["progress_sequence"] == "0"
+    assert owner == self()
+    {^native_incarnation, slot, token} = lease
+    assert {^token, :leased, ^owner, charge} = elem(slots, slot)
+    assert native_bytes == charge and native_bytes <= 524_288
+    assert native_bytes + charge > 524_288
 
-    assert {:ok, ^bytes} =
-             LoopexProtocol.Wire.identity(first_byte_record["progress"]["tool_call_id"])
-
-    assert {:noreply, trimmed} =
-             LoopexDaemon.SocketConnection.handle_info(
-               {:daemon_progress, "session",
-                %{byte_pressure | progress_sequence: 1, byte_offset: 65_536}},
-               one
-             )
-
-    assert :queue.len(trimmed.progress) == 1
-    assert trimmed.progress_bytes <= 524_288
-    [encoded] = :queue.to_list(trimmed.progress)
+    assert :dropped =
+             Loopex.ProgressSink.try_offer(sink, "session", %{fitting | model_sequence: 1})
 
     assert {:ok, record} =
              LoopexProtocol.Frame.decode(
@@ -342,17 +882,218 @@ defmodule LoopexDaemon.SocketConnectionTest do
                LoopexProtocol.Frame.output_record_bytes()
              )
 
-    assert {:ok, ^bytes} = LoopexProtocol.Wire.identity(record["progress"]["turn_id"])
-    assert record["progress"]["progress_sequence"] == "1"
-    assert record["progress"]["byte_offset"] == "65536"
+    assert record["progress"]["text"] == fitting.text
+    assert :ok = Loopex.ProgressSink.release(sink, lease)
+    assert :ok = Loopex.ProgressSink.close(sink)
+  end
 
-    oversized = %{large | text: String.duplicate("x", LoopexProtocol.Frame.output_record_bytes())}
+  # Concept: a fixture observes creation startup before its single native create.
+  # Technical depth: the public snapshot retains the literal original startup
+  # identity and deadline under one finite observation cutoff; no create is probed.
+  defp await_creation_startup(runtime) do
+    cutoff = now_ms() + 1_000
+    assert {:ok, snapshot} = Loopex.creation_startup_status(runtime, 1_000)
+    await_creation_startup(runtime, snapshot, min(cutoff, snapshot.startup_deadline_ms))
+  end
 
-    assert {:noreply, ^state} =
-             LoopexDaemon.SocketConnection.handle_info(
-               {:daemon_progress, "session", oversized},
-               state
-             )
+  defp await_creation_startup(runtime, snapshot, cutoff) do
+    remaining = cutoff - now_ms()
+    assert remaining > 0
+
+    case snapshot.state do
+      :ready ->
+        :ok
+
+      :starting ->
+        receive do
+        after
+          min(10, remaining) -> :ok
+        end
+
+        remaining = cutoff - now_ms()
+        assert remaining > 0
+        assert {:ok, next} = Loopex.creation_startup_status(runtime, min(1_000, remaining))
+        assert next.startup_id == snapshot.startup_id
+        assert next.startup_deadline_ms == snapshot.startup_deadline_ms
+        await_creation_startup(runtime, next, cutoff)
+
+      unavailable ->
+        flunk("original creation startup unavailable: #{inspect(unavailable)}")
+    end
+  end
+
+  # Concept: retirement proofs begin with public creation/attachment and real credit.
+  # Technical depth: the accepted emission reply, not physical send alone, ends
+  # external custody. No constructed Socket state or fake native close is used.
+  defp progress_client(daemon, runtime) do
+    client = initialized_client(daemon)
+    [socket] = initialized_connections(daemon)
+
+    :ok =
+      send_frame(client, %{
+        "method" => "session.create",
+        "request_id" => "close-create",
+        "command_id" => Wire.encode_identity("close-create"),
+        "session_options" => %{"purpose" => "retirement-proof"}
+      })
+
+    assert [%{"type" => "admission", "status" => "accepted", "session_id" => encoded}] =
+             receive_records(client, 1)
+
+    assert {:ok, session} = Wire.identity(encoded)
+    assert {:ok, %{event_sequence: cursor}} = Loopex.session_status(runtime, session)
+
+    :ok =
+      send_frame(client, %{
+        "method" => "session.attach",
+        "request_id" => "close-attach",
+        "session_id" => encoded,
+        "after_event_sequence" => Wire.encode_u64(cursor)
+      })
+
+    assert [%{"type" => "snapshot"}] = receive_records(client, 1)
+    sink = :sys.get_state(socket).progress_sink
+
+    :ok =
+      Loopex.ProgressSink.try_offer(sink, session, %{
+        progress_item(0)
+        | base_event_sequence: cursor
+      })
+
+    assert [%{"type" => "progress", "progress" => %{"text" => "retirement-proof"}}] =
+             receive_records(client, 1)
+
+    eventually(fn ->
+      state = :sys.get_state(socket)
+
+      map_size(state.progress_leases) == 0 and map_size(state.progress_frames) == 0 and
+        state.progress_bytes == 0 and :queue.is_empty(state.progress) and
+        state.enqueues_pending == 0 and :queue.is_empty(state.output_cursors) and
+        state.output_claim == nil and state.send_select == nil and
+        not Enum.any?(state.exchanges, fn {_id, exchange} ->
+          elem(exchange.label, 0) in [:enqueue, :enqueue_progress, :claim, :emitted]
+        end)
+    end)
+
+    {client, socket, session, sink}
+  end
+
+  defp progress_item(sequence) do
+    %{
+      kind: :text_delta,
+      turn_id: "turn",
+      text: "retirement-proof",
+      stream_domain_id: "0123456789abcdef0123456789abcdef",
+      model_sequence: sequence,
+      content_index: 0,
+      base_event_sequence: 0
+    }
+  end
+
+  defp close_connections(daemon) do
+    observer = self()
+
+    {caller, monitor} =
+      spawn_monitor(fn ->
+        result =
+          Owner.close_connections(
+            daemon.owner,
+            WireRecords.daemon_stopping("operator_stop"),
+            now_ms() + 5_000
+          )
+
+        send(observer, {:socket_close_answer, self(), result})
+      end)
+
+    on_exit(fn -> if Process.alive?(caller), do: Process.exit(caller, :kill) end)
+    {caller, monitor}
+  end
+
+  defp socket_row(registry, socket),
+    do:
+      Enum.find(:sys.get_state(registry).rows, fn {_token, row} ->
+        row.connection_pid == socket
+      end)
+
+  defp park_socket_terminal(socket, registry) do
+    gate = make_ref()
+    observer = self()
+
+    :ok =
+      :sys.install(
+        socket,
+        {gate,
+         fn
+           :waiting, {:in, {:socket_native_retirement, close_ref}}, _extra ->
+             send(observer, {:socket_terminal_parked, gate, close_ref})
+             await_socket_terminal(gate, registry)
+
+           debug, _event, _extra ->
+             debug
+         end, :waiting}
+      )
+
+    on_exit(fn -> send(socket, {:continue_socket_terminal, gate}) end)
+    gate
+  end
+
+  defp await_socket_terminal(gate, registry) do
+    receive do
+      {:continue_socket_terminal, ^gate} ->
+        :done
+
+      {:probe_socket_terminal, ^gate, requests, observer} ->
+        results = Enum.map(requests, &GenServer.call(registry, &1, 100))
+        send(observer, {:socket_terminal_probe, gate, results})
+        await_socket_terminal(gate, registry)
+    end
+  end
+
+  defp probe_socket_request(socket, registry, request) do
+    gate = make_ref()
+    observer = self()
+
+    :ok =
+      :sys.install(
+        socket,
+        {gate,
+         fn
+           :waiting, {:in, {:probe_socket_request, ^gate}}, _extra ->
+             result = GenServer.call(registry, request, 100)
+             send(observer, {:socket_request_probe, gate, result})
+             :done
+
+           debug, _event, _extra ->
+             debug
+         end, :waiting}
+      )
+
+    send(socket, {:probe_socket_request, gate})
+    assert_receive {:socket_request_probe, ^gate, result}, 1_000
+    result
+  end
+
+  defp now_ms, do: System.monotonic_time(:millisecond)
+
+  defp wait_until(cutoff) do
+    remaining = cutoff - now_ms()
+
+    if remaining > 0 do
+      receive do
+      after
+        remaining -> :ok
+      end
+
+      wait_until(cutoff)
+    end
+  end
+
+  defp resume_actor(actor) do
+    try do
+      :sys.resume(actor)
+    catch
+      :exit, _ -> :ok
+    end
   end
 
   defp initialized_connections(daemon) do

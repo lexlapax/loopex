@@ -1,0 +1,455 @@
+defmodule LoopexCli.DaemonRetirementWitnessDriver do
+  @moduledoc false
+
+  alias LoopexDaemon.{ConnectionRegistry, Owner, Sentinel, Service, SocketConnection}
+  alias Loopex.ProgressSink
+
+  @max_events 4_096
+  @modules [LoopexCli.Daemon, Sentinel, Service, Owner, ConnectionRegistry, SocketConnection, ProgressSink]
+
+  def run(arguments, evidence) do
+    :ok = :io.setopts(:standard_io, encoding: :unicode)
+    :ok = :io.setopts(:standard_error, encoding: :unicode)
+    {:ok, _applications} = Application.ensure_all_started(:loopex_cli)
+    _ = :logger.update_handler_config(:default, :config, %{type: :standard_error})
+    :ok = Logger.configure(level: :info)
+    Enum.each(@modules, &Code.ensure_loaded!/1)
+
+    modules = Enum.map(@modules, &module_identity/1)
+    {collector, monitor} = spawn_monitor(fn -> collect([], 0, 0, nil) end)
+    scope_key = {__MODULE__, :observer_scope, make_ref()}
+    Process.put(scope_key, %{
+      collector: collector, monitor: monitor, session: nil, status: nil,
+      cutoff: nil, snapshot: nil, down: nil, joined_at: nil,
+      session_destroyed: false, cleanup_errors: []
+    })
+
+    result =
+      try do
+        session = :trace.session_create(:m7_daemon_retirement_witness, collector, [])
+        update_scope(scope_key, &%{&1 | session: session})
+        install(session)
+
+        # Concept: observe the actual installed signal and native close route.
+        # Technical depth: only notify differs from the CLI halt wrapper; the
+        # same application graph, stdout/stderr, options and signals are used.
+        1 = :trace.process(session, self(), true, [
+          :call, :arity, :receive, :set_on_spawn, :monotonic_timestamp
+        ])
+
+        status = LoopexCli.Daemon.run(arguments, notify: collector)
+        cutoff = System.monotonic_time(:millisecond) + 1_000
+        update_scope(scope_key, &%{&1 | status: status, cutoff: cutoff})
+        send(collector, {:finish, self(), session, cutoff})
+        snapshot = await_snapshot(scope_key)
+        update_scope(scope_key, &%{&1 | snapshot: snapshot})
+
+        if snapshot.complete and snapshot.overflow == 0,
+          do: :ok,
+          else: {:error, :observer_trace_incomplete}
+      catch
+        kind, reason -> {:error, bounded_failure(kind, reason)}
+      after
+        cleanup_observer(scope_key)
+      end
+
+    scope = Process.delete(scope_key)
+    snapshot = scope.snapshot || %{events: [], overflow: 0, complete: false}
+    observer_ok = scope.cleanup_errors == [] and scope.session_destroyed and
+      match?({:DOWN, ^monitor, :process, ^collector, :normal}, scope.down)
+    witness_ok = result == :ok and observer_ok and snapshot.complete and snapshot.overflow == 0
+
+    metadata = %{
+      "format" => "m7-daemon-retirement-metadata/2",
+      "os_pid" => System.pid(), "status" => scope.status,
+      "witness_status" => if(witness_ok, do: scope.status, else: 1),
+      "modules" => modules,
+      "native_ticks_per_second" => System.convert_time_unit(1, :second, :native),
+      "trace_complete" => snapshot.complete and observer_ok,
+      "overflow" => snapshot.overflow, "events" => snapshot.events,
+      "observer" => %{
+        "collector" => inspect(collector), "monitor" => inspect(monitor),
+        "down_reason" => observer_reason(scope.down),
+        "joined_at_ms" => scope.joined_at, "cutoff_ms" => scope.cutoff,
+        "session_destroyed" => scope.session_destroyed,
+        "cleanup_errors" => Enum.map(scope.cleanup_errors, &Atom.to_string/1)
+      },
+      "witness_error" => if(witness_ok, do: nil, else: safe(if(result == :ok, do: {:error, :observer_teardown_unproved}, else: result)))
+    }
+
+    File.write!(evidence, JSON.encode!(metadata) <> "\n", [:exclusive])
+    # Concept: observer uncertainty cannot acknowledge a successful witness.
+    # Technical depth: the native status is retained separately; only a fenced
+    # snapshot, scoped-session destruction and original normal collector DOWN
+    # within the one observer cutoff allow that status to be returned unchanged.
+    System.halt(if(witness_ok, do: scope.status, else: 1))
+  end
+
+  # Concept: snapshot and observer retirement spend one captured allowance.
+  # Technical depth: reserve up to the final 100 ms of that same 1,000 ms for
+  # failure containment; no new allowance is granted after snapshot timeout.
+  defp await_snapshot(scope_key) do
+    scope = Process.get(scope_key)
+    remaining_observer!(scope.cutoff)
+    allowance = max(wait_delay(scope.cutoff) - 100, 0)
+    collector = scope.collector
+    monitor = scope.monitor
+
+    receive do
+      {:retirement_trace, ^collector, snapshot} ->
+        remaining_observer!(scope.cutoff)
+        snapshot
+
+      {:DOWN, ^monitor, :process, ^collector, _reason} = down ->
+        update_scope(scope_key, &%{&1 | down: down, joined_at: System.monotonic_time(:millisecond)})
+        throw(:observer_down_before_snapshot)
+    after
+      allowance -> throw(:observer_snapshot_timeout)
+    end
+  end
+
+  defp cleanup_observer(scope_key) do
+    scope = Process.get(scope_key)
+    cutoff = scope.cutoff || System.monotonic_time(:millisecond) + 1_000
+    update_scope(scope_key, &%{&1 | cutoff: cutoff})
+
+    # Concept: every established session is destroyed, including exceptional paths.
+    # Technical depth: destruction is attempted even after cutoff exhaustion;
+    # late return or failure stays uncertain and cannot become successful metadata.
+    if scope.session do
+      timely_before = System.monotonic_time(:millisecond) < cutoff
+      destroyed =
+        try do
+          _ = :trace.session_destroy(scope.session)
+          :ok
+        catch
+          _kind, _reason -> :error
+        end
+
+      if destroyed == :ok and timely_before and System.monotonic_time(:millisecond) < cutoff do
+        update_scope(scope_key, &%{&1 | session_destroyed: true})
+      else
+        cleanup_error(scope_key, :session_destruction_unproved)
+      end
+    else
+      cleanup_error(scope_key, :session_not_established)
+    end
+
+    scope = Process.get(scope_key)
+    unless scope.down do
+      if scope.snapshot == nil or not scope.session_destroyed,
+        do: Process.exit(scope.collector, :kill)
+
+      join_original_collector(scope_key, cutoff)
+    end
+
+    scope = Process.get(scope_key)
+    if scope.joined_at == nil or scope.joined_at >= cutoff,
+      do: cleanup_error(scope_key, :collector_join_unproved)
+
+    unless match?({:DOWN, _, :process, _, :normal}, scope.down),
+      do: cleanup_error(scope_key, :collector_down_not_normal)
+  end
+
+  defp join_original_collector(scope_key, cutoff) do
+    scope = Process.get(scope_key)
+    collector = scope.collector
+    monitor = scope.monitor
+
+    if System.monotonic_time(:millisecond) < cutoff do
+      receive do
+        {:DOWN, ^monitor, :process, ^collector, _reason} = down ->
+          observed = System.monotonic_time(:millisecond)
+          update_scope(scope_key, &%{&1 | down: down, joined_at: observed})
+          if observed >= cutoff, do: cleanup_error(scope_key, :collector_join_unproved)
+      after
+        wait_delay(cutoff) ->
+          Process.exit(collector, :kill)
+          cleanup_error(scope_key, :collector_join_unproved)
+      end
+    else
+      Process.exit(collector, :kill)
+      cleanup_error(scope_key, :collector_join_unproved)
+    end
+  end
+
+  defp update_scope(key, update), do: Process.put(key, update.(Process.get(key)))
+  defp cleanup_error(key, reason), do: update_scope(key, &%{&1 | cleanup_errors: [reason | &1.cleanup_errors]})
+  defp wait_delay(cutoff), do: max(0, cutoff - System.monotonic_time(:millisecond))
+  defp remaining_observer!(cutoff) do
+    if System.monotonic_time(:millisecond) >= cutoff, do: throw(:observer_cutoff_expired)
+    :ok
+  end
+
+  defp bounded_failure(kind, reason) when is_atom(reason), do: {kind, reason}
+  defp bounded_failure(kind, _reason), do: {kind, :unavailable_failure_shape}
+  defp observer_reason({:DOWN, _, :process, _, reason}) when is_atom(reason), do: Atom.to_string(reason)
+  defp observer_reason(_), do: "unavailable_reason_shape"
+
+  defp module_identity(module) do
+    {^module, beam, object_path} = :code.get_object_code(module)
+    source = module.module_info(:compile) |> Keyword.fetch!(:source) |> List.to_string()
+
+    source_sha256 =
+      case File.read(source) do
+        {:ok, bytes} -> sha256(bytes)
+        {:error, _} -> nil
+      end
+
+    %{
+      "module" => Atom.to_string(module),
+      "loaded_path" => :code.which(module) |> List.to_string(),
+      "object_path" => List.to_string(object_path),
+      "beam_sha256" => sha256(beam),
+      "loaded_md5" => module.module_info(:md5) |> Base.encode16(case: :lower),
+      "compile_source" => source,
+      "current_source_sha256" => source_sha256
+    }
+  end
+
+  defp sha256(bytes), do: Base.encode16(:crypto.hash(:sha256, bytes), case: :lower)
+
+  # Concept: observations contain identities, counters and decisions only.
+  # Technical depth: arity-only call records omit state/request arguments.
+  # Match-spec messages project closed metadata; only bounded-result functions
+  # get return_trace. Filtered receives admit atom-reason DOWN/EXIT only.
+  defp install(session) do
+    :trace.recv(
+      session,
+      [
+        {[:_, :_, {:DOWN, :"$1", :process, :"$2", :"$3"}],
+         [{:is_reference, :"$1"}, {:is_pid, :"$2"}, {:is_atom, :"$3"}], []},
+        {[:_, :_, {:EXIT, :"$1", :"$2"}], [{:is_pid, :"$1"}, {:is_atom, :"$2"}], []}
+      ],
+      []
+    )
+
+    pattern(session, Service, :fail_stop, 2,
+      [{[:_, :"$1"], [{:is_atom, :"$1"}], [{:message, tuple([:service_fail_stop, :"$1"])}]}]
+    )
+
+    pattern(session, Owner, :close_connections, 3,
+      [{[:"$1", :_, :"$2"], [], [{:message, tuple([:owner_close, :"$1", :"$2"])}, {:return_trace}]}]
+    )
+
+    pattern(session, ProgressSink, :open, 0, [{[], [], [{:message, :sink_open}, {:return_trace}]}])
+
+    pattern(session, ProgressSink, :close, 1,
+      [{[:"$1"], [], [{:message, tuple([:sink_close, :"$1"])}, {:return_trace}]}]
+    )
+
+    pattern(session, :erlang, :monitor, 2,
+      [{[:process, :"$1"], [{:is_pid, :"$1"}], [{:message, tuple([:monitor, :"$1"])}, {:return_trace}]}],
+      []
+    )
+
+    pattern(session, ConnectionRegistry, :socket_retirement_control, 5,
+      [{[:"$1", :"$2", :"$3", :"$4", :"$5"], [],
+        [{:message, tuple([:retirement_control, :"$1", :"$2", :"$3", :"$4", :"$5"])}]}]
+    )
+
+    for function <- [:fail_socket_retirement, :socket_retirement_step] do
+      row = get(get(:"$1", :rows), :"$2")
+      pattern(session, ConnectionRegistry, function, 2,
+        [
+          {[:"$1", :"$2"], [{:is_map, row}, {:is_map, get(row, :native_retirement)}],
+           [{:message, tuple([function, :"$2", row_metadata(row)])}]},
+          {[:"$1", :"$2"], [{:is_map, row}],
+           [{:message, tuple([function, :"$2", row_without_intent(row)])}]},
+          {[:_, :"$1"], [], [{:message, tuple([function, :"$1", :missing_row])}]}
+        ]
+      )
+    end
+
+    pattern(session, ConnectionRegistry, :retain_socket_retirement_disposition, 3,
+      [
+        {[:_, :"$1", :"$2"], [{:is_map, get(:"$2", :native_retirement)}],
+         [{:message, tuple([:retained_disposition, :"$1", row_metadata(:"$2")])}]},
+        {[:_, :"$1", :"$2"], [],
+         [{:message, tuple([:retained_disposition, :"$1", row_without_intent(:"$2")])}]}
+      ]
+    )
+
+    close = get(:"$1", :close_all)
+    pattern(session, ConnectionRegistry, :finish_registry_progress_close, 2,
+      [{[:"$1", :"$2"], [],
+        [{:message, tuple([
+          :registry_close_input, :"$2", get(close, :ref), get(close, :deadline),
+          get(close, :phase), get(:"$1", :progress_phase), get(:"$1", :close_all_failed),
+          {:map_size, get(close, :dispositions)}, {:map_size, get(:"$1", :rows)}
+        ])}]}]
+    )
+
+    pattern(session, ConnectionRegistry, :handle_info, 2,
+      [
+        {[{:socket_retirement_control_ready, :"$1", :"$2", :"$3", :"$4"}, :_], [],
+         [{:message, tuple([:control_ready, :"$1", :"$2", :"$3", :"$4"])}]},
+        {[{:DOWN, :"$1", :process, :"$2", :"$3"}, :_],
+         [{:not, {:is_atom, :"$3"}}], [{:message, tuple([:down_reason_unavailable_shape, :"$1", :"$2"])}]},
+        {[{:close_registry_progress, :"$1"}, :_], [], [{:message, tuple([:registry_arena_close, :"$1"])}]},
+        {[{:close_all_deadline, :"$1"}, :_], [], [{:message, tuple([:registry_deadline, :"$1"])}]}
+      ]
+    )
+
+    pattern(session, ConnectionRegistry, :handle_call, 3,
+      [
+        {[{:socket_retirement_intent, :"$1", :"$2", :"$3", :"$4"}, {:"$5", :_}, :_], [],
+         [{:message, tuple([:retirement_intent, :"$5", :"$1", :"$2", :"$3", :"$4"])}]},
+        {[{:socket_native_retirement_result, :"$1", :"$2", :"$3", :"$4", :ok}, {:"$5", :_}, :_], [],
+         [{:message, tuple([:retirement_result, :"$5", :"$1", :"$2", :"$3", :"$4", :ok])}]}
+      ]
+    )
+
+    pattern(session, Owner, :handle_info, 2,
+      [
+        {[{:owner_reply, :"$1", :"$2", :ok}, :_], [],
+         [{:message, tuple([:owner_registry_reply, :"$1", :"$2", :ok])}]},
+        {[{:owner_reply, :"$1", :"$2", {:ok, :forced}}, :_], [],
+         [{:message, tuple([:owner_registry_reply, :"$1", :"$2", tuple([:ok, :forced])])}]},
+        {[{:owner_reply, :"$1", :"$2", {:error, :"$3"}}, :_], [{:is_atom, :"$3"}],
+         [{:message, tuple([:owner_registry_reply, :"$1", :"$2", tuple([:error, :"$3"])])}]},
+        {[{:close_connections_deadline, :"$1"}, :_], [], [{:message, tuple([:owner_deadline, :"$1"])}]}
+      ]
+    )
+
+    pattern(session, SocketConnection, :drained_final_custody?, 1,
+      [{[:"$1"], [],
+        [{:message, tuple([
+          :socket_custody, {:map_size, get(:"$1", :progress_leases)},
+          {:map_size, get(:"$1", :progress_frames)}, get(:"$1", :progress_bytes),
+          get(:"$1", :enqueues_pending), {:==, get(:"$1", :output_claim), nil},
+          {:==, get(:"$1", :send_select), nil}, {:map_size, get(:"$1", :exchanges)}
+        ])}, {:return_trace}]}]
+    )
+
+    pattern(session, SocketConnection, :output_answered, 3,
+      [
+        {[:_, {:socket_retirement_intent, :"$1"}, {:reply, {:ok, :"$2"}}], [{:is_pid, :"$2"}],
+         [{:message, tuple([:intent_answer, :"$1", tuple([:ok, :"$2"])])}]},
+        {[:_, {:socket_retirement_intent, :"$1"}, {:reply, {:error, :"$2"}}], [{:is_atom, :"$2"}],
+         [{:message, tuple([:intent_answer, :"$1", tuple([:error, :"$2"])])}]},
+        {[:_, {:socket_retirement_intent, :"$1"}, :_], [],
+         [{:message, tuple([:intent_answer_unavailable_shape, :"$1"])}]}
+      ]
+    )
+
+    pattern(session, SocketConnection, :handle_info, 2,
+      [
+        {[{:socket_native_retirement, :"$1"}, :_], [], [{:message, tuple([:socket_terminal, :"$1"])}]},
+        {[{:owner_loss_close_deadline, :"$1"}, :_], [], [{:message, tuple([:socket_deadline, :"$1"])}]}
+      ]
+    )
+  end
+
+  defp row_metadata(row) do
+    intent = get(row, :native_retirement)
+    output = get(row, :output)
+
+    tuple([
+      get(row, :connection_pid), get(row, :connection_incarnation), get(row, :phase),
+      get(row, :connection_down), tuple([
+        {:is_atom, get(row, :connection_exit)}, {:==, get(row, :connection_exit), :normal},
+        {:==, get(row, :connection_exit), :killed}, {:==, get(row, :connection_exit), :shutdown}
+      ]), get(row, :progress_sink),
+      get(row, :progress_monitor), get(intent, :close_ref), get(intent, :cutoff),
+      get(intent, :control), get(intent, :control_monitor), get(intent, :ready),
+      get(intent, :result), get(intent, :guardian_joined), get(intent, :control_joined),
+      get(intent, :outcome), get(output, :bytes), {:==, get(output, :claim), nil},
+      get(output, :progress_items), get(output, :progress_bytes)
+    ])
+  end
+
+  defp row_without_intent(row) do
+    tuple([
+      :no_native_intent, get(row, :connection_pid), get(row, :connection_incarnation),
+      get(row, :phase), get(row, :connection_down), get(row, :progress_sink),
+      get(row, :progress_monitor)
+    ])
+  end
+
+  defp get(map, key), do: {:map_get, key, map}
+  defp tuple(items), do: {List.to_tuple(items)}
+
+  defp pattern(session, module, function, arity, clauses, flags \\ [:local]) do
+    if :trace.function(session, {module, function, arity}, clauses, flags) < 1,
+      do: raise("retirement trace function unavailable")
+  end
+
+  defp collect(events, count, overflow, fence) do
+    receive do
+      {:trace_ts, pid, :call, {module, function, arity}, metadata, at} ->
+        event = %{
+          "kind" => "call", "actor" => safe(pid), "mfa" => safe({module, function, arity}),
+          "metadata" => safe(metadata), "at_native" => at
+        }
+        retain(event, events, count, overflow, fence)
+
+      {:trace_ts, pid, :return_from, {module, function, arity}, result, at} ->
+        event = %{
+          "kind" => "return", "actor" => safe(pid), "mfa" => safe({module, function, arity}),
+          "result" => safe_return(module, function, result), "at_native" => at
+        }
+        retain(event, events, count, overflow, fence)
+
+      {:trace_ts, pid, :receive, {:DOWN, ref, :process, target, reason}, at} ->
+        event = %{
+          "kind" => "original_down", "actor" => safe(pid), "monitor" => safe(ref),
+          "target" => safe(target), "reason" => safe(reason), "at_native" => at
+        }
+        retain(event, events, count, overflow, fence)
+
+      {:trace_ts, pid, :receive, {:EXIT, target, reason}, at} ->
+        event = %{
+          "kind" => "original_exit", "actor" => safe(pid), "target" => safe(target),
+          "reason" => safe(reason), "at_native" => at
+        }
+        retain(event, events, count, overflow, fence)
+
+      {:loopex_daemon_sentinel, sentinel, ref, service} ->
+        event = %{
+          "kind" => "original_sentinel", "sentinel" => safe(sentinel),
+          "reference" => safe(ref), "service" => safe(service)
+        }
+        retain(event, events, count, overflow, fence)
+
+      {:finish, caller, session, cutoff} when fence == nil ->
+        if System.monotonic_time(:millisecond) >= cutoff, do: exit(:observer_fence_cutoff_expired)
+        reference = :trace.delivered(session, :all)
+        if System.monotonic_time(:millisecond) >= cutoff, do: exit(:observer_fence_cutoff_expired)
+        collect(events, count, overflow, {caller, reference, cutoff})
+
+      {:trace_delivered, :all, ref} when fence != nil and elem(fence, 1) == ref ->
+        if System.monotonic_time(:millisecond) >= elem(fence, 2), do: exit(:observer_fence_cutoff_expired)
+        send(elem(fence, 0), {:retirement_trace, self(), %{
+          events: Enum.reverse(events), overflow: overflow, complete: true
+        }})
+
+      _unexpected ->
+        collect(events, count, overflow + 1, fence)
+    end
+  end
+
+  defp retain(event, events, count, overflow, fence) when count < @max_events,
+    do: collect([event | events], count + 1, overflow, fence)
+
+  defp retain(_event, events, count, overflow, fence),
+    do: collect(events, count, overflow + 1, fence)
+
+  defp safe_return(ProgressSink, :open, {:ok, {pid, incarnation, arena}})
+       when is_pid(pid) and is_reference(incarnation) and is_reference(arena),
+       do: safe({:ok, {pid, incarnation, arena}})
+
+  defp safe_return(:erlang, :monitor, result) when is_reference(result), do: safe(result)
+  defp safe_return(SocketConnection, :drained_final_custody?, result) when is_boolean(result), do: result
+  defp safe_return(_module, _function, :ok), do: "ok"
+  defp safe_return(_module, _function, {:ok, :forced}), do: ["ok", "forced"]
+  defp safe_return(_module, _function, {:error, reason}) when is_atom(reason), do: ["error", safe(reason)]
+  defp safe_return(_module, _function, _result), do: "unavailable_result_shape"
+
+  defp safe(term) when is_pid(term) or is_reference(term), do: inspect(term)
+  defp safe(term) when is_boolean(term) or is_integer(term) or is_nil(term), do: term
+  defp safe(term) when is_atom(term), do: Atom.to_string(term)
+  defp safe(term) when is_binary(term) and byte_size(term) <= 128, do: Base.encode16(term, case: :lower)
+  defp safe(term) when is_tuple(term), do: term |> Tuple.to_list() |> Enum.map(&safe/1)
+  defp safe(_term), do: "unavailable_metadata_shape"
+end

@@ -8,7 +8,7 @@ defmodule LoopexDaemon.SocketConnection do
 
   ## Technical depth
 
-  `init/1` performs no IO or external call. It installs monitors on the exact
+  `init/1` opens its own credited native progress arena and installs monitors on the exact
   registry and listener and waits. After the listener has transferred the
   socket and the registry has recorded that result, activation asks the
   registry to promote the provisional slot. Only a successful acknowledgement
@@ -25,9 +25,8 @@ defmodule LoopexDaemon.SocketConnection do
   contain no received bytes. The socket, buffered bytes and monitor handles are
   redacted from formatted process status.
 
-  Every exchange with the registry and the relay is a request message whose
-  answer arrives in `handle_info/2`: the connection never waits inside a
-  handler, so a stalled registry cannot keep it from an owner-loss close, a
+  Every serving exchange with the registry and the relay is a request message whose
+  answer arrives in `handle_info/2`, so a stalled registry cannot keep it from an owner-loss close, a
   holder close, a relay record or EOF. The registry applies one connection's
   requests in the order they were sent, so output keeps its order and every
   enqueue still meets the output buffer's bounds and the succession reserve
@@ -53,6 +52,13 @@ defmodule LoopexDaemon.SocketConnection do
   writes the one uncorrelated `control_owner_lost` record, stops reading,
   attempts to flush within a fixed bound, closes and only then acknowledges
   the exact close reference.
+
+  Normal final retirement enters the owner-authorized native close only after
+  current empty output and zero external progress custody. Registry first fences
+  fanout and arms an independent child against the original final-close cutoff.
+  This opening Socket closes its transport, then its own native sink and exact
+  guardian. Its terminal result precedes normal exit; Registry separately joins
+  Socket and cutoff child. These acknowledgements cover only this drained path.
   """
 
   use GenServer
@@ -71,6 +77,7 @@ defmodule LoopexDaemon.SocketConnection do
   }
 
   alias LoopexProtocol.{Frame, Session.V2, Wire}
+  alias Loopex.ProgressSink
 
   @owner_loss_close_ms 1_000
 
@@ -132,7 +139,13 @@ defmodule LoopexDaemon.SocketConnection do
 
   @impl true
   def init(options) do
+    {:ok, progress_sink} = ProgressSink.open()
+
     state = %{
+      progress_sink: progress_sink,
+      progress_guardian_monitor: Process.monitor(elem(progress_sink, 0)),
+      progress_leases: %{},
+      progress_frames: %{},
       registry: Keyword.fetch!(options, :registry),
       registry_monitor: nil,
       listener: Keyword.fetch!(options, :listener),
@@ -191,7 +204,7 @@ defmodule LoopexDaemon.SocketConnection do
       request =
         ConnectionRegistry.connection_request(
           state.registry,
-          {:promote, state.rollback_token, state.incarnation}
+          {:promote, state.rollback_token, state.incarnation, state.progress_sink}
         )
 
       state = %{state | phase: :promoting, socket: socket}
@@ -236,41 +249,40 @@ defmodule LoopexDaemon.SocketConnection do
 
   def handle_info(:flush_output, state), do: output_step(state)
 
-  # Concept: progress is decoration: it waits behind durable output in a small
-  # bounded queue and is dropped, oldest first, rather than ever delaying an
-  # event.
-  #
-  # Technical depth: at most 32 records and 512 KiB of encoded progress wait,
-  # ADR 0023's transient bound. The queue is written only when this
-  # connection's durable output is empty.
-  # Concept: the accepted compaction codec remains unserved until its complete
-  # current generation is activated.
-  # Technical depth: reject this family before serialization under the current
-  # negotiated contract, including alternate-key or malformed native items.
-  def handle_info({:daemon_progress, _session_id, %{kind: "context.compaction_progress"}}, state),
-    do: {:noreply, state}
-
+  # Concept: native credit follows every local and Registry copy until its
+  # exact frame has been emitted or discarded. Ready notifications carry no data.
+  # Technical depth: one callback takes at most 32 leases; encoded accounting
+  # includes queue, pending admission, retained output, writer and pending ACK.
   def handle_info(
-        {:daemon_progress, _session_id, %{"kind" => "context.compaction_progress"}},
-        state
-      ),
+        {:loopex_progress_ready, sink},
+        %{progress_sink: sink, closing: %{owner: nil, retirement: retirement}} = state
+      )
+      when retirement in [:registering, :joined],
       do: {:noreply, state}
 
-  def handle_info(
-        {:daemon_progress, session_id, item},
-        %{attachment: %{session_id: session_id}} = state
-      ) do
-    with record when is_map(record) <- WireRecords.progress(session_id, item),
-         {:ok, encoded} <- Frame.encode(record) do
-      state
-      |> queue_progress(IO.iodata_to_binary(encoded))
-      |> flush_progress()
-    else
-      _unencodable -> {:noreply, state}
-    end
+  def handle_info({:loopex_progress_ready, sink}, %{progress_sink: sink} = state) do
+    send(self(), {:loopex_progress_ready, sink})
+    state |> drain_progress(32) |> flush_progress()
   end
 
-  def handle_info({:daemon_progress, _session_id, _item}, state), do: {:noreply, state}
+  def handle_info({:progress_discarded, incarnation, refs}, %{incarnation: incarnation} = state)
+      when is_list(refs) and length(refs) <= @progress_records do
+    state = Enum.reduce(refs, state, &release_progress_frame(&2, &1))
+
+    cursors =
+      Enum.reject(:queue.to_list(state.output_cursors), fn
+        {:progress, ref} -> ref in refs
+        _ -> false
+      end)
+
+    {:noreply, %{state | output_cursors: :queue.from_list(cursors)}}
+  end
+
+  def handle_info(
+        {:DOWN, monitor, :process, _guardian, _reason},
+        %{progress_guardian_monitor: monitor} = state
+      ),
+      do: {:stop, :progress_sink_lost, state}
 
   def handle_info(
         {:"$socket", socket, :select, handle},
@@ -404,6 +416,38 @@ defmodule LoopexDaemon.SocketConnection do
       ),
       do: finish_owner_loss_close(state)
 
+  def handle_info(
+        {:socket_native_retirement, close_ref},
+        %{
+          closing: %{
+            owner: nil,
+            close_ref: close_ref,
+            cutoff: cutoff,
+            retirement: :joined,
+            sink: sink,
+            control: control
+          }
+        } = state
+      ) do
+    if System.monotonic_time(:millisecond) < cutoff and Process.alive?(control) do
+      _ =
+        ConnectionRegistry.connection_request(
+          state.registry,
+          {:socket_native_retirement_result, state.incarnation, sink, close_ref, cutoff, :ok}
+        )
+    end
+
+    {:stop, :normal, state}
+  end
+
+  def handle_info({:socket_native_retirement, _close_ref}, state), do: {:noreply, state}
+
+  def handle_info(
+        {:DOWN, monitor, :process, control, _reason},
+        %{closing: %{owner: nil, control: control, control_monitor: monitor}} = state
+      ),
+      do: {:stop, :normal, state}
+
   # Concept: a stop that reaches a connection still completing its
   # initialization follows the initialization reply, exactly as it would had
   # initialization been one step.
@@ -443,13 +487,7 @@ defmodule LoopexDaemon.SocketConnection do
             {:enqueue_succession_notice, state.incarnation, IO.iodata_to_binary(encoded)}
           )
 
-        state = %{
-          state
-          | attachment: nil,
-            progress: :queue.new(),
-            progress_bytes: 0,
-            succession: :queue.new()
-        }
+        state = %{discard_local_progress(state) | attachment: nil, succession: :queue.new()}
 
         notice = {:notice, session_id, attachment_id, cursor}
         {:noreply, track_enqueue(state, request, nil, notice)}
@@ -1425,8 +1463,18 @@ defmodule LoopexDaemon.SocketConnection do
   # transport accepts it and then closes, within a fixed bound.
   defp begin_final_close(state, record) do
     close_ref = make_ref()
-    Process.send_after(self(), {:owner_loss_close_deadline, close_ref}, @owner_loss_close_ms)
-    state = %{state | closing: %{owner: nil, close_ref: close_ref}}
+    cutoff = System.monotonic_time(:millisecond) + @owner_loss_close_ms
+
+    Process.send_after(
+      self(),
+      {:owner_loss_close_deadline, close_ref},
+      max(cutoff - System.monotonic_time(:millisecond), 0)
+    )
+
+    state = %{
+      state
+      | closing: %{owner: nil, close_ref: close_ref, cutoff: cutoff, retirement: nil}
+    }
 
     case send_record(state, record) do
       {:ok, state} -> {:noreply, state}
@@ -1562,7 +1610,15 @@ defmodule LoopexDaemon.SocketConnection do
         Logger.debug("loopex daemon connection registry lost during an exchange")
         {:stop, :registry_lost, state}
 
-      elem(label, 0) in [:enqueue, :claim, :emitted, :finish_succession, :ignored] ->
+      elem(label, 0) in [
+        :enqueue,
+        :enqueue_progress,
+        :claim,
+        :emitted,
+        :socket_retirement_intent,
+        :finish_succession,
+        :ignored
+      ] ->
         output_answered(state, label, response)
 
       elem(label, 0) == :slot_promotion ->
@@ -2121,6 +2177,11 @@ defmodule LoopexDaemon.SocketConnection do
     await_exchange(state, request, :registry, {:enqueue, cursor, kind})
   end
 
+  defp output_step(%{closing: %{owner: nil, retirement: retirement}} = state)
+       when retirement in [:registering, :joined] do
+    {:noreply, state}
+  end
+
   defp output_step(%{output_claim: nil} = state) do
     request =
       ConnectionRegistry.connection_request(
@@ -2188,7 +2249,11 @@ defmodule LoopexDaemon.SocketConnection do
 
     send(self(), :flush_output)
     state = %{state | output_claim: nil, send_select: nil}
-    {:ok, state |> await_exchange(request, :registry, {:emitted}) |> advance_emitted_cursor()}
+
+    {:ok,
+     state
+     |> await_exchange(request, :registry, {:emitted, frame_ref})
+     |> advance_emitted_cursor()}
   end
 
   defp advance_emitted_cursor(state) do
@@ -2255,6 +2320,26 @@ defmodule LoopexDaemon.SocketConnection do
   # connection. A claim answered `:empty` after a later enqueue was sent is
   # claimed again, so neither a close nor a succession finish can overtake a
   # record already sent to the registry.
+  defp output_answered(state, {:enqueue_progress, lease}, {:reply, {:ok, frame_ref}})
+       when is_reference(frame_ref) do
+    state = %{
+      state
+      | enqueues_pending: state.enqueues_pending - 1,
+        progress_frames: Map.put(state.progress_frames, frame_ref, lease),
+        output_cursors: :queue.in({:progress, frame_ref}, state.output_cursors)
+    }
+
+    {:noreply, resume_input(state)}
+  end
+
+  defp output_answered(state, {:enqueue_progress, lease}, {:reply, :dropped}) do
+    state = release_progress_lease(%{state | enqueues_pending: state.enqueues_pending - 1}, lease)
+    {:noreply, resume_input(state)}
+  end
+
+  defp output_answered(state, {:enqueue_progress, _lease}, _unproved),
+    do: {:stop, :normal, state}
+
   defp output_answered(state, {:enqueue, cursor, kind}, {:reply, :ok}) do
     state =
       resume_input(%{
@@ -2330,6 +2415,7 @@ defmodule LoopexDaemon.SocketConnection do
     state = %{state | output_claim: nil}
 
     cond do
+      match?(%{owner: nil}, state.closing) -> begin_drained_final_close(state)
       state.closing -> finish_owner_loss_close(state)
       state.succession != nil -> finish_succession(state)
       :queue.is_empty(state.progress) -> {:noreply, state}
@@ -2338,13 +2424,99 @@ defmodule LoopexDaemon.SocketConnection do
   end
 
   defp output_answered(state, {:claim, _seq}, _refused), do: {:stop, :normal, state}
-  defp output_answered(state, {:emitted}, {:reply, :ok}), do: {:noreply, state}
-  defp output_answered(state, {:emitted}, _refused), do: {:stop, :normal, state}
+
+  defp output_answered(state, {:emitted, frame_ref}, {:reply, :ok}) do
+    state = release_progress_frame(state, frame_ref)
+
+    if match?(%{owner: nil, retirement: nil}, state.closing),
+      do: output_step(state),
+      else: {:noreply, state}
+  end
+
+  defp output_answered(state, {:socket_retirement_intent, close_ref}, {:reply, {:ok, control}})
+       when is_pid(control) do
+    case state.closing do
+      %{owner: nil, close_ref: ^close_ref, cutoff: cutoff, retirement: :registering} = closing ->
+        state = %{
+          state
+          | closing:
+              Map.merge(closing, %{
+                control: control,
+                control_monitor: Process.monitor(control),
+                sink: state.progress_sink
+              })
+        }
+
+        if drained_final_custody?(state) and System.monotonic_time(:millisecond) < cutoff and
+             Process.alive?(control) and :socket.close(state.socket) == :ok do
+          state = %{state | socket: nil}
+
+          if ProgressSink.close(state.progress_sink) == :ok and
+               System.monotonic_time(:millisecond) < cutoff and Process.alive?(control) do
+            Process.demonitor(state.progress_guardian_monitor, [:flush])
+            send(self(), {:socket_native_retirement, close_ref})
+
+            {:noreply,
+             %{
+               state
+               | progress_sink: nil,
+                 progress_guardian_monitor: nil,
+                 closing: %{state.closing | retirement: :joined}
+             }}
+          else
+            {:stop, :normal, state}
+          end
+        else
+          {:stop, :normal, state}
+        end
+
+      _ ->
+        {:noreply, state}
+    end
+  end
+
+  defp output_answered(state, {:socket_retirement_intent, _close_ref}, _refused),
+    do: {:stop, :normal, state}
+
+  defp output_answered(state, {:emitted, _frame_ref}, _refused), do: {:stop, :normal, state}
 
   defp output_answered(state, {:finish_succession}, response),
     do: succession_finished(state, response)
 
   defp output_answered(state, {:ignored}, _response), do: {:noreply, state}
+
+  # Concept: only a current empty claim can enter normal native retirement.
+  # Technical depth: outstanding ACKs retain native leases after physical send.
+  # No queue, claim, lease or exchange is cleared to qualify for this step.
+  defp begin_drained_final_close(%{closing: %{retirement: nil} = closing} = state) do
+    if drained_final_custody?(state) and System.monotonic_time(:millisecond) < closing.cutoff do
+      request =
+        ConnectionRegistry.connection_request(
+          state.registry,
+          {:socket_retirement_intent, state.incarnation, state.progress_sink, closing.close_ref,
+           closing.cutoff}
+        )
+
+      state = %{state | closing: %{closing | retirement: :registering}}
+
+      {:noreply,
+       await_exchange(state, request, :registry, {:socket_retirement_intent, closing.close_ref})}
+    else
+      {:noreply, state}
+    end
+  end
+
+  defp begin_drained_final_close(state), do: {:noreply, state}
+
+  defp drained_final_custody?(state) do
+    map_size(state.progress_leases) == 0 and map_size(state.progress_frames) == 0 and
+      :queue.is_empty(state.progress) and state.progress_bytes == 0 and
+      state.enqueues_pending == 0 and :queue.is_empty(state.output_cursors) and
+      is_nil(state.output_claim) and is_nil(state.send_select) and
+      not Enum.any?(state.exchanges, fn {_request, exchange} ->
+        elem(exchange.label, 0) in [:enqueue, :enqueue_progress, :claim, :emitted]
+      end)
+  end
 
   defp send_held_after_close(state, held) do
     case send_records(state, :queue.to_list(held)) do
@@ -2379,47 +2551,115 @@ defmodule LoopexDaemon.SocketConnection do
 
   defp track_lease(state, _record), do: state
 
-  defp queue_progress(state, encoded) do
-    queue = :queue.in(encoded, state.progress)
-    bytes = state.progress_bytes + byte_size(encoded)
-    trim_progress(%{state | progress: queue, progress_bytes: bytes})
+  defp drain_progress(state, 0), do: state
+
+  defp drain_progress(state, remaining) do
+    case ProgressSink.take(state.progress_sink) do
+      {:ok, lease, session_id, item} ->
+        state =
+          case state do
+            %{attachment: %{session_id: ^session_id}, closing: nil, succession: nil} ->
+              # Concept: current generation two does not serve compaction activity.
+              # Technical depth: reject either native key shape before serialization;
+              # the existing refusal branch releases this exact credited lease.
+              with false <-
+                     match?(%{kind: "context.compaction_progress"}, item) or
+                       match?(%{"kind" => "context.compaction_progress"}, item),
+                   record when is_map(record) <- WireRecords.progress(session_id, item),
+                   {:ok, encoded} <- Frame.encode(record) do
+                queue_progress(state, lease, IO.iodata_to_binary(encoded))
+              else
+                _ ->
+                  ProgressSink.release(state.progress_sink, lease)
+                  state
+              end
+
+            _ ->
+              ProgressSink.release(state.progress_sink, lease)
+              state
+          end
+
+        drain_progress(state, remaining - 1)
+
+      _ ->
+        state
+    end
+  end
+
+  defp queue_progress(state, lease, encoded) do
+    state = %{
+      state
+      | progress_leases: Map.put(state.progress_leases, lease, byte_size(encoded)),
+        progress_bytes: state.progress_bytes + byte_size(encoded),
+        progress: :queue.in({lease, encoded}, state.progress)
+    }
+
+    trim_progress(state)
   end
 
   defp trim_progress(state) do
-    if :queue.len(state.progress) > @progress_records or state.progress_bytes > @progress_bytes do
-      {{:value, dropped}, queue} = :queue.out(state.progress)
+    if map_size(state.progress_leases) > @progress_records or
+         state.progress_bytes > @progress_bytes do
+      case :queue.out(state.progress) do
+        {{:value, {lease, _encoded}}, queue} ->
+          trim_progress(release_progress_lease(%{state | progress: queue}, lease))
 
-      trim_progress(%{
-        state
-        | progress: queue,
-          progress_bytes: state.progress_bytes - byte_size(dropped)
-      })
+        {:empty, _} ->
+          state
+      end
     else
       state
     end
   end
 
-  # Technical depth: durable output is empty only when nothing is claimed,
-  # enqueued or awaiting the registry's acceptance; progress is then enqueued
-  # one record at a time, directly, as before.
+  defp release_progress_lease(state, lease) do
+    case Map.pop(state.progress_leases, lease) do
+      {nil, _} ->
+        state
+
+      {size, leases} ->
+        :ok = ProgressSink.release(state.progress_sink, lease)
+        %{state | progress_leases: leases, progress_bytes: state.progress_bytes - size}
+    end
+  end
+
+  defp release_progress_frame(state, frame_ref) do
+    case Map.pop(state.progress_frames, frame_ref) do
+      {nil, _} -> state
+      {lease, frames} -> release_progress_lease(%{state | progress_frames: frames}, lease)
+    end
+  end
+
+  defp discard_local_progress(state) do
+    leases = for {lease, _encoded} <- :queue.to_list(state.progress), do: lease
+    Enum.reduce(leases, %{state | progress: :queue.new()}, &release_progress_lease(&2, &1))
+  end
+
+  # Technical depth: dequeue transfers custody to an exact admission exchange;
+  # neither native nor encoded charge is freed by moving into the output FIFO.
   defp flush_progress(state) do
     idle =
-      state.output_claim == nil and :queue.is_empty(state.output_cursors) and
-        state.enqueues_pending == 0
+      state.closing == nil and state.succession == nil and state.output_claim == nil and
+        :queue.is_empty(state.output_cursors) and state.enqueues_pending == 0
 
     with true <- idle,
-         {{:value, encoded}, queue} <- :queue.out(state.progress) do
+         {{:value, {lease, encoded}}, queue} <- :queue.out(state.progress) do
+      request =
+        ConnectionRegistry.connection_request(
+          state.registry,
+          {:enqueue_progress, state.incarnation, encoded}
+        )
+
       state = %{
         state
         | progress: queue,
-          progress_bytes: state.progress_bytes - byte_size(encoded)
+          enqueue_seq: state.enqueue_seq + 1,
+          enqueues_pending: state.enqueues_pending + 1
       }
 
-      state
-      |> enqueue_output(encoded, nil, :progress)
-      |> output_step()
+      state |> await_exchange(request, :registry, {:enqueue_progress, lease}) |> output_step()
     else
-      _waiting -> {:noreply, state}
+      _ -> {:noreply, state}
     end
   end
 

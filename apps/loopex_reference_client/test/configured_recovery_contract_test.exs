@@ -84,11 +84,10 @@ defmodule Loopex.ReferenceClient.ConfiguredRecoveryContractTest do
     runtime_options = Keyword.put(base.runtime_options, :cleanup_grace_ms, cleanup_grace_ms)
     assert {:ok, client} = ReferenceClient.start(runtime_options)
 
-    fixture =
-      %{base | client: client, runtime_options: runtime_options}
-      |> Fixture.create(label)
-
+    fixture = %{base | client: client, runtime_options: runtime_options}
     on_exit(fn -> Fixture.stop(fixture, false) end)
+    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(client.runtime)
+    fixture = Fixture.create(fixture, label)
 
     session_id = fixture.client.session_id
     assert {:ok, %{status: :active}} = ReferenceClient.status(fixture.client)
@@ -218,11 +217,10 @@ defmodule Loopex.ReferenceClient.ConfiguredRecoveryContractTest do
     runtime_options = Keyword.put(base.runtime_options, :cleanup_grace_ms, cleanup_grace_ms)
     assert {:ok, client} = ReferenceClient.start(runtime_options)
 
-    fixture =
-      %{base | client: client, runtime_options: runtime_options}
-      |> Fixture.create(label)
-
+    fixture = %{base | client: client, runtime_options: runtime_options}
     on_exit(fn -> Fixture.stop(fixture, false) end)
+    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(client.runtime)
+    fixture = Fixture.create(fixture, label)
 
     session_id = fixture.client.session_id
     prompt_id = "prompt-#{label}"

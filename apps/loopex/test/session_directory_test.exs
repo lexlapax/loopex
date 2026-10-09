@@ -50,6 +50,8 @@ defmodule Loopex.SessionDirectoryTest do
 
     on_exit(fn -> stop_runtime(runtime) end)
 
+    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(runtime)
+
     {:ok, session_a} = Loopex.create_session(runtime, %{}, command_id: "create-a")
     :ok = SessionDirectory.record_session(state_root, session_a, runtime_id)
 
@@ -112,6 +114,9 @@ defmodule Loopex.SessionDirectoryTest do
         store: store
       )
 
+    on_exit(fn -> stop_runtime(creating_runtime) end)
+    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(creating_runtime)
+
     {:ok, session_id} = Loopex.create_session(creating_runtime, %{}, command_id: "create")
     :ok = SessionDirectory.record_session(state_root, session_id, runtime_id)
     :ok = Loopex.stop(creating_runtime)
@@ -136,6 +141,8 @@ defmodule Loopex.SessionDirectoryTest do
       )
 
     on_exit(fn -> stop_runtime(resuming_runtime) end)
+
+    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(resuming_runtime)
 
     assert {:ok, ^session_id} =
              SessionDirectory.resume(resumed_state_root, resuming_runtime, session_id, "resume-1")
@@ -270,6 +277,8 @@ defmodule Loopex.SessionDirectoryTest do
 
     on_exit(fn -> stop_runtime(creator_runtime) end)
 
+    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(creator_runtime)
+
     {:ok, session_id} = Loopex.create_session(creator_runtime, %{}, command_id: "create")
     :ok = SessionDirectory.record_session(state_root, session_id, "runtime-original")
 
@@ -283,6 +292,8 @@ defmodule Loopex.SessionDirectoryTest do
       )
 
     on_exit(fn -> stop_runtime(other_runtime) end)
+
+    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(other_runtime)
 
     before_epoch = session_owner_epoch(store_pid, session_id)
 
@@ -317,6 +328,8 @@ defmodule Loopex.SessionDirectoryTest do
       )
 
     on_exit(fn -> stop_runtime(runtime) end)
+
+    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(runtime)
 
     {:ok, session_id} = Loopex.create_session(runtime, %{}, command_id: "create")
     :ok = SessionDirectory.record_session(state_root, session_id, runtime_id)
@@ -357,6 +370,8 @@ defmodule Loopex.SessionDirectoryTest do
 
     on_exit(fn -> stop_runtime(runtime) end)
 
+    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(runtime)
+
     {:ok, session_id} = Loopex.create_session(runtime, %{}, command_id: "create-replay")
     :ok = SessionDirectory.record_session(root, session_id, runtime_id)
 
@@ -387,6 +402,8 @@ defmodule Loopex.SessionDirectoryTest do
       )
 
     on_exit(fn -> stop_runtime(runtime) end)
+
+    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(runtime)
 
     {:ok, session_id} = Loopex.create_session(runtime, %{}, command_id: "create-convergence")
     before_epoch = session_owner_epoch(store_pid, session_id)
@@ -429,6 +446,8 @@ defmodule Loopex.SessionDirectoryTest do
       )
 
     on_exit(fn -> stop_runtime(runtime) end)
+
+    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(runtime)
 
     {:ok, session_a} = Loopex.create_session(runtime, %{}, command_id: "create-a-conflict")
     {:ok, session_b} = Loopex.create_session(runtime, %{}, command_id: "create-b-conflict")

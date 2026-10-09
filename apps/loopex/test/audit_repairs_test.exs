@@ -208,7 +208,8 @@ defmodule Loopex.AuditRepairsTest do
       {{:ok, normalized, _bytes}, {:ok, transaction}} ->
         assert transaction.genesis == normalized
         assert :ok = Store.validate_transaction(transaction)
-        assert {:committed, _command_id, _receipt} = Store.transact(store, transaction)
+        assert {:committed, _command_id, _receipt} =
+                 Loopex.ConfiguredGenesisFixture.commit_creation(store, transaction)
 
       _refused ->
         :ok
@@ -278,6 +279,8 @@ defmodule Loopex.AuditRepairsTest do
       )
 
     {:ok, runtime} = Loopex.start_link(runtime_options)
+
+    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(runtime)
 
     %{runtime: runtime, runtime_id: runtime_id, store: store, store_pid: store_pid}
   end

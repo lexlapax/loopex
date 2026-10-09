@@ -1,4 +1,5 @@
 Code.require_file("support/m1_runtime_helper.exs", __DIR__)
+Code.require_file("support/configured_genesis_helper.exs", __DIR__)
 Code.require_file("support/agent_loop_helper.exs", __DIR__)
 
 defmodule Loopex.ResourceWorkspaceBindingTest do
@@ -73,6 +74,8 @@ defmodule Loopex.ResourceWorkspaceBindingTest do
 
     {:ok, writer} = Loopex.start_link(writer_options)
     on_exit(fn -> if Process.alive?(writer.supervisor), do: Loopex.stop(writer) end)
+    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(writer)
+
     {:ok, session} = Loopex.create_session(writer, %{}, command_id: "create")
     {:ok, attachment} = Loopex.attach(writer, session, after_event_sequence: 0)
 
@@ -94,6 +97,8 @@ defmodule Loopex.ResourceWorkspaceBindingTest do
 
     {:ok, reader} = Loopex.start_link(reader_options)
     on_exit(fn -> if Process.alive?(reader.supervisor), do: Loopex.stop(reader) end)
+
+    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(reader)
 
     assert {:ok, {:prepared, activation}} =
              Loopex.prepare_resume_session(reader, session, "resume")

@@ -23,6 +23,8 @@ defmodule Loopex.Runtime.StandaloneCompactOwnerTest do
     fixture = %{runtime: runtime, store: store_pid}
     on_exit(fn -> Fixture.stop(fixture) end)
 
+    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(runtime)
+
     {:ok, session} =
       Loopex.create_session(runtime, %{}, command_id: "create", genesis: Genesis.genesis([]))
 

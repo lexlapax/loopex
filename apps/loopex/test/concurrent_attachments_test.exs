@@ -24,6 +24,8 @@ defmodule Loopex.ConcurrentAttachmentTest do
       if Process.alive?(store_pid), do: GenServer.stop(store_pid)
     end)
 
+    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(runtime)
+
     %{runtime: runtime, store: store_pid}
   end
 
