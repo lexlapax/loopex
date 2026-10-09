@@ -1,5 +1,16 @@
 # M7 Implementation Tasks
 
+### Physical run-log initialization proved, 2026-10-09
+
+Original20054 at a1032d03 passed all217 cases in seven complete composition
+files on each supported toolchain, warning-free, after90.715 seconds.
+This closes one added T11 foundation subtask; helper activation and original
+T11 outcomes remain open. All6 original joins and32 assets are authenticated.
+The reviewed CLI adapter remains unjoined/native UNRUN. The [resume checkpoint](M7-resume.md)
+binds the proof, retained failures and266-asset immutable retention.
+T01–T19 original89 done /84 open /6 retired; added372 done /24 open;
+combined461 done /108 open /6 retired.
+
 ### Current daemon proved and CLI repair running, 2026-10-09
 
 Original53536 atc487580e passed all547 selected current Daemon cases, then
@@ -15850,7 +15861,7 @@ Hosted, attended and coordinated transport generation proofs remain separate.
 - [ ] Pin the complete private delegation ledger byte recipe and closed object/mutation field grammars under accepted ADR 0046 semantics before implementing append/recovery/transaction reduction; refuse incomplete or corrupt current frames without introducing a compatibility decoder.
 - [x] Implement the accepted private parent-binding captured-object validator and pure prepare-parent/bind-parent reducer; prove exact owning creation-history joins, independent digest/transaction literals, ordered replay, duplicate/conflict refusal and reserved binding completion credit on both pairs. Physical append, run accounting and helper execution remain separate.
 - [x] Implement the accepted physical parent-binding log through the retained-object owner; prove exact prepare/bind append and owning creation-history joins, writer custody, uncertain append fencing, acquisition-scoped tail repair, original fault-actor cleanup and complete 70-case affected selection on both supported pairs. This bounded log does not activate helpers or complete run accounting, startup classification or mutation protection.
-- [ ] Physically persist and reopen the initialize-only run-log prefix through the existing retained-object serial owner; prove exact original-transaction recovery, actual parent/history joins, complete present-log classification, strict exclusive tail repair and the shared binding/run uncertainty fence on both supported pairs. No child reservation, accounting, helper activation or missing-log allowance reset is admitted by this foundation step.
+- [x] Physically persist and reopen the initialize-only run-log prefix through the existing retained-object serial owner; prove exact original-transaction recovery, actual parent/history joins, complete present-log classification, strict exclusive tail repair and the shared binding/run uncertainty fence on both supported pairs. No child reservation, accounting, helper activation or missing-log allowance reset is admitted by this foundation step. Original20054 at `a1032d037106c2b79c9d64dba158f195c9ecf518` passed all217 cases in seven complete files on each supported pair, warning-free, after90.715s; zero exclusions/skips/invalid cases. All6 original joins verified. [Resume proof](M7-resume.md).
 - [x] Implement accepted ADR0056's private canonical JSON, closed binding/run headers and checksummed frames, plus production GenesisCodec byte entrypoints used by the actual retained-object install/reopen test; prove independent exact bytes, structural/size/corruption boundaries and complete affected files on both supported pairs. Physical append/recovery, transaction reduction, child accounting, mutation protection and helper execution remain separate.
 - [ ] Resolve exact retained child-accounting access and universal host mutation guards before exposing helpers through runtime-only clients; preserve host ownership, current serial session truth, retained maintenance charges and settled-child protection without copying private reducer accounting or adding an unapproved public read.
 

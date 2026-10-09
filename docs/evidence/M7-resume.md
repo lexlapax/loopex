@@ -27,6 +27,55 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+### Physical run-log initialization proved; CLI repair next, 2026-10-09
+
+Original20054 at `a1032d037106c2b79c9d64dba158f195c9ecf518` passed all217
+cases in seven complete composition files on both supported pairs, warning-free,
+after90.715 seconds. This includes the new36-case physical run-log file and
+all existing binding-log, retained-object, run-ledger, run-mutation,
+child-creation and ledger-codec cases. Zero exclusions, skips or invalid cases.
+All6 original process joins and32 assets were authenticated. Terminal SHA-256
+`975f92ade60f898c40efcc387d940f5137103ddcbdb934e65b4ec74323d918e3`;
+collection `8c2538727dd3ef7c2b426499ae5b0851f471b913a4dcff76792edaa00ecabd78`.
+Registry2945 SHA-256
+`f9a6332b19bc62c374aa78f699f9b2871e8497b130b38a4b1dbef9c812b8bf47`.
+
+The unit at2fff5422/815f6159 reuses accepted0046/0056 and the existing serial
+owner for initialize-only header/append/reopen/original-tx recovery. It proves
+actual parent/history joins, bidirectional uncertainty fencing, all present-log
+classification and strict exclusive tail repair. Only its added T11 foundation
+checkbox is done. Missing expected-log startup coverage, child reservations,
+accounting and helper activation remain excluded and owed before activation.
+Original80086 failed216/217 with a Local fixture teardown race and warnings.
+The reviewed ownership repair at ebe07416 passed current217; original46491
+failed its floor warning gate despite217 successful assertions. The one-line
+bb09b9f4 change produced new constant-branch warnings in original6600, retained
+as FAIL. Reviewed ordinary setup extraction at a1032d03 preserves all seven
+fault orders; original67101 formatting passed strict AST equality on both
+pairs without byte changes. None of these failed originals was relabeled.
+
+Immutable266-asset retention:
+`M7/current-source-preparation-20261009-v23/retention.json`, SHA-256
+`7a2eeafe7333b9bfa8721f346f3ea78dc53223d33ecf3b14e9fda6581734f895`.
+It includes all four test originals, four formatting originals, source repairs
+and reviews, the reviewed unjoined CLI packet and private retirement design.
+No native handle is live at this checkpoint.
+
+Root next integrates the source-cleared three-path CLI packet
+`/private/tmp/m7-cli-current-event-adaptation-source-20261009-v1`, manifest
+`ffb33542bc5e4a1e20992db51c17a51cbc3427235c6f61810144697bc029956c`;
+independent review `d0d3a2d95e5b0ee6133b286d7ad0017a120283a2e51c92a8105a0065c94b1bc0`.
+Complete current event/progress native adaptation preserves original53 cases
+and adds18; qualify all71 in eight whole files on both pairs. No all15-prior-
+failure resolution is claimed. Private stopped-leader audit
+`dc1598029f7260c8086edd628c9267237b86a482792365f166b5c3cc181c8b31`
+finds the Bash guardian feasible in source but leaves its accounting metric
+and complete numerical certificate unresolved; no new ownership is accepted
+or implemented. Core observation grace and ADR0065 remain pending.
+No full fast/release/closure result is claimed.
+T01–T19 original89 done /84 open /6 retired; added372 done /24 open;
+combined461 done /108 open /6 retired.
+
 ### Current daemon proved; CLI adaptation repair running, 2026-10-09
 
 Original53536 at `c487580e12af497281444ab9f09d636b88247278` is terminal
