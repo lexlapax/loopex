@@ -307,21 +307,21 @@ defmodule Loopex.AppServer.ForegroundOutputFixture do
               do: :erlang.resume_process(owner)
           end,
           fn ->
-            if state.writer_suspended and state.writer and Process.alive?(state.writer),
+            if state.writer_suspended and not is_nil(state.writer) and Process.alive?(state.writer),
               do: :sys.resume(state.writer, max(cutoff + 1_000 - now_ms(), 0))
           end,
           fn -> if not state.owner_down and Process.alive?(owner), do: Process.exit(owner, :kill) end,
           fn -> unless state.owner_down, do: join_actor(owner, owner_monitor, cutoff + 1_000) end,
           fn ->
-            if state.writer and not state.writer_down,
+            if not is_nil(state.writer) and not state.writer_down,
               do: join_actor(state.writer, state.writer_monitor, cutoff + 1_000)
           end,
           fn ->
-            if state.cleanup_monitor and not state.cleanup_worker_down,
+            if not is_nil(state.cleanup_monitor) and not state.cleanup_worker_down,
               do: join_actor(state.cleanup_worker, state.cleanup_monitor, cutoff + 1_000)
           end,
           fn ->
-            if state.input_monitor and not state.input_down,
+            if not is_nil(state.input_monitor) and not state.input_down,
               do: join_port(state.input_port, state.input_monitor, cutoff + 1_000)
           end,
           fn -> :gen_tcp.close(socket) end
@@ -601,6 +601,31 @@ defmodule Loopex.AppServer.ForegroundOutputFixture do
     %{state | dispatcher_suspended: nil, owner_suspended: false, writer_suspended: false, held: nil}
   end
 
+  defp command(state, :hold_create) do
+    Store.hold_next_transition_before_linearization(state.fixture.store, :runtime_control_create_session, self())
+    send_record(state.socket, :holding_next_create)
+    state
+  end
+  defp command(state, {:offer, kind, size}) do
+    result = Loopex.ProgressSink.try_offer(state.sink, state.session, item(kind, size))
+    send_record(state.socket, {:offered, result})
+    state
+  end
+  defp command(state, action) when action in [:stop_leader, :continue_leader] do
+    observer = self()
+    :sys.replace_state(state.writer, fn writer_state ->
+      send(observer, {:leader, writer_state.active.leader})
+      writer_state
+    end, max(state.cutoff - now_ms(), 0))
+    receive do
+      {:leader, leader} ->
+        signal = if action == :stop_leader, do: "-STOP", else: "-CONT"
+        {"", 0} = Loopex.Executor.Local.answer_within("/bin/kill", [signal, Integer.to_string(leader)], 500)
+        send_record(state.socket, if(action == :stop_leader, do: :leader_stopped, else: :leader_continued))
+    end
+    state
+  end
+
   # These new controls observe only their small no-progress failure scenarios.
   # They neither export resident frames nor mutate the owned Stdio state.
   defp await_owned(owner, predicate, cutoff) do
@@ -629,31 +654,6 @@ defmodule Loopex.AppServer.ForegroundOutputFixture do
   end
 
   defp require_time(cutoff), do: if(now_ms() >= cutoff, do: exit(:fixture_observation_expired))
-
-  defp command(state, :hold_create) do
-    Store.hold_next_transition_before_linearization(state.fixture.store, :runtime_control_create_session, self())
-    send_record(state.socket, :holding_next_create)
-    state
-  end
-  defp command(state, {:offer, kind, size}) do
-    result = Loopex.ProgressSink.try_offer(state.sink, state.session, item(kind, size))
-    send_record(state.socket, {:offered, result})
-    state
-  end
-  defp command(state, action) when action in [:stop_leader, :continue_leader] do
-    observer = self()
-    :sys.replace_state(state.writer, fn writer_state ->
-      send(observer, {:leader, writer_state.active.leader})
-      writer_state
-    end, max(state.cutoff - now_ms(), 0))
-    receive do
-      {:leader, leader} ->
-        signal = if action == :stop_leader, do: "-STOP", else: "-CONT"
-        {"", 0} = Loopex.Executor.Local.answer_within("/bin/kill", [signal, Integer.to_string(leader)], 500)
-        send_record(state.socket, if(action == :stop_leader, do: :leader_stopped, else: :leader_continued))
-    end
-    state
-  end
 
   # Only attachment identities cross this observation boundary. In particular,
   # no dispatcher state, resident progress item or writer frame is returned.

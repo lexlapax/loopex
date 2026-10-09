@@ -1,5 +1,41 @@
 # M7 Implementation Tasks
 
+### Foreground verification failed, 2026-10-08
+
+Original36184 at `7084b40da0a36fbd3ac2fbb85322e1a8e490d141` is terminal
+FAIL. Current toolchain, complete changed-source formatting and warning-free
+project compilation pass. App Server executes all94 cases with70 passes and24
+failures; no cases are excluded, skipped or invalid. The protocol, Core,
+Composition, helper and floor stages are UNRUN. The complete422.394-second run,
+four original process joins and21 artifacts are retained under
+`M7/reviewed-owner-focused-20261008-v6`; terminal SHA-256
+`4762e806a53a012586c6d68938dc849ac9cb0910f7840dd2fff43a8f643166ae`,
+original collection SHA-256
+`8424d4cd153dfa924ce295f8f3646dd07a897db9d740c6b80ac1c05ba9e620e9`.
+The failed result remains immutable and does not qualify later repairs.
+
+The foreground fixture driver contains four strict Boolean `and` expressions
+whose operands can be actual PIDs or monitor references. Its command clauses
+also surround unrelated helper declarations, producing a compiler warning.
+The sealed v3 one-file repair uses explicit nil-presence Booleans and moves
+exact helper declarations after all command clauses. It preserves the original
+actor/reference joins, cleanup deadlines and29 consumer bodies. Completed
+Probe stderr was not retained by the original fixture, and cleanup failures
+mask several lifecycle body failures; exact native causality is unconfirmed.
+Independent source review is SOURCE_CLEAR, retained at
+`/private/tmp/m7-appserver-foreground-fixture-repair-engineering-review-20261008-v2.md`,
+SHA-256 `a6a100223957ad54cba57a8f3a11e5c43fe657b385ac614d3560e2a95962d57a`.
+The one-file repair is joined with exact identities in
+`/private/tmp/m7-reviewed-foreground-driver-repair-join-20261008-v1.json`;
+corrected-source native verification remains UNRUN.
+
+No checkbox closes. T01-T19 counts remain original88 done /85 open /6 retired
+and added367 done /23 open. No native handle is live. Next registry2707,
+SHA-256 `515c9419832318c019c8d2a0dad19eee4d51ece309a6cbcec1c9c7b6b98276b3`.
+ADR0065 remains pending; helpers stay unregistered and new protocol generations
+remain unserved. The full integration, broader creation/daemon consumer checks,
+Linux stress and separately authorized closure/release remain open.
+
 ### Foreground repair layout verified, 2026-10-08
 
 The four reviewed repairs are committed at
