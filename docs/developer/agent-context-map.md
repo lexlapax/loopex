@@ -7115,3 +7115,29 @@ creation retry, cancellation proof or new recovery authority. Exact runtime and
 both real host-path proofs remain required. This acceptance closes no task,
 supplies no test result and authorizes no other proposal, milestone closure,
 merge or publication.
+
+<a id="disposition-m7-owned-artifact-transfer-opening-2026-10-08"></a>
+### M7 owned artifact transfer opening accepted, 2026-10-08
+
+The maintainer selected "Approve the exact pair", accepting all four choices in
+[ADR0066 Concept](../adr/0066-owned-artifact-transfer-opening.md#concept) and
+[Technical depth](../adr/0066-owned-artifact-transfer-opening-technical.md#technical-depth)
+at candidate `9ff86133371bce672b46651fe0c2703f1dc2fc80`. Historical Proposed
+Concept SHA-256 is `5cba4952170eee24270a8e2ac8481cc7ea4becbbb4ab65e241a756685e05eda3`;
+Technical SHA-256 is `ea17cac5634f30f5d9d723be972a5d9f02621f0628a4b6ac807b2f87e1300f53`.
+Both files were unchanged when accepted. Within the pair only Status and the
+empty Acceptance row change. Independent source review and the exact-candidate
+repository documentation gate passed before the decision.
+
+Implement the whole optional reservation/permission/open capability with original
+custodian and single persistent close/ack observer. Preserve the original
+60,000-ms opening response and implement the separately accepted first-anchored
+5,000-ms cleanup observation. Keep uncertain capacity occupied and unavailable
+until actual original proof permits prospective reclamation; owner loss supplies
+no substitute proof. Preserve full64MiB objects with128MiB payload work plus
+bounded metadata, conservatively charged against the existing connection ceiling.
+Current-only caller, Store, facade and transport migration and all real-storage,
+cleanup, loss, cardinality, accounting and elapsed proofs remain required.
+Acceptance amends only the named ADR0028 clauses, closes no implementation task
+and grants no other proposal, milestone closure, merge, serving activation or
+publication authority. ADR0065 remains Proposed and unanswered.

@@ -27,6 +27,31 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+### ADR0066 proposal documentation gate proved, 2026-10-08
+
+Exact Proposed candidate `9ff86133371bce672b46651fe0c2703f1dc2fc80`
+passed `bash scripts/check.sh --docs` on the current pair. Original32294 is
+terminal and collected PASS after25.820seconds; two original joins and13
+verified artifacts. Retained output is
+`M7/adr0066-proposal-docs-check-20261008-v1`. Terminal SHA-256
+`3754cdff75f236bea8c75591799fc280aef1af514fce0221066a095e32eea38d`;
+collection `3526fdc3b447c0c0a77d96bb27e5176092ab2e82da733096a1af2864a4fafe82`.
+Latest completed registry2821 SHA-256
+`56d3bd6247cdf1d786e5432560f773ad94dde188a48932ae8b74fbe4775cabe7`.
+The maintainer then accepted the exact pair and all four choices, recorded in
+the context-map disposition. Dependent implementation may begin; no completed
+API implementation, suite, production repair or closure is claimed.
+Original25781's actual all-ok Socket close / missing native result failure
+remains unchanged. Conditional control/result-order analysis and a deterministic
+real-result regression are being prepared independently of the bounded
+full-population continuation trace. No native handle is live.
+T01–T19 original88 done /85 open /6 retired; added370 done /25 open.
+No completion checkbox changes.
+
+Immutable18-asset gate/cause-analysis retention is
+`M7/current-source-preparation-20261008-v11/retention.json`, SHA-256
+`c5b150b414ad49afbf5f6ca928d366457e6660fd5f558bc6196c95fae5cad17d`.
+
 ### Socket close succeeded; terminal result remains missing, 2026-10-08
 
 Original25781 at `55e738439fbaade44c0ade20c9c2ea9bde7c97bb` is

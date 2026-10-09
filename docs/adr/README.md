@@ -37,7 +37,7 @@ a decision adds a new record rather than rewriting the old one.
 | 0025 | Resource packs and skill admission | Accepted (source and name-order clauses superseded by 0039 for named skill directories; M7 provenance, maintenance and continuation receipts amended by 0042–0044) | [Decision](0025-resource-packs-and-skill-admission.md#concept) | [Technical depth](0025-resource-packs-and-skill-admission-technical.md#technical-depth) |
 | 0026 | Development floor refresh | Accepted | [Decision](0026-development-floor-refresh.md#concept) | [Technical depth](0026-development-floor-refresh-technical.md#technical-depth) |
 | 0027 | Provider permit retirement | Accepted | [Decision](0027-provider-permit-retirement.md#concept) | [Technical depth](0027-provider-permit-retirement-technical.md#technical-depth) |
-| 0028 | Bounded artifact retrieval | Accepted (job-owned range reads and shared capacity extended by 0041) | [Decision](0028-bounded-artifact-retrieval.md#concept) | [Technical depth](0028-bounded-artifact-retrieval-technical.md#technical-depth) |
+| 0028 | Bounded artifact retrieval | Accepted (job-owned range reads and shared capacity extended by 0041; transfer opening, custody and accounting amended by 0066) | [Decision](0028-bounded-artifact-retrieval.md#concept) | [Technical depth](0028-bounded-artifact-retrieval-technical.md#technical-depth) |
 | 0029 | Bounded provider failure diagnostics | Accepted | [Decision](0029-bounded-provider-failure-diagnostics.md#concept) | [Technical depth](0029-bounded-provider-failure-diagnostics-technical.md#technical-depth) |
 | 0030 | Observability: tracing and telemetry | Accepted (tracing guarantees reused unchanged by 0049) | [Decision](0030-observability-tracing-and-telemetry.md#concept) | [Technical depth](0030-observability-tracing-and-telemetry-technical.md#technical-depth) |
 | 0031 | Daemon store selection for `0.2.0` | Accepted | [Decision](0031-daemon-grade-store-selection-and-migration.md#concept) | [Technical depth](0031-daemon-grade-store-selection-and-migration-technical.md#technical-depth) |
@@ -73,7 +73,7 @@ a decision adds a new record rather than rewriting the old one.
 | 0061 | Creation cancellation admission envelope | Accepted | [Decision](0061-creation-cancellation-admission-envelope.md#concept) | [Technical depth](0061-creation-cancellation-admission-envelope-technical.md#technical-depth) |
 | 0063 | Runtime creation startup status | Accepted | [Decision](0063-runtime-creation-startup-status.md#concept) | [Technical depth](0063-runtime-creation-startup-status-technical.md#technical-depth) |
 | 0065 | Private attempts IO prerequisite | Proposed | [Decision](0065-private-attempts-io-prerequisite.md#concept) | [Technical depth](0065-private-attempts-io-prerequisite-technical.md#technical-depth) |
-| 0066 | Owned artifact transfer opening | Proposed | [Decision](0066-owned-artifact-transfer-opening.md#concept) | [Technical depth](0066-owned-artifact-transfer-opening-technical.md#technical-depth) |
+| 0066 | Owned artifact transfer opening | Accepted | [Decision](0066-owned-artifact-transfer-opening.md#concept) | [Technical depth](0066-owned-artifact-transfer-opening-technical.md#technical-depth) |
 
 0001 and 0002 were the prerequisites that unblocked the first milestone
 candidate; the [plans register](../plans/README.md) records current status.

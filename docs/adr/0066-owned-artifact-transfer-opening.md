@@ -3,7 +3,7 @@
 
 Technical depth: [Owned artifact transfer opening mechanics](0066-owned-artifact-transfer-opening-technical.md#technical-depth).
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-08
 - **Decision owner:** Maintainer
 - **Amends:** [ADR 0028](0028-bounded-artifact-retrieval.md#concept), only the current transfer-opening callback, custody, cleanup and work-accounting contract described here.
@@ -145,4 +145,4 @@ Technical depth: [Coordinated migration mechanics](0066-owned-artifact-transfer-
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | — | — | — |
+| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-m7-owned-artifact-transfer-opening-2026-10-08) | candidate `9ff86133371bce672b46651fe0c2703f1dc2fc80`; concept `sha256:5cba4952170eee24270a8e2ac8481cc7ea4becbbb4ab65e241a756685e05eda3`; technical `sha256:ea17cac5634f30f5d9d723be972a5d9f02621f0628a4b6ac807b2f87e1300f53` |
