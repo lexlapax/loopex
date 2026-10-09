@@ -27,9 +27,9 @@ defmodule LoopexComposition.Delegation.RetainedObjects do
   Binding headers and transactions use LedgerCodec's current JSON framing.
   Objects sync before prepare; full file and directory sync, descriptor close
   and exact readback precede a transaction acknowledgement. Uncertainty gates
-  every binding and run in this owner. Initialize-only run logs revalidate the
-  actual bound parent and retain zero counts, tokens and completion credit;
-  later lifecycle mutations remain unavailable. Lookup replays the original
+  every binding and run in this owner. Run logs revalidate the actual bound
+  parent and fold every frame through RunLedger with its replayed external
+  inputs; an unjoined frame refuses. Lookup replays the original
   transaction and may repair only a strict incomplete final transaction after
   exclusive stale-writer recovery. Required missing/torn headers remain
   unavailable. Reopening requires explicit classification of every physically
@@ -98,21 +98,30 @@ defmodule LoopexComposition.Delegation.RetainedObjects do
     do: GenServer.call(owner, {:read_binding, command, runtime}, :infinity)
 
   @doc false
-  def open_run(owner, command, identifiers, runtime),
-    do: GenServer.call(owner, {:open_run, command, identifiers, runtime}, :infinity)
+  def open_run(owner, command, identifiers, runtime, options \\ []),
+    do: GenServer.call(owner, {:open_run, command, identifiers, runtime, options}, :infinity)
 
   @doc false
-  def commit_run(owner, command, identifiers, transaction, runtime),
+  def commit_run(owner, command, identifiers, transaction, runtime, options \\ []),
     do:
-      GenServer.call(owner, {:commit_run, command, identifiers, transaction, runtime}, :infinity)
+      GenServer.call(
+        owner,
+        {:commit_run, command, identifiers, transaction, runtime, options},
+        :infinity
+      )
 
   @doc false
-  def lookup_run(owner, command, identifiers, tx_id, runtime),
-    do: GenServer.call(owner, {:lookup_run, command, identifiers, tx_id, runtime}, :infinity)
+  def lookup_run(owner, command, identifiers, tx_id, runtime, options \\ []),
+    do:
+      GenServer.call(
+        owner,
+        {:lookup_run, command, identifiers, tx_id, runtime, options},
+        :infinity
+      )
 
   @doc false
-  def read_run(owner, command, identifiers, runtime),
-    do: GenServer.call(owner, {:read_run, command, identifiers, runtime}, :infinity)
+  def read_run(owner, command, identifiers, runtime, options \\ []),
+    do: GenServer.call(owner, {:read_run, command, identifiers, runtime, options}, :infinity)
 
   # Concept: offline readers inspect the same exact bytes without starting an owner.
   # Technical depth: the first header is mandatory; only a strict final transaction
@@ -134,9 +143,9 @@ defmodule LoopexComposition.Delegation.RetainedObjects do
 
   def decode_binding(_, _, _), do: {:error, :invalid_binding_log}
 
-  # Concept: the current physical run foundation admits initialization only.
-  # Technical depth: validate the mandatory scoped header and the sole closed
-  # transaction before exposing a prefix; a later lifecycle frame is unavailable,
+  # Concept: a run log exposes only a complete, consecutively versioned prefix.
+  # Technical depth: validate the mandatory scoped header, an initialize first
+  # frame and every closed transaction; a corrupt or gapped frame refuses,
   # never skipped or repaired into a fresh allowance.
   @doc false
   def decode_run(bytes, identifiers) when is_binary(bytes) and byte_size(bytes) <= @run_cap do
@@ -279,8 +288,8 @@ defmodule LoopexComposition.Delegation.RetainedObjects do
     {:reply, result, next}
   end
 
-  def handle_call({:open_run, command, identifiers, runtime}, _from, state) do
-    case do_open_run(state, command, identifiers, runtime) do
+  def handle_call({:open_run, command, identifiers, runtime, options}, _from, state) do
+    case do_open_run(state, command, identifiers, runtime, options) do
       {:ok, key, next} ->
         {:reply, {:ok, key}, next}
 
@@ -292,8 +301,8 @@ defmodule LoopexComposition.Delegation.RetainedObjects do
     end
   end
 
-  def handle_call({:commit_run, command, identifiers, tx, runtime}, _from, state) do
-    case do_commit_run(state, command, identifiers, tx, runtime) do
+  def handle_call({:commit_run, command, identifiers, tx, runtime, options}, _from, state) do
+    case do_commit_run(state, command, identifiers, tx, runtime, options) do
       {:ok, result} ->
         {:reply, {:ok, result}, state}
 
@@ -305,8 +314,8 @@ defmodule LoopexComposition.Delegation.RetainedObjects do
     end
   end
 
-  def handle_call({:lookup_run, command, identifiers, tx_id, runtime}, _from, state) do
-    case do_lookup_run(state, command, identifiers, tx_id, runtime) do
+  def handle_call({:lookup_run, command, identifiers, tx_id, runtime, options}, _from, state) do
+    case do_lookup_run(state, command, identifiers, tx_id, runtime, options) do
       {:ok, result, next} ->
         {:reply, {:ok, result}, next}
 
@@ -315,13 +324,13 @@ defmodule LoopexComposition.Delegation.RetainedObjects do
     end
   end
 
-  def handle_call({:read_run, command, identifiers, runtime}, _from, state) do
+  def handle_call({:read_run, command, identifiers, runtime, options}, _from, state) do
     result =
       with :ok <- mutation_open(state),
            {:ok, parent} <- run_parent(state, command, identifiers, runtime),
            {:ok, image} <- ledger_image(state, :run, identifiers),
            true <- image.decoded.tail == :complete,
-           {:ok, reduced} <- reduce_run(parent, image),
+           {:ok, reduced} <- reduce_run(parent, image, options),
            :ok <- confirm_run(state, image) do
         {:ok, run_view(reduced)}
       else
@@ -674,7 +683,7 @@ defmodule LoopexComposition.Delegation.RetainedObjects do
     end
   end
 
-  defp do_open_run(state, command, identifiers, runtime) do
+  defp do_open_run(state, command, identifiers, runtime, options) do
     with :ok <- mutation_open(state),
          {:ok, parent} <- run_parent(state, command, identifiers, runtime),
          {:ok, key} <- LedgerCodec.header_key(:run, identifiers),
@@ -699,7 +708,7 @@ defmodule LoopexComposition.Delegation.RetainedObjects do
         {:ok, _} ->
           with {:ok, image} <- ledger_image(next, :run, identifiers),
                true <- image.decoded.tail == :complete,
-               {:ok, _} <- reduce_run(parent, image),
+               {:ok, _} <- reduce_run(parent, image, options),
                :ok <- confirm_run(next, image) do
             {:ok, key, next}
           else
@@ -713,15 +722,14 @@ defmodule LoopexComposition.Delegation.RetainedObjects do
     end
   end
 
-  defp do_commit_run(state, command, identifiers, tx, runtime) do
+  defp do_commit_run(state, command, identifiers, tx, runtime, options) do
     with :ok <- mutation_open(state),
          {:ok, ^tx} <- RunMutation.validate(identifiers, tx),
-         true <- tx["mutation"]["kind"] == "initialize",
          {:ok, parent} <- run_parent(state, command, identifiers, runtime),
          {:ok, image} <- ledger_image(state, :run, identifiers),
          :ok <- complete_run(image),
-         {:ok, reduced} <- reduce_run(parent, image),
-         {:ok, next, result} <- RunLedger.admit(reduced, tx) do
+         {:ok, reduced} <- reduce_run(parent, image, options),
+         {:ok, next, result} <- RunLedger.admit(reduced, tx, Keyword.get(options, :inputs, %{})) do
       if next.version == reduced.version do
         case confirm_run(state, image) do
           :ok -> {:ok, result}
@@ -759,26 +767,32 @@ defmodule LoopexComposition.Delegation.RetainedObjects do
     end
   end
 
-  defp reduce_run(parent, image) do
+  # Concept: every replayed frame rejoins its original external evidence.
+  # Technical depth: the caller's replay function supplies each transaction's
+  # validated original job, retained child object or source digest; a frame
+  # whose inputs cannot be supplied refuses rather than replaying unjoined.
+  defp reduce_run(parent, image, options) do
+    replay = Keyword.get(options, :replay, fn _tx -> %{} end)
+
     Enum.reduce_while(image.decoded.transactions, {:ok, parent}, fn tx, {:ok, current} ->
-      case RunLedger.admit(current, tx) do
+      case RunLedger.admit(current, tx, replay.(tx)) do
         {:ok, next, _} -> {:cont, {:ok, next}}
         _ -> {:halt, {:error, :invalid_run_log}}
       end
     end)
   end
 
-  defp do_lookup_run(state, command, identifiers, tx_id, runtime) do
+  defp do_lookup_run(state, command, identifiers, tx_id, runtime, options) do
     with true <- is_binary(tx_id) and Regex.match?(~r/\A[0-9a-f]{64}\z/, tx_id),
          :ok <- run_lookup_allowed(state, command, identifiers, tx_id),
          {:ok, parent} <- run_parent(state, command, identifiers, runtime),
          {:ok, image} <- ledger_image(state, :run, identifiers),
          :ok <- original_identity(state, image),
-         {:ok, reduced} <- reduce_run(parent, image),
+         {:ok, reduced} <- reduce_run(parent, image, options),
          :ok <- recover_run(state, image),
          {:ok, confirmed} <- ledger_image(state, :run, identifiers),
          true <- confirmed.decoded.tail == :complete and confirmed.identity == image.identity,
-         {:ok, final} <- reduce_run(parent, confirmed),
+         {:ok, final} <- reduce_run(parent, confirmed, options),
          true <- final.version == reduced.version,
          :ok <- resolved_original(state, final),
          :ok <- confirm_run(state, confirmed) do
@@ -834,14 +848,14 @@ defmodule LoopexComposition.Delegation.RetainedObjects do
   defp run_frames("", _identifiers, offset, transactions),
     do: {:ok, Enum.reverse(transactions), offset, :complete}
 
-  defp run_frames(_bytes, _identifiers, _offset, [_]), do: {:error, :invalid_run_prefix}
-
-  defp run_frames(bytes, identifiers, offset, []) do
+  defp run_frames(bytes, identifiers, offset, transactions) do
     case LedgerCodec.decode_frame(bytes) do
       {:ok, payload, rest} ->
         with {:ok, tx} <- RunMutation.decode(identifiers, payload),
-             true <- tx["expected_version"] == 0 and tx["mutation"]["kind"] == "initialize" do
-          run_frames(rest, identifiers, offset + byte_size(bytes) - byte_size(rest), [tx])
+             true <- tx["expected_version"] == length(transactions),
+             true <- transactions != [] or tx["mutation"]["kind"] == "initialize" do
+          offset = offset + byte_size(bytes) - byte_size(rest)
+          run_frames(rest, identifiers, offset, [tx | transactions])
         else
           _ -> {:error, :invalid_run_prefix}
         end

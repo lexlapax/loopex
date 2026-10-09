@@ -179,7 +179,7 @@ defmodule LoopexComposition.DelegationRunLogTest do
     assert RetainedObjects.install(context.owner, "{}") == {:error, :ledger_fenced}
   end
 
-  test "physical prefix rejects duplicate appended initialization and unsupported later transactions",
+  test "physical prefix rejects duplicate appended initialization and unjoined later transactions",
        context do
     context = initialized(context)
     before = File.read!(path(context))
@@ -203,7 +203,7 @@ defmodule LoopexComposition.DelegationRunLogTest do
     }
 
     assert {:ok, unsupported} = RunMutation.transaction(context.ids, 1, mutation)
-    assert commit(context, unsupported) == {:error, :invalid_run_prefix}
+    assert commit(context, unsupported) == {:error, :invalid_run_transition}
     {header, _json, _result} = authored_bytes(context)
 
     assert RetainedObjects.decode_run(header <> framed(Fixture.json(unsupported)), context.ids) ==
