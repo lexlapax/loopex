@@ -327,6 +327,7 @@ defmodule Loopex.AppServer.InitializationTest do
 
     arguments =
       ["-pa", ebin(:loopex_protocol), "-pa", ebin(:loopex), "-pa", ebin(:loopex_app_server)] ++
+        ["-pa", ebin(:loopex_composition)] ++
         [
           "-pa",
           ebin(:loopex_executor_local),
