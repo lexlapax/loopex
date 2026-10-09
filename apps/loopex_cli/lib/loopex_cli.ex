@@ -82,7 +82,14 @@ defmodule LoopexCli do
     if stdio_encoding(:latin1) != :ok, do: System.halt(1)
     :ok = Application.put_env(:logger, :level, :none)
     :ok = :logger.set_primary_config(:level, :none)
-    System.halt(LoopexCli.Chat.run(argv))
+
+    # Concept: chat routes run beside composition's helper registry.
+    # Technical depth: the escript starts no application itself; helper guards
+    # look up that registry before any session mutation.
+    case Application.ensure_all_started(:loopex_composition) do
+      {:ok, _applications} -> System.halt(LoopexCli.Chat.run(argv))
+      {:error, _reason} -> System.halt(1)
+    end
   end
 
   def main(["daemon" | arguments]) do
