@@ -54,7 +54,6 @@ defmodule LoopexCli.ProviderAccountingIntegrationTest do
           store: store,
           diagnostics_to: self(),
           cleanup_grace_ms: 2_000,
-          sampling: %{"max_tokens" => 64},
           model: %{
             module: Adapter,
             model: model,
@@ -85,6 +84,8 @@ defmodule LoopexCli.ProviderAccountingIntegrationTest do
         if Process.alive?(executor), do: Agent.stop(executor)
       end)
 
+      # Creation refuses as store_unavailable until Control's startup is ready.
+      :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(runtime)
       {:ok, session_id} = Loopex.create_session(runtime, %{}, command_id: "create-accounting")
       {:ok, attachment} = Loopex.attach(runtime, session_id, after_event_sequence: 0)
       {:ok, %{control: control}} = Runtime.children(runtime)
