@@ -57,6 +57,8 @@ defmodule LoopexCli.ReceiptRoundTripTest do
       |> Map.put(:kind, "session_genesis_v3")
       |> Map.put("options", %{})
 
+    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(stack.runtime)
+
     assert {:ok, session_id} =
              Loopex.create_session(stack.runtime, %{}, command_id: "create-1", genesis: genesis)
 
