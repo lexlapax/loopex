@@ -712,7 +712,7 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
     activate(registry, "session")
     install_attachment(registry, relay, connection, "session", 0, "original")
     replacement = attach_async(registry, connection, "session", 1, "replacement")
-    assert_receive {:relay_request, ^relay, from, {:promote_ticket, origin, _, _, _}}, 500
+    assert_receive {:relay_request, ^relay, from, {:promote_ticket, _origin, _, _, _}}, 500
 
     route = fn attachment ->
       manual_registry_call(
