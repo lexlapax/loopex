@@ -1,5 +1,18 @@
 # M7 Implementation Tasks
 
+### Remaining ordinary workflow proof retained, 2026-10-09
+
+Original99704 at `3e5f83f3` passes all38 cases in the four remaining ordinary
+CLI ask/foundation files on both supported pairs, in168.994seconds. The
+[resume checkpoint](M7-resume.md) binds its collection,80-asset retention childv40,
+and the current lost-create diagnosis. No source, case, assertion or cutoff
+changed for this run. T06 remains open for CLI progress failures, intermittent
+duplicate output and separate provider/attended proofs. Next run the existing
+twelve-case recovery file with the reviewed lost-create-only metadata capture.
+No checkbox changes: T01–T19 original89 done/84 open/6 retired, added375 done/22
+open, combined464 done/106 open/6 retired. ADR0067 remains the presented question.
+
+
 ### Artifact lost-registration component proved, 2026-10-09
 
 Accepted ADR0066's original-owner four-fact branch is joined at `e91ce0c7`,

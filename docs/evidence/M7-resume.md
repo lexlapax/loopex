@@ -27,6 +27,43 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+### Remaining ordinary CLI workflows qualified, 2026-10-09
+
+At `3e5f83f30a7bb4ace9f4f6ecd37f9ee353a01873`, original99704 passes
+all38 cases on both supported pairs, zero excluded/skipped/invalid, in168.994
+seconds with12 original process joins. Complete files are
+`ask_integration_test.exs`7, `ask_ephemeral_test.exs`22,
+`ask_command_test.exs`4 and `foundation_workflow_test.exs`5. Their actual local
+HTTP, source-built CLI/separate VM, real tools, artifact and fresh-process
+recovery paths remain unchanged. Collection SHA-256
+`b06f79a0e28bf12fb0ee291caaf82497966b0bccfce55ca962f8302812fea18d`.
+
+Documentation original24169 passes the `3e5f83f3` checkpoint in26.486seconds;
+it does not validate this later checkpoint. Retention child
+`M7/current-source-preparation-20261009-v40/retention.json`, SHA-256
+`4b04c77760ada652eea40c80b6b5cce89b8cb74b1900d4f8aca981d96ffffeff`,
+retains80 assets and authenticates parentv39. Latest registry3282 SHA-256
+`273abf11f833a6f058122846b0a5d426d946f1e1de481aef3059bc89fbe83e42`.
+Both originals are terminal and collected once; no native handle is live.
+
+Next qualify the unchanged twelve-case `live_recovery_test.exs` with the
+reviewed lost-create-only bounded metadata capture. Original5122's intermittent
+duplicate output remains a defect; original99083's lost-prompt metadata overflow
+remains FAIL. The subsequent observation-scope correction preserves all cases,
+assertions, timeouts and128-row/65536-byte caps. No production repair or causal
+explanation is claimed. Current source diagnosis
+`/private/tmp/m7-cli-lost-create-current-diagnosis-20261009-v2.md`, SHA-256
+`a5f13685261216ea0bf40b43c7c807a642ed000debc7c153c2e73bcba52fe850`,
+records healthy closure-before-assistant metadata from99083; the failed5122 wire
+sequence is unavailable. A quiet run cannot resolve its root cause.
+
+T06 remains open for the known CLI progress failures, intermittent duplicate
+and separate provider/attended obligations. No checkbox closes. T01–T19 remain
+original89 done/84 open/6 retired, added375 done/22 open, combined464 done/106
+open/6 retired. ADR0067 remains the presented unanswered question;0065/0068
+and the older Core observer grace remain pending. Continue the existing goal
+on `m7`; no full integration or closure claim.
+
 ### Accepted artifact lost-registration branch qualified, 2026-10-09
 
 Implementation `e91ce0c75c85aa4a90c793b44944936c9d076d0d` and strict-AST
