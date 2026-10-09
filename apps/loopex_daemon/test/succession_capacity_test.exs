@@ -7,7 +7,7 @@ defmodule LoopexDaemon.SuccessionCapacityTest do
   test "the reserve is derived from every maximal legal succession record" do
     measurement = SuccessionCapacity.measure()
 
-    assert length(measurement.reply_candidates) == 42
+    assert length(measurement.reply_candidates) == 52
     assert Enum.uniq_by(measurement.reply_candidates, & &1.id) == measurement.reply_candidates
 
     assert measurement.reply_bytes ==
@@ -52,10 +52,22 @@ defmodule LoopexDaemon.SuccessionCapacityTest do
               "88c5ed73e3299810473de62be7b481bb32fc6c636134c4b48d48c2b15c5f1b68"},
              {"session.configure/refused/compaction_required", 87_578,
               "8a3e0212e0ed56068578829794fd336a58da9f2af10bac7af4e95cc80576eaa1"},
+             {"session.configure/refused/maintenance_active", 87_577,
+              "c4821d9c3fc1b99e275aba4212281649c28d7f29af1bf8cb767823301e573a6e"},
+             {"session.compact/accepted", 87_560,
+              "be99f859f3b9609a1b7fe3a468c04af303aa71d772c6185354041c7a94e16d4f"},
+             {"session.compact/refused/run_active", 87_567,
+              "a6a740fb47263253d539ec5b2778502519c91b5cb7336c478035f803e2399b40"},
+             {"session.compact/refused/maintenance_active", 87_575,
+              "a98482e4739c6b591f3fb6109a92e4c7408d67349a1a392d3ab17ea5b598a5fa"},
              {"session.prompt/accepted", 87_559,
               "f589d1f351517237e21dadc1ad891257e7e4e19ccdd9e49edd508c0f2eba0f5e"},
              {"session.prompt/refused/run_active", 87_566,
               "96c246f5577a11b39673ceef474827bcbde8964bc92b50190a67990da6df96ec"},
+             {"session.prompt/refused/deadline_elapsed", 87_572,
+              "61240e4e5a2aa7cebd823d0a7b6be18d2e82ebe559041309072aa3250bc04a50"},
+             {"session.prompt/refused/maintenance_active", 87_574,
+              "f080a7d0bddbc99edd87312be013f35f5cebced47ef2565531d76925a7ea13b7"},
              {"session.steer/accepted", 87_558,
               "741edf068f20f7c018bde9431bfa1cca6d1f2200fd04fc0a6fd70b281d4814dc"},
              {"session.steer/refused/run_mismatch", 87_567,
@@ -64,12 +76,18 @@ defmodule LoopexDaemon.SuccessionCapacityTest do
               "91d61b09fdd6048d24564ff8c30728187cce157221213f956543b29a834f0d1a"},
              {"session.steer/refused/no_active_run", 87_568,
               "3eac1e3a61fe009b93687546765078ea08e56d474b3054c621e21633119731d9"},
+             {"session.steer/refused/maintenance_active", 87_573,
+              "b5382eb1adea108f99c38e9151f6fd89e769a6f2ebf983f3fc05626729caea83"},
              {"session.follow_up/accepted", 87_562,
               "bd583a0b6ae8fdeff3efb30c6faeaac77f4b44aa4b29854c66eadada08c51a6f"},
              {"session.follow_up/refused/follow_up_pending", 87_576,
               "0938be4836fe2f3151ceecfeb1222cf881c158ad904144cf080154b960ac1956"},
              {"session.follow_up/refused/no_active_run", 87_572,
               "f8a572284e38ac783305a65476950e4a8f0807ab7f6d12e9c777c84473a5244c"},
+             {"session.follow_up/refused/deadline_elapsed", 87_575,
+              "c63c484d8ba982b170af2169b5d802129a7fe84361378c51aacc0c7bc25beab0"},
+             {"session.follow_up/refused/maintenance_active", 87_577,
+              "9c7117f42ee96cd48ddcf2940046a3f202e2548fbb74d74d17f05a92ab554719"},
              {"session.abort/accepted", 87_558,
               "949aa2e8e7846d96d5dfff6b4239a24fdbc3fda436e5823fea32ed89764f6d9e"},
              {"session.abort/refused/no_active_run", 87_568,
@@ -82,6 +100,8 @@ defmodule LoopexDaemon.SuccessionCapacityTest do
               "3b3ab067e8c22e6ddd3124b7a8b4c3afe2bfbeb7a22ea424f37ff83c1501e91a"},
              {"session.respond_interaction/refused/invalid_interaction_answer", 87_595,
               "19fdb2bd354a8c155fe408d4adad53c2e2b28a5b65ee5d60e16779bba4662476"},
+             {"session.respond_interaction/refused/maintenance_active", 87_587,
+              "8fd24cdbc214da48e980d752649e34995f5b077d46b01d5e8c33d144efd25be2"},
              {"session.admit_resources/accepted", 528,
               "ed0303b4c61e5fb8112fc3be249b617ef2bef130d231d913694b9f284d8e7263"},
              {"session.admit_resources/refused/run_active", 535,
