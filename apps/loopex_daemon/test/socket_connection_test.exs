@@ -139,7 +139,7 @@ defmodule LoopexDaemon.SocketConnectionTest do
     end
   end
 
-  test "the current negotiated socket drops compaction activity through credited ingress",
+  test "the current negotiated socket delivers compaction activity through credited ingress",
        %{daemon: daemon, runtime: runtime} do
     client = initialized_client(daemon)
     [connection] = initialized_connections(daemon)
@@ -214,10 +214,9 @@ defmodule LoopexDaemon.SocketConnectionTest do
       base_event_sequence: cursor
     }
 
-    # Concept: current serving still drops compaction activity before serialization.
-    # Technical depth: the actual arena admits the valid native activity, refuses
-    # private/oversized variants, and gives the following ordinary barrier credit.
-    # Observing that barrier first proves prior activity was released, not emitted.
+    # Concept: current serving emits the exact activity and releases its credit.
+    # Technical depth: private/oversized variants refuse before admission. Both
+    # valid rows must arrive within the original single five-second read window.
     :ok =
       Loopex.ProgressSink.try_offer(
         :sys.get_state(connection).progress_sink,
@@ -225,7 +224,34 @@ defmodule LoopexDaemon.SocketConnectionTest do
         ordinary
       )
 
-    assert [%{"type" => "progress", "progress" => progress}] = receive_records(client, 1)
+    read_cutoff = System.monotonic_time(:millisecond) + 5_000
+
+    [activity_record] =
+      receive_records(client, 1, max(read_cutoff - System.monotonic_time(:millisecond), 0))
+
+    assert System.monotonic_time(:millisecond) <= read_cutoff
+
+    assert activity_record == %{
+             "type" => "progress",
+             "session_id" => encoded_session,
+             "progress" => %{
+               "kind" => "context.compaction_progress",
+               "episode_id" => "AP8",
+               "owner" => %{"kind" => "compact", "id" => "_wA"},
+               "stream_domain_id" => "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+               "progress_sequence" => "0",
+               "base_event_sequence" => Integer.to_string(cursor)
+             }
+           }
+
+    assert [%{"type" => "progress", "progress" => progress}] =
+             receive_records(
+               client,
+               1,
+               max(read_cutoff - System.monotonic_time(:millisecond), 0)
+             )
+
+    assert System.monotonic_time(:millisecond) <= read_cutoff
 
     eventually(fn ->
       state = :sys.get_state(connection)
