@@ -44,9 +44,11 @@ defmodule Loopex.AppServer.ForegroundOutputLifecycleTest do
   end
 
   test "all64 durable slots include the active frame and only its exact join reopens one" do
-    queue = Enum.reduce(1..64, Delivery.new("session", 0), fn sequence, queue ->
-      Delivery.event(queue, event(sequence))
-    end)
+    queue =
+      Enum.reduce(1..64, Delivery.new("session", 0), fn sequence, queue ->
+        Delivery.event(queue, event(sequence))
+      end)
+
     {:ok, entry} = Delivery.next(queue)
     reference = make_ref()
     {:ok, active} = Delivery.activate(queue, entry.token, reference)
@@ -62,9 +64,11 @@ defmodule Loopex.AppServer.ForegroundOutputLifecycleTest do
   end
 
   test "all32 transient slots retain their active charge without moving the emitted cursor" do
-    queue = Enum.reduce(1..32, Delivery.new("session", 7), fn _, queue ->
-      Delivery.progress(queue, text_item("x"))
-    end)
+    queue =
+      Enum.reduce(1..32, Delivery.new("session", 7), fn _, queue ->
+        Delivery.progress(queue, text_item("x"))
+      end)
+
     {:ok, entry} = Delivery.next(queue)
     reference = make_ref()
     {:ok, active} = Delivery.activate(queue, entry.token, reference)
@@ -86,8 +90,13 @@ defmodule Loopex.AppServer.ForegroundOutputLifecycleTest do
     assert Delivery.cursor(joined) == 0
     refute Delivery.ready?(joined)
     {:ok, reservation, reserved} = Delivery.reserve(joined)
-    {:ok, snapshot} = Delivery.commit(reserved, reservation, %{"type" => "snapshot"},
-      %{incarnation: {"attachment", "incarnation"}, baseline: 9})
+
+    {:ok, snapshot} =
+      Delivery.commit(reserved, reservation, %{"type" => "snapshot"}, %{
+        incarnation: {"attachment", "incarnation"},
+        baseline: 9
+      })
+
     {:ok, next} = Delivery.next(snapshot)
     next_ref = make_ref()
     {:ok, active} = Delivery.activate(snapshot, next.token, next_ref)
@@ -115,8 +124,13 @@ defmodule Loopex.AppServer.ForegroundOutputLifecycleTest do
   test "actual wire creation retains its original command and snapshot joins before live progress" do
     Harness.with_fixture(:file, :runtime, fn fixture ->
       prepare(fixture)
-      Harness.send_frame(fixture, %{"method" => "session.create", "request_id" => "create",
-        "command_id" => Wire.encode_identity("wire-created")})
+
+      Harness.send_frame(fixture, %{
+        "method" => "session.create",
+        "request_id" => "create",
+        "command_id" => Wire.encode_identity("wire-created")
+      })
+
       records = Harness.await_lines(fixture, 3) |> Enum.map(&decode_payload/1)
       assert [initialized, snapshot, admission] = records
       assert initialized["type"] == "initialized"
@@ -135,16 +149,29 @@ defmodule Loopex.AppServer.ForegroundOutputLifecycleTest do
     end)
   end
 
-  for kind <- [:text_delta, :reasoning_delta, :tool_call_delta, :tool_progress,
-               :model_stream_closed, :tool_stream_closed, :activity] do
+  for kind <- [
+        :text_delta,
+        :reasoning_delta,
+        :tool_call_delta,
+        :tool_progress,
+        :model_stream_closed,
+        :tool_stream_closed,
+        :activity
+      ] do
     @kind kind
     test "actual #{@kind} frame retains native lease credit until the writer joins" do
       Harness.with_fixture(:file, :runtime, fn fixture ->
         prepare(fixture)
-        assert {:offered, :ok} = Harness.command(fixture, {:offer, @kind, 16}, &match?({:offered, _}, &1))
+
+        assert {:offered, :ok} =
+                 Harness.command(fixture, {:offer, @kind, 16}, &match?({:offered, _}, &1))
+
         records = Harness.await_lines(fixture, 3) |> Enum.map(&decode_payload/1)
         assert Enum.map(records, & &1["type"]) == ["initialized", "snapshot", "progress"]
-        expected = if @kind == :activity, do: "context.compaction_progress", else: Atom.to_string(@kind)
+
+        expected =
+          if @kind == :activity, do: "context.compaction_progress", else: Atom.to_string(@kind)
+
         assert List.last(records)["progress"]["kind"] == expected
         await_credit_empty(fixture)
         :file.close(fixture.input)
@@ -160,7 +187,10 @@ defmodule Loopex.AppServer.ForegroundOutputLifecycleTest do
   test "EOF retires a real blocked progress worker and actual holder without appending an error" do
     Harness.with_fixture(:fifo, :runtime, fn fixture ->
       prepare(fixture)
-      assert {:offered, :ok} = Harness.command(fixture, {:offer, :text_delta, 32_768}, &match?({:offered, _}, &1))
+
+      assert {:offered, :ok} =
+               Harness.command(fixture, {:offer, :text_delta, 32_768}, &match?({:offered, _}, &1))
+
       metadata = Harness.blocked(fixture)
       assert metadata.credit.slots == 1
       assert metadata.credit.bytes > 0 and metadata.credit.bytes <= 524_288
@@ -180,7 +210,10 @@ defmodule Loopex.AppServer.ForegroundOutputLifecycleTest do
   test "real WRITTEN without JOINED keeps native credit and EOF joins the stopped leader" do
     Harness.with_fixture(:fifo, :runtime, fn fixture ->
       prepare(fixture)
-      assert {:offered, :ok} = Harness.command(fixture, {:offer, :text_delta, 32_768}, &match?({:offered, _}, &1))
+
+      assert {:offered, :ok} =
+               Harness.command(fixture, {:offer, :text_delta, 32_768}, &match?({:offered, _}, &1))
+
       blocked = Harness.blocked(fixture)
       assert Harness.command(fixture, :stop_leader, &(&1 == :leader_stopped)) == :leader_stopped
       frame = Harness.read_fifo_frame(fixture)
@@ -203,20 +236,32 @@ defmodule Loopex.AppServer.ForegroundOutputLifecycleTest do
       prepare(fixture)
       {:metadata, before} = Harness.metadata(fixture)
       assert [original] = before.attachments
-      assert {:offered, :ok} = Harness.command(fixture, {:offer, :text_delta, 32_768}, &match?({:offered, _}, &1))
+
+      assert {:offered, :ok} =
+               Harness.command(fixture, {:offer, :text_delta, 32_768}, &match?({:offered, _}, &1))
+
       blocked = Harness.blocked(fixture)
       assert Harness.command(fixture, :stop_leader, &(&1 == :leader_stopped)) == :leader_stopped
       assert decode(Harness.read_fifo_frame(fixture))["type"] == "progress"
       written = await_written(fixture)
       assert written.active.reference == blocked.active.reference
       assert written.active.joined_at == nil
-      Harness.send_frame(fixture, %{"method" => "session.attach", "request_id" => "replacement",
-        "session_id" => Wire.encode_identity(fixture.session), "replace" => true})
+
+      Harness.send_frame(fixture, %{
+        "method" => "session.attach",
+        "request_id" => "replacement",
+        "session_id" => Wire.encode_identity(fixture.session),
+        "replace" => true
+      })
+
       {:metadata, waiting} = Harness.metadata(fixture)
       assert waiting.attachments == [original]
       assert waiting.credit.slots == 1
       assert waiting.active.reference == written.active.reference
-      assert Harness.command(fixture, :continue_leader, &(&1 == :leader_continued)) == :leader_continued
+
+      assert Harness.command(fixture, :continue_leader, &(&1 == :leader_continued)) ==
+               :leader_continued
+
       replacement = Harness.read_fifo_frame(fixture) |> decode()
       assert replacement["type"] == "snapshot"
       assert replacement["request_id"] == "replacement"
@@ -236,7 +281,10 @@ defmodule Loopex.AppServer.ForegroundOutputLifecycleTest do
   test "an actual broken output pipe retires the original group and lease without a successor write" do
     Harness.with_fixture(:fifo, :runtime, fn fixture ->
       prepare(fixture)
-      assert {:offered, :ok} = Harness.command(fixture, {:offer, :text_delta, 32_768}, &match?({:offered, _}, &1))
+
+      assert {:offered, :ok} =
+               Harness.command(fixture, {:offer, :text_delta, 32_768}, &match?({:offered, _}, &1))
+
       blocked = Harness.blocked(fixture)
       assert blocked.credit.slots == 1
       assert {:ok, prefix} = :file.read(fixture.fifo, 4_096)
@@ -260,21 +308,42 @@ defmodule Loopex.AppServer.ForegroundOutputLifecycleTest do
   test "output pressure closes before a later real creation reaches Store and releases its transfer holder" do
     Harness.with_fixture(:fifo, :runtime, fn fixture ->
       prepare(fixture)
-      Harness.send_frame(fixture, %{"method" => "artifact.open_transfer", "request_id" => "open",
-        "use_ref" => Wire.encode_reference(fixture.reference), "start_offset" => "0"})
+
+      Harness.send_frame(fixture, %{
+        "method" => "artifact.open_transfer",
+        "request_id" => "open",
+        "use_ref" => Wire.encode_reference(fixture.reference),
+        "start_offset" => "0"
+      })
+
       opened = Harness.read_fifo_frame(fixture) |> decode()
       transfer = opened["result"]["transfer_ref"]
+
       for index <- 1..3 do
-        Harness.send_frame(fixture, %{"method" => "artifact.read_chunk", "request_id" => "chunk#{index}",
-          "transfer_ref" => transfer, "length" => 32_768})
+        Harness.send_frame(fixture, %{
+          "method" => "artifact.read_chunk",
+          "request_id" => "chunk#{index}",
+          "transfer_ref" => transfer,
+          "length" => 32_768
+        })
       end
+
       metadata = Harness.blocked(fixture)
+
       for index <- 1..100 do
-        Harness.send_frame(fixture, %{"method" => "session.inspect", "request_id" => "query#{index}",
-          "session_id" => Wire.encode_identity(fixture.session)})
+        Harness.send_frame(fixture, %{
+          "method" => "session.inspect",
+          "request_id" => "query#{index}",
+          "session_id" => Wire.encode_identity(fixture.session)
+        })
       end
-      Harness.send_frame(fixture, %{"method" => "session.create", "request_id" => "denied",
-        "command_id" => Wire.encode_identity("must-not-reach-store")})
+
+      Harness.send_frame(fixture, %{
+        "method" => "session.create",
+        "request_id" => "denied",
+        "command_id" => Wire.encode_identity("must-not-reach-store")
+      })
+
       summary = Harness.finished(fixture)
       assert summary.result == {:error, :output_pressure}
       refute "must-not-reach-store" in summary.command_ids
@@ -289,16 +358,30 @@ defmodule Loopex.AppServer.ForegroundOutputLifecycleTest do
   test "EOF is serviced while a real Store final creation call is held and supplies no fabricated refusal" do
     Harness.with_fixture(:file, :runtime, fn fixture ->
       prepare(fixture)
-      assert Harness.command(fixture, :hold_create, &(&1 == :holding_next_create)) == :holding_next_create
-      Harness.send_frame(fixture, %{"method" => "session.create", "request_id" => "held",
-        "command_id" => Wire.encode_identity("held-original")})
-      assert {:held, :runtime_control_create_session, tx_id} = Harness.next(fixture, &match?({:held, _, _}, &1))
+
+      assert Harness.command(fixture, :hold_create, &(&1 == :holding_next_create)) ==
+               :holding_next_create
+
+      Harness.send_frame(fixture, %{
+        "method" => "session.create",
+        "request_id" => "held",
+        "command_id" => Wire.encode_identity("held-original")
+      })
+
+      assert {:held, :runtime_control_create_session, tx_id} =
+               Harness.next(fixture, &match?({:held, _, _}, &1))
+
       assert is_binary(tx_id)
       :file.close(fixture.input)
       summary = Harness.finished(fixture)
       assert summary.result == :ok
       assert summary.holders == 0
-      records = File.read!(fixture.output) |> String.split("\n", trim: true) |> Enum.map(&decode_payload/1)
+
+      records =
+        File.read!(fixture.output)
+        |> String.split("\n", trim: true)
+        |> Enum.map(&decode_payload/1)
+
       assert Enum.map(records, & &1["type"]) == ["initialized", "snapshot"]
       refute Enum.any?(records, &(&1["request_id"] == "held"))
     end)
@@ -309,15 +392,26 @@ defmodule Loopex.AppServer.ForegroundOutputLifecycleTest do
       prepare(fixture)
       {:metadata, before} = Harness.metadata(fixture)
       assert [_original] = before.attachments
+
       assert Harness.command(fixture, :hold_holder_cleanup, &(&1 == :holder_cleanup_held)) ==
                :holder_cleanup_held
+
       :file.close(fixture.input)
+
       assert {:cleanup_joined_while_owner_suspended, cutoff} =
-               Harness.command(fixture, :suspend_cleanup_owner,
-                 &match?({:cleanup_joined_while_owner_suspended, _}, &1))
+               Harness.command(
+                 fixture,
+                 :suspend_cleanup_owner,
+                 &match?({:cleanup_joined_while_owner_suspended, _}, &1)
+               )
+
       assert {:owner_resumed_after_cutoff, observed} =
-               Harness.command(fixture, :resume_expired_owner,
-                 &match?({:owner_resumed_after_cutoff, _}, &1))
+               Harness.command(
+                 fixture,
+                 :resume_expired_owner,
+                 &match?({:owner_resumed_after_cutoff, _}, &1)
+               )
+
       assert observed >= cutoff
       summary = Harness.finished(fixture)
       assert summary.result == {:error, :cleanup_unproved}
@@ -336,12 +430,22 @@ defmodule Loopex.AppServer.ForegroundOutputLifecycleTest do
       prepare(fixture)
       {:metadata, before} = Harness.metadata(fixture)
       assert [_original] = before.attachments
+
       assert Harness.command(fixture, :suspend_idle_writer, &(&1 == :idle_writer_suspended)) ==
                :idle_writer_suspended
-      Harness.send_frame(fixture, %{"method" => "session.inspect", "request_id" => "caught",
-        "session_id" => Wire.encode_identity(fixture.session)})
-      assert Harness.command(fixture, :kill_blocked_writer,
-               &(&1 == :original_blocked_writer_killed)) == :original_blocked_writer_killed
+
+      Harness.send_frame(fixture, %{
+        "method" => "session.inspect",
+        "request_id" => "caught",
+        "session_id" => Wire.encode_identity(fixture.session)
+      })
+
+      assert Harness.command(
+               fixture,
+               :kill_blocked_writer,
+               &(&1 == :original_blocked_writer_killed)
+             ) == :original_blocked_writer_killed
+
       summary = Harness.finished(fixture)
       assert summary.result == {:caught_exit, :killed}
       assert summary.caller_survived
@@ -357,20 +461,33 @@ defmodule Loopex.AppServer.ForegroundOutputLifecycleTest do
   end
 
   defp prepare(fixture) do
-    Harness.send_frame(fixture, %{"method" => "initialize", "request_id" => "init",
-      "generations" => [Session.generation()], "capabilities" => []})
-    Harness.send_frame(fixture, %{"method" => "session.attach", "request_id" => "attach",
-      "session_id" => Wire.encode_identity(fixture.session)})
-    records = if fixture.fifo do
-      [Harness.read_fifo_frame(fixture), Harness.read_fifo_frame(fixture)] |> Enum.map(&decode/1)
-    else
-      Harness.await_lines(fixture, 2) |> Enum.map(&decode_payload/1)
-    end
+    Harness.send_frame(fixture, %{
+      "method" => "initialize",
+      "request_id" => "init",
+      "generations" => [Session.generation()],
+      "capabilities" => []
+    })
+
+    Harness.send_frame(fixture, %{
+      "method" => "session.attach",
+      "request_id" => "attach",
+      "session_id" => Wire.encode_identity(fixture.session)
+    })
+
+    records =
+      if fixture.fifo do
+        [Harness.read_fifo_frame(fixture), Harness.read_fifo_frame(fixture)]
+        |> Enum.map(&decode/1)
+      else
+        Harness.await_lines(fixture, 2) |> Enum.map(&decode_payload/1)
+      end
+
     assert Enum.map(records, & &1["type"]) == ["initialized", "snapshot"]
   end
 
   defp await_credit_empty(fixture) do
     {:metadata, metadata} = Harness.metadata(fixture)
+
     if metadata.credit.slots == 0 do
       assert metadata.credit.bytes == 0
       :ok
@@ -382,6 +499,7 @@ defmodule Loopex.AppServer.ForegroundOutputLifecycleTest do
 
   defp await_written(fixture) do
     {:metadata, metadata} = Harness.metadata(fixture)
+
     if metadata.active && is_integer(metadata.active.written_at) do
       metadata
     else
@@ -390,11 +508,22 @@ defmodule Loopex.AppServer.ForegroundOutputLifecycleTest do
     end
   end
 
-  defp event(sequence), do: %{kind: "run.progressed", event_id: "event#{sequence}", event_sequence: sequence}
-  defp text_item(text), do: %{kind: :text_delta, turn_id: "turn",
-    stream_domain_id: "0123456789abcdef0123456789abcdef", model_sequence: 0,
-    base_event_sequence: 7, content_index: 0, text: text}
+  defp event(sequence),
+    do: %{kind: "run.progressed", event_id: "event#{sequence}", event_sequence: sequence}
+
+  defp text_item(text),
+    do: %{
+      kind: :text_delta,
+      turn_id: "turn",
+      stream_domain_id: "0123456789abcdef0123456789abcdef",
+      model_sequence: 0,
+      base_event_sequence: 7,
+      content_index: 0,
+      text: text
+    }
+
   defp decode(frame), do: frame |> String.trim_trailing("\n") |> decode_payload()
+
   defp decode_payload(payload) do
     assert {:ok, record} = Frame.decode(payload, 2_097_152)
     record

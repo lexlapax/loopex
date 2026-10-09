@@ -110,201 +110,205 @@ defmodule Loopex.ShutdownWitness do
     Process.put({cleanup_key, :session}, nil)
     Process.put({__MODULE__, :partial_evidence}, [])
 
-    result = try do
-      session = :trace.session_create(:loopex_private_task_shutdown, collector, [])
-      Process.put({cleanup_key, :session}, session)
-      child_pids = runs |> Enum.flat_map(&Map.keys(&1.roles)) |> Enum.uniq()
+    result =
+      try do
+        session = :trace.session_create(:loopex_private_task_shutdown, collector, [])
+        Process.put({cleanup_key, :session}, session)
+        child_pids = runs |> Enum.flat_map(&Map.keys(&1.roles)) |> Enum.uniq()
 
-      receive_patterns =
-        for pid <- child_pids,
-            reason <- @safe_reasons ++ [{:shutdown, :noproc}],
-            shape <- [:exit, :down] do
-          message =
-            case shape do
-              :exit -> {:EXIT, pid, reason}
-              :down -> {:DOWN, :_, :process, pid, reason}
-            end
+        receive_patterns =
+          for pid <- child_pids,
+              reason <- @safe_reasons ++ [{:shutdown, :noproc}],
+              shape <- [:exit, :down] do
+            message =
+              case shape do
+                :exit -> {:EXIT, pid, reason}
+                :down -> {:DOWN, :_, :process, pid, reason}
+              end
 
-          {[:_, :_, message], [], []}
-        end
+            {[:_, :_, message], [], []}
+          end
 
-      resource_patterns =
-        Enum.flat_map(managed, fn run ->
-          [
-            {[
-               :_,
-               :_,
-               {:loopex_provider_resource_stop, run.stop_reference, :"$1", run.guard, :_, :_}
-             ], [{:is_reference, :"$1"}], []},
-            {[:_, :_, {:loopex_provider_resource_stopped, :"$1", run.resource}],
-             [{:is_reference, :"$1"}], []}
-          ]
-        end)
+        resource_patterns =
+          Enum.flat_map(managed, fn run ->
+            [
+              {[
+                 :_,
+                 :_,
+                 {:loopex_provider_resource_stop, run.stop_reference, :"$1", run.guard, :_, :_}
+               ], [{:is_reference, :"$1"}], []},
+              {[:_, :_, {:loopex_provider_resource_stopped, :"$1", run.resource}],
+               [{:is_reference, :"$1"}], []}
+            ]
+          end)
 
-      :trace.recv(session, receive_patterns ++ resource_patterns, [])
+        :trace.recv(session, receive_patterns ++ resource_patterns, [])
 
-      assert :trace.function(
-               session,
-               {DynamicSupervisor, :monitor_child, 1},
-               for(
-                 pid <- child_pids,
-                 do: {[pid], [], [{:message, {:const, pid}}, {:return_trace}]}
-               ),
-               [:local]
-             ) > 0
-
-      assert :trace.function(
-               session,
-               {:erlang, :monitor, 2},
-               for(
-                 pid <- child_pids,
-                 do: {[:process, pid], [], [{:message, {:const, pid}}, {:return_trace}]}
-               ),
-               []
-             ) > 0
-
-      assert :trace.function(
-               session,
-               {:erlang, :unlink, 1},
-               for(
-                 pid <- child_pids,
-                 do: {[pid], [], [{:message, {:const, pid}}, {:return_trace}]}
-               ),
-               []
-             ) > 0
-
-      assert :trace.function(
-               session,
-               {:erlang, :exit, 2},
-               for(
-                 pid <- child_pids,
-                 reason <- [:kill, :shutdown],
-                 do: {[pid, reason], [], [{:message, {:const, {pid, reason}}}]}
-               ),
-               []
-             ) > 0
-
-      # Concept: record the exact actors that can stop these retained resources.
-      # Technical depth: arity-only calls have fixed-target match specifications;
-      # no request arguments or arbitrary messages enter the evidence records.
-      for pid <- Map.keys(actors) do
-        assert :trace.process(session, pid, true, [
-                 :call,
-                 :arity,
-                 :procs,
-                 :receive,
-                 :monotonic_timestamp
-               ]) == 1
-      end
-
-      for run <- runs do
-        case mode do
-          :explicit_stop -> send(run.owner, :explicit_stop)
-          :owner_exit -> send(run.owner, :stop)
-          :supervisor_fault -> Process.exit(run.workers, :kill)
-        end
-      end
-
-      monitors = Enum.reduce(runs, %{}, &Map.merge(&2, &1.monitors))
-
-      {monitors, first_evidence} =
-        if mode == :supervisor_fault do
-          [run] = runs
-          {reference, _} = Enum.find(run.monitors, fn {_, {pid, _}} -> pid == run.group end)
-
-          assert_receive {:DOWN, ^reference, :process, group, {:owner_workers_stopped, :killed}}
-                         when group == run.group,
-                         max(cutoff - System.monotonic_time(:millisecond), 0)
-
-          send(run.owner, :stop)
-
-          {Map.delete(monitors, reference),
-           [
-             %{
-               "event" => "original_down",
-               "pid" => identity(run.group),
-               "monitor" => identity(reference),
-               "role" => "owner_group",
-               "reason" => "owner_workers_stopped:killed"
-             }
-           ]}
-        else
-          {monitors, []}
-        end
-
-      evidence = join_originals(monitors, collector, cutoff, first_evidence)
-      send(collector, {:finish, observer, session})
-
-      assert_receive {:causal_trace, ^collector, records},
-                     max(cutoff - System.monotonic_time(:millisecond), 0)
-
-      assert_receive {:DOWN, ^collector_monitor, :process, ^collector, :normal},
-                     max(cutoff - System.monotonic_time(:millisecond), 0)
-
-      Process.put(cleanup_key, true)
-      assert System.monotonic_time(:millisecond) <= cutoff
-      evidence = evidence ++ records ++ drain_reports(runs, [])
-      evidence = evidence ++ classify.(evidence)
-      assert length(evidence) < 8_192
-      Process.put({__MODULE__, :partial_evidence}, evidence)
-      retain(label, evidence)
-
-      # Concept: every observed supervisor report comes from its joined producer.
-      # Technical depth: the primary filter runs in the local logging caller.
-      # Its send precedes that supervisor's original DOWN, so report custody uses
-      # the existing actor fence rather than an added Logger wait allowance.
-      for report <- evidence, report["event"] == "supervisor_report" do
-        assert report["logger_producer"] == report["supervisor"]
-        assert report["context"] in ["shutdown_error", "child_terminated"]
-        assert report["pid"] in Enum.map(Map.keys(actors), &identity/1)
-        assert report["reason"] != "other" and report["shutdown"] != "other"
-
-        assert Enum.any?(evidence, fn event ->
-                 event["event"] == "original_down" and
-                   event["pid"] == report["logger_producer"]
-               end)
-      end
-
-      if mode == :explicit_stop do
-        for run <- runs do
-          assert Enum.any?(
-                   evidence,
-                   &(&1["event"] == "explicit_stop_returned" and &1["pid"] == identity(run.owner))
+        assert :trace.function(
+                 session,
+                 {DynamicSupervisor, :monitor_child, 1},
+                 for(
+                   pid <- child_pids,
+                   do: {[pid], [], [{:message, {:const, pid}}, {:return_trace}]}
                  ),
-                 "explicit runtime stop did not return successfully: " <>
-                   inspect(evidence, limit: :infinity)
+                 [:local]
+               ) > 0
+
+        assert :trace.function(
+                 session,
+                 {:erlang, :monitor, 2},
+                 for(
+                   pid <- child_pids,
+                   do: {[:process, pid], [], [{:message, {:const, pid}}, {:return_trace}]}
+                 ),
+                 []
+               ) > 0
+
+        assert :trace.function(
+                 session,
+                 {:erlang, :unlink, 1},
+                 for(
+                   pid <- child_pids,
+                   do: {[pid], [], [{:message, {:const, pid}}, {:return_trace}]}
+                 ),
+                 []
+               ) > 0
+
+        assert :trace.function(
+                 session,
+                 {:erlang, :exit, 2},
+                 for(
+                   pid <- child_pids,
+                   reason <- [:kill, :shutdown],
+                   do: {[pid, reason], [], [{:message, {:const, {pid, reason}}}]}
+                 ),
+                 []
+               ) > 0
+
+        # Concept: record the exact actors that can stop these retained resources.
+        # Technical depth: arity-only calls have fixed-target match specifications;
+        # no request arguments or arbitrary messages enter the evidence records.
+        for pid <- Map.keys(actors) do
+          assert :trace.process(session, pid, true, [
+                   :call,
+                   :arity,
+                   :procs,
+                   :receive,
+                   :monotonic_timestamp
+                 ]) == 1
         end
+
+        for run <- runs do
+          case mode do
+            :explicit_stop -> send(run.owner, :explicit_stop)
+            :owner_exit -> send(run.owner, :stop)
+            :supervisor_fault -> Process.exit(run.workers, :kill)
+          end
+        end
+
+        monitors = Enum.reduce(runs, %{}, &Map.merge(&2, &1.monitors))
+
+        {monitors, first_evidence} =
+          if mode == :supervisor_fault do
+            [run] = runs
+            {reference, _} = Enum.find(run.monitors, fn {_, {pid, _}} -> pid == run.group end)
+
+            assert_receive {:DOWN, ^reference, :process, group, {:owner_workers_stopped, :killed}}
+                           when group == run.group,
+                           max(cutoff - System.monotonic_time(:millisecond), 0)
+
+            send(run.owner, :stop)
+
+            {Map.delete(monitors, reference),
+             [
+               %{
+                 "event" => "original_down",
+                 "pid" => identity(run.group),
+                 "monitor" => identity(reference),
+                 "role" => "owner_group",
+                 "reason" => "owner_workers_stopped:killed"
+               }
+             ]}
+          else
+            {monitors, []}
+          end
+
+        evidence = join_originals(monitors, collector, cutoff, first_evidence)
+        send(collector, {:finish, observer, session})
+
+        assert_receive {:causal_trace, ^collector, records},
+                       max(cutoff - System.monotonic_time(:millisecond), 0)
+
+        assert_receive {:DOWN, ^collector_monitor, :process, ^collector, :normal},
+                       max(cutoff - System.monotonic_time(:millisecond), 0)
+
+        Process.put(cleanup_key, true)
+        assert System.monotonic_time(:millisecond) <= cutoff
+        evidence = evidence ++ records ++ drain_reports(runs, [])
+        evidence = evidence ++ classify.(evidence)
+        assert length(evidence) < 8_192
+        Process.put({__MODULE__, :partial_evidence}, evidence)
+        retain(label, evidence)
+
+        # Concept: every observed supervisor report comes from its joined producer.
+        # Technical depth: the primary filter runs in the local logging caller.
+        # Its send precedes that supervisor's original DOWN, so report custody uses
+        # the existing actor fence rather than an added Logger wait allowance.
+        for report <- evidence, report["event"] == "supervisor_report" do
+          assert report["logger_producer"] == report["supervisor"]
+          assert report["context"] in ["shutdown_error", "child_terminated"]
+          assert report["pid"] in Enum.map(Map.keys(actors), &identity/1)
+          assert report["reason"] != "other" and report["shutdown"] != "other"
+
+          assert Enum.any?(evidence, fn event ->
+                   event["event"] == "original_down" and
+                     event["pid"] == report["logger_producer"]
+                 end)
+        end
+
+        if mode == :explicit_stop do
+          for run <- runs do
+            assert Enum.any?(
+                     evidence,
+                     &(&1["event"] == "explicit_stop_returned" and
+                         &1["pid"] == identity(run.owner))
+                   ),
+                   "explicit runtime stop did not return successfully: " <>
+                     inspect(evidence, limit: :infinity)
+          end
+        end
+
+        if require_quiet,
+          do:
+            refute(
+              Enum.any?(
+                evidence,
+                &(&1["event"] == "supervisor_report" and
+                    &1["context"] == "shutdown_error")
+              ),
+              inspect(evidence, limit: :infinity)
+            )
+
+        {:ok, evidence}
+      catch
+        kind, reason -> {:error, kind, reason, __STACKTRACE__}
       end
 
-      if require_quiet,
-        do:
-          refute(
-            Enum.any?(
-              evidence,
-              &(&1["event"] == "supervisor_report" and
-                  &1["context"] == "shutdown_error")
-            ),
-            inspect(evidence, limit: :infinity)
-          )
+    cleanup_errors =
+      cleanup_errors([
+        fn ->
+          if session = Process.delete({cleanup_key, :session}),
+            do: :trace.session_destroy(session)
+        end,
+        fn ->
+          unless Process.delete(cleanup_key) do
+            if Process.alive?(collector), do: Process.exit(collector, :kill)
 
-      {:ok, evidence}
-    catch
-      kind, reason -> {:error, kind, reason, __STACKTRACE__}
-    end
-
-    cleanup_errors = cleanup_errors([
-      fn ->
-        if session = Process.delete({cleanup_key, :session}),
-          do: :trace.session_destroy(session)
-      end,
-      fn ->
-        unless Process.delete(cleanup_key) do
-          if Process.alive?(collector), do: Process.exit(collector, :kill)
-          assert_receive {:DOWN, ^collector_monitor, :process, ^collector, _},
-                         max(cutoff - System.monotonic_time(:millisecond), 0)
+            assert_receive {:DOWN, ^collector_monitor, :process, ^collector, _},
+                           max(cutoff - System.monotonic_time(:millisecond), 0)
+          end
         end
-      end
-    ])
+      ])
 
     partial = Process.delete({__MODULE__, :partial_evidence})
 

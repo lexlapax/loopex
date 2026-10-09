@@ -47,7 +47,12 @@ defmodule LoopexComposition.EffectIntentsHistoryTest do
       fixture = fixture(@adapter, first_store, root)
 
       on_exit(fn -> stop_runtime(fixture.runtime) end)
-      assert :ok = LoopexComposition.StartupGate.publication(LoopexComposition.StartupGate.await(fixture.runtime))
+
+      assert :ok =
+               LoopexComposition.StartupGate.publication(
+                 LoopexComposition.StartupGate.await(fixture.runtime)
+               )
+
       assert {:ok, session} = Loopex.create_session(fixture.runtime, %{}, command_id: "create-1")
       assert {:ok, attachment} = Loopex.attach(fixture.runtime, session, after_event_sequence: 0)
 
@@ -105,7 +110,12 @@ defmodule LoopexComposition.EffectIntentsHistoryTest do
         )
 
       on_exit(fn -> stop_runtime(successor) end)
-      assert :ok = LoopexComposition.StartupGate.publication(LoopexComposition.StartupGate.await(successor))
+
+      assert :ok =
+               LoopexComposition.StartupGate.publication(
+                 LoopexComposition.StartupGate.await(successor)
+               )
+
       {:ok, %{sessions: supervisor}} = Runtime.children(successor)
       assert DynamicSupervisor.which_children(supervisor) == []
       before = if @adapter == Local, do: File.read!(path), else: :sys.get_state(store)

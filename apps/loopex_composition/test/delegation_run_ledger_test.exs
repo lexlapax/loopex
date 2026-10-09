@@ -5,7 +5,16 @@ defmodule LoopexComposition.DelegationRunLedgerTest do
 
   alias Loopex.{Executor, Runtime, Store}
   alias Loopex.Store.{Local, Memory}
-  alias LoopexComposition.Delegation.{GenesisCodec, LedgerCodec, ParentBinding, RunLedger, RunMutation, Tool}
+
+  alias LoopexComposition.Delegation.{
+    GenesisCodec,
+    LedgerCodec,
+    ParentBinding,
+    RunLedger,
+    RunMutation,
+    Tool
+  }
+
   alias LoopexComposition.DelegationParentBindingFixture, as: Fixture
   alias LoopexProtocol.Canonical
 
@@ -30,9 +39,16 @@ defmodule LoopexComposition.DelegationRunLedgerTest do
       {_state, entries} = complete_prefix(context)
       entries = Enum.take(entries, elem(@projection, 0))
       assert {:ok, state} = replay(context, entries)
-      assert {state.version, state.count, state.reserved_tokens, state.credit, state.phase} == @projection
+
+      assert {state.version, state.count, state.reserved_tokens, state.credit, state.phase} ==
+               @projection
+
       assert state.charged_tokens == 0
-      assert state.bytes == byte_size(state.header) + Enum.sum(Enum.map(entries, fn {tx, _} -> frame_size(tx) end))
+
+      assert state.bytes ==
+               byte_size(state.header) +
+                 Enum.sum(Enum.map(entries, fn {tx, _} -> frame_size(tx) end))
+
       assert state.bytes + state.credit <= @cap
     end
   end
@@ -42,49 +58,90 @@ defmodule LoopexComposition.DelegationRunLedgerTest do
     assert {:ok, @key} = LedgerCodec.header_key(:run, context.ids)
     assert domain_bytes("loopex:helper-run:v1", @identity_json) == @key
     {_state, entries} = complete_prefix(context)
+
     for {tx, _} <- entries do
       mutation = tx["mutation"]
-      target = case mutation["kind"] do
-        "initialize" -> []
-        "reserve" -> [mutation["operation_identity"], mutation["job"]["job_id"]]
-        "stop" -> mutation["operation_identity"]
-      end
+
+      target =
+        case mutation["kind"] do
+          "initialize" -> []
+          "reserve" -> [mutation["operation_identity"], mutation["job"]["job_id"]]
+          "stop" -> mutation["operation_identity"]
+        end
+
       assert tx["tx_id"] == domain("loopex:helper-tx:v1", [@key, mutation["kind"], target])
-      assert tx["mutation_digest"] == domain("loopex:helper-mutation:v1", [@key, tx["expected_version"], mutation])
+
+      assert tx["mutation_digest"] ==
+               domain("loopex:helper-mutation:v1", [@key, tx["expected_version"], mutation])
+
       assert {:ok, state} = replay(context, Enum.take(entries, tx["expected_version"] + 1))
-      assert List.last(state.transactions) == {tx, %{
-        "version" => 1, "tx_id" => tx["tx_id"], "ledger_version" => tx["expected_version"] + 1,
-        "mutation_digest" => tx["mutation_digest"]
-      }}
+
+      assert List.last(state.transactions) ==
+               {tx,
+                %{
+                  "version" => 1,
+                  "tx_id" => tx["tx_id"],
+                  "ledger_version" => tx["expected_version"] + 1,
+                  "mutation_digest" => tx["mutation_digest"]
+                }}
     end
   end
 
   test "mutable parent projections cannot repair original bytes or missing historical binding" do
     context = fixture()
-    changed = %{context.capture | declaration: %{"token_budget" => 1}, key: String.duplicate("0", 64)}
+
+    changed = %{
+      context.capture
+      | declaration: %{"token_budget" => 1},
+        key: String.duplicate("0", 64)
+    }
+
     assert {:ok, state} = RunLedger.new(context.ids, changed, context.binding, context.history)
     assert state.capture == context.capture and state.binding_key == context.capture.key
-    assert RunLedger.new(context.ids, context.capture, [], context.history) == {:error, :invalid_run_capture}
-    assert RunLedger.new(context.ids, context.capture, context.binding, :unobserved) == {:error, :invalid_run_capture}
+
+    assert RunLedger.new(context.ids, context.capture, [], context.history) ==
+             {:error, :invalid_run_capture}
+
+    assert RunLedger.new(context.ids, context.capture, context.binding, :unobserved) ==
+             {:error, :invalid_run_capture}
+
     changed = %{changed | object_bytes: ["{}" | tl(changed.object_bytes)]}
-    assert RunLedger.new(context.ids, changed, context.binding, context.history) == {:error, :invalid_run_capture}
-    for ids <- [["other", "session", "run"], ["runtime", "other", "run"], [], nil, ["runtime", "session", ""]] do
-      assert RunLedger.new(ids, context.capture, context.binding, context.history) == {:error, :invalid_run_capture}
+
+    assert RunLedger.new(context.ids, changed, context.binding, context.history) ==
+             {:error, :invalid_run_capture}
+
+    for ids <- [
+          ["other", "session", "run"],
+          ["runtime", "other", "run"],
+          [],
+          nil,
+          ["runtime", "session", ""]
+        ] do
+      assert RunLedger.new(ids, context.capture, context.binding, context.history) ==
+               {:error, :invalid_run_capture}
     end
   end
 
   test "initialize must be first and join every captured parent declaration member" do
     context = fixture()
     mutation = RunLedger.initialize_mutation(context.state)
+
     for field <- ~w(binding_key catalog_sha256 declaration_sha256) do
       tx = transaction(context.state, Map.put(mutation, field, String.duplicate("0", 64)))
       assert RunLedger.admit(context.state, tx) == {:error, :run_binding_mismatch}
     end
+
     changed = put_in(mutation, ["limits", "max_children"], 1)
-    assert RunLedger.admit(context.state, transaction(context.state, changed)) == {:error, :run_binding_mismatch}
+
+    assert RunLedger.admit(context.state, transaction(context.state, changed)) ==
+             {:error, :run_binding_mismatch}
+
     {ready, initialize} = initialized(context)
     assert RunLedger.admit(ready, initialize) == {:ok, ready, elem(hd(ready.transactions), 1)}
-    assert RunLedger.admit(ready, transaction(ready, mutation)) == {:error, :run_transaction_conflict}
+
+    assert RunLedger.admit(ready, transaction(ready, mutation)) ==
+             {:error, :run_transaction_conflict}
+
     {tx, inputs} = reservation(context, context.state, job(context, 1))
     assert RunLedger.admit(context.state, tx, inputs) == {:error, :invalid_run_transition}
   end
@@ -92,11 +149,19 @@ defmodule LoopexComposition.DelegationRunLedgerTest do
   test "canonical byte admission refuses changed hashes alternate spelling and native values" do
     context = fixture()
     {state, tx} = initialized(context)
-    assert RunLedger.admit_bytes(context.state, json(tx)) == {:ok, state, elem(hd(state.transactions), 1)}
+
+    assert RunLedger.admit_bytes(context.state, json(tx)) ==
+             {:ok, state, elem(hd(state.transactions), 1)}
+
     for bytes <- [" " <> json(tx), json(tx) <> "\n", self()] do
       assert {:error, _} = RunLedger.admit_bytes(context.state, bytes)
     end
-    for changed <- [Map.put(tx, "mutation_digest", String.duplicate("0", 64)), Map.put(tx, "extra", nil), nil] do
+
+    for changed <- [
+          Map.put(tx, "mutation_digest", String.duplicate("0", 64)),
+          Map.put(tx, "extra", nil),
+          nil
+        ] do
       assert RunLedger.admit(context.state, changed) == {:error, :invalid_run_transaction}
     end
   end
@@ -104,17 +169,24 @@ defmodule LoopexComposition.DelegationRunLedgerTest do
   test "exact original duplicates retain results before stale checks and changed bytes conflict" do
     context = fixture()
     {state, entries} = complete_prefix(context)
+
     for {tx, _inputs} <- entries do
       result = elem(Enum.at(state.transactions, tx["expected_version"]), 1)
       assert RunLedger.admit(state, tx) == {:ok, state, result}
       assert RunLedger.admit_bytes(state, json(tx)) == {:ok, state, result}
     end
+
     {first, inputs} = Enum.at(entries, 1)
-    for mutation <- [put_in(first["mutation"], ["source_intent", "journal_version"], 2), Map.put(first["mutation"], "absolute_cutoff_ms", 9_999)] do
+
+    for mutation <- [
+          put_in(first["mutation"], ["source_intent", "journal_version"], 2),
+          Map.put(first["mutation"], "absolute_cutoff_ms", 9_999)
+        ] do
       changed = transaction(context.ids, first["expected_version"], mutation)
       assert changed["tx_id"] == first["tx_id"]
       assert RunLedger.admit(state, changed, inputs) == {:error, :run_transaction_conflict}
     end
+
     changed = transaction(context.ids, state.version, first["mutation"])
     assert RunLedger.admit(state, changed, inputs) == {:error, :run_transaction_conflict}
   end
@@ -137,17 +209,22 @@ defmodule LoopexComposition.DelegationRunLedgerTest do
     assert RunLedger.admit(ready, tx, %{}) == {:error, :original_job_mismatch}
     other = job(context, 2)
     assert :ok = Executor.validate_job(other)
-    assert RunLedger.admit(ready, tx, %{inputs | original_job: other}) == {:error, :original_job_mismatch}
+
+    assert RunLedger.admit(ready, tx, %{inputs | original_job: other}) ==
+             {:error, :original_job_mismatch}
   end
 
   test "reservation recomputes positive R and all closing credit rather than caller money" do
     context = fixture()
     {ready, _} = initialized(context)
     {tx, inputs} = reservation(context, ready, job(context, 1))
-    for field <- ~w(reserved_tokens closing_credit_bytes), value <- [1, tx["mutation"][field] + 1] do
+
+    for field <- ~w(reserved_tokens closing_credit_bytes),
+        value <- [1, tx["mutation"][field] + 1] do
       changed = transaction(ready, Map.put(tx["mutation"], field, value))
       assert RunLedger.admit(ready, changed, inputs) == {:error, :reservation_mismatch}
     end
+
     {small, _tx, _inputs} = first_reserved(fixture(parent_with_limits(3_000, 8_192)))
     assert small.reserved_tokens == 3_000 and small.count == 1
   end
@@ -174,10 +251,15 @@ defmodule LoopexComposition.DelegationRunLedgerTest do
     assert RunLedger.admit(admitted, equal) == {:ok, admitted, result}
 
     {late, late_inputs} = reservation_at(context, ready, original, cutoff + 1)
-    assert Map.delete(late["mutation"], "absolute_cutoff_ms") == Map.delete(equal["mutation"], "absolute_cutoff_ms")
+
+    assert Map.delete(late["mutation"], "absolute_cutoff_ms") ==
+             Map.delete(equal["mutation"], "absolute_cutoff_ms")
+
     assert late_inputs == inputs
     assert RunLedger.admit(ready, late, late_inputs) == {:error, :parent_cutoff_exceeded}
-    assert replay(context, [{initialize, %{}}, {late, late_inputs}]) == {:error, :parent_cutoff_exceeded}
+
+    assert replay(context, [{initialize, %{}}, {late, late_inputs}]) ==
+             {:error, :parent_cutoff_exceeded}
   end
 
   test "a later original attempt must accommodate the frozen cutoff under its own effective deadline" do
@@ -191,15 +273,23 @@ defmodule LoopexComposition.DelegationRunLedgerTest do
     {equal, equal_inputs} = reservation_at(context, reserved, job(context, 2), cutoff)
     assert {:ok, admitted, _} = RunLedger.admit(reserved, equal, equal_inputs)
     assert admitted.operation.logical == reserved.operation.logical
-    assert admitted.count == reserved.count and admitted.reserved_tokens == reserved.reserved_tokens
+
+    assert admitted.count == reserved.count and
+             admitted.reserved_tokens == reserved.reserved_tokens
+
     prefix = [{initialize, %{}}, {first, first_inputs}]
     assert {:ok, ^admitted} = replay(context, prefix ++ [{equal, equal_inputs}])
 
     tighter = job(context, 2, run_deadline: cutoff - 1)
     assert tighter.effective_job_deadline == cutoff - 1
     {late, late_inputs} = reservation_at(context, reserved, tighter, cutoff)
-    assert Map.take(late["mutation"], Map.keys(reserved.operation.logical)) == reserved.operation.logical
-    assert late["mutation"]["source_intent"]["canonical_request_digest"] == tighter.canonical_request_digest
+
+    assert Map.take(late["mutation"], Map.keys(reserved.operation.logical)) ==
+             reserved.operation.logical
+
+    assert late["mutation"]["source_intent"]["canonical_request_digest"] ==
+             tighter.canonical_request_digest
+
     assert RunLedger.admit(reserved, late, late_inputs) == {:error, :parent_cutoff_exceeded}
     assert replay(context, prefix ++ [{late, late_inputs}]) == {:error, :parent_cutoff_exceeded}
   end
@@ -214,7 +304,10 @@ defmodule LoopexComposition.DelegationRunLedgerTest do
     {equal, inputs} = reservation_at(context, ready, original, original.effective_job_deadline)
     assert {:ok, admitted, _} = RunLedger.admit(ready, equal, inputs)
     assert {:ok, ^admitted} = replay(context, [{initialize, %{}}, {equal, inputs}])
-    {late, late_inputs} = reservation_at(context, ready, original, original.effective_job_deadline + 1)
+
+    {late, late_inputs} =
+      reservation_at(context, ready, original, original.effective_job_deadline + 1)
+
     assert late["mutation"]["absolute_cutoff_ms"] <= original.run_deadline
     assert RunLedger.admit(ready, late, late_inputs) == {:error, :parent_cutoff_exceeded}
   end
@@ -240,8 +333,16 @@ defmodule LoopexComposition.DelegationRunLedgerTest do
     context = fixture()
     {ready, _} = initialized(context)
     {tx, inputs} = reservation(context, ready, job(context, 1))
-    assert RunLedger.admit(ready, tx, %{inputs | child_creation: "{}"}) == {:error, :child_creation_mismatch}
-    changed = transaction(ready, Map.put(tx["mutation"], "child_creation_sha256", String.duplicate("0", 64)))
+
+    assert RunLedger.admit(ready, tx, %{inputs | child_creation: "{}"}) ==
+             {:error, :child_creation_mismatch}
+
+    changed =
+      transaction(
+        ready,
+        Map.put(tx["mutation"], "child_creation_sha256", String.duplicate("0", 64))
+      )
+
     assert RunLedger.admit(ready, changed, inputs) == {:error, :child_creation_mismatch}
     original = job(context, 1, role: "other")
     {tx, inputs} = reservation(context, ready, original)
@@ -249,25 +350,32 @@ defmodule LoopexComposition.DelegationRunLedgerTest do
     assert RunLedger.admit(ready, tx, inputs) == {:error, :child_creation_mismatch}
   end
 
-  for field <- ~w(operation_identity role task_digest child_creation_sha256 absolute_cutoff_ms reserved_tokens) do
+  for field <-
+        ~w(operation_identity role task_digest child_creation_sha256 absolute_cutoff_ms reserved_tokens) do
     @field field
     test "later original attempts freeze #{@field} without another child or reservation" do
       context = fixture()
       {state, _tx, _inputs} = first_reserved(context)
-      options = case @field do
-        "operation_identity" -> [operation_id: "other-operation"]
-        "role" -> [role: "other"]
-        "task_digest" -> [prompt: "changed task"]
-        _ -> []
-      end
+
+      options =
+        case @field do
+          "operation_identity" -> [operation_id: "other-operation"]
+          "role" -> [role: "other"]
+          "task_digest" -> [prompt: "changed task"]
+          _ -> []
+        end
+
       original = job(context, 2, options)
       {tx, inputs} = reservation(context, state, original)
-      mutation = case @field do
-        "child_creation_sha256" -> Map.put(tx["mutation"], @field, String.duplicate("0", 64))
-        "absolute_cutoff_ms" -> Map.put(tx["mutation"], @field, 9_999)
-        "reserved_tokens" -> Map.put(tx["mutation"], @field, 1)
-        _ -> tx["mutation"]
-      end
+
+      mutation =
+        case @field do
+          "child_creation_sha256" -> Map.put(tx["mutation"], @field, String.duplicate("0", 64))
+          "absolute_cutoff_ms" -> Map.put(tx["mutation"], @field, 9_999)
+          "reserved_tokens" -> Map.put(tx["mutation"], @field, 1)
+          _ -> tx["mutation"]
+        end
+
       changed = transaction(state, mutation)
       assert :ok = Executor.validate_job(original)
       assert :ok = RunMutation.match_job(context.ids, mutation, original)
@@ -279,10 +387,15 @@ defmodule LoopexComposition.DelegationRunLedgerTest do
     context = fixture()
     {state, _tx, _inputs} = first_reserved(context)
     {tx, inputs} = reservation(context, state, job(context, 2))
+
     for field <- ~w(create_command_id prompt_command_id) do
       changed = Map.put(tx["mutation"], field, Base.encode64(String.duplicate("0", 64)))
-      assert RunMutation.transaction(context.ids, state.version, changed) == {:error, :invalid_run_transaction}
-      assert RunLedger.admit(state, Map.put(tx, "mutation", changed), inputs) == {:error, :invalid_run_transaction}
+
+      assert RunMutation.transaction(context.ids, state.version, changed) ==
+               {:error, :invalid_run_transaction}
+
+      assert RunLedger.admit(state, Map.put(tx, "mutation", changed), inputs) ==
+               {:error, :invalid_run_transaction}
     end
   end
 
@@ -292,16 +405,27 @@ defmodule LoopexComposition.DelegationRunLedgerTest do
     {tx, inputs} = reservation(context, state, job(context, 2))
     assert {:ok, next, _} = RunLedger.admit(state, tx, inputs)
     assert next.count == state.count and next.reserved_tokens == state.reserved_tokens
-    assert next.operation.logical == state.operation.logical and next.credit == state.credit + @frame
+
+    assert next.operation.logical == state.operation.logical and
+             next.credit == state.credit + @frame
+
     assert next.operation.attempts[first["mutation"]["job"]["job_id"]] == %{
-      job: first["mutation"]["job"], source_intent: first["mutation"]["source_intent"]
-    }
-    assert next.operation.attempts[tx["mutation"]["job"]["job_id"]].source_intent == tx["mutation"]["source_intent"]
-    changed = transaction(next, Map.put(tx["mutation"], "closing_credit_bytes", next.credit + @frame))
+             job: first["mutation"]["job"],
+             source_intent: first["mutation"]["source_intent"]
+           }
+
+    assert next.operation.attempts[tx["mutation"]["job"]["job_id"]].source_intent ==
+             tx["mutation"]["source_intent"]
+
+    changed =
+      transaction(next, Map.put(tx["mutation"], "closing_credit_bytes", next.credit + @frame))
+
     assert RunLedger.admit(next, changed, inputs) == {:error, :run_transaction_conflict}
     changed = transaction(state, Map.put(tx["mutation"], "closing_credit_bytes", state.credit))
     assert RunLedger.admit(state, changed, inputs) == {:error, :reservation_mismatch}
-    assert RunLedger.admit(state, tx, %{inputs | child_creation: inputs.child_creation <> "\n"}) == {:error, :child_creation_mismatch}
+
+    assert RunLedger.admit(state, tx, %{inputs | child_creation: inputs.child_creation <> "\n"}) ==
+             {:error, :child_creation_mismatch}
   end
 
   for reason <- ~w(cancel cutoff adapter_recovery) do
@@ -311,14 +435,28 @@ defmodule LoopexComposition.DelegationRunLedgerTest do
       {state, _tx, inputs} = first_reserved(context)
       tx = stop_transaction(state, inputs.original_job, @reason)
       assert RunLedger.first_stop(state) == :absent
-      assert {:ok, stopped, result} = RunLedger.admit(state, tx, %{original_job: inputs.original_job})
-      assert stopped.credit == 4 * @frame and stopped.count == 1 and stopped.reserved_tokens == 8_192
+
+      assert {:ok, stopped, result} =
+               RunLedger.admit(state, tx, %{original_job: inputs.original_job})
+
+      assert stopped.credit == 4 * @frame and stopped.count == 1 and
+               stopped.reserved_tokens == 8_192
+
       assert RunLedger.first_stop(stopped) == {:ok, tx, result}
       assert RunLedger.admit(stopped, tx) == {:ok, stopped, result}
       {reserve, next_inputs} = reservation(context, stopped, job(context, 2))
       assert RunLedger.admit(stopped, reserve, next_inputs) == {:error, :invalid_run_transition}
-      changed = stop_transaction(stopped, inputs.original_job, if(@reason == "cancel", do: "cutoff", else: "cancel"))
-      assert RunLedger.admit(stopped, changed, %{original_job: inputs.original_job}) == {:error, :run_transaction_conflict}
+
+      changed =
+        stop_transaction(
+          stopped,
+          inputs.original_job,
+          if(@reason == "cancel", do: "cutoff", else: "cancel")
+        )
+
+      assert RunLedger.admit(stopped, changed, %{original_job: inputs.original_job}) ==
+               {:error, :run_transaction_conflict}
+
       assert RunLedger.first_stop(stopped) == {:ok, tx, result}
     end
   end
@@ -355,12 +493,17 @@ defmodule LoopexComposition.DelegationRunLedgerTest do
   test "accepted later lifecycle maps remain closed to prelaunch admission" do
     context = fixture()
     {state, _tx, _inputs} = first_reserved(context)
+
     mutation = %{
-      "kind" => "child_created", "operation_identity" => state.operation.logical["operation_identity"],
-      "child_session_id" => Base.encode64("child"), "child_creation_sha256" => state.operation.logical["child_creation_sha256"],
-      "configuration_digest" => String.duplicate("1", 64), "tool_selection_sha256" => String.duplicate("2", 64),
+      "kind" => "child_created",
+      "operation_identity" => state.operation.logical["operation_identity"],
+      "child_session_id" => Base.encode64("child"),
+      "child_creation_sha256" => state.operation.logical["child_creation_sha256"],
+      "configuration_digest" => String.duplicate("1", 64),
+      "tool_selection_sha256" => String.duplicate("2", 64),
       "policy_defer_mode" => "refuse"
     }
+
     tx = transaction(state, mutation)
     assert RunLedger.admit(state, tx) == {:error, :invalid_run_transition}
   end
@@ -389,7 +532,13 @@ defmodule LoopexComposition.DelegationRunLedgerTest do
     @adapter adapter
     test "#{inspect(adapter)} actual historical parent remains unactivated and unchanged" do
       capture = Fixture.valid_capture()
-      root = Path.join(System.tmp_dir!(), "m7-run-ledger-#{Base.encode16(:crypto.strong_rand_bytes(12))}")
+
+      root =
+        Path.join(
+          System.tmp_dir!(),
+          "m7-run-ledger-#{Base.encode16(:crypto.strong_rand_bytes(12))}"
+        )
+
       File.mkdir_p!(root)
       on_exit(fn -> File.rm_rf!(root) end)
       options = if @adapter == Local, do: [path: Path.join(root, "store.log")], else: []
@@ -397,16 +546,26 @@ defmodule LoopexComposition.DelegationRunLedgerTest do
       on_exit(fn -> if Process.alive?(first), do: GenServer.stop(first) end)
       {:ok, store} = Store.new(@adapter, first)
       assert {:committed, _, receipt} = Fixture.commit_creation(store, capture)
-      store_pid = if @adapter == Local do
-        stop_join(first)
-        {:ok, reopened} = Local.start_link(options)
-        reopened
-      else
-        first
-      end
+
+      store_pid =
+        if @adapter == Local do
+          stop_join(first)
+          {:ok, reopened} = Local.start_link(options)
+          reopened
+        else
+          first
+        end
+
       on_exit(fn -> if Process.alive?(store_pid), do: GenServer.stop(store_pid) end)
       {:ok, selected} = Store.new(@adapter, store_pid)
-      {:ok, runtime} = Loopex.start_link(runtime_id: capture.runtime, context_token_budget: 8_192, store: selected)
+
+      {:ok, runtime} =
+        Loopex.start_link(
+          runtime_id: capture.runtime,
+          context_token_budget: 8_192,
+          store: selected
+        )
+
       on_exit(fn -> if Runtime.alive?(runtime), do: Loopex.stop(runtime) end)
       assert :ok = Fixture.await_startup(runtime)
       assert {:ok, %{sessions: sessions}} = Runtime.children(runtime)
@@ -431,12 +590,24 @@ defmodule LoopexComposition.DelegationRunLedgerTest do
     # Concept: pure rows validate shape without authenticating a history producer.
     # Technical depth: the separate real Store cases obtain owning observations;
     # none of these inputs establishes a live source, grant or cross-run slot.
-    history = history || {:historical, %{
-      version: 1, runtime_id: capture.runtime, command_id: capture.command, session_id: session,
-      genesis_version: 3, canonical_create_digest: capture.creation["canonical_create_digest"]
-    }}
-    {:ok, prepare} = ParentBinding.transaction(capture.key, 0, ParentBinding.prepare_mutation(capture))
-    {:ok, bind} = ParentBinding.transaction(capture.key, 1, ParentBinding.bind_mutation(capture, session))
+    history =
+      history ||
+        {:historical,
+         %{
+           version: 1,
+           runtime_id: capture.runtime,
+           command_id: capture.command,
+           session_id: session,
+           genesis_version: 3,
+           canonical_create_digest: capture.creation["canonical_create_digest"]
+         }}
+
+    {:ok, prepare} =
+      ParentBinding.transaction(capture.key, 0, ParentBinding.prepare_mutation(capture))
+
+    {:ok, bind} =
+      ParentBinding.transaction(capture.key, 1, ParentBinding.bind_mutation(capture, session))
+
     ids = [capture.runtime, session, "run"]
     binding = [prepare, bind]
     assert {:ok, state} = RunLedger.new(ids, capture, binding, history)
@@ -465,15 +636,25 @@ defmodule LoopexComposition.DelegationRunLedgerTest do
     stop = stop_transaction(state, first_inputs.original_job, "cancel")
     stop_inputs = %{original_job: first_inputs.original_job}
     assert {:ok, state, _} = RunLedger.admit(state, stop, stop_inputs)
-    {state, [{initialize, %{}}, {first, first_inputs}, {second, second_inputs}, {stop, stop_inputs}]}
+
+    {state,
+     [{initialize, %{}}, {first, first_inputs}, {second, second_inputs}, {stop, stop_inputs}]}
   end
 
-  defp replay(context, entries), do: RunLedger.replay(context.ids, context.capture, context.binding, context.history, entries)
+  defp replay(context, entries),
+    do: RunLedger.replay(context.ids, context.capture, context.binding, context.history, entries)
 
   defp parent_with_limits(total, child) do
     {catalog, declaration, creation} = Fixture.objects()
-    declaration = declaration |> Map.put("token_budget", total) |> put_in(["child_bounds", "token_budget"], child)
-    creation = creation |> Map.put("declaration_sha256", hash(json(declaration))) |> Fixture.rehash()
+
+    declaration =
+      declaration
+      |> Map.put("token_budget", total)
+      |> put_in(["child_bounds", "token_budget"], child)
+
+    creation =
+      creation |> Map.put("declaration_sha256", hash(json(declaration))) |> Fixture.rehash()
+
     {:ok, capture} = Fixture.capture(catalog, declaration, creation)
     capture
   end
@@ -481,16 +662,40 @@ defmodule LoopexComposition.DelegationRunLedgerTest do
   defp job(context, attempt, options \\ []) do
     [_runtime, session, run] = context.ids
     definition = Tool.definition()
-    {:ok, job} = Executor.job(%{
-      protocol_version: 1, job_id: "original-job-#{attempt}", operation_id: Keyword.get(options, :operation_id, "operation"),
-      attempt: attempt, session_id: session, run_id: run, turn_id: "turn", tool_call_id: "call",
-      origin_session_epoch: 0, origin_executor_epoch: 1, executor_identity: "executor", required_capabilities: [],
-      tool_id: definition["tool_id"], tool_version: definition["tool_version"], effect_class: definition["effect_class"],
-      validated_arguments: %{"role" => Keyword.get(options, :role, "inspect"), "description" => "review", "prompt" => Keyword.get(options, :prompt, "inspect exact bytes")},
-      workspace_ref: "workspace", workspace_lease: "lease", run_deadline: Keyword.get(options, :run_deadline, 2_000_000_000_000),
-      resource_budgets: Keyword.get(options, :resource_budgets, definition["budgets"]), idempotency_class: definition["idempotency_class"], fencing_token: 1,
-      artifact_policy: %{"retain" => true}, output_policy: %{"capture" => true}, cleanup_grace_ms: 5_000
-    })
+
+    {:ok, job} =
+      Executor.job(%{
+        protocol_version: 1,
+        job_id: "original-job-#{attempt}",
+        operation_id: Keyword.get(options, :operation_id, "operation"),
+        attempt: attempt,
+        session_id: session,
+        run_id: run,
+        turn_id: "turn",
+        tool_call_id: "call",
+        origin_session_epoch: 0,
+        origin_executor_epoch: 1,
+        executor_identity: "executor",
+        required_capabilities: [],
+        tool_id: definition["tool_id"],
+        tool_version: definition["tool_version"],
+        effect_class: definition["effect_class"],
+        validated_arguments: %{
+          "role" => Keyword.get(options, :role, "inspect"),
+          "description" => "review",
+          "prompt" => Keyword.get(options, :prompt, "inspect exact bytes")
+        },
+        workspace_ref: "workspace",
+        workspace_lease: "lease",
+        run_deadline: Keyword.get(options, :run_deadline, 2_000_000_000_000),
+        resource_budgets: Keyword.get(options, :resource_budgets, definition["budgets"]),
+        idempotency_class: definition["idempotency_class"],
+        fencing_token: 1,
+        artifact_policy: %{"retain" => true},
+        output_policy: %{"capture" => true},
+        cleanup_grace_ms: 5_000
+      })
+
     assert :ok = Executor.validate_job(job)
     job
   end
@@ -498,15 +703,35 @@ defmodule LoopexComposition.DelegationRunLedgerTest do
   defp reservation(context, state, original) do
     operation = operation(context, original.operation_id)
     bytes = child_creation(context, operation)
-    reserved = if state.operation, do: state.operation.logical["reserved_tokens"], else: min(context.capture.declaration["token_budget"], context.capture.declaration["child_bounds"]["token_budget"])
+
+    reserved =
+      if state.operation,
+        do: state.operation.logical["reserved_tokens"],
+        else:
+          min(
+            context.capture.declaration["token_budget"],
+            context.capture.declaration["child_bounds"]["token_budget"]
+          )
+
     mutation = %{
-      "kind" => "reserve", "operation_identity" => operation,
-      "source_intent" => %{"session_id" => Base.encode64(original.session_id), "journal_version" => original.attempt, "canonical_request_digest" => original.canonical_request_digest},
-      "job" => project(original), "role" => original.validated_arguments["role"], "task_digest" => Canonical.digest(original.validated_arguments),
-      "child_creation_sha256" => hash(bytes), "create_command_id" => Base.encode64(command(context, operation, "create")),
-      "prompt_command_id" => Base.encode64(command(context, operation, "prompt")), "absolute_cutoff_ms" => 10_000,
-      "reserved_tokens" => reserved, "closing_credit_bytes" => if(state.operation, do: state.credit + @frame, else: 5 * @frame)
+      "kind" => "reserve",
+      "operation_identity" => operation,
+      "source_intent" => %{
+        "session_id" => Base.encode64(original.session_id),
+        "journal_version" => original.attempt,
+        "canonical_request_digest" => original.canonical_request_digest
+      },
+      "job" => project(original),
+      "role" => original.validated_arguments["role"],
+      "task_digest" => Canonical.digest(original.validated_arguments),
+      "child_creation_sha256" => hash(bytes),
+      "create_command_id" => Base.encode64(command(context, operation, "create")),
+      "prompt_command_id" => Base.encode64(command(context, operation, "prompt")),
+      "absolute_cutoff_ms" => 10_000,
+      "reserved_tokens" => reserved,
+      "closing_credit_bytes" => if(state.operation, do: state.credit + @frame, else: 5 * @frame)
     }
+
     tx = transaction(state, mutation)
     assert :ok = RunMutation.match_job(context.ids, mutation, original)
     {tx, %{original_job: original, child_creation: bytes}}
@@ -524,58 +749,96 @@ defmodule LoopexComposition.DelegationRunLedgerTest do
     {tx, inputs}
   end
 
-  defp operation(context, id), do: %{
-    "parent_session_id" => Base.encode64(Enum.at(context.ids, 1)), "parent_run_id" => Base.encode64(Enum.at(context.ids, 2)), "operation_id" => Base.encode64(id)
-  }
-  defp command(context, operation, kind), do: domain("loopex:helper-#{kind}:v1", [Base.encode64(hd(context.ids)), operation])
+  defp operation(context, id),
+    do: %{
+      "parent_session_id" => Base.encode64(Enum.at(context.ids, 1)),
+      "parent_run_id" => Base.encode64(Enum.at(context.ids, 2)),
+      "operation_id" => Base.encode64(id)
+    }
+
+  defp command(context, operation, kind),
+    do: domain("loopex:helper-#{kind}:v1", [Base.encode64(hd(context.ids)), operation])
 
   defp child_creation(context, operation) do
     {:ok, genesis} = GenesisCodec.decode(hd(context.capture.catalog["roles"])["genesis"])
-    genesis = Map.put(genesis, "options", %{"purpose" => "original child", "opaque" => <<255, 0, 128>>})
+
+    genesis =
+      Map.put(genesis, "options", %{"purpose" => "original child", "opaque" => <<255, 0, 128>>})
+
     {:ok, retained} = GenesisCodec.encode(genesis)
     create = command(context, operation, "create")
     {:ok, tx} = Store.create_session(hd(context.ids), create, genesis)
+
     object = %{
-      "version" => 1, "kind" => "child_creation", "runtime_id" => Base.encode64(hd(context.ids)), "operation_identity" => operation, "role" => "inspect",
-      "catalog_sha256" => context.capture.creation["catalog_sha256"], "declaration_sha256" => context.capture.creation["declaration_sha256"],
-      "command_id" => Base.encode64(create), "original_options" => Fixture.envelope(:erlang.term_to_binary(genesis["options"], [:deterministic])),
-      "genesis" => retained, "canonical_create_digest" => Base.encode16(tx.canonical_mutation_digest, case: :lower), "input_digest" => ""
+      "version" => 1,
+      "kind" => "child_creation",
+      "runtime_id" => Base.encode64(hd(context.ids)),
+      "operation_identity" => operation,
+      "role" => "inspect",
+      "catalog_sha256" => context.capture.creation["catalog_sha256"],
+      "declaration_sha256" => context.capture.creation["declaration_sha256"],
+      "command_id" => Base.encode64(create),
+      "original_options" =>
+        Fixture.envelope(:erlang.term_to_binary(genesis["options"], [:deterministic])),
+      "genesis" => retained,
+      "canonical_create_digest" => Base.encode16(tx.canonical_mutation_digest, case: :lower),
+      "input_digest" => ""
     }
+
     object |> Fixture.rehash() |> json()
   end
 
-  defp project(job), do: %{
-    "job_id" => Base.encode64(job.job_id), "route" => "helper", "operation_id" => Base.encode64(job.operation_id), "attempt" => job.attempt,
-    "session_id" => Base.encode64(job.session_id), "run_id" => Base.encode64(job.run_id), "canonical_request_digest" => job.canonical_request_digest,
-    "origin_session_epoch" => job.origin_session_epoch, "origin_executor_epoch" => job.origin_executor_epoch,
-    "executor_identity" => Base.encode64(job.executor_identity), "fencing_token" => job.fencing_token, "cleanup_grace_ms" => job.cleanup_grace_ms
-  }
+  defp project(job),
+    do: %{
+      "job_id" => Base.encode64(job.job_id),
+      "route" => "helper",
+      "operation_id" => Base.encode64(job.operation_id),
+      "attempt" => job.attempt,
+      "session_id" => Base.encode64(job.session_id),
+      "run_id" => Base.encode64(job.run_id),
+      "canonical_request_digest" => job.canonical_request_digest,
+      "origin_session_epoch" => job.origin_session_epoch,
+      "origin_executor_epoch" => job.origin_executor_epoch,
+      "executor_identity" => Base.encode64(job.executor_identity),
+      "fencing_token" => job.fencing_token,
+      "cleanup_grace_ms" => job.cleanup_grace_ms
+    }
 
   defp stop_transaction(state, original, reason) do
     operation = state.operation.logical["operation_identity"]
     {:ok, key} = LedgerCodec.header_key(:run, state.identifiers)
+
     transaction(state, %{
-      "kind" => "stop", "operation_identity" => operation, "job" => project(original),
-      "stop_tx_id" => domain("loopex:helper-tx:v1", [key, "stop", operation]), "reason" => reason
+      "kind" => "stop",
+      "operation_identity" => operation,
+      "job" => project(original),
+      "stop_tx_id" => domain("loopex:helper-tx:v1", [key, "stop", operation]),
+      "reason" => reason
     })
   end
+
   defp transaction(state, mutation), do: transaction(state.identifiers, state.version, mutation)
+
   defp transaction(ids, version, mutation) do
     assert {:ok, tx} = RunMutation.transaction(ids, version, mutation)
     tx
   end
+
   defp frame_size(tx) do
     assert {:ok, frame} = LedgerCodec.encode_frame(json(tx))
     byte_size(frame)
   end
+
   defp json(value) do
     assert {:ok, bytes} = LedgerCodec.encode_json(value, :object)
     bytes
   end
+
   defp domain(label, value) do
     wrapped = json(%{"v" => value})
     domain_bytes(label, binary_part(wrapped, 5, byte_size(wrapped) - 6))
   end
+
   defp domain_bytes(label, bytes), do: hash(label <> <<0>> <> bytes)
   defp hash(bytes), do: :crypto.hash(:sha256, bytes) |> Base.encode16(case: :lower)
 
@@ -592,14 +855,17 @@ defmodule LoopexComposition.DelegationRunLedgerTest do
     prefix = if remaining < target, do: Enum.drop(all, -2), else: prefix
     {:ok, earlier} = replay(context, prefix)
     remaining = @cap - earlier.bytes - (earlier.credit + @frame)
-    {prefix, 0} = Enum.map_reduce(prefix, remaining - target, fn {tx, inputs}, padding ->
-      if tx["mutation"]["kind"] == "reserve" do
-        spend = min(padding, @frame - frame_size(tx))
-        {pad_original(context, {tx, inputs}, spend), padding - spend}
-      else
-        {{tx, inputs}, padding}
-      end
-    end)
+
+    {prefix, 0} =
+      Enum.map_reduce(prefix, remaining - target, fn {tx, inputs}, padding ->
+        if tx["mutation"]["kind"] == "reserve" do
+          spend = min(padding, @frame - frame_size(tx))
+          {pad_original(context, {tx, inputs}, spend), padding - spend}
+        else
+          {{tx, inputs}, padding}
+        end
+      end)
+
     assert {:ok, earlier} = replay(context, prefix)
     original = job(context, 1_000)
     {last, inputs} = reservation(context, earlier, original)
@@ -609,32 +875,52 @@ defmodule LoopexComposition.DelegationRunLedgerTest do
     assert earlier.bytes + earlier.credit + @frame + frame_size(tx) == @cap
     {earlier, prefix, tx, inputs}
   end
+
   defp pad_original(_context, entry, 0), do: entry
+
   defp pad_original(context, {tx, inputs}, digits) do
     original = inputs.original_job
     width = byte_size(Integer.to_string(original.origin_session_epoch))
-    fields = original |> Map.from_struct() |> Map.put(:origin_session_epoch, Integer.pow(10, width + digits - 1))
+
+    fields =
+      original
+      |> Map.from_struct()
+      |> Map.put(:origin_session_epoch, Integer.pow(10, width + digits - 1))
+
     assert {:ok, changed} = Executor.job(fields)
     assert :ok = Executor.validate_job(changed)
     mutation = tx["mutation"] |> Map.put("job", project(changed))
-    mutation = put_in(mutation, ["source_intent", "canonical_request_digest"], changed.canonical_request_digest)
+
+    mutation =
+      put_in(
+        mutation,
+        ["source_intent", "canonical_request_digest"],
+        changed.canonical_request_digest
+      )
+
     assert :ok = RunMutation.match_job(context.ids, mutation, changed)
-    {transaction(context.ids, tx["expected_version"], mutation), %{inputs | original_job: changed}}
+
+    {transaction(context.ids, tx["expected_version"], mutation),
+     %{inputs | original_job: changed}}
   end
 
   defp fill_capacity(context, state, entries, attempt) do
     {tx, inputs} = reservation(context, state, job(context, attempt))
+
     case RunLedger.admit(state, tx, inputs) do
       {:ok, next, _} -> fill_capacity(context, next, entries ++ [{tx, inputs}], attempt + 1)
       {:error, :run_byte_limit} -> {state, entries}
       refusal -> flunk("Unexpected capacity fixture refusal: #{inspect(refusal)}")
     end
   end
+
   defp store_image(Local, pid, options) do
     assert Process.alive?(pid)
     File.read!(Keyword.fetch!(options, :path))
   end
+
   defp store_image(Memory, pid, _options), do: :sys.get_state(pid)
+
   defp stop_join(pid) do
     monitor = Process.monitor(pid)
     :ok = GenServer.stop(pid)

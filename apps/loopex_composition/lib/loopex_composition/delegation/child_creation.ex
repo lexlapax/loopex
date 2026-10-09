@@ -64,12 +64,15 @@ defmodule LoopexComposition.Delegation.ChildCreation do
            genesis["initial_configuration"]["max_tokens"] == parent.declaration["max_tokens"],
          true <- reservation?(reserved_tokens, parent.declaration),
          {:ok, input_digest} <-
-           domain("loopex:helper-create-input:v1",
-             Map.drop(creation, ~w(input_digest canonical_create_digest))),
+           domain(
+             "loopex:helper-create-input:v1",
+             Map.drop(creation, ~w(input_digest canonical_create_digest))
+           ),
          true <- creation["input_digest"] == input_digest,
          {:ok, transaction} <- Store.create_session(parent.runtime, command, genesis),
-         true <- creation["canonical_create_digest"] ==
-           Base.encode16(transaction.canonical_mutation_digest, case: :lower) do
+         true <-
+           creation["canonical_create_digest"] ==
+             Base.encode16(transaction.canonical_mutation_digest, case: :lower) do
       {:ok,
        %{
          creation: creation,
@@ -90,8 +93,12 @@ defmodule LoopexComposition.Delegation.ChildCreation do
     end
   end
 
-  defp parent(%{runtime: runtime, command: command, object_bytes: [catalog, declaration, creation]}),
-    do: ParentBinding.capture(runtime, command, catalog, declaration, creation)
+  defp parent(%{
+         runtime: runtime,
+         command: command,
+         object_bytes: [catalog, declaration, creation]
+       }),
+       do: ParentBinding.capture(runtime, command, catalog, declaration, creation)
 
   defp parent(_capture), do: :error
 
@@ -103,8 +110,8 @@ defmodule LoopexComposition.Delegation.ChildCreation do
          identifier?(value["parent_session_id"], 256) and
          identifier?(value["parent_run_id"], 256) and
          identifier?(value["operation_id"], 8_192),
-      do: :ok,
-      else: :error
+       do: :ok,
+       else: :error
   end
 
   defp identifier?(encoded, limit)
@@ -123,9 +130,10 @@ defmodule LoopexComposition.Delegation.ChildCreation do
     do: domain(label, [Base.encode64(runtime), creation["operation_identity"]])
 
   defp reservation?(tokens, declaration),
-    do: is_integer(tokens) and tokens > 0 and
-      tokens <= declaration["child_bounds"]["token_budget"] and
-      tokens <= declaration["token_budget"]
+    do:
+      is_integer(tokens) and tokens > 0 and
+        tokens <= declaration["child_bounds"]["token_budget"] and
+        tokens <= declaration["token_budget"]
 
   # Concept: options use Core's plain-data owner, not the genesis schema.
   # Technical depth: reject compressed, unsafe and trailing ETF before calling
@@ -141,7 +149,10 @@ defmodule LoopexComposition.Delegation.ChildCreation do
          {value, used} <- :erlang.binary_to_term(bytes, [:safe, :used]),
          true <- used == byte_size(bytes) and is_map(value) and not is_struct(value),
          {:ok, %{"options" => normalized}, _size} <-
-           Store.normalize_and_measure_item(:record, %{"options" => value, kind: "original_options"}) do
+           Store.normalize_and_measure_item(:record, %{
+             "options" => value,
+             kind: "original_options"
+           }) do
       {:ok, normalized}
     else
       _invalid -> :error

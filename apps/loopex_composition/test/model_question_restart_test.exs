@@ -202,7 +202,11 @@ defmodule LoopexComposition.ModelQuestionRestartTest do
       if Process.alive?(store_pid), do: GenServer.stop(store_pid)
     end)
 
-    assert :ok = LoopexComposition.StartupGate.publication(LoopexComposition.StartupGate.await(runtime))
+    assert :ok =
+             LoopexComposition.StartupGate.publication(
+               LoopexComposition.StartupGate.await(runtime)
+             )
+
     runtime
   end
 

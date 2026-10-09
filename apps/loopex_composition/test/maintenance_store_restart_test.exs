@@ -498,7 +498,12 @@ defmodule LoopexComposition.MaintenanceStoreRestartTest do
 
     fixture = %{runtime: runtime, store: store_pid, model: model, executor: executor}
     on_exit(fn -> stop(fixture) end)
-    assert :ok = LoopexComposition.StartupGate.publication(LoopexComposition.StartupGate.await(runtime))
+
+    assert :ok =
+             LoopexComposition.StartupGate.publication(
+               LoopexComposition.StartupGate.await(runtime)
+             )
+
     fixture
   end
 

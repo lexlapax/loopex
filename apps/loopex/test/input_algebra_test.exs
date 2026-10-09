@@ -624,49 +624,88 @@ defmodule Loopex.InputSuccessorShutdownTest do
 
   test "public stop joins a held retry successor with its queued steer and follow up" do
     observer = self()
-    fixture = Fixture.start(script: [
-      %{hold: observer, raw_result: {:error, {:not_dispatched, "model_call_failed"}}},
-      %{text: "still working", calls: [call("c2")], hold: observer},
-      %{text: "still working", calls: [call("c3")], hold: observer}
-    ])
+
+    fixture =
+      Fixture.start(
+        script: [
+          %{hold: observer, raw_result: {:error, {:not_dispatched, "model_call_failed"}}},
+          %{text: "still working", calls: [call("c2")], hold: observer},
+          %{text: "still working", calls: [call("c3")], hold: observer}
+        ]
+      )
+
     on_exit(fn -> cleanup_fixture(fixture) end)
 
     {:ok, session_id} = Loopex.create_session(fixture.runtime, %{"t" => "x"}, command_id: "cs")
     {:ok, attachment} = Loopex.attach(fixture.runtime, session_id, after_event_sequence: 0)
+
     assert {:accepted, "p1"} =
-      Loopex.command(attachment, %{type: :prompt, command_id: "p1", content: "the task"})
+             Loopex.command(attachment, %{type: :prompt, command_id: "p1", content: "the task"})
+
     assert_receive {:holding, predecessor_callback}, 5_000
     {:ok, %{active_run_id: run_id}} = Loopex.session_status(fixture.runtime, session_id)
     assert {:ok, before_children} = Loopex.Runtime.children(fixture.runtime)
     [{_, predecessor, _, _}] = Supervisor.which_children(before_children.sessions)
     predecessor_monitor = Process.monitor(predecessor)
 
-    assert {:accepted, "s1"} = Loopex.command(attachment, %{
-      type: :steer, command_id: "s1", run_id: run_id, content: "steer"
-    })
-    assert {:accepted, "f1"} = Loopex.command(attachment, %{
-      type: :follow_up, command_id: "f1", content: "follow"
-    })
-    assert {:error, :steer_pending} = Loopex.command(attachment, %{
-      type: :steer, command_id: "s2", run_id: run_id, content: "second"
-    })
-    assert {:error, :follow_up_pending} = Loopex.command(attachment, %{
-      type: :follow_up, command_id: "f2", content: "second"
-    })
-    assert :ok == M1RuntimeTestStore.delay_after_record(
-      fixture.store, "model_attempt_settled_v3", observer)
+    assert {:accepted, "s1"} =
+             Loopex.command(attachment, %{
+               type: :steer,
+               command_id: "s1",
+               run_id: run_id,
+               content: "steer"
+             })
+
+    assert {:accepted, "f1"} =
+             Loopex.command(attachment, %{
+               type: :follow_up,
+               command_id: "f1",
+               content: "follow"
+             })
+
+    assert {:error, :steer_pending} =
+             Loopex.command(attachment, %{
+               type: :steer,
+               command_id: "s2",
+               run_id: run_id,
+               content: "second"
+             })
+
+    assert {:error, :follow_up_pending} =
+             Loopex.command(attachment, %{
+               type: :follow_up,
+               command_id: "f2",
+               content: "second"
+             })
+
+    assert :ok ==
+             M1RuntimeTestStore.delay_after_record(
+               fixture.store,
+               "model_attempt_settled_v3",
+               observer
+             )
+
     send(predecessor_callback, :release)
+
     assert_receive {:record_linearized, settlement_waiter, _store, "model_attempt_settled_v3",
-                    _transition, {:committed, _tx_id, _receipt}}, 5_000
+                    _transition, {:committed, _tx_id, _receipt}},
+                   5_000
+
     settlement_monitor = Process.monitor(settlement_waiter)
     settlement_cutoff = System.monotonic_time(:millisecond) + 5_000
 
     {before_state, successor_hold_cutoff} =
       try do
         records = Fixture.records(fixture, session_id)
-        settlement = Enum.find(Enum.reverse(records), &(&1.payload[:kind] == "model_attempt_settled_v3"))
+
+        settlement =
+          Enum.find(Enum.reverse(records), &(&1.payload[:kind] == "model_attempt_settled_v3"))
+
         assert settlement.payload["next"] == "retry" and settlement.payload["run_id"] == run_id
-        assert {:ok, before_state} = SessionState.recover(session_id, records, Fixture.events(fixture, session_id))
+
+        assert {:ok, before_state} =
+                 SessionState.recover(session_id, records, Fixture.events(fixture, session_id))
+
         assert before_state.active_run_id == run_id
         assert before_state.pending_work[run_id].stage == "model_retry_permitted"
         assert before_state.steer[run_id].command_id == "s1"
@@ -675,8 +714,10 @@ defmodule Loopex.InputSuccessorShutdownTest do
         # Concept: the successor remains held through the complete stop observation.
         # Technical depth: its natural five-second timeout cannot begin before resume.
         successor_hold_cutoff = System.monotonic_time(:millisecond) + 5_000
+
         assert {:ok, ^session_id} =
-          Loopex.resume_session(fixture.runtime, session_id, command_id: "resume-1")
+                 Loopex.resume_session(fixture.runtime, session_id, command_id: "resume-1")
+
         {before_state, successor_hold_cutoff}
       after
         # Concept: setup owns the actual unlinked settlement waiter even on failure.
@@ -684,6 +725,7 @@ defmodule Loopex.InputSuccessorShutdownTest do
         # an expired setup join kills that same helper, joins it and remains a failure.
         M1RuntimeTestStore.release(settlement_waiter)
         settlement_receive_started = System.monotonic_time(:millisecond)
+
         receive do
           {:DOWN, ^settlement_monitor, :process, ^settlement_waiter, reason} ->
             assert settlement_receive_started < settlement_cutoff
@@ -696,20 +738,37 @@ defmodule Loopex.InputSuccessorShutdownTest do
             flunk("the original settlement waiter exceeded its five-second setup cutoff")
         end
       end
+
     assert_receive {:DOWN, ^predecessor_monitor, :process, ^predecessor, _}, 5_000
     assert_receive {:holding, callback}, 5_000
     refute callback == predecessor_callback
     assert length(AgentLoopTestModel.dispatched(fixture.model)) == 2
     assert {:ok, resumed} = Loopex.attach(fixture.runtime, session_id, after_event_sequence: 0)
-    assert {:error, :steer_pending} = Loopex.command(resumed, %{
-      type: :steer, command_id: "s3", run_id: run_id, content: "third"
-    })
-    assert {:error, :follow_up_pending} = Loopex.command(resumed, %{
-      type: :follow_up, command_id: "f3", content: "third"
-    })
+
+    assert {:error, :steer_pending} =
+             Loopex.command(resumed, %{
+               type: :steer,
+               command_id: "s3",
+               run_id: run_id,
+               content: "third"
+             })
+
+    assert {:error, :follow_up_pending} =
+             Loopex.command(resumed, %{
+               type: :follow_up,
+               command_id: "f3",
+               content: "third"
+             })
+
     assert {:ok, %{active_run_id: ^run_id}} = Loopex.session_status(fixture.runtime, session_id)
-    assert {:ok, successor_state} = SessionState.recover(
-      session_id, Fixture.records(fixture, session_id), Fixture.events(fixture, session_id))
+
+    assert {:ok, successor_state} =
+             SessionState.recover(
+               session_id,
+               Fixture.records(fixture, session_id),
+               Fixture.events(fixture, session_id)
+             )
+
     assert successor_state.owner_epoch > before_state.owner_epoch
     assert successor_state.steer[run_id].command_id == "s1"
     assert successor_state.follow_up.command_id == "f1"
@@ -725,49 +784,83 @@ defmodule Loopex.InputSuccessorShutdownTest do
     refute callback in tasks
     assert callback in elem(Process.info(guard, :links), 1)
 
-    {stopper, stopper_monitor} = spawn_monitor(fn ->
-      receive do
-        :explicit_stop ->
-          result = Loopex.stop(fixture.runtime)
-          assert result == :ok
-          send(observer, {:explicit_stop_returned, self()})
-          receive do: (:stop -> :ok)
-      end
-    end)
+    {stopper, stopper_monitor} =
+      spawn_monitor(fn ->
+        receive do
+          :explicit_stop ->
+            result = Loopex.stop(fixture.runtime)
+            assert result == :ok
+            send(observer, {:explicit_stop_returned, self()})
+            receive do: (:stop -> :ok)
+        end
+      end)
+
     on_exit(fn -> cleanup_actor(stopper, stopper_monitor) end)
 
-    roles = Map.new(children, fn {name, actor} -> {actor, "runtime_" <> Atom.to_string(name)} end)
+    roles =
+      Map.new(children, fn {name, actor} -> {actor, "runtime_" <> Atom.to_string(name)} end)
       |> Map.merge(Map.new(tasks, &{&1, "task"}))
-      |> Map.merge(%{callback => "callback", guard => "guard", workers => "private_supervisor",
-        group => "owner_group", coordinator => "coordinator", children.sessions => "sessions",
-        children.owner_groups => "owner_groups", fixture.runtime.supervisor => "runtime",
-        stopper => "stop_caller"})
-    monitors = Map.new(roles, fn {actor, role} ->
-      monitor = if actor == stopper, do: stopper_monitor, else: Process.monitor(actor)
-      assert Process.alive?(actor)
-      assert observer in elem(Process.info(actor, :monitored_by), 1)
-      {monitor, {actor, role}}
-    end)
+      |> Map.merge(%{
+        callback => "callback",
+        guard => "guard",
+        workers => "private_supervisor",
+        group => "owner_group",
+        coordinator => "coordinator",
+        children.sessions => "sessions",
+        children.owner_groups => "owner_groups",
+        fixture.runtime.supervisor => "runtime",
+        stopper => "stop_caller"
+      })
+
+    monitors =
+      Map.new(roles, fn {actor, role} ->
+        monitor = if actor == stopper, do: stopper_monitor, else: Process.monitor(actor)
+        assert Process.alive?(actor)
+        assert observer in elem(Process.info(actor, :monitored_by), 1)
+        {monitor, {actor, role}}
+      end)
+
     assert Process.alive?(callback) and guard in elem(Process.info(callback, :links), 1)
-    run = %{fixture: fixture, owner: stopper, owner_monitor: stopper_monitor,
-      workers: workers, group: group, owner_groups: children.owner_groups,
-      sessions: children.sessions, roles: roles, monitors: monitors}
+
+    run = %{
+      fixture: fixture,
+      owner: stopper,
+      owner_monitor: stopper_monitor,
+      workers: workers,
+      group: group,
+      owner_groups: children.owner_groups,
+      sessions: children.sessions,
+      roles: roles,
+      monitors: monitors
+    }
 
     assert System.monotonic_time(:millisecond) + 1_000 < successor_hold_cutoff
-    evidence = ShutdownWitness.observe([run], :explicit_stop, "input-held-successor", true, fn _ -> [] end)
+
+    evidence =
+      ShutdownWitness.observe([run], :explicit_stop, "input-held-successor", true, fn _ -> [] end)
+
     assert System.monotonic_time(:millisecond) < successor_hold_cutoff
     refute Enum.any?(evidence, &(&1["event"] == "supervisor_report"))
     downs = Enum.filter(evidence, &(&1["event"] == "original_down"))
     assert length(downs) == map_size(roles)
     assert length(Enum.uniq_by(downs, & &1["pid"])) == map_size(roles)
     assert length(Enum.uniq_by(downs, & &1["monitor"])) == map_size(roles)
+
     for down <- downs do
       assert down["reason"] in ["normal", "shutdown", "killed"]
-      assert Enum.any?(evidence, &(&1["event"] == "actor_exit" and
-        &1["pid"] == down["pid"] and &1["reason"] == down["reason"]))
+
+      assert Enum.any?(
+               evidence,
+               &(&1["event"] == "actor_exit" and
+                   &1["pid"] == down["pid"] and &1["reason"] == down["reason"])
+             )
     end
-    assert Enum.any?(evidence, &(&1["event"] == "explicit_stop_returned" and
-      &1["pid"] == ShutdownWitness.identity(stopper)))
+
+    assert Enum.any?(
+             evidence,
+             &(&1["event"] == "explicit_stop_returned" and
+                 &1["pid"] == ShutdownWitness.identity(stopper))
+           )
   end
 
   defp call(id), do: %{id: id, name: "write", arguments: %{"path" => id}}
@@ -780,23 +873,30 @@ defmodule Loopex.InputSuccessorShutdownTest do
     cutoff = System.monotonic_time(:millisecond) + 1_000
     actors = [fixture.runtime.supervisor, fixture.model, fixture.executor, fixture.store]
     owned = for actor <- actors, do: {actor, Process.monitor(actor)}
+
     ShutdownWitness.cleanup(
       Enum.map(owned, fn {actor, _} ->
         fn -> if Process.alive?(actor), do: Process.exit(actor, :kill) end
-      end) ++ Enum.map(owned, fn {actor, monitor} ->
-        fn -> assert_receive {:DOWN, ^monitor, :process, ^actor, _},
-          max(cutoff - System.monotonic_time(:millisecond), 0) end
-      end)
+      end) ++
+        Enum.map(owned, fn {actor, monitor} ->
+          fn ->
+            assert_receive {:DOWN, ^monitor, :process, ^actor, _},
+                           max(cutoff - System.monotonic_time(:millisecond), 0)
+          end
+        end)
     )
   end
 
   defp cleanup_actor(actor, original_monitor) do
     monitor = Process.monitor(actor)
     cutoff = System.monotonic_time(:millisecond) + 1_000
+
     ShutdownWitness.cleanup([
       fn -> if Process.alive?(actor), do: Process.exit(actor, :kill) end,
-      fn -> assert_receive {:DOWN, ^monitor, :process, ^actor, _},
-        max(cutoff - System.monotonic_time(:millisecond), 0) end,
+      fn ->
+        assert_receive {:DOWN, ^monitor, :process, ^actor, _},
+                       max(cutoff - System.monotonic_time(:millisecond), 0)
+      end,
       fn -> Process.demonitor(original_monitor, [:flush]) end
     ])
   end

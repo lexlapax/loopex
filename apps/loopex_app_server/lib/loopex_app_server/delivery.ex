@@ -113,10 +113,10 @@ defmodule Loopex.AppServer.Delivery do
   retain their counts and encoded bytes until matching physical completion.
   """
   @spec new(binary() | nil, non_neg_integer()) :: t()
-  def new(session_id, cursor) when (is_binary(session_id) or is_nil(session_id)) and
-                                  is_integer(cursor) and cursor >= 0 do
-    %__MODULE__{session_id: session_id, incarnation: nil, cursor: cursor,
-                pulled_cursor: cursor}
+  def new(session_id, cursor)
+      when (is_binary(session_id) or is_nil(session_id)) and
+             is_integer(cursor) and cursor >= 0 do
+    %__MODULE__{session_id: session_id, incarnation: nil, cursor: cursor, pulled_cursor: cursor}
   end
 
   # Concept: a facade may run only after its maximum reply already fits.
@@ -129,10 +129,24 @@ defmodule Loopex.AppServer.Delivery do
 
     if count < @durable_records and bytes + size <= @durable_bytes do
       token = make_ref()
-      entry = %{token: token, plane: :durable, bytes: size, frame: nil,
-                incarnation: queue.incarnation, sequence: nil, baseline: nil, lease: nil}
-      {:ok, token, %{queue | entries: insert_durable(queue.entries, entry),
-                             durable: {count + 1, bytes + size}}}
+
+      entry = %{
+        token: token,
+        plane: :durable,
+        bytes: size,
+        frame: nil,
+        incarnation: queue.incarnation,
+        sequence: nil,
+        baseline: nil,
+        lease: nil
+      }
+
+      {:ok, token,
+       %{
+         queue
+         | entries: insert_durable(queue.entries, entry),
+           durable: {count + 1, bytes + size}
+       }}
     else
       :full
     end
@@ -158,18 +172,33 @@ defmodule Loopex.AppServer.Delivery do
   @doc false
   def commit_frame(queue, token, frame, metadata \\ %{}) when is_binary(frame) do
     case Enum.find(queue.entries, &(&1.token == token and is_nil(&1.frame))) do
-      nil -> {:error, :stale_reservation, queue}
+      nil ->
+        {:error, :stale_reservation, queue}
+
       entry ->
         size = byte_size(frame)
+
         if size <= entry.bytes and size > 0 and :binary.last(frame) == ?\n do
-          entry = %{entry | frame: frame, bytes: size,
-                           incarnation: Map.get(metadata, :incarnation, entry.incarnation),
-                           sequence: Map.get(metadata, :sequence),
-                           baseline: Map.get(metadata, :baseline)}
+          entry = %{
+            entry
+            | frame: frame,
+              bytes: size,
+              incarnation: Map.get(metadata, :incarnation, entry.incarnation),
+              sequence: Map.get(metadata, :sequence),
+              baseline: Map.get(metadata, :baseline)
+          }
+
           {count, bytes} = queue.durable
-          entries = Enum.map(queue.entries, fn old -> if old.token == token, do: entry, else: old end)
-          {:ok, %{queue | entries: entries,
-                          durable: {count, bytes - Frame.output_record_bytes() + size}}}
+
+          entries =
+            Enum.map(queue.entries, fn old -> if old.token == token, do: entry, else: old end)
+
+          {:ok,
+           %{
+             queue
+             | entries: entries,
+               durable: {count, bytes - Frame.output_record_bytes() + size}
+           }}
         else
           {:error, :output_record_too_large, queue}
         end
@@ -196,15 +225,19 @@ defmodule Loopex.AppServer.Delivery do
   """
   @spec event(t(), map()) :: t()
   def event(%__MODULE__{detached: true} = queue, _event), do: queue
+
   def event(queue, event) do
     case reserve(queue) do
       {:ok, token, reserved} ->
         record = event_record(queue.session_id, event)
+
         case commit(reserved, token, record, %{sequence: Map.fetch!(event, :event_sequence)}) do
           {:ok, committed} -> %{committed | pulled_cursor: event.event_sequence}
           {:error, _reason, failed} -> %{cancel(failed, token) | detached: true}
         end
-      :full -> %{queue | detached: true}
+
+      :full ->
+        %{queue | detached: true}
     end
   end
 
@@ -223,19 +256,34 @@ defmodule Loopex.AppServer.Delivery do
 
   @doc false
   def progress(%__MODULE__{detached: true} = queue, _item, _lease), do: queue
+
   def progress(queue, item, lease) do
     case progress_record(queue.session_id, item) do
-      :error -> queue
+      :error ->
+        queue
+
       record ->
         {count, bytes} = queue.progress
         size = progress_frame_bytes(record)
+
         if count < @progress_records and bytes + size <= @progress_bytes do
           case encode(record) do
             {:ok, frame} when byte_size(frame) == size ->
-              entry = %{token: make_ref(), plane: :progress, bytes: size, frame: frame,
-                        incarnation: queue.incarnation, sequence: nil, baseline: nil, lease: lease}
+              entry = %{
+                token: make_ref(),
+                plane: :progress,
+                bytes: size,
+                frame: frame,
+                incarnation: queue.incarnation,
+                sequence: nil,
+                baseline: nil,
+                lease: lease
+              }
+
               %{queue | entries: queue.entries ++ [entry], progress: {count + 1, bytes + size}}
-            _invalid -> queue
+
+            _invalid ->
+              queue
           end
         else
           queue
@@ -245,14 +293,22 @@ defmodule Loopex.AppServer.Delivery do
 
   @doc false
   def next(%__MODULE__{active: nil, entries: [%{frame: frame} = entry | _]})
-      when is_binary(frame), do: {:ok, entry}
+      when is_binary(frame) do
+    {:ok, entry}
+  end
+
   def next(_queue), do: :empty
 
   @doc false
-  def activate(%__MODULE__{active: nil, entries: [%{token: token} = entry | rest]} = queue,
-               token, writer_ref) when is_reference(writer_ref) do
+  def activate(
+        %__MODULE__{active: nil, entries: [%{token: token} = entry | rest]} = queue,
+        token,
+        writer_ref
+      )
+      when is_reference(writer_ref) do
     {:ok, %{queue | entries: rest, active: Map.put(entry, :writer_ref, writer_ref)}}
   end
+
   def activate(queue, _token, _writer_ref), do: {:error, :stale_entry, queue}
 
   # Concept: physical JOINED is the only emitted-cursor transition.
@@ -261,19 +317,26 @@ defmodule Loopex.AppServer.Delivery do
   @doc false
   def joined(%__MODULE__{active: %{writer_ref: reference} = entry} = queue, reference) do
     queue = subtract(%{queue | active: nil}, entry)
+
     queue =
       if entry.incarnation == queue.incarnation do
         cond do
           is_integer(entry.baseline) ->
             %{queue | cursor: entry.baseline, baseline_joined: true}
-          is_integer(entry.sequence) -> %{queue | cursor: entry.sequence}
-          true -> queue
+
+          is_integer(entry.sequence) ->
+            %{queue | cursor: entry.sequence}
+
+          true ->
+            queue
         end
       else
         queue
       end
+
     {:ok, entry, queue}
   end
+
   def joined(queue, _reference), do: {:error, :stale_completion, queue}
 
   # Concept: this retirement follows physically proved failed-write cleanup.
@@ -283,6 +346,7 @@ defmodule Loopex.AppServer.Delivery do
   def failed(%__MODULE__{active: %{writer_ref: reference} = entry} = queue, reference) do
     {:ok, entry, %{subtract(%{queue | active: nil}, entry) | detached: true}}
   end
+
   def failed(queue, _reference), do: {:error, :stale_completion, queue}
 
   @doc false
@@ -300,8 +364,14 @@ defmodule Loopex.AppServer.Delivery do
 
   @doc false
   def attachment(queue, session_id, cursor, incarnation) do
-    %{queue | session_id: session_id, incarnation: incarnation,
-              cursor: 0, pulled_cursor: cursor, baseline_joined: false}
+    %{
+      queue
+      | session_id: session_id,
+        incarnation: incarnation,
+        cursor: 0,
+        pulled_cursor: cursor,
+        baseline_joined: false
+    }
   end
 
   @doc false
@@ -332,10 +402,13 @@ defmodule Loopex.AppServer.Delivery do
   """
   @spec detachment(t()) :: map()
   def detachment(queue) do
-    %{"type" => "error", "code" => "detached",
+    %{
+      "type" => "error",
+      "code" => "detached",
       "message" => "delivery stopped because this writer could not keep up",
       "session_id" => Wire.encode_identity(queue.session_id),
-      "event_cursor" => Wire.encode_u64(queue.cursor)}
+      "event_cursor" => Wire.encode_u64(queue.cursor)
+    }
   end
 
   # Concept: reserve the exact progress LF bytes before allocating JSON output.
@@ -344,9 +417,12 @@ defmodule Loopex.AppServer.Delivery do
   # encoder and the result must equal this byte count before queue admission.
   defp progress_frame_bytes(record), do: progress_json_bytes(record) + 1
   defp progress_json_bytes(value) when is_binary(value), do: progress_string_bytes(value, 2)
+
   defp progress_json_bytes(value) when is_integer(value),
     do: byte_size(Integer.to_string(value))
+
   defp progress_json_bytes(nil), do: 4
+
   defp progress_json_bytes(value) when is_map(value) do
     2 + max(map_size(value) - 1, 0) +
       Enum.reduce(value, 0, fn {key, member}, size ->
@@ -355,12 +431,15 @@ defmodule Loopex.AppServer.Delivery do
   end
 
   defp progress_string_bytes(<<>>, size), do: size
+
   defp progress_string_bytes(<<byte, rest::binary>>, size) do
-    extra = cond do
-      byte in [?", ?\\, ?\n, ?\r, ?\t] -> 2
-      byte < 32 -> 6
-      true -> 1
-    end
+    extra =
+      cond do
+        byte in [?", ?\\, ?\n, ?\r, ?\t] -> 2
+        byte < 32 -> 6
+        true -> 1
+      end
+
     progress_string_bytes(rest, size + extra)
   end
 

@@ -119,7 +119,12 @@ defmodule LoopexComposition.ExactCreateHistoryTest do
       )
 
     on_exit(fn -> if Runtime.alive?(runtime), do: Loopex.stop(runtime) end)
-    assert :ok = LoopexComposition.StartupGate.publication(LoopexComposition.StartupGate.await(runtime))
+
+    assert :ok =
+             LoopexComposition.StartupGate.publication(
+               LoopexComposition.StartupGate.await(runtime)
+             )
+
     runtime
   end
 

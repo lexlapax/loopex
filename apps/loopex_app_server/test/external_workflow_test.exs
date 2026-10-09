@@ -72,6 +72,7 @@ defmodule Loopex.AppServer.ExternalWorkflowTest do
 
     # It attached and was given the exact snapshot members.
     assert summary["snapshot_revision"] == 3
+
     assert summary["snapshot_members"] == [
              "active_maintenance",
              "active_run_id",

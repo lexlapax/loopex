@@ -186,10 +186,15 @@ defmodule LoopexProtocol.FrameTest do
   end
 
   test "the complete escape alphabet and Unicode retain literal current JSON bytes" do
-    text = <<0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
-             16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31>> <>
-      "\\\" / café 😀"
-    expected = ~S({"s":"\u0000\u0001\u0002\u0003\u0004\u0005\u0006\u0007\b\t\n\u000b\f\r\u000e\u000f\u0010\u0011\u0012\u0013\u0014\u0015\u0016\u0017\u0018\u0019\u001a\u001b\u001c\u001d\u001e\u001f\\\" / café 😀"}) <> "\n"
+    text =
+      <<0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15>> <>
+        <<16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31>> <>
+        "\\\" / café 😀"
+
+    expected =
+      ~S({"s":"\u0000\u0001\u0002\u0003\u0004\u0005\u0006\u0007\b\t\n\u000b\f\r\u000e\u000f\u0010\u0011\u0012\u0013\u0014\u0015\u0016\u0017\u0018\u0019\u001a\u001b\u001c\u001d\u001e\u001f\\\" / café 😀"}) <>
+        "\n"
+
     assert {:ok, encoded} = Frame.encode(%{"s" => text})
     assert IO.iodata_to_binary(encoded) == expected
     assert {:ok, %{"s" => ^text}} = Frame.decode(String.trim_trailing(expected, "\n"), @limit)
@@ -204,29 +209,46 @@ defmodule LoopexProtocol.FrameTest do
     size = 32_768
     tabs = :binary.copy("\t", size)
     words = div(14 * size + 8_192, :erlang.system_info(:wordsize))
-    options = [:monitor, {:max_heap_size,
-      %{size: words, kill: true, error_logger: false, include_shared_binaries: true}}]
+
+    options = [
+      :monitor,
+      {:max_heap_size,
+       %{size: words, kill: true, error_logger: false, include_shared_binaries: true}}
+    ]
+
     expected = "{\"s\":\"" <> :binary.copy("\\t", size) <> "\"}\n"
     digest = :crypto.hash(:sha256, expected)
     owner = self()
-    {encoder, monitor} = :erlang.spawn_opt(fn ->
-      {:ok, encoded} = Frame.encode(%{"s" => tabs})
-      frame = IO.iodata_to_binary(encoded)
-      send(owner, {:encoded, self(), byte_size(frame), :crypto.hash(:sha256, frame)})
-    end, options)
+
+    {encoder, monitor} =
+      :erlang.spawn_opt(
+        fn ->
+          {:ok, encoded} = Frame.encode(%{"s" => tabs})
+          frame = IO.iodata_to_binary(encoded)
+          send(owner, {:encoded, self(), byte_size(frame), :crypto.hash(:sha256, frame)})
+        end,
+        options
+      )
+
     assert_receive {:encoded, ^encoder, bytes, ^digest}, 1_000
     assert bytes == size * 2 + 9
     assert_receive {:DOWN, ^monitor, :process, ^encoder, :normal}, 1_000
 
-    {original, original_monitor} = :erlang.spawn_opt(fn ->
-      original_tab_escape(tabs, [])
-      send(owner, {:original_survived, self()})
-    end, options)
+    {original, original_monitor} =
+      :erlang.spawn_opt(
+        fn ->
+          original_tab_escape(tabs, [])
+          send(owner, {:original_survived, self()})
+        end,
+        options
+      )
+
     assert_receive {:DOWN, ^original_monitor, :process, ^original, :killed}, 1_000
     refute_received {:original_survived, ^original}
   end
 
   defp original_tab_escape(<<>>, acc), do: acc |> Enum.reverse() |> IO.iodata_to_binary()
+
   defp original_tab_escape(<<?\t, rest::binary>>, acc),
     do: original_tab_escape(rest, ["\\t" | acc])
 

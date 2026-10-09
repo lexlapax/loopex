@@ -140,8 +140,10 @@ defmodule Loopex.AppServer.Host do
       {:ok, sink} ->
         result =
           try do
-            LoopexComposition.with_runtime(Keyword.put(options, :progress_sink, sink),
-              fn runtime -> Stdio.serve(runtime, sink) end)
+            LoopexComposition.with_runtime(
+              Keyword.put(options, :progress_sink, sink),
+              fn runtime -> Stdio.serve(runtime, sink) end
+            )
           rescue
             exception ->
               Loopex.ProgressSink.close(sink)
@@ -151,11 +153,14 @@ defmodule Loopex.AppServer.Host do
               Loopex.ProgressSink.close(sink)
               :erlang.raise(kind, reason, __STACKTRACE__)
           end
+
         case Loopex.ProgressSink.close(sink) do
           :ok -> result
           {:error, _reason} -> {:error, :cleanup_unproved}
         end
-      {:error, _reason} -> {:error, :progress_sink_unavailable}
+
+      {:error, _reason} ->
+        {:error, :progress_sink_unavailable}
     end
   end
 

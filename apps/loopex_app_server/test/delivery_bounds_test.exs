@@ -553,11 +553,13 @@ defmodule Loopex.AppServer.DeliveryBoundsTest do
       read_all(connection, transfer_ref, collected <> bytes)
     end
   end
+
   # Concept: projection assertions simulate successful joins, not OS evidence.
   # Technical depth: the lifecycle suite separately drives the actual writer.
   # This helper selects one entry, keeps its charge active, decodes its LF frame,
   # and explicitly joins before selecting the next entry.
   defp drain(queue), do: drain(queue, [])
+
   defp drain(queue, records) do
     case Delivery.next(queue) do
       {:ok, entry} ->
@@ -567,8 +569,9 @@ defmodule Loopex.AppServer.DeliveryBoundsTest do
         {:ok, record} = LoopexProtocol.Frame.decode(payload, 2_097_152)
         {:ok, _entry, joined} = Delivery.joined(active, reference)
         drain(joined, [record | records])
-      :empty -> {Enum.reverse(records), queue}
+
+      :empty ->
+        {Enum.reverse(records), queue}
     end
   end
-
 end

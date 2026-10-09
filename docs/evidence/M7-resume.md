@@ -27,6 +27,23 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+### Portable foreground layout correction, 2026-10-08
+
+Reviewed source was committed at `b1c45f905b36f461b21ab2ab96d7cbd5fe184703`.
+Formatter40 original54351 preserves all30 non-line ASTs and passes current
+format checks, but FAILS floor layout for Delivery's one-line guarded clause
+and the frame fixture's long32-byte literal. Its failure remains retained:
+`M7/candidate-format-preparation-20261008-v40`, terminal
+`68f1a0cfc6948d32b2ee1e9741cb99d28b42fa30fceee1bccf7ac1cb694739c6`,
+collection `b85839b6475700d73851df7fcbbc6eb288dfca3c992fbfe2568c1cba32554e5e`.
+Use an explicit do/end guard and two concatenated16-byte literals; all32
+control bytes, Unicode, independent expected JSON and every assertion remain
+unchanged. A byte comparison verifies the literal equals the original0..31
+alphabet. Commit this corrected source before formatter41, with the full
+401-case native scope still UNRUN. Next registry2660, SHA-256
+`3a6a2438ccd48d5e5807a000bf6f86f542b245d4d6008c358560fb94b195eee7`.
+No checkbox closes. Previous formatter40 output is immutable.
+
 ### Reviewed repairs joined, 2026-10-08
 
 Creation readiness and physical custody are committed on `m7` at

@@ -85,7 +85,11 @@ defmodule LoopexComposition.FacadeClientTest do
       )
 
     try do
-      assert :ok = LoopexComposition.StartupGate.publication(LoopexComposition.StartupGate.await(runtime))
+      assert :ok =
+               LoopexComposition.StartupGate.publication(
+                 LoopexComposition.StartupGate.await(runtime)
+               )
+
       {client, monitor} = FacadeClient.start(self(), runtime, genesis())
       assert {:ok, session} = operation(client, :create)
       assert {:ok, attachment} = operation(client, :attach)
@@ -127,7 +131,11 @@ defmodule LoopexComposition.FacadeClientTest do
       if Process.alive?(store_pid), do: GenServer.stop(store_pid)
     end)
 
-    assert :ok = LoopexComposition.StartupGate.publication(LoopexComposition.StartupGate.await(runtime))
+    assert :ok =
+             LoopexComposition.StartupGate.publication(
+               LoopexComposition.StartupGate.await(runtime)
+             )
+
     {:ok, %{control: control}} = Loopex.Runtime.children(runtime)
     true = :erlang.suspend_process(control)
     test = self()

@@ -345,9 +345,11 @@ defmodule LoopexProtocol.Frame do
   defp escape(<<?\n, rest::binary>>, acc), do: escape(rest, <<acc::binary, ?\\, ?n>>)
   defp escape(<<?\r, rest::binary>>, acc), do: escape(rest, <<acc::binary, ?\\, ?r>>)
   defp escape(<<?\t, rest::binary>>, acc), do: escape(rest, <<acc::binary, ?\\, ?t>>)
+
   defp escape(<<code, rest::binary>>, acc) when code < 0x20 do
     escape(rest, <<acc::binary, ?\\, ?u, ?0, ?0, hex(div(code, 16)), hex(rem(code, 16))>>)
   end
+
   defp escape(<<code::utf8, rest::binary>>, acc), do: escape(rest, <<acc::binary, code::utf8>>)
 
   defp hex(value) when value < 10, do: ?0 + value

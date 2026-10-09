@@ -92,11 +92,13 @@ defmodule LoopexComposition.Delegation.RunLedger do
   def first_stop(%{stop: {tx, result}}), do: {:ok, tx, result}
 
   @doc false
-  def replay(identifiers, capture, binding_transactions, history, entries) when is_list(entries) do
+  def replay(identifiers, capture, binding_transactions, history, entries)
+      when is_list(entries) do
     with {:ok, state} <- new(identifiers, capture, binding_transactions, history) do
       Enum.reduce_while(entries, {:ok, state}, fn entry, {:ok, current} ->
         case entry do
-          {tx, inputs} when is_map(tx) and not is_struct(tx) and is_map(inputs) and not is_struct(inputs) ->
+          {tx, inputs}
+          when is_map(tx) and not is_struct(tx) and is_map(inputs) and not is_struct(inputs) ->
             if Enum.any?(current.transactions, fn {old, _} -> old["tx_id"] == tx["tx_id"] end) do
               {:halt, {:error, :duplicate_appended_transaction}}
             else
@@ -115,8 +117,12 @@ defmodule LoopexComposition.Delegation.RunLedger do
 
   def replay(_, _, _, _, _), do: {:error, :invalid_run_prefix}
 
-  defp parent(%{runtime: runtime, command: command, object_bytes: [catalog, declaration, creation]}),
-    do: ParentBinding.capture(runtime, command, catalog, declaration, creation)
+  defp parent(%{
+         runtime: runtime,
+         command: command,
+         object_bytes: [catalog, declaration, creation]
+       }),
+       do: ParentBinding.capture(runtime, command, catalog, declaration, creation)
 
   defp parent(_), do: :error
 
@@ -128,7 +134,12 @@ defmodule LoopexComposition.Delegation.RunLedger do
     end
   end
 
-  defp transition(%{phase: :empty} = state, %{"mutation" => %{"kind" => "initialize"}} = tx, size, _) do
+  defp transition(
+         %{phase: :empty} = state,
+         %{"mutation" => %{"kind" => "initialize"}} = tx,
+         size,
+         _
+       ) do
     if tx["mutation"] == initialize_mutation(state),
       do: install(state, tx, size, %{state | phase: :initialized}),
       else: {:error, :run_binding_mismatch}
@@ -139,7 +150,12 @@ defmodule LoopexComposition.Delegation.RunLedger do
     reserve(state, tx, size, inputs)
   end
 
-  defp transition(%{phase: :reserved} = state, %{"mutation" => %{"kind" => "stop"}} = tx, size, inputs) do
+  defp transition(
+         %{phase: :reserved} = state,
+         %{"mutation" => %{"kind" => "stop"}} = tx,
+         size,
+         inputs
+       ) do
     mutation = tx["mutation"]
 
     with %{original_job: original} <- inputs,
@@ -250,7 +266,8 @@ defmodule LoopexComposition.Delegation.RunLedger do
 
   defp child_matches?(child, mutation, [runtime, _parent, _run]) do
     child.runtime_id == runtime and child.operation_identity == mutation["operation_identity"] and
-      child.role == mutation["role"] and child.creation_sha256 == mutation["child_creation_sha256"] and
+      child.role == mutation["role"] and
+      child.creation_sha256 == mutation["child_creation_sha256"] and
       Base.encode64(child.command_id) == mutation["create_command_id"] and
       Base.encode64(child.prompt_command_id) == mutation["prompt_command_id"] and
       child.reserved_tokens == mutation["reserved_tokens"]
@@ -261,6 +278,7 @@ defmodule LoopexComposition.Delegation.RunLedger do
   defp install(state, tx, size, next) do
     if state.bytes + size + next.credit <= @cap do
       {:ok, result} = RunMutation.result(state.identifiers, tx)
+
       next = %{
         next
         | version: state.version + 1,

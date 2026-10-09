@@ -59,8 +59,11 @@ defmodule Loopex.AppServer.Connection do
   """
   @spec new(keyword()) :: t()
   def new(options \\ []) do
-    %__MODULE__{state: :uninitialized, runtime: Keyword.get(options, :runtime),
-                holder: Keyword.get(options, :holder, self())}
+    %__MODULE__{
+      state: :uninitialized,
+      runtime: Keyword.get(options, :runtime),
+      holder: Keyword.get(options, :holder, self())
+    }
   end
 
   @doc """
@@ -324,8 +327,12 @@ defmodule Loopex.AppServer.Connection do
          connection}
 
       true ->
-        context = %{runtime: connection.runtime, attachment: connection.attachment,
-                    holder: connection.holder, emitted_cursor: connection.emitted_cursor}
+        context = %{
+          runtime: connection.runtime,
+          attachment: connection.attachment,
+          holder: connection.holder,
+          emitted_cursor: connection.emitted_cursor
+        }
 
         case Mapping.call(request, context) do
           {:ok, record} ->

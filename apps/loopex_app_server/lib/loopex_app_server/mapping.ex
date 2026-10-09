@@ -628,23 +628,32 @@ defmodule Loopex.AppServer.Mapping do
   defp attach_for_holder(context, session_id, options) do
     holder = Map.get(context, :holder, self())
     runtime = context.runtime
-    case {Map.get(context, :attachment),
-          Loopex.Attachment.routing(Map.get(context, :attachment))} do
+
+    case {Map.get(context, :attachment), Loopex.Attachment.routing(Map.get(context, :attachment))} do
       {nil, {:error, _reason}} ->
         Loopex.Runtime.attach_for_holder(runtime, session_id, holder, options)
+
       {_old, {:ok, ^runtime, ^session_id, previous, _incarnation}} ->
         options =
           case Map.get(context, :emitted_cursor) do
             {^session_id, cursor} -> Keyword.put_new(options, :after_event_sequence, cursor)
             _none -> options
           end
-        Loopex.Runtime.attach_for_holder(runtime, session_id, holder,
-          Keyword.put(options, :replace_attachment_id, previous))
+
+        Loopex.Runtime.attach_for_holder(
+          runtime,
+          session_id,
+          holder,
+          Keyword.put(options, :replace_attachment_id, previous)
+        )
+
       {_old, {:ok, ^runtime, _other_session, _previous, _incarnation}} ->
         with :ok <- Loopex.Runtime.release_holder(runtime, holder) do
           Loopex.Runtime.attach_for_holder(runtime, session_id, holder, options)
         end
-      _stale -> {:error, :invalid_attachment}
+
+      _stale ->
+        {:error, :invalid_attachment}
     end
   end
 
