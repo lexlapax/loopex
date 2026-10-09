@@ -53,7 +53,8 @@ defmodule LoopexComposition do
 
   ## Technical depth
 
-  `:policy` is required and has no default. `:state_root` and `:workspace` are
+  `:policy` is required; a contextual reference's identity names only its module.
+  `:state_root` and `:workspace` are
   resolved by the caller rather than discovered here, because where an operator's
   data lives is the host's decision.
 
@@ -207,7 +208,7 @@ defmodule LoopexComposition do
          {:ok, store} <- Store.new(Store.Local, adapter),
          {:ok, spill} <- artifact_placement(root, options),
          {:ok, executor} <- open_executor(root, workspace, options, spill, credential_plane),
-         executor = delegated_executor(options, executor) do
+         executor = delegated_executor(options[:delegation], executor) do
       with {:ok, runtime} <-
              start_edge(
                Loopex,
@@ -258,12 +259,10 @@ defmodule LoopexComposition do
   # Concept: a helper-capable host routes its executor through the helper owner.
   # Technical depth: ADR 0046's router wraps the opened local executor before the
   # runtime starts; local requests and receipts pass through unchanged.
-  defp delegated_executor(options, executor) do
-    case options[:delegation] do
-      %{helper: _} = handle -> LoopexComposition.Delegation.wrap(handle, executor)
-      _ -> executor
-    end
-  end
+  defp delegated_executor(%{helper: _} = handle, executor),
+    do: LoopexComposition.Delegation.wrap(handle, executor)
+
+  defp delegated_executor(_handle, executor), do: executor
 
   # Concept: classification precedes durable admission but not read-only use.
   # Technical depth: an incomplete bounded pass returns the runtime with every
@@ -292,7 +291,7 @@ defmodule LoopexComposition do
 
   defp policy_identity(options, policy) do
     Keyword.get(options, :policy_identity) ||
-      %{"id" => inspect(policy), "revision" => "0.2.0"}
+      %{"id" => inspect(Loopex.Policy.adapter_module(policy)), "revision" => "0.2.0"}
   end
 
   defp store_options(root, options, credential_plane),

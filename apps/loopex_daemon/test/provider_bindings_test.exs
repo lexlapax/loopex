@@ -131,6 +131,146 @@ defmodule LoopexDaemon.ProviderBindingsTest do
     :trace.session_destroy(trace)
   end
 
+  # Concept: a controller configures across real host routes without learning
+  # them. Technical depth: accepted ADR 0050 over /4 with two bound provider
+  # routes. An authored alias resolves to the bound provider's canonical model;
+  # an unbound provider refuses before Store mutation; no admission, snapshot,
+  # event or inspection carries a route, binding, credential or host option.
+  test "socket configure resolves real bound routes without disclosing host-only data", %{
+    options: options
+  } do
+    {task, sentinel, ref, _owner} = ready(options ++ [active_tools: []])
+    {:ok, client} = :socket.open(:local, :stream, :default)
+    :ok = :socket.connect(client, %{family: :local, path: options[:socket_path]})
+
+    send_frame(client, %{
+      "method" => "initialize",
+      "request_id" => "init",
+      "generations" => [LoopexProtocol.Session.V2.generation()],
+      "capabilities" => []
+    })
+
+    records = [receive_frame(client)]
+
+    send_frame(client, %{
+      "method" => "session.create",
+      "request_id" => "create",
+      "command_id" => LoopexProtocol.Wire.encode_identity("routes-create"),
+      "session_options" => %{"version" => 1}
+    })
+
+    [%{"session_id" => session} = created] = [receive_frame(client)]
+
+    send_frame(client, %{
+      "method" => "session.acquire_control",
+      "request_id" => "acquire",
+      "session_id" => session
+    })
+
+    acquired = receive_frame(client)
+    epoch = acquired["result"]["writer_epoch"]
+
+    send_frame(client, %{
+      "method" => "session.attach",
+      "request_id" => "attach",
+      "session_id" => session,
+      "after_event_sequence" => "0"
+    })
+
+    snapshot = receive_frame(client)
+    assert snapshot["type"] == "snapshot"
+
+    send_frame(client, %{
+      "method" => "session.configure",
+      "request_id" => "unbound",
+      "command_id" => LoopexProtocol.Wire.encode_identity("unbound"),
+      "changes" => %{"model" => "google:gemini-unbound"},
+      "writer_epoch" => epoch
+    })
+
+    unbound = until_request(client, "unbound", [])
+    assert List.last(unbound)["status"] == "refused"
+
+    send_frame(client, %{
+      "method" => "session.configure",
+      "request_id" => "bound",
+      "command_id" => LoopexProtocol.Wire.encode_identity("bound"),
+      "changes" => %{"model" => "anthropic:claude-haiku-4-5"},
+      "writer_epoch" => epoch
+    })
+
+    bound = until_event(client, "session.configured", [])
+    [admission] = Enum.filter(bound, &(&1["request_id"] == "bound"))
+    assert admission["status"] == "accepted"
+
+    [%{"event" => %{"data" => change}}] =
+      Enum.filter(bound, &(get_in(&1, ["event", "kind"]) == "session.configured"))
+
+    assert change["configuration"]["model"] == "anthropic:claude-haiku-4-5-20251001"
+
+    send_frame(client, %{
+      "method" => "session.inspect",
+      "request_id" => "inspect",
+      "session_id" => session
+    })
+
+    inspected = until_request(client, "inspect", [])
+
+    public =
+      inspect([records, created, acquired, snapshot, unbound, bound, inspected], limit: :infinity)
+
+    for private <- [
+          "M7_DAEMON",
+          "canary",
+          "credential",
+          "provider_mapping",
+          "model_capabilities",
+          "provider_bindings",
+          "env"
+        ] do
+      refute public =~ private, private
+    end
+
+    :socket.close(client)
+    send(sentinel, {:daemon_signal, ref, :sigterm})
+    assert Task.await(task, 60_000) == 0
+  end
+
+  defp send_frame(client, record) do
+    {:ok, frame} = LoopexProtocol.Frame.encode(record)
+    :ok = :socket.send(client, IO.iodata_to_binary(frame))
+  end
+
+  defp receive_frame(client), do: receive_frame(client, Process.get({:frames, client}, ""))
+
+  defp receive_frame(client, buffer) do
+    case :binary.split(buffer, "\n") do
+      [line, rest] ->
+        Process.put({:frames, client}, rest)
+        {:ok, record} = LoopexProtocol.Frame.decode(line, 2_097_152)
+        record
+
+      [_partial] ->
+        {:ok, bytes} = :socket.recv(client, 0, 10_000)
+        receive_frame(client, buffer <> bytes)
+    end
+  end
+
+  defp until_request(client, id, records) do
+    record = receive_frame(client)
+    records = records ++ [record]
+    if record["request_id"] == id, do: records, else: until_request(client, id, records)
+  end
+
+  defp until_event(client, kind, records) do
+    record = receive_frame(client)
+    records = records ++ [record]
+
+    if get_in(record, ["event", "kind"]) == kind,
+      do: records,
+      else: until_event(client, kind, records)
+  end
+
   test "shared references create one custody and keep both provider tokens", %{options: options} do
     shared = Map.put(bindings(), "anthropic", bindings()["openai"])
     {task, sentinel, ref, owner} = ready(Keyword.put(options, :provider_bindings, shared))

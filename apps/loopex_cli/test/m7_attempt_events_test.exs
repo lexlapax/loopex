@@ -1734,21 +1734,21 @@ defmodule LoopexCli.M7AttemptEventsTest do
     end
   end
 
-  test "completed pre-merge rows remain separate from a prospective full matrix requiring invocation joins" do
+  test "a fresh full matrix owns its own attempts and never borrows completed pre-merge rows" do
     bodies = ownership_prefix() ++ [lane_started("first"), lane_completed("first")]
     {bytes, records} = ownership_chain(bodies)
     head = ownership_head(List.last(records))
     selection = Map.put(lane_selection(["first"]), "logical_matrix_id", "matrix-1")
 
-    assert {:unresolved, plan} =
+    assert {:ok, plan} =
              Events.verify_lane_history(bytes, head_line(head), "m7-vector", selection, :new)
 
-    assert plan.reason == :matrix_invocation_join_required
-    assert plan.reused == [] and plan.remaining == []
+    assert plan.reused == []
+    assert [%{history: nil}] = plan.remaining
     assert is_nil(hd(plan.case_history.records)["body"]["logical_matrix_id"])
   end
 
-  test "a same-matrix continuation retains its identities but cannot invent complete invocation joins" do
+  test "a same-matrix continuation reuses its passes and dispatches only not-dispatched cases" do
     bodies =
       ownership_prefix() ++
         Enum.map(
@@ -1757,10 +1757,42 @@ defmodule LoopexCli.M7AttemptEventsTest do
         )
 
     selection = Map.put(lane_selection(["first", "second"]), "logical_matrix_id", "matrix-1")
-    assert {{:unresolved, plan}, _} = lane_call(bodies, selection, :continue)
-    assert plan.reason == :matrix_invocation_join_required
-    assert plan.remaining == []
+    assert {{:ok, plan}, _} = lane_call(bodies, selection, :continue)
+    assert [%{pin: %{"case_key" => "first"}}] = plan.reused
+    assert [%{pin: %{"case_key" => "second"}}] = plan.remaining
     assert Enum.all?(plan.case_history.records, &(&1["body"]["logical_matrix_id"] == "matrix-1"))
+  end
+
+  test "a later lane joins only a matrix this invocation already began" do
+    matrix = &Map.merge(&1, %{"logical_matrix_id" => "matrix-1", "lane_id" => "lane-0"})
+
+    bodies =
+      ownership_prefix() ++ [matrix.(lane_started("zero")), matrix.(lane_completed("zero"))]
+
+    selection = Map.put(lane_selection(["first"]), "logical_matrix_id", "matrix-1")
+    assert {{:ok, plan}, _} = lane_call(bodies, selection, :join)
+    assert [%{pin: %{"case_key" => "first"}, history: nil}] = plan.remaining
+
+    assert {{:blocked, %{reason: :fresh_matrix_already_consumed}}, _} =
+             lane_call(bodies, selection, :new)
+
+    other = Map.put(selection, "logical_matrix_id", "matrix-2")
+    assert {{:blocked, %{reason: :matrix_join_unavailable}}, _} = lane_call(bodies, other, :join)
+
+    pre_merge = Map.put(selection, "logical_matrix_id", nil)
+
+    assert {{:blocked, %{reason: :matrix_join_unavailable}}, _} =
+             lane_call(bodies, pre_merge, :join)
+
+    failed =
+      ownership_prefix() ++
+        [
+          matrix.(lane_started("zero")),
+          matrix.(Map.put(lane_completed("zero"), "mechanical_result", "assertion_failed"))
+        ]
+
+    assert {{:blocked, %{reason: :consumed_matrix_failure}}, _} =
+             lane_call(failed, selection, :join)
   end
 
   test "a consumed failure in another lane of the same matrix blocks further case proposals" do

@@ -42,7 +42,7 @@ defmodule Loopex.AppServer.ForegroundOutputHarness do
         {~c"LOOPEX_FOREGROUND_FIXTURE", ~c"1"},
         {~c"LOOPEX_FOREGROUND_STDERR", String.to_charlist(stderr)},
         {~c"ERL_CRASH_DUMP", String.to_charlist(Path.join(root, "crash.dump"))},
-        {~c"ELIXIR_ERL_OPTIONS", ~c"+fnu +S 2:2 -noinput"}]
+        {~c"ELIXIR_ERL_OPTIONS", ~c"+S 2:2 +fnu -noinput"}]
       launcher = Port.open({:spawn_executable, ~c"/bin/bash"}, [:binary, :exit_status,
         {:args, [~c"--noprofile", ~c"--norc", String.to_charlist(script),
           String.to_charlist(System.find_executable("elixir") || flunk("Elixir unavailable")),
@@ -105,6 +105,7 @@ defmodule Loopex.AppServer.ForegroundOutputHarness do
   end
 
   defp own(key, name, value), do: Process.put(key, Map.put(Process.get(key), name, value))
+
   defp join_original_launcher({nil, _monitor, _cutoff}), do: :ok
   defp join_original_launcher({_launcher, nil, _cutoff}), do: :ok
   defp join_original_launcher({launcher, monitor, cutoff}) do
@@ -373,7 +374,7 @@ defmodule Loopex.AppServer.ForegroundOutputFixture do
   end
 
   defp own(observer, mode)
-       when mode in ["runtime", "writer_failure", "compaction", "question_text", "question_choice",
+       when mode in ["runtime", "writer_failure", "compaction", "compaction_held", "question_text", "question_choice",
          "question_decline"] do
     artifacts = Loopex.Store.Local.Artifacts
     root = Path.join(System.fetch_env!("LOOPEX_HOME"), "foreground-artifacts")
@@ -387,7 +388,7 @@ defmodule Loopex.AppServer.ForegroundOutputFixture do
     # Concept: question mode lets the actual model ask through the real stdio.
     # Technical depth: ADR 0067's operation-less terminal then crosses the same
     # writer, cursor and custody path as every other foreground record.
-    fixture = Fixture.start([script: script(mode),
+    fixture = Fixture.start([script: script(mode, observer),
       progress_sink: sink, artifact_store: %{module: artifacts, handle: artifact}] ++ tools(mode))
     try do
       await_ready(fixture.runtime, now_ms() + 1_000)
@@ -465,16 +466,26 @@ defmodule Loopex.AppServer.ForegroundOutputFixture do
       %{text: "done", calls: []}]
   end
 
+  defp script(_mode), do: [%{text: "done", calls: []}]
+
   # Concept: compaction mode answers one prompt, then summarizes it for an
   # explicit compact under the host's maintenance selection.
   # Technical depth: the permitted summary attempt emits real ADR 0054 activity
   # through the same sink Stdio routes; the summary text itself stays private.
-  defp script("compaction"), do: [%{text: "done", calls: []}, Fixture.summary_reply()]
+  defp script("compaction", _observer), do: [%{text: "done", calls: []}, Fixture.summary_reply()]
 
-  defp script(_mode), do: [%{text: "done", calls: []}]
+  # The held summary waits for the controller's :release_hold command, so a case
+  # can observe the session while maintenance is genuinely in flight.
+  defp script("compaction_held", observer),
+    do: [%{text: "done", calls: []},
+      Map.merge(Fixture.summary_reply(), %{hold: observer, hold_timeout_ms: 20_000,
+        deltas: ["PRIVATE summary delta"]})]
+
+  defp script(mode, _observer), do: script(mode)
+
   defp tools("question_" <> _name),
     do: [tools: [LoopexProtocol.ToolDefinition.question_definition()]]
-  defp tools("compaction"), do: [tools: []] ++ Fixture.maintenance_options()
+  defp tools("compaction" <> _held), do: [tools: []] ++ Fixture.maintenance_options()
   defp tools(_mode), do: []
 
   defp cleanup_all(actions) do
@@ -709,6 +720,33 @@ defmodule Loopex.AppServer.ForegroundOutputFixture do
     ])
     send_record(state.socket, :controls_released)
     %{state | dispatcher_suspended: nil, owner_suspended: false, writer_suspended: false, held: nil}
+  end
+
+  defp command(state, :await_hold) do
+    receive do
+      {:holding, worker} ->
+        send_record(state.socket, :holding)
+        Map.put(state, :held_worker, worker)
+    after
+      max(state.cutoff - now_ms(), 0) -> exit(:hold_missing)
+    end
+  end
+
+  defp command(state, :release_hold) do
+    send(Map.fetch!(state, :held_worker), :release)
+    send_record(state.socket, :hold_released)
+    state
+  end
+
+  defp command(state, {:inject, phase}) do
+    :ok = Loopex.M1RuntimeTestStore.inject(state.fixture.store, {:session_journal_commit, phase})
+    send_record(state.socket, :injected)
+    state
+  end
+
+  defp command(state, :observed_faults) do
+    send_record(state.socket, {:observed_faults, Loopex.M1RuntimeTestStore.observed(state.fixture.store)})
+    state
   end
 
   defp command(state, :hold_create) do

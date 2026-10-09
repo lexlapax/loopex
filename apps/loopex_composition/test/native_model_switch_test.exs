@@ -301,8 +301,12 @@ defmodule LoopexComposition.NativeModelSwitchTest do
     def decide(_request), do: {:allow, nil}
   end
 
+  test "verified native summary stays progress and out of the next canonical request after reopen",
+       %{root: root} do
+    privacy_workflow(root, :verified, "low", "PERMITTED_SUMMARY_CANARY", true)
+  end
+
   for {variant, reasoning, thinking, disclosed} <- [
-        {:verified, "low", "PERMITTED_SUMMARY_CANARY", true},
         {:empty, "low", "", false},
         {:unverified, "default", "UNVERIFIED_PRIVATE_THINKING_CANARY", false}
       ] do
@@ -362,7 +366,14 @@ defmodule LoopexComposition.NativeModelSwitchTest do
                else: %{"mode" => "adaptive", "effort" => "low", "display" => "summarized"}
              )
 
-    with_privacy_fixture(response_content(@model_a, native), fn fixture ->
+    # The verified summary case continues with a second prompt after reopen,
+    # so its fixture answers twice.
+    bodies =
+      if variant == :verified,
+        do: [response_content(@model_a, native), response_content(@model_a, native)],
+        else: [response_content(@model_a, native)]
+
+    with_privacy_fixture(bodies, fn fixture ->
       model =
         Model.reference(%{module: Loopex.LLM.ReqLLM, model: @model_a, options: fixture.options},
           provider_bindings: bindings()
@@ -462,10 +473,7 @@ defmodule LoopexComposition.NativeModelSwitchTest do
 
       before_reopen = File.read!(path)
 
-      with_privacy_runtime(path, model, runtime_id, artifacts, fn runtime,
-                                                                  store,
-                                                                  _custody,
-                                                                  sink ->
+      with_privacy_runtime(path, model, runtime_id, artifacts, fn runtime, store, custody, sink ->
         reopen_cutoff = now() + 10_000
         start_privacy_trace(runtime)
 
@@ -488,9 +496,28 @@ defmodule LoopexComposition.NativeModelSwitchTest do
         assert artifact_files(artifact_handle.root) == artifact_files_before
         assert_absent(artifact_files_before, public_exclusions)
         assert_privacy_trace(runtime, public_exclusions, reopen_cutoff)
+
+        if variant == :verified do
+          # Concept: V7.6 summary progress. The disclosed summary was progress,
+          # never canonical history: the next staged request and the reopened
+          # conversation hold the answer text and not the summary.
+          run(runtime, attachment, fixture, custody, "privacy-next", "Continue publicly.")
+          {records, _events, state} = history(store, session)
+
+          next =
+            records
+            |> Enum.filter(&(&1.payload.kind == "model_request_committed_v2"))
+            |> List.last()
+
+          staged = next.payload["request"]["messages"]
+          assert :erlang.term_to_binary(staged) =~ answer
+          assert_absent(staged, [thinking])
+          assert_absent(state.conversation, [thinking])
+          assert length(settlements(records)) == 2
+        end
       end)
 
-      assert [{body, true}] = Fixture.events(fixture)
+      assert [{body, true} | _] = Fixture.events(fixture)
       assert body["model"] == "claude-fable-5-1"
       assert body["max_tokens"] == 1_024
       assert body["messages"] == messages([{"user", "Return the public answer."}])
@@ -504,7 +531,9 @@ defmodule LoopexComposition.NativeModelSwitchTest do
       end
 
       assert_absent(body, public_exclusions)
-      assert Fixture.methods(fixture) == ["POST"]
+
+      assert Fixture.methods(fixture) ==
+               if(variant == :verified, do: ["POST", "POST"], else: ["POST"])
     end)
   end
 

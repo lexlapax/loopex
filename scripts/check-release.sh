@@ -213,6 +213,51 @@ for retained in source-archive-manifest source-archive-manifest.source-identity 
   (umask 077; set -C; : >"$retain/$retained") 2>/dev/null ||
     { printf 'check-release: retained path unavailable or already exists: %s\n' "$retain/$retained" >&2; exit 2; }
 done
+
+# The logical closure matrix and indexed rollback lanes record every release
+# lane in the attempts index before it runs. A resumed matrix skips the lanes
+# it already completed; fresh-source is rebuilt and must reproduce its retained
+# manifest digest. One recorder holds the writer until the conversation lanes.
+release_matrix_lanes=()
+if [ -n "$release_attempts_index" ] && { [ "$release_mode" = full ] || release_selected m7-rollback; }; then
+  if [ "$release_mode" = full ]; then
+    release_matrix_lanes=(fresh-source)
+    for row in 1 2 3 4 5 6 7 8 9 10 11; do release_matrix_lanes+=("real-provider-$row"); done
+    for app in loopex_app_server loopex_protocol loopex_daemon loopex_cli; do release_matrix_lanes+=("node-client-$app"); done
+    for app in loopex loopex_executor_local loopex_daemon loopex_composition loopex_llm_reqllm; do
+      release_matrix_lanes+=("long-bound-$app")
+    done
+    [ "$platform" != Linux ] || release_matrix_lanes+=(cross-uid)
+    release_matrix_id=${release_resume_matrix:-matrix-${commit:0:12}-$(date +%s)}
+  else
+    release_matrix_id=""
+  fi
+  release_matrix_lanes+=(m7-rollback-restore m7-rollback-nonredispatch)
+  script_digest=$(release_digest "$script_dir/check-release.sh")
+  m7_matrix_args=(--attempts-index "$release_attempts_index" --writer "$release_writer"
+    --host "$release_host" --markers "$release_markers" --candidate "$commit"
+    --concept "$checkout/docs/plans/M7.md" --run-root "$retain/m7-runs"
+    --manifest-digest "$(release_digest "$checkout/test/fixtures/m7/manifest.json")")
+  if [ -n "$release_matrix_id" ]; then
+    m7_matrix_args+=(--matrix "$release_matrix_id")
+  else
+    m7_matrix_args+=(--matrix "m7-rollback-${commit:0:12}")
+  fi
+  [ -z "$release_resume_matrix" ] || m7_matrix_args+=(--resume)
+  for label in "${release_matrix_lanes[@]}"; do
+    m7_matrix_args+=(--case "$label=$(release_text_digest "$label $script_digest")")
+  done
+  release_matrix_keys="${release_matrix_lanes[*]}"
+  printf 'check-release: logical matrix %s\n' "${release_matrix_id:-m7-rollback-${commit:0:12}}"
+  release_matrix_start without_credential mix loopex.m7_matrix "${m7_matrix_args[@]}" || exit 2
+fi
+fresh_skipped=0
+if release_matrix_skipped fresh-source; then
+  fresh_skipped=1
+  printf 'check-release: fresh-source completed in this logical matrix; rebuilding as a prerequisite\n'
+elif [ "${#release_matrix_lanes[@]}" -gt 0 ] && [ "${release_matrix_lanes[0]}" = fresh-source ]; then
+  release_matrix_request start fresh-source || exit 2
+fi
 tree="$fresh/src"
 printf 'check-release: fresh-source extraction of %s\n' "$commit"
 (
@@ -272,6 +317,12 @@ for retained in source-archive-manifest source-inventory; do
   release_retain_identity "$retain/$retained"
 done
 printf 'check-release: fresh-source elapsed=%ss\n' "$((SECONDS - fresh_started))"
+if [ "$fresh_skipped" -eq 1 ]; then
+  [ "$(release_digest "$retain/source-archive-manifest")" = "$(release_matrix_digest fresh-source)" ] ||
+    { echo 'check-release: the rebuilt archive manifest differs from the matrix first invocation' >&2; exit 1; }
+elif [ "${#release_matrix_lanes[@]}" -gt 0 ] && [ "${release_matrix_lanes[0]}" = fresh-source ]; then
+  release_matrix_request finish fresh-source pass "$retain/source-archive-manifest" || exit 1
+fi
 # The same validator runs again inside the built extraction, before any lane.
 if release_needs_m7; then
   (cd "$tree" && MIX_ENV=prod without_credential mix loopex.m7_evidence "${m7_args[@]}" </dev/null) ||
@@ -356,6 +407,39 @@ if release_selected cross_uid && [ "$platform" = Linux ]; then
 elif release_selected cross_uid; then
   printf 'cross_uid: not run (%s)\n' "$platform"
 fi
+
+# M7's credential-free rollback lane: current-format backup/restore with its
+# complete manifests, and unknown-effect nonredispatch after recovery.
+if release_selected m7-rollback; then
+  # The restore test builds its first fixture in this retained directory, so
+  # m7.restore in the operator lane joins this exact execution.
+  export M7_RESTORE_RETAIN="$retain/m7-restore-source"
+  lane m7-rollback-restore loopex_composition nonzero without_credential \
+    mix test test/restore_workflow_test.exs
+  unset M7_RESTORE_RETAIN
+  lane m7-rollback-nonredispatch loopex_reference_client 1 without_credential \
+    mix test test/end_to_end_recovery_test.exs \
+    --only "test:test an effect without a durable receipt becomes outcome_unknown and is not blindly retried"
+fi
+release_matrix_close || { echo 'check-release: attempts index recorder failed' >&2; exit 1; }
+
+# M7 conversation lanes run through the trusted fixture wrapper inside the
+# extraction; each case is recorded before dispatch under the same matrix.
+for m7_lane in m7-operator m7-provider; do
+  release_selected "$m7_lane" || continue
+  m7_wrapper=(--lane "$m7_lane" --attempts-index "$release_attempts_index" --writer "$release_writer"
+    --host "$release_host" --markers "$release_markers" --run-root "$retain/m7-runs"
+    --operator "$release_operator" --candidate "$commit")
+  [ -z "${release_matrix_id:-}" ] || m7_wrapper+=(--matrix "$release_matrix_id")
+  [ "$m7_lane" != m7-operator ] || m7_wrapper+=(--terminal)
+  [ -z "$release_pins" ] || m7_wrapper+=(--pins "$release_pins")
+  [ -z "${LOOPEX_M7_EXTERNAL_REPOSITORY:-}" ] ||
+    m7_wrapper+=(--external-repository "$LOOPEX_M7_EXTERNAL_REPOSITORY")
+  printf 'check-release: %s\n' "$m7_lane"
+  (cd "$tree" && with_credential mix run --no-start scripts/m7-fixture-chat.exs -- \
+    "${m7_wrapper[@]}" chat --config "$release_m7_config") ||
+    { printf 'check-release: %s RED\n' "$m7_lane" >&2; exit 1; }
+done
 printf 'check-release: total=%ss\n' "$((SECONDS - started))"
 if [ "$release_mode" = selection-only ]; then
   printf 'PASS (selection-only: not full closure evidence)\n'

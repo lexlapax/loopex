@@ -48,6 +48,7 @@ defmodule Loopex.AppServer.ExternalWorkflowTest do
           ebin(:loopex_protocol),
           ebin(:loopex),
           ebin(:loopex_app_server),
+          ebin(:loopex_composition),
           ebin(:loopex_executor_local),
           ebin(:loopex_store_local),
           ebin(:telemetry)
@@ -135,6 +136,7 @@ defmodule Loopex.AppServer.ExternalWorkflowTest do
           ebin(:loopex_protocol),
           ebin(:loopex),
           ebin(:loopex_app_server),
+          ebin(:loopex_composition),
           ebin(:loopex_executor_local),
           ebin(:loopex_store_local),
           ebin(:telemetry)
@@ -173,6 +175,7 @@ defmodule Loopex.AppServer.ExternalWorkflowTest do
           ebin(:loopex_protocol),
           ebin(:loopex),
           ebin(:loopex_app_server),
+          ebin(:loopex_composition),
           ebin(:loopex_executor_local),
           ebin(:loopex_store_local),
           ebin(:telemetry)
@@ -188,6 +191,43 @@ defmodule Loopex.AppServer.ExternalWorkflowTest do
              "owner" => %{"kind" => "compact", "id" => "node-compact"},
              "same_episode" => true,
              "disposition" => "checkpointed"
+           }
+  end
+
+  # Concept: the independent client negotiates against the real foreground.
+  # Technical depth: local refusal before initialization and after an old-only
+  # refusal, then the exact pinned generation/digest and a refused repeat.
+  @tag :node_client
+  test "an independent client negotiates and is refused by the real foreground server" do
+    node_executable = System.find_executable("node") || flunk("Node is required")
+
+    {output, status} =
+      System.cmd(
+        node_executable,
+        [
+          client("real-negotiation-workflow.mjs"),
+          System.find_executable("elixir") || flunk("Elixir executable unavailable"),
+          ebin(:loopex_protocol),
+          ebin(:loopex),
+          ebin(:loopex_app_server),
+          ebin(:loopex_composition),
+          ebin(:loopex_executor_local),
+          ebin(:loopex_store_local),
+          ebin(:telemetry)
+        ] ++ require_paths(),
+        env: child_environment(),
+        stderr_to_stdout: true
+      )
+
+    assert status == 0, output
+
+    assert decode(output) == %{
+             "refused_before_initialize" => true,
+             "old_offer_code" => "unsupported_generation",
+             "refused_after_old_offer" => true,
+             "generation" => "loopex.experimental/3",
+             "digest_matches_pin" => true,
+             "repeat_code" => "already_initialized"
            }
   end
 
@@ -208,6 +248,7 @@ defmodule Loopex.AppServer.ExternalWorkflowTest do
           ebin(:loopex_protocol),
           ebin(:loopex),
           ebin(:loopex_app_server),
+          ebin(:loopex_composition),
           ebin(:loopex_executor_local),
           ebin(:loopex_store_local),
           ebin(:telemetry)
@@ -337,6 +378,7 @@ defmodule Loopex.AppServer.ExternalWorkflowTest do
           ebin(:loopex_protocol),
           ebin(:loopex),
           ebin(:loopex_app_server),
+          ebin(:loopex_composition),
           ebin(:loopex_executor_local),
           ebin(:loopex_store_local),
           ebin(:telemetry)
@@ -624,6 +666,7 @@ defmodule Loopex.AppServer.ExternalWorkflowTest do
 
     arguments =
       ["-pa", ebin(:loopex_protocol), "-pa", ebin(:loopex), "-pa", ebin(:loopex_app_server)] ++
+        ["-pa", ebin(:loopex_composition)] ++
         ["-pa", ebin(:loopex_executor_local)] ++
         ["-pa", ebin(:loopex_store_local), "-pa", ebin(:telemetry)] ++
         Enum.flat_map(require_paths(), &["-r", &1]) ++

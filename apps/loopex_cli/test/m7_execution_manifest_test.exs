@@ -130,16 +130,19 @@ defmodule LoopexCli.M7ExecutionManifestTest do
   end
 
   test "lane selections pin each case's specification and refuse pending cases", f do
+    pending_manifest =
+      put_in(f.manifest, ["cases", "m7.thinking-bound", "status"], "pending:test")
+
     assert {:error, {:m7_cases_pending, pending}} =
              ExecutionManifest.selection(
-               f.manifest,
+               pending_manifest,
                f.digest,
                "m7-provider",
                String.duplicate("1", 40),
                nil
              )
 
-    assert "m7.pipe-answer" in pending
+    assert "m7.thinking-bound" in pending and "m7.pipe-answer" not in pending
 
     assert {:error, :unknown_m7_lane} =
              ExecutionManifest.selection(f.manifest, f.digest, "m7-x", "a", nil)
@@ -169,7 +172,11 @@ defmodule LoopexCli.M7ExecutionManifestTest do
     refute ExecutionManifest.specification_digest(changed, "m7.repair") ==
              repair["specification_digest"]
 
-    assert %{owners: owners} = ExecutionManifest.pending(f.manifest)
-    assert "V6.2.range" in owners
+    assert ExecutionManifest.pending(f.manifest) == %{cases: [], owners: []}
+
+    owed =
+      put_in(f.manifest, ["operator_step_evidence", "V8.6", "owner"], "pending:test")
+
+    assert %{owners: ["V8.6"]} = ExecutionManifest.pending(owed)
   end
 end

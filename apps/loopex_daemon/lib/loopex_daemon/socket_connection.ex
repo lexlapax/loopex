@@ -1161,6 +1161,13 @@ defmodule LoopexDaemon.SocketConnection do
         {:ok, :absent} ->
           {:fresh, create_task(state.context, request_id, command_id, options)}
 
+        # Concept: authored creation options are compared by the native create.
+        # Technical depth: the history lookup rebuilds only unprepared defaults,
+        # so a prepared candidate always differs there; the native path compares
+        # the retained authored capture and answers exact replay or conflict.
+        {:ok, :conflict} when map_size(options) > 1 ->
+          {:fresh, create_task(state.context, request_id, command_id, options)}
+
         {:ok, :conflict} ->
           record = create_admission(request_id, command_id, {:refused, :runtime_command_conflict})
           {:historical, fn -> {:no_activation, nil, record} end}

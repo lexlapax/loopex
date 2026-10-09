@@ -5,9 +5,9 @@
       "m7.baseline.ask": {
         "attended": true,
         "credential": true,
-        "driver": "demonstration",
+        "driver": "scenario-ask",
         "lane": "m7-operator",
-        "status": "pending:attended baseline driver",
+        "status": "ready",
         "steps": [
           "V1.1",
           "V1.2",
@@ -17,9 +17,9 @@
       "m7.baseline.durable": {
         "attended": true,
         "credential": true,
-        "driver": "demonstration",
+        "driver": "scenario-chat",
         "lane": "m7-operator",
-        "status": "pending:attended baseline driver",
+        "status": "ready",
         "steps": [
           "V1.3.durable",
           "V1.4",
@@ -31,7 +31,7 @@
         "credential": true,
         "driver": "provider-wrapper",
         "lane": "m7-provider",
-        "status": "pending:A/B provider pins",
+        "status": "ready",
         "steps": [
           "V6.7"
         ]
@@ -41,7 +41,7 @@
         "credential": true,
         "driver": "provider-wrapper",
         "lane": "m7-provider",
-        "status": "pending:daemon host fixture driver",
+        "status": "ready",
         "steps": [
           "V9.4"
         ]
@@ -51,7 +51,7 @@
         "credential": true,
         "driver": "demonstration",
         "lane": "m7-operator",
-        "status": "pending:scripts/m7-ephemeral-question-demo.exs",
+        "status": "ready",
         "steps": [
           "V5.6.positive"
         ]
@@ -75,7 +75,7 @@
         "credential": true,
         "driver": "fixture-chat",
         "lane": "m7-operator",
-        "status": "pending:committed-answer oracle branch join",
+        "status": "ready",
         "steps": [
           "V5.1",
           "V5.2"
@@ -84,9 +84,9 @@
       "m7.instructions.admitted": {
         "attended": true,
         "credential": true,
-        "driver": "demonstration",
+        "driver": "scenario-chat",
         "lane": "m7-operator",
-        "status": "pending:instruction fixture driver",
+        "status": "ready",
         "steps": [
           "V3.1",
           "V3.2"
@@ -95,9 +95,9 @@
       "m7.instructions.changed": {
         "attended": false,
         "credential": true,
-        "driver": "provider-wrapper",
+        "driver": "scenario-chat",
         "lane": "m7-provider",
-        "status": "pending:instruction fixture driver",
+        "status": "ready",
         "steps": [
           "V3.4"
         ]
@@ -105,9 +105,9 @@
       "m7.instructions.declined": {
         "attended": false,
         "credential": true,
-        "driver": "provider-wrapper",
+        "driver": "scenario-chat",
         "lane": "m7-provider",
-        "status": "pending:instruction fixture driver",
+        "status": "ready",
         "steps": [
           "V3.3"
         ]
@@ -117,7 +117,7 @@
         "credential": true,
         "driver": "demonstration",
         "lane": "m7-operator",
-        "status": "pending:FIFO hold runner and observer join",
+        "status": "ready",
         "steps": [
           "V9.2"
         ]
@@ -127,7 +127,7 @@
         "credential": true,
         "driver": "fixture-chat",
         "lane": "m7-operator",
-        "status": "pending:checkpoint and restart join inspection",
+        "status": "ready",
         "steps": [
           "V6.1",
           "V6.2.long",
@@ -141,7 +141,7 @@
         "credential": true,
         "driver": "demonstration",
         "lane": "m7-operator",
-        "status": "pending:oversized-source fixture",
+        "status": "ready",
         "steps": [
           "V6.5.positive"
         ]
@@ -149,9 +149,9 @@
       "m7.pipe-answer": {
         "attended": false,
         "credential": true,
-        "driver": "provider-wrapper",
+        "driver": "scenario-chat",
         "lane": "m7-provider",
-        "status": "pending:bidirectional pipe driver",
+        "status": "ready",
         "steps": [
           "V2.6.answer",
           "V2.6.decline"
@@ -160,9 +160,9 @@
       "m7.policy-denial": {
         "attended": true,
         "credential": true,
-        "driver": "demonstration",
+        "driver": "scenario-chat",
         "lane": "m7-operator",
-        "status": "pending:denial fixture driver",
+        "status": "ready",
         "steps": [
           "V9.1"
         ]
@@ -170,9 +170,9 @@
       "m7.provider-switch": {
         "attended": true,
         "credential": true,
-        "driver": "demonstration",
+        "driver": "scenario-chat",
         "lane": "m7-operator",
-        "status": "pending:A/B provider pins",
+        "status": "ready",
         "steps": [
           "V7.1",
           "V7.2",
@@ -184,7 +184,7 @@
         "credential": true,
         "driver": "demonstration",
         "lane": "m7-operator",
-        "status": "pending:controlled process-loss driver",
+        "status": "ready",
         "steps": [
           "V5.3"
         ]
@@ -208,7 +208,7 @@
         "credential": false,
         "driver": "demonstration",
         "lane": "m7-operator",
-        "status": "pending:attended restore driver",
+        "status": "ready",
         "steps": [
           "V13.1",
           "V13.4",
@@ -221,7 +221,7 @@
         "credential": true,
         "driver": "fixture-chat",
         "lane": "m7-operator",
-        "status": "pending:helper flow (T11)",
+        "status": "ready",
         "steps": [
           "V8.1",
           "V8.2",
@@ -234,7 +234,7 @@
         "credential": false,
         "driver": "release-lane",
         "lane": "m7-rollback",
-        "status": "pending:current-format backup/restore lane",
+        "status": "ready",
         "steps": [
           "V13.2"
         ]
@@ -244,7 +244,7 @@
         "credential": true,
         "driver": "demonstration",
         "lane": "m7-operator",
-        "status": "pending:FIFO hold runner and observer join",
+        "status": "ready",
         "steps": [
           "V4.1",
           "V4.2",
@@ -257,7 +257,7 @@
         "credential": true,
         "driver": "provider-wrapper",
         "lane": "m7-provider",
-        "status": "pending:thinking-cell witness driver",
+        "status": "ready",
         "steps": [
           "V7.7.bound"
         ]
@@ -267,7 +267,7 @@
         "credential": true,
         "driver": "provider-wrapper",
         "lane": "m7-provider",
-        "status": "pending:pre-transport cancellation gate driver",
+        "status": "ready",
         "steps": [
           "V7.7.cancel"
         ]
@@ -277,7 +277,7 @@
         "credential": true,
         "driver": "demonstration",
         "lane": "m7-operator",
-        "status": "pending:thinking-cell witness driver",
+        "status": "ready",
         "steps": [
           "V7.3.positive"
         ]
@@ -285,9 +285,9 @@
       "m7.trace.file": {
         "attended": true,
         "credential": true,
-        "driver": "demonstration",
+        "driver": "scenario-chat",
         "lane": "m7-operator",
-        "status": "pending:attended trace driver",
+        "status": "ready",
         "steps": [
           "V11.1.file",
           "V11.2.file",
@@ -298,9 +298,9 @@
       "m7.trace.flag": {
         "attended": true,
         "credential": true,
-        "driver": "demonstration",
+        "driver": "scenario-chat",
         "lane": "m7-operator",
-        "status": "pending:attended trace driver",
+        "status": "ready",
         "steps": [
           "V11.1.flag",
           "V11.2.flag",
@@ -311,9 +311,9 @@
       "m7.trace.json": {
         "attended": true,
         "credential": true,
-        "driver": "demonstration",
+        "driver": "scenario-ask",
         "lane": "m7-operator",
-        "status": "pending:attended trace driver",
+        "status": "ready",
         "steps": [
           "V11.5.json"
         ]
@@ -464,7 +464,7 @@
       },
       "V12.5.legacy-defaults": {
         "classification": "automated",
-        "owner": "pending:legacy one-shot default and unattended behavior test"
+        "owner": "test:apps/loopex_cli/test/ask_ephemeral_test.exs#legacy one-shot defaults leave model, bounds and questions to the ephemeral profile"
       },
       "V13.1": {
         "classification": "attended",
@@ -616,7 +616,7 @@
       },
       "V6.2.range": {
         "classification": "automated",
-        "owner": "pending:m7.range-read: no >=16 KiB 4 KiB-range through-EOF integration test yet"
+        "owner": "test:apps/loopex_composition/test/artifact_range_executor_test.exs#a mixed source of at least 16 KiB reads exactly through EOF in 4 KiB ranges"
       },
       "V6.3": {
         "classification": "attended",
@@ -732,7 +732,7 @@
       },
       "V7.6.summary-progress": {
         "classification": "automated",
-        "owner": "pending:verified-summary progress absent from reopened canonical history"
+        "owner": "test:apps/loopex_composition/test/native_model_switch_test.exs#verified native summary stays progress and out of the next canonical request after reopen"
       },
       "V7.7.bound": {
         "classification": "automated",
@@ -758,13 +758,21 @@
         "classification": "attended",
         "owner": "case:m7.review"
       },
-      "V8.5": {
+      "V8.5.failure": {
         "classification": "automated",
-        "owner": "pending:helper child failure, bound exhaustion and parent cancellation (T11)"
+        "owner": "test:apps/loopex_composition/test/delegation_run_ledger_test.exs#a created child never prompted settles failed at zero and refunds its reservation"
+      },
+      "V8.5.bound": {
+        "classification": "automated",
+        "owner": "test:apps/loopex_composition/test/delegation_helper_test.exs#count and token exhaustion refuse before any reservation and a new run reopens"
+      },
+      "V8.5.cancel": {
+        "classification": "automated",
+        "owner": "test:apps/loopex_composition/test/delegation_helper_test.exs#cancelling the parent stops its child and confirms cleanup"
       },
       "V8.6": {
         "classification": "automated",
-        "owner": "pending:serial-child delegation allowance exhaustion (T11)"
+        "owner": "test:apps/loopex_composition/test/delegation_recovery_test.exs#an exhausted serial child allowance survives restart and the parent reopens"
       },
       "V8.7": {
         "classification": "automated",

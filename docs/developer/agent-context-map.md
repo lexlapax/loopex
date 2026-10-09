@@ -7234,3 +7234,14 @@ fence accounting, Store state, cancellation inside the reserve); production
 bounds are unchanged. The maintainer also selected making a phase owner that
 observes its outer deadline already passed return `runtime_unavailable` rather
 than a late success.
+
+<a id="disposition-m7-provider-b-2026-10-09"></a>
+### M7 provider B is OpenAI, 2026-10-09
+
+The plan leaves the separate hosted provider B unselected. The maintainer
+selected OpenAI. Register one thinking-off OpenAI summarizer row (a
+non-reasoning model) with its exact mapping and deterministic conformance in
+the tested bytes. B's switching and helper legs may run under ADR 0044's
+generic descriptor at `default`. Pin B's exact models, mappings and credential
+variable name in the committed manifest before any attempt. Paid runs still
+wait for the candidate-time approval.

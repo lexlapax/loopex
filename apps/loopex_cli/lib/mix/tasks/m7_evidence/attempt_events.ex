@@ -206,7 +206,7 @@ defmodule Mix.Tasks.Loopex.M7Evidence.AttemptEvents do
   def verify_lane_history(bytes, concept, campaign, selection, mode) do
     with {:ok, head} <- AttemptHeads.select(concept, campaign),
          {:ok, projection} <- verify_case_history(bytes, head),
-         true <- mode in [:new, :continue] and lane_selection?(selection) do
+         true <- mode in [:new, :continue, :join] and lane_selection?(selection) do
       lane_projection(projection, head, selection, mode)
     else
       false -> {:error, :invalid_attempt_lane_selection}
@@ -282,8 +282,18 @@ defmodule Mix.Tasks.Loopex.M7Evidence.AttemptEvents do
       prior == :unauthorized ->
         lane_stopped(result, :blocked, :prior_failure_unauthorized)
 
-      not is_nil(selection["logical_matrix_id"]) ->
-        lane_stopped(result, :unresolved, :matrix_invocation_join_required)
+      mode == :join and (is_nil(selection["logical_matrix_id"]) or scoped != []) ->
+        lane_stopped(result, :blocked, :matrix_join_unavailable)
+
+      mode == :join and
+          not Enum.any?(projection.records, fn record ->
+            record["body"]["candidate_sha"] == selection["candidate_sha"] and
+                record["body"]["logical_matrix_id"] == selection["logical_matrix_id"]
+          end) ->
+        lane_stopped(result, :blocked, :matrix_join_unavailable)
+
+      mode == :join ->
+        {:ok, %{result | remaining: selected, authorizations: prior}}
 
       mode == :new and scoped != [] ->
         lane_stopped(result, :blocked, :lane_continuation_required)
@@ -299,6 +309,8 @@ defmodule Mix.Tasks.Loopex.M7Evidence.AttemptEvents do
 
         body["candidate_sha"] == selection["candidate_sha"] and
           lane_scope(body) != scope and
+          (is_nil(selection["logical_matrix_id"]) or
+             body["logical_matrix_id"] != selection["logical_matrix_id"]) and
             post_head_consumed?(record, head)
       end) ->
         lane_stopped(result, :unresolved, :multi_lane_invocation_join_required)

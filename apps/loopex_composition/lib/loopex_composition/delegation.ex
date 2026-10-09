@@ -208,10 +208,14 @@ defmodule LoopexComposition.Delegation do
   @spec guard(map() | nil, binary(), atom()) :: :ok | {:error, term()}
   def guard(nil, _session, _command), do: :ok
 
+  # A host that never started this application has no helper registry, so no
+  # helper can have registered for the runtime and there is nothing to guard.
   def guard(%Loopex.Runtime{supervisor: supervisor}, session, command) do
-    case Registry.lookup(LoopexComposition.Delegation.Registry, supervisor) do
-      [{helper, _}] -> guard(%{helper: helper}, session, command)
-      [] -> :ok
+    with registry when is_pid(registry) <- Process.whereis(LoopexComposition.Delegation.Registry),
+         [{helper, _}] <- Registry.lookup(LoopexComposition.Delegation.Registry, supervisor) do
+      guard(%{helper: helper}, session, command)
+    else
+      _no_helper -> :ok
     end
   end
 

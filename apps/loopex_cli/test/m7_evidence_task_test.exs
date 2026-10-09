@@ -13,7 +13,12 @@ defmodule LoopexCli.M7EvidenceTaskTest do
   @b String.duplicate("b", 64)
 
   setup do
-    root = Path.join(System.tmp_dir!(), "m7-evidence-#{System.unique_integer([:positive])}")
+    root =
+      Path.join(
+        System.tmp_dir!(),
+        "m7-evidence-#{System.pid()}-#{System.unique_integer([:positive])}"
+      )
+
     File.mkdir_p!(Path.join(root, "docs/plans"))
     File.mkdir_p!(Path.join(root, "test/fixtures"))
     File.cp_r!(Path.join(@repository, "test/fixtures/m7"), Path.join(root, "test/fixtures/m7"))
@@ -21,6 +26,12 @@ defmodule LoopexCli.M7EvidenceTaskTest do
     File.ln_s!(Path.join(@repository, "apps"), Path.join(root, "apps"))
     File.mkdir_p!(Path.join(root, "scripts"))
     File.mkdir_p!(Path.join(root, "docs/operator"))
+    File.mkdir_p!(Path.join(root, "docs/evidence"))
+
+    File.cp!(
+      Path.join(@repository, "docs/evidence/M7-closure-runs.md"),
+      Path.join(root, "docs/evidence/M7-closure-runs.md")
+    )
 
     File.cp!(
       Path.join(@repository, "docs/operator/m7-validation.md"),
@@ -40,8 +51,8 @@ defmodule LoopexCli.M7EvidenceTaskTest do
     assert {:ok, ["committed heads: " <> _, "fixture catalog " <> _, families, pending]} =
              Task.validate(@repository, [])
 
-    assert families =~ "11 legacy release cases" and families =~ "108 operator step keys"
-    assert pending =~ "pending:"
+    assert families =~ "11 legacy release cases" and families =~ "28 M7 cases"
+    assert pending == "pending: 0 cases, 0 step owners"
   end
 
   test "each campaign's greatest committed head is selected regardless of order", %{root: root} do
@@ -87,7 +98,6 @@ defmodule LoopexCli.M7EvidenceTaskTest do
            :attempts_index_required},
           {[lane: "m7-provider"], :attempts_index_required},
           {[lane: "m7-rollback", resume_matrix: "matrix-1"], :attempts_index_required},
-          {[lane: "m7-rollback"], {:m7_cases_pending, ["m7.rollback"]}},
           {[attempts_index: "relative/index", lane: "m7-provider"],
            :attempts_index_must_be_absolute},
           {[attempts_index: Path.join(root, "index"), lane: "m7-provider"],
@@ -99,11 +109,12 @@ defmodule LoopexCli.M7EvidenceTaskTest do
     end
 
     index = [attempts_index: "/retained/index"]
+    pend!(root, ["m7.thinking-bound", "m7.review"])
 
     assert {:error, {:m7_cases_pending, provider}} =
              Task.validate(root, [release: true, lane: "m7-provider"] ++ index)
 
-    assert "m7.pipe-answer" in provider
+    assert "m7.thinking-bound" in provider and "m7.pipe-answer" not in provider
 
     assert {:error, {:m7_cases_pending, all}} =
              Task.validate(
@@ -131,6 +142,20 @@ defmodule LoopexCli.M7EvidenceTaskTest do
       File.write!(runbook, changed)
       assert Task.validate(root, []) == {:error, :m7_runbook_stale}
     end
+  end
+
+  test "the closure scaffold must reserve a row for every committed key", %{root: root} do
+    concept!(root, [])
+    scaffold = Path.join(root, "docs/evidence/M7-closure-runs.md")
+    original = File.read!(scaffold)
+
+    for key <- ["| `V9.5` |", "| `m7.repair` |"] do
+      File.write!(scaffold, String.replace(original, key, "| `renamed` |"))
+      assert Task.validate(root, []) == {:error, :m7_closure_rows_missing}
+    end
+
+    File.rm!(scaffold)
+    assert Task.validate(root, []) == {:error, :m7_closure_rows_missing}
   end
 
   test "the legacy release family must keep its eleven literal cases", %{root: root} do
@@ -165,6 +190,7 @@ defmodule LoopexCli.M7EvidenceTaskTest do
 
   test "the command reports unavailable evidence with exit status two", %{root: root} do
     concept!(root, [])
+    pend!(root, ["m7.thinking-bound"])
     Mix.shell(Mix.Shell.Process)
     on_exit(fn -> Mix.shell(Mix.Shell.IO) end)
     Task.run(["--root", root])
@@ -178,14 +204,48 @@ defmodule LoopexCli.M7EvidenceTaskTest do
                "--attempts-index",
                "/retained/index",
                "--lane",
-               "m7-rollback"
+               "m7-provider"
              ])
            ) == {:shutdown, 2}
 
     assert_received {:mix_shell, :error,
-                     ["m7-evidence: evidence unavailable: m7_cases_pending m7.rollback"]}
+                     ["m7-evidence: evidence unavailable: m7_cases_pending " <> pending]}
+
+    assert pending =~ "m7.thinking-bound"
+
+    Task.run(["--root", root, "--release", "--lane", "m7-rollback"])
+    assert_received {:mix_shell, :info, ["m7-evidence: release lanes admitted: m7-rollback"]}
   end
 
   defp concept!(root, lines),
     do: File.write!(Path.join(root, "docs/plans/M7.md"), Enum.join(lines, "\n") <> "\n")
+
+  # Concept: a pending case is marked in the copied manifest and its runbook
+  # row by text, so every other byte of the copy stays the committed one.
+  defp pend!(root, cases) do
+    manifest = Path.join(root, "test/fixtures/m7/manifest.json")
+    runbook = Path.join(root, "docs/operator/m7-validation.md")
+
+    for id <- cases do
+      text = File.read!(manifest)
+      [head, tail] = String.split(text, ~s("#{id}": {), parts: 2)
+
+      tail =
+        String.replace(tail, ~s("status": "ready"), ~s("status": "pending:test"), global: false)
+
+      File.write!(manifest, head <> ~s("#{id}": {) <> tail)
+
+      rows =
+        runbook
+        |> File.read!()
+        |> String.split("\n")
+        |> Enum.map(fn row ->
+          if String.starts_with?(row, "| `#{id}` |") and String.ends_with?(row, "| `ready` |"),
+            do: String.replace_suffix(row, "| `ready` |", "| `pending:test` |"),
+            else: row
+        end)
+
+      File.write!(runbook, Enum.join(rows, "\n"))
+    end
+  end
 end

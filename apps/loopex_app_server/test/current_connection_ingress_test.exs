@@ -261,9 +261,22 @@ defmodule Loopex.AppServer.CurrentConnectionIngressTest do
     assert Map.take(finished, ~w(episode_id command_id result)) ==
              Map.take(native_finished, ~w(episode_id command_id result))
 
-    assert {:ok, _replay, _connection} =
+    assert {:ok, _replay, connection} =
              Connection.dispatch(connection, %{compact | "request_id" => "compact-retry"})
 
+    # A changed compact under the used identity refuses without new records.
+    compacted = Fixture.records(fixture, session)
+
+    changed =
+      Map.merge(compact, %{
+        "request_id" => "compact-changed",
+        "bounds" => %{"max_attempts" => "3", "deadline_ms" => "60000", "token_budget" => "32768"}
+      })
+
+    assert {:ok, conflict, _connection} = Connection.dispatch(connection, changed)
+    assert conflict["status"] == "refused"
+    assert conflict["reason"] == "idempotency_conflict"
+    assert Fixture.records(fixture, session) == compacted
     assert Loopex.AgentLoopTestModel.dispatched(fixture.model) == []
     assert Loopex.AgentLoopTestExecutor.jobs(fixture.executor) == []
   end
@@ -379,6 +392,19 @@ defmodule Loopex.AppServer.CurrentConnectionIngressTest do
     assert settled["answer"] == %{"text" => "exact response 猫\n"}
     assert settled["command_id"] == <<0, 255, 128>>
     await_event(fixture, session, "run.finished")
+    assert Connection.in_flight(connection) == []
+    answered = Fixture.records(fixture, session)
+
+    # A changed answer under the used identity refuses without new records.
+    assert {:ok, conflict, connection} =
+             Connection.dispatch(
+               connection,
+               Map.merge(answer, %{"request_id" => "changed", "answer" => %{"text" => "other"}})
+             )
+
+    assert conflict["status"] == "refused"
+    assert conflict["reason"] == "idempotency_conflict"
+    assert Fixture.records(fixture, session) == answered
     assert Connection.in_flight(connection) == []
     assert Loopex.AgentLoopTestExecutor.jobs(fixture.executor) == []
   end

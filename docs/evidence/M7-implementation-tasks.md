@@ -15709,22 +15709,49 @@ or check was relaxed.
 - [x] Consume captured defaults in implicit create/lookup, refuse unconfigured and superseded creation before Store mutation, remove the Core v2 writer, capture and forward the template through all three reference constructors and actual daemon startup, and prove physical Store reopen/resume and exact no-activation replay on both toolchains. Migrate shared loop and creation/lifecycle fixtures to current captures while preserving request-byte, command-binding, retry, ownership and cleanup proofs. Remaining callers/readers and coordinated wire generations stay open.
 
 - [x] Implement and prove the bounded native ADR 0050 Model-port preparation unit, retaining authored aliases bound to complete canonical candidates in current-v2 records, authority, duplicate disposition, bounded owned work, stale-result refusal and pure current replay. Join composition/CLI and dormant ingress without exposing host routes or metadata; prove both supported pairs and each actual 60-second cutoff. Full live wire coverage remains the separate row below.
-- [ ] Finish accepted ADR 0050 through live foreground /3, daemon /4 and independent clients after coordinated generation activation; prove lease/owner authority, runtime alias resolution, exact duplicate/unknown persistence, public projection and cleanup without host-route disclosure. Native implementation and dormant ingress are proved; superseded generations do not advertise configure.
+- [x] Finish accepted ADR 0050 through live foreground /3, daemon /4 and independent clients after coordinated generation activation; prove lease/owner authority, runtime alias resolution, exact duplicate/unknown persistence, public projection and cleanup without host-route disclosure. Native implementation and dormant ingress are proved; superseded generations do not advertise configure.
+  Proved in the wire rounds; final whole-app runs at `967dc15c` (tested as
+  `ba52f1e9`, identical tree): protocol244, app server206/207, daemon584/592
+  per pair with Node; `claude-20261009/t05-wire/`. See the wire note above. Includes uncertain configure through both transports and real-route non-disclosure (`provider_bindings_test`, `host_test`).
 
 ## T05 — Update records, protocols and independent clients
 
 ### Original checklist
 
 - [ ] Implement every new record/request generation before emitting it.
-- [ ] Add foreground protocol /3 and daemon protocol /4.
+- [x] Add foreground protocol /3 and daemon protocol /4.
+  Proved in the wire rounds; final whole-app runs at `967dc15c` (tested as
+  `ba52f1e9`, identical tree): protocol244, app server206/207, daemon584/592
+  per pair with Node; `claude-20261009/t05-wire/`. See the wire note above.
 - [x] Produce complete payload-schema manifests and reproducible digests.
-- [ ] Update both servers and the independent Node clients together.
-- [ ] Update daemon mutation, capacity, lease and succession inventories.
-- [ ] Implement bounded snapshots and events with consistent replay cursors.
-- [ ] Preserve numeric domains without JavaScript rounding or narrowing.
-- [ ] Test negotiation order, malformed offers, digest mismatches, old clients, authority checks and replay.
-- [ ] Verify private thinking, credentials and host-only data never enter public projections.
-- [ ] Run the required independent-client workflows.
+- [x] Update both servers and the independent Node clients together.
+  Proved in the wire rounds; final whole-app runs at `967dc15c` (tested as
+  `ba52f1e9`, identical tree): protocol244, app server206/207, daemon584/592
+  per pair with Node; `claude-20261009/t05-wire/`. See the wire note above.
+- [x] Update daemon mutation, capacity, lease and succession inventories.
+  Proved in the wire rounds; final whole-app runs at `967dc15c` (tested as
+  `ba52f1e9`, identical tree): protocol244, app server206/207, daemon584/592
+  per pair with Node; `claude-20261009/t05-wire/`. See the wire note above. `session_v2_schema_test`, `succession_capacity_test`, registry succession tests.
+- [x] Implement bounded snapshots and events with consistent replay cursors.
+  Proved in the wire rounds; final whole-app runs at `967dc15c` (tested as
+  `ba52f1e9`, identical tree): protocol244, app server206/207, daemon584/592
+  per pair with Node; `claude-20261009/t05-wire/`. See the wire note above. Mid-maintenance snapshot at the last `maintenance_changed` cursor; inspection at the admission cursor.
+- [x] Preserve numeric domains without JavaScript rounding or narrowing.
+  Proved in the wire rounds; final whole-app runs at `967dc15c` (tested as
+  `ba52f1e9`, identical tree): protocol244, app server206/207, daemon584/592
+  per pair with Node; `claude-20261009/t05-wire/`. See the wire note above. Bounds, configure, creation-option and ActiveBounds vectors consumed by Node.
+- [x] Test negotiation order, malformed offers, digest mismatches, old clients, authority checks and replay.
+  Proved in the wire rounds; final whole-app runs at `967dc15c` (tested as
+  `ba52f1e9`, identical tree): protocol244, app server206/207, daemon584/592
+  per pair with Node; `claude-20261009/t05-wire/`. See the wire note above. `negotiation_socket_test`, `stdio_probe_test`, `contract-identity.v1.json` (20 literal cases, Elixir and Node), ingress and socket conflict tests.
+- [x] Verify private thinking, credentials and host-only data never enter public projections.
+  Proved in the wire rounds; final whole-app runs at `967dc15c` (tested as
+  `ba52f1e9`, identical tree): protocol244, app server206/207, daemon584/592
+  per pair with Node; `claude-20261009/t05-wire/`. See the wire note above. Real bound routes on both transports, plus canaries in maintenance, inspection and remote-create tests.
+- [x] Run the required independent-client workflows.
+  Proved in the wire rounds; final whole-app runs at `967dc15c` (tested as
+  `ba52f1e9`, identical tree): protocol244, app server206/207, daemon584/592
+  per pair with Node; `claude-20261009/t05-wire/`. See the wire note above. Node negotiation, maintenance, compaction-activity, configure/compact and external workflows against the real servers.
 
 ### Added implementation subtasks
 
@@ -15772,11 +15799,20 @@ or check was relaxed.
 
 
 - [x] Implement the accepted ADR0052 standalone ten-field policy request and nine-field terminal codecs, literal schemas/vectors and independent Node projection; prove closed scalar/answer-pair/privacy and complete-output bounds on both toolchains. Native terminal provenance, authenticated cursor transitions, transport integration and generation activation remain separate.
-- [ ] Finish accepted ADR0052 native answer provenance, exact policy cursor/replay relations and shared Elixir/Node payload projection in both transports; prove focused current/floor and independent vectors after rejoin, complete negotiated manifests and real answered-command workflows.
-- [ ] Pin and implement the exact configure request and versioned remote creation-option grammars through governed decisions; preserve authored aliases, central preparation, host-only bindings, current command replay and both transport authority gates.
+- [x] Finish accepted ADR0052 native answer provenance, exact policy cursor/replay relations and shared Elixir/Node payload projection in both transports; prove focused current/floor and independent vectors after rejoin, complete negotiated manifests and real answered-command workflows.
+  Proved in the wire rounds; final whole-app runs at `967dc15c` (tested as
+  `ba52f1e9`, identical tree): protocol244, app server206/207, daemon584/592
+  per pair with Node; `claude-20261009/t05-wire/`. See the wire note above. Inspection tests plus `identity_corpus_test` answer cases.
+- [x] Pin and implement the exact configure request and versioned remote creation-option grammars through governed decisions; preserve authored aliases, central preparation, host-only bindings, current command replay and both transport authority gates.
+  Proved in the wire rounds; final whole-app runs at `967dc15c` (tested as
+  `ba52f1e9`, identical tree): protocol244, app server206/207, daemon584/592
+  per pair with Node; `claude-20261009/t05-wire/`. See the wire note above. Includes the remote-create retry fix (`55c7abb2`).
 - [x] Implement accepted foreground configure Mapping admission through the existing attachment and native command owners; prove complete mapping/initialization files, safe malformed correlation, authored retry identity, all three Store uncertainty phases and joined preparation on both supported pairs. Preserve the current Connection generation refusal until complete manifest activation.
 - [x] Prove the accepted standalone configure `changes` grammar, exact schema and371 literal vectors through shared Elixir and independent Node codecs plus both transport preparation wrappers on both supported pairs. Keep live configure routing, remote creation and whole-generation activation separate.
-- [ ] Pin and implement the closed transient compaction-progress payload and its actual owned emission/loss/succession behavior; exclude summaries and private captures and prove both transports/clients before complete generation activation.
+- [x] Pin and implement the closed transient compaction-progress payload and its actual owned emission/loss/succession behavior; exclude summaries and private captures and prove both transports/clients before complete generation activation.
+  Proved in the wire rounds; final whole-app runs at `967dc15c` (tested as
+  `ba52f1e9`, identical tree): protocol244, app server206/207, daemon584/592
+  per pair with Node; `claude-20261009/t05-wire/`. See the wire note above.
 
 - [x] Prepare the exact proposed ADR0052 policy public-event pair from current native/accepted sources, retain root review and complete once-only docs gate at ec9e8fbe with bound Proposed digests; required maintainer acceptance, native/event implementation, complete /3-/4 manifests and live clients remain open.
 
@@ -15808,7 +15844,10 @@ or check was relaxed.
 
 - [x] Pin the approved closed maintenance-view payload in a shared Elixir codec, independent Node decoder and literal schema/vectors; verify both owner bound domains, unbounded exact run/configuration quantities, null inactivity, closed/privacy refusals and complete opaque/UTF-8 byte boundaries on both supported toolchains. Live emission, snapshot reduction, negotiated generation-3/4 workflows and Store uncertainty proofs remain separate open work.
 
-- [ ] Implement the approved closed `context.maintenance_changed` event and active-maintenance snapshot view; authenticate both actual owners and retained admission bounds, emit only changed safe projections in serial-owner transactions, reduce snapshots at the same public cursor, and prove closed numeric/opaque domains, privacy canaries, paged/mid-transaction anchors, duplicate/succession and all three Store uncertainty phases with both independent Node workflows.
+- [x] Implement the approved closed `context.maintenance_changed` event and active-maintenance snapshot view; authenticate both actual owners and retained admission bounds, emit only changed safe projections in serial-owner transactions, reduce snapshots at the same public cursor, and prove closed numeric/opaque domains, privacy canaries, paged/mid-transaction anchors, duplicate/succession and all three Store uncertainty phases with both independent Node workflows.
+  Proved in the wire rounds; final whole-app runs at `967dc15c` (tested as
+  `ba52f1e9`, identical tree): protocol244, app server206/207, daemon584/592
+  per pair with Node; `claude-20261009/t05-wire/`. See the wire note above. All three Store fault phases on both transports (`maintenance_socket_test`, `foreground_output_lifecycle_test`).
 
 - [x] Implement the approved closed checkpoint-owner schema, shared Elixir codec and independent Node decoder/vectors; project both actual owner kinds through foreground and daemon events using opaque identity bytes and refuse superseded aliases. Prove 36 literal cases and complete identity boundaries on both toolchains; complete generation-3/4 manifests, snapshots and live negotiated workflows remain open.
 
@@ -15830,7 +15869,10 @@ or check was relaxed.
 - [x] Capture actual provider capabilities and exact chat startup template in CLI fixtures; preserve explicit context/system/reply/cleanup budgets, physical reopen/resume, real HTTP accounting and two-runtime diagnostic isolation, and prove all 18 cases on both supported pairs after integration.
 - [x] Bind the four daemon CLI response fixtures to the exact captured dated model; preserve all process/socket, project context, replay, lease, controller, signal, once-only command and shutdown proofs. Prove all 31 cases including pinned independent Node on both worker toolchains and after integration on the current pair; retain original FAIL evidence and every existing bound.
 - [x] Implement and verify the approved prompt/follow-up/compact wire bound codecs and independent Node vectors; preserve exact decimal/safe-integer domains, partial overrides and omission without defaults. Explicit maintainer approval supersedes the two retained automatic-review refusals; both supported pairs and independent Node pass the six integrated source paths. Complete negotiated transport joins remain open.
-- [ ] Resolve and pin the complete current inspection member inventory and answered policy-defer visibility at the correct public/private truth plane before hashing or serving the full /3-/4 manifests; preserve configuration, active bounds, maintenance privacy and snapshot cursor semantics.
+- [x] Resolve and pin the complete current inspection member inventory and answered policy-defer visibility at the correct public/private truth plane before hashing or serving the full /3-/4 manifests; preserve configuration, active bounds, maintenance privacy and snapshot cursor semantics.
+  Proved in the wire rounds; final whole-app runs at `967dc15c` (tested as
+  `ba52f1e9`, identical tree): protocol244, app server206/207, daemon584/592
+  per pair with Node; `claude-20261009/t05-wire/`. See the wire note above. `inspection_socket_test`, `inspection_ingress_test`.
 - [ ] Migrate remaining implicit Core/edge/transport test hosts to captured current creation, replace their superseded record assertions, remove old configuration-less readers/writers, and prove current replay, command identity, uncertainty, authority and cleanup without a Core fallback. Run the full check once on the resulting clean committed candidate. The headless/loop and context-admission fixture phases are complete; superseded request/admission decoders and edge/transport joins remain.
 
 ## T06 — Build the first complete chat workflow
@@ -16258,9 +16300,18 @@ Hosted, attended and coordinated transport generation proofs remain separate.
   Proved at merged `4c6804dc`: 18 composition files 310 per pair, Core run
   evidence/maintenance/standalone 131+2 excluded current and 133 floor; see the
   helper merge note above.
-- [ ] Implement bounded startup classification of all committed creates, including helpers-disabled startup.
-- [ ] Guard existing attachments and settled child sessions against ordinary host mutations.
-- [ ] Validate cache coverage, remove refused registrations and handle interrupted publication.
+- [x] Implement bounded startup classification of all committed creates, including helpers-disabled startup.
+  Proved at merged `30f1995f` on both pairs: composition 19 files 315,
+  `helper_route_guard_test` in app server, daemon and CLI, plus
+  `chat_helpers_test` and `config_inspection_test` (`merged-t11c-30f1995f-*`). Classification progress persists through `job-index-v1` coverage.
+- [x] Guard existing attachments and settled child sessions against ordinary host mutations.
+  Proved at merged `30f1995f` on both pairs: composition 19 files 315,
+  `helper_route_guard_test` in app server, daemon and CLI, plus
+  `chat_helpers_test` and `config_inspection_test` (`merged-t11c-30f1995f-*`). Each route refuses every non-read-only command on a helper child with `helper_session_owned` and writes no record (ADR 0069 host-route guard).
+- [x] Validate cache coverage, remove refused registrations and handle interrupted publication.
+  Proved at merged `30f1995f` on both pairs: composition 19 files 315,
+  `helper_route_guard_test` in app server, daemon and CLI, plus
+  `chat_helpers_test` and `config_inspection_test` (`merged-t11c-30f1995f-*`). `delegation_job_index_test` covers resume, forged-entry discard, refused-entry removal and interrupted publication.
 - [x] Recover completed results and stop unfinished helpers; recovery must never create or re-prompt them.
   Proved at merged `4c6804dc`: 18 composition files 310 per pair, Core run
   evidence/maintenance/standalone 131+2 excluded current and 133 floor; see the
@@ -16269,7 +16320,10 @@ Hosted, attended and coordinated transport generation proofs remain separate.
   Proved at merged `4c6804dc`: 18 composition files 310 per pair, Core run
   evidence/maintenance/standalone 131+2 excluded current and 133 floor; see the
   helper merge note above.
-- [ ] Inject faults at every binding, reserve, create, prompt, stop, settlement, receipt and cache boundary.
+- [x] Inject faults at every binding, reserve, create, prompt, stop, settlement, receipt and cache boundary.
+  Proved at merged `30f1995f` on both pairs: composition 19 files 315,
+  `helper_route_guard_test` in app server, daemon and CLI, plus
+  `chat_helpers_test` and `config_inspection_test` (`merged-t11c-30f1995f-*`).
 - [ ] Prove both role demonstrations with unchanged child workspaces and separate/combined usage.
 
 ### Added implementation subtasks

@@ -112,8 +112,15 @@ replaced or waived by a selected run. The full
 release check runs once against the closure candidate and includes them.
 An unavailable selected lane blocks the affected merge and is not PASS.
 The runner accepts zero or more `--only NAME` pairs, one `--attempts-index
-FILE` and, for the full matrix only, one `--resume-matrix ID`. Zero pairs
-select the full closure matrix, which requires an absolute `--attempts-index`.
+FILE` with its `--writer ID --host ID --markers DIR`, `--m7-config FILE
+--operator NAME` for the M7 conversation lanes and, for the full matrix only,
+one `--resume-matrix ID`. Zero pairs select the full closure matrix, which
+requires all of them. Its release lanes, fresh-source and the two
+`m7-rollback` lanes are recorded by `mix loopex.m7_matrix` in the index as lane
+`release-matrix` of one logical matrix; a resumed matrix skips completed lanes,
+reruns no completed or started lane and refuses a rebuilt archive manifest
+whose digest differs from the first invocation. `m7-rollback` runs
+`restore_workflow_test.exs` and the unknown-effect nonredispatch case.
 With pairs, it takes the union of the named lanes and executes each lane once.
 A repeated identical name refuses, even if its group was already selected; a
 group plus one of its rows is an ordinary union. `m7-provider` requires

@@ -31,25 +31,31 @@ expect_refusal() {
   (release_select "$@") >"$work/parser-output" 2>&1 || status=$?
   [ "$status" -eq 2 ] || fail "selector refusal returned $status"
 }
-release_select --attempts-index /retained/m7/attempts.jsonl
+IDX=(--attempts-index /retained/m7/attempts.jsonl --writer w --host h --markers /retained/m7/markers)
+CONV=(--m7-config /retained/m7/config.json --operator Maintainer)
+release_select "${IDX[@]}" "${CONV[@]}"
+[ "$release_writer $release_host $release_markers" = 'w h /retained/m7/markers' ] ||
+  fail 'full lost its writer identity'
+[ "$release_m7_config $release_operator" = '/retained/m7/config.json Maintainer' ] ||
+  fail 'full lost its conversation configuration'
 for row in 1 2 3 4 5 6 7 8 9 10 11; do release_selected "real-provider-$row" || fail "full omitted row $row"; done
 release_selected node_client && release_selected long_bound && release_selected cross_uid ||
   fail 'full omitted a group'
 release_selected m7-provider && release_selected m7-rollback && release_needs_m7 ||
   fail 'full omitted the M7 lanes'
 [ "$release_attempts_index" = /retained/m7/attempts.jsonl ] || fail 'full lost its attempts index'
-release_select --attempts-index /retained/m7/attempts.jsonl --resume-matrix matrix-1
+release_select "${IDX[@]}" "${CONV[@]}" --resume-matrix matrix-1
 [ "$release_mode" = full ] && [ "$release_resume_matrix" = matrix-1 ] ||
   fail 'full resume lost its matrix identity'
 # The M7 lanes: indexed paid work names its retained index, the attended lane
 # refuses, and legacy selections stay unindexed.
-release_select --only m7-provider --attempts-index /retained/m7/attempts.jsonl
+release_select --only m7-provider "${IDX[@]}" "${CONV[@]}"
 release_needs_m7 && release_needs_provider || fail 'm7-provider omitted its preflights'
 if release_selected real-provider-3 || release_selected m7-rollback; then fail 'm7-provider expanded'; fi
 release_select --only m7-rollback
 release_needs_m7 || fail 'm7-rollback omitted the M7 validator'
 if release_needs_provider || release_needs_node; then fail 'm7-rollback has unrelated preflights'; fi
-release_select --only m7-rollback --attempts-index /retained/m7/attempts.jsonl --only long_bound
+release_select --only m7-rollback "${IDX[@]}" --only long_bound
 [ "$release_selectors" = 'm7-rollback long_bound' ] || fail 'indexed rollback selection changed'
 release_select --only real_provider
 if release_needs_m7; then fail 'legacy provider rows require the M7 validator'; fi
@@ -97,6 +103,63 @@ expect_refusal --only m7-provider --only m7-provider --attempts-index /a
 expect_refusal --only m7-rollback --resume-matrix matrix-1 --attempts-index /a
 expect_refusal --only long_bound --attempts-index /retained/m7/attempts.jsonl
 expect_refusal --only m7-provider --attempts-index /a --resume-matrix matrix-1
+expect_refusal "${IDX[@]}"
+expect_refusal --only m7-rollback --attempts-index /a
+expect_refusal --only m7-rollback --attempts-index /a --writer w --host h --markers relative
+expect_refusal --only long_bound --writer w
+expect_refusal --only m7-provider "${IDX[@]}"
+expect_refusal --only m7-provider "${IDX[@]}" --m7-config relative --operator x
+expect_refusal --only m7-rollback "${IDX[@]}" "${CONV[@]}"
+expect_refusal --only m7-rollback "${IDX[@]}" --pins /retained/m7/pins.json
+expect_refusal --only m7-provider "${IDX[@]}" "${CONV[@]}" --pins relative.json
+release_select --only m7-provider "${IDX[@]}" "${CONV[@]}" --pins /retained/m7/pins.json
+[ "$release_pins" = /retained/m7/pins.json ] || fail 'pins file was lost' 
+expect_refusal --only m7-provider "${IDX[@]}" "${CONV[@]}" --writer again
+
+# The matrix recorder protocol: a scripted coprocess stands in for
+# `mix loopex.m7_matrix`; the runner ignores noise, skips completed lanes,
+# names their retained digest and records every other admitted lane.
+recorder="$work/recorder.sh"
+cat >"$recorder" <<'EOF'
+#!/usr/bin/env bash
+echo "Compiling 1 file (.ex)"
+echo "plan skip fresh-source abc123"
+echo "plan run node-client-x"
+echo "plan ready"
+while IFS= read -r line; do
+  case "$line" in
+    "start "*) echo "started ${line#start } attempt-1"; echo "$line" >>"$RECORDER_LOG" ;;
+    "finish "*) set -- $line; echo "finished $2"; echo "$line" >>"$RECORDER_LOG" ;;
+    *) echo "refused unknown" ;;
+  esac
+done
+EOF
+chmod +x "$recorder"
+export RECORDER_LOG="$work/recorder.log"
+release_matrix_keys="fresh-source node-client-x"
+release_matrix_start "$recorder" >"$work/matrix-start.out" 2>&1 || fail 'recorder plan was refused'
+release_matrix_skipped fresh-source || fail 'a completed lane was not skipped'
+[ "$(release_matrix_digest fresh-source)" = abc123 ] || fail 'skipped lane lost its digest'
+if release_matrix_skipped node-client-x || release_matrix_skipped unrelated; then
+  fail 'an unfinished or unadmitted lane was skipped'
+fi
+release_matrix_records node-client-x || fail 'an admitted lane is not recorded'
+if release_matrix_records unrelated; then fail 'an unadmitted lane would be recorded'; fi
+release_matrix_request start node-client-x >"$work/matrix-request.out" || fail 'start was refused'
+release_matrix_request finish node-client-x pass /retained/lane.log >>"$work/matrix-request.out" ||
+  fail 'finish was refused'
+if release_matrix_request bogus >>"$work/matrix-request.out" 2>&1; then fail 'a refused request passed'; fi
+release_matrix_close || fail 'recorder did not end cleanly'
+[ "$(cat "$RECORDER_LOG")" = "$(printf 'start node-client-x\nfinish node-client-x pass /retained/lane.log')" ] ||
+  fail 'recorder requests changed'
+refusing="$work/refusing.sh"
+printf '#!/usr/bin/env bash\necho "refused fresh_matrix_already_consumed"\n' >"$refusing"
+chmod +x "$refusing"
+status=0
+release_matrix_start "$refusing" >"$work/matrix-refused.out" 2>&1 || status=$?
+[ "$status" -eq 2 ] && grep -q fresh_matrix_already_consumed "$work/matrix-refused.out" ||
+  fail 'a refused matrix plan did not stop the runner'
+unset release_matrix_keys release_matrix_skips
 
 # The actual manifest census rejects a duplicated case even with the right
 # number of rows. It checks every definition before any provider lane can run.
@@ -552,7 +615,7 @@ preflight 2
 grep -q 'full closure matrix requires --attempts-index' "$work/preflight-output" ||
   fail 'unindexed full matrix was admitted'
 [ ! -s "$RELEASE_TEST_MARKER" ] || fail 'unindexed full matrix reached preflight helpers'
-preflight 2 --attempts-index /retained/m7/attempts.jsonl
+preflight 2 "${IDX[@]}" "${CONV[@]}"
 [ "$(cat "$RELEASE_TEST_MARKER")" = "$(printf 'node\nm7-evidence')" ] ||
   fail 'unavailable M7 evidence did not refuse the full matrix before staging'
 grep -q 'M7 evidence unavailable' "$work/preflight-output" || fail 'M7 refusal was not reported'
@@ -560,17 +623,17 @@ grep -q 'M7 evidence unavailable' "$work/preflight-output" || fail 'M7 refusal w
   'loopex.m7_evidence --release --attempts-index /retained/m7/attempts.jsonl --lane m7-operator --lane m7-provider --lane m7-rollback' ] ||
   fail 'full matrix passed the wrong M7 validator arguments'
 export RELEASE_TEST_M7_STATUS=0
-preflight 77 --attempts-index /retained/m7/attempts.jsonl --resume-matrix matrix-1
+preflight 77 "${IDX[@]}" "${CONV[@]}" --resume-matrix matrix-1
 [ "$(cat "$RELEASE_TEST_MARKER")" = "$(printf 'node\nm7-evidence\nstaging')" ] || fail 'full preflight changed'
 grep -q -- '--resume-matrix matrix-1' "$RELEASE_TEST_MARKER.m7-args" || fail 'resume identity was not validated'
-preflight 77 --only m7-provider --attempts-index /retained/m7/attempts.jsonl
+preflight 77 --only m7-provider "${IDX[@]}" "${CONV[@]}"
 [ "$(cat "$RELEASE_TEST_MARKER")" = "$(printf 'm7-evidence\nstaging')" ] ||
   fail 'm7-provider preflight selection is wrong'
 preflight 77 --only m7-rollback
 [ "$(cat "$RELEASE_TEST_MARKER.m7-args")" = 'loopex.m7_evidence --release --lane m7-rollback' ] ||
   fail 'unindexed m7-rollback passed the wrong M7 validator arguments'
 unset RELEASE_TEST_M7_STATUS
-preflight 2 --only m7-provider --attempts-index /retained/m7/attempts.jsonl
+preflight 2 --only m7-provider "${IDX[@]}" "${CONV[@]}"
 [ "$(cat "$RELEASE_TEST_MARKER")" = m7-evidence ] || fail 'unavailable M7 evidence reached staging'
 for selection in '--only m7-operator' '--only m7-provider' '--attempts-index relative'; do
   # shellcheck disable=SC2086

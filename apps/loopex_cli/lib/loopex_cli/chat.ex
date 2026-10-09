@@ -217,9 +217,20 @@ defmodule LoopexCli.Chat do
       cleanup_grace_ms: grace(invocation),
       recover_stale_writer: true,
       model: Map.get(configuration, "model", profile["session"]["model"]),
-      maintenance_model: get_in(profile, ["maintenance", "model"])
-    ]
+      maintenance_model: get_in(profile, ["maintenance", "model"]),
+      maintenance_instructions: LoopexCli.MaintenanceInstructions.reference()
+    ] ++ declared_budgets(profile["session"])
   end
+
+  # Composition's creation defaults use the profile's explicit ceilings, so a
+  # coding profile's tool definitions fit its declared system budget.
+  defp declared_budgets(session),
+    do:
+      for(
+        key <- ~w(context_token_budget system_class_tokens),
+        is_integer(session[key]),
+        do: {String.to_existing_atom(key), session[key]}
+      )
 
   defp callback(runtime, invocation, consumer, driver, placement, deps, tag) do
     try do

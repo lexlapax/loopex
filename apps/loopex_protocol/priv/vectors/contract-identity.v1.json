@@ -1,0 +1,225 @@
+{
+  "format": "loopex.experimental.contract-identity-vectors/1",
+  "cases": [
+    {
+      "name": "foreground-exact",
+      "client": "foreground",
+      "reply": {
+        "type": "initialized",
+        "request_id": "init",
+        "selected_generation": "loopex.experimental/3",
+        "exact_schema_sha256": "3503e92df274eb5f998960823d9ae6cc4b55c72a5cb249c4ffecf56cfcbc1cc0"
+      },
+      "verified": true
+    },
+    {
+      "name": "foreground-digest-one-hex-changed",
+      "client": "foreground",
+      "reply": {
+        "type": "initialized",
+        "request_id": "init",
+        "selected_generation": "loopex.experimental/3",
+        "exact_schema_sha256": "1503e92df274eb5f998960823d9ae6cc4b55c72a5cb249c4ffecf56cfcbc1cc0"
+      },
+      "verified": false
+    },
+    {
+      "name": "foreground-digest-last-hex-changed",
+      "client": "foreground",
+      "reply": {
+        "type": "initialized",
+        "request_id": "init",
+        "selected_generation": "loopex.experimental/3",
+        "exact_schema_sha256": "3503e92df274eb5f998960823d9ae6cc4b55c72a5cb249c4ffecf56cfcbc1cc1"
+      },
+      "verified": false
+    },
+    {
+      "name": "foreground-digest-uppercase",
+      "client": "foreground",
+      "reply": {
+        "type": "initialized",
+        "request_id": "init",
+        "selected_generation": "loopex.experimental/3",
+        "exact_schema_sha256": "3503E92DF274EB5F998960823D9AE6CC4B55C72A5CB249C4FFECF56CFCBC1CC0"
+      },
+      "verified": false
+    },
+    {
+      "name": "foreground-digest-truncated",
+      "client": "foreground",
+      "reply": {
+        "type": "initialized",
+        "request_id": "init",
+        "selected_generation": "loopex.experimental/3",
+        "exact_schema_sha256": "3503e92df274eb5f998960823d9ae6cc4b55c72a5cb249c4ffecf56cfcbc1cc"
+      },
+      "verified": false
+    },
+    {
+      "name": "foreground-digest-null",
+      "client": "foreground",
+      "reply": {
+        "type": "initialized",
+        "request_id": "init",
+        "selected_generation": "loopex.experimental/3",
+        "exact_schema_sha256": null
+      },
+      "verified": false
+    },
+    {
+      "name": "foreground-other-server-pair",
+      "client": "foreground",
+      "reply": {
+        "type": "initialized",
+        "request_id": "init",
+        "selected_generation": "loopex.experimental/4",
+        "exact_schema_sha256": "9a4a735d1a8a59237f3e063fa0fce21fd2d69e7a11785eee743c10311228b02c"
+      },
+      "verified": false
+    },
+    {
+      "name": "foreground-own-generation-other-digest",
+      "client": "foreground",
+      "reply": {
+        "type": "initialized",
+        "request_id": "init",
+        "selected_generation": "loopex.experimental/3",
+        "exact_schema_sha256": "9a4a735d1a8a59237f3e063fa0fce21fd2d69e7a11785eee743c10311228b02c"
+      },
+      "verified": false
+    },
+    {
+      "name": "foreground-old-generation",
+      "client": "foreground",
+      "reply": {
+        "type": "initialized",
+        "request_id": "init",
+        "selected_generation": "loopex.experimental/2",
+        "exact_schema_sha256": "3503e92df274eb5f998960823d9ae6cc4b55c72a5cb249c4ffecf56cfcbc1cc0"
+      },
+      "verified": false
+    },
+    {
+      "name": "foreground-refusal-record",
+      "client": "foreground",
+      "reply": {
+        "type": "error",
+        "request_id": "init",
+        "code": "unsupported_generation",
+        "message": "no common generation"
+      },
+      "verified": false
+    },
+    {
+      "name": "daemon-exact",
+      "client": "daemon",
+      "reply": {
+        "type": "initialized",
+        "request_id": "init",
+        "selected_generation": "loopex.experimental/4",
+        "exact_schema_sha256": "9a4a735d1a8a59237f3e063fa0fce21fd2d69e7a11785eee743c10311228b02c"
+      },
+      "verified": true
+    },
+    {
+      "name": "daemon-digest-one-hex-changed",
+      "client": "daemon",
+      "reply": {
+        "type": "initialized",
+        "request_id": "init",
+        "selected_generation": "loopex.experimental/4",
+        "exact_schema_sha256": "1a4a735d1a8a59237f3e063fa0fce21fd2d69e7a11785eee743c10311228b02c"
+      },
+      "verified": false
+    },
+    {
+      "name": "daemon-digest-last-hex-changed",
+      "client": "daemon",
+      "reply": {
+        "type": "initialized",
+        "request_id": "init",
+        "selected_generation": "loopex.experimental/4",
+        "exact_schema_sha256": "9a4a735d1a8a59237f3e063fa0fce21fd2d69e7a11785eee743c10311228b020"
+      },
+      "verified": false
+    },
+    {
+      "name": "daemon-digest-uppercase",
+      "client": "daemon",
+      "reply": {
+        "type": "initialized",
+        "request_id": "init",
+        "selected_generation": "loopex.experimental/4",
+        "exact_schema_sha256": "9A4A735D1A8A59237F3E063FA0FCE21FD2D69E7A11785EEE743C10311228B02C"
+      },
+      "verified": false
+    },
+    {
+      "name": "daemon-digest-truncated",
+      "client": "daemon",
+      "reply": {
+        "type": "initialized",
+        "request_id": "init",
+        "selected_generation": "loopex.experimental/4",
+        "exact_schema_sha256": "9a4a735d1a8a59237f3e063fa0fce21fd2d69e7a11785eee743c10311228b02"
+      },
+      "verified": false
+    },
+    {
+      "name": "daemon-digest-null",
+      "client": "daemon",
+      "reply": {
+        "type": "initialized",
+        "request_id": "init",
+        "selected_generation": "loopex.experimental/4",
+        "exact_schema_sha256": null
+      },
+      "verified": false
+    },
+    {
+      "name": "daemon-other-server-pair",
+      "client": "daemon",
+      "reply": {
+        "type": "initialized",
+        "request_id": "init",
+        "selected_generation": "loopex.experimental/3",
+        "exact_schema_sha256": "3503e92df274eb5f998960823d9ae6cc4b55c72a5cb249c4ffecf56cfcbc1cc0"
+      },
+      "verified": false
+    },
+    {
+      "name": "daemon-own-generation-other-digest",
+      "client": "daemon",
+      "reply": {
+        "type": "initialized",
+        "request_id": "init",
+        "selected_generation": "loopex.experimental/4",
+        "exact_schema_sha256": "3503e92df274eb5f998960823d9ae6cc4b55c72a5cb249c4ffecf56cfcbc1cc0"
+      },
+      "verified": false
+    },
+    {
+      "name": "daemon-old-generation",
+      "client": "daemon",
+      "reply": {
+        "type": "initialized",
+        "request_id": "init",
+        "selected_generation": "loopex.experimental/2",
+        "exact_schema_sha256": "9a4a735d1a8a59237f3e063fa0fce21fd2d69e7a11785eee743c10311228b02c"
+      },
+      "verified": false
+    },
+    {
+      "name": "daemon-refusal-record",
+      "client": "daemon",
+      "reply": {
+        "type": "error",
+        "request_id": "init",
+        "code": "unsupported_generation",
+        "message": "no common generation"
+      },
+      "verified": false
+    }
+  ]
+}

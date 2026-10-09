@@ -217,6 +217,43 @@ defmodule LoopexProtocol.CurrentContractManifestTest do
     assert report == %{"events" => 1_926, "snapshots" => 77, "progress" => 217}
   end
 
+  # Concept: a literal mismatched contract identity is refused by every client.
+  # Technical depth: only the exact current generation/digest pair of the
+  # named server verifies; one-hex, case, truncated, null, old-generation,
+  # other-server and refusal replies never do. The served identities here and
+  # both Node client pins are checked against the same literal vectors.
+  test "literal contract identity vectors verify only the exact pinned pair" do
+    fixture = File.read!(Path.join(@priv, "vectors/contract-identity.v1.json")) |> JSON.decode!()
+    assert fixture["format"] == "loopex.experimental.contract-identity-vectors/1"
+    assert length(fixture["cases"]) == 20
+
+    pins = %{
+      "foreground" => {Session.generation(), Session.schema_digest()},
+      "daemon" => {V2.generation(), V2.schema_digest()}
+    }
+
+    for vector <- fixture["cases"] do
+      {generation, digest} = Map.fetch!(pins, vector["client"])
+      reply = vector["reply"]
+
+      verdict =
+        reply["type"] == "initialized" and reply["selected_generation"] == generation and
+          reply["exact_schema_sha256"] == digest
+
+      assert verdict == vector["verified"], vector["name"]
+    end
+  end
+
+  @tag :node_client
+  test "Node consumes the literal contract identity vectors with both client pins" do
+    report =
+      run_node("contract-identity-vectors.mjs", [
+        Path.join(@priv, "vectors/contract-identity.v1.json")
+      ])
+
+    assert report == %{"checked" => 20, "verified" => 2}
+  end
+
   defp run_node(script, arguments) do
     node =
       System.find_executable("node") || flunk("Node is required for current contract conformance")

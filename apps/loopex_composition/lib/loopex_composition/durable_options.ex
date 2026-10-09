@@ -138,11 +138,16 @@ defmodule LoopexComposition.DurableOptions do
     end
   end
 
+  # A host's explicit context and system ceilings shape its creation defaults;
+  # omission keeps the model-window context and the 1,000-token system default.
   defp declared_context(options) do
-    case Keyword.fetch(options, :context_token_budget) do
-      {:ok, value} -> %{"context_token_budget" => value}
-      :error -> %{}
-    end
+    for {key, name} <- [
+          context_token_budget: "context_token_budget",
+          system_class_tokens: "system_class_tokens"
+        ],
+        {:ok, value} <- [Keyword.fetch(options, key)],
+        into: %{},
+        do: {name, value}
   end
 
   defp instruction_profile([]), do: "none"
@@ -162,6 +167,14 @@ defmodule LoopexComposition.DurableOptions do
   end
 
   defp policy(module) when is_atom(module) and not is_nil(module), do: {:ok, module}
+
+  # Core's contextual reference: its private context reaches only decide/2.
+  defp policy(%{module: _, context: _} = adapter) do
+    if Loopex.Policy.valid_adapter?(adapter),
+      do: {:ok, adapter},
+      else: {:error, :host_policy_required}
+  end
+
   defp policy(_absent), do: {:error, :host_policy_required}
 
   defp provider_launch(options) do

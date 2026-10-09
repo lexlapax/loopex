@@ -114,12 +114,19 @@ outside the repository. The direct command below describes the underlying
 release check for other workflows; do not run it again for M6 closure:
 
 ```bash
-bash scripts/check-release.sh --attempts-index /absolute/retained/m7-attempts.jsonl
+bash scripts/check-release.sh --attempts-index /absolute/retained/m7-attempts.jsonl \
+  --writer WRITER --host HOST --markers /absolute/retained/m7-markers \
+  --m7-config /absolute/retained/m7-config.json --operator Maintainer
 ```
 
 The full matrix requires `--attempts-index FILE`, the retained M7 attempts
-index outside the checkout; `--resume-matrix ID` continues that matrix after a
-pre-dispatch stop. Before staging, and again inside the built extraction, it
+index outside the checkout, with the writer identity that holds it
+(`--writer`, `--host`, `--markers`), and the conversation lanes' explicit
+configuration and named operator (`--m7-config`, `--operator`). One recorder
+records every release lane of the logical matrix in that index before it runs;
+`--resume-matrix ID` continues that matrix after a pre-dispatch stop, skipping
+the lanes it already completed and rebuilding fresh-source, whose archive
+manifest must reproduce the first invocation's digest. Before staging, and again inside the built extraction, it
 runs the M7 evidence validator with `--release`, which refuses an M7 lane
 (`m7-provider`, `m7-rollback`, or the attended `m7-operator` block in the full
 matrix) as unavailable evidence while any of its manifest cases is still

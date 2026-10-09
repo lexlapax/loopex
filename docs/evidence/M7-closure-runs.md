@@ -13,13 +13,11 @@ own the closure procedure. Complete immutable outputs remain outside the
 repository. Record measured durations and actual source identities, including
 failed attempts; unavailable evidence is never PASS.
 
-This is an initial scaffold. The committed fixture catalog still marks its
-complete execution manifest pending. Before assembling the tested candidate,
-replace the pending inventories below with the exact final manifest keys,
-profile rows, operator step/subcase rows and known earlier-attempt rows.
-That work is an ordinary implementation change, not an administrative fill.
-The T00 literal-key scaffold requirement remains open until those rows exist
-and their completeness is proved.
+The committed execution manifest in `test/fixtures/m7/manifest.json` fixes
+the step and case keys below, one row each; `mix loopex.m7_evidence` fails
+when a key is missing here. Profile rows and known earlier-attempt rows are
+still to be enumerated before the tested candidate, as an ordinary
+implementation change, not an administrative fill.
 
 ## Candidate and source identity
 
@@ -187,12 +185,128 @@ Never store credential values in this record.
 
 The [accepted operator evidence specification](../plans/M7-technical.md#technical-plan-operator-validation)
 requires one final row per manifest step/subcase key, including trace flag/file/
-JSON subcases and separately classified positive/fault paths. The exact keys
-are not yet committed. Expand this section from that manifest before the
-tested candidate; do not infer final keys, attendance or profiles from these
-inventory slots. The mandatory attended subset remains governed by the plan.
+JSON subcases and separately classified positive/fault paths. The rows below
+are the committed manifest's exact keys and owners; only their Pending cells
+are filled from retained execution records. The mandatory attended subset remains governed by the plan.
 Automated answers cannot stand in for a named person's validation. Retired
 cross-version steps are not passes; preserve current-format restore coverage.
+
+<!-- generated: step rows -->
+
+| Key | Owner | Operator and attendance authority | Source, attempt and session identities | Expected/actual result and objective assertion | Retained record reference | SHA-256 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `V1.1` | `case:m7.baseline.ask` | Pending | Pending | Pending | Pending | Pending |
+| `V1.2` | `case:m7.baseline.ask` | Pending | Pending | Pending | Pending | Pending |
+| `V1.3.ask` | `case:m7.baseline.ask` | Pending | Pending | Pending | Pending | Pending |
+| `V1.3.durable` | `case:m7.baseline.durable` | Pending | Pending | Pending | Pending | Pending |
+| `V1.4` | `case:m7.baseline.durable` | Pending | Pending | Pending | Pending | Pending |
+| `V1.5` | `case:m7.baseline.durable` | Pending | Pending | Pending | Pending | Pending |
+| `V2.1` | `case:m7.repair` | Pending | Pending | Pending | Pending | Pending |
+| `V2.2` | `case:m7.repair` | Pending | Pending | Pending | Pending | Pending |
+| `V2.3` | `case:m7.repair` | Pending | Pending | Pending | Pending | Pending |
+| `V2.4` | `case:m7.repair` | Pending | Pending | Pending | Pending | Pending |
+| `V2.5` | `case:m7.repair` | Pending | Pending | Pending | Pending | Pending |
+| `V2.6.answer` | `case:m7.pipe-answer` | Pending | Pending | Pending | Pending | Pending |
+| `V2.6.decline` | `case:m7.pipe-answer` | Pending | Pending | Pending | Pending | Pending |
+| `V3.1` | `case:m7.instructions.admitted` | Pending | Pending | Pending | Pending | Pending |
+| `V3.2` | `case:m7.instructions.admitted` | Pending | Pending | Pending | Pending | Pending |
+| `V3.3` | `case:m7.instructions.declined` | Pending | Pending | Pending | Pending | Pending |
+| `V3.4` | `case:m7.instructions.changed` | Pending | Pending | Pending | Pending | Pending |
+| `V3.5` | `test:apps/loopex/test/configured_session_test.exs#captured host sections cannot replace a denying policy with model-declared permission` | Pending | Pending | Pending | Pending | Pending |
+| `V4.1` | `case:m7.steer-barrier` | Pending | Pending | Pending | Pending | Pending |
+| `V4.2` | `case:m7.steer-barrier` | Pending | Pending | Pending | Pending | Pending |
+| `V4.3` | `case:m7.steer-barrier` | Pending | Pending | Pending | Pending | Pending |
+| `V4.4` | `case:m7.steer-barrier` | Pending | Pending | Pending | Pending | Pending |
+| `V4.5` | `test:apps/loopex/test/input_algebra_test.exs#a steer that arrives after its run is terminal commits unapplied with a reason and is never promoted` | Pending | Pending | Pending | Pending | Pending |
+| `V5.1` | `case:m7.feature` | Pending | Pending | Pending | Pending | Pending |
+| `V5.2` | `case:m7.feature` | Pending | Pending | Pending | Pending | Pending |
+| `V5.3` | `case:m7.question-restart` | Pending | Pending | Pending | Pending | Pending |
+| `V5.4.cancel` | `test:apps/loopex/test/configured_session_test.exs#aborting a pending model question settles its slot and preserves a cancelled result` | Pending | Pending | Pending | Pending | Pending |
+| `V5.4.decline` | `test:apps/loopex_cli/test/chat_pty_test.exs#terminal declines the actual pending question without dispatching an executor effect` | Pending | Pending | Pending | Pending | Pending |
+| `V5.4.denied` | `test:apps/loopex/test/configured_session_test.exs#the admitted question generation never dispatches an executor effect` | Pending | Pending | Pending | Pending | Pending |
+| `V5.4.expiry` | `test:apps/loopex/test/configured_session_test.exs#a live question deadline settles once and rejects a late answer after recovery` | Pending | Pending | Pending | Pending | Pending |
+| `V5.5.authority` | `test:apps/loopex/test/interaction_lifecycle_test.exs#a committed answer re-enters host policy and only an allow result mints a grant before dispatch` | Pending | Pending | Pending | Pending | Pending |
+| `V5.5.inactivity` | `test:apps/loopex/test/configured_session_test.exs#model questions settle exact text, choice and decline in one transaction` | Pending | Pending | Pending | Pending | Pending |
+| `V5.6.absent` | `test:apps/loopex_composition/test/ephemeral_model_integration_test.exs#one-shot questions without a responder deny before waiting and preserve ordinary effects` | Pending | Pending | Pending | Pending | Pending |
+| `V5.6.cancel` | `test:apps/loopex_composition/test/ephemeral_api_test.exs#stop aborts an unanswered interaction and proves its terminal` | Pending | Pending | Pending | Pending | Pending |
+| `V5.6.positive` | `case:m7.ephemeral-question` | Pending | Pending | Pending | Pending | Pending |
+| `V6.1` | `case:m7.long` | Pending | Pending | Pending | Pending | Pending |
+| `V6.2.long` | `case:m7.long` | Pending | Pending | Pending | Pending | Pending |
+| `V6.2.range` | `test:apps/loopex_composition/test/artifact_range_executor_test.exs#a mixed source of at least 16 KiB reads exactly through EOF in 4 KiB ranges` | Pending | Pending | Pending | Pending | Pending |
+| `V6.3` | `case:m7.long` | Pending | Pending | Pending | Pending | Pending |
+| `V6.4` | `case:m7.long` | Pending | Pending | Pending | Pending | Pending |
+| `V6.5.input-only` | `test:apps/loopex/test/conversation_test.exs#terminal input-only runs keep failed and cancelled prompts eligible` | Pending | Pending | Pending | Pending | Pending |
+| `V6.5.metadata` | `test:apps/loopex/test/compaction_source_test.exs#an oversized assistant and all its results remain one covered unit` | Pending | Pending | Pending | Pending | Pending |
+| `V6.5.positive` | `case:m7.oversized-source` | Pending | Pending | Pending | Pending | Pending |
+| `V6.5.size` | `test:apps/loopex/test/maintenance_episode_recovery_test.exs#an automatic episode with no fitting excerpt ends durably before dispatch` | Pending | Pending | Pending | Pending | Pending |
+| `V6.6.ambiguous` | `test:apps/loopex/test/maintenance_request_staging_test.exs#only a proven not-dispatched first attempt permits the exact retained retry` | Pending | Pending | Pending | Pending | Pending |
+| `V6.6.atomic-commit` | `test:apps/loopex/test/maintenance_request_staging_test.exs#checkpoint and event commit together while exact raw facts remain readable` | Pending | Pending | Pending | Pending | Pending |
+| `V6.6.missing-route` | `test:apps/loopex_composition/test/durable_bindings_startup_test.exs#missing ordinary or maintenance routes and local bindings refuse before consumption` | Pending | Pending | Pending | Pending | Pending |
+| `V6.6.positive` | `case:m7.long` | Pending | Pending | Pending | Pending | Pending |
+| `V6.6.summarizer-change` | `test:apps/loopex/test/standalone_compact_projection_test.exs#standalone succession reuses capture before consulting new settings, clock or work` | Pending | Pending | Pending | Pending | Pending |
+| `V6.7` | `case:m7.cross-provider-maintenance` | Pending | Pending | Pending | Pending | Pending |
+| `V7.1` | `case:m7.provider-switch` | Pending | Pending | Pending | Pending | Pending |
+| `V7.2` | `case:m7.provider-switch` | Pending | Pending | Pending | Pending | Pending |
+| `V7.3.barriers` | `test:apps/loopex_cli/test/chat_workflow_test.exs#actual model progress reaches both channels before settlement without releasing wait` | Pending | Pending | Pending | Pending | Pending |
+| `V7.3.near-limit` | `test:apps/loopex/test/maintenance_episode_recovery_test.exs#thinking preparation continues past a hard-limit fit until the captured targets fit` | Pending | Pending | Pending | Pending | Pending |
+| `V7.3.open-exchange-restart` | `test:apps/loopex/test/configured_session_test.exs#owner recovery reuses frozen project content without the original host manifest` | Pending | Pending | Pending | Pending | Pending |
+| `V7.3.positive` | `case:m7.thinking-rounds` | Pending | Pending | Pending | Pending | Pending |
+| `V7.3.split-events` | `test:apps/loopex_llm_reqllm/test/native_stream_test.exs#every byte boundary uses the pinned parser and exact native stop establishes completion` | Pending | Pending | Pending | Pending | Pending |
+| `V7.4` | `case:m7.provider-switch` | Pending | Pending | Pending | Pending | Pending |
+| `V7.5.in-run-change` | `test:apps/loopex/test/configured_session_test.exs#live configure refusal while a provider is active remains stable after it settles` | Pending | Pending | Pending | Pending | Pending |
+| `V7.5.missing-binding` | `test:apps/loopex_cli/test/chat_resume_configuration_test.exs#missing retained model route refuses and abandons, without credential reads` | Pending | Pending | Pending | Pending | Pending |
+| `V7.5.unsupported-level` | `test:apps/loopex_cli/test/chat_configuration_test.exs#configure preparation refuses host metadata, missing routes and unsupported reasoning` | Pending | Pending | Pending | Pending | Pending |
+| `V7.6.canaries` | `test:apps/loopex_composition/test/native_model_switch_test.exs#native private continuation stays out of a real tool-created artifact across reopen` | Pending | Pending | Pending | Pending | Pending |
+| `V7.6.conflicting-limits` | `test:apps/loopex_llm_reqllm/test/native_request_test.exs#each manual thinking budget must fit strictly below the committed output limit` | Pending | Pending | Pending | Pending | Pending |
+| `V7.6.limits` | `test:apps/loopex/test/configured_session_test.exs#aggregate continuation overflow records an unavailable projection before another attempt` | Pending | Pending | Pending | Pending | Pending |
+| `V7.6.missing-state` | `test:apps/loopex/test/configured_session_test.exs#required continuation refuses v2 and malformed v3 before tools or reported accounting` | Pending | Pending | Pending | Pending | Pending |
+| `V7.6.open-exchange-compaction` | `test:apps/loopex/test/maintenance_episode_admission_test.exs#no episode overlaps an open exchange, interaction, abort or provider/effect stage` | Pending | Pending | Pending | Pending | Pending |
+| `V7.6.summary-progress` | `test:apps/loopex_composition/test/native_model_switch_test.exs#verified native summary stays progress and out of the next canonical request after reopen` | Pending | Pending | Pending | Pending | Pending |
+| `V7.7.bound` | `case:m7.thinking-bound` | Pending | Pending | Pending | Pending | Pending |
+| `V7.7.cancel` | `case:m7.thinking-cancel` | Pending | Pending | Pending | Pending | Pending |
+| `V8.1` | `case:m7.review` | Pending | Pending | Pending | Pending | Pending |
+| `V8.2` | `case:m7.review` | Pending | Pending | Pending | Pending | Pending |
+| `V8.3` | `case:m7.review` | Pending | Pending | Pending | Pending | Pending |
+| `V8.4` | `case:m7.review` | Pending | Pending | Pending | Pending | Pending |
+| `V8.5.failure` | `test:apps/loopex_composition/test/delegation_run_ledger_test.exs#a created child never prompted settles failed at zero and refunds its reservation` | Pending | Pending | Pending | Pending | Pending |
+| `V8.5.bound` | `test:apps/loopex_composition/test/delegation_helper_test.exs#count and token exhaustion refuse before any reservation and a new run reopens` | Pending | Pending | Pending | Pending | Pending |
+| `V8.5.cancel` | `test:apps/loopex_composition/test/delegation_helper_test.exs#cancelling the parent stops its child and confirms cleanup` | Pending | Pending | Pending | Pending | Pending |
+| `V8.6` | `test:apps/loopex_composition/test/delegation_recovery_test.exs#an exhausted serial child allowance survives restart and the parent reopens` | Pending | Pending | Pending | Pending | Pending |
+| `V8.7` | `test:apps/loopex_composition/test/delegation_child_creation_test.exs#only authored enabled roles in the retained catalog admit` | Pending | Pending | Pending | Pending | Pending |
+| `V9.1` | `case:m7.policy-denial` | Pending | Pending | Pending | Pending | Pending |
+| `V9.2` | `case:m7.interrupt` | Pending | Pending | Pending | Pending | Pending |
+| `V9.3` | `test:apps/loopex_reference_client/test/end_to_end_recovery_test.exs#every acknowledged fact survives the restart` | Pending | Pending | Pending | Pending | Pending |
+| `V9.4` | `case:m7.daemon-detach` | Pending | Pending | Pending | Pending | Pending |
+| `V9.5` | `test:apps/loopex_reference_client/test/end_to_end_recovery_test.exs#an effect without a durable receipt becomes outcome_unknown and is not blindly retried` | Pending | Pending | Pending | Pending | Pending |
+| `V10.1` | `case:m7.external` | Pending | Pending | Pending | Pending | Pending |
+| `V10.2` | `case:m7.external` | Pending | Pending | Pending | Pending | Pending |
+| `V10.3` | `case:m7.external` | Pending | Pending | Pending | Pending | Pending |
+| `V10.4` | `case:m7.external` | Pending | Pending | Pending | Pending | Pending |
+| `V10.5` | `case:m7.external` | Pending | Pending | Pending | Pending | Pending |
+| `V11.1.file` | `case:m7.trace.file` | Pending | Pending | Pending | Pending | Pending |
+| `V11.1.flag` | `case:m7.trace.flag` | Pending | Pending | Pending | Pending | Pending |
+| `V11.2.file` | `case:m7.trace.file` | Pending | Pending | Pending | Pending | Pending |
+| `V11.2.flag` | `case:m7.trace.flag` | Pending | Pending | Pending | Pending | Pending |
+| `V11.3.invalid` | `test:apps/loopex_cli/test/ask_options_test.exs#trace controls reject conflicts, unsupported selectors and limits even when disabled` | Pending | Pending | Pending | Pending | Pending |
+| `V11.3.override` | `test:apps/loopex_cli/test/chat_workflow_test.exs#no-trace overrides an enabled file through actual chat startup` | Pending | Pending | Pending | Pending | Pending |
+| `V11.4.json` | `test:apps/loopex_cli/test/ask_integration_test.exs#startup trace reaches stderr while a real command keeps JSON stdout clean` | Pending | Pending | Pending | Pending | Pending |
+| `V11.5.file` | `case:m7.trace.file` | Pending | Pending | Pending | Pending | Pending |
+| `V11.5.flag` | `case:m7.trace.flag` | Pending | Pending | Pending | Pending | Pending |
+| `V11.5.json` | `case:m7.trace.json` | Pending | Pending | Pending | Pending | Pending |
+| `V12.1` | `case:m7.trace.file` | Pending | Pending | Pending | Pending | Pending |
+| `V12.2` | `case:m7.trace.flag` | Pending | Pending | Pending | Pending | Pending |
+| `V12.3` | `test:apps/loopex_cli/test/config_file_test.exs#JSON and authored schema refusals happen before relative resolution` | Pending | Pending | Pending | Pending | Pending |
+| `V12.4` | `test:apps/loopex_cli/test/chat_resume_configuration_test.exs#restart preserves exact settings and ignores changed file instructions, tools and helper defaults` | Pending | Pending | Pending | Pending | Pending |
+| `V12.5.in-flight` | `test:apps/loopex/test/session_configuration_admission_test.exs#active work, interactions, aborts and unresolved effects cannot be configured` | Pending | Pending | Pending | Pending | Pending |
+| `V12.5.legacy-defaults` | `test:apps/loopex_cli/test/ask_ephemeral_test.exs#legacy one-shot defaults leave model, bounds and questions to the ephemeral profile` | Pending | Pending | Pending | Pending | Pending |
+| `V13.1` | `case:m7.restore` | Pending | Pending | Pending | Pending | Pending |
+| `V13.2` | `case:m7.rollback` | Pending | Pending | Pending | Pending | Pending |
+| `V13.3` | `retired:docs/developer/agent-context-map.md#disposition-pre1-current-contract-2026-10-02` | Pending | Pending | Pending | Pending | Pending |
+| `V13.4` | `case:m7.restore` | Pending | Pending | Pending | Pending | Pending |
+| `V13.5` | `case:m7.restore` | Pending | Pending | Pending | Pending | Pending |
+| `V13.6` | `case:m7.restore` | Pending | Pending | Pending | Pending | Pending |
+
+<!-- end generated: step rows -->
 
 ## Case results and earlier attempts
 
@@ -215,6 +329,41 @@ dispositions, separate from its mechanical results. A new candidate
 alone does not authorize replacement of a dispatched case. References shared
 by multiple outcomes or operator steps denote the same execution, not an
 additional paid attempt. This scaffold supplies no spending authorization.
+
+<!-- generated: case rows -->
+
+| Case | Lane | Attempt, session, run and child identities | Mechanical result and verdict | Retained record reference | SHA-256 |
+| --- | --- | --- | --- | --- | --- |
+| `m7.baseline.ask` | `m7-operator` | Pending | Pending | Pending | Pending |
+| `m7.baseline.durable` | `m7-operator` | Pending | Pending | Pending | Pending |
+| `m7.trace.flag` | `m7-operator` | Pending | Pending | Pending | Pending |
+| `m7.trace.file` | `m7-operator` | Pending | Pending | Pending | Pending |
+| `m7.trace.json` | `m7-operator` | Pending | Pending | Pending | Pending |
+| `m7.repair` | `m7-operator` | Pending | Pending | Pending | Pending |
+| `m7.instructions.admitted` | `m7-operator` | Pending | Pending | Pending | Pending |
+| `m7.steer-barrier` | `m7-operator` | Pending | Pending | Pending | Pending |
+| `m7.feature` | `m7-operator` | Pending | Pending | Pending | Pending |
+| `m7.question-restart` | `m7-operator` | Pending | Pending | Pending | Pending |
+| `m7.ephemeral-question` | `m7-operator` | Pending | Pending | Pending | Pending |
+| `m7.long` | `m7-operator` | Pending | Pending | Pending | Pending |
+| `m7.oversized-source` | `m7-operator` | Pending | Pending | Pending | Pending |
+| `m7.provider-switch` | `m7-operator` | Pending | Pending | Pending | Pending |
+| `m7.thinking-rounds` | `m7-operator` | Pending | Pending | Pending | Pending |
+| `m7.review` | `m7-operator` | Pending | Pending | Pending | Pending |
+| `m7.policy-denial` | `m7-operator` | Pending | Pending | Pending | Pending |
+| `m7.interrupt` | `m7-operator` | Pending | Pending | Pending | Pending |
+| `m7.external` | `m7-operator` | Pending | Pending | Pending | Pending |
+| `m7.restore` | `m7-operator` | Pending | Pending | Pending | Pending |
+| `m7.pipe-answer` | `m7-provider` | Pending | Pending | Pending | Pending |
+| `m7.instructions.declined` | `m7-provider` | Pending | Pending | Pending | Pending |
+| `m7.instructions.changed` | `m7-provider` | Pending | Pending | Pending | Pending |
+| `m7.cross-provider-maintenance` | `m7-provider` | Pending | Pending | Pending | Pending |
+| `m7.thinking-bound` | `m7-provider` | Pending | Pending | Pending | Pending |
+| `m7.thinking-cancel` | `m7-provider` | Pending | Pending | Pending | Pending |
+| `m7.daemon-detach` | `m7-provider` | Pending | Pending | Pending | Pending |
+| `m7.rollback` | `m7-rollback` | Pending | Pending | Pending | Pending |
+
+<!-- end generated: case rows -->
 
 ## Security, independent and documentation reviews
 

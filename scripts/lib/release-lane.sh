@@ -6,7 +6,13 @@ release_select() {
   release_selectors=""
   release_attempts_index=""
   release_resume_matrix=""
-  local usage='check-release: usage: check-release.sh [--only NAME ...] [--attempts-index FILE] [--resume-matrix ID]'
+  release_writer=""
+  release_host=""
+  release_markers=""
+  release_m7_config=""
+  release_operator=""
+  release_pins=""
+  local usage='check-release: usage: check-release.sh [--only NAME ...] [--attempts-index FILE --writer ID --host ID --markers DIR] [--resume-matrix ID] [--m7-config FILE --operator NAME]'
   while [ "$#" -gt 0 ]; do
     [ "$#" -ge 2 ] && [ -n "$2" ] || { echo "$usage" >&2; return 2; }
     case "$1" in
@@ -32,6 +38,19 @@ release_select() {
       --resume-matrix)
         [ -z "$release_resume_matrix" ] || { echo 'check-release: duplicate --resume-matrix' >&2; return 2; }
         release_resume_matrix=$2 ;;
+      --writer | --host | --operator)
+        local variable="release_${1#--}"
+        [ -z "${!variable}" ] || { echo "check-release: duplicate $1" >&2; return 2; }
+        printf -v "$variable" '%s' "$2" ;;
+      --markers | --m7-config | --pins)
+        local variable=release_markers
+        [ "$1" = --m7-config ] && variable=release_m7_config
+        [ "$1" = --pins ] && variable=release_pins
+        [ -z "${!variable}" ] || { echo "check-release: duplicate $1" >&2; return 2; }
+        case "$2" in
+          /*) printf -v "$variable" '%s' "$2" ;;
+          *) echo "check-release: $1 must be an absolute path" >&2; return 2 ;;
+        esac ;;
       *) echo "$usage" >&2; return 2 ;;
     esac
     shift 2
@@ -53,6 +72,88 @@ release_select() {
       return 2
     fi
   fi
+  # The attempts index is written by one named writer on one named host.
+  if [ -n "$release_attempts_index" ]; then
+    [ -n "$release_writer" ] && [ -n "$release_host" ] && [ -n "$release_markers" ] ||
+      { echo 'check-release: --attempts-index requires --writer, --host and --markers' >&2; return 2; }
+  elif [ -n "$release_writer$release_host$release_markers" ]; then
+    echo 'check-release: --writer, --host and --markers apply only with --attempts-index' >&2
+    return 2
+  fi
+  # Conversation lanes need the operator's explicit configuration and name.
+  if release_selected m7-provider || release_selected m7-operator; then
+    [ -n "$release_m7_config" ] && [ -n "$release_operator" ] ||
+      { echo 'check-release: the M7 conversation lanes require --m7-config FILE and --operator NAME' >&2; return 2; }
+  elif [ -n "$release_m7_config$release_operator$release_pins" ]; then
+    echo 'check-release: --m7-config, --operator and --pins apply only to the M7 conversation lanes' >&2
+    return 2
+  fi
+}
+
+# Concept: one recorder holds the attempts writer for the release lanes of an
+# indexed invocation; a lane completed in this logical matrix is skipped,
+# never rerun. Technical depth: `mix loopex.m7_matrix` runs as a coprocess
+# speaking one line per request; noise lines from mix are ignored.
+release_matrix_start() {
+  release_matrix_skips=""
+  coproc RELEASE_MATRIX { "$@" 2>/dev/null; }
+  local reply
+  while IFS= read -r reply <&"${RELEASE_MATRIX[0]}"; do
+    case "$reply" in
+      'plan skip '*) reply=${reply#plan skip }; release_matrix_skips="$release_matrix_skips ${reply% *}=${reply##* } " ;;
+      'plan run '*) ;;
+      'plan ready') return 0 ;;
+      'plan ended') release_matrix_skips="ended"; return 0 ;;
+      refused*) printf 'check-release: attempts index %s\n' "$reply" >&2; return 2 ;;
+    esac
+  done
+  echo 'check-release: attempts index recorder ended before its plan' >&2
+  return 2
+}
+
+# Only the lanes the recorder admitted are recorded; other selected lanes run
+# as ordinary unindexed lanes.
+release_matrix_records() {
+  [ -n "${RELEASE_MATRIX_PID:-}" ] || return 1
+  case " ${release_matrix_keys:-} " in *" $1 "*) return 0 ;; esac
+  return 1
+}
+
+release_text_digest() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    printf '%s' "$1" | sha256sum | awk '{print $1}'
+  else
+    printf '%s' "$1" | shasum -a 256 | awk '{print $1}'
+  fi
+}
+
+release_matrix_skipped() {
+  case " ${release_matrix_keys:-} " in *" $1 "*) ;; *) return 1 ;; esac
+  [ "${release_matrix_skips:-}" = ended ] && return 0
+  case " ${release_matrix_skips:-} " in *" $1="*) return 0 ;; esac
+  return 1
+}
+
+release_matrix_request() {
+  [ -n "${RELEASE_MATRIX_PID:-}" ] || return 0
+  local reply
+  printf '%s\n' "$*" >&"${RELEASE_MATRIX[1]}"
+  while IFS= read -r reply <&"${RELEASE_MATRIX[0]}"; do
+    case "$reply" in
+      started* | finished* | stopped*) printf 'check-release: index %s\n' "$reply"; return 0 ;;
+      refused*) printf 'check-release: attempts index %s\n' "$reply" >&2; return 1 ;;
+    esac
+  done
+  echo 'check-release: attempts index recorder ended' >&2
+  return 1
+}
+
+release_matrix_close() {
+  [ -n "${RELEASE_MATRIX_PID:-}" ] || return 0
+  local pid=$RELEASE_MATRIX_PID
+  local input=${RELEASE_MATRIX[1]}
+  exec {input}>&-
+  wait "$pid"
 }
 
 release_selected() {
@@ -161,6 +262,10 @@ release_manifest_valid() {
 # refuses the lane even when a different test printed a green summary.
 release_case_lane() {
   local label=$1 app=$2 file=$3 name=$4 module=$5 line=$6 wrap=$7
+  if release_matrix_skipped "$label"; then
+    printf 'check-release: %s completed in this logical matrix; skipped\n' "$label"
+    return 0
+  fi
   local sidecar="$retain/$label.identity" expected actual source_file status=0
   if ! (umask 077; set -C; : >"$sidecar") 2>/dev/null; then
     printf 'check-release: %s identity sidecar unavailable or reused\n' "$label" >&2
@@ -202,7 +307,29 @@ release_redact() {
 # A failed command, redactor or parser still has an immutable evidence log.
 # The runner supplies tree and retain; fixtures supply disposable trees with
 # real judges.
+# Concept: an indexed invocation records each lane before it runs and its
+# result after; a lane this matrix already completed is skipped.
 lane() {
+  local label=$1 status=0
+  if release_matrix_skipped "$label"; then
+    printf 'check-release: %s completed in this logical matrix; skipped\n' "$label"
+    return 0
+  fi
+  if ! release_matrix_records "$label"; then
+    release_lane_run "$@"
+    return
+  fi
+  release_matrix_request start "$label" || return 1
+  release_lane_run "$@" || status=$?
+  if [ "$status" -eq 0 ]; then
+    release_matrix_request finish "$label" pass "$retain/$label.log" || return 1
+  else
+    release_matrix_request finish "$label" fail "$retain/$label.log" || true
+  fi
+  return "$status"
+}
+
+release_lane_run() {
   local label=$1 app=$2 expected=$3 wrap=$4 lane_started=$SECONDS
   local log summary_status executed=unavailable duration append_status=0
   local pipeline_statuses
@@ -246,4 +373,12 @@ lane() {
     return 1
   fi
   printf 'check-release: %s executed=%s elapsed=%ss\n' "$label" "$executed" "$duration"
+}
+
+release_matrix_digest() {
+  local entry
+  for entry in ${release_matrix_skips:-}; do
+    case "$entry" in "$1="*) printf '%s\n' "${entry#*=}"; return 0 ;; esac
+  done
+  return 1
 }

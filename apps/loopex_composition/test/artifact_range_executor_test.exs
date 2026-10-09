@@ -96,6 +96,61 @@ defmodule LoopexComposition.ArtifactRangeExecutorTest do
     refute_received :unexpected_fetch
   end
 
+  # Concept: m7.range-read. The real executor reads a mixed source of at least
+  # 16 KiB in 4 KiB ranges through EOF; no provider is called. Technical depth:
+  # ASCII ranges are full, three-byte UTF-8 straddles boundaries without a
+  # split character, and quote/backslash/control bytes shorten the range so its
+  # complete double-escaped tool message stays within 8,192 bytes.
+  test "a mixed source of at least 16 KiB reads exactly through EOF in 4 KiB ranges" do
+    bytes =
+      String.duplicate("plain ascii 0123456789\n", 270) <>
+        String.duplicate("猫", 1_400) <>
+        String.duplicate(~s(quote " backslash \\ tab \t\n), 120) <>
+        String.duplicate("tail line\n", 400)
+
+    assert byte_size(bytes) >= 16_384
+    f = fixture(:normal, bytes)
+
+    ranges =
+      Stream.unfold(0, fn
+        :done ->
+          nil
+
+        offset ->
+          {job, grant} = request(f, offset, 4_096)
+
+          assert {:ok, %{outcome: :completed, output: output, artifacts: []}} =
+                   Local.execute(f.executor, job, grant)
+
+          assert {:ok, range} = Frame.decode(output, 8_192)
+
+          message = %{
+            "role" => "tool",
+            "tool_call_id" => "lx_" <> String.duplicate("0", 48),
+            "outcome" => "completed",
+            "content" => output
+          }
+
+          assert {:ok, encoded} = Frame.encode(message)
+          assert IO.iodata_length(encoded) - 1 <= 8_192
+          assert range["offset"] == offset
+          assert range["content"] == binary_part(bytes, offset, range["byte_count"])
+          assert range["next_offset"] == offset + range["byte_count"]
+          {range, if(range["eof"], do: :done, else: range["next_offset"])}
+      end)
+      |> Enum.to_list()
+
+    assert hd(ranges)["byte_count"] == 4_096
+    assert length(ranges) >= 5
+    assert List.last(ranges)["eof"] and List.last(ranges)["next_offset"] == byte_size(bytes)
+    assert Enum.any?(ranges, &(&1["byte_count"] < 4_096 and not &1["eof"]))
+    assert Enum.map_join(ranges, & &1["content"]) == bytes
+
+    {job, grant} = request(f, byte_size(bytes), 4_096)
+    assert {:ok, %{outcome: :completed, output: output}} = Local.execute(f.executor, job, grant)
+    assert {:ok, %{"content" => "", "eof" => true}} = Frame.decode(output, 8_192)
+  end
+
   test "last and empty EOF ranges and UTF-8 refusals use the real executor path" do
     f = fixture(:normal, "a😀z")
 
