@@ -27,6 +27,37 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+### Owner-close diagnostic layout corrected, 2026-10-08
+
+Original58918 at `81514b36cbce9ffa3e432123528c2e9de268ce86`
+is collected FAIL at current formatting after1.705seconds. The formatter
+requires one blank line after the owner-count assertion. No population test,
+project compilation or floor stage ran. Both original process joins and17
+verified artifacts are retained under
+`M7/daemon-population-diagnostic-focused-20261008-v3`. Terminal SHA-256
+`b673071005c21e9a2e3ed74ed2f6b00872805753e2532bd2ea86471f2d2fb5ba`;
+collection SHA-256
+`2389f534527bde1354f593387a87ea1864f94a80ed9724521ff94575d15cb1c3`.
+Latest completed registry2806, SHA-256
+`280dca9d822a5b7b975038daaf536347b79533e0ebd7bb026268ebbbd414b57d`.
+
+The exact one-LF correction reconstructs all reviewed prior source bytes.
+Final test SHA-256
+`e9e3b814f5e49be26e7e1080bb459150955f824a4b97420d06bd0964cc975c3b`.
+Independent layout/recipe review SHA-256
+`efd3585f8c59cca6544463bb8cfbe4dc6cf436e11dd59c7fa497b94bd9525b6c`
+requires actual normalized AST equality before formatting/compile/workload
+on each pair. Native v4 is UNRUN, pending clean source binding; original58918
+and both genuine population failures remain failed. No native handle is live.
+Immutable15-asset retention is
+`M7/current-source-preparation-20261008-v8/retention.json`, SHA-256
+`3c53f75dd6347440cae230ae30436f6b07f9a49f97513c6e9667d3a5020d81a7`.
+It also retains the source-clear artifact-opening v4 proposal/review, whose
+four material choices remain unaccepted. Its Proposed ADR pair author is
+active privately; no dependent API implementation or acceptance is claimed.
+T01-T19 original88 done /85 open /6 retired; added370 done /25 open.
+No completion checkbox changes.
+
 ### Original Socket close diagnostic joined, 2026-10-08
 
 The independently reviewed test-only diagnostic now observes actual

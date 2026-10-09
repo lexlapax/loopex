@@ -420,6 +420,7 @@ defmodule LoopexDaemon.MaximumPopulationTest do
       end
 
     assert length(owners) <= @connections
+
     valid_owners? =
       Enum.all?(owners, fn {pid, {token, incarnation, sink}} ->
         is_pid(pid) and is_binary(token) and byte_size(token) == 16 and
