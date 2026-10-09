@@ -27,6 +27,27 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+### Fixture result layout verified, 2026-10-08
+
+Formatter47 original31137 at `092cb9bdd4dbd71562ce21f2246084cb80bfc3c9`
+passes the fixture's non-line syntax-tree comparison and complete changed-source
+format checks on both supported toolchains. Its only source delta is one blank
+line before the existing try in fixture_server.exs. The complete3.641-second
+run retains four original process joins and33 artifacts under
+`M7/candidate-format-preparation-20261008-v47`; terminal SHA-256
+`416ea2e93118e80b28a4da03950ee615fe7881042089dc9f3702a238e62a82e7`,
+original collection SHA-256
+`caa2b44e60ea04a0bb6fc1a9a65231e30b7ccc834854b064d6730b01b5ea80a3`.
+Next completed registry2721, SHA-256
+`b884f2c3e74a1dfd79f90e245e3003bc4095074a827532458e2a78c9a71fd460`.
+
+Corrected fixture behavior remains native UNRUN. The real stopped-leader
+production defect, full foreground proof and ADR0065 decision remain open.
+Next qualify the independently reviewed current creation and daemon consumers
+while preserving all original tests, bounds and the failed foreground result.
+No native handle is live and no checkbox closes. T01-T19 remain original88
+done /85 open /6 retired and added367 done /23 open.
+
 ### Held-create identity and failure retention joined, 2026-10-08
 
 Three independently reviewed fixture changes are joined. The harness preserves

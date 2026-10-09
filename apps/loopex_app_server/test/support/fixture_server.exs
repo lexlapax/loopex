@@ -202,6 +202,7 @@ defmodule Loopex.AppServer.Fixture do
 
     store = durable_store()
     fixture = Loopex.AgentLoopFixture.start(options ++ store)
+
     try do
       :ok = Loopex.AppServer.Stdio.serve(fixture.runtime)
     after
