@@ -669,25 +669,40 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
     install_attachment(registry, relay, connection, "session", 0, "attachment")
 
     route = fn incarnation, attachment ->
-      ConnectionRegistry.connection_request(registry, {:route_ready_progress, incarnation, attachment})
+      ConnectionRegistry.connection_request(
+        registry,
+        {:route_ready_progress, incarnation, attachment}
+      )
       |> :gen_server.receive_response(500)
     end
 
     assert {:reply, {:error, :output_unavailable}} = route.(connection.incarnation, "attachment")
 
     assert {:reply, {:error, :output_unavailable}} =
-             manual_registry_call(connection.pid, {:invoke, fn -> route.(make_ref(), "attachment") end})
+             manual_registry_call(
+               connection.pid,
+               {:invoke, fn -> route.(make_ref(), "attachment") end}
+             )
 
     assert {:reply, {:error, :output_unavailable}} =
-             manual_registry_call(connection.pid, {:invoke, fn -> route.(connection.incarnation, "stale") end})
+             manual_registry_call(
+               connection.pid,
+               {:invoke, fn -> route.(connection.incarnation, "stale") end}
+             )
 
     assert {:reply, :ok} =
-             manual_registry_call(connection.pid, {:invoke, fn -> route.(connection.incarnation, "attachment") end})
+             manual_registry_call(
+               connection.pid,
+               {:invoke, fn -> route.(connection.incarnation, "attachment") end}
+             )
 
     assert :ok = manual_registry_call(connection.pid, :fence_progress)
 
     assert {:reply, {:error, :output_unavailable}} =
-             manual_registry_call(connection.pid, {:invoke, fn -> route.(connection.incarnation, "attachment") end})
+             manual_registry_call(
+               connection.pid,
+               {:invoke, fn -> route.(connection.incarnation, "attachment") end}
+             )
   end
 
   test "routing retains only the original attachment during an actual pending replacement" do
@@ -700,19 +715,29 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
     assert_receive {:relay_request, ^relay, from, {:promote_ticket, origin, _, _, _}}, 500
 
     route = fn attachment ->
-      manual_registry_call(connection.pid, {:invoke, fn ->
-        ConnectionRegistry.connection_request(registry,
-          {:route_ready_progress, connection.incarnation, attachment})
-        |> :gen_server.receive_response(500)
-      end})
+      manual_registry_call(
+        connection.pid,
+        {:invoke,
+         fn ->
+           ConnectionRegistry.connection_request(
+             registry,
+             {:route_ready_progress, connection.incarnation, attachment}
+           )
+           |> :gen_server.receive_response(500)
+         end}
+      )
     end
 
     assert %{phase: :pending, attachment_id: nil} =
              Map.fetch!(:sys.get_state(registry).attachments, connection.incarnation)
+
     assert {:reply, :ok} = route.("original")
     assert {:reply, {:error, :output_unavailable}} = route.("replacement")
     invalidate(registry, connection, "original")
-    assert_receive {:registry_attachment, ^registry, nil, :closed, "session", _, _, "original"}, 500
+
+    assert_receive {:registry_attachment, ^registry, nil, :closed, "session", _, _, "original"},
+                   500
+
     assert {:reply, {:error, :output_unavailable}} = route.("original")
 
     GenServer.reply(from, {:error, :ticket_unavailable})
@@ -734,14 +759,24 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
     :ok = :sys.suspend(registry)
 
     try do
-      send(connection.pid, {:registry_call, self(), reference, {:invoke, fn ->
-        request = ConnectionRegistry.connection_request(registry,
-          {:route_ready_progress, connection.incarnation, "attachment"})
-        send(observer, {:routing_request_sent, reference})
-        :gen_server.receive_response(request, max(cutoff - now_ms(), 0))
-      end}})
+      send(
+        connection.pid,
+        {:registry_call, self(), reference,
+         {:invoke,
+          fn ->
+            request =
+              ConnectionRegistry.connection_request(
+                registry,
+                {:route_ready_progress, connection.incarnation, "attachment"}
+              )
+
+            send(observer, {:routing_request_sent, reference})
+            :gen_server.receive_response(request, max(cutoff - now_ms(), 0))
+          end}}
+      )
 
       assert_receive {:routing_request_sent, ^reference}, max(cutoff - now_ms(), 0)
+
       item = %{
         kind: :model_stream_closed,
         turn_id: "original",
@@ -752,10 +787,16 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
       }
 
       for sequence <- 0..30 do
-        assert :ok = Loopex.ProgressSink.try_offer(ingress, "session", %{
-          kind: :text_delta, turn_id: "original", stream_domain_id: String.duplicate("a", 32),
-          base_event_sequence: 0, model_sequence: sequence, content_index: 0, text: "prefix"
-        })
+        assert :ok =
+                 Loopex.ProgressSink.try_offer(ingress, "session", %{
+                   kind: :text_delta,
+                   turn_id: "original",
+                   stream_domain_id: String.duplicate("a", 32),
+                   base_event_sequence: 0,
+                   model_sequence: sequence,
+                   content_index: 0,
+                   text: "prefix"
+                 })
       end
 
       assert :ok = Loopex.ProgressSink.try_offer(ingress, "session", item)
@@ -763,11 +804,14 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
       assert_receive {:registry_result, ^reference, {:reply, :ok}}, max(cutoff - now_ms(), 0)
       assert now_ms() < cutoff
 
-      items = for _ <- 1..32 do
-        assert {:ok, lease, "session", taken} = manual_registry_call(connection.pid, :take_progress)
-        assert :ok = manual_registry_call(connection.pid, {:release_progress, lease})
-        taken
-      end
+      items =
+        for _ <- 1..32 do
+          assert {:ok, lease, "session", taken} =
+                   manual_registry_call(connection.pid, :take_progress)
+
+          assert :ok = manual_registry_call(connection.pid, {:release_progress, lease})
+          taken
+        end
 
       assert Enum.map(Enum.take(items, 31), & &1.model_sequence) == Enum.to_list(0..30)
       assert List.last(items) == item

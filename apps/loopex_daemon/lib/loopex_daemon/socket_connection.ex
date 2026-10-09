@@ -1438,7 +1438,12 @@ defmodule LoopexDaemon.SocketConnection do
     if state.succession != nil do
       with record when is_map(record) <- WireRecords.event(attached.session_id, event),
            {:ok, state} <-
-             send_record(state, record, Map.fetch!(event, :event_sequence), {:event, attached.pump}) do
+             send_record(
+               state,
+               record,
+               Map.fetch!(event, :event_sequence),
+               {:event, attached.pump}
+             ) do
         LoopexDaemon.AttachmentPump.continue(attached.pump)
         {:noreply, state}
       else
@@ -1480,7 +1485,9 @@ defmodule LoopexDaemon.SocketConnection do
         state = state |> drain_progress(32) |> admit_progress_prefix(cutoff, 32)
 
         if System.monotonic_time(:millisecond) < cutoff do
-          with record when is_map(record) <- WireRecords.event(state.attachment.session_id, event),
+          session_id = state.attachment.session_id
+
+          with record when is_map(record) <- WireRecords.event(session_id, event),
                {:ok, encoded} <- Frame.encode(record) do
             if System.monotonic_time(:millisecond) < cutoff do
               cursor = Map.fetch!(event, :event_sequence)

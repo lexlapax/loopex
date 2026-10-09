@@ -1058,6 +1058,7 @@ defmodule LoopexDaemon.SocketConnectionTest do
     assert text["kind"] == "text_delta"
     assert text["text"] == "ordered-prefix"
     assert text["model_sequence"] == "0"
+
     assert closure == %{
              "kind" => "model_stream_closed",
              "turn_id" => "b3JkZXJlZA",
@@ -1162,9 +1163,13 @@ defmodule LoopexDaemon.SocketConnectionTest do
       assert next.progress_leases == %{}
       assert next.progress_bytes == 0
       assert_receive {:"$gen_call", event_from, {:enqueue_output, _, encoded}}, 1_000
+
       assert {:ok, %{"event" => %{"kind" => "run.started"}}} =
-               LoopexProtocol.Frame.decode(String.trim_trailing(IO.iodata_to_binary(encoded), "\n"),
-                 LoopexProtocol.Frame.output_record_bytes())
+               LoopexProtocol.Frame.decode(
+                 String.trim_trailing(IO.iodata_to_binary(encoded), "\n"),
+                 LoopexProtocol.Frame.output_record_bytes()
+               )
+
       [{event_request, exchange}] = Map.to_list(next.exchanges)
       remember_routing_timer(exchange.timer)
       assert {:enqueue, 1, {:event, _, ^cutoff}} = exchange.label
@@ -1192,19 +1197,24 @@ defmodule LoopexDaemon.SocketConnectionTest do
     try do
       send(socket, {:attachment_event, pump, %{kind: "run.started", event_id: "malformed"}})
 
-      assert [%{
-               "type" => "error",
-               "code" => "detached",
-               "session_id" => encoded_session,
-               "event_cursor" => encoded_cursor
-             } = record] = receive_records(client, 1, max(cutoff - now_ms(), 0))
+      assert [
+               %{
+                 "type" => "error",
+                 "code" => "detached",
+                 "session_id" => encoded_session,
+                 "event_cursor" => encoded_cursor
+               } = record
+             ] = receive_records(client, 1, max(cutoff - now_ms(), 0))
+
       assert record == %{
                "type" => "error",
                "code" => "detached",
                "message" => "session attachment invalidated; reattach to continue",
                "session_id" => Wire.encode_identity(session),
-               "event_cursor" => Wire.encode_u64(attached.emitted_cursor || attached.snapshot_cursor)
+               "event_cursor" =>
+                 Wire.encode_u64(attached.emitted_cursor || attached.snapshot_cursor)
              }
+
       assert {:ok, ^session} = Wire.identity(encoded_session)
       assert {:ok, cursor} = Wire.u64(encoded_cursor)
       assert cursor == (attached.emitted_cursor || attached.snapshot_cursor)
@@ -1230,21 +1240,27 @@ defmodule LoopexDaemon.SocketConnectionTest do
 
     try do
       :ok = :sys.suspend(daemon.registry)
+
       assert {:accepted, "lost-route"} =
                Loopex.command(attached.attachment, %{
-                 type: :prompt, command_id: "lost-route", content: "lost-route"
+                 type: :prompt,
+                 command_id: "lost-route",
+                 content: "lost-route"
                })
+
       eventually(fn ->
         Enum.any?(:sys.get_state(socket).exchanges, fn {_request, exchange} ->
           elem(exchange.label, 0) == :route_progress
         end)
       end)
+
       Process.exit(daemon.registry, :kill)
       assert_receive {:daemon_component_fatal, ^owner, :connections_lost}, 5_000
     after
       resume_actor(daemon.registry)
       :socket.close(client)
       cutoff = now_ms() + 5_000
+
       for {actor, monitor} <- monitors do
         assert_receive {:DOWN, ^monitor, :process, ^actor, reason}, max(cutoff - now_ms(), 0)
         assert reason in [:normal, :registry_lost]
@@ -1319,8 +1335,14 @@ defmodule LoopexDaemon.SocketConnectionTest do
       end
 
       :ok = :sys.resume(daemon.registry)
-      records = receive_records(client, prefix_count + if(mode == :complete, do: 3, else: 2),
-        max(cutoff - now_ms(), 0))
+
+      records =
+        receive_records(
+          client,
+          prefix_count + if(mode == :complete, do: 3, else: 2),
+          max(cutoff - now_ms(), 0)
+        )
+
       assert now_ms() < cutoff
       assert Enum.all?(tl(records), &(&1["session_id"] == Wire.encode_identity(session)))
       records
@@ -1363,8 +1385,10 @@ defmodule LoopexDaemon.SocketConnectionTest do
              LoopexDaemon.SocketConnection.handle_info({:attachment_event, self(), event}, state)
 
     for {_request, exchange} <- state.exchanges, do: remember_routing_timer(exchange.timer)
-    assert_receive {:"$gen_call", from,
-                    {:route_ready_progress, incarnation, "original"}}, 1_000
+
+    assert_receive {:"$gen_call", from, {:route_ready_progress, incarnation, "original"}},
+                   1_000
+
     assert incarnation == state.incarnation
     [{request, exchange}] = Map.to_list(state.exchanges)
     {:route_progress, _pump, "original", ^event, cutoff} = exchange.label
