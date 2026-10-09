@@ -2,6 +2,7 @@
 # Keep known generated roots explicit. Broad package and report rules can
 # silently hide conformance repositories, fixtures, and retained evidence.
 /_build/
+/_build_floor/
 /deps/
 /cover/
 /doc/
