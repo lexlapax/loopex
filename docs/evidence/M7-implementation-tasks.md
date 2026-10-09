@@ -1,5 +1,36 @@
 # M7 Implementation Tasks
 
+### Retained repair checkpoint and next broad proof, 2026-10-08
+
+Immutable snapshot18 captures the exact clean primary
+`8cdd8d29451e0fcde75041c78eefcefa92a68f5f`,766 verified assets, eight new
+primary commits,24 complete native records and a verified Git bundle. Reference:
+`M7/coupled-current-context-20261008-v18/retention.json`; SHA-256
+`ff99139a9c01591ac5019fde71de22ee186de76b3ece26ada90bc7a65abb10f3`.
+Its parent remains immutable snapshot17. Latest completed registry is2760 from
+original38052, not a live or failed-stage substitute. Temporary repair packets,
+source/preimage files, reviews, census corrections and decision outlines now
+have retained copies; use snapshot asset mappings if temporary paths disappear.
+
+The corrected broad scope and v4 recipe independently pass SOURCE_CLEAR:
+115 unchanged whole-file selectors,1863 selected/1866 full cases, Core682,
+all18 long-bound cases, genuine Node workflow and unchanged64-restore bounds.
+Two cross-UID and one paid-provider cases remain explicit separate UNRUN
+obligations. Complete broad native verification is still UNRUN. The exact
+recipe/scope/review packet, sealed after snapshot18, is separately retained at
+`M7/creation-daemon-reviewed-admission-20261008-v4/retention.json`, SHA-256
+`4c2e5fbc4d2b7781bd9c707ba0121a11cc932192e976367f01aae7b3f1ae1463`;
+review SHA-256
+`72a9d5f8ef91bfb61148eae4a86c15331fabc12ccb59cb86f18ccd36912d1aa8`.
+
+Next freeze this committed primary, bind the actual source/seed/review pins and
+run v4 once from registry2760. Preserve every failed predecessor and all
+original oracles; no filtered pass supplies broad or closure evidence. T01-T19
+original88 done /85 open /6 retired; added369 done /23 open. No checkbox
+closes and no native handle is live at this checkpoint. ADR0065 remains pending;
+the responsive foreground guardian proposal still needs accepted platform and
+allocation-accounting decisions before implementation.
+
 ### Exact recovery-read comparisons proved, 2026-10-08
 
 Original38052 at `2c4247e44c8f7c0c3ec9f3dab1dd9c8f2c74ccbb` passes all16
