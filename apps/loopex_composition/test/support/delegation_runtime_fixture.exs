@@ -197,9 +197,11 @@ defmodule LoopexComposition.DelegationRuntimeFixture do
     Loopex.ConfiguredGenesisFixture.await_creation_ready(runtime)
     assert :ok = Helper.bind(helper, runtime)
 
-    if Keyword.get(options, :classify, false),
-      do: Helper.classify(helper),
-      else: Helper.classification(helper, :complete)
+    case Keyword.get(options, :classify, false) do
+      true -> Helper.classify(helper)
+      :skip -> :ok
+      false -> Helper.classification(helper, :complete)
+    end
 
     Map.merge(base, %{
       runtime: runtime,
@@ -244,8 +246,8 @@ defmodule LoopexComposition.DelegationRuntimeFixture do
   end
 
   # Concept: one enabled role over the scripted model with finite limits.
-  def parent(fixture, command, limits \\ %{}) do
-    assert {:ok, role} = Catalog.role_genesis(configuration(), read_definitions(), 5_000)
+  def parent(fixture, command, limits \\ %{}, role \\ nil) do
+    role = role || default_role()
 
     limits =
       Map.merge(
@@ -283,6 +285,11 @@ defmodule LoopexComposition.DelegationRuntimeFixture do
 
     assert {:ok, session} = Helper.create_parent(fixture.helper, capture)
     session
+  end
+
+  defp default_role do
+    assert {:ok, role} = Catalog.role_genesis(configuration(), read_definitions(), 5_000)
+    role
   end
 
   defp selection(definitions) do

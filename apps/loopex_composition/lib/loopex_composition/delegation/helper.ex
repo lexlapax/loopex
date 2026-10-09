@@ -992,10 +992,28 @@ defmodule LoopexComposition.Delegation.Helper do
              replay: replay,
              full: true
            ) do
-      %{state | runs: Map.put(state.runs, {session, run}, folded)}
+      %{
+        state
+        | runs: Map.put(state.runs, {session, run}, folded),
+          children: Map.merge(state.children, retained_children(folded))
+      }
     else
       _ -> %{state | excess: MapSet.put(state.excess, session)}
     end
+  end
+
+  # Concept: every child a run ever created stays a helper child, settled or not.
+  # Technical depth: the retained child_created facts name the children; the
+  # reserve with the same operation names the original job that owns each.
+  defp retained_children(ledger) do
+    jobs =
+      for {%{"mutation" => %{"kind" => "reserve"} = m}, _} <- ledger.transactions,
+          into: %{},
+          do: {m["operation_identity"], Base.decode64!(m["job"]["job_id"])}
+
+    for {%{"mutation" => %{"kind" => "child_created"} = m}, _} <- ledger.transactions,
+        into: %{},
+        do: {Base.decode64!(m["child_session_id"]), jobs[m["operation_identity"]]}
   end
 
   defp recovery_inputs(state, %{"mutation" => mutation}, read) do
