@@ -1369,7 +1369,8 @@ defmodule LoopexCli.M7CaseRunnerTest do
         assert CaseRunner.main(args, %{root: root, candidate: @candidate}) == 2
       end)
 
-    assert output =~ "m7_cases_pending"
+    # Admission refuses before staging: this campaign has no committed head.
+    assert output =~ "committed_attempt_head_unavailable"
     assert File.ls!(Path.join(f.root, "runs")) == []
 
     output =

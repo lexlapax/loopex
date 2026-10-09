@@ -51,8 +51,8 @@ defmodule LoopexCli.M7EvidenceTaskTest do
     assert {:ok, ["committed heads: " <> _, "fixture catalog " <> _, families, pending]} =
              Task.validate(@repository, [])
 
-    assert families =~ "11 legacy release cases" and families =~ "108 operator step keys"
-    assert pending =~ "pending:"
+    assert families =~ "11 legacy release cases" and families =~ "28 M7 cases"
+    assert pending == "pending: 0 cases, 0 step owners"
   end
 
   test "each campaign's greatest committed head is selected regardless of order", %{root: root} do
@@ -109,6 +109,7 @@ defmodule LoopexCli.M7EvidenceTaskTest do
     end
 
     index = [attempts_index: "/retained/index"]
+    pend!(root, ["m7.thinking-bound", "m7.review"])
 
     assert {:error, {:m7_cases_pending, provider}} =
              Task.validate(root, [release: true, lane: "m7-provider"] ++ index)
@@ -189,6 +190,7 @@ defmodule LoopexCli.M7EvidenceTaskTest do
 
   test "the command reports unavailable evidence with exit status two", %{root: root} do
     concept!(root, [])
+    pend!(root, ["m7.thinking-bound"])
     Mix.shell(Mix.Shell.Process)
     on_exit(fn -> Mix.shell(Mix.Shell.IO) end)
     Task.run(["--root", root])
@@ -217,4 +219,33 @@ defmodule LoopexCli.M7EvidenceTaskTest do
 
   defp concept!(root, lines),
     do: File.write!(Path.join(root, "docs/plans/M7.md"), Enum.join(lines, "\n") <> "\n")
+
+  # Concept: a pending case is marked in the copied manifest and its runbook
+  # row by text, so every other byte of the copy stays the committed one.
+  defp pend!(root, cases) do
+    manifest = Path.join(root, "test/fixtures/m7/manifest.json")
+    runbook = Path.join(root, "docs/operator/m7-validation.md")
+
+    for id <- cases do
+      text = File.read!(manifest)
+      [head, tail] = String.split(text, ~s("#{id}": {), parts: 2)
+
+      tail =
+        String.replace(tail, ~s("status": "ready"), ~s("status": "pending:test"), global: false)
+
+      File.write!(manifest, head <> ~s("#{id}": {) <> tail)
+
+      rows =
+        runbook
+        |> File.read!()
+        |> String.split("\n")
+        |> Enum.map(fn row ->
+          if String.starts_with?(row, "| `#{id}` |") and String.ends_with?(row, "| `ready` |"),
+            do: String.replace_suffix(row, "| `ready` |", "| `pending:test` |"),
+            else: row
+        end)
+
+      File.write!(runbook, Enum.join(rows, "\n"))
+    end
+  end
 end
