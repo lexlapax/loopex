@@ -28,6 +28,31 @@ physical restore implementation; it does not waive any full-history proof.
 ### Current work and restart order
 
 
+### Buffered native privacy source joined; qualification UNRUN, 2026-10-09
+
+The corrected V2 buffered fixture is joined. Its one new integration case uses
+actual verified localhost TLS for Haiku low and Fable default, then checks exact
+closed public ask/last_result/history observations and excludes separate native
+thinking/signature/redacted canaries and the synthetic selected key. Captured
+original provider actors must be live before release and joined afterward; all
+join observations finish strictly before the same original1,000-ms cutoff.
+All prior modes, cases and production bounds remain. No production source changed.
+
+Packet manifest SHA-256
+`18f06c8ae01e9e07d5668718865704e303f70aff5d7ab9a8d919fea8f83d26cc`;
+independent correction review
+`3fedf5a494df4646fdc7e99cfae639cc2411d26ef61b51f79d825019f2015d01`.
+V1's two findings remain retained and were corrected before joining. Source is
+unformatted/native UNRUN. Next strict-AST-format four joined diagnostic/privacy
+paths, then qualify complete integration, shared-helper ambient, public API and
+CallerWire files on both supported pairs. Native/tool-artifact privacy remains
+isolated work in progress. Separate T07 writer works only in its own detached
+worktree on the existing standalone arena/custody row, with no extra checkbox.
+Counts remain464 done/106 open/6 retired, ADR0067 unanswered. No native handle
+is live at this source checkpoint; no full integration or closure claim.
+
+
+
 ### Diagnostic capacity failure retained; privacy integration next, 2026-10-09
 
 Original18074 at `8b083be93091da95af57227323e77a54915b961f` finishes FAIL11/12

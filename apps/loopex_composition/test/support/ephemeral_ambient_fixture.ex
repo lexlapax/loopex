@@ -14,6 +14,8 @@ defmodule LoopexComposition.Ephemeral.AmbientFixture do
   and Store. It then inspects their settled state and planes.
   The other drives two TLS calls around a host-authorized read tool effect;
   its policy deliberately copies the ambient value to a workspace file.
+  The buffered-thinking mode admits verified and private native thinking over
+  TLS and inspects only canonical public results and history after settlement.
   The fixture reports no credential or request bytes to the parent.
   """
 
@@ -55,7 +57,7 @@ defmodule LoopexComposition.Ephemeral.AmbientFixture do
   end
 
   def run_in_child(mode \\ :disclosure, provider \\ :openai)
-      when mode in [:disclosure, :provider_only] and
+      when mode in [:disclosure, :provider_only, :buffered_thinking] and
              provider in [:openai, :anthropic, :openrouter] do
     System.cmd(
       System.find_executable("elixir"),
@@ -72,7 +74,7 @@ defmodule LoopexComposition.Ephemeral.AmbientFixture do
   end
 
   def probe(mode, provider)
-      when mode in [:disclosure, :provider_only] and
+      when mode in [:disclosure, :provider_only, :buffered_thinking] and
              provider in [:openai, :anthropic, :openrouter] do
     {:ok, _} = Application.ensure_all_started(:loopex_composition)
     {:ok, _} = Application.ensure_all_started(:ssl)
@@ -117,6 +119,9 @@ defmodule LoopexComposition.Ephemeral.AmbientFixture do
 
         :provider_only ->
           provider_only_case(certificate, workspace, profile)
+
+        :buffered_thinking ->
+          buffered_thinking_cases(certificate, workspace)
       end
     after
       File.rm_rf!(directory)
@@ -397,6 +402,262 @@ defmodule LoopexComposition.Ephemeral.AmbientFixture do
     end
   end
 
+  defp buffered_thinking_cases(certificate, workspace) do
+    for {id, reasoning, thought} <- [
+          {"claude-haiku-4-5-20251001", "low", "permitted buffered summary 猫"},
+          {"claude-fable-5-1", "default", "private buffered thought 猫"}
+        ] do
+      answer = "canonical buffered answer é猫"
+      signature = "buffered-private-signature+/="
+      redacted = "buffered-private-redacted+/="
+
+      body =
+        Jason.encode!(%{
+          "id" => "buffered-native-message",
+          "type" => "message",
+          "role" => "assistant",
+          "model" => id,
+          "content" => [
+            %{"type" => "thinking", "thinking" => thought, "signature" => signature},
+            %{"type" => "redacted_thinking", "data" => redacted},
+            %{"type" => "text", "text" => answer}
+          ],
+          "stop_reason" => "end_turn",
+          "stop_sequence" => nil,
+          "usage" => %{"input_tokens" => 3, "output_tokens" => 5}
+        })
+
+      canaries = [thought, signature, redacted]
+      for canary <- canaries, do: assert(String.contains?(body, canary))
+
+      {port, server, server_monitor, listener} =
+        start_server(certificate, [body], true, expected_auth(@provider_profiles.anthropic), true)
+
+      buffered_cleanup(
+        fn ->
+          assert {:ok, session} =
+                   Ephemeral.start_session(
+                     policy: Policy,
+                     model: "anthropic:" <> id,
+                     reasoning: reasoning,
+                     base_url: "https://localhost:#{port}",
+                     cwd: workspace,
+                     tools: :none,
+                     max_tokens: 8192,
+                     timeout: 20_000
+                   )
+
+          owner = elem(session, 1)
+          owner_monitor = Process.monitor(owner)
+
+          buffered_cleanup(
+            fn -> buffered_thinking_session(session, server, id, reasoning, answer, canaries) end,
+            [
+              fn -> stop_buffered_session(session) end,
+              fn -> join_buffered_actors([{owner_monitor, owner}]) end
+            ]
+          )
+        end,
+        [
+          fn -> send(server, {:ambient_release, self()}) end,
+          fn -> :ssl.close(listener) end,
+          fn -> stop_buffered_actor(server) end,
+          fn -> join_buffered_actors([{server_monitor, server}]) end
+        ]
+      )
+    end
+
+    IO.puts("EPHEMERAL_BUFFERED_THINKING_PRIVACY_PASSED")
+  end
+
+  defp buffered_thinking_session(session, server, id, reasoning, answer, canaries) do
+    owner = elem(session, 1)
+    startup = :sys.get_state(owner).startup
+
+    session_monitors =
+      startup.registered
+      |> Map.values()
+      |> Enum.filter(&is_pid/1)
+      |> Enum.uniq()
+      |> Enum.map(&{Process.monitor(&1), &1})
+
+    buffered_cleanup(
+      fn ->
+        assert is_pid(startup.registered.runtime_supervisor)
+        assert is_pid(startup.registered.private_supervisor)
+        assert is_pid(startup.registered.runtime_holder)
+        assert is_pid(startup.registered.memory_store)
+        assert File.dir?(startup.owned_root.path)
+        {:ok, children} =
+          Loopex.Runtime.Supervisor.children(startup.registered.runtime.supervisor)
+
+        model = :sys.get_state(children.control).model
+        assert model.module == LoopexComposition.Model
+        assert Keyword.fetch!(model.options, :adapter) == Loopex.LLM.ReqLLM.InProcess
+
+        ask = Task.async(fn -> Ephemeral.ask(session, "Answer without exposing thinking") end)
+        ask_monitor = Process.monitor(ask.pid)
+
+        buffered_cleanup(
+          fn ->
+            assert_receive {:buffered_native_request, ^server, request_line, request, true}, 5_000
+            pending = :sys.get_state(owner).model_census.pending
+
+            model_pids = Map.values(pending.resources) ++ [pending.candidate, pending.callback]
+            assert Enum.all?(model_pids, &(is_pid(&1) and Process.alive?(&1)))
+            model_monitors = Enum.map(model_pids, &{Process.monitor(&1), &1})
+
+            buffered_cleanup(
+              fn ->
+                assert length(Enum.uniq(model_pids)) == length(model_pids)
+                assert Enum.all?(model_pids, &Process.alive?/1)
+
+                assert Enum.sort(Map.keys(pending.resources)) ==
+                         Enum.sort([
+                           :root,
+                           :anonymous_supervisor,
+                           :pool_supervisor,
+                           :http1_worker,
+                           :caller
+                         ])
+
+                assert is_pid(pending.candidate) and is_pid(pending.callback)
+                assert request_line == "POST /v1/messages HTTP/1.1"
+                decoded = Jason.decode!(request)
+                assert decoded["model"] == id
+                assert decoded["max_tokens"] == 8192
+                refute Map.has_key?(decoded, "stream")
+                refute Map.has_key?(decoded, "output_config")
+
+                if reasoning == "low" do
+                  assert decoded["thinking"] == %{"type" => "enabled", "budget_tokens" => 1024}
+                else
+                  refute Map.has_key?(decoded, "thinking")
+                end
+
+                send(server, {:ambient_release, self()})
+                assert {:ok, result} = returned = Task.await(ask, 15_000)
+
+                for {_monitor, pid} <- model_monitors, pid != pending.callback,
+                    do: refute(Process.alive?(pid))
+
+                assert result.outcome == :completed
+                assert result.text == answer
+                assert result.profile == :ephemeral
+                assert result.text_truncated == false
+                assert result.tools == [] and result.tools_truncated == false
+
+                assert Enum.sort(Map.keys(result)) ==
+                         Enum.sort([
+                           :details,
+                           :outcome,
+                           :profile,
+                           :run_id,
+                           :session_id,
+                           :shadowed_skills,
+                           :text,
+                           :text_truncated,
+                           :tools,
+                           :tools_truncated
+                         ])
+
+                assert result.details == %{"cleanup_grace_ms" => 5_000}
+                assert Ephemeral.last_result(session) == returned
+
+                assert {:ok, history} = Ephemeral.history(session)
+                assert history == %{
+                         entries: [
+                           %{
+                             role: :user,
+                             text: "Answer without exposing thinking",
+                             text_truncated: false
+                           },
+                           %{role: :assistant, text: answer, text_truncated: false}
+                         ],
+                         truncated: false
+                       }
+
+                public = :erlang.term_to_binary({returned, Ephemeral.last_result(session), history})
+                for canary <- canaries, do: refute(String.contains?(public, canary))
+                assert_no_provider_key(public, @provider_profiles.anthropic.credential)
+                assert :sys.get_state(owner).model_census.pending == nil
+                assert_receive {:ambient_server_done, ^server}, 3_000
+                refute_receive {:buffered_native_request, ^server, _, _, _}, 50
+              end,
+              [
+                fn -> send(server, {:ambient_release, self()}) end,
+                fn -> stop_buffered_session(session) end,
+                fn -> join_buffered_actors(model_monitors) end
+              ]
+            )
+          end,
+          [
+            fn -> send(server, {:ambient_release, self()}) end,
+            fn -> stop_buffered_session(session) end,
+            fn -> stop_buffered_actor(ask.pid) end,
+            fn -> join_buffered_actors([{ask_monitor, ask.pid}]) end
+          ]
+        )
+      end,
+      [
+        fn -> stop_buffered_session(session) end,
+        fn -> join_buffered_actors(session_monitors) end,
+        fn -> refute File.exists?(startup.owned_root.path) end
+      ]
+    )
+  end
+
+  # Concept: fixture cleanup cannot turn the first failed proof into another error.
+  # Technical depth: run every release, stop and original-monitor join even when
+  # an earlier stage raises; restore the first captured kind, reason and stack.
+  defp buffered_cleanup(body, cleanup) do
+    body_result = capture_buffered_step(body)
+    cleanup_results = Enum.map(cleanup, &capture_buffered_step/1)
+    results = [body_result | cleanup_results]
+
+    case Enum.find(results, &match?({:error, _, _, _}, &1)) do
+      {:error, kind, reason, stack} -> :erlang.raise(kind, reason, stack)
+      nil -> :ok
+    end
+  end
+
+  defp capture_buffered_step(step) do
+    try do
+      {:ok, step.()}
+    catch
+      kind, reason -> {:error, kind, reason, __STACKTRACE__}
+    end
+  end
+
+  defp stop_buffered_session(session) do
+    if Process.alive?(elem(session, 1)), do: assert(:ok = Ephemeral.stop_session(session))
+  end
+
+  defp stop_buffered_actor(pid) do
+    if Process.alive?(pid) do
+      Process.unlink(pid)
+      Process.exit(pid, :kill)
+    end
+  end
+
+  defp join_buffered_actors(monitors) do
+    deadline = System.monotonic_time(:millisecond) + 1_000
+
+    joins =
+      Enum.map(monitors, fn {monitor, pid} ->
+        fn ->
+          remaining = max(deadline - System.monotonic_time(:millisecond), 0)
+          assert_receive {:DOWN, ^monitor, :process, ^pid, _reason}, remaining
+          refute Process.alive?(pid)
+        end
+      end)
+
+    buffered_cleanup(
+      fn -> :ok end,
+      joins ++ [fn -> assert System.monotonic_time(:millisecond) < deadline end]
+    )
+  end
+
   defp assert_owner_scan(probe_ref, cleanup_owner, cleanup_start_ref, phase) do
     assert_receive {:cleanup_owner_canary, ^probe_ref, ^cleanup_owner, ^cleanup_start_ref, ^phase,
                     matched?},
@@ -491,7 +752,8 @@ defmodule LoopexComposition.Ephemeral.AmbientFixture do
          certificate,
          bodies \\ [tool_reply(), answer_reply()],
          held \\ false,
-         auth \\ {"authorization", "Bearer " <> @credential}
+         auth \\ {"authorization", "Bearer " <> @credential},
+         observe_native \\ false
        ) do
     {:ok, listener} =
       :ssl.listen(0, [
@@ -505,13 +767,21 @@ defmodule LoopexComposition.Ephemeral.AmbientFixture do
     {:ok, {_, port}} = :ssl.sockname(listener)
     parent = self()
 
-    server =
-      spawn(fn ->
+    serve = fn ->
         for body <- bodies do
           {:ok, socket} = :ssl.transport_accept(listener, 10_000)
           {:ok, socket} = :ssl.handshake(socket, 10_000)
           {headers, request} = read_request(socket, <<>>)
-          send(parent, {:ambient_model_request, self(), request, selected_auth?(headers, auth)})
+
+          if observe_native do
+            send(
+              parent,
+              {:buffered_native_request, self(), hd(String.split(headers, "\r\n")), request,
+               selected_auth?(headers, auth)}
+            )
+          else
+            send(parent, {:ambient_model_request, self(), request, selected_auth?(headers, auth)})
+          end
 
           if held do
             receive do
@@ -534,9 +804,14 @@ defmodule LoopexComposition.Ephemeral.AmbientFixture do
 
         :ssl.close(listener)
         send(parent, {:ambient_server_done, self()})
-      end)
+      end
 
-    {port, server}
+    if observe_native do
+      {server, monitor} = spawn_monitor(serve)
+      {port, server, monitor, listener}
+    else
+      {port, spawn(serve)}
+    end
   end
 
   defp tool_reply do

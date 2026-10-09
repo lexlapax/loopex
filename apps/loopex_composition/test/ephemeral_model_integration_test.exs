@@ -1,3 +1,5 @@
+Code.require_file("support/ephemeral_ambient_fixture.ex", __DIR__)
+
 defmodule LoopexComposition.Ephemeral.ModelIntegrationTest do
   use ExUnit.Case, async: false
 
@@ -64,6 +66,14 @@ defmodule LoopexComposition.Ephemeral.ModelIntegrationTest do
     end)
 
     :ok
+  end
+
+  test "buffered native thinking returns only the canonical answer and history" do
+    {output, status} =
+      LoopexComposition.Ephemeral.AmbientFixture.run_in_child(:buffered_thinking, :anthropic)
+
+    assert status == 0, output
+    assert output =~ "EPHEMERAL_BUFFERED_THINKING_PRIVACY_PASSED"
   end
 
   test "a real in-process model turn retires custody before a second ask and stop" do
