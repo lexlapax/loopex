@@ -372,7 +372,7 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
     end
   end
 
-  defmodule LegacyStore do
+  defmodule TransferlessStore do
     @moduledoc false
     @behaviour Loopex.ArtifactStore
 
@@ -391,18 +391,19 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
     def describe(handle, use_locator), do: Artifacts.describe(handle, use_locator)
   end
 
-  test "an adapter without the capability keeps the prior API and refuses only the transfer family" do
-    %{handle: handle, reference: reference, bytes: bytes} = stored("bytes an old adapter holds")
+  test "an adapter without the optional transfer callbacks serves the rest and refuses transfers" do
+    %{handle: handle, reference: reference, bytes: bytes} =
+      stored("bytes a transferless adapter holds")
 
-    # The four callbacks that predate the decision answer exactly as before.
-    refute ArtifactStore.supports_transfer?(LegacyStore)
-    assert {:ok, ^bytes} = LegacyStore.fetch(handle, object(reference))
-    assert {:ok, stat} = LegacyStore.stat(handle, reference.locator)
+    # The four required callbacks answer; only the optional family is absent.
+    refute ArtifactStore.supports_transfer?(TransferlessStore)
+    assert {:ok, ^bytes} = TransferlessStore.fetch(handle, object(reference))
+    assert {:ok, stat} = TransferlessStore.stat(handle, reference.locator)
     assert stat.digest == reference.digest
-    assert {:ok, described} = LegacyStore.describe(handle, reference.use_locator)
+    assert {:ok, described} = TransferlessStore.describe(handle, reference.use_locator)
     assert described.object_locator == reference.locator
 
-    %{runtime: runtime, session_id: session_id} = session(handle, LegacyStore)
+    %{runtime: runtime, session_id: session_id} = session(handle, TransferlessStore)
     reference = for_session(handle, reference, session_id)
     {:ok, attachment} = Loopex.attach(runtime, session_id, after_event_sequence: 0)
 
@@ -687,28 +688,9 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
     assert File.read!(outside) == "not the scratch root's business"
   end
 
-  test "genuine old format artifacts remain readable and removing the transfer capability restores the prior API without rewriting data" do
-    bytes = "an artifact written before transfers existed"
-    %{handle: handle, reference: reference} = stored(bytes)
-
-    # The prior API reads it whole, and describes it, without a transfer.
-    assert {:ok, ^bytes} = Artifacts.fetch(handle, object(reference))
-    assert {:ok, stat} = Artifacts.stat(handle, reference.locator)
-    assert stat.digest == reference.digest
-    assert {:ok, described} = Artifacts.describe(handle, reference.use_locator)
-    assert described.object_locator == reference.locator
-
-    # An adapter without the transfer family keeps exactly that API and reads the
-    # same bytes: nothing was migrated to make transfers possible.
-    refute ArtifactStore.supports_transfer?(LegacyStore)
-    assert {:ok, ^bytes} = LegacyStore.fetch(handle, object(reference))
-    assert {:ok, legacy_stat} = LegacyStore.stat(handle, reference.locator)
-    assert legacy_stat.digest == reference.digest
-  end
-
   test "an unsupported ArtifactStore reports unsupported rather than falling back to a whole object fetch" do
     %{handle: handle, reference: reference} = stored("bytes")
-    %{runtime: runtime, session_id: session_id} = session(handle, LegacyStore)
+    %{runtime: runtime, session_id: session_id} = session(handle, TransferlessStore)
     reference = for_session(handle, reference, session_id)
     {:ok, attachment} = Loopex.attach(runtime, session_id, after_event_sequence: 0)
 
@@ -1124,6 +1106,57 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
     assert {:error, :unknown_transfer} = Artifacts.read_transfer(handle, transfer, 1)
     assert [] = Transfers.live(handle.transfers)
     assert {:ok, []} = File.ls(Path.join(handle.root, "transfers"))
+  end
+
+  # Concept: a source that yields fewer bytes than its verified size, or a
+  # snapshot that takes only part of a block, refuses the open honestly and
+  # leaves nothing behind.
+  # Technical depth: ADR 0066 short reads and partial writes. The probe answers
+  # the copy actor's second source read with a real 100-byte prefix, or its
+  # first snapshot write by writing 1,000 real bytes and reporting ENOSPC. Work
+  # counts exactly what was read and debited, a failed write stays uncertain,
+  # retirement still earns a receipt, and the scratch root is empty afterwards.
+  for {name, faults, reason, read, debit, uncertain} <- [
+        {"a short source read", [:continue, :continue, {:short, 100}], :artifact_integrity_failed,
+         65_536 + 100, 65_536, false},
+        {"a partial snapshot write", [:continue, {:partial, 1_000}], :artifact_unreadable, 65_536,
+         65_536, true}
+      ] do
+    test "#{name} refuses the open and retires every descriptor" do
+      faults = unquote(Macro.escape(faults))
+      handle = new_store(fault_probe: self())
+      bytes = :binary.copy("s", 3 * 65_536 + 7)
+      %{reference: reference} = stored(bytes, handle)
+      request = %{session_id: "transfer-session", use_locator: reference.use_locator, start: 0}
+      context = opening_context(60_000)
+
+      opener =
+        Task.async(fn ->
+          assert {:ok, _} = Artifacts.reserve_transfer(handle, request, context)
+          Artifacts.open_transfer(handle, request, context)
+        end)
+
+      points =
+        for action <- faults do
+          assert_receive {:loopex_transfer_fault_point, worker, ref, point}, 5_000
+          send(worker, {:loopex_transfer_fault_action, ref, action})
+          point
+        end
+
+      assert points == Enum.take([:source_read, :snapshot_write, :source_read], length(faults))
+
+      assert {:error, %{reason: unquote(reason), transfer_ref: id, work: work}} =
+               Task.await(opener, 5_000)
+
+      assert id == context.transfer_ref
+      assert work.source_read_bytes == unquote(read)
+      assert work.snapshot_write_debit == unquote(debit)
+      assert work.write_uncertain == unquote(uncertain)
+      refute_received {:loopex_transfer_fault_point, _, _, _}
+      assert :ok = retire_and_ack(handle, context)
+      assert [] = Transfers.live(handle.transfers)
+      assert {:ok, []} = File.ls(Path.join(handle.root, "transfers"))
+    end
   end
 
   test "a full 64 MiB object retains exact payload and separately accounted metadata work" do
@@ -1544,10 +1577,10 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
     %{handle: handle, reference: reference, bytes: bytes, root: handle.root}
   end
 
-  defp new_store do
+  defp new_store(options \\ []) do
     root = Path.join(System.tmp_dir!(), "loopex-transfer-#{:erlang.unique_integer([:positive])}")
     File.mkdir_p!(root)
-    {:ok, owner} = Transfers.start_link(root: root)
+    {:ok, owner} = Transfers.start_link([root: root] ++ options)
 
     on_exit(fn ->
       if Process.alive?(owner), do: GenServer.stop(owner)

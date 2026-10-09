@@ -144,7 +144,7 @@ No pending-read reply introduces a public busy status or treats waiting as empty
 | A committed result becomes current only through the post-commit fence. | `Loopex.Runtime.Control.current_owner_post_commit_fence/3` |
 | An outbox row is delivered only at or below the acknowledged position. | `Loopex.Runtime.EventDispatcher` |
 | One provider attempt is dispatched under exactly one permit, spent once. | `Loopex.Runtime.Control`, `spent_attempts` |
-| A live result or a receipt is admitted only on the full identity set. | `Loopex.Effect`, `Loopex.Runtime.SessionCoordinator.reconciliation_fields/0` |
+| A live result or a receipt is admitted only on the full identity set. | `Loopex.Executor.job/1`, `Loopex.Runtime.SessionCoordinator.reconciliation_fields/0` |
 | Durable and public data is bounded plain data under one normalizer. | `Loopex.Store.normalize_and_measure_item/2` |
 | A superseded owner stops only when nothing it owns is outstanding. | `Loopex.Runtime.SessionCoordinator.continue_after_owner_loss/1` |
 | Cancellation observation windows derive from one formula in core. | `Loopex.Executor.cancellation_bounds/1` |
@@ -220,34 +220,30 @@ identity after pruning or restart. Retirement changes no retry or accounting
 rule inherited from
 [ADR 0018](../adr/0018-provider-attempt-authority-and-recovery.md#concept).
 
-**The effect identity set.** `Loopex.Effect` is pure and process-free. A request
-is exactly `operation_id`, `attempt`, `domain`, `domain_version`, and `payload`;
-the `canonical_request_digest` is SHA-256 over the `:deterministic` external term
-format of exactly that five-field projection, and `tx_id` is derived from the
-request and its digest, so the same operation attempt always names the same
-transaction and a changed payload can never inherit a previous fence.
+**The effect identity set.** `Loopex.Executor.job/1` builds every dispatched
+job from its complete semantic field set: an unknown or missing field refuses,
+the `canonical_request_bytes` are the deterministic external-term bytes of that
+projection, and the `canonical_request_digest` is their lowercase SHA-256. The
+same operation attempt therefore always names the same request, and a changed
+field can never inherit a previous fence.
 
-A live result is admitted only when it matches the journaled intent on `tx_id`,
-`operation_id`, `attempt`, `canonical_request_digest`, `executor_identity`,
-`executor_epoch`, and `fencing_token`, and carries the coordinator's **current**
-`session_epoch`. A receipt for an effect whose outcome went unknown is narrower:
-it must additionally match the current `reconciliation_query_id`, the current
-`session_epoch`, the expected `executor_identity`, and carry a
-`session_epoch_at_dispatch` equal to the epoch journaled in the intent. Requiring
-the query identifier is what makes the answer solicited, so an executor cannot
-resolve a fence by volunteering one. Every comparison returns the first field
-that failed, because the difference between a wrong attempt and a stale epoch is
-what a recovery diagnosis needs.
+A live result is admitted only when it matches the journaled intent on
+`operation_id`, attempt, `canonical_request_digest`, executor identity and
+epoch, and fencing token, and carries the coordinator's **current** session
+epoch. A receipt for an effect whose outcome went unknown is narrower: it must
+answer the current solicited reconciliation query. Requiring the query
+identifier is what makes the answer solicited, so an executor cannot resolve a
+fence by volunteering one.
 
-The session coordinator does not call `Loopex.Effect`; it applies the same rule
-over its own eleven-field solicited set, published as
+The session coordinator applies that rule over its eleven-field solicited set,
+published as
 `Loopex.Runtime.SessionCoordinator.reconciliation_fields/0`:
 `reconciliation_query_id`, `current_session_epoch`,
 `expected_executor_identity`, `current_recovery_contract`,
 `journaled_operation_id`, `original_attempt`,
 `journaled_canonical_request_digest`, `original_session_epoch`,
 `original_executor_epoch`, `origin_executor_identity`, and
-`origin_fencing_token`. Presence is part of the comparison in both places:
+`origin_fencing_token`. Presence is part of the comparison:
 reading an absent key as `nil` would let an answer that simply omitted a field
 match an expected value that is legitimately `nil`.
 
@@ -673,11 +669,6 @@ durable companion's isolation claim.
 | Reference stack and surfaces | `apps/loopex_composition/lib/`, `apps/loopex_cli/lib/`, `apps/loopex_reference_client/lib/`, `apps/loopex_app_server/lib/`, `apps/loopex_daemon/lib/` |
 | Independent wire consumer | `clients/node/` |
 | Repository checks | `apps/loopex/lib/mix/tasks/`, `scripts/` |
-
-`Loopex.Journal`, `Loopex.Session`, `Loopex.Coordinator`, and
-`Loopex.VmGeneration` are retained feasibility modules. They keep their own
-tests and stay separately callable, and they are not the runtime path: the
-Store and the session coordinator do that work.
 
 <a id="technical-arch-checks"></a>
 ## Repository Checks

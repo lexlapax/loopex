@@ -8116,8 +8116,8 @@ defmodule Loopex.AgentLoopTest do
 
       # Concept: a field the receipt does not carry is a mismatch, not a pass.
       #
-      # Technical depth: `Loopex.Effect.match_fields/3` already states this for a
-      # live result, and the reconciliation comparators now match it. Reading an
+      # Technical depth: the live-result identity rule already states this, and
+      # the reconciliation comparators match it. Reading an
       # absent key as `nil` made the comparison depend on the distant invariant
       # that no compared job field is ever `nil`; asserting presence here keeps
       # the answer true whether or not that stays so.

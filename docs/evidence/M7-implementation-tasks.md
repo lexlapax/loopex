@@ -15718,7 +15718,11 @@ or check was relaxed.
 
 ### Original checklist
 
-- [ ] Implement every new record/request generation before emitting it.
+- [x] Implement every new record/request generation before emitting it.
+  `current_contract_manifest_test` ("all current methods and record families have
+  closed payload definitions"; "both Node connections validate every current
+  event snapshot and progress family") plus the Node public-records validator in
+  every real-server workflow; wire round 5 at `a1e8e548`, both pairs.
 - [x] Add foreground protocol /3 and daemon protocol /4.
   Proved in the wire rounds; final whole-app runs at `967dc15c` (tested as
   `ba52f1e9`, identical tree): protocol244, app server206/207, daemon584/592
@@ -15755,7 +15759,15 @@ or check was relaxed.
 
 ### Added implementation subtasks
 
-- [ ] Resolve and implement the current full-transfer opening boundary under ADR0028: one original lookup/verification deadline, bounded four-transfer custody and cancel-before-open behavior, honest cleanup/refusal and late reclamation, exact immutable-use identity and complete physical/transport proofs. Accepted ADR0066 supplies the port/ownership/work-accounting amendment; the separately proved artifact-description guard does not complete this obligation.
+- [x] Resolve and implement the current full-transfer opening boundary under ADR0028: one original lookup/verification deadline, bounded four-transfer custody and cancel-before-open behavior, honest cleanup/refusal and late reclamation, exact immutable-use identity and complete physical/transport proofs. Accepted ADR0066 supplies the port/ownership/work-accounting amendment; the separately proved artifact-description guard does not complete this obligation.
+  Proved in wire round 5 (`a270cc09`…`0e23c4e5`), both pairs: caller loss during
+  open retires once, a success handled at D_open is refused and reclaimed (fix:
+  it answered `cancelled`), lost acknowledgement keeps the receipt until the same
+  observer re-acknowledges, short reads and partial snapshot writes refuse and
+  retire every descriptor, the reference client reads through an owned transfer,
+  socket ceilings hold, and the Core36 test observes the 60 s answer by the ADR
+  0066 clock with no extra grace. The unreachable proved-cleanup opening reply
+  was deleted.
   Current component: `aa4187da`, original10853, all41 complete Local artifact
   cases pass on both pairs in144.495seconds, including actual60-second
   original-owner lost-registration reclamation and its conservative negatives.

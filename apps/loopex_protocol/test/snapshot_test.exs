@@ -80,9 +80,9 @@ defmodule LoopexProtocol.SnapshotTest do
   test "complete nested schemas and literal vectors have pinned byte identities" do
     for {relative, digest} <- [
           {"schema/open-interaction.v1.json",
-           "3b764fe133c8cabf59418d02d890edcb82a5eac764c28e13a41638742e910721"},
+           "bd20c3c66895cc6672f02fb88bd956afdfa8cb8914b0789f986987b831b75705"},
           {"schema/session-snapshot.v3.json",
-           "bce5ad3ea0e2b8027f7c29d2d480c864fe7b2032959290cc2ed8b234ed20aeeb"},
+           "25bfa7c3ff8728957958a373eec919c00c395e58955cf6e24a4703e171c2e0c7"},
           {"vectors/open-interaction.v1.json",
            "2fc849930dc7ccac592c9f076c1a2008bfb86a983531f499490b28d5c5c4288d"},
           {"vectors/session-snapshot.v3.json",

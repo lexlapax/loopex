@@ -2,7 +2,7 @@
   "format": "loopex.experimental.payload-contract/1",
   "contract": "model_question_events",
   "authority": "docs/adr/0045-model-originated-questions-technical.md",
-  "integration": "M7 coordinated foreground /3 and daemon /4; not independently served",
+  "integration": "served by foreground loopex.experimental/3 and daemon loopex.experimental/4",
   "runtime_exact_fields": [
     "answer",
     "choices",

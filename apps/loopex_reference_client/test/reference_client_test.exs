@@ -115,8 +115,67 @@ defmodule Loopex.ReferenceClientTest do
 
     assert calls ==
              MapSet.new(
-               ~w(start_link create_session attach resume_session command next_event reconciliation_query reconcile session_status stop)
+               ~w(start_link create_session attach resume_session command open_artifact_transfer read_artifact_chunk close_artifact_transfer next_event reconciliation_query reconcile session_status stop)
              )
+  end
+
+  # Concept: the reference client reads a retained artifact through an owned
+  # transfer and gets back exactly the stored bytes.
+  # Technical depth: accepted ADRs 0028 and 0066 against the real Local artifact
+  # store and its transfer owner. A two-chunk object crosses the embedded
+  # transfer API with per-chunk and whole-object digests checked; afterwards no
+  # transfer remains live in the owner, and a use from another session refuses.
+  test "the client reads a retained artifact use through an owned transfer" do
+    root =
+      Path.join(
+        System.tmp_dir!(),
+        "loopex-reference-artifact-#{System.unique_integer([:positive])}"
+      )
+
+    {:ok, handle} = Loopex.Store.Local.Artifacts.open(Path.join(root, "artifacts"))
+    {:ok, owner} = Loopex.Store.Local.Transfers.start_link(root: Path.join(root, "artifacts"))
+    Process.unlink(owner)
+    store = %{module: Loopex.Store.Local.Artifacts, handle: Map.put(handle, :transfers, owner)}
+
+    fixture =
+      Fixture.start("artifact-read", Loopex.ReferenceClientTestModel, [],
+        root: root,
+        artifact_store: store
+      )
+      |> Fixture.create("artifact-read")
+
+    on_exit(fn ->
+      Fixture.stop(fixture)
+      if Process.alive?(owner), do: GenServer.stop(owner, :normal, 5_000)
+      File.rm_rf!(root)
+    end)
+
+    bytes = :binary.copy("reference-artifact ", 2_000)
+
+    {:ok, reference} =
+      Loopex.ArtifactStore.put(store, bytes, use_metadata(fixture.client.session_id))
+
+    assert byte_size(bytes) > 32_768
+
+    assert {:ok, ^bytes} = ReferenceClient.read_artifact(fixture.client, reference.use_locator)
+    assert Loopex.Store.Local.Transfers.live(owner) == []
+
+    {:ok, foreign} = Loopex.ArtifactStore.put(store, bytes, use_metadata("another-session"))
+
+    assert {:error, %{reason: :artifact_use_mismatch, cleanup: :unproved}} =
+             ReferenceClient.read_artifact(fixture.client, foreign.use_locator)
+  end
+
+  defp use_metadata(session_id) do
+    %{
+      "media_type" => "text/plain",
+      "role" => "tool_output",
+      "session_id" => session_id,
+      "run_id" => "run",
+      "operation_id" => "operation",
+      "attempt" => 1,
+      "tool_call_id" => "tool"
+    }
   end
 
   test "the reference prompt commits a five minute duration and derives its instant at staging" do

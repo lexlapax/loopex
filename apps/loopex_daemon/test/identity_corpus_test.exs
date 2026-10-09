@@ -241,7 +241,7 @@ defmodule LoopexDaemon.IdentityCorpusTest do
         assert initialized["selected_generation"] == "loopex.experimental/4"
 
         assert initialized["exact_schema_sha256"] ==
-                 "9a4a735d1a8a59237f3e063fa0fce21fd2d69e7a11785eee743c10311228b02c"
+                 "bc3749d89204e1b4d5ad3b183058c650e17622750b84d39a4f53efe745ea0718"
 
         [row] = daemon.registry |> :sys.get_state() |> Map.fetch!(:rows) |> Map.values()
         connection = row.connection_pid

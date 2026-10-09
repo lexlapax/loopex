@@ -227,6 +227,10 @@ defmodule Loopex.RunEvidenceTest do
       Loopex.start_link(runtime_id: runtime_id, context_token_budget: 8_192, store: store)
 
     on_exit(fn -> Loopex.stop(runtime) end)
+    # Control answers evidence reads only after its creation startup settles
+    # (this read-only Store leaves creation unavailable);
+    # without this the first read raced startup and saw runtime_unavailable.
+    :ok = Loopex.ConfiguredGenesisFixture.await_creation_unavailable(runtime)
     {runtime, reference}
   end
 

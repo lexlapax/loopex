@@ -84,7 +84,7 @@ defmodule LoopexProtocol.InspectionTest do
 
     for {file, digest} <- [
           {"schema/inspection.v1.json",
-           "f9940c36d5a1dd382ed16738181f999f82a033e8677f7af4ca40ba17fa002af4"},
+           "26251f514e6240eedfbcfe0e7458a453dc750453357734af33b3fb5f839ef528"},
           {"vectors/inspection.v1.json",
            "3a3ce808d958a8d982a96680528af603321cd859edd481e72f1922578551c564"}
         ] do
