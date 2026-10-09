@@ -242,8 +242,7 @@ defmodule LoopexComposition.Delegation.RunLedger do
        ) do
     mutation = tx["mutation"]
 
-    with %{original_job: original} <- inputs,
-         :ok <- RunMutation.match_job(state.identifiers, mutation, original),
+    with {:ok, _original} <- joined_job(state.identifiers, mutation, inputs),
          true <- mutation["operation_identity"] == state.operation.logical["operation_identity"],
          {:ok, attempt} <- Map.fetch(state.operation.attempts, mutation["job"]["job_id"]),
          true <- attempt.job == mutation["job"] do
@@ -268,8 +267,8 @@ defmodule LoopexComposition.Delegation.RunLedger do
   defp reserve(state, tx, size, inputs) do
     mutation = tx["mutation"]
 
-    with %{original_job: original, child_creation: bytes} <- inputs,
-         :ok <- RunMutation.match_job(state.identifiers, mutation, original) do
+    with %{child_creation: bytes} <- inputs,
+         {:ok, original} <- joined_job(state.identifiers, mutation, inputs) do
       case state.operation do
         nil -> first_reserve(state, tx, size, bytes, original)
         operation -> later_reserve(state, tx, size, bytes, operation, original)
@@ -290,7 +289,7 @@ defmodule LoopexComposition.Delegation.RunLedger do
     # Technical depth: match_job already validates this captured effective wall
     # deadline. Compare that original value; replay never reconstructs its clock.
     cond do
-      mutation["absolute_cutoff_ms"] > original.effective_job_deadline ->
+      exceeds_cutoff?(mutation, original) ->
         {:error, :parent_cutoff_exceeded}
 
       state.count >= limits["max_children"] ->
@@ -337,7 +336,7 @@ defmodule LoopexComposition.Delegation.RunLedger do
     credit = state.credit + @frame
 
     cond do
-      mutation["absolute_cutoff_ms"] > original.effective_job_deadline ->
+      exceeds_cutoff?(mutation, original) ->
         {:error, :parent_cutoff_exceeded}
 
       Map.take(mutation, @logical) != operation.logical ->
@@ -369,8 +368,7 @@ defmodule LoopexComposition.Delegation.RunLedger do
     identity = mutation["operation_identity"]
     credit = 2 * @frame
 
-    with %{original_job: original} <- inputs,
-         {:ok, job} <- RunMutation.match_source(state.identifiers, mutation, original) do
+    with {:ok, job} <- joined_source(state.identifiers, mutation, inputs) do
       cond do
         state.operation != nil and state.operation.logical["operation_identity"] == identity ->
           {:error, :invalid_run_transition}
@@ -564,7 +562,8 @@ defmodule LoopexComposition.Delegation.RunLedger do
            operation(state, mutation["operation_identity"]),
          %{job: job} <- Map.get(operation.attempts, job_id),
          true <- job == mutation["job"] and not MapSet.member?(operation.receipts, job_id),
-         %{receipt: bytes, original_job: original} <- inputs,
+         %{receipt: bytes} <- inputs,
+         {:ok, original} <- joined_job(state.identifiers, mutation, inputs),
          true <- hash(bytes) == mutation["receipt_sha256"],
          {:ok, _receipt} <- receipt_object(bytes, state.identifiers, mutation, original) do
       operation = %{operation | receipts: MapSet.put(operation.receipts, job_id)}
@@ -575,7 +574,64 @@ defmodule LoopexComposition.Delegation.RunLedger do
     end
   end
 
+  # Concept: a frame joins its attempt by the original job or, on replay below a
+  # validated coverage watermark, by its retained job-index entry.
+  # Technical depth: live admission always validates the complete original
+  # JobRequest. A replayed frame whose original intent lies below the watermark
+  # of a coverage entry that validated this start is joined to the job index
+  # entry's exact projection instead; that frame was fully validated when it was
+  # first admitted and its bytes are checksummed. No new frame is ever admitted
+  # this way, and the cutoff and Core receipt checks it skips were proved then.
+  defp joined_job(_identifiers, mutation, %{indexed_job: projection}) do
+    if mutation["job"] == projection, do: {:ok, :indexed}, else: :error
+  end
+
+  defp joined_job(identifiers, mutation, %{original_job: original}) do
+    case RunMutation.match_job(identifiers, mutation, original) do
+      :ok -> {:ok, original}
+      _ -> :error
+    end
+  end
+
+  defp joined_job(_identifiers, _mutation, _inputs), do: :error
+
+  defp joined_source(_identifiers, mutation, %{indexed_job: job}) do
+    source = mutation["source_intent"]
+    operation = mutation["operation_identity"]
+
+    if job["session_id"] == source["session_id"] and
+         job["canonical_request_digest"] == source["canonical_request_digest"] and
+         job["operation_id"] == operation["operation_id"] and
+         job["run_id"] == operation["parent_run_id"],
+       do: {:ok, job},
+       else: :error
+  end
+
+  defp joined_source(identifiers, mutation, %{original_job: original}),
+    do: RunMutation.match_source(identifiers, mutation, original)
+
+  defp joined_source(_identifiers, _mutation, _inputs), do: :error
+
+  defp exceeds_cutoff?(_mutation, :indexed), do: false
+
+  defp exceeds_cutoff?(mutation, original),
+    do: mutation["absolute_cutoff_ms"] > original.effective_job_deadline
+
   @doc false
+  def receipt_object(bytes, [runtime | _], mutation, :indexed) do
+    with {:ok, object} <- LedgerCodec.decode_json(bytes, :object),
+         true <- closed?(object, ~w(version kind runtime_id operation_identity job receipt)),
+         true <- object["version"] === 1 and object["kind"] == "receipt",
+         true <- object["runtime_id"] == Base.encode64(runtime),
+         true <- object["operation_identity"] == mutation["operation_identity"],
+         true <- object["job"] == mutation["job"],
+         {:ok, plain} <- plain_receipt(object["receipt"]) do
+      {:ok, plain}
+    else
+      _ -> {:error, :invalid_receipt_object}
+    end
+  end
+
   def receipt_object(bytes, [runtime | _] = identifiers, mutation, original) do
     with {:ok, object} <- LedgerCodec.decode_json(bytes, :object),
          true <- closed?(object, ~w(version kind runtime_id operation_identity job receipt)),

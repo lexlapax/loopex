@@ -232,6 +232,17 @@ defmodule LoopexComposition.DelegationRuntimeFixture do
     :ok
   end
 
+  # Concept: lose every host process this fixture ever started, known or not.
+  def crash_all(base) do
+    for {:pid, _kind, pid} <- Agent.get(base.owned, & &1), Process.alive?(pid) do
+      ref = Process.monitor(pid)
+      Process.exit(pid, :kill)
+      assert_receive {:DOWN, ^ref, :process, ^pid, _}, 5_000
+    end
+
+    :ok
+  end
+
   def restart(fixture, options \\ []) do
     crash(fixture)
     boot(fixture, Keyword.merge([recover_stale_writer: true, classify: true], options))

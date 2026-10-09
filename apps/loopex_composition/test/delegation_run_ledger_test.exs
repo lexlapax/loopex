@@ -689,6 +689,23 @@ defmodule LoopexComposition.DelegationRunLedgerTest do
     assert released.credit == 0 and released.count == 1 and released.charged_tokens == 0
   end
 
+  test "indexed replay joins only the exact job-index projection of a retained frame" do
+    context = fixture()
+    {ready, _} = initialized(context)
+    {tx, inputs} = reservation(context, ready, job(context, 1))
+    assert {:ok, live, _} = RunLedger.admit(ready, tx, inputs)
+    indexed = %{indexed_job: tx["mutation"]["job"], child_creation: inputs.child_creation}
+    assert {:ok, replayed, _} = RunLedger.admit(ready, tx, indexed)
+    assert replayed == live
+    other = %{indexed | indexed_job: project(job(context, 2))}
+    assert RunLedger.admit(ready, tx, other) == {:error, :original_job_mismatch}
+    stop = stop_transaction(live, inputs.original_job, "cancel")
+    assert {:ok, _, _} = RunLedger.admit(live, stop, %{indexed_job: tx["mutation"]["job"]})
+
+    assert RunLedger.admit(live, stop, %{indexed_job: project(job(context, 2))}) ==
+             {:error, :original_stop_mismatch}
+  end
+
   test "known child creation joins retained genesis digests and survives a later stop" do
     context = fixture()
     {state, _tx, inputs} = first_reserved(context)
