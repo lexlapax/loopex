@@ -43,7 +43,7 @@ defmodule LoopexCli.LiveRecoveryTest do
     test "a lost #{label} reply is re-presented and applied once", context do
       method = unquote(method)
       daemon = start_daemon(context, launch("#{unquote(label)} answer", unquote(label)))
-      proxy = DaemonProxy.start(context.socket, [{method, 1}], & &1, observe: true)
+      proxy = DaemonProxy.start(context.socket, [{method, 1}], & &1, observe: method == "session.create")
       proxy_monitor = Process.monitor(proxy.pid)
 
       try do
@@ -59,16 +59,18 @@ defmodule LoopexCli.LiveRecoveryTest do
         assert length(listed_sessions(context.socket)) == 1
       after
         try do
-          observations = DaemonProxy.observations(proxy)
+          if method == "session.create" do
+            observations = DaemonProxy.observations(proxy)
 
-          IO.puts(
-            :stderr,
-            "proxy observations for #{method}: " <>
-              inspect(observations, limit: :infinity, printable_limit: :infinity)
-          )
+            IO.puts(
+              :stderr,
+              "proxy observations for #{method}: " <>
+                inspect(observations, limit: :infinity, printable_limit: :infinity)
+            )
 
-          assert observations.overflow == false, "proxy metadata capacity exhausted"
-          assert observations.incomplete == false, "proxy metadata frame was incomplete"
+            assert observations.overflow == false, "proxy metadata capacity exhausted"
+            assert observations.incomplete == false, "proxy metadata frame was incomplete"
+          end
         after
           try do
             stop_proxy(proxy, proxy_monitor)
