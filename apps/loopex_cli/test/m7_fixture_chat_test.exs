@@ -10,7 +10,12 @@ defmodule LoopexCli.M7FixtureChatTest do
   @fixtures Path.expand("../../../test/fixtures/m7", __DIR__)
 
   setup do
-    root = Path.join(System.tmp_dir!(), "m7-preparation-#{System.unique_integer([:positive])}")
+    root =
+      Path.join(
+        System.tmp_dir!(),
+        "m7-preparation-#{System.pid()}-#{System.unique_integer([:positive])}"
+      )
+
     File.mkdir_p!(root)
     on_exit(fn -> File.rm_rf!(root) end)
     catalog_root = Path.join(root, "catalog")

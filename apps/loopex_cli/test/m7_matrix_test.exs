@@ -13,7 +13,12 @@ defmodule LoopexCli.M7MatrixTest do
   @digest String.duplicate("0", 64)
 
   setup do
-    root = Path.join(System.tmp_dir!(), "m7-matrix-#{System.unique_integer([:positive])}")
+    root =
+      Path.join(
+        System.tmp_dir!(),
+        "m7-matrix-#{System.pid()}-#{System.unique_integer([:positive])}"
+      )
+
     File.mkdir_p!(Path.join(root, "markers"))
     on_exit(fn -> File.rm_rf!(root) end)
     index = Path.join(root, "attempts.jsonl")

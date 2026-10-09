@@ -17,7 +17,12 @@ defmodule LoopexCli.M7AttemptWriterTest do
   @third String.duplicate("3", 40)
 
   setup do
-    dir = Path.join(System.tmp_dir!(), "m7-writer-#{System.unique_integer([:positive])}")
+    dir =
+      Path.join(
+        System.tmp_dir!(),
+        "m7-writer-#{System.pid()}-#{System.unique_integer([:positive])}"
+      )
+
     File.mkdir_p!(dir)
     on_exit(fn -> File.rm_rf!(dir) end)
     {:ok, dir: dir, index: Path.join(dir, "attempts.jsonl")}

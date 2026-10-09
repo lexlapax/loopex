@@ -13,7 +13,12 @@ defmodule LoopexCli.M7EvidenceTaskTest do
   @b String.duplicate("b", 64)
 
   setup do
-    root = Path.join(System.tmp_dir!(), "m7-evidence-#{System.unique_integer([:positive])}")
+    root =
+      Path.join(
+        System.tmp_dir!(),
+        "m7-evidence-#{System.pid()}-#{System.unique_integer([:positive])}"
+      )
+
     File.mkdir_p!(Path.join(root, "docs/plans"))
     File.mkdir_p!(Path.join(root, "test/fixtures"))
     File.cp_r!(Path.join(@repository, "test/fixtures/m7"), Path.join(root, "test/fixtures/m7"))

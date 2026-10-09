@@ -16,7 +16,12 @@ defmodule LoopexCli.M7EphemeralDemoTest do
   }
 
   setup do
-    root = Path.join(System.tmp_dir!(), "m7-ephemeral-#{System.unique_integer([:positive])}")
+    root =
+      Path.join(
+        System.tmp_dir!(),
+        "m7-ephemeral-#{System.pid()}-#{System.unique_integer([:positive])}"
+      )
+
     File.mkdir_p!(Path.join(root, "workspace"))
     on_exit(fn -> File.rm_rf!(root) end)
     %{root: root}

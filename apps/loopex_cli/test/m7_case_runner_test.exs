@@ -36,7 +36,12 @@ defmodule LoopexCli.M7CaseRunnerTest do
   @fixed "defmodule Ledger do\n  def total(entries), do: Enum.sum(entries)\nend\n"
 
   setup do
-    root = Path.join(System.tmp_dir!(), "m7-case-runner-#{System.unique_integer([:positive])}")
+    root =
+      Path.join(
+        System.tmp_dir!(),
+        "m7-case-runner-#{System.pid()}-#{System.unique_integer([:positive])}"
+      )
+
     File.mkdir_p!(Path.join(root, "runs"))
     File.mkdir_p!(Path.join(root, "markers"))
     on_exit(fn -> File.rm_rf!(root) end)

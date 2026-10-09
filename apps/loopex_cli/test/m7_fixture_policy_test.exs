@@ -29,7 +29,12 @@ defmodule LoopexCli.M7FixturePolicyTest do
   @fixtures Path.expand("../../../test/fixtures/m7", __DIR__)
 
   setup do
-    root = Path.join(System.tmp_dir!(), "m7-pinned-policy-#{System.unique_integer([:positive])}")
+    root =
+      Path.join(
+        System.tmp_dir!(),
+        "m7-pinned-policy-#{System.pid()}-#{System.unique_integer([:positive])}"
+      )
+
     workspace = Path.join(root, "workspace")
     trusted = Path.join(root, "trusted")
     File.mkdir_p!(trusted)
