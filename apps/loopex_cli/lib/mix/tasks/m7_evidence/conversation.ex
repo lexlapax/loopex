@@ -32,7 +32,8 @@ defmodule Mix.Tasks.Loopex.M7Evidence.Conversation do
   `owner` for its independent observation and waits for the reply; a refused
   observation ends input. `:release` writes one line to the FIFO, which lets
   the runner finish; nothing else releases it. `:interrupt` asks the owner to
-  deliver the terminal interrupt. Stopping the device closes the holder without
+  deliver the terminal interrupt. `:await_gate` waits until the owner reports
+  that its pre-transport model gate holds a request. Stopping the device closes the holder without
   writing, and an unopened FIFO is unblocked by a reader that discards nothing.
   """
 
@@ -65,6 +66,7 @@ defmodule Mix.Tasks.Loopex.M7Evidence.Conversation do
        held: false,
        released: false,
        observed: nil,
+       gate_held: false,
        events: []
      }}
   end
@@ -88,6 +90,9 @@ defmodule Mix.Tasks.Loopex.M7Evidence.Conversation do
     events = [:released, :hold_expired | state.events]
     {:noreply, serve(%{state | steps: [], released: true, events: events})}
   end
+
+  def handle_info(:gate_held, state),
+    do: {:noreply, serve(%{state | gate_held: true, events: [:gate_held | state.events]})}
 
   def handle_info({:observed, result}, state),
     do:
@@ -240,6 +245,9 @@ defmodule Mix.Tasks.Loopex.M7Evidence.Conversation do
     send(pid, :release)
     {:skip, %{state | released: true, events: [:released | state.events]}}
   end
+
+  defp next(:await_gate, %{gate_held: true} = state), do: {:skip, state}
+  defp next(:await_gate, state), do: {:wait, state}
 
   defp next(:interrupt, state) do
     if state.owner, do: send(state.owner, {:conversation_interrupt, self()})

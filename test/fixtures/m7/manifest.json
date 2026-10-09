@@ -267,7 +267,7 @@
         "credential": true,
         "driver": "provider-wrapper",
         "lane": "m7-provider",
-        "status": "pending:pre-transport cancellation gate driver",
+        "status": "ready",
         "steps": [
           "V7.7.cancel"
         ]

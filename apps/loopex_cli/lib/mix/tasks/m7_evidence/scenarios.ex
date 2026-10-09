@@ -33,6 +33,12 @@ defmodule Mix.Tasks.Loopex.M7Evidence.Scenarios do
     {@fable, "high"}
   ]
   @bound_cells [{@dated, "default"}, {@dated, "none"} | @thinking_cells]
+  @cancel_cell {@fable, "low"}
+  @cut_prompts [
+    "Use the read tool on a.txt, then report its word.",
+    "Without any tool, state the word you read.",
+    "Without any tool, state that word once more."
+  ]
   @rounds_facts %{"a.txt" => "cedar", "b.txt" => "seven", "c.txt" => "amber"}
   @rounds_files Map.new(@rounds_facts, fn {path, word} -> {path, word <> "\n"} end)
   @rounds_prompt "Read a.txt, then b.txt, then c.txt, one read tool call at a time and in that order. Then reply with the three words you read, in order."
@@ -569,16 +575,93 @@ defmodule Mix.Tasks.Loopex.M7Evidence.Scenarios do
     }
   end
 
+  # V7.7 cancel: on its pinned cell, the trusted gate holds the second staged
+  # request after the first tool group commits; the observer joins it and the
+  # operator's abort cancels the run before transport. The two later prompts
+  # and their oracle are the bound case's.
+  def get("m7.thinking-cancel") do
+    %{
+      seed: @rounds_files,
+      allowed: [],
+      profile: fn profile ->
+        profile
+        |> put_in(["session", "model"], @dated)
+        |> put_in(["session", "max_tokens"], 8_192)
+        |> put_in(["session", "tools"], "read-only")
+      end,
+      plan: fn context ->
+        {model, reasoning} = cancel_cell(context)
+        [first, second, third] = @cut_prompts
+
+        {:ok,
+         [
+           %{
+             resume: false,
+             cut: true,
+             steps: [
+               {:line, ~s(/configure {"model":"#{model}","reasoning":"#{reasoning}"})},
+               {:line, first},
+               :await_gate,
+               {:line, "/status"},
+               {:await, ~s("event":"status")},
+               :observe,
+               {:line, "/abort"},
+               {:line, "/wait"},
+               {:line, second},
+               {:line, "/wait"},
+               {:line, third},
+               {:line, "/wait"},
+               {:line, "/quit"}
+             ]
+           }
+         ]}
+      end,
+      joins: fn rows, outcome, _workspace ->
+        observed? =
+          Enum.any?(outcome.events, &match?({:observed, {:ok, _}}, &1)) and
+            :gate_held in outcome.events
+
+        # The held attempt settles truthfully: the gate admitted its callback,
+        # so its dispatch stays dispatched_or_unknown though no bytes left.
+        cut =
+          Enum.find(
+            rows,
+            &(&1.payload.kind == "run_terminal_committed" and &1.payload["outcome"] == "cancelled")
+          )
+
+        held =
+          cut &&
+            rows
+            |> Enum.filter(
+              &(&1.payload.kind == "model_attempt_settled_v3" and
+                  &1.payload["run_id"] == cut.payload["run_id"])
+            )
+            |> List.last()
+
+        cond do
+          not observed? -> {:missing, :gate_observation}
+          is_nil(held) -> {:missing, :held_attempt}
+          held.payload["transport"] != "dispatched_or_unknown" -> {:failed, :held_dispatch}
+          true -> thinking_cut(rows, [@cancel_cell], "cancelled")
+        end
+      end
+    }
+  end
+
   def get(_case_id), do: nil
 
   @doc false
-  def bound_cells, do: @bound_cells
+  def cancel_cell, do: @cancel_cell
 
-  @cut_prompts [
-    "Use the read tool on a.txt, then report its word.",
-    "Without any tool, state the word you read.",
-    "Without any tool, state that word once more."
-  ]
+  defp cancel_cell(context) do
+    case get_in(context, [:pins, "cancel_cell"]) do
+      %{"model" => model, "reasoning" => reasoning} -> {model, reasoning}
+      _ -> @cancel_cell
+    end
+  end
+
+  @doc false
+  def bound_cells, do: @bound_cells
 
   # Each later cell first checkpoints the earlier cells' native history.
   defp cut_steps(cells) do

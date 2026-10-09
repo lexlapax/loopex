@@ -149,6 +149,16 @@ and summarizes with Haiku at reasoning `none`. The adapter registers Haiku at
 Anthropic route. The case therefore proves distinct models, not distinct
 provider routes. Pins `thinking_model` and `summarizer` override the models.
 
+`m7.thinking-bound` cuts each of the nine ADR 0044 cells with a one-turn
+limit after its first tool group commits. `m7.thinking-cancel` instead wraps
+the selected adapter with the trusted pre-transport cancellation gate. The
+gate holds the second staged request, the observer joins the committed tool
+result, and the wrapper sends `/abort`. In both cases two later prompts on the
+same model must complete without replaying the cut run's native state, and the
+last reply must use native thinking exactly when the cell requires
+continuation. The cancel case's pinned cell is Fable at `low`; pin
+`cancel_cell` overrides it.
+
 The wrapper restores the configuration's named credential variables before
 each conversation, because composition consumes them and every case runs in
 one VM.
@@ -327,6 +337,6 @@ One row per manifest case in lane order; `pending:` names what still blocks it.
 | `m7.instructions.changed` | `m7-provider` | scenario-chat | `ready` |
 | `m7.cross-provider-maintenance` | `m7-provider` | provider-wrapper | `ready` |
 | `m7.thinking-bound` | `m7-provider` | provider-wrapper | `ready` |
-| `m7.thinking-cancel` | `m7-provider` | provider-wrapper | `pending:pre-transport cancellation gate driver` |
+| `m7.thinking-cancel` | `m7-provider` | provider-wrapper | `ready` |
 | `m7.daemon-detach` | `m7-provider` | provider-wrapper | `pending:daemon host fixture driver` |
 | `m7.rollback` | `m7-rollback` | release-lane | `ready` |

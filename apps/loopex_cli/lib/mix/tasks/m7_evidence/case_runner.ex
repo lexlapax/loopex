@@ -43,6 +43,7 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
 
   alias LoopexCli.{Chat, M7FixtureChat}
   alias LoopexCli.Policy.M7Fixture, as: Policy
+  alias LoopexCli.Model.M7CancellationGate, as: CancellationGate
   alias LoopexComposition.WorkspaceIdentity
   alias LoopexProtocol.Canonical
 
@@ -1083,6 +1084,7 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
         else: Conversation.start(steps, step_deadline(context), known, self())
 
     observed = :observe in steps
+    gate = if :await_gate in steps, do: start_gate(), else: nil
 
     {input, output, chat_mode} =
       if mode == :terminal, do: {:stdio, :stdio, :interactive}, else: {device, device, :pipe}
@@ -1098,9 +1100,11 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
         fixture_policy: staged.capture
       ] ++ Map.get(context, :chat_options, [])
 
-    options = if observed, do: observer_runtime(options, self()), else: options
+    options = if gate, do: gated_model(options, gate), else: options
+    options = if observed or gate, do: observer_runtime(options, self()), else: options
     restore_credentials(context)
-    exit = host(fn -> Chat.run(staged.config_argv ++ extra, options) end, device)
+    exit = host(fn -> Chat.run(staged.config_argv ++ extra, options) end, device, gate)
+    if gate, do: CancellationGate.stop(gate, System.monotonic_time(:millisecond) + 5_000)
     {_, stderr} = StringIO.contents(diagnostics)
 
     {stdout, events} =
@@ -1134,29 +1138,38 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
   # loss can end it abruptly, as an operator's kill would.
   # Technical depth: the host is killed only on its device's request; its
   # linked runtime dies with it and the durable store keeps what committed.
-  defp host(run, device) do
+  defp host(run, device, gate) do
     parent = self()
     {pid, ref} = spawn_monitor(fn -> send(parent, {:conversation_exit, self(), run.()}) end)
-    await_host(pid, ref, device, nil)
+    await_host(pid, ref, device, nil, gate)
   end
 
-  defp await_host(pid, ref, device, runtime) do
+  defp await_host(pid, ref, device, runtime, gate) do
     receive do
       {:conversation_exit, ^pid, exit} ->
         Process.demonitor(ref, [:flush])
         exit
 
       {:m7_observed_runtime, observed} ->
-        await_host(pid, ref, device, observed)
+        if gate, do: bind_gate(gate, observed)
+        await_host(pid, ref, device, observed, gate)
+
+      # The gate holds the second staged request before transport.
+      {:loopex_m7_gate, :held, ^gate, _callback, _digest, _token} when device != nil ->
+        send(device, :gate_held)
+        await_host(pid, ref, device, runtime, gate)
+
+      {:loopex_m7_gate, :permitted, ^gate, _callback, _digest, _count} ->
+        await_host(pid, ref, device, runtime, gate)
 
       {:conversation_observe, ^device, output} when device != nil ->
         send(device, {:observed, observe(runtime, output)})
-        await_host(pid, ref, device, runtime)
+        await_host(pid, ref, device, runtime, gate)
 
       # The terminal interrupt as the chat's signal holder receives it.
       {:conversation_interrupt, ^device} when device != nil ->
         :gen_event.notify(:erl_signal_server, :sigterm)
-        await_host(pid, ref, device, runtime)
+        await_host(pid, ref, device, runtime, gate)
 
       {:conversation_lose, ^device} when device != nil ->
         Process.exit(pid, :kill)
@@ -1168,6 +1181,38 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
       {:DOWN, ^ref, :process, ^pid, _} ->
         1
     end
+  end
+
+  # Concept: V7.7's trusted pre-transport cancellation gate, the one model
+  # override the plan admits besides the fixture policy.
+  # Technical depth: this runner is the gate's host; composition wraps its
+  # selected adapter with the gate, which delegates the exact call and holds
+  # only the second distinct staged request. It binds to the runtime's control.
+  defp start_gate do
+    {:ok, gate} = CancellationGate.start_link(self())
+    Process.unlink(gate)
+    gate
+  end
+
+  defp gated_model(options, gate) do
+    base = Keyword.get(options, :with_runtime, &LoopexComposition.with_runtime/2)
+
+    wrap = fn adapter ->
+      %{
+        module: CancellationGate,
+        model: adapter.model,
+        options: CancellationGate.options(gate, adapter.module, adapter.options)
+      }
+    end
+
+    Keyword.put(options, :with_runtime, fn composition, callback ->
+      base.(Keyword.put(composition, :model_adapter, wrap), callback)
+    end)
+  end
+
+  defp bind_gate(gate, runtime) do
+    with {:ok, %{control: control}} <- Loopex.Runtime.children(runtime),
+         do: CancellationGate.bind_control(gate, control)
   end
 
   # Concept: the independent observer is a read-only attachment to the same
@@ -1232,7 +1277,7 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
     tool =
       Enum.find(
         events,
-        &(&1[:kind] == "tool.started" and &1["run_id"] == run and &1["tool_id"] == "loopex.bash")
+        &(&1[:kind] == "tool.started" and &1["run_id"] == run)
       )
 
     cond do

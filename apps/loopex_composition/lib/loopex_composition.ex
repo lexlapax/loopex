@@ -104,6 +104,10 @@ defmodule LoopexComposition do
   once for this runtime. Missing or nil remains unconfigured; composition
   supplies no instruction default.
 
+  Optional trusted `:model_adapter` is a one-argument function that wraps the
+  selected `%{module:, model:, options:}` adapter map, for a harness gate that
+  delegates the exact call. It has no configuration grammar.
+
   Optional `:maintenance_model` resolves once against the admitted provider routes
   with the registered thinking-off mapping and fixed maintenance reply allowance.
   Nil remains unconfigured. Explicit `:provider_bindings` admits only its named
@@ -224,7 +228,7 @@ defmodule LoopexComposition do
                  [
                    model:
                      LoopexComposition.Model.reference(
-                       %{
+                       model_adapter(options, %{
                          module: ReqLLM,
                          model: Keyword.get(options, :model, ReqLLM.default_model()),
                          options:
@@ -236,7 +240,7 @@ defmodule LoopexComposition do
                                    ReqLLM.credential_variable()
                                  ])
                              ]
-                       },
+                       }),
                        options
                      )
                  ] ++
@@ -252,6 +256,18 @@ defmodule LoopexComposition do
         Logger.debug("reference composition trace capability bound")
         {:ok, runtime}
       end
+    end
+  end
+
+  # Concept: a trusted harness may wrap the selected adapter with a Model-port
+  # gate that delegates the exact call, such as M7's pre-transport
+  # cancellation gate. Ordinary hosts supply none.
+  # Technical depth: the wrapper receives the closed adapter map and returns
+  # one; route admission, credentials and the reference wrapper are unchanged.
+  defp model_adapter(options, adapter) do
+    case Keyword.get(options, :model_adapter) do
+      wrap when is_function(wrap, 1) -> wrap.(adapter)
+      _ -> adapter
     end
   end
 

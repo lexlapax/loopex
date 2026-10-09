@@ -1022,6 +1022,30 @@ defmodule LoopexCli.M7CaseRunnerTest do
     assert facts(result)["join"] =~ "native_thinking"
   end
 
+  # The held second request never reaches the fixture: the abort cancels it
+  # before transport, so only the tool reply and the two later replies exist.
+  @tag timeout: 120_000
+  test "thinking cancel aborts the gated second request and resumes native thinking", f do
+    cell = Mix.Tasks.Loopex.M7Evidence.Scenarios.cancel_cell()
+    [_summaryless | _] = replies = cut_replies([cell])
+
+    fixture =
+      Loopex.LLM.ReqLLM.ProviderIsolationFixture.new(:reply,
+        credential: "m7-thinking-cancel-synthetic",
+        response_bodies: replies
+      )
+
+    result =
+      passed!(
+        scenario!(f, "m7.thinking-cancel", fn _ -> [] end, %{chat_options: native!(f, fixture)})
+      )
+
+    inputs = File.read!(Path.join(result.root, "records/input-1.txt"))
+    [held, abort] = Enum.map([":gate_held", "/abort"], &elem(:binary.match(inputs, &1), 0))
+    assert held < abort
+    assert facts(result)["kinds"]["run_terminal_committed"] == 3
+  end
+
   test "provider switch moves A to B, reopens and returns to A with its tool facts", f do
     profile =
       put_in(profile(f.root), ["providers", "openai"], %{
