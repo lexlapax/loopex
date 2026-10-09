@@ -184,7 +184,7 @@
         "credential": true,
         "driver": "demonstration",
         "lane": "m7-operator",
-        "status": "pending:controlled process-loss driver",
+        "status": "ready",
         "steps": [
           "V5.3"
         ]

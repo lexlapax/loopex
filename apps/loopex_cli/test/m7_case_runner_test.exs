@@ -683,6 +683,54 @@ defmodule LoopexCli.M7CaseRunnerTest do
     assert refused.mechanical_result == "evidence_incomplete_pre_dispatch"
   end
 
+  test "question restart keeps the pending identity through process loss and answers it after reopen",
+       f do
+    [%{"arguments" => question}] =
+      f.context.manifest["fixtures"]["feature"]["required_model_actions"]
+
+    script = fn
+      _capture, 1 ->
+        [%{text: "ask", calls: [%{id: "nil-choice", name: "ask", arguments: question}]}]
+
+      capture, _ ->
+        [
+          %{
+            text: "implement",
+            calls: [
+              %{
+                id: "write",
+                name: "write",
+                arguments: %{"path" => "lib/row_encoder.ex", "content" => encoder("literal_null")}
+              }
+            ]
+          },
+          %{
+            text: "test",
+            calls: [
+              %{
+                id: "oracle",
+                name: "bash",
+                arguments: %{"argv" => capture.argv ++ ["literal_null"]}
+              }
+            ]
+          },
+          %{text: "done", calls: []}
+        ]
+    end
+
+    context =
+      Map.merge(f.context, %{
+        manifest: lane(f.context.manifest, ["m7.question-restart"]),
+        answers: %{"m7.question-restart" => "choice-2"},
+        chat_options: chat_options(f, script, self())
+      })
+
+    result = passed!(CaseRunner.run_lane(f.writer, "m7-operator", context))
+    assert facts(result)["kinds"]["model_question_requested_v1"] == 1
+    assert File.read!(Path.join(result.root, "records/input-1.txt")) =~ "process_loss"
+    assert File.read!(Path.join(result.root, "records/input-2.txt")) =~ "/answer "
+  end
+
   test "the wrapper command checks admission without staging and refuses bad arguments", f do
     :ok = AttemptWriter.close(f.writer)
     root = Path.expand("../../..", __DIR__)

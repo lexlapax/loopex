@@ -69,7 +69,8 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
     terminal: :boolean,
     check: :boolean,
     candidate: :string,
-    pins: :string
+    pins: :string,
+    answer: :string
   ]
 
   @doc """
@@ -83,6 +84,7 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
   `--lane LANE --attempts-index FILE --writer ID --host ID --markers DIR
   --run-root DIR --operator NAME [--create] [--continue] [--matrix ID]
   [--terminal] [--external-repository DIR] [--pins FILE] [--candidate SHA]
+  [--answer choice-1|choice-2]
   [--check] chat --config FILE`. It runs from the clean candidate checkout, or
   from its extraction with `--candidate`. `--matrix` joins, continues or skips
   the lane within that logical matrix by the index alone; `--pins` supplies
@@ -118,7 +120,8 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
             dispatch: if(opts[:terminal], do: :terminal, else: :pipe),
             operator: opts[:operator],
             external_repository: opts[:external_repository],
-            pins: read_pins(opts[:pins])
+            pins: read_pins(opts[:pins]),
+            answers: Map.new(~w(m7.feature m7.question-restart), &{&1, opts[:answer]})
           },
           Map.drop(overrides, [:root, :candidate, :secrets])
         )
@@ -463,7 +466,13 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
   # Technical depth: the runner and oracle live outside the workspace and are
   # pinned with the shell, env, interpreter and catalog before preparation.
   defp stage(case_id, root, context) do
-    name = String.replace_prefix(case_id, "m7.", "")
+    # The question-restart case reuses the feature fixture and its policy.
+    name =
+      if case_id == "m7.question-restart",
+        do: "feature",
+        else: String.replace_prefix(case_id, "m7.", "")
+
+    policy_case = "m7." <> name
     entry = FixtureManifest.entry(context.manifest, name)
     workspace = Path.join(root, "workspace")
     trusted = Path.join(root, "trusted")
@@ -475,7 +484,7 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
          {:ok, _} <- File.copy(Path.join(context.catalog_root, entry["oracle"]["path"]), oracle),
          :ok <- File.chmod(oracle, entry["oracle"]["mode"]),
          environment = Map.get(context, :environment, %{}),
-         {:ok, recipe} <- Policy.oracle_runner(case_id, workspace, oracle, environment),
+         {:ok, recipe} <- Policy.oracle_runner(policy_case, workspace, oracle, environment),
          runner = Path.join(trusted, "run.sh"),
          :ok <- File.write(runner, recipe.bytes),
          :ok <- File.chmod(runner, 0o644),
@@ -489,7 +498,7 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
              catalog_path(context)
            ]),
          fixture = %{
-           case_id: case_id,
+           case_id: policy_case,
            catalog_root: context.catalog_root,
            workspace: workspace,
            runner: runner,
@@ -515,7 +524,8 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
          trusted: trusted,
          config_argv: config_argv,
          conversations: conversations,
-         scenario: nil
+         scenario: nil,
+         case_id: case_id
        }}
     else
       {:error, reason} -> {:error, reason}
@@ -687,6 +697,27 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
     end
   end
 
+  def plan("m7.question-restart", entry, context) do
+    choice = get_in(context, [:answers, "m7.question-restart"])
+    [prompt] = entry["prompts"]
+
+    cond do
+      choice in ["choice-1", "choice-2"] ->
+        {:ok,
+         [
+           %{resume: false, steps: [{:line, prompt}, {:await, ~s("event":"question")}, :lose]},
+           %{
+             resume: true,
+             reanswer: true,
+             steps: [{:answer, choice}, {:line, "/wait"}, {:line, "/status"}, {:line, "/quit"}]
+           }
+         ]}
+
+      true ->
+        {:error, :question_restart_requires_operator}
+    end
+  end
+
   def plan("m7.external", entry, _context), do: {:ok, [barriers(entry["prompts"])]}
   def plan(_case_id, _entry, _context), do: {:error, :case_driver_unavailable}
 
@@ -729,11 +760,12 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
         outcome(Enum.reverse(done), session)
 
       true ->
-        result = chat(staged, context, conversation.steps, mode, extra, n, questions(done))
+        known = if conversation[:reanswer], do: [], else: questions(done)
+        result = chat(staged, context, conversation.steps, mode, extra, n, known)
         result = Map.put(result, :session, session_id(result.output))
         session = session || result.session
 
-        if result.exit == 0,
+        if result.exit == 0 or (result.exit == :lost and :lose in conversation.steps),
           do: converse(rest, staged, context, mode, session, [result | done], n + 1),
           else: outcome(Enum.reverse([result | done]), session)
     end
@@ -741,7 +773,7 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
 
   defp outcome(results, session) do
     %{
-      exit: if(results != [] and Enum.all?(results, &(&1.exit == 0)), do: 0, else: 1),
+      exit: if(results != [] and Enum.all?(results, &(&1.exit in [0, :lost])), do: 0, else: 1),
       conversations: length(results),
       session: session,
       sessions: results |> Enum.map(& &1.session) |> Enum.reject(&is_nil/1) |> Enum.uniq(),
@@ -765,7 +797,7 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
     {:ok, device} =
       if mode == :terminal,
         do: {:ok, nil},
-        else: Conversation.start(steps, step_deadline(context), known)
+        else: Conversation.start(steps, step_deadline(context), known, self())
 
     {input, output, chat_mode} =
       if mode == :terminal, do: {:stdio, :stdio, :interactive}, else: {device, device, :pipe}
@@ -781,7 +813,7 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
         fixture_policy: staged.capture
       ] ++ Map.get(context, :chat_options, [])
 
-    exit = Chat.run(staged.config_argv ++ extra, options)
+    exit = host(fn -> Chat.run(staged.config_argv ++ extra, options) end, device)
     {_, stderr} = StringIO.contents(diagnostics)
 
     {stdout, inputs} =
@@ -806,6 +838,34 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
   end
 
   defp step_deadline(context), do: Map.get(context, :step_deadline_ms, 600_000)
+
+  # Concept: the conversation host runs in its own process so a prescribed
+  # loss can end it abruptly, as an operator's kill would.
+  # Technical depth: the host is killed only on its device's request; its
+  # linked runtime dies with it and the durable store keeps what committed.
+  defp host(run, device) do
+    parent = self()
+    {pid, ref} = spawn_monitor(fn -> send(parent, {:conversation_exit, self(), run.()}) end)
+    await_host(pid, ref, device)
+  end
+
+  defp await_host(pid, ref, device) do
+    receive do
+      {:conversation_exit, ^pid, exit} ->
+        Process.demonitor(ref, [:flush])
+        exit
+
+      {:conversation_lose, ^device} when device != nil ->
+        Process.exit(pid, :kill)
+
+        receive do
+          {:DOWN, ^ref, :process, ^pid, _} -> :lost
+        end
+
+      {:DOWN, ^ref, :process, ^pid, _} ->
+        1
+    end
+  end
 
   defp session_id(output) do
     output
@@ -902,6 +962,18 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
     end
   end
 
+  # The restart case: the one question survives the prescribed loss with its
+  # identity and is answered only after reopening.
+  def joins("m7.question-restart", rows, entry, outcome) do
+    requested = Enum.filter(rows, &(kind(&1) == "model_question_requested_v1"))
+
+    cond do
+      outcome.conversations < 2 -> {:missing, :restart}
+      length(requested) != 1 -> {:failed, :question_identity_changed}
+      true -> joins("m7.feature", rows, entry, outcome)
+    end
+  end
+
   def joins("m7.long", rows, entry, outcome) do
     [facts | _] = entry["prompts"]
 
@@ -958,7 +1030,7 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
         join =
           if staged.scenario,
             do: staged.scenario.joins.(rows, outcome, staged.fixture.workspace),
-            else: joins(staged.fixture.case_id, rows, staged.entry, outcome)
+            else: joins(staged.case_id, rows, staged.entry, outcome)
 
         kinds = rows |> Enum.map(&kind/1) |> Enum.frequencies()
 

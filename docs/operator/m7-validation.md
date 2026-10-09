@@ -253,7 +253,7 @@ One row per manifest case in lane order; `pending:` names what still blocks it.
 | `m7.instructions.admitted` | `m7-operator` | scenario-chat | `ready` |
 | `m7.steer-barrier` | `m7-operator` | demonstration | `pending:FIFO hold runner and observer join` |
 | `m7.feature` | `m7-operator` | fixture-chat | `ready` |
-| `m7.question-restart` | `m7-operator` | demonstration | `pending:controlled process-loss driver` |
+| `m7.question-restart` | `m7-operator` | demonstration | `ready` |
 | `m7.ephemeral-question` | `m7-operator` | demonstration | `pending:scripts/m7-ephemeral-question-demo.exs` |
 | `m7.long` | `m7-operator` | fixture-chat | `pending:loopex chat composes no maintenance instructions, so every compaction refuses maintenance_instructions_unconfigured` |
 | `m7.oversized-source` | `m7-operator` | demonstration | `pending:oversized-source fixture` |

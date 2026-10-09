@@ -17,7 +17,9 @@ defmodule Mix.Tasks.Loopex.M7Evidence.Conversation do
   or `/decline ID` with that record's exact printed identities; `choice`
   names a choice by its label or decoded identity. Every wait is bounded
   by the step deadline; expiry records `timeout` and ends input, which the
-  conversation sees as end of file. `known` lists interaction IDs an earlier
+  conversation sees as end of file. `:lose` asks the
+  `owner` process to end the conversation's host abruptly, the prescribed
+  process loss; nothing is written after it. `known` lists interaction IDs an earlier
   conversation of the same session already settled: a reopened conversation
   replays their records, and they are never answered again. `transcript/1` returns the output and the
   ordered observations without stopping the server.
@@ -26,8 +28,8 @@ defmodule Mix.Tasks.Loopex.M7Evidence.Conversation do
   use GenServer
 
   @doc false
-  def start(steps, deadline_ms \\ 120_000, known \\ []),
-    do: GenServer.start(__MODULE__, {steps, deadline_ms, known})
+  def start(steps, deadline_ms \\ 120_000, known \\ [], owner \\ nil),
+    do: GenServer.start(__MODULE__, {steps, deadline_ms, known, owner})
 
   @doc false
   def transcript(device), do: GenServer.call(device, :transcript)
@@ -36,9 +38,10 @@ defmodule Mix.Tasks.Loopex.M7Evidence.Conversation do
   def stop(device), do: GenServer.stop(device)
 
   @impl true
-  def init({steps, deadline, known}) do
+  def init({steps, deadline, known, owner}) do
     {:ok,
      %{
+       owner: owner,
        steps: steps,
        deadline: deadline,
        output: "",
@@ -151,6 +154,15 @@ defmodule Mix.Tasks.Loopex.M7Evidence.Conversation do
   end
 
   defp next(:decline, state), do: question(state, &"/decline #{&1["interaction_id"]}")
+
+  # Controlled process loss: the owner kills the conversation's host; this
+  # device writes nothing more.
+  defp next(:lose, state) do
+    if state.owner, do: send(state.owner, {:conversation_lose, self()})
+    {:wait, %{state | steps: [:lost], events: [:process_loss | state.events]}}
+  end
+
+  defp next(:lost, state), do: {:wait, state}
 
   # Concept: only a question the conversation actually emitted is answered.
   # Technical depth: the first unanswered question record supplies the exact
