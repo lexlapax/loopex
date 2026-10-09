@@ -28,6 +28,45 @@ physical restore implementation; it does not waive any full-history proof.
 ### Current work and restart order
 
 
+### Buffered privacy proved on both pairs; remaining T08 planes next, 2026-10-09
+
+At `764110c3cbaa320b3cd6af358c0545d62f9c0c57`, original35897 passes all55
+cases per supported pair in141.152seconds, zero exclusions/skips/invalid.
+Complete files: Composition model integration29, ambient disclosure2, public
+API19, and provider CallerWire5. Actual child-local verified TLS proves the
+Haiku-low permitted-summary and Fable-default private-thinking buffered cases;
+exact public ask/last_result/history, native canary positive controls and original
+actor retirement/joins pass. The five CallerWire cases include their existing
+native mapping matrix. This is credential-free local-provider evidence.
+
+Output `M7/buffered-thinking-privacy-focused-20261009-v1`;16 original stage
+processes joined and67 artifacts authenticated. Collection SHA-256
+`c07e84fe139baf3253f2250e589f0983843f804ad9aad3eff52caf4174785552`;
+terminal `658447c359913f6db79e809bee47d9019eb62e6d4c60fd448d9c9ca9336b54ed`;
+registry3324 `be758d4ed8263a3e26446702663e7188f13f7e0fc0e9f8134f41f65d3e18d4ec`.
+Formatter original84418 passes strict non-line AST equivalence for all four
+joined paths and both format checks in2.810seconds. Collection
+`170e4128d896e7c5cc3b55d148791b3a13af6e12e617abdf858a54cefc984906`.
+Retention child `M7/current-source-preparation-20261009-v43/retention.json`,
+SHA-256 `6d06b66ea7840539a123f0d429a61376e1331149d4c72d72b4bd4dc0a0e341bd`,
+retains126 assets and authenticates parentv42, including corrected bufferedV2,
+both independent reviews, recipes and the existing-row next-work audit.
+
+No native process is live. Next finish and review the isolated native privacy
+V3, including actual Executor-created artifact retrieval after physical reopen;
+qualify its complete file and NativeTransport on both pairs. This completes
+only the buffered part of the existing originalT08 privacy row; do not add a
+checkbox or close that row until all its proof joins. T07 independently develops
+the existing standalone ProgressSink row in
+`/private/tmp/m7-progress-sink-completion-20261009-v1`. Exact32 failed real CAS,
+physical intermediate cuts, custody and same-cutoff joins are required. No new
+public contract or changed limit is authorized. Recovery diagnostic qualification
+and the prior duplicate defect remain open. Counts unchanged: original89 done/
+84 open/6 retired; added375 done/22 open; combined464 done/106 open/6 retired.
+ADR0067 remains unanswered; no broader integration/provider/attended/closure claim.
+
+
+
 ### Buffered native privacy source joined; qualification UNRUN, 2026-10-09
 
 The corrected V2 buffered fixture is joined. Its one new integration case uses

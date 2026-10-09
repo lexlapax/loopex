@@ -1,5 +1,19 @@
 # M7 Implementation Tasks
 
+### Buffered T08 privacy proof retained; whole row remains open, 2026-10-09
+
+Original35897 at `764110c3` passes all55 cases per supported pair in141.152
+seconds, zero excluded/skipped/invalid: integration29, ambient2, API19 and
+CallerWire5. The [resume checkpoint](M7-resume.md) binds exact results, original
+joins, formatter proof and126-asset retention childv43. Native streaming/trace/
+artifact privacy with actual tool-created artifacts still awaits its complete
+joined proof; the buffered component adds no checklist row and closes none.
+T07 independently develops its existing standalone arena/custody row. The CLI
+duplicate and changed diagnostic qualification remain open. T01–T19 counts stay
+original89 done/84 open/6 retired, added375 done/22 open, combined464 done/106
+open/6 retired. ADR0067 remains the unanswered decision.
+
+
 ### Diagnostic failure retained; existing privacy proof progresses, 2026-10-09
 
 Original18074 remains FAIL11/12 current recovery cases in332.233seconds; floor
