@@ -68,14 +68,22 @@ all physical proofs remain required. Exact Concept SHA-256
 `89e1bcb090a1e1648ef289c3238f5541d0b62627778419b5084fa3295a309b6f`;
 Technical SHA-256 `6b40f8445e23a106911254ef09a14f76eff49d3cf7afd16060c94751783200d4`.
 Indexing review SHA-256 `ad3d3e41ec079bfab10b482a602e48511a8a6ae5e2d4369f91edcfcf87ab223c`.
-Its exact documentation gate is next; no dependent output implementation starts.
+Exact candidate `773e090df996d3cd2e5966244121a9b632cffbd7` passes
+`bash scripts/check.sh --docs` once, original 30983 in 25.941 seconds, two
+original joins and thirteen assets. Collection SHA-256
+`65db81c359adb6c65faa1e19897b97d73419dafad6af576934c018d39cadcc85`.
+No dependent output implementation starts; source review/docs PASS supplies
+no physical mechanism, capacity, acceptance or suite result.
 
 Retention child v35 preserves 296 assets, the six original collections, source
 packets/reviews, acquisition options and current numbered task report:
 `M7/current-source-preparation-20261009-v35/retention.json`, SHA-256
 `028c8c1db5232827f1d08902e01deef487b1f0db7b848bdc11691b314dfd7073`.
-Parent v34 remains authenticated. Every completed original was collected once;
-all agents are done and no native handle is live. T01–T19 counts are original
+Parent v34 remains authenticated. Every completed original was collected once.
+Child v36 retains the exact documentation gate as sixteen further assets,
+`M7/current-source-preparation-20261009-v36/retention.json`, SHA-256
+`335d6e04614d9e3236bbcd1ce6c0d754c961107542aa25b5639a4c47fe423bee`.
+All agents are done and no native handle is live. T01–T19 counts are original
 89 done/84 open/6 retired, added 374 done/23 open, combined 463 done/107 open/
 6 retired. Only T01, T02 and T10 are fully complete. ADR 0066 remains Accepted.
 ADR 0067 exact acceptance is the current presented human question; ADR 0065,
