@@ -43,7 +43,7 @@ defmodule Loopex.AppServer.ForegroundOutputHarness do
         {~c"LOOPEX_FOREGROUND_FIXTURE", ~c"1"},
         {~c"LOOPEX_FOREGROUND_STDERR", String.to_charlist(stderr)},
         {~c"ERL_CRASH_DUMP", String.to_charlist(Path.join(root, "crash.dump"))},
-        {~c"ELIXIR_ERL_OPTIONS", ~c"+S 2:2 -noinput"}]
+        {~c"ELIXIR_ERL_OPTIONS", ~c"+S 2:2 +fnu -noinput"}]
       launcher = Port.open({:spawn_executable, ~c"/bin/bash"}, [:binary, :exit_status,
         {:args, [~c"--noprofile", ~c"--norc", String.to_charlist(script),
           String.to_charlist(System.find_executable("elixir") || flunk("Elixir unavailable")),
