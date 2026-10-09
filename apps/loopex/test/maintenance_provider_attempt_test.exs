@@ -638,8 +638,10 @@ defmodule Loopex.Runtime.MaintenanceShutdownTest do
               assert {:ok, binding} = ProviderAttempt.binding_from_opened(session, opened)
               control = :sys.get_state(children.control, remaining(setup_cutoff))
               assert control.sessions[session].coordinator == coordinator
+
               assert {permit_worker, permit_reference} =
                        Map.fetch!(control.spent_attempts, binding)
+
               assert permit_worker in tasks and is_reference(permit_reference)
               [_, request] = AgentLoopTestModel.dispatched(fixture.model)
               assert request.staged_request_digest == binding["staged_request_digest"]
