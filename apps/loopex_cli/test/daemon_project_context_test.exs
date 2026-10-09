@@ -3,11 +3,14 @@ Code.require_file(
   __DIR__
 )
 
+Code.require_file("support/output_capture.exs", __DIR__)
+
 defmodule LoopexCli.DaemonProjectContextTest do
   use ExUnit.Case, async: false
   @moduletag capture_log: true
 
   import ExUnit.CaptureIO
+  alias LoopexCli.Test.OutputCapture
 
   alias Loopex.LLM.ReqLLM.ProviderIsolationFixture, as: ProviderFixture
   alias LoopexDaemon.ExitStatus
@@ -221,9 +224,7 @@ defmodule LoopexCli.DaemonProjectContextTest do
     assert Enum.any?(transcript, &(&1 =~ "admit these project resources for this run?"))
 
     output =
-      capture_io(fn ->
-        assert :ok = LoopexCli.dispatch(["run", "--daemon", context.socket, "go"])
-      end)
+      stdout!(["run", "--daemon", context.socket, "go"])
 
     assert output =~ "admitted answer"
     assert ProviderFixture.count(provider) == 1
@@ -301,9 +302,7 @@ defmodule LoopexCli.DaemonProjectContextTest do
         await_ready(output, 3_000)
 
         run_output =
-          capture_io(fn ->
-            assert :ok = LoopexCli.dispatch(["run", "--daemon", context.socket, "go"])
-          end)
+          stdout!(["run", "--daemon", context.socket, "go"])
 
         send(sentinel, {:daemon_signal, owner_ref, :sigterm})
         assert Task.await(daemon, 60_000) == 0
@@ -412,5 +411,12 @@ defmodule LoopexCli.DaemonProjectContextTest do
     |> Enum.map_join(fn event ->
       "event: #{event["type"]}\ndata: #{Jason.encode!(event)}\n\n"
     end)
+  end
+
+  # Concept: a command's bytes come from a target this test owns.
+  defp stdout!(argv, options \\ []) do
+    {result, stdout, stderr} = OutputCapture.dispatch(argv, options)
+    assert result == :ok, inspect({result, stdout, stderr})
+    stdout
   end
 end

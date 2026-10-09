@@ -3,6 +3,7 @@ Code.require_file("../../loopex/test/support/agent_loop_helper.exs", __DIR__)
 
 defmodule LoopexCli.ChatStartupTest do
   use ExUnit.Case, async: false
+  alias LoopexCli.Output.Memory
   @moduletag capture_log: true
   alias LoopexCli.ChatDriver
   alias Loopex.AgentLoopFixture, as: Fixture
@@ -12,7 +13,7 @@ defmodule LoopexCli.ChatStartupTest do
     on_exit(fn -> Fixture.stop(fixture) end)
     {:ok, session} = Loopex.create_session(fixture.runtime, %{}, command_id: "create")
     {:ok, input} = StringIO.open("one\n/wait\n/quit\n", encoding: :latin1)
-    {:ok, output} = StringIO.open("", encoding: :latin1)
+    {:ok, output} = Memory.start()
     %{fixture: fixture, session: session, input: input, output: output}
   end
 
@@ -36,7 +37,7 @@ defmodule LoopexCli.ChatStartupTest do
     assert MapSet.new([command, reader]) == MapSet.new(Map.keys(state.workers))
     refute_receive {:facade, :next_event, _}
     assert {"one\n/wait\n/quit\n", ""} == StringIO.contents(f.input)
-    assert {"", ""} == StringIO.contents(f.output)
+    assert {"", ""} == Memory.contents(f.output)
     assert Loopex.AgentLoopTestModel.dispatched(f.fixture.model) == []
     assert {:ok, _} = ChatDriver.prepare(driver)
 
@@ -92,7 +93,7 @@ defmodule LoopexCli.ChatStartupTest do
       assert {:error, :invalid_chat_cleanup_grace} = driver(f, cleanup_grace_ms: grace)
     end
 
-    assert {"", ""} == StringIO.contents(f.output)
+    assert {"", ""} == Memory.contents(f.output)
     assert {"one\n/wait\n/quit\n", ""} == StringIO.contents(f.input)
   end
 
@@ -105,7 +106,9 @@ defmodule LoopexCli.ChatStartupTest do
         apply(module, function, args)
       end
 
-      {:ok, driver} = driver(f, facade: facade, cleanup_grace_ms: 1234)
+      # Each transport owner acquires its own output target exclusively.
+      {:ok, output} = Memory.start()
+      {:ok, driver} = driver(%{f | output: output}, facade: facade, cleanup_grace_ms: 1234)
       ChatDriver.interrupt(driver)
       state = :sys.get_state(driver)
       assert state.stopping
@@ -234,7 +237,7 @@ defmodule LoopexCli.ChatStartupTest do
   end
 
   defp driver(f, options \\ []),
-    do: ChatDriver.start_link(f.fixture.runtime, f.session, f.input, f.output, options)
+    do: ChatDriver.start_link(f.fixture.runtime, f.session, f.input, {:owned, f.output}, options)
 
   defp join_remaining_workers(driver) do
     for pid <- Map.keys(:sys.get_state(driver).workers) do

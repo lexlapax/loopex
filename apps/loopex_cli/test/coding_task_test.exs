@@ -9,12 +9,13 @@ Code.require_file("../../loopex/test/support/agent_loop_helper.exs", __DIR__)
 Code.require_file("../../loopex_llm_reqllm/test/support/provider_build_fixture.exs", __DIR__)
 Code.require_file("support/demonstration.ex", __DIR__)
 
+Code.require_file("support/output_capture.exs", __DIR__)
+
 defmodule LoopexCli.CodingTaskTest do
   @moduledoc false
 
   use ExUnit.Case, async: false
-
-  import ExUnit.CaptureIO
+  alias LoopexCli.Test.OutputCapture
 
   alias LoopexCli.Demonstration
   alias LoopexCli.Demonstration.Evidence
@@ -129,12 +130,7 @@ defmodule LoopexCli.CodingTaskTest do
     stack = stack(label: "transcript", script: coding_script())
     {_session_id, attachment} = Demonstration.prompt(stack, "edit the notes and verify")
 
-    transcript =
-      capture_io(:stderr, fn ->
-        send(self(), {:out, capture_io(fn -> Render.stream(attachment) end)})
-      end)
-
-    assert_received {:out, answer}
+    {_, answer, transcript} = OutputCapture.capture(fn _ -> Render.stream(attachment) end)
 
     # Every tool the task used is named where it started and where it finished,
     # so an operator reading the terminal can say what their agent did.
@@ -158,12 +154,7 @@ defmodule LoopexCli.CodingTaskTest do
 
     {_session_id, attachment} = Demonstration.prompt(stack, "edit the notes and verify")
 
-    transcript =
-      capture_io(:stderr, fn ->
-        send(self(), {:out, capture_io(fn -> Render.stream(attachment) end)})
-      end)
-
-    assert_received {:out, answer}
+    {_, answer, transcript} = OutputCapture.capture(fn _ -> Render.stream(attachment) end)
 
     # The refused call is reported as refused, and the task keeps going rather
     # than ending or retrying the call the host already refused.
@@ -313,31 +304,24 @@ defmodule LoopexCli.CodingTaskTest do
         "that it was refused, then confirm summary.txt still exists by using the " <>
         "read tool on it, and stop."
 
-    transcript =
-      capture_io(:stderr, fn ->
-        send(
-          self(),
-          {:out,
-           capture_io(fn ->
-             assert :ok =
-                      LoopexCli.dispatch(
-                        [
-                          "run",
-                          "--policy",
-                          "shell-allowlist",
-                          "--state-root",
-                          state_root,
-                          "--workspace",
-                          workspace,
-                          prompt
-                        ],
-                        runtime_starter: runtime_starter
-                      )
-           end)}
-        )
+    {_, answer, transcript} =
+      OutputCapture.capture(fn _ ->
+        assert :ok =
+                 LoopexCli.dispatch(
+                   [
+                     "run",
+                     "--policy",
+                     "shell-allowlist",
+                     "--state-root",
+                     state_root,
+                     "--workspace",
+                     workspace,
+                     prompt
+                   ],
+                   runtime_starter: runtime_starter
+                 )
       end)
 
-    assert_received {:out, answer}
     facts = real_run_facts(state_root)
 
     # Concept: an attended demonstration says what it observed.

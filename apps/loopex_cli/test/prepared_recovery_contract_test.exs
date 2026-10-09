@@ -2,12 +2,13 @@ Code.require_file("../../loopex/test/support/m1_runtime_helper.exs", __DIR__)
 Code.require_file("../../loopex/test/support/agent_loop_helper.exs", __DIR__)
 Code.require_file("support/prepared_participant.exs", __DIR__)
 
+Code.require_file("support/output_capture.exs", __DIR__)
+
 defmodule LoopexCli.PreparedRecoveryContractTest do
   @moduledoc false
 
   use ExUnit.Case, async: false
-
-  import ExUnit.CaptureIO
+  alias LoopexCli.Test.OutputCapture
 
   alias Loopex.M1RuntimeTestStore
   alias Loopex.Executor.Local
@@ -2512,7 +2513,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
 
     output =
       try do
-        capture_io(fn ->
+        OutputCapture.stdout(fn ->
           send(
             test,
             {:resume_result,
@@ -2588,7 +2589,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
 
     output =
       try do
-        capture_io(fn ->
+        OutputCapture.stdout(fn ->
           send(
             test,
             {:refused_resume_result,
@@ -2745,7 +2746,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     end
 
     output =
-      capture_io(fn ->
+      OutputCapture.stdout(fn ->
         assert :ok =
                  LoopexCli.dispatch(
                    [
@@ -2877,7 +2878,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     end
 
     result =
-      capture_io(:stderr, fn ->
+      OutputCapture.stderr(fn ->
         send(
           self(),
           {:explicit_cancel_result,
@@ -3043,9 +3044,11 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
   end
 
   test "prepared recovery and separately prepared Local authority stay out of durable and rendered planes" do
+    {:ok, sink} = Loopex.ProgressSink.open()
+
     fixture =
       recovered_fixture("security-plane", :admitted,
-        progress_to: self(),
+        progress_sink: sink,
         script: [
           %{text: "public security-plane output", calls: []}
         ]
@@ -3078,24 +3081,18 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
       Loopex.attach(fixture.runtime, fixture.session_id, after_event_sequence: 0)
 
     events = collect_terminal_events(event_attachment)
-    progress = collect_security_progress()
+    progress = collect_security_progress(sink)
 
     {:ok, render_attachment} =
       Loopex.attach(fixture.runtime, fixture.session_id, after_event_sequence: 0)
 
     parent = self()
 
-    stdout =
-      capture_io(fn ->
-        stderr =
-          capture_io(:stderr, fn ->
-            assert :ok = Render.stream(render_attachment, idle_limit_ms: 1_000)
-          end)
-
-        send(parent, {:security_plane_stderr, stderr})
+    {_, stdout, stderr} =
+      OutputCapture.capture(fn _ ->
+        assert :ok = Render.stream(render_attachment, idle_limit_ms: 1_000)
       end)
 
-    assert_receive {:security_plane_stderr, stderr}, 5_000
     assert stdout =~ "public security-plane output"
 
     planes = %{
@@ -3159,17 +3156,11 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
 
     parent = self()
 
-    stdout =
-      capture_io(fn ->
-        stderr =
-          capture_io(:stderr, fn ->
-            assert :ok = Render.stream(fixture.attachment, idle_limit_ms: 1_000)
-          end)
-
-        send(parent, {:raw_error_renderer_stderr, stderr})
+    {_, stdout, stderr} =
+      OutputCapture.capture(fn _ ->
+        assert :ok = Render.stream(fixture.attachment, idle_limit_ms: 1_000)
       end)
 
-    assert_receive {:raw_error_renderer_stderr, stderr}, 5_000
     assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == 1
     assert stdout =~ "render only bounded provider failure"
     assert stderr =~ "model_call_failed"
@@ -3484,7 +3475,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
         policy_identity: %{"id" => "loopex.test.policy", "revision" => "1"},
         grant_decision: {:host_policy, :allow},
         cleanup_grace_ms: @grace,
-        progress_to: Keyword.get(options, :progress_to),
+        progress_sink: Keyword.get(options, :progress_sink),
         session_creation_defaults:
           Loopex.AgentLoopFixture.creation_defaults(tools, cleanup_grace_ms: @grace)
       ]
@@ -4426,12 +4417,14 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     end
   end
 
-  defp collect_security_progress(acc \\ []) do
-    receive do
-      {:loopex_progress, item} -> collect_security_progress([item | acc])
-      {:loopex_progress, _session_id, item} -> collect_security_progress([item | acc])
-    after
-      50 -> Enum.reverse(acc)
+  defp collect_security_progress(sink, acc \\ []) do
+    case Loopex.ProgressSink.take(sink) do
+      {:ok, lease, _session_id, item} ->
+        :ok = Loopex.ProgressSink.release(sink, lease)
+        collect_security_progress(sink, [item | acc])
+
+      _empty ->
+        Enum.reverse(acc)
     end
   end
 

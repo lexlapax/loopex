@@ -4,15 +4,14 @@ Code.require_file(
 )
 
 Code.require_file("support/daemon_proxy.exs", __DIR__)
+Code.require_file("support/output_capture.exs", __DIR__)
 
 defmodule LoopexCli.LiveDaemonTest do
   use ExUnit.Case, async: false
   @moduletag capture_log: true
 
-  import ExUnit.CaptureIO
-
   alias Loopex.LLM.ReqLLM.ProviderIsolationFixture, as: ProviderFixture
-  alias LoopexCli.Test.DaemonProxy
+  alias LoopexCli.Test.{DaemonProxy, OutputCapture}
   alias LoopexDaemon.Sentinel
 
   @credential "live-daemon-placeholder"
@@ -166,13 +165,13 @@ defmodule LoopexCli.LiveDaemonTest do
     socket = context.socket
 
     output =
-      capture_io(fn -> assert :ok = LoopexCli.dispatch(["run", "--daemon", socket, "go"]) end)
+      stdout!(["run", "--daemon", socket, "go"])
 
     # Streamed progress and the durable answer show the text exactly once.
     assert length(String.split(output, "first answer")) == 2, output
 
     listing =
-      capture_io(fn -> assert :ok = LoopexCli.dispatch(["sessions", "--daemon", socket]) end)
+      stdout!(["sessions", "--daemon", socket])
 
     assert String.ends_with?(listing, "}\n") and length(String.split(listing, "\n")) == 2
 
@@ -188,9 +187,7 @@ defmodule LoopexCli.LiveDaemonTest do
              ~w(sessions session_id placement_identity residency controlled next_after_session_id index_full)
 
     status =
-      capture_io(fn ->
-        assert :ok = LoopexCli.dispatch(["sessions", "--daemon", socket, "--status"])
-      end)
+      stdout!(["sessions", "--daemon", socket, "--status"])
 
     assert %{"active_sessions" => 1, "attachments" => 0, "socket_path" => ^socket} =
              JSON.decode!(status)
@@ -202,48 +199,38 @@ defmodule LoopexCli.LiveDaemonTest do
 
     # An idle session shows its history and ends; the finished run is history.
     observed =
-      capture_io(fn ->
-        assert :ok = LoopexCli.dispatch(["attach", session_id, "--daemon", socket])
-      end)
+      stdout!(["attach", session_id, "--daemon", socket])
 
     assert observed =~ "first answer"
 
     resumed =
-      capture_io(fn ->
-        assert :ok = LoopexCli.dispatch(["resume", "--daemon", socket, session_id])
-      end)
+      stdout!(["resume", "--daemon", socket, session_id])
 
     assert resumed =~ "first answer"
 
     taken =
-      capture_io(fn ->
-        assert :ok =
-                 LoopexCli.dispatch([
-                   "attach",
-                   session_id,
-                   "--daemon",
-                   socket,
-                   "--take-over",
-                   "--prompt",
-                   "again"
-                 ])
-      end)
+      stdout!([
+        "attach",
+        session_id,
+        "--daemon",
+        socket,
+        "--take-over",
+        "--prompt",
+        "again"
+      ])
 
     assert taken =~ "second answer"
 
     # Every controller released its lease: a fresh take-over is granted at once.
     assert {:ok, _} =
              :timer.tc(fn ->
-               capture_io(fn ->
-                 assert :ok =
-                          LoopexCli.dispatch([
-                            "attach",
-                            session_id,
-                            "--daemon",
-                            socket,
-                            "--take-over"
-                          ])
-               end)
+               stdout!([
+                 "attach",
+                 session_id,
+                 "--daemon",
+                 socket,
+                 "--take-over"
+               ])
              end)
              |> then(fn {micros, _output} ->
                if micros < 900_000, do: {:ok, micros}, else: :slow
@@ -259,17 +246,13 @@ defmodule LoopexCli.LiveDaemonTest do
     assert dormant =~ "dormant"
 
     reactivated =
-      capture_io(fn ->
-        assert :ok = LoopexCli.dispatch(["resume", "--daemon", socket, session_id])
-      end)
+      stdout!(["resume", "--daemon", socket, session_id])
 
     assert reactivated =~ "first answer"
     assert reactivated =~ "second answer"
 
     observed =
-      capture_io(fn ->
-        assert :ok = LoopexCli.dispatch(["attach", session_id, "--daemon", socket, "--observe"])
-      end)
+      stdout!(["attach", session_id, "--daemon", socket, "--observe"])
 
     assert observed =~ "second answer"
     stop_daemon(daemon)
@@ -313,9 +296,7 @@ defmodule LoopexCli.LiveDaemonTest do
 
     try do
       output =
-        capture_io(fn ->
-          assert :ok = LoopexCli.dispatch(["run", "--daemon", proxy.path, "go"])
-        end)
+        stdout!(["run", "--daemon", proxy.path, "go"])
 
       assert_received :service_held
       assert length(String.split(output, "held answer")) == 2, inspect(output)
@@ -375,10 +356,7 @@ defmodule LoopexCli.LiveDaemonTest do
 
     controller =
       Task.async(fn ->
-        capture_io(fn ->
-          send(self(), {:result, LoopexCli.dispatch(["run", "--daemon", socket, "go"])})
-        end)
-        |> then(fn output -> {receive(do: ({:result, result} -> result)), output} end)
+        with_stdout(["run", "--daemon", socket, "go"])
       end)
 
     session_id = eventually(fn -> listed_session(socket) end)
@@ -386,10 +364,7 @@ defmodule LoopexCli.LiveDaemonTest do
 
     observer =
       Task.async(fn ->
-        capture_io(fn ->
-          send(self(), {:result, LoopexCli.dispatch(["attach", session_id, "--daemon", socket])})
-        end)
-        |> then(fn output -> {receive(do: ({:result, result} -> result)), output} end)
+        with_stdout(["attach", session_id, "--daemon", socket])
       end)
 
     eventually(fn -> daemon_status(socket)["attachments"] == 2 end)
@@ -431,10 +406,7 @@ defmodule LoopexCli.LiveDaemonTest do
 
     controller =
       Task.async(fn ->
-        capture_io(:stderr, fn ->
-          send(self(), {:result, LoopexCli.dispatch(["run", "--daemon", socket, "go"])})
-        end)
-        |> then(fn stderr -> {receive(do: ({:result, result} -> result)), stderr} end)
+        with_stderr(["run", "--daemon", socket, "go"])
       end)
 
     eventually(fn -> ProviderFixture.reached?(provider, "pid") end)
@@ -473,13 +445,7 @@ defmodule LoopexCli.LiveDaemonTest do
 
     controller =
       Task.async(fn ->
-        capture_io(:stderr, fn ->
-          result =
-            LoopexCli.dispatch(["run", "--daemon", socket, "go"], install_live_signals: true)
-
-          send(self(), {:result, result})
-        end)
-        |> then(fn stderr -> {receive(do: ({:result, result} -> result)), stderr} end)
+        with_stderr(["run", "--daemon", socket, "go"], install_live_signals: true)
       end)
 
     session_id = eventually(fn -> listed_session(socket) end)
@@ -533,7 +499,7 @@ defmodule LoopexCli.LiveDaemonTest do
 
     runner =
       Task.async(fn ->
-        capture_io(fn -> LoopexCli.dispatch(["run", "--daemon", socket, "go"]) end)
+        elem(OutputCapture.dispatch(["run", "--daemon", socket, "go"]), 1)
       end)
 
     session_id = eventually(fn -> listed_session(socket) end)
@@ -541,16 +507,9 @@ defmodule LoopexCli.LiveDaemonTest do
 
     observer =
       Task.async(fn ->
-        capture_io(fn ->
-          send(
-            self(),
-            {:result,
-             LoopexCli.dispatch(["attach", session_id, "--daemon", socket, "--observe"],
-               install_live_signals: true
-             )}
-          )
-        end)
-        |> then(fn output -> {receive(do: ({:result, result} -> result)), output} end)
+        with_stdout(["attach", session_id, "--daemon", socket, "--observe"],
+          install_live_signals: true
+        )
       end)
 
     eventually(fn -> daemon_status(socket)["attachments"] == 2 end)
@@ -575,30 +534,24 @@ defmodule LoopexCli.LiveDaemonTest do
 
     daemon = start_daemon(context, launch)
     socket = context.socket
-    capture_io(fn -> assert :ok = LoopexCli.dispatch(["run", "--daemon", socket, "go"]) end)
+    stdout!(["run", "--daemon", socket, "go"])
     session_id = listed_session(socket)
     tail = daemon_status_tail(socket, session_id)
 
     replayed =
-      capture_io(fn ->
-        assert :ok =
-                 LoopexCli.dispatch(["attach", session_id, "--daemon", socket, "--after", "0"])
-      end)
+      stdout!(["attach", session_id, "--daemon", socket, "--after", "0"])
 
     assert replayed =~ "history answer"
 
     after_tail =
-      capture_io(fn ->
-        assert :ok =
-                 LoopexCli.dispatch([
-                   "attach",
-                   session_id,
-                   "--daemon",
-                   socket,
-                   "--after",
-                   Integer.to_string(tail)
-                 ])
-      end)
+      stdout!([
+        "attach",
+        session_id,
+        "--daemon",
+        socket,
+        "--after",
+        Integer.to_string(tail)
+      ])
 
     refute after_tail =~ "history answer"
     stop_daemon(daemon)
@@ -632,9 +585,7 @@ defmodule LoopexCli.LiveDaemonTest do
 
     started = System.monotonic_time(:millisecond)
 
-    capture_io(fn ->
-      assert :ok = LoopexCli.dispatch(["resume", "--daemon", context.socket, session_id])
-    end)
+    stdout!(["resume", "--daemon", context.socket, session_id])
 
     assert System.monotonic_time(:millisecond) - started < 10_000
     stop_daemon(second)
@@ -702,9 +653,8 @@ defmodule LoopexCli.LiveDaemonTest do
   test "an empty live listing is exactly the fixed compact record", context do
     daemon = start_daemon(context, [])
 
-    assert capture_io(fn ->
-             assert :ok = LoopexCli.dispatch(["sessions", "--daemon", context.socket])
-           end) == ~s({"sessions":[],"next_after_session_id":null,"index_full":false}\n)
+    assert stdout!(["sessions", "--daemon", context.socket]) ==
+             ~s({"sessions":[],"next_after_session_id":null,"index_full":false}\n)
 
     stop_daemon(daemon)
   end
@@ -935,7 +885,7 @@ defmodule LoopexCli.LiveDaemonTest do
   defp eventually_observed(socket, session_id, text) do
     eventually(fn ->
       output =
-        capture_io(fn -> :ok = LoopexCli.dispatch(["attach", session_id, "--daemon", socket]) end)
+        stdout!(["attach", session_id, "--daemon", socket])
 
       output =~ text
     end)
@@ -1079,5 +1029,22 @@ defmodule LoopexCli.LiveDaemonTest do
     |> Enum.map_join(fn event ->
       "event: #{event["type"]}\ndata: #{Jason.encode!(event)}\n\n"
     end)
+  end
+
+  # Concept: a command's bytes come from a target this test owns.
+  defp stdout!(argv, options \\ []) do
+    {result, stdout, stderr} = OutputCapture.dispatch(argv, options)
+    assert result == :ok, inspect({result, stdout, stderr})
+    stdout
+  end
+
+  defp with_stdout(argv, options \\ []) do
+    {result, stdout, _stderr} = OutputCapture.dispatch(argv, options)
+    {result, stdout}
+  end
+
+  defp with_stderr(argv, options \\ []) do
+    {result, _stdout, stderr} = OutputCapture.dispatch(argv, options)
+    {result, stderr}
   end
 end

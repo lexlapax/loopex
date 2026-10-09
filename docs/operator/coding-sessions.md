@@ -154,6 +154,17 @@ was displayed. Everything else — each tool starting, each tool's outcome, and
 the run's ending — goes to standard error, so `loopex run ... > answer.txt`
 keeps the answer and leaves the commentary on your terminal.
 
+<a id="operator-sessions-output"></a>
+Each command owns its output before it starts any runtime or provider work.
+It writes standard output and standard error through one small `/bin/bash`
+writer of its own, so the bytes it shows are exact and a terminal or pipe that
+stops reading stays inside that command. A streamed answer replaces the
+durable copy only when every streamed piece was completely written; otherwise
+the durable answer is printed as well, so a damaged stream can repeat text but
+never hides it. If output stops being read, the command gives up after its
+record's five-second delivery limit, stops its writer and exits nonzero. The
+session's committed outcome is unchanged and `loopex resume` reads it again.
+
 <a id="operator-sessions-input"></a>
 ## The Four Things You Can Say
 

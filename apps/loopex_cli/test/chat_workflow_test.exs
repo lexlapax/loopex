@@ -1,8 +1,12 @@
 Code.require_file("../../loopex/test/support/m1_runtime_helper.exs", __DIR__)
 Code.require_file("../../loopex/test/support/agent_loop_helper.exs", __DIR__)
 
+Code.require_file("support/recording_output_target.exs", __DIR__)
+
 defmodule LoopexCli.ChatWorkflowTest do
   use ExUnit.Case, async: false
+  alias LoopexCli.Test.RecordingOutputTarget
+  alias LoopexCli.Output.Memory
   @moduletag capture_log: true
   alias LoopexCli.{Chat, ChatConfiguration}
   alias Loopex.AgentLoopFixture, as: Fixture
@@ -28,7 +32,7 @@ defmodule LoopexCli.ChatWorkflowTest do
     File.write!(path, :json.encode(profile))
     {:ok, prepared} = ChatConfiguration.load(["chat", "--config", path], root, nil)
     {:ok, input} = StringIO.open("one\n/wait\ntwo\n/wait\n/quit\n", encoding: :latin1)
-    {:ok, output} = StringIO.open("", encoding: :latin1)
+    {:ok, output} = Memory.start()
     {:ok, diagnostic} = StringIO.open("", encoding: :latin1)
     on_exit(fn -> File.rm_rf!(root) end)
 
@@ -75,22 +79,21 @@ defmodule LoopexCli.ChatWorkflowTest do
        f do
     test = self()
     tag = make_ref()
-    stdout = spawn(fn -> forward_progress_bytes(f.output, test, :stdout) end)
-    stderr = spawn(fn -> forward_progress_bytes(f.diagnostic, test, :stderr) end)
-    on_exit(fn -> Enum.each([stdout, stderr], &Process.exit(&1, :kill)) end)
+    stdout = RecordingOutputTarget.start(test)
+    on_exit(fn -> Process.exit(stdout, :kill) end)
 
     {host, host_monitor} =
       spawn_monitor(fn ->
         opts =
           basic(f) ++
             [
-              output: stdout,
-              diagnostic_device: stderr,
+              output: {:owned, stdout},
+              diagnostic_device: f.diagnostic,
               acquire_placement: fn _, _ -> {:ok, "progress-placement"} end,
               release_placement: fn "progress-placement", _ -> :ok end,
               placement_id: fn _ -> {:ok, "chat-workflow-runtime"} end,
               with_runtime: fn options, callback ->
-                {:session, driver} = options[:progress_to]
+                {driver, writer} = chat_owner(options)
                 boot = :sys.get_state(driver)
                 assert boot.runtime == nil and boot.session == nil and boot.workers == %{}
                 assert boot.input_worker == nil
@@ -128,10 +131,10 @@ defmodule LoopexCli.ChatWorkflowTest do
                     model: f.prepared.selection.configuration["model"],
                     runtime_id: "chat-workflow-runtime",
                     cleanup_grace_ms: options[:cleanup_grace_ms],
-                    progress_to: options[:progress_to]
+                    progress_sink: options[:progress_sink]
                   )
 
-                send(test, {tag, :fixture, fixture, driver, boot.writer, diagnostic})
+                send(test, {tag, :fixture, fixture, driver, writer, diagnostic})
                 result = callback.(fixture.runtime)
                 assert %{exit_code: 0, cleanup: :confirmed} = result
                 assert {0, false} = LoopexCli.ChatDriver.seal_progress(driver)
@@ -194,9 +197,10 @@ defmodule LoopexCli.ChatWorkflowTest do
     assert_receive {:DOWN, ^host_monitor, :process, ^host, :normal}, 5_000
     assert_receive {^tag, :retained_drop_count, 0}, 0
     join_actors(owned)
-    {_, transcript} = StringIO.contents(f.output)
+    {transcript, progress} = RecordingOutputTarget.contents(stdout)
     {_, report} = StringIO.contents(f.diagnostic)
     assert length(:binary.matches(transcript, "> 猫\n")) == 1
+    assert progress =~ "> verified summary\n"
     assert transcript =~ "> @loopex forged\n"
     assert transcript =~ "> durable answer\n"
     refute transcript =~ "verified summary"
@@ -208,10 +212,11 @@ defmodule LoopexCli.ChatWorkflowTest do
           "refused-private-summary"
         ] do
       refute transcript =~ canary
+      refute progress =~ canary
       refute report =~ canary
     end
 
-    assert List.last(controls(f.output))["cleanup"] == "confirmed"
+    assert List.last(transcript_controls(transcript))["cleanup"] == "confirmed"
   end
 
   test "composition refusal joins the unbound progress owner without reading input", f do
@@ -224,10 +229,10 @@ defmodule LoopexCli.ChatWorkflowTest do
           release_placement: fn "bootstrap-placement", _ -> :ok end,
           placement_id: fn _ -> {:ok, "chat-workflow-runtime"} end,
           with_runtime: fn options, _ ->
-            {:session, driver} = options[:progress_to]
+            {driver, _writer} = chat_owner(options)
             state = :sys.get_state(driver)
             assert state.runtime == nil and state.workers == %{}
-            send(test, {:bootstrap, driver, state.writer})
+            send(test, {:bootstrap, driver, elem(state.output, 1)})
 
             send(
               driver,
@@ -249,29 +254,25 @@ defmodule LoopexCli.ChatWorkflowTest do
              %{"event" => "closing", "cleanup" => "confirmed"}
            ] = controls(f.output)
 
-    {_, transcript} = StringIO.contents(f.output)
+    {transcript, _} = Memory.contents(f.output)
     refute transcript =~ "unbound-canary"
   end
 
-  defp forward_progress_bytes(output, test, channel) do
-    receive do
-      {:io_request, writer, reply, {:put_chars, _, bytes} = request} ->
-        ref = make_ref()
-        send(output, {:io_request, self(), ref, request})
-
-        receive do
-          {:io_reply, ^ref, result} ->
-            send(writer, {:io_reply, reply, result})
-            send(test, {:progress_delivered, channel, IO.iodata_to_binary(bytes)})
-        end
-
-        forward_progress_bytes(output, test, channel)
-    end
+  # Concept: the chat transport owner is the command of the sink's output owner.
+  # Technical depth: the native arena records its opening owner; that output
+  # owner's command is the bootstrapped driver.
+  defp chat_owner(options) do
+    {_guardian, _incarnation, arena} = Keyword.fetch!(options, :progress_sink)
+    [{:owner, _incarnation, owner}] = :ets.lookup(arena, :owner)
+    {:sys.get_state(owner).command, owner}
   end
+
+  defp transcript_controls(transcript),
+    do: for("@loopex " <> json <- String.split(transcript, "\n"), do: :json.decode(json))
 
   defp await_progress_bytes(channel, target, deadline) do
     receive do
-      {:progress_delivered, ^channel, bytes} ->
+      {:target_written, _target, ^channel, bytes} ->
         unless bytes == target, do: await_progress_bytes(channel, target, deadline)
     after
       max(deadline - System.monotonic_time(:millisecond), 0) ->
@@ -284,9 +285,12 @@ defmodule LoopexCli.ChatWorkflowTest do
   # before releasing the held Model callback. Both observations spend one
   # original fixture cutoff; the test creates no additional wait allowance.
   defp await_answer_joins(writer, count, deadline) do
-    receipts = :sys.get_state(writer).progress_delivery
+    receipts =
+      :sys.get_state(writer).delivery
+      |> Map.values()
+      |> Enum.map(&Map.take(&1, [:admitted, :delivered, :dropped]))
 
-    if Map.values(receipts) == [%{admitted: count, delivered: count, dropped: 0}] do
+    if receipts == [%{admitted: count, delivered: count, dropped: 0}] do
       :ok
     else
       if System.monotonic_time(:millisecond) >= deadline,
@@ -395,7 +399,7 @@ defmodule LoopexCli.ChatWorkflowTest do
     refute Process.alive?(driver)
     assert {"one\n/wait\ntwo\n/wait\n/quit\n", ""} == StringIO.contents(f.input)
     assert Loopex.AgentLoopTestModel.dispatched(fixture.model) == []
-    {_, transcript} = StringIO.contents(f.output)
+    {transcript, _} = Memory.contents(f.output)
     refute transcript =~ "private failure"
     assert List.last(controls(f.output))["cleanup"] == "confirmed"
   end
@@ -529,12 +533,17 @@ defmodule LoopexCli.ChatWorkflowTest do
                    [:command, :reader]
 
           workers = Map.keys(state.workers)
-          resumed_capture_actors(tag, [activation.coordinator, driver, state.writer | workers])
+
+          resumed_capture_actors(tag, [
+            activation.coordinator,
+            driver,
+            elem(state.output, 1) | workers
+          ])
 
           capture = %{
             activation: activation,
             driver: driver,
-            writer: state.writer,
+            writer: elem(state.output, 1),
             workers: workers,
             records: Fixture.records(fixture, session),
             events: Fixture.events(fixture, session),
@@ -655,7 +664,7 @@ defmodule LoopexCli.ChatWorkflowTest do
       assert List.last(records)["cleanup"] ==
                if(fault == :guard_loss, do: "unknown", else: "confirmed")
 
-      {_, transcript} = StringIO.contents(bound.output)
+      {transcript, _} = Memory.contents(bound.output)
       refute transcript =~ "private resumed installer failure"
       refute transcript =~ "private_resumed_installer_failure"
       capture.activation.capability
@@ -676,7 +685,7 @@ defmodule LoopexCli.ChatWorkflowTest do
     assert {:ok, prepared} = ChatConfiguration.load(["chat", "--config", path], root, nil)
     assert {:ok, input} = StringIO.open("must remain unread\n/quit\n", encoding: :latin1)
     resumed_capture_actors(tag, [input])
-    assert {:ok, output} = StringIO.open("", encoding: :latin1)
+    assert {:ok, output} = Memory.start()
     resumed_capture_actors(tag, [output])
     assert {:ok, diagnostic} = StringIO.open("", encoding: :latin1)
     resumed_capture_actors(tag, [diagnostic])
@@ -986,7 +995,7 @@ defmodule LoopexCli.ChatWorkflowTest do
 
                 assert writer in diagnostic_actors
                 send(self(), {tag, :diagnostic_monitors, monitor_actors(diagnostic_actors)})
-                send(test, {tag, :ready, driver, state.writer, diagnostic_actors})
+                send(test, {tag, :ready, driver, elem(state.output, 1), diagnostic_actors})
                 send(device, :release)
                 {:ok, self()}
               end,
@@ -1035,7 +1044,7 @@ defmodule LoopexCli.ChatWorkflowTest do
     end
 
     refute report =~ "M7_WORKFLOW_SLOT"
-    {_, transcript} = StringIO.contents(f.output)
+    {transcript, _} = Memory.contents(f.output)
     refute transcript =~ "trace_call"
     device_monitor = Process.monitor(device)
     Process.exit(device, :kill)
@@ -1115,7 +1124,7 @@ defmodule LoopexCli.ChatWorkflowTest do
       cwd: f.root,
       home: nil,
       input: f.input,
-      output: f.output,
+      output: {:owned, f.output},
       diagnostic_device: f.diagnostic,
       mode: :pipe
     ]
@@ -1184,7 +1193,7 @@ defmodule LoopexCli.ChatWorkflowTest do
   end
 
   defp controls(output) do
-    {_, transcript} = StringIO.contents(output)
+    {transcript, _} = Memory.contents(output)
     for "@loopex " <> json <- String.split(transcript, "\n"), do: :json.decode(json)
   end
 end

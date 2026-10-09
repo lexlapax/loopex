@@ -4,15 +4,14 @@ Code.require_file(
 )
 
 Code.require_file("support/daemon_proxy.exs", __DIR__)
+Code.require_file("support/output_capture.exs", __DIR__)
 
 defmodule LoopexCli.LiveRecoveryTest do
   use ExUnit.Case, async: false
   @moduletag capture_log: true
 
-  import ExUnit.CaptureIO
-
   alias Loopex.LLM.ReqLLM.ProviderIsolationFixture, as: ProviderFixture
-  alias LoopexCli.Test.DaemonProxy
+  alias LoopexCli.Test.{DaemonProxy, OutputCapture}
   alias LoopexDaemon.Sentinel
 
   @credential "live-recovery-placeholder"
@@ -52,10 +51,10 @@ defmodule LoopexCli.LiveRecoveryTest do
       observation_label = if method == "session.create", do: method
 
       with_recovery_observation(proxy, daemon, observation_label, fn ->
-        output =
-          capture_io(fn ->
-            assert :ok = LoopexCli.dispatch(["run", "--daemon", proxy.path, "go"])
-          end)
+        {result, output, _stderr} =
+          OutputCapture.dispatch(["run", "--daemon", proxy.path, "go"])
+
+        assert result == :ok
 
         assert length(String.split(output, "#{unquote(label)} answer")) == 2,
                "expected the answer exactly once: #{inspect(output)}"
@@ -79,10 +78,8 @@ defmodule LoopexCli.LiveRecoveryTest do
       )
 
     with_recovery_observation(proxy, daemon, "before session.prompt", fn ->
-      output =
-        capture_io(fn ->
-          assert :ok = LoopexCli.dispatch(["run", "--daemon", proxy.path, "go"])
-        end)
+      {result, output, _stderr} = OutputCapture.dispatch(["run", "--daemon", proxy.path, "go"])
+      assert result == :ok
 
       assert length(String.split(output, "fresh answer")) == 2,
              "expected the answer exactly once: #{inspect(output)}"
@@ -337,12 +334,7 @@ defmodule LoopexCli.LiveRecoveryTest do
         end)
       end)
 
-    stderr =
-      capture_io(:stderr, fn ->
-        send(self(), {:result, run(["run", "--daemon", proxy.path, "go"])})
-      end)
-
-    assert_received {:result, {result, _output}}
+    {result, _output, stderr} = OutputCapture.dispatch(["run", "--daemon", proxy.path, "go"])
     assert result == :ok
     assert stderr =~ "the daemon stopped"
     assert Enum.count(DaemonProxy.seen(proxy), &(&1 == "initialize")) == 1
@@ -396,12 +388,8 @@ defmodule LoopexCli.LiveRecoveryTest do
 
     command =
       Task.async(fn ->
-        stderr =
-          capture_io(:stderr, fn ->
-            send(self(), {:result, run(["run", "--daemon", proxy.path, "go"])})
-          end)
-
-        {receive(do: ({:result, result} -> result)), stderr}
+        {result, output, stderr} = OutputCapture.dispatch(["run", "--daemon", proxy.path, "go"])
+        {{result, output}, stderr}
       end)
 
     assert Enum.any?(1..1_000, fn _ ->
@@ -508,12 +496,8 @@ defmodule LoopexCli.LiveRecoveryTest do
   end
 
   defp run(argv) do
-    output =
-      capture_io(fn ->
-        send(self(), {:result, LoopexCli.dispatch(argv)})
-      end)
-
-    {receive(do: ({:result, result} -> result)), output}
+    {result, output, _stderr} = OutputCapture.dispatch(argv)
+    {result, output}
   end
 
   defp launch(text, label) do

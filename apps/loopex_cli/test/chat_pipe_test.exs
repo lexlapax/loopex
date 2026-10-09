@@ -246,7 +246,6 @@ defmodule LoopexCli.ChatPipeTest do
     assert length(causal_records) <= 64
     [observed] = Enum.filter(causal_records, &(&1["event"] == "snapshot"))
     assert observed["worker"] == writer["worker"]
-    assert observed["original_monitor"] == writer["original_monitor"]
     assert observed["deadline_ms"] == writer["delivery_deadline_ms"]
     assert observed["cleanup_grace_ms"] == writer["cleanup_grace_ms"]
     assert observed["reap_cutoff_ms"] == writer["reap_cutoff_ms"]
@@ -264,7 +263,6 @@ defmodule LoopexCli.ChatPipeTest do
     assert witness_joined_at <= reap_cutoff_ns
     [original_down] = Enum.filter(causal_records, &(&1["event"] == "original_down"))
     assert original_down["worker"] == writer["worker"]
-    assert original_down["monitor"] == writer["original_monitor"]
     assert original_down["reason"] == "killed"
 
     [kill] =
@@ -289,7 +287,7 @@ defmodule LoopexCli.ChatPipeTest do
     assert kill["at_ns"] <= original_down["at_ns"]
     assert original_down["at_ns"] <= reap_cutoff_ns
     actor_downs = Enum.filter(causal_records, &(&1["event"] == "actor_down"))
-    assert Enum.any?(actor_downs, &(&1["actor"] == writer["worker"]))
+    assert Enum.any?(actor_downs, &(&1["actor"] == writer["manager"]))
     assert Enum.all?(actor_downs, &(&1["at_ns"] <= reap_cutoff_ns))
 
     assert {:evidence, evidence, 1} = Enum.find(messages, &match?({:evidence, _, _}, &1))
@@ -547,7 +545,8 @@ defmodule LoopexCli.ChatPipeTest do
   end
 
   defp records(transcript) do
-    for [_, json] <- Regex.scan(~r/@loopex ([^\r\n]+)/, transcript), do: JSON.decode!(json)
+    # A pipe delivers bytes, not records: only LF-terminated records are complete.
+    for [_, json] <- Regex.scan(~r/@loopex ([^\r\n]+)\r?\n/, transcript), do: JSON.decode!(json)
   end
 
   defp control(socket, cutoff \\ System.monotonic_time(:millisecond) + 15_000) do

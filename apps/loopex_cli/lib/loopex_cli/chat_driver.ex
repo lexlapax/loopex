@@ -27,7 +27,7 @@ defmodule LoopexCli.ChatDriver do
   """
 
   use GenServer
-  alias LoopexCli.{ChatControl, ChatInput, ChatOutput, ProgressConsumer, Render}
+  alias LoopexCli.{ChatControl, ChatInput, Output, Render}
   alias LoopexProtocol.Session.{CompactResult, Outcome}
 
   @outcomes %{
@@ -52,7 +52,8 @@ defmodule LoopexCli.ChatDriver do
 
   ## Technical depth
 
-  Devices are existing Latin-1 byte devices. Options select pipe or interactive refusal handling, already validated
+  Input is an existing Latin-1 byte device. Output is a target this driver
+  acquires as its command's output owner: `:stdio` or an owned custom target. Options select pipe or interactive refusal handling, already validated
   invocation run bounds, an optional prepared new-session configuration and
   the private facade test seam. A supplied cleanup grace must be validated and
   match the session; it sizes cancellation before the first status reply.
@@ -73,11 +74,16 @@ defmodule LoopexCli.ChatDriver do
     end
   end
 
-  # Concept: receive progress directly while composition owns startup.
-  # Technical depth: an unbound driver owns only its writer. The creating host
-  # binds the exact runtime/session before attachments, activation or input.
+  # Concept: own output before composition starts any runtime or provider work.
+  # Technical depth: an unbound driver owns only its output owner and native
+  # sink. The creating host binds the exact runtime/session before
+  # attachments, activation or input.
   @doc false
   def bootstrap(input, output, options), do: start_link(nil, nil, input, output, options)
+
+  # Concept: the serving runtime offers progress into this driver's sink.
+  @doc false
+  def progress_sink(driver), do: GenServer.call(driver, :progress_sink)
 
   @doc false
   def bind(driver, runtime, session, options),
@@ -149,10 +155,20 @@ defmodule LoopexCli.ChatDriver do
     do: GenServer.call(driver, {:refuse_startup, code}, :infinity)
 
   @impl true
-  def init({owner, runtime, session, input, output, options}) do
+  def init({owner, runtime, session, input, target, options}) do
     Process.flag(:trap_exit, true)
+
+    case Output.open(target, Output.acquisition(),
+           mode: :chat,
+           progress_device: Keyword.get(options, :progress_device, :stderr)
+         ) do
+      {:ok, output, sink} -> init_state(owner, runtime, session, input, output, sink, options)
+      {:error, _code} -> {:stop, :normal}
+    end
+  end
+
+  defp init_state(owner, runtime, session, input, output, sink, options) do
     grace = Keyword.get(options, :cleanup_grace_ms)
-    {:ok, writer} = ChatOutput.start_link(output)
     facade = Keyword.get(options, :facade, &apply/3)
 
     state = %{
@@ -165,9 +181,9 @@ defmodule LoopexCli.ChatDriver do
       default_bounds: Keyword.get(options, :bounds),
       configuration: Keyword.get(options, :configuration),
       status_policy: Keyword.get(options, :status_policy),
-      writer: writer,
-      progress_device: Keyword.get(options, :progress_device, :stderr),
-      progress: ProgressConsumer.new(:chat),
+      output: output,
+      sink: sink,
+      held_assistant: nil,
       progress_sealed: false,
       progress_reported: false,
       progress_dropped: nil,
@@ -230,6 +246,9 @@ defmodule LoopexCli.ChatDriver do
          cleanup_grace_ms: Keyword.get(options, :cleanup_grace_ms, state.cleanup_grace_ms)
      }}
   end
+
+  def handle_call(:progress_sink, {caller, _}, %{owner: caller} = state),
+    do: {:reply, state.sink, state}
 
   def handle_call(:seal_progress, {caller, _}, %{owner: caller} = state) do
     first = not state.progress_reported
@@ -307,6 +326,7 @@ defmodule LoopexCli.ChatDriver do
       )
       when cleanup in [:confirmed, :unknown] and minimum_exit_code in [0, 1] do
     cleanup = if state.local_cleanup == :unknown, do: :unknown, else: cleanup
+    state = release_held(state)
     code = max(state.exit_code, minimum_exit_code)
     code = if cleanup == :confirmed, do: code, else: max(code, 1)
 
@@ -324,36 +344,6 @@ defmodule LoopexCli.ChatDriver do
   def handle_call(_, _from, state), do: {:reply, {:error, :invalid_chat_driver_call}, state}
 
   @impl true
-  def handle_info(
-        {:loopex_progress, session, item},
-        %{session: session, progress_sealed: false, startup: :ready, stopping: false} = state
-      )
-      when is_binary(session) do
-    {progress, actions} = ProgressConsumer.consume(state.progress, item)
-    domain = if is_map(item) and item[:kind] == :text_delta, do: item[:stream_domain_id]
-    state = %{state | progress: progress}
-
-    state =
-      Enum.reduce(actions, state, fn {channel, text}, current ->
-        device = if channel == :stdout, do: nil, else: current.progress_device
-
-        with {:ok, rendered} <- Render.chat_text(text) do
-          result = ChatOutput.progress(current.writer, rendered, device, domain)
-
-          case result do
-            reply when reply in [:ok, :dropped] -> current
-            {:error, code} -> fail(current, code)
-          end
-        else
-          {:error, _} -> current
-        end
-      end)
-
-    {:noreply, state}
-  catch
-    :exit, _ -> {:noreply, fail(state, :output_failed)}
-  end
-
   def handle_info({pid, ref, :ready, _attachment}, state) do
     case owned(state, pid, ref) do
       kind when kind in [:command, :reader] and not state.reaping ->
@@ -435,7 +425,6 @@ defmodule LoopexCli.ChatDriver do
         join_reply(maybe_finished(state))
 
       _ when monitor == state.owner_monitor and pid == state.owner ->
-        if Process.alive?(state.writer), do: Process.exit(state.writer, :kill)
         state = reap(%{state | from: nil, prepare_from: nil, finished: true, closed: true})
         join_reply(state)
 
@@ -444,19 +433,22 @@ defmodule LoopexCli.ChatDriver do
     end
   end
 
-  def handle_info({:EXIT, pid, _}, %{writer: pid, finished: false} = state),
-    do: {:noreply, fail(state, :output_failed)}
-
   def handle_info({:EXIT, _, _}, state), do: {:noreply, state}
 
-  def handle_info({:loopex_chat_output_deadline, writer, deadline}, %{writer: writer} = state)
+  def handle_info(
+        {:loopex_cli_output_deadline, incarnation, deadline},
+        %{output: {:loopex_cli_output, _, incarnation}} = state
+      )
       when is_integer(deadline) or is_nil(deadline) do
     state = retain_display_deadline(state, deadline)
     {:noreply, shorten_stop(%{state | output_deadline: deadline}, deadline)}
   end
 
-  def handle_info({:loopex_chat_output_failed, writer, code}, %{writer: writer} = state),
-    do: {:noreply, fail(state, code)}
+  def handle_info(
+        {:loopex_cli_output_failed, incarnation, code},
+        %{output: {:loopex_cli_output, _, incarnation}} = state
+      ),
+      do: {:noreply, fail(state, code)}
 
   def handle_info(
         {:compact_displayed, id, cutoff},
@@ -509,7 +501,6 @@ defmodule LoopexCli.ChatDriver do
   @impl true
   def terminate(_reason, state) do
     Enum.each(state.workers, fn {pid, _} -> Process.exit(pid, :kill) end)
-    if Process.alive?(state.writer), do: Process.exit(state.writer, :kill)
   end
 
   @impl true
@@ -811,9 +802,9 @@ defmodule LoopexCli.ChatDriver do
 
       :compact ->
         # Concept: display the fixed reference bounds before submitting compact.
-        # Technical depth: the existing writer charges the active IO until its
-        # original worker DOWN. One captured output ceiling gates submission;
-        # input and event grants stay paused without another writer or receipt.
+        # Technical depth: the output owner charges the active write until its
+        # joined write. One captured output ceiling gates submission;
+        # input and event grants stay paused without another owner or receipt.
         cutoff = System.monotonic_time(:millisecond) + 5_000
         cutoff = if state.output_deadline, do: min(cutoff, state.output_deadline), else: cutoff
 
@@ -885,10 +876,10 @@ defmodule LoopexCli.ChatDriver do
     if remaining <= 0 do
       fail(state, :output_drain_timeout)
     else
-      # Concept: inspect the same writer without renewing its display deadline.
-      # Technical depth: this is ChatOutput.status's existing owner-only endpoint,
-      # with the captured remaining wait instead of a fresh default call timeout.
-      case GenServer.call(state.writer, :status, remaining) do
+      # Concept: inspect the same output owner without renewing its deadline.
+      # Technical depth: status is the owner's non-blocking counter view; the
+      # captured cutoff above, not a fresh default wait, bounds this display.
+      case Output.status(state.output) do
         %{bytes: 0, failure: nil} ->
           if not state.stopping and System.monotonic_time(:millisecond) < cutoff do
             # Concept: already queued cancellation wins before compact submission.
@@ -1071,11 +1062,20 @@ defmodule LoopexCli.ChatDriver do
 
   defp consume_event(%{waiting_event: {:ok, %{event_sequence: seq} = event}} = state)
        when is_integer(seq) and seq > state.cursor do
-    state = %{state | waiting_event: nil, cursor: seq}
-    state = project_event(state, event)
-    {progress, retired} = ProgressConsumer.advance(state.progress, seq)
-    Enum.each(retired, &ChatOutput.settle_progress(state.writer, &1))
-    state = %{state | progress: progress}
+    state = release_held(%{state | waiting_event: nil, cursor: seq})
+
+    # Concept: an answer waits for the next durable event before it is shown.
+    # Technical depth: Core offers the stream closure after committing the
+    # answer and before its next durable event, so by then the output owner's
+    # native sink holds it. No timer decides that disposition.
+    state =
+      if event.kind == "assistant.message_appended" do
+        %{state | held_assistant: event}
+      else
+        state = project_event(state, event)
+        _ = Output.advance(state.output, seq)
+        state
+      end
 
     # Concept: input or output failure still requires observing cancellation truth.
     # Technical depth: reader grants continue until the existing barrier/reap join;
@@ -1085,29 +1085,19 @@ defmodule LoopexCli.ChatDriver do
 
   defp consume_event(state), do: fail(%{state | waiting_event: nil}, :event_reader_failed)
 
-  defp project_event(state, %{"content" => text, kind: "assistant.message_appended"} = event) do
-    {progress, candidate} =
-      ProgressConsumer.chat_assistant(state.progress, event.event_sequence, text)
+  # Concept: a durable answer is shown unless its streamed copy already was.
+  # Technical depth: the output owner suppresses it only for the exact complete
+  # domain whose every quoted fragment joined; otherwise this full quoted
+  # fallback is written.
+  defp release_held(%{held_assistant: nil} = state), do: state
 
-    {progress, retired} = ProgressConsumer.advance(progress, event.event_sequence)
-    receipts = Map.new(retired, &{&1, ChatOutput.settle_progress(state.writer, &1)})
-    state = %{state | progress: progress}
+  defp release_held(%{held_assistant: %{"content" => text} = event} = state) do
+    state = %{state | held_assistant: nil}
 
-    suppressed =
-      case candidate do
-        {domain, count} ->
-          Map.get(receipts, domain) == %{admitted: count, delivered: count, dropped: 0}
-
-        nil ->
-          false
-      end
-
-    with {:ok, text} <- Render.chat_text(if(suppressed, do: "", else: text)),
-         :ok <- ChatOutput.write(state.writer, :text, text),
+    with {:ok, rendered} <- Render.chat_text(text),
+         :ok <- Output.assistant(state.output, event.event_sequence, text, rendered),
          do: state,
          else: ({:error, code} -> fail(state, code))
-  catch
-    :exit, _ -> fail(state, :output_failed)
   end
 
   defp project_event(state, %{"run_id" => run, kind: "run.started"}),
@@ -1194,11 +1184,9 @@ defmodule LoopexCli.ChatDriver do
 
   defp write_text(state, text) do
     with {:ok, rendered} <- Render.chat_text(text),
-         :ok <- ChatOutput.write(state.writer, :text, rendered),
+         :ok <- Output.write(state.output, :text, :stdout, rendered),
          do: state,
          else: ({:error, code} -> fail(state, code))
-  catch
-    :exit, _ -> fail(state, :output_failed)
   end
 
   defp finish_inspection(%{pending: {:inspect_tail, fields, tail}, cursor: cursor} = state)
@@ -1342,7 +1330,7 @@ defmodule LoopexCli.ChatDriver do
     state
   end
 
-  # Concept: a late writer notification may shorten an active shutdown.
+  # Concept: a late output-owner notification may shorten an active shutdown.
   # Technical depth: queue admission and this owner's mailbox are independent.
   # Preserve the minimum once stopping starts, even when output later drains
   # or provisional unknown cleanup already returned. Closing shares that cutoff;
@@ -1432,16 +1420,13 @@ defmodule LoopexCli.ChatDriver do
   defp seal_progress_state(%{progress_sealed: true} = state), do: state
 
   defp seal_progress_state(state) do
-    dropped = ChatOutput.seal_progress(state.writer)
+    case Output.seal_progress(state.output) do
+      dropped when is_integer(dropped) ->
+        %{state | progress_sealed: true, progress_dropped: dropped}
 
-    %{
-      state
-      | progress_sealed: true,
-        progress_dropped: dropped,
-        progress: ProgressConsumer.new(:chat)
-    }
-  catch
-    :exit, _ -> %{state | progress_sealed: true, progress_dropped: nil}
+      _ ->
+        %{state | progress_sealed: true, progress_dropped: nil}
+    end
   end
 
   defp join_reply(%{closed: true, workers: workers} = state) when map_size(workers) == 0,
@@ -1493,17 +1478,13 @@ defmodule LoopexCli.ChatDriver do
 
   defp emit(state, event, fields) do
     with {:ok, bytes} <- ChatControl.encode(event, fields),
-         do: ChatOutput.write(state.writer, :control, bytes)
-  catch
-    :exit, _ -> {:error, :output_failed}
+         do: Output.write(state.output, :control, :stdout, bytes)
   end
 
   defp finish_output(state) do
     if state.deadline,
-      do: ChatOutput.finish(state.writer, state.deadline),
-      else: ChatOutput.finish(state.writer)
-  catch
-    :exit, _ -> {:error, :output_failed}
+      do: Output.finish(state.output, state.deadline),
+      else: Output.finish(state.output)
   end
 
   defp stable_code(code) when is_atom(code), do: code

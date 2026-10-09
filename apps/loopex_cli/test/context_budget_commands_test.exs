@@ -1,12 +1,13 @@
 Code.require_file("../../loopex/test/support/m1_runtime_helper.exs", __DIR__)
 Code.require_file("../../loopex/test/support/agent_loop_helper.exs", __DIR__)
 
+Code.require_file("support/output_capture.exs", __DIR__)
+
 defmodule LoopexCli.ContextBudgetCommandsTest do
   @moduledoc false
 
   use ExUnit.Case, async: false
-
-  import ExUnit.CaptureIO
+  alias LoopexCli.Test.OutputCapture
 
   alias Loopex.AgentLoopFixture
   alias Loopex.AgentLoopTestExecutor
@@ -179,17 +180,11 @@ defmodule LoopexCli.ContextBudgetCommandsTest do
 
     parent = self()
 
-    stdout =
-      capture_io(fn ->
-        stderr =
-          capture_io(:stderr, fn ->
-            assert :ok = Render.stream(:context_failure, next_event: next_event)
-          end)
-
-        send(parent, {:context_failure_stderr, stderr})
+    {_, stdout, stderr} =
+      OutputCapture.capture(fn _ ->
+        assert :ok = Render.stream(:context_failure, next_event: next_event)
       end)
 
-    assert_receive {:context_failure_stderr, stderr}
     assert stdout == ""
     assert stderr =~ "context_budget_exceeded"
     assert stderr =~ "false"
@@ -208,7 +203,7 @@ defmodule LoopexCli.ContextBudgetCommandsTest do
       before = length(AgentLoopTestModel.dispatched(fixture.model))
 
       output =
-        capture_io(fn ->
+        OutputCapture.stdout(fn ->
           assert :ok = dispatch_context_command(:resume, fixture, explicit)
         end)
 
@@ -246,7 +241,7 @@ defmodule LoopexCli.ContextBudgetCommandsTest do
       before = length(AgentLoopTestModel.dispatched(fixture.model))
 
       output =
-        capture_io(:stderr, fn ->
+        OutputCapture.stderr(fn ->
           assert :ok = dispatch_context_command(:cancel, fixture, explicit)
         end)
 
@@ -370,7 +365,7 @@ defmodule LoopexCli.ContextBudgetCommandsTest do
       end
 
       result =
-        capture_io(fn ->
+        OutputCapture.stdout(fn ->
           send(self(), {
             :settled_context_result,
             dispatch_context_command(command, fixture, explicit, runtime_starter: starter)

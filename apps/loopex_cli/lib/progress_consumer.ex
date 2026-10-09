@@ -16,12 +16,17 @@ defmodule LoopexCli.ProgressConsumer do
   only that domain invalid. A retry therefore cannot repair or poison its
   predecessor.
 
-  Progress is never awaited. The caller drains whatever is already in its mailbox
-  and then continues with durable events. A durable assistant message is
-  suppressed only when a complete model domain anchored immediately before that
-  event reconstructed exactly its text; an open, absent, abandoned, invalid,
-  differently anchored, or text-mismatched domain falls back to the durable
-  message.
+  Progress is never awaited. The output owner drains whatever its native sink
+  already holds and then continues with durable events. A durable assistant
+  message is suppressed only when a complete model domain anchored immediately
+  before that event reconstructed exactly its text; an open, absent, abandoned,
+  invalid, differently anchored, or text-mismatched domain falls back to the
+  durable message.
+
+  A domain retains no copy of its answer text. It keeps the SHA-256 state of
+  the exact concatenated answer bytes, their length and fragment count, so
+  native credit can be released once each fragment's write has joined while
+  exact-text comparison remains possible.
   """
 
   @model_delta_kinds [:text_delta, :reasoning_delta, :tool_call_delta]
@@ -38,7 +43,11 @@ defmodule LoopexCli.ProgressConsumer do
           required(:identity) => tuple(),
           required(:next_sequence) => non_neg_integer(),
           required(:status) => :open | :complete | :abandoned | :invalid,
-          required(:text) => [binary()],
+          required(:digest) => term(),
+          required(:bytes) => non_neg_integer(),
+          required(:fragments) => non_neg_integer(),
+          required(:framed) => boolean(),
+          required(:last_lf) => boolean(),
           required(:closure_order) => non_neg_integer() | nil,
           required(:consumed) => boolean()
         }
@@ -62,10 +71,11 @@ defmodule LoopexCli.ProgressConsumer do
   @spec new() :: t()
   def new, do: %__MODULE__{}
 
-  # Concept: long chat retains only its current provisional display evidence.
-  # Technical depth: reuse the transcript's 256-KiB ceiling for retained answer
-  # fragments. Exhaustion invalidates that domain and preserves durable fallback.
-  # Advancing the durable cursor retires prior domains and refuses stale items.
+  # Concept: long chat accepts provisional answers only within its display ceiling.
+  # Technical depth: reuse the transcript's 256-KiB ceiling for answer bytes a
+  # domain has shown. Exhaustion invalidates that domain and preserves durable
+  # fallback. Advancing the durable cursor retires prior domains and refuses
+  # stale items.
   @doc false
   def new(:chat), do: %__MODULE__{retention_limit: 262_144}
 
@@ -81,21 +91,29 @@ defmodule LoopexCli.ProgressConsumer do
   end
 
   # Concept: complete transient content is only a candidate for suppression.
-  # Technical depth: the chat writer must separately prove every nonempty answer
-  # fragment delivered and its IO worker joined. No closure proves output IO.
+  # Technical depth: the output owner must separately prove every nonempty
+  # answer fragment delivered and joined. No closure proves output IO. Chat
+  # quotes each fragment as complete lines, so every fragment before the last
+  # must end at LF for concatenated rendering to equal the durable answer.
   @doc false
-  def chat_assistant(%__MODULE__{} = state, event_sequence, content) do
+  def chat_assistant(%__MODULE__{} = state, event_sequence, content),
+    do: assistant_candidate(state, event_sequence, content, true)
+
+  # Concept: the plain renderer prints answer fragments as raw text.
+  # Technical depth: the same exact complete domain is the only candidate; its
+  # fragment count is what the output owner must see delivered.
+  @doc false
+  def plain_assistant(%__MODULE__{} = state, event_sequence, content),
+    do: assistant_candidate(state, event_sequence, content, false)
+
+  defp assistant_candidate(state, event_sequence, content, framed?) do
     candidate = next_complete_model(state, event_sequence - 1)
     {next, disposition} = durable_assistant(state, event_sequence, content)
 
     case {disposition, candidate} do
-      {:suppress, {domain, %{text: [_last | earlier]} = evidence}} ->
-        # Concept: suppression preserves the answer's displayed line framing.
-        # Technical depth: each queued fragment is visibly quoted and terminated.
-        # Earlier fragments must already end at LF boundaries for concatenated
-        # rendering to equal the complete durable answer. Otherwise fall back.
-        if Enum.all?(earlier, &String.ends_with?(&1, "\n")),
-          do: {next, {domain, length(evidence.text)}},
+      {:suppress, {domain, evidence}} ->
+        if evidence.fragments > 0 and (evidence.framed or not framed?),
+          do: {next, {domain, evidence.fragments}},
           else: {next, nil}
 
       _ ->
@@ -159,11 +177,11 @@ defmodule LoopexCli.ProgressConsumer do
 
       {domain_id, domain} ->
         next = put_domain(state, domain_id, %{domain | consumed: true})
-        reconstructed = domain.text |> Enum.reverse() |> IO.iodata_to_binary()
 
-        if is_binary(content) and reconstructed == content,
-          do: {next, :suppress},
-          else: {next, :render}
+        if is_binary(content) and byte_size(content) == domain.bytes and
+             :crypto.hash_final(domain.digest) == :crypto.hash(:sha256, content),
+           do: {next, :suppress},
+           else: {next, :render}
     end
   end
 
@@ -191,17 +209,12 @@ defmodule LoopexCli.ProgressConsumer do
 
         domain.kind == kind and domain.identity == identity and domain.status == :open and
             domain.next_sequence == sequence ->
-          next_domain = %{
-            domain
-            | next_sequence: sequence + 1,
-              text: retain_text(kind, item, domain.text)
-          }
-
+          next_domain = retain_text(kind, item, %{domain | next_sequence: sequence + 1})
           next = put_domain(state, domain_id, next_domain)
 
           if within_retention?(next),
             do: {next, actions(kind, item)},
-            else: {put_domain(next, domain_id, %{next_domain | status: :invalid, text: []}), []}
+            else: {put_domain(next, domain_id, %{next_domain | status: :invalid}), []}
 
         true ->
           {invalidate(state, domain_id, domain, kind, identity), []}
@@ -295,9 +308,20 @@ defmodule LoopexCli.ProgressConsumer do
   defp optional_terminal_text?(nil), do: true
   defp optional_terminal_text?(value), do: ProgressPayload.terminal_safe?(value)
 
-  defp retain_text(:model, %{kind: :text_delta, text: ""}, retained), do: retained
-  defp retain_text(:model, %{kind: :text_delta, text: text}, retained), do: [text | retained]
-  defp retain_text(_kind, _item, retained), do: retained
+  defp retain_text(:model, %{kind: :text_delta, text: ""}, domain), do: domain
+
+  defp retain_text(:model, %{kind: :text_delta, text: text}, domain) do
+    %{
+      domain
+      | digest: :crypto.hash_update(domain.digest, text),
+        bytes: domain.bytes + byte_size(text),
+        fragments: domain.fragments + 1,
+        framed: domain.framed and (domain.fragments == 0 or domain.last_lf),
+        last_lf: String.ends_with?(text, "\n")
+    }
+  end
+
+  defp retain_text(_kind, _item, domain), do: domain
 
   defp actions(:model, %{kind: :text_delta, text: text}), do: [{:stdout, text}]
   defp actions(:model, %{kind: :reasoning_delta, text: text}), do: [{:stderr, text}]
@@ -322,7 +346,11 @@ defmodule LoopexCli.ProgressConsumer do
       identity: identity,
       next_sequence: 0,
       status: :open,
-      text: [],
+      digest: :crypto.hash_init(:sha256),
+      bytes: 0,
+      fragments: 0,
+      framed: true,
+      last_lf: false,
       closure_order: nil,
       consumed: false
     }
@@ -356,8 +384,9 @@ defmodule LoopexCli.ProgressConsumer do
   defp within_retention?(%{retention_limit: nil}), do: true
 
   defp within_retention?(state) do
-    Enum.reduce(state.domains, 0, fn {_id, domain}, bytes ->
-      Enum.reduce(domain.text, bytes, &(byte_size(&1) + &2))
+    Enum.reduce(state.domains, 0, fn
+      {_id, %{status: :invalid}}, bytes -> bytes
+      {_id, domain}, bytes -> bytes + domain.bytes
     end) <= state.retention_limit
   end
 

@@ -2,8 +2,12 @@ Code.require_file("../../loopex/test/support/m1_runtime_helper.exs", __DIR__)
 Code.require_file("../../loopex/test/support/agent_loop_helper.exs", __DIR__)
 Code.require_file("../../loopex/test/support/configured_genesis_helper.exs", __DIR__)
 
+Code.require_file("support/recording_output_target.exs", __DIR__)
+
 defmodule LoopexCli.ChatDriverTest do
   use ExUnit.Case, async: false
+  alias LoopexCli.Test.RecordingOutputTarget
+  alias LoopexCli.Output.Memory
   @moduletag capture_log: true
   alias LoopexCli.ChatDriver
   alias Loopex.AgentLoopFixture, as: Fixture
@@ -69,7 +73,7 @@ defmodule LoopexCli.ChatDriverTest do
     {:ok, input} =
       StringIO.open(prefix <> "/compact\n/wait\n/status\n/quit\n", encoding: :latin1)
 
-    {:ok, output} = StringIO.open("", encoding: :latin1)
+    {:ok, output} = Memory.start()
     test = self()
 
     facade = fn module, function, arguments ->
@@ -104,7 +108,7 @@ defmodule LoopexCli.ChatDriverTest do
     assert completion["command_id"] == command.command_id
     assert completion["result"]["disposition"] == Atom.to_string(disposition)
     assert completion["result"]["cleanup"] == "confirmed"
-    {_, transcript} = StringIO.contents(output)
+    {transcript, _} = Memory.contents(output)
     rows = records(transcript)
     status = Enum.find(rows, &(&1["event"] == "status"))
     last = status["maintenance"]["last_compact"]
@@ -142,7 +146,7 @@ defmodule LoopexCli.ChatDriverTest do
     assert :sys.get_state(driver).compact_commands == MapSet.new()
     assert :sys.get_state(driver).workers == %{}
     close_host_and_fixture(fixture, host, driver, expected_exit)
-    {_, closed} = StringIO.contents(output)
+    {closed, _} = Memory.contents(output)
     closing = Enum.find(records(closed), &(&1["event"] == "closing"))
     assert closing["exit_code"] == expected_exit
 
@@ -194,13 +198,13 @@ defmodule LoopexCli.ChatDriverTest do
       )
 
     {:ok, first_input} = StringIO.open("one\n/wait\n/compact\n/wait\n/quit\n", encoding: :latin1)
-    {:ok, first_output} = StringIO.open("", encoding: :latin1)
+    {:ok, first_output} = Memory.start()
 
     {first_host, first_driver} =
       start_host(fixture.runtime, session, first_input, first_output, configuration: prepared)
 
     assert_receive {:provisional, ^first_host, %{exit_code: 1, cleanup: :confirmed}}, 5_000
-    first_writer = :sys.get_state(first_driver).writer
+    first_writer = elem(:sys.get_state(first_driver).output, 1)
     monitors = monitor_processes([first_host, first_driver, first_writer])
     send(first_host, {:close, :confirmed})
     assert_receive {:closed, ^first_host, 1}, 5_000
@@ -211,10 +215,10 @@ defmodule LoopexCli.ChatDriverTest do
 
     assert completion["result"]["disposition"] == "failed"
     {:ok, input} = StringIO.open("/status\n/quit\n", encoding: :latin1)
-    {:ok, output} = StringIO.open("", encoding: :latin1)
+    {:ok, output} = Memory.start()
     {host, driver} = start_host(fixture.runtime, session, input, output, configuration: prepared)
     assert_receive {:provisional, ^host, %{exit_code: 0, cleanup: :confirmed}}, 5_000
-    {_, transcript} = StringIO.contents(output)
+    {transcript, _} = Memory.contents(output)
     status = Enum.find(records(transcript), &(&1["event"] == "status"))
     assert status["maintenance"]["last_compact"]["result"]["disposition"] == "failed"
 
@@ -355,12 +359,12 @@ defmodule LoopexCli.ChatDriverTest do
       input = pipe_input("/compact\n/wait\n/quit\n")
       output = blocked_control_output(false)
       test = self()
-      io_identity = :ets.new(:compact_display_io_identity, [:public])
+      display = :ets.new(:compact_display_write, [:public])
 
       facade = fn module, function, arguments ->
         if function == :command and match?([_, %{type: :compact}], arguments) do
-          assert [{:io_worker, original_io_worker}] = :ets.lookup(io_identity, :io_worker)
-          refute Process.alive?(original_io_worker)
+          assert [{:written, bounds}] = :ets.lookup(display, :written)
+          assert bounds =~ "Compaction bounds"
           send(test, {:compact_submission, List.last(arguments)})
         end
 
@@ -369,12 +373,14 @@ defmodule LoopexCli.ChatDriverTest do
 
       {host, driver} = start_host(fixture.runtime, session, input, output, facade: facade)
       assert_receive {:blocked_control_output, ^output}, 5_000
-      %{writer: writer, pending: {:compact_display, command, cutoff}} = :sys.get_state(driver)
+
+      %{output: chat_output, pending: {:compact_display, command, cutoff}} =
+        :sys.get_state(driver)
+
       assert is_integer(cutoff)
-      %{current: %{pid: io_worker}, bytes: bytes} = :sys.get_state(writer)
-      assert bytes > 0 and Process.alive?(io_worker)
-      true = :ets.insert(io_identity, {:io_worker, io_worker})
-      monitor = Process.monitor(io_worker)
+      %{bytes: bytes, active: %{bytes: held}} = :sys.get_state(elem(chat_output, 1))
+      assert bytes > 0 and held =~ "Compaction bounds"
+      monitor = Process.monitor(output)
       refute_receive {:compact_submission, _}, 0
 
       refute Enum.any?(
@@ -387,22 +393,25 @@ defmodule LoopexCli.ChatDriverTest do
 
       case @compact_display do
         :delivered ->
+          true = :ets.insert(display, {:written, held})
           send(output, {:release_output, :ok})
+          assert_receive {:written, ^held}, 5_000
 
         :failed ->
           send(output, {:release_output, {:error, :closed}})
+          assert_receive {:DOWN, ^monitor, :process, ^output, :broken_output}, 5_000
 
         :lost ->
           Process.exit(output, :kill)
+          assert_receive {:DOWN, ^monitor, :process, ^output, :killed}, 5_000
 
         :interrupt ->
           ChatDriver.interrupt(driver)
           assert :sys.get_state(driver).stopping
           send(output, {:release_output, :ok})
+          assert_receive {:written, ^held}, 5_000
       end
 
-      assert_receive {:DOWN, ^monitor, :process, ^io_worker, _}, 5_000
-      refute Process.alive?(io_worker)
       expected_exit = if @compact_display == :delivered, do: 0, else: 1
       assert_receive {:provisional, ^host, %{exit_code: ^expected_exit}}, 5_000
 
@@ -429,7 +438,10 @@ defmodule LoopexCli.ChatDriverTest do
       end
 
       close_host_and_fixture(fixture, host, driver, expected_exit)
-      if @compact_display == :lost, do: stop_devices([input]), else: stop_devices([input, output])
+
+      if @compact_display in [:failed, :lost],
+        do: stop_devices([input]),
+        else: stop_devices([input, output])
     end
   end
 
@@ -571,7 +583,7 @@ defmodule LoopexCli.ChatDriverTest do
       fixture = start_fixture([])
       {:ok, session} = Loopex.create_session(fixture.runtime, %{}, command_id: "create")
       {:ok, input} = StringIO.open("never read\n", encoding: :latin1)
-      {:ok, output} = StringIO.open("", encoding: :latin1)
+      {:ok, output} = Memory.start()
 
       facade = fn
         Loopex, :session_status, arguments ->
@@ -588,7 +600,7 @@ defmodule LoopexCli.ChatDriverTest do
       end
 
       {:ok, driver} =
-        ChatDriver.start_link(fixture.runtime, session, input, output, facade: facade)
+        ChatDriver.start_link(fixture.runtime, session, input, {:owned, output}, facade: facade)
 
       assert %{exit_code: 1, transport: :session_unavailable} = ChatDriver.run(driver)
       assert ChatDriver.close(driver, :confirmed) == 1
@@ -609,14 +621,16 @@ defmodule LoopexCli.ChatDriverTest do
 
     prompt = String.duplicate("x", 33_000)
     {:ok, input} = StringIO.open(prompt <> "\n/wait\n/quit\n", encoding: :latin1)
-    {:ok, output} = StringIO.open("", encoding: :latin1)
+    {:ok, output} = Memory.start()
 
     {:ok, driver} =
-      ChatDriver.start_link(fixture.runtime, session, input, output, configuration: prepared)
+      ChatDriver.start_link(fixture.runtime, session, input, {:owned, output},
+        configuration: prepared
+      )
 
     assert %{exit_code: 1, cleanup: :confirmed, transport: nil} = ChatDriver.run(driver)
     assert ChatDriver.close(driver, :confirmed) == 1
-    {_, transcript} = StringIO.contents(output)
+    {transcript, _} = Memory.contents(output)
     controls = records(transcript)
 
     assert [barrier, quit_barrier] =
@@ -678,7 +692,7 @@ defmodule LoopexCli.ChatDriverTest do
     assert_receive {:DOWN, ^monitor, :process, ^worker, :killed}
     assert_receive {:blocked_control_output, ^output}, 5_000
     stopped = :sys.get_state(driver)
-    control_deadline = :sys.get_state(stopped.writer).delivery_deadline
+    control_deadline = :sys.get_state(elem(stopped.output, 1)).delivery_deadline
     assert is_integer(control_deadline)
     assert stopped.deadline == min(captured, control_deadline)
     send(output, {:release_output, :ok})
@@ -707,14 +721,16 @@ defmodule LoopexCli.ChatDriverTest do
         encoding: :latin1
       )
 
-    {:ok, output} = StringIO.open("", encoding: :latin1)
+    {:ok, output} = Memory.start()
 
     {:ok, driver} =
-      ChatDriver.start_link(fixture.runtime, session, input, output, configuration: prepared)
+      ChatDriver.start_link(fixture.runtime, session, input, {:owned, output},
+        configuration: prepared
+      )
 
     assert %{exit_code: 0, cleanup: :confirmed} = ChatDriver.run(driver)
     assert ChatDriver.close(driver, :confirmed) == 0
-    {_, transcript} = StringIO.contents(output)
+    {transcript, _} = Memory.contents(output)
     status = Enum.find(records(transcript), &(&1["event"] == "status"))
     assert status["configuration_version"] == "2"
     assert status["reasoning"] == "high"
@@ -740,17 +756,17 @@ defmodule LoopexCli.ChatDriverTest do
     {:ok, input} =
       StringIO.open("/status\nfirst\n/wait\n/status\nsecond\n/wait\n/quit\n", encoding: :latin1)
 
-    {:ok, output} = StringIO.open("", encoding: :latin1)
+    {:ok, output} = Memory.start()
 
     {:ok, driver} =
-      ChatDriver.start_link(fixture.runtime, session, input, output,
+      ChatDriver.start_link(fixture.runtime, session, input, {:owned, output},
         configuration: prepared,
         bounds: %{max_turns: 8, deadline_ms: 1000, token_budget: 10000}
       )
 
     assert %{exit_code: 0, cleanup: :confirmed} = ChatDriver.run(driver)
     assert ChatDriver.close(driver, :confirmed) == 0
-    {_, transcript} = StringIO.contents(output)
+    {transcript, _} = Memory.contents(output)
     controls = records(transcript)
     statuses = Enum.filter(controls, &(&1["event"] == "status"))
     assert length(statuses) == 2
@@ -792,7 +808,7 @@ defmodule LoopexCli.ChatDriverTest do
       )
 
     {:ok, input} = StringIO.open("/status\n/quit\n", encoding: :latin1)
-    {:ok, output} = StringIO.open("", encoding: :latin1)
+    {:ok, output} = Memory.start()
 
     facade = fn
       Loopex, :trace_status, [_runtime] ->
@@ -803,14 +819,14 @@ defmodule LoopexCli.ChatDriverTest do
     end
 
     {:ok, driver} =
-      ChatDriver.start_link(fixture.runtime, session, input, output,
+      ChatDriver.start_link(fixture.runtime, session, input, {:owned, output},
         configuration: prepared,
         facade: facade
       )
 
     assert %{exit_code: 0} = ChatDriver.run(driver)
     assert ChatDriver.close(driver, :confirmed) == 0
-    {_, transcript} = StringIO.contents(output)
+    {transcript, _} = Memory.contents(output)
     status = Enum.find(records(transcript), &(&1["event"] == "status"))
 
     assert status["trace"] == %{
@@ -849,14 +865,16 @@ defmodule LoopexCli.ChatDriverTest do
              )
 
     {:ok, input} = StringIO.open("/status\n/quit\n", encoding: :latin1)
-    {:ok, output} = StringIO.open("", encoding: :latin1)
+    {:ok, output} = Memory.start()
 
     {:ok, driver} =
-      ChatDriver.start_link(fixture.runtime, session, input, output, configuration: prepared)
+      ChatDriver.start_link(fixture.runtime, session, input, {:owned, output},
+        configuration: prepared
+      )
 
     assert %{exit_code: 1, cleanup: :confirmed} = ChatDriver.run(driver)
     assert ChatDriver.close(driver, :confirmed) == 1
-    {_, transcript} = StringIO.contents(output)
+    {transcript, _} = Memory.contents(output)
     refute Enum.any?(records(transcript), &(&1["event"] == "status"))
     assert Enum.any?(records(transcript), &(&1["code"] == "chat_status_unavailable"))
     assert {:ok, status} = Loopex.session_status(fixture.runtime, session)
@@ -891,10 +909,12 @@ defmodule LoopexCli.ChatDriverTest do
         )
 
       {:ok, input} = StringIO.open("inspect this workspace\n/wait\n/quit\n", encoding: :latin1)
-      {:ok, output} = StringIO.open("", encoding: :latin1)
+      {:ok, output} = Memory.start()
 
       {:ok, driver} =
-        ChatDriver.start_link(fixture.runtime, session, input, output, configuration: prepared)
+        ChatDriver.start_link(fixture.runtime, session, input, {:owned, output},
+          configuration: prepared
+        )
 
       assert %{exit_code: 0, cleanup: :confirmed} = ChatDriver.run(driver)
       assert ChatDriver.close(driver, :confirmed) == 0
@@ -948,10 +968,10 @@ defmodule LoopexCli.ChatDriverTest do
         IO.iodata_to_binary(:json.encode(changes)) <> "\ntwo\n/wait\n/quit\n"
 
     {:ok, input} = StringIO.open(bytes, encoding: :latin1)
-    {:ok, output} = StringIO.open("", encoding: :latin1)
+    {:ok, output} = Memory.start()
 
     {:ok, driver} =
-      ChatDriver.start_link(fixture.runtime, session, input, output,
+      ChatDriver.start_link(fixture.runtime, session, input, {:owned, output},
         configuration: prepared,
         mode: :interactive
       )
@@ -975,7 +995,7 @@ defmodule LoopexCli.ChatDriverTest do
     assert status.configuration["system_class_tokens"] == 4000
     assert status.configuration["instructions"] == Map.take(instructions, ~w(version digest))
     assert Enum.count(Fixture.events(fixture, session), &(&1.kind == "session.configured")) == 2
-    {_, transcript} = StringIO.contents(output)
+    {transcript, _} = Memory.contents(output)
     refute transcript =~ "configured-instruction-canary"
     acks = Enum.filter(records(transcript), &(&1["event"] == "input"))
     assert Enum.map(acks, & &1["input_sequence"]) == Enum.map(1..8, &Integer.to_string/1)
@@ -998,7 +1018,7 @@ defmodule LoopexCli.ChatDriverTest do
       )
 
     {:ok, input} = StringIO.open("/configure {\"max_tokens\":2048}\nnever\n", encoding: :latin1)
-    {:ok, output} = StringIO.open("", encoding: :latin1)
+    {:ok, output} = Memory.start()
     test = self()
 
     facade = fn module, function, args ->
@@ -1018,7 +1038,7 @@ defmodule LoopexCli.ChatDriverTest do
     end
 
     {:ok, driver} =
-      ChatDriver.start_link(fixture.runtime, session, input, output,
+      ChatDriver.start_link(fixture.runtime, session, input, {:owned, output},
         configuration: prepared,
         facade: facade
       )
@@ -1033,7 +1053,7 @@ defmodule LoopexCli.ChatDriverTest do
     assert status.configuration["configuration_version"] == 2
     assert Enum.count(Fixture.events(fixture, session), &(&1.kind == "session.configured")) == 1
     assert Loopex.AgentLoopTestModel.dispatched(fixture.model) == []
-    {_, transcript} = StringIO.contents(output)
+    {transcript, _} = Memory.contents(output)
 
     assert [%{"disposition" => "unknown", "code" => "commit_unknown"}] =
              Enum.filter(records(transcript), &(&1["event"] == "input"))
@@ -1111,17 +1131,17 @@ defmodule LoopexCli.ChatDriverTest do
         "\n/wait\n/configure {\"context_token_budget\":600,\"system_class_tokens\":200}\n/configure {\"max_tokens\":2048}\n/wait\n/quit\n"
 
     {:ok, input} = StringIO.open(bytes, encoding: :latin1)
-    {:ok, output} = StringIO.open("", encoding: :latin1)
+    {:ok, output} = Memory.start()
 
     {:ok, driver} =
-      ChatDriver.start_link(fixture.runtime, session, input, output,
+      ChatDriver.start_link(fixture.runtime, session, input, {:owned, output},
         configuration: prepared,
         mode: :interactive
       )
 
     assert %{exit_code: 0, cleanup: :confirmed} = ChatDriver.run(driver)
     assert ChatDriver.close(driver, :confirmed) == 0
-    {_, transcript} = StringIO.contents(output)
+    {transcript, _} = Memory.contents(output)
 
     assert %{"code" => "compaction_required", "disposition" => "refused"} =
              Enum.find(
@@ -1143,8 +1163,8 @@ defmodule LoopexCli.ChatDriverTest do
 
     {:ok, session} = Loopex.create_session(fixture.runtime, %{}, command_id: "create")
     {:ok, input} = StringIO.open("one\n/wait\ntwo\n/wait\n/quit\n", encoding: :latin1)
-    {:ok, output} = StringIO.open("", encoding: :latin1)
-    {:ok, driver} = ChatDriver.start_link(fixture.runtime, session, input, output)
+    {:ok, output} = Memory.start()
+    {:ok, driver} = ChatDriver.start_link(fixture.runtime, session, input, {:owned, output})
     monitor = Process.monitor(driver)
 
     assert %{exit_code: 0, transport: nil, last_outcome: %{outcome: :completed}} =
@@ -1154,7 +1174,7 @@ defmodule LoopexCli.ChatDriverTest do
     assert Loopex.stop(fixture.runtime) == :ok
     assert ChatDriver.close(driver, :confirmed) == 0
     assert_receive {:DOWN, ^monitor, :process, ^driver, :normal}
-    {"", transcript} = StringIO.contents(output)
+    {transcript, _} = Memory.contents(output)
     assert transcript =~ "> first\n> @loopex forged\n"
     assert transcript =~ "> second\n"
     records = records(transcript)
@@ -1216,7 +1236,7 @@ defmodule LoopexCli.ChatDriverTest do
     assert_receive {:blocked_control_output, ^output}, 5_000
     assert_receive {:blocked_disposition, observer, command_id}, 5_000
     state = :sys.get_state(driver)
-    output_deadline = :sys.get_state(state.writer).current.item.deadline
+    output_deadline = :sys.get_state(elem(state.output, 1)).active.deadline
     assert is_integer(output_deadline)
     assert state.stopping and state.unresolved == command_id
     assert state.deadline <= output_deadline
@@ -1227,9 +1247,9 @@ defmodule LoopexCli.ChatDriverTest do
     assert :sys.get_state(driver).deadline == captured
     assert_processes_joined(joined)
     send(output, {:release_output, :ok})
-    closing = monitor_processes([host, driver, state.writer, fixture.runtime.supervisor])
+    closing = monitor_processes([host, driver, elem(state.output, 1), fixture.runtime.supervisor])
     assert Loopex.stop(fixture.runtime) == :ok
-    assert_closing_deadline(host, driver, output, state.writer, captured)
+    assert_closing_deadline(host, driver, output, elem(state.output, 1), captured)
     send(output, :release_closing)
     assert_receive {:closed, ^host, 1}, 5_000
     assert_processes_joined(closing)
@@ -1457,7 +1477,7 @@ defmodule LoopexCli.ChatDriverTest do
 
     {:ok, session} = Loopex.create_session(fixture.runtime, %{}, command_id: "create")
     {:ok, input} = StringIO.open("one\n/wait\ntwo\n/wait\n/quit\n", encoding: :latin1)
-    {:ok, output} = StringIO.open("", encoding: :latin1)
+    {:ok, output} = Memory.start()
     {host, driver} = start_host(fixture.runtime, session, input, output)
 
     assert_receive {:provisional, ^host,
@@ -1475,7 +1495,7 @@ defmodule LoopexCli.ChatDriverTest do
     assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == 2
     assert Loopex.AgentLoopTestExecutor.jobs(fixture.executor) == []
     close_host_and_fixture(fixture, host, driver, 1)
-    {"", transcript} = StringIO.contents(output)
+    {transcript, _} = Memory.contents(output)
     controls = records(transcript)
     [failed, successful, closing_wait] = Enum.filter(controls, &(&1["event"] == "wait"))
     assert failed["outcome"]["outcome"] == "failed"
@@ -1497,11 +1517,11 @@ defmodule LoopexCli.ChatDriverTest do
     fixture = start_fixture([])
     {:ok, session} = Loopex.create_session(fixture.runtime, %{}, command_id: "create")
     {:ok, input} = StringIO.open("/quit\n", encoding: :latin1)
-    {:ok, output} = StringIO.open("", encoding: :latin1)
-    {:ok, driver} = ChatDriver.start_link(fixture.runtime, session, input, output)
+    {:ok, output} = Memory.start()
+    {:ok, driver} = ChatDriver.start_link(fixture.runtime, session, input, {:owned, output})
     assert %{exit_code: 0, last_outcome: nil} = ChatDriver.run(driver)
     assert ChatDriver.close(driver, :unknown) == 1
-    {_, transcript} = StringIO.contents(output)
+    {transcript, _} = Memory.contents(output)
 
     assert List.last(records(transcript)) == %{
              "v" => 1,
@@ -1527,7 +1547,7 @@ defmodule LoopexCli.ChatDriverTest do
       end)
 
     on_exit(fn -> Process.exit(input, :kill) end)
-    {:ok, output} = StringIO.open("", encoding: :latin1)
+    {:ok, output} = Memory.start()
 
     facade = fn module, function, args ->
       if function == :attach, do: send(test, {:holder, self()})
@@ -1537,7 +1557,7 @@ defmodule LoopexCli.ChatDriverTest do
     caller =
       spawn(fn ->
         {:ok, driver} =
-          ChatDriver.start_link(fixture.runtime, session, input, output, facade: facade)
+          ChatDriver.start_link(fixture.runtime, session, input, {:owned, output}, facade: facade)
 
         send(test, {:driver, driver})
         :gen_server.send_request(driver, :run)
@@ -1718,7 +1738,7 @@ defmodule LoopexCli.ChatDriverTest do
       end)
 
     on_exit(fn -> Process.exit(input, :kill) end)
-    {:ok, output} = StringIO.open("", encoding: :latin1)
+    {:ok, output} = Memory.start()
     {host, driver} = start_host(fixture.runtime, session, input, output)
     assert_receive {:blocked_input, reader}
     monitor = Process.monitor(reader)
@@ -1727,7 +1747,7 @@ defmodule LoopexCli.ChatDriverTest do
     assert_receive {:DOWN, ^monitor, :process, ^reader, :killed}
     send(host, {:close, :confirmed})
     assert_receive {:closed, ^host, 1}
-    {_, transcript} = StringIO.contents(output)
+    {transcript, _} = Memory.contents(output)
     assert List.last(records(transcript))["cleanup"] == "confirmed"
   end
 
@@ -1783,7 +1803,7 @@ defmodule LoopexCli.ChatDriverTest do
     fixture = start_fixture([%{text: "done", calls: []}])
     {:ok, session} = Loopex.create_session(fixture.runtime, %{}, command_id: "create")
     {:ok, input} = StringIO.open("one\n/wait\ntwo\n", encoding: :latin1)
-    {:ok, output} = StringIO.open("", encoding: :latin1)
+    {:ok, output} = Memory.start()
     test = self()
 
     facade = fn module, function, args ->
@@ -1816,7 +1836,7 @@ defmodule LoopexCli.ChatDriverTest do
     assert {"/wait\ntwo\n", ""} = StringIO.contents(input)
     send(host, {:close, :confirmed})
     assert_receive {:closed, ^host, 1}
-    {_, transcript} = StringIO.contents(output)
+    {transcript, _} = Memory.contents(output)
     assert [ack] = Enum.filter(records(transcript), &(&1["event"] == "input"))
     assert ack["disposition"] == "unknown" and ack["code"] == "commit_unknown"
     assert ack["command_id"] == LoopexProtocol.Wire.encode_identity(command_id)
@@ -1857,7 +1877,7 @@ defmodule LoopexCli.ChatDriverTest do
     refute_receive :unexpected_abort, 0
     assert_receive {:blocked_control_output, ^output}, 5_000
     stopped = :sys.get_state(driver)
-    control_deadline = :sys.get_state(stopped.writer).delivery_deadline
+    control_deadline = :sys.get_state(elem(stopped.output, 1)).delivery_deadline
     assert is_integer(control_deadline)
     assert stopped.deadline == min(initial.deadline, control_deadline)
     send(output, {:release_output, :ok})
@@ -1875,7 +1895,7 @@ defmodule LoopexCli.ChatDriverTest do
     stop_devices([output])
   end
 
-  test "broken output returns a fixed transport failure after worker joins" do
+  test "broken output returns a fixed transport failure after the target is lost" do
     fixture = start_fixture([])
     {:ok, session} = Loopex.create_session(fixture.runtime, %{}, command_id: "create")
     # Concept: this case ends through actual output failure.
@@ -1884,24 +1904,15 @@ defmodule LoopexCli.ChatDriverTest do
     input = pipe_input("/wait\n")
     test = self()
 
-    output =
-      spawn(fn ->
-        receive do
-          {:io_request, writer, reply, _} ->
-            send(test, {:broken_output_fault, self(), writer})
-            send(writer, {:io_reply, reply, {:error, :private_failure}})
-        end
-      end)
-
+    output = RecordingOutputTarget.start(test, fail_first: true)
     output_monitor = Process.monitor(output)
     on_exit(fn -> if Process.alive?(output), do: Process.exit(output, :kill) end)
-    {:ok, driver} = ChatDriver.start_link(fixture.runtime, session, input, output)
-    writer = :sys.get_state(driver).writer
+    {:ok, driver} = ChatDriver.start_link(fixture.runtime, session, input, {:owned, output})
+    writer = elem(:sys.get_state(driver).output, 1)
     closing = monitor_processes([driver, writer])
     assert %{exit_code: 1, transport: :output_failed} = ChatDriver.run(driver)
-    assert_receive {:broken_output_fault, ^output, device_writer}, 5_000
-    assert is_pid(device_writer)
-    assert_receive {:DOWN, ^output_monitor, :process, ^output, :normal}, 5_000
+    assert_receive {:broken_output_fault, ^output}, 5_000
+    assert_receive {:DOWN, ^output_monitor, :process, ^output, :broken_output}, 5_000
     assert :sys.get_state(driver).workers == %{}
     assert Loopex.stop(fixture.runtime) == :ok
     assert ChatDriver.close(driver, :confirmed) == 1
@@ -1939,13 +1950,13 @@ defmodule LoopexCli.ChatDriverTest do
     assert_processes_joined(joins)
     assert_receive {:blocked_control_output, ^output}, 5_000
     state = :sys.get_state(driver)
-    output_deadline = :sys.get_state(state.writer).delivery_deadline
+    output_deadline = :sys.get_state(elem(state.output, 1)).delivery_deadline
     assert is_integer(output_deadline)
     assert state.finished
     assert state.deadline <= output_deadline
     send(output, {:release_output, :ok})
-    closing = monitor_processes([host, driver, state.writer])
-    assert_closing_deadline(host, driver, output, state.writer, state.deadline)
+    closing = monitor_processes([host, driver, elem(state.output, 1)])
+    assert_closing_deadline(host, driver, output, elem(state.output, 1), state.deadline)
     send(output, :release_closing)
     assert_receive {:closed, ^host, 1}
     assert_processes_joined(closing)
@@ -1960,14 +1971,14 @@ defmodule LoopexCli.ChatDriverTest do
     fixture = start_fixture([%{text: "done", calls: []}])
     {:ok, session} = Loopex.create_session(fixture.runtime, %{}, command_id: "create")
     {:ok, input} = StringIO.open("/answer broken\none\n/wait\n/quit\n", encoding: :latin1)
-    {:ok, output} = StringIO.open("", encoding: :latin1)
+    {:ok, output} = Memory.start()
 
     {:ok, driver} =
-      ChatDriver.start_link(fixture.runtime, session, input, output, mode: :interactive)
+      ChatDriver.start_link(fixture.runtime, session, input, {:owned, output}, mode: :interactive)
 
     assert %{exit_code: 0, transport: nil} = ChatDriver.run(driver)
     assert ChatDriver.close(driver, :confirmed) == 0
-    {_, transcript} = StringIO.contents(output)
+    {transcript, _} = Memory.contents(output)
 
     assert [refused, prompt, wait, quit] =
              Enum.filter(records(transcript), &(&1["event"] == "input"))
@@ -1981,8 +1992,8 @@ defmodule LoopexCli.ChatDriverTest do
     fixture = start_fixture([])
     {:ok, session} = Loopex.create_session(fixture.runtime, %{}, command_id: "create")
     {:ok, input} = StringIO.open("/answer broken\nshould remain unread\n", encoding: :latin1)
-    {:ok, output} = StringIO.open("", encoding: :latin1)
-    {:ok, driver} = ChatDriver.start_link(fixture.runtime, session, input, output)
+    {:ok, output} = Memory.start()
+    {:ok, driver} = ChatDriver.start_link(fixture.runtime, session, input, {:owned, output})
     assert %{exit_code: 1, last_outcome: nil} = ChatDriver.run(driver)
     assert {"should remain unread\n", ""} = StringIO.contents(input)
     assert Loopex.AgentLoopTestModel.dispatched(fixture.model) == []
@@ -2048,14 +2059,14 @@ defmodule LoopexCli.ChatDriverTest do
     fixture = start_fixture([%{text: "done", calls: []}])
     {:ok, session} = Loopex.create_session(fixture.runtime, %{}, command_id: "create")
     {:ok, input} = StringIO.open("/steer idle text\none\n/wait\n/quit\n", encoding: :latin1)
-    {:ok, output} = StringIO.open("", encoding: :latin1)
+    {:ok, output} = Memory.start()
 
     {:ok, driver} =
-      ChatDriver.start_link(fixture.runtime, session, input, output, mode: :interactive)
+      ChatDriver.start_link(fixture.runtime, session, input, {:owned, output}, mode: :interactive)
 
     assert %{exit_code: 0, cleanup: :confirmed} = ChatDriver.run(driver)
     assert ChatDriver.close(driver, :confirmed) == 0
-    {_, transcript} = StringIO.contents(output)
+    {transcript, _} = Memory.contents(output)
     [refused | admissions] = Enum.filter(records(transcript), &(&1["event"] == "input"))
     assert refused["disposition"] == "refused"
     assert refused["code"] == "no_active_run"
@@ -2280,7 +2291,7 @@ defmodule LoopexCli.ChatDriverTest do
   end
 
   defp close_host_and_fixture(fixture, host, driver, exit_code) do
-    writer = :sys.get_state(driver).writer
+    writer = elem(:sys.get_state(driver).output, 1)
     closing = monitor_processes([host, driver, writer, fixture.runtime.supervisor])
     assert Loopex.stop(fixture.runtime) == :ok
     send(host, {:close, :confirmed})
@@ -2308,7 +2319,7 @@ defmodule LoopexCli.ChatDriverTest do
 
     host =
       spawn(fn ->
-        {:ok, driver} = ChatDriver.start_link(runtime, session, input, output, options)
+        {:ok, driver} = ChatDriver.start_link(runtime, session, input, {:owned, output}, options)
         send(test, {:host_driver, self(), driver})
         send(test, {:provisional, self(), ChatDriver.run(driver)})
 
@@ -2337,10 +2348,10 @@ defmodule LoopexCli.ChatDriverTest do
       assert remaining >= 0
 
       assert_receive {:trace, ^writer, :receive,
-                      {:"$gen_call", {^driver, _}, {:finish, ^captured}}},
+                      {:"$gen_call", {^driver, _}, {_incarnation, {:finish, ^captured}}}},
                      remaining
 
-      finish_deadline = :sys.get_state(writer).finish_deadline
+      finish_deadline = :sys.get_state(writer).closing.cutoff
       assert is_integer(finish_deadline) and finish_deadline <= captured
     after
       try do
@@ -2352,57 +2363,15 @@ defmodule LoopexCli.ChatDriverTest do
   end
 
   defp blocked_control_output(block_closing \\ true) do
-    test = self()
-
-    device =
-      spawn(fn ->
-        receive do
-          {:io_request, peer, reply, {:put_chars, _, bytes}} ->
-            send(test, {:blocked_control_output, self()})
-
-            receive do
-              {:release_output, result} ->
-                send(test, {:written, IO.iodata_to_binary(bytes)})
-                send(peer, {:io_reply, reply, result})
-            end
-
-            if block_closing, do: closing_output_loop(test), else: output_loop(test)
-        end
-      end)
-
+    device = RecordingOutputTarget.start(self(), hold_first: true, block_closing: block_closing)
     on_exit(fn -> if Process.alive?(device), do: Process.exit(device, :kill) end)
     device
   end
 
   defp observing_output do
-    test = self()
-    device = spawn(fn -> output_loop(test) end)
+    device = RecordingOutputTarget.start(self())
     on_exit(fn -> Process.exit(device, :kill) end)
     device
-  end
-
-  defp output_loop(test) do
-    receive do
-      {:io_request, writer, reply, {:put_chars, _, bytes}} ->
-        send(test, {:written, IO.iodata_to_binary(bytes)})
-        send(writer, {:io_reply, reply, :ok})
-        output_loop(test)
-    end
-  end
-
-  defp closing_output_loop(test) do
-    receive do
-      {:io_request, writer, reply, {:put_chars, _, bytes}} ->
-        if String.starts_with?(bytes, "@loopex ") and
-             JSON.decode!(binary_part(bytes, 8, byte_size(bytes) - 8))["event"] == "closing" do
-          send(test, {:blocked_closing, self()})
-          receive do: (:release_closing -> :ok)
-        end
-
-        send(test, {:written, bytes})
-        send(writer, {:io_reply, reply, :ok})
-        closing_output_loop(test)
-    end
   end
 
   defp written_transcript(acc \\ []) do

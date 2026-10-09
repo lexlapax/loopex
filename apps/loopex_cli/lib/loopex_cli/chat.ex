@@ -22,11 +22,11 @@ defmodule LoopexCli.Chat do
     ChatConfiguration,
     ChatControl,
     ChatDriver,
-    ChatOutput,
     ConfigInspection,
     ConfigOptions,
     DiagnosticLifetime,
-    Interrupt
+    Interrupt,
+    Output
   }
 
   alias LoopexComposition.{
@@ -101,12 +101,21 @@ defmodule LoopexCli.Chat do
                DiagnosticLifetime.start(deps.diagnostic_device, grace(invocation)) do
           remember(tag, :diagnostics, {consumer, Process.monitor(consumer), grace(invocation)})
 
-          {:ok, driver} =
-            ChatDriver.bootstrap(deps.input, deps.output,
-              mode: deps.mode,
-              cleanup_grace_ms: grace(invocation),
-              progress_device: deps.diagnostic_device
-            )
+          driver =
+            case ChatDriver.bootstrap(deps.input, deps.output,
+                   mode: deps.mode,
+                   cleanup_grace_ms: grace(invocation),
+                   progress_device: :stderr
+                 ) do
+              {:ok, driver} ->
+                driver
+
+              _unavailable ->
+                # Concept: an unusable target is never acquired again to report
+                # its own failure; the command exits nonzero silently.
+                remember(tag, :output_unavailable, true)
+                throw(:chat_output_unavailable)
+            end
 
           Process.unlink(driver)
           remember(tag, :driver, {driver, Process.monitor(driver)})
@@ -203,7 +212,7 @@ defmodule LoopexCli.Chat do
       provider_launch: deps.provider_launch.(),
       resource_manifest: resources.manifest,
       diagnostics_to: consumer,
-      progress_to: {:session, driver},
+      progress_sink: ChatDriver.progress_sink(driver),
       active_tools: Map.get(invocation, :active_tools, []),
       cleanup_grace_ms: grace(invocation),
       recover_stale_writer: true,
@@ -470,23 +479,32 @@ defmodule LoopexCli.Chat do
         Process.demonitor(monitor, [:flush])
         if is_integer(code) and joined, do: code, else: 1
 
+      %{output_unavailable: true} ->
+        1
+
       _ ->
         startup_failure(deps.output, result, cleanup)
     end
   end
 
-  defp startup_failure(output, result, cleanup) do
+  # Concept: a refusal before the transport owner exists still owns its output.
+  # Technical depth: no runtime or provider work follows this acquisition; the
+  # two fixed records are joined before the nonzero exit.
+  defp startup_failure(target, result, cleanup) do
     code = startup_code(result)
 
     guarded(fn ->
-      with {:ok, writer} <- ChatOutput.start_link(output),
-           {:ok, error} <- ChatControl.encode(:error, %{input_sequence: nil, code: code}),
-           :ok <- ChatOutput.write(writer, :control, error),
-           {:ok, closing} <-
-             ChatControl.encode(:closing, %{exit_code: 1, cleanup: cleanup, last_outcome: nil}),
-           :ok <- ChatOutput.write(writer, :control, closing),
-           :ok <- ChatOutput.finish(writer),
-           do: :ok
+      with {:ok, output, _sink} <- Output.open(target, Output.acquisition(), mode: :chat) do
+        written =
+          with {:ok, error} <- ChatControl.encode(:error, %{input_sequence: nil, code: code}),
+               :ok <- Output.write(output, :control, :stdout, error),
+               {:ok, closing} <-
+                 ChatControl.encode(:closing, %{exit_code: 1, cleanup: cleanup, last_outcome: nil}),
+               do: Output.write(output, :control, :stdout, closing)
+
+        finished = Output.finish(output)
+        if written == :ok, do: finished, else: written
+      end
     end)
 
     1
