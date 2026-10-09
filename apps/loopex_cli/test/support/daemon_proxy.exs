@@ -276,8 +276,8 @@ defmodule LoopexCli.Test.DaemonProxy do
     state =
       if state.observations.pending != "" and
            state.observations.pending_direction != direction,
-        do: finish_observed_connection(state),
-        else: state
+         do: finish_observed_connection(state),
+         else: state
 
     pending = state.observations.pending
 
