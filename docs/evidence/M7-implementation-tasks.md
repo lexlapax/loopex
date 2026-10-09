@@ -1,5 +1,18 @@
 # M7 Implementation Tasks
 
+### Daemon ordering qualification remains open, 2026-10-09
+
+Reviewed daemon ordering source and fixture corrections are joined through
+16806eee. Original58657 passed20/23 Socket cases; three callback alias-response
+controls failed. The distinct owned peer correction is source-reviewed, native
+UNRUN. Complete Registry, remaining Daemon, CLI and floor qualification remain
+owed. T09's answer join also needs actual daemon model-question settlements;
+an isolated test writer is addressing that existing open row. Separate Core
+provenance containment is reviewed but unjoined/unproved. The
+[resume checkpoint](M7-resume.md) binds all failures, exact source/reviews and
+immutable346-asset retention. No checkbox changes: T01–T19 original89 done
+/84 open/6 retired; added373 done/23 open; combined462 done/107 open/6 retired.
+
 ### Core settlement ordering proved, 2026-10-09
 
 Original39805 at886c9ff9 passed all222 cases in six complete Core files on

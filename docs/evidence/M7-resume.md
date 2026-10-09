@@ -27,6 +27,62 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+### Daemon source joined; callback peer qualification next, 2026-10-09
+
+Reviewed daemon v2 joined at `cf1eea15`; formatting and narrow compiler/fixture
+corrections follow through `16806eee`. The newest correction gives the three
+callback controls a distinct owned Registry peer, preserves actual OTP aliases,
+and joins its original monitor together with the native guardian under one
+existing1,000ms fixture cleanup cutoff. Independent peer review SHA-256
+`48ac2b36f79720aae93b7664dd18a5bfc547ba427825c79e70b74e312e31508e`.
+These newest bytes remain native UNRUN. Next root action is prepared formatter
+v68, then unchanged-logic complete Daemon/CLI v8 at the resulting clean commit.
+Their pin files remain unwritten. No native handle is live at this checkpoint.
+
+Original64509 floor formatting failed; its strict AST comparison passed.
+Original2864,58642,65605 and27157 formatting passed both pairs. Original28140
+stopped at an unreachable-clause compile warning after2.759s. Original27396
+stopped at a new fixture's unused-variable discovery warning after28.596s.
+Both warnings are corrected. Original73034 failed three constructor controls
+after51.936s; its reference-to-binary fixture correction is committed.
+Original58657 at `5ebdb15500526dc0b58d1955e2919b00f58f6159` failed the same
+three controls at alias-response observation after59.020s:20/23 Socket cases
+passed, zero exclusions/skips/invalids. All real-socket new cases passed.
+Registry, remaining Daemon, CLI and every floor test stage remain UNRUN for
+this candidate. Native discovery confirmed561 full/558 selected Daemon cases
+and71 CLI cases across48 complete files. Original58657 collection SHA-256
+`0eb6ba26ddd1e61b4ea295d61ca59a18981b433fa8b227148fc29fad41809ffd`;
+registry3015 SHA-256
+`a4f03ed8ecf9fb3252937f5108376ab076528ca8d3a2e482ead50ac16e563200`.
+Every failed original stays FAIL; no unchanged-source retry is authorized.
+
+Immutable346-asset retention:
+`M7/current-source-preparation-20261009-v26/retention.json`, SHA-256
+`ed8c051f1365f1800f2f06046990dd6e12602916b18d89d63b11e998179ad596`.
+It preserves all nine completed originals/collections, daemon v1/v2 packets
+and reviews, formatter/recipe findings, the T09 audit and both source-only
+provenance packets/reviews. The v7 runner's seed-path preparation typo admitted
+no stage or cache work; its corrected original58657 is retained separately.
+
+T09's schema/decoder join is present, but its open added row still lacks an
+actual daemon model-question choice/text/decline settlement proof. Audit
+SHA-256 `5a1a71bb91332d267a6511dc70a4bbeddb2bb39803b9bb18afb5cb856aac55b6`.
+An isolated writer at `/private/tmp/m7-daemon-model-question-worktree-20261009-v1`
+owns only `identity_corpus_test.exs`; preserve its original two cases. No new
+production boundary or deadline is authorized.
+
+The separate Core provenance containment v2 is source-reviewed, unjoined and
+native UNRUN. Its retained packet manifest is
+`149b1b456489a334b037dde16e0520c373795b01c0dac7de5fe0724323325c82`;
+independent review `9441de112be24a77e8ae090325774bac8143b1109028fa055a1d9d67e53268af`.
+Reuse of the existing bounded reader preserves the1,000ms allowance and exact
+original actor joins; it does not prove the complete60-second classifier slice
+or Store-server cancellation. Join and qualify separately after daemon work.
+ADR0066 remains accepted; Core artifact observation grace and ADR0065 remain
+unanswered. Stopped-output-leader ownership/accounting remains unaccepted.
+No checkbox changes: T01–T19 original89 done/84 open/6 retired;
+added373 done/23 open; combined462 done/107 open/6 retired.
+
 ### Core settlement ordering proved; daemon admission repair next, 2026-10-09
 
 At `886c9ff96607fca0c16128c306d4c40eeaaf85e0`, original39805 passed all
