@@ -540,7 +540,6 @@ defmodule Loopex.AppServer.Stdio do
   # start_output: backing + host/driver/proxy(4E) + 4096 <= reserved credit.
   # Delivery retains only the flat LF frame, metadata and the exact lease.
   defp consume_progress(%{sink: nil} = state), do: state
-  defp consume_progress(%{closing: true} = state), do: state
 
   defp consume_progress(state) do
     case Loopex.ProgressSink.take(state.sink) do

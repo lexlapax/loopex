@@ -1,5 +1,26 @@
 # M7 Implementation Tasks
 
+### Foreground compile correction, 2026-10-08
+
+Portable formatter41 original21474 passes all30 non-line AST comparisons and
+both complete changed-source format checks,3.246seconds/four joins. Terminal
+`3fe74955a92722904fc0e4006df6ff7faefd39f202db5b0ac4c619f88d2e28d5`,
+collection `88742f45476ba2bf9f3eed336ae65f428ee05f9eaa8096f352bd1b04d72f2ade`.
+The source was pushed at `7b0858d6c7679446bc6bfd8e9d994bf4193b8e22`.
+Whole401 proof original2372 then FAILS warnings-as-errors before test execution:
+Stdio's private consume_progress closing=true clause is unreachable. Its two
+actual call sites already establish closing=false, through receive_owned's
+exact state pattern and service's closing branch. Remove only the unused
+private clause; preserve both fences and all sink/credit/retirement mechanics.
+No new behavior, test filter or changed bound is introduced. Retained output
+`M7/reviewed-owner-focused-20261008-v1`,7.017seconds/three original joins,
+terminal `3d6a09fcd30c4d740ad04c3bd7407b28d5c517ce17e7a41251c1e1e3238f7f75`,
+collection `ecf8942224876712c14b91ec86f0e125ca92a49cc1ce9194273c9414de6e0326`.
+All401 tests and floor remain UNRUN in that failed original. Verify the new
+committed source with the same whole401 selection on both pairs. Next registry
+2667, SHA-256 `9d9c24ec73ea7932287f7c389806a642c2bb4f62ae00b9c1fbe1f50d64af2ab4`.
+No checklist box closes. Prior failures remain immutable.
+
 ### Portable foreground layout correction, 2026-10-08
 
 Reviewed source was committed at `b1c45f905b36f461b21ab2ab96d7cbd5fe184703`.
