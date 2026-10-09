@@ -1265,8 +1265,12 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
     assert original.invocation === :idle
     assert original.read === nil
     assert original.lost === false
-    assert state.artifact_monitors[original.custodian_monitor] === {id, :custodian, original.custodian}
-    assert state.artifact_monitors[original.observer_monitor] === {id, :observer, original.observer}
+
+    assert state.artifact_monitors[original.custodian_monitor] ===
+             {id, :custodian, original.custodian}
+
+    assert state.artifact_monitors[original.observer_monitor] ===
+             {id, :observer, original.observer}
 
     local = :sys.get_state(handle.transfers, replacement_remaining(fixture_observation_cutoff))
     record = Map.fetch!(local.transfers, id)
@@ -1323,7 +1327,14 @@ defmodule Loopex.Store.Local.ArtifactTransferTest do
 
     for {_kind, pid, _monitor} <- actors, do: assert(Process.alive?(pid))
     assert System.monotonic_time(:millisecond) < fixture_observation_cutoff
-    %{cutoff: fixture_observation_cutoff, dispatcher: dispatcher, id: id, actors: actors, hook_id: hook_id}
+
+    %{
+      cutoff: fixture_observation_cutoff,
+      dispatcher: dispatcher,
+      id: id,
+      actors: actors,
+      hook_id: hook_id
+    }
   end
 
   defp join_replacement_cleanup(cleanup, handle) do
