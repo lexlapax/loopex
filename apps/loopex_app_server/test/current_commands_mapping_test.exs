@@ -304,7 +304,17 @@ defmodule Loopex.AppServer.CurrentCommandsMappingTest do
       assert {:ok, admitted} = Mapping.call(request, context)
       assert admitted["status"] == "accepted"
       settled = await_event(fixture, session, "interaction." <> vector["disposition"])
-      assert settled["answer"] == answer
+      expected_terminal_answer =
+        case answer do
+          %{"choice_id" => id} ->
+            choice = Enum.find(vector["interaction_request"]["choices"], &(&1["id"] == id))
+            %{"choice_id" => id, "label" => choice["label"]}
+
+          answer ->
+            answer
+        end
+
+      assert settled["answer"] == expected_terminal_answer
       [record] = command_records(fixture, session, corpus["command_id"])
       assert record.payload.kind == "model_question_response_admitted_v2"
       assert record.payload["answer"] == answer
