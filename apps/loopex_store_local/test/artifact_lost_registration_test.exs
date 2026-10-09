@@ -84,7 +84,14 @@ defmodule Loopex.Store.Local.ArtifactLostRegistrationTest do
 
     kill_custodian(lost_observer)
     Process.exit(lost_observer.original.observer, :kill)
-    join(lost_observer.original.observer, lost_observer.observer_monitor, :killed, fixture_cutoff())
+
+    join(
+      lost_observer.original.observer,
+      lost_observer.observer_monitor,
+      :killed,
+      fixture_cutoff()
+    )
+
     await(fn -> entry(lost_observer).observer_down != nil end)
     assert entry(lost_observer).loss_kind == :other
     resume(lost_observer.owner)
@@ -152,8 +159,10 @@ defmodule Loopex.Store.Local.ArtifactLostRegistrationTest do
     assert core(early).artifact_monitors == %{}
     assert ledger(early).transfer_debit == 1_048_576
     assert ledger(early).transfer_reserved == 0
+
     assert {:error, :unknown_transfer} =
              Loopex.close_artifact_transfer(early.attachment, early.original.id)
+
     assert ledger(early).transfer_debit == 1_048_576
     assert_no_io_or_ack(early)
 
@@ -165,8 +174,10 @@ defmodule Loopex.Store.Local.ArtifactLostRegistrationTest do
     assert entry(late).observer_monitor == late.original.observer_monitor
     assert core(late).artifact_monitors == late_monitors
     assert occupied(late)
+
     assert {:error, :cleanup_unproved} =
              Loopex.close_artifact_transfer(late.attachment, late.original.id)
+
     assert entry(late).cleanup == late_selector
     assert core(late).artifact_monitors == late_monitors
     resume(late.owner)
@@ -211,23 +222,29 @@ defmodule Loopex.Store.Local.ArtifactLostRegistrationTest do
              Artifacts.close_transfer(lost_observer.artifacts, entry(lost_observer).cleanup)
 
     assert lost_observer_id == lost_observer.original.id
+
     assert {:error, :cleanup_unproved} =
              Loopex.close_artifact_transfer(lost_observer.attachment, lost_observer.original.id)
+
     assert occupied(lost_observer)
 
     assert {:error, :cleanup_unproved} =
              Loopex.close_artifact_transfer(lost_owner.attachment, lost_owner.original.id)
+
     await(fn -> entry(lost_owner).observation == :idle end)
     assert entry(lost_owner).store.handle.transfers == lost_owner.owner
     assert occupied(lost_owner)
+
     assert {:error, :transfers_unavailable} =
              Artifacts.close_transfer(lost_owner.artifacts, entry(lost_owner).cleanup)
+
     assert ledger(lost_owner).transfer_reserved == 134_348_801
     refute entry(lost_owner).not_reserved
     assert Transfers.live(successor) == []
 
     assert {:error, :cleanup_unproved} =
              Loopex.close_artifact_transfer(permitted.attachment, permitted.original.id)
+
     await(fn -> entry(permitted).observation == :idle end)
     assert entry(permitted).permission
     assert entry(permitted).no_reservation_proof == nil
@@ -304,6 +321,7 @@ defmodule Loopex.Store.Local.ArtifactLostRegistrationTest do
         System.tmp_dir!(),
         "loopex-lost-registration-#{System.unique_integer([:positive])}"
       )
+
     File.mkdir_p!(root)
     on_exit(fn -> File.rm_rf!(root) end)
     {:ok, owner} = Transfers.start_link(root: Path.join(root, "artifacts"))
@@ -414,7 +432,10 @@ defmodule Loopex.Store.Local.ArtifactLostRegistrationTest do
 
   defp observed_close(fixture) do
     owner = fixture.owner
-    assert_receive {:original_store_close, ^owner, observer, selector, at}, @fixture_observation_ms
+
+    assert_receive {:original_store_close, ^owner, observer, selector, at},
+                   @fixture_observation_ms
+
     %{observer: observer, selector: selector, at: at}
   end
 
@@ -509,9 +530,13 @@ defmodule Loopex.Store.Local.ArtifactLostRegistrationTest do
   defp now, do: System.monotonic_time(:millisecond)
   defp core(fixture), do: :sys.get_state(fixture.dispatcher)
   defp entry(fixture), do: Map.fetch!(core(fixture).artifact_transfers, fixture.original.id)
+
   defp store_entry(fixture),
     do: Map.fetch!(:sys.get_state(fixture.owner).transfers, fixture.original.id)
-  defp released?(fixture), do: not Map.has_key?(core(fixture).artifact_transfers, fixture.original.id)
+
+  defp released?(fixture),
+    do: not Map.has_key?(core(fixture).artifact_transfers, fixture.original.id)
+
   defp occupied(fixture), do: map_size(core(fixture).artifact_transfers) == 1
   defp ledger(fixture), do: Map.fetch!(core(fixture).holders, self())
 end

@@ -1989,12 +1989,14 @@ defmodule Loopex.Runtime.EventDispatcher do
 
       ArtifactStore.valid_reserve_result?(result, entry.context) ->
         {:error, failure} = result
+
         entry = %{
           entry
           | not_reserved: true,
             no_reservation_proof: :reply,
             reason: failure.reason
         }
+
         state = state |> put_artifact_entry(entry) |> settle_never_reserved(id)
 
         state
@@ -2352,7 +2354,7 @@ defmodule Loopex.Runtime.EventDispatcher do
         state |> put_artifact_entry(%{entry | receipt: receipt}) |> advance_artifact_cleanup(id)
 
       valid and match?({:unregistered, _}, result) and
-          entry.observation_proof === :lost_registration and
+        entry.observation_proof === :lost_registration and
           artifact_lost_registration_candidate?(entry, artifact_now()) ->
         # Concept: original absence can settle a lost registration prospectively.
         # Technical depth: eligibility was captured before this sole original
@@ -2473,7 +2475,10 @@ defmodule Loopex.Runtime.EventDispatcher do
         evidence = %{reason: reason, at: artifact_now()}
         key = if kind == :custodian, do: :custodian_down, else: :observer_down
         entry = Map.put(entry, key, evidence)
-        entry = if entry.stopping and reason === :normal, do: entry, else: artifact_loss(entry, kind)
+
+        entry =
+          if entry.stopping and reason === :normal, do: entry, else: artifact_loss(entry, kind)
+
         state = put_artifact_entry(state, entry)
 
         if entry.stopping do
