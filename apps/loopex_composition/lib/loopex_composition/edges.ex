@@ -124,6 +124,38 @@ defmodule LoopexComposition.Edges do
       (not Map.has_key?(plane, :capability_pid) or plane.capability_pid == capability.pid)
   end
 
+  @doc """
+  ## Concept
+
+  Lends a caller the Store this stack composes under `state_root`, after its
+  runtime has stopped, so evidence can read committed facts through the Store
+  port without naming the implementation.
+
+  ## Technical depth
+
+  The adapter is started unlinked from the caller's view, `function` receives
+  the port handle, and the adapter stops before the result returns. A start
+  failure is `{:error, :store_unavailable}`.
+  """
+  @spec with_store(binary(), (Loopex.Store.t() -> result)) ::
+          result | {:error, :store_unavailable}
+        when result: term()
+  def with_store(state_root, function) when is_binary(state_root) and is_function(function, 1) do
+    case Loopex.Store.Local.start_link(path: Path.join(state_root, "store.log")) do
+      {:ok, adapter} ->
+        try do
+          {:ok, store} = Loopex.Store.new(Loopex.Store.Local, adapter)
+          function.(store)
+        after
+          Process.unlink(adapter)
+          GenServer.stop(adapter)
+        end
+
+      _ ->
+        {:error, :store_unavailable}
+    end
+  end
+
   @doc false
   @spec start(term(), term(), (term() -> term()), (term() -> term())) ::
           {:ok, map()} | {:error, term(), map()}
