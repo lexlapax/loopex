@@ -73,7 +73,17 @@ defmodule Loopex.CreateHistoryQueryTest do
     assert {:error, :invalid_session_creation} =
              Loopex.create_session(fixture.runtime, options, ["not-keyword"])
 
-    assert before_conflict == M1RuntimeTestStore.inspect_state(fixture.store)
+    expected_after_conflict = %{
+      before_conflict
+      | creation_queries:
+          before_conflict.creation_queries ++
+            [
+              %{runtime_id: "agent-loop-runtime", command_id: "exact"},
+              %{runtime_id: "agent-loop-runtime", command_id: "mismatched"}
+            ]
+    }
+
+    assert expected_after_conflict == M1RuntimeTestStore.inspect_state(fixture.store)
 
     :ok = Loopex.stop(fixture.runtime)
     {:ok, store} = Store.new(M1RuntimeTestStore, fixture.store)

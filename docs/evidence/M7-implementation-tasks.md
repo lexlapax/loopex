@@ -1,5 +1,30 @@
 # M7 Implementation Tasks
 
+### Exact recovery-read comparisons joined, 2026-10-08
+
+The two-file repair for original60633's remaining three equality failures is
+joined after independent SOURCE_CLEAR review. Each actual complete Store state
+must equal its captured baseline with only the literal permitted recovery-read
+suffix appended. Every other field, counter and original query prefix remains
+exact; invalid requests that require zero reads still compare unchanged state.
+All16 whole cases, 65,536/65,537-byte boundaries, pre-authority/effect-intent
+assertions, fault schedules, cutoffs and monitor joins remain unchanged.
+This implements accepted ADR0059's reads without moving production preflight.
+Exact join receipt:
+`/private/tmp/m7-reviewed-exact-read-observation-join-20261008-v1.json`, SHA-256
+`19216204c9c424208e5bc83be38c7e4c1920eba1f5bea09068e2054760fc8fee`.
+Source review SHA-256
+`ae08d7b0b686cd7e888fa54485ba659f08c91ccde54a7c0c1e5878d0a1037aa8`.
+Original truncated failure maps do not prove the sole delta; the corrected full
+state comparisons still require native qualification. Formatter/tests UNRUN.
+
+A bounded16-case T16 repair subtask is added. T01-T19 original88 done /85
+open /6 retired; added368 done /24 open. No native handle is live. Seed next
+native work from original72370's completed2746 registry. Next format these two
+files and qualify all16 cases on both pairs, then rejoin the broader creation
+and daemon scope using corrected Core682 census. The original failed full
+scope, foreground stopped-leader defect and pending ADR0065 remain open.
+
 ### Current creation fixture repair proved, 2026-10-08
 
 Original72370 at `c3165b8bc9c7f58a02b20e3c4c09aaab2655a960` passes all65
@@ -15287,6 +15312,8 @@ full restore175, operator attendance, helpers or whole integration.
 - [ ] Independently review integration changes and fix confirmed defects without weakening checks.
 
 ### Added implementation subtasks
+
+- [ ] Repair original60633's three creation-refusal/history full-state comparisons to permit only exact accepted recovery-read suffixes; retain every other field/counter, query prefix, zero-read invalid case, byte/authority/fault/cutoff/join assertion and all16 whole cases. Prove both supported pairs; preserve the original failure and keep full Core682/integration separate.
 
 - [x] Repair the two normalization properties and four test Store provenance wrappers exposed by original60633; retain every sample, byte/record/readback/refusal assertion, callback observer, compact/status/binding/fault gate, cutoff and process join. Prove all six whole affected files /65 cases per supported pair, with original652/682 and30 failures retained. Full Core682, other applications and integration remain separate.
 

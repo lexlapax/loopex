@@ -574,8 +574,15 @@ defmodule Loopex.CancellationObservationContractTest do
              command_id: "oversized-genesis"
            ) == {:error, :session_configuration_too_large}
 
-    assert M1RuntimeTestStore.inspect_state(store_pid) == before,
-           "an oversized genesis reached Store or acquired session authority before refusal"
+    expected_after_refusal = %{
+      before
+      | creation_queries:
+          before.creation_queries ++
+            [%{runtime_id: "genesis-preflight", command_id: "oversized-genesis"}]
+    }
+
+    assert M1RuntimeTestStore.inspect_state(store_pid) == expected_after_refusal,
+           "an oversized genesis changed Store state beyond its exact recovery read before refusal"
 
     definition =
       Loopex.AgentLoopFixture.tool_definition(%{
@@ -656,7 +663,14 @@ defmodule Loopex.CancellationObservationContractTest do
              command_id: "genesis-over-limit"
            ) == {:error, :session_configuration_too_large}
 
-    assert M1RuntimeTestStore.inspect_state(store_pid) == before_oversized
+    expected_after_oversized = %{
+      before_oversized
+      | creation_queries:
+          before_oversized.creation_queries ++
+            [%{runtime_id: "genesis-exact-boundary", command_id: "genesis-over-limit"}]
+    }
+
+    assert M1RuntimeTestStore.inspect_state(store_pid) == expected_after_oversized
   end
 
   defp runtime_fixture(grace, mode, options \\ []) do

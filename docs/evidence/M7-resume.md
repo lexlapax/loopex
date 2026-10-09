@@ -27,6 +27,31 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+### Exact recovery-read comparisons joined, 2026-10-08
+
+The two-file repair for original60633's remaining three equality failures is
+joined after independent SOURCE_CLEAR review. Each actual complete Store state
+must equal its captured baseline with only the literal permitted recovery-read
+suffix appended. Every other field, counter and original query prefix remains
+exact; invalid requests that require zero reads still compare unchanged state.
+All16 whole cases, 65,536/65,537-byte boundaries, pre-authority/effect-intent
+assertions, fault schedules, cutoffs and monitor joins remain unchanged.
+This implements accepted ADR0059's reads without moving production preflight.
+Exact join receipt:
+`/private/tmp/m7-reviewed-exact-read-observation-join-20261008-v1.json`, SHA-256
+`19216204c9c424208e5bc83be38c7e4c1920eba1f5bea09068e2054760fc8fee`.
+Source review SHA-256
+`ae08d7b0b686cd7e888fa54485ba659f08c91ccde54a7c0c1e5878d0a1037aa8`.
+Original truncated failure maps do not prove the sole delta; the corrected full
+state comparisons still require native qualification. Formatter/tests UNRUN.
+
+A bounded16-case T16 repair subtask is added. T01-T19 original88 done /85
+open /6 retired; added368 done /24 open. No native handle is live. Seed next
+native work from original72370's completed2746 registry. Next format these two
+files and qualify all16 cases on both pairs, then rejoin the broader creation
+and daemon scope using corrected Core682 census. The original failed full
+scope, foreground stopped-leader defect and pending ADR0065 remain open.
+
 ### Current creation fixture repair proved, 2026-10-08
 
 Original72370 at `c3165b8bc9c7f58a02b20e3c4c09aaab2655a960` passes all65
