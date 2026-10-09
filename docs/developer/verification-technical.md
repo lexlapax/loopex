@@ -111,10 +111,13 @@ daemon changes select its `node_client`, `long_bound`, applicable unattended
 replaced or waived by a selected run. The full
 release check runs once against the closure candidate and includes them.
 An unavailable selected lane blocks the affected merge and is not PASS.
-The runner accepts zero or more `--only NAME` pairs. Zero pairs select the
-full closure matrix. With pairs, it takes the union of the named lanes and
-executes each lane once. A repeated identical name refuses, even if its group
-was already selected; a group plus one of its rows is an ordinary union.
+The runner accepts zero or more `--only NAME` pairs, one `--attempts-index
+FILE` and, for the full matrix only, one `--resume-matrix ID`. Zero pairs
+select the full closure matrix, which requires an absolute `--attempts-index`.
+With pairs, it takes the union of the named lanes and executes each lane once.
+A repeated identical name refuses, even if its group was already selected; a
+group plus one of its rows is an ordinary union. `m7-provider` requires
+`--attempts-index`; `m7-rollback` accepts it; any other selection refuses it.
 
 | Name | Selected cases |
 | --- | --- |
@@ -123,8 +126,10 @@ was already selected; a group plus one of its rows is an ordinary union.
 | `node_client` | The Node client cases in app server, protocol, daemon and CLI |
 | `long_bound` | The current long-bound cases in core, local executor and daemon, plus the ReqLLM transport-drain case |
 | `cross_uid` | The daemon's two Linux cross-UID cases |
+| `m7-provider` | The unattended paid M7 cases, each recorded in the attempts index |
+| `m7-rollback` | The credential-free M7 rollback cases, recorded when an index is given |
 
-Rows 1 and 2 are attended and cannot be selected individually. Unknown names,
+Rows 1 and 2 and the `m7-operator` block are attended and cannot be selected. Unknown names,
 missing names, duplicate names and any other argument refuse with exit 2
 before repository checks, temporary-directory creation, builds or networking.
 The entire manifest must contain exactly eleven uniquely defined rows; the
@@ -143,9 +148,37 @@ The full run retains both credential and Node preconditions. An explicitly selec
 `cross_uid` refuses outside
 Linux before staging. Every selection keeps the fresh-source extraction and
 build, then runs only its selected test lanes. Its final line is
-`PASS (selection-only: not full closure evidence)`. The unchanged no-option
-command still runs the attended rows and every group; outside Linux it reports
-the existing closure-incomplete result.
+`PASS (selection-only: not full closure evidence)`. The full matrix runs the
+attended rows and every group; outside Linux it reports the existing
+closure-incomplete result.
+
+`mix loopex.m7_evidence` is the M7 evidence validator. The fast check runs it
+over the current tree: every `index-head: <campaign_id> <sequence> <sha256>`
+line in `docs/plans/M7.md` is exact, each campaign's greatest head is selected
+and conflicting digests at one sequence refuse, and the pinned
+`test/fixtures/m7` catalog and oracle digests verify. When the full matrix or
+an M7 lane is selected, the release check runs it with `--release` from the
+clean checkout before staging; it also requires the index to be absolute and
+outside the checkout and the execution manifest to pin the campaign and lane
+cases. While that manifest is pending, it exits 2 and the runner refuses.
+
+The attempts index has one writer, `AttemptWriter` in `loopex_cli`, under
+[ADR 0065](../adr/0065-private-attempts-io-prerequisite.md#concept): an
+exclusive 127.0.0.1 listener on the port in the index's immutable
+`<index>.lock` record, owned by the process that performs every read, append
+and sync. Each acknowledged record is completely written and synced before a
+case is dispatched. The writer replays the complete chain under
+[ADR 0057](../adr/0057-attempts-event-bodies.md#concept) before every append
+and admission: a torn tail, missing history, fork or stale copy refuses,
+missing or mismatched reference bytes are unavailable evidence, a pre-dispatch
+stop resumes only on its commit without redispatching completed cases, a
+committed head or a later commit's lane abandons a suspended lane, and a
+failed case runs on a new candidate only when its latest failure authorizes
+exactly that candidate with a reviewer other than its writer and complete
+causal references. Handoff writes quiescence, relinquishment and a local
+marker before the destination accepts against the transferred bytes. Its tests
+in `apps/loopex_cli/test/m7_attempt_writer_test.exs` use real files, real
+listeners and independent VMs.
 
 The runner sources `scripts/lib/release-lane.sh`; the fixture command
 `bash scripts/test/check-release-test.sh` executes that same parser and lane

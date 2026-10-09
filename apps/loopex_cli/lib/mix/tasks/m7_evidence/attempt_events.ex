@@ -27,12 +27,17 @@ defmodule Mix.Tasks.Loopex.M7Evidence.AttemptEvents do
   Lane-history verification selects the greatest committed anchor and joins
   consumed-case and post-head barriers before proposing a single-lane
   continuation. Its trusted in-memory selection retains original pass histories
-  and only recorded pre-dispatch rows; missing invocation, grouped-subcase,
-  head-recording or authority joins remain unresolved. Fresh full invocations
-  cannot bypass consumed matrix histories. This performs no IO, tail recovery,
-  evidence dereferencing or manifest admission. Matching handoff references do
-  not prove actual
-  quiescence, custody or authority; no projection grants dispatch permission.
+  and only recorded pre-dispatch rows. A suspended lane whose rows a committed
+  head covers, or after which another commit's lane recorded rows, is
+  abandoned. A consumed failure on another candidate blocks a new lane unless
+  its latest failure authorizes exactly this candidate with a reviewer other
+  than its writer; those authorizing records are returned for complete byte
+  verification. Missing invocation and grouped-subcase joins remain
+  unresolved, and fresh full invocations cannot bypass consumed matrix
+  histories. This performs no IO, tail recovery, evidence dereferencing or
+  manifest admission; `AttemptWriter` owns those. Matching handoff references
+  do not prove actual quiescence, custody or authority; no projection grants
+  dispatch permission.
   """
 
   alias Mix.Tasks.Loopex.M7Evidence.AttemptFrames
@@ -129,41 +134,49 @@ defmodule Mix.Tasks.Loopex.M7Evidence.AttemptEvents do
   # predecessors, against its own digest. The caller retains byte custody.
   # Report only the first bounded reference failure beside the original history;
   # null post-dispatch evidence never inherits an earlier execution-path proof.
-  defp case_evidence(projection, reference_bytes)
-       when is_map(reference_bytes) and not is_struct(reference_bytes) do
-    Enum.reduce_while(projection.records, {:ok, projection}, fn record, result ->
-      body = record["body"]
+  defp case_evidence(projection, reference_bytes) do
+    case record_evidence(projection.records, reference_bytes) do
+      :ok -> {:ok, projection}
+      {:unavailable, detail} -> {:unavailable, Map.put(detail, :case_history, projection)}
+    end
+  end
 
-      if is_nil(body["evidence"]) do
-        {:halt, evidence_unavailable(projection, record, "evidence", nil, :absent_evidence)}
-      else
-        references =
-          Enum.map(body["evidence"], &{"evidence", &1}) ++
-            Enum.flat_map(~w(diagnosis disposition authorization_evidence), fn member ->
-              if is_nil(body[member]), do: [], else: [{member, body[member]}]
-            end)
+  @doc false
+  def record_evidence(records, reference_bytes)
+      when is_map(reference_bytes) and not is_struct(reference_bytes) do
+    Enum.reduce_while(records, :ok, fn record, :ok ->
+      case reference_unavailable(record["body"], reference_bytes) do
+        nil ->
+          {:cont, :ok}
 
-        unavailable =
-          Enum.find_value(references, fn {member, reference} ->
-            case reference_bytes_status(reference, reference_bytes) do
-              :ok -> nil
-              reason -> {member, reference, reason}
-            end
-          end)
-
-        case unavailable do
-          nil ->
-            {:cont, result}
-
-          {member, reference, reason} ->
-            {:halt, evidence_unavailable(projection, record, member, reference, reason)}
-        end
+        {member, reference, reason} ->
+          {:halt, evidence_unavailable(record, member, reference, reason)}
       end
     end)
   end
 
-  defp case_evidence(projection, _reference_bytes),
-    do: evidence_unavailable(projection, nil, nil, nil, :invalid_reference_bytes)
+  def record_evidence(_records, _reference_bytes),
+    do: evidence_unavailable(nil, nil, nil, :invalid_reference_bytes)
+
+  @doc false
+  def references(body) do
+    Enum.flat_map(["evidence" | ~w(diagnosis disposition authorization_evidence)], fn
+      "evidence" -> Enum.map(body["evidence"] || [], &{"evidence", &1})
+      member -> if is_nil(body[member]), do: [], else: [{member, body[member]}]
+    end)
+  end
+
+  defp reference_unavailable(%{"evidence" => nil}, _reference_bytes),
+    do: {"evidence", nil, :absent_evidence}
+
+  defp reference_unavailable(body, reference_bytes) do
+    Enum.find_value(references(body), fn {member, reference} ->
+      case reference_bytes_status(reference, reference_bytes) do
+        :ok -> nil
+        reason -> {member, reference, reason}
+      end
+    end)
+  end
 
   defp reference_bytes_status(reference, reference_bytes) do
     case Map.fetch(reference_bytes, reference["reference"]) do
@@ -179,10 +192,9 @@ defmodule Mix.Tasks.Loopex.M7Evidence.AttemptEvents do
     end
   end
 
-  defp evidence_unavailable(projection, record, member, reference, reason) do
+  defp evidence_unavailable(record, member, reference, reason) do
     {:unavailable,
      %{
-       case_history: projection,
        head: if(is_nil(record), do: nil, else: Map.take(record, ~w(campaign_id sequence digest))),
        member: member,
        reference: reference,
@@ -225,8 +237,11 @@ defmodule Mix.Tasks.Loopex.M7Evidence.AttemptEvents do
       selection: selection,
       reused: [],
       remaining: [],
+      authorizations: [],
       reason: nil
     }
+
+    prior = prior_failures(projection, scope)
 
     cond do
       mode == :new and not is_nil(selection["logical_matrix_id"]) and
@@ -264,8 +279,8 @@ defmodule Mix.Tasks.Loopex.M7Evidence.AttemptEvents do
       is_nil(projection.ownership.owner) ->
         lane_stopped(result, :unresolved, :writer_designation_unavailable)
 
-      prior_lane_failure?(projection, scope) ->
-        lane_stopped(result, :unresolved, :prior_failure_authority_join_required)
+      prior == :unauthorized ->
+        lane_stopped(result, :blocked, :prior_failure_unauthorized)
 
       not is_nil(selection["logical_matrix_id"]) ->
         lane_stopped(result, :unresolved, :matrix_invocation_join_required)
@@ -274,7 +289,7 @@ defmodule Mix.Tasks.Loopex.M7Evidence.AttemptEvents do
         lane_stopped(result, :blocked, :lane_continuation_required)
 
       mode == :new ->
-        {:ok, %{result | remaining: selected}}
+        {:ok, %{result | remaining: selected, authorizations: prior}}
 
       scoped == [] ->
         lane_stopped(result, :unresolved, :lane_history_unavailable)
@@ -291,23 +306,21 @@ defmodule Mix.Tasks.Loopex.M7Evidence.AttemptEvents do
       Enum.any?(selected, &is_nil(&1.history)) ->
         lane_stopped(result, :unresolved, :not_dispatched_evidence_unavailable)
 
-      Enum.any?(selected, fn row ->
-        row.history.state == "not_dispatched" and
-            List.last(row.history.records)["sequence"] <= head["sequence"]
-      end) ->
-        lane_stopped(result, :unresolved, :head_recorded_lane_join_required)
-
       true ->
-        suspended_lane(result, selected)
+        abandoned? = lane_abandoned?(projection, scoped, scope, head)
+        suspended_lane(result, selected, abandoned?, prior)
     end
   end
 
-  defp suspended_lane(result, selected) do
+  defp suspended_lane(result, selected, abandoned?, authorizations) do
     {reused, remaining} = Enum.split_while(selected, &completed_pass?(&1.history))
 
     cond do
       remaining == [] ->
         lane_stopped(result, :blocked, :lane_already_ended)
+
+      abandoned? ->
+        lane_stopped(result, :blocked, :lane_abandoned)
 
       Enum.any?(remaining, &completed_pass?(&1.history)) ->
         lane_stopped(result, :unresolved, :noncontiguous_case_order)
@@ -318,7 +331,7 @@ defmodule Mix.Tasks.Loopex.M7Evidence.AttemptEvents do
         lane_stopped(result, :unresolved, :grouped_subcase_join_required)
 
       true ->
-        {:ok, %{result | reused: reused, remaining: remaining}}
+        {:ok, %{result | reused: reused, remaining: remaining, authorizations: authorizations}}
     end
   end
 
@@ -344,11 +357,48 @@ defmodule Mix.Tasks.Loopex.M7Evidence.AttemptEvents do
       latest["verdict"] in [nil, "pass"]
   end
 
-  defp prior_lane_failure?(projection, scope) do
-    Enum.any?(projection.histories, fn {locator, history} ->
-      locator["lane_id"] == scope["lane_id"] and
-        lane_scope(locator) != scope and consumed_failure?(history)
+  # Concept: a new candidate alone never authorizes repeating a failed case.
+  # Technical depth: every consumed failure of this lane on another scope needs
+  # an authorization record; the latest failure of each case must name this
+  # candidate and an independent reviewer. The returned authorizing records
+  # still need complete reference bytes before any dispatch.
+  defp prior_failures(projection, scope) do
+    projection.histories
+    |> Enum.filter(fn {locator, history} ->
+      locator["lane_id"] == scope["lane_id"] and lane_scope(locator) != scope and
+        consumed_failure?(history)
     end)
+    |> Enum.group_by(fn {locator, _} -> Map.take(locator, ~w(case_key subcase_key)) end)
+    |> Enum.reduce_while([], fn {_case, failures}, authorizations ->
+      [{_, latest} | older] =
+        Enum.sort_by(failures, fn {_, history} -> -hd(history.records)["sequence"] end)
+
+      authorizing = List.last(latest.records)["body"]
+
+      if latest.state == "authorized_next_candidate" and
+           authorizing["authorized_candidate_sha"] == scope["candidate_sha"] and
+           authorizing["reviewer_id"] != hd(latest.records)["body"]["writer_id"] and
+           Enum.all?(older, fn {_, history} -> history.state == "authorized_next_candidate" end) do
+        {:cont, authorizations ++ [List.last(latest.records)]}
+      else
+        {:halt, :unauthorized}
+      end
+    end)
+  end
+
+  # Concept: a committed head or a later lane on another commit ends a
+  # suspended lane for good. Technical depth: suspended rows always lie beyond
+  # the latest committed head on their own commit, and a new lane on another
+  # commit can begin only after that suspension was abandoned.
+  defp lane_abandoned?(projection, scoped, scope, head) do
+    records = Enum.flat_map(scoped, fn {_, history} -> history.records end)
+    last = records |> Enum.map(& &1["sequence"]) |> Enum.max()
+
+    Enum.any?(records, &(&1["sequence"] <= head["sequence"])) or
+      Enum.any?(projection.records, fn record ->
+        record["sequence"] > last and record["body"]["lane_id"] == scope["lane_id"] and
+          record["body"]["candidate_sha"] != scope["candidate_sha"]
+      end)
   end
 
   defp post_head_consumed?(record, head),
