@@ -726,7 +726,7 @@ defmodule Loopex.CreationCustodyLifecycleTest do
 
   test "owned carrier before permit dispatches nothing and its positive exact permit makes one call" do
     {pid, store} = fixture()
-    {:ok, workers} = Task.Supervisor.start_link()
+    {:ok, workers} = Loopex.Runtime.TaskSupervisor.start_link()
     # Concept: The linked fixture supervisor may exit before its on_exit callback stops it.
     # Technical depth: Accept only absence of this original supervisor; other stop failures surface.
     on_exit(fn ->

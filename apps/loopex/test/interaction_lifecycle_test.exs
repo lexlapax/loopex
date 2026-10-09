@@ -1152,7 +1152,7 @@ defmodule Loopex.InteractionLifecycleTest do
     end
   end
 
-  test "public runtime stop joins an answered interaction's held policy and attributes original shutdown reports" do
+  test "public runtime stop joins an answered interaction's held policy without shutdown reports" do
     observer = self()
     nonce = make_ref()
     fixture = loop_fixture(%{module: StopWitnessPolicy, context: {observer, nonce}})
@@ -1174,8 +1174,9 @@ defmodule Loopex.InteractionLifecycleTest do
     %{workers: private_workers, providers: providers} = :sys.get_state(group, 1_000)
     assert {:ok, ^private_workers} = Loopex.Runtime.OwnerGroup.workers(group)
 
-    assert {:undefined, policy, :worker, [Task.Supervised]} in Supervisor.which_children(
-             private_workers
+    assert Enum.any?(
+             Supervisor.which_children(private_workers),
+             &match?({_id, ^policy, :worker, [Loopex.Runtime.TaskSupervisor]}, &1)
            )
 
     # Completed model actors can remain in a retirement record, but none may
@@ -1222,7 +1223,8 @@ defmodule Loopex.InteractionLifecycleTest do
   # Concept: ordinary stop evidence names the actual pre-captured actor census.
   # Technical depth: the primary filter preserves the event and copies only
   # fixed supervisor metadata. One cutoff spans stop, original joins and trace
-  # delivery; no Logger drain allowance or blanket quiet assertion is added.
+  # delivery; no Logger drain allowance is added. The filter is scoped to the
+  # captured actors, and an intentional stop must leave it empty.
   defp interaction_stop_observe(fixture, session_id, actors, monitors, records_before, nonce) do
     observer = self()
     {:ok, logger_started} = Application.ensure_all_started(:logger)
@@ -1283,20 +1285,15 @@ defmodule Loopex.InteractionLifecycleTest do
 
           :trace.recv(session, receive_patterns, [])
 
-          for {mfa, arguments} <- [
-                {{:erlang, :monitor, 2}, fn pid -> [:process, pid] end},
-                {{DynamicSupervisor, :monitor_child, 1}, fn pid -> [pid] end}
-              ] do
-            assert :trace.function(
-                     session,
-                     mfa,
-                     for(
-                       pid <- pids,
-                       do: {arguments.(pid), [], [{:message, {:const, pid}}, {:return_trace}]}
-                     ),
-                     if(elem(mfa, 0) == DynamicSupervisor, do: [:local], else: [])
-                   ) > 0
-          end
+          assert :trace.function(
+                   session,
+                   {:erlang, :monitor, 2},
+                   for(
+                     pid <- pids,
+                     do: {[:process, pid], [], [{:message, {:const, pid}}, {:return_trace}]}
+                   ),
+                   []
+                 ) > 0
 
           assert :trace.function(
                    session,
@@ -1360,40 +1357,8 @@ defmodule Loopex.InteractionLifecycleTest do
             assert row["reason"] in ["normal", "shutdown"]
           end
 
-          for report <- evidence.reports do
-            assert report["logger_producer"] == report["supervisor"]
-            assert Enum.any?(evidence.joins, &(&1["pid"] == report["supervisor"]))
-            original = Enum.find(evidence.joins, &(&1["pid"] == report["pid"]))
-            assert original != nil
-
-            exited =
-              Enum.find(
-                evidence.trace,
-                &(&1["event"] == "actor_exit" and &1["pid"] == report["pid"])
-              )
-
-            assert exited != nil and exited["reason"] == original["reason"]
-
-            if report["reason"] == "noproc" do
-              installed =
-                Enum.find(
-                  evidence.trace,
-                  &(&1["event"] == "monitor_installed" and
-                      &1["pid"] == report["pid"] and &1["actor"] == report["supervisor"])
-                )
-
-              assert installed != nil and exited["at_ns"] <= installed["at_ns"]
-
-              assert Enum.any?(
-                       evidence.trace,
-                       &(&1["event"] == "supervisor_down" and
-                           &1["actor"] == report["supervisor"] and &1["pid"] == report["pid"] and
-                           &1["monitor"] == installed["monitor"] and &1["reason"] == "noproc")
-                     )
-            else
-              assert report["reason"] == original["reason"]
-            end
-          end
+          # An intentional stop of ordinary temporary children reports nothing.
+          assert evidence.reports == []
         after
           interaction_stop_cleanup([
             fn -> interaction_stop_retain(Process.get(key), cutoff) end,

@@ -47,19 +47,17 @@ defmodule LoopexComposition.StartupGate do
 
     listener = test_listener()
     task = fn -> owned_observer(owner, tag, runtime, initial, listener, read) end
-    callers = [owner | Process.get(:"$callers", [])]
-    args = [{node(), owner, owner}, callers, {:erlang, :apply, [task, []]}]
+    spec = Loopex.Runtime.TaskSupervisor.task_spec(task, :brutal_kill)
 
     # Concept: admission uses the same temporary task owned by Runtime.Workers.
-    # Technical depth: Elixir 1.18.5/OTP27 and 1.20.3/OTP29 Task.Supervisor use
-    # this exact private request/Task.Supervised argument shape. The public
-    # start_child helper waits infinitely; this source-pinned adapter uses OTP's
-    # asynchronous GenServer request API and requires proof on both pairs.
+    # Technical depth: Runtime.TaskSupervisor accepts this exact `start_child`
+    # spec. Its public start helper waits infinitely; this adapter uses OTP's
+    # asynchronous GenServer request API under the shared initial cap.
     with {:ok, children} <- request(runtime.supervisor, :which_children, initial),
          {Loopex.Runtime.Workers, workers, _type, _modules} when is_pid(workers) <-
            List.keyfind(children, Loopex.Runtime.Workers, 0),
          {:ok, {:ok, pid}} when is_pid(pid) <-
-           request(workers, {:start_task, args, :temporary, :brutal_kill}, initial) do
+           request(workers, {:start_child, spec}, initial) do
       monitor = Process.monitor(pid)
       send(pid, {owner, tag, :observe})
       {:ok, %{pid: pid, monitor: monitor, tag: tag}}

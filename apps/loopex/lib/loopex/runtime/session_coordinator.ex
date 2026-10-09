@@ -25,6 +25,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
   use GenServer
 
+  alias Loopex.Runtime.TaskSupervisor
   alias Loopex.Bounds
   alias Loopex.Conversation
   alias Loopex.CompactionProgress
@@ -1715,7 +1716,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
   defp handle_owner_info({:policy_timeout, reference, run_id}, state) do
     case Map.pop(state.in_flight, reference) do
       {{:policy, ^run_id, pid}, remaining} ->
-        _ = Task.Supervisor.terminate_child(state.owner_workers, pid)
+        _ = TaskSupervisor.terminate_child(state.owner_workers, pid)
         _ = take_worker_result(reference)
 
         state =
@@ -2886,7 +2887,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
     model = state.model
 
     task =
-      Task.Supervisor.async_nolink(state.owner_workers, fn ->
+      TaskSupervisor.async_nolink(state.owner_workers, fn ->
         configuration_preparation_group(
           owner,
           caller,
@@ -3064,7 +3065,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
       {outcome, cleanup} =
         try do
           {:ok, guard} =
-            Task.Supervisor.start_child(
+            TaskSupervisor.start_child(
               owner_workers,
               fn ->
                 guard_provider_call(
@@ -3084,7 +3085,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
           :ok = OwnerGroup.retain_provider(owner_group, guard, reference, grace, work_bound)
 
           worker =
-            Task.Supervisor.async_nolink(owner_workers, fn ->
+            TaskSupervisor.async_nolink(owner_workers, fn ->
               Process.put(:loopex_provider_cleanup_owner, {owner_group, reference})
               Process.put(:loopex_provider_cleanup_guard, guard)
               Process.put(:loopex_provider_work_bound, work_bound)
@@ -3163,7 +3164,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
   defp start_invocation_child(_module, owner_workers, child),
     do:
-      Task.Supervisor.start_child(owner_workers, child,
+      TaskSupervisor.start_child(owner_workers, child,
         restart: :temporary,
         shutdown: :brutal_kill
       )
@@ -3218,7 +3219,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
       when is_pid(requester) and is_reference(request) and is_function(child, 0) ->
         if Process.alive?(requester) and System.monotonic_time(:millisecond) < deadline do
           result =
-            Task.Supervisor.start_child(owner_workers, child,
+            TaskSupervisor.start_child(owner_workers, child,
               restart: :temporary,
               shutdown: :brutal_kill
             )
@@ -3831,7 +3832,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
           transaction = state.unknown_admission.transaction
 
           worker =
-            Task.Supervisor.async_nolink(state.owner_workers, fn ->
+            TaskSupervisor.async_nolink(state.owner_workers, fn ->
               OwnerLane.transact(lane, transaction)
             end)
 
@@ -4252,7 +4253,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
       end
 
       task =
-        Task.Supervisor.async_nolink(state.owner_workers, fn ->
+        TaskSupervisor.async_nolink(state.owner_workers, fn ->
           try do
             compact_preparation_proposal(durable, selection, instructions, now, check)
           rescue
@@ -4747,7 +4748,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
       gate = if is_binary(key), do: Map.get(state, :native_callback_gate)
 
       task =
-        Task.Supervisor.async_nolink(state.owner_workers, fn ->
+        TaskSupervisor.async_nolink(state.owner_workers, fn ->
           try do
             result =
               SessionState.propose_selected_maintenance_request(
@@ -5057,7 +5058,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
         store = state.artifact_store
 
         task =
-          Task.Supervisor.async_nolink(state.owner_workers, fn ->
+          TaskSupervisor.async_nolink(state.owner_workers, fn ->
             try do
               case store do
                 %{module: _module, handle: _handle} ->
@@ -6308,7 +6309,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
     owner_group = state.owner_group
 
     {:ok, guard} =
-      Task.Supervisor.start_child(owner_workers, fn ->
+      TaskSupervisor.start_child(owner_workers, fn ->
         guard_provider_call(
           coordinator,
           provider_reference,
@@ -6329,7 +6330,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
       )
 
     task =
-      Task.Supervisor.async_nolink(state.owner_workers, fn ->
+      TaskSupervisor.async_nolink(state.owner_workers, fn ->
         Process.put(:loopex_provider_cleanup_owner, {owner_group, provider_reference})
         Process.put(:loopex_provider_cleanup_guard, guard)
         Process.put(:loopex_provider_work_bound, work_bound)
@@ -6473,7 +6474,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # Concept: an adapter failure becomes one private, fixed runtime result before
   # any task machinery can render the adapter's reason.
   #
-  # Technical depth: `Task.Supervised` logs uncaught errors, throws, exits, and
+  # Technical depth: the supervised task process logs uncaught errors, throws, exits, and
   # asynchronous linked-exit reasons before this coordinator can normalize its
   # `DOWN`. The coordinator therefore creates and retains a plain lifetime guard
   # before it asks Control for a permit. The supervised worker's first act stays
@@ -7902,7 +7903,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
       {:error, :provider_cleanup_unproved} -> exit(:provider_cleanup_unproved)
     end
 
-    _ = Task.Supervisor.terminate_child(state.owner_workers, task.pid)
+    _ = TaskSupervisor.terminate_child(state.owner_workers, task.pid)
     _ = take_worker_result(task.ref)
 
     state
@@ -8515,7 +8516,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
         cancel_effect_free_preparation(next, run_id, kind)
 
       {reference, {:model, run_id, pid, tree}}, next ->
-        _ = Task.Supervisor.terminate_child(next.owner_workers, pid)
+        _ = TaskSupervisor.terminate_child(next.owner_workers, pid)
         _ = take_worker_result(reference)
         stop_provider_tree(tree)
 
@@ -8525,7 +8526,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
         |> abandon_terminated_model_cleanup(run_id)
 
       {reference, {:policy, run_id, pid}}, next ->
-        _ = Task.Supervisor.terminate_child(next.owner_workers, pid)
+        _ = TaskSupervisor.terminate_child(next.owner_workers, pid)
         _ = take_worker_result(reference)
 
         next
@@ -9017,7 +9018,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
         {:noreply, state}
 
       {reference, pid, tree} ->
-        _ = Task.Supervisor.terminate_child(state.owner_workers, pid)
+        _ = TaskSupervisor.terminate_child(state.owner_workers, pid)
         answer = take_worker_result(reference)
         cleanup = provider_tree_cleanup(answer, tree)
         state = %{state | in_flight: Map.delete(state.in_flight, reference)}
@@ -9107,7 +9108,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
     grace = state.durable.cleanup_grace_ms
 
     task =
-      Task.Supervisor.async_nolink(state.workers, fn ->
+      TaskSupervisor.async_nolink(state.workers, fn ->
         Executor.cancel(module, reference, job_id, grace)
       end)
 
@@ -9206,7 +9207,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
         {state, :cleaned}
 
       {reference, pid, tree} ->
-        _ = Task.Supervisor.terminate_child(state.owner_workers, pid)
+        _ = TaskSupervisor.terminate_child(state.owner_workers, pid)
         answer = take_worker_result(reference)
         cleanup = provider_tree_cleanup(answer, tree)
 
@@ -9243,7 +9244,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
         state
 
       {reference, pid} ->
-        _ = Task.Supervisor.terminate_child(state.owner_workers, pid)
+        _ = TaskSupervisor.terminate_child(state.owner_workers, pid)
         _ = take_worker_result(reference)
 
         state
@@ -9434,7 +9435,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
         if System.monotonic_time(:millisecond) < until do
           {:noreply, arm_execute_result_slice(state, run_id, until)}
         else
-          _ = Task.Supervisor.terminate_child(state.workers, pid)
+          _ = TaskSupervisor.terminate_child(state.workers, pid)
           answer = take_worker_result(reference)
           state = %{state | in_flight: Map.delete(state.in_flight, reference)}
           close_execute_result_reserve(state, run_id, answer)
@@ -9600,7 +9601,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
     request = policy_request(state, work, call, definition)
 
     task =
-      Task.Supervisor.async_nolink(state.owner_workers, fn ->
+      TaskSupervisor.async_nolink(state.owner_workers, fn ->
         Policy.evaluate_callback(state.policy, request, policy_defer_mode(state, definition))
       end)
 
@@ -9862,7 +9863,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
               )
 
             task =
-              Task.Supervisor.async_nolink(state.owner_workers, fn ->
+              TaskSupervisor.async_nolink(state.owner_workers, fn ->
                 Policy.evaluate_callback(state.policy, request, policy_defer_mode(state))
               end)
 
@@ -10224,7 +10225,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
         }
 
         task =
-          Task.Supervisor.async_nolink(state.workers, fn ->
+          TaskSupervisor.async_nolink(state.workers, fn ->
             Instrumentation.span(
               [:executor, :execute],
               identities,
@@ -11103,7 +11104,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
     job_id = work.job.job_id
 
     task =
-      Task.Supervisor.async_nolink(state.workers, fn ->
+      TaskSupervisor.async_nolink(state.workers, fn ->
         Executor.retained_receipt(executor.module, executor.reference, job_id)
       end)
 

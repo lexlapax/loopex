@@ -17,6 +17,7 @@ defmodule Loopex.Runtime.StreamRelay do
   is published. Owner linkage ends the plane without fabricating an outcome.
   """
 
+  alias Loopex.Runtime.TaskSupervisor
   alias Loopex.ProgressSink
   alias Loopex.Runtime.Control
   alias Loopex.Runtime.ProgressIngress
@@ -77,7 +78,7 @@ defmodule Loopex.Runtime.StreamRelay do
     gate = ProgressIngress.gate()
     ready = make_ref()
 
-    case Task.Supervisor.start_child(supervisor, fn ->
+    case TaskSupervisor.start_child(supervisor, fn ->
            try do
              Process.link(opener)
              monitor = Process.monitor(opener)

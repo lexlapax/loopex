@@ -487,9 +487,10 @@ defmodule Loopex.ModelConfigurationPreparationTest do
 
   # Concept: owner loss before async startup is reachable through the real runtime.
   # Technical depth: hold only this private supervisor's first start and reply;
-  # retain the actual owner monitor chain and shutdown report, not a claim about
-  # earlier reports or registered-resource cleanup. Every new wait shares 1,000 ms.
-  test "configuration owner loss before task startup retains the actual compound shutdown chain" do
+  # retain the actual owner monitor chain. The child's queued {:shutdown, :noproc}
+  # EXIT is consumed by the Erlang task supervisor's own shutdown monitor, so the
+  # intentional stop emits no shutdown report. Every new wait shares 1,000 ms.
+  test "configuration owner loss before task startup stops its child without a shutdown report" do
     cutoff = System.monotonic_time(:millisecond) + 1_000
     f = fixture()
     observer = self()
@@ -614,9 +615,6 @@ defmodule Loopex.ModelConfigurationPreparationTest do
       assert startup_queued(workers, group, child)
       send(workers, {:startup_release, nonce, :finish})
 
-      assert_receive {:startup_supervisor_report, ^workers, ^child, {:shutdown, :noproc}, 5_000},
-                     startup_left(cutoff)
-
       assert_receive {:startup_command_result, ^nonce, ^caller, {:error, _}}, startup_left(cutoff)
       assert Agent.get(f.controller, & &1.calls, startup_left(cutoff)) == 0
 
@@ -630,6 +628,9 @@ defmodule Loopex.ModelConfigurationPreparationTest do
       assert Agent.get(f.executor, & &1.jobs, startup_left(cutoff)) |> Enum.reverse() == []
 
       startup_join_set(key, MapSet.new([group, workers, caller]), cutoff)
+      # The report filter runs in the reporting supervisor before it exits, so
+      # a shutdown report for this already-exited child would be queued here.
+      refute_received {:startup_supervisor_report, ^workers, _child, _reason, _shutdown}
       :ok = Supervisor.stop(f.runtime.supervisor, :normal, startup_left(cutoff))
 
       for pid <- [f.controller, f.model, f.executor, f.store] do
@@ -657,8 +658,7 @@ defmodule Loopex.ModelConfigurationPreparationTest do
               "event" => "supervisor_report",
               "supervisor" => startup_identity(workers),
               "pid" => startup_identity(child),
-              "reason" => "shutdown:noproc",
-              "shutdown" => 5_000
+              "reports" => 0
             }
           ]
 
@@ -818,7 +818,7 @@ defmodule Loopex.ModelConfigurationPreparationTest do
 
   defp startup_barrier(
          {observer, owner, nonce, cutoff, :before_start},
-         {:in, {:"$gen_call", {owner, _tag}, {:start_task, _args, _restart, _shutdown}}},
+         {:in, {:"$gen_call", {owner, _tag}, {:start_child, _spec}}},
          _name
        ) do
     send(observer, {:startup_blocked, nonce, self()})
@@ -867,16 +867,6 @@ defmodule Loopex.ModelConfigurationPreparationTest do
                 [{:message, :"$1"}, {:return_trace}]}
              ],
              []
-           ) > 0
-
-    assert :trace.function(
-             session,
-             {DynamicSupervisor, :monitor_child, 1},
-             [
-               {[:"$1"], [{:"=:=", {:self}, workers}, {:is_pid, :"$1"}],
-                [{:message, :"$1"}, {:return_trace}]}
-             ],
-             [:local]
            ) > 0
 
     assert :trace.send(
@@ -964,7 +954,7 @@ defmodule Loopex.ModelConfigurationPreparationTest do
         send(observer, {:startup_stop_enqueued, self(), group, workers})
         startup_acquire(observer, owner, group, workers, actors, cutoff, [record | records])
 
-      {:trace_ts, ^workers, :spawn, child, {Task.Supervised, :reply, _args}, at}
+      {:trace_ts, ^workers, :spawn, child, {:proc_lib, :init_p, _args}, at}
       when is_pid(child) ->
         record = startup_record("child_acquired", workers, child, at)
 
@@ -1078,50 +1068,6 @@ defmodule Loopex.ModelConfigurationPreparationTest do
   end
 
   defp startup_frame(
-         {:trace_ts, pid, :call, {DynamicSupervisor, :monitor_child, 1}, target, at},
-         actors,
-         targets,
-         _child,
-         _observer
-       ) do
-    assert MapSet.member?(actors, pid) and MapSet.member?(actors, target)
-
-    {startup_record("monitor_child_call", pid, target, at),
-     Map.put(targets, {pid, :monitor_child}, target)}
-  end
-
-  defp startup_frame(
-         {:trace_ts, pid, :return_from, {DynamicSupervisor, :monitor_child, 1}, result, at},
-         actors,
-         targets,
-         _child,
-         _observer
-       ) do
-    assert MapSet.member?(actors, pid)
-
-    rendered =
-      case result do
-        :ok -> "ok"
-        {:error, {:shutdown, :noproc}} -> "error:shutdown:noproc"
-        _ -> "other"
-      end
-
-    record =
-      Map.put(
-        startup_record(
-          "monitor_child_return",
-          pid,
-          Map.fetch!(targets, {pid, :monitor_child}),
-          at
-        ),
-        "result",
-        rendered
-      )
-
-    {record, targets}
-  end
-
-  defp startup_frame(
          {:trace_ts, pid, :call, {:erlang, function, arity}, target, at},
          actors,
          targets,
@@ -1210,7 +1156,7 @@ defmodule Loopex.ModelConfigurationPreparationTest do
   end
 
   defp startup_frame(
-         {:trace_ts, pid, :spawned, parent, {Task.Supervised, :reply, _args}, at},
+         {:trace_ts, pid, :spawned, parent, {:proc_lib, :init_p, _args}, at},
          actors,
          targets,
          child,
@@ -1320,10 +1266,11 @@ defmodule Loopex.ModelConfigurationPreparationTest do
     assert stop["observations"] in 1..64
     received = select.("exit_received", workers, child)
     assert received != nil and received["reason"] == "shutdown:noproc"
-    unlink = select.("unlink_call", workers, child)
-    assert unlink != nil and select.("unlink_return", workers, child) != nil
-    returned = select.("monitor_child_return", workers, child)
-    assert returned != nil and returned["result"] == "error:shutdown:noproc"
+    shutdown_monitor = select.("monitor_call", workers, child)
+    shutdown_down = select.("down_received", workers, child)
+    assert shutdown_monitor != nil and shutdown_down != nil
+    assert shutdown_down["reason"] == "noproc"
+    assert received["at_ns"] <= shutdown_monitor["at_ns"]
   end
 
   # Concept: observe the real report while preserving its Logger event unchanged.
@@ -1348,8 +1295,7 @@ defmodule Loopex.ModelConfigurationPreparationTest do
       reason = Keyword.get(report, :reason)
       shutdown = Keyword.get(offender, :shutdown)
 
-      if is_pid(child) and reason == {:shutdown, :noproc} and shutdown == 5_000,
-        do: send(observer, {:startup_supervisor_report, workers, child, reason, shutdown})
+      send(observer, {:startup_supervisor_report, workers, child, reason, shutdown})
     end
 
     event

@@ -2928,6 +2928,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     worker = attempt.worker
     guard_monitor = Process.monitor(guard)
     worker_monitor = Process.monitor(worker)
+    worker_id = Loopex.Runtime.TaskSupervisor.child_id(worker)
     coordinator = attempt.coordinator
     :erlang.trace(coordinator, true, [:send, :receive])
     suspend_process(coordinator)
@@ -2968,7 +2969,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
       assert_receive {:DOWN, ^guard_monitor, :process, ^guard, :normal}, 5_000
 
       assert_receive {:trace, ^coordinator, :send,
-                      {:"$gen_call", _from, {:terminate_child, ^worker}}, ^workers},
+                      {:"$gen_call", _from, {:terminate_child, ^worker_id}}, ^workers},
                      5_000
 
       assert_receive {:DOWN, ^worker_monitor, :process, ^worker, :shutdown}, 5_000

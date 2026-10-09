@@ -14,7 +14,7 @@ defmodule Loopex.Runtime.OwnerGroupsTest do
         {:ok, workers} = OwnerGroup.workers(group)
 
         {:ok, task} =
-          Task.Supervisor.start_child(workers, fn ->
+          Loopex.Runtime.TaskSupervisor.start_child(workers, fn ->
             Process.flag(:trap_exit, true)
             send(parent, {:ready, self()})
 

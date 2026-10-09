@@ -3025,6 +3025,7 @@ defmodule Loopex.AgentLoopTest do
       Map.to_list(coordinator_state.in_flight)
 
     refute permit_worker == model
+    permit_id = Loopex.Runtime.TaskSupervisor.child_id(permit_worker)
 
     :ok = :sys.suspend(workers)
 
@@ -3049,16 +3050,16 @@ defmodule Loopex.AgentLoopTest do
       end)
 
     assert await_process_message(workers, fn
-             {:"$gen_call", _from, {:terminate_child, ^permit_worker}} -> true
+             {:"$gen_call", _from, {:terminate_child, ^permit_id}} -> true
              _other -> false
            end),
            "the coordinator never asked its real supervisor to stop the model worker"
 
     {:messages, messages} = Process.info(workers, :messages)
 
-    {:"$gen_call", from, {:terminate_child, ^permit_worker}} =
+    {:"$gen_call", from, {:terminate_child, ^permit_id}} =
       Enum.find(messages, fn
-        {:"$gen_call", _from, {:terminate_child, ^permit_worker}} -> true
+        {:"$gen_call", _from, {:terminate_child, ^permit_id}} -> true
         _other -> false
       end)
 
@@ -4992,7 +4993,7 @@ defmodule Loopex.AgentLoopTest do
   # genuine request reaches real Control on the same reopened ordinary gate.
   # The actor messages contain references/results only, never progress data.
   defp ordered_ordinary_cut(kind) do
-    supervisor = start_supervised!({Task.Supervisor, []})
+    supervisor = start_supervised!({Loopex.Runtime.TaskSupervisor, []})
     {route, header} = standalone_progress_route()
     {sink, session, control, owner, _header} = route
     proxy = Loopex.AgentLoopControlBoundaryProxy.start(control, self(), :hold_first_progress)
@@ -5209,7 +5210,9 @@ defmodule Loopex.AgentLoopTest do
     # the number of items before it, and that their sequences are gapless from
     # zero.
     supervisor =
-      start_supervised!({Task.Supervisor, name: :"relay-#{System.unique_integer([:positive])}"})
+      start_supervised!(
+        {Loopex.Runtime.TaskSupervisor, name: :"relay-#{System.unique_integer([:positive])}"}
+      )
 
     {route, header} = standalone_progress_route()
 
@@ -5271,7 +5274,9 @@ defmodule Loopex.AgentLoopTest do
     # needs no answer and has none to misread. A second close has no relay to ask
     # and says so rather than inventing a second, different total.
     supervisor =
-      start_supervised!({Task.Supervisor, name: :"relay-#{System.unique_integer([:positive])}"})
+      start_supervised!(
+        {Loopex.Runtime.TaskSupervisor, name: :"relay-#{System.unique_integer([:positive])}"}
+      )
 
     {route, header} = standalone_progress_route()
 
@@ -5488,6 +5493,7 @@ defmodule Loopex.AgentLoopTest do
       Map.to_list(predecessor_state.in_flight)
 
     refute permit_worker == model
+    permit_id = Loopex.Runtime.TaskSupervisor.child_id(permit_worker)
     relay = stream.relay
     relay_pid = StreamRelay.pid(relay)
     relay_reference = Process.monitor(relay_pid)
@@ -5502,7 +5508,7 @@ defmodule Loopex.AgentLoopTest do
       GenServer.cast(predecessor, {:superseded, "replacement-generation"})
 
       assert await_process_message(workers, fn
-               {:"$gen_call", {^predecessor, _tag}, {:terminate_child, ^permit_worker}} -> true
+               {:"$gen_call", {^predecessor, _tag}, {:terminate_child, ^permit_id}} -> true
                _other -> false
              end),
              "the notified predecessor never tried to terminate its model worker"
@@ -7550,7 +7556,9 @@ defmodule Loopex.AgentLoopTest do
     # the backlog or fabricating `abandoned`; ADR 0011 defines the resulting
     # missing closure as an incomplete transient view.
     supervisor =
-      start_supervised!({Task.Supervisor, name: :"relay-#{System.unique_integer([:positive])}"})
+      start_supervised!(
+        {Loopex.Runtime.TaskSupervisor, name: :"relay-#{System.unique_integer([:positive])}"}
+      )
 
     {route, header} = standalone_progress_route()
 
@@ -7661,7 +7669,8 @@ defmodule Loopex.AgentLoopTest do
 
     supervisor =
       start_supervised!(
-        {Task.Supervisor, name: :"executor-stream-#{System.unique_integer([:positive])}"}
+        {Loopex.Runtime.TaskSupervisor,
+         name: :"executor-stream-#{System.unique_integer([:positive])}"}
       )
 
     {route, _header} = standalone_progress_route()
