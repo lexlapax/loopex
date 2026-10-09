@@ -28,6 +28,28 @@ physical restore implementation; it does not waive any full-history proof.
 ### Current work and restart order
 
 
+### Handoff checkpoint; new privacy failures retained, 2026-10-09
+
+The maintainer requests commit/push and pause for a new agent. Start with the
+[complete takeover runbook](M7-handoff.md), which preserves goal, all remaining
+original/additional rows, decisions, actual source/evidence identities and the
+next repair steps. Source0317a998 joins the final independently reviewed nativeV4
+and ProgressSinkV2 units, plus strict AST-equivalent formatting. Original18775
+finishes FAIL in54.023seconds: current sink48passes, native3/5passes; missing
+public text delta and `host_policy_required` fixture startup remain. Transport,
+all floor and production compile-out stages are UNRUN. Ten original processes
+joined/45 assets authenticated. Collection
+`566d873a996ec82d7b807f41303cf79b5106e352f20df0a886fb44f5f15974bd`.
+
+Retention childv44 authenticates151 assets, SHA-256
+`420fb369b95fc83f0dd325a9a86e3d00bac65e5bb506f53b34aad52101a9a255`.
+All latest source is committed in the primary checkout; donor worktrees are
+stale raw copies. Workers finished and no native original is live. No checklist
+row closes. T01–T19 remain original89done/84open/6retired, added375done/22open,
+combined464done/106open/6retired. ADR0067 remains unanswered. Final handoff
+commit/push and its documentation check are the remaining administrative steps;
+then pause this chat's goal as explicitly requested.
+
 ### Two source-reviewed units joined for handoff qualification, 2026-10-09
 
 The maintainer requests a complete repository handoff, commit/push and pause.

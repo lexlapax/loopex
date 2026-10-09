@@ -1,5 +1,17 @@
 # M7 Implementation Tasks
 
+### Handoff source committed; two new privacy failures retained, 2026-10-09
+
+The [takeover runbook](M7-handoff.md) preserves the complete remaining task and
+subtask snapshot, pending decisions, proof recipes and retained outputs. Exact
+source0317a998 joins reviewed nativeV4 and ProgressSinkV2 with strict AST formatting.
+Original18775 finishes FAIL in54.023seconds: current sink48passes and native3/5
+passes; missing public text delta and host-policy startup remain. Floor, transport
+and production compile-out are UNRUN. No checklist closes. T01–T19 remain
+original89done/84open/6retired; added375done/22open; combined464done/106open/6retired.
+All source is committed; workers finished; no native original is live. The
+maintainer requests final commit/push and pause for another agent to take over.
+
 ### Buffered T08 privacy proof retained; whole row remains open, 2026-10-09
 
 Original35897 at `764110c3` passes all55 cases per supported pair in141.152

@@ -36,6 +36,7 @@ Evidence is unpaired: it is a log, not a Concept and Technical depth pair.
 | [M4 bootstrap remediation](M4-bootstrap-remediation.md) | A green bootstrap aggregate on the m4 branch after the commit-title exception, retained verbatim from the gate run at 08782a0 as the replacement evidence the bootstrap-at-rebind disposition names. |
 | [M7 implementation tasks](M7-implementation-tasks.md) | Maintainer task checklist, implementation progress and discovered subtasks; no closure claim. |
 | [M7 closure runs](M7-closure-runs.md) | Initial Pending scaffold for exact-candidate runs, archive identity, M7 outcomes, operator/profile/attempt inventories and reviews; final manifest keys and closure evidence remain open. |
+| [M7 agent handoff](M7-handoff.md) | Current takeover goal, remaining T00–T19 rows, exact committed source, failures, decisions, retained packets and next qualification steps. |
 | [M7 restart checkpoint](M7-resume.md) | Exact paused implementation state, isolated WIP branches, proof identities, pending decisions and next resume actions; no closure claim. |
 | [M7 planning review](M7-planning-review.md) | Internal implementation-readiness findings, repairs, reviewed contract digests and external-audit gates; no implementation or acceptance claim. |
 | [M7 external review, round 1](M7-external-review-1.md) | Received assessment of candidate 20ff082a; retained source for the planning repairs. |
