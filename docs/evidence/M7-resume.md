@@ -62,9 +62,14 @@ All completed originals were collected once; no native handle remains live.
 ADR 0066 is already Accepted; the repeated exact approval changes no contract.
 ADR 0067 exact-pair approval remains the current pending human question;
 ADR 0065, the Core artifact observer-grace question and output ownership/accounting
-choices remain unresolved. A private ADR 0068 output proposal is being prepared
-at `/private/tmp/m7-cli-owned-output-proposal-20261009-v1`; it is not accepted or
-implementation authority. Continue original goal on m7, with no main merge,
+choices remain unresolved. Private ADR 0068 draft
+`/private/tmp/m7-cli-owned-output-proposal-20261009-v1` is sealed and NOT READY
+FOR ACCEPTANCE: no pre-runtime acquisition cutoff exists at every caller, and
+no new allowance or borrowed Core cutoff was selected. Five draft assets are
+retained in `M7/current-source-preparation-20261009-v34/retention.json`, SHA-256
+`d84cc88f249d00d9169e252a739421ac8e16d163a63ffcb6fa869a54081bc3b0`.
+It is not implementation authority. All agents are done; no native handle is
+live. Continue original goal on m7, with no main merge,
 closure, publication, provider campaign or softened checks. Next qualify current
 fixture changes with the actual output migration, investigate the retained
 intermittent duplicate without weakening complete-closure suppression, and
