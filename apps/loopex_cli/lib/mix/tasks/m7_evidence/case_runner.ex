@@ -469,9 +469,6 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
     end
   end
 
-  defp execution_policy(%{case_id: "m7.ephemeral-question"}),
-    do: inspect(LoopexCli.Policy.AllowAll)
-
   defp execution_policy(%{capture: nil}), do: "ordinary"
   defp execution_policy(staged), do: Policy.identity(staged.capture)
 
@@ -869,10 +866,10 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
   end
 
   # Concept: the ephemeral host runs under the operator's configured model and
-  # provider routes; there is no durable session, so its record decides.
-  # Technical depth: Ephemeral admits only a context-free policy module, so
-  # this case runs under the allow-all host policy; the workspace inventory
-  # and the independent oracle still bound what it may change.
+  # provider routes and the case's pinned fixture policy; there is no durable
+  # session, so its record decides.
+  # Technical depth: the capture reaches the policy only as Core's contextual
+  # reference, so the same exact invocations and paths as the chat cases apply.
   defp dispatch(%{conversations: [%{ephemeral: line}]} = staged, context) do
     ["chat", "--config", path | _] = staged.config_argv
     {:ok, profile} = path |> File.read!() |> LoopexCli.ConfigJson.decode()
@@ -895,7 +892,11 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
         ],
         input,
         if(terminal?, do: :stdio, else: output),
-        [provider_bindings: profile["providers"], max_tokens: profile["session"]["max_tokens"]]
+        [
+          policy: %{module: Policy, context: staged.capture},
+          provider_bindings: profile["providers"],
+          max_tokens: profile["session"]["max_tokens"]
+        ]
         |> Enum.reject(&is_nil(elem(&1, 1)))
         |> Keyword.merge(Map.get(context, :ephemeral_options, []))
       )

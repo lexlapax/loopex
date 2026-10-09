@@ -63,6 +63,20 @@ defmodule LoopexComposition.Ephemeral.OptionsTest do
               }}
   end
 
+  test "a contextual policy reference needs decide/2 and keeps its context private" do
+    contextual = %{module: WrongArity, context: %{"capture" => "private"}}
+    assert {:ok, %{policy: ^contextual}} = Options.parse(policy: contextual)
+
+    for invalid <- [
+          %{module: Policy, context: nil},
+          %{module: WrongArity},
+          %{module: WrongArity, context: nil, extra: 1},
+          %{module: nil, context: nil}
+        ] do
+      assert Options.parse(policy: invalid) == {:error, {:invalid_option, :policy}}
+    end
+  end
+
   test "questions require a Boolean startup opt-in and a nonempty tool profile" do
     for tools <- [:coding, :read_only], enabled <- [false, true] do
       assert {:ok, %{questions: ^enabled}} =

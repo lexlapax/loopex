@@ -126,9 +126,9 @@ choices and reads the operator's line: a choice label or number answers,
 `decline` declines. The retained `records/ephemeral.json` names the operator,
 question, typed answer, selected choice and outcome. The independent oracle
 reruns the branch for the selected default, so a run that ignores the answer
-fails. The ephemeral API admits only a context-free policy module, so this case
-runs under the allow-all host policy; the workspace inventory and the oracle
-bound what it may change. `scripts/m7-ephemeral-question-demo.exs` runs the
+fails. The ephemeral call runs under the case's pinned fixture policy, passed
+as a contextual policy reference, so it admits the same invocations and paths
+as the chat cases. `scripts/m7-ephemeral-question-demo.exs` runs the
 same host outside a lane for rehearsal; its record is not lane evidence.
 
 ## Held cases

@@ -141,6 +141,15 @@ defmodule LoopexComposition.Ephemeral.Options do
   defp validate(:reasoning, value),
     do: accept(:reasoning, value, value in ~w(default none low medium high))
 
+  # Concept: a bare policy module, or Core's contextual reference whose
+  # private context reaches only that module's decide/2.
+  # Technical depth: identity derives from the module alone, so the context
+  # never enters a durable or diagnostic identity.
+  defp validate(:policy, %{module: module, context: _} = value) do
+    valid = Loopex.Policy.valid_adapter?(value) and text?(inspect(module), 256)
+    accept(:policy, value, valid)
+  end
+
   defp validate(:policy, value) do
     valid =
       is_atom(value) and not is_nil(value) and Code.ensure_loaded?(value) and
