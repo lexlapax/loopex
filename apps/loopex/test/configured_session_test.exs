@@ -863,7 +863,12 @@ defmodule Loopex.ConfiguredSessionTest do
              "accounting_evidence" => %{"kind" => "none"}
            }
 
-    assert {:ok, _} = SessionState.recover(session, Fixture.records(fixture, session), events)
+    assert {:ok, _} =
+             SessionState.recover(
+               session,
+               Fixture.records(fixture, session),
+               Fixture.events(fixture, session)
+             )
   end
 
   test "owner recovery reuses frozen project content without the original host manifest" do
@@ -1429,7 +1434,13 @@ defmodule Loopex.ConfiguredSessionTest do
     assert refusal["projection_state"] == "unavailable"
     assert refusal["failure"]["cause"] == "context_projection_invalid"
     assert refusal["provider_estimated_tokens"] == nil
-    assert {:ok, _} = SessionState.recover(session, Fixture.records(fixture, session), events)
+
+    assert {:ok, _} =
+             SessionState.recover(
+               session,
+               Fixture.records(fixture, session),
+               Fixture.events(fixture, session)
+             )
   end
 
   defp open_turn(id) do
