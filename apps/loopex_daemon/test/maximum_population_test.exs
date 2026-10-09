@@ -424,7 +424,8 @@ defmodule LoopexDaemon.MaximumPopulationTest do
     valid_owners? =
       Enum.all?(owners, fn {pid, {token, incarnation, sink}} ->
         is_pid(pid) and is_binary(token) and byte_size(token) == 16 and
-          is_reference(incarnation) and is_tuple(sink) and tuple_size(sink) == 3
+          is_binary(incarnation) and byte_size(incarnation) == 16 and
+          is_tuple(sink) and tuple_size(sink) == 3
       end)
 
     assert valid_owners?

@@ -27,6 +27,40 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+### Diagnostic incarnation domain corrected, 2026-10-08
+
+Original65944 at `453865e0bfb5ea84202b25e4e0d68c70d2c8f6e8`
+is collected FAIL2/2 after17.014seconds. Current actual AST equality,
+formatting, warning-free compile, documentation and status pass, then both
+cases fail at the new diagnostic valid_owners? assertion before tracing or
+requested stop. The fixture incorrectly expected a reference; the actual
+Registry producer creates an exact16-byte binary incarnation. There is no
+new Socket-close observation or attribution of the original production failure.
+Floor remains UNRUN. All7 original process joins and32 verified artifacts
+are retained under `M7/daemon-population-diagnostic-focused-20261008-v4`.
+Terminal SHA-256
+`35643f367fda939324842948e208ed3789824fa2cf21e23bf0f722b821bfdfb0`;
+collection SHA-256
+`cfed2919febe308ac710d42ccd7f2513b072a47ed9ac55854c6b7a61f9aa08e6`.
+Latest completed registry2813, SHA-256
+`ae046800346b167cc4ddaac8a070846a84334cee63abf65cf1e52d15303b57e6`.
+
+The exact corrected diagnostic accepts only the producer's binary16 domain;
+all other file bytes, original bodies/assertions, trace guards, privacy,
+cutoffs and joins are unchanged. Final test SHA-256
+`08b78d25c75a2e586444cf44e2ec48e1265dc7346eabe03274b7a0877b9e6d72`;
+independent narrow source/recipe review SHA-256
+`897e9db01a4abace5cb8d0b7a08b042d92363fcc25078c07c1009547d52094ba`.
+Immutable14-asset retention is
+`M7/current-source-preparation-20261008-v9/retention.json`, SHA-256
+`a7f2894eec36ecf377476c6b4b3be5dcf9096e7433cf80118b095be284bc1780`.
+Native v5 remains UNRUN pending exact clean source binding. Original10084,
+30030,58918 and65944 failures remain retained with distinct scopes.
+No native handle is live. Proposed ADR0066 pair is sealed privately and under
+independent review; its four choices and ADR0065 remain unaccepted.
+T01-T19 original88 done /85 open /6 retired; added370 done /25 open.
+No completion checkbox changes.
+
 ### Owner-close diagnostic layout corrected, 2026-10-08
 
 Original58918 at `81514b36cbce9ffa3e432123528c2e9de268ce86`
