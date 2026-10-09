@@ -177,18 +177,32 @@ defmodule LoopexDaemon.WireRecordsTest do
   end
 
   test "both checkpoint owner kinds preserve opaque bytes in the daemon envelope" do
+    path = Path.join(:code.priv_dir(:loopex_protocol), "vectors/checkpoint-projection.v1.json")
+    cases = JSON.decode!(File.read!(path))["cases"]
+    complete = Enum.find(cases, &(&1["name"] == "run-covered-prefix"))["input"]
+
     for kind <- ["run", "compact"] do
-      event = %{
-        :kind => "context.compacted",
-        :event_id => "event",
-        :event_sequence => 1,
-        "owner" => %{"kind" => kind, "id" => <<0, 255, 10>>}
-      }
+      expected = Map.put(complete, "owner", %{"kind" => kind, "id" => "AP8K"})
+      assert {:ok, native} = LoopexProtocol.Session.Checkpoint.decode_wire(expected)
+      assert native["owner"] == %{"kind" => kind, "id" => <<0, 255, 10>>}
+
+      event =
+        Map.merge(native, %{
+          kind: "context.compacted",
+          event_id: "event",
+          event_sequence: 1
+        })
 
       record = WireRecords.event("session", event)
-      assert record["event"]["data"] == %{"owner" => %{"kind" => kind, "id" => "AP8K"}}
+      assert record["event"]["data"] == expected
+      assert record["event"]["data"]["owner"] == %{"kind" => kind, "id" => "AP8K"}
       assert record["event"]["event_sequence"] == "1"
-      assert {:ok, _} = Frame.encode(record)
+      assert {:ok, encoded} = Frame.encode(record)
+      assert {:ok, ^record} =
+               Frame.decode(
+                 IO.iodata_to_binary(encoded) |> String.trim_trailing("\n"),
+                 Frame.output_record_bytes()
+               )
     end
   end
 
@@ -213,9 +227,8 @@ defmodule LoopexDaemon.WireRecordsTest do
       assert record["event"]["data"] == wire
       assert {:ok, _} = Frame.encode(record)
 
-      assert_raise MatchError, fn ->
-        WireRecords.event("session", Map.put(event, "source", "PRIVATE_COMPLETION_CANARY"))
-      end
+      assert :error =
+               WireRecords.event("session", Map.put(event, "source", "PRIVATE_COMPLETION_CANARY"))
     end
   end
 

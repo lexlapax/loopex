@@ -85,7 +85,10 @@ defmodule LoopexDaemon.ConfigureIngressTest do
     assert {:ok, prepared} = Adapter.prepare_configuration_request(request())
     assert {:ok, parsed} = Adapter.parse(request())
     assert parsed.operation == :session_configure
-    assert parsed.fields == prepared
+    assert parsed.request_id == prepared.request_id
+    assert parsed.request_id == request()["request_id"]
+    assert parsed.fields == Map.delete(prepared, :request_id)
+    assert Map.put(parsed.fields, :request_id, parsed.request_id) == prepared
   end
 
   defp request do
