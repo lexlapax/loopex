@@ -696,7 +696,9 @@ defmodule Loopex.Runtime.Control do
         if state.creation do
           {:ok, :store_unavailable}
         else
-          case Store.creation_provenance(state.store, state.runtime_id, selector) do
+          case bounded_store_read(fn ->
+                 Store.creation_provenance(state.store, state.runtime_id, selector)
+               end) do
             :unavailable -> {:ok, :store_unavailable}
             observation -> {:ok, observation}
           end

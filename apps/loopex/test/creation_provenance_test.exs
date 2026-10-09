@@ -28,7 +28,21 @@ defmodule Loopex.CreationProvenanceTest do
       to: Loopex.M5QueryFaultStore
 
     @impl Store
-    def creation_provenance(:kill_control, _, _), do: Process.exit(self(), :kill)
+    def creation_provenance(:kill_reader, _, _), do: Process.exit(self(), :kill)
+
+    def creation_provenance({:observed, observer, result}, runtime, selector) do
+      send(observer, {:provenance_callback_invoked, self(), runtime, selector})
+      result
+    end
+
+    def creation_provenance({:controlled, observer, result}, _, _) do
+      send(observer, {:provenance_reader_started, self()})
+
+      receive do
+        :release_provenance_reader -> result
+      end
+    end
+
     def creation_provenance(:raise, _, _), do: raise("unavailable callback")
     def creation_provenance(result, _, _), do: result
   end
@@ -200,14 +214,169 @@ defmodule Loopex.CreationProvenanceTest do
     end
   end
 
-  test "provenance Control loss remains runtime unavailability" do
-    runtime = start_runtime(FaultStore, :kill_control)
+  test "provenance reader failure remains Store unavailability with live Control" do
+    runtime = start_runtime(FaultStore, :kill_reader)
+    {:ok, %{control: control}} = Runtime.children(runtime)
 
-    assert {:error, :runtime_unavailable} =
+    assert {:ok, :store_unavailable} =
              Runtime.creation_provenance(runtime, %{kind: :session, session_id: "session"})
 
+    assert Process.alive?(control)
+    assert {:ok, %{control: ^control}} = Runtime.children(runtime)
+
+    assert {:ok, :unexpected} =
+             Runtime.creation_provenance(runtime, %{kind: :command, command_id: ""})
+  end
+
+  test "provenance success joins its original reader and guardian before answering" do
+    runtime = start_runtime(FaultStore, {:controlled, self(), {:historical, @row}})
+    {:ok, %{control: control}} = Runtime.children(runtime)
+    selector = %{kind: :command, command_id: "create"}
+
+    with_provenance_reader(runtime, selector, fn task, reader, guardian, _cleanup_cutoff ->
+      caller = task.pid
+      caller_monitor = Process.monitor(caller)
+      refute reader == control
+      reader_monitor = Process.monitor(reader)
+      guardian_monitor = Process.monitor(guardian)
+      send(reader, :release_provenance_reader)
+
+      assert {:ok, {:historical, @row}} = Task.await(task, 5_000)
+      refute Process.alive?(reader)
+      refute Process.alive?(guardian)
+      assert_receive {:DOWN, ^reader_monitor, :process, ^reader, :normal}, 5_000
+      assert_receive {:DOWN, ^guardian_monitor, :process, ^guardian, :normal}, 5_000
+      assert_receive {:DOWN, ^caller_monitor, :process, ^caller, :normal}, 5_000
+      assert {:ok, %{control: ^control}} = Runtime.children(runtime)
+    end)
+  end
+
+  test "provenance timeout joins its original blocked reader before answering" do
+    runtime = start_runtime(FaultStore, {:controlled, self(), :absent})
+    {:ok, %{control: control}} = Runtime.children(runtime)
+    selector = %{kind: :session, session_id: "session"}
+
+    with_provenance_reader(runtime, selector, fn task, reader, guardian, _cleanup_cutoff ->
+      caller = task.pid
+      caller_monitor = Process.monitor(caller)
+      refute reader == control
+      reader_monitor = Process.monitor(reader)
+      guardian_monitor = Process.monitor(guardian)
+
+      assert {:ok, :store_unavailable} = Task.await(task, 5_000)
+      refute Process.alive?(reader)
+      refute Process.alive?(guardian)
+      assert_receive {:DOWN, ^reader_monitor, :process, ^reader, :killed}, 5_000
+      assert_receive {:DOWN, ^guardian_monitor, :process, ^guardian, :normal}, 5_000
+      assert_receive {:DOWN, ^caller_monitor, :process, ^caller, :normal}, 5_000
+      assert Process.alive?(control)
+      assert {:ok, %{control: ^control}} = Runtime.children(runtime)
+
+      assert {:ok, :unexpected} =
+               Runtime.creation_provenance(runtime, %{kind: :command, command_id: ""})
+    end)
+  end
+
+  test "provenance Control loss remains runtime unavailability" do
+    runtime = start_runtime(FaultStore, {:controlled, self(), :absent})
+    {:ok, %{control: control}} = Runtime.children(runtime)
+    selector = %{kind: :session, session_id: "session"}
+
+    with_provenance_reader(runtime, selector, fn task, reader, guardian, cleanup_cutoff ->
+      caller = task.pid
+      caller_monitor = Process.monitor(caller)
+      refute reader == control
+      reader_monitor = Process.monitor(reader)
+      guardian_monitor = Process.monitor(guardian)
+      control_monitor = Process.monitor(control)
+      control_cleanup_monitor = Process.monitor(control)
+
+      try do
+        Process.exit(control, :kill)
+
+        assert {:error, :runtime_unavailable} = Task.await(task, 5_000)
+        assert_receive {:DOWN, ^control_monitor, :process, ^control, :killed}, 5_000
+        assert_receive {:DOWN, ^reader_monitor, :process, ^reader, :killed}, 5_000
+        assert_receive {:DOWN, ^guardian_monitor, :process, ^guardian, :normal}, 5_000
+        assert_receive {:DOWN, ^caller_monitor, :process, ^caller, :normal}, 5_000
+
+        assert {:error, :runtime_unavailable} =
+                 Runtime.creation_provenance(nil, %{kind: :command, command_id: "create"})
+      after
+        Process.exit(control, :kill)
+        join_provenance_actor(control, control_cleanup_monitor, cleanup_cutoff)
+      end
+    end)
+  end
+
+  test "a wrong token refuses before Store dispatch on the original Control" do
+    runtime = start_runtime(FaultStore, {:observed, self(), {:historical, @row}})
+    {:ok, %{control: control}} = Runtime.children(runtime)
+    selector = %{kind: :command, command_id: "create"}
+    wrong_token = make_ref()
+    refute wrong_token == runtime.token
+
     assert {:error, :runtime_unavailable} =
-             Runtime.creation_provenance(nil, %{kind: :command, command_id: "create"})
+             GenServer.call(control, {:creation_provenance, wrong_token, selector}, 5_000)
+
+    # Concept: the completed serial refusal is the no-dispatch barrier.
+    # Technical depth: the same original Control must then complete the valid
+    # query and expose its actual callback notification, so an unavailable Store
+    # or unused notification fixture cannot manufacture this authentication proof.
+    refute_receive {:provenance_callback_invoked, _, _, _}, 0
+
+    assert {:ok, {:historical, @row}} =
+             GenServer.call(control, {:creation_provenance, runtime.token, selector}, 5_000)
+
+    assert_receive {:provenance_callback_invoked, reader, "runtime", ^selector}, 5_000
+    refute reader == control
+    refute_receive {:provenance_callback_invoked, _, _, _}, 0
+    assert Process.alive?(control)
+    assert {:ok, %{control: ^control}} = Runtime.children(runtime)
+  end
+
+  # Concept: failed fixture assertions still retire every discovered original actor.
+  # Technical depth: cleanup monitors are installed before release or kill and are
+  # distinct from reason-specific proof monitors. One captured five-second fixture
+  # allowance covers all joins; cleanup never monitors an already-retired replacement.
+  defp with_provenance_reader(runtime, selector, proof) do
+    task = Task.async(fn -> Runtime.creation_provenance(runtime, selector) end)
+    caller = task.pid
+    caller_cleanup_monitor = Process.monitor(caller)
+    cleanup_cutoff = System.monotonic_time(:millisecond) + 5_000
+
+    try do
+      assert_receive {:provenance_reader_started, reader}, 5_000
+      guardian_snapshot = Process.info(reader, :monitored_by)
+      reader_cleanup_monitor = Process.monitor(reader)
+
+      try do
+        assert {:monitored_by, [guardian]} = guardian_snapshot
+        guardian_cleanup_monitor = Process.monitor(guardian)
+
+        try do
+          proof.(task, reader, guardian, cleanup_cutoff)
+        after
+          send(reader, :release_provenance_reader)
+          join_provenance_actor(guardian, guardian_cleanup_monitor, cleanup_cutoff)
+        end
+      after
+        Process.exit(reader, :kill)
+        join_provenance_actor(reader, reader_cleanup_monitor, cleanup_cutoff)
+      end
+    after
+      Process.unlink(caller)
+      Process.exit(caller, :kill)
+      join_provenance_actor(caller, caller_cleanup_monitor, cleanup_cutoff)
+      Process.demonitor(task.ref, [:flush])
+    end
+  end
+
+  defp join_provenance_actor(actor, monitor, cutoff) do
+    remaining = max(cutoff - System.monotonic_time(:millisecond), 0)
+    assert_receive {:DOWN, ^monitor, :process, ^actor, _reason}, remaining
+    assert System.monotonic_time(:millisecond) <= cutoff
+    refute Process.alive?(actor)
   end
 
   defp start_runtime(adapter, reference) do
