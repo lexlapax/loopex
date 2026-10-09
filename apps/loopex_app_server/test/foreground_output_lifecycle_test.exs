@@ -194,7 +194,8 @@ defmodule Loopex.AppServer.ForegroundOutputLifecycleTest do
       metadata = Harness.blocked(fixture)
       assert metadata.credit.slots == 1
       assert metadata.credit.bytes > 0 and metadata.credit.bytes <= 524_288
-      assert {:ok, prefix} = :file.read(fixture.fifo, 4_096)
+      prefix = Harness.read_fifo_chunk(fixture)
+      assert byte_size(prefix) == 4_096
       refute String.contains?(prefix, "\n")
       assert prefix =~ "{"
       :file.close(fixture.input)
@@ -287,7 +288,8 @@ defmodule Loopex.AppServer.ForegroundOutputLifecycleTest do
 
       blocked = Harness.blocked(fixture)
       assert blocked.credit.slots == 1
-      assert {:ok, prefix} = :file.read(fixture.fifo, 4_096)
+      prefix = Harness.read_fifo_chunk(fixture)
+      assert byte_size(prefix) == 4_096
       refute String.contains?(prefix, "\n")
       assert :file.close(fixture.fifo) == :ok
       summary = Harness.finished(fixture)

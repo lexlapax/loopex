@@ -48,6 +48,7 @@ defmodule Loopex.AppServer.ExternalWorkflowTest do
           ebin(:loopex_protocol),
           ebin(:loopex),
           ebin(:loopex_app_server),
+          ebin(:loopex_executor_local),
           ebin(:telemetry)
         ] ++ require_paths(),
         env: child_environment(),
@@ -128,6 +129,7 @@ defmodule Loopex.AppServer.ExternalWorkflowTest do
           ebin(:loopex_protocol),
           ebin(:loopex),
           ebin(:loopex_app_server),
+          ebin(:loopex_executor_local),
           ebin(:telemetry)
         ] ++ require_paths(),
         env: [{"LOOPEX_WORKSPACE_REF", "workspace-ref"} | child_environment()],
@@ -253,6 +255,7 @@ defmodule Loopex.AppServer.ExternalWorkflowTest do
           ebin(:loopex_protocol),
           ebin(:loopex),
           ebin(:loopex_app_server),
+          ebin(:loopex_executor_local),
           ebin(:loopex_store_local),
           ebin(:telemetry)
         ] ++ require_paths(),
@@ -537,6 +540,7 @@ defmodule Loopex.AppServer.ExternalWorkflowTest do
 
     arguments =
       ["-pa", ebin(:loopex_protocol), "-pa", ebin(:loopex), "-pa", ebin(:loopex_app_server)] ++
+        ["-pa", ebin(:loopex_executor_local)] ++
         ["-pa", ebin(:loopex_store_local), "-pa", ebin(:telemetry)] ++
         Enum.flat_map(require_paths(), &["-r", &1]) ++
         ["-e", "Loopex.AppServer.Fixture.serve()"]

@@ -1,5 +1,31 @@
 # M7 Implementation Tasks
 
+### Foreground failures repaired in reviewed source, 2026-10-08
+
+Four reviewed paths repair the original64183 failure causes: retain unrelated
+host application messages outside Stdio's actual input/known control classes;
+load executor-local in all four real External VM launch inventories; join the
+original harness launcher/monitor through an explicitly typed tuple; and read
+only demanded FIFO blocks through the existing finite guarded OS helper.
+The Host's exact nine original caller-mailbox actor identities and all94 whole
+App Server cases, including four Node workflows, remain unchanged. All29
+harness cases retain original cutoffs, physical pressure and actor/credit/cursor
+joins; the two partial-prefix controls now require exactly4096 bytes. No reader
+prefetch or background drain is introduced. Missing/unknown helper answers,
+nonzero status and empty/oversize reads still fail. Upstream OTP29 source explains
+the raw FIFO filling loop; exact OTP27 native-source equivalence is unavailable
+and neither binary is claimed proved by source review.
+
+Independent source reviews are sealed; exact four-path identities are retained
+in `/private/tmp/m7-reviewed-foreground-failure-repair-join-20261008-v1.json`.
+Next qualify446 whole component cases on each toolchain: Core66, Composition55,
+helper213, App Server94 and Protocol18. No exclusions/skips/invalid or fake Node
+substitute is permitted for that scope. The broader newly joined current-creation,
+daemon and shared-helper consumer scopes still require separate verification;
+this component run does not replace the failed full integration. T01-T19 counts
+remain original88 done /85 open /6 retired and added367 done /23 open.
+No generation activation, helper registration or milestone closure is claimed.
+
 ### Both-toolchain layout verified, 2026-10-08
 
 The50-path reviewed join is committed and pushed at

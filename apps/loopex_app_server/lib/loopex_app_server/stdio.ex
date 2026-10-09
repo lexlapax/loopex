@@ -21,6 +21,24 @@ defmodule Loopex.AppServer.Stdio do
   @request_ms 30_000
   @cleanup_ms 5_000
 
+  # Concept: foreground loops preserve unrelated host application messages.
+  # Technical depth: only input and known control classes enter the dispatcher;
+  # its existing actor/reference checks reject stale controls. Stop replies use
+  # the original OTP request alias. Both normal service and cleanup use this gate.
+  defguardp foreground_message(message, port)
+            when message == :service or
+                   (is_tuple(message) and
+                      ((is_port(port) and elem(message, 0) == port) or
+                         elem(message, 0) in [
+                           :DOWN,
+                           :EXIT,
+                           :loopex_progress_ready,
+                           :foreground_result,
+                           :request_expired,
+                           :loopex_output_writer_retired,
+                           :loopex_output_writer
+                         ]))
+
   @doc """
   ## Concept
 
@@ -144,7 +162,11 @@ defmodule Loopex.AppServer.Stdio do
 
       true ->
         receive do
-          message -> state |> receive_message(message) |> loop()
+          message when foreground_message(message, state.port) ->
+            state |> receive_message(message) |> loop()
+
+          {[:alias | request], _reply} = message when is_reference(request) and request == state.stop_request ->
+            state |> receive_message(message) |> loop()
         after
           @idle_ms -> %{state | poll_due: true} |> wake() |> loop()
         end
@@ -841,7 +863,11 @@ defmodule Loopex.AppServer.Stdio do
 
       true ->
         receive do
-          message -> state |> receive_message(message) |> cleanup_loop()
+          message when foreground_message(message, state.port) ->
+            state |> receive_message(message) |> cleanup_loop()
+
+          {[:alias | request], _reply} = message when is_reference(request) and request == state.stop_request ->
+            state |> receive_message(message) |> cleanup_loop()
         after
           @idle_ms -> cleanup_loop(state)
         end
