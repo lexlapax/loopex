@@ -214,7 +214,7 @@ defmodule LoopexComposition.DelegationRuntimeFixture do
     )
 
     Loopex.ConfiguredGenesisFixture.await_creation_ready(runtime)
-    assert :ok = Helper.bind(helper, runtime)
+    assert :ok = Helper.bind(helper, runtime, store)
 
     case Keyword.get(options, :classify, false) do
       true -> Helper.classify(helper)
@@ -242,6 +242,17 @@ defmodule LoopexComposition.DelegationRuntimeFixture do
           fixture.executor
         ],
         Process.alive?(pid) do
+      ref = Process.monitor(pid)
+      Process.exit(pid, :kill)
+      assert_receive {:DOWN, ^ref, :process, ^pid, _}, 5_000
+    end
+
+    :ok
+  end
+
+  # Concept: lose every host process this fixture ever started, known or not.
+  def crash_all(base) do
+    for {:pid, _kind, pid} <- Agent.get(base.owned, & &1), Process.alive?(pid) do
       ref = Process.monitor(pid)
       Process.exit(pid, :kill)
       assert_receive {:DOWN, ^ref, :process, ^pid, _}, 5_000

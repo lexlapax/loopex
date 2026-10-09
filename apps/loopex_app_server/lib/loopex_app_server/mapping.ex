@@ -159,7 +159,9 @@ defmodule Loopex.AppServer.Mapping do
   def call(%{"method" => "session.resume"} = request, context) do
     with {:ok, session_id} <- field(request, "session_id", &Wire.session_identity/1),
          {:ok, command_id} <- field(request, "command_id", &Wire.identity/1) do
-      case Loopex.resume_session(context.runtime, session_id, command_id: command_id) do
+      case guarded(context.runtime, session_id, :resume, fn ->
+             Loopex.resume_session(context.runtime, session_id, command_id: command_id)
+           end) do
         {:ok, resumed} ->
           {:ok,
            admission(request, command_id, "accepted", %{
@@ -390,7 +392,9 @@ defmodule Loopex.AppServer.Mapping do
         |> Map.merge(fields)
         |> Map.merge(Map.new(fixed))
 
-      case Loopex.command(context.attachment, command) do
+      case guarded(context.runtime, context.attachment.session_id, type, fn ->
+             Loopex.command(context.attachment, command)
+           end) do
         {:accepted, accepted_id} ->
           {:ok, admission(request, accepted_id, "accepted", %{})}
 
@@ -853,6 +857,22 @@ defmodule Loopex.AppServer.Mapping do
   # it as text carries a category and never a message someone wrote. A reason
   # that is not an atom is not a category, and collapses rather than being
   # serialized.
+  # Concept: ADR 0069's host-route guard precedes every session mutation.
+  # Technical depth: a helper child, or any session while helper classification
+  # is incomplete, refuses before Core admission; nothing is recorded.
+  defp guarded(runtime, session_id, type, call) do
+    case LoopexComposition.Delegation.guard(runtime, session_id, type) do
+      :ok ->
+        call.()
+
+      {:error, {:helper_classification_incomplete, _, _, _}} ->
+        {:error, :helper_classification_incomplete}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
   defp refused(request, command_id, reason) do
     request
     |> admission(command_id, "refused", %{})

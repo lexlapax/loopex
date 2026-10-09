@@ -252,8 +252,8 @@ defmodule LoopexCli.ConfigInspectionTest do
     refute output =~ "Inspect facts without changing files."
     refute output =~ "catalog_digest"
 
-    assert ChatConfiguration.load(["chat", "--config", f.config_path], f.root, nil) ==
-             {:error, :chat_delegation_unavailable}
+    assert {:ok, %{helpers: true}} =
+             ChatConfiguration.load(["chat", "--config", f.config_path], f.root, nil)
 
     File.write!(
       f.config_path,

@@ -84,6 +84,32 @@ defmodule LoopexComposition.Delegation.RetainedObjects do
   @doc false
   def present(owner), do: GenServer.call(owner, :present, :infinity)
 
+  @doc """
+  ## Concept
+
+  Read, replace, remove or list ADR 0046's disposable job-index-v1 entries.
+
+  ## Technical depth
+
+  Entries live below `job-index-v1/` (job entries) and `job-index-v1/coverage/`
+  under this owner's leased runtime directory, named by a lowercase SHA-256.
+  Directories are 0700 and files 0600. A write syncs a private temporary file,
+  renames it over the entry and syncs the directory; a removal syncs the
+  directory. Entries are derived cache bytes, never ledger facts or authority,
+  and their owner validates them against retained truth before any use.
+  """
+  def put_index(owner, name, bytes),
+    do: GenServer.call(owner, {:put_index, name, bytes}, :infinity)
+
+  @doc false
+  def read_index(owner, name), do: GenServer.call(owner, {:read_index, name}, :infinity)
+
+  @doc false
+  def delete_index(owner, name), do: GenServer.call(owner, {:delete_index, name}, :infinity)
+
+  @doc false
+  def list_index(owner), do: GenServer.call(owner, :list_index, :infinity)
+
   @doc false
   def open_binding(owner, command, objects, runtime \\ nil),
     do: GenServer.call(owner, {:open_binding, command, objects, runtime}, :infinity)
@@ -229,6 +255,46 @@ defmodule LoopexComposition.Delegation.RetainedObjects do
   def handle_call({:install, bytes}, _from, state) do
     result = with :ok <- mutation_open(state), do: install_object(state, bytes)
     {:reply, result, state}
+  end
+
+  def handle_call({:put_index, name, bytes}, _from, state) do
+    {:reply, with_index(state, name, &write_index(state, &1, bytes)), state}
+  end
+
+  def handle_call({:read_index, name}, _from, state) do
+    reply =
+      with_index(state, name, fn path ->
+        case File.lstat(path) do
+          {:error, :enoent} -> :absent
+          {:ok, %File.Stat{type: :regular, size: size}} when size <= 65_536 -> File.read(path)
+          _ -> {:error, :invalid_index_entry}
+        end
+      end)
+
+    {:reply, reply, state}
+  end
+
+  def handle_call({:delete_index, name}, _from, state) do
+    reply =
+      with_index(state, name, fn path ->
+        case File.rm(path) do
+          ok when ok in [:ok, {:error, :enoent}] -> Log.sync_parent(path)
+          error -> error
+        end
+      end)
+
+    {:reply, reply, state}
+  end
+
+  def handle_call(:list_index, _from, state) do
+    root = Path.join(state.directory, "job-index-v1")
+
+    reply =
+      with :ok <- verify(state) do
+        {:ok, %{jobs: entries(root), coverage: entries(Path.join(root, "coverage"))}}
+      end
+
+    {:reply, reply, state}
   end
 
   def handle_call(:present, _from, state) do
@@ -378,6 +444,76 @@ defmodule LoopexComposition.Delegation.RetainedObjects do
         %{caller_monitor: monitor} = state
       ),
       do: {:stop, :normal, state}
+
+  defp with_index(state, name, action) do
+    with true <- is_binary(name) and Regex.match?(~r/\A(coverage\/)?[0-9a-f]{64}\z/, name),
+         :ok <- verify(state),
+         :ok <- index_directories(state) do
+      action.(Path.join([state.directory, "job-index-v1", name]))
+    else
+      false -> {:error, :invalid_index_name}
+      error -> error
+    end
+  end
+
+  defp index_directories(state) do
+    root = Path.join(state.directory, "job-index-v1")
+
+    Enum.reduce_while([root, Path.join(root, "coverage")], :ok, fn path, :ok ->
+      case File.lstat(path) do
+        {:ok, %File.Stat{type: :directory}} ->
+          {:cont, :ok}
+
+        {:error, :enoent} ->
+          with :ok <- File.mkdir(path),
+               :ok <- File.chmod(path, 0o700),
+               :ok <- Log.sync_parent(path),
+               do: {:cont, :ok},
+               else: (error -> {:halt, error})
+
+        _ ->
+          {:halt, {:error, :invalid_index_namespace}}
+      end
+    end)
+  end
+
+  defp write_index(state, path, bytes) when is_binary(bytes) and byte_size(bytes) in 1..65_536 do
+    temporary =
+      Path.join(Path.dirname(path), ".tmp-" <> Base.encode16(:crypto.strong_rand_bytes(16)))
+
+    try do
+      with {:ok, io} <-
+             :file.open(String.to_charlist(temporary), [:write, :raw, :binary, :exclusive]) do
+        written =
+          try do
+            with :ok <- File.chmod(temporary, 0o600),
+                 :ok <- :file.write(io, bytes),
+                 :ok <- checkpoint(state, :index_written),
+                 :ok <- :file.sync(io),
+                 do: :ok
+          after
+            :file.close(io)
+          end
+
+        with :ok <- written,
+             :ok <- File.rename(temporary, path),
+             :ok <- checkpoint(state, :index_renamed),
+             :ok <- Log.sync_parent(path),
+             do: :ok
+      end
+    after
+      File.rm(temporary)
+    end
+  end
+
+  defp write_index(_state, _path, _bytes), do: {:error, :invalid_index_entry}
+
+  defp entries(directory) do
+    case File.ls(directory) do
+      {:ok, names} -> Enum.filter(names, &Regex.match?(~r/\A[0-9a-f]{64}\z/, &1)) |> Enum.sort()
+      _ -> []
+    end
+  end
 
   # Concept: replay may read retained objects inside this owner without a call.
   # Technical depth: the closure runs in the owner process and verifies the

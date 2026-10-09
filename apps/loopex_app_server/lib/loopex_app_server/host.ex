@@ -140,10 +140,12 @@ defmodule Loopex.AppServer.Host do
       {:ok, sink} ->
         result =
           try do
-            LoopexComposition.with_runtime(
-              Keyword.put(options, :progress_sink, sink),
-              fn runtime -> Stdio.serve(runtime, sink) end
-            )
+            with_delegation(options, fn options ->
+              LoopexComposition.with_runtime(
+                Keyword.put(options, :progress_sink, sink),
+                fn runtime -> Stdio.serve(runtime, sink) end
+              )
+            end)
           rescue
             exception ->
               Loopex.ProgressSink.close(sink)
@@ -161,6 +163,46 @@ defmodule Loopex.AppServer.Host do
 
       {:error, _reason} ->
         {:error, :progress_sink_unavailable}
+    end
+  end
+
+  # Concept: a root holding helper history is classified and guarded here too.
+  # Technical depth: the foreground host reads no helper configuration, so it
+  # never enables new helpers. When the root already holds a helper ledger it
+  # takes the placement lease that ledger requires, opens the helper owner and
+  # releases both after the runtime stops. A root without one is unchanged.
+  defp with_delegation(options, serve) do
+    root = Keyword.fetch!(options, :state_root)
+
+    if File.dir?(Path.join(root, "delegation")) do
+      case LoopexComposition.Placement.acquire(root) do
+        {:ok, lock} ->
+          try do
+            case LoopexComposition.Delegation.host(
+                   root,
+                   Keyword.fetch!(options, :runtime_id),
+                   lock,
+                   false
+                 ) do
+              {:ok, delegation} ->
+                try do
+                  serve.(Keyword.put(options, :delegation, delegation))
+                after
+                  LoopexComposition.Delegation.close(delegation)
+                end
+
+              {:error, reason} ->
+                {:error, {:delegation_unavailable, reason}}
+            end
+          after
+            LoopexComposition.Placement.release(lock)
+          end
+
+        {:error, reason} ->
+          {:error, {:placement_unavailable, reason}}
+      end
+    else
+      serve.(options)
     end
   end
 

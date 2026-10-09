@@ -50,6 +50,21 @@ defmodule LoopexComposition.DelegationRecoveryTest do
           assert ledger.count == 1
       end
 
+      if @step == :after_create do
+        # Concept: the unprompted child's terminal names its actual last record.
+        [settle] =
+          for {tx, _} <- ledger.transactions, tx["mutation"]["kind"] == "settle", do: tx
+
+        terminal = settle["mutation"]["terminal"]
+        child = Base.decode64!(terminal["child_session_id"])
+        through = terminal["journal_version"]
+        {:ok, [last]} = Loopex.Store.load_records(restarted.store, child, through - 1, 1)
+        assert last.journal_version == through
+
+        assert terminal["terminal_record_sha256"] ==
+                 LoopexProtocol.Canonical.digest(last.payload)
+      end
+
       assert {:ok, {:prepared, activation}} =
                Loopex.prepare_resume_session(restarted.runtime, parent, "resume-parent")
 

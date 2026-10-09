@@ -328,7 +328,8 @@ defmodule LoopexCli.ChatConfigurationTest do
     refute File.exists?(Path.join(fixture.root, "state"))
   end
 
-  test "enabled delegation remains refused until its retained binding is prepared", fixture do
+  test "enabled delegation selects the fixed task generation without reading roles yet",
+       fixture do
     profile =
       profile()
       |> Map.put("roles", %{
@@ -346,7 +347,16 @@ defmodule LoopexCli.ChatConfigurationTest do
       })
 
     File.write!(fixture.config_path, :json.encode(profile))
-    assert {:error, :chat_delegation_unavailable} = load(fixture)
+    assert {:ok, prepared} = load(fixture)
+    assert prepared.helpers
+
+    assert LoopexComposition.Delegation.Tool.definition() in prepared.genesis["tool_selection"][
+             "definitions"
+           ]
+
+    environment = prepared.selection.configuration["instructions"]["environment"]
+    assert environment =~ ~s("enabled_roles":["reviewer"])
+    assert environment =~ "sha256:" <> String.duplicate("0", 64)
     refute File.exists?(Path.join(fixture.root, "state"))
   end
 

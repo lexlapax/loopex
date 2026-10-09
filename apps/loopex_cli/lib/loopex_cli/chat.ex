@@ -89,6 +89,14 @@ defmodule LoopexCli.Chat do
 
       try do
         with {:ok, placement} <- deps.placement_id.(root(invocation)),
+             {:ok, delegation} <-
+               LoopexComposition.Delegation.host(
+                 root(invocation),
+                 placement,
+                 lock,
+                 Map.get(invocation, :helpers, false)
+               ),
+             :ok <- keep_delegation(tag, delegation),
              {:ok, consumer} <-
                DiagnosticLifetime.start(deps.diagnostic_device, grace(invocation)) do
           remember(tag, :diagnostics, {consumer, Process.monitor(consumer), grace(invocation)})
@@ -105,7 +113,8 @@ defmodule LoopexCli.Chat do
 
           result =
             deps.with_runtime.(
-              composition_options(invocation, resources, placement, consumer, driver, deps),
+              composition_options(invocation, resources, placement, consumer, driver, deps) ++
+                [delegation: delegation],
               fn runtime ->
                 callback(runtime, invocation, consumer, driver, placement, deps, tag)
               end
@@ -120,6 +129,7 @@ defmodule LoopexCli.Chat do
           result
         end
       after
+        LoopexComposition.Delegation.close(Process.delete({__MODULE__, :delegation, tag}))
         released = deps.release_placement.(lock, probe(routes))
         remember(tag, :placement_released, released == :ok)
       end
@@ -242,7 +252,8 @@ defmodule LoopexCli.Chat do
   end
 
   defp session(runtime, %{resume_session_id: session} = invocation, _placement, deps, tag) do
-    with {:ok, {:prepared, activation}} <-
+    with :ok <- LoopexComposition.Delegation.guard(runtime, session, :resume),
+         {:ok, {:prepared, activation}} <-
            deps.prepare_resume.(root(invocation), runtime, session, command_id()) do
       remember(tag, :activation, {:direct, activation})
 
@@ -262,17 +273,38 @@ defmodule LoopexCli.Chat do
     end
   end
 
-  defp session(runtime, prepared, placement, _deps, _tag) do
+  defp session(runtime, prepared, placement, _deps, tag) do
     with :ok <- recheck(prepared),
          {:ok, session} <-
-           Loopex.create_session(runtime, prepared.session_options,
-             command_id: command_id(),
-             genesis: prepared.genesis
-           ),
+           create(runtime, prepared, placement, Process.get({__MODULE__, :delegation, tag})),
          :ok <- Loopex.track_session(root(prepared), session, placement) do
       {:ok, prepared, session, nil}
     end
   end
+
+  # Concept: a helper-enabled chat creates its parent through the helper owner.
+  # Technical depth: the frozen roles, limits and exact catalog digest are bound
+  # for this runtime identity; the owner retains them before Core creates.
+  defp create(_runtime, %{helpers: true} = prepared, placement, %{} = delegation) do
+    with {:ok, parent} <- ChatConfiguration.helper_parent(prepared, placement) do
+      LoopexComposition.Delegation.create_parent(
+        delegation,
+        command_id(),
+        parent.providers,
+        parent.roles,
+        parent.limits,
+        prepared.session_options,
+        parent.genesis
+      )
+    end
+  end
+
+  defp create(runtime, prepared, _placement, _delegation),
+    do:
+      Loopex.create_session(runtime, prepared.session_options,
+        command_id: command_id(),
+        genesis: prepared.genesis
+      )
 
   defp trace(runtime, prepared) do
     with {:ok, selection} <-
@@ -482,6 +514,12 @@ defmodule LoopexCli.Chat do
 
   defp command_id, do: :crypto.strong_rand_bytes(16) |> Base.url_encode64(padding: false)
   defp remember(tag, key, value), do: send(self(), {tag, key, value})
+
+  # Concept: the helper owner outlives the runtime callback until placement release.
+  defp keep_delegation(tag, delegation) do
+    Process.put({__MODULE__, :delegation, tag}, delegation)
+    :ok
+  end
 
   defp collect(tag, context) do
     receive do

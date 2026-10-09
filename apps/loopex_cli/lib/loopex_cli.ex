@@ -796,6 +796,11 @@ defmodule LoopexCli do
   # reports no active context and therefore compares none: an explicit ceiling
   # there governs the next run, not one that already ended.
   defp recover(command, root, runtime, session_id, flags) do
+    with :ok <- LoopexComposition.Delegation.guard(runtime, session_id, :resume),
+         do: recover_guarded(command, root, runtime, session_id, flags)
+  end
+
+  defp recover_guarded(command, root, runtime, session_id, flags) do
     case facade(Loopex, :prepare_resume_known_session, [root, runtime, session_id, unique_id()]) do
       {:ok, {:prepared, activation}} ->
         settle(command, runtime, session_id, flags, activation)
@@ -1071,7 +1076,14 @@ defmodule LoopexCli do
 
   defp inspect_recovery_manifest(root, session_id, runtime) do
     prepared =
-      facade(Loopex, :prepare_resume_known_session, [root, runtime, session_id, unique_id()])
+      with :ok <- LoopexComposition.Delegation.guard(runtime, session_id, :resume),
+           do:
+             facade(Loopex, :prepare_resume_known_session, [
+               root,
+               runtime,
+               session_id,
+               unique_id()
+             ])
 
     case prepared do
       {:ok, {:prepared, activation}} ->
@@ -1503,9 +1515,9 @@ defmodule LoopexCli do
          {:ok, root} <- state_root(flags),
          {:ok, cleanup} <- cleanup_grace(flags),
          {:ok, context} <- context_token_budget(flags),
-         :ok <- own_placement(root, excluded) do
-      {:ok, placement} = facade(Loopex, :runtime_placement_id, [root])
-
+         :ok <- own_placement(root, excluded),
+         {:ok, placement} <- facade(Loopex, :runtime_placement_id, [root]),
+         {:ok, delegation} <- delegation(root, placement) do
       # Concept: what a workspace says about how an agent should behave is shown
       # to the operator before the run starts.
       #
@@ -1546,7 +1558,8 @@ defmodule LoopexCli do
          project_decision: decision,
          progress_to: self(),
          provider_launch: LoopexCli.ProviderLaunch.options(),
-         recover_stale_writer: true
+         recover_stale_writer: true,
+         delegation: delegation
        ] ++
          resource_options ++
          cleanup ++
@@ -1559,6 +1572,28 @@ defmodule LoopexCli do
            :maintenance_model,
            :maintenance_instructions
          ])}
+    end
+  end
+
+  # Concept: a root holding helper history is classified and guarded here too.
+  # Technical depth: each composition in this command process gets a fresh helper
+  # owner under the command's placement lock; the previous one is stopped first
+  # because the retained ledger admits one writer. A root without helper history
+  # opens none.
+  @delegation_key {__MODULE__, :delegation}
+
+  defp delegation(root, placement) do
+    LoopexComposition.Delegation.close(Process.delete(@delegation_key))
+
+    case :persistent_term.get(@placement_key, nil) do
+      {lock, _excluded} ->
+        with {:ok, handle} <- LoopexComposition.Delegation.host(root, placement, lock, false) do
+          Process.put(@delegation_key, handle)
+          {:ok, handle}
+        end
+
+      nil ->
+        {:ok, nil}
     end
   end
 

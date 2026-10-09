@@ -246,7 +246,7 @@ defmodule LoopexComposition do
                  Keyword.take(options, @host_supplied)
              ),
            {:ok, startup_deadline} <- LoopexComposition.StartupGate.await(runtime),
-           :ok <- bind_delegation(options[:delegation], runtime),
+           :ok <- bind_delegation(options[:delegation], runtime, store),
            :ok <- Loopex.Trace.Capability.bind(credential_plane.capability, runtime),
            :ok <- LoopexComposition.StartupGate.publication({:ok, startup_deadline}) do
         Logger.debug("reference composition trace capability bound")
@@ -268,10 +268,10 @@ defmodule LoopexComposition do
   # Concept: classification precedes durable admission but not read-only use.
   # Technical depth: an incomplete bounded pass returns the runtime with every
   # helper and mutating route closed by the guard; a binding refusal fails start.
-  defp bind_delegation(nil, _runtime), do: :ok
+  defp bind_delegation(nil, _runtime, _store), do: :ok
 
-  defp bind_delegation(handle, runtime) do
-    case LoopexComposition.Delegation.bind(handle, runtime) do
+  defp bind_delegation(handle, runtime, store) do
+    case LoopexComposition.Delegation.bind(handle, runtime, store) do
       :ok -> :ok
       {:error, {:helper_classification_incomplete, _, _, _}} -> :ok
       {:error, reason} -> {:error, {:delegation_unavailable, reason}}

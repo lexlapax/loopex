@@ -409,6 +409,20 @@ defmodule LoopexDaemon.Service do
     end
   end
 
+  # Concept: a root holding helper history is classified and guarded here too.
+  # Technical depth: the daemon enables no new helpers; when its root already
+  # holds a helper ledger it opens the helper owner under its own placement
+  # lease. The owner is linked to this service and stops with it. A root without
+  # helper history opens nothing.
+  defp delegation(state) do
+    LoopexComposition.Delegation.host(
+      option!(state, :state_root),
+      state.placement_identity,
+      state.placement,
+      false
+    )
+  end
+
   defp placement_probe(state) do
     excluded = state.excluded_env_names
     fn pid -> Placement.process_incarnation(pid, "/bin/ps", excluded) end
@@ -563,6 +577,13 @@ defmodule LoopexDaemon.Service do
   end
 
   defp start_composition(state) do
+    case delegation(state) do
+      {:ok, delegation} -> start_composition(state, delegation)
+      {:error, _reason} -> {:stop, {:fatal, :composition_start_failed}, state}
+    end
+  end
+
+  defp start_composition(state, delegation) do
     options =
       state.options
       |> Keyword.take([
@@ -589,7 +610,8 @@ defmodule LoopexDaemon.Service do
         state_root: option!(state, :state_root),
         runtime_id: state.placement_identity,
         recover_stale_writer: true,
-        credential_plane: state.components.credential_plane
+        credential_plane: state.components.credential_plane,
+        delegation: delegation
       )
 
     interrupt = fn ->

@@ -27,6 +27,7 @@ defmodule LoopexComposition.Delegation.Helper do
 
   alias LoopexComposition.Delegation.{
     ChildCreation,
+    JobIndex,
     GenesisCodec,
     LedgerCodec,
     ParentBinding,
@@ -62,7 +63,8 @@ defmodule LoopexComposition.Delegation.Helper do
   Identical rebinding is idempotent; a different runtime refuses. Until bound,
   every helper call refuses `router_unavailable`.
   """
-  def bind(helper, runtime), do: GenServer.call(helper, {:bind, runtime}, :infinity)
+  def bind(helper, runtime, store \\ nil),
+    do: GenServer.call(helper, {:bind, runtime, store}, :infinity)
 
   @doc false
   def classification(helper, value),
@@ -141,6 +143,7 @@ defmodule LoopexComposition.Delegation.Helper do
        clock: Keyword.get(options, :clock, fn -> System.system_time(:millisecond) end),
        fault: Keyword.get(options, :fault, fn _step -> :ok end),
        runtime: nil,
+       store: nil,
        classified: Keyword.get(options, :classified, :pending),
        parents: %{},
        children: %{},
@@ -157,19 +160,27 @@ defmodule LoopexComposition.Delegation.Helper do
        blobs: %{},
        expected: %{},
        half_bound: [],
+       indexed: %{},
+       index_entries: %{},
+       scan: %{},
        unresolved: MapSet.new(),
        excess: MapSet.new()
      }}
   end
 
   @impl true
-  def handle_call({:bind, runtime}, _from, %{runtime: nil} = state),
-    do: {:reply, :ok, %{state | runtime: runtime}}
+  def handle_call({:bind, runtime, store}, _from, %{runtime: nil} = state) do
+    # Concept: host routes find this owner by the exact runtime incarnation.
+    # Technical depth: the registry key is the runtime's supervisor PID, so a
+    # replacement runtime never inherits it and the entry leaves with this owner.
+    {:ok, _} = Registry.register(LoopexComposition.Delegation.Registry, runtime.supervisor, nil)
+    {:reply, :ok, %{state | runtime: runtime, store: store}}
+  end
 
-  def handle_call({:bind, runtime}, _from, %{runtime: runtime} = state),
+  def handle_call({:bind, runtime, _store}, _from, %{runtime: runtime} = state),
     do: {:reply, :ok, state}
 
-  def handle_call({:bind, _runtime}, _from, state),
+  def handle_call({:bind, _runtime, _store}, _from, state),
     do: {:reply, {:error, :router_bound}, state}
 
   def handle_call({:classification, value}, _from, state),
@@ -183,8 +194,16 @@ defmodule LoopexComposition.Delegation.Helper do
   def handle_call(:status, _from, state),
     do:
       {:reply,
-       Map.take(state, [:classified, :closed, :fenced, :parents, :children, :runs, :receipts]),
-       state}
+       Map.take(state, [
+         :classified,
+         :closed,
+         :fenced,
+         :parents,
+         :children,
+         :runs,
+         :receipts,
+         :scan
+       ]), state}
 
   def handle_call({:create_parent, capture}, _from, state) do
     case do_create_parent(state, capture) do
@@ -303,6 +322,9 @@ defmodule LoopexComposition.Delegation.Helper do
 
   defp new_parent(state, capture) do
     # Concept: re-presenting an authorized creation first classifies its own log.
+    # Technical depth: until then RetainedObjects fences every mutation of this
+    # owner, not only this parent, because an unclassified log could hold any
+    # parent's obligations; the fence is conservative and lifts on re-presentation.
     # Technical depth: a prepared binding left by a lost owner stays pending until
     # its exact command is presented again; lookup replays it without mutation.
     if MapSet.member?(RetainedObjects.present(state.objects).bindings, capture.key) do
@@ -451,15 +473,28 @@ defmodule LoopexComposition.Delegation.Helper do
             })
       }
 
-      fault(state, :before_reserve)
+      {:ok, run_log} = LedgerCodec.header_key(:run, ids)
 
-      case commit(state, ids, tx, %{original_job: job, child_creation: bytes}) do
-        {:ok, state} ->
-          fault(state, :after_reserve)
-          create_child(state, job.job_id, child, cutoff)
+      # Concept: the job entry exists before any reservation can.
+      # Technical depth: a write failure refuses before the reserve append; the
+      # offset update after it is best effort, because the next classification
+      # rebuilds every entry above the watermark from the retained log.
+      case index_job(state, job, mutation["source_intent"], run_log, nil) do
+        :ok ->
+          fault(state, :before_reserve)
 
-        {:error, state} ->
-          {:unresolved, state}
+          case commit(state, ids, tx, %{original_job: job, child_creation: bytes}) do
+            {:ok, state} ->
+              index_job(state, job, mutation["source_intent"], run_log, run.bytes)
+              fault(state, :after_reserve)
+              create_child(state, job.job_id, child, cutoff)
+
+            {:error, state} ->
+              {:unresolved, state}
+          end
+
+        :error ->
+          {:refused, :helper_index_unavailable, state}
       end
     else
       {:refused, reason, state} -> {:refused, reason, state}
@@ -468,6 +503,15 @@ defmodule LoopexComposition.Delegation.Helper do
       {:error, :delegation_count_exhausted} -> {:refused, :delegation_count_exhausted, state}
       {:error, :delegation_tokens_exhausted} -> {:refused, :delegation_tokens_exhausted, state}
       {:error, _reason} -> {:refused, :delegation_binding_unavailable, state}
+    end
+  end
+
+  defp index_job(state, job, source, run_log, offset) do
+    with {:ok, bytes} <- JobIndex.job_entry(project(job), source, run_log, offset),
+         :ok <- RetainedObjects.put_index(state.objects, JobIndex.job_name(job.job_id), bytes) do
+      :ok
+    else
+      _ -> :error
     end
   end
 
@@ -802,7 +846,7 @@ defmodule LoopexComposition.Delegation.Helper do
     case enumerate(state.runtime, nil, [], deadline) do
       {:ok, rows} ->
         present = RetainedObjects.present(state.objects).bindings
-        classify_sessions(state, rows, present, deadline)
+        classify_sessions(%{state | index_entries: index_entries(state)}, rows, present, deadline)
 
       :error ->
         {:incomplete, 0, 0, [], state}
@@ -854,9 +898,16 @@ defmodule LoopexComposition.Delegation.Helper do
     {:ok, key} = LedgerCodec.header_key(:binding, [state.runtime_id, row.command_id])
 
     if MapSet.member?(present, key) or Map.has_key?(state.parents, row.session_id) do
+      {cursor, covered} = coverage(state, row.session_id)
+
       with {:ok, state} <- load_parent(state, row),
-           {:ok, intents} <- session_intents(state, row.session_id, deadline) do
-        {:ok, %{state | expected: Map.put(state.expected, row.session_id, intents)}}
+           {:ok, intents, scan} <- session_intents(state, row.session_id, cursor, deadline) do
+        {:ok,
+         %{
+           state
+           | expected: Map.put(state.expected, row.session_id, covered ++ intents),
+             scan: Map.put(state.scan, row.session_id, Map.put(scan, :resumed, cursor != nil))
+         }}
       else
         :timeout -> :timeout
         _ -> {:failed, state}
@@ -922,8 +973,8 @@ defmodule LoopexComposition.Delegation.Helper do
   # Technical depth: terminals join their exact run/tool-call intent; the first
   # terminal of an intent decides it, so a receipt followed by its tool result
   # stays a receipt. The run-level unknown joins the run's open intent.
-  defp session_intents(state, session, deadline),
-    do: session_intents(state, session, nil, %{}, [], deadline)
+  defp session_intents(state, session, cursor, deadline),
+    do: session_intents(state, session, cursor, %{}, [], deadline)
 
   defp session_intents(state, session, cursor, open, done, deadline) do
     if System.monotonic_time(:millisecond) >= deadline do
@@ -933,14 +984,89 @@ defmodule LoopexComposition.Delegation.Helper do
         {:ok, page} ->
           {open, done} = Enum.reduce(page.rows, {open, done}, &join_row/2)
 
-          if page.next_cursor,
-            do: session_intents(state, session, page.next_cursor, open, done, deadline),
-            else: {:ok, Enum.sort_by(Map.values(open) ++ done, & &1.journal_version)}
+          if page.next_cursor do
+            session_intents(state, session, page.next_cursor, open, done, deadline)
+          else
+            scan = %{through: page.scanned_through, token: page.prefix_token, open: open != %{}}
+            {:ok, Enum.sort_by(Map.values(open) ++ done, & &1.journal_version), scan}
+          end
 
         _ ->
           :error
       end
     end
+  end
+
+  # Concept: a validated coverage entry resumes the scan after its watermark.
+  # Technical depth: the entry validates when its closed shape, scope and
+  # expected digest over this session's job entries match and Core re-reads the
+  # watermark record with the identical token; anything else rescans from the
+  # start. Attempts below the watermark are represented by their job entries.
+  defp coverage(state, session) do
+    entries = Map.get(state.index_entries, session, [])
+
+    with {:ok, bytes} <-
+           RetainedObjects.read_index(state.objects, JobIndex.coverage_name(session)),
+         {:ok, cov} <- JobIndex.decode_coverage(bytes, state.runtime_id, session),
+         true <- cov.through > 0,
+         true <- JobIndex.expected(entries, cov.through) == cov.expected do
+      cursor = %{
+        version: 1,
+        runtime_id: state.runtime_id,
+        session_id: session,
+        resume_after_version: cov.through,
+        prefix_token: cov.token
+      }
+
+      covered =
+        for entry <- entries,
+            entry["source_intent"]["journal_version"] <= cov.through,
+            do: covered_intent(entry)
+
+      if match?({:ok, _}, Runtime.effect_intents(state.runtime, session, cursor, 1)),
+        do: {cursor, covered},
+        else: {nil, []}
+    else
+      _ -> {nil, []}
+    end
+  end
+
+  defp covered_intent(entry) do
+    job = entry["job"]
+
+    %{
+      journal_version: entry["source_intent"]["journal_version"],
+      job: %{
+        job_id: Base.decode64!(job["job_id"]),
+        run_id: Base.decode64!(job["run_id"]),
+        operation_id: Base.decode64!(job["operation_id"]),
+        session_id: Base.decode64!(job["session_id"])
+      },
+      projection: job,
+      disposition: "covered"
+    }
+  end
+
+  defp index_entries(state) do
+    case RetainedObjects.list_index(state.objects) do
+      {:ok, %{jobs: names}} ->
+        names
+        |> Enum.flat_map(fn name ->
+          with {:ok, bytes} <- RetainedObjects.read_index(state.objects, name),
+               {:ok, entry} <- JobIndex.decode_job(bytes),
+               true <- JobIndex.job_name(Base.decode64!(entry["job"]["job_id"])) == name do
+            [entry]
+          else
+            _ -> []
+          end
+        end)
+        |> Enum.group_by(& &1.session, &Map.delete(&1, :session))
+
+      _ ->
+        %{}
+    end
+  rescue
+    _ -> %{}
   end
 
   defp join_row(%{kind: "intent", journal_version: version, job: job}, {open, done}) do
@@ -971,6 +1097,81 @@ defmodule LoopexComposition.Delegation.Helper do
 
   defp join_row(_row, acc), do: acc
 
+  # Concept: coverage is published only after recovery and only where safe.
+  # Technical depth: job entries of refused registrations are removed and every
+  # expected attempt's entry is written with its exact frame offset before the
+  # coverage entry is replaced. A session with an open intent or any unresolved
+  # operation gets no new coverage, so it is rescanned from the start. An
+  # interrupted publication leaves the previous, absent or mismatching coverage.
+  defp publish_coverage(state) do
+    Enum.reduce(state.expected, state, fn {session, intents}, state ->
+      publish_session(state, session, intents, state.scan[session])
+    end)
+  end
+
+  defp publish_session(state, session, intents, %{open: false} = scan) do
+    unresolved =
+      MapSet.member?(state.excess, session) or
+        Enum.any?(intents, &MapSet.member?(state.unresolved, &1.job.job_id))
+
+    if unresolved do
+      state
+    else
+      for %{disposition: "refused_before_effect"} = intent <- intents do
+        RetainedObjects.delete_index(state.objects, JobIndex.job_name(intent.job.job_id))
+      end
+
+      entries =
+        for intent <- intents, intent.disposition not in ["refused_before_effect"] do
+          entry_for(state, session, intent)
+        end
+
+      with true <- Enum.all?(entries, &match?({:ok, _}, &1)),
+           :ok <- fault(state, :before_coverage),
+           {:ok, bytes} <-
+             JobIndex.coverage_entry(
+               state.runtime_id,
+               session,
+               scan.through,
+               scan.token,
+               JobIndex.expected(Enum.map(entries, &elem(&1, 1)), scan.through)
+             ) do
+        RetainedObjects.put_index(state.objects, JobIndex.coverage_name(session), bytes)
+      end
+
+      state
+    end
+  end
+
+  defp publish_session(state, _session, _intents, _scan), do: state
+
+  defp entry_for(state, _session, %{disposition: "covered", projection: projection} = intent) do
+    entries = Map.get(state.index_entries, Base.decode64!(projection["session_id"]), [])
+
+    case Enum.find(entries, &(&1["job"] == projection)) do
+      nil -> {:error, intent}
+      entry -> {:ok, entry}
+    end
+  end
+
+  defp entry_for(state, session, intent) do
+    projection = project(intent.job)
+    source = source(intent.job, intent.journal_version)
+    ids = [state.runtime_id, session, intent.job.run_id]
+    {:ok, run_log} = LedgerCodec.header_key(:run, ids)
+    ledger = state.runs[{session, intent.job.run_id}]
+    offset = ledger && JobIndex.frame_offset(ledger, projection, source)
+
+    with {:ok, bytes} <- JobIndex.job_entry(projection, source, run_log, offset),
+         :ok <-
+           RetainedObjects.put_index(state.objects, JobIndex.job_name(intent.job.job_id), bytes),
+         {:ok, entry} <- JobIndex.decode_job(bytes) do
+      {:ok, Map.delete(entry, :session)}
+    else
+      _ -> {:error, intent}
+    end
+  end
+
   # Concept: recovery is stop-only and runs operation by operation in journal order.
   defp recover_all(state, deadline) do
     state = Enum.reduce(state.half_bound, %{state | half_bound: []}, &finish_binding/2)
@@ -985,7 +1186,7 @@ defmodule LoopexComposition.Delegation.Helper do
         end)
       end)
 
-    {:ok, state}
+    {:ok, publish_coverage(state)}
   end
 
   # Concept: a lost bind acknowledgement finishes from exact creation history.
@@ -1011,11 +1212,13 @@ defmodule LoopexComposition.Delegation.Helper do
   defp recover_run(state, session, run, intents, deadline) do
     parent = state.parents[session]
     ids = [state.runtime_id, session, run]
-    jobs = Enum.map(intents, &original/1)
+    {covered, scanned} = Enum.split_with(intents, &(&1.disposition == "covered"))
+    jobs = Enum.map(scanned, &original/1)
 
     state = %{
       state
       | originals: Enum.reduce(jobs, state.originals, &Map.put(&2, &1.job_id, &1)),
+        indexed: Enum.reduce(covered, state.indexed, &Map.put(&2, &1.job.job_id, &1.projection)),
         intents:
           Enum.reduce(intents, state.intents, &Map.put(&2, &1.job.job_id, &1.journal_version))
     }
@@ -1078,7 +1281,34 @@ defmodule LoopexComposition.Delegation.Helper do
         do: {Base.decode64!(m["child_session_id"]), jobs[m["operation_identity"]]}
   end
 
-  defp recovery_inputs(state, %{"mutation" => mutation}, read) do
+  defp recovery_inputs(state, %{"mutation" => mutation} = tx, read) do
+    inputs = recovery_inputs_original(state, tx, read)
+    job_id = mutation["job"] && Base.decode64!(mutation["job"]["job_id"])
+
+    # Concept: a frame whose attempt lies below a validated watermark replays
+    # against its job-index entry instead of the unscanned original intent.
+    cond do
+      Map.has_key?(inputs, :original_job) and is_nil(inputs.original_job) and
+          Map.has_key?(state.indexed, job_id) ->
+        inputs |> Map.delete(:original_job) |> Map.put(:indexed_job, state.indexed[job_id])
+
+      mutation["kind"] == "recover_uncreated" and is_nil(inputs[:original_job]) ->
+        case Enum.find(state.indexed, fn {_id, projection} ->
+               projection["canonical_request_digest"] ==
+                 mutation["source_intent"]["canonical_request_digest"]
+             end) do
+          {_id, projection} -> %{indexed_job: projection}
+          nil -> inputs
+        end
+
+      true ->
+        inputs
+    end
+  rescue
+    _ -> %{}
+  end
+
+  defp recovery_inputs_original(state, %{"mutation" => mutation}, read) do
     job = fn -> state.originals[Base.decode64!(mutation["job"]["job_id"])] end
 
     case mutation["kind"] do
@@ -1189,7 +1419,13 @@ defmodule LoopexComposition.Delegation.Helper do
 
     cond do
       ledger && MapSet.member?(ledger.released, identity) ->
-        retain_receipts(state, ledger, intents)
+        retain_receipts(state, ledger, Enum.reject(intents, &(&1.disposition == "covered")))
+
+      Enum.any?(intents, &(&1.disposition == "covered")) ->
+        # Concept: coverage never passes an unreleased operation, so a covered
+        # one that is not released means the index no longer matches the log.
+        state = Enum.reduce(intents, state, &mark_unresolved(&2, &1.job))
+        %{state | excess: MapSet.put(state.excess, session)}
 
       ledger && ledger.operation && ledger.operation.logical["operation_identity"] == identity ->
         recover_reserved(state, parent, ids, intents, deadline)
@@ -1423,7 +1659,28 @@ defmodule LoopexComposition.Delegation.Helper do
     end
   end
 
+  # Concept: an unprompted child's terminal is its last owning record.
+  # Technical depth: ADR 0056 binds the failed no-run terminal to the last record
+  # of the complete captured child prefix. The record at the captured version is
+  # read from the host's own Store and named by Core Canonical's digest of its
+  # payload, exactly as every other terminal record digest.
   defp settle_unprompted(state, entry, child, through, token) do
+    case last_record_digest(state, child, through) do
+      {:ok, digest} -> settle_unprompted(state, entry, child, through, token, digest)
+      :error -> {:unresolved, state}
+    end
+  end
+
+  defp last_record_digest(%{store: nil}, _child, _through), do: :error
+
+  defp last_record_digest(state, child, through) do
+    case Loopex.Store.load_records(state.store, child, through - 1, 1) do
+      {:ok, [%{journal_version: ^through, payload: payload}]} -> {:ok, Canonical.digest(payload)}
+      _ -> :error
+    end
+  end
+
+  defp settle_unprompted(state, entry, child, through, token, record_digest) do
     [_, session, run] = entry.ids
     reserved = state.runs[{session, run}].operation.logical["reserved_tokens"]
 
@@ -1432,7 +1689,7 @@ defmodule LoopexComposition.Delegation.Helper do
       "child_session_id" => Base.encode64(child),
       "child_run_id" => nil,
       "journal_version" => through,
-      "terminal_record_sha256" => hash(token),
+      "terminal_record_sha256" => record_digest,
       "cleanup" => "confirmed"
     }
 
@@ -1520,6 +1777,10 @@ defmodule LoopexComposition.Delegation.Helper do
     end
   end
 
+  # Concept: a recovered no-child terminal names the intent that proved absence.
+  # Technical depth: the read-only intent query returns Core's validated job
+  # projection, not the raw record, so the terminal digest is Core Canonical's
+  # digest of that projection; replay recomputes it from the same scan.
   defp settle_recovered(state, entry, %{settled: nil}, intents) do
     intent = hd(intents)
     digest = Canonical.digest(Map.delete(intent.job, :__struct__))
@@ -1651,6 +1912,11 @@ defmodule LoopexComposition.Delegation.Helper do
     end)
   end
 
+  # Concept: ADR 0056's accounting endpoint token comes from Core's own scan.
+  # Technical depth: ADR 0069's run evidence carries no prefix token, so the
+  # child's complete private prefix is paged through effect_intents/4 and the
+  # final page's token names the captured endpoint. Replay later re-proves that
+  # endpoint with the resume form instead of trusting the retained frame.
   @doc false
   def prefix(state, session), do: prefix(state, session, nil, nil)
 
