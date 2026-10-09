@@ -1,5 +1,14 @@
 # M7 Implementation Tasks
 
+### Current daemon correction, 2026-10-09
+
+Original84684 failed1/15 Socket cases; later/floor UNRUN. The reviewed accepted
+compaction-activity fixture correction is committed at5aa0e93c, formatting
+passed unchanged, native qualification next. See the [resume checkpoint](M7-resume.md).
+T01–T19 original89 done /84 open /6 retired; added371 done /24 open;
+combined460 done /108 open /6 retired. Original T15 helper-aware restore stays
+open. No checkbox changes or full-check claim.
+
 ### Foreground fixture corrections proved, 2026-10-09
 
 At source `c49e237796643ddb5dfc9e5639ba21094b571c5a`, original2962

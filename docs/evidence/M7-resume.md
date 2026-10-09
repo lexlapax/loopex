@@ -27,6 +27,43 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+### Daemon current-activity fixture correction, 2026-10-09
+
+Original84684 at `e4171b6d8b238aac939bf4b1ad9b22b180e27cb8` passed
+warning-free compilation, compiled documentation and status, then failed1 of15
+Socket cases after31.615 seconds. The case expected valid compaction activity
+to be dropped although accepted ADR0054/current serving emits it. All later
+stages and floor remain UNRUN. Terminal SHA-256
+`87c119d367626d1611d8a7c27a720be1a0b825b36d061d7d90de5d3c6b14d800`;
+collection `295c73f805bcdc2aebb321caeb207da0cec5bf336b52bd866aa5f02a75143a24`.
+
+The one-case source repair at `5aa0e93c3aadf3da00598872342358cf1cd6842f`
+requires the exact activity and ordinary barrier within one shared original5s
+observation, retaining malformed/private/oversized refusals, zero credit and
+unchanged cursor. Independent review
+`9e843712fc5d04611c0c5e50109e633e8c9dfe3f501545045bef0e2e143797a8`
+confirms all15 cases/14 unchanged bodies. Original81408 formatting and strict
+AST proof passed both toolchains after2.431 seconds with no source-byte change.
+Native qualification remains owed. Registry2892 SHA-256
+`179e410b5c71dd52d84b7c6854c1bcc9823ff5ee4650cb4974ad23ff9530b0c9`.
+
+Original T15 empty-root restore stays open for helper-containing state. Audit
+`a44089e04f519b00425bf5435c399de452af49170cbeed4fe90ca65bdcebb189`
+credits eligible-profile manifests and distinguishes current-only302.520s
+original10084 from older both-pair original49568; its configured-genesis helper
+dependency differs. The stopped-leader audit
+`b38d4cb0477a8c08b17e8d94422640dbd538e0b0f0aa385fe9b8b6aadca24fdb`
+finds independent retirement ownership needs a governed design. No new
+ownership is accepted. Core observation grace and ADR0065 remain pending.
+
+Immutable64-asset retention:
+`M7/current-source-preparation-20261009-v20/retention.json`, SHA-256
+`a08196f4a8ff328ffc566d3373fc9f9ce3196c4074b3eba028e9e4244ff9f267`.
+No native handle is live. Root next owns the complete Daemon547/CLI53 focused
+qualification on both pairs. No full fast/release/closure result is claimed.
+T01–T19 original89 done /84 open /6 retired; added371 done /24 open;
+combined460 done /108 open /6 retired. No checkbox changes.
+
 ### Foreground fixture corrections proved, 2026-10-09
 
 At source `c49e237796643ddb5dfc9e5639ba21094b571c5a`, original2962
