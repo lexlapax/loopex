@@ -7141,3 +7141,33 @@ cleanup, loss, cardinality, accounting and elapsed proofs remain required.
 Acceptance amends only the named ADR0028 clauses, closes no implementation task
 and grants no other proposal, milestone closure, merge, serving activation or
 publication authority. ADR0065 remains Proposed and unanswered.
+
+<a id="disposition-m7-adr-0065-0067-0068-2026-10-09"></a>
+### M7 prerequisites ADR 0065, 0067 and 0068 accepted, 2026-10-09
+
+The maintainer answered the three pending prerequisite questions on 2026-10-09.
+
+- [ADR0067](../adr/0067-tool-result-event-projections.md#concept): "Two
+  variants", accepting the exact Proposed pair at candidate
+  `805df2c2107bee43b81d266f520935c7b9cb4b89` (concept SHA-256
+  `fd19c8e175c35abec19a168638146d8f630c3270c23dd01003f788271b6bc995`, technical
+  `b04e5e2706aad4f695e71eada2ac4d0b7c61e729f097301ac02cb868d9417e7f`). Only
+  Status and the Acceptance row changed.
+- [ADR0068](../adr/0068-cli-owned-output.md#concept): "Accept, 5,000 ms",
+  accepting the exact Proposed pair at candidate
+  `773e090df996d3cd2e5966244121a9b632cffbd7` (concept SHA-256
+  `89e1bcb090a1e1648ef289c3238f5541d0b62627778419b5084fa3295a309b6f`, technical
+  `6b40f8445e23a106911254ef09a14f76eff49d3cf7afd16060c94751783200d4`). Only
+  Status and the Acceptance row changed.
+- [ADR0065](../adr/0065-private-attempts-io-prerequisite.md#concept): the
+  maintainer asked for the lock helper in Elixir to minimize external
+  dependencies, with Python only if that is impossible. The pair is rewritten
+  to the selected Elixir loopback-listener lock at candidate
+  `5678825a607e3f105ca8284af18a8c1fe57afe52` (concept SHA-256
+  `d39401de2eee633e94e1b7867b39f174d2a3dbe0418b3d338d44422ef55ac553`, technical
+  `bab7499c2d295aab6a3a232e55ad3d4f327d4f04f92953d345cdb5fdad7cce76`) and
+  accepted in that form; the Python option is recorded as not selected.
+
+Acceptance authorizes implementation only. Required proofs, milestone closure,
+merge and publication keep their separate authorization.
+

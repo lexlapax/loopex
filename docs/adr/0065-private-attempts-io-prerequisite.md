@@ -3,7 +3,7 @@
 
 Technical depth: [Private attempts IO prerequisite](0065-private-attempts-io-prerequisite-technical.md#technical-depth).
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-09
 - **Decision owner:** Maintainer
 - **Refines:** The development prerequisites for [M7's attempts procedure](../plans/M7-technical.md#technical-plan-evidence). Campaign ownership and [ADR 0057](0057-attempts-event-bodies.md#concept)'s event grammar remain authoritative.
@@ -73,4 +73,4 @@ execution cannot fall back to unlocked writes.
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | — | — | — |
+| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-m7-adr-0065-0067-0068-2026-10-09) | candidate `5678825a607e3f105ca8284af18a8c1fe57afe52`; concept `sha256:d39401de2eee633e94e1b7867b39f174d2a3dbe0418b3d338d44422ef55ac553`; technical `sha256:bab7499c2d295aab6a3a232e55ad3d4f327d4f04f92953d345cdb5fdad7cce76` |

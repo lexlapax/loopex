@@ -95,6 +95,8 @@
 .env.*
 !.env.example
 !.env.*.example
+# 1Password template: secrets are op:// references (make .env with `op inject -i .env.tpl -o .env`)
+!.env.tpl
 .envrc.local
 /.direnv/
 /.mise.local.toml

@@ -3,7 +3,7 @@
 
 Technical depth: [CLI output ownership and completion](0068-cli-owned-output-technical.md#technical-depth).
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-09
 - **Decision owner:** Maintainer
 - **Refines:** [ADR 0058](0058-bounded-progress-delivery.md#concept), CLI custody of native progress; [ADR 0049](0049-explicit-host-configuration.md#concept), physical transcript completion with its existing limits.
@@ -111,4 +111,4 @@ Technical depth: [Migration and confinement](0068-cli-owned-output-technical.md#
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | — | — | — |
+| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-m7-adr-0065-0067-0068-2026-10-09) | candidate `773e090df996d3cd2e5966244121a9b632cffbd7`; concept `sha256:89e1bcb090a1e1648ef289c3238f5541d0b62627778419b5084fa3295a309b6f`; technical `sha256:6b40f8445e23a106911254ef09a14f76eff49d3cf7afd16060c94751783200d4` |

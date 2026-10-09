@@ -42,23 +42,13 @@ implementation authority:
 | [ADR 0049](../adr/0049-explicit-host-configuration.md#concept) | Outcomes 6 and 7 explicit configuration, roles and command grammar |
 | [ADR 0051](../adr/0051-current-format-physical-restore.md#concept) | Accepted prerequisite for the fresh physical-root current-format restore outcome; implementation must satisfy its [exact contracts and proof](../adr/0051-current-format-physical-restore-technical.md#technical-depth) |
 
-Implementation prerequisite discovered on 2026-10-08: Proposed
-[ADR 0065](../adr/0065-private-attempts-io-prerequisite.md#concept) must be
-dispositioned before the private physical attempts writer and its dependent
-checks are implemented. This records the missing portable file-lock
-prerequisite; unrelated accepted M7 work continues.
-
-Implementation prerequisite discovered on 2026-10-09: Proposed
-[ADR 0067](../adr/0067-tool-result-event-projections.md#concept) must be
-dispositioned before changing the public tool-result payload, complete manifests
-and clients. This records the existing model-question projection gap; unrelated
-accepted M7 implementation and required proof continue.
-
-Implementation prerequisite discovered on 2026-10-09: Proposed
-[ADR 0068](../adr/0068-cli-owned-output.md#concept) must be dispositioned before
-implementing CLI physical output ownership and its pre-runtime acquisition
-cutoff. It records the pending-copy custody gap; existing output limits and
-required physical capacity/cleanup proof remain. Unrelated work continues.
+Implementation prerequisites discovered on 2026-10-08 and 2026-10-09 were
+accepted on 2026-10-09: [ADR 0065](../adr/0065-private-attempts-io-prerequisite.md#concept)
+(the attempts writer's loopback-listener lock in Elixir, with no Python),
+[ADR 0067](../adr/0067-tool-result-event-projections.md#concept) (the two
+closed `tool.finished` variants) and
+[ADR 0068](../adr/0068-cli-owned-output.md#concept) (CLI-owned output with a
+5,000-ms acquisition interval).
 
 Accepted decisions that constrain the work:
 

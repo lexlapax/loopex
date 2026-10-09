@@ -3,7 +3,7 @@
 
 Technical depth: [Tool result event projection mechanics](0067-tool-result-event-projections-technical.md#technical-depth).
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-09
 - **Decision owner:** Maintainer
 - **Proposed amendments:** [ADR 0023](0023-experimental-public-session-protocol.md#concept), only the closed `tool.finished` wire payload; [ADR 0044](0044-run-model-and-reasoning-configuration.md#concept), only that payload in the complete current foreground `/3` and daemon `/4` manifests; [ADR 0045](0045-model-originated-questions.md#concept), only the transport projection of its existing original tool terminal result.
@@ -107,4 +107,4 @@ Technical depth: [Current-contract replacement mechanics](0067-tool-result-event
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | — | — | — |
+| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-m7-adr-0065-0067-0068-2026-10-09) | candidate `805df2c2107bee43b81d266f520935c7b9cb4b89`; concept `sha256:fd19c8e175c35abec19a168638146d8f630c3270c23dd01003f788271b6bc995`; technical `sha256:b04e5e2706aad4f695e71eada2ac4d0b7c61e729f097301ac02cb868d9417e7f` |

@@ -72,10 +72,10 @@ a decision adds a new record rather than rewriting the old one.
 | 0060 | Restore full-mode helper | Proposed | [Decision](0060-restore-full-mode-helper.md#concept) | [Technical depth](0060-restore-full-mode-helper-technical.md#technical-depth) |
 | 0061 | Creation cancellation admission envelope | Accepted | [Decision](0061-creation-cancellation-admission-envelope.md#concept) | [Technical depth](0061-creation-cancellation-admission-envelope-technical.md#technical-depth) |
 | 0063 | Runtime creation startup status | Accepted | [Decision](0063-runtime-creation-startup-status.md#concept) | [Technical depth](0063-runtime-creation-startup-status-technical.md#technical-depth) |
-| 0065 | Private attempts IO prerequisite | Proposed | [Decision](0065-private-attempts-io-prerequisite.md#concept) | [Technical depth](0065-private-attempts-io-prerequisite-technical.md#technical-depth) |
+| 0065 | Private attempts IO prerequisite | Accepted | [Decision](0065-private-attempts-io-prerequisite.md#concept) | [Technical depth](0065-private-attempts-io-prerequisite-technical.md#technical-depth) |
 | 0066 | Owned artifact transfer opening | Accepted | [Decision](0066-owned-artifact-transfer-opening.md#concept) | [Technical depth](0066-owned-artifact-transfer-opening-technical.md#technical-depth) |
-| 0067 | Tool-result event projections | Proposed | [Decision](0067-tool-result-event-projections.md#concept) | [Technical depth](0067-tool-result-event-projections-technical.md#technical-depth) |
-| 0068 | CLI-owned output | Proposed | [Decision](0068-cli-owned-output.md#concept) | [Technical depth](0068-cli-owned-output-technical.md#technical-depth) |
+| 0067 | Tool-result event projections | Accepted | [Decision](0067-tool-result-event-projections.md#concept) | [Technical depth](0067-tool-result-event-projections-technical.md#technical-depth) |
+| 0068 | CLI-owned output | Accepted | [Decision](0068-cli-owned-output.md#concept) | [Technical depth](0068-cli-owned-output-technical.md#technical-depth) |
 
 0001 and 0002 were the prerequisites that unblocked the first milestone
 candidate; the [plans register](../plans/README.md) records current status.
