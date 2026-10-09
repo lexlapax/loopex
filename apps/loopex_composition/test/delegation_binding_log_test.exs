@@ -11,7 +11,7 @@ defmodule LoopexComposition.DelegationBindingLogTest do
 
   setup do
     root =
-      Path.join("/private/tmp", "loopex-binding-#{Base.encode16(:crypto.strong_rand_bytes(12))}")
+      Path.join(physical_tmp(), "loopex-binding-#{Base.encode16(:crypto.strong_rand_bytes(12))}")
 
     File.mkdir!(root)
     {:ok, lease} = Placement.acquire(root)
@@ -892,4 +892,9 @@ defmodule LoopexComposition.DelegationBindingLogTest do
 
   defp store_image(Local, _pid, path), do: File.read!(path)
   defp store_image(Memory, pid, _path), do: :sys.get_state(pid)
+
+  # Concept: physical roots must not traverse a symlinked temporary directory.
+  # Technical depth: macOS /tmp is a symlink to /private/tmp, which the owner
+  # refuses; other hosts use their ordinary non-symlinked /tmp.
+  defp physical_tmp, do: if(File.dir?("/private/tmp"), do: "/private/tmp", else: "/tmp")
 end

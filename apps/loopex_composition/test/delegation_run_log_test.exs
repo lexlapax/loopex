@@ -13,7 +13,7 @@ defmodule LoopexComposition.DelegationRunLogTest do
 
   setup do
     root =
-      Path.join("/private/tmp", "loopex-run-log-#{Base.encode16(:crypto.strong_rand_bytes(12))}")
+      Path.join(physical_tmp(), "loopex-run-log-#{Base.encode16(:crypto.strong_rand_bytes(12))}")
 
     File.mkdir!(root)
     {:ok, lease} = Placement.acquire(root)
@@ -943,4 +943,9 @@ defmodule LoopexComposition.DelegationRunLogTest do
           "Original fault actor cleanup exceeded its captured cutoff; retaining #{context.root}"
         )
   end
+
+  # Concept: physical roots must not traverse a symlinked temporary directory.
+  # Technical depth: macOS /tmp is a symlink to /private/tmp, which the owner
+  # refuses; other hosts use their ordinary non-symlinked /tmp.
+  defp physical_tmp, do: if(File.dir?("/private/tmp"), do: "/private/tmp", else: "/tmp")
 end
