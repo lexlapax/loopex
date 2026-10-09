@@ -287,6 +287,8 @@ defmodule LoopexCli.M7CancellationGateTest do
 
     {:ok, %{control: control}} = Loopex.Runtime.children(runtime)
     assert :ok = Gate.bind_control(gate, control)
+    {:ok, startup_deadline} = LoopexComposition.StartupGate.await(runtime)
+    :ok = LoopexComposition.StartupGate.publication({:ok, startup_deadline})
 
     on_exit(fn ->
       if Loopex.Runtime.alive?(runtime), do: Loopex.stop(runtime)

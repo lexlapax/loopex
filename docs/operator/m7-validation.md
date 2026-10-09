@@ -290,7 +290,7 @@ One row per manifest case in lane order; `pending:` names what still blocks it.
 | `m7.question-restart` | `m7-operator` | demonstration | `ready` |
 | `m7.ephemeral-question` | `m7-operator` | demonstration | `ready` |
 | `m7.long` | `m7-operator` | fixture-chat | `pending:loopex chat composes no maintenance instructions, so every compaction refuses maintenance_instructions_unconfigured` |
-| `m7.oversized-source` | `m7-operator` | demonstration | `pending:oversized-source fixture` |
+| `m7.oversized-source` | `m7-operator` | demonstration | `pending:loopex chat composes no maintenance instructions, so every compaction refuses maintenance_instructions_unconfigured` |
 | `m7.provider-switch` | `m7-operator` | scenario-chat | `ready` |
 | `m7.thinking-rounds` | `m7-operator` | demonstration | `pending:thinking-cell witness driver` |
 | `m7.review` | `m7-operator` | fixture-chat | `pending:helper flow (T11)` |
@@ -301,7 +301,7 @@ One row per manifest case in lane order; `pending:` names what still blocks it.
 | `m7.pipe-answer` | `m7-provider` | scenario-chat | `ready` |
 | `m7.instructions.declined` | `m7-provider` | scenario-chat | `ready` |
 | `m7.instructions.changed` | `m7-provider` | scenario-chat | `ready` |
-| `m7.cross-provider-maintenance` | `m7-provider` | provider-wrapper | `pending:A/B provider pins` |
+| `m7.cross-provider-maintenance` | `m7-provider` | provider-wrapper | `pending:loopex chat composes no maintenance instructions, so every compaction refuses maintenance_instructions_unconfigured` |
 | `m7.thinking-bound` | `m7-provider` | provider-wrapper | `pending:thinking-cell witness driver` |
 | `m7.thinking-cancel` | `m7-provider` | provider-wrapper | `pending:pre-transport cancellation gate driver` |
 | `m7.daemon-detach` | `m7-provider` | provider-wrapper | `pending:daemon host fixture driver` |

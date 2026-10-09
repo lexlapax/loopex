@@ -31,7 +31,7 @@
         "credential": true,
         "driver": "provider-wrapper",
         "lane": "m7-provider",
-        "status": "pending:A/B provider pins",
+        "status": "pending:loopex chat composes no maintenance instructions, so every compaction refuses maintenance_instructions_unconfigured",
         "steps": [
           "V6.7"
         ]
@@ -141,7 +141,7 @@
         "credential": true,
         "driver": "demonstration",
         "lane": "m7-operator",
-        "status": "pending:oversized-source fixture",
+        "status": "pending:loopex chat composes no maintenance instructions, so every compaction refuses maintenance_instructions_unconfigured",
         "steps": [
           "V6.5.positive"
         ]
