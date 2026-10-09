@@ -115,6 +115,12 @@ defmodule LoopexCli.Demonstration do
   Submits one prompt and returns the attachment following it.
   """
   def prompt(stack, content) do
+    # Concept: direct runtime startup precedes eligibility for session creation.
+    # Technical depth: observe and publish the original startup cutoff inside
+    # the caller's existing stack cleanup bracket before issuing creation.
+    {:ok, startup_deadline} = LoopexComposition.StartupGate.await(stack.runtime)
+    :ok = LoopexComposition.StartupGate.publication({:ok, startup_deadline})
+
     {:ok, session_id} =
       Loopex.create_session(stack.runtime, %{"surface" => "demonstration"},
         command_id: "create-1"
