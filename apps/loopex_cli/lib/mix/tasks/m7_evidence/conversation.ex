@@ -23,6 +23,17 @@ defmodule Mix.Tasks.Loopex.M7Evidence.Conversation do
   conversation of the same session already settled: a reopened conversation
   replays their records, and they are never answered again. `transcript/1` returns the output and the
   ordered observations without stopping the server.
+
+  A held case adds four steps. `{:hold, fifo, limit_ms}` opens the harness
+  FIFO for writing in a holder process and waits until the case's runner has
+  opened it for reading, so the tool call is provably running. If `:release`
+  has not run `limit_ms` after that, the holder is released, `hold_expired` is
+  recorded and input ends: expiry is a retained failure, never a pass. `:observe` asks the
+  `owner` for its independent observation and waits for the reply; a refused
+  observation ends input. `:release` writes one line to the FIFO, which lets
+  the runner finish; nothing else releases it. `:interrupt` asks the owner to
+  deliver the terminal interrupt. Stopping the device closes the holder without
+  writing, and an unopened FIFO is unblocked by a reader that discards nothing.
   """
 
   use GenServer
@@ -50,6 +61,10 @@ defmodule Mix.Tasks.Loopex.M7Evidence.Conversation do
        pending: "",
        reader: nil,
        timer: nil,
+       holder: nil,
+       held: false,
+       released: false,
+       observed: nil,
        events: []
      }}
   end
@@ -63,12 +78,36 @@ defmodule Mix.Tasks.Loopex.M7Evidence.Conversation do
     {:noreply, io(request, {from, reply_as}, state)}
   end
 
+  def handle_info({:held, {_pid, _fifo, limit} = holder}, %{holder: holder} = state) do
+    Process.send_after(self(), {:hold_limit, holder}, limit)
+    {:noreply, serve(%{state | held: true, events: [:held | state.events]})}
+  end
+
+  def handle_info({:hold_limit, {pid, _, _} = holder}, %{holder: holder, released: false} = state) do
+    send(pid, :release)
+    events = [:released, :hold_expired | state.events]
+    {:noreply, serve(%{state | steps: [], released: true, events: events})}
+  end
+
+  def handle_info({:observed, result}, state),
+    do:
+      {:noreply, serve(%{state | observed: result, events: [{:observed, result} | state.events]})}
+
   def handle_info({:deadline, ref}, %{timer: ref} = state) do
     state = %{state | steps: [], timer: nil, events: [:timeout | state.events]}
     {:noreply, serve(state)}
   end
 
   def handle_info(_message, state), do: {:noreply, state}
+
+  @impl true
+  def terminate(_reason, %{holder: {pid, fifo, _limit}, held: held}) do
+    # An unopened FIFO blocks its holder's open; one reader unblocks it.
+    unless held, do: spawn(fn -> File.open(fifo, [:read, :raw]) end)
+    Process.exit(pid, :kill)
+  end
+
+  def terminate(_reason, _state), do: :ok
 
   defp io({:put_chars, _encoding, chars}, client, state),
     do: reply(client, :ok, serve(%{state | output: state.output <> IO.iodata_to_binary(chars)}))
@@ -125,6 +164,9 @@ defmodule Mix.Tasks.Loopex.M7Evidence.Conversation do
       {:skip, state} ->
         serve(%{cancel(state) | steps: rest})
 
+      {:end, state} ->
+        serve(%{cancel(state) | steps: []})
+
       {:wait, state} ->
         arm(state)
     end
@@ -163,6 +205,46 @@ defmodule Mix.Tasks.Loopex.M7Evidence.Conversation do
   end
 
   defp next(:lost, state), do: {:wait, state}
+
+  defp next({:hold, fifo, limit}, %{holder: nil} = state) do
+    device = self()
+
+    pid =
+      spawn(fn ->
+        {:ok, io} = File.open(fifo, [:write, :raw])
+        send(device, {:held, {self(), fifo, limit}})
+
+        receive do
+          :release -> _ = :file.write(io, "released\n")
+        end
+
+        File.close(io)
+      end)
+
+    {:wait, %{state | holder: {pid, fifo, limit}}}
+  end
+
+  defp next({:hold, _fifo, _limit}, %{held: true} = state), do: {:skip, state}
+  defp next({:hold, _fifo, _limit}, state), do: {:wait, state}
+
+  defp next(:observe, %{observed: nil} = state) do
+    if state.owner, do: send(state.owner, {:conversation_observe, self(), state.output})
+    {:wait, %{state | observed: :pending}}
+  end
+
+  defp next(:observe, %{observed: :pending} = state), do: {:wait, state}
+  defp next(:observe, %{observed: {:ok, _}} = state), do: {:skip, state}
+  defp next(:observe, state), do: {:end, state}
+
+  defp next(:release, %{holder: {pid, _fifo, _limit}, held: true} = state) do
+    send(pid, :release)
+    {:skip, %{state | released: true, events: [:released | state.events]}}
+  end
+
+  defp next(:interrupt, state) do
+    if state.owner, do: send(state.owner, {:conversation_interrupt, self()})
+    {:skip, %{state | events: [:interrupt | state.events]}}
+  end
 
   # Concept: only a question the conversation actually emitted is answered.
   # Technical depth: the first unanswered question record supplies the exact

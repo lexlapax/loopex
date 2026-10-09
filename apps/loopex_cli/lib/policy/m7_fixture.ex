@@ -16,7 +16,9 @@ defmodule LoopexCli.Policy.M7Fixture do
   alternate arguments, generations, leases and directories refuse. Feature
   alone also admits the captured vector plus one catalog default, because its
   unpinned runner takes the operator's answer as that single argument. Review
-  refuses file mutations while permitting its pinned test command. The existing Policy port owns
+  refuses file mutations while permitting its pinned test command. The held
+  steer and interrupt cases permit only their pinned FIFO runner and no file
+  mutation; they have no oracle runner. The existing Policy port owns
   timeout, durable decisions and grants. Captures perform no execution and do
   not authorize a provider attempt or replace the campaign admission procedure.
   The shared fixed runner recipe uses the hosting Elixir/OTP paths (Python 3 for the
@@ -31,7 +33,7 @@ defmodule LoopexCli.Policy.M7Fixture do
   alias LoopexComposition.WorkspaceIdentity
   alias LoopexProtocol.{Canonical, ToolDefinition}
 
-  @cases ~w(m7.repair m7.feature m7.review m7.long m7.external)
+  @cases ~w(m7.repair m7.feature m7.review m7.long m7.external m7.steer-barrier m7.interrupt)
 
   @doc false
   def oracle_runner(case_id, workspace, oracle, environment) do
@@ -233,8 +235,8 @@ defmodule LoopexCli.Policy.M7Fixture do
         "m7.repair" -> ["lib/ledger.ex"]
         "m7.feature" -> ["lib/row_encoder.ex"]
         "m7.long" -> ["release.txt", "batches.txt"]
-        "m7.review" -> []
         "m7.external" -> ["tools/threads.py"]
+        _held_or_review -> []
       end
 
     path in paths

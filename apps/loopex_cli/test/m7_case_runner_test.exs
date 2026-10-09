@@ -731,6 +731,79 @@ defmodule LoopexCli.M7CaseRunnerTest do
     assert File.read!(Path.join(result.root, "records/input-2.txt")) =~ "/answer "
   end
 
+  # Concept: a held tool call is released only after the observer joins the
+  # active run, its operation and the accepted steer and follow-up.
+  defp held_script(after_release) do
+    fn capture, _call ->
+      [
+        %{
+          text: "hold",
+          calls: [%{id: "hold", name: "bash", arguments: %{"argv" => capture.argv}}]
+        }
+        | after_release
+      ]
+    end
+  end
+
+  test "steer and follow-up are admitted while the held call runs and only then released", f do
+    context =
+      Map.merge(f.context, %{
+        manifest: lane(f.context.manifest, ["m7.steer-barrier"]),
+        chat_options:
+          chat_options(
+            f,
+            held_script([%{text: "STEERED", calls: []}, %{text: "followed", calls: []}]),
+            self()
+          )
+      })
+
+    result = passed!(CaseRunner.run_lane(f.writer, "m7-operator", context))
+    inputs = File.read!(Path.join(result.root, "records/input-1.txt"))
+    [observed, released] = Enum.map([":observed", ":released"], &:binary.match(inputs, &1))
+    assert elem(observed, 0) < elem(released, 0)
+    assert facts(result)["kinds"]["run_terminal_committed"] == 2
+  end
+
+  test "a held call that is never made is required_action_absent and nothing is released", f do
+    context =
+      Map.merge(f.context, %{
+        manifest: lane(f.context.manifest, ["m7.steer-barrier"]),
+        step_deadline_ms: 1_000,
+        chat_options:
+          chat_options(f, fn _capture, _call -> [%{text: "no", calls: []}] end, self())
+      })
+
+    {:stopped, [{:ok, result}]} = CaseRunner.run_lane(f.writer, "m7-operator", context)
+    assert result.mechanical_result == "required_action_absent"
+    refute File.read!(Path.join(result.root, "records/input-1.txt")) =~ ":released"
+  end
+
+  test "an expired hold is a retained failure even though the run then completes", f do
+    context =
+      Map.merge(f.context, %{
+        manifest: lane(f.context.manifest, ["m7.steer-barrier"]),
+        hold_limit_ms: 1,
+        chat_options: chat_options(f, held_script([%{text: "done", calls: []}]), self())
+      })
+
+    {:stopped, [{:ok, result}]} = CaseRunner.run_lane(f.writer, "m7-operator", context)
+    assert result.mechanical_result == "assertion_failed"
+    assert File.read!(Path.join(result.root, "records/input-1.txt")) =~ ":hold_expired"
+  end
+
+  test "an interrupt cancels the held call without releasing it and cleanup is confirmed", f do
+    context =
+      Map.merge(f.context, %{
+        manifest: lane(f.context.manifest, ["m7.interrupt"]),
+        chat_options: chat_options(f, held_script([%{text: "late", calls: []}]), self())
+      })
+
+    result = passed!(CaseRunner.run_lane(f.writer, "m7-operator", context))
+    inputs = File.read!(Path.join(result.root, "records/input-1.txt"))
+    assert inputs =~ ":interrupt"
+    refute inputs =~ ":released"
+  end
+
   test "the wrapper command checks admission without staging and refuses bad arguments", f do
     :ok = AttemptWriter.close(f.writer)
     root = Path.expand("../../..", __DIR__)

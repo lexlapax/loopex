@@ -131,6 +131,26 @@ runs under the allow-all host policy; the workspace inventory and the oracle
 bound what it may change. `scripts/m7-ephemeral-question-demo.exs` runs the
 same host outside a lane for rehearsal; its record is not lane evidence.
 
+## Held cases
+
+`m7.steer-barrier` and `m7.interrupt` ask the model to run
+`/bin/sh <attempt>/trusted/hold.sh` once. The runner waits on
+`trusted/hold.fifo`, outside the writable workspace, and the fixture policy
+admits only that pinned invocation. The wrapper knows the call is running when
+the runner opens the FIFO. It then prints `/status`. For the steer case it
+also sends `/steer` and `/follow-up`. Next an independent read-only attachment
+to the same runtime confirms the active run and its held operation. The
+wrapper also requires the runtime to have accepted those commands. Only then
+does it write one line to the FIFO. The interrupt case never writes: it
+delivers the terminal interrupt and the run must end by cancellation with
+confirmed cleanup. A hold of 90 seconds without release, below the 120-second
+tool wall time, releases the runner and records `hold_expired` as a failure.
+After the run, committed facts decide the case. The steer and follow-up must be
+admitted before the held operation's receipt. The steer must be applied to the
+held run, and the follow-up must run separately with the held run's context.
+These cases run in piped mode only; an operator's Ctrl-C under `mix run` would
+end the whole harness rather than reach the chat.
+
 ## Step ownership
 
 Every key below has exactly one owner: `case:` an M7 manifest case run by its
@@ -265,7 +285,7 @@ One row per manifest case in lane order; `pending:` names what still blocks it.
 | `m7.trace.json` | `m7-operator` | scenario-ask | `ready` |
 | `m7.repair` | `m7-operator` | fixture-chat | `ready` |
 | `m7.instructions.admitted` | `m7-operator` | scenario-chat | `ready` |
-| `m7.steer-barrier` | `m7-operator` | demonstration | `pending:FIFO hold runner and observer join` |
+| `m7.steer-barrier` | `m7-operator` | demonstration | `ready` |
 | `m7.feature` | `m7-operator` | fixture-chat | `ready` |
 | `m7.question-restart` | `m7-operator` | demonstration | `ready` |
 | `m7.ephemeral-question` | `m7-operator` | demonstration | `ready` |
@@ -275,7 +295,7 @@ One row per manifest case in lane order; `pending:` names what still blocks it.
 | `m7.thinking-rounds` | `m7-operator` | demonstration | `pending:thinking-cell witness driver` |
 | `m7.review` | `m7-operator` | fixture-chat | `pending:helper flow (T11)` |
 | `m7.policy-denial` | `m7-operator` | scenario-chat | `ready` |
-| `m7.interrupt` | `m7-operator` | demonstration | `pending:FIFO hold runner and observer join` |
+| `m7.interrupt` | `m7-operator` | demonstration | `ready` |
 | `m7.external` | `m7-operator` | external-chat | `ready` |
 | `m7.restore` | `m7-operator` | demonstration | `pending:attended restore driver` |
 | `m7.pipe-answer` | `m7-provider` | scenario-chat | `ready` |
