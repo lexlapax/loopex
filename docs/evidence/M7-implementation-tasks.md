@@ -1,5 +1,78 @@
 # M7 Implementation Tasks
 
+### Held-create identity and failure retention joined, 2026-10-08
+
+Three independently reviewed fixture changes are joined. The harness preserves
+both the original body error and first cleanup error with ExUnit.MultiError;
+every original cleanup action still runs once under its original cutoff. The
+held final-create observer guards the original Store, retains its actual waiter
+before fallible publication and extracts the original command identity through
+public Loopex.Store.transaction_id/1. The external fixture requires Stdio's
+existing :ok success and always performs the same real Store cleanup; returned
+failures can no longer become false VM exit0. It adds no custom diagnostic
+printing or wire record. All original29 foreground bodies and7 External cases,
+physical pressure, actor/credit/cursor joins and numeric bounds remain required.
+Exact layered identities and independent review pointers are retained in
+`/private/tmp/m7-reviewed-foreground-held-and-results-join-20261008-v1.json`.
+Corrected-source native verification is UNRUN.
+
+The stopped-leader cleanup gap remains a production defect. The stopped Bash
+leader is also the sole actor that processes STOP and terminates the anchored
+group. A responsive native guardian mechanism is already investigated, but its
+ownership/build/package amendment is unaccepted; no guardian is implemented.
+The original physical stopped-leader test and5+5-second bounds remain unchanged.
+Causal audit is retained at
+`/private/tmp/m7-foreground-stopped-leader-cleanup-causal-audit-20261008-v1.md`,
+SHA-256 `11879c421edeb259ad5871ddf7105803147fd3cdea4883285974d0f15fffe275`.
+The specific original closing branch/timestamps remain unproved. Foreground
+112-case qualification therefore remains open; no filtered pass substitutes
+for it. Unrelated accepted creation/daemon work can proceed.
+
+No checkbox closes. T01-T19 remain original88 done /85 open /6 retired and
+added367 done /23 open. ADR0065 remains pending. Next completed registry is
+original72233's2717; preserve the immutable failed run before new qualification.
+
+### Foreground qualification retains three failures, 2026-10-08
+
+Original72233 at `237652e4bfe61a7ff573743b03eca54126a8a37b` is terminal
+FAIL. Current formatting, warning-free project compilation, compiled
+documentation and current-tree status pass. App Server executes94 cases:
+91 pass,3 fail, zero excluded/skipped/invalid. The abort/restart workflow
+observes its second server Port exit0; the real stopped-leader case reports
+`cleanup_unproved`; the held final-create case's cleanup sees a closed socket
+and masks its body. Protocol, Core, Composition, helper and floor stages remain
+UNRUN. No failure is retried unchanged or relabeled.
+
+The complete161.192-second run, six original process joins and27 artifacts are
+retained under `M7/reviewed-owner-focused-20261008-v7`; terminal SHA-256
+`36b18c85b939bcec3f8dda648e46984c1a78d2c7384063e2e13c0f606d0db24a`,
+original collection SHA-256
+`6dba40d4303013bc3013c1249289c7614bdc9f71e9e4ad16f52433d819c86101`.
+Next registry2717, SHA-256
+`3514de2fa597f7c8aa8ea7753a10e42423a09b383c001603b41ac6c667ab55e3`.
+No native handle is live. Three independent read-only audits investigate the
+failures. A root-owned diagnostic-only harness packet preserves the original
+body error alongside its first cleanup error using existing ExUnit.MultiError;
+all cleanup actions and deadlines remain required. It is not yet applied.
+
+Immutable restart snapshot17 retains570 assets,16 primary source commits,
+16 complete native records and a verified Git bundle at
+`M7/coupled-current-context-20261008-v17/retention.json`, SHA-256
+`1eb275e313d924342fc539433c8c047631b37d21726c04ddebf2802584414f45`.
+Its live72233 entry records observation state at capture; the terminal result
+above supersedes that observation. Snapshot17's latest completed registry is
+2711; next work must use the actual terminal2717 registry above. The separate
+CLI output ownership outline is retained, without formal acceptance or
+implementation, at
+`/private/tmp/m7-cli-physical-output-boundary-decision-outline-20261008-v2.md`,
+SHA-256 `9d6c8b344ca4406cd74378603594e7b40f244f6146ad6a4632f1dd7b46634ffd`.
+
+No checkbox closes. T01-T19 remain original88 done /85 open /6 retired and
+added367 done /23 open. ADR0065 remains pending. Current-format creation/daemon
+consumer qualification and accepted implementation continue independently;
+no protocol generation activation, helper execution or milestone closure is
+claimed.
+
 ### Snapshot prerequisite layout verified, 2026-10-08
 
 The reviewed prerequisite is committed at

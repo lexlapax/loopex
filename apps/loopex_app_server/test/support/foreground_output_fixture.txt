@@ -14,7 +14,7 @@ defmodule Loopex.AppServer.ForegroundOutputHarness do
     File.mkdir!(root)
     key = {__MODULE__, make_ref()}
     Process.put(key, %{root: root, cutoff: cutoff})
-    try do
+    body = try do
       File.chmod!(root, 0o700)
       input_path = Path.join(root, "stdin")
       output = Path.join(root, "stdout")
@@ -59,8 +59,11 @@ defmodule Loopex.AppServer.ForegroundOutputHarness do
       assert {:ready, _os_pid, session, reference} = next(fixture, &match?({:ready, _, _, _}, &1))
       fixture = Map.merge(fixture, %{session: session, reference: reference})
       own(key, :fixture, fixture)
-      function.(fixture)
-    after
+      {:ok, function.(fixture)}
+    catch
+      kind, reason -> {:error, {kind, reason, __STACKTRACE__}}
+    end
+    cleanup = try do
       owned = Process.get(key)
       launcher_join = {Map.get(owned, :launcher), Map.get(owned, :monitor), cutoff + @join_grace}
       try do
@@ -88,6 +91,16 @@ defmodule Loopex.AppServer.ForegroundOutputHarness do
       after
         Process.delete(key)
       end
+      :ok
+    catch
+      kind, reason -> {:error, {kind, reason, __STACKTRACE__}}
+    end
+    case {body, cleanup} do
+      {{:ok, value}, :ok} -> value
+      {{:error, {kind, reason, stack}}, :ok} -> :erlang.raise(kind, reason, stack)
+      {{:ok, _value}, {:error, {kind, reason, stack}}} -> :erlang.raise(kind, reason, stack)
+      {{:error, body_error}, {:error, cleanup_error}} ->
+        raise ExUnit.MultiError, errors: [body_error, cleanup_error]
     end
   end
 
@@ -449,9 +462,13 @@ defmodule Loopex.AppServer.ForegroundOutputFixture do
     receive do
       {:tcp, socket, bytes} when socket == state.socket ->
         state |> command(:erlang.binary_to_term(bytes, [:safe])) |> loop()
-      {:record_held_before_linearization, waiter, _store, kind, transaction} ->
-        send_record(state.socket, {:held, kind, transaction.tx_id})
-        loop(%{state | held: waiter})
+      {:record_held_before_linearization, waiter, store, kind, transaction}
+          when store == state.fixture.store ->
+        state = %{state | held: waiter}
+        Process.put({__MODULE__, :controller}, state)
+        {:ok, transaction_id} = Loopex.Store.transaction_id(transaction)
+        send_record(state.socket, {:held, kind, transaction_id})
+        loop(state)
       {:served, owner, summary} when owner == state.owner ->
         if state.held, do: Store.release(state.held)
         send(owner, :finish_fixture)

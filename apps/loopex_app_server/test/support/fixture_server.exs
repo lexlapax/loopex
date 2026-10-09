@@ -202,15 +202,17 @@ defmodule Loopex.AppServer.Fixture do
 
     store = durable_store()
     fixture = Loopex.AgentLoopFixture.start(options ++ store)
-    Loopex.AppServer.Stdio.serve(fixture.runtime)
-
-    # Ending input ends the process, and a virtual machine that simply halts runs
-    # no `terminate/2`. A durable Store would then keep its writer marker and
-    # refuse the next process, so the shutdown is orderly here rather than
-    # abrupt: the Store is stopped, which is what gives the marker back.
-    case Keyword.get(store, :store) do
-      nil -> :ok
-      pid -> GenServer.stop(pid, :normal, 5_000)
+    try do
+      :ok = Loopex.AppServer.Stdio.serve(fixture.runtime)
+    after
+      # Ending input ends the process, and a virtual machine that simply halts runs
+      # no `terminate/2`. A durable Store would then keep its writer marker and
+      # refuse the next process, so the shutdown is orderly here rather than
+      # abrupt: the Store is stopped, which is what gives the marker back.
+      case Keyword.get(store, :store) do
+        nil -> :ok
+        pid -> GenServer.stop(pid, :normal, 5_000)
+      end
     end
   end
 
