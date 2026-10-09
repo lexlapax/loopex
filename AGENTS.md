@@ -287,7 +287,8 @@ repository's checks are two commands, described in
   workflows, the independent Node client, the fresh-source archive build, and
   the long-duration bound proofs the fast check excludes. It needs a provider
   credential in `LOOPEX_PROVIDER_API_KEY`, pinned Node, a clean tree and, for
-  the full matrix, `--attempts-index FILE` naming the retained M7 attempts index; two of
+  the full matrix, `--attempts-index FILE` naming the retained M7 attempts index
+  with its writer identity and the M7 conversation configuration; two of
   its tests are attended. Before a provider or credential, wire-protocol, or daemon
   change merges, run the selected unattended lanes the verification guide
   names using `--only`. The full check, including attended cases, runs once

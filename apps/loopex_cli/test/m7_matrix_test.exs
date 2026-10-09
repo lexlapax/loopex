@@ -45,7 +45,9 @@ defmodule LoopexCli.M7MatrixTest do
 
     input = "start a\n"
     assert {2, resumed} = serve(f, "matrix-1", ["--resume"], input)
-    assert Enum.take(resumed, 4) == ["plan skip a", "plan run b", "plan run c", "plan ready"]
+    assert [skip | rest] = Enum.take(resumed, 4)
+    assert skip == "plan skip a " <> LoopexProtocol.Canonical.digest_bytes(File.read!(f.log))
+    assert rest == ["plan run b", "plan run c", "plan ready"]
     assert List.last(resumed) =~ "refused"
 
     input = "start b\nfinish b pass #{f.log}\nstart c\nfinish c pass #{f.log}\n"

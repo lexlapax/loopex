@@ -88,6 +88,24 @@ Continue a lane suspended by a pre-dispatch stop on the same commit with
 `index-head: <campaign_id> <sequence> <sha256>` line to the M7 plan's
 Progress and Evidence section.
 
+## Through the release check
+
+The full closure matrix runs every lane in order and records each in the same
+index under one logical matrix:
+
+```bash
+bash scripts/check-release.sh --attempts-index /retained/m7/attempts.jsonl \
+  --writer maintainer-workstation --host workstation-1 --markers /retained/m7/markers \
+  --m7-config /retained/m7/config.json --operator Maintainer
+```
+
+It prints `check-release: logical matrix ID`. After a pre-dispatch stop, rerun
+on the same commit with `--resume-matrix ID`: completed lanes are skipped and
+named, fresh-source is rebuilt and must reproduce its first archive manifest,
+and only not-dispatched cases run. A lane that started and did not pass ends
+the matrix; it is never resumed. Set `LOOPEX_M7_EXTERNAL_REPOSITORY` to the
+external repository's checkout for the operator lane's external task.
+
 ## External task
 
 The maintainer-selected external task changes `slugify` in
@@ -253,4 +271,4 @@ One row per manifest case in lane order; `pending:` names what still blocks it.
 | `m7.thinking-bound` | `m7-provider` | provider-wrapper | `pending:thinking-cell witness driver` |
 | `m7.thinking-cancel` | `m7-provider` | provider-wrapper | `pending:pre-transport cancellation gate driver` |
 | `m7.daemon-detach` | `m7-provider` | provider-wrapper | `pending:daemon host fixture driver` |
-| `m7.rollback` | `m7-rollback` | release-lane | `pending:current-format backup/restore lane` |
+| `m7.rollback` | `m7-rollback` | release-lane | `ready` |

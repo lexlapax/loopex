@@ -93,7 +93,6 @@ defmodule LoopexCli.M7EvidenceTaskTest do
            :attempts_index_required},
           {[lane: "m7-provider"], :attempts_index_required},
           {[lane: "m7-rollback", resume_matrix: "matrix-1"], :attempts_index_required},
-          {[lane: "m7-rollback"], {:m7_cases_pending, ["m7.rollback"]}},
           {[attempts_index: "relative/index", lane: "m7-provider"],
            :attempts_index_must_be_absolute},
           {[attempts_index: Path.join(root, "index"), lane: "m7-provider"],
@@ -198,12 +197,17 @@ defmodule LoopexCli.M7EvidenceTaskTest do
                "--attempts-index",
                "/retained/index",
                "--lane",
-               "m7-rollback"
+               "m7-provider"
              ])
            ) == {:shutdown, 2}
 
     assert_received {:mix_shell, :error,
-                     ["m7-evidence: evidence unavailable: m7_cases_pending m7.rollback"]}
+                     ["m7-evidence: evidence unavailable: m7_cases_pending " <> pending]}
+
+    assert pending =~ "m7.thinking-bound"
+
+    Task.run(["--root", root, "--release", "--lane", "m7-rollback"])
+    assert_received {:mix_shell, :info, ["m7-evidence: release lanes admitted: m7-rollback"]}
   end
 
   defp concept!(root, lines),

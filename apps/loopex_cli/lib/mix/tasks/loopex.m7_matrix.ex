@@ -86,7 +86,17 @@ defmodule Mix.Tasks.Loopex.M7Matrix do
 
     with {:ok, invocation} <- invocation(opts),
          {:ok, plan} <- AttemptWriter.admit(writer, concept, selection, mode) do
-      for %{pin: pin} <- plan.reused, do: IO.puts(output, "plan skip #{pin["case_key"]}")
+      # A reused lane names the digest of its retained result, which a
+      # rebuilt prerequisite such as the fresh-source manifest must reproduce.
+      for %{pin: pin, history: history} <- plan.reused do
+        completed = Enum.find(history.records, &(&1["body"]["state"] == "completed"))
+
+        IO.puts(
+          output,
+          "plan skip #{pin["case_key"]} #{List.last(completed["body"]["evidence"])["sha256"]}"
+        )
+      end
+
       for %{pin: pin} <- plan.remaining, do: IO.puts(output, "plan run #{pin["case_key"]}")
       IO.puts(output, "plan ready")
       loop(writer, selection, invocation, opts[:run_root], input, output)
