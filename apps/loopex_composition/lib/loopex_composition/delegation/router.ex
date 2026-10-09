@@ -50,8 +50,34 @@ defmodule LoopexComposition.Delegation.Router do
   @impl true
   def cancel(%{helper: helper, local: {module, reference}}, job_id) do
     case Helper.cancel(helper, job_id) do
+      {:stopped, child} -> observe(child)
       {:ok, _confirmation} = answer -> answer
       _local_or_unknown -> module.cancel(reference, job_id)
+    end
+  end
+
+  # Concept: a helper stop is cleaned only once the child's run has ended.
+  # Technical depth: the bound is derived once from the parent job's committed
+  # grace and Core's executor observation window, less a fixed reply margin.
+  # Missing that bound answers unconfirmed; it never rewrites the parent.
+  defp observe(child) do
+    {:ok, bounds} = Loopex.Executor.cancellation_bounds(child.grace)
+    deadline = System.monotonic_time(:millisecond) + bounds.executor_observe_ms - 250
+    observe(child, deadline)
+  end
+
+  defp observe(child, deadline) do
+    case Loopex.Runtime.run_evidence(child.runtime, child.session, child.run) do
+      {:ok, %{terminal: %{}}} ->
+        {:ok, :cleaned}
+
+      _ ->
+        if System.monotonic_time(:millisecond) >= deadline do
+          {:ok, :unconfirmed}
+        else
+          Process.sleep(20)
+          observe(child, deadline)
+        end
     end
   end
 

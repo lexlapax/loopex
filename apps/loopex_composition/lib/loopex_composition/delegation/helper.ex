@@ -723,7 +723,7 @@ defmodule LoopexComposition.Delegation.Helper do
             :unresolved
 
           not stopped and now >= launch.cutoff ->
-            GenServer.call(helper, {:stop, job.job_id, "cutoff"}, :infinity)
+            _ = GenServer.call(helper, {:stop, job.job_id, "cutoff"}, :infinity)
             observe(helper, runtime, job, launch, deadline, true)
 
           true ->
@@ -986,27 +986,60 @@ defmodule LoopexComposition.Delegation.Helper do
   defp stop(state, job_id, reason) do
     with %{} = entry <- state.jobs[job_id],
          [_, session, run_id] = entry.ids,
-         %{operation: %{stop: nil} = operation} <- state.runs[{session, run_id}],
-         {:ok, key} <- LedgerCodec.header_key(:run, entry.ids),
-         {:ok, stop_id} <- domain_value("loopex:helper-tx:v1", [key, "stop", entry.operation]),
-         {:ok, state} <-
-           append(
-             state,
-             entry.ids,
-             %{
-               "kind" => "stop",
-               "operation_identity" => entry.operation,
-               "job" => project(entry.job),
-               "stop_tx_id" => stop_id,
-               "reason" => reason
-             },
-             %{original_job: entry.job}
-           ) do
-      abort_child(state, operation)
-      {{:ok, :unconfirmed}, state}
+         %{operation: %{} = operation} <- state.runs[{session, run_id}] do
+      state =
+        if operation.stop == nil do
+          case commit_stop(state, entry, reason) do
+            {:ok, state} ->
+              abort_child(state, operation)
+              state
+
+            {:unresolved, state} ->
+              state
+          end
+        else
+          state
+        end
+
+      {observation(state, operation, entry.job), state}
     else
-      {:unresolved, state} -> {{:ok, :unconfirmed}, state}
       _ -> {{:ok, :unconfirmed}, state}
+    end
+  end
+
+  # Concept: cleanup is observed by the canceller within the parent's bound.
+  # Technical depth: the reply names the child run for the caller to observe;
+  # the owner never waits for cleanup itself.
+  defp observation(state, %{child: child, child_run: run}, job)
+       when is_binary(child) and is_binary(run) do
+    {:stopped,
+     %{
+       runtime: state.runtime,
+       session: Base.decode64!(child),
+       run: Base.decode64!(run),
+       grace: job.cleanup_grace_ms
+     }}
+  end
+
+  defp observation(_state, _operation, _job), do: {:ok, :unconfirmed}
+
+  defp commit_stop(state, entry, reason) do
+    with {:ok, key} <- LedgerCodec.header_key(:run, entry.ids),
+         {:ok, stop_id} <- domain_value("loopex:helper-tx:v1", [key, "stop", entry.operation]) do
+      append(
+        state,
+        entry.ids,
+        %{
+          "kind" => "stop",
+          "operation_identity" => entry.operation,
+          "job" => project(entry.job),
+          "stop_tx_id" => stop_id,
+          "reason" => reason
+        },
+        %{original_job: entry.job}
+      )
+    else
+      _ -> {:unresolved, state}
     end
   end
 

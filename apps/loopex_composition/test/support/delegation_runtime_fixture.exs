@@ -1,6 +1,61 @@
 Code.require_file("../../../loopex/test/support/m1_runtime_helper.exs", __DIR__)
 Code.require_file("../../../loopex/test/support/agent_loop_helper.exs", __DIR__)
 
+defmodule LoopexComposition.HelperDeciderModel do
+  @moduledoc false
+  @behaviour Loopex.Model
+
+  # Concept: a scripted model whose reply depends on the request it is handed.
+  # Technical depth: concurrent parents and children interleave requests, so a
+  # shared ordered script cannot describe them; the test's decision function
+  # reads the first user message and the number of assistant turns instead.
+  def start(decide) when is_function(decide, 2) do
+    {:ok, pid} = Agent.start_link(fn -> %{decide: decide, seen: []} end)
+    pid
+  end
+
+  def dispatched(pid), do: Agent.get(pid, & &1.seen) |> Enum.reverse()
+
+  @impl Loopex.Model
+  def complete(request, options, _progress \\ nil) do
+    pid = Keyword.fetch!(options, :script)
+    decide = Agent.get(pid, & &1.decide)
+    Agent.update(pid, &%{&1 | seen: [request | &1.seen]})
+    user = Enum.find_value(request.messages, fn m -> m["role"] == "user" && m["content"] end)
+    turns = Enum.count(request.messages, &(&1["role"] == "assistant"))
+    turn = decide.(user, turns)
+
+    case Map.get(turn, :hold) do
+      waiter when is_pid(waiter) ->
+        send(waiter, {:holding, user, self()})
+
+        receive do
+          :release -> :ok
+        after
+          Map.get(turn, :hold_timeout_ms, 30_000) -> :ok
+        end
+
+      nil ->
+        :ok
+    end
+
+    {:ok,
+     %{
+       completion: "unknown",
+       continuation: nil,
+       text: Map.get(turn, :text, ""),
+       identity: %{provider: "scripted", model: request.model, endpoint: "in-process"},
+       usage: Map.get(turn, :usage, %{input_tokens: 1, output_tokens: 1}),
+       tool_calls: Map.get(turn, :calls, []),
+       delta_count: 0,
+       streamed: false,
+       provider_response_id: nil,
+       canonical_request_bytes: request.canonical_request_bytes,
+       staged_request_digest: request.staged_request_digest
+     }}
+  end
+end
+
 defmodule LoopexComposition.DelegationRuntimeFixture do
   @moduledoc false
   import ExUnit.Assertions
@@ -31,7 +86,14 @@ defmodule LoopexComposition.DelegationRuntimeFixture do
     {:ok, store} = Loopex.Store.new(Loopex.Store.Local, store_pid)
     {:ok, helper} = Helper.start_link(objects: objects, runtime_id: "helper-runtime")
     Process.unlink(helper)
-    model = AgentLoopTestModel.start(script)
+
+    {model_module, model} =
+      if is_function(script, 2),
+        do:
+          {LoopexComposition.HelperDeciderModel,
+           LoopexComposition.HelperDeciderModel.start(script)},
+        else: {AgentLoopTestModel, AgentLoopTestModel.start(script)}
+
     executor = Loopex.AgentLoopTestExecutor.start(Keyword.get(options, :outcomes, %{}))
     definitions = read_definitions() ++ [Tool.definition()]
 
@@ -43,7 +105,7 @@ defmodule LoopexComposition.DelegationRuntimeFixture do
         session_creation_defaults:
           AgentLoopFixture.creation_defaults(read_definitions(), model: @model),
         model: %{
-          module: AgentLoopTestModel,
+          module: model_module,
           model: @model,
           options: [script: model, max_tokens: 256]
         },
