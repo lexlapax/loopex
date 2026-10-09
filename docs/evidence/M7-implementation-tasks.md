@@ -1,5 +1,48 @@
 # M7 Implementation Tasks
 
+### Complete daemon repair qualified on both toolchains, 2026-10-08
+
+Original49724 is terminal and collected PASS at tested implementation
+`5246b7e62703532c84141ec0ad7356b85243afde`, after 1,547.964 seconds.
+Each supported pair passed all573 selected cases across45 whole files:
+Socket15, MaximumPopulation2, remaining Daemon506 and CLI50. Each file ran once
+per pair. This covers all523 credential-free Daemon cases and the50 selected
+CLI consumers, including the genuine Node observer. Both real512-connection
+and510-connection cleanup populations passed with original actors and cutoffs.
+Formatting and warning-free compilation passed on both pairs; current compiled
+documentation ordering and current-tree status passed. Three cross-UID/provider
+cases remain separate UNRUN obligations, with zero skips/invalid cases. Earlier
+failed originals10084,25781 and53514 remain unchanged evidence.
+
+Retained complete output: `M7/daemon-control-result-order-repair-focused-20261008-v2`.
+Terminal SHA-256 `58be3291a120a17eb3db5b1408f2ba61a411d9af86192d971ea85c5b6ce7318c`;
+collection `13a61f18d8c57383fb5c683179ee179206990df3357ca4821fa75a1222b5dac9`.
+All16 original process joins and61 artifacts were verified; completed registry
+2843 SHA-256 `d4767d68aaa4f4e9eb190696656e87a0421f8f4343c287ddecd77d63bc8134de`.
+Independent repair/recipe review remains
+`34fc731990bd201351f5734aa16509bb124ce06b767a2822efe495b0cfcc9580`.
+The added T16 complete67-failure Daemon repair row is now done. Full integration,
+fast/release/closure, environment lanes and historical missing evidence remain
+separate obligations; no serving generation or milestone status changes.
+
+Accepted ADR0066 implementation continues privately. Strict Core port v2 and
+Local v2 passed source review; actual Local AppServer fixtures and independent
+Node refusal observations also passed source review. Native/parser/compiler/
+formatter remain UNRUN for all those new source units. Runtime/Dispatcher custody
+and connection accounting, final current-only transport projections and both
+complete schema identities must join together before qualification. The Core
+lifetime/Store autonomous cleanup-anchor question is under independent source
+analysis; no new timestamp contract or deadline change is assumed. Root's
+admitted mapping v2 is sealed raw pending review. A separate private writer owns
+the unserved /3 and /4 schema/digest/vector preparation; serving selectors remain
+held. ADR0065 remains Proposed and its physical writer dependency is paused.
+
+Immutable189-asset preparation/run retention:
+`M7/current-source-preparation-20261008-v14/retention.json`, SHA-256
+`fab16767b1610154eae72b0062b5797b0113e3f7b61d4cb6de376144809564cf`.
+No native handle is live at this checkpoint. T01–T19 original88 done /85 open /
+6 retired; added371 done /24 open. Combined459 done /109 open /6 retired.
+
 ### Timely result admission correction, 2026-10-08
 
 Original53514 at `e31e71b6b9c6019a6875da950c8469d19dc1ce35` is
@@ -15890,7 +15933,22 @@ full restore175, operator attendance, helpers or whole integration.
 
 ### Added implementation subtasks
 
-- [ ] Repair original10084's complete67-failure Daemon stage at cfe6188: establish actual cleanup and shutdown causes, correct receive-marker and blocking-call defects, preserve all522 selected cases, three separate environment obligations, full population, original actors/cutoffs and exact joins, and prove the repaired scope on both toolchains without rerunning unchanged failures.
+- [x] Repair original10084's complete67-failure Daemon stage at cfe6188: establish actual cleanup and shutdown causes, correct receive-marker and blocking-call defects, preserve all522 selected cases, three separate environment obligations, full population, original actors/cutoffs and exact joins, and prove the repaired scope on both toolchains without rerunning unchanged failures.
+
+  Evidence: tested `5246b7e62703532c84141ec0ad7356b85243afde`, original49724,
+  PASS573 selected cases per pair across45 whole files, including all523
+  credential-free Daemon and50 CLI consumers. Socket15 +MaximumPopulation2
+  +remainingDaemon506 +CLI50 run once per pair; three environment cases remain
+  separate UNRUN obligations. Both real512/510 populations, original cutoffs,
+  actors and cleanup joins passed. Duration1,547.964seconds;16 original joins,
+  61 artifacts, registry2843. Retained complete output:
+  `M7/daemon-control-result-order-repair-focused-20261008-v2`; terminal
+  `58be3291a120a17eb3db5b1408f2ba61a411d9af86192d971ea85c5b6ce7318c`,
+  collection `13a61f18d8c57383fb5c683179ee179206990df3357ca4821fa75a1222b5dac9`,
+  registry `d4767d68aaa4f4e9eb190696656e87a0421f8f4343c287ddecd77d63bc8134de`.
+  Earlier10084/25781/53514 failures remain unchanged. Full fast/release,
+  environment lanes, Linux stress, serving activation and M7 closure remain open.
+
 
 - [x] Repair original60633's three creation-refusal/history full-state comparisons to permit only exact accepted recovery-read suffixes; retain every other field/counter, query prefix, zero-read invalid case, byte/authority/fault/cutoff/join assertion and all16 whole cases. Prove both supported pairs; preserve the original failure and keep full Core682/integration separate.
 
