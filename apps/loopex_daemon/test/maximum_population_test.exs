@@ -440,9 +440,15 @@ defmodule LoopexDaemon.MaximumPopulationTest do
           ])}
        ]},
       {[:"$1", :"$2", :"$3"], selected_guards ++ [{:==, intent, nil}],
-       [{:message, retirement_tuple([:selected_disposition, :missing, false, false, false, sticky])}]},
+       [
+         {:message,
+          retirement_tuple([:selected_disposition, :missing, false, false, false, sticky])}
+       ]},
       {[:"$1", :"$2", :_], selected_guards,
-       [{:message, retirement_tuple([:selected_disposition, :invalid, false, false, false, sticky])}]}
+       [
+         {:message,
+          retirement_tuple([:selected_disposition, :invalid, false, false, false, sticky])}
+       ]}
     ]
 
     close = retirement_get(:"$1", :close_all)
@@ -554,7 +560,8 @@ defmodule LoopexDaemon.MaximumPopulationTest do
                 | dispositions: summary.dispositions + 1,
                   outcomes: Map.update!(summary.outcomes, outcome, &(&1 + 1)),
                   result_unproved: summary.result_unproved + if(result_ok, do: 0, else: 1),
-                  guardian_unjoined: summary.guardian_unjoined + if(guardian_joined, do: 0, else: 1),
+                  guardian_unjoined:
+                    summary.guardian_unjoined + if(guardian_joined, do: 0, else: 1),
                   control_unjoined: summary.control_unjoined + if(control_joined, do: 0, else: 1),
                   sticky_seen: summary.sticky_seen or sticky
               }

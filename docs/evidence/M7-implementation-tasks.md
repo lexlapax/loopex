@@ -1,5 +1,31 @@
 # M7 Implementation Tasks
 
+### Population diagnostic layout corrected before execution, 2026-10-08
+
+Original31875 at `6441c8a61f65e043cb23310dd67c1a2334e11dcf`
+is collected FAIL at the current formatting gate: three layout issues in the
+new test-only diagnostic. No population test, compilation or floor stage ran.
+The1.593-second result retains both exact original process joins and17
+verified artifacts under `M7/daemon-population-diagnostic-focused-20261008-v1`.
+Terminal SHA-256
+`5a616b673050fdf81acddc641fd0c1646b3d787b9ebc57d18db56d5785f32bc4`;
+collection SHA-256
+`247eaf25de39976c24a8e7eec8d7456f2a6d766a503a577eb55cd969ba941b85`.
+Latest completed registry2797, SHA-256
+`caef7ef3fcccc45ba5e4a8e2a719f50766837f7363ecd7658bf0cf195a6a1523`.
+The layout correction applies the exact reported whitespace-only wrapping.
+All non-whitespace bytes remain identical; native AST equality and the
+corrected formatting gate must precede any diagnostic workload execution.
+Original10084's genuine population failures remain unresolved and retained.
+
+Immutable27-asset admission/source retention is
+`M7/current-source-preparation-20261008-v4/retention.json`, SHA-256
+`e62d666e309e2e88dc888943723904e2472f008e82ad062c8a79099ed411123b`.
+It preserves the original diagnostic source and both independent reviews;
+its preparation-time UNRUN disposition does not overwrite the later failure.
+No native handle remains live. T01-T19 original88 done /85 open /6 retired;
+added370 done /24 open. No checkbox closes.
+
 ### Full-population daemon diagnostic joined, 2026-10-08
 
 The independently reviewed test-only diagnostic is joined in
