@@ -136,14 +136,14 @@ defmodule LoopexDaemon.MaximumPopulationTest do
     )
 
     registry = :sys.get_state(service).registry
-    trace_retirement(registry)
+    retirement_owners = trace_retirement(registry)
     started = System.monotonic_time(:millisecond)
     retirement_cutoff = started + 600_000
     send(sentinel, {:daemon_signal, owner_ref, :sigterm})
     status = Task.await(daemon, 600_000)
     elapsed = System.monotonic_time(:millisecond) - started
-    retirement = finish_retirement_trace(registry, retirement_cutoff)
-    untrace_retirement(registry)
+    retirement = finish_retirement_trace(registry, retirement_owners, retirement_cutoff)
+    untrace_retirement(registry, retirement_owners)
     IO.puts("maximum-population native retirement: #{inspect(retirement)}")
     assert status == 0
 
@@ -339,12 +339,12 @@ defmodule LoopexDaemon.MaximumPopulationTest do
     losses = Enum.map(2..3, &reply_matching(holder.(&1), owner_lost?))
 
     registry = :sys.get_state(service).registry
-    trace_retirement(registry)
+    retirement_owners = trace_retirement(registry)
     retirement_cutoff = System.monotonic_time(:millisecond) + 60_000
     send(sentinel, {:daemon_signal, owner_ref, :sigterm})
     status = Task.yield(daemon, 60_000) || Task.shutdown(daemon, :brutal_kill)
-    retirement = finish_retirement_trace(registry, retirement_cutoff)
-    untrace_retirement(registry)
+    retirement = finish_retirement_trace(registry, retirement_owners, retirement_cutoff)
+    untrace_retirement(registry, retirement_owners)
     IO.puts("maximum-population T15 native retirement: #{inspect(retirement)}")
     untrace_steps()
     send(tracer, {:events, self()})
@@ -407,11 +407,31 @@ defmodule LoopexDaemon.MaximumPopulationTest do
   end
 
   # Concept: native retirement diagnostics retain decisions without copying owner state.
-  # Technical depth: only the original Registry PID is traced. Selected tokens
-  # remain private match-spec inputs; messages expose booleans, closed enums and
-  # counts. A row is popped once, so the selected population supplies at most
-  # 512 dispositions, followed by at most one arena result and one finish input.
+  # Technical depth: the original Registry and its captured initialized Socket
+  # owners are traced. Tokens, incarnations and sinks stay private match-spec
+  # inputs. Messages retain closed decisions or the two ProgressSink.close
+  # results. Each Socket has one owner-close call, so at most 512 extra returns
+  # can precede the unchanged original stop-cutoff delivery fence.
   defp trace_retirement(registry) when is_pid(registry) do
+    owners =
+      for {token, row} <- :sys.get_state(registry).rows,
+          row.initialized and is_pid(row.connection_pid) do
+        {row.connection_pid, {token, row.connection_incarnation, row.progress_sink}}
+      end
+
+    assert length(owners) <= @connections
+    valid_owners? =
+      Enum.all?(owners, fn {pid, {token, incarnation, sink}} ->
+        is_pid(pid) and is_binary(token) and byte_size(token) == 16 and
+          is_reference(incarnation) and is_tuple(sink) and tuple_size(sink) == 3
+      end)
+
+    assert valid_owners?
+
+    entries = owners
+    owners = Map.new(entries)
+    assert map_size(owners) == length(entries)
+
     selected = retirement_get(retirement_get(retirement_get(:"$1", :close_all), :selected), :map)
     sticky = retirement_get(:"$1", :close_all_failed)
     intent = retirement_get(:"$3", :native_retirement)
@@ -472,7 +492,7 @@ defmodule LoopexDaemon.MaximumPopulationTest do
          ]}
       end
 
-    on_exit(fn -> untrace_retirement(registry) end)
+    on_exit(fn -> untrace_retirement(registry, owners) end)
 
     assert :erlang.trace_pattern(
              {LoopexDaemon.ConnectionRegistry, :retain_socket_retirement_disposition, 3},
@@ -486,21 +506,26 @@ defmodule LoopexDaemon.MaximumPopulationTest do
              [:local]
            ) == 1
 
+    owner_close =
+      for {pid, {_token, _incarnation, sink}} <- owners do
+        {[:"$1"], [retirement_actor_guard(pid), {:==, :"$1", {:const, sink}}],
+         [{:message, false}, {:return_trace}]}
+      end
+
     assert :erlang.trace_pattern(
              {Loopex.ProgressSink, :close, 1},
-             [{:_, [], [{:message, false}, {:return_trace}]}],
+             [{:_, [retirement_actor_guard(registry)], [{:message, false}, {:return_trace}]}] ++
+               owner_close,
              [:local]
            ) == 1
 
     assert :erlang.trace(registry, true, [:call, :arity, {:tracer, self()}]) == 1
+    Enum.each(Map.keys(owners), &trace_retirement_actor(&1, true))
+    owners
   end
 
-  defp untrace_retirement(registry) do
-    try do
-      :erlang.trace(registry, false, [:call])
-    rescue
-      ArgumentError -> :ok
-    end
+  defp untrace_retirement(registry, owners) do
+    Enum.each([registry | Map.keys(owners)], &trace_retirement_actor(&1, false))
 
     for {module, function, arity} <- [
           {LoopexDaemon.ConnectionRegistry, :retain_socket_retirement_disposition, 3},
@@ -510,6 +535,21 @@ defmodule LoopexDaemon.MaximumPopulationTest do
         do: :erlang.trace_pattern({module, function, arity}, false, [:local])
   end
 
+  # Concept: an already-retired original actor remains unobserved.
+  # Technical depth: trace enable/disable can race that actor's actual exit.
+  # A dead original PID is never replaced or treated as owner-close success.
+  defp trace_retirement_actor(pid, enabled) do
+    flags = if enabled, do: [:call, :arity, {:tracer, self()}], else: [:call]
+
+    try do
+      :erlang.trace(pid, enabled, flags)
+    rescue
+      ArgumentError -> :ok
+    end
+  end
+
+  defp retirement_actor_guard(pid), do: {:==, {:self}, {:const, pid}}
+
   defp retirement_get(map, key), do: {:map_get, key, map}
   defp retirement_tuple(items), do: {List.to_tuple(items)}
 
@@ -517,7 +557,7 @@ defmodule LoopexDaemon.MaximumPopulationTest do
   # Technical depth: trace_delivered is a delivery fence, not an actor join.
   # Collection spends the original stop allowance; pre/post checks cannot accept
   # a late queued fence. No receive consumes unrelated caller-mailbox evidence.
-  defp finish_retirement_trace(registry, cutoff) do
+  defp finish_retirement_trace(registry, owners, cutoff) do
     summary = %{
       dispositions: 0,
       outcomes: %{proved: 0, unproved: 0, pending: 0, missing: 0, invalid: 0},
@@ -525,6 +565,13 @@ defmodule LoopexDaemon.MaximumPopulationTest do
       guardian_unjoined: 0,
       control_unjoined: 0,
       sticky_seen: false,
+      owner_close: %{
+        captured: map_size(owners),
+        ok: 0,
+        cleanup_unproved: 0,
+        unobserved: map_size(owners),
+        overflow: false
+      },
       arena_result: :not_observed,
       finish: :not_observed,
       controls: 0,
@@ -534,13 +581,13 @@ defmodule LoopexDaemon.MaximumPopulationTest do
 
     if System.monotonic_time(:millisecond) < cutoff do
       fence = :erlang.trace_delivered(:all)
-      collect_retirement_trace(registry, fence, cutoff, summary)
+      collect_retirement_trace(registry, owners, MapSet.new(), fence, cutoff, summary)
     else
       summary
     end
   end
 
-  defp collect_retirement_trace(registry, fence, cutoff, summary) do
+  defp collect_retirement_trace(registry, owners, observed, fence, cutoff, summary) do
     remaining = max(cutoff - System.monotonic_time(:millisecond), 0)
 
     if remaining == 0 do
@@ -569,13 +616,13 @@ defmodule LoopexDaemon.MaximumPopulationTest do
               %{summary | overflow: true}
             end
 
-          collect_retirement_trace(registry, fence, cutoff, summary)
+          collect_retirement_trace(registry, owners, observed, fence, cutoff, summary)
 
         {:trace, ^registry, :return_from, {Loopex.ProgressSink, :close, 1}, result}
         when result == :ok or result == {:error, :cleanup_unproved} ->
           arena_result = if result == :ok, do: :ok, else: :cleanup_unproved
           summary = retirement_control(summary, :arena_result, arena_result)
-          collect_retirement_trace(registry, fence, cutoff, summary)
+          collect_retirement_trace(registry, owners, observed, fence, cutoff, summary)
 
         {:trace, ^registry, :call,
          {LoopexDaemon.ConnectionRegistry, :finish_registry_progress_close, 2},
@@ -594,7 +641,29 @@ defmodule LoopexDaemon.MaximumPopulationTest do
           }
 
           summary = retirement_control(summary, :finish, finish)
-          collect_retirement_trace(registry, fence, cutoff, summary)
+          collect_retirement_trace(registry, owners, observed, fence, cutoff, summary)
+
+        {:trace, pid, :return_from, {Loopex.ProgressSink, :close, 1}, result}
+        when is_map_key(owners, pid) and
+               (result == :ok or result == {:error, :cleanup_unproved}) ->
+          owner_close = summary.owner_close
+
+          {owner_close, observed} =
+            if MapSet.member?(observed, pid) do
+              {%{owner_close | overflow: true}, observed}
+            else
+              key = if result == :ok, do: :ok, else: :cleanup_unproved
+
+              owner_close =
+                owner_close
+                |> Map.update!(key, &(&1 + 1))
+                |> Map.update!(:unobserved, &(&1 - 1))
+
+              {owner_close, MapSet.put(observed, pid)}
+            end
+
+          summary = %{summary | owner_close: owner_close}
+          collect_retirement_trace(registry, owners, observed, fence, cutoff, summary)
 
         {:trace_delivered, :all, ^fence} ->
           %{summary | complete: System.monotonic_time(:millisecond) < cutoff}
@@ -689,9 +758,13 @@ defmodule LoopexDaemon.MaximumPopulationTest do
   ]
 
   defp trace_steps(collaboration, tracer) do
-    step = [{[:_, :"$1", :"$2"], [], [{:message, {{:"$1", :"$2"}}}]}]
-    done = [{[:_, :"$1", :_], [], [{:message, {{:"$1", :done}}}]}]
-    late = [{[:_, :"$1", :_, :_], [], [{:message, {{:"$1", :late}}}]}]
+    # Concept: T15 keeps only its original collaboration owner's step events.
+    # Technical depth: Socket call tracing cannot enable these unrelated local
+    # patterns on another actor or expose its operation reference to the caller.
+    owner = [retirement_actor_guard(collaboration)]
+    step = [{[:_, :"$1", :"$2"], owner, [{:message, {{:"$1", :"$2"}}}]}]
+    done = [{[:_, :"$1", :_], owner, [{:message, {{:"$1", :done}}}]}]
+    late = [{[:_, :"$1", :_, :_], owner, [{:message, {{:"$1", :late}}}]}]
     :erlang.trace_pattern({LoopexDaemon.Owner, :enter_step, 3}, step, [:local])
     :erlang.trace_pattern({LoopexDaemon.Owner, :complete_operation, 3}, done, [:local])
 

@@ -27,6 +27,37 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+### Original Socket close diagnostic joined, 2026-10-08
+
+The independently reviewed test-only diagnostic now observes actual
+ProgressSink.close returns from each captured original Socket owner against
+its original sink. At most512 additional return records contribute closed
+ok/cleanup_unproved/unobserved counters; private identities remain unprinted.
+The original Registry observations, both complete512-connection/eight-session
+cases, success assertions, cutoffs, joins and T15 distribution remain.
+T15 match-specs retain their original collaboration actor and exclude newly
+traced Socket actors. No production correction or passing reinterpretation
+is included; original10084 and30030 failures stay retained.
+
+Final test SHA-256
+`576074b507da62e4887f94a795a5ac95a7610ccb81ff6a88926af11525b04ed5`;
+independent source review
+`c9e8cd45035b7bf3d11c7c2e094cad1096681518a6f54455e80842a875fee5b5`;
+prospective native recipe review
+`ffbba197f3c312836d88e1e216548989bf7b3fab4c81b85882381e38d2cffc8f`.
+Immutable21-asset admission/source retention is
+`M7/current-source-preparation-20261008-v7/retention.json`, SHA-256
+`f8a50ba66f4eeebd41c079d636210dda79410c7ff0a17b90b8fd1fea8a20c30a`.
+Formatting, compilation and native diagnostics remain UNRUN. Root must bind
+the clean committed source before launching original v3 exactly once;
+first failure stops successors and leaves floor UNRUN. An observed close:ok
+still does not prove later cutoff/control/report/admission checks; unobserved
+is unknown. No native handle is live at this checkpoint.
+Artifact-opening v4 is sealed privately but awaits independent review;
+its four material choices remain unaccepted. ADR0065 remains pending.
+T01-T19 original88 done /85 open /6 retired; added370 done /25 open.
+No completion checkbox changes.
+
 ### Artifact-opening obligation tracked explicitly, 2026-10-08
 
 A bounded added T05 row now tracks complete full-transfer opening separately
