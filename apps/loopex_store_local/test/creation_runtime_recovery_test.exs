@@ -26,7 +26,10 @@ defmodule Loopex.Store.CreationRuntimeRecoveryTest do
 
   setup do
     directory =
-      Path.join(System.tmp_dir!(), "loopex-creation-runtime-#{System.unique_integer([:positive])}")
+      Path.join(
+        System.tmp_dir!(),
+        "loopex-creation-runtime-#{System.unique_integer([:positive])}"
+      )
 
     File.mkdir_p!(directory)
     on_exit(fn -> File.rm_rf!(directory) end)
@@ -48,7 +51,11 @@ defmodule Loopex.Store.CreationRuntimeRecoveryTest do
 
       {caller, caller_monitor} =
         spawn_monitor(fn ->
-          send(observer, {:original_reply, Runtime.create_session(runtime, Fixture.command_id(), Fixture.options())})
+          send(
+            observer,
+            {:original_reply,
+             Runtime.create_session(runtime, Fixture.command_id(), Fixture.options())}
+          )
         end)
 
       on_exit(fn -> if Process.alive?(caller), do: Process.exit(caller, :kill) end)
@@ -56,6 +63,7 @@ defmodule Loopex.Store.CreationRuntimeRecoveryTest do
       assert_receive {:creation_checkpoint, ^probe, ^local, reference, ^target}, 1_000
       on_exit(fn -> send(probe, {:release, reference}) end)
       original = Fixture.capture(runtime, path, terminal)
+
       actors =
         [runtime.supervisor | Map.values(original.children)] ++
           [original.action.pid, original.action.group, original.action.worker]
@@ -100,7 +108,13 @@ defmodule Loopex.Store.CreationRuntimeRecoveryTest do
         System.cmd(executable, args, stderr_to_stdout: true)
 
       assert String.ends_with?(encoded, "\n")
-      original = encoded |> String.trim_trailing("\n") |> Base.decode64!() |> :erlang.binary_to_term([:safe])
+
+      original =
+        encoded
+        |> String.trim_trailing("\n")
+        |> Base.decode64!()
+        |> :erlang.binary_to_term([:safe])
+
       frames = original.frames
       assert {:ok, ^frames, :complete} = Local.Log.read(path)
       assert File.regular?(path <> ".writer")
@@ -108,15 +122,22 @@ defmodule Loopex.Store.CreationRuntimeRecoveryTest do
     end
   end
 
-  test "lost physical Store keeps successor creation unavailable without a fallback", %{path: path} do
+  test "lost physical Store keeps successor creation unavailable without a fallback", %{
+    path: path
+  } do
     {local, store} = local(path)
     stop_local(local)
     runtime = runtime(store)
     :ok = ConfiguredGenesisFixture.await_creation_unavailable(runtime)
     assert {:ok, %{state: :unavailable}} = Runtime.creation_startup_status(runtime)
     before = File.read!(path)
-    assert {:error, :store_unavailable} = Runtime.create_session(runtime, Fixture.command_id(), Fixture.options())
-    assert {:ok, :store_unavailable} = Runtime.lookup_create_result(runtime, Fixture.command_id(), Fixture.options())
+
+    assert {:error, :store_unavailable} =
+             Runtime.create_session(runtime, Fixture.command_id(), Fixture.options())
+
+    assert {:ok, :store_unavailable} =
+             Runtime.lookup_create_result(runtime, Fixture.command_id(), Fixture.options())
+
     assert {:ok, %{sessions: sessions}} = Runtime.children(runtime)
     assert DynamicSupervisor.which_children(sessions) == []
     assert File.read!(path) == before
@@ -127,12 +148,17 @@ defmodule Loopex.Store.CreationRuntimeRecoveryTest do
     changed = Fixture.genesis("Replacement defaults must not rebuild original capture.")
     successor = runtime(store, changed)
     :ok = ConfiguredGenesisFixture.await_creation_ready(successor)
+
     assert {:ok, %{state: :ready, startup_id: startup, startup_deadline_ms: deadline}} =
              Runtime.creation_startup_status(successor)
+
     assert byte_size(startup) == 32 and is_integer(deadline)
 
     assert {:ok, %{head: head, command: capsule}} =
-             Store.creation_recovery(store, %{runtime_id: Fixture.runtime_id(), command_id: Fixture.command_id()})
+             Store.creation_recovery(store, %{
+               runtime_id: Fixture.runtime_id(),
+               command_id: Fixture.command_id()
+             })
 
     assert capsule.genesis == original.capsule.genesis
     assert capsule.reservation_tx_id == original.capsule.reservation_tx_id
@@ -141,8 +167,13 @@ defmodule Loopex.Store.CreationRuntimeRecoveryTest do
     assert capsule.reservation_domain_version == original.capsule.reservation_domain_version
     assert head.owner_selection != original.head.owner_selection
     assert head.active_command_id == nil
-    assert head.owner_generation == original.head.owner_generation + if(terminal == :reserved, do: 2, else: 1)
-    assert head.domain_version == original.head.domain_version + if(terminal == :reserved, do: 1, else: 0)
+
+    assert head.owner_generation ==
+             original.head.owner_generation + if(terminal == :reserved, do: 2, else: 1)
+
+    assert head.domain_version ==
+             original.head.domain_version + if(terminal == :reserved, do: 1, else: 0)
+
     {:ok, %{sessions: sessions}} = Runtime.children(successor)
     assert DynamicSupervisor.which_children(sessions) == []
     before = File.read!(path)
@@ -153,20 +184,50 @@ defmodule Loopex.Store.CreationRuntimeRecoveryTest do
         assert capsule.final_resolution == {:not_committed, :creation_cancelled}
         assert capsule.session_id == nil
         assert :sys.get_state(local).store.sessions == %{}
-        assert {:error, :creation_cancelled} = Runtime.create_session(successor, Fixture.command_id(), Fixture.options())
-        assert {:error, :creation_cancelled} = Runtime.create_session_with_genesis(successor, Fixture.command_id(), Fixture.options(), original.final.genesis)
+
+        assert {:error, :creation_cancelled} =
+                 Runtime.create_session(successor, Fixture.command_id(), Fixture.options())
+
+        assert {:error, :creation_cancelled} =
+                 Runtime.create_session_with_genesis(
+                   successor,
+                   Fixture.command_id(),
+                   Fixture.options(),
+                   original.final.genesis
+                 )
 
       :created ->
         assert capsule == original.capsule
         session = capsule.session_id
         assert map_size(:sys.get_state(local).store.sessions) == 1
+
         assert {:ok, %{owner_epoch: 0, journal_version: 1}} =
                  Store.ownership_head(store, session, session)
+
         assert :sys.get_state(local).store.sessions[session].owner_incarnation_id == nil
-        assert {:ok, :conflict} = Runtime.lookup_create_result(successor, Fixture.command_id(), Fixture.options())
-        assert {:ok, {:historical, ^session}} = Runtime.lookup_create_result(successor, Fixture.command_id(), Fixture.options(), original.final.genesis)
-        assert {:ok, ^session} = Runtime.create_session(successor, Fixture.command_id(), Fixture.options())
-        assert {:ok, ^session} = Runtime.create_session_with_genesis(successor, Fixture.command_id(), Fixture.options(), original.final.genesis)
+
+        assert {:ok, :conflict} =
+                 Runtime.lookup_create_result(successor, Fixture.command_id(), Fixture.options())
+
+        assert {:ok, {:historical, ^session}} =
+                 Runtime.lookup_create_result(
+                   successor,
+                   Fixture.command_id(),
+                   Fixture.options(),
+                   original.final.genesis
+                 )
+
+        assert {:ok, ^session} =
+                 Runtime.create_session(successor, Fixture.command_id(), Fixture.options())
+
+        assert {:ok, ^session} =
+                 Runtime.create_session_with_genesis(
+                   successor,
+                   Fixture.command_id(),
+                   Fixture.options(),
+                   original.final.genesis
+                 )
+
         assert {:error, :session_unavailable} = Runtime.session_status(successor, session)
     end
 
@@ -174,10 +235,16 @@ defmodule Loopex.Store.CreationRuntimeRecoveryTest do
              Runtime.create_session(successor, Fixture.command_id(), %{"original" => "changed"})
 
     assert {:error, :runtime_command_conflict} =
-             Runtime.create_session_with_genesis(successor, Fixture.command_id(), Fixture.options(), Map.put(changed, "options", Fixture.options()))
+             Runtime.create_session_with_genesis(
+               successor,
+               Fixture.command_id(),
+               Fixture.options(),
+               Map.put(changed, "options", Fixture.options())
+             )
 
     assert DynamicSupervisor.which_children(sessions) == []
     assert File.read!(path) == before
+
     assert {:ok, %{state: :ready, startup_id: ^startup, startup_deadline_ms: ^deadline}} =
              Runtime.creation_startup_status(successor)
   end

@@ -31,6 +31,7 @@ defmodule LoopexDaemon.NativeConfigurationResolutionTest do
 
   test "the native route retains the host-resolved alias and exact candidate once across owner recovery" do
     f = fixture([])
+
     {:ok, instructions} =
       Instructions.capture(%{
         "version" => "changed.v1",
@@ -55,7 +56,9 @@ defmodule LoopexDaemon.NativeConfigurationResolutionTest do
     assert candidate["max_tokens"] == 8_192
     assert candidate["instructions"] == instructions
     assert candidate["configuration_version"] == 2
-    assert :ok = SessionConfiguration.validate_candidate(f.initial, command.changes, candidate, [])
+
+    assert :ok =
+             SessionConfiguration.validate_candidate(f.initial, command.changes, candidate, [])
 
     assert row.payload["changes"] ==
              Map.put(command.changes, "instructions", Map.take(instructions, ~w(version digest)))
@@ -124,6 +127,7 @@ defmodule LoopexDaemon.NativeConfigurationResolutionTest do
       compact(f, "compact")
       prompt(f, "tail", tail)
       before = recover(f)
+
       {:ok, summary_entry} =
         CompactionSummary.project(
           before.active_checkpoint,
@@ -131,6 +135,7 @@ defmodule LoopexDaemon.NativeConfigurationResolutionTest do
         )
 
       assert {:ok, entries, nil} = SessionState.projected_lineage(before, :session, 0)
+
       assert entries ==
                [summary_entry] ++
                  elem(
@@ -142,6 +147,7 @@ defmodule LoopexDaemon.NativeConfigurationResolutionTest do
 
       assert Enum.count(entries, &(&1 == summary_entry)) == 1
       assert elem(List.last(entries), 1)["content"] == "tail finished"
+
       command =
         configure("too-small", %{
           "model" => @authored_model,
@@ -150,7 +156,9 @@ defmodule LoopexDaemon.NativeConfigurationResolutionTest do
           "system_class_tokens" => 500
         })
 
-      reason = if @limiting == :tail, do: :compaction_required, else: :invalid_session_configuration
+      reason =
+        if @limiting == :tail, do: :compaction_required, else: :invalid_session_configuration
+
       assert {:error, ^reason} = native(f, command)
       assert {:error, ^reason} = native(f, command)
       assert_resolution(f, [command.changes])
@@ -174,6 +182,7 @@ defmodule LoopexDaemon.NativeConfigurationResolutionTest do
       request = List.last(Script.dispatched(f.model))
       assert request.model == @canonical_model
       assert request.sampling["max_tokens"] == 512
+
       assert Enum.drop(request.messages, 1) ==
                Enum.map(entries, &elem(&1, 1)) ++
                  [%{"role" => "user", "content" => "next configured prompt"}]
@@ -189,7 +198,10 @@ defmodule LoopexDaemon.NativeConfigurationResolutionTest do
     assert_receive {:holding, callback}, 5_000
     monitor = Process.monitor(callback)
     pending = recover(f)
-    assert pending.maintenance_episodes[pending.active_maintenance]["stage"] == "model_attempt_open"
+
+    assert pending.maintenance_episodes[pending.active_maintenance]["stage"] ==
+             "model_attempt_open"
+
     command = configure("during-maintenance", %{"model" => @authored_model})
     assert {:error, :maintenance_active} = native(f, command)
     assert_resolution(f, [])
@@ -216,6 +228,7 @@ defmodule LoopexDaemon.NativeConfigurationResolutionTest do
 
   defp fixture(script, options \\ []) do
     bindings = %{"anthropic" => credential()}
+
     {:ok, initial} =
       ProviderBindings.resolve_configuration(
         %{
@@ -284,19 +297,34 @@ defmodule LoopexDaemon.NativeConfigurationResolutionTest do
     end)
 
     :ok = Genesis.await_creation_ready(runtime)
+
     assert {:ok, session} =
-             Loopex.create_session(runtime, %{}, command_id: "create", genesis: Genesis.genesis([], initial))
+             Loopex.create_session(runtime, %{},
+               command_id: "create",
+               genesis: Genesis.genesis([], initial)
+             )
 
     assert {:ok, attachment} = Loopex.attach(runtime, session, after_event_sequence: 0)
-    %{runtime: runtime, store: store, model: model, executor: executor,
-      session: session, attachment: attachment, initial: initial, trace: trace}
+
+    %{
+      runtime: runtime,
+      store: store,
+      model: model,
+      executor: executor,
+      session: session,
+      attachment: attachment,
+      initial: initial,
+      trace: trace
+    }
   end
 
   defp credential, do: %{"credential" => %{"env" => @credential_name}}
   defp configure(id, changes), do: %{type: :configure, command_id: id, changes: changes}
+
   defp native(f, command) do
     assert {:routed, %Loopex.Runtime.DaemonRoute{}, reply} =
              Loopex.Runtime.command_for_daemon(f.attachment, command)
+
     reply
   end
 
@@ -305,10 +333,13 @@ defmodule LoopexDaemon.NativeConfigurationResolutionTest do
     await_settled(f)
   end
 
-  defp compact_command(id), do: %{
-    type: :compact, command_id: id,
-    bounds: %{"max_attempts" => 4, "deadline_ms" => 60_000, "token_budget" => 32_768}
-  }
+  defp compact_command(id),
+    do: %{
+      type: :compact,
+      command_id: id,
+      bounds: %{"max_attempts" => 4, "deadline_ms" => 60_000, "token_budget" => 32_768}
+    }
+
   defp compact(f, id) do
     assert {:accepted, ^id} = native(f, compact_command(id))
     state = await_settled(f)
@@ -317,13 +348,22 @@ defmodule LoopexDaemon.NativeConfigurationResolutionTest do
     assert is_binary(state.active_checkpoint)
   end
 
-  defp normal(text), do: %{
-    text: text, calls: [], reply_overrides: %{completion: "natural", continuation: nil}
-  }
+  defp normal(text),
+    do: %{
+      text: text,
+      calls: [],
+      reply_overrides: %{completion: "natural", continuation: nil}
+    }
+
   defp summary_turn(summary, options \\ []) do
-    {:ok, encoded} = LoopexProtocol.Frame.encode(%{
-      "v" => %{"summary" => summary, "carry_forward" => %{"files_read" => [], "files_changed" => []}}
-    })
+    {:ok, encoded} =
+      LoopexProtocol.Frame.encode(%{
+        "v" => %{
+          "summary" => summary,
+          "carry_forward" => %{"files_read" => [], "files_changed" => []}
+        }
+      })
+
     bytes = IO.iodata_to_binary(encoded)
     normal(binary_part(bytes, 5, byte_size(bytes) - 7)) |> Map.merge(Map.new(options))
   end
@@ -334,8 +374,12 @@ defmodule LoopexDaemon.NativeConfigurationResolutionTest do
     state
   end
 
-  defp configuration_rows(f), do:
-    Enum.filter(Fixture.records(f, f.session), &(&1.payload.kind == "session_configuration_admitted_v2"))
+  defp configuration_rows(f),
+    do:
+      Enum.filter(
+        Fixture.records(f, f.session),
+        &(&1.payload.kind == "session_configuration_admitted_v2")
+      )
 
   defp assert_replay(f) do
     state = recover(f)
@@ -353,6 +397,7 @@ defmodule LoopexDaemon.NativeConfigurationResolutionTest do
   defp await_settled(f, cutoff \\ nil) do
     cutoff = cutoff || System.monotonic_time(:millisecond) + 5_000
     state = recover(f)
+
     if is_nil(state.active_run_id) and is_nil(state.pending_compact) do
       state
     else
@@ -367,14 +412,17 @@ defmodule LoopexDaemon.NativeConfigurationResolutionTest do
   # actors. Its delivery barrier retains calls, returns and original worker exits.
   defp trace_resolution do
     trace = :trace.session_create(:m7_daemon_native_configuration, self(), [])
+
     for {module, _, _} = function <- [
-      {Model, :prepare_configuration, 5},
-      {ProviderBindings, :resolve_configuration_routes, 3}
-    ] do
+          {Model, :prepare_configuration, 5},
+          {ProviderBindings, :resolve_configuration_routes, 3}
+        ] do
       Code.ensure_loaded!(module)
       assert :trace.function(trace, function, [{:_, [], [{:return_trace}]}], [:local]) == 1
     end
+
     assert :trace.process(trace, self(), true, [:call, :procs, :set_on_spawn]) == 1
+
     on_exit(fn ->
       try do
         :trace.session_destroy(trace)
@@ -382,20 +430,34 @@ defmodule LoopexDaemon.NativeConfigurationResolutionTest do
         :error, :badarg -> :ok
       end
     end)
+
     trace
   end
 
   defp assert_resolution(f, authored) do
     fence = :trace.delivered(f.trace, :all)
     key = {__MODULE__, f.trace}
-    frames = collect_trace(fence, System.monotonic_time(:millisecond) + 5_000, Process.get(key, []))
+
+    frames =
+      collect_trace(fence, System.monotonic_time(:millisecond) + 5_000, Process.get(key, []))
+
     Process.put(key, frames)
-    preparations = for {:trace, worker, :call, {Model, :prepare_configuration, args}} <- frames,
-      do: {worker, args}
-    assert Enum.map(preparations, fn {_worker, [_current, changes, [], _context, _options]} -> changes end) == authored
-    routes = for {:trace, worker, :call, {ProviderBindings, :resolve_configuration_routes, args}} <- frames,
-      do: {worker, args}
+
+    preparations =
+      for {:trace, worker, :call, {Model, :prepare_configuration, args}} <- frames,
+          do: {worker, args}
+
+    assert Enum.map(preparations, fn {_worker, [_current, changes, [], _context, _options]} ->
+             changes
+           end) == authored
+
+    routes =
+      for {:trace, worker, :call, {ProviderBindings, :resolve_configuration_routes, args}} <-
+            frames,
+          do: {worker, args}
+
     assert length(routes) == length(authored)
+
     for {worker, [current, changes, [], context, options]} <- preparations do
       assert Enum.sort(Map.keys(context)) == [:cleanup_grace_ms, :deadline_monotonic_ms]
       assert context.cleanup_grace_ms == 5_000
@@ -403,18 +465,27 @@ defmodule LoopexDaemon.NativeConfigurationResolutionTest do
       assert Keyword.fetch!(options, :adapter) == Script
       assert Keyword.fetch!(options, :adapter_options) == [script: f.model, max_tokens: 1_024]
       host_bindings = options[:host_options][:provider_bindings]
-      assert [{^worker, [declaration, providers, []]}] = Enum.filter(routes, &(elem(&1, 0) == worker))
+
+      assert [{^worker, [declaration, providers, []]}] =
+               Enum.filter(routes, &(elem(&1, 0) == worker))
+
       assert Enum.sort(providers) == Enum.sort(Map.keys(host_bindings))
       assert declaration["model"] == Map.get(changes, "model", current["model"])
-      results = for {:trace, ^worker, :return_from, {Model, :prepare_configuration, 5}, result} <- frames,
-        do: result
+
+      results =
+        for {:trace, ^worker, :return_from, {Model, :prepare_configuration, 5}, result} <- frames,
+            do: result
+
       assert [result] = results
+
       case result do
         {:ok, candidate} ->
           assert :ok = SessionConfiguration.validate_candidate(current, changes, candidate, [])
+
         {:error, :configuration_not_prepared} ->
           :ok
       end
+
       assert Enum.any?(frames, &match?({:trace, ^worker, :exit, :normal}, &1))
       refute Process.alive?(worker)
     end
@@ -423,6 +494,7 @@ defmodule LoopexDaemon.NativeConfigurationResolutionTest do
   defp collect_trace(fence, cutoff, frames) do
     remaining = cutoff - System.monotonic_time(:millisecond)
     assert remaining > 0
+
     receive do
       {:trace_delivered, :all, ^fence} -> frames
       {:trace, _, _, _} = frame -> collect_trace(fence, cutoff, frames ++ [frame])
