@@ -27,6 +27,43 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+### Exact recovery-read comparisons proved, 2026-10-08
+
+Original38052 at `2c4247e44c8f7c0c3ec9f3dab1dd9c8f2c74ccbb` passes all16
+whole cases on each supported toolchain, zero failures, exclusions, skips or
+invalids. The original long-duration cancellation case remains included. All
+three complete-state comparisons now prove that only their literal required
+query suffixes differ; every other field and zero-read invalid control remains
+exact. Both pairs pass warning-free project compilation and complete changed-
+source formatting; current documentation and status pass. The complete
+153.107-second run retains ten original process joins and43 artifacts under
+`M7/core-fixture-repairs-focused-20261008-v3`; terminal SHA-256
+`02fc10ea007fbe5d0b4fd441fe82fd1da7fea873b7877f646243bc3968d9b088`,
+collection SHA-256
+`0b93c96bd6a6719de03c4c8832496f41896435d11c2e38fd074c11132d851305`.
+Next completed registry2760, SHA-256
+`40d4f4cadc9d093c72c66171c5659f99464b9ed2594d4a671295f014f8bdd6f7`.
+
+Formatter50 original75411 at the same source passes both non-line syntax-tree
+comparisons and both complete changed-source format checks, with no source
+delta. Retained3.55seconds/four original joins and34 artifacts:
+`M7/candidate-format-preparation-20261008-v50`; terminal SHA-256
+`d501aace8a6d804bf5ad72c3b6c227433678df9c60fdb124a640e633f206bd8a`,
+collection SHA-256
+`8a24644093597c09d1d5b11821da0ec426ffefaaa342030a2164fa08b45c44ec`.
+
+The65-case and16-case repairs are independently reviewed and proved on both
+pairs. All30 original60633 failures have corresponding whole-file corrected
+proofs; its failed682-case result remains unchanged. The corrected broad scope
+is115 files,1863 credential-free selected cases/1866 full cases, including
+Core682; its v4 recipe is UNRUN and under independent review. No broader pass,
+served-generation activation, helper execution or closure is claimed.
+T01-T19 original88 done /85 open /6 retired; added369 done /23 open.
+T16 added is72 done /4 open. No native handle is live. Next retain these exact
+source/proof/decision packets, then qualify the corrected broad candidate once
+its recipe and final source pins are verified. ADR0065 and the foreground
+stopped-leader defect remain open.
+
 ### Exact recovery-read comparisons joined, 2026-10-08
 
 The two-file repair for original60633's remaining three equality failures is
