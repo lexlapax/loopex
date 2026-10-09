@@ -156,6 +156,7 @@ defmodule LoopexComposition.Delegation.Helper do
        settlements: %{},
        blobs: %{},
        expected: %{},
+       half_bound: [],
        unresolved: MapSet.new(),
        excess: MapSet.new()
      }}
@@ -286,11 +287,44 @@ defmodule LoopexComposition.Delegation.Helper do
     do: {:error, :router_unavailable, state}
 
   defp do_create_parent(state, capture) do
+    case Enum.find(state.parents, fn {_session, parent} ->
+           parent.command == capture.command
+         end) do
+      {session, %{capture: %{object_bytes: bytes}}} when bytes == capture.object_bytes ->
+        {:ok, session, state}
+
+      {_session, _different} ->
+        {:error, :parent_binding_conflict, state}
+
+      nil ->
+        new_parent(state, capture)
+    end
+  end
+
+  defp new_parent(state, capture) do
+    # Concept: re-presenting an authorized creation first classifies its own log.
+    # Technical depth: a prepared binding left by a lost owner stays pending until
+    # its exact command is presented again; lookup replays it without mutation.
+    if MapSet.member?(RetainedObjects.present(state.objects).bindings, capture.key) do
+      RetainedObjects.lookup_binding(
+        state.objects,
+        capture.command,
+        String.duplicate("0", 64),
+        state.runtime
+      )
+    end
+
     with {:ok, _} <-
-           RetainedObjects.open_binding(state.objects, capture.command, capture.object_bytes),
+           RetainedObjects.open_binding(
+             state.objects,
+             capture.command,
+             capture.object_bytes,
+             state.runtime
+           ),
          {:ok, prepare} <-
            ParentBinding.transaction(capture.key, 0, ParentBinding.prepare_mutation(capture)),
          {:ok, _} <- RetainedObjects.commit_binding(state.objects, capture.command, prepare),
+         :ok <- fault(state, :after_prepare),
          {:ok, session} <-
            Runtime.create_session_with_genesis(
              state.runtime,
@@ -298,6 +332,7 @@ defmodule LoopexComposition.Delegation.Helper do
              capture.options,
              capture.genesis
            ),
+         :ok <- fault(state, :after_parent_create),
          {:ok, bind} <-
            ParentBinding.transaction(
              capture.key,
@@ -853,10 +888,15 @@ defmodule LoopexComposition.Delegation.Helper do
                declaration,
                creation
              ),
-           binding = Enum.map(view.transactions, &elem(&1, 0)),
-           true <- length(binding) == 2 do
-        parent = %{command: row.command_id, capture: capture, binding: binding}
-        {:ok, %{state | parents: Map.put(state.parents, row.session_id, parent)}}
+           binding = Enum.map(view.transactions, &elem(&1, 0)) do
+        case binding do
+          [_prepare, _bind] ->
+            parent = %{command: row.command_id, capture: capture, binding: binding}
+            {:ok, %{state | parents: Map.put(state.parents, row.session_id, parent)}}
+
+          [prepare] ->
+            {:ok, %{state | half_bound: [{row, capture, prepare} | state.half_bound]}}
+        end
       else
         _ -> :error
       end
@@ -933,6 +973,8 @@ defmodule LoopexComposition.Delegation.Helper do
 
   # Concept: recovery is stop-only and runs operation by operation in journal order.
   defp recover_all(state, deadline) do
+    state = Enum.reduce(state.half_bound, %{state | half_bound: []}, &finish_binding/2)
+
     state =
       Enum.reduce(state.expected, state, fn {session, intents}, state ->
         intents
@@ -944,6 +986,26 @@ defmodule LoopexComposition.Delegation.Helper do
       end)
 
     {:ok, state}
+  end
+
+  # Concept: a lost bind acknowledgement finishes from exact creation history.
+  # Technical depth: Core's read-only exact-genesis lookup and provenance prove
+  # the original parent creation; nothing is created or activated here.
+  defp finish_binding({row, capture, prepare}, state) do
+    with {:ok, {:historical, history}} <- ParentBinding.observe_creation(state.runtime, capture),
+         {:ok, bind} <-
+           ParentBinding.transaction(
+             capture.key,
+             1,
+             ParentBinding.bind_mutation(capture, history.session_id)
+           ),
+         {:ok, _} <-
+           RetainedObjects.commit_binding(state.objects, row.command_id, bind, state.runtime) do
+      parent = %{command: row.command_id, capture: capture, binding: [prepare, bind]}
+      %{state | parents: Map.put(state.parents, history.session_id, parent)}
+    else
+      _ -> %{state | excess: MapSet.put(state.excess, row.session_id)}
+    end
   end
 
   defp recover_run(state, session, run, intents, deadline) do

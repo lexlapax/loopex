@@ -112,6 +112,38 @@ defmodule LoopexComposition.DelegationRecoveryTest do
     assert child_prompts == 1
   end
 
+  test "a lost bind acknowledgement finishes from exact creation history" do
+    test = self()
+    fixture = Fixture.start(decide(), fault: fault(test, :after_parent_create))
+    capture = Fixture.capture("parent-create")
+    Task.start(fn -> Helper.create_parent(fixture.helper, capture) end)
+    assert_receive {:fault, :after_parent_create}, 10_000
+    restarted = Fixture.restart(fixture)
+    status = Helper.status(restarted.helper)
+    assert status.classified == :complete
+    assert [{parent, _}] = Map.to_list(status.parents)
+    assert {:ok, ^parent} = Loopex.resume_session(restarted.runtime, parent, command_id: "resume")
+    {_attachment, run} = Fixture.prompt(restarted, parent, "parent-prompt", "parent:x")
+    assert Fixture.await_terminal(restarted, parent, run).terminal.state == "completed"
+    assert map_size(Helper.status(restarted.helper).receipts) == 1
+    # Concept: re-presenting the same creation returns the original parent.
+    assert Helper.create_parent(restarted.helper, capture) == {:ok, parent}
+  end
+
+  test "a prepared parent never created fences helpers until its creation is re-presented" do
+    test = self()
+    fixture = Fixture.start(decide(), fault: fault(test, :after_prepare))
+    capture = Fixture.capture("parent-create")
+    Task.start(fn -> Helper.create_parent(fixture.helper, capture) end)
+    assert_receive {:fault, :after_prepare}, 10_000
+    restarted = Fixture.restart(fixture)
+    assert Helper.status(restarted.helper).parents == %{}
+    assert {:ok, parent} = Helper.create_parent(restarted.helper, capture)
+    {_attachment, run} = Fixture.prompt(restarted, parent, "parent-prompt", "parent:x")
+    assert Fixture.await_terminal(restarted, parent, run).terminal.state == "completed"
+    assert map_size(Helper.status(restarted.helper).receipts) == 1
+  end
+
   defp decide do
     fn
       "parent:" <> _, 0 ->

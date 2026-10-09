@@ -247,6 +247,11 @@ defmodule LoopexComposition.DelegationRuntimeFixture do
 
   # Concept: one enabled role over the scripted model with finite limits.
   def parent(fixture, command, limits \\ %{}, role \\ nil) do
+    assert {:ok, session} = Helper.create_parent(fixture.helper, capture(command, limits, role))
+    session
+  end
+
+  def capture(command, limits \\ %{}, role \\ nil) do
     role = role || default_role()
 
     limits =
@@ -283,8 +288,7 @@ defmodule LoopexComposition.DelegationRuntimeFixture do
                genesis
              )
 
-    assert {:ok, session} = Helper.create_parent(fixture.helper, capture)
-    session
+    capture
   end
 
   defp default_role do
