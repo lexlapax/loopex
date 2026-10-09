@@ -27,6 +27,50 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+### Maintenance and durable restart proved; recovery diagnostic retained, 2026-10-09
+
+Source `5fd91659537410425d5fb1a149d840a800aadea1` passes all six maintenance
+and 36 durable-ask cases on both supported pairs. Original 36406 completed in
+71.394 seconds, 16 original joins, zero excluded/skipped/invalid. Collection
+SHA-256 `f6262b218b80e2068f37ea7135e29857664159fafa210d03289a6756b4f64fe4`.
+The actual held-summary shutdown witness and same-physical-store reopen/resume
+are proved for that source. No historical missing-log attribution is inferred.
+
+Original 53643 remains FAIL130/134; its other CLI rendering failures are open.
+Reviewed native fixture migration joined at `c273b8aa`; bounded proxy observation
+at `05a3c0e2`, with AST-only formatting child `f6660964`. Original 99083 at f6660964
+is FAIL11/12, current pair only, after 332.482 seconds and seven original joins.
+The lost-create case passed with 25 complete metadata rows: readable text/closure
+preceded the durable assistant. The lost-prompt diagnostic exhausted 128 rows;
+its after assertion may mask a body exception. Do not infer prompt-body PASS
+or treat the quiet create as a duplicate-answer repair. Collection SHA-256
+`002ce1f12d4afa8f4232d5e2e2f27ae2132108ebd09518c880e46f36be993987`.
+
+Reviewed observation scope correction `744d80b6` targets only lost-create,
+preserving all 12 cases, original assertions and 128-row/65536-byte caps.
+Formatter child `36daef99` passes strict non-line AST and both supported
+formatting checks, original 2653 in2.705 seconds. Final changed-source native
+qualification remains UNRUN. No runtime/CLI rendering production fix is claimed.
+
+Retention of 232 assets: `M7/current-source-preparation-20261009-v32/retention.json`,
+SHA-256 `e3dda356606e0228e749b8eea197130c9b8679c87aeb1dfb00d76b6dc52a64b7`.
+Its 72-asset child v33 binds the failed diagnostic, correction/review, ordering
+assessment and numbered task report, SHA-256
+`9bacaf3ac81aec1b2dd05a697d9c6e2b348d5399901f0169ac02788feb75eff8`.
+All completed originals were collected once; no native handle remains live.
+
+ADR 0066 is already Accepted; the repeated exact approval changes no contract.
+ADR 0067 exact-pair approval remains the current pending human question;
+ADR 0065, the Core artifact observer-grace question and output ownership/accounting
+choices remain unresolved. A private ADR 0068 output proposal is being prepared
+at `/private/tmp/m7-cli-owned-output-proposal-20261009-v1`; it is not accepted or
+implementation authority. Continue original goal on m7, with no main merge,
+closure, publication, provider campaign or softened checks. Next qualify current
+fixture changes with the actual output migration, investigate the retained
+intermittent duplicate without weakening complete-closure suppression, and
+review the private output proposal. T01–T19 counts remain original 89 done/84 open/
+6 retired; added 373 done/23 open; combined 462 done/107 open/6 retired.
+
 ### Orderly-stop current proof; duplicate-output investigation, 2026-10-09
 
 Reviewed guardv3 joined at `5a521b2c01c1c565cbff1447d2237210237fc2d9`;

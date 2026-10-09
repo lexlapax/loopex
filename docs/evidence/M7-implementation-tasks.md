@@ -1,5 +1,17 @@
 # M7 Implementation Tasks
 
+### Maintenance and durable restart qualification, 2026-10-09
+
+Original 36406 passes 6 maintenance+36 durable-ask cases on both supported pairs
+at 5fd91659 in71.394s. Original 99083 remains FAIL11/12: prompt diagnostic capacity
+exhaustion, quiet create trace with valid prior closure. Reviewed create-only
+observation correction and both-pair strict AST formatting joined through 36daef99;
+final native qualification and production duplicate/rendering repairs remain open.
+The [resume checkpoint](M7-resume.md) binds exact collections and232/72-asset
+retention v32/v33. No native handle is live. Original T01–T19: 89 done/84 open/
+6 retired; added 373 done/23 open; combined 462 done/107 open/6 retired. No checkbox
+changes. ADR 0066 remains Accepted; ADR 0067 exact acceptance remains pending.
+
 ### Orderly-stop current proof; duplicate-output investigation, 2026-10-09
 
 Reviewed guardv3 joined at `5a521b2c01c1c565cbff1447d2237210237fc2d9`;
