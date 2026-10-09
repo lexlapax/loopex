@@ -27,6 +27,65 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+### Case evidence integrity proved; startup eligibility repaired, 2026-10-09
+
+Continue the active goal on `m7`. Source `5f2c5065498d85a4e528bb9a6e04e8dd33f309ba`
+passes all 136 complete frame/head/event cases on both supported pairs, original
+57532 in 23.815 seconds, twelve original joins, zero excluded/skipped/invalid.
+Collection SHA-256 `1fb8d55479f4e95ef5fe9bdc842d5922e91a8a85b7d41e8febd9e4568cd77c48`.
+The added pure `verify_case_evidence` unit compares every original reference
+with caller-supplied complete bytes. Missing/corrupt/null evidence stays
+unavailable, preserving consumption, errors, unresolved histories and verdicts.
+It proves no physical IO, cleanup, manifest, review or dispatch authority.
+Independent source review SHA-256
+`3f47ab7f084f543819aedfa7df81ca5ac6efc12b875200bd5e6a015e55a6b56c`.
+One added T14 row is complete; all ten original T14 rows remain open.
+
+The demonstration fixture now awaits/publishes the existing original startup
+cutoff before creating a session, inside the caller's existing cleanup bracket.
+Repair commit `9b7fe5711f932b978d5e629b6d8c0f0142a2c749` changes no allowance or retry.
+Original 73600 at `4aa3ecdbbe65deb3a3bff8acb9e5f25d46b4e5b9` improves the complete
+current CLI file from original 51024's FAIL57/60 to FAIL58/60 in 44.374 seconds.
+The second-interrupt case passes; working-text/default-composition progress
+failures remain open. Collection SHA-256
+`858deb35186a4128cb79369ee6a48264230ce4ce657f1e27d7bdb9949f60fafc`.
+This is not a CLI PASS, floor proof or duplicate-answer repair.
+Original 80421 at `5f2c5065` separately passes all five ordinary coding-task
+cases on both pairs in 21.657 seconds, using the real store, executor and tools.
+Its two existing attended provider exclusions remain required separately.
+Collection SHA-256 `2ccfd8cdd9d5b3c71f29385c93bdd87ace92ad7d53e45738595753489bd09a2a`.
+Strict-AST formatter originals 97994 and 96773 pass both pairs in 2.712 and
+2.783 seconds. The CLI recipe's earlier sidecar-binding failure happened
+before output/native admission; its failed recipe and correction are retained.
+
+The [initial closure scaffold](M7-closure-runs.md) is indexed with future results
+Pending. T00 stays open until final literal case/operator/profile/earlier-attempt
+inventories exist. Reviewed [ADR 0068](../adr/0068-cli-owned-output.md#concept)
+is now Proposed and indexed, with its pending prerequisite declared in both
+plan depths and the derived status capsule. Its five-second pre-runtime
+acquisition is a new unaccepted choice; existing output clocks/capacity and
+all physical proofs remain required. Exact Concept SHA-256
+`89e1bcb090a1e1648ef289c3238f5541d0b62627778419b5084fa3295a309b6f`;
+Technical SHA-256 `6b40f8445e23a106911254ef09a14f76eff49d3cf7afd16060c94751783200d4`.
+Indexing review SHA-256 `ad3d3e41ec079bfab10b482a602e48511a8a6ae5e2d4369f91edcfcf87ab223c`.
+Its exact documentation gate is next; no dependent output implementation starts.
+
+Retention child v35 preserves 296 assets, the six original collections, source
+packets/reviews, acquisition options and current numbered task report:
+`M7/current-source-preparation-20261009-v35/retention.json`, SHA-256
+`028c8c1db5232827f1d08902e01deef487b1f0db7b848bdc11691b314dfd7073`.
+Parent v34 remains authenticated. Every completed original was collected once;
+all agents are done and no native handle is live. T01–T19 counts are original
+89 done/84 open/6 retired, added 374 done/23 open, combined 463 done/107 open/
+6 retired. Only T01, T02 and T10 are fully complete. ADR 0066 remains Accepted.
+ADR 0067 exact acceptance is the current presented human question; ADR 0065,
+the separate Core artifact observer grace, T11 accounting/mutation decisions
+and output allocation choice remain unresolved. Ask decisions one at a time.
+After acceptance, rejoin the retained ADR 0067 four-part implementation map;
+otherwise continue independent accepted work. Preserve the original recovery
+diagnostic and output failures below. No full integration, closure, main merge,
+release, provider campaign or weakened check is authorized or claimed.
+
 ### Maintenance and durable restart proved; recovery diagnostic retained, 2026-10-09
 
 Source `5fd91659537410425d5fb1a149d840a800aadea1` passes all six maintenance

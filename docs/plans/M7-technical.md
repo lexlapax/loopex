@@ -54,6 +54,12 @@ dispositioned before changing the public tool-result payload, complete manifests
 and clients. This records the existing model-question projection gap; unrelated
 accepted M7 implementation and required proof continue.
 
+Implementation prerequisite discovered on 2026-10-09: Proposed
+[ADR 0068](../adr/0068-cli-owned-output.md#concept) must be dispositioned before
+implementing CLI physical output ownership and its pre-runtime acquisition
+cutoff. It records the pending-copy custody gap; existing output limits and
+required physical capacity/cleanup proof remain. Unrelated work continues.
+
 Accepted decisions that constrain the work:
 
 | Decision | Constraint on M7 |
