@@ -97,6 +97,29 @@ defmodule LoopexDaemon.NegotiationSocketTest do
     assert %{activations_used: 0} = ConnectionRegistry.status(daemon.registry)
   end
 
+  # Concept: the independent daemon client negotiates against the real daemon.
+  # Technical depth: local refusal before initialization and after an old-only
+  # refusal, then the exact pinned generation/digest and a refused repeat.
+  @tag :node_client
+  test "the independent Node client negotiates and is refused by the real daemon",
+       %{daemon: daemon} do
+    node = System.find_executable("node") || flunk("Node is required")
+    script = Path.expand("../../../clients/node/real-negotiation-workflow.mjs", __DIR__)
+    {output, status} = System.cmd(node, [script, "--daemon", daemon.path], stderr_to_stdout: true)
+    assert status == 0, output
+
+    assert JSON.decode!(output) == %{
+             "refused_before_initialize" => true,
+             "old_offer_code" => "unsupported_generation",
+             "refused_after_old_offer" => true,
+             "generation" => "loopex.experimental/4",
+             "digest_matches_pin" => true,
+             "repeat_code" => "already_initialized"
+           }
+
+    assert %{activations_used: 0} = ConnectionRegistry.status(daemon.registry)
+  end
+
   defp initialize(id, generations),
     do: %{
       "method" => "initialize",

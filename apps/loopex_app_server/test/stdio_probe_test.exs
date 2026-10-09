@@ -74,6 +74,38 @@ defmodule Loopex.AppServer.StdioProbeTest do
     assert second["code"] == "already_initialized"
   end
 
+  # Concept: real old and wrong-server generations are refused over stdio.
+  # Technical depth: the retired name, generations one and two and the daemon's
+  # /4 each spend the one attempt; later create, attach, resume and prompt
+  # frames are then refused as not_initialized before any session work.
+  test "real old and daemon generations are refused and fence later session frames" do
+    for offer <- [
+          "loopex.session.v1-experimental",
+          "loopex.experimental/1",
+          "loopex.experimental/2",
+          "loopex.experimental/4"
+        ] do
+      [refused | later] =
+        run([
+          ~s({"method":"initialize","request_id":"old","generations":["#{offer}"],"capabilities":[]}),
+          ~s({"method":"session.create","request_id":"create","command_id":"Yw","session_options":{"version":1}}),
+          ~s({"method":"session.attach","request_id":"attach","session_id":"c190ZXN0XzE"}),
+          ~s({"method":"session.resume","request_id":"resume","session_id":"c190ZXN0XzE","command_id":"cg"}),
+          ~s({"method":"session.prompt","request_id":"prompt","command_id":"cA","content_b64":"Z28"})
+        ])
+
+      assert refused["code"] == "unsupported_generation", offer
+      assert refused["request_id"] == "old"
+
+      assert Enum.map(later, &{&1["request_id"], &1["code"]}) == [
+               {"create", "not_initialized"},
+               {"attach", "not_initialized"},
+               {"resume", "not_initialized"},
+               {"prompt", "not_initialized"}
+             ]
+    end
+  end
+
   test "a malformed frame is refused uncorrelated, and the process keeps reading" do
     [invalid, duplicate, trailing, initialized] =
       run([
