@@ -27,6 +27,48 @@ physical restore implementation; it does not waive any full-history proof.
 
 ### Current work and restart order
 
+
+### Diagnostic capacity failure retained; privacy integration next, 2026-10-09
+
+Original18074 at `8b083be93091da95af57227323e77a54915b961f` finishes FAIL11/12
+current CLI recovery cases in332.233seconds, with no exclusions, skips or invalid
+cases. Floor stages remain UNRUN. The fresh-case body passed this schedule;
+its metadata capture exhausted128 records during acquire-control polling before
+answer progress. This neither resolves the earlier duplicate nor supplies its
+failed wire. Seven original processes joined and34 assets authenticated.
+Collection SHA-256 `3cd101e7614aa2b8477f8e333e51717377b02b86f3e5ea27bde90d8b48b11211`.
+Registry3304 SHA-256 `e28949d09fb815983b979d5c566af21bdb3103e63ea503032ba840824e8c7444`.
+
+The reviewed answer-scope fixture is joined, unformatted and native UNRUN. It
+retains every recognized progress/event/snapshot/admission and create/prompt/
+attach request. Omitted controls are counted and global order advances. Original
+behavior assertions, links, joins, cutoffs and128/65536 metadata caps remain.
+This is explicitly a selected-plane diagnostic, not a complete control trace or
+production repair. Manifest SHA-256
+`d05cc277aca39a4625b58a50e1ec1bd086a918ba42eaf6e89cc137ab42e3726f`.
+Independent source/lifecycle reviews respectively
+`1c57a5a0501e481fa6b9bb612784c2bc26cc7f9f8e00daa000359ee05d2f357b` and
+`41764ef017fac4d4f5450c626ba021ae107d5e71d1274a7ee7c2d003e3f3ee44`.
+
+Retention child `M7/current-source-preparation-20261009-v42/retention.json`,
+SHA-256 `25fc05c26cc566670d8a78084aa63e4cf8cc4f63e7d71d5350541523816f6223`,
+retains147 assets and authenticates parentv41. It includes originals58167,
+45411 and18074, all frozen native/buffered/privacy/diagnostic source packets,
+reviews and tool-artifact scope. Original45411 strict non-line AST formatting
+passes in2.787seconds with four original joins and26 authenticated assets;
+collection `6235f7f28b6acc2b310d3f1248c4eba6c0fe4631738e33c7b95d0f505c64b1f2`.
+
+Buffered privacy source awaits independent review. Native privacy V2 is source
+clear; its writer now adds the missing actual Executor-created artifact case in
+the isolated native worktree. None is a native PASS yet. Root owns all native
+custody. No process is live. Next join the reviewed buffered test, strict-AST
+format, and qualify complete integration/ambient/API/CallerWire files on both
+pairs; then qualify the actual tool-artifact/native privacy whole file and the
+changed recovery diagnostic. All broader task counts and pending decisions
+remain unchanged: T01–T19 original89 done/84 open/6 retired, added375 done/22 open,
+combined464 done/106 open/6 retired. ADR0067 remains the unanswered question.
+
+
 ### Fresh-case observation corrected; native qualification next, 2026-10-09
 
 The source-clear v2 diagnostic fixture is joined, native UNRUN. It enables the

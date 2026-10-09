@@ -73,7 +73,10 @@ defmodule LoopexCli.LiveRecoveryTest do
     daemon = start_daemon(context, launch("fresh answer", "fresh"))
 
     proxy =
-      DaemonProxy.start(context.socket, [{{:before, "session.prompt"}, 1}], & &1, observe: true)
+      DaemonProxy.start(context.socket, [{{:before, "session.prompt"}, 1}], & &1,
+        observe: true,
+        observation_scope: :answer
+      )
 
     with_recovery_observation(proxy, daemon, "before session.prompt", fn ->
       output =

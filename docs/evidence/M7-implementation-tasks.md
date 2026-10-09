@@ -1,5 +1,17 @@
 # M7 Implementation Tasks
 
+### Diagnostic failure retained; existing privacy proof progresses, 2026-10-09
+
+Original18074 remains FAIL11/12 current recovery cases in332.233seconds; floor
+UNRUN. Its fresh body passed but the diagnostic metadata cap filled. The joined
+source-clear answer scope counts omitted controls and preserves every original
+behavior check and bound; qualification is UNRUN. The [resume checkpoint](M7-resume.md)
+binds the failure,147-asset retention childv42, reviews and unjoined privacy
+packets. Buffered privacy awaits review; native privacy adds actual tool-created
+artifact retrieval/reopen. No repair, full-row completion or new checkbox is
+claimed. Counts remain original89 done/84 open/6 retired, added375 done/22 open,
+combined464 done/106 open/6 retired. ADR0067 remains pending.
+
 ### Existing recovery duplicate reproduced; privacy proof in progress, 2026-10-09
 
 Original44759 at `0fc5b96b` remains FAIL11/12 current CLI cases in332.425seconds;

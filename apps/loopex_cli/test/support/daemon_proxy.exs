@@ -53,7 +53,10 @@ defmodule LoopexCli.Test.DaemonProxy do
           counts: %{},
           rewrite: rewrite,
           parent: parent,
-          observations: if(Keyword.get(options, :observe, false), do: new_observations())
+          observations:
+            if(Keyword.get(options, :observe, false),
+              do: new_observations(Keyword.get(options, :observation_scope, :all))
+            )
         })
       end)
 
@@ -225,8 +228,10 @@ defmodule LoopexCli.Test.DaemonProxy do
     finish_observed_connection(state)
   end
 
-  defp new_observations do
+  defp new_observations(scope) when scope in [:all, :answer] do
     %{
+      scope: scope,
+      omitted_control_records: 0,
       records: [],
       bytes: 0,
       connection: 0,
@@ -265,6 +270,8 @@ defmodule LoopexCli.Test.DaemonProxy do
 
   defp observation_snapshot(%{observations: observations}) do
     %{
+      scope: observations.scope,
+      omitted_control_records: observations.omitted_control_records,
       records: Enum.reverse(observations.records),
       overflow: observations.overflow,
       incomplete: observations.incomplete or observations.pending != ""
@@ -302,6 +309,12 @@ defmodule LoopexCli.Test.DaemonProxy do
     case LoopexProtocol.Frame.decode(line, LoopexProtocol.Frame.output_record_bytes()) do
       {:ok, record} ->
         observations = state.observations
+
+        if observations.scope == :answer and not answer_observation?(record) do
+          %{state | observations: %{observations |
+            next_order: observations.next_order + 1,
+            omitted_control_records: observations.omitted_control_records + 1}}
+        else
         event = record["event"]
         event_data = if is_map(event), do: event["data"]
 
@@ -341,10 +354,22 @@ defmodule LoopexCli.Test.DaemonProxy do
         else
           observation_overflow(state)
         end
+        end
 
       _invalid ->
         put_in(state.observations.incomplete, true)
     end
+  end
+
+  # Concept: capture every answer-plane record despite lease-recovery polling.
+  # Technical depth: the answer scope retains every progress, durable event,
+  # snapshot and command admission plus create/prompt/attach requests. Other
+  # control records are counted explicitly, and order still advances for them.
+  # It is not a complete control-wire trace. Framing failure and the original
+  # whole-record count/byte overflow remain failures in either scope.
+  defp answer_observation?(record) do
+    record["type"] in ~w(progress event snapshot admission) or
+      record["method"] in ~w(session.create session.prompt session.attach)
   end
 
   defp observation_fields(record, fields) when is_map(record) do
