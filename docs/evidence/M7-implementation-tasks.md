@@ -14977,19 +14977,26 @@ bGlzZWNvbmQpIDw9IGN1dG9mZgogICAgIGVuZAogICBlbmQKIAo=
 
 ### Original checklist
 
-- [ ] Inventory every affected record, API, tool generation, adapter and protocol.
-- [ ] Pin schema definitions, digests, compatibility vectors and provider mappings.
-- [ ] Create the M7 fixture manifest with exact prompts, budgets, allowed changes and objective results.
-- [ ] Assign every operator step and negative scenario to a named test or demonstration.
-- [ ] Prepare the indexed closure-evidence scaffold with results marked Pending.
+- [x] Inventory every affected record, API, tool generation, adapter and protocol.
+  See [M7 contract inventory](M7-contract-inventory.md), whose 83 cited tests, paths and digests were checked against the tree at `825f98ee`.
+- [x] Pin schema definitions, digests, compatibility vectors and provider mappings.
+  See [M7 contract inventory](M7-contract-inventory.md), whose 83 cited tests, paths and digests were checked against the tree at `825f98ee`.
+- [x] Create the M7 fixture manifest with exact prompts, budgets, allowed changes and objective results.
+  `test/fixtures/m7/manifest.json` with its execution manifest: 28 cases, 108 step keys, provider A/B pins; `mix loopex.m7_evidence` reports 0 pending cases and owners.
+- [x] Assign every operator step and negative scenario to a named test or demonstration.
+  Every V1–V13 step key has a `case:` or `test:` owner validated by `ExecutionManifest` (literal test names checked).
+- [x] Prepare the indexed closure-evidence scaffold with results marked Pending.
+  `M7-closure-runs.md` carries one generated Pending row for every case and step key.
 - [-] Retain the exact historical binaries and session roots needed for migration and rollback.
-- [ ] Verify manifest completeness, invalid-manifest rejection and actual instruction/tool-schema costs.
+- [x] Verify manifest completeness, invalid-manifest rejection and actual instruction/tool-schema costs.
+  See [M7 contract inventory](M7-contract-inventory.md), whose 83 cited tests, paths and digests were checked against the tree at `825f98ee`.
 
 ### Added implementation subtasks
 
 - [x] Add a read-only numbered checklist reporter that separates original and added counts, validates T00–T19 ordering and preserves the supplied 186-item original denominator.
 - [x] Map the 22 accepted contract families to implementation owners and retained/new generations.
-- [ ] Join that family inventory to exact payload schemas, path inventories and decoder vectors.
+- [x] Join that family inventory to exact payload schemas, path inventories and decoder vectors.
+  See [M7 contract inventory](M7-contract-inventory.md), whose 83 cited tests, paths and digests were checked against the tree at `825f98ee`.
 - [x] Pin legacy and planned M7 read-definition canonical preimages/digests and the revision-1 literal artifact-read capability table.
 - [x] Create the four fixed base workspace roots and independent repair, feature, review and long-conversation oracles; prove both feature-default branches and positive/negative oracle controls on both toolchains.
 
@@ -16654,8 +16661,10 @@ full restore175, operator attendance, helpers or whole integration.
 
 - [x] Move M7 to In progress when product work begins.
 - [ ] Keep outcome rows linked to actual tests and evidence.
-- [ ] Update operator/developer documentation, indexes, compatibility guidance, README, roadmap and changelog.
-- [ ] Update verification guidance to the accepted M7 procedures.
+- [x] Update operator/developer documentation, indexes, compatibility guidance, README, roadmap and changelog.
+  Audited and corrected at `825f98ee` (generation names /3 and /4, chat and helpers, restore of helper objects, tool versions, roadmap state, changelog, M7 release procedure with provider B); `bash scripts/check.sh --docs` passes.
+- [x] Update verification guidance to the accepted M7 procedures.
+  Audited and corrected at `825f98ee` (generation names /3 and /4, chat and helpers, restore of helper objects, tool versions, roadmap state, changelog, M7 release procedure with provider B); `bash scripts/check.sh --docs` passes.
 - [ ] Run focused unit, property, conformance, fault, security, protocol and CLI tests during development.
 - [ ] Run the fast check once per clean integration candidate.
 - [ ] Run required selected real-provider, Node, daemon, long-bound and cross-UID lanes.
