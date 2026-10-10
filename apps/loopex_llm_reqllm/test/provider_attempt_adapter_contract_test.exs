@@ -729,7 +729,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
 
     File.write!(runner, """
     #!/usr/bin/env escript
-    %%! +S 2:2 +SDcpu 1 +SDio 1 +A 2
+    %%! +S 2:2 +SDcpu 1 +SDio 1 +A 2 +sbwt none +sbwtdcpu none +sbwtdio none
     main([]) ->
       ok = code:add_paths(#{paths}),
       {ok, _} = application:ensure_all_started(elixir),

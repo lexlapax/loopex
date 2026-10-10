@@ -268,7 +268,8 @@ defmodule Loopex.LLM.ReqLLM.InProcess.PackagingTest do
 
   defp packaged_driver(fixture, mode, model, base, ca, workspace, environment) do
     arguments =
-      ["+S", "2:2", "+SDcpu", "1", "+SDio", "1", "+A", "2", "-noshell", "-noinput"] ++
+      ["+S", "2:2", "+SDcpu", "1", "+SDio", "1", "+A", "2", "+sbwt", "none"] ++
+        ["+sbwtdcpu", "none", "+sbwtdio", "none", "-noshell", "-noinput"] ++
         Enum.flat_map(fixture.paths, &["-pa", &1]) ++
         [
           "-eval",

@@ -1321,7 +1321,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridgeTest do
 
     File.write!(script, """
     #!/usr/bin/env escript
-    %%! +S 2:2 +A 2
+    %%! +S 2:2 +A 2 +sbwt none +sbwtdcpu none +sbwtdio none
     main(Arguments) ->
       true = code:add_paths(#{paths}) =:= ok,
       {ok, _} = application:ensure_all_started(elixir),

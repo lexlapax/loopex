@@ -151,7 +151,7 @@ defmodule LoopexComposition.BootstrapTest do
     {output, status} =
       System.cmd(
         System.find_executable("elixir"),
-        ["--erl", "+S 2:2"] ++ paths ++ ["-e", code],
+        ["--erl", "+S 2:2 +sbwt none +sbwtdcpu none +sbwtdio none"] ++ paths ++ ["-e", code],
         stderr_to_stdout: true
       )
 
