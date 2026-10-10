@@ -15,9 +15,11 @@ failed attempts; unavailable evidence is never PASS.
 
 The committed execution manifest in `test/fixtures/m7/manifest.json` fixes
 the step and case keys below, one row each; `mix loopex.m7_evidence` fails
-when a key is missing here. Profile rows and known earlier-attempt rows are
-still to be enumerated before the tested candidate, as an ordinary
-implementation change, not an administrative fill.
+when a key is missing here. The manifest's execution section is pinned as
+campaign `m7-closure-1`, genesis digest
+`c610f52419997327f70bcda3a362d10a93f80851e1719496c8690f7a460d1920`, with 28
+cases and 110 operator step keys and none pending. It declares no separate
+profile keys; see "Fixture, profile and provider pins" below.
 
 ## Candidate and source identity
 
@@ -160,6 +162,13 @@ proof. These slots do not replace the plan's final Proved progress rows.
 | External pin UTC timestamp, complete bytes/reference and SHA-256 | Pending |
 | Ordered pre-dispatch pin log, completion recheck, reference and SHA-256 | Pending |
 | Final demonstrated profile-key inventory | Pending |
+
+The current catalog is `test/fixtures/m7/manifest.json`: four base fixtures,
+the pinned external task and the pinned execution manifest. Provider A is
+`anthropic` through `LOOPEX_PROVIDER_API_KEY`; provider B is `openai`
+`openai:gpt-4.1-mini` through `OPENAI_API_KEY`, with its `summarizer` and
+`switch` cells, for `m7.provider-switch`, `m7.cross-provider-maintenance` and
+`m7.review`.
 
 The committed manifest `test/fixtures/m7/manifest.json` declares the closed
 set of demonstrated profile keys below, each with its system-class ceiling and
@@ -341,9 +350,13 @@ cross-version steps are not passes; preserve current-format restore coverage.
 | Complete earlier-attempt records/reports and SHA-256 digests | Pending |
 
 Before commitment enumerate every known prior attempt and final case in
-literal rows. Preserve the plan's distinct `product_failure`,
-`model_nonconformance`, `evidence_unavailable` and `environment_failure`
-dispositions, separate from its mechanical results. A new candidate
+literal rows. The final cases are the 28 rows below. No earlier M7 closure
+candidate was nominated, and no case attempt of campaign `m7-closure-1` is
+known before this candidate: `mix loopex.m7_evidence` reports no committed
+attempts head, and every paid case waited for the T17 approval. Preserve the
+plan's distinct `product_failure`, `model_nonconformance`,
+`evidence_unavailable` and `environment_failure` dispositions, separate from
+its mechanical results. A new candidate
 alone does not authorize replacement of a dispatched case. References shared
 by multiple outcomes or operator steps denote the same execution, not an
 additional paid attempt. This scaffold supplies no spending authorization.

@@ -26,20 +26,20 @@ while the session lives; a session "brain" can coordinate local or remote
 <!-- loopex:readme-status:start -->
 ## Where Things Stand
 
-**Revision status:** Closed milestone product baseline; active milestone `M7` is in progress; no next candidate is recorded.
+**Revision status:** Closed milestone product baseline; active milestone `M7` is in review; no next candidate is recorded.
 
 [Canonical milestone status and plan records](docs/plans/)
 <!-- loopex:readme-status:end -->
 
-The accepted [M7 coding-agent proof](docs/plans/M7.md#concept) is in progress.
+The accepted [M7 coding-agent proof](docs/plans/M7.md#concept) is in review.
 Current source includes native [chat from an explicit profile](docs/operator/coding-sessions.md#operator-sessions-chat),
 [settled configuration and compaction](docs/operator/coding-sessions.md#operator-sessions-chat-settings),
 and [model-question responders for embedding](docs/developer/runtime-and-embedding.md#technical-embedding-question-responder).
 It also includes read-only helper roles that may run on their own provider,
 a separate thinking-off summarizer, and the coordinated `loopex.experimental/3`
 and `/4` wire generations. The operator and real-provider closure runs in the
-[M7 validation runbook](docs/operator/m7-validation.md) remain, so M7's nine
-outcomes are not closed. M6 is the last closed product checkpoint;
+[M7 validation runbook](docs/operator/m7-validation.md) and the independent
+review of the exact candidate remain, so M7's nine outcomes are not closed. M6 is the last closed product checkpoint;
 successors remain drafts.
 
 ## What Loopex Provides

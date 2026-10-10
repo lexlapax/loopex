@@ -16,16 +16,16 @@ its last `Closed` row identifies the last closed product baseline.
 <!-- loopex:current-status:start -->
 ## Current Status
 
-**Revision status:** Closed milestone product baseline; active milestone `M7` is in progress; no next candidate is recorded.
+**Revision status:** Closed milestone product baseline; active milestone `M7` is in review; no next candidate is recorded.
 
 | Field | Value |
 | --- | --- |
 | Integrated phase | Closed milestone product baseline |
 | Last closed product checkpoint | `M6` — 2026-09-29 |
-| Blockers | None; `M7` is in progress against its accepted plan pair |
+| Blockers | `M7` awaits the closure matrix and independent review of its exact candidate |
 | Authorized work | Implementation inside the accepted `M7` plan pair, landing on `main` in small reviewed changes |
-| Next maintainer decision | None until `M7` is ready for independent review |
-| Next transition | Ensure that `docs/evidence/M7-closure-runs.md` is indexed as a scaffold, map every outcome to evidence in the plan, then make the tested implementation commit by moving `M7` to In review; run the closure matrix and independent review from that exact SHA |
+| Next maintainer decision | Close `M7` or reject its closure candidate on the matrix or review findings |
+| Next transition | After the maintainer closes it, make the administrative direct child: fill the existing `docs/evidence/M7-closure-runs.md` scaffold, record the closure governance row naming the tested implementation SHA, and move `M7` to Closed |
 | Validation | `bash scripts/check-bootstrap.sh` |
 <!-- loopex:current-status:end -->
 
@@ -38,7 +38,9 @@ binds every historical pair's digests and records the integration instruction.
 The founding prerequisites are accepted and implementation may begin. The maintainer
 accepted ADRs 0065, 0067 and 0068 on 2026-10-09 in the
 [disposition](../developer/agent-context-map.md#disposition-m7-adr-0065-0067-0068-2026-10-09). M7's outcome rows
-remain Open; implementation began with the cross-run conversation regression.
+now read Proved and name their proof obligations; the closure matrix,
+attended block and independent review of the exact candidate remain Pending in
+the [closure scaffold](../evidence/M7-closure-runs.md).
 No partially accepted subset authorizes dependent implementation.
 
 Until the first planned milestone closes, `Last closed product checkpoint` is the
@@ -151,7 +153,7 @@ representable.
 | `M4` | Closed | [concept](M4.md) | [technical depth](M4-technical.md) | [gate](M4-gate.md) |
 | `M5` | Closed | [concept](M5.md) | [technical depth](M5-technical.md) | — |
 | `M6` | Closed | [concept](M6.md) | [technical depth](M6-technical.md) | — |
-| `M7` | In progress | [concept](M7.md) | [technical depth](M7-technical.md) | — |
+| `M7` | In review | [concept](M7.md) | [technical depth](M7-technical.md) | — |
 <!-- loopex:milestone-register:end -->
 
 When a plan exists, the Concept and Technical depth columns link their exact
