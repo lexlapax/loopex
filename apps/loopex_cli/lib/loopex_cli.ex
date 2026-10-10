@@ -128,7 +128,20 @@ defmodule LoopexCli do
   defp own_stdio_output do
     case Output.open(:stdio, Output.acquisition()) do
       {:ok, output, sink} -> Output.put_current(output, sink)
-      {:error, _code} -> System.halt(1)
+      {:error, _code} -> halt_unless_stopping(1)
+    end
+  end
+
+  # Concept: a signal that arrives before the command's handler stops the
+  # emulator in its ordinary way; the command's own startup does not race it.
+  # Technical depth: until a handler is installed the emulator's default
+  # SIGTERM handler runs init:stop/0, whose application shutdown is what makes
+  # output acquisition fail. That stop already owns the exit, so this caller
+  # waits for it instead of halting first with a different status.
+  defp halt_unless_stopping(status) do
+    case :init.get_status() do
+      {:stopping, _} -> Process.sleep(:infinity)
+      _ -> System.halt(status)
     end
   end
 

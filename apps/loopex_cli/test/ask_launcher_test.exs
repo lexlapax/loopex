@@ -121,7 +121,7 @@ defmodule LoopexCli.AskLauncherTest do
       try do
         assert {:os_pid, launcher_pid} = Port.info(port, :os_pid)
         child_pid = await_pid(assigned_pid)
-        assert_pid(running_pid, child_pid)
+        await_child_ready(running_pid, child_pid, port)
         assert {_, 0} = System.cmd("/bin/kill", ["-0", child_pid])
 
         # No prompt words and an open Port stdin hold the real command in
@@ -223,16 +223,12 @@ defmodule LoopexCli.AskLauncherTest do
     end
   end
 
-  defp await_pid(path), do: await_pid_file(path, :pid_line)
-
-  defp assert_pid(path, expected), do: await_pid_file(path, expected)
-
-  defp await_pid_file(path, expected) do
+  defp await_pid(path) do
     deadline = System.monotonic_time(:millisecond) + 5_000
-    await_pid_file(path, expected, deadline)
+    await_pid(path, deadline)
   end
 
-  defp await_pid_file(path, expected, deadline) do
+  defp await_pid(path, deadline) do
     actual =
       case File.read(path) do
         {:ok, contents} -> contents
@@ -241,19 +237,35 @@ defmodule LoopexCli.AskLauncherTest do
       end
 
     cond do
-      expected == :pid_line and is_binary(actual) and
-          Regex.match?(~r/\A[1-9][0-9]*\n\z/, actual) ->
+      is_binary(actual) and Regex.match?(~r/\A[1-9][0-9]*\n\z/, actual) ->
         String.trim_trailing(actual)
 
-      actual == expected ->
-        :ok
-
       System.monotonic_time(:millisecond) >= deadline ->
-        flunk("PID file #{path} expected #{inspect(expected)}, got #{inspect(actual)}")
+        flunk("PID file #{path} expected a PID line, got #{inspect(actual)}")
 
       true ->
         Process.sleep(10)
-        await_pid_file(path, expected, deadline)
+        await_pid(path, deadline)
+    end
+  end
+
+  # Concept: the child VM is ready once it records its own PID; how long its
+  # boot takes under host load is not what this test proves.
+  # Technical depth: wait for that exact record or the launcher's exit,
+  # whichever comes first. An exit before readiness fails with its status, and
+  # ExUnit's test timeout bounds a child that does neither.
+  defp await_child_ready(path, expected, port) do
+    case File.read(path) do
+      {:ok, ^expected} ->
+        :ok
+
+      _ ->
+        receive do
+          {^port, {:exit_status, status}} ->
+            flunk("launcher exited #{status} before the child recorded its PID")
+        after
+          10 -> await_child_ready(path, expected, port)
+        end
     end
   end
 
