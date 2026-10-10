@@ -733,34 +733,29 @@ defmodule Loopex.Executor.LocalTest do
     # Concept: the caller of `cancel/2` keeps listening after the episode's
     # instant, because the answer it waits for is sent after that.
     #
-    # Technical depth: this proves only that the caller waits past the
-    # instant. The stand-in owner holds the real caller's exact episode, waits
-    # until the instant has passed on the same monotonic clock, gives the
-    # caller up to 300 ms more to stop waiting, and then answers `cleaned`. A
-    # caller that stops at the instant has returned `unconfirmed` by then; one
-    # that keeps waiting returns the answer.
+    # Technical depth: the stand-in owner reports the real caller's exact
+    # episode instant, waits until that instant has passed on the same
+    # monotonic clock and then answers `cleaned`. The caller's traced wait
+    # shows the instant it waits until, so a caller that stops at the episode
+    # instant fails here by its own deadline rather than by a race against a
+    # fixed pause; one that keeps waiting returns the late answer.
+    parent = self()
+
     {worker, job_id, table} =
       stand_in_owner("late-answer-cancel-job", 40, fn token, reply_to, {until, _grace, _probe} ->
-        requester =
-          receive do
-            {:requester, pid} -> pid
-          end
-
+        send(parent, {:instant, until})
         wait_past(until)
-        requester_monitor = Process.monitor(requester)
-
-        receive do
-          {:DOWN, ^requester_monitor, :process, ^requester, _reason} -> :ok
-        after
-          300 -> Process.demonitor(requester_monitor, [:flush])
-        end
-
         send(reply_to, {:loopex_cancel_result, token, {:ok, :cleaned}})
       end)
 
-    cancelling = Task.async(fn -> Local.cancel(worker, job_id) end)
-    send(worker, {:requester, cancelling.pid})
-    assert Task.await(cancelling, 5_000) == {:ok, :cleaned}
+    events =
+      trace_local_calls([await_cancel_result: 4], fn ->
+        assert Local.cancel(worker, job_id) == {:ok, :cleaned}
+      end)
+
+    assert_received {:instant, instant}
+    [{:await_cancel_result, [_watched, _monitor, _token, waits_until]} | _] = events
+    assert waits_until > instant
     :ets.delete(table)
   end
 
