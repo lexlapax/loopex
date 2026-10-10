@@ -294,7 +294,7 @@ defmodule LoopexCli.OutputTest do
   end
 
   test "a publication queued before the cutoff but received after it is refused" do
-    held = Held.start(acquire: {:delay, 4_900})
+    held = Held.start(acquire: :hold)
     test = self()
 
     command =
@@ -308,10 +308,16 @@ defmodule LoopexCli.OutputTest do
     assert_receive {:held_target_acquire, owner, _id}
     owner_monitor = Process.monitor(owner)
 
-    # The owner publishes inside the interval; the caller only reads it later.
-    Process.sleep(max(acquisition.cutoff - 300 - System.monotonic_time(:millisecond), 0))
+    # Concept: the owner publishes inside the interval; the caller reads it later.
+    # Technical depth: the caller is suspended before the target acknowledges.
+    # The owner answers the sys request only after its acquisition step, so its
+    # successful publication is already queued; the caller resumes after the cutoff.
     true = :erlang.suspend_process(command)
-    Process.sleep(max(acquisition.cutoff + 200 - System.monotonic_time(:millisecond), 0))
+    Held.release(held, :acquired)
+    _ = :sys.get_state(owner)
+    {:messages, queued} = Process.info(command, :messages)
+    assert [{:loopex_cli_output_opened, ^owner, _, {:ok, _, _}}] = queued
+    Process.sleep(max(acquisition.cutoff + 1 - System.monotonic_time(:millisecond), 0))
     true = :erlang.resume_process(command)
 
     assert_receive {:opened, {:error, :output_acquisition_expired}}, 2_000
