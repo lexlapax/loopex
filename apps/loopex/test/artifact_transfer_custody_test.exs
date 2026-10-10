@@ -593,6 +593,62 @@ defmodule Loopex.ArtifactTransferCustodyTest do
     assert now() < retire.arguments.close_deadline_ms
   end
 
+  # Concept: a reservation that is only processed at its opening deadline is
+  # refused with the deadline, not as a cancellation.
+  # Technical depth: ADR 0066 boundary equality for reserve. The reservation
+  # success is queued before D_open while the Dispatcher is suspended and is
+  # handled at or after D_open with the open timer still queued: no open
+  # permission is issued, the caller gets open_deadline_exhausted, and normal
+  # retirement anchored at D_open reclaims the slot.
+  test "a reservation handled at its opening deadline answers the deadline and is reclaimed" do
+    fixture = fixture()
+    data = data(fixture.attachment.session_id)
+    attachment = fixture.attachment
+
+    context = %{
+      transfer_ref: String.duplicate("f", 32),
+      open_deadline_ms: now() + 500,
+      object_work_bytes: ArtifactStore.transfer_limits().open_work_bytes,
+      metadata_read_bytes: ArtifactStore.transfer_limits().metadata_read_bytes
+    }
+
+    request = Map.put(data.request, :session_id, attachment.session_id)
+
+    message =
+      {:open_transfer, fixture.runtime.token, attachment.session_id, attachment.attachment_id,
+       attachment.incarnation_id, request, context}
+
+    caller = Task.async(fn -> GenServer.call(fixture.dispatcher, message, 5_000) end)
+    reserve = callback(:reserve)
+    :ok = :sys.suspend(fixture.dispatcher)
+    reply(reserve, {:ok, %{transfer_ref: context.transfer_ref}})
+
+    receive do
+      :unexpected_fixture_message -> flunk("unexpected fixture message")
+    after
+      max(0, context.open_deadline_ms - now()) -> :ok
+    end
+
+    assert now() >= context.open_deadline_ms
+    :ok = :sys.resume(fixture.dispatcher)
+
+    assert {:error, %{reason: :open_deadline_exhausted, cleanup: :unproved}} =
+             Task.await(caller, 1_000)
+
+    retire = callback(:retire)
+    assert retire.arguments.close_deadline_ms === context.open_deadline_ms + 5_000
+    assert entry(fixture, context.transfer_ref).reason === :open_deadline_exhausted
+    refute_received {:artifact_callback, :open, _, _, _}
+    current = Map.fetch!(state(fixture).attachments, attachment.attachment_id)
+    refute Map.has_key?(current.transfers, context.transfer_ref)
+    reply(retire, {:retired, receipt(context, data.work)})
+    ack = callback(:acknowledge)
+    reply(ack, :ok)
+    await_released(fixture, context.transfer_ref)
+    assert now() < retire.arguments.close_deadline_ms
+    assert ledger(fixture).transfer_reserved === 0
+  end
+
   # Concept: a lost acknowledgement proves nothing new; the retained receipt and
   # the occupied slot remain until the same observer acknowledges it again.
   # Technical depth: ADR 0066 ack reply loss. The first close expires at its

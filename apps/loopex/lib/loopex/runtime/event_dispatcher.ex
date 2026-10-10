@@ -1982,8 +1982,15 @@ defmodule Loopex.Runtime.EventDispatcher do
               invocation_started_at: permission_issued_at
           })
         else
+          # Concept: a reservation handled at or after D_open answers as the deadline.
+          # Technical depth: ADR 0066 boundary equality, as for an open success.
+          reason =
+            if artifact_now() >= entry.context.open_deadline_ms,
+              do: :open_deadline_exhausted,
+              else: :cancelled
+
           state
-          |> retire_artifact(id, :cancelled, artifact_cancel_anchor(entry))
+          |> retire_artifact(id, reason, artifact_cancel_anchor(entry))
           |> observe_artifact_retirement(id)
         end
 
