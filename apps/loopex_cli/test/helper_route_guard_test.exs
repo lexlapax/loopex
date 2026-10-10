@@ -51,6 +51,33 @@ defmodule LoopexCli.HelperRouteGuardTest do
              {:error, :helper_session_owned}
   end
 
+  # Concept: the chat route fails closed once the bound helper owner is gone.
+  # Technical depth: a chat prompt on the parent refuses
+  # `helper_owner_unavailable` before admission and the parent records nothing.
+  test "a lost helper owner closes chat mutation of every session" do
+    fixture =
+      Fixture.start([
+        %{text: "go", calls: [Fixture.task_call("call-task")]},
+        %{text: "Finding.", calls: []},
+        %{text: "done", calls: []}
+      ])
+
+    parent = Fixture.parent(fixture, "parent-create")
+    {_attachment, run} = Fixture.prompt(fixture, parent, "prompt", "investigate")
+    assert Fixture.await_terminal(fixture, parent, run).terminal.state == "completed"
+    {:ok, before} = Loopex.Store.load_records(fixture.store, parent, 0, 1_000)
+    monitor = Process.monitor(fixture.helper)
+    Process.exit(fixture.helper, :kill)
+    assert_receive {:DOWN, ^monitor, :process, _, :killed}, 5_000
+
+    transcript = drive(fixture.runtime, parent, "prompt text", prepared_configuration())
+    assert transcript =~ ~s("code":"helper_owner_unavailable")
+    assert {:ok, ^before} = Loopex.Store.load_records(fixture.store, parent, 0, 1_000)
+
+    assert LoopexComposition.Delegation.guard(fixture.runtime, parent, :resume) ==
+             {:error, :helper_owner_unavailable}
+  end
+
   defp drive(runtime, session, line, configuration) do
     {:ok, input} = StringIO.open(line <> "\n/quit\n", encoding: :latin1)
     {:ok, output} = Memory.start()

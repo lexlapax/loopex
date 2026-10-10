@@ -602,10 +602,19 @@ defmodule LoopexDaemon.Service do
 
   defp start_composition(state) do
     case delegation(state) do
-      {:ok, delegation} -> start_composition(state, delegation)
+      {:ok, delegation} -> start_composition(track_delegation(state, delegation), delegation)
       {:error, _reason} -> {:stop, {:fatal, :composition_start_failed}, state}
     end
   end
+
+  # Concept: the helper owner is a component this daemon cannot serve without.
+  # Technical depth: ADR 0069's route guard classifies helper children through
+  # the owner, so its or its retained-object writer's exit ends the daemon as
+  # `runtime_lost` (the default running class) instead of serving unguarded.
+  defp track_delegation(state, %{helper: helper, objects: objects}),
+    do: state |> track(:delegation_helper, helper) |> track(:delegation_objects, objects)
+
+  defp track_delegation(state, nil), do: state
 
   defp start_composition(state, delegation) do
     options =

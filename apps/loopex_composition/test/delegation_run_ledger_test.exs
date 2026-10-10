@@ -662,9 +662,24 @@ defmodule LoopexComposition.DelegationRunLedgerTest do
     }
 
     settle = transaction(created, settlement(identity, terminal, accounting, 0, 8_192))
+    prompt = Base.decode64!(created.operation.logical["prompt_command_id"])
+    unprompted = %{through_version: 4, prefix_token: token, admitted_prompts: MapSet.new()}
+
+    # Concept: an admitted prompt in the captured prefix refutes "unprompted",
+    # and a settlement without the prefix scan proves nothing (ADR 0056).
+    for refuted <- [
+          %{unprompted | admitted_prompts: MapSet.new([prompt])},
+          Map.delete(unprompted, :admitted_prompts)
+        ] do
+      assert RunLedger.admit(created, settle, refuted) == {:error, :settlement_mismatch}
+    end
 
     assert {:ok, settled, _} =
-             RunLedger.admit(created, settle, %{through_version: 4, prefix_token: token})
+             RunLedger.admit(
+               created,
+               settle,
+               %{unprompted | admitted_prompts: MapSet.new(["other-prompt"])}
+             )
 
     assert settled.charged_tokens == 0 and settled.reserved_tokens == 0 and settled.count == 1
     {bind, bind_inputs} = binding(settled, inputs.original_job)

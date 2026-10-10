@@ -506,8 +506,13 @@ defmodule LoopexComposition.Delegation.RunLedger do
 
     joined =
       case {operation.child_run, inputs} do
-        {nil, %{through_version: through, prefix_token: token}} ->
+        # ADR 0056: a missing acknowledgement alone cannot prove an unprompted
+        # child, so the captured prefix must hold no admission of its prompt.
+        {nil, %{through_version: through, prefix_token: token, admitted_prompts: admitted}} ->
+          prompt = Base.decode64!(operation.logical["prompt_command_id"])
+
           terminal["state"] == "failed" and is_nil(terminal["child_run_id"]) and
+            not MapSet.member?(admitted, prompt) and
             accounting["through_version"] == through and
             accounting["prefix_token"] == Base.encode64(token)
 

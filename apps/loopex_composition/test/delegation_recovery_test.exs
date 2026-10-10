@@ -87,6 +87,62 @@ defmodule LoopexComposition.DelegationRecoveryTest do
     end
   end
 
+  # Concept: a missing prompt acknowledgement alone never proves "unprompted".
+  # Technical depth: ADR 0056. The helper is lost right after creating its
+  # child. Before the restarted owner classifies, trusted host code holds a
+  # live, activated child owner under the recovery's former fixed resume
+  # identity, so a repeated presentation would only replay and leave that owner
+  # live. Recovery must instead take ownership afresh (one new
+  # `owner_advanced` record) before it reads the absent admission, and only
+  # then settle the failed terminal at zero exactly once.
+  test "an unprompted verdict comes only from a fresh prepared child owner" do
+    test = self()
+    fixture = Fixture.start(decide(), fault: fault(test, :after_create))
+    parent = Fixture.parent(fixture, "parent-create")
+    {_attachment, run} = Fixture.prompt(fixture, parent, "parent-prompt", "parent:x")
+    assert_receive {:fault, :after_create}, 10_000
+    restarted = Fixture.restart(fixture, classify: :skip)
+
+    {:ok, {:page, %{rows: rows, next_cursor: nil}}} =
+      Loopex.Runtime.creation_provenance(restarted.runtime, %{
+        kind: :runtime_page,
+        cursor: nil,
+        limit: 16
+      })
+
+    [row] = for row <- rows, row.session_id != parent, do: row
+    child = row.session_id
+
+    assert {:ok, {:prepared, activation}} =
+             Loopex.prepare_resume_session(
+               restarted.runtime,
+               child,
+               "helper-recovery:" <> row.command_id
+             )
+
+    assert {:ok, ^child} = Loopex.activate_resume(activation)
+    advanced = owner_advances(restarted, child)
+    assert Helper.classify(restarted.helper) == :ok
+    assert owner_advances(restarted, child) == advanced + 1
+
+    status = Helper.status(restarted.helper)
+    ledger = status.runs[{parent, run}]
+    refute RunLedger.occupied?(ledger)
+    assert [{_job, %{outcome: :failed}}] = Map.to_list(status.receipts)
+
+    assert [%{"charge_tokens" => 0, "terminal" => %{"child_run_id" => nil}}] =
+             for(
+               {tx, _} <- ledger.transactions,
+               tx["mutation"]["kind"] == "settle",
+               do: tx["mutation"]
+             )
+  end
+
+  defp owner_advances(fixture, session) do
+    {:ok, rows} = Loopex.Store.load_records(fixture.store, session, 0, 1_000)
+    Enum.count(rows, &(&1.payload.kind == "owner_advanced"))
+  end
+
   test "a prompted child interrupted mid-flight is stopped, never prompted again" do
     test = self()
 

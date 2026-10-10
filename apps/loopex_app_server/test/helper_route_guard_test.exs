@@ -70,6 +70,35 @@ defmodule Loopex.AppServer.HelperRouteGuardTest do
              )
   end
 
+  # Concept: the foreground route fails closed once the bound helper owner is gone.
+  # Technical depth: a mutation of the parent (or any session) refuses
+  # `helper_owner_unavailable` before admission and records nothing.
+  test "a lost helper owner closes every foreground mutation route" do
+    {fixture, parent, child} = helper_child()
+    {:ok, before} = Loopex.Store.load_records(fixture.store, parent, 0, 1_000)
+    monitor = Process.monitor(fixture.helper)
+    Process.exit(fixture.helper, :kill)
+    assert_receive {:DOWN, ^monitor, :process, _, :killed}, 5_000
+    {:ok, attachment} = Loopex.attach(fixture.runtime, parent, after_event_sequence: 0)
+
+    requests = [
+      request("session.prompt", "p")
+      |> Map.put("content_b64", Wire.encode_bytes("after loss")),
+      request("session.abort", "a"),
+      request("session.resume", "r") |> Map.put("session_id", Wire.encode_identity(child))
+    ]
+
+    for request <- requests do
+      assert {:ok, reply} =
+               Mapping.call(request, %{runtime: fixture.runtime, attachment: attachment})
+
+      assert reply["status"] == "refused", request["method"]
+      assert reply["reason"] == "helper_owner_unavailable", request["method"]
+    end
+
+    assert {:ok, ^before} = Loopex.Store.load_records(fixture.store, parent, 0, 1_000)
+  end
+
   defp helper_child do
     fixture =
       Fixture.start([

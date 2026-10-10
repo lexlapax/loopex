@@ -204,18 +204,25 @@ defmodule LoopexComposition.Delegation do
   every mutating route refuses with the covered and enumerated counts. Read-only
   attachment, inspection and history are never guarded here. A refused command
   is decided before admission, so it writes no record and starts no work.
+
+  The guard fails closed: once a helper owner has been bound to the runtime,
+  an owner that has exited refuses every mutating route
+  with `helper_owner_unavailable`, because its children can no longer be
+  told apart from ordinary sessions.
   """
   @spec guard(map() | nil, binary(), atom()) :: :ok | {:error, term()}
   def guard(nil, _session, _command), do: :ok
 
-  # A host that never started this application has no helper registry, so no
-  # helper can have registered for the runtime and there is nothing to guard.
+  # Concept: only a runtime no helper owner was ever bound to is unguarded.
+  # Technical depth: `Helper.bind/3` registers from the host process, so the
+  # entry survives the owner's exit. A host that never started this application
+  # has no registry and therefore cannot have bound an owner.
   def guard(%Loopex.Runtime{supervisor: supervisor}, session, command) do
     with registry when is_pid(registry) <- Process.whereis(LoopexComposition.Delegation.Registry),
-         [{helper, _}] <- Registry.lookup(LoopexComposition.Delegation.Registry, supervisor) do
+         [{_host, helper}] <- Registry.lookup(LoopexComposition.Delegation.Registry, supervisor) do
       guard(%{helper: helper}, session, command)
     else
-      _no_helper -> :ok
+      _never_bound -> :ok
     end
   end
 
@@ -225,6 +232,8 @@ defmodule LoopexComposition.Delegation do
       {:ok, _ordinary_or_parent} -> :ok
       {:error, :helper_classification_incomplete} -> incomplete(helper)
     end
+  catch
+    :exit, _owner_gone -> {:error, :helper_owner_unavailable}
   end
 
   def guard(_handle, _session, _command), do: :ok

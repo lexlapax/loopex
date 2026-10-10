@@ -51,4 +51,41 @@ defmodule LoopexDaemon.HelperRouteGuardTest do
     assert {:ok, ^before} = Loopex.Store.load_records(fixture.store, child, 0, 1_000)
     assert SocketConnection.route_guard(fixture.runtime, parent, :prompt) == :ok
   end
+
+  # Concept: the daemon route fails closed once the bound helper owner is gone.
+  # Technical depth: every mutation on a child or any other session refuses
+  # `helper_owner_unavailable` before admission and records nothing.
+  test "a lost helper owner closes every daemon mutation route" do
+    fixture =
+      Fixture.start([
+        %{text: "go", calls: [Fixture.task_call("call-task")]},
+        %{text: "Finding.", calls: []},
+        %{text: "done", calls: []}
+      ])
+
+    parent = Fixture.parent(fixture, "parent-create")
+    {_attachment, run} = Fixture.prompt(fixture, parent, "prompt", "investigate")
+    assert Fixture.await_terminal(fixture, parent, run).terminal.state == "completed"
+    [{child, _}] = Map.to_list(Helper.status(fixture.helper).children)
+    {:ok, before} = Loopex.Store.load_records(fixture.store, parent, 0, 1_000)
+    monitor = Process.monitor(fixture.helper)
+    Process.exit(fixture.helper, :kill)
+    assert_receive {:DOWN, ^monitor, :process, _, :killed}, 5_000
+
+    {:ok, attachment} = Loopex.attach(fixture.runtime, parent, after_event_sequence: 0)
+    command = %{type: :prompt, command_id: "after-loss", content: "x"}
+
+    assert {:refused, record} =
+             SocketConnection.run_mutation(attachment, command, "request", "session.prompt", nil)
+
+    assert inspect(record) =~ "helper_owner_unavailable"
+
+    for session <- [child, parent] do
+      resume = SocketConnection.resume_task(%{runtime: fixture.runtime}, "request", session, "r")
+      assert {:refused, :no_activation, record} = resume.()
+      assert inspect(record) =~ "helper_owner_unavailable"
+    end
+
+    assert {:ok, ^before} = Loopex.Store.load_records(fixture.store, parent, 0, 1_000)
+  end
 end

@@ -61,10 +61,26 @@ defmodule LoopexComposition.Delegation.Helper do
   ## Technical depth
 
   Identical rebinding is idempotent; a different runtime refuses. Until bound,
-  every helper call refuses `router_unavailable`.
+  every helper call refuses `router_unavailable`. The calling host process
+  first registers this owner under the runtime's supervisor PID in
+  `LoopexComposition.Delegation.Registry`, so the entry lives as long as the
+  host rather than the owner: a route that finds the entry but no live owner
+  refuses instead of treating the runtime as helper-free (ADR 0069 fails
+  closed).
   """
-  def bind(helper, runtime, store \\ nil),
-    do: GenServer.call(helper, {:bind, runtime, store}, :infinity)
+  def bind(helper, runtime, store \\ nil) do
+    case Registry.register(LoopexComposition.Delegation.Registry, runtime.supervisor, helper) do
+      {:ok, _owner} -> GenServer.call(helper, {:bind, runtime, store}, :infinity)
+      {:error, {:already_registered, _host}} -> rebind(helper, runtime, store)
+    end
+  end
+
+  defp rebind(helper, runtime, store) do
+    case Registry.lookup(LoopexComposition.Delegation.Registry, runtime.supervisor) do
+      [{_host, ^helper}] -> GenServer.call(helper, {:bind, runtime, store}, :infinity)
+      _other_owner -> {:error, :router_bound}
+    end
+  end
 
   @doc false
   def classification(helper, value),
@@ -169,13 +185,8 @@ defmodule LoopexComposition.Delegation.Helper do
   end
 
   @impl true
-  def handle_call({:bind, runtime, store}, _from, %{runtime: nil} = state) do
-    # Concept: host routes find this owner by the exact runtime incarnation.
-    # Technical depth: the registry key is the runtime's supervisor PID, so a
-    # replacement runtime never inherits it and the entry leaves with this owner.
-    {:ok, _} = Registry.register(LoopexComposition.Delegation.Registry, runtime.supervisor, nil)
-    {:reply, :ok, %{state | runtime: runtime, store: store}}
-  end
+  def handle_call({:bind, runtime, store}, _from, %{runtime: nil} = state),
+    do: {:reply, :ok, %{state | runtime: runtime, store: store}}
 
   def handle_call({:bind, runtime, _store}, _from, %{runtime: runtime} = state),
     do: {:reply, :ok, state}
@@ -382,9 +393,11 @@ defmodule LoopexComposition.Delegation.Helper do
     parent = Map.get(state.parents, job.session_id)
     arguments = job.validated_arguments
 
+    # A non-map argument value leaves `role` nil, so the eager checks below
+    # never index it and it refuses as `invalid_tool_arguments`.
     role =
-      parent && is_map(arguments) &&
-        Enum.find(parent.capture.catalog["roles"], &(&1["name"] == arguments["role"]))
+      if parent && is_map(arguments),
+        do: Enum.find(parent.capture.catalog["roles"], &(&1["name"] == arguments["role"]))
 
     now = state.clock.()
 
@@ -1381,7 +1394,13 @@ defmodule LoopexComposition.Delegation.Helper do
         with :ok <- endpoint(state, child, through, token) do
           case terminal["child_run_id"] do
             nil ->
-              %{through_version: through, prefix_token: token}
+              case admitted_prompts(state, child, through) do
+                {:ok, admitted} ->
+                  %{through_version: through, prefix_token: token, admitted_prompts: admitted}
+
+                :error ->
+                  %{}
+              end
 
             encoded ->
               case Runtime.run_evidence(state.runtime, child, Base.decode64!(encoded)) do
@@ -1552,40 +1571,65 @@ defmodule LoopexComposition.Delegation.Helper do
     operation = state.runs[{session, run}].operation
     child = Base.decode64!(operation.child)
 
-    with {:ok, activation} <- prepare(state, child, entry),
-         {:ok, attachment} <- Runtime.attach(state.runtime, child, after_event_sequence: 0) do
-      result =
-        case operation.child_run do
-          nil ->
-            case disposition(attachment, entry.child.prompt_command_id) do
-              {:ok, %{run_id: child_run}} ->
-                recover_prompted(state, entry, attachment, child, child_run, deadline)
+    case prepare(state, child, entry) do
+      {:ok, activation} ->
+        result =
+          case Runtime.attach(state.runtime, child, after_event_sequence: 0) do
+            {:ok, attachment} -> end_child(state, entry, operation, attachment, child, deadline)
+            _ -> {:unresolved, state}
+          end
 
-              _ ->
-                {:ok, state, {:unprompted, child}}
-            end
+        Loopex.abandon_resume(activation)
+        result
 
-          encoded ->
-            await_child(state, attachment, child, Base.decode64!(encoded), deadline)
-        end
-
-      if activation, do: Loopex.abandon_resume(activation)
-      result
-    else
-      _ -> {:unresolved, state}
+      _ ->
+        {:unresolved, state}
     end
   end
 
+  defp end_child(state, entry, %{child_run: nil}, attachment, child, deadline) do
+    case Runtime.command_disposition(attachment, entry.child.prompt_command_id) do
+      {:ok, {:committed, :admitted, _code, run}} when is_binary(run) ->
+        recover_prompted(state, entry, attachment, child, run, deadline)
+
+      observation ->
+        if unprompted?(observation),
+          do: {:ok, state, {:unprompted, child}},
+          else: {:unresolved, state}
+    end
+  end
+
+  defp end_child(state, _entry, %{child_run: run}, attachment, child, deadline),
+    do: await_child(state, attachment, child, Base.decode64!(run), deadline)
+
+  # Concept: only a conclusive answer proves a child was never prompted.
+  # Technical depth: ADR 0056 says a missing acknowledgement alone cannot
+  # prove it. The answer comes from the owner this attempt just prepared: its
+  # succession superseded every earlier owner, so no earlier prompt can still
+  # commit, and it replayed the complete journal. A committed refusal, its own
+  # not-committed answer or an absent admission is therefore conclusive; an
+  # unavailable owner says nothing and the operation stays unresolved with the
+  # parent's slot occupied, to be retried by a later recovery.
+  defp unprompted?({:ok, {:committed, :refused, _code, _run}}), do: true
+  defp unprompted?({:ok, {:not_committed, nil, :admission_not_committed, nil}}), do: true
+  defp unprompted?({:ok, {:pending, nil, :commit_unknown, nil}}), do: true
+  defp unprompted?(_unavailable), do: false
+
+  # Concept: every recovery attempt takes ownership afresh.
+  # Technical depth: a resume command identity is durable, so a repeated one
+  # replays without a new succession and leaves any earlier owner live. Each
+  # attempt therefore presents a fresh identity, and only a new prepared,
+  # never-activated owner is accepted.
   defp prepare(state, child, entry) do
+    nonce = Base.encode16(:crypto.strong_rand_bytes(16), case: :lower)
+
     case Loopex.prepare_resume_session(
            state.runtime,
            child,
-           "helper-recovery:" <> entry.child.command_id
+           "helper-recovery:" <> nonce <> ":" <> entry.child.command_id
          ) do
       {:ok, {:prepared, activation}} -> {:ok, activation}
-      {:ok, {:replayed, _}} -> {:ok, nil}
-      {:error, :session_already_active} -> {:ok, nil}
-      other -> other
+      other -> {:error, other}
     end
   end
 
@@ -1665,13 +1709,46 @@ defmodule LoopexComposition.Delegation.Helper do
   # read from the host's own Store and named by Core Canonical's digest of its
   # payload, exactly as every other terminal record digest.
   defp settle_unprompted(state, entry, child, through, token) do
-    case last_record_digest(state, child, through) do
-      {:ok, digest} -> settle_unprompted(state, entry, child, through, token, digest)
-      :error -> {:unresolved, state}
+    with {:ok, admitted} <- admitted_prompts(state, child, through),
+         false <- MapSet.member?(admitted, entry.child.prompt_command_id),
+         {:ok, digest} <- last_record_digest(state, child, through) do
+      settle_unprompted(state, entry, child, through, token, digest, admitted)
+    else
+      _ -> {:unresolved, state}
     end
   end
 
-  defp last_record_digest(%{store: nil}, _child, _through), do: :error
+  # Concept: an unprompted settlement is proved by the captured child prefix.
+  # Technical depth: every `prompt_admitted_v3` command identity at or below
+  # `through` is read from the host's own Store, live and again on replay, so
+  # the ledger refuses an unprompted settlement whose prompt was admitted.
+  @prefix_page 256
+
+  defp admitted_prompts(%{store: nil}, _child, _through), do: :error
+
+  defp admitted_prompts(state, child, through),
+    do: admitted_prompts(state, child, through, 0, MapSet.new())
+
+  defp admitted_prompts(_state, _child, through, after_version, admitted)
+       when after_version >= through,
+       do: {:ok, admitted}
+
+  defp admitted_prompts(state, child, through, after_version, admitted) do
+    case Loopex.Store.load_records(state.store, child, after_version, @prefix_page) do
+      {:ok, [_ | _] = records} ->
+        admitted =
+          for %{journal_version: version, payload: %{kind: "prompt_admitted_v3"} = payload} <-
+                records,
+              version <= through,
+              into: admitted,
+              do: payload["command_id"]
+
+        admitted_prompts(state, child, through, List.last(records).journal_version, admitted)
+
+      _ ->
+        :error
+    end
+  end
 
   defp last_record_digest(state, child, through) do
     case Loopex.Store.load_records(state.store, child, through - 1, 1) do
@@ -1680,7 +1757,7 @@ defmodule LoopexComposition.Delegation.Helper do
     end
   end
 
-  defp settle_unprompted(state, entry, child, through, token, record_digest) do
+  defp settle_unprompted(state, entry, child, through, token, record_digest, admitted) do
     [_, session, run] = entry.ids
     reserved = state.runs[{session, run}].operation.logical["reserved_tokens"]
 
@@ -1715,7 +1792,11 @@ defmodule LoopexComposition.Delegation.Helper do
       "refund_tokens" => reserved
     }
 
-    append(state, entry.ids, mutation, %{through_version: through, prefix_token: token})
+    append(state, entry.ids, mutation, %{
+      through_version: through,
+      prefix_token: token,
+      admitted_prompts: admitted
+    })
   end
 
   # Concept: a recovered or never-run helper call still owes its parent one
