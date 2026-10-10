@@ -65,13 +65,12 @@ defmodule Loopex.Executor.Local.CodingTools do
       "tool_id" => "loopex.write",
       "tool_version" => "1.0.0",
       "name" => "write",
-      "description" =>
-        "Create or replace a file beneath the workspace root with the exact content given.",
+      "description" => "Create or replace a workspace file.",
       "parameter_schema" => %{
         "type" => "object",
         "properties" => %{
-          "path" => %{"type" => "string", "description" => "Path relative to the workspace root."},
-          "content" => %{"type" => "string", "description" => "Exact bytes to write."}
+          "path" => %{"type" => "string", "description" => "Workspace-relative path."},
+          "content" => %{"type" => "string", "description" => "Exact bytes."}
         },
         "required" => ["path", "content"]
       },
@@ -88,14 +87,13 @@ defmodule Loopex.Executor.Local.CodingTools do
       "tool_id" => "loopex.edit",
       "tool_version" => "1.0.0",
       "name" => "edit",
-      "description" =>
-        "Replace one exact occurrence of a string in a file. Fails and reports what it found if the match is absent or ambiguous.",
+      "description" => "Replace one exact, unique match in a file; reports mismatches.",
       "parameter_schema" => %{
         "type" => "object",
         "properties" => %{
-          "path" => %{"type" => "string", "description" => "Path relative to the workspace root."},
-          "old" => %{"type" => "string", "description" => "Exact text to replace."},
-          "new" => %{"type" => "string", "description" => "Replacement text."}
+          "path" => %{"type" => "string", "description" => "Workspace-relative path."},
+          "old" => %{"type" => "string", "description" => "Exact text."},
+          "new" => %{"type" => "string", "description" => "Replacement."}
         },
         "required" => ["path", "old", "new"]
       },
@@ -112,19 +110,18 @@ defmodule Loopex.Executor.Local.CodingTools do
       "tool_id" => "loopex.bash",
       "tool_version" => "1.0.0",
       "name" => "bash",
-      "description" =>
-        "Run a command in the workspace. Supply argv for no shell interpretation, or command for an explicit shell.",
+      "description" => "Run argv without a shell, or command in a shell.",
       "parameter_schema" => %{
         "type" => "object",
         "properties" => %{
           "argv" => %{
             "type" => "array",
             "items" => %{"type" => "string"},
-            "description" => "Program and arguments, run without a shell."
+            "description" => "Program and arguments."
           },
           "command" => %{
             "type" => "string",
-            "description" => "A raw shell command, interpreted by the shell."
+            "description" => "Shell command."
           }
         },
         "required" => []
@@ -140,19 +137,19 @@ defmodule Loopex.Executor.Local.CodingTools do
     }
   ]
 
-  @search_definitions (for {name, properties, required} <- [
-                             {"grep",
+  @search_definitions (for {name, description, properties, required} <- [
+                             {"grep", "Search file contents.",
                               %{
                                 "pattern" => %{"type" => "string"},
                                 "path" => %{"type" => "string"},
                                 "glob" => %{"type" => "string"}
                               }, ["pattern"]},
-                             {"find",
+                             {"find", "Find paths by pattern.",
                               %{
                                 "pattern" => %{"type" => "string"},
                                 "path" => %{"type" => "string"}
                               }, ["pattern"]},
-                             {"ls",
+                             {"ls", "List directory entries.",
                               %{
                                 "path" => %{"type" => "string"},
                                 "recursive" => %{"type" => "boolean"}
@@ -162,8 +159,7 @@ defmodule Loopex.Executor.Local.CodingTools do
                            "tool_id" => "loopex." <> name,
                            "tool_version" => "1.1.0",
                            "name" => name,
-                           "description" =>
-                             "Inspect workspace entries with bounded, encoded records.",
+                           "description" => description,
                            "parameter_schema" => %{
                              "type" => "object",
                              "properties" => properties,
@@ -190,19 +186,19 @@ defmodule Loopex.Executor.Local.CodingTools do
       "wall_time_ms" => 30000
     },
     "description" =>
-      "Read a workspace text file, or an authorized artifact range. Artifact ranges require artifact_use, offset and length (at most 4096 bytes).",
+      "Read a workspace file, or an artifact range (artifact_use, offset, length).",
     "effect_class" => "read_only",
     "idempotency_class" => "safe_retry",
     "name" => "read",
     "parameter_schema" => %{
       "properties" => %{
         "artifact_use" => %{
-          "description" => "Committed use:<sha256> reference.",
+          "description" => "use:<sha256> reference.",
           "type" => "string"
         },
         "length" => %{"description" => "1 to 4096 bytes.", "type" => "integer"},
-        "offset" => %{"description" => "Unsigned byte offset.", "type" => "integer"},
-        "path" => %{"description" => "Path relative to the workspace root.", "type" => "string"}
+        "offset" => %{"description" => "Byte offset.", "type" => "integer"},
+        "path" => %{"description" => "Workspace-relative path.", "type" => "string"}
       },
       "required" => [],
       "type" => "object"

@@ -69,7 +69,7 @@ defmodule LoopexCli.ChatConfigurationTest do
                  "tool_id" => "loopex.read",
                  "tool_version" => "1.1.0",
                  "definition_digest" =>
-                   "858956b73d7059ffaf18943d28bb0654ee3ca935f86cec3a136ba8e93b6e3c9e"
+                   "49a166620b21ea1a517d972afa9605fae0cb768e54427784ae6a9dfaadfea009"
                }
 
         assert Enum.find(definitions, &(&1["tool_id"] == "loopex.read"))["tool_version"] ==

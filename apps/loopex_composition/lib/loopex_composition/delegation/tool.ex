@@ -19,21 +19,21 @@ defmodule LoopexComposition.Delegation.Tool do
     "tool_id" => "loopex.task",
     "tool_version" => "1.0.0",
     "name" => "task",
-    "description" => "Ask one saved read-only helper role to perform a bounded task.",
+    "description" => "Run a saved read-only helper role on a task.",
     "parameter_schema" => %{
       "type" => "object",
       "properties" => %{
         "role" => %{
           "type" => "string",
-          "description" => "Enabled role matching [a-z][a-z0-9_-]{0,63}."
+          "description" => "An enabled role name."
         },
         "description" => %{
           "type" => "string",
-          "description" => "Nonempty UTF-8 task description, at most 256 bytes."
+          "description" => "At most 256 bytes."
         },
         "prompt" => %{
           "type" => "string",
-          "description" => "Nonempty UTF-8 task prompt, at most 16,384 bytes."
+          "description" => "At most 16384 bytes."
         }
       },
       "required" => ~w(role description prompt)

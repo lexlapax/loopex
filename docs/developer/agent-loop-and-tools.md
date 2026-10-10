@@ -809,7 +809,8 @@ default.
 active model-facing tool projections. Store separately normalizes and measures
 each private record and unstamped public-event payload against its exact 65,536-
 byte item ceiling before that value can commit or authorize later work. The
-reference fixture makes the distinction concrete: system plus four projected
+M2 reference fixture at its recorded revision, before the M7 compaction of
+the tool descriptions, makes the distinction concrete: system plus four projected
 tools is 2,393 canonical bytes and 799 estimated tokens; the system message
 plus the four full canonical definitions occupy 4,382 component bytes and
 measure 1,462 estimator tokens when each component is measured separately;

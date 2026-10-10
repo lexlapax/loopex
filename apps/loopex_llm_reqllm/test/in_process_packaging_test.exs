@@ -25,9 +25,8 @@ defmodule Loopex.LLM.ReqLLM.InProcess.PackagingTest do
     "req/ebin/req.app",
     "finch/ebin/finch.app"
   ]
-  @system "loopex.reference.v1: You are a coding agent working in a real workspace. " <>
-            "Use the tools you are given to inspect and change files, and run commands " <>
-            "when you need to. Continue until the task is done, then stop."
+  @system "loopex.reference.v1: You are a coding agent in a real workspace. " <>
+            "Use the tools until the task is done, then stop."
   @prompt "Answer with fixture reply."
 
   setup_all do
