@@ -632,18 +632,27 @@ defmodule LoopexDaemon.SocketConnection do
         state |> consume_bytes(bytes) |> input_result()
 
       {:ok, _empty} ->
-        {:stop, :normal, state}
+        peer_closed(state)
 
       {:select, select_info} ->
         {:noreply, %{state | receive_select: select_info}}
 
       {:error, :closed} ->
-        {:stop, :normal, state}
+        peer_closed(state)
 
       {:error, _reason} ->
         Logger.debug("loopex daemon socket receive failed")
         {:stop, :normal, state}
     end
+  end
+
+  # Concept: the client hanging up is reported to the registry before the
+  # connection ends, so an orderly stop counts this close as proved.
+  # Technical depth: the report precedes this process's exit signal, so the
+  # registry always sees it before the connection's `DOWN`.
+  defp peer_closed(state) do
+    send(state.registry, {:connection_peer_closed, self(), state.incarnation})
+    {:stop, :normal, state}
   end
 
   defp input_result({:ok, state}) do

@@ -475,7 +475,7 @@ defmodule Loopex.AppServer.ExternalWorkflowTest do
       {"LOOPEX_PROVIDER_LAUNCH", SourceArchive.absent_companion_launch!(root)},
       {"LOOPEX_POLICY", "allow-all"},
       {"LOOPEX_PROVIDER_API_KEY", placeholder},
-      {"ELIXIR_ERL_OPTIONS", "-noinput"}
+      {"ELIXIR_ERL_OPTIONS", "+sbwt none +sbwtdcpu none +sbwtdio none -noinput"}
     ]
 
     {output, status} =
@@ -655,7 +655,7 @@ defmodule Loopex.AppServer.ExternalWorkflowTest do
       {"LOOPEX_WORKSPACE", Path.join(root, "workspace")},
       {"LOOPEX_WORKFLOW_SCRIPT", "tool"},
       {"LOOPEX_WORKFLOW_STORE", store},
-      {"ELIXIR_ERL_OPTIONS", "-noinput"}
+      {"ELIXIR_ERL_OPTIONS", "+sbwt none +sbwtdcpu none +sbwtdio none -noinput"}
     ]
 
     %{environment: environment, store: store}
@@ -874,7 +874,7 @@ defmodule Loopex.AppServer.ExternalWorkflowTest do
     [
       {"LOOPEX_HOME", Path.join(root, "home")},
       {"LOOPEX_WORKSPACE", Path.join(root, "workspace")},
-      {"ELIXIR_ERL_OPTIONS", "-noinput"}
+      {"ELIXIR_ERL_OPTIONS", "+sbwt none +sbwtdcpu none +sbwtdio none -noinput"}
     ]
   end
 

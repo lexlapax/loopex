@@ -848,6 +848,7 @@ defmodule LoopexDaemon.ConnectionRegistry do
             progress_fenced: false,
             native_retirement: nil,
             connection_exit: nil,
+            peer_closed: false,
             listener_closed: false,
             listener_down: false,
             connection_down: false,
@@ -1914,6 +1915,24 @@ defmodule LoopexDaemon.ConnectionRegistry do
     case drain_progress(state, 32) do
       :ok -> {:noreply, state}
       :error -> {:stop, :connections_lost, state}
+    end
+  end
+
+  # Concept: a connection says when its own client hung up, so an orderly stop
+  # can tell a peer that left from a connection the stop failed to close.
+  #
+  # Technical depth: the connection sends this immediately before its normal
+  # exit, so it arrives before that exit's `DOWN`. Only the exact live row of
+  # that pid and incarnation with no native retirement intent is marked.
+  def handle_info({:connection_peer_closed, pid, incarnation}, state) do
+    case Enum.find(state.rows, fn {_token, row} ->
+           row.connection_pid == pid and row.connection_incarnation == incarnation
+         end) do
+      {token, %{phase: phase, native_retirement: nil}} when phase in [:live, :closing] ->
+        {:noreply, update_row(state, token, &%{&1 | peer_closed: true})}
+
+      _other ->
+        {:noreply, state}
     end
   end
 
@@ -3421,15 +3440,34 @@ defmodule LoopexDaemon.ConnectionRegistry do
     do: intent.control_joined and intent.outcome in [:proved, :unproved]
 
   # Concept: removing a selected row cannot erase its missing native proof.
+  # A connection whose client closed normally, with everything it held
+  # drained, has no one left to tell and is proved too.
   # Technical depth: only the current close-all population contributes here.
   # The sticky failure also prevents a later empty-row close from repairing it.
+  # The peer-close proof needs the connection's own report, its `:normal`
+  # exit, no native retirement intent and the full retirement barrier: relay
+  # retired, holder cleanup acknowledged and its worker reaped. Any other
+  # removal of a selected row stays unproved.
   defp retain_socket_retirement_disposition(
          %{close_all: %{selected: selected}} = state,
          token,
          row
        ) do
     if MapSet.member?(selected, token) do
-      proved = match?(%{outcome: :proved}, row.native_retirement)
+      proved =
+        match?(%{outcome: :proved}, row.native_retirement) or
+          match?(
+            %{
+              peer_closed: true,
+              native_retirement: nil,
+              connection_exit: :normal,
+              phase: :retiring,
+              relay_retired: true,
+              holder_cleanup_acked: true,
+              cleanup_worker_reaped: true
+            },
+            row
+          )
 
       state =
         put_in(

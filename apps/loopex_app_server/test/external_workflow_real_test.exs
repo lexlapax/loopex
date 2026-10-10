@@ -122,7 +122,7 @@ defmodule Loopex.AppServer.ExternalWorkflowRealTest do
       {"LOOPEX_WORKSPACE", workspace},
       {"LOOPEX_PROVIDER_LAUNCH", launch_configuration},
       {"LOOPEX_POLICY", "ask"},
-      {"ELIXIR_ERL_OPTIONS", "-noinput"},
+      {"ELIXIR_ERL_OPTIONS", "+sbwt none +sbwtdcpu none +sbwtdio none -noinput"},
       {"LOOPEX_WORKFLOW_STORE", store},
       {"LOOPEX_WORKFLOW_PROMPT", @task},
       {"LOOPEX_WORKFLOW_PATIENCE_MS", "300000"}

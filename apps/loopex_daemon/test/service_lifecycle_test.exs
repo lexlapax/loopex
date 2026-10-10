@@ -269,6 +269,54 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
     :ok = GenServer.stop(adapter)
   end
 
+  # Concept: a client that hung up normally while the stop began has nothing
+  # left to lose; its connection retiring that way, with its leases drained,
+  # is a proved close and the orderly stop still exits zero.
+  #
+  # Technical depth: the initialized connection is suspended, its peer
+  # closes, and the stop is signalled; the connection resumes only once the
+  # registry's close-all has selected it, so it observes the peer close
+  # instead of writing `daemon.stopping` and exits `:normal` without a native
+  # retirement intent.
+  test "a peer that closes as the orderly stop begins still exits zero",
+       %{options: options} do
+    daemon = start_daemon(options)
+    _ready = await_ready(daemon.output)
+    client = initialized(options[:socket_path])
+    registry = :sys.get_state(:sys.get_state(daemon.owner).pids.collaboration).registry
+    [row] = Map.values(:sys.get_state(registry).rows)
+    connection = row.connection_pid
+    :ok = :sys.suspend(connection)
+    :socket.close(client)
+    send(daemon.sentinel, {:daemon_signal, daemon.owner_ref, :sigterm})
+    await_until(fn -> :sys.get_state(registry).close_all != nil end)
+    :ok = :sys.resume(connection)
+    assert Task.await(daemon.task, 60_000) == 0
+  end
+
+  # Concept: only the client's own hang-up excuses a missing close proof; a
+  # connection that ends normally for any other reason while its client is
+  # still connected is lost, and the stop says so.
+  #
+  # Technical depth: the same suspended connection is terminated `:normal`
+  # through a system message once close-all has selected it, so it exits
+  # without writing `daemon.stopping` and without a peer-close report.
+  test "a selected connection ending normally with its peer still open is connections_lost",
+       %{options: options} do
+    daemon = start_daemon(options)
+    _ready = await_ready(daemon.output)
+    _client = initialized(options[:socket_path])
+    registry = :sys.get_state(:sys.get_state(daemon.owner).pids.collaboration).registry
+    [row] = Map.values(:sys.get_state(registry).rows)
+    connection = row.connection_pid
+    :ok = :sys.suspend(connection)
+    send(daemon.sentinel, {:daemon_signal, daemon.owner_ref, :sigterm})
+    await_until(fn -> :sys.get_state(registry).close_all != nil end)
+    :ok = :sys.terminate(connection, :normal)
+    {:ok, connections_lost} = LoopexDaemon.ExitStatus.fetch(:connections_lost)
+    assert Task.await(daemon.task, 60_000) == connections_lost
+  end
+
   # Concept (T14): no process another component waits on under a deadline —
   # the collaboration owner, the connection registry, a lease owner or a
   # connection — makes a blocking call into another daemon component, while

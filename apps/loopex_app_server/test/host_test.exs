@@ -420,7 +420,7 @@ defmodule Loopex.AppServer.HostTest do
       "LOOPEX_PROVIDER_LAUNCH" => launch_configuration(),
       "LOOPEX_POLICY" => "ask",
       "LOOPEX_PROVIDER_API_KEY" => @placeholder,
-      "ELIXIR_ERL_OPTIONS" => "-noinput"
+      "ELIXIR_ERL_OPTIONS" => "+sbwt none +sbwtdcpu none +sbwtdio none -noinput"
     }
 
     defaults |> Map.merge(overrides) |> Map.to_list()

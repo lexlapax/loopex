@@ -198,7 +198,10 @@ refuses new work, lets admitted work reach the runtime, drains its sessions,
 tells every client `daemon.stopping` with `operator_stop`, stops its components
 with the Store last, releases the root, and exits `0`. If a component is lost
 while it stops — the Store, or the runtime's own processes — the stop ends with
-that component's exit status instead, never `0`.
+that component's exit status instead, never `0`. A client that hangs up as
+the stop begins has nothing left to be told: once what its connection held is
+released, that connection counts as closed and the stop can still exit `0`. Any
+other connection the stop cannot prove closed ends it `connections_lost`.
 
 Let it finish. The worst case is the [stop bound](#operator-daemon-stop-bound);
 a service manager whose stop timeout is shorter forces the stop, after which the

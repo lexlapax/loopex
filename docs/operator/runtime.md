@@ -162,6 +162,13 @@ your own host, follow the
 - The reference executor needs `/bin/bash` for its own supervision and `/bin/ps`
   to confirm cleanup; see the
   [local supervision prerequisite](tools-and-policy.md#operator-local-supervision-shell).
+- On a host whose CPUs are oversubscribed — more runnable work than cores, as
+  on a small shared CI runner — start the VM with scheduler busy-wait off by
+  adding `+sbwt none +sbwtdcpu none +sbwtdio none` to any `ELIXIR_ERL_OPTIONS`
+  already set (for example `-noinput` for the app-server). Idle schedulers
+  otherwise spin on cores the rest of the work needs; under such load a VM boot
+  was measured at 12–14 s instead of about 1 s. Loopex leaves the VM's default
+  unchanged, and the repository's own child-VM tests run with these flags.
 
 <a id="operator-runtime-lifecycle"></a>
 ## Operating Lifecycle

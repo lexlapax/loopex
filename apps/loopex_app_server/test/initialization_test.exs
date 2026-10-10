@@ -511,7 +511,7 @@ defmodule Loopex.AppServer.InitializationTest do
     [
       {"LOOPEX_HOME", Path.join(root, "home")},
       {"LOOPEX_WORKSPACE", Path.join(root, "workspace")},
-      {"ELIXIR_ERL_OPTIONS", "-noinput"}
+      {"ELIXIR_ERL_OPTIONS", "+sbwt none +sbwtdcpu none +sbwtdio none -noinput"}
     ]
   end
 
