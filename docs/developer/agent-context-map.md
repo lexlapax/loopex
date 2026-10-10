@@ -7256,3 +7256,16 @@ child genesis: when a supplied genesis names a different model, Core runs it
 through the existing model preparation used by authored creation and accepts
 it only if preparation reproduces the genesis exactly. This clarifies the
 accepted ADRs' per-role provider selection; no other creation rule changes.
+
+<a id="disposition-m7-helper-restore-2026-10-09"></a>
+### M7 public restore audits and accepts helper namespaces, 2026-10-09
+
+Public restore fenced every `delegation/` namespace pending a semantic audit.
+The maintainer selected auditing and lifting the fence: restore accepts a helper
+namespace only when the root is quiescent (no writer lock or `objects.writer`
+marker) and every digest-named object and binding/run log validates with the
+existing `RetainedObjects` decoders for runtimes in the plan. The disposable
+`job-index-v1` is excluded and rebuilt by the normal startup rescan. Proof uses
+a real helper parent and child with an unknown effect: restore into an empty
+root, complete state and workspace manifests, and no dispatch or helper rerun
+after reopen, on both supported pairs.
