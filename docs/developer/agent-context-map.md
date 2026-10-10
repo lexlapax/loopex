@@ -7330,3 +7330,19 @@ ADR 0039's custody and deadline guarantees. The test deadline stays 15 s.
   a normal peer close, with its leases drained, counts as proved during an
   orderly stop instead of ending the stop with `connections_lost` (exit 106).
   This clarifies the daemon close rule in ADRs 0032 and 0033 for that case only.
+
+<a id="disposition-m7-negotiation-bound-and-interrupt-probe-2026-10-10"></a>
+### M7 daemon negotiation test bound and interrupt probe, 2026-10-10
+
+- **Negotiation test bound.** Under pinned load, the CLI live-daemon
+  negotiation peers failed 2 in 30 because the client's initialize timeout was
+  whatever remained of a 1,000 ms fixture budget, and a starved test process
+  spent it before the client connected. The maintainer selected letting the
+  client's own 30,000 ms default govern the handshake, with the 1,000 ms bound
+  starting when the reply is sent. The cases still prove that every wrong
+  generation or digest is refused without session work; they no longer prove an
+  externally shortened initialize timeout.
+- **Interrupt probe.** The CLI's 100 ms interrupt-manager probe stays
+  unchanged. Only the stress fixture's watcher is fixed so it reports a failure
+  instead of exiting silently. Under extreme CPU starvation a user can still see
+  the interrupt handler reported unavailable.
