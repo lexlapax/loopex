@@ -87,6 +87,12 @@ defmodule Loopex.LLM.ReqLLM.ProviderWorker do
       # and a catalog alias is sent as its literal, unregistered model id.
       Application.put_env(:llm_db, :skip_packaged_load, true, persistent: true)
       Application.put_env(:req_llm, :warn_unverified_models, false, persistent: true)
+      # Concept: the guard's cleanup TERM ends this worker at once.
+      # Technical depth: the result reaches Core only after the guard proves
+      # the group gone. ERTS's default TERM handler runs a graceful init:stop,
+      # measured at up to 1.4 s, inside every call; this one-use worker has
+      # nothing to drain, so TERM keeps the kernel's default disposition.
+      :ok = :os.set_signal(:sigterm, :default)
       sink = spawn_link(fn -> io_sink() end)
       true = Process.group_leader(self(), sink)
       :ok = :logger.set_primary_config(:level, :none)
