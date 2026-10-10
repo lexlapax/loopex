@@ -664,6 +664,7 @@ defmodule Loopex.ArtifactTransferCustodyTest do
         Loopex.close_artifact_transfer(fixture.attachment, context.transfer_ref)
       end)
 
+    trace_answer(closer)
     retire = callback(:retire)
     receipt = receipt(context, opened.work)
     reply(retire, {:retired, receipt})
@@ -681,11 +682,14 @@ defmodule Loopex.ArtifactTransferCustodyTest do
 
     refute_received {:artifact_callback, _, _, _, _}
 
-    # The expiry reply can only follow D_close, so prove silence strictly before
-    # it and then wait for it under the case's own ExUnit timeout, with no grace.
-    assert Task.yield(closer, retire.arguments.close_deadline_ms - now() - 1) == nil
+    # The expiry answer can only follow D_close: wait for it under the case's own
+    # ExUnit timeout, with no grace, and prove from the closer's traced send that
+    # it answered no earlier than D_close.
     assert {:error, :cleanup_unproved} = Task.await(closer, :infinity)
-    assert now() >= retire.arguments.close_deadline_ms
+
+    assert answered_at(closer, {:error, :cleanup_unproved}) >=
+             retire.arguments.close_deadline_ms
+
     assert map_size(state(fixture).artifact_transfers) === 1
 
     late =
@@ -886,6 +890,7 @@ defmodule Loopex.ArtifactTransferCustodyTest do
     fixture = fixture()
     data = data(fixture.attachment.session_id)
     caller = Task.async(fn -> Loopex.open_artifact_transfer(fixture.attachment, data.request) end)
+    trace_answer(caller)
     reserve = callback(:reserve)
     {_request, context} = reserve.arguments
 
@@ -893,13 +898,14 @@ defmodule Loopex.ArtifactTransferCustodyTest do
     # Technical depth: the dispatcher's timer fires at D_open and the reply can only
     # arrive after it, so a 60-second await started after the reservation races
     # that reply by a millisecond. Observe it against the ADR 0066 clock instead:
-    # silence strictly before D_open, then the answer below D_close = D_open + 5000.
-    assert Task.yield(caller, context.open_deadline_ms - now() - 1) == nil
+    # the caller's traced send is at or after D_open and the answer is below
+    # D_close = D_open + 5000.
+    refusal = {:error, %{reason: :open_deadline_exhausted, cleanup: :unproved}}
 
-    assert {:ok, {:error, %{reason: :open_deadline_exhausted, cleanup: :unproved}}} =
+    assert {:ok, ^refusal} =
              Task.yield(caller, max(0, context.open_deadline_ms + 5_000 - now()))
 
-    assert now() >= context.open_deadline_ms
+    assert answered_at(caller, refusal) >= context.open_deadline_ms
     retire = callback(:retire)
     assert retire.arguments.close_deadline_ms === context.open_deadline_ms + 5_000
     assert entry(fixture, context.transfer_ref).invocation === :reserve
@@ -1049,6 +1055,29 @@ defmodule Loopex.ArtifactTransferCustodyTest do
 
   defp digest(bytes), do: Base.encode16(:crypto.hash(:sha256, bytes), case: :lower)
   defp now, do: System.monotonic_time(:millisecond)
+
+  # Concept: a task's answer is bounded below by when the task sent it, not by
+  # when the test next looked.
+  # Technical depth: a silence window computed from now() ends late whenever the
+  # test process is descheduled, so an answer produced exactly at a deadline can
+  # land inside it. The VM stamps each traced send with monotonic time as the
+  # task sends it, independent of the test's scheduling and of whether the
+  # dispatcher's reply or the caller's own call timeout decided the answer.
+  defp trace_answer(task),
+    do: assert(:erlang.trace(task.pid, true, [:send, :monotonic_timestamp]) === 1)
+
+  defp answered_at(task, result) do
+    %Task{pid: pid, ref: tag} = task
+    ref = :erlang.trace_delivered(pid)
+    assert_receive {:trace_delivered, ^pid, ^ref}, 1_000
+    assert {:messages, messages} = Process.info(self(), :messages)
+
+    assert [at] =
+             for({:trace_ts, ^pid, :send, {^tag, ^result}, _to, at} <- messages, do: at)
+
+    System.convert_time_unit(at, :native, :millisecond)
+  end
+
   defp state(fixture), do: :sys.get_state(fixture.dispatcher)
   defp entry(fixture, id), do: Map.fetch!(state(fixture).artifact_transfers, id)
   defp ledger(fixture), do: Map.fetch!(state(fixture).holders, fixture.holder)
