@@ -729,6 +729,15 @@ defmodule LoopexCli.LiveDaemonTest do
             {:links, [reader]} = Process.info(caller, :links)
             assert is_pid(reader)
             reader_monitor = Process.monitor(reader)
+            # Concept: the reader is alive and watched before the reply exists.
+            # Technical depth: `Process.monitor/1` is an asynchronous signal, and
+            # Erlang orders signals only per sender pair. The client's later kill
+            # comes from another process and can be handled first, which turns
+            # a still-pending monitor into DOWN/noproc. A process-info request
+            # from this process is ordered after its monitor signal, so seeing
+            # this process among the monitors proves the monitor is in place.
+            assert {:monitored_by, monitors} = Process.info(reader, :monitored_by)
+            assert self() in monitors
 
             body =
               negotiation_capture(fn ->
