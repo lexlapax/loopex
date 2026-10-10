@@ -32,7 +32,9 @@ pushes.
 
 `execution_manifest` pins the attempts campaign and its genesis digest, the
 three M7 lanes and their ordered cases, and one owner for every V1–V13 step
-and subcase. Cases and owners marked `pending:` name what still blocks them;
+and subcase. Each attended case also pins the objective shown to its operator
+and its finite ceilings: run, standalone-maintenance and question/tool-hold
+counts at their per-unit ceilings, plus cleanup. Cases and owners marked `pending:` name what still blocks them;
 a lane holding one cannot run. The catalog authorizes no provider attempt;
 actual identities and outcomes live in retained execution records and the
 attempts index. The [M7 validation runbook](../../../docs/operator/m7-validation.md)

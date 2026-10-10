@@ -25,7 +25,12 @@ defmodule Mix.Tasks.Loopex.M7Evidence.ExecutionManifest do
   at least one attended key, no pending or retired key, and every attended key
   is owned by an `m7-operator` case. Each case lists exactly the keys it owns,
   its lane, attendance, credential need, driver and status; lane lists hold
-  exactly their cases in execution order. A case's specification digest is
+  exactly their cases in execution order. An attended case also carries the
+  `objective` shown to its operator and its `ceilings`: per-unit `run_ms`
+  (at most 600,000), `maintenance_ms` (at most 60,000), `hold_ms` (at most
+  120,000) for questions, attendance and tool holds, with fixed `runs`,
+  `maintenance` and `holds` counts, and `cleanup_ms`. `case_ceiling/2` sums
+  them with the 60,000-ms setup allowance. A case's specification digest is
   the canonical JSON digest of its entry with the provider pins, which the
   attempts index pins.
   `verify_owners/2` additionally proves each test owner is a literal test in
@@ -58,6 +63,9 @@ defmodule Mix.Tasks.Loopex.M7Evidence.ExecutionManifest do
   @keys ~w(status coverage campaign_id genesis_digest lanes cases operator_step_evidence providers)
   @credential_names ~w(LOOPEX_PROVIDER_API_KEY OPENAI_API_KEY ANTHROPIC_API_KEY OPENROUTER_API_KEY)
   @case_keys ~w(lane attended credential driver status steps)
+  @attended_keys @case_keys ++ ~w(objective ceilings)
+  @setup_ms 60_000
+  @unit_caps %{"run_ms" => 600_000, "maintenance_ms" => 60_000, "hold_ms" => 120_000}
   @drivers ~w(fixture-chat external-chat scenario-chat scenario-ask demonstration provider-wrapper release-lane)
 
   # The 74 numbered step identities of the accepted V1–V13 scenarios.
@@ -180,6 +188,21 @@ defmodule Mix.Tasks.Loopex.M7Evidence.ExecutionManifest do
     end
   end
 
+  # Concept: a case's finite ceiling, fixed by the manifest before any run.
+  # Technical depth: its fixed counts times their per-unit ceilings, plus
+  # cleanup and the setup allowance; nil for a case that pins none.
+  @doc false
+  def case_ceiling(manifest, case_id) do
+    case get_in(manifest, ["cases", case_id, "ceilings"]) do
+      %{} = c ->
+        c["runs"] * c["run_ms"] + c["maintenance"] * c["maintenance_ms"] +
+          c["holds"] * c["hold_ms"] + c["cleanup_ms"] + @setup_ms
+
+      _ ->
+        nil
+    end
+  end
+
   # Pending owners and cases, for reports and the release refusal.
   @doc false
   def pending(manifest) do
@@ -235,12 +258,26 @@ defmodule Mix.Tasks.Loopex.M7Evidence.ExecutionManifest do
   end
 
   defp case_entry?(id, entry) do
-    Regex.match?(~r/\Am7\.[a-z0-9.-]+\z/, id) and closed?(entry, @case_keys) and
+    attended = is_map(entry) and entry["attended"] == true
+
+    Regex.match?(~r/\Am7\.[a-z0-9.-]+\z/, id) and
+      closed?(entry, if(attended, do: @attended_keys, else: @case_keys)) and
+      (not attended or (objective?(entry["objective"]) and ceilings?(entry["ceilings"]))) and
       entry["lane"] in @lanes and is_boolean(entry["attended"]) and
       entry["attended"] == (entry["lane"] == "m7-operator") and
       is_boolean(entry["credential"]) and entry["driver"] in @drivers and
       status?(entry["status"]) and is_list(entry["steps"]) and entry["steps"] != [] and
       entry["steps"] == Enum.uniq(entry["steps"])
+  end
+
+  defp objective?(text), do: is_binary(text) and text != "" and byte_size(text) <= 512
+
+  defp ceilings?(ceilings) do
+    closed?(ceilings, ~w(runs run_ms maintenance maintenance_ms holds hold_ms cleanup_ms)) and
+      Enum.all?(~w(runs maintenance holds), &(is_integer(ceilings[&1]) and ceilings[&1] >= 0)) and
+      Enum.all?(@unit_caps, fn {key, cap} ->
+        is_integer(ceilings[key]) and ceilings[key] > 0 and ceilings[key] <= cap
+      end) and is_integer(ceilings["cleanup_ms"]) and ceilings["cleanup_ms"] > 0
   end
 
   defp status?("ready"), do: true

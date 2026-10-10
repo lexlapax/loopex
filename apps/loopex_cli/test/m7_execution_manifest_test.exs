@@ -115,6 +115,51 @@ defmodule LoopexCli.M7ExecutionManifestTest do
     end
   end
 
+  # Concept: the attended block's ceiling is fixed before any run: per case,
+  # its fixed counts at their per-unit ceilings, cleanup and a 60,000-ms setup
+  # allowance; the block is their sum.
+  test "attended cases pin an objective and finite ceilings within the plan's bounds", f do
+    operator = f.manifest["lanes"]["m7-operator"]
+
+    totals =
+      for id <- operator do
+        %{"objective" => objective, "ceilings" => c} = f.manifest["cases"][id]
+        assert is_binary(objective) and objective != ""
+        assert c["run_ms"] <= 600_000 and c["maintenance_ms"] <= 60_000
+        assert c["hold_ms"] <= 120_000
+
+        total =
+          c["runs"] * c["run_ms"] + c["maintenance"] * c["maintenance_ms"] +
+            c["holds"] * c["hold_ms"] + c["cleanup_ms"] + 60_000
+
+        assert ExecutionManifest.case_ceiling(f.manifest, id) == total
+        total
+      end
+
+    assert Enum.sum(totals) == 25_800_000
+    assert ExecutionManifest.case_ceiling(f.manifest, "m7.pipe-answer") == nil
+
+    ceilings = ["cases", "m7.repair", "ceilings"]
+
+    for changed <- [
+          put_in(f.manifest, ceilings ++ ["run_ms"], 600_001),
+          put_in(f.manifest, ceilings ++ ["maintenance_ms"], 60_001),
+          put_in(f.manifest, ceilings ++ ["hold_ms"], 120_001),
+          put_in(f.manifest, ceilings ++ ["cleanup_ms"], 0),
+          put_in(f.manifest, ceilings ++ ["runs"], -1),
+          put_in(f.manifest, ceilings ++ ["extra"], 1),
+          update_in(f.manifest, ["cases", "m7.repair"], &Map.delete(&1, "ceilings")),
+          put_in(f.manifest, ["cases", "m7.repair", "objective"], ""),
+          put_in(
+            f.manifest,
+            ["cases", "m7.pipe-answer", "ceilings"],
+            f.manifest["cases"]["m7.repair"]["ceilings"]
+          )
+        ] do
+      assert ExecutionManifest.validate(changed) == {:error, :invalid_m7_cases}
+    end
+  end
+
   test "providers A and B pin distinct release names and B's exact registered cells", f do
     assert ExecutionManifest.credential_names(f.manifest) ==
              ~w(LOOPEX_PROVIDER_API_KEY OPENAI_API_KEY)
