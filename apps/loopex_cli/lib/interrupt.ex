@@ -86,28 +86,6 @@ defmodule LoopexCli.Interrupt do
   @doc """
   ## Concept
 
-  Installs the interrupt handler for one attachment.
-
-  ## Technical depth
-
-  Returns `:ok` even where the platform refuses a signal or the emulator has no
-  signal server to hold a handler, because a terminal that cannot install a
-  handler should still run the task; the operator's recourse is then
-  `loopex cancel`, which needs nothing from this process. The caller is
-  recorded as the terminal so the backstop can tell a stalled stop from a
-  finished one. `install_prepared/3` cannot make that trade, because a prepared
-  owner's capability has nowhere to go without a handler, and it reports the
-  refusal instead.
-  """
-  @spec install(Loopex.Attachment.t()) :: :ok
-  def install(attachment) do
-    _ = do_install(attachment, @grace_ms, nil, nil)
-    :ok
-  end
-
-  @doc """
-  ## Concept
-
   Installs the handler under the cleanup period the session actually committed,
   so the backstop that ends this process is sized by the operator's own number
   rather than by a fixed one this module chose.
@@ -121,7 +99,9 @@ defmodule LoopexCli.Interrupt do
   long time stopping is not halted while its executor is still inside the period
   it was promised. A period outside the admitted domain leaves this module's own
   grace in place rather than refusing to install: a terminal that cannot size its
-  backstop correctly should still be able to stop its run.
+  backstop correctly should still be able to stop its run. It returns `:ok` even
+  where the platform refuses a signal or the emulator has no signal server; the
+  operator's recourse is then `loopex cancel`. ADR 0070 retired `install/1`.
   """
   @spec install(Loopex.Attachment.t(), pos_integer()) :: :ok
   def install(attachment, cleanup_grace_ms) do

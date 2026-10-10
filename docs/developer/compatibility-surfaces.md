@@ -338,7 +338,7 @@ diagnostic; the ADR 0040 cases also explain what to check before retrying.
 `loopex artifact` reads objects through the
 `Loopex.ArtifactStore`
 port. The command's cross-application interrupt entries —
-`LoopexCli.Interrupt.install/1`, `install/2`, `install_prepared/3`,
+`LoopexCli.Interrupt.install/2`, `install_prepared/3`,
 `activate_prepared/1`, `abandon_prepared/1`, and `abandon_resume/2` — are
 described in
 [Runtime and embedding](runtime-and-embedding.md#technical-embedding-recovery).
