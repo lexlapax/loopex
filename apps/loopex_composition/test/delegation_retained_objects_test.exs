@@ -309,7 +309,14 @@ defmodule LoopexComposition.DelegationRetainedObjectsTest do
 
   defp open(context, options \\ []) do
     {:ok, owner} = RetainedObjects.open(context.root, "retained-test", context.lease, options)
-    on_exit(fn -> if Process.alive?(owner), do: GenServer.stop(owner) end)
+    # Concept: the owner is linked to and monitors the test process, so it ends
+    # with it. Technical depth: a stop racing that exit fails with the link's
+    # `:shutdown`; waiting for the owner's own DOWN joins it without a race.
+    on_exit(fn ->
+      monitor = Process.monitor(owner)
+      receive do: ({:DOWN, ^monitor, :process, ^owner, _reason} -> :ok)
+    end)
+
     owner
   end
 

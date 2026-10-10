@@ -3434,8 +3434,6 @@ defmodule LoopexCliTest do
       end)
     end
 
-    parent = self()
-
     {_, stdout, stderr} =
       OutputCapture.capture(fn _ -> Render.stream(:terminal_safe, next_event: next_event) end)
 
