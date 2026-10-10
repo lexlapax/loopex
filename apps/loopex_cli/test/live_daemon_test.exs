@@ -673,13 +673,20 @@ defmodule LoopexCli.LiveDaemonTest do
   # Concept: these peers exercise the actual client socket and original reader.
   # Technical depth: mutate one member of the current producer's valid reply,
   # monitor both original actors before replying, and join them under one
-  # captured 1,000 ms fixture cutoff. Body and cleanup errors remain separate.
+  # 1,000 ms cutoff taken when the reply is sent. Body and cleanup errors
+  # remain separate.
   defp negotiation_peer(context, change_reply, expected) do
     {:ok, reply} = LoopexProtocol.Session.V2.negotiate([@daemon_generation], [])
     assert reply["selected_generation"] == @daemon_generation
     assert reply["exact_schema_sha256"] == @daemon_schema_digest
     File.mkdir_p!(Path.dirname(context.socket))
-    cutoff = System.monotonic_time(:millisecond) + 1_000
+    # Concept: the client's own initialize timeout governs the handshake; the
+    # one-second bound starts when the reply is sent.
+    # Technical depth: a starved test process must not spend the client's
+    # timeout before it connects, so the pre-reply steps share the client's
+    # 30,000 ms default and every post-reply step stays inside one second.
+    handshake = System.monotonic_time(:millisecond) + 30_000
+    Process.delete(:negotiation_cutoff)
 
     {:ok, listener} =
       :gen_tcp.listen(0, [
@@ -693,7 +700,7 @@ defmodule LoopexCli.LiveDaemonTest do
 
     {caller, caller_monitor} =
       case negotiation_capture(fn ->
-             spawn_monitor(fn -> negotiation_client(parent, context.socket, cutoff) end)
+             spawn_monitor(fn -> negotiation_client(parent, context.socket, handshake) end)
            end) do
         {:ok, actors} ->
           actors
@@ -706,11 +713,11 @@ defmodule LoopexCli.LiveDaemonTest do
 
     body =
       negotiation_capture(fn ->
-        {:ok, peer} = :gen_tcp.accept(listener, negotiation_remaining(cutoff))
+        {:ok, peer} = :gen_tcp.accept(listener, negotiation_remaining(handshake))
 
         body =
           negotiation_capture(fn ->
-            request = negotiation_record(peer, cutoff)
+            request = negotiation_record(peer, handshake)
 
             assert request == %{
                      "method" => "initialize",
@@ -729,6 +736,8 @@ defmodule LoopexCli.LiveDaemonTest do
                   reply |> Map.put("request_id", request["request_id"]) |> change_reply.()
 
                 {:ok, encoded} = LoopexProtocol.Frame.encode(response)
+                cutoff = System.monotonic_time(:millisecond) + 1_000
+                Process.put(:negotiation_cutoff, cutoff)
                 assert :ok = :gen_tcp.send(peer, encoded)
 
                 assert_receive {:negotiation_result, ^caller, result},
@@ -760,6 +769,7 @@ defmodule LoopexCli.LiveDaemonTest do
 
             cleanup =
               negotiation_capture(fn ->
+                cutoff = Process.get(:negotiation_cutoff, handshake)
                 before_join = System.monotonic_time(:millisecond)
 
                 assert_receive {:DOWN, ^reader_monitor, :process, ^reader, :killed},
@@ -780,6 +790,7 @@ defmodule LoopexCli.LiveDaemonTest do
       end)
 
     send(caller, :finish)
+    cutoff = Process.get(:negotiation_cutoff, handshake)
 
     caller_cleanup =
       negotiation_capture(fn ->
@@ -829,9 +840,7 @@ defmodule LoopexCli.LiveDaemonTest do
 
   defp negotiation_client(parent, socket, cutoff) do
     result =
-      LoopexCli.DaemonClient.connect(socket,
-        timeout: negotiation_remaining(cutoff)
-      )
+      LoopexCli.DaemonClient.connect(socket)
 
     send(parent, {:negotiation_result, self(), result})
 
