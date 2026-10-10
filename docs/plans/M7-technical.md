@@ -277,6 +277,10 @@ increase can satisfy this gate. Before each provider attempt, validate its final
 staged request, including receipt revision 4 and applicable expanded-continuation
 accounting, against all configured bounds and the 65,536-byte ceiling. The earlier
 990-token prototype is a narrow arithmetic example, not this final-profile proof.
+The [2026-10-10 maintainer override](../developer/agent-context-map.md#disposition-m7-reference-profile-target-2026-10-10)
+admits explicit ceilings of 1,500 for `chat-coding` and `chat-coding-appendix`
+and 2,000 for `chat-coding-helpers`; every other demonstrated profile meets
+this target at a 512-byte workspace path.
 
 Trace flags map only to the existing runtime-scoped host API and ceilings.
 Bounded pending stderr output, separate drop/delivery-uncertainty counts,
