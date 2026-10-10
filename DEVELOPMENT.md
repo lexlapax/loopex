@@ -110,16 +110,21 @@ bash scripts/attended-release.sh --output LOG
 ```
 
 Run each once for the tested SHA. `DIR` and `LOG` are new retained-output paths
-outside the repository. The direct command below is the release check itself.
-M7 closure runs it once from a terminal, because `scripts/attended-release.sh`
-does not forward the M7 matrix arguments; the attended `m7-operator` cases read
-the operator's answers on that terminal:
+outside the repository. For M7 closure, load provider B's `OPENAI_API_KEY` the
+same way and pass the M7 matrix options to the attended runner, which forwards
+them unchanged to the release check and redacts both providers' values from
+its transcript:
 
 ```bash
-bash scripts/check-release.sh --attempts-index /absolute/retained/m7-attempts.jsonl \
+bash scripts/attended-release.sh --output LOG \
+  --attempts-index /absolute/retained/m7-attempts.jsonl \
   --writer WRITER --host HOST --markers /absolute/retained/m7-markers \
   --m7-config /absolute/retained/m7-config.json --operator Maintainer
 ```
+
+The runner forwards `--attempts-index`, `--writer`, `--host`, `--markers`,
+`--m7-config`, `--operator`, `--pins` and `--resume-matrix`, each at most once.
+The underlying release check accepts the same options directly.
 
 The full matrix requires `--attempts-index FILE`, the retained M7 attempts
 index outside the checkout, with the writer identity that holds it
