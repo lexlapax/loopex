@@ -138,6 +138,12 @@ defmodule LoopexComposition.ProviderBindings do
     end
   end
 
+  # Concept: evidence reads a model's exact registered mapping through the
+  # composition rather than naming the provider adapter.
+  @doc false
+  def mapping(model, reasoning, max_tokens),
+    do: ModelCapabilities.mapping(model, reasoning, max_tokens)
+
   # Concept: evidence reads a model's continuation requirement from the
   # composition's own capability mapping rather than the provider adapter.
   @doc false

@@ -114,7 +114,7 @@ defmodule Mix.Tasks.Loopex.M7Evidence.ExecutionManifest do
 
   defp cell?(model, %{"reasoning" => level, "mapping" => mapping} = cell) do
     map_size(cell) == 2 and
-      Loopex.LLM.ReqLLM.ModelCapabilities.mapping(model, level, 4_096) == {:ok, mapping}
+      LoopexComposition.ProviderBindings.mapping(model, level, 4_096) == {:ok, mapping}
   end
 
   defp cell?(_, _), do: false
