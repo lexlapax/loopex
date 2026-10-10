@@ -614,9 +614,10 @@ Credentials stay at the provider boundary, but the two profiles make different
 isolation claims. In the durable profile the companion adapter reads no
 environment variable: the host reads `LOOPEX_PROVIDER_API_KEY` once, deletes it
 and holds it in a custody process beside a routing registry
-(`LoopexComposition.CredentialHost`), and the adapter, given an opaque
-`:credential_token` and that `:credential_registry`, resolves it per
-invocation; a short-lived sender materializes it after the configured
+(`LoopexComposition.CredentialHost`) as a version-2 plane whose provider
+routes all name that one custody (ADR 0070), and the adapter, given the opaque
+`:provider_routes` and that `:credential_registry`, selects the request's
+route and resolves it per invocation; a short-lived sender materializes it after the configured
 companion has proved its protected entry and build identity. Neither
 the initial process image nor its arguments carry the credential. The companion
 uses it as a per-request option, with child diagnostics suppressed before ReqLLM

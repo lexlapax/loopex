@@ -93,7 +93,9 @@ defmodule LoopexComposition.CredentialPlaneTest do
           assert Keyword.fetch!(model.options, :adapter) == Loopex.LLM.ReqLLM
           model_options = Keyword.fetch!(model.options, :adapter_options)
 
-          token = Keyword.fetch!(model_options, :credential_token)
+          routes = Keyword.fetch!(model_options, :provider_routes)
+          assert Enum.sort(Map.keys(routes)) == ["anthropic", "openai", "openrouter"]
+          assert [token] = routes |> Map.values() |> Enum.uniq()
           registry = Keyword.fetch!(model_options, :credential_registry)
           capability = Keyword.fetch!(model_options, :tracing_capability)
 

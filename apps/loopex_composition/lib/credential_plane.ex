@@ -60,7 +60,7 @@ defmodule LoopexComposition.CredentialPlane do
   # Technical depth: validation precedes every environment operation. Only
   # returned linked children enter the reverse-order rollback list. Each error
   # joins their termination before returning; successful ownership stays with
-  # the opener. The unused legacy variable is deleted without being read.
+  # the opener. An unused released provider variable is deleted unread.
   @doc false
   def load_bindings(bindings, start_edge) when is_function(start_edge, 2) do
     with {:ok, validated} <- LoopexComposition.ProviderBindings.validate(bindings),
@@ -141,6 +141,27 @@ defmodule LoopexComposition.CredentialPlane do
     end
   end
 
+  @doc """
+  ## Concept
+
+  The bindings a host with one provider credential and no explicit bindings
+  composes.
+
+  ## Technical depth
+
+  ADR 0070 replaces the unversioned single-token plane: every compiled hosted
+  provider that requires a credential routes to the one released credential
+  slot, so the host's single reference becomes an ordinary version-2 plane
+  through the same loader, exclusions and route selection as explicit bindings.
+  """
+  @spec single_credential_bindings() :: map()
+  def single_credential_bindings do
+    for {provider, %{credential_required: true}} <-
+          Loopex.LLM.ReqLLM.InProcess.Guards.binding_catalog(),
+        into: %{},
+        do: {provider, %{"credential" => %{"env" => ReqLLM.credential_variable()}}}
+  end
+
   @doc false
   def binding_plane(loaded, capability) do
     %{
@@ -177,37 +198,6 @@ defmodule LoopexComposition.CredentialPlane do
     end
   catch
     _, _ -> {:error, :credential_binding_start_failed}
-  end
-
-  @doc false
-  @spec open((module(), keyword() -> {:ok, pid()} | {:error, term()})) ::
-          {:ok, %{capability: Capability.Handle.t(), model_options: keyword()}} | {:error, term()}
-  def open(start_edge) when is_function(start_edge, 2) do
-    variable = ReqLLM.credential_variable()
-    credential = System.get_env(variable)
-    System.delete_env(variable)
-
-    with :ok <- validate_credential(credential),
-         {:ok, registry_pid} <- start_edge.(CredentialRegistry, []),
-         {:ok, registry} <- CredentialRegistry.handle(registry_pid),
-         {:ok, custody_pid} <- start_edge.(CredentialCustody, credential: credential),
-         {:ok, custody} <- CredentialCustody.reference(custody_pid),
-         token = CredentialToken.new(),
-         :ok <- CredentialRegistry.put(registry, token, custody),
-         {:ok, capability_pid} <- start_edge.(Capability, []),
-         {:ok, capability} <- Capability.handle(capability_pid) do
-      Logger.debug("reference composition credential plane started")
-
-      {:ok,
-       %{
-         capability: capability,
-         model_options: [
-           credential_token: token,
-           credential_registry: registry,
-           tracing_capability: capability
-         ]
-       }}
-    end
   end
 
   defp validate_credential(credential)

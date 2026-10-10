@@ -176,12 +176,16 @@ defmodule LoopexComposition.ModelTest do
     assert candidate["budget_origins"] == current["budget_origins"]
   end
 
-  test "legacy, absent and unadmitted routes cannot prepare a configuration" do
+  test "absent and unadmitted routes cannot prepare a configuration" do
     current = current()
     authored = %{"model" => "anthropic:claude-haiku-4-5"}
 
+    # ADR 0070: a host with no bindings routes its single credential as a
+    # version-2 plane, so its sessions prepare like any other admitted route.
+    assert {:ok, _candidate} =
+             Model.prepare_configuration(current, authored, [], context(), reference([]).options)
+
     for host <- [
-          [],
           [provider_bindings: %{"openai" => env("OTHER_HOST_KEY")}],
           [provider_bindings: %{"ollama" => %{"credential" => %{"none" => true}}}]
         ] do

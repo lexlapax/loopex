@@ -48,7 +48,7 @@ defmodule LoopexComposition.CredentialHostTest do
     end)
 
     try do
-      host = %CredentialHost{registry: :registry, token: :token}
+      host = %CredentialHost{registry: :registry, provider_routes: %{}, excluded_env_names: []}
       assert CredentialHost.plane(host) == {:error, :unavailable}
       assert_receive {:capability_started, pid}
       refute Process.alive?(pid)
@@ -85,7 +85,10 @@ defmodule LoopexComposition.CredentialHostTest do
               assert Capability.bind(plane.capability, runtime) == :ok
 
               registry = Keyword.fetch!(plane.model_options, :credential_registry)
-              token = Keyword.fetch!(plane.model_options, :credential_token)
+              assert plane.version == 2
+              routes = Keyword.fetch!(plane.model_options, :provider_routes)
+              assert Enum.sort(Map.keys(routes)) == ["anthropic", "openai", "openrouter"]
+              assert [token] = routes |> Map.values() |> Enum.uniq()
               assert {:ok, custody} = CredentialRegistry.route(registry, token)
               assert {:ok, %{credential: ^credential}} = CredentialCustody.resolve(custody)
               runtime

@@ -47,10 +47,14 @@ defmodule LoopexComposition.Edges do
           else: {:error, {:invalid_composition_option, :credential_plane}}
 
       :error ->
-        case Keyword.fetch(options, :provider_bindings) do
-          {:ok, bindings} -> CredentialPlane.open(bindings, start_edge)
-          :error -> CredentialPlane.open(start_edge)
-        end
+        bindings =
+          Keyword.get_lazy(
+            options,
+            :provider_bindings,
+            &CredentialPlane.single_credential_bindings/0
+          )
+
+        CredentialPlane.open(bindings, start_edge)
     end
   end
 
@@ -70,24 +74,20 @@ defmodule LoopexComposition.Edges do
         end
 
       {:error, {:ok, plane}} ->
-        if valid_plane?(plane) do
-          case plane do
-            %{version: 2} -> {:ok, Map.keys(plane.model_options[:provider_routes])}
-            _ -> {:ok, :legacy}
-          end
-        else
-          {:error, {:invalid_composition_option, :credential_plane}}
-        end
+        if valid_plane?(plane),
+          do: {:ok, Map.keys(plane.model_options[:provider_routes])},
+          else: {:error, {:invalid_composition_option, :credential_plane}}
 
       {:error, :error} ->
-        {:ok, :legacy}
+        {:ok, Map.keys(CredentialPlane.single_credential_bindings())}
     end
   end
 
   # Concept: borrowed planes admit only their immutable routes and exclusions.
-  # Technical depth: preflight checks the whole closed shape and resolves every
-  # token in the supplied registry without reading credential values. The legacy
-  # branch keeps its separate grammar. A malformed keyword list is a refusal.
+  # Technical depth: preflight checks the whole closed version-2 shape and
+  # resolves every token in the supplied registry without reading credential
+  # values. ADR 0070 retired the unversioned plane. A malformed keyword list is
+  # a refusal.
   defp valid_plane?(
          %{version: 2, capability: capability, model_options: options, excluded_env_names: names} =
            plane
@@ -101,13 +101,6 @@ defmodule LoopexComposition.Edges do
       Enum.all?(options[:provider_routes], fn {_provider, token} ->
         match?({:ok, _}, CredentialRegistry.route(options[:credential_registry], token))
       end)
-  end
-
-  defp valid_plane?(%{capability: capability, model_options: options} = plane) do
-    Map.keys(plane) -- [:capability, :model_options, :capability_pid] == [] and
-      model_options?(options, [:credential_registry, :credential_token, :tracing_capability]) and
-      common_plane?(plane, capability, options) and
-      Loopex.LLM.ReqLLM.CredentialToken.validate(options[:credential_token]) == :ok
   end
 
   defp valid_plane?(_plane), do: false

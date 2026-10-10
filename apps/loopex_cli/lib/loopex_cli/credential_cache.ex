@@ -10,7 +10,7 @@ defmodule LoopexCli.CredentialCache do
   The cache is process-local. Opening it consumes the environment variable
   once; each plane starts a fresh runtime-bound trace capability. Explicit binding
   maps are immutable for the command lifetime; repeated opens borrow the same
-  routes, while a changed map or replacement of a legacy host refuses without
+  routes, while a changed map or replacement of a single-credential host refuses without
   reading or deleting another credential. The host
   process owns the linked custody and registry until that process ends.
   """

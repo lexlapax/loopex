@@ -42,7 +42,11 @@ defmodule LoopexCli.CredentialCustodyTest do
     for broken <- [
           %{plane | model_options: Keyword.delete(model_options, :credential_registry)},
           %{plane | model_options: model_options ++ [extra: @canary]},
-          %{plane | model_options: Keyword.put(model_options, :credential_token, @canary)},
+          %{
+            plane
+            | model_options:
+                Keyword.put(model_options, :provider_routes, %{"anthropic" => @canary})
+          },
           %{plane | model_options: Keyword.put(model_options, :credential_registry, :bogus)},
           %{plane | capability: :bogus},
           Map.put(plane, :extra, @canary)
@@ -73,7 +77,7 @@ defmodule LoopexCli.CredentialCustodyTest do
   test "custody and registry refuse canary-bearing requests and a forced crash reports no canary" do
     {holder, plane} = hosted_plane()
     registry = Keyword.fetch!(plane.model_options, :credential_registry)
-    token = Keyword.fetch!(plane.model_options, :credential_token)
+    token = Keyword.fetch!(plane.model_options, :provider_routes)["anthropic"]
     {:ok, custody} = ReqLLM.CredentialRegistry.route(registry, token)
 
     log =

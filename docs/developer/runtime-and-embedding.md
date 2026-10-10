@@ -705,9 +705,11 @@ the job transfer owner, because resumed sessions use their retained tools.
 
 **The provider credential is consumed once.** A composition started without a
 `:credential_plane` reads `LOOPEX_PROVIDER_API_KEY`, deletes it from the VM
-environment, and places it in a custody process beside a routing registry; the
-model edge receives only an opaque `:credential_token` and the
-`:credential_registry` handle. A second composition in the same VM finds no
+environment, and places it in a custody process beside a routing registry. The
+result is the version-2 single-credential plane of ADR 0070: every hosted
+provider that needs a credential routes to that one custody, and the model edge
+receives only opaque `:provider_routes` and the `:credential_registry` handle.
+Explicit `:provider_bindings` replace those routes. A second composition in the same VM finds no
 variable and returns `{:error, :provider_credential_required}` without starting
 anything. A host that composes more than one runtime in one lifetime — the
 command inspects and then resumes under separate runtimes, and the daemon holds

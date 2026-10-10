@@ -25,8 +25,9 @@ defmodule LoopexDaemon.Service do
   with `:credential` before environment or placement effects. Each unique slot
   has one owned custody; every route uses the same registry and fresh trace
   capability. Validated exclusions cover placement acquisition and release as
-  well as the composed Store, executor and provider launches. The legacy
-  value-bearing credential branch retains its separate lifetime and defaults.
+  well as the composed Store, executor and provider launches. A supplied
+  `:credential` value becomes the version-2 single-credential plane (ADR 0070)
+  with its own custody lifetime.
 
   Readiness is arbitrated by the sentinel: the owner submits the line, then
   after the sentinel's exact output success rechecks every component and
@@ -488,14 +489,20 @@ defmodule LoopexDaemon.Service do
          {:ok, capability_pid} <- Capability.start_link([]),
          state = track(state, :capability, capability_pid),
          {:ok, capability} <- Capability.handle(capability_pid) do
-      plane = %{
-        capability: capability,
-        model_options: [
-          credential_token: token,
-          credential_registry: registry,
-          tracing_capability: capability
-        ]
+      # ADR 0070: the supplied credential becomes the version-2 single-credential
+      # plane, one custody routed for every hosted provider that needs one.
+      routes =
+        Map.new(CredentialPlane.single_credential_bindings(), fn {provider, _binding} ->
+          {provider, token}
+        end)
+
+      loaded = %{
+        registry: registry,
+        provider_routes: routes,
+        excluded_env_names: [Loopex.LLM.ReqLLM.credential_variable()]
       }
+
+      plane = CredentialPlane.binding_plane(loaded, capability)
 
       Logger.debug("loopex daemon credential plane started")
 
