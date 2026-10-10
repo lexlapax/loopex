@@ -3,7 +3,7 @@
 
 Technical depth: [Retirement mechanics](0070-pre-1-superseded-surface-retirement-technical.md#technical-depth).
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-09
 - **Decision owner:** Maintainer
 - **Context:** The 2026-10-02 pre-1.0 current-contract disposition and the maintainer's direction that less code is better. Several superseded surfaces survive only because accepted ADRs 0009, 0016, 0019, 0024, 0031, 0032 and 0048 name them.
@@ -46,4 +46,4 @@ candidate.
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | — | — | — |
+| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-m7-adr-0070-2026-10-09) | candidate `3aa7fedd6703c98fb468e8e7f7a1a0bfeedfa37b`; concept `sha256:6576c8ab1d8081c3ee4808ad8c950746ef7df3071391a92a4a330f6b014aa439`; technical `sha256:199ed09307ad76813cac9e98c1729a5bc81dd26fedd108e5e537fa568fdc97a4` |

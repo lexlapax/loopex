@@ -7269,3 +7269,16 @@ existing `RetainedObjects` decoders for runtimes in the plan. The disposable
 a real helper parent and child with an unknown effect: restore into an empty
 root, complete state and workspace manifests, and no dispatch or helper rerun
 after reopen, on both supported pairs.
+
+<a id="disposition-m7-adr-0070-2026-10-09"></a>
+### M7 superseded surface retirement accepted, 2026-10-09
+
+Asked which ADR-held superseded surfaces to remove in M7, the maintainer
+selected all four groups: the no-caller leftovers, the legacy credential plane,
+the demo tools and the offline prepare-index import. They are recorded as
+[ADR0070](../adr/0070-pre-1-superseded-surface-retirement.md#concept) at
+candidate `3aa7fedd6703c98fb468e8e7f7a1a0bfeedfa37b` (concept SHA-256
+`6576c8ab1d8081c3ee4808ad8c950746ef7df3071391a92a4a330f6b014aa439`, technical
+`199ed09307ad76813cac9e98c1729a5bc81dd26fedd108e5e537fa568fdc97a4`), amending only
+the named clauses of ADRs 0009, 0016, 0019, 0024, 0031, 0032 and 0048.
+
