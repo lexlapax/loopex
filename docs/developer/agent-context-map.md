@@ -7406,3 +7406,17 @@ ADR 0039's custody and deadline guarantees. The test deadline stays 15 s.
 - **Where it is enforced.** The manifest's `profiles` set records each
   ceiling, and `M7ProfilesTest` enforces it. The runner gives each attempt its
   case's ceilings, so the earlier host widenings to 2,000 and 4,000 are gone.
+
+<a id="disposition-m7-closure-preparation-2026-10-10"></a>
+### M7 closure preparation decisions, 2026-10-10
+
+- **Darwin output proof.** The maintainer runs ADR 0068's Darwin output proof
+  on a Mac, under both pairs, against the exact candidate SHA. The Linux host
+  runs everything else.
+- **Cross-UID.** The release lane uses `LOOPEX_CROSS_UID_USER=loopex-xuid`, a
+  system user reachable by `sudo -n` for `/usr/bin/python3` only.
+- **Pinned load.** The thirty-run pinned-load sets retained at their earlier
+  SHAs stand for the candidate. The open `chat_pipe_test.exs:180` defect is
+  recorded under the stress-chase cap.
+- **Profile keys.** The manifest declares the demonstrated profile keys rather
+  than leaving the per-profile inventory empty.

@@ -49,7 +49,7 @@ All recorded in the context map with exact identities:
 
 ### Open work at this checkpoint, 2026-10-10
 
-All agent work is merged into `m7` at `a09e480b`; the closure-candidate
+All agent work is merged into `m7` at `3747e9a9`; the closure-candidate
 documentation commits that follow it move M7 to In review and change only
 documentation. No agent is running and no `worktree-agent-*` branch holds
 unmerged work. `main` (`e78fa64c`) is an ancestor of the candidate.

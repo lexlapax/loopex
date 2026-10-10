@@ -2,7 +2,8 @@
 
 ### Closure candidate nominated, 2026-10-10
 
-All agent work is merged at `a09e480b`. The documentation commits after it move
+All agent work is merged at `3747e9a9`, including the compacted tool text and
+the declared profile keys. The documentation commits after it move
 M7 to In review, rewrite the nine outcome rows as Proved with named proof
 obligations, and update the closure scaffold's manifest and earlier-attempt
 prose; they change no source. A focused both-pair run at `a09e480b` (93/93 per
@@ -17003,9 +17004,9 @@ is claimed.
 - [ ] Provision Linux cross-UID support, descriptor limits, retained evidence storage and attendance.
 - [ ] Finish all source, fixtures and documentation before committing the tested candidate.
 - [ ] Move the candidate to In review with complete proof mappings and Pending evidence slots.
-  Transition made by the candidate nomination commit on 2026-10-10. Left open until the reviewer accepts the mappings, including the plan's per-profile-key rows: the committed manifest declares no profile keys.
+  Transition made by the candidate nomination commit on 2026-10-10. Left open until the reviewer accepts the mappings, including the plan's per-profile-key rows: the manifest declares ten profile keys, pinned by `m7_profiles_test.exs`, under the 2026-10-10 reference-profile override.
 - [ ] Verify main is an ancestor.
-  Checked at nomination: `main` and `origin/main` (`e78fa64c`) are ancestors of `a09e480b` and the candidate. Repeat before the matrix, before the packet and before the administrative child.
+  Checked at nomination: `main` and `origin/main` (`e78fa64c`) are ancestors of the candidate. Repeat before the matrix, before the packet and before the administrative child.
 - [ ] Count the existing current-toolchain fast check; run the floor-toolchain check.
 - [ ] Run the full logical release matrix in its fixed order.
 - [ ] Complete every M7 case, subcase and operator evidence join.
