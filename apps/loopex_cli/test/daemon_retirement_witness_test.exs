@@ -74,8 +74,14 @@ defmodule LoopexCli.DaemonRetirementWitnessTest do
           :hide,
           {:line, 65_536},
           env: [{~c"LOOPEX_PROVIDER_API_KEY", ~c"daemon-command-placeholder"}],
+          # Concept: the witness child must boot on a host whose cores are saturated.
+          # Technical depth: a spinning scheduler yields its core, so on an
+          # oversubscribed CPU set each handoff between schedulers waits out other
+          # processes' time slices (measured: 0.3 s of CPU took 14 s to boot); with
+          # busy-wait off an idle scheduler sleeps and wakes with normal priority.
           args:
-            Enum.flat_map(:code.get_path(), fn path -> ["-pa", List.to_string(path)] end) ++
+            ["--erl", "+sbwt none +sbwtdcpu none +sbwtdio none"] ++
+              Enum.flat_map(:code.get_path(), fn path -> ["-pa", List.to_string(path)] end) ++
               ["-e", code]
         ],
         root,
