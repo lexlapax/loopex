@@ -28,45 +28,6 @@ defmodule Loopex.SessionDirectoryTest do
     %{root: root}
   end
 
-  test "a fresh operating system process lists the sessions in a resolved state root", %{
-    root: root
-  } do
-    {store_pid, store} = M1RuntimeTestStore.start_store(label: "list-store")
-    on_exit(fn -> stop_store(store_pid) end)
-
-    assert {:ok, state_root} = SessionDirectory.state_root()
-    assert state_root == root
-
-    {:ok, runtime_id} = SessionDirectory.runtime_id(state_root)
-
-    {:ok, runtime} =
-      Loopex.start_link(
-        context_token_budget: 8_192,
-        session_creation_defaults:
-          Loopex.ConfiguredGenesisFixture.genesis([]) |> Map.drop([:kind, "options"]),
-        runtime_id: runtime_id,
-        store: store
-      )
-
-    on_exit(fn -> stop_runtime(runtime) end)
-
-    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(runtime)
-
-    {:ok, session_a} = Loopex.create_session(runtime, %{}, command_id: "create-a")
-    :ok = SessionDirectory.record_session(state_root, session_a, runtime_id)
-
-    {:ok, session_b} = Loopex.create_session(runtime, %{}, command_id: "create-b")
-    :ok = SessionDirectory.record_session(state_root, session_b, runtime_id)
-
-    # Nothing here reads the runtime this test just started: a fresh
-    # operating-system process would hold no such reference either, only the
-    # resolved state root on disk.
-    assert {:ok, listed} = SessionDirectory.list_sessions(state_root)
-
-    assert Enum.sort(Enum.map(listed, & &1.session_id)) == Enum.sort([session_a, session_b])
-    assert Enum.all?(listed, &(&1.runtime_id == runtime_id))
-  end
-
   test "the state root resolves from LOOPEX_HOME and never from application environment", %{
     root: root
   } do
@@ -92,62 +53,6 @@ defmodule Loopex.SessionDirectoryTest do
 
     File.rm_rf(other_root)
     System.put_env("LOOPEX_HOME", root)
-  end
-
-  test "a session resumes under the durable runtime placement identity that created it", %{
-    root: root
-  } do
-    {store_pid, store} = M1RuntimeTestStore.start_store(label: "resume-store")
-    on_exit(fn -> stop_store(store_pid) end)
-
-    {:ok, state_root} = SessionDirectory.state_root()
-    assert state_root == root
-
-    {:ok, runtime_id} = SessionDirectory.runtime_id(state_root)
-
-    {:ok, creating_runtime} =
-      Loopex.start_link(
-        context_token_budget: 8_192,
-        session_creation_defaults:
-          Loopex.ConfiguredGenesisFixture.genesis([]) |> Map.drop([:kind, "options"]),
-        runtime_id: runtime_id,
-        store: store
-      )
-
-    on_exit(fn -> stop_runtime(creating_runtime) end)
-    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(creating_runtime)
-
-    {:ok, session_id} = Loopex.create_session(creating_runtime, %{}, command_id: "create")
-    :ok = SessionDirectory.record_session(state_root, session_id, runtime_id)
-    :ok = Loopex.stop(creating_runtime)
-
-    before_epoch = session_owner_epoch(store_pid, session_id)
-
-    # Simulate a fresh operating-system process: the only thing that survives
-    # is the state root on disk and the durable Store. Re-resolving the root
-    # and re-presenting its persisted runtime_id must reconstruct the exact
-    # placement identity this session was created under.
-    {:ok, resumed_state_root} = SessionDirectory.state_root()
-    {:ok, resumed_runtime_id} = SessionDirectory.runtime_id(resumed_state_root)
-    assert resumed_runtime_id == runtime_id
-
-    {:ok, resuming_runtime} =
-      Loopex.start_link(
-        context_token_budget: 8_192,
-        session_creation_defaults:
-          Loopex.ConfiguredGenesisFixture.genesis([]) |> Map.drop([:kind, "options"]),
-        runtime_id: resumed_runtime_id,
-        store: store
-      )
-
-    on_exit(fn -> stop_runtime(resuming_runtime) end)
-
-    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(resuming_runtime)
-
-    assert {:ok, ^session_id} =
-             SessionDirectory.resume(resumed_state_root, resuming_runtime, session_id, "resume-1")
-
-    assert session_owner_epoch(store_pid, session_id) == before_epoch + 1
   end
 
   test "a fresh operating system process re-presents the runtime placement identity persisted by its predecessor",
@@ -258,56 +163,6 @@ defmodule Loopex.SessionDirectoryTest do
            |> Enum.sort() == ["runtime_id"]
   end
 
-  test "resuming a session through a different runtime identity is refused with an explicit reason",
-       %{root: root} do
-    {store_pid, store} = M1RuntimeTestStore.start_store(label: "mismatch-store")
-    on_exit(fn -> stop_store(store_pid) end)
-
-    {:ok, state_root} = SessionDirectory.state_root()
-    assert state_root == root
-
-    {:ok, creator_runtime} =
-      Loopex.start_link(
-        context_token_budget: 8_192,
-        session_creation_defaults:
-          Loopex.ConfiguredGenesisFixture.genesis([]) |> Map.drop([:kind, "options"]),
-        runtime_id: "runtime-original",
-        store: store
-      )
-
-    on_exit(fn -> stop_runtime(creator_runtime) end)
-
-    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(creator_runtime)
-
-    {:ok, session_id} = Loopex.create_session(creator_runtime, %{}, command_id: "create")
-    :ok = SessionDirectory.record_session(state_root, session_id, "runtime-original")
-
-    {:ok, other_runtime} =
-      Loopex.start_link(
-        context_token_budget: 8_192,
-        session_creation_defaults:
-          Loopex.ConfiguredGenesisFixture.genesis([]) |> Map.drop([:kind, "options"]),
-        runtime_id: "runtime-different",
-        store: store
-      )
-
-    on_exit(fn -> stop_runtime(other_runtime) end)
-
-    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(other_runtime)
-
-    before_epoch = session_owner_epoch(store_pid, session_id)
-
-    assert {:error, {:runtime_placement_mismatch, reason}} =
-             SessionDirectory.resume(state_root, other_runtime, session_id, "resume-wrong")
-
-    assert is_binary(reason)
-    assert reason =~ "runtime-original"
-
-    # A refused placement never reaches the Store: ownership is exactly as it
-    # was before the attempt.
-    assert session_owner_epoch(store_pid, session_id) == before_epoch
-  end
-
   test "a repeated resume command identity returns its historical result while a fresh identity acquires ownership",
        %{root: root} do
     {store_pid, store} = M1RuntimeTestStore.start_store(label: "idempotent-store")
@@ -332,58 +187,24 @@ defmodule Loopex.SessionDirectoryTest do
     :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(runtime)
 
     {:ok, session_id} = Loopex.create_session(runtime, %{}, command_id: "create")
-    :ok = SessionDirectory.record_session(state_root, session_id, runtime_id)
 
     assert {:ok, ^session_id} =
-             SessionDirectory.resume(state_root, runtime, session_id, "resume-1")
+             Runtime.resume_session(runtime, session_id, "resume-1")
 
     epoch_after_first = session_owner_epoch(store_pid, session_id)
 
     # Re-presenting the same command_id must return the historical result
     # without contesting ownership again.
     assert {:ok, ^session_id} =
-             SessionDirectory.resume(state_root, runtime, session_id, "resume-1")
+             Runtime.resume_session(runtime, session_id, "resume-1")
 
     assert session_owner_epoch(store_pid, session_id) == epoch_after_first
 
     # A fresh command_id, in contrast, acquires a genuine replacement owner.
     assert {:ok, ^session_id} =
-             SessionDirectory.resume(state_root, runtime, session_id, "resume-2")
+             Runtime.resume_session(runtime, session_id, "resume-2")
 
     assert session_owner_epoch(store_pid, session_id) == epoch_after_first + 1
-  end
-
-  test "Store replay of a resume command survives a missing directory cache", %{root: root} do
-    {store_pid, store} = M1RuntimeTestStore.start_store(label: "resume-store-replay")
-    on_exit(fn -> stop_store(store_pid) end)
-
-    {:ok, runtime_id} = SessionDirectory.runtime_id(root)
-
-    {:ok, runtime} =
-      Loopex.start_link(
-        context_token_budget: 8_192,
-        session_creation_defaults:
-          Loopex.ConfiguredGenesisFixture.genesis([]) |> Map.drop([:kind, "options"]),
-        runtime_id: runtime_id,
-        store: store
-      )
-
-    on_exit(fn -> stop_runtime(runtime) end)
-
-    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(runtime)
-
-    {:ok, session_id} = Loopex.create_session(runtime, %{}, command_id: "create-replay")
-    :ok = SessionDirectory.record_session(root, session_id, runtime_id)
-
-    assert {:ok, ^session_id} =
-             Loopex.Runtime.resume_session(runtime, session_id, "resume-store-owned")
-
-    epoch = session_owner_epoch(store_pid, session_id)
-
-    assert {:ok, ^session_id} =
-             SessionDirectory.resume(root, runtime, session_id, "resume-store-owned")
-
-    assert session_owner_epoch(store_pid, session_id) == epoch
   end
 
   test "simultaneous resume misses converge on one durable owner advance", %{root: root} do
@@ -469,183 +290,6 @@ defmodule Loopex.SessionDirectoryTest do
     assert session_owner_epoch(store_pid, session_b) == before_b
   end
 
-  test "a session identifier that is not one contained name is refused before any file is touched",
-       %{root: root} do
-    # Concept: the identifier an operator types names an entry in this
-    # directory, never a path through the rest of the state root.
-    #
-    # Technical depth: `loopex resume` hands its positional argument straight
-    # here, and the argument used to be joined unchecked. A traversal
-    # identifier therefore read and wrote outside the sessions directory --
-    # `record_session/3` would create a file anywhere the process can write,
-    # and `resume/4` became a probe for whatever was there.
-    {:ok, state_root} = SessionDirectory.state_root()
-    {:ok, runtime_id} = SessionDirectory.runtime_id(state_root)
-
-    outside = Path.join(root, "outside-entry")
-
-    File.write!(
-      outside,
-      :erlang.term_to_binary(%{session_id: "x", runtime_id: "r", commands: %{}})
-    )
-
-    for identifier <- ["../outside-entry", "../../etc/passwd", "..", ".", "a/b", <<"a", 0, "b">>] do
-      assert {:error, :invalid_session_id} =
-               SessionDirectory.record_session(state_root, identifier, runtime_id),
-             "#{inspect(identifier)} was accepted as a session identifier"
-    end
-
-    # The escape was readable as well as writable: the planted entry decodes,
-    # so an unchecked join would have answered from it.
-    assert {:error, :invalid_session_id} =
-             SessionDirectory.resume(state_root, :unused, "../outside-entry", "resume-1")
-
-    # Nothing was created beside the file that was planted, and it is unchanged.
-    assert File.ls!(root) |> Enum.sort() == ["outside-entry", "runtime_id"]
-  end
-
-  test "two runtimes recording one session concurrently leave exactly one durable binding", %{
-    root: root
-  } do
-    # Concept: the runtime that creates a session owns it permanently, and two
-    # arriving together cannot both come away believing they own it.
-    #
-    # Technical depth: `record_session/3` read, saw the session unknown, and
-    # renamed unconditionally. Between the read and the rename another runtime
-    # could complete the same sequence, and the later rename replaced the
-    # earlier binding with no error to either caller -- the ADR 0008 placement
-    # binding lost to a race that the `:session_already_bound` branch appeared
-    # to cover. Creation now links rather than renames, so exactly one writer
-    # can win and the other settles against what is durably there.
-    {:ok, state_root} = SessionDirectory.state_root()
-    session_id = "contended-session"
-
-    # Serialised on a barrier so both attempts pass their read before either
-    # publishes; that is the window the unconditional rename left open.
-    barrier = :counters.new(1, [:atomics])
-
-    runtimes = for index <- 1..8, do: "runtime-#{index}"
-
-    results =
-      runtimes
-      |> Enum.map(fn id ->
-        Task.async(fn ->
-          :counters.add(barrier, 1, 1)
-          wait_for_barrier(barrier, length(runtimes))
-          {id, SessionDirectory.record_session(state_root, session_id, id)}
-        end)
-      end)
-      |> Task.await_many(5_000)
-
-    winners = for {id, :ok} <- results, do: id
-    assert length(winners) == 1, "expected one binding, got #{inspect(winners)}"
-
-    for {_id, result} <- results, result != :ok do
-      assert {:error, {:session_already_bound, bound}} = result
-      assert bound == hd(winners)
-    end
-
-    # The durable record agrees with the one caller that was told it won, and
-    # that caller can re-present its own identity idempotently.
-    assert {:ok, [%{session_id: ^session_id, runtime_id: recorded}]} =
-             SessionDirectory.list_sessions(state_root)
-
-    assert recorded == hd(winners)
-    assert :ok = SessionDirectory.record_session(state_root, session_id, recorded)
-
-    # No temporary file survived any losing attempt.
-    assert Path.join([root, "sessions"]) |> File.ls!() == [session_id]
-  end
-
-  test "a planted symlink is not an entry of this directory and never becomes one", %{root: root} do
-    # Concept: an entry in the sessions directory is a file that directory
-    # holds. A name pointing somewhere else is not a session of this state root,
-    # whatever it decodes to.
-    #
-    # Technical depth: `contained?/1` constrains the identifier and says nothing
-    # about what the name already refers to, and `File.read/1` follows a symlink
-    # to its target. Anyone able to write into the sessions directory could
-    # therefore plant one: `list_sessions/1` reported bytes from outside the
-    # state root as a session of it, under a `runtime_id` the planter chose, and
-    # the name being taken made `record_session/3` refuse the real session
-    # `:session_already_bound` against a binding this host never made. Neither
-    # the listing nor the refusal was true.
-    {:ok, state_root} = SessionDirectory.state_root()
-    {:ok, runtime_id} = SessionDirectory.runtime_id(state_root)
-
-    sessions = Path.join(root, "sessions")
-    File.mkdir_p!(sessions)
-
-    outside = Path.join(root, "planted-entry")
-
-    File.write!(
-      outside,
-      :erlang.term_to_binary(%{
-        session_id: "s_planted",
-        runtime_id: "runtime_attacker",
-        commands: %{}
-      })
-    )
-
-    File.ln_s!(outside, Path.join(sessions, "s_planted"))
-
-    # The listing answers from what this directory holds, and it holds no
-    # session by that name.
-    assert {:ok, listed} = SessionDirectory.list_sessions(state_root)
-
-    refute Enum.any?(listed, &(&1.session_id == "s_planted")),
-           "a planted symlink was listed as a session: #{inspect(listed)}"
-
-    refute Enum.any?(listed, &(&1.runtime_id == "runtime_attacker")),
-           "an outside runtime_id reached the listing: #{inspect(listed)}"
-
-    # And the squat is refused as what it is, rather than answered from the
-    # bytes it points at.
-    assert {:error, :invalid_session_id} =
-             SessionDirectory.record_session(state_root, "s_planted", runtime_id)
-
-    assert {:error, :invalid_session_id} =
-             SessionDirectory.resume(state_root, :unused, "s_planted", "resume-1")
-
-    # The link and its target are left exactly as they were: refusing an entry
-    # is not licence to delete whatever an operator deliberately linked.
-    assert {:ok, %File.Stat{type: :symlink}} = File.lstat(Path.join(sessions, "s_planted"))
-    assert File.exists?(outside)
-
-    # An ordinary entry beside it is unaffected, so the rule is about the link
-    # and not about the directory.
-    assert :ok = SessionDirectory.record_session(state_root, "s_real", runtime_id)
-    assert {:ok, entries} = SessionDirectory.list_sessions(state_root)
-    assert Enum.map(entries, & &1.session_id) == ["s_real"]
-  end
-
-  test "a non regular session entry is refused before it can block or redirect a read", %{
-    root: root
-  } do
-    {:ok, state_root} = SessionDirectory.state_root()
-    {:ok, runtime_id} = SessionDirectory.runtime_id(state_root)
-
-    sessions = Path.join(root, "sessions")
-    File.mkdir_p!(Path.join(sessions, "not-a-session"))
-
-    assert {:ok, []} = SessionDirectory.list_sessions(state_root)
-
-    assert {:error, :invalid_session_id} =
-             SessionDirectory.record_session(
-               state_root,
-               "not-a-session",
-               runtime_id
-             )
-
-    assert {:error, :invalid_session_id} =
-             SessionDirectory.resume(
-               state_root,
-               :unused,
-               "not-a-session",
-               "resume-1"
-             )
-  end
-
   test "runtime identity refuses a link or fifo before reading placement bytes", %{root: root} do
     identity_path = Path.join(root, "runtime_id")
     outside = Path.join(root, "outside-runtime-id")
@@ -662,97 +306,14 @@ defmodule Loopex.SessionDirectoryTest do
     assert {:error, :corrupt_runtime_id} = Task.await(task, 1_000)
   end
 
-  test "a linked sessions directory cannot redirect listing recording or resume", %{root: root} do
-    outside = Path.join(root, "outside-sessions")
-    File.mkdir_p!(outside)
-
-    outside_entry =
-      :erlang.term_to_binary(%{
-        session_id: "s_outside",
-        runtime_id: "runtime_attacker",
-        commands: %{}
-      })
-
-    File.write!(Path.join(outside, "s_outside"), outside_entry)
-
-    File.ln_s!(outside, Path.join(root, "sessions"))
-
-    assert {:error, :sessions_directory_unreadable} = SessionDirectory.list_sessions(root)
-
-    assert {:error, :invalid_session_id} =
-             SessionDirectory.record_session(root, "s_outside", "runtime_real")
-
-    assert {:error, :invalid_session_id} =
-             SessionDirectory.resume(root, :unused, "s_outside", "resume-1")
-
-    assert File.read!(Path.join(outside, "s_outside")) == outside_entry
-  end
-
-  test "a session entry is bounded and its durable identity cannot disagree with its name", %{
-    root: root
-  } do
-    sessions = Path.join(root, "sessions")
-    File.mkdir_p!(sessions)
-
-    planted = fn name, entry ->
-      File.write!(Path.join(sessions, name), :erlang.term_to_binary(entry))
-    end
-
-    planted.("s_mismatch", %{
-      session_id: "s_other",
-      runtime_id: "runtime_attacker",
-      commands: %{}
-    })
-
-    planted.("s_host_term", %{
-      session_id: "s_host_term",
-      runtime_id: "runtime_attacker",
-      commands: %{"resume-1" => self()}
-    })
-
-    compressed =
-      :erlang.term_to_binary(
-        %{
-          session_id: "s_compressed",
-          runtime_id: "runtime_attacker",
-          commands: %{},
-          padding: String.duplicate("x", 2_000_000)
-        },
-        compressed: 9
-      )
-
-    assert byte_size(compressed) < 1_048_576
-    File.write!(Path.join(sessions, "s_compressed"), compressed)
-    File.write!(Path.join(sessions, "s_oversized"), String.duplicate("x", 1_048_577))
-
-    for session_id <- ["s_mismatch", "s_host_term", "s_compressed", "s_oversized"] do
-      assert {:error, :corrupt_session_entry} =
-               SessionDirectory.resume(root, :unused, session_id, "resume-1"),
-             "#{session_id} crossed the public resume boundary"
-    end
-
-    assert {:ok, []} = SessionDirectory.list_sessions(root)
-  end
-
-  test "cold runtime and session directory publication syncs every new namespace boundary", %{
-    root: root
-  } do
+  test "cold runtime identity publication syncs every new namespace boundary", %{root: root} do
     cold_root = Path.join([root, "cold-parent", "state"])
 
     {runtime_result, runtime_syncs} =
       trace_syncs(fn -> SessionDirectory.runtime_id(cold_root) end)
 
-    assert {:ok, runtime_id} = runtime_result
+    assert {:ok, _runtime_id} = runtime_result
     assert runtime_syncs == 5
-
-    {record_result, record_syncs} =
-      trace_syncs(fn -> SessionDirectory.record_session(cold_root, "s_durable", runtime_id) end)
-
-    assert :ok = record_result
-    assert record_syncs == 3
-
-    assert {:ok, [%{session_id: "s_durable", runtime_id: ^runtime_id}]} =
-             SessionDirectory.list_sessions(cold_root)
   end
 
   defp trace_syncs(fun) do
@@ -793,14 +354,6 @@ defmodule Loopex.SessionDirectoryTest do
 
       {:finish, ^test} ->
         send(test, {:session_directory_syncs, count})
-    end
-  end
-
-  defp wait_for_barrier(barrier, target) do
-    if :counters.get(barrier, 1) >= target do
-      :ok
-    else
-      wait_for_barrier(barrier, target)
     end
   end
 

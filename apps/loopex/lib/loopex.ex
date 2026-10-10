@@ -593,57 +593,6 @@ defmodule Loopex do
   @doc """
   ## Concept
 
-  Records a session as known to the operator's session directory, bound to the
-  runtime placement identity that created it.
-
-  ## Technical depth
-
-  Delegates to `Loopex.SessionDirectory.record_session/3`. A host calls this
-  after `create_session/3` commits, so a later `list_sessions/1` or
-  `resume_known_session/4` can find it.
-  """
-  @spec track_session(Path.t(), binary(), binary()) :: :ok | {:error, term()}
-  def track_session(state_root, session_id, runtime_id),
-    do: SessionDirectory.record_session(state_root, session_id, runtime_id)
-
-  @doc """
-  ## Concept
-
-  Lists the sessions an operator's state root knows about.
-
-  ## Technical depth
-
-  Delegates to `Loopex.SessionDirectory.list_sessions/1` and reads only the
-  resolved state root's files, so a fresh operating-system process with no
-  runtime started yet sees the same sessions a live host would.
-  """
-  @spec list_sessions(Path.t()) :: {:ok, [SessionDirectory.entry()]} | {:error, term()}
-  def list_sessions(state_root), do: SessionDirectory.list_sessions(state_root)
-
-  @doc """
-  ## Concept
-
-  Resumes a session the operator's state root already knows about, enforcing
-  ADR 0008 runtime placement: the supplied runtime must carry the exact
-  `runtime_id` that created the session, and re-presenting a `command_id`
-  already resolved here returns its historical result instead of contesting
-  ownership again.
-
-  ## Technical depth
-
-  Delegates to `Loopex.SessionDirectory.resume/4`. A placement mismatch is
-  refused before any Store call, as `{:error, {:runtime_placement_mismatch,
-  reason}}` naming the runtime_id the session requires; only a fresh
-  `command_id` acquires a genuine replacement owner.
-  """
-  @spec resume_known_session(Path.t(), Runtime.t(), binary(), binary()) ::
-          {:ok, binary()} | {:error, term()}
-  def resume_known_session(state_root, runtime, session_id, command_id),
-    do: SessionDirectory.resume(state_root, runtime, session_id, command_id)
-
-  @doc """
-  ## Concept
-
   Acquires a session's owner and rebuilds its history without letting the
   recovered work start, returning the one-use capability that decides whether it
   ever does. This is what lets an operator's terminal recover the session's own
@@ -672,27 +621,6 @@ defmodule Loopex do
 
   def prepare_resume_session(_runtime, _session_id, _command_id),
     do: {:error, :invalid_session_resume}
-
-  @doc """
-  ## Concept
-
-  Prepared recovery for a session the operator's state root already knows about,
-  enforcing the same ADR 0008 runtime placement that `resume_known_session/4`
-  enforces.
-
-  ## Technical depth
-
-  Delegates to `Loopex.SessionDirectory.prepare_resume/4`. A placement mismatch
-  is refused before any Store call and therefore before any owner is contested;
-  a re-presented `command_id` returns `{:ok, {:replayed, session_id}}` from the
-  state root's own record rather than acquiring a second owner.
-  """
-  @spec prepare_resume_known_session(Path.t(), Runtime.t(), binary(), binary()) ::
-          {:ok, {:prepared, ResumeActivation.t()}}
-          | {:ok, {:replayed, binary()}}
-          | {:error, term()}
-  def prepare_resume_known_session(state_root, runtime, session_id, command_id),
-    do: SessionDirectory.prepare_resume(state_root, runtime, session_id, command_id)
 
   @doc """
   ## Concept
