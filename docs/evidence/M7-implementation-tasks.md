@@ -16700,6 +16700,14 @@ full restore175, operator attendance, helpers or whole integration.
 - [ ] Run the fast check once per clean integration candidate.
 - [ ] Run required selected real-provider, Node, daemon, long-bound and cross-UID lanes.
 - [ ] Run changed process-boundary cases thirty times under the prescribed pinned Linux load.
+  Open defect under the 2026-10-10 stress-chase cap: `chat_pipe_test.exs:180`
+  with the `""` fragment failed 2/30 with `{:reader_down, :noproc}` at `624795`
+  (`busywait-peerclose/final-chat_pipe-180-empty*`), then 0/75 in later
+  instrumented and uninstrumented pinned runs (`cli-residual-flakes/diag*`).
+  Hypothesis: the input reader's one-byte `IO.binread(:stdio, 1)` returned
+  early (an `input_failed` error or end of input), so the driver began its stop
+  before the half-close. This is unconfirmed and possibly a stdio defect. This
+  case is not counted toward the thirty-run row.
 - [ ] Independently review integration changes and fix confirmed defects without weakening checks.
 
 ### Added implementation subtasks
