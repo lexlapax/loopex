@@ -11,7 +11,8 @@ defmodule Loopex.LLM.ReqLLM.ModelCapabilities do
   ADR 0044 names the packaged LLMDB snapshot. This boundary verifies that exact
   snapshot and reads its model limits directly, avoiding runtime catalog filters,
   custom overlays and cold-load effects during inspection. The build embeds the
-  dependency snapshot already; no second catalog is retained here. Missing model
+  dependency snapshot already; only its verified model-limit rows are kept, once
+  per VM, so repeated captures do not re-read the whole catalog. Missing model
   rows or limits remain unknown. Only ADR 0044's literal Haiku alias is rewritten.
   The six-member plain record retains the source revision and canonical digest.
   Its reasoning subset contains only ADR 0044's nine literal cells proved by
@@ -230,12 +231,41 @@ defmodule Loopex.LLM.ReqLLM.ModelCapabilities do
   defp thinking(@fable, level),
     do: {%{"mode" => "adaptive", "effort" => level, "display" => "summarized"}, true}
 
+  # Concept: the pinned catalog is verified once per VM, not once per capture.
+  # Technical depth: reading and verifying the packaged snapshot costs about
+  # 0.3 s of CPU and 29 MB of heap and is deterministic for this pinned id, so
+  # only the verified model-limit rows are kept in `:persistent_term` under
+  # this module and id. A refusal is never kept and is re-read on next use.
   defp packaged do
+    key = {__MODULE__, @snapshot_id}
+
+    case :persistent_term.get(key, nil) do
+      nil ->
+        with {:ok, rows} = verified <- verified_rows() do
+          :persistent_term.put(key, rows)
+          verified
+        end
+
+      rows ->
+        {:ok, rows}
+    end
+  end
+
+  defp verified_rows do
     case LLMDB.Packaged.snapshot() do
       %{"snapshot_id" => @snapshot_id} = snapshot ->
         case LLMDB.Snapshot.verify(snapshot) do
-          :ok -> {:ok, snapshot}
-          _ -> {:error, :model_catalog_unavailable}
+          :ok ->
+            rows =
+              for {provider, %{"models" => models}} when is_map(models) <- snapshot["providers"],
+                  {id, row} <- models,
+                  into: %{},
+                  do: {{provider, id}, if(is_map(row), do: Map.get(row, "limits"))}
+
+            {:ok, rows}
+
+          _ ->
+            {:error, :model_catalog_unavailable}
         end
 
       _ ->
@@ -247,10 +277,9 @@ defmodule Loopex.LLM.ReqLLM.ModelCapabilities do
     _, _ -> {:error, :model_catalog_unavailable}
   end
 
-  defp limits(snapshot, model) do
+  defp limits(rows, model) do
     [provider, id] = String.split(model, ":", parts: 2)
-    row = get_in(snapshot, ["providers", provider, "models", id])
-    limits = if is_nil(row), do: %{}, else: Map.get(row, "limits") || %{}
+    limits = Map.get(rows, {provider, id}) || %{}
 
     if is_map(limits) and valid_limit?(limits["context"]) and valid_limit?(limits["output"]) do
       {:ok, %{"context_window" => limits["context"], "output_limit" => limits["output"]}}
