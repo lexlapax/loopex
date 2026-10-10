@@ -161,14 +161,32 @@ proof. These slots do not replace the plan's final Proved progress rows.
 | Ordered pre-dispatch pin log, completion recheck, reference and SHA-256 | Pending |
 | Final demonstrated profile-key inventory | Pending |
 
-The current catalog is `test/fixtures/m7/manifest.json`; its source verifier
-explicitly distinguishes four base fixtures from the pending complete
-execution manifest. Before candidate commitment, enumerate every demonstrated
-profile key here with exact resolved roots/catalogs, full instruction/tool/
-environment/role preimages and digests, and measured system-class estimate
-strictly below 1,000 tokens. All post-run values remain Pending until observed.
-Generic profile placeholders cannot prove that literal inventory complete.
-Never store credential values in this record.
+The committed manifest `test/fixtures/m7/manifest.json` declares the closed
+set of demonstrated profile keys below, each with its system-class ceiling and
+owning cases. The plan target is below 1,000 estimated tokens; the
+[maintainer override](../developer/agent-context-map.md#disposition-m7-reference-profile-target-2026-10-10)
+admits 1,500 for the two question-enabled coding chats and 2,000 for the
+helper parent. The preimage digest prefixes name the credential-free pins in
+`apps/loopex_cli/test/m7_profiles_test.exs`: instruction version, base and
+appendix with the ordered tool generations, without the per-attempt
+environment. Each run fills only these rows' Pending values: the exact resolved
+workspace, state root and catalog digest; the measured system-class estimate;
+and the complete instruction/tool/environment/role preimages with their
+retained reference and SHA-256. Runs never add a profile key. Never store
+credential values in this record.
+
+| Profile key | Ceiling | Owning cases | Preimage digest prefixes | Resolved workspace, state root and catalog digest | Measured system-class estimate | Retained preimages, reference and SHA-256 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `chat-coding` | 1,500 | `m7.baseline.durable`, `m7.external`, `m7.feature`, `m7.instructions.declined`, `m7.interrupt`, `m7.long`, `m7.oversized-source`, `m7.pipe-answer`, `m7.policy-denial`, `m7.provider-switch`, `m7.question-restart`, `m7.repair`, `m7.steer-barrier`, `m7.trace.file`, `m7.trace.flag` | `8b691d14f3d0` | Pending | Pending | Pending |
+| `chat-coding-appendix` | 1,500 | `m7.instructions.admitted`, `m7.instructions.changed` | `8e8b7d9e3e98`, `aec13e0034a4` | Pending | Pending | Pending |
+| `chat-coding-helpers` | 2,000 | `m7.review` | `6e4be2450e74` | Pending | Pending | Pending |
+| `chat-read-only` | 1,000 | `m7.cross-provider-maintenance`, `m7.thinking-bound`, `m7.thinking-cancel`, `m7.thinking-rounds` | `3e31a652f491` | Pending | Pending | Pending |
+| `daemon-coding` | 1,000 | `m7.daemon-detach` | `06ff722b14a5` | Pending | Pending | Pending |
+| `ask-coding` | 1,000 | `m7.trace.json` | `06ff722b14a5` | Pending | Pending | Pending |
+| `ask-read-only` | 1,000 | `m7.baseline.ask` | `48f116bc2060` | Pending | Pending | Pending |
+| `ephemeral-question` | 1,000 | `m7.ephemeral-question` | `b2c67a0244ac` | Pending | Pending | Pending |
+| `helper-investigate` | 1,000 | `m7.review` | `5fb824f7d2a9` | Pending | Pending | Pending |
+| `helper-review` | 1,000 | `m7.review` | `60a2011b68fa` | Pending | Pending | Pending |
 
 ## operator_step_evidence
 

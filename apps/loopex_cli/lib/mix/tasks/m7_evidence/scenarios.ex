@@ -394,7 +394,6 @@ defmodule Mix.Tasks.Loopex.M7Evidence.Scenarios do
       profile: fn profile ->
         profile
         |> put_in(["session", "context_token_budget"], 6_000)
-        |> put_in(["session", "system_class_tokens"], 2_000)
         |> put_in(["session", "max_tokens"], 1_024)
         |> Map.put("maintenance", %{"model" => profile["session"]["model"]})
       end,

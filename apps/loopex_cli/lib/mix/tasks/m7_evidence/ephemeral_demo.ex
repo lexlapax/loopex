@@ -54,23 +54,8 @@ defmodule Mix.Tasks.Loopex.M7Evidence.EphemeralDemo do
     end
 
     options =
-      [
-        policy: LoopexCli.Policy.AllowAll,
-        cwd: opts[:workspace],
-        tools: :coding,
-        questions: true,
-        # Concept: the coding tools plus the question tool exceed the default
-        # system budget. Technical depth: the host widens only that ceiling.
-        system_class_tokens: 4_000,
-        # The host composes the instruction envelope; this demonstration's is fixed.
-        instructions: %{
-          "version" => "m7.ephemeral.v1",
-          "base" => "Complete the task using the selected tools and the operator's answers.",
-          "environment" => "",
-          "appendix" => ""
-        },
-        question_responder: responder
-      ] ++
+      session_options(opts[:workspace]) ++
+        [question_responder: responder] ++
         Enum.flat_map([model: opts[:model], base_url: opts[:base_url]], fn
           {_key, nil} -> []
           pair -> [pair]
@@ -97,6 +82,25 @@ defmodule Mix.Tasks.Loopex.M7Evidence.EphemeralDemo do
     :ok = File.write(opts[:record], encoded, [:exclusive])
     IO.puts(output, "outcome: " <> outcome)
     if outcome == "completed" and answered, do: 0, else: 1
+  end
+
+  # Concept: the ephemeral session this host selects, under the default system
+  # ceiling. Technical depth: the coding tools, the question tool and the
+  # host's fixed instruction envelope; the profile measurement reads the same.
+  @doc false
+  def session_options(workspace) do
+    [
+      policy: LoopexCli.Policy.AllowAll,
+      cwd: workspace,
+      tools: :coding,
+      questions: true,
+      instructions: %{
+        "version" => "m7.ephemeral.v1",
+        "base" => "Complete the task using the selected tools and the operator's answers.",
+        "environment" => "",
+        "appendix" => ""
+      }
+    ]
   end
 
   defp response(_choices, "decline"), do: {:decline, nil}

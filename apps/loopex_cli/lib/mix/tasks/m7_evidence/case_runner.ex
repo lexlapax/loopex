@@ -672,6 +672,44 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
 
   defp fixture_profile(_case_id, _trusted, _context), do: {:ok, & &1}
 
+  # Concept: the configuration change a case's conversations start from, with
+  # the system ceiling of the profiles the manifest assigns to the case.
+  # Technical depth: held cases run the coding tools, scenarios apply their own
+  # change and fixture cases theirs. The session takes the largest of the
+  # case's profile ceilings and an enabled helper catalog the smallest, so a
+  # helper parent and its children each run under their own profile's ceiling.
+  @doc false
+  def case_transform(case_id, trusted, context) do
+    scenario = Scenarios.get(case_id)
+    execution = context.manifest["execution_manifest"]
+
+    transform =
+      cond do
+        case_id in @held -> {:ok, &put_in(&1, ["session", "tools"], "coding")}
+        is_nil(scenario) -> fixture_profile(case_id, trusted, context)
+        is_function(scenario.profile, 2) -> {:ok, &scenario.profile.(&1, context)}
+        true -> {:ok, scenario.profile}
+      end
+
+    ceilings =
+      for key <- execution["cases"][case_id]["profiles"],
+          do: execution["profiles"][key]["system_class_tokens"]
+
+    with {:ok, transform} <- transform do
+      {:ok,
+       fn profile ->
+         profile =
+           profile
+           |> transform.()
+           |> put_in(["session", "system_class_tokens"], Enum.max(ceilings))
+
+         if is_map(profile["delegation"]),
+           do: put_in(profile, ["delegation", "system_class_tokens"], Enum.min(ceilings)),
+           else: profile
+       end}
+    end
+  end
+
   defp execution_policy(%{capture: nil}), do: "ordinary"
   defp execution_policy(staged), do: Policy.identity(staged.capture)
 
@@ -720,7 +758,7 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
            pins: pins
          },
          {:ok, conversations} <- plan(case_id, entry, context),
-         {:ok, transform} <- fixture_profile(case_id, trusted, context),
+         {:ok, transform} <- case_transform(case_id, trusted, context),
          {:ok, config_argv} <- attempt_config(context.config_argv, workspace, root, transform),
          {:ok, prepared} <-
            M7FixtureChat.prepare(
@@ -754,15 +792,10 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
     scenario = Scenarios.get(case_id)
     workspace = Path.join(root, "workspace")
 
-    # A profile change may read the case's pins, such as a second provider.
-    transform =
-      if is_function(scenario.profile, 2),
-        do: &scenario.profile.(&1, context),
-        else: scenario.profile
-
     with :ok <- File.mkdir(workspace),
          :ok <- write_seed(workspace, scenario.seed),
          {:ok, conversations} <- scenario.plan.(Map.put(context, :workspace, workspace)),
+         {:ok, transform} <- case_transform(case_id, nil, context),
          {:ok, config_argv} <-
            attempt_config(context.config_argv, workspace, root, transform) do
       {:ok,
@@ -830,13 +863,8 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
          {:ok, pins} <- pins(["/bin/sh", runner]),
          {:ok, capture} <-
            Policy.prepare(case_id, context.manifest_digest, workspace, ["/bin/sh", runner], pins),
-         {:ok, config_argv} <-
-           attempt_config(
-             context.config_argv,
-             workspace,
-             root,
-             &put_in(&1, ["session", "tools"], "coding")
-           ) do
+         {:ok, transform} <- case_transform(case_id, trusted, context),
+         {:ok, config_argv} <- attempt_config(context.config_argv, workspace, root, transform) do
       {:ok,
        %{
          name: case_id,
