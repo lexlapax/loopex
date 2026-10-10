@@ -123,6 +123,7 @@ defmodule LoopexCli.ProviderRuntimeIsolationTest do
                "tidewave_absent" => true,
                "req_dotenv_disabled" => true,
                "db_dotenv_disabled" => true,
+               "catalog_unloaded" => true,
                "no_core" => true
              }
 
