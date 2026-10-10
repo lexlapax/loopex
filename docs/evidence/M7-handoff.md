@@ -1,4 +1,4 @@
-# M7 handoff checkpoint, 2026-10-09 (Linux takeover)
+# M7 handoff checkpoint, 2026-10-10 (closure candidate)
 
 Part of the [evidence index](README.md). This is the current resume runbook. It
 does not accept an ADR, close M7 or authorize publication. The previous macOS
@@ -47,30 +47,48 @@ All recorded in the context map with exact identities:
 - Commit titles must be at most 72 characters with no trailers. Run
   `scripts/check-commit-messages.sh` before every push.
 
-### Open work at this checkpoint
+### Open work at this checkpoint, 2026-10-10
 
-m7 head at this checkpoint contains every agent unit; no agent is running and
-no `worktree-agent-*` branch holds unmerged work.
+All agent work is merged into `m7` at `a09e480b`; the closure-candidate
+documentation commits that follow it move M7 to In review and change only
+documentation. No agent is running and no `worktree-agent-*` branch holds
+unmerged work. `main` (`e78fa64c`) is an ancestor of the candidate.
 
-- ADR 0070 groups 1–4 are merged, but whole-app floor-pair runs for the
-  credential-plane and demo-tool removals and the single-catalog change are
-  still owed. Rerun the whole suites on both pairs, one pair at a time.
-- Composition whole suite: green on current (two seeds) and floor (one seed);
-  one more floor seed is owed.
-- Fix the isolated provider worker's per-call model-catalog cold load (context
-  map, 2026-10-09 credential-plane and cold-load disposition). This is what
-  makes `m7_case_runner_test` "thinking rounds" flake under load.
-- CLI source-scan failure: `apps/loopex_cli/lib/mix/tasks/m7_evidence/execution_manifest.ex`
-  names `Loopex.LLM`; route it through composition as was done for the other
-  m7_evidence files.
-- Then: the full `bash scripts/check.sh` on both pairs; the remaining T16 rows
-  (focused/fast/release lanes, process-boundary stress thirty times on Linux,
-  independent review); the T05 migration row and the T04 Control-slot row once
-  the full check is green; and T08/T06/T07/T12 rows whose remaining proof is the
-  full check or the paid/attended campaign.
-- Then T17: present the paid/attended case list and its cost; run the closure
-  matrix through `scripts/attended-release.sh` with the M7 options. T18 and T19
-  need separate maintainer approval.
+- Open defect, recorded under the 2026-10-10 stress-chase cap:
+  `chat_pipe_test.exs:180` with the `""` fragment failed 2/30 under pinned load
+  with `{:reader_down, :noproc}`, then 0/75 in later pinned runs. It is not
+  counted toward the T16 thirty-run row; the task ledger has the evidence and
+  hypothesis. A failure of it in either check command is still fixed, never
+  retried.
+- Next: the candidate fast check on both pairs, once each, from the clean
+  candidate SHA. Current pair: `bash scripts/check.sh`; floor pair:
+  `scripts/floor-lane.sh SHA --output-dir DIR --long-bound` or the milestone
+  guide's `env -u MIX_BUILD_PATH MIX_BUILD_ROOT=/absolute/M7-otp27-build`
+  floor command. Retain each complete output and SHA-256 outside the
+  repository.
+- Then T17: `scripts/attended-release.sh` with the M7 options from
+  [DEVELOPMENT.md](../../DEVELOPMENT.md): `--output LOG --attempts-index FILE
+  --writer W --host H --markers DIR --m7-config FILE --operator Maintainer`.
+  The maintainer approved the run with a $150 provider-spend cap and keeps
+  Ollama row 10; the maintainer attends the `m7-operator` block.
+- Prerequisites for that run:
+  - `LOOPEX_PROVIDER_API_KEY` (Anthropic, provider A) and `OPENAI_API_KEY`
+    (provider B), read with `read -rs`, never on the command line;
+  - `LOOPEX_RELEASE_OLLAMA_MODEL=ollama:qwen3.5:9b` with Ollama serving at
+    `127.0.0.1:11434`;
+  - `LOOPEX_CROSS_UID_USER` naming a second unprivileged user runnable with
+    `sudo -n` (passwordless) on this Linux host;
+  - Node 22.14.0 (`mise x ... node@22.14.0`) and an open-file limit of at
+    least 4,096;
+  - `LOOPEX_M7_EXTERNAL_REPOSITORY=~/projects/lexlapax/lapaxworks` at the
+    pinned `30a49d6`;
+  - the retained attempts index created once with
+    `scripts/m7-fixture-chat.exs --create` as in the
+    [M7 validation runbook](../operator/m7-validation.md), outside the
+    checkout, with its writer identity and markers directory.
+- Also owed for the candidate: the independent review, and ADR 0068's Darwin
+  physical output proof on both pairs, which this Linux host cannot run.
+- T18 (closure) and T19 (release) need separate maintainer approval.
 
 Worktree branches named `worktree-agent-*` hold unmerged agent work; merge or
 discard them deliberately. Their committed heads survive a restart; uncommitted
