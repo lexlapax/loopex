@@ -26,6 +26,14 @@ defmodule Loopex.AppServer.OutputWriterTest do
   @frame_bytes 2_097_152
   @fixture_grace 1_000
 
+  # Concept: any retirement reason the fixture reports decodes as data.
+  # Technical depth: `[:safe]` refuses unknown atoms, and a focused run may
+  # never load the writer whose reason atoms (e.g. :group_unproved) it reports.
+  setup_all do
+    Code.ensure_loaded!(OutputWriter)
+    :ok
+  end
+
   test "literal frame bytes and LF are written once before exact joins release them" do
     with_fixture(:file, fn fixture ->
       startup = Path.join(Path.dirname(fixture.output), "unwanted-startup.bash")
@@ -373,7 +381,10 @@ defmodule Loopex.AppServer.OutputWriterTest do
       {:state, %{phase: :writing, worker: worker} = active, false} when is_integer(worker) ->
         active
 
-      {:state, _active, _sealed} ->
+      {:state, _active, true} ->
+        early_retirement(fixture)
+
+      {:state, _active, false} ->
         Process.sleep(10)
         blocked_worker(fixture, cutoff)
     end
@@ -386,10 +397,18 @@ defmodule Loopex.AppServer.OutputWriterTest do
       {:state, %{phase: ^phase} = active, false} ->
         active
 
-      {:state, _active, _sealed} ->
+      {:state, _active, true} ->
+        early_retirement(fixture)
+
+      {:state, _active, false} ->
         Process.sleep(10)
         phase(fixture, phase, cutoff)
     end
+  end
+
+  defp early_retirement(fixture) do
+    record = next(fixture, &match?({:retired, _, _}, &1))
+    flunk("writer retired before the awaited state: #{inspect(record)}")
   end
 
   defp assert_stopped(pid, cutoff) do
