@@ -121,6 +121,54 @@ defmodule LoopexCli.AskExitTest do
            ) == %{status: 130, stdout: "", stderr: @tool_lines <> "ending completed\n"}
   end
 
+  # Concept: an interrupted question whose stop answered it still reports that
+  # answer's ending, however late its worker is scheduled.
+  #
+  # Technical depth: the command runs in this test process. The stop releases
+  # the blocked worker, which returns only once this process is waiting for
+  # it. Killing the worker as soon as the stop returned would drop the ending
+  # this asserts.
+  test "an interrupted ask keeps the ending its stop answered" do
+    test = self()
+    manager = spawn(fn -> receive do: (:release -> :ok) end)
+    on_exit(fn -> Process.exit(manager, :kill) end)
+    phases = :counters.new(1, [])
+    answer = {:ok, observation(:completed, %{"cleanup_grace_ms" => 5_000})}
+
+    result =
+      command(:text, answer,
+        install_interrupt: fn main, reference ->
+          send(main, {manager, reference, :interrupt})
+          {:ok, manager}
+        end,
+        signal_manager: fn -> manager end,
+        interrupt_phase: fn _, _ ->
+          :counters.add(phases, 1, 1)
+          if :counters.get(phases, 1) == 1, do: :idle, else: :stopping
+        end,
+        finish_interrupt: fn _, _ -> {:ok, :interrupted} end,
+        ask: fn _, _ ->
+          send(test, {:worker, self()})
+          receive do: (:release -> :ok)
+          await_waiting(test)
+          answer
+        end,
+        stop_session: fn _ ->
+          receive do: ({:worker, worker} -> send(worker, :release))
+          :ok
+        end
+      )
+
+    assert result == %{status: 130, stdout: "", stderr: @tool_lines <> "ending completed\n"}
+  end
+
+  defp await_waiting(pid) do
+    case Process.info(pid, :status) do
+      {:status, :waiting} -> :ok
+      _ -> await_waiting(pid)
+    end
+  end
+
   test "hostile input and facade terms never enter status-one diagnostics" do
     secret = "SENSITIVE\nline\t" <> String.duplicate("x", 70_000)
     nested = {:private, %{token: secret, nested: [secret, %{path: "/" <> secret}]}}
