@@ -110,6 +110,10 @@ and only not-dispatched cases run. A lane that started and did not pass ends
 the matrix; it is never resumed. Set `LOOPEX_M7_EXTERNAL_REPOSITORY` to the
 external repository's checkout for the operator lane's external task.
 
+For closure, run the same options through
+`bash scripts/attended-release.sh --output LOG ...`. It forwards them unchanged
+and retains a transcript with both providers' credential values redacted.
+
 ## External task
 
 The maintainer-selected external task changes `slugify` in

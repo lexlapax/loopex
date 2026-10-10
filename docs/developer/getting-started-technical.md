@@ -421,7 +421,7 @@ Concept: [Contributing: toolchain and checks](getting-started.md#concept-getting
 | The fast check for a prose-only change | `bash scripts/check.sh --docs` |
 | The mode CI picks from the diff | `bash scripts/check.sh --select` |
 | M6 closure checks for the exact committed candidate | `bash scripts/floor-lane.sh SHA --output-dir DIR --long-bound`, then `bash scripts/attended-release.sh --output LOG` with the history-safe provider credential, pinned Node, running Ollama and `LOOPEX_RELEASE_OLLAMA_MODEL` described in [DEVELOPMENT.md](../../DEVELOPMENT.md) |
-| M7 release check for the exact committed candidate | `bash scripts/check-release.sh --attempts-index FILE --writer ID --host ID --markers DIR --m7-config FILE --operator NAME`, once from a terminal, with providers A and B's credentials as described in [DEVELOPMENT.md](../../DEVELOPMENT.md) and the [M7 validation runbook](../operator/m7-validation.md) |
+| M7 closure release check for the exact committed candidate | `bash scripts/attended-release.sh --output LOG --attempts-index FILE --writer ID --host ID --markers DIR --m7-config FILE --operator NAME`, with providers A and B's credentials as described in [DEVELOPMENT.md](../../DEVELOPMENT.md) and the [M7 validation runbook](../operator/m7-validation.md) |
 
 A local pre-merge fast check counts only from a clean candidate. Retain its
 complete output and exact HEAD SHA outside the repository; otherwise use the
@@ -437,8 +437,8 @@ For the attended runner, load `LOOPEX_PROVIDER_API_KEY` using the
 [history-safe input pattern](../../DEVELOPMENT.md) before running it;
 do not put its value in a shell command line. The direct
 `bash scripts/check-release.sh` remains the underlying release check for
-other workflows; M6 closure does not run it again, and M7 closure runs it
-directly because the attended runner does not forward the M7 matrix arguments.
+other workflows; closure does not run it again. For M7 the attended runner
+forwards the matrix options to it.
 
 Each application's test helper excludes the release-only tags —
 `real_provider`, `long_bound`, `node_client`, and `cross_uid` where they occur —

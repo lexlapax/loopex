@@ -33,7 +33,7 @@ safe_line() {
   fi
 }
 usage() {
-  safe_line 2 'usage: attended-release.sh --output LOG [--answer-attended --disposition ANCHOR --milestone NAME --authority-sha AUTH_SHA]'
+  safe_line 2 'usage: attended-release.sh --output LOG [--answer-attended --disposition ANCHOR --milestone NAME --authority-sha AUTH_SHA] [M7 release-check options]'
   exit 2
 }
 
@@ -44,6 +44,10 @@ automatic=0
 anchor=''
 milestone=''
 authority_sha=''
+# The M7 closure matrix options pass through unchanged to check-release.sh,
+# each at most once; that script validates their values.
+check_args=()
+check_seen=' '
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --output)
@@ -65,6 +69,13 @@ while [ "$#" -gt 0 ]; do
     --authority-sha)
       [ "$#" -ge 2 ] && [ -z "$authority_sha" ] || usage
       authority_sha=$2
+      shift 2 ;;
+    --attempts-index|--writer|--host|--markers|--m7-config|--operator|--pins|--resume-matrix)
+      [ "$#" -ge 2 ] || usage
+      case "$check_seen" in *" $1 "*) usage ;; esac
+      case "$2" in ''|*$'\n'*|*$'\r'*) usage ;; esac
+      check_seen="$check_seen$1 "
+      check_args+=("$1" "$2")
       shift 2 ;;
     *) usage ;;
   esac
@@ -130,14 +141,23 @@ for name in LOOPEX_PROVIDER_API_KEY OPENAI_API_KEY ANTHROPIC_API_KEY OPENROUTER_
   case "$value" in *$'\n'*|*$'\r'*) fail credential_value_unredactable ;; esac
   if [ -n "$value" ]; then
     case "$output" in *"$value"*) fail output_contains_credential ;; esac
+    for argument in ${check_args[@]+"${check_args[@]}"}; do
+      case "$argument" in *"$value"*) fail argument_contains_credential ;; esac
+    done
   fi
 done
-unset value
+unset value argument
 
 scratch=$(mktemp -d "${TMPDIR:-/tmp}/loopex-attended.XXXXXX") || fail scratch_unavailable
 chmod 700 "$scratch"
 cleanup() { rm -rf "$scratch"; }
 trap cleanup EXIT
+# Both launch paths run this private wrapper, so the forwarded options reach
+# check-release.sh exactly; it holds no credential value.
+release_check="$scratch/release-check"
+printf 'exec bash %q' "$script_dir/check-release.sh" >"$release_check"
+for argument in ${check_args[@]+"${check_args[@]}"}; do printf ' %q' "$argument" >>"$release_check"; done
+printf '\n' >>"$release_check"
 
 if [ "$automatic" -eq 1 ]; then
   [[ "$anchor" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]] || fail invalid_anchor
@@ -206,9 +226,9 @@ script_command() (
   unset ANTHROPIC_API_KEY OPENROUTER_API_KEY
   export LOOPEX_PROVIDER_API_KEY OPENAI_API_KEY
   if [ "$platform" = Darwin ]; then
-    script -q -e -F /dev/null bash "$script_dir/check-release.sh"
+    script -q -e -F /dev/null bash "$release_check"
   else
-    SHELL=/bin/sh LOOPEX_ATTENDED_RELEASE_CHECK="$script_dir/check-release.sh" \
+    SHELL=/bin/sh LOOPEX_ATTENDED_RELEASE_CHECK="$release_check" \
       script -q -e -f -c 'exec bash "$LOOPEX_ATTENDED_RELEASE_CHECK"' /dev/null
   fi
 )
@@ -224,7 +244,7 @@ if [ "$automatic" -eq 1 ]; then
   }
   trap forward_signal HUP INT TERM
   with_redaction_keys python3 "$script_dir/attended-pty.py" --output "$output" \
-    --check "$script_dir/check-release.sh" &
+    --check "$release_check" &
   controller=$!
   while true; do
     wait "$controller"
