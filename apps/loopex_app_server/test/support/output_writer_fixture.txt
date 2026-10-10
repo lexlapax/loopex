@@ -120,6 +120,7 @@ defmodule Loopex.AppServer.OutputWriterFixture do
                 "order" -> "JOINED #{captured.nonce} #{captured.worker}\n"
                 "repeat" -> prefix <> "\n"
                 "trailing" -> "WRITTEN #{captured.nonce} extra\n"
+                "written" -> "WRITTEN #{captured.nonce}\n"
               end
               send(state.writer, {captured.port, {:data, bytes}})
               send_record(socket, :injected)

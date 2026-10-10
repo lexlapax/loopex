@@ -256,16 +256,8 @@ defmodule Loopex.LLM.ReqLLM.InProcess.Caller do
                   try do
                     case ReqLLM.generate_text(inline_model, prepared.context, options) do
                       {:ok, %ReqLLM.Response{} = response} ->
-                        metadata = %{
-                          usage: response.usage || %{},
-                          finish_reason: response.finish_reason,
-                          headers: Process.get(header_key, [])
-                        }
-
                         metadata =
-                          if is_nil(response.error),
-                            do: metadata,
-                            else: Map.put(metadata, :error, response.error)
+                          Mapping.response_metadata(response, Process.get(header_key, []))
 
                         with :ok <- Mapping.completed(metadata),
                              {:ok, reply} <- mapped_reply(prepared, response, metadata, tag) do
