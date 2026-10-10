@@ -372,10 +372,12 @@ defmodule Loopex.AppServer.OutputWriterTest do
   end
 
   defp blocked_worker(fixture),
-    do: blocked_worker(fixture, System.monotonic_time(:millisecond) + 5_000)
+    do: blocked_worker(fixture, System.monotonic_time(:millisecond) + 5_000, nil)
 
-  defp blocked_worker(fixture, cutoff) do
-    assert System.monotonic_time(:millisecond) < cutoff
+  defp blocked_worker(fixture, cutoff, last) do
+    assert System.monotonic_time(:millisecond) < cutoff,
+           "no blocked worker before the cutoff; last state #{inspect(last)} " <>
+             "(writer clock #{inspect(last && last.observed_at)})"
 
     case request(fixture, "state", &match?({:state, _, _}, &1)) do
       {:state, %{phase: :writing, worker: worker} = active, false} when is_integer(worker) ->
@@ -384,9 +386,9 @@ defmodule Loopex.AppServer.OutputWriterTest do
       {:state, _active, true} ->
         early_retirement(fixture)
 
-      {:state, _active, false} ->
+      {:state, active, false} ->
         Process.sleep(10)
-        blocked_worker(fixture, cutoff)
+        blocked_worker(fixture, cutoff, active)
     end
   end
 
