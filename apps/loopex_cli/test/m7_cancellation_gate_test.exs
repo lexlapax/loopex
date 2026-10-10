@@ -296,6 +296,7 @@ defmodule LoopexCli.M7CancellationGateTest do
       for pid <- [store_pid, script, executor], Process.alive?(pid), do: GenServer.stop(pid)
     end)
 
+    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(runtime)
     {:ok, session} = Loopex.create_session(runtime, %{}, command_id: "create")
     {:ok, attachment} = Loopex.attach(runtime, session, after_event_sequence: 0)
 

@@ -1,7 +1,8 @@
 defmodule LoopexCli.ChatControlTest do
   use ExUnit.Case, async: true
 
-  alias LoopexCli.{ChatControl, ChatOutput}
+  alias LoopexCli.{ChatControl, Output}
+  alias LoopexCli.Output.Memory
   alias LoopexProtocol.{Frame, Wire}
 
   test "input identities are opaque and quantities retain their exact wire spelling" do
@@ -216,10 +217,11 @@ defmodule LoopexCli.ChatControlTest do
              {:error, :invalid_control_record}
   end
 
-  test "encoded records drain unchanged through the bounded writer" do
-    StringIO.open("", [encoding: :latin1], fn device ->
-      {:ok, writer} = ChatOutput.start_link(device)
+  test "encoded records drain unchanged through the bounded output owner" do
+    {:ok, target} = Memory.start()
+    {:ok, writer, _sink} = Output.open(Memory.target(target), Output.acquisition())
 
+    try do
       {:ok, input} =
         ChatControl.encode(:input, %{
           input_sequence: 1,
@@ -238,13 +240,15 @@ defmodule LoopexCli.ChatControlTest do
           last_outcome: completed()
         })
 
-      assert :ok = ChatOutput.write(writer, :control, input)
-      assert :ok = ChatOutput.write(writer, :control, question)
-      assert :ok = ChatOutput.write(writer, :control, barrier)
-      assert :ok = ChatOutput.write(writer, :control, closing)
-      assert :ok = ChatOutput.finish(writer)
-      assert StringIO.contents(device) == {"", input <> question <> barrier <> closing}
-    end)
+      assert :ok = Output.write(writer, :control, :stdout, input)
+      assert :ok = Output.write(writer, :control, :stdout, question)
+      assert :ok = Output.write(writer, :control, :stdout, barrier)
+      assert :ok = Output.write(writer, :control, :stdout, closing)
+      assert :ok = Output.finish(writer)
+      assert Memory.contents(target) == {input <> question <> barrier <> closing, ""}
+    after
+      Memory.stop(target)
+    end
   end
 
   test "wait records retain run-only outcomes and the distinct question and uncertainty branches" do

@@ -20,7 +20,6 @@ defmodule Mix.Tasks.Loopex.M7Evidence.RestoreCase do
   step; `records` lists retained evidence. Any refusal leaves the checks false.
   """
 
-  alias Loopex.Executor.Local.{RestoreCodec, RestoreGuard}
   alias LoopexComposition.Restore
   alias LoopexComposition.Restore.IO, as: RestoreIO
   alias LoopexProtocol.Canonical
@@ -57,8 +56,8 @@ defmodule Mix.Tasks.Loopex.M7Evidence.RestoreCase do
     # Ordinary opens refuse the retired root at its own path before it moves.
     prevented =
       if File.exists?(source),
-        do: RestoreGuard.state(source) == {:error, :source_retired},
-        else: match?({:error, _}, RestoreGuard.state(retired))
+        do: Restore.source_state(source) == {:error, :source_retired},
+        else: match?({:error, _}, Restore.source_state(retired))
 
     if File.exists?(source) and not File.exists?(retired), do: :ok = File.rename(source, retired)
     :ok = File.mkdir(destination)
@@ -129,8 +128,8 @@ defmodule Mix.Tasks.Loopex.M7Evidence.RestoreCase do
   @rebound ["executor_epoch", "generation_id", "root_binding"]
 
   defp complete?(baseline, {:ok, restored}, backup, destination) do
-    with {:ok, expected} <- RestoreCodec.manifest(baseline, @total),
-         {:ok, actual} <- RestoreCodec.manifest(restored, @total) do
+    with {:ok, expected} <- Restore.manifest(baseline, @total),
+         {:ok, actual} <- Restore.manifest(restored, @total) do
       index = Map.new(actual, &{&1["path"], &1})
       added = Map.keys(index) -- Enum.map(expected, & &1["path"])
 
@@ -152,7 +151,7 @@ defmodule Mix.Tasks.Loopex.M7Evidence.RestoreCase do
 
   defp generation(root, path) do
     with {:ok, bytes} <- File.read(Path.join(root, path)),
-         {:ok, generation} <- RestoreCodec.decode(:generation, bytes),
+         {:ok, generation} <- Restore.generation(bytes),
          do: Map.drop(generation, @rebound)
   end
 

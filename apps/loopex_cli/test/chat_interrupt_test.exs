@@ -3,6 +3,7 @@ Code.require_file("../../loopex/test/support/agent_loop_helper.exs", __DIR__)
 
 defmodule LoopexCli.ChatInterruptTest do
   use ExUnit.Case, async: false
+  alias LoopexCli.Output.Memory
   @moduletag capture_log: true
   alias LoopexCli.{ChatDriver, Interrupt}
   alias Loopex.AgentLoopFixture, as: Fixture
@@ -28,8 +29,15 @@ defmodule LoopexCli.ChatInterruptTest do
     on_exit(fn -> Fixture.stop(fixture) end)
     {:ok, session} = Loopex.create_session(fixture.runtime, %{}, command_id: "create")
     {:ok, input} = StringIO.open("one\n/wait\n/quit\n", encoding: :latin1)
-    {:ok, output} = StringIO.open("", encoding: :latin1)
-    %{manager: manager, fixture: fixture, session: session, input: input, output: output}
+    {:ok, output} = Memory.start()
+
+    %{
+      manager: manager,
+      fixture: fixture,
+      session: session,
+      input: input,
+      output: output
+    }
   end
 
   test "normal driver close preserves the route until exact host finish", f do
@@ -175,7 +183,7 @@ defmodule LoopexCli.ChatInterruptTest do
     assert :ok = :gen_event.sync_notify(manager, :sigterm)
     assert {:ok, :interrupted} = Interrupt.finish_chat(manager, ref)
     assert ChatDriver.close(driver, :confirmed, 1) == 1
-    {_, transcript} = StringIO.contents(f.output)
+    {transcript, _} = Memory.contents(f.output)
     assert transcript =~ "\"exit_code\":1"
     assert transcript =~ "\"cleanup\":\"confirmed\""
   end
@@ -186,7 +194,9 @@ defmodule LoopexCli.ChatInterruptTest do
       {:ok, {:prepared, activation}} =
         Loopex.prepare_resume_session(f.fixture.runtime, f.session, "resume-#{signal}")
 
-      {:ok, driver} = driver(f)
+      # Each transport owner acquires its own output target exclusively.
+      {:ok, output} = Memory.start()
+      {:ok, driver} = driver(%{f | output: output})
       assert {:ok, _} = ChatDriver.prepare(driver)
       ref = make_ref()
       assert {:ok, manager} = Interrupt.install_chat(driver, ref, 5000)
@@ -250,7 +260,7 @@ defmodule LoopexCli.ChatInterruptTest do
     assert {"/wait\n/quit\n", ""} == StringIO.contents(f.input)
     send(host, :close)
     assert_receive {:closed, ^host, 1, {:ok, :interrupted}}, 1000
-    {_, transcript} = StringIO.contents(f.output)
+    {transcript, _} = Memory.contents(f.output)
     assert transcript =~ "\"cleanup\":\"unknown\""
     assert transcript =~ "\"outcome\":\"commit_unknown\""
   end
@@ -309,7 +319,7 @@ defmodule LoopexCli.ChatInterruptTest do
 
     assert_receive {:installed, ^host, driver, _ref, {:ok, manager}}, 1000
     state = :sys.get_state(driver)
-    pids = [driver, state.writer | Map.keys(state.workers)]
+    pids = [driver, elem(state.output, 1) | Map.keys(state.workers)]
     monitors = Enum.map(pids, &{&1, Process.monitor(&1)})
     for pid <- pids, do: assert(self() in elem(Process.info(pid, :monitored_by), 1))
     send(host, :exit)
@@ -409,7 +419,7 @@ defmodule LoopexCli.ChatInterruptTest do
         f.fixture.runtime,
         f.session,
         f.input,
-        f.output,
+        {:owned, f.output},
         Keyword.put(options, :cleanup_grace_ms, 5000)
       )
 

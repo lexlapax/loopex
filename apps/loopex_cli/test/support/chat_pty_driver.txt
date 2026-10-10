@@ -134,13 +134,13 @@ defmodule LoopexCli.ChatPTYDriver do
           true = LoopexComposition.ProjectResources.operator_present?() == (mode == :interactive)
           true = MapSet.size(state.ready) == 2
           monitors = monitor_actors(Map.keys(state.workers))
-          outer_monitors = monitor_actors([driver, state.writer])
+          outer_monitors = monitor_actors([driver, elem(state.output, 1)])
           send(host, {:driver, driver, monitors, outer_monitors, state.session})
 
           witness =
             if scenario == "pipe-stall" do
               {collector, monitor} =
-                spawn_monitor(fn -> pipe_witness(socket, host, driver, state.writer) end)
+                spawn_monitor(fn -> pipe_witness(socket, host, driver, elem(state.output, 1)) end)
 
               receive do
                 {:pipe_witness_ready, ^collector} -> :ok
@@ -351,10 +351,10 @@ defmodule LoopexCli.ChatPTYDriver do
           :inspect_writer ->
             {current, writer} = await_writer(driver, System.monotonic_time(:millisecond) + 5000)
             installed_at = System.monotonic_time(:nanosecond)
-            monitor = Process.monitor(current.pid)
-            true = self() in elem(Process.info(current.pid, :monitored_by), 1)
+            leader = writer.target.leader
+            true = os_alive?(leader)
             driver_state = :sys.get_state(driver)
-            {:ok, manager} = Map.fetch(driver_state, :writer)
+            manager = elem(driver_state.output, 1)
             grace = driver_state.cleanup_grace_ms
             true = is_integer(grace) and grace > 0
             cutoff = writer.delivery_deadline + grace
@@ -363,8 +363,8 @@ defmodule LoopexCli.ChatPTYDriver do
 
             send(
               witness,
-              {:snapshot, self(), monitor, manager, current.pid, token, writer.delivery_deadline,
-               grace, cutoff, installed_at}
+              {:snapshot, self(), manager, leader, token, writer.delivery_deadline, grace, cutoff,
+               installed_at}
             )
 
             send_control(
@@ -372,15 +372,14 @@ defmodule LoopexCli.ChatPTYDriver do
               {:writer_blocked,
                %{
                  "worker_waiting" => true,
-                 "worker_alive" => Process.alive?(current.pid),
-                 "kind" => Atom.to_string(current.item.kind),
-                 "bytes" => byte_size(current.item.bytes),
+                 "worker_alive" => true,
+                 "kind" => Atom.to_string(current.kind),
+                 "bytes" => byte_size(current.bytes),
                  "retained_bytes" => writer.bytes,
-                 "result_pending" => current.result == nil,
+                 "result_pending" => true,
                  "pending_control" => true,
                  "delivery_cutoff_present" => is_integer(writer.delivery_deadline),
-                 "worker" => pipe_identity(current.pid),
-                 "original_monitor" => pipe_identity(monitor),
+                 "worker" => os_identity(leader),
                  "manager" => pipe_identity(manager),
                  "timer_token" => pipe_identity(token),
                  "delivery_deadline_ms" => writer.delivery_deadline,
@@ -391,42 +390,21 @@ defmodule LoopexCli.ChatPTYDriver do
                }}
             )
 
-            reason =
-              receive do
-                {:DOWN, ^monitor, :process, pid, reason} when pid == current.pid -> reason
-              after
-                max(cutoff - System.monotonic_time(:millisecond), 0) ->
-                  # Concept: a cutoff still admits an already-delivered exact join.
-                  # Technical depth: inspect the mailbox immediately with no
-                  # additional wait before diagnostics. A dead PID alone proves
-                  # nothing; absence of this monitor's DOWN remains a failure.
-                  receive do
-                    {:DOWN, ^monitor, :process, pid, reason} when pid == current.pid -> reason
-                  after
-                    0 ->
-                      send(
-                        witness,
-                        {:cutoff, current.pid, monitor, System.monotonic_time(:nanosecond)}
-                      )
+            # Concept: the blocked bytes are held by the writer's process group.
+            # Technical depth: absence of every group member, read from the
+            # process table before the shared reap cutoff, is the exact join.
+            case await_group_absent(leader, cutoff) do
+              :absent ->
+                joined_at = System.monotonic_time(:nanosecond)
+                send_control(socket, {:writer_down, :killed})
+                send(witness, {:original_down, leader, joined_at})
+                send(host, :writer_joined)
 
-                      send_control(
-                        socket,
-                        {:writer_join_timeout,
-                         %{
-                           "worker_alive" => Process.alive?(current.pid),
-                           "worker_status" => inspect(Process.info(current.pid, :status))
-                         }}
-                      )
-
-                      raise "actual pipe IO worker did not join"
-                  end
-              end
-
-            joined_at = System.monotonic_time(:nanosecond)
-            send_control(socket, {:writer_down, reason})
-            false = Process.alive?(current.pid)
-            send(witness, {:original_down, current.pid, monitor, reason, joined_at})
-            send(host, :writer_joined)
+              :present ->
+                send(witness, {:cutoff, leader, System.monotonic_time(:nanosecond)})
+                send_control(socket, {:writer_join_timeout, %{"worker_alive" => os_alive?(leader)}})
+                raise "actual pipe writer group did not join"
+            end
 
           :inspect_reader ->
             reader = await_reader(driver, System.monotonic_time(:millisecond) + 5000)
@@ -458,16 +436,13 @@ defmodule LoopexCli.ChatPTYDriver do
   # the driver's retained cleanup grace and is shared by both exact join waits.
   defp await_writer(driver, cutoff) do
     state = :sys.get_state(driver)
-    writer = :sys.get_state(state.writer)
+    writer = :sys.get_state(elem(state.output, 1))
 
-    case writer.current do
-      %{pid: pid, result: nil} = current ->
-        pending_control =
-          current.item.kind == :control or
-            Enum.any?(:queue.to_list(writer.queue), &(&1.kind == :control))
-
-        if Process.info(pid, :status) == {:status, :waiting} and pending_control and
-             is_integer(writer.delivery_deadline) do
+    case writer.active do
+      %{} = current ->
+        if (current.kind == :control or
+              Enum.any?(:queue.to_list(writer.queue), &(&1.kind == :control))) and
+             is_integer(writer.delivery_deadline) and writer.timer != nil do
           {current, writer}
         else
           await_writer_again(driver, cutoff)
@@ -477,6 +452,29 @@ defmodule LoopexCli.ChatPTYDriver do
         await_writer_again(driver, cutoff)
     end
   end
+
+  defp os_alive?(pid) do
+    {_, status} = System.cmd("ps", ["-p", Integer.to_string(pid), "-o", "pid="])
+    status == 0
+  end
+
+  defp await_group_absent(leader, cutoff) do
+    {table, 0} = System.cmd("ps", ["-e", "-o", "pgid="])
+
+    cond do
+      Integer.to_string(leader) not in String.split(table, ~r/\s+/, trim: true) ->
+        :absent
+
+      System.monotonic_time(:millisecond) >= cutoff ->
+        :present
+
+      true ->
+        Process.sleep(20)
+        await_group_absent(leader, cutoff)
+    end
+  end
+
+  defp os_identity(pid), do: "os:" <> Integer.to_string(pid)
 
   defp await_writer_again(driver, cutoff) do
     if System.monotonic_time(:millisecond) >= cutoff,
@@ -510,11 +508,11 @@ defmodule LoopexCli.ChatPTYDriver do
   # monitors. It never receives raw function arguments or process mailboxes.
   defp pipe_witness(socket, host, driver, manager) do
     patterns = [
-      {{LoopexCli.ChatOutput, :handle_info, 2},
+      {{LoopexCli.Output, :handle_info, 2},
        [{[{:output_deadline, :"$1"}, :_], [], [{:message, :"$1"}]}], [:local]},
-      {{LoopexCli.ChatOutput, :fail, 2},
+      {{LoopexCli.Output, :fail, 2},
        [{[:_, :output_drain_timeout], [], [{:message, :output_drain_timeout}]}], [:local]},
-      {{:erlang, :exit, 2}, [{[:"$1", :kill], [], [{:message, :"$1"}]}], []},
+      {{LoopexCli.Output.Stdio, :kill_group, 1}, [{[:"$1"], [], [{:message, :"$1"}]}], []},
       {{:erlang, :send_after, 3},
        [{[:"$1", :"$2", {:output_deadline, :"$3"}], [], [{:message, {{:"$1", :"$2", :"$3"}}}]}],
        []},
@@ -541,7 +539,6 @@ defmodule LoopexCli.ChatPTYDriver do
       manager: manager,
       monitors: monitors,
       worker: nil,
-      original_monitor: nil,
       records: [],
       patterns: patterns,
       fence: nil,
@@ -553,20 +550,20 @@ defmodule LoopexCli.ChatPTYDriver do
 
   defp pipe_witness_loop(state) do
     receive do
-      {:trace_ts, manager, :call, {LoopexCli.ChatOutput, :handle_info, 2}, token, at}
+      {:trace_ts, manager, :call, {LoopexCli.Output, :handle_info, 2}, token, at}
       when manager == state.manager ->
         state
         |> pipe_record("deadline_handled", at, %{"token" => pipe_identity(token)})
         |> pipe_witness_loop()
 
-      {:trace_ts, manager, :call, {LoopexCli.ChatOutput, :fail, 2}, :output_drain_timeout, at}
+      {:trace_ts, manager, :call, {LoopexCli.Output, :fail, 2}, :output_drain_timeout, at}
       when manager == state.manager ->
         state |> pipe_record("output_drain_timeout", at, %{}) |> pipe_witness_loop()
 
-      {:trace_ts, manager, :call, {:erlang, :exit, 2}, target, at}
+      {:trace_ts, manager, :call, {LoopexCli.Output.Stdio, :kill_group, 1}, leader, at}
       when manager == state.manager ->
         state
-        |> pipe_record("kill", at, %{"target" => pipe_identity(target)})
+        |> pipe_record("kill", at, %{"target" => os_identity(leader)})
         |> pipe_witness_loop()
 
       {:trace_ts, manager, :call, {:erlang, :send_after, arity}, {delay, target, token}, at}
@@ -579,23 +576,14 @@ defmodule LoopexCli.ChatPTYDriver do
         })
         |> pipe_witness_loop()
 
-      {:snapshot, receiver, original, manager, worker, token, deadline, grace, cutoff, at}
+      {:snapshot, receiver, manager, leader, token, deadline, grace, cutoff, at}
       when manager == state.manager and state.worker == nil ->
-        monitor = Process.monitor(worker)
-
-        state = %{
-          state
-          | worker: worker,
-            original_monitor: original,
-            monitors: Map.put(state.monitors, monitor, worker)
-        }
+        state = %{state | worker: leader}
 
         state
         |> pipe_record("snapshot", at, %{
           "receiver" => pipe_identity(receiver),
-          "worker" => pipe_identity(worker),
-          "original_monitor" => pipe_identity(original),
-          "collector_monitor" => pipe_identity(monitor),
+          "worker" => os_identity(leader),
           "token" => pipe_identity(token),
           "deadline_ms" => deadline,
           "cleanup_grace_ms" => grace,
@@ -603,21 +591,18 @@ defmodule LoopexCli.ChatPTYDriver do
         })
         |> pipe_witness_loop()
 
-      {:original_down, worker, original, reason, at}
-      when worker == state.worker and original == state.original_monitor ->
+      {:original_down, leader, at} when leader == state.worker ->
         fence = :erlang.trace_delivered(:all)
         state = %{state | original_down: true, fence: fence}
 
         state
         |> pipe_record("original_down", at, %{
-          "worker" => pipe_identity(worker),
-          "monitor" => pipe_identity(original),
-          "reason" => Atom.to_string(reason)
+          "worker" => os_identity(leader),
+          "reason" => "killed"
         })
         |> pipe_witness_loop()
 
-      {:cutoff, worker, original, at}
-      when worker == state.worker and original == state.original_monitor ->
+      {:cutoff, worker, at} when worker == state.worker ->
         send_control(
           state.socket,
           {:writer_causal,
@@ -627,7 +612,7 @@ defmodule LoopexCli.ChatPTYDriver do
              "status_observed_at_ns" => System.monotonic_time(:nanosecond),
              "manager_status" => pipe_status(state.manager),
              "driver_status" => pipe_status(state.driver),
-             "worker_status" => pipe_status(worker)
+             "worker_alive" => os_alive?(worker)
            }}
         )
 

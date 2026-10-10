@@ -3,6 +3,7 @@ Code.require_file("../../loopex/test/support/agent_loop_helper.exs", __DIR__)
 
 defmodule LoopexCli.M7FixturePolicyTest do
   use ExUnit.Case, async: false
+  alias LoopexCli.Output.Memory
   @moduletag capture_log: true
 
   alias LoopexCli.{Chat, ChatConfiguration}
@@ -185,14 +186,14 @@ defmodule LoopexCli.M7FixturePolicyTest do
   test "ordinary profile validation precedes the trusted override and owned startup", f do
     File.write!(f.config, :json.encode(put_in(f.profile, ["policy"], "invented")))
     {:ok, input} = StringIO.open("/quit\n", encoding: :latin1)
-    {:ok, output} = StringIO.open("", encoding: :latin1)
+    {:ok, output} = Memory.start()
 
     assert Chat.run(["chat", "--config", f.config],
              cwd: f.root,
              home: nil,
              fixture_policy: f.capture,
              input: input,
-             output: output,
+             output: {:owned, output},
              acquire_placement: fn _, _ -> flunk("invalid authored profile reached placement") end
            ) == 1
 
@@ -227,7 +228,7 @@ defmodule LoopexCli.M7FixturePolicyTest do
     ]
 
     {:ok, input} = StringIO.open("repair\n/wait\n/status\n/quit\n", encoding: :latin1)
-    {:ok, output} = StringIO.open("", encoding: :latin1)
+    {:ok, output} = Memory.start()
     {:ok, diagnostic} = StringIO.open("", encoding: :latin1)
     parent = self()
 
@@ -235,7 +236,7 @@ defmodule LoopexCli.M7FixturePolicyTest do
       cwd: f.root,
       home: nil,
       input: input,
-      output: output,
+      output: {:owned, output},
       diagnostic_device: diagnostic,
       mode: :pipe,
       fixture_policy: f.capture,
@@ -263,7 +264,7 @@ defmodule LoopexCli.M7FixturePolicyTest do
 
       assert result == 0,
              inspect(%{
-               output: StringIO.contents(output),
+               output: Memory.contents(output),
                diagnostics: StringIO.contents(diagnostic),
                fault: fault
              })
@@ -295,7 +296,7 @@ defmodule LoopexCli.M7FixturePolicyTest do
     assert oracle_receipt["child_environment_names"] == ["PATH"]
     assert_suite(oracle_receipt["output"], Path.join(f.root, "trusted/agent.log"))
 
-    {_, stdout} = StringIO.contents(output)
+    {stdout, _} = Memory.contents(output)
     controls = for "@loopex " <> bytes <- String.split(stdout, "\n"), do: :json.decode(bytes)
     assert Enum.find(controls, &(&1["event"] == "status"))["policy"]["origin"] == "harness"
     assert List.last(controls)["cleanup"] == "confirmed"
@@ -308,9 +309,13 @@ defmodule LoopexCli.M7FixturePolicyTest do
 
     File.write!(f.config, :json.encode(put_in(f.profile, ["session", "tools"], "none")))
 
+    # Each command acquires its own output target exclusively.
+    {:ok, resumed_output} = Memory.start()
+
     resumed_options =
       opts
       |> Keyword.put(:input, resumed_input)
+      |> Keyword.put(:output, {:owned, resumed_output})
       |> Keyword.put(:with_runtime, fn options, callback ->
         with_stack(f, [%{text: "retained repair", calls: []}], options, callback, parent)
       end)
@@ -321,7 +326,7 @@ defmodule LoopexCli.M7FixturePolicyTest do
     assert Enum.count(resumed_rows, &(&1.payload.kind == "effect_intent_committed_v2")) == 2
     assert Enum.any?(resumed_request.messages, &(&1["content"] == "repair"))
     assert Enum.any?(resumed_request.messages, &(&1["content"] == "remember the repair"))
-    {_, resumed_stdout} = StringIO.contents(output)
+    {resumed_stdout, _} = Memory.contents(output)
 
     resumed_controls =
       for "@loopex " <> bytes <- String.split(resumed_stdout, "\n"), do: :json.decode(bytes)

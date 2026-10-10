@@ -3,6 +3,7 @@ Code.require_file("../../loopex/test/support/agent_loop_helper.exs", __DIR__)
 
 defmodule LoopexCli.ChatHelpersTest do
   use ExUnit.Case, async: false
+  alias LoopexCli.Output.Memory
   @moduletag capture_log: true
 
   alias Loopex.AgentLoopFixture
@@ -59,7 +60,7 @@ defmodule LoopexCli.ChatHelpersTest do
 
     File.write!(path, :json.encode(profile))
     {:ok, input} = StringIO.open("investigate\n/wait\n/quit\n", encoding: :latin1)
-    {:ok, output} = StringIO.open("", encoding: :latin1)
+    {:ok, output} = Memory.start()
     {:ok, diagnostic} = StringIO.open("", encoding: :latin1)
     test = self()
 
@@ -87,7 +88,7 @@ defmodule LoopexCli.ChatHelpersTest do
       cwd: root,
       home: nil,
       input: input,
-      output: output,
+      output: {:owned, output},
       diagnostic_device: diagnostic,
       mode: :pipe,
       placement_id: fn _ -> {:ok, "chat-helper-runtime"} end,
@@ -106,7 +107,7 @@ defmodule LoopexCli.ChatHelpersTest do
 
     assert Chat.run(["chat", "--config", path], options) == 0
     assert_received {:runtime, _runtime, handle}
-    {_, transcript} = StringIO.contents(output)
+    {transcript, _} = Memory.contents(output)
     assert transcript =~ ~s("state":"settled")
     refute Process.alive?(handle.helper)
     assert File.dir?(Path.join([root, "state", "delegation"]))

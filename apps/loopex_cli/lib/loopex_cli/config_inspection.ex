@@ -103,7 +103,7 @@ defmodule LoopexCli.ConfigInspection do
   def run(argv, cwd, home) do
     with {:ok, prepared} <- prepare(argv, cwd, home),
          {:ok, bytes} <- report(prepared),
-         :ok <- IO.write(:stdio, bytes) do
+         :ok <- LoopexCli.Output.put(bytes) do
       :ok
     else
       {:error, {class, pointer}} -> {:error, "#{class} #{pointer}"}

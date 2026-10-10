@@ -223,6 +223,23 @@ defmodule LoopexDaemon.Service do
     end
   end
 
+  # Concept: an event is routed only after progress emitted before it.
+  # Technical depth: Core offers a closure into this runtime sink before it
+  # commits the next durable event, but this owner forwards that sink on its own
+  # schedule. Registry asks for this bounded drain before routing an event, so
+  # the closure reaches Registry credit first. The answer carries no payload.
+  def handle_info({:loopex_daemon_drain_ingress, registry, ref}, %{registry: registry} = state)
+      when is_pid(registry) and is_reference(ref) do
+    case drain_progress(state, 32) do
+      :ok ->
+        send(registry, {:loopex_daemon_ingress_drained, ref})
+        {:noreply, state}
+
+      :error ->
+        fail_stop(state, :connections_lost)
+    end
+  end
+
   def handle_info({:DOWN, monitor, :process, _pid, _reason}, state)
       when monitor == state.progress_guardian_monitor or
              monitor == state.registry_progress_monitor,
@@ -664,6 +681,7 @@ defmodule LoopexDaemon.Service do
              Keyword.get(state.options, :admission_wait_ms, @default_admission_wait_ms),
            runtime: state.edges.runtime,
            fatal_recipient: self(),
+           progress_ingress: self(),
            index: state.pids.index,
            placement_identity: state.placement_identity,
            socket_path: option!(state, :socket_path),

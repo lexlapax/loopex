@@ -348,6 +348,7 @@ defmodule LoopexCli.ProviderRuntimeIsolationTest do
   end
 
   defp prompt(fixture, command_id) do
+    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(fixture.runtime)
     assert {:ok, session_id} = Loopex.create_session(fixture.runtime, %{}, command_id: "create")
     assert {:ok, attachment} = Loopex.attach(fixture.runtime, session_id, after_event_sequence: 0)
 

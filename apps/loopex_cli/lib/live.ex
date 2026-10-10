@@ -38,7 +38,7 @@ defmodule LoopexCli.Live do
 
   require Logger
 
-  alias LoopexCli.{DaemonClient, Render}
+  alias LoopexCli.{DaemonClient, Output, Render}
   alias LoopexProtocol.Wire
 
   @renewal_ms 10_000
@@ -284,7 +284,7 @@ defmodule LoopexCli.Live do
   # not UTF-8; the absent continuation is `null` and the absent `index_full`
   # is `false`.
   defp render_query(%{status: true}, %{"type" => "result", "result" => status}) do
-    IO.write([ordered(Enum.map(@status_keys, &{&1, Map.get(status, &1)})), "\n"])
+    Output.put([ordered(Enum.map(@status_keys, &{&1, Map.get(status, &1)})), "\n"])
     warn_if_full(Map.get(status, "index_full"))
   end
 
@@ -301,7 +301,7 @@ defmodule LoopexCli.Live do
 
     full = Map.get(page, "index_full", false)
 
-    IO.write([
+    Output.put([
       ordered([
         {"sessions", {:raw, ["[", Enum.intersperse(sessions, ","), "]"]}},
         {"next_after_session_id", readable(Map.get(page, "next_after_session_id"))},
@@ -384,7 +384,7 @@ defmodule LoopexCli.Live do
   # Concept: a signal detaches this window; admitted work stays the daemon's.
   defp detach(state) do
     Logger.debug("loopex live client detaching on a signal")
-    IO.puts(:stderr, "loopex: detached; the session continues in the daemon")
+    Output.puts(:stderr, "loopex: detached; the session continues in the daemon")
     finish(state, {:detached, 0})
   end
 
@@ -509,7 +509,7 @@ defmodule LoopexCli.Live do
          }) do
       {:ok, %{"type" => "admission", "status" => "accepted", "session_id" => encoded}, state} ->
         session_id = decode_identity(encoded)
-        IO.puts(:stderr, "loopex: session #{session_id}")
+        Output.puts(:stderr, "loopex: session #{session_id}")
         {:ok, %{state | session_id: session_id}}
 
       {:ok, record, state} ->
@@ -789,7 +789,7 @@ defmodule LoopexCli.Live do
   defp conclude({:fail, message}, state), do: {:fail, message, state}
 
   defp conclude({:stopping, "operator_stop"}, state) do
-    IO.puts(:stderr, "loopex: the daemon stopped; reconnect after it restarts")
+    Output.puts(:stderr, "loopex: the daemon stopped; reconnect after it restarts")
     {:done, :ok, %{state | client: nil}}
   end
 
@@ -839,11 +839,11 @@ defmodule LoopexCli.Live do
         {:loopex_daemon_record, ^reader, %{"type" => "event"} = record} ->
           delivered(state, DaemonClient.event(record))
 
-        # Concept: progress is handed to the renderer's own transient drain;
+        # Concept: progress joins the command's output owner in wire order;
         # an item this client cannot read is simply not shown.
         {:loopex_daemon_record, ^reader, %{"type" => "progress"} = record} ->
           with {:ok, item} <- DaemonClient.progress(record),
-               do: send(self(), {:loopex_progress, item})
+               do: Output.progress(Output.current(), item)
 
           next_event()
 
@@ -911,7 +911,7 @@ defmodule LoopexCli.Live do
         Logger.debug("loopex live client renewal refused")
 
         if state.role == :controller,
-          do: IO.puts(:stderr, "loopex: control was lost; continuing as an observer")
+          do: Output.puts(:stderr, "loopex: control was lost; continuing as an observer")
 
         {:ok, %{state | role: :observer, epoch: nil}}
 
@@ -922,7 +922,7 @@ defmodule LoopexCli.Live do
         {:fail, unresolved_step(Enum.at(state.steps, index)), state}
 
       {{:step, index}, _refused} ->
-        IO.puts(:stderr, "loopex: the steer was refused")
+        Output.puts(:stderr, "loopex: the steer was refused")
         {:ok, put_status(state, index, :refused)}
 
       {nil, _unrelated} ->
@@ -1053,7 +1053,7 @@ defmodule LoopexCli.Live do
   end
 
   defp warn_if_full(true) do
-    IO.puts(
+    Output.puts(
       :stderr,
       "loopex: the daemon's index is full, so this listing may omit sessions this root contains"
     )

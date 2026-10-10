@@ -286,6 +286,16 @@ defmodule LoopexCli.ResourceAdmissionWorkflowTest do
         test_seams: %{
           temp_root: %{tmp: fn -> tmp end},
           runtime_holder: %{
+            # The fake supervisor has no Core Control, so it supplies the
+            # creation-ready proof a real runtime publishes itself.
+            creation_startup_status: fn _runtime, _timeout ->
+              {:ok,
+               %{
+                 state: :ready,
+                 startup_id: <<0::256>>,
+                 startup_deadline_ms: System.monotonic_time(:millisecond) + 1_000
+               }}
+            end,
             runtime_start: fn _options ->
               {:ok, supervisor} = Supervisor.start_link([], strategy: :one_for_one)
 

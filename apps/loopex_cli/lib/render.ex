@@ -33,9 +33,8 @@ defmodule LoopexCli.Render do
   @idle_limit_ms 660_000
   @poll_ms 10
 
-  alias LoopexCli.ProgressConsumer
-
   alias Loopex.ProgressPayload
+  alias LoopexCli.Output
 
   @doc """
   ## Concept
@@ -100,13 +99,15 @@ defmodule LoopexCli.Render do
 
   ## Technical depth
 
-  Blocks on the durable event stream and drains whatever transient progress has
-  arrived alongside it. The durable stream decides when the run is over; progress
-  never does, because progress can stop for reasons that have nothing to do with
-  the run. A `:next_event` answering `:stop` ends the stream at once after
-  showing any held message. `:replay_through` names the last event sequence a daemon attachment
-  replays: a run that finished at or before it is history being shown, not the
-  end of this command.
+  Blocks on the durable event stream and writes each record through this
+  command's output owner, which renders transient progress from its own native
+  sink or from wire records the caller hands it. The durable stream decides
+  when the run is over; progress never does, because progress can stop for
+  reasons that have nothing to do with the run. A `:next_event` answering
+  `:stop` ends the stream at once after showing any held message.
+  `:replay_through` names the last event sequence a daemon attachment replays:
+  a run that finished at or before it is history being shown, not the end of
+  this command. `:output` defaults to the command's current output owner.
   """
   @spec stream(Loopex.Attachment.t() | nil, keyword()) :: :ok | {:error, binary()}
   def stream(attachment, options \\ []) do
@@ -117,7 +118,7 @@ defmodule LoopexCli.Render do
       {Keyword.get(options, :idle_limit_ms, @idle_limit_ms),
        Keyword.get(options, :replay_through, -1)},
       Keyword.get(options, :next_event, &Loopex.next_event/1),
-      ProgressConsumer.new(),
+      Keyword.get_lazy(options, :output, &Output.current/0),
       nil
     )
   end
@@ -134,51 +135,50 @@ defmodule LoopexCli.Render do
   """
   @spec sessions([map()]) :: :ok
   def sessions([]) do
-    IO.puts("no sessions in this state root")
+    Output.puts("no sessions in this state root")
     :ok
   end
 
   def sessions(entries) do
     for entry <- entries do
-      IO.puts(terminal_text(entry[:session_id] || entry["session_id"]))
+      Output.puts(terminal_text(entry[:session_id] || entry["session_id"]))
     end
 
     :ok
   end
 
-  defp follow(attachment, waited, on_run_started, bounds, next_event, progress, pending) do
-    progress = drain_progress(progress)
-
+  defp follow(attachment, waited, on_run_started, bounds, next_event, output, pending) do
     case next_event.(attachment) do
       # Concept: a caller whose stream has nothing more to show ends it
       # without a terminal event, and a held assistant message is still shown.
       :stop ->
-        _progress = render_pending(pending, drain_progress(progress))
+        render_pending(pending, output)
         :ok
 
       {:ok, event} ->
-        # The durable result is committed before its transient closure is sent.
-        # An assistant event is therefore held until the next durable event. By
-        # then the relay close that precedes later durable work has returned, so
-        # a healthy closure has reached this mailbox without this consumer
-        # inventing a timeout to decide the stream's disposition.
-        progress = drain_progress(progress)
-        progress = render_pending(pending, progress)
+        # The durable result is committed before its transient closure is
+        # offered. An assistant event is therefore held until the next durable
+        # event. By then the relay close that precedes later durable work has
+        # returned, so a healthy closure is in the output owner's native sink,
+        # which it drains before deciding, without anyone inventing a timeout
+        # to decide the stream's disposition.
+        render_pending(pending, output)
 
-        {progress, pending} =
+        pending =
           if event.kind == "assistant.message_appended" do
-            {progress, event}
+            event
           else
-            {render_event(event, progress), nil}
+            render(event, output)
+            nil
           end
 
         announce(event, on_run_started)
 
         if terminal?(event) and event.event_sequence > elem(bounds, 1) do
-          _progress = render_pending(pending, drain_progress(progress))
+          render_pending(pending, output)
           :ok
         else
-          follow(attachment, 0, on_run_started, bounds, next_event, progress, pending)
+          follow(attachment, 0, on_run_started, bounds, next_event, output, pending)
         end
 
       _absent when waited < elem(bounds, 0) ->
@@ -190,7 +190,7 @@ defmodule LoopexCli.Render do
           on_run_started,
           bounds,
           next_event,
-          progress,
+          output,
           pending
         )
 
@@ -202,9 +202,9 @@ defmodule LoopexCli.Render do
       # journal are unaffected and `loopex resume` continues reading from where
       # this stopped.
       _absent ->
-        _progress = render_pending(pending, drain_progress(progress))
-        IO.puts(:stderr, "loopex: stopped following this run; it may still be running")
-        IO.puts(:stderr, "loopex: `loopex resume` continues reading from the durable record")
+        render_pending(pending, output)
+        line(output, :stderr, "loopex: stopped following this run; it may still be running")
+        line(output, :stderr, "loopex: `loopex resume` continues reading from the durable record")
         :ok
     end
   end
@@ -223,70 +223,39 @@ defmodule LoopexCli.Render do
 
   defp announce(_event, _on_run_started), do: :ok
 
-  # Concept: drain whatever arrived, never wait for it.
-  #
-  # Technical depth: progress rides the transient plane and may be coalesced,
-  # dropped under backpressure, or lost with the plane when its owner changes.
-  # Waiting on it would make the terminal's liveness depend on something with no
-  # delivery guarantee.
-  defp drain_progress(progress) do
-    receive do
-      {:loopex_progress, item} ->
-        {next, actions} = ProgressConsumer.consume(progress, item)
-        Enum.each(actions, &render_progress/1)
-        drain_progress(next)
-    after
-      0 -> progress
-    end
-  end
-
-  defp render_progress({:stdout, text}) do
-    IO.write(text)
-  end
-
-  defp render_progress({:stderr, chunk}) do
-    IO.write(:stderr, chunk)
-  end
-
   # Concept: a complete transient answer is already in the terminal.
   #
-  # Technical depth: only the per-domain consumer may suppress this durable
-  # projection. It requires a gapless, count-matched complete closure and exact
-  # byte reconstruction anchored immediately before this durable event. Every
-  # other state renders the record as fallback.
-  defp render_event(%{kind: "assistant.message_appended"} = event, progress) do
-    case ProgressConsumer.durable_assistant(
-           progress,
-           Map.get(event, :event_sequence),
-           event["content"]
-         ) do
-      {next, :suppress} ->
-        next
+  # Technical depth: only the output owner may suppress this durable
+  # projection. It requires a gapless, count-matched complete closure, exact
+  # byte equality anchored immediately before this durable event and every
+  # streamed fragment's joined write. Every other state renders the record as
+  # fallback.
+  defp render_pending(nil, _output), do: :ok
 
-      {next, :render} ->
-        render(event)
-        next
-    end
+  defp render_pending(event, output) do
+    _ =
+      Output.assistant(
+        output,
+        Map.get(event, :event_sequence),
+        event["content"],
+        "\n#{terminal_text(event["content"])}\n"
+      )
+
+    :ok
   end
 
-  defp render_event(event, progress) do
-    render(event)
-    progress
+  defp line(output, destination, text) do
+    _ = Output.write(output, :text, destination, [text, "\n"])
+    :ok
   end
 
-  defp render_pending(nil, progress), do: progress
-  defp render_pending(event, progress), do: render_event(event, progress)
-
-  defp render(%{kind: "user.message_appended"} = event) do
-    IO.puts("> #{terminal_text(event["content"])}")
+  defp render(%{kind: "user.message_appended"} = event, output) do
+    line(output, :stdout, "> #{terminal_text(event["content"])}")
   end
 
-  defp render(%{kind: "assistant.message_appended"} = event) do
-    IO.puts("\n#{terminal_text(event["content"])}")
-  end
-
-  defp render(%{kind: "tool.started"} = event) do
-    IO.puts(
+  defp render(%{kind: "tool.started"} = event, output) do
+    line(
+      output,
       :stderr,
       "  · #{terminal_text(event["tool_id"])} (#{terminal_text(event["tool_call_id"])})"
     )
@@ -299,8 +268,9 @@ defmodule LoopexCli.Render do
   # takes exactly that locator. A terminal that printed only the outcome left the
   # operator holding a retrieval command with nothing to give it, which makes the
   # spill a loss from where they are standing even though nothing was lost.
-  defp render(%{kind: "tool.finished"} = event) do
-    IO.puts(
+  defp render(%{kind: "tool.finished"} = event, output) do
+    line(
+      output,
       :stderr,
       "  · #{terminal_text(event["tool_id"] || event["tool_call_id"])}: " <>
         terminal_text(event["outcome"])
@@ -309,7 +279,8 @@ defmodule LoopexCli.Render do
     for artifact <- event["artifacts"] || [] do
       locator = terminal_text(artifact["locator"])
 
-      IO.puts(
+      line(
+        output,
         :stderr,
         "    output beyond the tool's bound was retained: #{terminal_text(artifact["size"])} bytes, " <>
           "read it with `loopex artifact -- #{shell_quote(locator)}`"
@@ -323,13 +294,14 @@ defmodule LoopexCli.Render do
   # says plainly that the effect's truth was not established. Printing it as a
   # cancellation would tell an operator something false about work that may still
   # have taken effect.
-  defp render(%{kind: "run.finished"} = event) do
+  defp render(%{kind: "run.finished"} = event, output) do
     case event["outcome"] do
       "completed" ->
-        IO.puts(:stderr, "\nloopex: done")
+        line(output, :stderr, "\nloopex: done")
 
       "bound_reached" ->
-        IO.puts(
+        line(
+          output,
           :stderr,
           "\nloopex: stopped at the #{terminal_text(event["bound"])} bound " <>
             "(#{terminal_text(event["observed"])} against " <>
@@ -337,25 +309,31 @@ defmodule LoopexCli.Render do
         )
 
       "outcome_unknown" ->
-        IO.puts(:stderr, "\nloopex: stopped, but the effect's outcome is unknown")
-        IO.puts(:stderr, "loopex: reconcile with #{terminal_text(event["reconciliation_ref"])}")
+        line(output, :stderr, "\nloopex: stopped, but the effect's outcome is unknown")
+
+        line(
+          output,
+          :stderr,
+          "loopex: reconcile with #{terminal_text(event["reconciliation_ref"])}"
+        )
 
       "failed" ->
-        IO.puts(:stderr, "\nloopex: failed#{failure_text(event)}")
+        line(output, :stderr, "\nloopex: failed#{failure_text(event)}")
 
       other ->
-        IO.puts(:stderr, "\nloopex: #{terminal_text(other)}")
+        line(output, :stderr, "\nloopex: #{terminal_text(other)}")
     end
   end
 
-  defp render(%{kind: "steer.resolved"} = event) do
-    IO.puts(
+  defp render(%{kind: "steer.resolved"} = event, output) do
+    line(
+      output,
       :stderr,
       "  · steer #{terminal_text(event["command_id"])}: #{terminal_text(event["disposition"])}"
     )
   end
 
-  defp render(_other), do: :ok
+  defp render(_other, _output), do: :ok
 
   defp terminal?(%{kind: "run.finished"}), do: true
   defp terminal?(_event), do: false

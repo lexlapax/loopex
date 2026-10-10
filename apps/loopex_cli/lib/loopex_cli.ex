@@ -37,6 +37,7 @@ defmodule LoopexCli do
   alias LoopexCli.Interrupt
   alias LoopexComposition.Placement
   alias LoopexComposition.ProjectResources
+  alias LoopexCli.Output
   alias LoopexCli.Render
 
   @doc """
@@ -52,9 +53,14 @@ defmodule LoopexCli do
   """
   @spec main([binary()]) :: no_return()
   def main([command | _rest] = argv) when command in ["ask", "-p"] do
-    # Concept: ask admits and emits exact bytes, including non-ASCII UTF-8.
+    # Concept: the command owns its output before it reads or runs anything.
+    # Technical depth: ADR 0068 acquisition spends one 5,000-ms interval; an
+    # unusable target is never borrowed to print its own failure.
+    own_stdio_output()
+
+    # Concept: ask admits exact bytes, including non-ASCII UTF-8.
     # Technical depth: the escript boots in Latin-1 mode before OTP can read
-    # ahead. Keep that mode for IO.binread/binwrite's byte-preserving requests.
+    # ahead. Keep that mode for IO.binread's byte-preserving requests.
     if stdio_encoding(:latin1) != :ok do
       LoopexCli.AskResult.diagnostic(:command_failed) |> halt_ask()
     end
@@ -76,31 +82,54 @@ defmodule LoopexCli do
     if stdio_encoding(:latin1) != :ok, do: System.halt(1)
     :ok = Application.put_env(:logger, :level, :none)
     :ok = :logger.set_primary_config(:level, :none)
-    System.halt(LoopexCli.Chat.run(argv))
+
+    # Concept: chat routes run beside composition's helper registry.
+    # Technical depth: the escript starts no application itself; helper guards
+    # look up that registry before any session mutation.
+    case Application.ensure_all_started(:loopex_composition) do
+      {:ok, _applications} -> System.halt(LoopexCli.Chat.run(argv))
+      {:error, _reason} -> System.halt(1)
+    end
   end
 
   def main(["daemon" | arguments]) do
+    # Concept: the daemon is its own host; its readiness and stop records are
+    # the daemon sentinel's output, not this command's transcript.
     start_legacy_application_or_halt()
     LoopexCli.Daemon.main(arguments)
   end
 
   def main(["config" | _] = argv) do
+    own_stdio_output()
+
     # Concept: inspection preserves ambient credential references and starts no
     # runtime, provider or legacy credential host.
     # Technical depth: classify this command before legacy application startup
     # and credential discard. No input is read; Unicode output preserves the
     # selected paths while JSON escaping keeps each setting on one line.
     if stdio_encoding(:unicode) == :ok,
-      do: halt(dispatch(argv)),
+      do: halt(dispatch(argv, output: Output.current())),
       else: halt({:error, "configuration_report_unavailable"})
   end
 
   def main(argv) do
+    own_stdio_output()
     start_legacy_application_or_halt()
     unless composes_offline?(argv), do: LoopexComposition.CredentialHost.discard()
-    result = dispatch(argv, install_live_signals: true)
+    result = dispatch(argv, install_live_signals: true, output: Output.current())
     release_placement()
     halt(result)
+  end
+
+  # Concept: an operator command writes only through the output it owns.
+  # Technical depth: inherited stdout/stderr are acquired through the fixed
+  # writer before any application, runtime or provider work. Failure exits
+  # nonzero without writing through the unusable target.
+  defp own_stdio_output do
+    case Output.open(:stdio, Output.acquisition()) do
+      {:ok, output, sink} -> Output.put_current(output, sink)
+      {:error, _code} -> System.halt(1)
+    end
   end
 
   defp stdio_encoding(encoding) do
@@ -144,13 +173,22 @@ defmodule LoopexCli do
         :ok
 
       {:error, {application, reason}} when is_atom(application) ->
-        IO.write(:stderr, [
+        message = [
           "ERROR! Could not start application ",
           Atom.to_string(application),
           ": ",
           Application.format_error(reason),
           "\n"
-        ])
+        ]
+
+        # Concept: a command reports through its own output; the daemon host,
+        # which owns no command transcript, keeps its own standard error.
+        if Output.current?() do
+          _ = Output.put(:stderr, message)
+          _ = Output.finish(Output.current())
+        else
+          IO.write(:stderr, message)
+        end
 
         :erlang.halt(1)
     end
@@ -171,34 +209,63 @@ defmodule LoopexCli do
   @spec dispatch([binary()]) :: :ok | {:error, binary()} | {:detached, non_neg_integer()}
   def dispatch(argv), do: dispatch(argv, [])
 
+  # Concept: every command writes through one output owner it acquired first.
+  # Technical depth: `:output` names a handle the calling command already owns
+  # and will finish. An explicit `:output_target` is acquired here, before any
+  # runtime work, and finished before the result returns; without one, an
+  # output already current in this process is reused, else `:stdio` is
+  # acquired the same way. A failed delivery
+  # turns success into an error without changing durable outcomes. Chat
+  # acquires its own output inside its transport owner.
   @doc false
   @spec dispatch([binary()], keyword()) ::
           :ok | {:error, binary()} | {:detached, non_neg_integer()}
-  def dispatch(["run" | rest], options),
-    do: offline_or_live("run", rest, options, &run(&1, options))
-
   def dispatch(["chat" | _] = argv, options) do
-    case LoopexCli.Chat.run(argv, Keyword.get(options, :chat_options, [])) do
+    chat_options =
+      options
+      |> Keyword.get(:chat_options, [])
+      |> Keyword.put_new(:output, Keyword.get(options, :output_target, :stdio))
+
+    case LoopexCli.Chat.run(argv, chat_options) do
       0 -> :ok
       _ -> {:error, "chat_failed"}
     end
   end
 
-  def dispatch(["config" | _] = argv, _options),
-    do: LoopexCli.ConfigInspection.run(argv, File.cwd!(), System.get_env("LOOPEX_HOME"))
+  def dispatch(["run" | rest], options),
+    do: with_output(options, &offline_or_live("run", rest, &1, fn parsed -> run(parsed, &1) end))
+
+  def dispatch(["config" | _] = argv, options),
+    do:
+      with_output(options, fn _options ->
+        LoopexCli.ConfigInspection.run(argv, File.cwd!(), System.get_env("LOOPEX_HOME"))
+      end)
 
   def dispatch(["sessions" | rest], options),
-    do: offline_or_live("sessions", rest, options, &sessions/1)
+    do:
+      with_output(
+        options,
+        &offline_or_live("sessions", rest, &1, fn parsed -> sessions(parsed) end)
+      )
 
   def dispatch(["resume" | rest], options),
-    do: offline_or_live("resume", rest, options, &resume(&1, options))
+    do:
+      with_output(
+        options,
+        &offline_or_live("resume", rest, &1, fn parsed -> resume(parsed, &1) end)
+      )
 
   def dispatch(["attach" | rest], options),
-    do: LoopexCli.Live.command("attach", rest, live_options(options))
+    do: with_output(options, &LoopexCli.Live.command("attach", rest, live_options(&1)))
 
-  def dispatch(["cancel" | rest], options), do: admitted("cancel", rest, &cancel(&1, options))
-  def dispatch(["artifact" | rest], _options), do: admitted("artifact", rest, &artifact/1)
-  def dispatch(["skill" | rest], options), do: admitted("skill", rest, &skill(&1, options))
+  def dispatch(["cancel" | rest], options),
+    do: with_output(options, &admitted("cancel", rest, fn parsed -> cancel(parsed, &1) end))
+
+  def dispatch(["artifact" | rest], options),
+    do: with_output(options, fn _options -> admitted("artifact", rest, &artifact/1) end)
+
+  def dispatch(["skill" | rest], options),
+    do: with_output(options, &admitted("skill", rest, fn parsed -> skill(parsed, &1) end))
 
   def dispatch([], _options),
     do:
@@ -208,6 +275,45 @@ defmodule LoopexCli do
 
   def dispatch([unknown | _rest], _options),
     do: {:error, "unknown command #{unknown}\n\n" <> usage()}
+
+  defp with_output(options, command) do
+    cond do
+      Keyword.has_key?(options, :output) ->
+        command.(options)
+
+      Keyword.has_key?(options, :output_target) ->
+        acquire_and_run(options, command)
+
+      Output.current?() ->
+        command.(Keyword.put(options, :output, Output.current()))
+
+      true ->
+        acquire_and_run(options, command)
+    end
+  end
+
+  defp acquire_and_run(options, command) do
+    target = Keyword.get(options, :output_target, :stdio)
+
+    case Output.open(target, Output.acquisition()) do
+      {:ok, output, sink} ->
+        previous = Output.put_current(output, sink)
+
+        try do
+          result = command.(Keyword.put(options, :output, output))
+          delivered(result, Output.finish(output))
+        after
+          Output.restore_current(previous)
+        end
+
+      {:error, code} ->
+        {:error, "the command's output is unavailable (#{code})"}
+    end
+  end
+
+  defp delivered(:ok, :ok), do: :ok
+  defp delivered(:ok, {:error, code}), do: {:error, "the command's output failed (#{code})"}
+  defp delivered(result, _finished), do: result
 
   # Concept: only an offline command that composes a runtime needs the
   # credential; every other command removes it before doing anything, so no
@@ -512,16 +618,14 @@ defmodule LoopexCli do
       |> Enum.map(&"#{&1["source_id"]}:#{&1["name"]}")
       |> Enum.join(", ")
 
-    IO.puts(:stderr, "loopex: project skills #{sources}")
-    IO.puts(:stderr, "loopex: complete manifest digest #{manifest_digest}")
+    Output.puts(:stderr, "loopex: project skills #{sources}")
+    Output.puts(:stderr, "loopex: complete manifest digest #{manifest_digest}")
 
     operator_present =
       Keyword.get_lazy(options, :operator_present, &ProjectResources.operator_present?/0)
 
     if operator_present do
-      IO.write(:stderr, "loopex: trust this exact skill manifest for the next run? [y/N] ")
-
-      answer = IO.gets("")
+      answer = ask_operator("loopex: trust this exact skill manifest for the next run? [y/N] ")
 
       if is_binary(answer) and String.downcase(String.trim(answer)) in ["y", "yes"] do
         {:ok,
@@ -539,7 +643,11 @@ defmodule LoopexCli do
         {:ok, nil}
       end
     else
-      IO.puts(:stderr, "loopex: no skill trust decision was supplied; skill content is withheld")
+      Output.puts(
+        :stderr,
+        "loopex: no skill trust decision was supplied; skill content is withheld"
+      )
+
       {:ok, nil}
     end
   end
@@ -687,7 +795,7 @@ defmodule LoopexCli do
             :ok
 
           {:error, reason} ->
-            IO.puts(:stderr, "loopex: the steer was refused: #{inspect(reason)}")
+            Output.puts(:stderr, "loopex: the steer was refused: #{inspect(reason)}")
         end
       end
     )
@@ -756,7 +864,7 @@ defmodule LoopexCli do
             "`loopex sessions` will not list #{session_id} and " <>
             "`loopex resume #{session_id}` cannot reach it"
 
-        IO.puts(:stderr, "loopex: #{terminal_message(message)}")
+        Output.puts(:stderr, "loopex: #{terminal_message(message)}")
         {:error, message}
     end
   end
@@ -1114,7 +1222,7 @@ defmodule LoopexCli do
         {:ok, manifest}
 
       {:error, {_reason, _detail}} ->
-        IO.puts(
+        Output.puts(
           :stderr,
           "loopex: the admitted skill snapshot is unavailable; recovery continues with skill content withheld"
         )
@@ -1183,10 +1291,20 @@ defmodule LoopexCli do
          {:ok, root} <- state_root(flags),
          {:ok, store} <- LoopexComposition.artifacts(root),
          {:ok, bytes} <- fetch_artifact(store, reference) do
-      IO.binwrite(bytes)
-      :ok
+      write_artifact(bytes)
     end
   end
+
+  # Concept: retained artifact bytes reach standard output exactly, in order.
+  # Technical depth: each chunk fits the output queue and joins before the
+  # next, so a large artifact spends bounded transcript capacity.
+  defp write_artifact(<<chunk::binary-size(65_536), rest::binary>>) do
+    with :ok <- Output.put(chunk),
+         :ok <- Output.flush(Output.current()),
+         do: write_artifact(rest)
+  end
+
+  defp write_artifact(bytes), do: Output.put(bytes)
 
   defp skill({flags, ["add", source]}, options) do
     with :ok <- only_flags(flags, ~w(state-root workspace rev path), "skill add"),
@@ -1210,8 +1328,8 @@ defmodule LoopexCli do
                executor_authorization: authorization
              ]
            ]) do
-      IO.puts("installed #{pack["source_id"]}:#{pack["name"]}")
-      IO.puts(:stderr, "loopex: installation does not trust this skill for a run")
+      Output.puts("installed #{pack["source_id"]}:#{pack["name"]}")
+      Output.puts(:stderr, "loopex: installation does not trust this skill for a run")
       :ok
     else
       {:error, {reason, detail}} ->
@@ -1230,13 +1348,13 @@ defmodule LoopexCli do
          {:ok, manifest} <- discover_skill_manifest(flags, options) do
       case manifest["packs"] do
         [] ->
-          IO.puts("no skills")
+          Output.puts("no skills")
 
         packs ->
           Enum.each(packs, fn pack ->
             manual = if pack["manual_only"], do: " (manual only)", else: ""
 
-            IO.puts(
+            Output.puts(
               "#{pack["source_id"]}:#{pack["name"]}#{manual}  #{terminal_message(pack["description"])}"
             )
           end)
@@ -1250,16 +1368,16 @@ defmodule LoopexCli do
     with :ok <- only_flags(flags, ~w(state-root workspace), "skill show"),
          {:ok, manifest} <- discover_skill_manifest(flags, options),
          {:ok, pack} <- find_skill(manifest["packs"], qualified_name) do
-      IO.puts("#{pack["source_id"]}:#{pack["name"]}")
-      IO.puts(terminal_message(pack["description"]))
-      IO.puts("origin #{pack["origin"] || "local workspace"}")
-      IO.puts("commit #{pack["commit"] || "local"}")
-      IO.puts("tree #{pack["tree_digest"] || "local"}")
-      IO.puts("pack digest #{Loopex.ResourcePack.pack_digest(pack)}")
-      IO.puts(if(pack["manual_only"], do: "manual only", else: "model invocation compatible"))
+      Output.puts("#{pack["source_id"]}:#{pack["name"]}")
+      Output.puts(terminal_message(pack["description"]))
+      Output.puts("origin #{pack["origin"] || "local workspace"}")
+      Output.puts("commit #{pack["commit"] || "local"}")
+      Output.puts("tree #{pack["tree_digest"] || "local"}")
+      Output.puts("pack digest #{Loopex.ResourcePack.pack_digest(pack)}")
+      Output.puts(if(pack["manual_only"], do: "manual only", else: "model invocation compatible"))
 
       Enum.each(pack["files"], fn file ->
-        IO.puts("#{file["label"]}  #{file["size"]} bytes  #{file["digest"]}")
+        Output.puts("#{file["label"]}  #{file["size"]} bytes  #{file["digest"]}")
       end)
 
       :ok
@@ -1308,12 +1426,9 @@ defmodule LoopexCli do
           Keyword.get_lazy(options, :operator_present, &ProjectResources.operator_present?/0)
 
         if operator_present do
-          IO.write(
-            :stderr,
-            "loopex: fetch exact Git commit #{revision} from #{source}, path #{path}? [y/N] "
-          )
-
-          case IO.gets("") do
+          case ask_operator(
+                 "loopex: fetch exact Git commit #{revision} from #{source}, path #{path}? [y/N] "
+               ) do
             answer when is_binary(answer) ->
               if String.downcase(String.trim(answer)) in ["y", "yes"],
                 do: {:ok, {:host_policy, :allow}},
@@ -1556,7 +1671,6 @@ defmodule LoopexCli do
          policy: policy,
          project_manifest: manifest,
          project_decision: decision,
-         progress_to: self(),
          provider_launch: LoopexCli.ProviderLaunch.options(),
          recover_stale_writer: true,
          delegation: delegation
@@ -1597,7 +1711,12 @@ defmodule LoopexCli do
     end
   end
 
+  # Concept: only the serving runtime receives the command's native sink.
+  # Technical depth: recovery inspection composes without progress; one sink is
+  # never bound to two runtime incarnations.
   defp start_configured_runtime(composition_options, options) do
+    composition_options = Keyword.put(composition_options, :progress_sink, Output.current_sink())
+
     options
     |> Keyword.get(:runtime_starter, &start_hosted/1)
     |> then(& &1.(composition_options))
@@ -1902,21 +2021,39 @@ defmodule LoopexCli do
     """
   end
 
-  defp halt(:ok), do: System.halt(0)
-  defp halt({:detached, status}), do: System.halt(status)
+  defp halt(:ok), do: exit_after_output(0)
+  defp halt({:detached, status}), do: exit_after_output(status)
 
   defp halt({:error, message}) do
-    IO.puts(:stderr, "loopex: #{terminal_message(message)}")
-    System.halt(1)
+    Output.puts(:stderr, "loopex: #{terminal_message(message)}")
+    exit_after_output(1)
   end
 
   # Concept: ask writes only the already-selected final result, once.
   # Technical depth: no arbitrary error term reaches the legacy formatter.
   defp halt_ask(%{status: status, stdout: stdout, stderr: stderr})
        when is_integer(status) and is_binary(stdout) and is_binary(stderr) do
-    if stdout != "", do: IO.binwrite(:stdio, stdout)
-    if stderr != "", do: IO.binwrite(:stderr, stderr)
-    System.halt(status)
+    Output.put(:stdout, stdout)
+    Output.put(:stderr, stderr)
+    exit_after_output(status)
+  end
+
+  # Concept: the exit status reflects output delivery as well as the command.
+  # Technical depth: finish joins the writer within its own cutoff; an
+  # unconfirmed delivery makes a successful command exit nonzero.
+  defp exit_after_output(status) do
+    case Output.finish(Output.current()) do
+      :ok -> System.halt(status)
+      _ -> System.halt(max(status, 1))
+    end
+  end
+
+  # Concept: a question reaches the operator before the answer is read.
+  defp ask_operator(prompt) do
+    with :ok <- Output.put(:stderr, prompt),
+         :ok <- Output.flush(Output.current()),
+         do: IO.gets(""),
+         else: (_ -> :eof)
   end
 
   defp terminal_message(value) when is_binary(value) do

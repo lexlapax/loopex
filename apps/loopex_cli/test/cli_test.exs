@@ -11,10 +11,13 @@ Code.require_file("../../loopex/test/support/m1_runtime_helper.exs", __DIR__)
 Code.require_file("../../loopex/test/support/agent_loop_helper.exs", __DIR__)
 Code.require_file("support/demonstration.ex", __DIR__)
 
+Code.require_file("support/output_capture.exs", __DIR__)
+
 defmodule LoopexCliTest do
   @moduledoc false
 
   use ExUnit.Case, async: false
+  alias LoopexCli.Test.OutputCapture
 
   import ExUnit.CaptureIO
   import Loopex.ProgressTestConsumer, only: [assert_progress: 3]
@@ -249,7 +252,7 @@ defmodule LoopexCliTest do
     }
 
     output =
-      capture_io("y\n", fn ->
+      OutputCapture.stdout(fn ->
         assert :ok =
                  LoopexCli.dispatch(
                    [
@@ -295,7 +298,7 @@ defmodule LoopexCliTest do
     _stdout =
       capture_io("yes\n", fn ->
         stderr =
-          capture_io(:stderr, fn ->
+          OutputCapture.stderr(fn ->
             send(
               parent,
               {:skill_add_result,
@@ -353,7 +356,7 @@ defmodule LoopexCliTest do
     }
 
     output =
-      capture_io(fn ->
+      OutputCapture.stdout(fn ->
         assert :ok =
                  LoopexCli.dispatch(
                    [
@@ -397,7 +400,7 @@ defmodule LoopexCliTest do
 
     for command <- [["skill", "list"], ["skill", "show", "example.test/skills:review"]] do
       output =
-        capture_io(fn ->
+        OutputCapture.stdout(fn ->
           assert :ok =
                    LoopexCli.dispatch(
                      command ++ ["--state-root", state_root, "--workspace", workspace],
@@ -435,7 +438,7 @@ defmodule LoopexCliTest do
     }
 
     output =
-      capture_io(fn ->
+      OutputCapture.stdout(fn ->
         assert :ok =
                  LoopexCli.dispatch(
                    [
@@ -530,10 +533,10 @@ defmodule LoopexCliTest do
       end)
 
       try do
-        output =
+        _ =
           capture_io(unquote(input), fn ->
-            stderr =
-              capture_io(:stderr, fn ->
+            {_, stdout, stderr} =
+              OutputCapture.capture(fn _ ->
                 assert :ok =
                          LoopexCli.dispatch(
                            [
@@ -550,11 +553,11 @@ defmodule LoopexCliTest do
                          )
               end)
 
-            send(parent, {:skill_trust_stderr, stderr})
+            send(parent, {:skill_trust_stderr, stdout, stderr})
           end)
 
+        assert_receive {:skill_trust_stderr, output, stderr}
         assert output =~ "ordinary coding completed"
-        assert_receive {:skill_trust_stderr, stderr}
         assert stderr =~ "complete manifest digest"
 
         if unquote(operator_present),
@@ -617,7 +620,7 @@ defmodule LoopexCliTest do
 
         try do
           capture_io(unquote(input), fn ->
-            capture_io(:stderr, fn ->
+            OutputCapture.stderr(fn ->
               assert {:error, message} =
                        LoopexCli.dispatch(
                          [
@@ -828,43 +831,38 @@ defmodule LoopexCliTest do
     revision = git_cli!(source, ["rev-parse", "HEAD"])
 
     added =
-      capture_io(fn ->
-        capture_io(:stderr, fn ->
-          assert :ok =
-                   LoopexCli.dispatch(
-                     [
-                       "skill",
-                       "add",
-                       source,
-                       "--rev",
-                       revision,
-                       "--path",
-                       "review",
-                       "--state-root",
-                       state_root,
-                       "--workspace",
-                       workspace
-                     ],
-                     executor_authorization: {:host_policy, :allow}
-                   )
-        end)
+      OutputCapture.stdout(fn ->
+        assert :ok =
+                 LoopexCli.dispatch(
+                   [
+                     "skill",
+                     "add",
+                     source,
+                     "--rev",
+                     revision,
+                     "--path",
+                     "review",
+                     "--state-root",
+                     state_root,
+                     "--workspace",
+                     workspace
+                   ],
+                   executor_authorization: {:host_policy, :allow}
+                 )
       end)
 
     assert added =~ "installed git:"
     assert added =~ ":review"
 
     listed =
-      capture_io(fn ->
-        assert :ok =
-                 LoopexCli.dispatch([
-                   "skill",
-                   "list",
-                   "--state-root",
-                   state_root,
-                   "--workspace",
-                   workspace
-                 ])
-      end)
+      stdout!([
+        "skill",
+        "list",
+        "--state-root",
+        state_root,
+        "--workspace",
+        workspace
+      ])
 
     assert listed =~ "review"
     assert listed =~ "Review through the CLI."
@@ -880,18 +878,15 @@ defmodule LoopexCliTest do
     qualified = "#{pack["source_id"]}:#{pack["name"]}"
 
     shown =
-      capture_io(fn ->
-        assert :ok =
-                 LoopexCli.dispatch([
-                   "skill",
-                   "show",
-                   qualified,
-                   "--state-root",
-                   state_root,
-                   "--workspace",
-                   workspace
-                 ])
-      end)
+      stdout!([
+        "skill",
+        "show",
+        qualified,
+        "--state-root",
+        state_root,
+        "--workspace",
+        workspace
+      ])
 
     assert shown =~ qualified
     assert shown =~ revision
@@ -1032,24 +1027,23 @@ defmodule LoopexCliTest do
   end
 
   test "loopex run submits a prompt and streams the answer with its tool calls and results" do
-    fixture =
-      fixture(
-        script: [
-          %{text: "", calls: [call()], deltas: ["work", "ing"]},
-          %{text: "the file is written"}
-        ],
-        progress_to: self()
-      )
+    {_, answer, output} =
+      OutputCapture.capture(fn capture ->
+        fixture =
+          fixture(
+            script: [
+              %{text: "", calls: [call()], deltas: ["work", "ing"]},
+              %{text: "the file is written"}
+            ],
+            progress_sink: capture.sink
+          )
 
-    {_session_id, attachment, reply} = AgentLoopFixture.run(fixture, "write the notes file")
-    assert {:accepted, _id} = reply
+        {_session_id, attachment, reply} =
+          AgentLoopFixture.run(fixture, "write the notes file")
 
-    output =
-      capture_io(:stderr, fn ->
-        send(self(), {:out, capture_io(fn -> Render.stream(attachment) end)})
+        assert {:accepted, _id} = reply
+        Render.stream(attachment)
       end)
-
-    assert_received {:out, answer}
 
     # The prompt, the answer, the tool call, and its result all reach the
     # terminal, in the plane each belongs to: what the operator reads is on
@@ -1431,22 +1425,19 @@ defmodule LoopexCliTest do
     # is already over and its terminal event already consumed, so this names a
     # short window rather than waiting out the shipped patience.
     output =
-      capture_io(:stderr, fn ->
-        send(
-          self(),
-          {:loopex_progress,
-           %{
-             kind: :tool_progress,
-             turn_id: "terminal-test-turn",
-             tool_call_id: "terminal-test-call",
-             stream_domain_id: "terminal-test-domain",
-             base_event_sequence: 0,
-             progress_sequence: 0,
-             stream: "stdout",
-             byte_offset: 0,
-             chunk: "working"
-           }}
-        )
+      OutputCapture.stderr(fn ->
+        :ok =
+          LoopexCli.Output.progress(LoopexCli.Output.current(), %{
+            kind: :tool_progress,
+            turn_id: "terminal-test-turn",
+            tool_call_id: "terminal-test-call",
+            stream_domain_id: "terminal-test-domain",
+            base_event_sequence: 0,
+            progress_sequence: 0,
+            stream: "stdout",
+            byte_offset: 0,
+            chunk: "working"
+          })
 
         Render.stream(attachment, idle_limit_ms: 200)
       end)
@@ -1487,19 +1478,16 @@ defmodule LoopexCliTest do
 
     default_output =
       try do
-        capture_io(fn ->
-          assert :ok =
-                   LoopexCli.dispatch([
-                     "run",
-                     "--policy",
-                     "allow-all",
-                     "--state-root",
-                     state_root,
-                     "--workspace",
-                     workspace,
-                     "show the streamed reply"
-                   ])
-        end)
+        stdout!([
+          "run",
+          "--policy",
+          "allow-all",
+          "--state-root",
+          state_root,
+          "--workspace",
+          workspace,
+          "show the streamed reply"
+        ])
       after
         Process.delete(:"$loopex_composition_edge_observer")
       end
@@ -1513,7 +1501,7 @@ defmodule LoopexCliTest do
   test "loopex sessions lists the operator's sessions and loopex resume continues one" do
     {state_root, workspace} = roots()
 
-    empty = capture_io(fn -> LoopexCli.dispatch(["sessions", "--state-root", state_root]) end)
+    empty = elem(OutputCapture.dispatch(["sessions", "--state-root", state_root]), 1)
     assert empty =~ "no sessions"
 
     {:ok, placement} = Loopex.runtime_placement_id(state_root)
@@ -1526,7 +1514,7 @@ defmodule LoopexCliTest do
 
     :ok = Loopex.track_session(state_root, session_id, placement)
 
-    listed = capture_io(fn -> LoopexCli.dispatch(["sessions", "--state-root", state_root]) end)
+    listed = elem(OutputCapture.dispatch(["sessions", "--state-root", state_root]), 1)
     assert listed =~ session_id
 
     # Resuming continues that session through the command the operator actually
@@ -1542,7 +1530,7 @@ defmodule LoopexCliTest do
     on_exit(fn -> restore_signal_handlers() end)
 
     output =
-      capture_io(fn ->
+      OutputCapture.stdout(fn ->
         assert :ok =
                  LoopexCli.dispatch(
                    [
@@ -1664,19 +1652,16 @@ defmodule LoopexCliTest do
     on_exit(&restore_signal_handlers/0)
 
     run_output =
-      capture_io(fn ->
-        assert :ok =
-                 LoopexCli.dispatch([
-                   "run",
-                   "--policy",
-                   "allow-all",
-                   "--state-root",
-                   state_root,
-                   "--workspace",
-                   workspace,
-                   "do yesterday's work"
-                 ])
-      end)
+      stdout!([
+        "run",
+        "--policy",
+        "allow-all",
+        "--state-root",
+        state_root,
+        "--workspace",
+        workspace,
+        "do yesterday's work"
+      ])
 
     assert run_output =~ "yesterday's answer"
 
@@ -1684,19 +1669,16 @@ defmodule LoopexCliTest do
     first_marker = end_the_process(marker)
 
     resume_output =
-      capture_io(fn ->
-        assert :ok =
-                 LoopexCli.dispatch([
-                   "resume",
-                   session_id,
-                   "--policy",
-                   "allow-all",
-                   "--state-root",
-                   state_root,
-                   "--workspace",
-                   workspace
-                 ])
-      end)
+      stdout!([
+        "resume",
+        session_id,
+        "--policy",
+        "allow-all",
+        "--state-root",
+        state_root,
+        "--workspace",
+        workspace
+      ])
 
     assert resume_output =~ "yesterday's answer"
 
@@ -1706,19 +1688,16 @@ defmodule LoopexCliTest do
            "resume reused the dead process's marker instead of recovering it"
 
     cancel_output =
-      capture_io(fn ->
-        assert :ok =
-                 LoopexCli.dispatch([
-                   "cancel",
-                   session_id,
-                   "--policy",
-                   "allow-all",
-                   "--state-root",
-                   state_root,
-                   "--workspace",
-                   workspace
-                 ])
-      end)
+      stdout!([
+        "cancel",
+        session_id,
+        "--policy",
+        "allow-all",
+        "--state-root",
+        state_root,
+        "--workspace",
+        workspace
+      ])
 
     assert cancel_output =~ "yesterday's answer"
     _cancelled_marker = end_the_process(marker)
@@ -2167,7 +2146,7 @@ defmodule LoopexCliTest do
     {:accepted, _abort} = Loopex.command(attachment, %{type: :abort, command_id: "abort-1"})
 
     output =
-      capture_io(:stderr, fn ->
+      OutputCapture.stderr(fn ->
         send(self(), {:done, Render.stream(attachment)})
       end)
 
@@ -2261,7 +2240,7 @@ defmodule LoopexCliTest do
     assert_receive {:holding, _model}, 2_000
 
     output =
-      capture_io(:stderr, fn ->
+      OutputCapture.stderr(fn ->
         send(
           self(),
           {:cancelled,
@@ -2539,12 +2518,7 @@ defmodule LoopexCliTest do
 
     {_session_id, attachment, {:accepted, _id}} = AgentLoopFixture.run(fixture, "write the file")
 
-    output =
-      capture_io(:stderr, fn ->
-        send(self(), {:out, capture_io(fn -> Render.stream(attachment) end)})
-      end)
-
-    assert_received {:out, answer}
+    {_, answer, output} = OutputCapture.capture(fn _ -> Render.stream(attachment) end)
     assert output =~ "denied"
     assert answer =~ "I could not do that"
   end
@@ -2634,10 +2608,7 @@ defmodule LoopexCliTest do
       })
 
     output =
-      capture_io(fn ->
-        assert :ok =
-                 LoopexCli.dispatch(["artifact", reference.locator, "--state-root", state_root])
-      end)
+      stdout!(["artifact", reference.locator, "--state-root", state_root])
 
     assert output == "the whole output"
 
@@ -2906,7 +2877,7 @@ defmodule LoopexCliTest do
     File.write!(Path.join(state_root, "sessions"), "not a directory")
 
     reported =
-      capture_io(:stderr, fn ->
+      OutputCapture.stderr(fn ->
         send(self(), {:recorded, LoopexCli.record_session(state_root, "s_unrecorded")})
       end)
 
@@ -3248,12 +3219,7 @@ defmodule LoopexCliTest do
     fixture = fixture(script: [%{text: "", calls: [call()]}, %{text: "finished anyway"}])
     {_session_id, attachment, {:accepted, _id}} = AgentLoopFixture.run(fixture, "do the thing")
 
-    output =
-      capture_io(:stderr, fn ->
-        send(self(), {:out, capture_io(fn -> Render.stream(attachment) end)})
-      end)
-
-    assert_received {:out, answer}
+    {_, answer, output} = OutputCapture.capture(fn _ -> Render.stream(attachment) end)
     assert answer =~ "finished anyway"
     assert output =~ "example.write"
     assert output =~ "loopex: done"
@@ -3280,7 +3246,7 @@ defmodule LoopexCliTest do
     # than the runtime's own deadline on purpose, and what this case is about is
     # what the terminal says when it does stop, not how long it waits first.
     quiet_output =
-      capture_io(:stderr, fn -> Render.stream(quiet, idle_limit_ms: 200) end)
+      OutputCapture.stderr(fn -> Render.stream(quiet, idle_limit_ms: 200) end)
 
     assert quiet_output =~ "it may still be running"
     assert quiet_output =~ "resume"
@@ -3423,15 +3389,9 @@ defmodule LoopexCliTest do
 
     parent = self()
 
-    stdout =
-      capture_io(fn ->
-        stderr =
-          capture_io(:stderr, fn -> Render.stream(:terminal_safe, next_event: next_event) end)
+    {_, stdout, stderr} =
+      OutputCapture.capture(fn _ -> Render.stream(:terminal_safe, next_event: next_event) end)
 
-        send(parent, {:terminal_safe_stderr, stderr})
-      end)
-
-    assert_receive {:terminal_safe_stderr, stderr}
     refute stdout =~ "\e"
     refute stderr =~ "\e"
     assert stdout =~ "\\e"
@@ -3441,52 +3401,43 @@ defmodule LoopexCliTest do
   end
 
   test "a closure delivered after its durable assistant prevents duplicate terminal output" do
-    send(
-      self(),
-      {:loopex_progress,
-       %{
-         kind: :text_delta,
-         text: "hello",
-         content_index: 0,
-         turn_id: "turn-ordered",
-         stream_domain_id: "domain-ordered",
-         model_sequence: 0,
-         base_event_sequence: 4
-       }}
-    )
-
     {:ok, source} = Agent.start_link(fn -> 0 end)
-    consumer = self()
 
-    next_event = fn _attachment ->
-      Agent.get_and_update(source, fn
-        0 ->
-          event = %{"content" => "hello", kind: "assistant.message_appended", event_sequence: 5}
-          {{:ok, event}, 1}
-
-        1 ->
-          send(
-            consumer,
-            {:loopex_progress,
-             %{
-               kind: :model_stream_closed,
-               turn_id: "turn-ordered",
-               stream_domain_id: "domain-ordered",
-               base_event_sequence: 4,
-               disposition: :complete,
-               delta_count: 1
-             }}
-          )
-
-          event = %{"outcome" => "completed", kind: "run.finished", event_sequence: 6}
-          {{:ok, event}, 2}
-      end)
+    progress = fn item ->
+      :ok = LoopexCli.Output.progress(LoopexCli.Output.current(), item)
     end
 
-    answer =
-      capture_io(fn ->
-        capture_io(:stderr, fn -> Render.stream(:test_attachment, next_event: next_event) end)
-      end)
+    next_event = fn _attachment ->
+      case Agent.get_and_update(source, &{&1, &1 + 1}) do
+        0 ->
+          progress.(%{
+            kind: :text_delta,
+            text: "hello",
+            content_index: 0,
+            turn_id: "turn-ordered",
+            stream_domain_id: "domain-ordered",
+            model_sequence: 0,
+            base_event_sequence: 4
+          })
+
+          {:ok, %{"content" => "hello", kind: "assistant.message_appended", event_sequence: 5}}
+
+        1 ->
+          progress.(%{
+            kind: :model_stream_closed,
+            turn_id: "turn-ordered",
+            stream_domain_id: "domain-ordered",
+            base_event_sequence: 4,
+            disposition: :complete,
+            delta_count: 1
+          })
+
+          {:ok, %{"outcome" => "completed", kind: "run.finished", event_sequence: 6}}
+      end
+    end
+
+    {_, answer, _stderr} =
+      OutputCapture.capture(fn _ -> Render.stream(:test_attachment, next_event: next_event) end)
 
     assert answer == "hello"
   end
@@ -3502,38 +3453,41 @@ defmodule LoopexCliTest do
 
     base_event_sequence = assistant_sequence - 1
 
-    for item <- [
-          %{
-            kind: :text_delta,
-            text: "hel",
-            content_index: 0,
-            turn_id: "turn-once",
-            stream_domain_id: "domain-once",
-            model_sequence: 0,
-            base_event_sequence: base_event_sequence
-          },
-          %{
-            kind: :text_delta,
-            text: "lo",
-            content_index: 0,
-            turn_id: "turn-once",
-            stream_domain_id: "domain-once",
-            model_sequence: 1,
-            base_event_sequence: base_event_sequence
-          },
-          %{
-            kind: :model_stream_closed,
-            turn_id: "turn-once",
-            stream_domain_id: "domain-once",
-            base_event_sequence: base_event_sequence,
-            disposition: :complete,
-            delta_count: 2
-          }
-        ] do
-      send(self(), {:loopex_progress, item})
-    end
+    items = [
+      %{
+        kind: :text_delta,
+        text: "hel",
+        content_index: 0,
+        turn_id: "turn-once",
+        stream_domain_id: "domain-once",
+        model_sequence: 0,
+        base_event_sequence: base_event_sequence
+      },
+      %{
+        kind: :text_delta,
+        text: "lo",
+        content_index: 0,
+        turn_id: "turn-once",
+        stream_domain_id: "domain-once",
+        model_sequence: 1,
+        base_event_sequence: base_event_sequence
+      },
+      %{
+        kind: :model_stream_closed,
+        turn_id: "turn-once",
+        stream_domain_id: "domain-once",
+        base_event_sequence: base_event_sequence,
+        disposition: :complete,
+        delta_count: 2
+      }
+    ]
 
-    answer = capture_io(fn -> Render.stream(attachment) end)
+    answer =
+      OutputCapture.stdout(fn ->
+        Enum.each(items, &(:ok = LoopexCli.Output.progress(LoopexCli.Output.current(), &1)))
+        Render.stream(attachment)
+      end)
+
     occurrences = answer |> String.split("hello") |> length() |> Kernel.-(1)
 
     assert occurrences == 1,
@@ -3927,6 +3881,13 @@ defmodule LoopexCliTest do
     assert displayed =~ "trust class project_resource"
     assert displayed =~ entry.content_digest
     assert displayed =~ "manifest digest #{decision.manifest_digest}"
+  end
+
+  # Concept: a command's bytes come from a target this test owns.
+  defp stdout!(argv, options \\ []) do
+    {result, stdout, stderr} = OutputCapture.dispatch(argv, options)
+    assert result == :ok, inspect({result, stdout, stderr})
+    stdout
   end
 end
 

@@ -1,7 +1,8 @@
+Code.require_file("support/output_capture.exs", __DIR__)
+
 defmodule LoopexCli.DaemonClientTest do
   use ExUnit.Case, async: false
-  import ExUnit.CaptureIO
-
+  alias LoopexCli.Test.OutputCapture
   alias LoopexCli.{DaemonClient, ProgressConsumer, Render}
   alias LoopexProtocol.{Frame, Wire}
 
@@ -589,34 +590,29 @@ defmodule LoopexCli.DaemonClientTest do
   defp render(events, progress \\ [], on_run_started \\ fn _ -> :ok end) do
     key = make_ref()
     Process.put(key, events)
-    Enum.each(progress, &send(self(), {:loopex_progress, &1}))
-    owner = self()
 
     try do
-      stdout =
-        capture_io(fn ->
-          stderr =
-            capture_io(:stderr, fn ->
-              assert :ok =
-                       Render.stream(nil,
-                         next_event: fn _ ->
-                           case Process.get(key) do
-                             [event | rest] ->
-                               Process.put(key, rest)
-                               {:ok, event}
+      {_, stdout, stderr} =
+        OutputCapture.capture(fn capture ->
+          # Concept: wire progress reaches the command's output owner in order.
+          Enum.each(progress, &(:ok = LoopexCli.Output.progress(capture.output, &1)))
 
-                             [] ->
-                               :stop
-                           end
-                         end,
-                         on_run_started: on_run_started
-                       )
-            end)
+          assert :ok =
+                   Render.stream(nil,
+                     next_event: fn _ ->
+                       case Process.get(key) do
+                         [event | rest] ->
+                           Process.put(key, rest)
+                           {:ok, event}
 
-          send(owner, {key, stderr})
+                         [] ->
+                           :stop
+                       end
+                     end,
+                     on_run_started: on_run_started
+                   )
         end)
 
-      assert_receive {^key, stderr}
       {stdout, stderr}
     after
       Process.delete(key)

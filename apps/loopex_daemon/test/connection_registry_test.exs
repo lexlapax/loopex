@@ -705,6 +705,67 @@ defmodule LoopexDaemon.ConnectionRegistryTest do
              )
   end
 
+  # Concept: an event follows the progress the runtime emitted before it.
+  # Technical depth: the runtime sink belongs to its Service, so routing waits
+  # for that owner's exact drain answer before Registry fans out its own credit.
+  # The transport cut answers a route whose drain never answers.
+  test "finite progress routing first drains the runtime ingress owner" do
+    test = self()
+
+    ingress =
+      spawn_link(fn ->
+        for _ <- 1..2 do
+          receive do
+            {:loopex_daemon_drain_ingress, registry, ref} ->
+              send(test, {:drain_requested, registry, ref})
+          end
+        end
+
+        receive do: (:stop -> :ok)
+      end)
+
+    registry =
+      start_registry(5_000, connection_module: ManualConnection, progress_ingress: ingress)
+
+    {relay, _} = bind_scripted_relay(registry)
+    connection = initialized_manual_connection(registry)
+    activate(registry, "session")
+    install_attachment(registry, relay, connection, "session", 0, "attachment")
+    assert {:ok, registry_sink} = ConnectionRegistry.progress_sink(registry)
+    item = progress_item()
+
+    route = fn ->
+      manual_registry_call(
+        connection.pid,
+        {:invoke,
+         fn ->
+           ConnectionRegistry.connection_request(
+             registry,
+             {:route_ready_progress, connection.incarnation, "attachment"}
+           )
+           |> :gen_server.receive_response(2_000)
+         end}
+      )
+    end
+
+    routed = Task.async(route)
+    assert_receive {:drain_requested, ^registry, ref}, 500
+    refute Task.yield(routed, 100)
+    assert :ok = Loopex.ProgressSink.try_offer(registry_sink, "session", item)
+    send(registry, {:loopex_daemon_ingress_drained, ref})
+    assert {:reply, :ok} = Task.await(routed)
+    assert {:ok, lease, "session", ^item} = manual_registry_call(connection.pid, :take_progress)
+    assert :ok = manual_registry_call(connection.pid, {:release_progress, lease})
+
+    cut = Task.async(route)
+    assert_receive {:drain_requested, ^registry, _unanswered}, 500
+    refute Task.yield(cut, 100)
+    cut_ref = make_ref()
+    assert {:ok, ^cut_ref} = reply_value(ConnectionRegistry.transport_closing(registry, cut_ref))
+    assert {:reply, :ok} = Task.await(cut)
+    send(ingress, :stop)
+  end
+
   test "the admission cut keeps original durable output live after finite progress routing" do
     registry = start_registry(5_000, connection_module: ManualConnection)
     registry_monitor = Process.monitor(registry)

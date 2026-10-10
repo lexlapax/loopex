@@ -4,6 +4,8 @@ defmodule LoopexCli.ChatOSSignalDriver do
   alias Loopex.AgentLoopFixture, as: Fixture
 
   def main do
+    # The command's application graph owns composition's helper registry.
+    {:ok, _} = Application.ensure_all_started(:loopex_cli)
     {:ok, socket} = :gen_tcp.connect({127, 0, 0, 1},
       String.to_integer(System.fetch_env!("LOOPEX_CHAT_SIGNAL_PORT")),
       [:binary, active: false, packet: 4], 5000)
@@ -11,7 +13,7 @@ defmodule LoopexCli.ChatOSSignalDriver do
     scenario = System.fetch_env!("LOOPEX_CHAT_SIGNAL_SCENARIO")
     fixture = Fixture.start(script: [], tools: [])
     {:ok, session} = Loopex.create_session(fixture.runtime, %{}, command_id: "create")
-    {:ok, output} = StringIO.open("", encoding: :latin1)
+    {:ok, output} = LoopexCli.Output.Memory.start()
     {:ok, input} = StringIO.open("one\n/wait\n", encoding: :latin1)
     parent = self()
 
@@ -41,7 +43,7 @@ defmodule LoopexCli.ChatOSSignalDriver do
         {device, device}
       end
 
-    {:ok, driver} = ChatDriver.start_link(fixture.runtime, session, input, output,
+    {:ok, driver} = ChatDriver.start_link(fixture.runtime, session, input, {:owned, output},
       cleanup_grace_ms: 5000, facade: facade)
     {:ok, _} = ChatDriver.prepare(driver)
     ref = make_ref()
@@ -58,7 +60,7 @@ defmodule LoopexCli.ChatOSSignalDriver do
     finish = Interrupt.finish_chat(manager, ref)
     minimum_exit = if finish == {:ok, :ordinary}, do: 0, else: 1
     code = ChatDriver.close(driver, :confirmed, minimum_exit)
-    {_, transcript} = StringIO.contents(output)
+    {transcript, _} = LoopexCli.Output.Memory.contents(output)
     jobs = Agent.get(fixture.executor, & &1.jobs)
     models = Loopex.AgentLoopTestModel.dispatched(fixture.model)
     if input_owner, do: Process.exit(input_owner, :kill)

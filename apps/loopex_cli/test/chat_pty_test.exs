@@ -354,7 +354,8 @@ defmodule LoopexCli.ChatPTYTest do
   end
 
   defp records(transcript) do
-    for [_, json] <- Regex.scan(~r/@loopex ([^\r\n]+)/, transcript), do: JSON.decode!(json)
+    # A terminal delivers bytes, not records: only terminated records are complete.
+    for [_, json] <- Regex.scan(~r/@loopex ([^\r\n]+)\r?\n/, transcript), do: JSON.decode!(json)
   end
 
   defp control(socket) do

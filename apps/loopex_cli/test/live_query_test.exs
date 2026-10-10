@@ -1,10 +1,11 @@
 Code.require_file("support/daemon_proxy.exs", __DIR__)
 
+Code.require_file("support/output_capture.exs", __DIR__)
+
 defmodule LoopexCli.LiveQueryTest do
   use ExUnit.Case, async: false
+  alias LoopexCli.Test.OutputCapture
   @moduletag capture_log: true
-
-  import ExUnit.CaptureIO
 
   alias LoopexCli.DaemonClient
   alias LoopexCli.Test.DaemonProxy
@@ -164,7 +165,7 @@ defmodule LoopexCli.LiveQueryTest do
     proxy = DaemonProxy.start(socket, [], refuse_inspect)
 
     _stderr =
-      capture_io(:stderr, fn ->
+      OutputCapture.stderr(fn ->
         result =
           LoopexCli.dispatch([
             "attach",
@@ -225,7 +226,7 @@ defmodule LoopexCli.LiveQueryTest do
     argv = ["attach", session_id, "--daemon", proxy.path, "--take-over", "--prompt", "more"]
 
     {:ok, controller} =
-      Task.start(fn -> capture_io(:stderr, fn -> LoopexCli.dispatch(argv) end) end)
+      Task.start(fn -> OutputCapture.stderr(fn -> LoopexCli.dispatch(argv) end) end)
 
     assert eventually(fn -> "session.inspect" in DaemonProxy.seen(proxy) end)
     Process.exit(controller, :kill)
@@ -278,13 +279,9 @@ defmodule LoopexCli.LiveQueryTest do
   end
 
   defp raw(argv) do
-    stderr =
-      capture_io(:stderr, fn ->
-        stdout = capture_io(fn -> assert :ok = LoopexCli.dispatch(argv) end)
-        send(self(), {:stdout, stdout})
-      end)
-
-    {receive(do: ({:stdout, stdout} -> stdout)), stderr}
+    {result, stdout, stderr} = OutputCapture.dispatch(argv)
+    assert result == :ok
+    {stdout, stderr}
   end
 
   defp ordered_keys(line) do

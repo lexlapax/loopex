@@ -39,8 +39,7 @@ defmodule LoopexCli.ChatProgressTest do
         next
       end)
 
-    assert state.domains["a"].text == []
-    assert state.domains["a"].next_sequence == 1000
+    assert %{fragments: 0, bytes: 0, next_sequence: 1000} = state.domains["a"]
   end
 
   test "retired cursor domains cannot accumulate or repair themselves with late progress" do
@@ -68,7 +67,6 @@ defmodule LoopexCli.ChatProgressTest do
 
     {state, []} = ProgressConsumer.consume(state, delta("overflow", 4, "a"))
     assert ProgressConsumer.status(state, "a") == :invalid
-    assert state.domains["a"].text == []
     {state, []} = ProgressConsumer.consume(state, closed("a", 5, :complete))
     assert {_, nil} = ProgressConsumer.chat_assistant(state, 2, chunk)
   end

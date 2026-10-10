@@ -2,11 +2,12 @@ Code.require_file("../../loopex/test/support/m1_runtime_helper.exs", __DIR__)
 Code.require_file("../../loopex/test/support/agent_loop_helper.exs", __DIR__)
 Code.require_file("../../loopex_llm_reqllm/test/support/provider_isolation_fixture.exs", __DIR__)
 
+Code.require_file("support/output_capture.exs", __DIR__)
+
 defmodule LoopexCli.ProviderAccountingIntegrationTest do
   @moduledoc false
   use ExUnit.Case, async: false
-  import ExUnit.CaptureIO
-
+  alias LoopexCli.Test.OutputCapture
   alias Loopex.AgentLoopFixture
   alias Loopex.AgentLoopTestExecutor
   alias Loopex.LLM.ReqLLM, as: Adapter
@@ -85,6 +86,7 @@ defmodule LoopexCli.ProviderAccountingIntegrationTest do
         if Process.alive?(executor), do: Agent.stop(executor)
       end)
 
+      :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(runtime)
       {:ok, session_id} = Loopex.create_session(runtime, %{}, command_id: "create-accounting")
       {:ok, attachment} = Loopex.attach(runtime, session_id, after_event_sequence: 0)
       {:ok, %{control: control}} = Runtime.children(runtime)
@@ -98,17 +100,10 @@ defmodule LoopexCli.ProviderAccountingIntegrationTest do
                  content: "observe accounting without executing discarded tools"
                })
 
-      output =
-        capture_io(:stderr, fn ->
-          stdout =
-            capture_io(fn ->
-              assert :ok = LoopexCli.Render.stream(attachment, idle_limit_ms: 10_000)
-            end)
-
-          send(self(), {:rendered_stdout, stdout})
+      {_, stdout, output} =
+        OutputCapture.capture(fn _ ->
+          assert :ok = LoopexCli.Render.stream(attachment, idle_limit_ms: 10_000)
         end)
-
-      assert_receive {:rendered_stdout, stdout}
 
       assert {:ok, _status} = Loopex.session_status(runtime, session_id)
       fence = :erlang.trace_delivered(coordinator)

@@ -9,8 +9,8 @@ defmodule Mix.Tasks.Loopex.M7Evidence.Conversation do
 
   ## Technical depth
 
-  One process serves the Erlang IO protocol for both devices. Output bytes are
-  retained in order. Input comes from a step list: `{:line, text}` writes one
+  One process serves the Erlang IO protocol for input and is chat's owned
+  output target under accepted ADR 0068. Output bytes are retained in order. Input comes from a step list: `{:line, text}` writes one
   line; `{:await, text}` waits until output written after the previous await
   contains `text`; `{:answer, choice}` and `:decline` wait for the next
   unanswered `question` control record and write `/answer ID --choice CHOICE`
@@ -59,6 +59,8 @@ defmodule Mix.Tasks.Loopex.M7Evidence.Conversation do
        steps: steps,
        deadline: deadline,
        output: "",
+       stderr: "",
+       target: nil,
        mark: 0,
        answered: known,
        pending: "",
@@ -76,12 +78,57 @@ defmodule Mix.Tasks.Loopex.M7Evidence.Conversation do
 
   @impl true
   def handle_call(:transcript, _from, state),
-    do: {:reply, %{output: state.output, events: Enum.reverse(state.events)}, state}
+    do:
+      {:reply, %{output: state.output, stderr: state.stderr, events: Enum.reverse(state.events)},
+       state}
 
   @impl true
   def handle_info({:io_request, from, reply_as, request}, state) do
     {:noreply, io(request, {from, reply_as}, state)}
   end
+
+  # Concept: the conversation is also chat's owned ADR 0068 output target.
+  # Technical depth: one acquisition only; a write is complete once appended
+  # here, so the exact incarnation and nonce are answered at once. Standard
+  # output feeds the awaits and transcript; standard error is kept apart.
+  def handle_info({:loopex_cli_output_target, :acquire, owner, id}, %{target: nil} = state)
+      when is_pid(owner) do
+    incarnation = make_ref()
+    send(owner, {:loopex_cli_output_target, :acquired, self(), id, incarnation})
+    {:noreply, %{state | target: {owner, Process.monitor(owner), incarnation}}}
+  end
+
+  def handle_info({:loopex_cli_output_target, :acquire, owner, id}, state) when is_pid(owner) do
+    send(owner, {:loopex_cli_output_target, :refused, self(), id})
+    {:noreply, state}
+  end
+
+  def handle_info(
+        {:loopex_cli_output_target, :write, owner, incarnation, nonce, destination, bytes},
+        %{target: {owner, _monitor, incarnation}} = state
+      )
+      when destination in [:stdout, :stderr] and is_binary(bytes) do
+    send(owner, {:loopex_cli_output_target, :written, self(), incarnation, nonce})
+
+    if destination == :stdout,
+      do: {:noreply, serve(%{state | output: state.output <> bytes})},
+      else: {:noreply, %{state | stderr: state.stderr <> bytes}}
+  end
+
+  def handle_info(
+        {:loopex_cli_output_target, :retire, owner, incarnation, nonce},
+        %{target: {owner, monitor, incarnation}} = state
+      ) do
+    Process.demonitor(monitor, [:flush])
+    send(owner, {:loopex_cli_output_target, :retired, self(), incarnation, nonce})
+    {:noreply, %{state | target: :retired}}
+  end
+
+  def handle_info(
+        {:DOWN, monitor, :process, _owner, _reason},
+        %{target: {_, monitor, _}} = state
+      ),
+      do: {:noreply, %{state | target: :retired}}
 
   def handle_info({:held, {_pid, _fifo, limit} = holder}, %{holder: holder} = state) do
     Process.send_after(self(), {:hold_limit, holder}, limit)

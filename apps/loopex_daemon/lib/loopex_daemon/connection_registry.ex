@@ -756,6 +756,8 @@ defmodule LoopexDaemon.ConnectionRegistry do
            progress_sink: progress_sink,
            progress_guardian_monitor: Process.monitor(guardian),
            progress_phase: :open,
+           progress_ingress: Keyword.get(options, :progress_ingress),
+           ingress_routes: %{},
            progress_monitors: %{},
            socket_retirement_controls: %{},
            close_all_failed: false,
@@ -999,29 +1001,32 @@ defmodule LoopexDaemon.ConnectionRegistry do
   # draining in :closing discards transient ingress without reopening fanout.
   def handle_call(
         {:route_ready_progress, incarnation, attachment_id},
-        {caller, _tag},
-        state
-      ) do
-    attachment = Map.get(state.attachments, incarnation)
+        {caller, _tag} = from,
+        %{transport: :serving, progress_ingress: ingress} = state
+      )
+      when is_pid(ingress) do
+    case route_ready_progress(state, caller, incarnation, attachment_id) do
+      {:route, state} ->
+        # Concept: the runtime's own ingress precedes this event's routing.
+        # Technical depth: one request per connection incarnation is pending; a
+        # newer one answers its abandoned predecessor. The transport cut answers
+        # every pending request, so a stopping Service never holds a route.
+        {previous, routes} = Map.pop(state.ingress_routes, incarnation)
+        if previous, do: GenServer.reply(elem(previous, 1), {:error, :output_unavailable})
+        ref = make_ref()
+        send(ingress, {:loopex_daemon_drain_ingress, self(), ref})
+        routes = Map.put(routes, incarnation, {ref, from, caller, attachment_id})
+        {:noreply, %{state | ingress_routes: routes}}
 
-    matching_attachment =
-      match?(%{phase: :installed, attachment_id: ^attachment_id}, attachment) or
-        (match?(%{phase: :pending}, attachment) and
-           Enum.any?(state.activation_promotions, fn {_ref, promotion} ->
-             pending_previous?(promotion, incarnation, attachment_id)
-           end))
+      {reply, state} ->
+        {:reply, reply, state}
+    end
+  end
 
-    case initialized_connection_row(state, caller, incarnation) do
-      {_token, %{phase: :live, progress_fenced: false}}
-      when state.transport in [:serving, :closing] and state.progress_phase == :open and
-             matching_attachment ->
-        case drain_progress(state, 32) do
-          :ok -> {:reply, :ok, state}
-          :error -> {:stop, :connections_lost, {:error, :output_unavailable}, state}
-        end
-
-      _ ->
-        {:reply, {:error, :output_unavailable}, state}
+  def handle_call({:route_ready_progress, incarnation, attachment_id}, {caller, _tag}, state) do
+    case route_ready_progress(state, caller, incarnation, attachment_id) do
+      {:route, state} -> drain_route(state)
+      {reply, state} -> {:reply, reply, state}
     end
   end
 
@@ -1550,7 +1555,11 @@ defmodule LoopexDaemon.ConnectionRegistry do
     }
 
     Logger.debug("loopex daemon connection transport gate closed")
-    {:reply, {:ok, cut_ref}, state}
+
+    case resume_ingress_routes(state) do
+      {:noreply, state} -> {:reply, {:ok, cut_ref}, state}
+      {:stop, reason, state} -> {:stop, reason, {:ok, cut_ref}, state}
+    end
   end
 
   def handle_call(
@@ -2188,6 +2197,13 @@ defmodule LoopexDaemon.ConnectionRegistry do
   end
 
   def handle_info({:daemon_fatal_close, _recipient, _record}, state), do: {:noreply, state}
+
+  def handle_info({:loopex_daemon_ingress_drained, ref}, state) when is_reference(ref) do
+    case Enum.find(state.ingress_routes, fn {_incarnation, route} -> elem(route, 0) == ref end) do
+      {incarnation, _route} -> resume_ingress_route(state, incarnation)
+      nil -> {:noreply, state}
+    end
+  end
 
   def handle_info(_message, state), do: {:noreply, state}
 
@@ -2993,6 +3009,74 @@ defmodule LoopexDaemon.ConnectionRegistry do
   end
 
   defp progress_sink_shape?(_), do: false
+
+  defp route_ready_progress(state, caller, incarnation, attachment_id) do
+    attachment = Map.get(state.attachments, incarnation)
+
+    matching_attachment =
+      match?(%{phase: :installed, attachment_id: ^attachment_id}, attachment) or
+        (match?(%{phase: :pending}, attachment) and
+           Enum.any?(state.activation_promotions, fn {_ref, promotion} ->
+             pending_previous?(promotion, incarnation, attachment_id)
+           end))
+
+    case initialized_connection_row(state, caller, incarnation) do
+      {_token, %{phase: :live, progress_fenced: false}}
+      when state.transport in [:serving, :closing] and state.progress_phase == :open and
+             matching_attachment ->
+        {:route, state}
+
+      _ ->
+        {{:error, :output_unavailable}, state}
+    end
+  end
+
+  defp drain_route(state) do
+    case drain_progress(state, 32) do
+      :ok -> {:reply, :ok, state}
+      :error -> {:stop, :connections_lost, {:error, :output_unavailable}, state}
+    end
+  end
+
+  # Concept: an answered or cut ingress request resumes its original route.
+  # Technical depth: the original caller, incarnation and attachment are checked
+  # again, because the connection may have changed while the Service drained.
+  defp resume_ingress_route(state, incarnation) do
+    case Map.pop(state.ingress_routes, incarnation) do
+      {nil, _routes} ->
+        {:noreply, state}
+
+      {{_ref, from, caller, attachment_id}, routes} ->
+        state = %{state | ingress_routes: routes}
+
+        case route_ready_progress(state, caller, incarnation, attachment_id) do
+          {:route, state} ->
+            case drain_route(state) do
+              {:reply, reply, state} ->
+                GenServer.reply(from, reply)
+                {:noreply, state}
+
+              {:stop, reason, reply, state} ->
+                GenServer.reply(from, reply)
+                {:stop, reason, state}
+            end
+
+          {reply, state} ->
+            GenServer.reply(from, reply)
+            {:noreply, state}
+        end
+    end
+  end
+
+  defp resume_ingress_routes(state) do
+    Enum.reduce_while(Map.keys(state.ingress_routes), {:noreply, state}, fn incarnation,
+                                                                            {:noreply, acc} ->
+      case resume_ingress_route(acc, incarnation) do
+        {:noreply, acc} -> {:cont, {:noreply, acc}}
+        stop -> {:halt, stop}
+      end
+    end)
+  end
 
   defp drain_progress(_state, 0), do: :ok
 

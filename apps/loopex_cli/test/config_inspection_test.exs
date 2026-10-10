@@ -1,6 +1,8 @@
+Code.require_file("support/output_capture.exs", __DIR__)
+
 defmodule LoopexCli.ConfigInspectionTest do
   use ExUnit.Case, async: false
-  import ExUnit.CaptureIO
+  alias LoopexCli.Test.OutputCapture
   alias LoopexCli.{ChatConfiguration, ConfigInspection}
   @slot "M7_INSPECTION_SECRET_SLOT"
   @secret "selected-credential-canary-69ef"
@@ -108,7 +110,7 @@ defmodule LoopexCli.ConfigInspectionTest do
     assert prepared.selection.configuration["context_token_budget"] == 198_976
 
     output =
-      capture_io(fn ->
+      OutputCapture.stdout(fn ->
         assert :ok = ConfigInspection.run(argv, f.root, Path.join(f.root, "env-state"))
       end)
 
@@ -149,7 +151,10 @@ defmodule LoopexCli.ConfigInspectionTest do
 
     refute Map.has_key?(inspection, :genesis)
     refute Map.has_key?(inspection, :session_options)
-    output = capture_io(fn -> assert :ok = ConfigInspection.run(show(f), f.root, nil) end)
+
+    output =
+      OutputCapture.stdout(fn -> assert :ok = ConfigInspection.run(show(f), f.root, nil) end)
+
     refute output =~ "workspace_binding"
     refute output =~ chat.session_options["workspace_binding"]["workspace_ref"]
   end
@@ -165,9 +170,14 @@ defmodule LoopexCli.ConfigInspectionTest do
       )
     )
 
-    output = capture_io(fn -> assert :ok = ConfigInspection.run(validate(f), f.root, nil) end)
+    output =
+      OutputCapture.stdout(fn -> assert :ok = ConfigInspection.run(validate(f), f.root, nil) end)
+
     assert output == "Configuration valid.\nollama: credential-free binding cannot run chat.\n"
-    output = capture_io(fn -> assert :ok = ConfigInspection.run(show(f), f.root, nil) end)
+
+    output =
+      OutputCapture.stdout(fn -> assert :ok = ConfigInspection.run(show(f), f.root, nil) end)
+
     assert output =~ ~s("reference_form":"credential_free")
     assert output =~ ~s("unavailable_commands":["chat"])
     assert output =~ ~s(/maintenance/model = {"value":"unconfigured"} [default])
@@ -188,7 +198,7 @@ defmodule LoopexCli.ConfigInspectionTest do
                {:error, {:missing_member, "/session/bounds/" <> key}}
 
       output =
-        capture_io(fn ->
+        OutputCapture.stdout(fn ->
           assert {:error, _} = ConfigInspection.run(show(f) ++ flags, f.root, nil)
         end)
 
@@ -211,7 +221,9 @@ defmodule LoopexCli.ConfigInspectionTest do
       assert {:error, {class, _}} = ConfigInspection.prepare(validate(f), f.root, nil)
       assert class == expected
 
-      assert capture_io(fn -> assert {:error, _} = ConfigInspection.run(show(f), f.root, nil) end) ==
+      assert OutputCapture.stdout(fn ->
+               assert {:error, _} = ConfigInspection.run(show(f), f.root, nil)
+             end) ==
                ""
     end
   end
@@ -244,7 +256,10 @@ defmodule LoopexCli.ConfigInspectionTest do
     environment = prepared.selection.configuration["instructions"]["environment"]
     assert environment =~ ~s("enabled_roles":["reviewer"])
     assert environment =~ "sha256:"
-    output = capture_io(fn -> assert :ok = ConfigInspection.run(show(f), f.root, nil) end)
+
+    output =
+      OutputCapture.stdout(fn -> assert :ok = ConfigInspection.run(show(f), f.root, nil) end)
+
     assert output =~ ~s(/roles/reviewer/model = {"value":"#{@canonical}"})
     assert output =~ ~s(/roles/reviewer/context_token_budget = {"value":"197952"} [default])
 
@@ -324,7 +339,7 @@ defmodule LoopexCli.ConfigInspectionTest do
   end
 
   test "actual command dispatch reaches inspection and rejects trace and session flags", f do
-    output = capture_io(fn -> assert LoopexCli.dispatch(validate(f)) == :ok end)
+    output = OutputCapture.stdout(fn -> assert LoopexCli.dispatch(validate(f)) == :ok end)
     assert output == "Configuration valid.\n"
 
     for argv <- [
@@ -333,7 +348,7 @@ defmodule LoopexCli.ConfigInspectionTest do
           ["config", "unknown", "--config", f.config_path],
           ["config", "show", "--config", f.config_path]
         ] do
-      assert capture_io(fn -> assert {:error, _} = LoopexCli.dispatch(argv) end) == ""
+      assert OutputCapture.stdout(fn -> assert {:error, _} = LoopexCli.dispatch(argv) end) == ""
     end
   end
 

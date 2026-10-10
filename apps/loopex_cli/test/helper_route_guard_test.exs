@@ -5,6 +5,7 @@ Code.require_file(
 
 defmodule LoopexCli.HelperRouteGuardTest do
   use ExUnit.Case, async: false
+  alias LoopexCli.Output.Memory
   @moduletag capture_log: true
 
   alias LoopexCli.ChatDriver
@@ -52,20 +53,22 @@ defmodule LoopexCli.HelperRouteGuardTest do
 
   defp drive(runtime, session, line, configuration) do
     {:ok, input} = StringIO.open(line <> "\n/quit\n", encoding: :latin1)
-    {:ok, output} = StringIO.open("", encoding: :latin1)
+    {:ok, output} = Memory.start()
     test = self()
 
     host =
       spawn(fn ->
         {:ok, driver} =
-          ChatDriver.start_link(runtime, session, input, output, configuration: configuration)
+          ChatDriver.start_link(runtime, session, input, {:owned, output},
+            configuration: configuration
+          )
 
         send(test, {:provisional, self(), ChatDriver.run(driver)})
       end)
 
     on_exit(fn -> if Process.alive?(host), do: Process.exit(host, :kill) end)
     assert_receive {:provisional, ^host, _result}, 10_000
-    {_, transcript} = StringIO.contents(output)
+    {transcript, _} = Memory.contents(output)
     transcript
   end
 

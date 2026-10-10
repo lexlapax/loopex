@@ -55,6 +55,9 @@ You need:
 - An executable `/bin/bash`. The local executor uses it for its own process
   supervision; see the
   [local supervision prerequisite](tools-and-policy.md#operator-local-supervision-shell).
+  Every `loopex` command also writes its terminal output through a fixed Bash
+  writer that copies bytes with the standard `dd` command; see
+  [command output](coding-sessions.md#operator-sessions-output).
 - An executable `/bin/ps`. Loopex runs it to confirm that a stopped tool's
   processes are gone and that a lock's owner is still alive.
 - Network access for fetching dependencies and for the selected model endpoint.

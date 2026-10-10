@@ -1199,8 +1199,12 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
     observed = :observe in steps
     gate = if :await_gate in steps, do: start_gate(), else: nil
 
+    # Concept: the conversation is chat's input device and its owned output
+    # target (ADR 0068); the terminal case acquires the process's own stdio.
     {input, output, chat_mode} =
-      if mode == :terminal, do: {:stdio, :stdio, :interactive}, else: {device, device, :pipe}
+      if mode == :terminal,
+        do: {:stdio, :stdio, :interactive},
+        else: {device, {:owned, device}, :pipe}
 
     options =
       [
@@ -1486,19 +1490,12 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
 
   # Concept: required runtime facts are read from the committed session, not
   # from the conversation's prose.
-  # Technical depth: the attempt's own Local Store is opened after every
+  # Technical depth: the composition lends the attempt's own Store after every
   # conversation has closed; rows are read in order and the store is stopped.
   @doc false
   def committed(state_root, session) when is_binary(session) do
-    with {:ok, adapter} <- Loopex.Store.Local.start_link(path: Path.join(state_root, "store.log")) do
-      try do
-        {:ok, store} = Loopex.Store.new(Loopex.Store.Local, adapter)
-        page(store, session, 0, [])
-      after
-        Process.unlink(adapter)
-        GenServer.stop(adapter)
-      end
-    else
+    case LoopexComposition.Edges.with_store(state_root, &page(&1, session, 0, [])) do
+      {:ok, rows} -> {:ok, rows}
       _ -> {:error, :committed_facts_unavailable}
     end
   rescue
