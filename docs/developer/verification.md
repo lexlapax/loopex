@@ -86,7 +86,7 @@ Technical depth: [The selection table](verification-technical.md#technical-verif
 | Durable records, the Store, recovery | Nothing more to run; the review confirms current-format fault injection, restart/replay and uncertainty cases still cover the change |
 | The wire protocol, its schema or vectors | The Node consumer workflows (`--only node_client`, part of the release check), and the compatibility surfaces page updated in the same change |
 | The CLI or operator-facing commands | The operator page that describes the behavior updated in the same change; a changed operator command also selects its workflow in the release check |
-| Provider or credential handling | The applicable unattended real-provider cases, selected with `check-release.sh --only`; attended cases remain mandatory at closure |
+| Provider or credential handling | The applicable unattended real-provider cases and, for an M7 provider route, `m7-provider`, selected with `check-release.sh --only`; attended cases remain mandatory at closure |
 | An operating-system process boundary: the executor's or the provider child's (launch, signals, credential delivery, cleanup) | `bash scripts/fixtures/pinned-load.sh` over the touched cases on a Linux host: thirty runs under four pinned cores and load, no failure and no hang |
 | The daemon's socket, peer check or lifecycle | The daemon's `node_client`, `long_bound`, applicable unattended `real_provider` cases and Linux `cross_uid` lanes in the release check, and the [daemon operator page](../operator/daemon.md#concept) updated in the same change |
 | The toolchain floor or `.tool-versions` | The fast check under the floor pair once |
@@ -114,7 +114,9 @@ matrix, which records every case in the retained M7 attempts index named by
 
 M7 adds two pre-merge lanes: `m7-provider`, paid and recorded in the attempts
 index, and the credential-free `m7-rollback`. The attended `m7-operator`
-block runs only in the full matrix. Both check commands run the M7 evidence
+block runs only in the full matrix, from a terminal. The M7 conversation lanes
+carry exactly provider A's `LOOPEX_PROVIDER_API_KEY` and provider B's
+`OPENAI_API_KEY`, the names the committed manifest pins. Both check commands run the M7 evidence
 validator; the release check refuses an M7 lane before staging while any of
 its committed cases is still pending, and the full matrix while any V1–V13
 step owner is. A refused lane is not PASS, and a new candidate SHA alone never

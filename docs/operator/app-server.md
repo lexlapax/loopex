@@ -24,7 +24,7 @@ Constraints:
   ends the connection ends, and the durable session stays where it was. Nothing
   listens on a socket and a second process cannot take a session over. For
   those, use [the daemon](daemon.md#concept).
-- The protocol generation is named `loopex.experimental/1`. The word
+- The protocol generation is named `loopex.experimental/3`. The word
   "experimental" is part of the name, so no client can mistake it for a released
   contract; it may change without a migration path.
 - A client drives a session; it never configures one. Every choice that
@@ -315,7 +315,7 @@ belongs is refused rather than rounded.
 | Capability | State |
 | --- | --- |
 | Drive a session from another language over standard input and output | Available, experimental |
-| Run in the background or listen on a socket | Not here; `loopex daemon` does, on generation 2 — see [the daemon](daemon.md#concept) |
+| Run in the background or listen on a socket | Not here; `loopex daemon` does, on generation 4 — see [the daemon](daemon.md#concept) |
 | Attach more than one client to a session, or take one over | Not here; the daemon provides both |
 | Install a Hex package, binary or installer | Not provided |
 | Rely on the generation staying unchanged | Not provided; the name says experimental |

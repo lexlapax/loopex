@@ -15,7 +15,7 @@ is the index of what exists.
 
 | Directory | Contents |
 | --- | --- |
-| [operator/](operator/README.md) | Runbooks for running Loopex: getting started, coding sessions and project skills, tools and policy, the daemon, the app server, observability, and how a run works. |
+| [operator/](operator/README.md) | Runbooks for running Loopex: getting started, coding sessions and chat, project skills, tools and policy, the daemon, the app server, observability, how a run works, and the M7 validation runbook. |
 | [developer/](developer/README.md) | Building on Loopex and contributing to it: getting started, architecture, embedding, the agent loop, protocols, the daemon, observability, compatibility, and the development method. |
 | [adr/](adr/README.md) | Numbered architecture decisions and their governance records. |
 | [plans/](plans/README.md) | Milestone register, lifecycle, plan templates, and current status. |
@@ -133,9 +133,10 @@ whose path or explicit fragment does not resolve.
 - [M4 headless external consumption](plans/M4.md#concept) and [technical plan](plans/M4-technical.md#technical-depth) — durable interactions, artifact transfers, the floor refresh, observability, and the experimental session protocol driven by an independent Node consumer in plain JavaScript; Closed, with its runs in [M4 closure runs](evidence/M4-closure-runs.md).
 - [M5 durable service](plans/M5.md#concept) and [technical plan](plans/M5-technical.md#technical-depth) — daemon-owned session lifetime on the ADR-selected local store within its documented limits, generation-2-only Unix-domain-socket transport, in-memory controller lease with observers and takeover, and at-least-once replay with residency limits over M4.; Closed, with its runs in [M5 closure runs](evidence/M5-closure-runs.md).
 - [M6 minimal runnable Loopex](plans/M6.md#concept) and [technical plan](plans/M6-technical.md#technical-depth) — the embedded ephemeral API, the in-process model adapter and memory store, the standalone command for shells and agents, full Loopex unchanged, and closure tooling in the repository. The [plans register](plans/README.md) carries its current state.
-- M7 is Accepted for implementation: [M7 coding-agent proof](plans/M7.md#concept) ([technical](plans/M7-technical.md#technical-depth)), placed first on 2026-09-29; then the unregistered successor drafts: [M8 installed durable operator](drafts/m8-installed-durable-operator.md#concept) ([technical](drafts/m8-installed-durable-operator-technical.md#technical-depth)), [M9 store engine successor](drafts/m9-store-engine-successor.md#concept) ([technical](drafts/m9-store-engine-successor-technical.md#technical-depth)) and [M10 governed extension runtime](drafts/m10-governed-extension-runtime.md#concept) ([technical](drafts/m10-governed-extension-runtime-technical.md#technical-depth)).
+- M7 is in progress: [M7 coding-agent proof](plans/M7.md#concept) ([technical](plans/M7-technical.md#technical-depth)), placed first on 2026-09-29; then the unregistered successor drafts: [M8 installed durable operator](drafts/m8-installed-durable-operator.md#concept) ([technical](drafts/m8-installed-durable-operator-technical.md#technical-depth)), [M9 store engine successor](drafts/m9-store-engine-successor.md#concept) ([technical](drafts/m9-store-engine-successor-technical.md#technical-depth)) and [M10 governed extension runtime](drafts/m10-governed-extension-runtime.md#concept) ([technical](drafts/m10-governed-extension-runtime-technical.md#technical-depth)).
 
-- [M7 closure evidence scaffold](evidence/M7-closure-runs.md) — Pending run, source, outcome and review fields; complete literal manifest inventories remain open.
+- [M7 closure evidence scaffold](evidence/M7-closure-runs.md) — Pending run, source, outcome and review fields.
+- [M7 contract inventory](evidence/M7-contract-inventory.md) — every record, API, tool generation, adapter and protocol M7 changes, with its pinned digests and proving tests.
 - [Development contract](../AGENTS.md) — canonical tool-neutral authority,
   autonomy, documentation, milestone, and enforcement rules.
 - [Plans and current status](plans/README.md) — canonical milestone register,
@@ -148,9 +149,11 @@ whose path or explicit fragment does not resolve.
   runs, what is durable at every step, and what a crash at each stage leaves
   behind.
 - [Coding sessions](operator/coding-sessions.md#concept) — running, streaming,
-  steering, resuming, and stopping a coding task with the `loopex` command, the
-  project-resource trust decision, the configuration a resumed session recovers,
-  and what stopping does and does not promise.
+  steering, resuming, and stopping a coding task with the `loopex` command,
+  chat from an explicit configuration file with settled settings, compaction,
+  questions and helper roles, the project-resource trust decision, the
+  configuration a resumed session recovers, and what stopping does and does not
+  promise.
 - [Tools and policy](operator/tools-and-policy.md#concept) — the four coding and
   three read-only tools, what local execution reaches, host authority, artifacts
   and how to read one back, and what the local store keeps on disk.
@@ -167,6 +170,9 @@ whose path or explicit fragment does not resolve.
   foreground session-protocol server and driving it from a client.
 - [Observability](operator/observability.md#concept) — starting a trace session
   and reading bounded, redacted telemetry.
+- [M7 validation runbook](operator/m7-validation.md) — running the M7 coding-task
+  validation lanes and finding which test, case or demonstration owns each
+  scenario step.
 - [Agent loop and tools](developer/agent-loop-and-tools.md#concept) — the
   multi-turn loop, tool contract and registry, bounds, stream domains, host
   authority, artifacts, and project resources.

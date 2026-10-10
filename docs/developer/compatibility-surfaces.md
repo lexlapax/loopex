@@ -25,8 +25,8 @@ Checkpoint events now identify their actual owner with the closed
 encode its opaque identity with the existing base64url codec. The
 [approved owner amendment](agent-context-map.md#disposition-m7-standalone-checkpoint-owner-2026-10-03)
 removes the public owning `run_id` alias. Literal vectors cover both kinds,
-malformed shapes and the complete identity ceiling. The complete M7 negotiated
-generation and checkpoint snapshot integration remain in progress.
+malformed shapes and the complete identity ceiling. The foreground `/3` and
+daemon `/4` schemas include it.
 Breaking an experimental API in a minor release carries an explicit migration
 note under the vision's 0.x policy. This page lists what an embedder, a client
 author, or an operator can reach today, what each surface consists of, which
@@ -39,8 +39,9 @@ surface only when its own consumers, schemas, vectors, migration, rollback, and
 operational evidence justify the claim. No surface has all of those yet, so
 labelling one stable would be a promise with nothing behind it.
 
-**Versions name source, not contracts.** The closed M5 source is `v0.2.0`;
-M6 targets `0.3.0` with an ephemeral embedding profile and `loopex ask`.
+**Versions name source, not contracts.** The closed M5 source is `v0.2.0` and
+the closed M6 source is `v0.3.0`, with an ephemeral embedding profile and
+`loopex ask`; M7 has no selected version.
 The older `v0.0.0-m2` and `v0.1.0` tags also name source snapshots. None is a
 package or a compatibility freeze. No installed binary or package is published,
 so the vision's package surface — released names, contents, and constraints —
@@ -50,8 +51,8 @@ independently of the source version, as accepted
 requires.
 
 **The wire protocol is experimental by name.** The app server speaks the exact
-generation `loopex.experimental/1` over standard input and output, and the
-daemon speaks `loopex.experimental/2` over its socket. A client offers an
+generation `loopex.experimental/3` over standard input and output, and the
+daemon speaks `loopex.experimental/4` over its socket. A client offers an
 ordered list of generations and the server selects one it knows, with no
 partial match, no nearest neighbour, and no version comparison that could round
 the word `experimental` up to a released contract. A generation has schemas,
@@ -110,8 +111,8 @@ surface it belongs to under
 | Durable record shapes | committed record kinds, replayed by `Loopex.Runtime.SessionState` | 1, private journal and store schema | Unstable |
 | Durable interaction records | `interaction_requested_v1`, `interaction_answer_admitted_v1`, `interaction_resolved_v1`, and the `interaction_answer` command | 1, private journal and store schema | Experimental; refused by older readers |
 | Public event shapes | `Loopex.attach/3`, `Loopex.next_event/1` | 2, public protocol | Unstable |
-| App-server wire protocol | generation `loopex.experimental/1`: methods, records, error codes, identities, limits | 2, public protocol semantics | Experimental; exact generation agreement only |
-| Daemon wire protocol | generation `loopex.experimental/2` over the daemon's Unix-domain socket | 2, public protocol semantics | Experimental; exact generation agreement only |
+| App-server wire protocol | generation `loopex.experimental/3`: methods, records, error codes, identities, limits | 2, public protocol semantics | Experimental; exact generation agreement only |
+| Daemon wire protocol | generation `loopex.experimental/4` over the daemon's Unix-domain socket | 2, public protocol semantics | Experimental; exact generation agreement only |
 | Public protocol schemas and vectors | `apps/loopex_protocol/priv/schema/` and `priv/vectors/`, reported as a schema digest at initialization | 2, public protocol semantics | Experimental |
 | Telemetry events | the `[:loopex, …]` span inventory, `Loopex.Telemetry.attach/1` and `detach/1` | not a listed surface; transient diagnostics | Experimental |
 | Trace sessions | `Loopex.trace/1`, `trace/2`, `trace_status/1`, `trace_stop/1` | 5, embedded Elixir API; transient diagnostics | Experimental |
@@ -342,11 +343,11 @@ port. The command's cross-application interrupt entries —
 described in
 [Runtime and embedding](runtime-and-embedding.md#technical-embedding-recovery).
 
-**App-server and daemon wire protocols.** Generation `loopex.experimental/1`
-has sixteen methods, seven record families, and fifteen error codes;
-`loopex.experimental/2` adds four methods, two record families, twelve error
-codes, seven limits, and a `writer_epoch` on every mutation of an existing
-session. The exact contract is
+**App-server and daemon wire protocols.** The foreground serves only
+`loopex.experimental/3` and the daemon only `loopex.experimental/4`; the daemon
+generation adds session listing, daemon status, the controller lease and a
+`writer_epoch` on every mutation of an existing session. Earlier generations
+are no longer served. The exact contract is
 [the protocol technical reference](app-server-protocol-technical.md#technical-depth).
 Initialization reports the selected generation, the exact schema digest, the
 methods, and the limits, and because the digest covers the whole schema, any

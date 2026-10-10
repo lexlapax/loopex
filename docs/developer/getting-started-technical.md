@@ -310,7 +310,7 @@ quantities are decimal strings, and the connection's attachment receives the
 commands that follow it:
 
 ```json
-{"method":"initialize","request_id":"c1","generations":["loopex.experimental/1"],"capabilities":[]}
+{"method":"initialize","request_id":"c1","generations":["loopex.experimental/3"],"capabilities":[]}
 {"method":"session.create","request_id":"c2","command_id":"Y3JlYXRlLTE","session_options":{}}
 {"method":"session.attach","request_id":"c3","session_id":"<session_id from the admission>","after_event_sequence":"0"}
 {"method":"session.prompt","request_id":"c4","command_id":"cHJvbXB0LTE","content_b64":"ZG8gdGhlIHRhc2s"}
@@ -362,12 +362,12 @@ apps/loopex_cli/bin/loopex daemon \
   --provider-launch _build/prod/loopex_provider.launch --policy allow-all
 ```
 
-A client offers `loopex.experimental/2` and must hold the session's controller
+A client offers `loopex.experimental/4` and must hold the session's controller
 lease to change it. Controlled mutations carry the `writer_epoch` the lease
 returned:
 
 ```json
-{"method":"initialize","request_id":"c1","generations":["loopex.experimental/2"],"capabilities":[]}
+{"method":"initialize","request_id":"c1","generations":["loopex.experimental/4"],"capabilities":[]}
 {"method":"session.attach","request_id":"c2","session_id":"<session>","after_event_sequence":"0"}
 {"method":"session.acquire_control","request_id":"c3","session_id":"<session>"}
 {"method":"session.prompt","request_id":"c4","command_id":"<identity>","content_b64":"<bytes>","writer_epoch":"<writer_epoch from the result>"}
@@ -421,6 +421,7 @@ Concept: [Contributing: toolchain and checks](getting-started.md#concept-getting
 | The fast check for a prose-only change | `bash scripts/check.sh --docs` |
 | The mode CI picks from the diff | `bash scripts/check.sh --select` |
 | M6 closure checks for the exact committed candidate | `bash scripts/floor-lane.sh SHA --output-dir DIR --long-bound`, then `bash scripts/attended-release.sh --output LOG` with the history-safe provider credential, pinned Node, running Ollama and `LOOPEX_RELEASE_OLLAMA_MODEL` described in [DEVELOPMENT.md](../../DEVELOPMENT.md) |
+| M7 release check for the exact committed candidate | `bash scripts/check-release.sh --attempts-index FILE --writer ID --host ID --markers DIR --m7-config FILE --operator NAME`, once from a terminal, with providers A and B's credentials as described in [DEVELOPMENT.md](../../DEVELOPMENT.md) and the [M7 validation runbook](../operator/m7-validation.md) |
 
 A local pre-merge fast check counts only from a clean candidate. Retain its
 complete output and exact HEAD SHA outside the repository; otherwise use the
@@ -436,7 +437,8 @@ For the attended runner, load `LOOPEX_PROVIDER_API_KEY` using the
 [history-safe input pattern](../../DEVELOPMENT.md) before running it;
 do not put its value in a shell command line. The direct
 `bash scripts/check-release.sh` remains the underlying release check for
-other workflows; M6 closure does not run it again.
+other workflows; M6 closure does not run it again, and M7 closure runs it
+directly because the attended runner does not forward the M7 matrix arguments.
 
 Each application's test helper excludes the release-only tags —
 `real_provider`, `long_bound`, `node_client`, and `cross_uid` where they occur —

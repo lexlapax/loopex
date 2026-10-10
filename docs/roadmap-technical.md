@@ -34,7 +34,7 @@ The current intermediate milestone projection is:
 
 | Milestone | Candidate proof | Release authority |
 | --- | --- | --- |
-| [M7](plans/M7.md#concept) | Accepted coding workflow, compaction, configuration, questions and bounded host helpers; implementation follows the plan's serial phases and retained proof obligations | Accepted for implementation; no version or publication selected |
+| [M7](plans/M7.md#concept) | Accepted coding workflow, compaction, configuration, questions and bounded host helpers; implementation follows the plan's serial phases and retained proof obligations | In progress against the accepted plan; no version or publication selected |
 | [M8](drafts/m8-installed-durable-operator.md#concept) | Installed discovery, lifecycle and release artifact | Draft; separate acceptance/version decision |
 | [M9](drafts/m9-store-engine-successor.md#concept) | Selected store engine, full-history migration and rollback | Draft; separate acceptance/version decision |
 
