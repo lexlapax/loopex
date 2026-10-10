@@ -107,10 +107,8 @@ defmodule LoopexComposition.Ephemeral.CleanupTest do
   end
 
   test "runtime stop waits for its worker result, finish, and exact DOWN", %{tmp: tmp} do
-    # The held worker must still be inside its phase while this case forges and
-    # observes messages; the explicit window keeps the default 1 s slot from
-    # retiring it first on a loaded host. Ordering, not the window, is proved.
-    session = start_session(tmp, successful_drain(), abort_phase_window_ms: {5_000, 6_000})
+    test = self()
+    session = start_session(tmp, successful_drain(), phase_started: {test, :runtime_stop})
     {:loopex_ephemeral_session, owner, cell} = session
 
     %{startup: %{owned_root: %{path: root}, registered: %{runtime: %Runtime{} = runtime}}} =
@@ -126,7 +124,7 @@ defmodule LoopexComposition.Ephemeral.CleanupTest do
     stop_ref = stop.ref
 
     assert %{stage: :runtime_stop, worker: %{pid: worker, reference: reference} = phase_worker} =
-             await_runtime_stop(owner)
+             suspend_at_phase(owner, :runtime_stop)
 
     assert %{result: false, finish_sent: false} = phase_worker
     worker_monitor = Process.monitor(worker)
@@ -144,8 +142,11 @@ defmodule LoopexComposition.Ephemeral.CleanupTest do
       {self(), reference, :runtime_stop, :result, :ok, System.monotonic_time()}
     )
 
-    assert %{stage: :runtime_stop, worker: %{pid: ^worker, result: false, finish_sent: false}} =
-             :sys.get_state(owner).abort
+    # Concept: observe the owner after the forged messages and before the real result.
+    # Technical depth: the suspended owner handles this queued sys request after
+    # the forged messages; the worker cannot answer until the runtime is released.
+    probe = make_ref()
+    send(owner, {:system, {test, probe}, :get_state})
 
     assert Process.alive?(worker)
     assert Process.alive?(root_pid)
@@ -154,6 +155,12 @@ defmodule LoopexComposition.Ephemeral.CleanupTest do
 
     send(suspension, {self(), :release})
     assert_receive {^suspension, :released}, 1_000
+    assert :ok = :sys.resume(owner)
+
+    assert_receive {^probe, {:ok, %{abort: probed}}}, 1_000
+
+    assert %{stage: :runtime_stop, worker: %{pid: ^worker, result: false, finish_sent: false}} =
+             probed
 
     assert_receive {:DOWN, ^worker_monitor, :process, ^worker, :normal}, 1_000
     assert :ok = Task.await(stop, 7_000)
@@ -214,9 +221,7 @@ defmodule LoopexComposition.Ephemeral.CleanupTest do
   end
 
   test "a failed runtime-stop worker cannot certify the session subtree", %{tmp: tmp} do
-    # This case kills the held worker itself; the explicit window keeps the
-    # default 1 s slot from retiring it first on a loaded host.
-    session = start_session(tmp, successful_drain(), abort_phase_window_ms: {5_000, 6_000})
+    session = start_session(tmp, successful_drain(), phase_started: {self(), :runtime_stop})
     {:loopex_ephemeral_session, owner, cell} = session
 
     %{startup: %{owned_root: %{path: root}, registered: %{runtime: %Runtime{} = runtime}}} =
@@ -225,10 +230,14 @@ defmodule LoopexComposition.Ephemeral.CleanupTest do
     suspension = suspend_runtime(runtime.supervisor)
     on_exit(fn -> send(suspension, {self(), :release}) end)
     stop = Task.async(fn -> Ephemeral.stop_session(session) end)
-    assert %{stage: :runtime_stop, worker: %{pid: worker}} = await_runtime_stop(owner)
+
+    assert %{stage: :runtime_stop, worker: %{pid: worker}} =
+             suspend_at_phase(owner, :runtime_stop)
+
     monitor = Process.monitor(worker)
     Process.exit(worker, :kill)
     assert_receive {:DOWN, ^monitor, :process, ^worker, :killed}, 1_000
+    assert :ok = :sys.resume(owner)
     send(suspension, {self(), :release})
     assert_receive {^suspension, :released}, 1_000
 
@@ -440,7 +449,7 @@ defmodule LoopexComposition.Ephemeral.CleanupTest do
               group_drain: drain,
               group_attest: fn _executor, _instance, _nonce, _deadline -> :ok end
             },
-            Map.new(Keyword.take(options, [:subtree_stop, :abort_phase_window_ms]))
+            Map.new(Keyword.take(options, [:subtree_stop, :phase_started]))
           )
       }
       |> LoopexComposition.PreparedSessionFixture.capture()
@@ -472,17 +481,18 @@ defmodule LoopexComposition.Ephemeral.CleanupTest do
     end)
   end
 
-  defp await_runtime_stop(owner) do
-    Enum.reduce_while(1..100, nil, fn _, _ ->
-      case :sys.get_state(owner).abort do
-        %{stage: :runtime_stop, worker: worker} = abort when is_map(worker) ->
-          {:halt, abort}
-
-        _ ->
-          Process.sleep(2)
-          {:cont, nil}
-      end
-    end)
+  # Concept: suspend the owner at a phase start, ahead of that phase's deadlines.
+  # Technical depth: the owner is held before it launches the phase worker and
+  # arms its cutoff and slot timers; this sys suspend request is queued before
+  # the owner continues, so it is handled before either timer message. The
+  # suspended owner still answers sys requests, which returns the launched worker.
+  defp suspend_at_phase(owner, phase) do
+    assert_receive {:abort_phase_held, ^phase, ^owner, reference}, 3_000
+    suspended = make_ref()
+    send(owner, {:system, {self(), suspended}, :suspend})
+    send(owner, {reference, :continue})
+    assert_receive {^suspended, :ok}, 3_000
+    :sys.get_state(owner).abort
   end
 
   defp suspend_runtime(runtime_supervisor), do: suspend_process(runtime_supervisor)

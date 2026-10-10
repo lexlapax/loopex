@@ -3723,10 +3723,25 @@ defmodule LoopexComposition.Ephemeral.SessionOwner do
       end
     end
 
+    # Concept: a test can hold the owner at the start of one named phase.
+    # Technical depth: the hold precedes worker launch and timer arming, so a
+    # message the test enqueues before continuing is handled ahead of either
+    # phase deadline message.
     defp notify_abort_phase_start(configuration, phase) do
       case get_in(configuration, [:test_seams, :phase_started]) do
-        pid when is_pid(pid) -> send(pid, {:abort_phase_started, phase})
-        _ -> :ok
+        pid when is_pid(pid) ->
+          send(pid, {:abort_phase_started, phase})
+
+        {pid, ^phase} when is_pid(pid) ->
+          reference = make_ref()
+          send(pid, {:abort_phase_held, phase, self(), reference})
+
+          receive do
+            {^reference, :continue} -> :ok
+          end
+
+        _ ->
+          :ok
       end
     end
 
