@@ -16742,6 +16742,13 @@ full restore175, operator attendance, helpers or whole integration.
   early (an `input_failed` error or end of input), so the driver began its stop
   before the half-close. This is unconfirmed and possibly a stdio defect. This
   case is not counted toward the thirty-run row.
+  Second open defect under the same cap: `apps/loopex/test/artifact_runtime_test.exs:346`
+  failed once while pinned-load hogs ran on other cores. `assert_receive
+  {:tool_progress_emitted, ...}` in `live_preparation_fixture/1` timed out
+  (`custody-close/suite-loopex-current-run1-under-pinned-hogs.log`). It
+  passed in the next unloaded whole-suite run. Hypothesis: the fixture's
+  1,000 ms run deadline is reached under load before tool progress is
+  emitted. Not proved.
   Pending proof (2026-10-10, candidate nomination): the closure scaffold's two
   Linux pinned-load rows. The retained sets in `pinned-load/` (`CASES.txt`) ran
   at pre-candidate SHAs; whether they stand for the candidate or the touched
