@@ -1,3 +1,5 @@
+Code.require_file("support/m7_lock_ports.exs", __DIR__)
+
 defmodule LoopexCli.M7MatrixTest do
   use ExUnit.Case, async: true
 
@@ -23,7 +25,12 @@ defmodule LoopexCli.M7MatrixTest do
     on_exit(fn -> File.rm_rf!(root) end)
     index = Path.join(root, "attempts.jsonl")
     identity = %{"writer_id" => "w", "host_id" => "h", "marker_dir" => Path.join(root, "markers")}
-    {:ok, writer} = AttemptWriter.create(index, "m7-closure-1", identity)
+
+    {:ok, writer} =
+      AttemptWriter.create(index, "m7-closure-1", identity,
+        lock_port: LoopexCli.M7LockPorts.claim()
+      )
+
     :ok = AttemptWriter.close(writer)
     [_, designation] = records(index)
     concept = Path.join(root, "M7.md")

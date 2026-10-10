@@ -97,8 +97,10 @@ defmodule Mix.Tasks.Loopex.M7Evidence.AttemptWriter do
   def init({{mode, path, campaign, identity, opts}, caller}) do
     Process.monitor(caller)
 
-    with true <- absolute?(path) and identity?(identity),
-         {:ok, state} <- acquire(mode, path, identity) do
+    port = Keyword.get(opts, :lock_port)
+
+    with true <- absolute?(path) and identity?(identity) and (is_nil(port) or port in @ports),
+         {:ok, state} <- acquire(mode, path, identity, port) do
       state = %{
         state
         | secrets: Enum.filter(Keyword.get(opts, :secrets, []), &(is_binary(&1) and &1 != "")),
@@ -117,10 +119,15 @@ defmodule Mix.Tasks.Loopex.M7Evidence.AttemptWriter do
 
   # Concept: creation fixes the lock before any index byte exists.
   # Technical depth: a free port is found by listening first, so the immutable
-  # record never names a port this writer could not hold.
-  defp acquire(:create, path, identity) do
+  # record never names a port this writer could not hold. `:lock_port` names
+  # the one candidate instead of a random draw, for a caller that has already
+  # reserved a port no other index on this host will name; held, it refuses as
+  # contention like any other.
+  defp acquire(:create, path, identity, port) do
+    candidates = if port, do: [port], else: Enum.take(Enum.shuffle(@ports), 64)
+
     with false <- File.exists?(path) or File.exists?(path <> ".lock"),
-         {:ok, listener, port} <- listen_free(Enum.shuffle(@ports) |> Enum.take(64)),
+         {:ok, listener, port} <- listen_free(candidates),
          :ok <- write_exclusive(path <> ".lock", ~s({"port":#{port},"version":1}\n)),
          {:ok, fd} <- :file.open(path, [:raw, :binary, :read, :append, :exclusive]) do
       {:ok, state(path, identity, listener, fd)}
@@ -142,7 +149,7 @@ defmodule Mix.Tasks.Loopex.M7Evidence.AttemptWriter do
     end
   end
 
-  defp acquire(:open, path, identity) do
+  defp acquire(:open, path, identity, _port) do
     with {:ok, port} <- lock_port(path),
          {:ok, listener} <- listen(port),
          {:ok, fd} <- open_index(path) do

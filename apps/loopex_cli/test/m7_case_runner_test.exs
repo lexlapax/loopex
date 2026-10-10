@@ -1,3 +1,4 @@
+Code.require_file("support/m7_lock_ports.exs", __DIR__)
 Code.require_file("../../loopex/test/support/m1_runtime_helper.exs", __DIR__)
 Code.require_file("../../loopex/test/support/agent_loop_helper.exs", __DIR__)
 
@@ -177,7 +178,10 @@ defmodule LoopexCli.M7CaseRunnerTest do
     {:ok, catalog} = FixtureManifest.load(@fixtures)
     index = Path.join(root, "attempts.jsonl")
     campaign = catalog.catalog["execution_manifest"]["campaign_id"]
-    {:ok, writer} = AttemptWriter.create(index, campaign, identity)
+
+    {:ok, writer} =
+      AttemptWriter.create(index, campaign, identity, lock_port: LoopexCli.M7LockPorts.claim())
+
     [_, designation] = records(index)
     config = Path.join(root, "template.json")
     File.write!(config, :json.encode(profile(root)))

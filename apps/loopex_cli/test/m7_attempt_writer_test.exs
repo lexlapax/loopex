@@ -1,14 +1,20 @@
+Code.require_file("support/m7_lock_ports.exs", __DIR__)
+
 defmodule LoopexCli.M7AttemptWriterTest do
   use ExUnit.Case, async: true
 
   # Concept: the attempts writer is proved on real files, real loopback
   # listeners and real independent VMs; no mutex or callback stands in for the
   # lock. Technical depth: every test uses its own temporary directory outside
-  # the repository and its own index, so each lock port is chosen afresh.
+  # the repository and its own index, and every index it creates takes a lock
+  # port claimed for it alone (`LoopexCli.M7LockPorts`), so a contention a test
+  # sees comes from its own holders.
 
   alias Mix.Tasks.Loopex.M7Evidence.AttemptEvents, as: Events
   alias Mix.Tasks.Loopex.M7Evidence.AttemptFrames, as: Frames
   alias Mix.Tasks.Loopex.M7Evidence.AttemptWriter, as: Writer
+
+  import LoopexCli.M7LockPorts, only: [claim: 0]
 
   @campaign "m7-writer"
   @digest String.duplicate("0", 64)
@@ -32,7 +38,7 @@ defmodule LoopexCli.M7AttemptWriterTest do
     dir: dir,
     index: index
   } do
-    assert {:ok, writer} = Writer.create(index, @campaign, host(dir, 1))
+    assert {:ok, writer} = Writer.create(index, @campaign, host(dir, 1), lock_port: claim())
     lock = File.read!(index <> ".lock")
     assert [_, port] = Regex.run(~r/\A\{"port":([0-9]{5}),"version":1\}\n\z/, lock)
     assert String.to_integer(port) in 20_000..32_767
@@ -44,6 +50,12 @@ defmodule LoopexCli.M7AttemptWriterTest do
 
     assert Writer.open(index, host(dir, 1)) == {:error, :attempt_writer_contention}
     assert Writer.create(index, @campaign, host(dir, 1)) == {:error, :attempt_evidence_exists}
+    other = Path.join(dir, "other.jsonl")
+
+    assert Writer.create(other, @campaign, host(dir, 1), lock_port: 19_999) ==
+             {:error, :invalid_attempt_writer_request}
+
+    refute File.exists?(other) or File.exists?(other <> ".lock")
     :ok = Writer.close(writer)
     assert {:ok, reopened} = Writer.open(index, host(dir, 1))
     assert File.read!(index <> ".lock") == lock
@@ -66,7 +78,12 @@ defmodule LoopexCli.M7AttemptWriterTest do
       "disposition" => reference
     }
 
-    assert {:ok, writer} = Writer.create(index, @campaign, host(dir, 1), succession: succession)
+    assert {:ok, writer} =
+             Writer.create(index, @campaign, host(dir, 1),
+               succession: succession,
+               lock_port: claim()
+             )
+
     assert [_, _, %{"body" => ^succession, "sequence" => 3}] = records(index)
     :ok = Writer.close(writer)
 
@@ -80,7 +97,7 @@ defmodule LoopexCli.M7AttemptWriterTest do
       })
 
     assert {:error, :invalid_attempt_event} =
-             Writer.create(other, @campaign, host(dir, 1), succession: lost)
+             Writer.create(other, @campaign, host(dir, 1), succession: lost, lock_port: claim())
   end
 
   test "missing or malformed lock records and a missing index are unavailable evidence",
@@ -574,7 +591,7 @@ defmodule LoopexCli.M7AttemptWriterTest do
     source =
       vm("""
       #{prelude()}
-      {:ok, w} = Writer.create(#{lit(index_a)}, #{lit(@campaign)}, #{lit(host_a)})
+      {:ok, w} = Writer.create(#{lit(index_a)}, #{lit(@campaign)}, #{lit(host_a)}, lock_port: #{claim()})
       {:ok, %{marker: marker}} = Writer.relinquish(w, "writer-b", "host-b", "handoff-ab", #{lit(Path.join(a, "quiescence"))})
       IO.puts("MARKER " <> marker)
       """)
@@ -719,7 +736,7 @@ defmodule LoopexCli.M7AttemptWriterTest do
 
   defp created!(dir, index) do
     File.mkdir_p!(Path.join(dir, "markers-1"))
-    {:ok, writer} = Writer.create(index, @campaign, host(dir, 1))
+    {:ok, writer} = Writer.create(index, @campaign, host(dir, 1), lock_port: claim())
     [_, designation] = records(index)
     {writer, head_line(designation)}
   end
