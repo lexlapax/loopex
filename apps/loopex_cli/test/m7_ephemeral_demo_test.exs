@@ -1,3 +1,5 @@
+Code.require_file("support/m7_lock_ports.exs", __DIR__)
+
 defmodule LoopexCli.M7EphemeralDemoTest do
   use ExUnit.Case, async: false
   @moduletag capture_log: true
@@ -167,7 +169,9 @@ defmodule LoopexCli.M7EphemeralDemoTest do
       "marker_dir" => Path.join(f.root, "markers")
     }
 
-    {:ok, writer} = AttemptWriter.create(index, campaign, identity)
+    {:ok, writer} =
+      AttemptWriter.create(index, campaign, identity, lock_port: LoopexCli.M7LockPorts.claim())
+
     last = index |> File.read!() |> String.split("\n", trim: true) |> List.last()
     {:ok, designation} = AttemptEvents.decode(last)
     config = Path.join(f.root, "template.json")
