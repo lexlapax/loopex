@@ -1477,22 +1477,38 @@ defmodule LoopexComposition.Restore.Workflow do
     end
   end
 
-  # Concept: unsupported helper state cannot receive a physical restore receipt.
-  # Technical depth: any delegation namespace, including locks and temporaries,
-  # stays fenced until the separately governed semantic audit is implemented.
+  # Concept: only quiescent, auditable helper state can receive a receipt.
+  # Technical depth: a helper namespace may hold only runtime directories,
+  # digest-named objects and binding/run logs; Audit then decodes every member.
+  # A writer marker, lock, temporary or the disposable job index refuses here.
   defp driver_supported_baseline!(bytes, max_total) do
     {:ok, entries} = RestoreCodec.manifest(bytes, max_total)
 
     ensure!(
-      not Enum.any?(entries, fn entry ->
+      Enum.all?(entries, fn entry ->
         case Path.split(entry["path"]) do
-          ["delegation" | _] -> true
-          _ -> false
+          ["delegation" | _] = parts -> helper_shape?(parts)
+          _ -> true
         end
       end),
       "invalid_current_history"
     )
   end
+
+  defp helper_shape?(["delegation"]), do: true
+  defp helper_shape?(["delegation", runtime]), do: hex?(runtime)
+
+  defp helper_shape?(["delegation", runtime, member]),
+    do: hex?(runtime) and (member in ["bindings", "runs"] or hex?(member))
+
+  defp helper_shape?(["delegation", runtime, ledger, name]) when ledger in ["bindings", "runs"],
+    do:
+      hex?(runtime) and String.ends_with?(name, ".log") and
+        hex?(String.trim_trailing(name, ".log"))
+
+  defp helper_shape?(_parts), do: false
+
+  defp hex?(value), do: Regex.match?(~r/\A[0-9a-f]{64}\z/, value)
 
   defp driver_refusal("restore_history_invalid"), do: "invalid_current_history"
   defp driver_refusal("physical_destination_changed"), do: "source_changed"

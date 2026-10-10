@@ -223,7 +223,7 @@ defmodule LoopexComposition.RestorePublicResolutionTest do
   end
 
   for member <- ["objects.lock", "objects.writer", "opaque"] do
-    test "public helper #{member} namespace remains fenced until semantic audit exists", %{
+    test "public helper #{member} namespace outside the audited members refuses", %{
       root: root
     } do
       cut = prepare(root, "available")

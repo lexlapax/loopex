@@ -11,14 +11,19 @@ defmodule LoopexComposition.Restore.Audit do
   This private reduction runs inside Restore.IO's existing serial worker. Its
   IO callback executes owned captures under that invocation's original cutoffs.
   It folds every original journal record, including records summarized by later
-  checkpoints. Host attestation covers host-owned ledgers; the separate helper
-  accounting grammar remains unfinished and this unit makes no helper proof.
+  checkpoints. Host attestation covers host-owned ledgers. A helper namespace
+  restores only from a quiescent root: every member is a digest-named object or
+  a complete binding/run log the existing `RetainedObjects` decoders accept for
+  a planned runtime, and each committed `loopex.task` receipt must equal the
+  receipt object its run log bound. Writer markers, locks, the disposable
+  `job-index-v1` cache and any other member refuse.
   """
 
   alias Loopex.ArtifactStore
   alias Loopex.Executor.Local
   alias Loopex.Executor.Local.RestoreCodec
   alias Loopex.Runtime.SessionState
+  alias LoopexComposition.Delegation.{LedgerCodec, RetainedObjects, RunLedger, Tool}
   alias LoopexProtocol.Canonical
 
   @reference_fields [
@@ -81,11 +86,12 @@ defmodule LoopexComposition.Restore.Audit do
       end)
 
     resources = resource_inventory!(root, index, manifest, io)
+    helpers = helper_namespace!(plan, root, index, io)
 
     history =
       Enum.flat_map(stores, fn {_path, facts} ->
         Enum.flat_map(facts.store.sessions, fn {session, retained} ->
-          session_history!(session, retained, plan, ledgers, resources)
+          session_history!(session, retained, plan, ledgers, resources, helpers)
         end)
       end)
 
@@ -115,7 +121,6 @@ defmodule LoopexComposition.Restore.Audit do
       require!(io.({:audit_artifact_object, root, reference, manifest, max_total}))
     end)
 
-    retained_objects!(plan, root, index, io)
     %{stores: stores, ledgers: ledgers, resources: resources}
   end
 
@@ -182,7 +187,7 @@ defmodule LoopexComposition.Restore.Audit do
     end)
   end
 
-  defp session_history!(session_id, session, plan, ledgers, resources) do
+  defp session_history!(session_id, session, plan, ledgers, resources, helpers) do
     workspace = plan["workspace"]["workspace_ref"]
 
     Enum.reduce(session.records, %{jobs: %{}, references: []}, fn row, history ->
@@ -205,11 +210,13 @@ defmodule LoopexComposition.Restore.Audit do
           retained = record["receipt"]
           key = {record["run_id"], retained["tool_call_id"]}
           job = fetch!(history.jobs, key)
-          ledger = ledger_for!(plan, ledgers, job.executor_identity)
-          receipt = fetch!(ledger.receipts, job.job_id)
-          ensure!(Local.retained_receipt_matches_job?(receipt, job))
-          ensure!(plain(receipt) == retained)
-          %{history | references: receipt.artifacts ++ history.references}
+
+          if job.tool_id == Tool.definition()["tool_id"] do
+            task_receipt!(job, retained, session.runtime_id, helpers)
+            history
+          else
+            local_receipt(history, job, retained, plan, ledgers)
+          end
 
         "tool_result_reference_prepared" ->
           %{history | references: [reference!(record["reference"]) | history.references]}
@@ -308,22 +315,114 @@ defmodule LoopexComposition.Restore.Audit do
     ensure!(manifest["workspace_ref"] == workspace)
   end
 
-  defp retained_objects!(plan, root, index, io) do
+  defp local_receipt(history, job, retained, plan, ledgers) do
+    ledger = ledger_for!(plan, ledgers, job.executor_identity)
+    receipt = fetch!(ledger.receipts, job.job_id)
+    ensure!(Local.retained_receipt_matches_job?(receipt, job))
+    ensure!(plain(receipt) == retained)
+    %{history | references: receipt.artifacts ++ history.references}
+  end
+
+  # Concept: a helper task receipt is the one its run log bound, never a guess.
+  # Technical depth: exactly one complete bind_receipt names the job; its
+  # digest-named object passes the run ledger's own receipt validator against
+  # the original job and must equal Core's committed receipt.
+  defp task_receipt!(job, retained, runtime, helpers) do
+    binds =
+      for {identifiers, transactions} <- Map.get(helpers.runs, runtime, []),
+          %{"mutation" => %{"kind" => "bind_receipt"} = mutation} <- transactions,
+          mutation["job"]["job_id"] == Base.encode64(job.job_id),
+          do: {identifiers, mutation}
+
+    ensure!(length(binds) == 1)
+    [{identifiers, mutation}] = binds
+    bytes = fetch!(helpers.objects, {runtime, mutation["receipt_sha256"]})
+    receipt = require!(RunLedger.receipt_object(bytes, identifiers, mutation, job))
+    ensure!(plain(receipt) == retained)
+  end
+
+  # Concept: helper state restores only from a quiescent, fully decodable root.
+  # Technical depth: each member must be a planned runtime's directory, a
+  # digest-named object, or a complete binding/run log named by its header key
+  # and accepted by the existing offline decoders. Anything else, including a
+  # writer marker, lock, temporary or the disposable job index, refuses.
+  defp helper_namespace!(plan, root, index, io) do
     namespaces = Map.new(plan["runtime_ids"], &{RestoreCodec.digest_bytes(&1), &1})
 
-    Enum.each(index, fn {path, entry} ->
+    Enum.reduce(index, %{objects: %{}, runs: %{}}, fn {path, entry}, helpers ->
       case Path.split(path) do
+        ["delegation"] ->
+          ensure!(entry["kind"] == "directory")
+          helpers
+
+        ["delegation", runtime_hash] ->
+          ensure!(Map.has_key?(namespaces, runtime_hash) and entry["kind"] == "directory")
+          helpers
+
+        ["delegation", runtime_hash, ledger] when ledger in ["bindings", "runs"] ->
+          ensure!(Map.has_key?(namespaces, runtime_hash) and entry["kind"] == "directory")
+          helpers
+
         ["delegation", runtime_hash, object_hash] when byte_size(object_hash) == 64 ->
           ensure!(Map.has_key?(namespaces, runtime_hash) and hex?(object_hash))
           ensure!(entry["kind"] == "regular" and entry["size"] in 1..1_048_576)
           bytes = require!(io.({:read, Path.join(root, path), 1_048_576}))
           ensure!(String.valid?(bytes) and RestoreCodec.digest_bytes(bytes) == object_hash)
+          key = {namespaces[runtime_hash], object_hash}
+          %{helpers | objects: Map.put(helpers.objects, key, bytes)}
+
+        ["delegation", runtime_hash, ledger, name] when ledger in ["bindings", "runs"] ->
+          runtime = fetch!(namespaces, runtime_hash)
+          cap = if ledger == "bindings", do: 1_048_576, else: 16_777_216
+          ensure!(entry["kind"] == "regular" and entry["size"] in 1..cap)
+          bytes = require!(io.({:read, Path.join(root, path), cap}))
+          {identifiers, log} = helper_log!(ledger, runtime, bytes)
+          ensure!(log.tail == :complete and name == log.key <> ".log")
+
+          if ledger == "runs",
+            do: %{
+              helpers
+              | runs:
+                  Map.update(
+                    helpers.runs,
+                    runtime,
+                    [{identifiers, log.transactions}],
+                    &[{identifiers, log.transactions} | &1]
+                  )
+            },
+            else: helpers
+
+        ["delegation" | _] ->
+          throw({:restore_refusal, "invalid_current_history"})
 
         _ ->
-          :ok
+          helpers
       end
     end)
   end
+
+  defp helper_log!(ledger, runtime, bytes) do
+    with {:ok, payload, _rest} <- LedgerCodec.decode_frame(bytes),
+         {:ok, %{"identity" => identity}} <- LedgerCodec.decode_json(payload, :frame),
+         true <- is_list(identity),
+         identifiers = Enum.map(identity, &Base.decode64!/1),
+         [^runtime | _] <- identifiers,
+         {:ok, log} <- decode_helper_log(ledger, bytes, identifiers) do
+      {identifiers, log}
+    else
+      _ -> throw({:restore_refusal, "invalid_current_history"})
+    end
+  rescue
+    ArgumentError -> throw({:restore_refusal, "invalid_current_history"})
+  end
+
+  defp decode_helper_log("bindings", bytes, [runtime, command]),
+    do: RetainedObjects.decode_binding(bytes, runtime, command)
+
+  defp decode_helper_log("runs", bytes, identifiers),
+    do: RetainedObjects.decode_run(bytes, identifiers)
+
+  defp decode_helper_log(_ledger, _bytes, _identifiers), do: {:error, :invalid_helper_log}
 
   defp reference!(reference) do
     decoded = Map.new(@reference_fields, fn key -> {key, reference[Atom.to_string(key)]} end)
