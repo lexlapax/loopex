@@ -1,5 +1,23 @@
 # M7 Implementation Tasks
 
+### CLI-owned output and the duplicate answer, 2026-10-09
+
+Merged as `e5861402`. The intermittent duplicate CLI answer was the daemon's
+three progress hops: Service runtime sink, Registry sink and connection sink.
+The Registry drained only its own sink before routing durable events, so
+`assistant.message_appended`/`run.finished` could overtake an already offered
+model-stream closure, and the client printed streamed text plus the durable
+answer. The Registry now asks the Service to drain its runtime ingress before
+routing (`850d28fe`). A Service suspended 500 ms reproduced the duplicate 5/5
+before the fix and printed the answer exactly once 5/5 after. Accepted ADR
+0068 is implemented: one owned output per command, owned pipe/PTY/memory/custom
+targets, acquisition before runtime work, refused borrowed devices, and
+delivery confirmed after write and join. The M7 case-runner `Conversation` is an
+owned target. Whole CLI suite at `7315f668`: floor 931/931, current 926/927
+(one load flake in the thinking-rounds case, now assigned). Outputs are in
+`claude-20261009/cli-output/`. The T16 App Server OutputWriter row is separate.
+
+
 ### Helpers execute; activity routing and cancellation joined, 2026-10-09
 
 Accepted ADR 0069 unblocked helper execution. The private `run_evidence/3`
