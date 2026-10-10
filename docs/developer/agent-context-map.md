@@ -7359,3 +7359,8 @@ ADR 0039's custody and deadline guarantees. The test deadline stays 15 s.
 - Required-check failures are not covered by this cap: any failure in
   `scripts/check.sh` or `scripts/check-release.sh` is still fixed, never
   retried.
+- **Closure campaign approvals (2026-10-10).** The maintainer keeps the
+  legacy Ollama real-provider row (row 10) in the closure release check, and
+  pre-approved a $150 provider-spend cap for the T17 closure matrix (estimate:
+  likely $10–25, worst case about $130). The maintainer attends the
+  `m7-operator` block.
