@@ -113,7 +113,8 @@ release check runs once against the closure candidate and includes them.
 An unavailable selected lane blocks the affected merge and is not PASS.
 The runner accepts zero or more `--only NAME` pairs, one `--attempts-index
 FILE` with its `--writer ID --host ID --markers DIR`, `--m7-config FILE
---operator NAME` for the M7 conversation lanes and, for the full matrix only,
+--operator NAME` and an optional `--pins FILE` of operator overrides for the
+M7 conversation lanes and, for the full matrix only,
 one `--resume-matrix ID`. Zero pairs select the full closure matrix, which
 requires all of them. Its release lanes, fresh-source and the two
 `m7-rollback` lanes are recorded by `mix loopex.m7_matrix` in the index as lane
@@ -146,7 +147,10 @@ Provider rows 1 through 9 and 11 require `LOOPEX_PROVIDER_API_KEY`; row 10
 uses local Ollama with provider credential variables removed and requires a
 reachable model named by `LOOPEX_RELEASE_OLLAMA_MODEL=ollama:<installed-model>`.
 Row 11 maps the release credential to `ANTHROPIC_API_KEY` and removes the
-other hosted-provider keys for its test process. Node is required for
+other hosted-provider keys for its test process. The M7 conversation lanes
+receive exactly `LOOPEX_PROVIDER_API_KEY` and `OPENAI_API_KEY`, and
+`mix loopex.m7_evidence` refuses when that list differs from the manifest's
+providers A and B. Node is required for
 `node_client`, provider row 4 and provider row 9. The
 [pre-1.0 maintainer override](agent-context-map.md#disposition-pre1-current-contract-2026-10-02)
 removes the cross-version `rollback` selector, its staging and its exclusive

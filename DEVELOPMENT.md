@@ -25,7 +25,7 @@ through `scripts/json-field.sh`, which uses `awk` from the baseline rather than
 an added dependency. Adding another development dependency requires the
 ordinary dependency decision.
 
-The direct M6 `scripts/check-release.sh` uses the existing Elixir byte-stream
+The direct `scripts/check-release.sh` uses the existing Elixir byte-stream
 redactor before each release lane reaches the terminal or its retained log.
 The `scripts/attended-release.sh` closure helper uses the same redactor for a
 person's `script(1)` transcript. Only authorized
@@ -110,8 +110,10 @@ bash scripts/attended-release.sh --output LOG
 ```
 
 Run each once for the tested SHA. `DIR` and `LOG` are new retained-output paths
-outside the repository. The direct command below describes the underlying
-release check for other workflows; do not run it again for M6 closure:
+outside the repository. The direct command below is the release check itself.
+M7 closure runs it once from a terminal, because `scripts/attended-release.sh`
+does not forward the M7 matrix arguments; the attended `m7-operator` cases read
+the operator's answers on that terminal:
 
 ```bash
 bash scripts/check-release.sh --attempts-index /absolute/retained/m7-attempts.jsonl \
@@ -130,10 +132,12 @@ manifest must reproduce the first invocation's digest. Before staging, and again
 runs the M7 evidence validator with `--release`, which refuses an M7 lane
 (`m7-provider`, `m7-rollback`, or the attended `m7-operator` block in the full
 matrix) as unavailable evidence while any of its manifest cases is still
-pending, and the full matrix while any step owner is pending; until those
-drivers exist the full matrix therefore refuses with exit 2. The cases
-themselves run through `scripts/m7-fixture-chat.exs`, described in the
-[M7 validation runbook](docs/operator/m7-validation.md).
+pending, and the full matrix while any step owner is pending; the committed
+manifest has no pending case or step owner. The M7 conversation lanes carry
+exactly provider A's `LOOPEX_PROVIDER_API_KEY` and provider B's
+`OPENAI_API_KEY`; set `LOOPEX_M7_EXTERNAL_REPOSITORY` to the external task's
+checkout. The cases themselves run through `scripts/m7-fixture-chat.exs`,
+described in the [M7 validation runbook](docs/operator/m7-validation.md).
 It refuses without the credential, without the pinned Node, or on a dirty tree, and raises its own open-file soft limit toward the hard limit, refusing below 4,096, because the maximum-population case holds both ends of 512 daemon connections in one VM.
 It first stages the candidate as a fresh source archive and builds it there
 (described below), then runs every test lane inside that extraction rather than
@@ -184,9 +188,10 @@ or encoded disclosures are outside exact-value masking. The runner refuses a
 selector or release path containing a supported value before archive
 extraction and prevents inherited Bash startup hooks from running again in
 its children. Trusted host code that ran before the script starts remains the
-host's responsibility. Two of the real-provider tests are attended:
-they prompt on the controlling terminal for the operator's trust decisions
-(`Type yes and press Enter.`), so run the command from a terminal.
+host's responsibility. Two of the real-provider tests and the `m7-operator`
+block's attended cases are attended: they prompt on the controlling terminal
+for the operator's decisions (`Type yes and press Enter.`), so run the command
+from a terminal.
 
 An unchanged-source release reuses this closure evidence. It runs only the
 pre-tag administrative-SHA proofs described by the milestone and verification

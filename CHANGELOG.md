@@ -30,10 +30,30 @@ and [configuration and compaction](docs/operator/coding-sessions.md#operator-ses
 Embedding hosts can provide a
 [one-shot question responder](docs/developer/runtime-and-embedding.md#technical-embedding-question-responder).
 
-M7 remains in progress. Helper execution, authored creation custody, complete
-progress delivery, coordinated remote generation serving and its remaining
-verification are unfinished. This entry records current source behavior, not a source release or
-milestone closure.
+Chat adds `/configure`, `/compact`, `/status`, `/wait` and `/abort`, a pipe
+mode, `loopex config validate` and `config show --effective`, and runtime
+tracing selected by file or flags. A profile may enable read-only helper roles:
+the parent's `task` tool runs one helper child per call under its saved role,
+which may use another provider, and returns the child's answer with separate
+and combined usage. Compaction can use a separate thinking-off summarizer; the
+adapter registers OpenAI `openai:gpt-4.1-mini` as one, beside the Anthropic
+thinking cells.
+
+The app server and daemon now serve only `loopex.experimental/3` and
+`loopex.experimental/4`. They deliver transient compaction progress, accept
+authored remote creation options and project tool results that never reached
+an executor (ADR 0067). The CLI owns bounded live output when a pipe stalls
+(ADR 0068). Helper children record their run evidence, and mutating commands
+refuse a helper child (ADR 0069).
+
+Add the M7 validation tooling: the fixture manifest, `mix loopex.m7_evidence`,
+the retained single-writer attempts index, `mix loopex.m7_matrix`, and the
+`m7-provider`, `m7-rollback` and attended `m7-operator` release lanes; see the
+[M7 validation runbook](docs/operator/m7-validation.md).
+
+M7 remains in progress: its operator and real-provider closure runs remain.
+This entry records current source behavior, not a source release or milestone
+closure.
 
 ## [0.3.0] — 2026-09-29
 

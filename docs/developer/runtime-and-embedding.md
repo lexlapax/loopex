@@ -392,10 +392,11 @@ empty attachment queue or absent activity notice is insufficient evidence.
 
 ADR 0054's native `context.compaction_progress` item is one transient notice
 at the positive provider-attempt permit. It has no closing record or percentage,
-and no durable outcome authority. Its foreground delivery and coordinated new
-wire serving remain unfinished; this native API example activates neither.
-The separate authored remote creation route and its transaction custody are
-also unfinished. Standalone creation-option validation does not supply them.
+and no durable outcome authority. The app server and daemon deliver it as
+transient progress on the `/3` and `/4` generations; this native API example
+activates neither. Remote `session.create` options with a `version` take the
+authored creation route under the same creation custody and central
+preparation as native authored creation.
 
 <a id="technical-embedding-ephemeral"></a>
 ### Ephemeral Composition

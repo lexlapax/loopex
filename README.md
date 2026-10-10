@@ -35,10 +35,11 @@ The accepted [M7 coding-agent proof](docs/plans/M7.md#concept) is in progress.
 Current source includes native [chat from an explicit profile](docs/operator/coding-sessions.md#operator-sessions-chat),
 [settled configuration and compaction](docs/operator/coding-sessions.md#operator-sessions-chat-settings),
 and [model-question responders for embedding](docs/developer/runtime-and-embedding.md#technical-embedding-question-responder).
-Helper execution, authored creation custody, complete progress delivery,
-coordinated wire generation serving and the remaining operator/provider proof
-are unfinished. These native paths do
-not close M7's nine outcomes. M6 is the last closed product checkpoint;
+It also includes read-only helper roles that may run on their own provider,
+a separate thinking-off summarizer, and the coordinated `loopex.experimental/3`
+and `/4` wire generations. The operator and real-provider closure runs in the
+[M7 validation runbook](docs/operator/m7-validation.md) remain, so M7's nine
+outcomes are not closed. M6 is the last closed product checkpoint;
 successors remain drafts.
 
 ## What Loopex Provides
@@ -64,7 +65,10 @@ arrived.
   model sees the whole conversation and the real output of every tool it ran.
   Four coding tools (`read`, `write`, `edit`, `bash`) act on a real workspace
   under a host policy that can allow or refuse each call. Earlier sessions can be
-  listed and resumed. See [coding sessions](docs/operator/coding-sessions.md#concept).
+  listed and resumed. `loopex chat --config FILE` holds a conversation from an
+  explicit JSON profile, with settled `/configure`, compaction, model
+  questions and read-only helper roles. See
+  [coding sessions](docs/operator/coding-sessions.md#concept).
 - **Governed model context.** A repository's instruction files and pinned Git
   skills reach the model only after an explicit admission decision. They are
   budgeted, provenance-typed data and never a grant of authority. Downloaded
@@ -89,8 +93,8 @@ arrived.
   session state, so it can be answered after the asking process is gone.
   Clients read tool output back in verified, bounded chunks.
 - **Session protocols and an independent client.** A foreground app server
-  speaks the experimental session protocol `loopex.experimental/1` over standard
-  input and output, and the daemon speaks `loopex.experimental/2` over its
+  speaks the experimental session protocol `loopex.experimental/3` over standard
+  input and output, and the daemon speaks `loopex.experimental/4` over its
   socket. A dependency-free [Node client](clients/node/README.md) drives
   sessions end to end over both. See [app server operations](docs/operator/app-server.md#concept).
 - **A local daemon that outlives its clients.** `loopex daemon` owns every
@@ -220,7 +224,8 @@ without entering the kernel.
 - **A seven-tool coding surface** (`read write edit bash grep find ls`)
   inside a system prompt budgeted under 1,000 tokens. The coding and
   read-only presets select four tools each, and the selected definitions are
-  measured with the request before dispatch.
+  measured with the request before dispatch. Chat adds the model-question
+  tool to a nonempty profile and, when helpers are enabled, the `task` tool.
 
 ## Honest Posture
 
@@ -253,7 +258,7 @@ Two commands, both run from the repository root and described in
 
 ```bash
 bash scripts/check.sh            # the fast check, credential-free
-bash scripts/check-release.sh    # after securely exporting LOOPEX_PROVIDER_API_KEY
+bash scripts/check-release.sh --attempts-index FILE ...   # see DEVELOPMENT.md
 ```
 
 `scripts/check.sh` runs warning-free compilation, formatting, the repository
@@ -261,8 +266,9 @@ structure checks, documentation ordering, the dependency budget, one version
 across the applications, and the credential-free suite with one application per
 VM. It runs once per integration candidate. `scripts/check-release.sh` is the
 slow one: the real-provider workflows, the independent Node client, the
-fresh-source archive build and the long-duration bound proofs; it needs a
-provider credential and the pinned Node, and runs once before closure. An
+fresh-source archive build, the long-duration bound proofs and the M7 lanes
+recorded in a retained attempts index; it needs provider credentials and the
+pinned Node, and runs once before closure. An
 unchanged-source release reuses that evidence and runs only its pre-tag
 administrative-SHA proofs. [DEVELOPMENT.md](DEVELOPMENT.md) shows a
 history-safe way to load the credential.

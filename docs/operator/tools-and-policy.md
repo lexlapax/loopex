@@ -9,8 +9,10 @@ A coding session is useful only if it can act. Loopex ships four coding tools
 — `read`, `write`, `edit` and `bash` — plus three read-only search tools:
 `grep`, `find` and `ls`. The standalone `ask` command selects `none`,
 `read-only` or `coding`, while an embedding host may select a valid subset of
-the seven tools for a durable session. A host policy stands in front of every
-tool call.
+the seven tools for a durable session. Chat also offers the model-question
+tool `loopex.ask` in a nonempty profile and, when helpers are enabled, the
+`loopex.task` tool that runs one read-only helper child. A host policy stands
+in front of every tool call.
 
 Authority is the host's, not the runtime's. Loopex owns the mechanics of running
 a tool and stopping it truthfully; it has no opinion about whether a particular
@@ -459,7 +461,8 @@ complete receipt before retaining it; unusually large identity fields can shrink
 the inline prefix further, with truncation or artifact retention reported in the
 result.
 
-All seven carry version `1.0.0`. The `loopex.` prefix is reserved: the runtime
+`write`, `edit` and `bash` carry version `1.0.0`; `read`, `grep`, `find` and
+`ls` carry `1.1.0`. The `loopex.` prefix is reserved: the runtime
 admits a tool with that prefix only through its own `:tools` start option, so no
 tenant or extension can register a definition that shadows one of these.
 

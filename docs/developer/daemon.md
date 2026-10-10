@@ -8,7 +8,7 @@ Technical depth: [Processes, orders, bounds and evidence](daemon-technical.md#te
 `loopex_daemon` is the host application that keeps one state root's sessions
 alive between separate operating-system processes. It composes the reference
 runtime once, listens on a Unix-domain socket inside that root, and serves the
-generation-2 session protocol to any number of clients, so sessions keep
+generation-4 session protocol to any number of clients, so sessions keep
 running while no client is connected and several clients can watch one session.
 The [operator page](../operator/daemon.md#concept) says how to run it; this page
 is for changing it or building a client for it, whose wire contract is
@@ -133,7 +133,7 @@ Technical depth: [The session index](daemon-technical.md#technical-daemon-index)
 - [Operator guide to the daemon](../operator/daemon.md#concept).
 - [Architecture](architecture.md#concept) — where the host role sits.
 - [App server protocol](app-server-protocol.md#concept) — the session protocol,
-  generation 1 and the generation 2 this daemon serves.
+  the foreground generation 3 and the generation 4 this daemon serves.
 - [Getting started](getting-started.md#concept) — a first client against a
   running daemon.
 - [ADR 0031](../adr/0031-daemon-grade-store-selection-and-migration.md#concept),

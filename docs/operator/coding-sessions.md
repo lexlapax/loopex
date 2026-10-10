@@ -57,8 +57,7 @@ and instruction contents withheld. A credential-free route remains valid for
 inspection and is identified as unavailable to chat. A successful inspection
 validates configuration; it does not create a retained helper binding or prove
 a runtime or provider workflow. Start the native conversational command with
-the selected file as described below. Helper execution and complete progress
-delivery remain unfinished.
+the selected file as described below.
 
 Technical depth:
 [Inspection commands, file example and report](#technical-sessions-configuration-inspection).
@@ -78,8 +77,11 @@ loopex chat --config profile.json --no-helpers
 The example's `refuse-all` policy allows no tool effects. Select a different
 existing host policy deliberately when the task needs them. Nonempty chat tool
 profiles include the model-question tool, but policy still decides whether a
-question may open. `--no-helpers` keeps this example on the implemented ordinary
-chat path; saved-role inspection does not prove live helper execution.
+question may open. `--no-helpers` keeps this example on the ordinary chat path.
+Without it, a file that enables delegation gives the session the `task` tool:
+each call runs one read-only helper child under its saved role, model and
+limits, which may name another configured provider. The parent receives one
+receipt with the child's answer and its child, parent and combined usage.
 
 Chat requires the file's authored `max_turns`, `deadline_ms` and `token_budget`,
 even if flags override them. It selects credentials through the file's explicit
@@ -275,9 +277,9 @@ adequate bounds. The 1,024-token maintenance reply reserve must fit before a
 summary request can dispatch.
 
 Native compaction activity is a best-effort notice after a summary attempt
-receives permission. It has no percentage or closing notice. Foreground activity
-delivery remains unfinished, so silence says nothing about completion; durable
-status and completion events decide it.
+receives permission. It has no percentage or closing notice, and it is
+transient, so silence says nothing about completion; durable status and
+completion events decide it.
 
 Technical depth:
 [Native configure, compact and completion reads](../developer/runtime-and-embedding.md#technical-embedding-configure-compaction).

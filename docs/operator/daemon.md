@@ -10,7 +10,7 @@ offline `loopex run` composes a runtime for itself and stops it when the command
 ends, a daemon composes one runtime, listens on a Unix-domain socket inside the
 state root, and lets separate client processes create, drive, observe, take over
 and list its sessions. Every client is a peer: the `loopex` command's live forms,
-the Node client in `clients/node`, or any program that speaks the generation-2
+the Node client in `clients/node`, or any program that speaks the generation-4
 session protocol over that socket. None of them owns a loop or durable session
 truth; the daemon's runtime does, and the journal is the record.
 
@@ -263,7 +263,7 @@ Policies are `allow-all` and `shell-allowlist`.
 
 ### Wire
 
-The socket speaks generation `loopex.experimental/2`: one compact JSON object per
+The socket speaks generation `loopex.experimental/4`: one compact JSON object per
 LF, the generation-1 framing, initialize handshake, admission, snapshot, event,
 progress and artifact-transfer records, plus `session.list`, `daemon.status`,
 `session.acquire_control`, `session.release_control`, a `writer_epoch` on every

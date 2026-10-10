@@ -121,7 +121,7 @@ Concept: [Nothing admitted is forgotten](daemon.md#concept-daemon-accounting).
    short or undecodable credential fails closed.
 3. The registry records socket ownership and transfers the socket to the
    connection process; until then the child is inert.
-4. `initialize` must arrive within 30 s and must offer `loopex.experimental/2`.
+4. `initialize` must arrive within 30 s and must offer `loopex.experimental/4`.
 5. Each request is admitted by a relay ticket, run by a worker, and answered
    exactly once through the ledger.
 6. On close the slot moves to retiring and is freed only when the relay reports

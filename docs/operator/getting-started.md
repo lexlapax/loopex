@@ -455,7 +455,10 @@ Every `loopex daemon` exit status is listed in the
 - [How a run works](how-a-run-works.md#concept) — the picture of one run, what
   is durable at each step, and what a crash leaves behind.
 - [Coding sessions](coding-sessions.md#concept) — steering, follow-ups,
-  resuming, project skills, and every flag of the offline command.
+  resuming, project skills, and every flag of the offline command; and
+  [`loopex chat`](coding-sessions.md#operator-sessions-chat), a conversation
+  from an explicit configuration file with settled settings, compaction,
+  model questions and helper roles.
 - [Tools and policy](tools-and-policy.md#concept) — the coding and read-only presets, host
   authority, artifacts, and the limits of local execution.
 - [The daemon](daemon.md#concept) — several clients, takeover, reconnection,
