@@ -32,8 +32,11 @@ defmodule LoopexCli.DaemonRetirementWitnessTest do
     evidence_root = System.get_env("M7_DAEMON_RETIREMENT_EVIDENCE_DIR") || System.tmp_dir!()
     File.mkdir_p!(evidence_root)
 
-    evidence =
-      Path.join(evidence_root, "daemon-retirement-#{System.unique_integer([:positive])}.json")
+    # Concept: each run's retained evidence has its own name.
+    # Technical depth: unique_integer restarts in every VM, so earlier runs'
+    # retained files in a shared directory would collide; a random name cannot.
+    suffix = Base.url_encode64(:crypto.strong_rand_bytes(12), padding: false)
+    evidence = Path.join(evidence_root, "daemon-retirement-#{suffix}.json")
 
     refute File.exists?(evidence)
 
