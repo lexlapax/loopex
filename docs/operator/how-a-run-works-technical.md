@@ -274,9 +274,10 @@ The host positively terminates all previous owners, excludes competing roots,
 retains complete unexcluded manifests and preserves the original workspace's
 physical identity. Available source retirement is one-way; lost-source recovery
 requires positive absence and the accepted host attestation. Ordinary copied or
-moved roots still refuse activation. Any `delegation/` namespace remains fenced
-until the complete helper-ledger restore audit is implemented; dropping it from
-a backup is not a supported remedy.
+moved roots still refuse activation. A helper namespace restores only from a
+quiescent root whose objects and binding/run logs pass the helper decoders and
+whose task receipts match their run logs; the disposable `job-index-v1` cache is
+removed before backup and rebuilt on startup.
 
 Restore preserves original effect tuples, receipts, markers and private recovery
 state. Unknown effects stay fenced and are never redispatched because a backup

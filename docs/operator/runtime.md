@@ -250,12 +250,14 @@ plan construction and retained exclusion evidence. The accepted
 and [closed input schemas](../adr/0051-current-format-physical-restore-technical.md#technical-adr-0051-boundary)
 define this administrative operation.
 
-This procedure refuses a state root containing any `delegation/` namespace,
-including helper locks or temporary files, because the complete helper-ledger
-audit is not implemented for it. Do not omit those entries to make a backup
-eligible. A root that has run helpers therefore cannot be restored this way
-yet; copying opaque helper state does not prove it recoverable. Another machine, an older snapshot, an
-older format, or a lost or recreated workspace is outside this procedure.
+A root that has run helpers restores when its `delegation/` namespace is
+quiescent and auditable. Restore accepts only each planned runtime's directory,
+digest-named objects, and complete binding and run logs that the helper's own
+decoders accept. Each committed helper `task` receipt must equal the receipt its
+run log bound. A writer marker (`objects.writer`), lock, temporary file, the
+`job-index-v1` cache or any other member refuses the restore. Another machine,
+an older snapshot, an older format, or a lost or recreated workspace is outside
+this procedure.
 
 <a id="operator-runtime-backup-capture"></a>
 ### Capture a complete idle backup
@@ -267,7 +269,11 @@ older format, or a lost or recreated workspace is outside this procedure.
    restore administrator and its file resources. A runtime stop or a caller's
    death alone does not prove all these owners ended. If termination cannot be
    proved, keep the roots excluded; the accepted host-reboot assertion must
-   cover the previous authority before proceeding.
+   cover the previous authority before proceeding. Join the helper owner too:
+   an orderly stop removes its `objects.writer` marker, so a remaining marker
+   means it did not stop cleanly. Then remove each
+   `delegation/RUNTIME/job-index-v1` directory; it is a disposable cache with no
+   authority, and the helper's next startup rescans history to rebuild it.
 2. Record the latest idle cut, the source root's path/device/inode placement,
    each Local ledger's placement and generation digest, the original physical
    workspace reference, and the complete prior restore lineage. Exclude all
