@@ -2737,6 +2737,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
       case Loopex.start_link(fresh_runtime_options) do
         {:ok, runtime} = started ->
           send(parent, {:fresh_recovery_runtime, runtime})
+          :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(runtime)
           started
 
         error ->
@@ -3045,7 +3046,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
   test "prepared recovery and separately prepared Local authority stay out of durable and rendered planes" do
     fixture =
       recovered_fixture("security-plane", :admitted,
-        progress_to: self(),
+        progress_sink: Loopex.ProgressTestConsumer.open_sink(),
         script: [
           %{text: "public security-plane output", calls: []}
         ]
@@ -3078,7 +3079,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
       Loopex.attach(fixture.runtime, fixture.session_id, after_event_sequence: 0)
 
     events = collect_terminal_events(event_attachment)
-    progress = collect_security_progress()
+    progress = Loopex.ProgressTestConsumer.drain(50)
 
     {:ok, render_attachment} =
       Loopex.attach(fixture.runtime, fixture.session_id, after_event_sequence: 0)
@@ -3484,7 +3485,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
         policy_identity: %{"id" => "loopex.test.policy", "revision" => "1"},
         grant_decision: {:host_policy, :allow},
         cleanup_grace_ms: @grace,
-        progress_to: Keyword.get(options, :progress_to),
+        progress_sink: Keyword.get(options, :progress_sink),
         session_creation_defaults:
           Loopex.AgentLoopFixture.creation_defaults(tools, cleanup_grace_ms: @grace)
       ]
@@ -3497,6 +3498,8 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
       stop(model)
       stop(store_pid)
     end)
+
+    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(runtime)
 
     {:ok, session_id} =
       Loopex.create_session(runtime, %{"surface" => "prepared-recovery"},
@@ -4423,15 +4426,6 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
       _absent ->
         Process.sleep(5)
         collect_terminal_events(attachment, acc, attempts - 1)
-    end
-  end
-
-  defp collect_security_progress(acc \\ []) do
-    receive do
-      {:loopex_progress, item} -> collect_security_progress([item | acc])
-      {:loopex_progress, _session_id, item} -> collect_security_progress([item | acc])
-    after
-      50 -> Enum.reverse(acc)
     end
   end
 

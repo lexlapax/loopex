@@ -1,3 +1,10 @@
+unless System.get_env("LOOPEX_HOME") do
+  home = Path.join(System.tmp_dir!(), "ldnc-home-#{Loopex.TestTmp.Daemon.token()}")
+  File.mkdir_p!(home)
+  System.put_env("LOOPEX_HOME", home)
+  System.at_exit(fn _status -> File.rm_rf(home) end)
+end
+
 Code.require_file("../../loopex/test/support/m1_runtime_helper.exs", __DIR__)
 Code.require_file("../../loopex/test/support/agent_loop_helper.exs", __DIR__)
 
