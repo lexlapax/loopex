@@ -434,11 +434,12 @@ prescribed host reboot, before a fresh root is used.
 - Expect the absence of a stream closure. It is an emission obligation, never a
   delivery guarantee, so a consumer falls back to the durable record rather than
   inferring abandonment.
-- Know which policy caller you are answering. The one-shot
-  `Loopex.Policy.decide/2` resolves `{:defer, _}` to
-  `{:deny, :interaction_unsupported}`; the interaction-aware
-  `Loopex.Policy.evaluate/2`, which the session owner uses, admits a validated
-  defer and suspends the tool call on a durable question.
+- Know how your session reads a defer. Under its committed policy-defer mode
+  the session owner either refuses `{:defer, _}` as
+  `{:deny, :interaction_unsupported}` or admits a validated defer and suspends
+  the tool call on a durable question. `Loopex.Policy.evaluate/2` always
+  returns the validated question; ADR 0070 retired the one-shot
+  `Loopex.Policy.decide/2` facade.
 - Supply a `:policy_identity` alongside `:policy`, and change its revision when
   your policy's behaviour changes.
 - Treat a transfer reference as opaque and attachment-owned.

@@ -38,12 +38,12 @@ defmodule Loopex.PolicyContextTest do
 
   test "bare modules keep decide/1 while explicit context selects decide/2 exactly once" do
     request = request()
-    assert Policy.decide(Adapter, request) == {:allow, nil}
+    assert Policy.evaluate(Adapter, request) == {:allow, nil}
     assert Policy.evaluate(Adapter, request) == {:allow, nil}
     assert Policy.evaluate_callback(Adapter, request, :admit_defer) == {:allow, nil}
     refute_receive {:context_decision, _, _, _}, 0
 
-    for evaluator <- [&Policy.decide/2, &Policy.evaluate/2] do
+    for evaluator <- [&Policy.evaluate/2, &Policy.evaluate_callback/2] do
       adapter = %{module: Adapter, context: {self(), "private-context", {:deny, :policy_denied}}}
       assert evaluator.(adapter, request) == {:deny, :policy_denied}
       assert_receive {:context_decision, _, ^request, "private-context"}

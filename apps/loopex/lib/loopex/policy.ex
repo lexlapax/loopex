@@ -44,7 +44,7 @@ defmodule Loopex.Policy do
 
   Every one of those paths ends in a denial. A policy that is broken, slow, or
   wrong denies; it never falls through to allow. That direction is the whole
-  point of the port, and it is why `decide/2` here catches rather than lets an
+  point of the port, and it is why evaluation here catches rather than lets an
   exception propagate: a crashing policy must produce a decision, not take the
   session down with it.
 
@@ -124,7 +124,7 @@ defmodule Loopex.Policy do
   ## Technical depth
 
   A closed enumeration, so an operator reading a denial gets a category they can
-  act on rather than free text that varies by host. `decide/2` enforces the
+  act on rather than free text that varies by host. Evaluation enforces the
   closure: a denial carrying anything else resolves to `:policy_unavailable`.
   The literal union and `reason_categories/0` are the same list.
   """
@@ -227,43 +227,18 @@ defmodule Loopex.Policy do
   @doc """
   ## Concept
 
-  Asks the host, and turns anything that is not a well-formed allow into a
-  denial.
-
-  ## Technical depth
-
-  Runs the callback in an unlinked monitored task so a policy that blocks cannot
-  block the session owner, and so a policy that raises or exits — including an
-  untrappable `:kill` — produces a decision instead of a crash. The timeout is
-  fixed rather than configurable: a host that wants longer to decide is a host
-  that wants an interactive `defer`, which is a different decision that
-  `evaluate/2` admits and this one-shot form refuses.
-  """
-  @spec decide(adapter(), request()) :: {:allow, context()} | {:deny, reason_category()}
-  def decide(module, request) when (is_atom(module) or is_map(module)) and is_map(request) do
-    caller = self()
-    reply_ref = make_ref()
-
-    {:ok, pid} = Task.start(fn -> send(caller, {reply_ref, safely(module, request)}) end)
-    await_policy(pid, Process.monitor(pid), reply_ref)
-  end
-
-  def decide(_module, _request), do: {:deny, :policy_unavailable}
-
-  @doc """
-  ## Concept
-
-  Asks the host the same question `decide/2` asks, and admits the deferred
-  answer `decide/2` must refuse.
+  Asks the host one question and returns its validated decision, including a
+  deferred question.
 
   ## Technical depth
 
   Accepted ADR 0024 adds this evaluator around the same decision algebra.
   Bare modules use decide/1; an explicitly contextual adapter uses decide/2
   with its unchanged private context. Both receive the same request and return
-  the one algebra ADR 0009 defines. `decide/2` keeps M2's fail-closed projection of a
-  defer, which the inherited gate still proves; this evaluator returns the
-  validated question instead, and a defer that is not inside the admitted
+  the one algebra ADR 0009 defines. The callback runs in an unlinked monitored
+  task, so a policy that blocks, raises or exits produces a decision rather than
+  a crash. A defer is returned as the validated question (ADR 0070 retired the
+  one-shot `decide/2` facade that refused it); a defer outside the admitted
   question family is `policy_unavailable`, not a malformed interaction.
 
   A resumed evaluation calls this with the original request's exact fields plus
@@ -368,7 +343,7 @@ defmodule Loopex.Policy do
   # Concept: the same call as `safely/2`, with the defer branch admitted.
   #
   # Technical depth: every other branch resolves exactly as it does for
-  # `decide/2`, so a host sees one algebra and one callback. A deferred question
+  # `safely/2`, so a host sees one algebra and one callback. A deferred question
   # outside the admitted family resolves to `policy_unavailable` rather than to
   # a malformed interaction: the runtime refuses to retain a question it cannot
   # bound, and refusing it as unavailable is the same fail-closed direction the

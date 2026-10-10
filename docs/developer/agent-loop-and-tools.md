@@ -516,7 +516,7 @@ tool-call identity, the resolved generation triple, validated arguments, effect
 class, idempotency class, and the workspace lease reference. It carries no pid,
 credential, or provider value.
 
-`Loopex.Policy.decide/2` runs the callback in a supervised task with a fixed
+Policy evaluation runs the callback in a supervised task with a fixed
 5000 ms timeout, so a policy that blocks cannot block the session owner and one
 that raises or exits produces a decision instead of a crash. Resolution is
 exhaustive and every path that is not a well-formed allow ends in a denial:
@@ -530,13 +530,13 @@ exhaustive and every path that is not a well-formed allow ends in a denial:
 | callback raises, exits, or times out | `{:deny, :policy_unavailable}` |
 | any other return shape | `{:deny, :policy_unavailable}` |
 
-That table is the one-shot projection, and it is still exact for `decide/2`: a
-caller that asks for a single verdict and has nowhere to put a question reads a
-`defer` as `{:deny, :interaction_unsupported}`.
+That table is the refusing projection a session with defers disabled uses: it
+has nowhere to put a question, so it reads a `defer` as
+`{:deny, :interaction_unsupported}`. ADR 0070 retired the separate one-shot
+`Loopex.Policy.decide/2` facade.
 
-The session coordinator does not use that projection. It calls the
-interaction-aware `Loopex.Policy.evaluate/2`, which admits a validated deferred
-question under
+A session that admits defers instead keeps a validated deferred question, as
+`Loopex.Policy.evaluate/2` returns it, under
 [ADR 0024](../adr/0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept):
 the coordinator commits the question as durable session state, suspends the
 tool call without minting a grant or committing an effect intent, and calls the

@@ -56,7 +56,7 @@ defmodule Loopex.ReferenceClient.AllowAllPolicyTest do
     # It resolves through the port to an allow with a valid context, so a runtime
     # that names it gets a decision the boundary will carry.
     capture_io(:stderr, fn ->
-      assert {:allow, nil} = Loopex.Policy.decide(AllowAll, request())
+      assert {:allow, nil} = Loopex.Policy.evaluate(AllowAll, request())
       assert Loopex.Policy.valid_context?(nil)
     end)
   end
