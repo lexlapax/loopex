@@ -35,6 +35,7 @@ Evidence is unpaired: it is a log, not a Concept and Technical depth pair.
 | [M2 toolchain matrix](M2-toolchain-matrix.md) | Source-candidate metadata and the floor, current, and Linux-current M2 captures. |
 | [M4 bootstrap remediation](M4-bootstrap-remediation.md) | A green bootstrap aggregate on the m4 branch after the commit-title exception, retained verbatim from the gate run at 08782a0 as the replacement evidence the bootstrap-at-rebind disposition names. |
 | [M7 implementation tasks](M7-implementation-tasks.md) | Maintainer task checklist, implementation progress and discovered subtasks; no closure claim. |
+| [M7 contract inventory](M7-contract-inventory.md) | Every record, API, tool generation, adapter and protocol M7 changes, with current status, pinned schemas, digests and vectors, manifest checks and measured instruction/tool-schema costs, each tied to its proving test. |
 | [M7 closure runs](M7-closure-runs.md) | Initial Pending scaffold for exact-candidate runs, archive identity, M7 outcomes, operator/profile/attempt inventories and reviews; final manifest keys and closure evidence remain open. |
 | [M7 agent handoff](M7-handoff.md) | Current takeover goal, remaining T00–T19 rows, exact committed source, failures, decisions, retained packets and next qualification steps. |
 | [M7 restart checkpoint](M7-resume.md) | Exact paused implementation state, isolated WIP branches, proof identities, pending decisions and next resume actions; no closure claim. |
