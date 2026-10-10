@@ -575,6 +575,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
           tidewave_absent: System.get_env("TIDEWAVE_REPL") == nil,
           req_dotenv_disabled: Application.get_env(:req_llm, :load_dotenv) == false,
           db_dotenv_disabled: Application.get_env(:llm_db, :load_dotenv) == false,
+          catalog_unloaded: LLMDB.Catalog.snapshot() == nil,
           no_core: Enum.all?(Application.started_applications(), fn {app, _, _} ->
             app not in [:loopex, :loopex_cli, :loopex_composition, :loopex_llm_reqllm]
           end)
@@ -1122,8 +1123,13 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
     Application.put_env(:req_llm, :openai, [base_url: "http://127.0.0.1:#{port}/v1"])
     Application.put_env(:req_llm, :finch_request_adapter, LoopexProviderFixtureTransport)
     [path | _] = Enum.map(arguments, &List.to_string/1)
-    File.write!(#{inspect(Path.join(root, "pid"))}, System.pid())
-    File.write!(#{inspect(Path.join(root, "namespace"))}, Path.dirname(path))
+    # A marker appears only complete: a reader polling for it never sees the
+    # empty file a direct write creates before its bytes land.
+    for {name, value} <- [{"pid", System.pid()}, {"namespace", Path.dirname(path)}] do
+      marker = Path.join(#{inspect(root)}, name)
+      File.write!(marker <> ".partial", value)
+      File.rename!(marker <> ".partial", marker)
+    end
     File.write!(#{inspect(Path.join(root, "entry-env"))}, inspect(Enum.sort(Map.keys(System.get_env()))))
     if #{inspect(mode)} == :dotenv, do: File.cd!(#{inspect(root)})
     if #{inspect(mode)} == :pre_entry_crash, do: System.halt(71)

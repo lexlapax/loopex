@@ -452,7 +452,11 @@ defmodule Loopex.LLM.ReqLLM.InProcessCatalogFixture do
       :ok
     end
 
-    server = spawn(fn -> serve_direct(listener, parent) end)
+    # The call's own deadline, shared with the server below: a cold catalog
+    # load is charged to it (ADR 0039), so the server waits for the
+    # connection exactly as long as the call may still make it.
+    deadline = System.system_time(:millisecond) + 10_000
+    server = spawn(fn -> serve_direct(listener, parent, deadline) end)
     {:ok, supervisor} = Task.Supervisor.start_link()
     runtime = Wire.runtime()
 
@@ -471,7 +475,7 @@ defmodule Loopex.LLM.ReqLLM.InProcessCatalogFixture do
       {:ok, request} =
         Model.request(@model, [%{"role" => "user", "content" => "success"}],
           sampling: %{"max_tokens" => 64},
-          deadline: System.system_time(:millisecond) + 10_000
+          deadline: deadline
         )
 
       result =
@@ -508,9 +512,9 @@ defmodule Loopex.LLM.ReqLLM.InProcessCatalogFixture do
     end
   end
 
-  defp serve_direct(listener, parent) do
-    {:ok, socket} = :ssl.transport_accept(listener, 5_000)
-    {:ok, socket} = :ssl.handshake(socket, 5_000)
+  defp serve_direct(listener, parent, deadline) do
+    {:ok, socket} = :ssl.transport_accept(listener, remaining(deadline))
+    {:ok, socket} = :ssl.handshake(socket, remaining(deadline))
     {head, _body} = read_direct_request(socket, "")
     [line | lines] = String.split(head, "\r\n")
 
@@ -531,6 +535,8 @@ defmodule Loopex.LLM.ReqLLM.InProcessCatalogFixture do
     send(parent, {:catalog_model_closed, self()})
     :ssl.close(socket)
   end
+
+  defp remaining(deadline), do: max(deadline - System.system_time(:millisecond), 0)
 
   defp read_direct_request(socket, bytes) do
     case :binary.split(bytes, "\r\n\r\n") do

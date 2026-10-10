@@ -77,6 +77,22 @@ defmodule Loopex.LLM.ReqLLM.ProviderWorker do
       # before dependencies start, preserving it across application loading.
       Application.put_env(:req_llm, :load_dotenv, false, persistent: true)
       Application.put_env(:llm_db, :load_dotenv, false, persistent: true)
+      # Concept: a one-use worker never pays a whole model-catalog load.
+      # Technical depth: the first metadata query would load LLMDB's packaged
+      # catalog, about 1 s of CPU, and this VM serves exactly one call. Host
+      # admission already captured the verified limits and mapping into the
+      # committed request. With the catalog left empty the model resolves
+      # without catalog rows, as the ephemeral profile's inline model does:
+      # base URLs come from configuration or the built-in provider default,
+      # and a catalog alias is sent as its literal, unregistered model id.
+      Application.put_env(:llm_db, :skip_packaged_load, true, persistent: true)
+      Application.put_env(:req_llm, :warn_unverified_models, false, persistent: true)
+      # Concept: the guard's cleanup TERM ends this worker at once.
+      # Technical depth: the result reaches Core only after the guard proves
+      # the group gone. ERTS's default TERM handler runs a graceful init:stop,
+      # measured at up to 1.4 s, inside every call; this one-use worker has
+      # nothing to drain, so TERM keeps the kernel's default disposition.
+      :ok = :os.set_signal(:sigterm, :default)
       sink = spawn_link(fn -> io_sink() end)
       true = Process.group_leader(self(), sink)
       :ok = :logger.set_primary_config(:level, :none)
