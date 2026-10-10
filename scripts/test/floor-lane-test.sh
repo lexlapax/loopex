@@ -30,6 +30,9 @@ printf '%s\n' '#!/usr/bin/env bash' \
   'printf "fixture fast stdout\n"' \
   'printf "fixture fast stderr\n" >&2' \
   'printf "fixture fast native encoding=%s\n" "$(locale charmap)"' \
+  'printf "fixture fast umask=%s\n" "$(umask)"' \
+  'm=$(stat -c %a apps/loopex/.fixture 2>/dev/null || stat -f %Lp apps/loopex/.fixture)' \
+  'printf "fixture fast source mode=%s\n" "$m"' \
   'if [[ -n ${FLOOR_TEST_FAST_SLEEP:-} ]]; then' \
   '  if [[ -n ${FLOOR_TEST_FAST_IGNORE_TERM:-} ]]; then' \
   '    (trap "" TERM; exec sleep "$FLOOR_TEST_FAST_SLEEP") &' \
@@ -180,6 +183,10 @@ for platform in Darwin Linux; do
   grep -qx 'fixture fast stderr' "$out/check.log" || fail "$platform lost stderr"
   grep -qx 'fixture fast native encoding=UTF-8' "$out/check.log" ||
     fail "$platform did not select UTF-8 from a POSIX login locale"
+  grep -qx 'fixture fast umask=0022' "$out/check.log" ||
+    fail "$platform fast check inherited the runner umask"
+  grep -qx 'fixture fast source mode=644' "$out/check.log" ||
+    fail "$platform clone did not keep ordinary source modes"
   ! grep -q 'this dirty line must not run' "$out/check.log" ||
     fail "$platform used the working tree instead of the commit"
   grep -q '^DURATION_S=[0-9][0-9]*$' "$out/check.log" || fail "$platform lost duration"
