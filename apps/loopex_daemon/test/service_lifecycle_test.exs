@@ -294,6 +294,28 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
     assert Task.await(daemon.task, 60_000) == 0
   end
 
+  # Concept: a client that hangs up just after the stop began is the same
+  # case seen from the other side: the stop's record meets a broken pipe.
+  #
+  # Technical depth: close-all selects the suspended connection before its
+  # peer closes, so on resume it handles `daemon.stopping` first and its write
+  # of the record fails with `epipe` instead of reading end of input.
+  test "a peer that closes as the stop record is written still exits zero",
+       %{options: options} do
+    daemon = start_daemon(options)
+    _ready = await_ready(daemon.output)
+    client = initialized(options[:socket_path])
+    registry = :sys.get_state(:sys.get_state(daemon.owner).pids.collaboration).registry
+    [row] = Map.values(:sys.get_state(registry).rows)
+    connection = row.connection_pid
+    :ok = :sys.suspend(connection)
+    send(daemon.sentinel, {:daemon_signal, daemon.owner_ref, :sigterm})
+    await_until(fn -> :sys.get_state(registry).close_all != nil end)
+    :socket.close(client)
+    :ok = :sys.resume(connection)
+    assert Task.await(daemon.task, 60_000) == 0
+  end
+
   # Concept: only the client's own hang-up excuses a missing close proof; a
   # connection that ends normally for any other reason while its client is
   # still connected is lost, and the stop says so.

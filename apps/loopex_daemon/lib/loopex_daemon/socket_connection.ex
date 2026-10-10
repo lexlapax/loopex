@@ -647,13 +647,18 @@ defmodule LoopexDaemon.SocketConnection do
   end
 
   # Concept: the client hanging up is reported to the registry before the
-  # connection ends, so an orderly stop counts this close as proved.
+  # connection ends, so an orderly stop counts this close as proved. A hang-up
+  # is seen either as end of input or, when the stop's record is written
+  # first, as a broken pipe.
   # Technical depth: the report precedes this process's exit signal, so the
   # registry always sees it before the connection's `DOWN`.
   defp peer_closed(state) do
-    send(state.registry, {:connection_peer_closed, self(), state.incarnation})
+    report_peer_closed(state)
     {:stop, :normal, state}
   end
+
+  defp report_peer_closed(state),
+    do: send(state.registry, {:connection_peer_closed, self(), state.incarnation})
 
   defp input_result({:ok, state}) do
     send(self(), :receive_next)
@@ -2378,8 +2383,9 @@ defmodule LoopexDaemon.SocketConnection do
       {:select, select_info} ->
         {:ok, %{state | send_select: select_info}}
 
-      {:error, _reason} ->
+      {:error, reason} ->
         Logger.debug("loopex daemon socket send failed")
+        if reason == :epipe or match?({:epipe, _rest}, reason), do: report_peer_closed(state)
         {:stop, state}
 
       _other ->
