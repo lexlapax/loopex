@@ -1869,33 +1869,35 @@ defmodule LoopexComposition.RestoreIOTest do
     joined(owned)
   end
 
-  test "selected receipt exact cap is a decoder control and over-cap refuses before open",
+  test "selected receipt is a physical decoder control and over-cap refuses before open",
        context do
     fixture = receipt_fixture(context.root)
     assert Loopex.Store.max_item_bytes() == 65_536
 
-    control = %{
+    # Concept: a rewritten receipt at the largest current tool output is a
+    # physical decoder control.
+    # Technical depth: ADR 0070 retired the demonstration tools whose output
+    # ceiling let a valid receipt reach the exact 65,536-byte item cap; every
+    # current tool's ceiling keeps a valid receipt below it. The executor did not
+    # publish this changed tool/output. Both capture and manifest use its actual
+    # bytes; no selected filename grants finality.
+    receipt = %{
       fixture.receipt
-      | tool_id: "loopex.demo.write",
+      | tool_id: "loopex.bash",
         tool_version: "1.0.0",
         child_environment_names: ["PATH"],
         artifacts: [],
-        output: <<>>
+        output: :binary.copy("x", 16_384)
     }
 
-    width = 65_536 - byte_size(:erlang.term_to_binary(control, [:deterministic]))
-    receipt = %{control | output: :binary.copy("x", width)}
     bytes = :erlang.term_to_binary(receipt, [:deterministic])
-    assert byte_size(bytes) == 65_536
+    assert byte_size(bytes) < 65_536
     assert {:ok, ^receipt} = Loopex.Executor.Local.decode_receipt_bytes(bytes)
-    # Concept: rewritten demonstration receipt is a physical decoder control.
-    # Technical depth: the executor did not publish this changed tool/output. Both
-    # capture and manifest use its actual bytes; no selected filename grants finality.
     File.write!(fixture.path, bytes)
     owned = launch(receipt_operation(fixture), :receipt_decode)
     assert {{:joined, {:ok, ^receipt}, %{opens: 1, closes: 1}}, _} = drive(owned)
     joined(owned)
-    File.write!(fixture.path, bytes <> <<0>>)
+    File.write!(fixture.path, bytes <> :binary.copy(<<0>>, 65_537 - byte_size(bytes)))
     owned = launch(receipt_operation(fixture), :receipt_manifest)
     assert {{:joined, {:error, :io_error}, %{opens: 0, closes: 0}}, events} = drive(owned)
     refute :read in issued_kinds(events)

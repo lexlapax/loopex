@@ -208,7 +208,7 @@ defmodule Loopex.Executor.LocalHostPolicyTest do
     # The same contract holds for each: exactly one of two resolved shapes comes
     # back, and nothing else ever does.
     for module <- [Allows, AllowsWithContext, Denies, Raises, Malformed, Defers, Unbounded] do
-      decision = Policy.decide(module, request())
+      decision = Policy.evaluate(module, request())
 
       assert match?({:allow, _context}, decision) or match?({:deny, _category}, decision),
              "#{inspect(module)} resolved to #{inspect(decision)}"
@@ -221,7 +221,7 @@ defmodule Loopex.Executor.LocalHostPolicyTest do
   end
 
   test "a host policy deny decision issues no grant and starts no operating system process" do
-    assert {:deny, :policy_denied} = Policy.decide(Denies, request())
+    assert {:deny, :policy_denied} = Policy.evaluate(Denies, request())
 
     # The refusal is the whole point: nothing downstream is reached. A grant can
     # only be minted from an explicit allow, so a denial cannot produce one even
@@ -233,7 +233,7 @@ defmodule Loopex.Executor.LocalHostPolicyTest do
   test "a denied tool call commits a truthful denied outcome the operator can read" do
     # The category is closed and readable rather than free text that varies by
     # host, and it is one of the declared reasons.
-    assert {:deny, category} = Policy.decide(Denies, request())
+    assert {:deny, category} = Policy.evaluate(Denies, request())
     assert category in Policy.reason_categories()
 
     assert Loopex.Conversation.result_content(:denied, Atom.to_string(category)) =~ "refused"
@@ -383,25 +383,30 @@ defmodule Loopex.Executor.LocalHostPolicyTest do
   test "a policy that raises times out or returns a malformed value fails closed into denial" do
     # Every one of these has not allowed anything, and the safe reading of "I do
     # not know" is no.
-    assert {:deny, :policy_unavailable} = Policy.decide(Raises, request())
-    assert {:deny, :policy_unavailable} = Policy.decide(KillsItself, request())
-    assert {:deny, :policy_unavailable} = Policy.decide(Malformed, request())
-    assert {:deny, :policy_unavailable} = Policy.decide(Unbounded, request())
-    assert {:deny, :policy_unavailable} = Policy.decide(LeaksAPid, request())
-    assert {:deny, :policy_unavailable} = Policy.decide(:not_a_module, request())
+    assert {:deny, :policy_unavailable} = Policy.evaluate(Raises, request())
+    assert {:deny, :policy_unavailable} = Policy.evaluate(KillsItself, request())
+    assert {:deny, :policy_unavailable} = Policy.evaluate(Malformed, request())
+    assert {:deny, :policy_unavailable} = Policy.evaluate(Unbounded, request())
+    assert {:deny, :policy_unavailable} = Policy.evaluate(LeaksAPid, request())
+    assert {:deny, :policy_unavailable} = Policy.evaluate(:not_a_module, request())
 
     # A hanging policy denies rather than blocking the session owner forever.
     started = System.monotonic_time(:millisecond)
-    assert {:deny, :policy_unavailable} = Policy.decide(Hangs, request())
+    assert {:deny, :policy_unavailable} = Policy.evaluate(Hangs, request())
     elapsed = System.monotonic_time(:millisecond) - started
     assert elapsed < 30_000, "a hanging policy must not block for its own duration"
   end
 
-  test "defer is declared and refused in this milestone rather than treated as allow or deny" do
-    # It resolves to a denial, and to a category that says precisely why: the
-    # interaction it asks for is unsupported, not that the host refused the call.
-    assert {:deny, :interaction_unsupported} = Policy.decide(Defers, request())
-    refute match?({:deny, :policy_denied}, Policy.decide(Defers, request()))
+  test "a defer is never treated as allow or deny" do
+    # A session that refuses defers resolves it to a denial whose category says
+    # precisely why: the interaction it asks for is unsupported, not that the
+    # host refused the call. Evaluated directly, this question is outside the
+    # admitted family, so it is unavailable rather than retained.
+    assert {:deny, :interaction_unsupported} =
+             Policy.evaluate_callback(Defers, request(), :refuse_defer)
+
+    assert {:deny, :policy_unavailable} = Policy.evaluate(Defers, request())
+    refute match?({:deny, :policy_denied}, Policy.evaluate(Defers, request()))
     assert :interaction_unsupported in Policy.reason_categories()
   end
 
@@ -411,7 +416,7 @@ defmodule Loopex.Executor.LocalHostPolicyTest do
     # they can look up.
     for category <- Policy.reason_categories() do
       assert {:deny, ^category} =
-               Policy.decide(DeniesAsAsked, request(%{arguments: %{"category" => category}}))
+               Policy.evaluate(DeniesAsAsked, request(%{arguments: %{"category" => category}}))
     end
 
     # A category the host invented is not one of them, and this boundary does not
@@ -421,7 +426,7 @@ defmodule Loopex.Executor.LocalHostPolicyTest do
     refute :invented_by_the_host in Policy.reason_categories()
 
     assert {:deny, :policy_unavailable} =
-             Policy.decide(
+             Policy.evaluate(
                DeniesAsAsked,
                request(%{arguments: %{"category" => :invented_by_the_host}})
              )
@@ -433,9 +438,9 @@ defmodule Loopex.Executor.LocalHostPolicyTest do
     # branch nothing policed.
     for effect_class <- ["read_only", "workspace_write", "process", "external_effect"] do
       assert {:deny, :policy_denied} =
-               Policy.decide(Denies, request(%{effect_class: effect_class}))
+               Policy.evaluate(Denies, request(%{effect_class: effect_class}))
 
-      assert {:allow, nil} = Policy.decide(Allows, request(%{effect_class: effect_class}))
+      assert {:allow, nil} = Policy.evaluate(Allows, request(%{effect_class: effect_class}))
     end
   end
 

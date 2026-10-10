@@ -348,14 +348,8 @@ defmodule Loopex.CancellationObservationContractTest do
       refute_received {:cancel_callback_reached, "job-invalid"}
     end
 
-    assert function_exported?(Executor, :cancel, 3),
-           "the defensive legacy facade disappeared instead of staying available to direct callers"
-
     assert function_exported?(Executor, :cancel, 4),
-           "configured cancellation has no distinct production entry"
-
-    assert Executor.cancel(CancelObserver, self(), "legacy-direct") == {:ok, :cleaned}
-    assert_receive {:cancel_callback_reached, "legacy-direct"}, 5_000
+           "configured cancellation has no production entry"
 
     assert invoke(Executor, :cancel, [CancelObserver, self(), "configured-uint64", @max_uint64]) ==
              {:ok, :cleaned},
@@ -375,17 +369,15 @@ defmodule Loopex.CancellationObservationContractTest do
     assert_receive {:trace, _caller, :call, {Executor, :cancel, [_, _, _, 1]}}, 5_000
     assert_receive {:executor_cancelled, ^job_id}, 5_000
 
-    refute_receive {:trace, _caller, :call, {Executor, :cancel, [_, _, _]}}, 100
-
     assert Enum.find(drain(attachment), &(&1.kind == "run.finished"))["outcome"] == "cancelled"
   end
 
   @tag timeout: 70_000
   @tag :long_bound
-  test "configured cancellation observes a delayed callback beyond the legacy sixty second bound" do
+  test "configured cancellation observes a delayed callback beyond sixty seconds" do
     # This is deliberately a real duration rather than a source or call-shape
-    # assertion. A configured facade that delegates to cancel/3 stays green for
-    # every short callback and is false only after the old defensive bound.
+    # assertion. A facade that armed a fixed sixty-second bound would stay green
+    # for every short callback and be false only after that bound.
     #
     # The duration is the claim, so it is kept and the case is tagged
     # `:long_bound` instead of being shortened: the ordinary suite excludes that
@@ -827,7 +819,6 @@ defmodule Loopex.CancellationObservationContractTest do
   end
 
   defp trace_cancel_entries do
-    assert :erlang.trace_pattern({Executor, :cancel, 3}, true, []) == 1
     assert :erlang.trace_pattern({Executor, :cancel, 4}, true, []) == 1
 
     Enum.each(Process.list(), fn pid ->
@@ -844,7 +835,6 @@ defmodule Loopex.CancellationObservationContractTest do
       _ = :erlang.trace(pid, false, [:call])
     end)
 
-    _ = :erlang.trace_pattern({Executor, :cancel, 3}, false, [])
     _ = :erlang.trace_pattern({Executor, :cancel, 4}, false, [])
     :ok
   end

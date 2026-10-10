@@ -93,7 +93,7 @@ defmodule Loopex.Executor.LocalTest do
       )
 
     on_exit(fn -> stop_fixture(fixture) end)
-    {first, first_grant} = job_and_grant(fixture, "first-tool", "loopex.demo.write")
+    {first, first_grant} = job_and_grant(fixture, "first-tool", "loopex.write")
     assert {:ok, _receipt} = Local.execute(fixture.executor, first, first_grant)
     executor = fixture.executor
 
@@ -105,7 +105,7 @@ defmodule Loopex.Executor.LocalTest do
     assert File.exists?(Path.join(fixture.workspace, "first-tool.txt"))
 
     :atomics.put(cell, 1, 3)
-    {second, second_grant} = job_and_grant(fixture, "sealed-tool", "loopex.demo.write")
+    {second, second_grant} = job_and_grant(fixture, "sealed-tool", "loopex.write")
 
     assert {:error, {:refused_before_effect, :session_admission_closed}} =
              Local.execute(fixture.executor, second, second_grant)
@@ -136,7 +136,7 @@ defmodule Loopex.Executor.LocalTest do
       )
 
     on_exit(fn -> stop_fixture(fixture) end)
-    {job, grant} = job_and_grant(fixture, "grant-deadline", "loopex.demo.write")
+    {job, grant} = job_and_grant(fixture, "grant-deadline", "loopex.write")
     {:ok, prepared} = Ledger.prepare(fixture.ledger, "executor-local", 5_000)
     assert {:ok, placement} = GenServer.call(fixture.executor, {:reserve, job}, 10_000)
     reservation_ref = Map.fetch!(placement, :reservation_ref)
@@ -228,7 +228,10 @@ defmodule Loopex.Executor.LocalTest do
       )
 
     on_exit(fn -> stop_fixture(fixture) end)
-    {job, grant} = job_and_grant(fixture, "shell-fence", "loopex.demo.write")
+
+    {job, grant} =
+      job_and_grant(fixture, "shell-fence", "loopex.bash", shell_write("shell-fence"))
+
     barrier = make_ref()
     parent = self()
 
@@ -285,7 +288,7 @@ defmodule Loopex.Executor.LocalTest do
       )
 
     on_exit(fn -> stop_fixture(fixture) end)
-    {first, first_grant} = job_and_grant(fixture, "proved-tool", "loopex.demo.write")
+    {first, first_grant} = job_and_grant(fixture, "proved-tool", "loopex.write")
 
     assert {:ok, %{cleanup_confirmation: :confirmed}} =
              Local.execute(fixture.executor, first, first_grant)
@@ -316,7 +319,7 @@ defmodule Loopex.Executor.LocalTest do
     assert {:error, :process_groups_unproved} =
              Local.attest_process_groups(executor, instance, nonce, deadline)
 
-    {later, later_grant} = job_and_grant(fixture, "after-proof", "loopex.demo.write")
+    {later, later_grant} = job_and_grant(fixture, "after-proof", "loopex.write")
 
     assert {:error, {:refused_before_effect, :session_admission_closed}} =
              Local.execute(executor, later, later_grant)
@@ -341,8 +344,8 @@ defmodule Loopex.Executor.LocalTest do
     on_exit(fn -> stop_fixture(fixture) end)
 
     {job, grant} =
-      job_and_grant(fixture, "live-tool", "loopex.demo.wait_write", %{
-        "relative_path" => "live-tool.txt",
+      job_and_grant(fixture, "live-tool", "loopex.bash", %{
+        "path" => "live-tool.txt",
         "content" => "must-not-land",
         "delay_ms" => 10_000
       })
@@ -351,7 +354,7 @@ defmodule Loopex.Executor.LocalTest do
     running = Task.async(fn -> Local.execute(fixture.executor, job, grant, notify: parent) end)
     assert_receive {:session_tool_grant_requested, _, _, _}, 1_000
 
-    assert_receive {:executor_process_started, job_id, "loopex.demo.wait_write", ["PATH"]},
+    assert_receive {:executor_process_started, job_id, "loopex.bash", ["PATH"]},
                    5_000
 
     assert job_id == job.job_id
@@ -442,13 +445,13 @@ defmodule Loopex.Executor.LocalTest do
     # reading these bare would be inferring it.
     for field <- Executor.required_grant_bindings() do
       {missing_job, missing_grant} =
-        job_and_grant(fixture, "negative-missing-#{field}", "loopex.demo.write")
+        job_and_grant(fixture, "negative-missing-#{field}", "loopex.write")
 
       assert {:error, {:refused_before_effect, {:missing_binding, ^field}}} =
                Local.execute(fixture.executor, missing_job, Map.delete(missing_grant, field))
 
       {wrong_job, wrong_grant} =
-        job_and_grant(fixture, "negative-wrong-#{field}", "loopex.demo.write")
+        job_and_grant(fixture, "negative-wrong-#{field}", "loopex.write")
 
       assert {:error, {:refused_before_effect, {:binding_mismatch, ^field}}} =
                Local.execute(
@@ -465,7 +468,7 @@ defmodule Loopex.Executor.LocalTest do
   test "only an explicit host-policy allow decision can issue or widen a grant" do
     fixture = fixture("policy")
     on_exit(fn -> stop_fixture(fixture) end)
-    {job, grant} = job_and_grant(fixture, "policy", "loopex.demo.write")
+    {job, grant} = job_and_grant(fixture, "policy", "loopex.write")
     expiry = System.system_time(:millisecond) + 60_000
 
     assert {:error, :host_policy_allow_required} =
@@ -474,7 +477,7 @@ defmodule Loopex.Executor.LocalTest do
     assert {:error, :host_policy_allow_required} =
              Executor.issue_grant({:client, :allow}, job, expiry)
 
-    widened_job = %{job | tool_id: "loopex.demo.wait_write"}
+    widened_job = %{job | tool_id: "loopex.bash"}
 
     assert {:error, {:refused_before_effect, :canonical_job_request_mismatch}} =
              Local.execute(fixture.executor, widened_job, grant)
@@ -487,7 +490,7 @@ defmodule Loopex.Executor.LocalTest do
   test "the executor recomputes the canonical JobRequest digest and the receipt retains verified origin identity" do
     fixture = fixture("digest")
     on_exit(fn -> stop_fixture(fixture) end)
-    {job, grant} = job_and_grant(fixture, "digest", "loopex.demo.write")
+    {job, grant} = job_and_grant(fixture, "digest", "loopex.write")
 
     altered = %{job | canonical_request_digest: job.canonical_request_digest <> "00"}
 
@@ -561,8 +564,8 @@ defmodule Loopex.Executor.LocalTest do
     # lease is stopped, so shortening it changes how long the case takes and
     # nothing about what it observes.
     {default_job, default_grant} =
-      job_and_grant(fixture, "lease-loss", "loopex.demo.wait_write", %{
-        "relative_path" => "lease-loss.txt",
+      job_and_grant(fixture, "lease-loss", "loopex.bash", %{
+        "path" => "lease-loss.txt",
         "content" => "bytes-lease-loss",
         "delay_ms" => 2_000
       })
@@ -589,7 +592,7 @@ defmodule Loopex.Executor.LocalTest do
     task =
       Task.async(fn -> Local.execute(fixture.executor, job, grant, notify: parent) end)
 
-    assert_receive {:executor_process_started, job_id, "loopex.demo.wait_write", ["PATH"]},
+    assert_receive {:executor_process_started, job_id, "loopex.bash", ["PATH"]},
                    2_000
 
     assert job_id == job.job_id
@@ -1335,14 +1338,14 @@ defmodule Loopex.Executor.LocalTest do
   test "the executor starts one credential-free OS tool that writes the expected workspace bytes and retains its receipt" do
     fixture = fixture("real-tool")
     on_exit(fn -> stop_fixture(fixture) end)
-    {job, grant} = job_and_grant(fixture, "real-tool", "loopex.demo.write")
+    {job, grant} = job_and_grant(fixture, "real-tool", "loopex.bash", shell_write("real-tool"))
 
     previous = System.get_env("LOOPEX_PROVIDER_API_KEY")
     System.put_env("LOOPEX_PROVIDER_API_KEY", "must-not-reach-child")
 
     try do
       assert {:ok, receipt} = Local.execute(fixture.executor, job, grant, notify: self())
-      assert_receive {:executor_process_started, job_id, "loopex.demo.write", ["PATH"]}
+      assert_receive {:executor_process_started, job_id, "loopex.bash", ["PATH"]}
       assert job_id == job.job_id
       assert receipt.outcome == :completed
       assert receipt.child_environment_names == ["PATH"]
@@ -1375,8 +1378,8 @@ defmodule Loopex.Executor.LocalTest do
     # job is dispatched, so the window only has to be longer than one poll, and
     # the case waits out the rest of it before it can read the retained receipt.
     {job, grant} =
-      job_and_grant(fixture, "in-flight", "loopex.demo.wait_write", %{
-        "relative_path" => "in-flight.txt",
+      job_and_grant(fixture, "in-flight", "loopex.bash", %{
+        "path" => "in-flight.txt",
         "content" => "bytes-in-flight",
         "delay_ms" => 2_000
       })
@@ -1423,7 +1426,7 @@ defmodule Loopex.Executor.LocalTest do
   test "a pre-admission reservation dies with the process that asked for it" do
     fixture = fixture("reservation-owner")
     on_exit(fn -> stop_fixture(fixture) end)
-    {job, _grant} = job_and_grant(fixture, "owner", "loopex.demo.write")
+    {job, _grant} = job_and_grant(fixture, "owner", "loopex.write")
     parent = self()
 
     reserver =
@@ -1460,7 +1463,7 @@ defmodule Loopex.Executor.LocalTest do
     # `effect_unresolved` the truthful receipt answer throughout.
     fixture = fixture("same-job-holders")
     on_exit(fn -> stop_fixture(fixture) end)
-    {job, _grant} = job_and_grant(fixture, "same-job-holders", "loopex.demo.write")
+    {job, _grant} = job_and_grant(fixture, "same-job-holders", "loopex.write")
     parent = self()
 
     assert {:ok, prepared} = Ledger.prepare(fixture.ledger, "executor-local", 5_000)
@@ -1530,7 +1533,7 @@ defmodule Loopex.Executor.LocalTest do
     # validation, and the admission record must remain the durable answer.
     fixture = fixture("admission-before-revalidation")
     on_exit(fn -> stop_fixture(fixture) end)
-    {job, grant} = job_and_grant(fixture, "admission-before-revalidation", "loopex.demo.write")
+    {job, grant} = job_and_grant(fixture, "admission-before-revalidation", "loopex.write")
     {:ok, prepared} = Ledger.prepare(fixture.ledger, "executor-local", 5_000)
 
     assert :ok =
@@ -1576,13 +1579,13 @@ defmodule Loopex.Executor.LocalTest do
     # removing the polling joiner's independent reservation.
     fixture = fixture("dead-owner-live-joiner")
     on_exit(fn -> stop_fixture(fixture) end)
-    {job, grant} = job_and_grant(fixture, "dead-owner-live-joiner", "loopex.demo.wait_write")
+    {job, grant} = job_and_grant(fixture, "dead-owner-live-joiner", "loopex.bash")
     parent = self()
 
     owner =
       Task.async(fn -> Local.execute(fixture.executor, job, grant, notify: parent) end)
 
-    assert_receive {:executor_process_started, job_id, "loopex.demo.wait_write", ["PATH"]},
+    assert_receive {:executor_process_started, job_id, "loopex.bash", ["PATH"]},
                    5_000
 
     assert job_id == job.job_id
@@ -1646,7 +1649,7 @@ defmodule Loopex.Executor.LocalTest do
       assert Process.alive?(joiner.pid), "the same-job joiner did not remain live"
 
       {unrelated, unrelated_grant} =
-        job_and_grant(fixture, "after-dead-owner", "loopex.demo.write")
+        job_and_grant(fixture, "after-dead-owner", "loopex.write")
 
       unrelated_result = Local.execute(fixture.executor, unrelated, unrelated_grant)
       receipt_result = Local.receipt(fixture.executor, job.job_id)
@@ -1681,10 +1684,10 @@ defmodule Loopex.Executor.LocalTest do
     on_exit(fn -> stop_fixture(fixture) end)
 
     {owned, owned_grant} =
-      job_and_grant(fixture, "pre-reserved-owner", "loopex.demo.wait_write")
+      job_and_grant(fixture, "pre-reserved-owner", "loopex.bash")
 
     {queued, queued_grant} =
-      job_and_grant(fixture, "pre-reserved-unrelated", "loopex.demo.write")
+      job_and_grant(fixture, "pre-reserved-unrelated", "loopex.write")
 
     parent = self()
 
@@ -1693,7 +1696,7 @@ defmodule Loopex.Executor.LocalTest do
         Local.execute(fixture.executor, owned, owned_grant, notify: parent)
       end)
 
-    assert_receive {:executor_process_started, owned_job_id, "loopex.demo.wait_write", ["PATH"]},
+    assert_receive {:executor_process_started, owned_job_id, "loopex.bash", ["PATH"]},
                    5_000
 
     assert owned_job_id == owned.job_id
@@ -1773,10 +1776,10 @@ defmodule Loopex.Executor.LocalTest do
     on_exit(fn -> stop_fixture(fixture) end)
 
     {owned, owned_grant} =
-      job_and_grant(fixture, "post-validation-owner", "loopex.demo.wait_write")
+      job_and_grant(fixture, "post-validation-owner", "loopex.bash")
 
     {queued, queued_grant} =
-      job_and_grant(fixture, "post-validation-unrelated", "loopex.demo.write")
+      job_and_grant(fixture, "post-validation-unrelated", "loopex.write")
 
     parent = self()
 
@@ -1785,7 +1788,7 @@ defmodule Loopex.Executor.LocalTest do
         Local.execute(fixture.executor, owned, owned_grant, notify: parent)
       end)
 
-    assert_receive {:executor_process_started, owned_job_id, "loopex.demo.wait_write", ["PATH"]},
+    assert_receive {:executor_process_started, owned_job_id, "loopex.bash", ["PATH"]},
                    5_000
 
     assert owned_job_id == owned.job_id
@@ -1857,7 +1860,7 @@ defmodule Loopex.Executor.LocalTest do
   test "a malformed open authority snapshot cannot become permission" do
     fixture = fixture("malformed-open-snapshot")
     on_exit(fn -> stop_fixture(fixture) end)
-    {job, grant} = job_and_grant(fixture, "malformed-open-snapshot", "loopex.demo.write")
+    {job, grant} = job_and_grant(fixture, "malformed-open-snapshot", "loopex.write")
 
     assert {:ok, placement} = GenServer.call(fixture.executor, {:reserve, job}, 10_000)
     reservation_ref = Map.fetch!(placement, :reservation_ref)
@@ -1890,9 +1893,9 @@ defmodule Loopex.Executor.LocalTest do
     fixture = fixture("several-unresolved-open")
     on_exit(fn -> stop_fixture(fixture) end)
 
-    {first, _first_grant} = job_and_grant(fixture, "unresolved-first", "loopex.demo.write")
-    {second, _second_grant} = job_and_grant(fixture, "unresolved-second", "loopex.demo.write")
-    {job, grant} = job_and_grant(fixture, "after-several-unresolved", "loopex.demo.write")
+    {first, _first_grant} = job_and_grant(fixture, "unresolved-first", "loopex.write")
+    {second, _second_grant} = job_and_grant(fixture, "unresolved-second", "loopex.write")
+    {job, grant} = job_and_grant(fixture, "after-several-unresolved", "loopex.write")
     assert {:ok, prepared} = Ledger.prepare(fixture.ledger, "executor-local", 5_000)
 
     assert :ok =
@@ -1932,16 +1935,16 @@ defmodule Loopex.Executor.LocalTest do
     on_exit(fn -> stop_fixture(fixture) end)
 
     {owned, owned_grant} =
-      job_and_grant(fixture, "exact-count-owned", "loopex.demo.wait_write", %{
-        "relative_path" => "exact-count-owned.txt",
+      job_and_grant(fixture, "exact-count-owned", "loopex.bash", %{
+        "path" => "exact-count-owned.txt",
         "content" => "bytes-exact-count-owned",
         "delay_ms" => 30_000
       })
 
     {foreign, _foreign_grant} =
-      job_and_grant(fixture, "exact-count-foreign", "loopex.demo.write")
+      job_and_grant(fixture, "exact-count-foreign", "loopex.write")
 
-    {job, grant} = job_and_grant(fixture, "exact-count-new", "loopex.demo.write")
+    {job, grant} = job_and_grant(fixture, "exact-count-new", "loopex.write")
     parent = self()
 
     owner =
@@ -1949,7 +1952,7 @@ defmodule Loopex.Executor.LocalTest do
         Local.execute(fixture.executor, owned, owned_grant, notify: parent)
       end)
 
-    assert_receive {:executor_process_started, owned_job_id, "loopex.demo.wait_write", ["PATH"]},
+    assert_receive {:executor_process_started, owned_job_id, "loopex.bash", ["PATH"]},
                    5_000
 
     assert owned_job_id == owned.job_id
@@ -1990,7 +1993,7 @@ defmodule Loopex.Executor.LocalTest do
     # process itself, withhold the permit, and leave no durable admission.
     fixture = fixture("permit-holder-dies")
     on_exit(fn -> stop_fixture(fixture) end)
-    {job, grant} = job_and_grant(fixture, "permit-holder-dies", "loopex.demo.write")
+    {job, grant} = job_and_grant(fixture, "permit-holder-dies", "loopex.write")
     parent = self()
 
     holder =
@@ -2066,10 +2069,10 @@ defmodule Loopex.Executor.LocalTest do
     on_exit(fn -> stop_fixture(fixture) end)
 
     {owned, owned_grant} =
-      job_and_grant(fixture, "quarantined-owner", "loopex.demo.write")
+      job_and_grant(fixture, "quarantined-owner", "loopex.write")
 
     {queued, queued_grant} =
-      job_and_grant(fixture, "queued-after-quarantine", "loopex.demo.write")
+      job_and_grant(fixture, "queued-after-quarantine", "loopex.write")
 
     queued_holder =
       spawn(fn ->
@@ -2241,7 +2244,7 @@ defmodule Loopex.Executor.LocalTest do
     claim_wait_ms = 300
     fixture = fixture("reservation-claim", claim_wait_ms: claim_wait_ms)
     on_exit(fn -> stop_fixture(fixture) end)
-    {job, grant} = job_and_grant(fixture, "claim", "loopex.demo.write")
+    {job, grant} = job_and_grant(fixture, "claim", "loopex.write")
     {:ok, prepared} = Ledger.prepare(fixture.ledger, "executor-local", 5_000)
     parent = self()
 
@@ -2288,7 +2291,9 @@ defmodule Loopex.Executor.LocalTest do
     :erlang.trace(self(), true, [:call, :set_on_spawn, {:tracer, tracer}])
 
     try do
-      {job, grant} = job_and_grant(fixture, "excluded-job", "loopex.demo.write")
+      {job, grant} =
+        job_and_grant(fixture, "excluded-job", "loopex.bash", shell_write("excluded-job"))
+
       assert {:ok, receipt} = Local.execute(fixture.executor, job, grant)
       assert receipt.outcome == :completed
       assert receipt.child_environment_names == ["PATH"]
@@ -2464,6 +2469,10 @@ defmodule Loopex.Executor.LocalTest do
 
   defp job_and_grant(fixture, label, tool_id, arguments) do
     {:ok, tool} = Local.tool(tool_id)
+
+    arguments =
+      if Map.has_key?(arguments, "delay_ms"), do: delayed_write(arguments), else: arguments
+
     now = System.system_time(:millisecond)
 
     fields = %{
@@ -2549,15 +2558,22 @@ defmodule Loopex.Executor.LocalTest do
     end
   end
 
-  defp maybe_delay(arguments, "loopex.demo.wait_write"), do: Map.put(arguments, "delay_ms", 5_000)
-  defp maybe_delay(arguments, _tool), do: arguments
+  defp tool_arguments(label, "loopex.bash"),
+    do: %{"path" => "#{label}.txt", "content" => "bytes-#{label}", "delay_ms" => 5_000}
 
-  defp tool_arguments(label, "loopex.write"),
+  defp tool_arguments(label, _tool_id),
     do: %{"path" => "#{label}.txt", "content" => "bytes-#{label}"}
 
-  defp tool_arguments(label, tool_id) do
-    %{"relative_path" => "#{label}.txt", "content" => "bytes-#{label}"}
-    |> maybe_delay(tool_id)
+  # The credential-free OS process that writes the expected workspace bytes.
+  defp shell_write(label),
+    do: %{"command" => "printf %s 'bytes-#{label}' > '#{label}.txt'"}
+
+  # Concept: a write that must stay in flight for a while is a real bash job.
+  # Technical depth: ADR 0070 retired the M1 delayed-write demonstration; the
+  # same effect runs through the current process tool, sleeping whole seconds
+  # before writing the content beneath the workspace root.
+  defp delayed_write(%{"path" => path, "content" => content, "delay_ms" => delay}) do
+    %{"command" => "sleep #{div(delay + 999, 1_000)}; printf %s '#{content}' > '#{path}'"}
   end
 
   defp wrong(:attempt, grant), do: grant.attempt + 1

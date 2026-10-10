@@ -280,10 +280,9 @@ and reaches no callback. The intervals stay distinct and no bound is derived fro
 another's already-spent instant. `Loopex.Executor.default_cleanup_grace_ms/0` is
 `5_000` and lives on the port because the session declares it and the executor
 performs it; a default defined twice is two numbers that agree until one is
-edited. `cancel/3` retains
-[ADR 0012](../adr/0012-executor-cancellation-capability.md#concept)'s fixed
-60-second defensive bound for a direct caller with no committed value, and
-production coordination never selects it.
+edited. `cancel/4` is the only cancellation entry;
+[ADR 0070](../adr/0070-pre-1-superseded-surface-retirement.md#concept) retired
+the fixed-bound `cancel/3`.
 
 ### Record and Event Shapes by Name
 
@@ -498,13 +497,12 @@ rather than crashing on a missing function or falling back to an unbounded
 `fetch/2` ([ADR 0028](../adr/0028-bounded-artifact-retrieval.md#concept)).
 
 `Loopex.Policy` has exactly one callback, `decide/1`, whose answers are
-`{:allow, context}`, `{:deny, category}`, or `{:defer, request}`. Two core
-callers resolve it. The one-shot `Loopex.Policy.decide/2` projects a defer to
-`{:deny, :interaction_unsupported}`; `Loopex.Policy.evaluate/2`, which the
-session coordinator uses, admits a validated defer for the session-owned
-interaction lifecycle of
+`{:allow, context}`, `{:deny, category}`, or `{:defer, request}`. The session
+coordinator resolves it under the session's committed defer mode: a refusing
+session projects a defer to `{:deny, :interaction_unsupported}`, and an admitting
+one keeps a validated defer for the session-owned interaction lifecycle of
 [ADR 0024](../adr/0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept).
-A host cannot tell which caller it is answering, and a defer outside the
+A host cannot tell which mode it is answering, and a defer outside the
 admitted question family is `policy_unavailable` rather than a malformed
 interaction.
 
@@ -532,7 +530,7 @@ first, so an adapter receives exactly `%{media_type:, role:, metadata:}`; core
 then computes the expected digest and size from the input bytes, requires the
 adapter's answer to match, reconstructs the use record from the validated object
 triple, and resolves the adapter's `use_locator` through `describe/2` before the
-reference may reach anything durable. `Loopex.Policy.decide/2` catches a raise,
+reference may reach anything durable. Policy evaluation catches a raise,
 exit, or timeout and resolves it to `{:deny, :policy_unavailable}`, because a
 crashing policy must produce a decision rather than take the session down.
 
@@ -616,9 +614,10 @@ Credentials stay at the provider boundary, but the two profiles make different
 isolation claims. In the durable profile the companion adapter reads no
 environment variable: the host reads `LOOPEX_PROVIDER_API_KEY` once, deletes it
 and holds it in a custody process beside a routing registry
-(`LoopexComposition.CredentialHost`), and the adapter, given an opaque
-`:credential_token` and that `:credential_registry`, resolves it per
-invocation; a short-lived sender materializes it after the configured
+(`LoopexComposition.CredentialHost`) as a version-2 plane whose provider
+routes all name that one custody (ADR 0070), and the adapter, given the opaque
+`:provider_routes` and that `:credential_registry`, selects the request's
+route and resolves it per invocation; a short-lived sender materializes it after the configured
 companion has proved its protected entry and build identity. Neither
 the initial process image nor its arguments carry the credential. The companion
 uses it as a per-request option, with child diagnostics suppressed before ReqLLM

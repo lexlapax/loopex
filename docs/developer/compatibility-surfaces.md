@@ -186,8 +186,8 @@ private companion process per invocation and explicit adapter options:
 file. Unmanaged calls also supply the validated `cleanup_grace_ms`; managed calls
 use Core's retained value. Missing, malformed, or mismatched configuration
 refuses before credential delivery, with no shared-VM fallback or runtime code
-discovery. The Model callback is `complete/3`; the bare-model `complete/2`
-helper refuses, and direct callers use `complete_prompt/3`, which takes a
+discovery. The Model callback is `complete/3`; direct callers use
+`complete_prompt/3` (ADR 0070 retired the bare-model `complete/2`), which takes a
 composed `:credential_token` and `:credential_registry` and refuses before
 launch without them — compose custody as `LoopexComposition.CredentialHost`
 does. `Loopex.LLM.ReqLLM.call_options/3` is an exported, unstable helper that
@@ -338,7 +338,7 @@ diagnostic; the ADR 0040 cases also explain what to check before retrying.
 `loopex artifact` reads objects through the
 `Loopex.ArtifactStore`
 port. The command's cross-application interrupt entries —
-`LoopexCli.Interrupt.install/1`, `install/2`, `install_prepared/3`,
+`LoopexCli.Interrupt.install/2`, `install_prepared/3`,
 `activate_prepared/1`, `abandon_prepared/1`, and `abandon_resume/2` — are
 described in
 [Runtime and embedding](runtime-and-embedding.md#technical-embedding-recovery).
@@ -434,11 +434,12 @@ prescribed host reboot, before a fresh root is used.
 - Expect the absence of a stream closure. It is an emission obligation, never a
   delivery guarantee, so a consumer falls back to the durable record rather than
   inferring abandonment.
-- Know which policy caller you are answering. The one-shot
-  `Loopex.Policy.decide/2` resolves `{:defer, _}` to
-  `{:deny, :interaction_unsupported}`; the interaction-aware
-  `Loopex.Policy.evaluate/2`, which the session owner uses, admits a validated
-  defer and suspends the tool call on a durable question.
+- Know how your session reads a defer. Under its committed policy-defer mode
+  the session owner either refuses `{:defer, _}` as
+  `{:deny, :interaction_unsupported}` or admits a validated defer and suspends
+  the tool call on a durable question. `Loopex.Policy.evaluate/2` always
+  returns the validated question; ADR 0070 retired the one-shot
+  `Loopex.Policy.decide/2` facade.
 - Supply a `:policy_identity` alongside `:policy`, and change its revision when
   your policy's behaviour changes.
 - Treat a transfer reference as opaque and attachment-owned.

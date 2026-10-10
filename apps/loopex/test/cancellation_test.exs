@@ -1035,17 +1035,11 @@ defmodule Loopex.CancellationTest do
     # facade turns silence into an unconfirmed cleanup rather than inventing a
     # clean stop.
     #
-    # Technical depth: ADR 0016 makes `Executor.cancel/4` the production abort
-    # entry, bounded by the session's configured period, and keeps `cancel/3`'s
-    # fixed sixty-second bound for a direct caller with no committed value. Both
-    # arm that wait in one private boundary, `bounded_cancel/4`, which takes the
-    # bound as an argument -- so the two facts this case owns can be proved
-    # separately instead of being paid for together in a minute of wall time.
-    # The silence is observed end to end at the shortest period the configured
-    # entry can arm: the callback never answers, its worker is killed at the
-    # bound, and the answer is `unconfirmed`. The defensive constant is then read
-    # where it is applied, by tracing one `cancel/3` call that answers at once.
-    # A mutant that removes the bound still leaks here, because the callback
+    # Technical depth: ADR 0016 makes `Executor.cancel/4` the abort entry,
+    # bounded by the session's configured period through one private boundary,
+    # `bounded_cancel/4`. The silence is observed end to end at the shortest
+    # period the entry can arm: the callback never answers, its worker is killed
+    # at the bound, and the answer is `unconfirmed`. A mutant that removes the bound still leaks here, because the callback
     # publishes its own pid and then waits only for this test owner to die.
     executor = Loopex.CancellationTestExecutor.start({:cancel_never_returns, self()})
     assert {:ok, %{executor_observe_ms: observe_ms}} = Loopex.Executor.cancellation_bounds(1)
@@ -1080,32 +1074,12 @@ defmodule Loopex.CancellationTest do
                     {Loopex.Executor, :bounded_cancel,
                      [_module, _reference, "job-never-answers", ^observe_ms]}},
                    1_000
-
-    # The direct caller still gets ADR 0012's fixed minute. This executor answers
-    # immediately, so the constant is read from the boundary that applies it
-    # rather than waited out.
-    answering = Loopex.CancellationTestExecutor.start(:never_answers)
-
-    defensive =
-      Task.async(fn ->
-        Loopex.Executor.cancel(Loopex.CancellationTestExecutor, answering, "job-answers")
-      end)
-
-    assert Task.await(defensive, 5_000) == {:ok, :cleaned}
-
-    assert_receive {:trace, _defensive, :call,
-                    {Loopex.Executor, :bounded_cancel,
-                     [_module, _reference, "job-answers", defensive_bound]}},
-                   1_000
-
-    assert defensive_bound == 60_000,
-           "the defensive facade armed #{defensive_bound} ms instead of its documented minute"
   end
 
   test "a cancellation executor without cancel/2 is unconfirmed" do
     refute function_exported?(Loopex.NoCancellationTestExecutor, :cancel, 2)
 
-    assert Loopex.Executor.cancel(Loopex.NoCancellationTestExecutor, :ignored, "job-1") ==
+    assert Loopex.Executor.cancel(Loopex.NoCancellationTestExecutor, :ignored, "job-1", 5_000) ==
              {:ok, :unconfirmed}
   end
 
@@ -1795,7 +1769,7 @@ defmodule Loopex.CancellationTest do
     # was confirmed quiescent. An executor that said nothing intelligible has not
     # confirmed it.
     #
-    # Technical depth: `Loopex.Executor.cancel/3` reads exactly two answers and
+    # Technical depth: `Loopex.Executor.cancel/4` reads exactly two answers and
     # treats everything else as unconfirmed. That last clause was reachable by no
     # test: mutating it from `:unconfirmed` to `:cleaned` left every cancellation
     # case and the whole suite green, so a raised, exited, or malformed

@@ -230,12 +230,11 @@ defmodule LoopexComposition.DurableOptions do
            String.split(Keyword.get(options, :model, Loopex.LLM.ReqLLM.default_model()), ":",
              parts: 2
            ),
-         providers = if(routes == :legacy, do: [provider], else: routes),
-         true <- provider in providers,
+         true <- provider in routes,
          {:ok, maintenance} <-
            LoopexComposition.ProviderBindings.resolve_maintenance_routes(
              Keyword.get(options, :maintenance_model),
-             providers
+             routes
            ) do
       if Keyword.has_key?(options, :maintenance_model),
         do: {:ok, Keyword.put(options, :maintenance_model, maintenance)},

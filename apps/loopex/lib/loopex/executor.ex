@@ -38,9 +38,6 @@ defmodule Loopex.Executor do
 
   @protocol_version 1
 
-  # How long this runtime waits for a host-supplied `cancel/2` before reporting
-  # the cleanup unproven. Not an operator budget — see `cancel/3`.
-  @cancel_bound_ms 60_000
   # A receipt lookup reads retained bytes and starts nothing; an executor that
   # cannot answer inside this bound is broken, and the coordinator leaves the
   # reconciliation to the host rather than waiting on it.
@@ -242,58 +239,6 @@ defmodule Loopex.Executor do
 
   @optional_callbacks retained_receipt: 2
 
-  @doc """
-  ## Concept
-
-  Asks an executor to stop a job and fails closed when cleanup is not proved.
-
-  ## Technical depth
-
-  Every conforming executor implements `cancel/2`. The facade retains a
-  defensive path for a legacy or nonconforming module that does not: absence is
-  treated as unconfirmed, never as evidence that nothing remains. The same
-  fail-closed result applies when the callback returns `{:error, reason}`, raises,
-  exits, times out, or returns anything outside the two admitted success shapes.
-  The safe reading of "I could not tell you" is that something may still be
-  running, and a run must not claim `cancelled` on that basis.
-
-  The call is bounded and runs in a process of its own, because it is
-  host-supplied code that a caller invokes while a run is in flight. An
-  implementation that blocks would otherwise block the caller — and the caller
-  here is the session coordinator, which then cannot answer the operator's second
-  interrupt, arm a deadline, or admit anything at all. An answer that never comes
-  is `{:ok, :unconfirmed}`, which is the same reading as an answer that says it
-  could not tell.
-
-  The bound is this runtime's protection against an executor that does not
-  return, not an operator-facing budget: the shipped local executor bounds its
-  own cancellation by the cleanup period it was configured with, and reaches this
-  bound only if it is itself broken. It is deliberately far longer than that
-  period, so a slow-but-working executor is never cut off and reported unproven
-  when it was about to answer.
-  """
-  @spec cancel(module(), term(), binary()) :: {:ok, :cleaned} | {:ok, :unconfirmed}
-  def cancel(module, reference, job_id) when is_atom(module) and is_binary(job_id) do
-    span([:executor, :cancel], %{job_id: job_id}, fn ->
-      if function_exported?(module, :cancel, 2) do
-        bounded_cancel(module, reference, job_id, @cancel_bound_ms)
-      else
-        # Concept: an executor that declares no cancellation has confirmed
-        # nothing, and silence is not a clean stop.
-        #
-        # Technical depth: this used to answer `cleaned`, on the reasoning that an
-        # implementation without the callback has nothing to leave behind. That is
-        # a statement about the implementation this repository ships, not about the
-        # port: a legacy or nonconforming module may own an operating-system process
-        # and not export `cancel/2`, and reading its silence as confirmed cleanup
-        # committed `cancelled` for a tree nobody signalled and nobody looked at.
-        # `unconfirmed` is what this runtime actually knows, and it ends the run
-        # `outcome_unknown` with a reconciliation reference instead.
-        {:ok, :unconfirmed}
-      end
-    end)
-  end
-
   # Concept: one instrumented Executor dispatch, named in the accepted
   # inventory.
   #
@@ -376,7 +321,7 @@ defmodule Loopex.Executor do
   it; a module that does not answers `{:error, :receipt_lookup_unsupported}`,
   which the coordinator reads as "leave this to the host" rather than as any
   fact about the effect. The call is bounded and runs in a process of its own
-  for the reason `cancel/3` gives: it is host-supplied code invoked by the
+  for the reason `cancel/4` gives: it is host-supplied code invoked by the
   session coordinator, which must stay able to answer an operator while it
   waits. A raise, an exit, an answer outside the three admitted shapes, or the
   bound elapsing each become an error the coordinator declines on; none of them
@@ -480,17 +425,18 @@ defmodule Loopex.Executor do
 
   ## Technical depth
 
-  This is the production cancellation entry. The observation bound is derived
-  from `grace_ms` by `cancellation_bounds/1` rather than from this runtime's
-  defensive constant, so a session that committed a long valid cleanup period is
-  observed for that period instead of being cut off and reported unproven.
-  `cancel/3` keeps ADR 0012's fixed defensive bound for a direct caller that has
-  no committed value; production coordination never selects it.
+  This is the only cancellation entry (ADR 0070 retired the fixed-bound
+  `cancel/3`). The observation bound is derived from `grace_ms` by
+  `cancellation_bounds/1`, so a session that committed a long valid cleanup
+  period is observed for that period instead of being cut off and reported
+  unproven.
 
   An invalid period is refused before the callback runs, because a bound that
-  cannot be computed is not a bound that may be guessed. Every other failure
-  reads exactly as it does through `cancel/3`: silence, a raise, an exit, or an
-  answer outside the two admitted shapes is `{:ok, :unconfirmed}`.
+  cannot be computed is not a bound that may be guessed. The host callback runs
+  in a process of its own so a blocking implementation cannot block the session
+  coordinator. Every other failure fails closed: a module without `cancel/2`,
+  silence past the bound, a raise, an exit, or an answer outside the two admitted
+  shapes is `{:ok, :unconfirmed}`, never evidence that nothing remains.
   """
   @spec cancel(module(), term(), binary(), term()) ::
           {:ok, :cleaned} | {:ok, :unconfirmed} | {:error, :invalid_cleanup_grace}

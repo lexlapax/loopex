@@ -59,16 +59,13 @@ defmodule Loopex.InteractionLifecycleTest do
     end
   end
 
-  test "the evaluator admits a bounded deferred question that the inherited projection still refuses" do
+  test "the evaluator admits a bounded deferred question" do
     request = policy_request()
 
     assert {:defer, question} = Policy.evaluate(DeferringPolicy, request)
     assert question.kind == :choice
     assert Enum.map(question.choices, & &1.id) == ["allow", "deny"]
     assert question.expires_in_ms == 60_000
-
-    # M2's locked one-shot projection is unchanged by the evaluator existing.
-    assert Policy.decide(DeferringPolicy, request) == {:deny, :interaction_unsupported}
   end
 
   test "a caller that already owns a supervised task chooses how a defer is read" do
@@ -117,7 +114,9 @@ defmodule Loopex.InteractionLifecycleTest do
     assert {:defer, _question} = Policy.evaluate(CountingPolicy, policy_request())
     assert :counters.get(counter, 1) == 1
 
-    assert {:deny, :interaction_unsupported} = Policy.decide(CountingPolicy, policy_request())
+    assert {:deny, :interaction_unsupported} =
+             Policy.evaluate_callback(CountingPolicy, policy_request(), :refuse_defer)
+
     assert :counters.get(counter, 1) == 2
   end
 
@@ -1819,7 +1818,7 @@ defmodule Loopex.InteractionLifecycleTest do
       session_id: "session-1",
       run_id: "run-1",
       tool_call_id: "call-1",
-      tool_id: "loopex.demo.write@1.0.0",
+      tool_id: "loopex.write@1.0.0",
       arguments: %{"path" => "workspace/file.txt"}
     }
   end

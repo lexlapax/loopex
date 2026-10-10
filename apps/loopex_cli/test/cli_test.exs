@@ -1735,7 +1735,7 @@ defmodule LoopexCliTest do
     {_session_id, attachment, {:accepted, _id}} = AgentLoopFixture.run(fixture, "do the thing")
     assert_receive {:holding, model}, 2_000
 
-    Interrupt.install(attachment)
+    Interrupt.install(attachment, Loopex.Executor.default_cleanup_grace_ms())
     on_exit(fn -> restore_signal_handlers() end)
 
     # The handler replaced the runtime's own, which would have stopped the
@@ -1902,7 +1902,7 @@ defmodule LoopexCliTest do
     {_session_id, attachment, {:accepted, _id}} = AgentLoopFixture.run(fixture, "do the thing")
     assert_receive {:holding, model}, 2_000
 
-    Interrupt.install(attachment)
+    Interrupt.install(attachment, Loopex.Executor.default_cleanup_grace_ms())
     on_exit(fn -> restore_signal_handlers() end)
 
     {_output, 0} = System.cmd("/bin/kill", ["-TERM", System.pid()])
@@ -2924,7 +2924,7 @@ defmodule LoopexCliTest do
     {_session_id, attachment, {:accepted, _id}} = AgentLoopFixture.run(fixture, "do the thing")
     assert_receive {:holding, model}, 2_000
 
-    Interrupt.install(attachment)
+    Interrupt.install(attachment, Loopex.Executor.default_cleanup_grace_ms())
     on_exit(fn -> restore_signal_handlers() end)
 
     launcher = app_path("bin/loopex")

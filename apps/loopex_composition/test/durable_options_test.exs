@@ -554,8 +554,10 @@ defmodule LoopexComposition.DurableOptionsTest do
 
     {%{
        capability: capability,
+       version: 2,
+       excluded_env_names: ["LOOPEX_PROVIDER_API_KEY"],
        model_options: [
-         credential_token: token,
+         provider_routes: Map.new(~w(anthropic openai openrouter), &{&1, token}),
          credential_registry: registry,
          tracing_capability: capability
        ]

@@ -21,8 +21,8 @@ defmodule Loopex.ReferenceClient.AllowAllPolicyTest do
         session_id: "s1",
         run_id: "r1",
         tool_call_id: "c1",
-        generation: {"loopex.demo.write", "1.0.0", String.duplicate("a", 64)},
-        arguments: %{"relative_path" => "trace.txt", "content" => "x"},
+        generation: {"loopex.write", "1.0.0", String.duplicate("a", 64)},
+        arguments: %{"path" => "trace.txt", "content" => "x"},
         effect_class: "workspace_write",
         idempotency_class: "reconcile_then_retry",
         workspace_lease: "lease-1"
@@ -56,7 +56,7 @@ defmodule Loopex.ReferenceClient.AllowAllPolicyTest do
     # It resolves through the port to an allow with a valid context, so a runtime
     # that names it gets a decision the boundary will carry.
     capture_io(:stderr, fn ->
-      assert {:allow, nil} = Loopex.Policy.decide(AllowAll, request())
+      assert {:allow, nil} = Loopex.Policy.evaluate(AllowAll, request())
       assert Loopex.Policy.valid_context?(nil)
     end)
   end

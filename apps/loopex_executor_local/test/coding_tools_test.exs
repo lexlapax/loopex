@@ -3475,7 +3475,7 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     System.delete_env("LOOPEX_PROVIDER_API_KEY")
     parent = self()
 
-    for kind <- [:coding, :demonstration] do
+    for kind <- [:coding, :helper] do
       raced =
         Task.async(fn ->
           port =
@@ -3509,18 +3509,12 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
       System.delete_env("LOOPEX_PROVIDER_API_KEY")
     end
 
-    # The demonstration launcher is the other spawn site and already begins with
-    # the clearing option rather than with an executable path; asserting it keeps
-    # the two vectors from drifting apart again.
-    assert {:ok, demonstration} =
-             run(root, "loopex.demo.write", %{
-               "relative_path" => "demonstrated.txt",
-               "content" => "ran"
-             })
-
-    assert demonstration.outcome == :completed
-    assert demonstration.child_environment_names == ["PATH"]
-    refute demonstration.provider_credential_present
+    # A real job through that one launcher records the same PATH-only child
+    # environment and no provider credential.
+    assert {:ok, job} = run(root, "loopex.bash", %{"command" => "printf ran > ran.txt"})
+    assert job.outcome == :completed
+    assert job.child_environment_names == ["PATH"]
+    refute job.provider_credential_present
   end
 
   test "all configured exclusions survive reinsertion after the launch snapshot" do
@@ -3534,7 +3528,7 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
       end
     end)
 
-    for kind <- [:coding, :demonstration] do
+    for kind <- [:coding, :helper] do
       Enum.each(names, &System.delete_env/1)
 
       port =
@@ -4593,70 +4587,6 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
              assert Local.answer_within("/bin/loopex-no-such-cleanup-program", [], 5_000) ==
                       :no_answer
            end) =~ ""
-  end
-
-  test "the run deadline bounds the demonstration launcher as well as the coding tools" do
-    # Concept: the run's instant bounds every tool this executor starts, not only
-    # the ones this milestone added.
-    #
-    # Technical depth: enumerating what the run owns between dispatch and durable
-    # receipt turned this up beside the two retentions. `await_port/5` named the
-    # port and the lease and nothing else, so the second launcher in this module
-    # -- the one M1's demonstration tools still use, and the one whose registry
-    # entries this executor deliberately keeps resolvable -- had no deadline
-    # among its alternatives at all. A `loopex.demo.wait_write` declaring a five
-    # second delay ran for five seconds under a run deadline three hundred
-    # milliseconds away and reported `:completed`.
-    #
-    # The demonstration now uses the same owned process-group launcher as bash.
-    # Reaching the deadline while the lease still holds therefore produces a
-    # proved cancellation with confirmed cleanup rather than an unknown effect.
-    root = workspace()
-    # The delay stays at five seconds. It is not a bound this case waits for but
-    # the window the whole stop has to land inside -- the advanced deadline being
-    # noticed, the group being signalled, and the cooperative share of the
-    # committed period elapsing -- and a two-second window failed exactly that
-    # way under a loaded suite while passing on its own.
-    delay = 5_000
-
-    {clock, wall, advance} = controlled_deadline_clock()
-    {executor, lease_id} = executor_with_options(root, clock_provider: clock)
-
-    observer = self()
-
-    running =
-      Task.async(fn ->
-        run(
-          root,
-          "loopex.demo.wait_write",
-          %{"relative_path" => "delayed.txt", "content" => "late", "delay_ms" => delay},
-          %{
-            executor: executor,
-            lease_id: lease_id,
-            execute_options: [notify: observer],
-            run_deadline: wall + 300
-          }
-        )
-      end)
-
-    assert_receive {:executor_process_started, _job_id, "loopex.demo.wait_write", _environment},
-                   5_000
-
-    advance.(:both, 301)
-
-    assert {:ok, receipt} = Task.await(running, 10_000)
-
-    # The substituted paired clock, the cancelled terminal and the eventual
-    # absence of the delayed effect are the ordering proof. A tighter elapsed
-    # wall-time assertion measures scheduler and cleanup-probe load instead of
-    # the committed clock and can reject these same facts on a busy host.
-    assert receipt.outcome == :cancelled
-    assert receipt.cleanup_confirmation == :confirmed
-    assert receipt.output =~ "run deadline"
-    assert receipt.output =~ "confirmed cleaned"
-
-    Process.sleep(delay + 500)
-    refute File.exists?(Path.join(root, "delayed.txt"))
   end
 
   test "the cleanup budget is one configured period with a declared default and every receipt records it" do

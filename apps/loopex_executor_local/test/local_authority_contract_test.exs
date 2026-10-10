@@ -587,7 +587,7 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
         fixture,
         "clock-no-refresh",
         %{
-          "relative_path" => "clock-no-refresh.txt",
+          "path" => "clock-no-refresh.txt",
           "content" => "forbidden",
           "delay_ms" => 175
         },
@@ -749,7 +749,7 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
 
     joining =
       job(fixture, "malformed-joining-job", %{
-        "relative_path" => "malformed-joining-job.txt",
+        "path" => "malformed-joining-job.txt",
         "content" => "ok",
         "delay_ms" => 1_000
       })
@@ -933,9 +933,7 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
 
   test "retained process-tool receipts bind exactly the PATH-only child environment" do
     cases = [
-      {"bash", %{"command" => "printf ok"}, %{}},
-      {"demo", %{"relative_path" => "demo-environment.txt", "content" => "ok"},
-       %{tool_id: "loopex.demo.write", effect_class: "workspace_write"}}
+      {"bash", %{"command" => "printf ok"}, %{}}
     ]
 
     for {label, arguments, overrides} <- cases do
@@ -968,46 +966,20 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
                  {:error, :invalid_retained_receipt}
       end
 
-      if label == "bash" do
-        bash_output_limit =
-          Loopex.Executor.Local.CodingTools.definitions()
-          |> Enum.find(&(&1["tool_id"] == "loopex.bash"))
-          |> get_in(["budgets", "output_bytes"])
+      bash_output_limit =
+        Loopex.Executor.Local.CodingTools.definitions()
+        |> Enum.find(&(&1["tool_id"] == "loopex.bash"))
+        |> get_in(["budgets", "output_bytes"])
 
-        File.write!(
-          path,
-          :erlang.term_to_binary(
-            %{receipt | output: :binary.copy("x", bash_output_limit + 1)},
-            [:deterministic]
-          )
+      File.write!(
+        path,
+        :erlang.term_to_binary(
+          %{receipt | output: :binary.copy("x", bash_output_limit + 1)},
+          [:deterministic]
         )
+      )
 
-        assert Local.receipt(local, request.job_id) == {:error, :invalid_retained_receipt}
-      else
-        File.write!(
-          path,
-          :erlang.term_to_binary(%{receipt | progress_count: 1}, [:deterministic])
-        )
-
-        assert Local.receipt(local, request.job_id) == {:error, :invalid_retained_receipt}
-
-        {:ok, artifact_store} = ArtifactStore.start(:truthful)
-        on_exit(fn -> stop(artifact_store) end)
-
-        assert {:ok, unrelated_reference} =
-                 ArtifactStore.put(artifact_store, "unrelated", %{
-                   media_type: "text/plain",
-                   role: "tool_output",
-                   metadata: %{}
-                 })
-
-        File.write!(
-          path,
-          :erlang.term_to_binary(%{receipt | artifacts: [unrelated_reference]}, [:deterministic])
-        )
-
-        assert Local.receipt(local, request.job_id) == {:error, :invalid_retained_receipt}
-      end
+      assert Local.receipt(local, request.job_id) == {:error, :invalid_retained_receipt}
 
       assert Local.stats(local).dispatches[request.job_id] == 1
     end
@@ -1181,10 +1153,10 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
     refute File.exists?(Path.join(preflight_fixture.workspace, "must-not-exist.txt"))
     assert Map.get(Local.stats(preflight_local).dispatches, preflight_job.job_id, 0) == 0
 
-    # The raw retained envelope is bounded independently of every member's
-    # domain. The output member's own ceiling is larger than the complete
-    # envelope, so this remains valid in every other respect and would replay if
-    # the complete-byte ceiling were omitted.
+    # The raw retained envelope is bounded at the Store item ceiling. Every
+    # current tool's output ceiling keeps a valid receipt well below it (the
+    # retired demonstration tools had a larger one), so an envelope one byte over
+    # the ceiling is refused before replay.
     envelope_fixture = prepared_fixture("receipt-envelope")
     {:ok, envelope_local} = start_local(envelope_fixture)
     on_exit(fn -> stop(envelope_local) end)
@@ -1193,9 +1165,7 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
       job(
         envelope_fixture,
         "receipt-envelope-job",
-        %{"relative_path" => "receipt-envelope.txt", "content" => "ok"},
-        System.system_time(:millisecond) + 60_000,
-        %{tool_id: "loopex.demo.write", effect_class: "workspace_write"}
+        %{"command" => "printf ok > receipt-envelope.txt"}
       )
 
     assert {:ok, envelope_receipt} =
@@ -1218,8 +1188,6 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
       |> :erlang.term_to_binary([:deterministic])
 
     assert byte_size(exact_bytes) == 65_536
-    File.write!(envelope_path, exact_bytes)
-    assert {:ok, %{output: ^exact_output}} = Local.receipt(envelope_local, envelope_job.job_id)
 
     oversized_bytes =
       envelope_receipt
@@ -1301,7 +1269,9 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
     # not a claim that the executor published that rewritten receipt itself.
     assert_receipt_decode_calls([
       {published_bytes, {:ok, envelope_receipt}, 1},
-      {exact_bytes, {:ok, %{envelope_receipt | output: exact_output}}, 1},
+      # Exactly at the envelope cap the bytes are decoded, then refused by the
+      # output member's own ceiling; one byte over is refused before decoding.
+      {exact_bytes, {:error, :invalid_retained_receipt}, 1},
       {compressed_bytes, {:error, :invalid_retained_receipt}, 0},
       {oversized_bytes, {:error, :invalid_retained_receipt}, 0},
       {unknown_atom_bytes, {:error, :invalid_retained_receipt}, 1},
@@ -1313,7 +1283,7 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
   end
 
   test "captured receipts decode after original authorities join and the root is removed" do
-    for kind <- [:demo, :bash, :artifact] do
+    for kind <- [:bash, :artifact] do
       fixture = prepared_fixture("captured-receipt-#{kind}")
       {:ok, artifacts} = ArtifactStore.start(:truthful)
       on_exit(fn -> stop(artifacts) end)
@@ -1327,11 +1297,6 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
 
       {tool, effect, arguments, budgets} =
         case kind do
-          :demo ->
-            {"loopex.demo.write", "workspace_write",
-             %{"relative_path" => "captured.txt", "content" => "ok"},
-             %{"max_output_bytes" => 65_536}}
-
           :bash ->
             {"loopex.bash", "process", %{"argv" => ["/usr/bin/printf", "captured"]},
              %{"max_output_bytes" => 65_536}}
@@ -1495,7 +1460,7 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
 
     request =
       job(fixture, "observed-at-job", %{
-        "relative_path" => "observed-at.txt",
+        "path" => "observed-at.txt",
         "content" => "ok",
         "delay_ms" => 150
       })
@@ -1540,7 +1505,7 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
 
     request =
       job(fixture, "ledger-open-job", %{
-        "relative_path" => "ledger-open.txt",
+        "path" => "ledger-open.txt",
         "content" => "forbidden",
         "delay_ms" => 5_000
       })
@@ -1663,7 +1628,7 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
 
     admitted =
       job(fixture, "cancel-after-admission", %{
-        "relative_path" => "cancel-after-admission.txt",
+        "path" => "cancel-after-admission.txt",
         "content" => "forbidden",
         "delay_ms" => 5_000
       })
@@ -1757,7 +1722,7 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
 
     request =
       job(fixture, "open-index-authority", %{
-        "relative_path" => "must-not-land.txt",
+        "path" => "must-not-land.txt",
         "content" => "forbidden",
         "delay_ms" => 5_000
       })
@@ -1914,7 +1879,7 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
 
     stranded =
       job(fixture, "peer-stranded", %{
-        "relative_path" => "never-settles.txt",
+        "path" => "never-settles.txt",
         "content" => "held",
         "delay_ms" => 5_000
       })
@@ -1969,7 +1934,7 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
 
     held =
       job(fixture, "concurrent-held", %{
-        "relative_path" => "held.txt",
+        "path" => "held.txt",
         "content" => "held",
         "delay_ms" => 1_500
       })
@@ -2308,6 +2273,16 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
     Local.start_link(options)
   end
 
+  # Concept: a write that must stay in flight for a while is a real bash job.
+  # Technical depth: ADR 0070 retired the M1 delayed-write demonstration; the
+  # same effect runs through the current process tool, sleeping whole seconds
+  # before writing the content beneath the workspace root.
+  defp delayed_write(%{"path" => path, "content" => content, "delay_ms" => delay}) do
+    %{"command" => "sleep #{div(delay + 999, 1_000)}; printf %s '#{content}' > '#{path}'"}
+  end
+
+  defp delayed_write(arguments), do: arguments
+
   defp job(
          fixture,
          id,
@@ -2315,12 +2290,10 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
          deadline \\ System.system_time(:millisecond) + 60_000,
          overrides \\ %{}
        ) do
+    arguments = delayed_write(arguments)
+
     default_tool_id =
-      cond do
-        Map.has_key?(arguments, "command") -> "loopex.bash"
-        Map.has_key?(arguments, "delay_ms") -> "loopex.demo.wait_write"
-        true -> "loopex.write"
-      end
+      if Map.has_key?(arguments, "command"), do: "loopex.bash", else: "loopex.write"
 
     tool_id = Map.get(overrides, :tool_id, default_tool_id)
 
@@ -2560,7 +2533,7 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
 
     request =
       job(fixture, "seed-#{label}", %{
-        "relative_path" => "seed-#{label}.txt",
+        "path" => "seed-#{label}.txt",
         "content" => "forbidden",
         "delay_ms" => 30_000
       })

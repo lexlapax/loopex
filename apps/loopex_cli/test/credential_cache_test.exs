@@ -20,7 +20,7 @@ defmodule LoopexCli.CredentialCacheTest do
       refute Process.alive?(first.capability_pid)
 
       registry = Keyword.fetch!(first.model_options, :credential_registry)
-      token = Keyword.fetch!(first.model_options, :credential_token)
+      token = Keyword.fetch!(first.model_options, :provider_routes)["anthropic"]
       assert {:ok, _custody} = CredentialRegistry.route(registry, token)
 
       assert {:ok, second} = CredentialCache.plane()

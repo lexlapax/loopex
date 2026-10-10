@@ -2967,15 +2967,12 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     assert finished["command_id"] == admission.payload["command_id"]
   end
 
-  test "a configured signal before any prompt dispatches no work and legacy install remains available" do
+  test "a configured signal before any prompt dispatches no work" do
     fixture = recovered_fixture("pre-prompt-signal", :idle)
 
-    assert :ok = Interrupt.install(fixture.attachment)
+    assert :ok = invoke(Interrupt, :install, [fixture.attachment, @grace])
     assert Interrupt in :gen_event.which_handlers(:erl_signal_server)
     assert Interrupt.signals() == [:sigterm, :sighup, :sigquit]
-    assert Interrupt.grace_ms() == 10_000
-
-    assert :ok = invoke(Interrupt, :install, [fixture.attachment, @grace])
     :gen_event.notify(:erl_signal_server, :sigterm)
     Process.sleep(100)
     assert Loopex.AgentLoopTestModel.dispatched(fixture.model) == []

@@ -268,7 +268,7 @@ defmodule Loopex.ReferenceClient.EndToEndRecoveryTest do
       "adapter_build" => "loopex_llm_reqllm@#{Loopex.version()}",
       "executor_build" => "loopex_executor_local@#{Loopex.version()}",
       "executor_identity" => "executor-local",
-      "tool_identity" => "loopex.demo.write@1.0.0"
+      "tool_identity" => "loopex.write@1.0.0"
     })
   end
 

@@ -22,8 +22,7 @@ defmodule Loopex.LLM.ReqLLM do
 
   `complete/3` uses the configured bridge. `complete_prompt/3` builds a bounded
   standalone request and requires the same explicit launch configuration plus a
-  cleanup period. The legacy bare-model `complete/2` has no such configuration
-  and always refuses; there is no shared-VM fallback or ambient worker discovery.
+  cleanup period. There is no shared-VM fallback or ambient worker discovery.
 
   The companion starts ReqLLM only after protected entry. Anthropic uses its
   invocation-owned native wrapper at `ReqLLM.Streaming.start_stream/4`; other
@@ -207,21 +206,6 @@ defmodule Loopex.LLM.ReqLLM do
         {:error, {:unresolved_model, model_spec, reason}}
     end
   end
-
-  @doc """
-  ## Concept
-
-  The legacy bare-model convenience entry refuses without host configuration.
-
-  ## Technical depth
-
-  Use `complete_prompt/3` with explicit worker paths, digests, and cleanup
-  period. This arity cannot infer those choices or fall back to an unsafe
-  shared-VM invocation.
-  """
-  @spec complete(String.t(), String.t()) :: {:error, {:not_dispatched, String.t()}}
-  def complete(model_spec, prompt) when is_binary(model_spec) and is_binary(prompt),
-    do: {:error, {:not_dispatched, @call_failed}}
 
   @doc """
   ## Concept
