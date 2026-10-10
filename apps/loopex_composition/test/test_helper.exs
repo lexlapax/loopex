@@ -12,6 +12,17 @@ File.mkdir_p!(tmp)
 System.put_env("TMPDIR", tmp)
 System.at_exit(fn _status -> File.rm_rf(tmp) end)
 
+# Concept: one-time VM warm-up happens before cases start, not inside their waits.
+# Technical depth: the test VM loads modules lazily through the one code server,
+# and capture verifies the packaged catalog once per VM. Left to the first forty
+# concurrent cases, both serialized behind each other and outran those cases'
+# bounded waits. Loading every application module and the catalog here leaves
+# each case only its own work.
+for {app, _, _} <- Application.loaded_applications(),
+    do: :code.ensure_modules_loaded(Application.spec(app, :modules) || [])
+
+{:ok, _} = Loopex.LLM.ReqLLM.ModelCapabilities.capture(Loopex.LLM.ReqLLM.default_model())
+
 defmodule LoopexComposition.TestHost do
   @moduledoc false
 
