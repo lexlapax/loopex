@@ -26,6 +26,14 @@ defmodule Loopex.AppServer.OutputWriterTest do
   @frame_bytes 2_097_152
   @fixture_grace 1_000
 
+  # Concept: any retirement reason the fixture reports decodes as data.
+  # Technical depth: `[:safe]` refuses unknown atoms, and a focused run may
+  # never load the writer whose reason atoms (e.g. :group_unproved) it reports.
+  setup_all do
+    Code.ensure_loaded!(OutputWriter)
+    :ok
+  end
+
   test "literal frame bytes and LF are written once before exact joins release them" do
     with_fixture(:file, fn fixture ->
       startup = Path.join(Path.dirname(fixture.output), "unwanted-startup.bash")
@@ -232,7 +240,8 @@ defmodule Loopex.AppServer.OutputWriterTest do
       assert_live_group(active)
       assert request(fixture, "suspend", &(&1 == :suspended)) == :suspended
       captured = Path.join(Path.dirname(fixture.output), "actually-written")
-      drain = "IFS= read -r -t 5 payload < \"$1\" || exit 1; printf '%s\\n' \"$payload\" > \"$2\""
+      # One exact-length copy: a byte-wise `read` of 2 MiB misses 5 s under load.
+      drain = "head -c \"$3\" < \"$1\" > \"$2\""
 
       assert {<<>>, 0} =
                Local.answer_within(
@@ -244,7 +253,8 @@ defmodule Loopex.AppServer.OutputWriterTest do
                    drain,
                    "fixture-drain",
                    fixture.output,
-                   captured
+                   captured,
+                   Integer.to_string(byte_size(frame))
                  ],
                  5_000
                )
@@ -364,18 +374,23 @@ defmodule Loopex.AppServer.OutputWriterTest do
   end
 
   defp blocked_worker(fixture),
-    do: blocked_worker(fixture, System.monotonic_time(:millisecond) + 5_000)
+    do: blocked_worker(fixture, System.monotonic_time(:millisecond) + 5_000, nil)
 
-  defp blocked_worker(fixture, cutoff) do
-    assert System.monotonic_time(:millisecond) < cutoff
+  defp blocked_worker(fixture, cutoff, last) do
+    assert System.monotonic_time(:millisecond) < cutoff,
+           "no blocked worker before the cutoff; last state #{inspect(last)} " <>
+             "(writer clock #{inspect(last && last.observed_at)})"
 
     case request(fixture, "state", &match?({:state, _, _}, &1)) do
       {:state, %{phase: :writing, worker: worker} = active, false} when is_integer(worker) ->
         active
 
-      {:state, _active, _sealed} ->
+      {:state, _active, true} ->
+        early_retirement(fixture)
+
+      {:state, active, false} ->
         Process.sleep(10)
-        blocked_worker(fixture, cutoff)
+        blocked_worker(fixture, cutoff, active)
     end
   end
 
@@ -386,10 +401,18 @@ defmodule Loopex.AppServer.OutputWriterTest do
       {:state, %{phase: ^phase} = active, false} ->
         active
 
-      {:state, _active, _sealed} ->
+      {:state, _active, true} ->
+        early_retirement(fixture)
+
+      {:state, _active, false} ->
         Process.sleep(10)
         phase(fixture, phase, cutoff)
     end
+  end
+
+  defp early_retirement(fixture) do
+    record = next(fixture, &match?({:retired, _, _}, &1))
+    flunk("writer retired before the awaited state: #{inspect(record)}")
   end
 
   defp assert_stopped(pid, cutoff) do

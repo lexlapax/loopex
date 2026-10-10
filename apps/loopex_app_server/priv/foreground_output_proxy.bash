@@ -26,10 +26,16 @@ IFS= read -r -t 5 -u 3 header || abort_group
 case "$header" in "FRAME $nonce "*) size=${header#"FRAME $nonce "} ;; *) abort_group ;; esac
 case "$size" in ''|0*|*[!0-9]*) abort_group ;; esac
 [ "${#size}" -le 7 ] && [ "$size" -le 2097152 ] || abort_group
-IFS= read -r -t 5 -u 3 payload || abort_group
-[ "$(( ${#payload} + 1 ))" = "$size" ] || abort_group
-frame=$payload$'\n'
-unset payload
+# Concept: the frame is one exact-length buffered copy, not a byte-wise read,
+# so a full frame fits its write budget; a short or malformed frame is refused.
+# Technical depth: nothing follows the frame on fd 3 before WRITTEN, so `head`
+# cannot consume control. The sentinel survives LF stripping; under LC_ALL=C a
+# short read or dropped NUL fails the byte count, and only a final LF is legal.
+frame=$(head -c "$size" <&3 && printf .) || abort_group
+[ "${#frame}" = "$(( size + 1 ))" ] || abort_group
+frame=${frame%.}
+case ${frame%?} in *$'\n'*) abort_group ;; esac
+case $frame in *$'\n') ;; *) abort_group ;; esac
 (
   exec 3<&-
   printf '%s' "$frame" || exit 125
