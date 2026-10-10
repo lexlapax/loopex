@@ -1404,6 +1404,42 @@ defmodule Loopex.ModelConfigurationPreparationTest do
     assert Agent.get(f.controller, & &1.calls) == 3
   end
 
+  # Concept: a supplied genesis whose preparation answers after the episode
+  # cutoff is refused like an authored one and leaves creation available.
+  # Technical depth: preparation is held while the retained episode cutoff is
+  # moved into the past, then released with a reproducing reply. The reply
+  # refuses `invalid_session_creation` before any Store step, nothing is
+  # retained under the command, and the same command then creates normally.
+  test "a supplied genesis preparation answered after the cutoff refuses without a mutation" do
+    f = fixture()
+    genesis = foreign_genesis("scripted:v2")
+    prepare_as(f, "scripted:v2")
+    Agent.update(f.controller, &%{&1 | mode: :hold})
+    {:ok, %{control: control}} = Loopex.Runtime.children(f.runtime)
+
+    caller =
+      Task.async(fn ->
+        Loopex.Runtime.create_session_with_genesis(f.runtime, "late-child", %{}, genesis)
+      end)
+
+    assert_receive {:preparing, preparer, _, %{"model" => "scripted:v2"}, [], _, _}, 1_000
+    past = System.monotonic_time(:millisecond) - 1
+    :sys.replace_state(control, &put_in(&1.creation.cutoff, past))
+    send(preparer, :release)
+
+    assert Task.await(caller, 5_000) == {:error, :invalid_session_creation}
+
+    assert Loopex.Runtime.lookup_create_result(f.runtime, "late-child", %{}, genesis) ==
+             {:ok, :absent}
+
+    Agent.update(f.controller, &%{&1 | mode: :normal})
+
+    assert {:ok, child} =
+             Loopex.Runtime.create_session_with_genesis(f.runtime, "late-child", %{}, genesis)
+
+    assert child != f.session
+  end
+
   test "a runtime model without preparation refuses another model's supplied genesis" do
     f = fixture(adapter: Loopex.AgentLoopTestModel)
 

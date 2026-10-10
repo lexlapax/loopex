@@ -3429,10 +3429,15 @@ defmodule Loopex.Runtime.Control do
     end
   end
 
+  # Concept: a supplied genesis meets the same episode cutoff as an authored one.
+  # Technical depth: a preparation reply processed after the original cutoff is
+  # an ordinary refusal with creation still available, never a Store step whose
+  # phase deadline would report the Store unavailable and close creation.
   defp creation_supplied_final(state, genesis, prepared) do
     entry = state.creation
 
     with false <- entry.stopped,
+         true <- System.monotonic_time(:millisecond) < entry.cutoff,
          :ok <- validate_fresh_selection(state, genesis, prepared),
          {:ok, final} <- Store.create_session(state.runtime_id, entry.command_id, genesis) do
       creation_call(

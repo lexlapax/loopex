@@ -1948,6 +1948,29 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
     assert Task.await(daemon.task, 60_000) == session_index_lost
   end
 
+  # Concept: a daemon serving a root with helper history cannot serve unguarded.
+  # Technical depth: the helper owner and its retained-object writer are owned
+  # components; losing either while serving fail-stops `runtime_lost` and the
+  # client hears that class, instead of the daemon continuing with ADR 0069's
+  # route guard unable to classify helper children.
+  for component <- [:delegation_helper, :delegation_objects] do
+    test "losing the #{component} fail-stops runtime_lost", %{options: options} do
+      File.mkdir_p!(Path.join(options[:state_root], "delegation"))
+      daemon = start_daemon(options)
+      _ready = await_ready(daemon.output)
+      client = initialized(options[:socket_path])
+
+      pid = Map.fetch!(:sys.get_state(daemon.owner).pids, unquote(component))
+      Process.exit(pid, :kill)
+
+      assert [%{"type" => "daemon.stopping", "reason" => "fatal:runtime_lost"}] =
+               receive_records(client, 1)
+
+      {:ok, runtime_lost} = LoopexDaemon.ExitStatus.fetch(:runtime_lost)
+      assert Task.await(daemon.task, 40_000) == runtime_lost
+    end
+  end
+
   test "losing the Store fail-stops with its class and tells the client",
        %{options: options} do
     daemon = start_daemon(options)

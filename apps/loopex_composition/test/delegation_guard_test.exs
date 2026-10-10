@@ -40,6 +40,41 @@ defmodule LoopexComposition.DelegationGuardTest do
     assert {:ok, _attachment} = Loopex.attach(fixture.runtime, child, after_event_sequence: 0)
   end
 
+  # Concept: the guard fails closed when the bound helper owner is gone.
+  # Technical depth: the registry entry belongs to the host that bound the
+  # owner, so after the owner exits every mutating route on that runtime refuses
+  # (children and ordinary sessions alike) instead of admitting; read-only
+  # routes stay open and the child's history is unchanged.
+  test "a runtime whose bound helper owner exited refuses every mutating route" do
+    fixture =
+      Fixture.start([
+        %{text: "go", calls: [Fixture.task_call("call-task")]},
+        %{text: "Finding.", calls: []},
+        %{text: "done", calls: []}
+      ])
+
+    parent = Fixture.parent(fixture, "parent-create")
+    {_attachment, run} = Fixture.prompt(fixture, parent, "prompt", "investigate")
+    assert Fixture.await_terminal(fixture, parent, run).terminal.state == "completed"
+    [{child, _}] = Map.to_list(Helper.status(fixture.helper).children)
+    {:ok, before} = Loopex.Store.load_records(fixture.store, child, 0, 1_000)
+    assert Delegation.guard(fixture.runtime, child, :prompt) == {:error, :helper_session_owned}
+
+    monitor = Process.monitor(fixture.helper)
+    Process.exit(fixture.helper, :kill)
+    assert_receive {:DOWN, ^monitor, :process, _, :killed}, 5_000
+
+    for command <- Delegation.mutating_commands(), session <- [child, parent, "ordinary"] do
+      assert Delegation.guard(fixture.runtime, session, command) ==
+               {:error, :helper_owner_unavailable}
+    end
+
+    for read_only <- [:attach, :snapshot, :history, :artifact],
+        do: assert(Delegation.guard(fixture.runtime, child, read_only) == :ok)
+
+    assert {:ok, ^before} = Loopex.Store.load_records(fixture.store, child, 0, 1_000)
+  end
+
   test "an exhausted classification bound closes helper and mutating admission with counts" do
     fixture =
       Fixture.start([
