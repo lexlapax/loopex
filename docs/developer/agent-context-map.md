@@ -7315,3 +7315,18 @@ ADR 0039's custody and deadline guarantees. The test deadline stays 15 s.
 - **Cleanup test window.** The maintainer rejected widening the
   `ephemeral_cleanup_test` abort window to `{5_000, 6_000}`. Those cases must
   become deterministic by event ordering under the default 1,000 ms window.
+
+<a id="disposition-m7-busy-wait-and-peer-close-2026-10-10"></a>
+### M7 scheduler busy-wait under stress and peer close during stop, 2026-10-10
+
+- **Busy-wait.** Measured under the pinned-load harness, BEAM scheduler
+  busy-wait on oversubscribed CPUs made a VM boot take 12–14 s instead of about
+  1 s. The maintainer selected running the harness VMs and child-VM test
+  fixtures with `+sbwt none +sbwtdcpu none +sbwtdio none`, plus an operator note
+  recommending the same on oversubscribed hosts. Production defaults are
+  unchanged. This supersedes the 2026-10-10 exclusion of the CLI chat/ask
+  child-VM fixtures: they rejoin the thirty-run pinned-load row.
+- **Peer close during an orderly stop.** A daemon connection that retired after
+  a normal peer close, with its leases drained, counts as proved during an
+  orderly stop instead of ending the stop with `connections_lost` (exit 106).
+  This clarifies the daemon close rule in ADRs 0032 and 0033 for that case only.
