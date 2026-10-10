@@ -2045,19 +2045,50 @@ defmodule Loopex.Executor.LocalTest do
     # start another effect.
     #
     # Technical depth: settlement runs in the caller while permits serialize in
-    # the executor. The close seam holds A's root claim as B's permit queues, then
-    # fails without removing A's open entry. If A's owner token survives until a
-    # later release cast, B runs first and excludes that open entry as though A
-    # were still live. Removing the exact owner token when settlement begins
-    # makes the open entry visible to B's first post-claim reconciliation.
+    # the executor. The close seam holds A's root claim, has B's holder issue its
+    # permit call and waits until that holder is blocked inside the call, then
+    # fails without removing A's open entry. The seam orders this itself, inside
+    # the removal's own bounded share, so no test-process hop competes with that
+    # bound. If A's owner token survives until a later release cast, B runs first
+    # and excludes that open entry as though A were still live. Removing the
+    # exact owner token when settlement begins makes the open entry visible to
+    # B's first post-claim reconciliation.
     parent = self()
+
+    queued_holder =
+      spawn(fn ->
+        {executor, queued, queued_grant} =
+          receive do
+            {:queued_permit, executor, queued, queued_grant} -> {executor, queued, queued_grant}
+          end
+
+        {:ok, placement} = GenServer.call(executor, {:reserve, queued}, 10_000)
+        reservation_ref = Map.fetch!(placement, :reservation_ref)
+        send(parent, {:quarantine_waiter_reserved, self()})
+
+        receive do
+          {:request_quarantined_permit, seam} ->
+            send(seam, {:quarantine_waiter_calling, self()})
+
+            answer =
+              GenServer.call(executor, {:permit, queued, queued_grant, reservation_ref}, 15_000)
+
+            send(parent, {:quarantine_waiter_answer, self(), answer})
+        end
+      end)
 
     close = fn _ledger, job_id ->
       send(parent, {:quarantine_close_started, job_id, self()})
+      send(queued_holder, {:request_quarantined_permit, self()})
 
       receive do
-        {:finish_quarantine_close, ^job_id} -> {:error, :forced_close_failure}
+        {:quarantine_waiter_calling, ^queued_holder} -> :ok
       end
+
+      # The holder's next receive is the reply wait inside its synchronous
+      # call, so a waiting holder has its permit request queued or taken.
+      await_waiting(queued_holder)
+      {:error, :forced_close_failure}
     end
 
     fixture = fixture("queued-permit-after-quarantine", open_authority_close: close)
@@ -2069,27 +2100,7 @@ defmodule Loopex.Executor.LocalTest do
     {queued, queued_grant} =
       job_and_grant(fixture, "queued-after-quarantine", "loopex.write")
 
-    queued_holder =
-      spawn(fn ->
-        {:ok, placement} = GenServer.call(fixture.executor, {:reserve, queued}, 10_000)
-        reservation_ref = Map.fetch!(placement, :reservation_ref)
-        send(parent, {:quarantine_waiter_reserved, self()})
-
-        receive do
-          :request_quarantined_permit ->
-            send(parent, {:quarantine_waiter_calling, self()})
-
-            answer =
-              GenServer.call(
-                fixture.executor,
-                {:permit, queued, queued_grant, reservation_ref},
-                15_000
-              )
-
-            send(parent, {:quarantine_waiter_answer, self(), answer})
-        end
-      end)
-
+    send(queued_holder, {:queued_permit, fixture.executor, queued, queued_grant})
     assert_receive {:quarantine_waiter_reserved, ^queued_holder}, 5_000
 
     owner =
@@ -2106,19 +2117,8 @@ defmodule Loopex.Executor.LocalTest do
       if Process.alive?(owner), do: Process.exit(owner, :kill)
     end)
 
-    assert_receive {:quarantine_close_started, owned_job_id, close_worker}, 5_000
+    assert_receive {:quarantine_close_started, owned_job_id, _close_worker}, 5_000
     assert owned_job_id == owned.job_id
-
-    send(queued_holder, :request_quarantined_permit)
-    assert_receive {:quarantine_waiter_calling, ^queued_holder}, 2_000
-
-    # Give the holder a scheduler turn to enter its synchronous call. The
-    # executor either has that call queued or has already taken it and is waiting
-    # for the root claim held by A; both establish the ordering this case needs.
-    Process.sleep(25)
-    refute_received {:quarantine_waiter_answer, ^queued_holder, _answer}
-
-    send(close_worker, {:finish_quarantine_close, owned.job_id})
 
     assert_receive {:quarantined_owner_result, ^owner,
                     {:error,
@@ -2756,6 +2756,17 @@ defmodule Loopex.Executor.LocalTest do
 
   # Returns only once the monotonic clock the executor's cleanup episodes use
   # has moved past `instant`.
+  defp await_waiting(pid) do
+    case Process.info(pid, :status) do
+      {:status, :waiting} ->
+        :ok
+
+      _ ->
+        Process.sleep(1)
+        await_waiting(pid)
+    end
+  end
+
   defp wait_past(instant) do
     remaining = instant - System.monotonic_time(:millisecond)
 
