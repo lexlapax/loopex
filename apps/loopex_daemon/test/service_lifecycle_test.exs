@@ -743,6 +743,15 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
     assert Task.await(daemon.task, 60_000) == 0
   end
 
+  # Concept: the client leaves before the stop begins, as the case states.
+  # Technical depth: the Registry has retired the closed connection before the
+  # signal, so close-all never selects a connection whose peer already left.
+  defp close_and_await_retirement(daemon, client) do
+    :socket.close(client)
+    registry = :sys.get_state(:sys.get_state(daemon.owner).pids.collaboration).registry
+    await_until(fn -> LoopexDaemon.ConnectionRegistry.status(registry).occupied == 0 end)
+  end
+
   defp await_until(predicate, attempts \\ 1_000)
   defp await_until(predicate, 0), do: assert(predicate.())
 
@@ -1080,7 +1089,7 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
     client = initialized(options[:socket_path])
     session_id = create.(client)
     assert [%{"type" => "snapshot"}] = attach.(client, session_id)
-    :socket.close(client)
+    close_and_await_retirement(first, client)
     send(first.sentinel, {:daemon_signal, first.owner_ref, :sigterm})
     assert Task.await(first.task, 60_000) == 0
 
@@ -1089,7 +1098,7 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
     client = initialized(options[:socket_path])
     assert create.(client) == session_id
     assert [%{"code" => "session_dormant"}] = attach.(client, session_id)
-    :socket.close(client)
+    close_and_await_retirement(second, client)
     send(second.sentinel, {:daemon_signal, second.owner_ref, :sigterm})
     assert Task.await(second.task, 60_000) == 0
   end
