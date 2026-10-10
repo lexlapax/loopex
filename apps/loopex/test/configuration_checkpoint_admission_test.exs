@@ -387,7 +387,6 @@ defmodule Loopex.ConfigurationCheckpointAdmissionTest do
           workspace_lease: "workspace-lease"
         },
         bounds: Fixture.bounds(),
-        sampling: %{"max_tokens" => 1_024},
         tools: definitions,
         active_tools: Enum.map(definitions, & &1["tool_id"]),
         policy: Loopex.AgentLoopTestPolicy,
