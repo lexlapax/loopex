@@ -240,7 +240,8 @@ defmodule Loopex.AppServer.OutputWriterTest do
       assert_live_group(active)
       assert request(fixture, "suspend", &(&1 == :suspended)) == :suspended
       captured = Path.join(Path.dirname(fixture.output), "actually-written")
-      drain = "IFS= read -r -t 5 payload < \"$1\" || exit 1; printf '%s\\n' \"$payload\" > \"$2\""
+      # One exact-length copy: a byte-wise `read` of 2 MiB misses 5 s under load.
+      drain = "head -c \"$3\" < \"$1\" > \"$2\""
 
       assert {<<>>, 0} =
                Local.answer_within(
@@ -252,7 +253,8 @@ defmodule Loopex.AppServer.OutputWriterTest do
                    drain,
                    "fixture-drain",
                    fixture.output,
-                   captured
+                   captured,
+                   Integer.to_string(byte_size(frame))
                  ],
                  5_000
                )
