@@ -45,6 +45,12 @@ case "${ATTENDED_TEST_MODE:-}" in
     if [ -n "${ATTENDED_TEST_ECHO_FILE:-}" ]; then cat "$ATTENDED_TEST_ECHO_FILE"; fi
     exit 0 ;;
   human_failure) printf 'fixture human path failed\n'; exit 17 ;;
+  m7_args)
+    printf 'forwarded:'
+    for argument in "$@"; do printf ' [%s]' "$argument"; done
+    printf '\nprovider a: %s\nprovider b: %s\n' \
+      "${LOOPEX_PROVIDER_API_KEY:-}" "${OPENAI_API_KEY:-}"
+    exit 0 ;;
   human_no_newline) printf 'tail'; exit 0 ;;
   malformed)
     printf 'Authorize pinned public skill import: wrong source. Type yes and press Enter.\n'
@@ -86,7 +92,9 @@ value=synthetic-openrouter-key
 printf 'split credential: %s' "${value:0:10}"
 sleep 0.05
 printf '%s\n' "${value:10}"
-printf 'fixture release complete\n'
+printf 'forwarded:'
+for argument in "$@"; do printf ' [%s]' "$argument"; done
+printf '\nfixture release complete\n'
 exit "${ATTENDED_TEST_RELEASE_EXIT:-0}"
 EOF
 git -C "$repo" add scripts/check-release.sh
@@ -431,6 +439,43 @@ status=0
 [ "$status" -eq 1 ] &&
   grep -qx 'RELEASE_EXIT=17' "$work/retained/human-failed.log" ||
   fail 'human terminal path lost the release failure'
+
+# The M7 closure matrix options reach check-release.sh unchanged and in order
+# on both launch paths, with provider A and B values present and redacted.
+m7_args=(--attempts-index "$work/retained/m7 attempts.jsonl" --writer workstation
+  --host host-1 --markers "$work/retained/markers" --m7-config "$work/m7 config.json"
+  --operator 'A Person' --pins "$work/pins.json" --resume-matrix matrix-1)
+m7_line="forwarded: [--attempts-index] [$work/retained/m7 attempts.jsonl] [--writer] [workstation] [--host] [host-1] [--markers] [$work/retained/markers] [--m7-config] [$work/m7 config.json] [--operator] [A Person] [--pins] [$work/pins.json] [--resume-matrix] [matrix-1]"
+(cd "$repo" && ATTENDED_TEST_MODE=m7_args bash "$runner" \
+  --output "$work/retained/human-m7.log" "${m7_args[@]}") >"$work/human-m7.output" 2>&1 ||
+  fail 'human terminal path with M7 options failed'
+tr -d '\r' <"$work/retained/human-m7.log" >"$work/human-m7.lines"
+grep -qxF "$m7_line" "$work/human-m7.lines" ||
+  fail 'human terminal path did not forward the M7 options exactly'
+grep -qx 'provider a: <REDACTED>' "$work/human-m7.lines" &&
+  grep -qx 'provider b: <REDACTED>' "$work/human-m7.lines" ||
+  fail 'provider A and B values did not reach the check redacted'
+(cd "$repo" && bash "$runner" --output "$work/retained/auto-m7.log" "${auto_args[@]}" \
+  "${m7_args[@]}") >"$work/auto-m7.output" 2>&1 ||
+  fail 'automatic path with M7 options failed'
+tr -d '\r' <"$work/retained/auto-m7.log" | grep -qxF "$m7_line" ||
+  fail 'automatic path did not forward the M7 options exactly'
+for secret in "$LOOPEX_PROVIDER_API_KEY" "$OPENAI_API_KEY"; do
+  ! grep -Fq "$secret" "$work/retained/human-m7.log" "$work/retained/auto-m7.log" \
+    "$work/human-m7.output" "$work/auto-m7.output" ||
+    fail 'M7 options run published a credential'
+done
+for refused in "--writer a --writer b" "--operator" "--host x --unknown y"; do
+  status=0
+  # shellcheck disable=SC2086
+  (cd "$repo" && bash "$runner" --output "$work/retained/refused-m7.log" $refused) \
+    >"$work/refused-m7.output" 2>&1 || status=$?
+  [ "$status" -eq 2 ] && [ ! -e "$work/retained/refused-m7.log" ] &&
+    grep -q 'usage: attended-release.sh' "$work/refused-m7.output" ||
+    fail "malformed M7 options were accepted: $refused"
+done
+expect_preflight_failure m7_credential_argument argument_contains_credential \
+  --operator "operator-$OPENAI_API_KEY"
 
 # A human-attended run uses the baseline toolchain, not Python. Hide Python's
 # availability check and make any later invocation fail, including one buried
