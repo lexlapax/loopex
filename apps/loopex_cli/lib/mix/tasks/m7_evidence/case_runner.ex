@@ -96,7 +96,8 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
   [--check] chat --config FILE`. It runs from the clean candidate checkout, or
   from its extraction with `--candidate`. `--matrix` joins, continues or skips
   the lane within that logical matrix by the index alone; `--pins` supplies
-  the immutable A/B provider pins as JSON. `--check` admits the lane and
+  optional operator overrides as JSON, such as `restore_source` and
+  `cancel_cell`; providers A and B are pinned in the manifest. `--check` admits the lane and
   reports its plan without staging or dispatch. Returns the exit status: 0
   when every case passed or the check admitted, 1 when a case stopped the
   lane, 2 when evidence is unavailable.
@@ -170,9 +171,9 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
     end
   end
 
-  # Concept: the immutable A/B provider pins arrive as one retained file,
-  # never as credentials. Technical depth: an unreadable or malformed file
-  # leaves the pins absent, so cases needing them refuse before dispatch.
+  # Concept: optional operator overrides arrive as one retained file, never
+  # as credentials. Technical depth: an unreadable or malformed file leaves
+  # them absent, so each case uses its committed default.
   defp read_pins(nil), do: nil
 
   defp read_pins(path) do
