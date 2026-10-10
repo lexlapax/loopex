@@ -44,6 +44,12 @@ defmodule LoopexCli.SessionCatalog do
   ## Concept
 
   Lists the sessions this state root knows about, in raw identifier order.
+
+  ## Technical depth
+
+  Reads the index image without the placement lock, as
+  `LoopexDaemon.SessionIndex.read_offline/1` describes, and projects each row's
+  placement identity as `runtime_id`.
   """
   @spec list(Path.t()) ::
           {:ok, [%{session_id: binary(), runtime_id: binary()}]} | {:error, atom()}
