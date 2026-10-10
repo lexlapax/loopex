@@ -7346,3 +7346,16 @@ ADR 0039's custody and deadline guarantees. The test deadline stays 15 s.
   unchanged. Only the stress fixture's watcher is fixed so it reports a failure
   instead of exiting silently. Under extreme CPU starvation a user can still see
   the interrupt handler reported unavailable.
+
+<a id="disposition-m7-stress-chase-cap-2026-10-10"></a>
+### M7 pinned-load stress chase capped, 2026-10-10
+
+- The maintainer capped the pinned-load flake chase at about 12:00 PDT. Fixes
+  proved by then merge. Each remaining failure seen only under pinned load is
+  recorded in the task ledger as an open defect, with its symptom, observed
+  rate, evidence and hypothesis. Its case is not counted toward the thirty-run
+  pinned-load row.
+- M7 proceeds to the full check on both pairs and the T17 closure matrix.
+- Required-check failures are not covered by this cap: any failure in
+  `scripts/check.sh` or `scripts/check-release.sh` is still fixed, never
+  retried.
