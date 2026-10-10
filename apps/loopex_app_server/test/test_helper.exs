@@ -31,6 +31,20 @@ end
 
 System.at_exit(fn _status -> File.rm_rf(root) end)
 
+# Concept: a child VM a case starts never spins idle schedulers.
+#
+# Technical depth: the chat, ask, signal, output and daemon fixtures boot
+# separate `elixir` VMs that inherit this environment. Scheduler busy-wait on an
+# oversubscribed host stretched such a boot from about 1 s to 12-14 s, past the
+# fixtures' bounded waits, so their VMs run with busy-wait off; a fixture that
+# builds its own environment passes the same flags itself. Production defaults
+# are unchanged.
+busy_wait_off = "+sbwt none +sbwtdcpu none +sbwtdio none"
+erl_options = System.get_env("ELIXIR_ERL_OPTIONS", "")
+
+unless String.contains?(erl_options, busy_wait_off),
+  do: System.put_env("ELIXIR_ERL_OPTIONS", String.trim("#{erl_options} #{busy_wait_off}"))
+
 # Concept: the independent JavaScript client is exercised with whatever Node the
 # host already has; Node is not a dependency of this suite.
 #

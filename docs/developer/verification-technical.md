@@ -247,6 +247,12 @@ as slow as today's. The procedure is `scripts/fixtures/pinned-load.sh`,
 which takes an application directory and the test specs and prints one line
 per run and a final count; it needs `taskset`, so it runs on a Linux host
 such as serenity, and it is a developer tool rather than a repository check.
+It runs the test VM, and every child VM that inherits its environment, with
+scheduler busy-wait off (`+sbwt none +sbwtdcpu none +sbwtdio none`); spinning
+idle schedulers on the pinned cores stretched a VM boot from about 1 s to
+12–14 s. A run of 60 s or more counts as a hang, and that wall time includes
+the test VM's own start, so the specs of one run are chosen to finish well
+inside it.
 
 <a id="technical-verification-speed"></a>
 ### Measurements and plan

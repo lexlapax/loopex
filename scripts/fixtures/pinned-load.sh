@@ -12,7 +12,10 @@
 #     test/coding_tools_test.exs:4302 test/post_closure_hotfix_test.exs:786
 #
 # ITER (default 30), CPUS (default 0-3) and HOGS (default 8) are environment
-# variables. Prints one line per run and a final count. KEEP=<prefix> also
+# variables. The test VM and every child VM inheriting its environment run
+# with scheduler busy-wait off (`+sbwt none +sbwtdcpu none +sbwtdio none`,
+# appended to any ELIXIR_ERL_OPTIONS already set): spinning idle schedulers on
+# oversubscribed cores stretched a VM boot from about 1 s to 12-14 s. Prints one line per run and a final count. KEEP=<prefix> also
 # writes each run's complete output to <prefix>.<run>.log for retention.
 set -u
 [ $# -ge 2 ] || { echo "usage: pinned-load.sh <app dir> <test spec>..." >&2; exit 2; }
@@ -22,6 +25,7 @@ shift
 ITER=${ITER:-30}
 CPUS=${CPUS:-0-3}
 HOGS=${HOGS:-8}
+export ELIXIR_ERL_OPTIONS="${ELIXIR_ERL_OPTIONS:+$ELIXIR_ERL_OPTIONS }+sbwt none +sbwtdcpu none +sbwtdio none"
 fsync_file=$(mktemp "${TMPDIR:-/tmp}/loopex-pinned-load.XXXXXX")
 hogs=()
 for _ in $(seq 1 "$HOGS"); do
@@ -31,7 +35,7 @@ done
 taskset -c "$CPUS" bash -c "while :; do dd if=/dev/zero of='$fsync_file' bs=1M count=8 oflag=dsync 2>/dev/null; done" &
 hogs+=($!)
 trap 'kill ${hogs[*]} 2>/dev/null; rm -f "$fsync_file"' EXIT
-echo "pinned-load: cpus=$CPUS hogs=$HOGS iterations=$ITER specs=$*"
+echo "pinned-load: cpus=$CPUS hogs=$HOGS iterations=$ITER erl_options=\"$ELIXIR_ERL_OPTIONS\" specs=$*"
 fails=0
 hangs=0
 for i in $(seq 1 "$ITER"); do

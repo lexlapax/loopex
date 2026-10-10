@@ -513,7 +513,8 @@ defmodule Loopex.AppServer.OutputWriterTest do
                 {~c"PATH", String.to_charlist(System.get_env("PATH"))},
                 {~c"HOME", String.to_charlist(root)},
                 {~c"ERL_CRASH_DUMP", String.to_charlist(Path.join(root, "crash.dump"))},
-                {~c"ELIXIR_ERL_OPTIONS", ~c"+S 2:2 +fnu -noinput"},
+                {~c"ELIXIR_ERL_OPTIONS",
+                 ~c"+S 2:2 +sbwt none +sbwtdcpu none +sbwtdio none +fnu -noinput"},
                 {~c"LOOPEX_HOME", String.to_charlist(root)},
                 {~c"LOOPEX_WRITER_STDERR", String.to_charlist(stderr)}
               ]

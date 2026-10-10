@@ -90,7 +90,7 @@ defmodule Loopex.LLM.ReqLLM.DependencyStartTest do
     """
 
     arguments =
-      ["--erl", "+S 2:2 +SDcpu 1 +SDio 1 +A 2"] ++
+      ["--erl", "+S 2:2 +SDcpu 1 +SDio 1 +A 2 +sbwt none +sbwtdcpu none +sbwtdio none"] ++
         Enum.flat_map(paths, &["-pa", &1]) ++ ["-e", source]
 
     assert {output, 0} =
@@ -143,7 +143,7 @@ defmodule Loopex.LLM.ReqLLM.DependencyStartTest do
     """
 
     arguments =
-      ["--erl", "+S 2:2 +SDcpu 1 +SDio 1 +A 2"] ++
+      ["--erl", "+S 2:2 +SDcpu 1 +SDio 1 +A 2 +sbwt none +sbwtdcpu none +sbwtdio none"] ++
         Enum.flat_map(paths, &["-pa", &1]) ++ ["-e", source]
 
     assert {output, 0} =

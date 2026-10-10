@@ -1176,7 +1176,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
 
     File.write!(script, """
     #!/usr/bin/env escript
-    %%! +S 2:2 +SDcpu 1 +SDio 1 +A 2
+    %%! +S 2:2 +SDcpu 1 +SDio 1 +A 2 +sbwt none +sbwtdcpu none +sbwtdio none
     main(Arguments) ->
       ok = code:add_paths(#{paths}),
       {ok, _} = application:ensure_all_started(elixir),
@@ -1225,7 +1225,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
 
     File.write!(preparation, """
     #!/usr/bin/env escript
-    %%! +S 2:2 +SDcpu 1 +SDio 1 +A 2
+    %%! +S 2:2 +SDcpu 1 +SDio 1 +A 2 +sbwt none +sbwtdcpu none +sbwtdio none
     main([]) ->
       spawn(fun() -> receive after 50000 -> erlang:halt(70) end end),
       ok = code:add_paths(#{paths}),

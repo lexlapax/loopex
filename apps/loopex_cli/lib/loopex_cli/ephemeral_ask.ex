@@ -325,15 +325,26 @@ defmodule LoopexCli.EphemeralAsk do
     end
   end
 
+  # Concept: a completed stop has answered the worker's question, so the
+  # worker is given its bounded chance to report that answer before it is
+  # killed.
+  # Technical depth: the stop's reply can reach this process while the worker
+  # is still returning from its answered call. Killing it at once raced that
+  # return and dropped the run's ending under scheduler load. The worker's
+  # result precedes its `DOWN`, so its own `DOWN` within `@reap_ms` selects
+  # it; a worker still alive then is killed and joined as before.
   defp reap_after_stop(state, first) do
-    result = if first == :none, do: queued_result(state.worker, state.reference), else: first
+    %{worker: worker, worker_monitor: worker_monitor, reference: reference} = state
 
-    if queued_down(state.worker, state.worker_monitor) do
-      {:ok, result}
-    else
-      Process.exit(state.worker, :kill)
-      deadline = state.dependencies.monotonic_ms.() + @reap_ms
-      await_killed_worker(state, result, deadline)
+    receive do
+      {:DOWN, ^worker_monitor, :process, ^worker, _reason} ->
+        {:ok, if(first == :none, do: queued_result(worker, reference), else: first)}
+    after
+      @reap_ms ->
+        result = if first == :none, do: queued_result(worker, reference), else: first
+        Process.exit(worker, :kill)
+        deadline = state.dependencies.monotonic_ms.() + @reap_ms
+        await_killed_worker(state, result, deadline)
     end
   end
 
