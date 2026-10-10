@@ -55,7 +55,6 @@ defmodule LoopexCli.ProviderAccountingIntegrationTest do
           store: store,
           diagnostics_to: self(),
           cleanup_grace_ms: 2_000,
-          sampling: %{"max_tokens" => 64},
           model: %{
             module: Adapter,
             model: model,

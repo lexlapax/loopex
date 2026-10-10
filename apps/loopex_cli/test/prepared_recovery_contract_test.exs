@@ -2,12 +2,13 @@ Code.require_file("../../loopex/test/support/m1_runtime_helper.exs", __DIR__)
 Code.require_file("../../loopex/test/support/agent_loop_helper.exs", __DIR__)
 Code.require_file("support/prepared_participant.exs", __DIR__)
 
+Code.require_file("support/output_capture.exs", __DIR__)
+
 defmodule LoopexCli.PreparedRecoveryContractTest do
   @moduledoc false
 
   use ExUnit.Case, async: false
-
-  import ExUnit.CaptureIO
+  alias LoopexCli.Test.OutputCapture
 
   alias Loopex.M1RuntimeTestStore
   alias Loopex.Executor.Local
@@ -2512,7 +2513,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
 
     output =
       try do
-        capture_io(fn ->
+        OutputCapture.stdout(fn ->
           send(
             test,
             {:resume_result,
@@ -2588,7 +2589,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
 
     output =
       try do
-        capture_io(fn ->
+        OutputCapture.stdout(fn ->
           send(
             test,
             {:refused_resume_result,
@@ -2736,8 +2737,8 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
 
       case Loopex.start_link(fresh_runtime_options) do
         {:ok, runtime} = started ->
-          send(parent, {:fresh_recovery_runtime, runtime})
           :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(runtime)
+          send(parent, {:fresh_recovery_runtime, runtime})
           started
 
         error ->
@@ -2746,7 +2747,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     end
 
     output =
-      capture_io(fn ->
+      OutputCapture.stdout(fn ->
         assert :ok =
                  LoopexCli.dispatch(
                    [
@@ -2878,7 +2879,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     end
 
     result =
-      capture_io(:stderr, fn ->
+      OutputCapture.stderr(fn ->
         send(
           self(),
           {:explicit_cancel_result,
@@ -3044,9 +3045,11 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
   end
 
   test "prepared recovery and separately prepared Local authority stay out of durable and rendered planes" do
+    {:ok, sink} = Loopex.ProgressSink.open()
+
     fixture =
       recovered_fixture("security-plane", :admitted,
-        progress_sink: Loopex.ProgressTestConsumer.open_sink(),
+        progress_sink: sink,
         script: [
           %{text: "public security-plane output", calls: []}
         ]
@@ -3079,24 +3082,16 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
       Loopex.attach(fixture.runtime, fixture.session_id, after_event_sequence: 0)
 
     events = collect_terminal_events(event_attachment)
-    progress = Loopex.ProgressTestConsumer.drain(50)
+    progress = collect_security_progress(sink)
 
     {:ok, render_attachment} =
       Loopex.attach(fixture.runtime, fixture.session_id, after_event_sequence: 0)
 
-    parent = self()
-
-    stdout =
-      capture_io(fn ->
-        stderr =
-          capture_io(:stderr, fn ->
-            assert :ok = Render.stream(render_attachment, idle_limit_ms: 1_000)
-          end)
-
-        send(parent, {:security_plane_stderr, stderr})
+    {_, stdout, stderr} =
+      OutputCapture.capture(fn _ ->
+        assert :ok = Render.stream(render_attachment, idle_limit_ms: 1_000)
       end)
 
-    assert_receive {:security_plane_stderr, stderr}, 5_000
     assert stdout =~ "public security-plane output"
 
     planes = %{
@@ -3158,19 +3153,11 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
                content: "render only bounded provider failure"
              })
 
-    parent = self()
-
-    stdout =
-      capture_io(fn ->
-        stderr =
-          capture_io(:stderr, fn ->
-            assert :ok = Render.stream(fixture.attachment, idle_limit_ms: 1_000)
-          end)
-
-        send(parent, {:raw_error_renderer_stderr, stderr})
+    {_, stdout, stderr} =
+      OutputCapture.capture(fn _ ->
+        assert :ok = Render.stream(fixture.attachment, idle_limit_ms: 1_000)
       end)
 
-    assert_receive {:raw_error_renderer_stderr, stderr}, 5_000
     assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == 1
     assert stdout =~ "render only bounded provider failure"
     assert stderr =~ "model_call_failed"
@@ -3491,6 +3478,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
       ]
 
     {:ok, runtime} = Loopex.start_link(runtime_options)
+    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(runtime)
 
     on_exit(fn ->
       stop_runtime(runtime)
@@ -3498,8 +3486,6 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
       stop(model)
       stop(store_pid)
     end)
-
-    :ok = Loopex.ConfiguredGenesisFixture.await_creation_ready(runtime)
 
     {:ok, session_id} =
       Loopex.create_session(runtime, %{"surface" => "prepared-recovery"},
@@ -4426,6 +4412,17 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
       _absent ->
         Process.sleep(5)
         collect_terminal_events(attachment, acc, attempts - 1)
+    end
+  end
+
+  defp collect_security_progress(sink, acc \\ []) do
+    case Loopex.ProgressSink.take(sink) do
+      {:ok, lease, _session_id, item} ->
+        :ok = Loopex.ProgressSink.release(sink, lease)
+        collect_security_progress(sink, [item | acc])
+
+      _empty ->
+        Enum.reverse(acc)
     end
   end
 
