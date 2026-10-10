@@ -3155,8 +3155,7 @@ defmodule LoopexDaemon.SocketConnection do
   # nothing.
   #
   # Technical depth: the index row is written through its one owner; a write
-  # failure tells the causing client with `daemon.notice`. The compatibility
-  # directory entry is best effort with a fixed, identity-free warning.
+  # failure tells the causing client with `daemon.notice`.
   defp publish_session(context, connection, session_id) do
     case Map.get(context, :index) do
       nil ->
@@ -3170,20 +3169,6 @@ defmodule LoopexDaemon.SocketConnection do
           _recorded_or_full ->
             :ok
         end
-    end
-
-    case {Map.get(context, :state_root), Map.get(context, :placement_identity)} do
-      {root, placement} when is_binary(root) and is_binary(placement) ->
-        case Loopex.track_session(root, session_id, placement) do
-          :ok ->
-            :ok
-
-          {:error, _reason} ->
-            Logger.warning("loopex daemon compatibility session entry not written")
-        end
-
-      _unconfigured ->
-        :ok
     end
   end
 

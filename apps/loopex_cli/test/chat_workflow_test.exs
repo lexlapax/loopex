@@ -2,6 +2,7 @@ Code.require_file("../../loopex/test/support/m1_runtime_helper.exs", __DIR__)
 Code.require_file("../../loopex/test/support/agent_loop_helper.exs", __DIR__)
 
 Code.require_file("support/recording_output_target.exs", __DIR__)
+Code.require_file("support/session_catalog_helper.exs", __DIR__)
 
 defmodule LoopexCli.ChatWorkflowTest do
   use ExUnit.Case, async: false
@@ -320,7 +321,11 @@ defmodule LoopexCli.ChatWorkflowTest do
       )
 
     assert :ok =
-             Loopex.track_session(Path.join(f.root, "state"), session, "chat-workflow-runtime")
+             LoopexCli.Test.SessionCatalog.record(
+               Path.join(f.root, "state"),
+               session,
+               "chat-workflow-runtime"
+             )
 
     {:ok, attachment} = Loopex.attach(original.runtime, session, after_event_sequence: 0)
 
@@ -508,7 +513,7 @@ defmodule LoopexCli.ChatWorkflowTest do
                )
 
       assert :ok =
-               Loopex.track_session(
+               LoopexCli.Test.SessionCatalog.record(
                  Path.join(bound.root, "state"),
                  session,
                  "chat-workflow-runtime"

@@ -63,7 +63,7 @@ defmodule LoopexCli.Chat do
       release_placement: &Placement.release/2,
       placement_id: &Loopex.runtime_placement_id/1,
       provider_launch: &LoopexCli.ProviderLaunch.options/0,
-      prepare_resume: &Loopex.prepare_resume_known_session/4,
+      prepare_resume: &LoopexCli.SessionCatalog.prepare_resume/4,
       install_signal: fn driver, ref, grace, activation ->
         if activation,
           do: Interrupt.install_chat(driver, ref, grace, activation),
@@ -302,7 +302,7 @@ defmodule LoopexCli.Chat do
     with :ok <- recheck(prepared),
          {:ok, session} <-
            create(runtime, prepared, placement, Process.get({__MODULE__, :delegation, tag})),
-         :ok <- Loopex.track_session(root(prepared), session, placement) do
+         :ok <- LoopexCli.SessionCatalog.record(root(prepared), session, placement) do
       {:ok, prepared, session, nil}
     end
   end

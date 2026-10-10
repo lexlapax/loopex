@@ -1930,7 +1930,7 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
   # Technical depth: the index the service started is killed while an
   # initialized client is connected. The client receives `daemon.stopping`
   # with `fatal:session_index_lost` and the sentinel exits
-  # `session_index_lost` (111).
+  # `session_index_lost` (110).
   test "losing the session index fail-stops with session_index_lost",
        %{options: options} do
     daemon = start_daemon(options)
@@ -1944,7 +1944,7 @@ defmodule LoopexDaemon.ServiceLifecycleTest do
              receive_records(client, 1)
 
     {:ok, session_index_lost} = LoopexDaemon.ExitStatus.fetch(:session_index_lost)
-    assert session_index_lost == 111
+    assert session_index_lost == 110
     assert Task.await(daemon.task, 60_000) == session_index_lost
   end
 

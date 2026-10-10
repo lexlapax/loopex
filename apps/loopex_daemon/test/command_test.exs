@@ -3,7 +3,7 @@ defmodule LoopexDaemon.CommandTest do
 
   alias LoopexDaemon.{Command, ExitStatus}
 
-  test "startup and prepare-index accept only their exact grammar" do
+  test "startup accepts only its exact grammar" do
     assert {:ok,
             {:start,
              %{
@@ -26,11 +26,7 @@ defmodule LoopexDaemon.CommandTest do
                "/state/daemon/service.sock"
              ])
 
-    assert {:ok, {:prepare_index, %{"state-root" => "/state"}}} =
-             Command.parse(["prepare-index", "--state-root", "/state"])
-
     assert {:ok, {:start, %{}}} = Command.parse(["--"])
-    assert {:ok, {:prepare_index, %{}}} = Command.parse(["prepare-index", "--"])
 
     for arguments <- [
           ["--unknown", "value"],
@@ -40,9 +36,7 @@ defmodule LoopexDaemon.CommandTest do
           ["--workspace"],
           ["positional"],
           ["--", "positional"],
-          ["prepare-index", "--workspace", "/workspace"],
-          ["prepare-index", "again"],
-          ["prepare-index", "--", "--state-root", "/state"],
+          ["prepare-index", "--state-root", "/state"],
           ["--state-root", :not_a_binary]
         ] do
       assert {:error, :invalid_daemon_arguments} = Command.parse(arguments)
@@ -53,8 +47,8 @@ defmodule LoopexDaemon.CommandTest do
     classes = ExitStatus.classes()
     statuses = Map.values(classes)
 
-    assert map_size(classes) == 47
-    assert Enum.sort(statuses) == Enum.to_list(65..111)
+    assert map_size(classes) == 46
+    assert Enum.sort(statuses) == Enum.to_list(65..110)
     assert length(Enum.uniq(statuses)) == map_size(classes)
     assert ExitStatus.success() == 0
     assert ExitStatus.parser_refusal() == 1

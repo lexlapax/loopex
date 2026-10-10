@@ -335,7 +335,7 @@ defmodule LoopexCli.FoundationWorkflowRealTest do
   end
 
   defp retained_records(state_root) do
-    assert {:ok, [%{session_id: session_id}]} = Loopex.list_sessions(state_root)
+    assert {:ok, [%{session_id: session_id}]} = LoopexCli.SessionCatalog.list(state_root)
     copy = Path.join(state_root, "attended-reader.log")
     File.cp!(Path.join(state_root, "store.log"), copy)
     {:ok, store_pid} = Store.Local.start_link(path: copy)

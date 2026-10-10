@@ -9,9 +9,11 @@ defmodule LoopexDaemon.SessionIndex do
   ## Technical depth
 
   One unregistered GenServer serializes the in-memory rows and complete snapshot
-  replacement. A fresh root gets a persisted empty image; a legacy `sessions/`
-  directory without an image requires the explicit offline import. Rows are
-  monotonic and keyed by raw session-id bytes. Ordinary publication becomes
+  replacement. A fresh root gets a persisted empty image; a root whose sessions
+  exist only in the retired `sessions/` catalog is refused, never imported.
+  Offline commands write the same image under the same rule: only the holder of
+  the root's placement lock writes, so the daemon and an offline command are
+  never writers at once. Rows are monotonic and keyed by raw session-id bytes. Ordinary publication becomes
   visible only after durable replacement; a post-rename directory-sync failure
   adopts the complete named image but poisons later publication, while a proved
   pre-rename cleanup leaves the prior projection and permits retry.
@@ -62,6 +64,83 @@ defmodule LoopexDaemon.SessionIndex do
           poisoned: boolean()
         }
   def status(index), do: GenServer.call(index, :status)
+
+  @doc """
+  ## Concept
+
+  Records a session an offline command created, in the one catalogue the
+  daemon also lists.
+
+  ## Technical depth
+
+  The caller holds the root's placement lock, which is what excludes the
+  daemon; every offline command records only inside that hold. The image owner
+  is the state root's owner, the same anchor `read_offline/1` uses; the image
+  is loaded or initialized, the row decided by the same rules as `record/3`,
+  and the whole image published durably. A full index answers
+  `{:ok, :index_full}` and records nothing.
+  """
+  @spec record_offline(Path.t(), binary(), binary()) ::
+          :ok
+          | {:ok, :index_full}
+          | {:error, atom()}
+  def record_offline(state_root, session_id, placement_identity) when is_binary(state_root) do
+    directory = Path.join(state_root, "daemon")
+
+    with :ok <- validate_entry(session_id, placement_identity),
+         {:ok, uid} <- root_uid(state_root),
+         :ok <- Storage.prepare(directory, uid),
+         {:ok, rows} <- load_or_initialize(state_root, directory, uid) do
+      entries = Map.new(rows, &{&1.session_id, &1.placement_identity})
+
+      case decide(entries, session_id, placement_identity) do
+        :publish ->
+          case Storage.publish(
+                 directory,
+                 uid,
+                 rows(Map.put(entries, session_id, placement_identity))
+               ) do
+            :ok -> :ok
+            {:error, :session_index_full} -> {:ok, :index_full}
+            {:error, :invalid_index_entry} -> {:error, :invalid_index_entry}
+            {:error, _write_failure} -> {:error, :index_write_failed}
+          end
+
+        decided ->
+          decided
+      end
+    end
+  end
+
+  @doc """
+  ## Concept
+
+  Reads the catalogue for an offline listing or resume.
+
+  ## Technical depth
+
+  A listing holds no placement lock, so the image owner is taken as the state
+  root's owner, the uid that created the root. A missing image is an empty
+  catalogue unless the retired `sessions/` catalog is present, which refuses.
+  """
+  @spec read_offline(Path.t()) :: {:ok, [Codec.row()]} | {:error, atom()}
+  def read_offline(state_root) when is_binary(state_root) do
+    directory = Path.join(state_root, "daemon")
+
+    with {:ok, uid} <- root_uid(state_root),
+         {:ok, loaded} <- load_present(directory, uid) do
+      case loaded do
+        :missing -> missing_rows(state_root)
+        rows -> {:ok, rows}
+      end
+    else
+      {:error, reason} when reason in [:session_index_too_large, :session_index_corrupt] ->
+        {:error, reason}
+
+      _unusable ->
+        {:error, :state_root_unusable}
+    end
+  end
 
   @impl true
   def init(options) do
@@ -121,21 +200,34 @@ defmodule LoopexDaemon.SessionIndex do
   end
 
   defp record_validated(state, session_id, placement_identity) do
-    case Map.fetch(state.entries, session_id) do
-      {:ok, ^placement_identity} ->
-        {:reply, :ok, state}
+    case decide(state.entries, session_id, placement_identity) do
+      :publish when state.poisoned -> {:reply, {:error, :index_write_failed}, state}
+      :publish -> publish_entry(state, session_id, placement_identity)
+      decided -> {:reply, decided, state}
+    end
+  end
 
-      {:ok, _other_placement} ->
-        {:reply, {:error, :composition_mismatch}, state}
+  # Concept: one row decision for the daemon and offline writers alike.
+  defp decide(entries, session_id, placement_identity) do
+    case Map.fetch(entries, session_id) do
+      {:ok, ^placement_identity} -> :ok
+      {:ok, _other_placement} -> {:error, :composition_mismatch}
+      :error when map_size(entries) == @index_limit -> {:ok, :index_full}
+      :error -> :publish
+    end
+  end
 
-      :error when map_size(state.entries) == @index_limit ->
-        {:reply, {:ok, :index_full}, state}
+  defp load_present(directory, uid) do
+    case File.lstat(directory) do
+      {:error, :enoent} -> {:ok, :missing}
+      _present -> Storage.load(directory, uid)
+    end
+  end
 
-      :error when state.poisoned ->
-        {:reply, {:error, :index_write_failed}, state}
-
-      :error ->
-        publish_entry(state, session_id, placement_identity)
+  defp root_uid(state_root) do
+    case File.stat(state_root) do
+      {:ok, %File.Stat{type: :directory, uid: uid}} -> {:ok, uid}
+      _unusable -> {:error, :state_root_unusable}
     end
   end
 
@@ -204,18 +296,20 @@ defmodule LoopexDaemon.SessionIndex do
   end
 
   defp initialize_missing(state_root, directory, daemon_uid) do
+    with {:ok, []} <- missing_rows(state_root) do
+      case Storage.publish(directory, daemon_uid, []) do
+        :ok -> {:ok, []}
+        {:error, _reason} -> {:error, :session_index_write_failed}
+      end
+    end
+  end
+
+  # Concept: sessions known only to the retired offline catalog are refused.
+  defp missing_rows(state_root) do
     case File.lstat(Path.join(state_root, "sessions")) do
-      {:error, :enoent} ->
-        case Storage.publish(directory, daemon_uid, []) do
-          :ok -> {:ok, []}
-          {:error, _reason} -> {:error, :session_index_write_failed}
-        end
-
-      {:ok, %File.Stat{type: :directory}} ->
-        {:error, :session_index_upgrade_required}
-
-      _other ->
-        {:error, :session_index_corrupt}
+      {:error, :enoent} -> {:ok, []}
+      {:ok, %File.Stat{type: :directory}} -> {:error, :session_catalog_retired}
+      _other -> {:error, :session_index_corrupt}
     end
   end
 

@@ -397,7 +397,7 @@ Neither changes a durable format, and removing either needs no migration.
 | `model_attempt_settled_v1` and `model_attempt_settled_v2` settlements | Refused before activation; only `model_attempt_settled_v3` is read, so start on a fresh state root | — |
 | `resource_command_v1`, `model_request_committed_resources_v1` | Replayed; even a refused resource command creates this boundary | A reader without resource records refuses the session at load |
 | `interaction_requested_v1`, `interaction_answer_admitted_v1`, `interaction_resolved_v1` | Replayed | A reader without interaction records refuses the session before any effect |
-| A root with a session directory but no daemon index | Offline commands read it; the daemon refuses it as `session_index_upgrade_required` until `loopex daemon prepare-index` imports it | — |
+| A root whose sessions exist only in the retired offline `sessions/` directory | Refused as `session_catalog_retired` by the daemon and by offline listing, recording and resume (ADR 0070); start on a fresh state root | — |
 
 M6's ephemeral sessions have no row in this table: they leave no durable
 session root to migrate or roll back. Its durable defaults preserve the M5

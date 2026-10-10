@@ -3,6 +3,7 @@ Code.require_file("../../loopex/test/support/agent_loop_helper.exs", __DIR__)
 Code.require_file("support/prepared_participant.exs", __DIR__)
 
 Code.require_file("support/output_capture.exs", __DIR__)
+Code.require_file("support/session_catalog_helper.exs", __DIR__)
 
 defmodule LoopexCli.PreparedRecoveryContractTest do
   @moduledoc false
@@ -33,7 +34,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     fixture = recovered_fixture("unresolved-live-preparer", :admitted)
 
     {:ok, {:prepared, activation}} =
-      Loopex.prepare_resume_known_session(
+      LoopexCli.SessionCatalog.prepare_resume(
         fixture.state_root,
         fixture.runtime,
         fixture.session_id,
@@ -96,7 +97,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     fixture = recovered_fixture("ack-role-identity", :idle)
 
     {:ok, {:prepared, activation}} =
-      Loopex.prepare_resume_known_session(
+      LoopexCli.SessionCatalog.prepare_resume(
         fixture.state_root,
         fixture.runtime,
         fixture.session_id,
@@ -163,7 +164,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     fixture = recovered_fixture("explicit-roles", :idle)
 
     {:ok, {:prepared, activation}} =
-      Loopex.prepare_resume_known_session(
+      LoopexCli.SessionCatalog.prepare_resume(
         fixture.state_root,
         fixture.runtime,
         fixture.session_id,
@@ -224,7 +225,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     end
 
     {:ok, {:prepared, activation}} =
-      Loopex.prepare_resume_known_session(
+      LoopexCli.SessionCatalog.prepare_resume(
         fixture.state_root,
         fixture.runtime,
         fixture.session_id,
@@ -248,7 +249,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
       )
 
     {:ok, {:prepared, activation}} =
-      Loopex.prepare_resume_known_session(
+      LoopexCli.SessionCatalog.prepare_resume(
         fixture.state_root,
         fixture.runtime,
         fixture.session_id,
@@ -301,7 +302,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
       )
 
     {:ok, {:prepared, activation}} =
-      Loopex.prepare_resume_known_session(
+      LoopexCli.SessionCatalog.prepare_resume(
         fixture.state_root,
         fixture.runtime,
         fixture.session_id,
@@ -380,7 +381,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     fixture = recovered_fixture("independent-refusal", :admitted)
 
     {:ok, {:prepared, activation}} =
-      Loopex.prepare_resume_known_session(
+      LoopexCli.SessionCatalog.prepare_resume(
         fixture.state_root,
         fixture.runtime,
         fixture.session_id,
@@ -467,7 +468,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     fixture = recovered_fixture("bounded-holder-observation", :idle)
 
     {:ok, {:prepared, activation}} =
-      Loopex.prepare_resume_known_session(
+      LoopexCli.SessionCatalog.prepare_resume(
         fixture.state_root,
         fixture.runtime,
         fixture.session_id,
@@ -508,7 +509,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     assert Loopex.AgentLoopTestExecutor.jobs(fixture.executor) == []
 
     assert {:ok, {:prepared, activation}} =
-             invoke(Loopex, :prepare_resume_known_session, [
+             invoke(LoopexCli.SessionCatalog, :prepare_resume, [
                fixture.state_root,
                fixture.runtime,
                fixture.session_id,
@@ -552,7 +553,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
       )
 
     assert {:ok, {:prepared, activation}} =
-             invoke(Loopex, :prepare_resume_known_session, [
+             invoke(LoopexCli.SessionCatalog, :prepare_resume, [
                fixture.state_root,
                fixture.runtime,
                fixture.session_id,
@@ -589,7 +590,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     fixture = recovered_fixture("abandon", :active)
 
     assert {:ok, {:prepared, abandoned}} =
-             invoke(Loopex, :prepare_resume_known_session, [
+             invoke(LoopexCli.SessionCatalog, :prepare_resume, [
                fixture.state_root,
                fixture.runtime,
                fixture.session_id,
@@ -617,7 +618,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
         send(
           parent,
           {:prepared_by_short_lived_owner,
-           invoke(Loopex, :prepare_resume_known_session, [
+           invoke(LoopexCli.SessionCatalog, :prepare_resume, [
              fixture.state_root,
              fixture.runtime,
              fixture.session_id,
@@ -677,7 +678,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
       spawn_monitor(fn ->
         result =
           with {:ok, {:prepared, activation}} <-
-                 invoke(Loopex, :prepare_resume_known_session, [
+                 invoke(LoopexCli.SessionCatalog, :prepare_resume, [
                    fixture.state_root,
                    fixture.runtime,
                    fixture.session_id,
@@ -771,7 +772,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
       spawn_monitor(fn ->
         result =
           with {:ok, {:prepared, activation}} <-
-                 invoke(Loopex, :prepare_resume_known_session, [
+                 invoke(LoopexCli.SessionCatalog, :prepare_resume, [
                    fixture.state_root,
                    fixture.runtime,
                    fixture.session_id,
@@ -827,7 +828,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     parent = self()
 
     assert {:ok, {:prepared, activation}} =
-             invoke(Loopex, :prepare_resume_known_session, [
+             invoke(LoopexCli.SessionCatalog, :prepare_resume, [
                fixture.state_root,
                fixture.runtime,
                fixture.session_id,
@@ -869,7 +870,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     before = length(Loopex.AgentLoopTestModel.dispatched(fixture.model))
 
     assert {:ok, {:prepared, activation}} =
-             invoke(Loopex, :prepare_resume_known_session, [
+             invoke(LoopexCli.SessionCatalog, :prepare_resume, [
                fixture.state_root,
                fixture.runtime,
                fixture.session_id,
@@ -935,7 +936,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     store_pid = fixture.store_pid
 
     assert {:ok, {:prepared, activation}} =
-             invoke(Loopex, :prepare_resume_known_session, [
+             invoke(LoopexCli.SessionCatalog, :prepare_resume, [
                fixture.state_root,
                fixture.runtime,
                fixture.session_id,
@@ -1012,7 +1013,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     store_pid = fixture.store_pid
 
     assert {:ok, {:prepared, activation}} =
-             invoke(Loopex, :prepare_resume_known_session, [
+             invoke(LoopexCli.SessionCatalog, :prepare_resume, [
                fixture.state_root,
                fixture.runtime,
                fixture.session_id,
@@ -1113,7 +1114,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     fixture = recovered_fixture("handoff-answer", :active)
 
     assert {:ok, {:prepared, unmoved}} =
-             invoke(Loopex, :prepare_resume_known_session, [
+             invoke(LoopexCli.SessionCatalog, :prepare_resume, [
                fixture.state_root,
                fixture.runtime,
                fixture.session_id,
@@ -1139,7 +1140,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     assert :ok = invoke(Loopex, :abandon_resume, [unmoved])
 
     assert {:ok, {:prepared, moved}} =
-             invoke(Loopex, :prepare_resume_known_session, [
+             invoke(LoopexCli.SessionCatalog, :prepare_resume, [
                fixture.state_root,
                fixture.runtime,
                fixture.session_id,
@@ -1169,7 +1170,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     fixture = recovered_fixture("handler-removed", :active)
 
     assert {:ok, {:prepared, activation}} =
-             invoke(Loopex, :prepare_resume_known_session, [
+             invoke(LoopexCli.SessionCatalog, :prepare_resume, [
                fixture.state_root,
                fixture.runtime,
                fixture.session_id,
@@ -1201,7 +1202,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     fixture = recovered_fixture("pre-install-installer-death", :active)
 
     assert {:ok, {:prepared, activation}} =
-             Loopex.prepare_resume_known_session(
+             LoopexCli.SessionCatalog.prepare_resume(
                fixture.state_root,
                fixture.runtime,
                fixture.session_id,
@@ -1276,7 +1277,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     {installer, installer_monitor} =
       spawn_monitor(fn ->
         result =
-          case invoke(Loopex, :prepare_resume_known_session, [
+          case invoke(LoopexCli.SessionCatalog, :prepare_resume, [
                  fixture.state_root,
                  fixture.runtime,
                  fixture.session_id,
@@ -1379,7 +1380,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     {installer, installer_monitor} =
       spawn_monitor(fn ->
         result =
-          case invoke(Loopex, :prepare_resume_known_session, [
+          case invoke(LoopexCli.SessionCatalog, :prepare_resume, [
                  fixture.state_root,
                  fixture.runtime,
                  fixture.session_id,
@@ -1458,7 +1459,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     {installer, installer_monitor} =
       spawn_monitor(fn ->
         result =
-          case invoke(Loopex, :prepare_resume_known_session, [
+          case invoke(LoopexCli.SessionCatalog, :prepare_resume, [
                  fixture.state_root,
                  fixture.runtime,
                  fixture.session_id,
@@ -1707,7 +1708,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     before = length(Loopex.AgentLoopTestModel.dispatched(fixture.model))
 
     assert {:ok, {:prepared, activation}} =
-             invoke(Loopex, :prepare_resume_known_session, [
+             invoke(LoopexCli.SessionCatalog, :prepare_resume, [
                fixture.state_root,
                fixture.runtime,
                fixture.session_id,
@@ -1738,7 +1739,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     fixture = recovered_fixture("explicit-input-and-loss", :idle)
 
     {:ok, {:prepared, activation}} =
-      Loopex.prepare_resume_known_session(
+      LoopexCli.SessionCatalog.prepare_resume(
         fixture.state_root,
         fixture.runtime,
         fixture.session_id,
@@ -1823,7 +1824,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     fixture = recovered_fixture("unresponsive-transfer-guard", :active)
 
     assert {:ok, {:prepared, activation}} =
-             invoke(Loopex, :prepare_resume_known_session, [
+             invoke(LoopexCli.SessionCatalog, :prepare_resume, [
                fixture.state_root,
                fixture.runtime,
                fixture.session_id,
@@ -1883,7 +1884,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     fixture = recovered_fixture("guarded-before-visibility", :idle)
 
     {:ok, {:prepared, activation}} =
-      Loopex.prepare_resume_known_session(
+      LoopexCli.SessionCatalog.prepare_resume(
         fixture.state_root,
         fixture.runtime,
         fixture.session_id,
@@ -1972,7 +1973,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     fixture = recovered_fixture("pre-transfer-manager-loss", :active)
 
     assert {:ok, {:prepared, activation}} =
-             invoke(Loopex, :prepare_resume_known_session, [
+             invoke(LoopexCli.SessionCatalog, :prepare_resume, [
                fixture.state_root,
                fixture.runtime,
                fixture.session_id,
@@ -2063,7 +2064,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     fixture = recovered_fixture("signal-manager-holder", :active)
 
     assert {:ok, {:prepared, activation}} =
-             invoke(Loopex, :prepare_resume_known_session, [
+             invoke(LoopexCli.SessionCatalog, :prepare_resume, [
                fixture.state_root,
                fixture.runtime,
                fixture.session_id,
@@ -2106,7 +2107,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     fixture = recovered_fixture("exact-manager", :idle)
 
     {:ok, {:prepared, activation}} =
-      Loopex.prepare_resume_known_session(
+      LoopexCli.SessionCatalog.prepare_resume(
         fixture.state_root,
         fixture.runtime,
         fixture.session_id,
@@ -2387,7 +2388,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     fixture = recovered_fixture("interrupt-abandon", :active)
 
     assert {:ok, {:prepared, abandoned}} =
-             invoke(Loopex, :prepare_resume_known_session, [
+             invoke(LoopexCli.SessionCatalog, :prepare_resume, [
                fixture.state_root,
                fixture.runtime,
                fixture.session_id,
@@ -2422,7 +2423,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     fixture = recovered_fixture("prepared-commit-unknown", :active)
 
     assert {:ok, {:prepared, activation}} =
-             invoke(Loopex, :prepare_resume_known_session, [
+             invoke(LoopexCli.SessionCatalog, :prepare_resume, [
                fixture.state_root,
                fixture.runtime,
                fixture.session_id,
@@ -2646,7 +2647,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
           result = apply(module, function, arguments)
 
           case {module, function, result} do
-            {Loopex, :prepare_resume_known_session, {:ok, {:prepared, activation}}} ->
+            {LoopexCli.SessionCatalog, :prepare_resume, {:ok, {:prepared, activation}}} ->
               send(parent, {:command_prepared, activation})
 
             {Loopex, :attach, {:ok, _attachment}} ->
@@ -2809,7 +2810,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
       assert Placement.live_owner(fixture.state_root) == :none
 
       assert {:ok, {:prepared, replacement}} =
-               invoke(Loopex, :prepare_resume_known_session, [
+               invoke(LoopexCli.SessionCatalog, :prepare_resume, [
                  fixture.state_root,
                  fixture.runtime,
                  fixture.session_id,
@@ -3060,7 +3061,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     generation = local_generation_record!(local_root)
 
     assert {:ok, {:prepared, activation}} =
-             invoke(Loopex, :prepare_resume_known_session, [
+             invoke(LoopexCli.SessionCatalog, :prepare_resume, [
                fixture.state_root,
                fixture.runtime,
                fixture.session_id,
@@ -3185,7 +3186,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     fixture = recovered_fixture(label, :active)
 
     {:ok, {:prepared, activation}} =
-      Loopex.prepare_resume_known_session(
+      LoopexCli.SessionCatalog.prepare_resume(
         fixture.state_root,
         fixture.runtime,
         fixture.session_id,
@@ -3224,7 +3225,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
           )
 
         {:ok, {:prepared, activation}} =
-          Loopex.prepare_resume_known_session(
+          LoopexCli.SessionCatalog.prepare_resume(
             fixture.state_root,
             fixture.runtime,
             fixture.session_id,
@@ -3548,7 +3549,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
           nil
       end
 
-    :ok = Loopex.track_session(state_root, session_id, placement)
+    :ok = LoopexCli.Test.SessionCatalog.record(state_root, session_id, placement)
 
     if is_pid(held_worker) do
       on_exit(fn -> send(held_worker, :release) end)
@@ -3879,7 +3880,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     {installer, installer_monitor} =
       spawn_monitor(fn ->
         result =
-          case invoke(Loopex, :prepare_resume_known_session, [
+          case invoke(LoopexCli.SessionCatalog, :prepare_resume, [
                  fixture.state_root,
                  fixture.runtime,
                  fixture.session_id,

@@ -86,29 +86,18 @@ root loses at the placement lock and exits `placement_active` (76) without
 touching the first.
 
 <a id="operator-daemon-migration"></a>
-## Importing an Existing Root
+## One Session Catalogue
 
-A state root that offline commands have written — including one written by the
-`0.1.0` release — has a session directory but no daemon index, and the daemon
-refuses to start on it with `session_index_upgrade_required` (85). Import it once,
-while nothing else holds the root:
+A state root has one session catalogue, the daemon's index. Offline commands
+such as `loopex run` and `loopex chat` record each session they create there
+while they hold the root, so `loopex sessions` and `sessions --daemon` list the
+same sessions and a daemon started on the root later needs no import step.
 
-```text
-loopex daemon prepare-index --state-root ~/.loopex
-```
-
-The import takes the same placement lock and Store marker a daemon would, reads
-every recorded session strictly, and publishes the daemon's index as the union
-of any existing index and those sessions. Unlike `loopex sessions`, which skips
-an entry it cannot read, the import refuses the whole root when any entry is
-damaged (`session_index_corrupt`, 84) and leaves any earlier index exactly as it
-was. It reports the number of sessions recorded on standard error and exits `0`.
-A `SIGTERM` during the import stops it with `prepare_index_interrupted` (110)
-after releasing the root. Running it again is harmless.
-
-Offline commands do not update the daemon's index. A session an offline
-`loopex run` creates after the import is not listed by `sessions --daemon` until
-you stop the daemon and run `prepare-index` again.
+Before 1.0 the offline `sessions/` directory earlier builds wrote is retired.
+A root whose sessions exist only there is refused rather than imported: the
+daemon will not start on it and exits `session_catalog_retired` (85), and
+offline listing and recording refuse with the same reason. Start such work in a
+fresh state root.
 
 <a id="operator-daemon-driving"></a>
 ## Driving a Session
@@ -243,7 +232,6 @@ Developer companion: [The daemon for developers](../developer/daemon-technical.m
 ```text
 loopex daemon [--state-root DIR] [--workspace DIR] [--provider-launch PATH]
               [--policy NAME] [--cleanup-grace-ms MS] [--socket PATH]
-loopex daemon prepare-index [--state-root DIR]
 loopex run --daemon SOCKET [--steer TEXT | --follow-up TEXT] PROMPT
 loopex resume --daemon SOCKET SESSION
 loopex sessions --daemon SOCKET [--limit 1..256] [--after SESSION]
@@ -351,12 +339,11 @@ class ends the process within 35 s of the first fatal.
 | 65–75 | `state_root_required`, `state_root_unusable`, `workspace_required`, `workspace_unusable`, `provider_launch_required`, `provider_launch_invalid`, `policy_required`, `policy_unknown`, `provider_credential_required`, `project_skills_unusable`, `cleanup_grace_invalid` | A missing or invalid start input, before any effect |
 | 76–78 | `placement_active`, `placement_unverifiable`, `placement_lock_failed` | The root's placement lock |
 | 79–82 | `store_writer_active`, `store_writer_unverifiable`, `store_writer_acquisition_failed`, `store_log_too_large` | The root's Store marker and log |
-| 83–86 | `session_index_too_large`, `session_index_corrupt`, `session_index_upgrade_required`, `session_index_write_failed` | The daemon index; 85 means run `prepare-index` |
+| 83–86 | `session_index_too_large`, `session_index_corrupt`, `session_catalog_retired`, `session_index_write_failed` | The daemon index; 85 means the root's sessions exist only in the retired offline catalog |
 | 87–89 | `socket_path_too_long`, `socket_permission_unverified`, `invalid_socket_path` | The socket |
 | 90–95 | `signal_install_failed`, `credential_plane_start_failed`, `composition_start_failed`, `daemon_services_start_failed`, `listener_start_failed`, `readiness_write_failed` | Startup components |
 | 96–109 | `store_capacity_exceeded`, `store_lost`, `transfers_lost`, `workspace_lease_lost`, `executor_lost`, `registry_lost`, `custody_lost`, `capability_lost`, `runtime_lost`, `relay_lost`, `connections_lost`, `listener_lost`, `drain_failed`, `owner_lost` | A running component failed and the daemon fail-stopped |
-| 110 | `prepare_index_interrupted` | The import was stopped |
-| 111 | `session_index_lost` | The running daemon's session index failed and the daemon fail-stopped |
+| 110 | `session_index_lost` | The running daemon's session index failed and the daemon fail-stopped |
 
 Each class occupies its own status, in the order listed. An input refusal
 (65–75) writes `loopex daemon refused to start: <class>` to standard error; a

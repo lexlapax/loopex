@@ -1,5 +1,6 @@
 Code.require_file("../../loopex/test/support/m1_runtime_helper.exs", __DIR__)
 Code.require_file("../../loopex/test/support/agent_loop_helper.exs", __DIR__)
+Code.require_file("support/session_catalog_helper.exs", __DIR__)
 
 defmodule LoopexCli.M7FixturePolicyTest do
   use ExUnit.Case, async: false
@@ -424,7 +425,13 @@ defmodule LoopexCli.M7FixturePolicyTest do
             genesis: prepared.genesis
           )
 
-        :ok = Loopex.track_session(Path.join(f.root, "state"), session, "fixture-real-runtime")
+        :ok =
+          LoopexCli.Test.SessionCatalog.record(
+            Path.join(f.root, "state"),
+            session,
+            "fixture-real-runtime"
+          )
+
         {:ok, attachment} = Loopex.attach(runtime, session, after_event_sequence: 0)
         [prompt] = spec["prompts"]
 
@@ -568,7 +575,13 @@ defmodule LoopexCli.M7FixturePolicyTest do
           genesis: prepared.genesis
         )
 
-      :ok = Loopex.track_session(Path.join(f.root, "state"), session, "fixture-real-runtime")
+      :ok =
+        LoopexCli.Test.SessionCatalog.record(
+          Path.join(f.root, "state"),
+          session,
+          "fixture-real-runtime"
+        )
+
       {:ok, attachment} = Loopex.attach(runtime, session, after_event_sequence: 0)
 
       for {prompt, index} <- Enum.with_index([facts, explain, recall], 1) do
@@ -737,7 +750,7 @@ defmodule LoopexCli.M7FixturePolicyTest do
 
     try do
       result = callback.(stack.runtime)
-      {:ok, [session]} = Loopex.list_sessions(Path.join(f.root, "state"))
+      {:ok, [session]} = LoopexCli.SessionCatalog.list(Path.join(f.root, "state"))
       {:ok, rows} = Loopex.Store.load_records(stack.store, session.session_id, 0, 1000)
 
       send(

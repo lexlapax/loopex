@@ -571,7 +571,7 @@ defmodule LoopexCli.CodingTaskTest do
   end
 
   defp sessions(state_root) do
-    case Loopex.list_sessions(state_root) do
+    case LoopexCli.SessionCatalog.list(state_root) do
       {:ok, [_first | _rest] = entries} ->
         {:ok, Enum.map(entries, &%{session_id: &1[:session_id] || &1["session_id"]})}
 

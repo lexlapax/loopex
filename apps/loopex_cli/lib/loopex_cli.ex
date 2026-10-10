@@ -837,9 +837,8 @@ defmodule LoopexCli do
 
   It ran its `with` for the effect, discarded whatever it returned, and answered
   `:ok` unconditionally. Every reason recording can fail --
-  `{:session_entry_persist_failed, :eacces}` against a read-only state root, a
-  placement identity that cannot be read, a `sessions` name something else
-  already occupies -- therefore became success. The run streamed exactly as it
+  an index that cannot be written against a read-only state root, a placement
+  identity that cannot be read, a full index -- therefore became success. The run streamed exactly as it
   does when everything worked, and the first the operator learned of it was
   `loopex sessions` not listing the session and `loopex resume` refusing to
   reach it, with nothing left by then to say which run it had been.
@@ -855,7 +854,7 @@ defmodule LoopexCli do
   @spec record_session(Path.t(), binary()) :: :ok | {:error, binary()}
   def record_session(root, session_id) do
     with {:ok, placement} <- facade(Loopex, :runtime_placement_id, [root]),
-         :ok <- facade(Loopex, :track_session, [root, session_id, placement]) do
+         :ok <- facade(LoopexCli.SessionCatalog, :record, [root, session_id, placement]) do
       :ok
     else
       {:error, reason} ->
@@ -872,7 +871,7 @@ defmodule LoopexCli do
   defp sessions({flags, words}) do
     with :ok <- no_positionals(words, "sessions"),
          {:ok, root} <- state_root(flags),
-         {:ok, entries} <- facade(Loopex, :list_sessions, [root]) do
+         {:ok, entries} <- facade(LoopexCli.SessionCatalog, :list, [root]) do
       Render.sessions(entries)
     end
   end
@@ -909,7 +908,12 @@ defmodule LoopexCli do
   end
 
   defp recover_guarded(command, root, runtime, session_id, flags) do
-    case facade(Loopex, :prepare_resume_known_session, [root, runtime, session_id, unique_id()]) do
+    case facade(LoopexCli.SessionCatalog, :prepare_resume, [
+           root,
+           runtime,
+           session_id,
+           unique_id()
+         ]) do
       {:ok, {:prepared, activation}} ->
         settle(command, runtime, session_id, flags, activation)
 
@@ -1186,7 +1190,7 @@ defmodule LoopexCli do
     prepared =
       with :ok <- LoopexComposition.Delegation.guard(runtime, session_id, :resume),
            do:
-             facade(Loopex, :prepare_resume_known_session, [
+             facade(LoopexCli.SessionCatalog, :prepare_resume, [
                root,
                runtime,
                session_id,

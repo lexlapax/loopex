@@ -69,9 +69,6 @@ defmodule LoopexCli.Daemon do
       {:ok, {:start, flags}} ->
         start(flags, Keyword.put(options, :resolved_credential, credential))
 
-      {:ok, {:prepare_index, flags}} ->
-        prepare_index(flags, options)
-
       {:error, :invalid_daemon_arguments} ->
         diagnostic(usage())
         ExitStatus.parser_refusal()
@@ -116,31 +113,6 @@ defmodule LoopexCli.Daemon do
     end
   end
 
-  # Concept: the offline import needs only the state root, and says what it
-  # recorded or why it refused on standard error.
-  defp prepare_index(flags, options) do
-    env = Keyword.get(options, :env, &System.get_env/1)
-
-    result =
-      with {:ok, root} <- input(flags, env, "state-root", "LOOPEX_HOME", :state_root_required),
-           {:ok, root} <- LoopexDaemon.Paths.state_root(root) do
-        LoopexDaemon.PrepareIndex.run(root, Keyword.take(options, [:install_signals, :notify]))
-      end
-
-    case result do
-      {:ok, count} ->
-        diagnostic("loopex daemon prepare-index recorded #{count} sessions")
-        ExitStatus.success()
-
-      {:error, class} ->
-        diagnostic("loopex daemon prepare-index refused: #{class}")
-        {:ok, status} = ExitStatus.fetch(class)
-        status
-    end
-  end
-
-  # Concept: a present flag wins; an absent flag falls back to its environment
-  # variable, and an empty environment value is as missing as an absent one.
   defp input(flags, env, flag, variable, missing) do
     case Map.fetch(flags, flag) do
       {:ok, value} ->
@@ -265,7 +237,6 @@ defmodule LoopexCli.Daemon do
     usage: loopex daemon [--state-root <directory>] [--workspace <directory>]
                          [--provider-launch <configuration-path>] [--policy <name>]
                          [--cleanup-grace-ms <milliseconds>] [--socket <path>]
-           loopex daemon prepare-index [--state-root <directory>]
     """
   end
 end

@@ -614,8 +614,6 @@ defmodule LoopexDaemon.SocketTransportTest do
     assert [%{"request_id" => "after-replay", "result" => %{"entries" => []}}] =
              receive_records(client, 1)
 
-    assert {:ok, []} = Loopex.list_sessions(state)
-
     :ok = send_frame(client, resume("fresh", session_id, "resume-fresh", epoch))
     assert [%{"request_id" => "fresh", "status" => "accepted"}] = receive_records(client, 1)
     assert %{activations_used: 1} = ConnectionRegistry.status(daemon.registry)
@@ -625,7 +623,6 @@ defmodule LoopexDaemon.SocketTransportTest do
              receive_records(client, 1)
 
     assert entry["session_id"] == Wire.encode_identity(session_id)
-    assert {:ok, [_directory_entry]} = Loopex.list_sessions(state)
   end
 
   test "a closed connection's slot frees only after the relay retires it and core releases its holder",

@@ -2,8 +2,7 @@ defmodule LoopexDaemon.Command do
   @moduledoc """
   ## Concept
 
-  The daemon startup and offline index import are different commands with
-  different inputs. This parser keeps that distinction before either command
+  The daemon startup command accepts one closed flag set, checked before it
   can acquire a state-root resource.
 
   ## Technical depth
@@ -11,30 +10,25 @@ defmodule LoopexDaemon.Command do
   Parsing is effect-free. Every flag takes one nonempty value and may appear
   only once. Both `--flag value` and `--flag=value` are accepted; a bare `--`
   ends option parsing, after which every word is a refused positional argument.
-  The result retains only the closed flag set for the selected form.
+  The result retains only the closed flag set.
   """
 
   @startup_flags ~w(state-root workspace provider-launch policy cleanup-grace-ms socket)
-  @prepare_index_flags ~w(state-root)
 
   defguardp is_flag?(value)
             when is_binary(value) and byte_size(value) >= 2 and
                    binary_part(value, 0, 2) == "--"
 
   @typedoc false
-  @type mode :: :start | :prepare_index
+  @type mode :: :start
 
   @typedoc false
   @type parsed :: {mode(), %{optional(binary()) => binary()}}
 
   @doc false
   @spec parse([binary()]) :: {:ok, parsed()} | {:error, :invalid_daemon_arguments}
-  def parse(arguments) when is_list(arguments) do
-    case arguments do
-      ["prepare-index" | rest] -> parse_flags(:prepare_index, @prepare_index_flags, rest)
-      rest -> parse_flags(:start, @startup_flags, rest)
-    end
-  end
+  def parse(arguments) when is_list(arguments),
+    do: parse_flags(:start, @startup_flags, arguments)
 
   def parse(_arguments), do: {:error, :invalid_daemon_arguments}
 

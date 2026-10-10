@@ -4,13 +4,13 @@ defmodule LoopexDaemon.ExitStatus do
 
   A daemon process exit is an operator-facing result. Each failure class has
   one stable nonzero status so a service manager can distinguish startup,
-  running, cleanup, and offline-import failures without parsing prose.
+  running and cleanup failures without parsing prose.
 
   ## Technical depth
 
   Parser refusal is the ordinary command status `1`. The daemon's typed classes
-  occupy every integer from 65 through 111 exactly once. Status `0` is reserved
-  for successful import or an operator-requested stop whose cleanup completes.
+  occupy every integer from 65 through 110 exactly once. Status `0` is reserved
+  for an operator-requested stop whose cleanup completes.
   """
 
   @parser_refusal 1
@@ -37,7 +37,7 @@ defmodule LoopexDaemon.ExitStatus do
     store_log_too_large: 82,
     session_index_too_large: 83,
     session_index_corrupt: 84,
-    session_index_upgrade_required: 85,
+    session_catalog_retired: 85,
     session_index_write_failed: 86,
     socket_path_too_long: 87,
     socket_permission_unverified: 88,
@@ -62,8 +62,7 @@ defmodule LoopexDaemon.ExitStatus do
     listener_lost: 107,
     drain_failed: 108,
     owner_lost: 109,
-    prepare_index_interrupted: 110,
-    session_index_lost: 111
+    session_index_lost: 110
   }
 
   @typedoc false

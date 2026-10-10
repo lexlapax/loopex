@@ -4,7 +4,7 @@ defmodule LoopexDaemon.SessionIndexTest do
   alias LoopexDaemon.SessionIndex
   alias LoopexDaemon.SessionIndex.Storage
 
-  test "a fresh root persists an empty image and a legacy root requires import" do
+  test "a fresh root persists an empty image and a retired-catalog root is refused" do
     fresh = temporary_root("fresh")
     legacy = temporary_root("legacy")
     File.mkdir!(Path.join(legacy, "sessions"))
@@ -20,8 +20,45 @@ defmodule LoopexDaemon.SessionIndexTest do
     GenServer.stop(index)
 
     previous = Process.flag(:trap_exit, true)
-    assert {:error, :session_index_upgrade_required} = start_index(legacy)
+    assert {:error, :session_catalog_retired} = start_index(legacy)
     Process.flag(:trap_exit, previous)
+  end
+
+  # Concept: an offline command writes the daemon's one catalogue while it
+  # holds the root's placement lock, which is what excludes a daemon.
+  test "offline recording publishes the daemon's image and refuses a retired catalog" do
+    root = temporary_root("offline")
+    retired = temporary_root("offline-retired")
+    File.mkdir!(Path.join(retired, "sessions"))
+
+    on_exit(fn ->
+      File.rm_rf!(root)
+      File.rm_rf!(retired)
+    end)
+
+    assert {:ok, []} = SessionIndex.read_offline(root)
+
+    {:ok, lock} = LoopexComposition.Placement.acquire(root)
+    assert :ok = SessionIndex.record_offline(root, "s", "p")
+    assert :ok = SessionIndex.record_offline(root, "s", "p")
+    assert {:error, :composition_mismatch} = SessionIndex.record_offline(root, "s", "other")
+    :ok = LoopexComposition.Placement.release(lock)
+
+    assert {:ok, [%{session_id: "s", placement_identity: "p"}]} =
+             SessionIndex.read_offline(root)
+
+    assert {:ok, index} = start_index(root)
+
+    assert {:ok, %{entries: [%{session_id: "s", placement_identity: "p"}]}} =
+             SessionIndex.page(index, nil, 256)
+
+    GenServer.stop(index)
+
+    assert {:error, :session_catalog_retired} = SessionIndex.read_offline(retired)
+    {:ok, lock} = LoopexComposition.Placement.acquire(retired)
+    assert {:error, :session_catalog_retired} = SessionIndex.record_offline(retired, "s", "p")
+    :ok = LoopexComposition.Placement.release(lock)
+    refute File.exists?(Path.join([retired, "daemon", "session-index-v1"]))
   end
 
   test "recording is durable, idempotent and placement-bound" do

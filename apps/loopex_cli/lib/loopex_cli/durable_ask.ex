@@ -374,7 +374,7 @@ defmodule LoopexCli.DurableAsk do
   end
 
   defp track(root, session_id, placement, deps) do
-    case facade(deps, Loopex, :track_session, [root, session_id, placement]) do
+    case facade(deps, LoopexCli.SessionCatalog, :record, [root, session_id, placement]) do
       :ok -> :ok
       _ -> {:diagnostic, :session_tracking_failed}
     end

@@ -207,7 +207,7 @@ flowchart TB
       LOG["store.log — the journal"]
       REC["receipts/ — the executor's ledger"]
       ART["artifacts/ — spilled tool output"]
-      SESS["sessions/, runtime_id, placement.lock"]
+      SESS["daemon/ session index, runtime_id, placement.lock"]
     end
 
     WS["the workspace — your repository"]
