@@ -256,12 +256,12 @@ work has completed.
 | Runtime | `start_link/1`, `stop/1`, `version/0` |
 | Sessions | `create_session/3`, `resume_session/3`, `session_status/2` |
 | Creation evidence | `lookup_create_result/4`, `creation_provenance/2` |
-| Session directory | `state_root/0` (reads `LOOPEX_HOME`), `runtime_placement_id/1`, `track_session/3`, `list_sessions/1`, `resume_known_session/4` |
+| State root and placement | `state_root/0` (reads `LOOPEX_HOME`), `runtime_placement_id/1`; the session catalogue is the daemon index, which hosts write (ADR 0070) |
 | Attachment | `attach/2`, `attach/3`, `command/2`, `command_with_configuration/3`, `command_disposition/2`, `next_event/1`, `snapshot/1`, `attachment_status/1`, `progress/2`, `diagnostic/2` |
 | Project skills | `resource_catalog/2`, `read_resource/3` |
 | Artifacts | `open_artifact_transfer/2`, `read_artifact_chunk/3`, `close_artifact_transfer/2` |
 | Diagnostics | `trace/1`, `trace/2`, `trace_status/1`, `trace_stop/1` |
-| Recovery | `reconciliation_query/1`, `reconcile/2`, `prepare_resume_session/3`, `prepare_resume_known_session/4`, `prepared_session_configuration/1`, `prepared_session_startup/1`, `activate_resume/1`, `abandon_resume/1`, `transfer_resume/2`, `transfer_resume/3` |
+| Recovery | `reconciliation_query/1`, `reconcile/2`, `prepare_resume_session/3`, `prepared_session_configuration/1`, `prepared_session_startup/1`, `activate_resume/1`, `abandon_resume/1`, `transfer_resume/2`, `transfer_resume/3` |
 
 `lookup_create_result/4` takes the runtime, command ID, original session
 options and complete retained genesis. It compares the exact canonical Store
@@ -1037,9 +1037,9 @@ away under a digest taken at read time, while a complete-but-invalid frame
 refuses to start rather than repairing itself.
 
 **Resuming.** The host starts a replacement runtime with the same placement
-identity and calls `Loopex.resume_session/3` (or `resume_known_session/4`, which
-also enforces that the runtime carries the placement identity that created the
-session). The new coordinator resolves the exact prior transaction, reads the
+identity and calls `Loopex.resume_session/3`; the reference CLI first checks the
+session's row in the daemon index against the runtime's placement identity. The
+new coordinator resolves the exact prior transaction, reads the
 non-authorizing ownership head, and commits a fresh owner succession before
 routing commands. A model attempt found open is settled `owner_loss` — charged
 the run's remaining allowance and ended `failed` — because a provider call is not
@@ -1063,7 +1063,7 @@ one item sits at `effect_dispatched`; otherwise the answer is
 running. Unsolicited evidence is refused.
 
 **Prepared resume.** Recovery that may race an operator interrupt is two-phase.
-`prepare_resume_session/3` and `prepare_resume_known_session/4` return either a
+`prepare_resume_session/3` returns either a
 replayed result or an opaque one-use activation capability while recovered work
 stays paused. The coordinator monitors the preparer, and preparer loss abandons
 unspent authority. Only the current holder may activate, abandon, or transfer

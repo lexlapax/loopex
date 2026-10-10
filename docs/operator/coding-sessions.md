@@ -690,9 +690,9 @@ and `loopex daemon` add their own statuses, listed on the
 The state root resolves from `--state-root`, or from `LOOPEX_HOME`, and never
 from Elixir application environment, so the directory your shell names is the
 directory used. It holds the journal (`store.log`), the executor's receipt
-ledger, spilled artifacts, the session directory `loopex sessions` reads, the
+ledger, spilled artifacts, the session index `loopex sessions` reads, the
 placement lock, the runtime placement identity, retained skill manifests and
-their provenance, and a daemon's socket and index when one has run. The full
+their provenance, and a daemon's socket when one has run. The full
 layout, with what writes each path and the size ceilings, is in
 [where the files live](how-a-run-works-technical.md#technical-run-state-root).
 

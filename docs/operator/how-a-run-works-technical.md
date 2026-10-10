@@ -107,7 +107,7 @@ application environment, and a command that finds neither refuses.
 | `store.log.writer` | the local store | The writer marker that keeps two writers off one log |
 | `artifacts/` | the artifact store | Content-addressed objects at `<2 hex>/<64 hex>`, with immutable use records under `uses/` |
 | `receipts/` | the local executor | The ledger root: `generation`, the `claim` directory, `markers/`, `open/`, and one `<job digest>.receipt` per job |
-| `sessions/<session id>` | the runtime | The entries `loopex sessions` lists |
+| `daemon/session-index-v1` | the `loopex` command or the daemon, whichever holds `placement.lock` | The one session catalogue `loopex sessions` and `sessions --daemon` list |
 | `runtime_id` | the runtime | The durable placement identity sessions are recorded under |
 | `placement.lock` | the `loopex` command or the daemon | The owning process, for single-owner exclusion |
 | `resource-packs/manifests/` | the composition host | Complete verified skill snapshots named by manifest digest |

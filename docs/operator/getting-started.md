@@ -378,13 +378,8 @@ its refusals.
 running while no command is attached, and several terminals can reach the same
 session. The daemon, not the client, owns the workspace, policy and credential.
 
-A state root that offline commands have already written, as steps 5 to 7 did,
-must be imported once, while nothing else holds it. Otherwise the daemon refuses
-to start with status `85` (`session_index_upgrade_required`).
-
-```bash
-loopex daemon prepare-index
-```
+The sessions steps 5 to 7 created are already in the root's one session
+catalogue, so the daemon lists them with no import step.
 
 Start the daemon in its own terminal. It needs the credential and the provider
 launch file the build wrote:
@@ -445,7 +440,7 @@ offline commands against the root.
 | `loopex: provider_credential_required` | Durable `ask` has no usable provider credential | Export the key before durable `ask`; local Ollama ephemeral `ask` needs no key |
 | `loopex: --policy is required; there is no default host authority` | `run` or `resume` was given no policy | Name `shell-allowlist` or `allow-all` |
 | `loopex: another loopex process (pid N) is using this state root; …` | Another command or a daemon holds the state root | Use the daemon's live forms, stop the other process, or pass another `--state-root` |
-| `loopex daemon` exits 85 (`session_index_upgrade_required`) | The root has offline sessions and no daemon index | Run `loopex daemon prepare-index` with nothing else holding the root |
+| `loopex daemon` exits 85 (`session_catalog_retired`) | The root's sessions exist only in the retired offline `sessions/` catalog | Use a fresh state root; retired roots are not imported |
 | `loopex daemon` exits 76 (`placement_active`) | Another daemon or command holds this root | Stop it, or use another state root |
 | `ending failed` (exit `2`) for `ask` text mode; JSON `details.reason: "model_call_failed"`; `loopex: failed model_call_failed` for durable `run` or `resume` | The provider call failed; private provider details are withheld | For local Ollama, check that Ollama is running and the selected model is available. For a hosted provider, check its key, the network and the provider's status, then run again |
 
