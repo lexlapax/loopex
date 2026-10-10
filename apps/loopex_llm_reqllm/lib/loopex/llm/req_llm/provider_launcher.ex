@@ -144,28 +144,22 @@ defmodule Loopex.LLM.ReqLLM.ProviderLauncher do
   # Group signals use the shell builtin's explicit `-s SIGNAL -- -PGID` form:
   # dash rejects `-SIGNAL --`, while omitting `--` misparses the negative PGID.
   # Keeping actuation in the live shell preserves its birth-group authority.
-  # Wait retries use that shell's trapped-interruption flag: dash loses its job
-  # table in command substitutions. A final status <=128 wins over a concurrent
-  # trap; an untrapped signal exit remains final instead of being retried.
+  # The carrier catches TERM and USR1 until the fork, so the guard is born with
+  # default dispositions, then ignores them: a trapped signal would interrupt
+  # its wait, and a shell that reaps the guard during that interruption can
+  # answer the retried wait with 127, which would read as guard failure.
   defp carrier_program do
     ~S"""
     exec </dev/null >/dev/null 2>&1
     guard_program=$1
     shift
-    trap 'wait_interrupted=1' TERM USR1
+    trap ':' TERM USR1
     /bin/sh -c "$guard_program" loopex-provider-guard "$$" "$@" 3<&3 4>&4 &
     guard_pid=$!
+    trap '' TERM USR1
     exec 3<&- 4>&-
-    while :; do
-      wait_interrupted=0
-      wait "$guard_pid"
-      status=$?
-      if [ "$status" -le 128 ] || [ "$wait_interrupted" -eq 0 ]; then
-        break
-      fi
-    done
-    [ "$status" -eq 0 ] && exit 0
-    trap '' TERM
+    wait "$guard_pid"
+    [ "$?" -eq 0 ] && exit 0
     kill -s TERM -- -"$$" 2>/dev/null
     kill -s KILL -- -"$$" 2>/dev/null
     exit 125
@@ -182,7 +176,9 @@ defmodule Loopex.LLM.ReqLLM.ProviderLauncher do
   # cannot disarm it. Its sole first external child is sleep, forked after trap
   # installation: observing that live child proves cancellation is armed. All
   # signals retain the live birth-group authority. Namespace failure always
-  # exits unproved, even if a signal interrupts its timer wait.
+  # exits unproved, even if a signal interrupts its timer wait. Before the
+  # cancelling USR1 the guard ignores every signal it traps, so its own USR1 or
+  # a concurrent TERM cannot interrupt the timer wait whose status it reports.
   # Ignore generic termination before forking the timer, not in the newborn
   # timer: caught traps reset on fork, leaving a default-disposition window.
   # The timer and its sleeper retain these ignored dispositions; the guard
@@ -264,16 +260,10 @@ defmodule Loopex.LLM.ReqLLM.ProviderLauncher do
             for (pid in groups) if (groups[pid] == group && !allowed[pid] && !timer_tree[pid] && states[pid] !~ /^Z/) exit 1
             exit 0
           }'; then
+          trap '' TERM HUP INT PIPE USR1
           kill -s USR1 -- -"$group" 2>/dev/null
-          while :; do
-            wait_interrupted=0
-            wait "$timer"
-            timer_status=$?
-            if [ "$timer_status" -le 128 ] || [ "$wait_interrupted" -eq 0 ]; then
-              break
-            fi
-          done
-          [ "$timer_status" -eq 0 ] || exit 125
+          wait "$timer"
+          [ "$?" -eq 0 ] || exit 125
           if [ -n "$stop_id" ]; then
             printf 'cleanup_complete:%s:%s\n' "$nonce" "$stop_id" >&4 || exit 125
           fi

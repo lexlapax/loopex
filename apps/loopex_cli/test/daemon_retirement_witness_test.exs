@@ -32,8 +32,11 @@ defmodule LoopexCli.DaemonRetirementWitnessTest do
     evidence_root = System.get_env("M7_DAEMON_RETIREMENT_EVIDENCE_DIR") || System.tmp_dir!()
     File.mkdir_p!(evidence_root)
 
-    evidence =
-      Path.join(evidence_root, "daemon-retirement-#{System.unique_integer([:positive])}.json")
+    # Concept: each run's retained evidence has its own name.
+    # Technical depth: unique_integer restarts in every VM, so earlier runs'
+    # retained files in a shared directory would collide; a random name cannot.
+    suffix = Base.url_encode64(:crypto.strong_rand_bytes(12), padding: false)
+    evidence = Path.join(evidence_root, "daemon-retirement-#{suffix}.json")
 
     refute File.exists?(evidence)
 
@@ -74,8 +77,14 @@ defmodule LoopexCli.DaemonRetirementWitnessTest do
           :hide,
           {:line, 65_536},
           env: [{~c"LOOPEX_PROVIDER_API_KEY", ~c"daemon-command-placeholder"}],
+          # Concept: the witness child must boot on a host whose cores are saturated.
+          # Technical depth: a spinning scheduler yields its core, so on an
+          # oversubscribed CPU set each handoff between schedulers waits out other
+          # processes' time slices (measured: 0.3 s of CPU took 14 s to boot); with
+          # busy-wait off an idle scheduler sleeps and wakes with normal priority.
           args:
-            Enum.flat_map(:code.get_path(), fn path -> ["-pa", List.to_string(path)] end) ++
+            ["--erl", "+sbwt none +sbwtdcpu none +sbwtdio none"] ++
+              Enum.flat_map(:code.get_path(), fn path -> ["-pa", List.to_string(path)] end) ++
               ["-e", code]
         ],
         root,

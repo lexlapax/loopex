@@ -54,6 +54,15 @@ defmodule LoopexCli.Test.HeldOutputTarget do
             send(owner, {:loopex_cli_output_target, :acquired, self(), id, incarnation})
             loop(%{state | owner: owner, incarnation: incarnation})
 
+          :hold ->
+            receive do
+              {:held_target_release, :acquired} -> :ok
+            end
+
+            incarnation = make_ref()
+            send(owner, {:loopex_cli_output_target, :acquired, self(), id, incarnation})
+            loop(%{state | owner: owner, incarnation: incarnation})
+
           :refuse ->
             send(owner, {:loopex_cli_output_target, :refused, self(), id})
             loop(state)
