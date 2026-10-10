@@ -580,8 +580,8 @@ cleanup. Production invokes it through configured `cancel/4`; one checked
 formula derives the observation window from the session's committed cleanup
 period. The facade maps every other answer, raise, exit, timeout, malformed
 answer, and the defensive case of a legacy module missing the required callback
-to unconfirmed cleanup. Retained `cancel/3` keeps its fixed defensive bound for
-direct compatibility callers and is never selected by production coordination.
+to unconfirmed cleanup. `cancel/4` is the only entry; ADR 0070 retired the
+fixed-bound `cancel/3`.
 
 `Loopex.Executor.Local.cancel/2` answers `{:ok, :cleaned}` only after the job's
 receipt with `cleanup_confirmation: :confirmed` is durably published and its

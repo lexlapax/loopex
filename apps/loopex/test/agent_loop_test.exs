@@ -7761,14 +7761,14 @@ defmodule Loopex.AgentLoopTest do
     assert {:cancel, 2} in Loopex.Executor.behaviour_info(:callbacks)
     refute {:cancel, 2} in Loopex.Executor.behaviour_info(:optional_callbacks)
 
-    assert Loopex.Executor.cancel(AgentLoopSilentExecutor, :ignored, "job-1") ==
+    assert Loopex.Executor.cancel(AgentLoopSilentExecutor, :ignored, "job-1", 5_000) ==
              {:ok, :unconfirmed},
            "an executor that declares no cancellation had its silence read as a clean stop"
 
     # And an executor that does declare one is still asked and still answered.
     answering = AgentLoopAnsweringExecutor.start(%{})
 
-    assert Loopex.Executor.cancel(AgentLoopAnsweringExecutor, answering, "job-1") ==
+    assert Loopex.Executor.cancel(AgentLoopAnsweringExecutor, answering, "job-1", 5_000) ==
              {:ok, :cleaned}
   end
 

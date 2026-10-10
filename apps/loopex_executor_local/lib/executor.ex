@@ -562,12 +562,9 @@ defmodule Loopex.Executor.Local do
   # mailbox of a process that has moved on; any delivered before the removal
   # but not read is flushed.
   #
-  # Core's retained `Executor.cancel/3` waits a fixed 60 s. This caller returns
-  # as soon as it is answered, so the margin lengthens only the wait for an
-  # answer that is late. For a period near or above 60 s that facade can stop
-  # before the answer arrives, as it already could before the margin existed;
-  # production uses `Executor.cancel/4`, whose observation bound covers the
-  # period plus 2 s.
+  # This caller returns as soon as it is answered, so the margin lengthens only
+  # the wait for an answer that is late. Core's `Executor.cancel/4` observation
+  # bound covers the period plus 2 s.
   defp cancel_owned_job(worker, {until, grace, _probe} = episode, request_alias \\ nil) do
     token = make_ref()
     reply_to = Process.alias()

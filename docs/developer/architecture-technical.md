@@ -280,10 +280,9 @@ and reaches no callback. The intervals stay distinct and no bound is derived fro
 another's already-spent instant. `Loopex.Executor.default_cleanup_grace_ms/0` is
 `5_000` and lives on the port because the session declares it and the executor
 performs it; a default defined twice is two numbers that agree until one is
-edited. `cancel/3` retains
-[ADR 0012](../adr/0012-executor-cancellation-capability.md#concept)'s fixed
-60-second defensive bound for a direct caller with no committed value, and
-production coordination never selects it.
+edited. `cancel/4` is the only cancellation entry;
+[ADR 0070](../adr/0070-pre-1-superseded-surface-retirement.md#concept) retired
+the fixed-bound `cancel/3`.
 
 ### Record and Event Shapes by Name
 

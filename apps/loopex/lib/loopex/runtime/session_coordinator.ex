@@ -9096,11 +9096,9 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # Concept: the executor is observed for the period the session committed, not
   # for a fixed number this runtime chose.
   #
-  # Technical depth: ADR 0016 makes `Executor.cancel/4` the production entry and
-  # keeps `cancel/3`'s fixed defensive bound for direct callers only. Selecting
-  # the legacy entry here would report a valid long cleanup unproven the moment
-  # it passed sixty seconds, which is a false `outcome_unknown` for work that was
-  # cleaning up exactly as configured.
+  # Technical depth: ADR 0016 makes `Executor.cancel/4` the entry, so a valid
+  # long cleanup is observed for its committed period rather than reported
+  # unproven at a fixed bound, which would be a false `outcome_unknown`.
   defp dispatch_host_cancel(state, run_id, job_id) do
     module = state.executor.module
     reference = state.executor.reference
@@ -10519,7 +10517,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # An executor that declares nothing is unproven, which is also the answer for
   # anything this runtime cannot read as an error at all: `failed` is a positive
   # claim that the effect did not happen, and nothing here can support it.
-  # `Loopex.Executor.cancel/3` reads an unadmitted answer the same way, for the
+  # `Loopex.Executor.cancel/4` reads an unadmitted answer the same way, for the
   # same reason.
   # It is a pattern match and not a call. The shape this replaced asked the
   # executor module a question from inside this process while a run was in
