@@ -78,7 +78,7 @@ defmodule Loopex.ReferenceClientTraceChild do
 
         true = length(model_results(records)) == 1
         true = length(tool_calls) == 1
-        true = List.first(tool_calls)["name"] == "loopex_demo_write"
+        true = List.first(tool_calls)["name"] == "write"
         true = Local.stats(fixture.executor).dispatches == %{receipt.job_id => 1}
         :completed = receipt.outcome
         true = receipt.child_environment_names == ["PATH"]

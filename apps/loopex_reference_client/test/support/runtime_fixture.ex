@@ -23,7 +23,7 @@ defmodule Loopex.ReferenceClientTestModel do
               id: "deterministic-tool-call",
               name: name,
               arguments: %{
-                "relative_path" => Keyword.get(options, :relative_path, "trace.txt"),
+                "path" => Keyword.get(options, :relative_path, "trace.txt"),
                 "content" => Keyword.get(options, :content, "loopex-effect")
               }
             }
@@ -79,7 +79,7 @@ defmodule Loopex.ReferenceClientRuntimeFixture do
   alias Loopex.Store.Local, as: LocalStore
   alias LoopexProtocol.ToolDefinition
 
-  @demo_tool_wall_time_ms 30_000
+  @write_tool_wall_time_ms 30_000
 
   def start(label, model_module, model_options \\ [], options \\ []) do
     root =
@@ -129,32 +129,14 @@ defmodule Loopex.ReferenceClientRuntimeFixture do
         ] ++ Keyword.get(options, :executor_options, [])
       )
 
-    # The demonstration tool is an ordinary registered generation now. It keeps
-    # M1's exact identity and version so the inherited executor and recovery
-    # cases still resolve it, and it reaches the model only because this test
-    # composition selects it; nothing in the reference distribution does.
-    tool = %{
-      "tool_id" => "loopex.demo.write",
-      "tool_version" => "1.0.0",
-      "name" => "loopex_demo_write",
-      "description" => "Write the fixed demonstration bytes beneath the leased workspace.",
-      "parameter_schema" => %{
-        "type" => "object",
-        "properties" => %{
-          "relative_path" => %{"type" => "string"},
-          "content" => %{"type" => "string"}
-        },
-        "required" => ["relative_path", "content"]
-      },
-      "result_shape" => %{"content_type" => "text", "description" => "What was written."},
-      "effect_class" => "workspace_write",
-      "idempotency_class" => "reconcile_then_retry",
-      "budgets" => %{
-        "wall_time_ms" => @demo_tool_wall_time_ms,
-        "output_bytes" => 1_048_576,
-        "artifact_bytes" => 1_048_576
-      }
-    }
+    # The coding write tool is the one tool this composition selects for the
+    # model; it is a current registered generation (ADR 0070 retired the M1
+    # demonstration tools).
+    tool =
+      Enum.find(
+        Loopex.Executor.Local.CodingTools.definitions(),
+        &(&1["tool_id"] == "loopex.write")
+      )
 
     executor_reference =
       case Keyword.get(options, :executor_reference_builder) do
@@ -182,7 +164,7 @@ defmodule Loopex.ReferenceClientRuntimeFixture do
       },
       tool: nil,
       tools: [tool],
-      active_tools: ["loopex.demo.write"],
+      active_tools: ["loopex.write"],
       policy: Loopex.ReferenceClient.Policy.AllowAll,
       policy_identity: %{"id" => "loopex.reference_client.allow_all", "revision" => "1"},
       grant_decision: {:host_policy, :allow},
@@ -343,8 +325,7 @@ defmodule Loopex.ReferenceClientRuntimeFixture do
   # Concept: the recovery fault boundary waits for the complete valid tool
   # lifetime rather than an arbitrary fraction of it.
   #
-  # Technical depth: the demonstration tool is a controlled process with its
-  # own wall bound. A successful answer may then spend the committed cleanup
+  # Technical depth: the write tool carries its own wall bound. A successful answer may then spend the committed cleanup
   # period confirming the process group and the separate receipt-retention
   # reserve before Core can emit the fault hook. The former three-second receive
   # raced that healthy path under suite load. This helper derives its ceiling
@@ -362,7 +343,7 @@ defmodule Loopex.ReferenceClientRuntimeFixture do
     {:ok, bounds} = Executor.cancellation_bounds(grace_ms)
 
     timeout_ms =
-      @demo_tool_wall_time_ms + bounds.executor_observe_ms + bounds.receipt_retention_ms
+      @write_tool_wall_time_ms + bounds.executor_observe_ms + bounds.receipt_retention_ms
 
     await_executor_receipt_fault(
       fixture,
@@ -474,7 +455,7 @@ defmodule Loopex.ReferenceClientRuntimeFixture do
   defp model_spec(_module), do: "deterministic:test"
 
   # Concept: real calls use the trusted companion, with sampling owned by Core.
-  # Technical depth: build before Store/executor startup; demo-only tool inputs
+  # Technical depth: build before Store/executor startup; fixture-only tool inputs
   # never enter the adapter's closed launch options. The deterministic branch
   # retains its existing options and max_tokens default without a build.
   defp model_configuration(Loopex.LLM.ReqLLM, options, root, owns_root?, credential) do

@@ -222,9 +222,6 @@ defmodule Loopex.Executor.Local do
   # already been exceeded, and a worker blocked in a dirty scheduler may never
   # answer at all.
   @abandon_confirmation_ms 1_000
-  @tool_version "1.0.0"
-  @write_tool "loopex.demo.write"
-  @wait_write_tool "loopex.demo.wait_write"
   @credential_name "LOOPEX_PROVIDER_API_KEY"
   @search_path_name "PATH"
   @search_path_value "/usr/bin:/bin"
@@ -1216,19 +1213,10 @@ defmodule Loopex.Executor.Local do
 
   @doc false
   @spec tool(binary()) :: {:ok, map()} | :error
-  def tool(@write_tool),
-    do: {:ok, %{id: @write_tool, version: @tool_version, effect_class: "workspace_write"}}
-
-  def tool(@wait_write_tool),
-    do: {:ok, %{id: @wait_write_tool, version: @tool_version, effect_class: "workspace_write"}}
-
-  # Concept: the four coding tools an operator actually uses.
+  # Concept: the coding tools an operator actually uses.
   #
-  # Technical depth: routed here beside the two demonstration tools rather than
-  # replacing them. M1's inherited executor and recovery cases still resolve the
-  # demonstrations, and the registry must prove it resolves a generation outside
-  # any active profile; deleting them to tidy up would break proved protection to
-  # save two clauses.
+  # Technical depth: ADR 0070 retired the M1 demonstration tools; every
+  # generation this executor runs is a current coding-tool definition.
   def tool(id) do
     case Enum.find(CodingTools.definitions(), &(&1["tool_id"] == id)) do
       nil ->
@@ -2033,11 +2021,8 @@ defmodule Loopex.Executor.Local do
 
   defp retained_output_matches_job?(receipt, job) do
     case resolve_tool(job) do
-      {:ok, %{coding: _definition} = tool} ->
+      {:ok, tool} ->
         byte_size(receipt.output) <= effective_output_limits(job, tool).output
-
-      {:ok, _demonstration_tool} ->
-        byte_size(receipt.output) <= @max_output_bytes
 
       {:error, _reason} ->
         false
@@ -2477,10 +2462,7 @@ defmodule Loopex.Executor.Local do
   # false. The empty, confirmed cancellation receipt closes that marker through
   # the same settlement path as any other admitted job.
   defp session_cancelled_receipt(state, job, tool, arguments) do
-    environment =
-      if Map.has_key?(tool, :coding),
-        do: coding_tool_environment(arguments),
-        else: demonstration_environment()
+    environment = coding_tool_environment(arguments)
 
     {:settle,
      receipt(
@@ -2970,15 +2952,8 @@ defmodule Loopex.Executor.Local do
   end
 
   # Concept: retained jobs must name a supported exact generation before dispatch.
-  # Technical depth: demonstration tools keep their fixed identities; coding
-  # tools match both ID and version before their effect class is checked above.
-  defp tool_generation(id, version) when id in [@write_tool, @wait_write_tool] do
-    case tool(id) do
-      {:ok, %{version: ^version}} = found -> found
-      _other -> :error
-    end
-  end
-
+  # Technical depth: coding tools match both ID and version before their effect
+  # class is checked above.
   defp tool_generation(id, version) do
     case Enum.find(CodingTools.definitions(), fn definition ->
            definition["tool_id"] == id and definition["tool_version"] == version
@@ -3022,20 +2997,9 @@ defmodule Loopex.Executor.Local do
        else: {:error, :invalid_projection_context}
   end
 
-  defp validate_arguments(%{id: @write_tool}, arguments),
-    do: write_arguments(arguments, 0)
-
   defp validate_arguments(%{coding: %{"tool_id" => id}}, arguments)
        when id in ["loopex.grep", "loopex.find", "loopex.ls"],
        do: Loopex.Executor.Local.ReadOnlyTools.arguments(id, arguments)
-
-  defp validate_arguments(%{id: @wait_write_tool}, %{
-         "relative_path" => path,
-         "content" => content,
-         "delay_ms" => delay
-       })
-       when is_integer(delay) and delay in 1..30_000,
-       do: write_arguments(%{"relative_path" => path, "content" => content}, delay)
 
   defp validate_arguments(%{coding: %{"tool_id" => "loopex.write"}}, %{
          "path" => path,
@@ -3077,19 +3041,6 @@ defmodule Loopex.Executor.Local do
   end
 
   defp validate_arguments(_tool, _arguments), do: {:error, :invalid_tool_arguments}
-
-  defp write_arguments(%{"relative_path" => path, "content" => content}, delay)
-       when is_binary(path) and is_binary(content) and byte_size(content) <= 65_536 do
-    safe =
-      byte_size(path) in 1..255 and path not in [".", ".."] and
-        Path.basename(path) == path and not String.contains?(path, <<0>>)
-
-    if safe,
-      do: {:ok, %{path: path, content: content, delay_ms: delay}},
-      else: {:error, :invalid_tool_arguments}
-  end
-
-  defp write_arguments(_arguments, _delay), do: {:error, :invalid_tool_arguments}
 
   # Concept: every wait a coding tool sits in carries the lease's death as one of
   # its alternatives.
@@ -3165,58 +3116,6 @@ defmodule Loopex.Executor.Local do
            cleanup_confirmation
          )}
     end
-  end
-
-  defp run_tool(
-         state,
-         job,
-         tool,
-         workspace,
-         arguments,
-         receipt_output_limit,
-         options,
-         lease,
-         _progress
-       ) do
-    deadline = effective_deadline(job, tool)
-
-    limits =
-      cap_output_limit(
-        %{output: @max_output_bytes, artifact: @max_output_bytes},
-        receipt_output_limit
-      )
-
-    {tool_result, progress_count, cleanup_confirmation} =
-      run_owned_process(
-        job,
-        tool,
-        workspace,
-        demonstration_process_arguments(arguments),
-        options,
-        lease,
-        fence(state, deadline),
-        limits,
-        nil,
-        progress_identity(state, job)
-      )
-
-    _retention_deadline = retention_until()
-
-    {outcome, output, _complete} = normalize_tool_result(tool_result)
-
-    {:settle,
-     receipt(
-       state,
-       job,
-       tool,
-       outcome,
-       output,
-       demonstration_environment(),
-       [],
-       deadline,
-       progress_count,
-       cleanup_confirmation
-     )}
   end
 
   defp progress_identity(state, job) do
@@ -5599,8 +5498,6 @@ defmodule Loopex.Executor.Local do
   defp receipt_environment(%{coding: _definition}, arguments),
     do: coding_tool_environment(arguments)
 
-  defp receipt_environment(_demonstration, _arguments), do: demonstration_environment()
-
   defp receipt_artifact_variants(%{artifacts: artifacts}, %{coding: _definition})
        when not is_nil(artifacts),
        do: [[], [largest_artifact_reference()]]
@@ -5931,8 +5828,8 @@ defmodule Loopex.Executor.Local do
   # executor constructed.
   #
   # Technical depth: a port opened without `env:` inherits the emulator's whole
-  # environment. The demonstration tools were launched through `/usr/bin/env -i`
-  # and so received nothing; the coding tools were not, so every `bash` call this
+  # environment. The retired demonstration tools were launched through
+  # `/usr/bin/env -i` and so received nothing; the coding tools were not, so every `bash` call this
   # milestone added ran with the operator's variables -- the provider credential
   # among them, because the operator must export it for the command to run at
   # all. The receipt then journalled `provider_credential_present: false`, which
@@ -5943,14 +5840,14 @@ defmodule Loopex.Executor.Local do
   # explicitly after that snapshot so the security claim never rests on the
   # snapshot being complete. The downstream `env -i` boundary constructs the
   # exact PATH-only command environment recorded by the receipt.
-  # Concept: the demonstration tools and coding tools share one owned-process
-  # launcher and construct their environment in argv.
+  # Concept: guarded helpers and coding tools share one owned-process launcher
+  # and construct their environment in argv.
   #
   # Technical depth: `process_launcher/2` passes `-i` and one assignment to
   # `/usr/bin/env`, so the child's environment is that one name. Expressing both
   # tool classes in the same shape also gives both the same captured process-group
-  # cleanup rather than leaving demonstration children behind a released Port.
-  defp demonstration_environment do
+  # cleanup rather than leaving helper children behind a released Port.
+  defp helper_environment do
     [{String.to_charlist(@search_path_name), String.to_charlist(@search_path_value)}]
   end
 
@@ -6000,21 +5897,21 @@ defmodule Loopex.Executor.Local do
     do: open_launcher("/usr/bin/env", [], child_environment(), workspace)
 
   @doc false
-  @spec launcher_probe_port(binary(), :coding | :demonstration, (-> term())) :: port()
+  @spec launcher_probe_port(binary(), :coding | :helper, (-> term())) :: port()
   def launcher_probe_port(workspace, kind, before_open)
-      when is_binary(workspace) and kind in [:coding, :demonstration] and
+      when is_binary(workspace) and kind in [:coding, :helper] and
              is_function(before_open, 0) do
     environment =
       case kind do
         :coding -> child_environment()
-        :demonstration -> demonstration_environment()
+        :helper -> helper_environment()
       end
 
     open_launcher("/usr/bin/env", [], environment, workspace, before_open)
   end
 
   @doc false
-  @spec launcher_probe_port(binary(), :coding | :demonstration, (-> term()), [binary()]) ::
+  @spec launcher_probe_port(binary(), :coding | :helper, (-> term()), [binary()]) ::
           port()
   def launcher_probe_port(workspace, kind, before_open, excluded_env_names) do
     true = valid_excluded_env_names?(excluded_env_names)
@@ -7412,7 +7309,7 @@ defmodule Loopex.Executor.Local do
 
   defp launch_guarded_helper(program, arguments, {until, _bound, _probe} = episode, allowance) do
     stop = until - allowance
-    environment = demonstration_environment()
+    environment = helper_environment()
     token = launch_guard_token()
 
     {launcher, command_arguments} =
@@ -7844,39 +7741,6 @@ defmodule Loopex.Executor.Local do
     kept_output = binary_part(output, 0, min(byte_size(output), available))
     kept_output <> kept_suffix
   end
-
-  # Concept: a tool that did something says what it did.
-  #
-  # Technical depth: this demonstration tool wrote its file and printed nothing,
-  # so the model received an empty result. Under M1's fixed two turns nothing
-  # depended on the model understanding it. Under M2's real loop it does: a
-  # result that says nothing is indistinguishable from a call that failed
-  # silently, and a real provider answered it by writing the same file again,
-  # several times, in a live recovery trace. The four operator-facing coding
-  # tools already report what they did; this one now does too.
-  defp demonstration_process_arguments(%{path: path, content: content, delay_ms: delay}) do
-    script =
-      "if [ \"${#{@credential_name}+x}\" = x ]; then exit 97; fi; " <>
-        "delay=$1; target=$2; content=$3; " <>
-        "if [ \"$delay\" -gt 0 ]; then sleep \"$delay\"; fi; " <>
-        "umask 077; printf %s \"$content\" > \"$target\"; " <>
-        "printf 'wrote the requested content to %s' \"$target\""
-
-    %{
-      argv: [
-        "/bin/sh",
-        "-c",
-        script,
-        "loopex-controlled-tool",
-        Integer.to_string(div(delay + 999, 1_000)),
-        path,
-        content
-      ]
-    }
-  end
-
-  defp normalize_tool_result({outcome, output, spill}), do: {outcome, output, spill}
-  defp normalize_tool_result({outcome, output}), do: {outcome, output, :complete}
 
   defp receipt(
          state,
@@ -8349,8 +8213,7 @@ defmodule Loopex.Executor.Local do
   defp receipt_output_limit(job, receipt) do
     domain_limit =
       case resolve_tool(job) do
-        {:ok, %{coding: _definition} = tool} -> effective_output_limits(job, tool).output
-        {:ok, _demonstration_tool} -> receipt_output_limit(receipt)
+        {:ok, tool} -> effective_output_limits(job, tool).output
         {:error, _reason} -> receipt_output_limit(receipt)
       end
 
@@ -8362,7 +8225,6 @@ defmodule Loopex.Executor.Local do
   defp receipt_output_limit(receipt) do
     case tool_generation(receipt.tool_id, receipt.tool_version) do
       {:ok, %{coding: %{"budgets" => %{"output_bytes" => output}}}} -> output
-      {:ok, _demonstration_tool} -> @max_output_bytes
       :error -> @max_output_bytes
     end
   end

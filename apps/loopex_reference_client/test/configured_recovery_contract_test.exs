@@ -494,7 +494,7 @@ defmodule Loopex.ReferenceClient.ConfiguredRecoveryContractTest do
     now = System.system_time(:millisecond)
     proof = "#{label}-unrelated"
     target = "#{proof}.txt"
-    {:ok, tool} = Local.tool("loopex.demo.write")
+    {:ok, tool} = Local.tool("loopex.write")
 
     {:ok, job} =
       Executor.job(%{
@@ -513,7 +513,7 @@ defmodule Loopex.ReferenceClient.ConfiguredRecoveryContractTest do
         tool_id: tool.id,
         tool_version: tool.version,
         effect_class: tool.effect_class,
-        validated_arguments: %{"relative_path" => target, "content" => "must-not-run"},
+        validated_arguments: %{"path" => target, "content" => "must-not-run"},
         workspace_ref: "workspace-#{label}",
         workspace_lease: "lease-#{label}",
         run_deadline: now + 60_000,

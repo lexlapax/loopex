@@ -902,19 +902,17 @@ defmodule Loopex.Executor.Local.PostClosureHotfixTest do
     #
     # Technical depth: opening the episode lazily inside `spill/5` or
     # `settle_receipt/4` leaves ordinary replies free to spend unbounded
-    # preparation time before the clock exists. Both production `run_tool`
-    # clauses therefore open it after the actual effect result and before their
-    # first normalization/spill or receipt construction. Observe calls and
+    # preparation time before the clock exists. The production `run_tool`
+    # therefore opens it after the actual effect result and before its first
+    # spill or receipt construction. Observe calls and
     # returns in the real execute process, not lexical positions in source.
     # Each path must actually write its file and return a completed receipt.
     # This is an ordering observation, not a simulated slow-filesystem result;
     # the sibling below proves later phases reuse the same allowance.
     traced = [
       {:run_coding_tool, 10},
-      {:run_owned_process, 10},
       {:retention_until, 0},
       {:spill, 5},
-      {:normalize_tool_result, 1},
       {:receipt, 10}
     ]
 
@@ -934,13 +932,6 @@ defmodule Loopex.Executor.Local.PostClosureHotfixTest do
                {:returned, :run_coding_tool},
                {:called, :retention_until},
                {:called, :spill},
-               {:called, :receipt}
-             ]},
-            {"loopex.demo.write", %{"relative_path" => "demo.txt", "content" => "demo"},
-             [
-               {:returned, :run_owned_process},
-               {:called, :retention_until},
-               {:called, :normalize_tool_result},
                {:called, :receipt}
              ]}
           ] do
@@ -972,7 +963,7 @@ defmodule Loopex.Executor.Local.PostClosureHotfixTest do
           send(caller, :execute)
           assert_receive {:observed_receipt, ^caller, {:ok, receipt}}, 10_000
           assert receipt.outcome == :completed
-          path = Map.get(arguments, "path") || Map.fetch!(arguments, "relative_path")
+          path = Map.fetch!(arguments, "path")
           assert File.read!(Path.join(root, path)) == arguments["content"]
           barrier = :erlang.trace_delivered(caller)
           assert_receive {:trace_delivered, ^caller, ^barrier}

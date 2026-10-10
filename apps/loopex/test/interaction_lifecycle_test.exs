@@ -1818,7 +1818,7 @@ defmodule Loopex.InteractionLifecycleTest do
       session_id: "session-1",
       run_id: "run-1",
       tool_call_id: "call-1",
-      tool_id: "loopex.demo.write@1.0.0",
+      tool_id: "loopex.write@1.0.0",
       arguments: %{"path" => "workspace/file.txt"}
     }
   end
