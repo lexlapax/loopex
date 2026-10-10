@@ -1,5 +1,17 @@
 # M7 Implementation Tasks
 
+### Closure candidate nominated, 2026-10-10
+
+All agent work is merged at `a09e480b`. The documentation commits after it move
+M7 to In review, rewrite the nine outcome rows as Proved with named proof
+obligations, and update the closure scaffold's manifest and earlier-attempt
+prose; they change no source. A focused both-pair run at `a09e480b` (93/93 per
+pair, `closure-candidate-docs`) closes T13's wrapper, oracle-rerun and
+runnable-step rows. T16's focused-test and outcome-link rows close. Every other
+open row now names its pending proof: the candidate fast check on both pairs,
+the release matrix lanes and case IDs, the attended `m7-operator` block, or the
+independent review. The `chat_pipe_test.exs:180` pinned-load defect stays open.
+
 ### CLI-owned output and the duplicate answer, 2026-10-09
 
 Merged as `e5861402`. The intermittent duplicate CLI answer was the daemon's
@@ -15677,6 +15689,7 @@ or check was relaxed.
   both pairs in8.066seconds with exact unchanged final bytes. The complete
   current-format restore and native responsive lifecycle obligations stay open.
 - [ ] Implement accepted ADR0059's owned Control creation slot, conservative pre-permit fence and mechanical carrier with finite startup/recovery; prove actual held Store stop/status/overlap behavior, occupied-read refusals, original joins/cutoffs, actor/root/VM loss and no historical activation before coordinated rejoin.
+  Pending proof (2026-10-10, candidate nomination): the 2026-10-09 handoff records this implementation as complete; remaining proof is the candidate fast check on both pairs, the release check's `long_bound` lane for the sixty-second cutoff cases, and the independent review.
   Evidence (2026-10-09, `4a5ca415`, both supported pairs, `M7/claude-20261009/t04-t14`): `creation_custody_lifecycle_test.exs` (all 22, including # "runtime stop remains serviceable during an actual held Store RPC and joins owned actors", # "occupied Store reads refuse immediately while the actual claim call remains held", # "Control failure joins the original carrier and fresh startup never activates committed history"); `creation_startup_status_test.exs` (all 16, including # "stop and quiesce reduce availability while a real startup read remains held", # "original startup actors physically join normally after cutoff without becoming ready"); `creation_runtime_recovery_test.exs` # "root loss recovers the original #{@terminal} Local creation", # "VM loss recovers the original #{@terminal} Local creation"; `authored_creation_lifecycle_test.exs`. The six real sixty-second cutoff cases, including # "actual sixty second authored cutoff stops the original callback without a fresh allowance" and the cutoff-join case above, pass under `--only long_bound` on both pairs. Remaining caller migration is tracked by its own open T05 row.
 
   Current audit: paired79 at `ecc14289`, original59208, completes the literal
@@ -15918,6 +15931,7 @@ or check was relaxed.
   `ba52f1e9`, identical tree): protocol244, app server206/207, daemon584/592
   per pair with Node; `claude-20261009/t05-wire/`. See the wire note above. `inspection_socket_test`, `inspection_ingress_test`.
 - [ ] Migrate remaining implicit Core/edge/transport test hosts to captured current creation, replace their superseded record assertions, remove old configuration-less readers/writers, and prove current replay, command identity, uncertainty, authority and cleanup without a Core fallback. Run the full check once on the resulting clean committed candidate. The headless/loop and context-admission fixture phases are complete; superseded request/admission decoders and edge/transport joins remain.
+  Pending proof (2026-10-10, candidate nomination): the 2026-10-09 handoff records the migration as complete pending its full check; remaining proof is the candidate fast check on both pairs and the independent review's confirmation that no configuration-less reader or Core fallback remains.
 
 ## T06 — Build the first complete chat workflow
 
@@ -15928,8 +15942,10 @@ or check was relaxed.
 - [x] Support prompts, status, wait, abort, bounded output and truthful shutdown.
 - [x] Prove two prompts and restart through the built command.
 - [ ] Preserve existing ask, durable-run and embedded workflows.
+  Pending proof (2026-10-10, candidate nomination): the candidate fast check on both pairs; release real-provider rows 3–11; `m7.baseline.ask` and `m7.baseline.durable` (`m7-operator`).
 - [x] Test startup refusal, admission failure, output and cleanup.
 - [ ] Later retain the required attended multi-prompt proof.
+  Pending proof (2026-10-10, candidate nomination): the attended `m7-operator` block, cases `m7.repair`, `m7.long` and `m7.provider-switch`.
 
 ### Original item evidence — 2026-10-07
 
@@ -15986,6 +16002,7 @@ original item open. The [resume record](M7-resume.md) binds the original output.
 - [x] Test oversized oldest/newest groups, small problematic groups, trailing inputs, omitted content, length stops and non-progress.
 - [x] Inject crashes around preparation, staging, settlement, checkpoint and publication.
 - [ ] Prove automatic compaction, explicit compaction and restart preserve the required facts.
+  Pending proof (2026-10-10, candidate nomination): `m7.long` (`m7-operator`, V6.1–V6.4, V6.6.positive) and `m7.oversized-source` (V6.5.positive) against the real provider, plus the candidate fast check on both pairs.
 
 <a id="t07-original-item-evidence"></a>
 ### Original item evidence — 2026-10-04
@@ -16161,7 +16178,9 @@ the still-open real-provider, live protocol, persistent-fault or closure lanes.
 - [x] Bound raw streaming/parser buffers; implement fatal-error latching, flushing and wakeup.
 - [x] Test the bridge against a local HTTP server before integrating live-provider proofs.
 - [ ] Test model switching, crashes, cancellation, malformed replies, overflow, usage accounting and privacy.
+  Pending proof (2026-10-10, candidate nomination): the candidate fast check on both pairs over the switching, crash, cancellation, malformed, overflow, accounting and privacy files named in the native-privacy note above; `m7.provider-switch` (`m7-operator`).
 - [ ] Complete the seven thinking-round subcases, nine bound subcases and cancellation witness, including their prescribed subsequent prompts.
+  Pending proof (2026-10-10, candidate nomination): `m7.thinking-rounds` (`m7-operator`, V7.3.positive), `m7.thinking-bound` (V7.7.bound) and `m7.thinking-cancel` (V7.7.cancel) in `m7-provider`.
 
 ### Added implementation subtasks
 
@@ -16369,6 +16388,7 @@ Hosted, attended and coordinated transport generation proofs remain separate.
   `helper_route_guard_test` in app server, daemon and CLI, plus
   `chat_helpers_test` and `config_inspection_test` (`merged-t11c-30f1995f-*`).
 - [ ] Prove both role demonstrations with unchanged child workspaces and separate/combined usage.
+  Pending proof (2026-10-10, candidate nomination): `m7.review` (`m7-operator`, V8.1–V8.4), both roles on provider B.
 
 ### Added implementation subtasks
 
@@ -16429,7 +16449,9 @@ Hosted, attended and coordinated transport generation proofs remain separate.
 - [x] Join responder termination before another question or successful cleanup.
 - [x] Test blocked, invalid, failed and late callbacks, cancellation, expiry and cleanup uncertainty.
 - [ ] Preserve the existing credential and transport-cleanup guarantees.
+  Pending proof (2026-10-10, candidate nomination): the candidate fast check on both pairs, release real-provider rows 10 and 11, and the release check's `long_bound` lane with the provider transport-drain witness.
 - [ ] Complete the attended ephemeral-question witness.
+  Pending proof (2026-10-10, candidate nomination): `m7.ephemeral-question` (`m7-operator`, V5.6.positive) through `scripts/m7-ephemeral-question-demo.exs`.
 
 Items 1 and 2 map to the audited startup, public model/question/trace and
 buffered-wire cases recorded under [Current work](#current-work). Exact current
@@ -16462,12 +16484,18 @@ candidate integration and focused floor proofs are retained there; items 9 and
 - [x] Implement the feature fixture requiring the nil-encoding question.
 - [x] Implement the review fixture with the exact duplicate-fee finding and call chain.
 - [x] Implement the long fixture preserving the required facts through compaction and restart.
-- [ ] Implement the trusted fixture wrapper and exact approved test-command policy.
-- [ ] Let the agent run approved tests; independently rerun immutable oracles and inspect allowed changes.
+- [x] Implement the trusted fixture wrapper and exact approved test-command policy.
+  Implemented by `scripts/m7-fixture-chat.exs`, `Mix.Tasks.Loopex.M7Evidence.CaseRunner` and `LoopexCli.Policy.M7Fixture`. Evidence (2026-10-10, source `a09e480b`, both supported pairs, `M7/claude-20261009/closure-candidate-docs`): `m7_case_runner_test`, `m7_fixture_policy_test`, `m7_fixture_chat_test`, `m7_execution_manifest_test` and `m7_fixture_test` pass 93/93 per pair (current 134.6 s, SHA-256 `cb04c882…`; floor 137.0 s, `f019c4e2…`). Cases include `m7_fixture_policy_test.exs` # "only exact argv, current generations and the selected lease permit dispatch", `m7_fixture_chat_test.exs` # "unknown cases and caller-supplied command vectors are refused", # "a fully pinned alternate runner cannot become the selected catalog oracle" and `m7_case_runner_test.exs` # "the wrapper command checks admission without staging and refuses bad arguments".
+- [x] Let the agent run approved tests; independently rerun immutable oracles and inspect allowed changes.
+  Mechanism proved with local model fixtures in the same run: `m7_fixture_policy_test.exs` # "real chat commits the agent oracle, refuses alternate shell, reports harness and independently reruns unchanged bytes"; `m7_case_runner_test.exs` # "a repair attempt is recorded before dispatch, reopens its session and passes independently", # "a failing oracle completes as assertion_failed and stops the lane", # "the external task runs in a disposable checkout and inspects only allowed changes". Real-provider execution belongs to the `m7-operator` fixture cases.
 - [ ] Pin and execute the maintainer-selected external repository task.
-- [ ] Make every V1–V13 instruction runnable, with one owner and evidence slot per step/subcase.
+  Pinned: `test/fixtures/m7/manifest.json` `external` (base `30a49d6059b2a69b54e6e97f69a5623ce977b16d`, allowed change `tools/threads.py`, oracle `external/oracle_test.py` SHA-256 `22598b99…`), proved by `m7_case_runner_test.exs` # "the external task runs in a disposable checkout and inspects only allowed changes" in the run cited above. Pending proof (2026-10-10, candidate nomination): `m7.external` (`m7-operator`, V10.1–V10.5) with `LOOPEX_M7_EXTERNAL_REPOSITORY`.
+- [x] Make every V1–V13 instruction runnable, with one owner and evidence slot per step/subcase.
+  The execution manifest gives each of 110 step keys one `case:` or `test:` owner and every case a driver with status `ready`; `M7-closure-runs.md` carries one Pending row per key. Proved by `m7_execution_manifest_test.exs` # "the committed manifest covers all 74 numbered steps with literal test owners", # "test owners must name a literal test in an application test file", # "lane selections pin each case's specification and refuse pending cases" in the run cited above, and `mix loopex.m7_evidence` (`pending: 0 cases, 0 step owners`) in the `check.sh --docs` of this candidate.
 - [ ] Complete the specified human-attended steps with a named operator.
+  Pending proof (2026-10-10, candidate nomination): the attended `m7-operator` block (20 cases) through `scripts/attended-release.sh --operator Maintainer`.
 - [ ] Collect previous executions without adding extra model attempts.
+  Pending proof (2026-10-10, candidate nomination): the closure matrix's attempts index for campaign `m7-closure-1`; no earlier attempt is known (`mix loopex.m7_evidence`: committed heads none).
 
 A source audit after the reboot confirms original wrapper/oracle rows remain
 open. Policy/chat seams and actual repair, feature and long fixture proofs are
@@ -16683,6 +16711,7 @@ full restore175, operator attendance, helpers or whole integration.
 - [x] Remove the historical cross-version archive lane, its exclusive helpers and fixtures; refuse its retired selector before staging and prove current build/redaction/manifest checks on both supported toolchains.
 - [x] Retire shipped 1.0 read/search definitions, their capability/vector/dispatch support and default-selection shim; migrate current callers and fixtures, prove exact current identities, all tool subsets, retired-version refusal, inline/spill/range restart and unchanged path/budget/context/cleanup obligations on both supported pairs.
 - [ ] Remove superseded record/API/protocol readers, tool generations, host fallbacks and compatibility-only fixtures; migrate current callers and retain one current contract at each boundary.
+  Pending proof (2026-10-10, candidate nomination): ADR 0070 groups 1–4 are merged (`b782bf93`); remaining proof is the candidate fast check on both pairs and the independent review.
 - [x] Prove current-format backup/restore and recovery with complete manifests, separate workspace state and exact nonredispatch of unresolved effects.
   Evidence (2026-10-09, `94da3797`, both supported pairs, `M7/claude-20261009/t15-helper-restore`): `restore_helper_root_test.exs` # "a quiescent helper root restores into an empty root and reopens without dispatch" runs a real helper parent and child on the shipped Local Store and executor beside an outcome-unknown bash effect, publicly restores into an empty root, compares the complete state manifest and the separate workspace manifest, then reopens with the helper and Local executor: zero dispatches, no model call and no new child; # "a helper namespace with #{damage} damage restores only when undamaged" commits the undamaged control and refuses a writer marker, a corrupt run log, an unknown member and `job-index-v1` before any destination mutation. Without helpers: `restore_workflow_test.exs` # "public runtime restore leaves workspace intact before a separate same-directory content restore"; `restore_public_resolution_test.exs` # "public helper #{member} namespace outside the audited members refuses"; `end_to_end_recovery_test.exs` # "an effect without a durable receipt becomes outcome_unknown and is not blindly retried". Operator attendance belongs to `m7.restore`.
 
@@ -16691,14 +16720,18 @@ full restore175, operator attendance, helpers or whole integration.
 ### Original checklist
 
 - [x] Move M7 to In progress when product work begins.
-- [ ] Keep outcome rows linked to actual tests and evidence.
+- [x] Keep outcome rows linked to actual tests and evidence.
+  The candidate nomination (2026-10-10) rewrites all nine Progress and Evidence rows in `docs/plans/M7.md` as Proved, each naming its fast-check suites and exact manifest case IDs; the closure scaffold holds their Pending results.
 - [x] Update operator/developer documentation, indexes, compatibility guidance, README, roadmap and changelog.
   Audited and corrected at `825f98ee` (generation names /3 and /4, chat and helpers, restore of helper objects, tool versions, roadmap state, changelog, M7 release procedure with provider B); `bash scripts/check.sh --docs` passes.
 - [x] Update verification guidance to the accepted M7 procedures.
   Audited and corrected at `825f98ee` (generation names /3 and /4, chat and helpers, restore of helper objects, tool versions, roadmap state, changelog, M7 release procedure with provider B); `bash scripts/check.sh --docs` passes.
-- [ ] Run focused unit, property, conformance, fault, security, protocol and CLI tests during development.
+- [x] Run focused unit, property, conformance, fault, security, protocol and CLI tests during development.
+  Done throughout development: the per-unit focused both-pair runs cited in the rows above, retained under `loopex-evidence/M7/claude-20261009/` with `SHA256SUMS` (for example `t04-t14`, `t05-wire`, `t11-helpers`, `t15-helper-restore`, `operator-block`, `closure-candidate-docs`).
 - [ ] Run the fast check once per clean integration candidate.
+  Pending proof (2026-10-10, candidate nomination): `bash scripts/check.sh` of the candidate on the current pair, and on the floor pair through `scripts/floor-lane.sh`.
 - [ ] Run required selected real-provider, Node, daemon, long-bound and cross-UID lanes.
+  Pending proof (2026-10-10, candidate nomination): the full `scripts/check-release.sh` through `scripts/attended-release.sh`: `real_provider` rows 1–11, `node_client`, `long_bound`, `cross_uid`, `m7-rollback`, `m7-operator`, `m7-provider`.
 - [ ] Run changed process-boundary cases thirty times under the prescribed pinned Linux load.
   Open defect under the 2026-10-10 stress-chase cap: `chat_pipe_test.exs:180`
   with the `""` fragment failed 2/30 with `{:reader_down, :noproc}` at `624795`
@@ -16708,7 +16741,12 @@ full restore175, operator attendance, helpers or whole integration.
   early (an `input_failed` error or end of input), so the driver began its stop
   before the half-close. This is unconfirmed and possibly a stdio defect. This
   case is not counted toward the thirty-run row.
+  Pending proof (2026-10-10, candidate nomination): the closure scaffold's two
+  Linux pinned-load rows. The retained sets in `pinned-load/` (`CASES.txt`) ran
+  at pre-candidate SHAs; whether they stand for the candidate or the touched
+  cases rerun at its SHA is a maintainer decision.
 - [ ] Independently review integration changes and fix confirmed defects without weakening checks.
+  Pending proof (2026-10-10, candidate nomination): the independent review of the exact candidate (T17).
 
 ### Added implementation subtasks
 
@@ -16965,7 +17003,9 @@ is claimed.
 - [ ] Provision Linux cross-UID support, descriptor limits, retained evidence storage and attendance.
 - [ ] Finish all source, fixtures and documentation before committing the tested candidate.
 - [ ] Move the candidate to In review with complete proof mappings and Pending evidence slots.
+  Transition made by the candidate nomination commit on 2026-10-10. Left open until the reviewer accepts the mappings, including the plan's per-profile-key rows: the committed manifest declares no profile keys.
 - [ ] Verify main is an ancestor.
+  Checked at nomination: `main` and `origin/main` (`e78fa64c`) are ancestors of `a09e480b` and the candidate. Repeat before the matrix, before the packet and before the administrative child.
 - [ ] Count the existing current-toolchain fast check; run the floor-toolchain check.
 - [ ] Run the full logical release matrix in its fixed order.
 - [ ] Complete every M7 case, subcase and operator evidence join.
