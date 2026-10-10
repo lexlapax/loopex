@@ -77,6 +77,16 @@ defmodule Loopex.LLM.ReqLLM.ProviderWorker do
       # before dependencies start, preserving it across application loading.
       Application.put_env(:req_llm, :load_dotenv, false, persistent: true)
       Application.put_env(:llm_db, :load_dotenv, false, persistent: true)
+      # Concept: a one-use worker never pays a whole model-catalog load.
+      # Technical depth: the first metadata query would load LLMDB's packaged
+      # catalog, about 1 s of CPU, and this VM serves exactly one call. Host
+      # admission already captured the verified limits and mapping into the
+      # committed request. With the catalog left empty the model resolves
+      # without catalog rows, as the ephemeral profile's inline model does:
+      # base URLs come from configuration or the built-in provider default,
+      # and a catalog alias is sent as its literal, unregistered model id.
+      Application.put_env(:llm_db, :skip_packaged_load, true, persistent: true)
+      Application.put_env(:req_llm, :warn_unverified_models, false, persistent: true)
       sink = spawn_link(fn -> io_sink() end)
       true = Process.group_leader(self(), sink)
       :ok = :logger.set_primary_config(:level, :none)

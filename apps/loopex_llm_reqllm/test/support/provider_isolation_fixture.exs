@@ -575,6 +575,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
           tidewave_absent: System.get_env("TIDEWAVE_REPL") == nil,
           req_dotenv_disabled: Application.get_env(:req_llm, :load_dotenv) == false,
           db_dotenv_disabled: Application.get_env(:llm_db, :load_dotenv) == false,
+          catalog_unloaded: LLMDB.Catalog.snapshot() == nil,
           no_core: Enum.all?(Application.started_applications(), fn {app, _, _} ->
             app not in [:loopex, :loopex_cli, :loopex_composition, :loopex_llm_reqllm]
           end)

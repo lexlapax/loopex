@@ -68,7 +68,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderEntryTest do
     Fixture.assert_gone(fixture)
   end
 
-  test "protected entry prevents workspace dotenv and development activation before dependency startup" do
+  test "protected entry prevents workspace dotenv, development activation and a catalog load before dispatch" do
     fixture = Fixture.new(:dotenv)
     before = {Application.get_all_env(:req_llm), Application.get_all_env(:llm_db)}
     assert {:ok, _reply} = Fixture.complete(fixture)
@@ -78,6 +78,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderEntryTest do
              "tidewave_absent" => true,
              "req_dotenv_disabled" => true,
              "db_dotenv_disabled" => true,
+             "catalog_unloaded" => true,
              "no_core" => true
            }
 
