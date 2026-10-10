@@ -186,8 +186,8 @@ private companion process per invocation and explicit adapter options:
 file. Unmanaged calls also supply the validated `cleanup_grace_ms`; managed calls
 use Core's retained value. Missing, malformed, or mismatched configuration
 refuses before credential delivery, with no shared-VM fallback or runtime code
-discovery. The Model callback is `complete/3`; the bare-model `complete/2`
-helper refuses, and direct callers use `complete_prompt/3`, which takes a
+discovery. The Model callback is `complete/3`; direct callers use
+`complete_prompt/3` (ADR 0070 retired the bare-model `complete/2`), which takes a
 composed `:credential_token` and `:credential_registry` and refuses before
 launch without them — compose custody as `LoopexComposition.CredentialHost`
 does. `Loopex.LLM.ReqLLM.call_options/3` is an exported, unstable helper that
