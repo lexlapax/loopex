@@ -105,7 +105,7 @@ defmodule LoopexProtocol.Session.V2Test do
           "session_id_invalid",
           "session_index_too_large",
           "session_index_corrupt",
-          "session_index_upgrade_required",
+          "session_catalog_retired",
           "attachment_superseded",
           "attachment_route_invalidated"
         ] do
