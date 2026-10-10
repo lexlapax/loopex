@@ -166,6 +166,29 @@ defmodule Loopex.LLM.ReqLLM.Mapping do
     }
   end
 
+  @doc """
+  ## Concept
+
+  Read a non-streaming response into the metadata both model edges classify.
+
+  ## Technical depth
+
+  Carries usage, finish reason, captured headers, any response error and only
+  the provider-reported `status`, under the same `provider_meta` key a streamed
+  Responses terminal carries, so completion is classified from what the
+  provider reported rather than from the dependency's default stop.
+  """
+  def response_metadata(%ReqLLM.Response{} = response, headers) do
+    metadata = %{
+      usage: response.usage || %{},
+      finish_reason: response.finish_reason,
+      provider_meta: Map.take(response.provider_meta || %{}, ["status"]),
+      headers: headers
+    }
+
+    if is_nil(response.error), do: metadata, else: Map.put(metadata, :error, response.error)
+  end
+
   # Concept: a completion the provider finished, distinguished from one that was
   # cut off — including the completion that finished with nothing to say.
   #

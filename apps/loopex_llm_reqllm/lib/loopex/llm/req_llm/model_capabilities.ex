@@ -199,17 +199,19 @@ defmodule Loopex.LLM.ReqLLM.ModelCapabilities do
   ## Technical depth
 
   Only a request whose captured mapping is a registered OpenAI cell, which
-  `verify_captured/1` proved exact before transport, is classified: the
-  Responses `response.completed` terminal is `natural` and an output-limit
-  stop is `limit`. Every other request, including the generic cell, stays
-  `unknown`, so no completion evidence is invented for an unregistered route.
+  `verify_captured/1` proved exact before transport, is classified: a stop
+  whose provider-reported Responses status is `completed` is `natural` and an
+  output-limit stop is `limit`. The dependency maps every other non-streaming
+  status, a missing one included, to a stop, so a stop without that reported
+  status stays `unknown`, as does every other request, including the generic
+  cell: no completion evidence is invented.
   """
   @spec completion(map(), map()) :: String.t()
   def completion(%{model: "openai:" <> _, sampling: %{"provider_mapping" => mapping}}, metadata)
       when mapping != @generic do
-    case Map.get(metadata, :finish_reason) do
-      :stop -> "natural"
-      :length -> "limit"
+    case {Map.get(metadata, :finish_reason), Map.get(metadata, :provider_meta)} do
+      {:stop, %{"status" => "completed"}} -> "natural"
+      {:length, _meta} -> "limit"
       _ -> "unknown"
     end
   end

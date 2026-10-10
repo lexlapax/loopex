@@ -91,14 +91,67 @@ defmodule Loopex.LLM.ReqLLM.OpenAISummarizerTest do
     refute Enum.any?(Map.keys(body), &(&1 =~ "reason" or &1 =~ "thinking"))
   end
 
-  test "only the registered cell's terminal stop is classified" do
-    for {reason, completion} <- [stop: "natural", length: "limit", incomplete: "unknown"] do
-      assert ModelCapabilities.completion(request("none", @none), %{finish_reason: reason}) ==
-               completion
+  test "only the registered cell's reported completed stop is classified" do
+    completed = %{"status" => "completed"}
+
+    for {reason, meta, completion} <- [
+          {:stop, completed, "natural"},
+          {:stop, %{}, "unknown"},
+          {:stop, %{"status" => "failed"}, "unknown"},
+          {:length, %{"status" => "incomplete"}, "limit"},
+          {:incomplete, completed, "unknown"}
+        ] do
+      metadata = %{finish_reason: reason, provider_meta: meta}
+      assert ModelCapabilities.completion(request("none", @none), metadata) == completion
     end
 
-    assert ModelCapabilities.completion(request("default", @generic), %{finish_reason: :stop}) ==
-             "unknown"
+    assert ModelCapabilities.completion(request("default", @generic), %{
+             finish_reason: :stop,
+             provider_meta: completed
+           }) == "unknown"
+  end
+
+  # Concept: a non-streaming Responses body is natural only when it says completed.
+  # Technical depth: the dependency maps every status other than completed or
+  # incomplete -- failed, cancelled, in_progress, queued or missing -- to :stop,
+  # so the stop alone is not evidence; the carried provider status decides.
+  test "a non-streaming body without a completed status is not natural" do
+    for {status, completion} <- [
+          {"completed", "natural"},
+          {"failed", "unknown"},
+          {"cancelled", "unknown"},
+          {"in_progress", "unknown"},
+          {"queued", "unknown"},
+          {nil, "unknown"}
+        ] do
+      body =
+        %{
+          "id" => "resp_m7",
+          "model" => "gpt-4.1-mini",
+          "output" => [
+            %{
+              "type" => "message",
+              "id" => "msg_m7",
+              "role" => "assistant",
+              "content" => [%{"type" => "output_text", "text" => "summary"}]
+            }
+          ],
+          "usage" => %{"input_tokens" => 9, "output_tokens" => 2}
+        }
+        |> then(&if(status, do: Map.put(&1, "status", status), else: &1))
+
+      {_req, %Req.Response{body: %ReqLLM.Response{} = response}} =
+        ReqLLM.Providers.OpenAI.ResponsesAPI.decode_response(
+          {Req.new(), %Req.Response{status: 200, body: body}}
+        )
+
+      assert response.finish_reason == :stop
+      metadata = Loopex.LLM.ReqLLM.Mapping.response_metadata(response, [])
+      assert Loopex.LLM.ReqLLM.Mapping.completed(metadata) == :ok
+
+      assert ModelCapabilities.completion(request("none", @none), metadata) == completion,
+             "status #{inspect(status)}"
+    end
   end
 
   test "a request whose captured mapping differs refuses before transport" do
