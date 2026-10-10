@@ -288,14 +288,13 @@ defmodule Loopex.Bounds do
   the prompt-budget measurement and the token accounting are visibly the same
   estimator rather than two that happen to agree today.
 
-  ADR 0017 renames the identity to `loopex.context_bytes.v1`. The
-  one-token-per-three-canonical-bytes algorithm is unchanged; the new name is
-  what stops a retained measurement inheriting the superseded claim that this
-  estimate never undercounts every provider tokenizer. It is deterministic
-  admission policy, not a guarantee about a selected model.
+  The current identity is `loopex.context_bytes.v2` (ADR 0044): the
+  one-token-per-three-canonical-bytes algorithm over the exact provider-visible
+  request. It is deterministic admission policy, not a guarantee about a
+  selected model. Every receipt and refusal this runtime writes carries it.
   """
   @spec estimator() :: binary()
-  def estimator, do: "loopex.context_bytes.v1"
+  def estimator, do: "loopex.context_bytes.v2"
 
   @doc """
   ## Concept

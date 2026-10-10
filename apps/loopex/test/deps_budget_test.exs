@@ -823,6 +823,7 @@ defmodule Mix.Tasks.Loopex.DepsBudgetTest do
       "loopex_llm_reqllm",
       :edge,
       [
+        {:loopex, [in_umbrella: true]},
         {:loopex_protocol, [in_umbrella: true]}
       ] ++ @load_only_edge_dependencies
     )

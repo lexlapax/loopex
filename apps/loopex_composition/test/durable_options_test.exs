@@ -289,10 +289,14 @@ defmodule LoopexComposition.DurableOptionsTest do
       assert capture(entry, bounds: %{})[:bounds] == %{}
 
       for n <- [1, 1_000_000] do
-        assert capture(entry,
-                 model: "openai:unregistered-fixture",
-                 sampling: %{"max_tokens" => n}
-               )[:sampling] == %{"max_tokens" => n}
+        captured =
+          capture(entry,
+            model: "openai:unregistered-fixture",
+            sampling: %{"max_tokens" => n}
+          )
+
+        refute Keyword.has_key?(captured, :sampling)
+        assert captured[:session_creation_defaults]["initial_configuration"]["max_tokens"] == n
       end
     end
   end
@@ -379,7 +383,8 @@ defmodule LoopexComposition.DurableOptionsTest do
 
       assert opts[:model].model == "openai:id"
       assert opts[:bounds] == %{max_turns: 1}
-      assert opts[:sampling] == %{"max_tokens" => 1}
+      refute Keyword.has_key?(opts, :sampling)
+      assert opts[:session_creation_defaults]["initial_configuration"]["max_tokens"] == 1
       assert opts[:active_tools] == []
       assert opts[:tools] == []
       refute Keyword.has_key?(opts, :unknown)

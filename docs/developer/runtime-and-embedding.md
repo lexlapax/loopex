@@ -163,7 +163,6 @@ Optional options:
 | Option | Default and meaning |
 | --- | --- |
 | `:bounds` | `%{max_turns: 16, token_budget: 1_000_000, deadline_ms: 600_000}`; supplied keys override. |
-| `:sampling` | `%{"max_tokens" => 4_096}`. |
 | `:maintenance_model` | `nil`, or the closed resolved `model`, `reasoning`, `model_capabilities`, `provider_mapping` map under ADR 0043. It is independent of the ordinary model. |
 | `:maintenance_instructions` | `nil`, or exactly `%{"version" => version, "body" => body}` with version up to 64 bytes and nonempty UTF-8 body up to 2,048 bytes. Startup captures its exact rendering and digest. |
 | `:cleanup_grace_ms` | `Loopex.Executor.default_cleanup_grace_ms/0`, `5_000`; the committed cleanup period every job and terminal carries. |
@@ -687,7 +686,7 @@ companion ReqLLM model adapter:
 | `:provider_launch` | The provider companion's launch configuration, a keyword list read from the non-secret `.launch` file that `mix loopex.provider.build` writes. No companion is discovered. |
 | `:model` | Optional hosted `provider:model`; default `anthropic:claude-haiku-4-5`. The durable profile refuses `ollama:`. |
 | `:bounds` | Optional map of positive unsigned-64-bit `:max_turns`, `:token_budget` and `:deadline_ms`; omitted members keep runtime defaults. |
-| `:sampling` | Optional exact `%{"max_tokens" => n}` with `n` from 1 to 1,000,000. |
+| `:sampling` | Optional exact `%{"max_tokens" => n}` with `n` from 1 to 1,000,000; it sets the captured initial configuration's `max_tokens`. |
 | `:active_tools` | Optional unique list of declared tool IDs, from the four coding tools and `loopex.grep`, `loopex.find`, `loopex.ls`. Omission keeps the coding four active. |
 | `:context_token_budget` | Defaults to `8_192` estimated tokens; an explicit valid value is forwarded unchanged. |
 | `:cleanup_grace_ms`, `:process_probe` | Forwarded to the session and executor together, so a run's ending reports the period its cleanup ran under. |

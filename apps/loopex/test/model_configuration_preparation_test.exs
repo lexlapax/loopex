@@ -1470,7 +1470,6 @@ defmodule Loopex.ModelConfigurationPreparationTest do
         workspace_lease: "workspace-lease"
       },
       bounds: Fixture.bounds(),
-      sampling: %{"max_tokens" => 1_024},
       tools: [],
       active_tools: [],
       policy: Loopex.AgentLoopTestPolicy,

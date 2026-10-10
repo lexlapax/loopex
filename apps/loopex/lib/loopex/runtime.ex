@@ -102,7 +102,6 @@ defmodule Loopex.Runtime do
           | {:project_manifest, map() | nil}
           | {:project_decision, map() | nil}
           | {:resource_manifest, map() | nil}
-          | {:sampling, map()}
           | {:grant_decision, term()}
           | {:fault_to, pid() | nil}
 
@@ -1237,7 +1236,6 @@ defmodule Loopex.Runtime do
              active_tools: [],
              session_creation_defaults: nil,
              bounds: nil,
-             sampling: nil,
              policy: nil,
              project_manifest: nil,
              project_decision: nil,
@@ -1276,7 +1274,6 @@ defmodule Loopex.Runtime do
            validate_policy(validated[:policy], validated[:tools], validated[:tool]),
          {:ok, policy_identity} <-
            validate_policy_identity(validated[:policy_identity], policy),
-         {:ok, sampling} <- validate_sampling(validated[:sampling]),
          {:ok, resource_manifest} <-
            validate_resource_manifest(validated[:resource_manifest], executor),
          {:ok, grant_decision} <- validate_grant_decision(validated[:grant_decision]),
@@ -1310,7 +1307,6 @@ defmodule Loopex.Runtime do
          active_tools: active_tools,
          session_creation_defaults: session_creation_defaults,
          bounds: bounds,
-         sampling: sampling,
          policy: policy,
          policy_identity: policy_identity,
          project_manifest: validated[:project_manifest],
@@ -1403,12 +1399,11 @@ defmodule Loopex.Runtime do
     end
   end
 
-  # Concept: the three declared run bounds, and the sampling bound every request
-  # carries.
+  # Concept: the three declared run bounds.
   #
   # Technical depth: ADR 0010 gives each bound a configured value with a default,
   # and requires the value to be committed with the run rather than invented at
-  # dispatch. Both are therefore resolved here, once, where a host can see and
+  # dispatch. They are therefore resolved here, once, where a host can see and
   # override them, and are committed with the run that uses them. A host that
   # explicitly supplies a malformed value is refused at start rather than
   # silently given the default, which is what "refused at start" protects: the
@@ -1422,7 +1417,6 @@ defmodule Loopex.Runtime do
   # request re-presents its instant while a run that staged nothing still has no
   # instant to extend or expire.
   @default_bounds %{max_turns: 16, token_budget: 1_000_000, deadline_ms: 600_000}
-  @default_sampling %{"max_tokens" => 4_096}
   @uint64_max 18_446_744_073_709_551_615
 
   # Concept: ADR 0017 makes the context token budget a required runtime option
@@ -1514,14 +1508,6 @@ defmodule Loopex.Runtime do
   end
 
   defp validate_bounds(_bounds), do: {:error, :invalid_declared_bounds}
-
-  defp validate_sampling(nil), do: {:ok, @default_sampling}
-
-  defp validate_sampling(%{"max_tokens" => max_tokens} = sampling)
-       when is_integer(max_tokens) and max_tokens > 0 and map_size(sampling) == 1,
-       do: {:ok, sampling}
-
-  defp validate_sampling(_sampling), do: {:error, :invalid_sampling_bound}
 
   # Concept: the tool set a runtime is composed with.
   #

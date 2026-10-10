@@ -189,10 +189,12 @@ defmodule Loopex.ReferenceClientRuntimeFixture do
       fault_to: Keyword.get(options, :fault_to)
     ]
 
+    # The fixture keeps its sampling choice for the genesis it builds; the
+    # runtime itself takes none, because each session captures its own.
     runtime_options =
       runtime_options ++ sampling_options ++ Keyword.take(options, [:artifact_store])
 
-    {:ok, client} = ReferenceClient.start(runtime_options)
+    {:ok, client} = ReferenceClient.start(Keyword.delete(runtime_options, :sampling))
 
     case Keyword.get(model_options, :tracing_capability) do
       nil -> :ok

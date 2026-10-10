@@ -539,7 +539,6 @@ defmodule Loopex.TimerDomainTest do
         declared_tools: [],
         active_tools: [],
         bounds: %{max_turns: 8, token_budget: 1_000, deadline_ms: 600_000},
-        sampling: %{"max_tokens" => 256},
         policy: nil,
         project_manifest: nil,
         project_decision: nil,

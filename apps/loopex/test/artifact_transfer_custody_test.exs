@@ -254,7 +254,9 @@ defmodule Loopex.ArtifactTransferCustodyTest do
     retire = callback(:retire)
     reply(retire, {:retired, receipt(context, opened.work)})
     assert {:error, :unknown_transfer} = Task.await(reader, 1_000)
-    assert entry(fixture, context.transfer_ref).receipt !== nil
+    # The reader is answered when retirement begins; the receipt arrives with
+    # the observer's later result, so wait for it rather than racing it.
+    await(fn -> entry(fixture, context.transfer_ref).receipt !== nil end)
     assert entry(fixture, context.transfer_ref).invocation !== :idle
     refute_received {:artifact_callback, :acknowledge, _, _, _}
     reply(read, {:ok, %{offset: 0, bytes: "abc", chunk_digest: digest("abc")}})

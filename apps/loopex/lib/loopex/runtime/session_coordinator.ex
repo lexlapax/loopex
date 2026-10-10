@@ -420,7 +420,6 @@ defmodule Loopex.Runtime.SessionCoordinator do
        project_manifest: Keyword.get(options, :project_manifest),
        project_decision: Keyword.get(options, :project_decision),
        resource_snapshot: Keyword.get(options, :resource_snapshot),
-       sampling: Keyword.get(options, :sampling),
        grant_decision: Keyword.fetch!(options, :grant_decision),
        fault_to: Keyword.fetch!(options, :fault_to),
        cleanup_grace_ms: Keyword.fetch!(options, :cleanup_grace_ms),

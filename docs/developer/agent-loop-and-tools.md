@@ -805,7 +805,7 @@ matches, abandon before activation or abort on conflict, and treat a settled
 session's nil active value as no comparison rather than as the reference
 default.
 
-`loopex.context_bytes.v1` measures the exact final provider-visible messages and
+`loopex.context_bytes.v2` measures the exact final provider-visible messages and
 active model-facing tool projections. Store separately normalizes and measures
 each private record and unstamped public-event payload against its exact 65,536-
 byte item ceiling before that value can commit or authorize later work. The
