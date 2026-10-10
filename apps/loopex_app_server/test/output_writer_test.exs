@@ -139,6 +139,50 @@ defmodule Loopex.AppServer.OutputWriterTest do
     end)
   end
 
+  # Concept: a whole group stopped while its leader waits for the worker is
+  # still joined by retirement, and the worker never writes after it.
+  # Technical depth: a private WRITTEN enters the decoder while the real
+  # worker is blocked on the FIFO, the one deterministic way to hold a live
+  # worker behind the leader's `wait`; it releases nothing, since retirement
+  # precedes any JOINED. The group is then SIGSTOPped and the FIFO's only
+  # reader closed. Resuming only the leader would leave `wait` blocked on the
+  # stopped worker; resuming the group lets the worker take its broken pipe,
+  # the leader's `wait` fail into its own group kill, and cleanup join.
+  test "retirement resumes a group stopped while its leader waits for the worker" do
+    with_fixture(:fifo, fn fixture ->
+      frame = :binary.copy("w", @frame_bytes - 1) <> "\n"
+      {:reply, {:ok, reference}} = request(fixture, {"write", frame}, &match?({:reply, _}, &1))
+      active = blocked_worker(fixture)
+      assert_live_group(active)
+      assert request(fixture, {"inject", "written"}, &(&1 == :injected)) == :injected
+      waiting = phase(fixture, :waiting, System.monotonic_time(:millisecond) + 5_000)
+      assert waiting.worker == active.worker
+
+      assert {<<>>, 0} =
+               Local.answer_within(
+                 "/bin/kill",
+                 ["-STOP", "--", "-#{active.leader}"],
+                 500
+               )
+
+      assert_stopped(active.leader, System.monotonic_time(:millisecond) + 5_000)
+      assert_stopped(active.worker, System.monotonic_time(:millisecond) + 5_000)
+      :ok = :file.close(fixture.fifo)
+      send_command(fixture, "stop")
+      {:retired, ^reference, :stopped} = next(fixture, &match?({:retired, _, _}, &1))
+      {:stopped, {:ok, facts}} = next(fixture, &match?({:stopped, _}, &1))
+      refute facts.worker_waited
+      assert facts.worker == active.worker
+      assert facts.group_absent
+      assert facts.port_down
+      assert is_integer(facts.port_exit_status)
+      assert facts.cleanup == :joined
+      assert facts.cleanup_observed_at < facts.cleanup_cutoff
+      {:writer_down, :normal, at} = next(fixture, &match?({:writer_down, _, _}, &1))
+      assert at < facts.cleanup_cutoff + @fixture_grace
+    end)
+  end
+
   test "a broken stdout cannot acknowledge the worker or prevent physical cleanup" do
     with_fixture(:fifo, fn fixture ->
       :ok = :file.close(fixture.fifo)
@@ -332,6 +376,36 @@ defmodule Loopex.AppServer.OutputWriterTest do
       {:state, _active, _sealed} ->
         Process.sleep(10)
         blocked_worker(fixture, cutoff)
+    end
+  end
+
+  defp phase(fixture, phase, cutoff) do
+    assert System.monotonic_time(:millisecond) < cutoff
+
+    case request(fixture, "state", &match?({:state, _, _}, &1)) do
+      {:state, %{phase: ^phase} = active, false} ->
+        active
+
+      {:state, _active, _sealed} ->
+        Process.sleep(10)
+        phase(fixture, phase, cutoff)
+    end
+  end
+
+  defp assert_stopped(pid, cutoff) do
+    remaining = cutoff - System.monotonic_time(:millisecond)
+    assert remaining > 0
+
+    assert {status, 0} =
+             Local.answer_within(
+               "/bin/ps",
+               ["-o", "stat=", "-p", Integer.to_string(pid)],
+               min(500, remaining)
+             )
+
+    unless String.starts_with?(String.trim(status), "T") do
+      Process.sleep(min(10, remaining))
+      assert_stopped(pid, cutoff)
     end
   end
 
