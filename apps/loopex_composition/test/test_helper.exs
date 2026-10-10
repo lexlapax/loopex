@@ -1,5 +1,28 @@
 Code.require_file("../../loopex/test/support/configured_genesis_helper.exs", __DIR__)
 
+# Concept: each test VM owns its own temporary namespace.
+# Technical depth: suites name roots by `System.unique_integer/1`, which restarts
+# in every VM, so concurrent VMs (both toolchain pairs, other checkouts) chose the
+# same `/tmp` names. Qualifying `TMPDIR` by this VM's OS pid gives every
+# `System.tmp_dir!/0` root, and each child process, a namespace no live VM shares.
+# A same-pid directory can only be a dead VM's residue and is replaced.
+tmp = Path.join(System.tmp_dir!(), "loopex-composition-test-#{System.pid()}")
+File.rm_rf!(tmp)
+File.mkdir_p!(tmp)
+System.put_env("TMPDIR", tmp)
+System.at_exit(fn _status -> File.rm_rf(tmp) end)
+
+# Concept: one-time VM warm-up happens before cases start, not inside their waits.
+# Technical depth: the test VM loads modules lazily through the one code server,
+# and capture verifies the packaged catalog once per VM. Left to the first forty
+# concurrent cases, both serialized behind each other and outran those cases'
+# bounded waits. Loading every application module and the catalog here leaves
+# each case only its own work.
+for {app, _, _} <- Application.loaded_applications(),
+    do: :code.ensure_modules_loaded(Application.spec(app, :modules) || [])
+
+{:ok, _} = Loopex.LLM.ReqLLM.ModelCapabilities.capture(Loopex.LLM.ReqLLM.default_model())
+
 defmodule LoopexComposition.TestHost do
   @moduledoc false
 

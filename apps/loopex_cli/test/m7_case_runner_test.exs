@@ -1555,7 +1555,21 @@ defmodule LoopexCli.M7CaseRunnerTest do
         {name, binary_part(bytes, max(byte_size(bytes) - 2_000, 0), min(byte_size(bytes), 2_000))}
       end
 
-    flunk(inspect(%{lane: elem(other, 0), records: retained}, pretty: true, limit: :infinity))
+    # Every run's settled outcome, in order: an early bound (for example a
+    # run deadline) explains the later turns a scripted fixture then misaligns.
+    outcomes =
+      for name <- File.ls!(records),
+          String.starts_with?(name, "transcript-"),
+          "@loopex " <> line <- String.split(File.read!(Path.join(records, name)), "\n"),
+          {:ok, %{"event" => "wait", "outcome" => outcome}} <- [JSON.decode(line)],
+          do: outcome
+
+    flunk(
+      inspect(%{lane: elem(other, 0), outcomes: outcomes, records: retained},
+        pretty: true,
+        limit: :infinity
+      )
+    )
   end
 
   # A pre-dispatch stop reports its retained refusal.

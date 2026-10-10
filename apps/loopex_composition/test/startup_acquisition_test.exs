@@ -355,7 +355,16 @@ defmodule LoopexComposition.StartupAcquisitionTest do
       late =
         if target == :workers do
           assert_receive {:startup_task, pid, ^owner, initial}, 1_000
-          if action == :initial_cap, do: assert(System.monotonic_time() >= initial)
+          # The gate spends its cap in whole milliseconds and treats a
+          # sub-millisecond remainder as expired, so the refusal can precede
+          # `initial` by less than one millisecond, never by more.
+          if action == :initial_cap,
+            do:
+              assert(
+                System.monotonic_time() + System.convert_time_unit(1, :millisecond, :native) >
+                  initial
+              )
+
           monitor = Process.monitor(pid)
 
           if action == :initial_cap do
