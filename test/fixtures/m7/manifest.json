@@ -4,9 +4,19 @@
     "cases": {
       "m7.baseline.ask": {
         "attended": true,
+        "ceilings": {
+          "cleanup_ms": 60000,
+          "hold_ms": 120000,
+          "holds": 0,
+          "maintenance": 0,
+          "maintenance_ms": 60000,
+          "run_ms": 600000,
+          "runs": 1
+        },
         "credential": true,
         "driver": "scenario-ask",
         "lane": "m7-operator",
+        "objective": "A one-shot ask reads README.md and writes exactly one completed JSON result.",
         "status": "ready",
         "steps": [
           "V1.1",
@@ -16,9 +26,19 @@
       },
       "m7.baseline.durable": {
         "attended": true,
+        "ceilings": {
+          "cleanup_ms": 60000,
+          "hold_ms": 120000,
+          "holds": 0,
+          "maintenance": 0,
+          "maintenance_ms": 60000,
+          "run_ms": 600000,
+          "runs": 1
+        },
         "credential": true,
         "driver": "scenario-chat",
         "lane": "m7-operator",
+        "objective": "A durable chat on the dated Haiku model at default reasoning completes a read tool round.",
         "status": "ready",
         "steps": [
           "V1.3.durable",
@@ -48,9 +68,19 @@
       },
       "m7.ephemeral-question": {
         "attended": true,
+        "ceilings": {
+          "cleanup_ms": 60000,
+          "hold_ms": 120000,
+          "holds": 1,
+          "maintenance": 0,
+          "maintenance_ms": 60000,
+          "run_ms": 600000,
+          "runs": 1
+        },
         "credential": true,
         "driver": "demonstration",
         "lane": "m7-operator",
+        "objective": "Real displayed question, human callback answer, chosen feature oracle and ephemeral cleanup.",
         "status": "ready",
         "steps": [
           "V5.6.positive"
@@ -58,9 +88,19 @@
       },
       "m7.external": {
         "attended": true,
+        "ceilings": {
+          "cleanup_ms": 60000,
+          "hold_ms": 120000,
+          "holds": 0,
+          "maintenance": 0,
+          "maintenance_ms": 60000,
+          "run_ms": 600000,
+          "runs": 1
+        },
         "credential": true,
         "driver": "external-chat",
         "lane": "m7-operator",
+        "objective": "Pre-dispatch pin, pinned repository acceptance commands and an allowed diff of tools/threads.py only.",
         "status": "ready",
         "steps": [
           "V10.1",
@@ -72,9 +112,19 @@
       },
       "m7.feature": {
         "attended": true,
+        "ceilings": {
+          "cleanup_ms": 60000,
+          "hold_ms": 120000,
+          "holds": 1,
+          "maintenance": 0,
+          "maintenance_ms": 60000,
+          "run_ms": 600000,
+          "runs": 1
+        },
         "credential": true,
         "driver": "fixture-chat",
         "lane": "m7-operator",
+        "objective": "Committed ask/actual-ID answer, chosen row default and both pinned test results.",
         "status": "ready",
         "steps": [
           "V5.1",
@@ -83,9 +133,19 @@
       },
       "m7.instructions.admitted": {
         "attended": true,
+        "ceilings": {
+          "cleanup_ms": 60000,
+          "hold_ms": 120000,
+          "holds": 0,
+          "maintenance": 0,
+          "maintenance_ms": 60000,
+          "run_ms": 600000,
+          "runs": 1
+        },
         "credential": true,
         "driver": "scenario-chat",
         "lane": "m7-operator",
+        "objective": "An appended project instruction is admitted at genesis and followed: the answer ends with AMBER-SENTINEL.",
         "status": "ready",
         "steps": [
           "V3.1",
@@ -114,9 +174,19 @@
       },
       "m7.interrupt": {
         "attended": true,
+        "ceilings": {
+          "cleanup_ms": 60000,
+          "hold_ms": 90000,
+          "holds": 1,
+          "maintenance": 0,
+          "maintenance_ms": 60000,
+          "run_ms": 600000,
+          "runs": 1
+        },
         "credential": true,
         "driver": "demonstration",
         "lane": "m7-operator",
+        "objective": "A terminal interrupt cancels the held tool call without releasing it, and cleanup is confirmed.",
         "status": "ready",
         "steps": [
           "V9.2"
@@ -124,9 +194,19 @@
       },
       "m7.long": {
         "attended": true,
+        "ceilings": {
+          "cleanup_ms": 60000,
+          "hold_ms": 120000,
+          "holds": 0,
+          "maintenance": 1,
+          "maintenance_ms": 60000,
+          "run_ms": 600000,
+          "runs": 4
+        },
         "credential": true,
         "driver": "fixture-chat",
         "lane": "m7-operator",
+        "objective": "Long catalog facts/files after automatic/explicit compaction and restart; raw/checkpoint agreement.",
         "status": "ready",
         "steps": [
           "V6.1",
@@ -138,9 +218,19 @@
       },
       "m7.oversized-source": {
         "attended": true,
+        "ceilings": {
+          "cleanup_ms": 60000,
+          "hold_ms": 120000,
+          "holds": 0,
+          "maintenance": 2,
+          "maintenance_ms": 60000,
+          "run_ms": 600000,
+          "runs": 3
+        },
         "credential": true,
         "driver": "demonstration",
         "lane": "m7-operator",
+        "objective": "Progressing checkpoint, inherited omission flag and host-readable complete sentinel/original.",
         "status": "ready",
         "steps": [
           "V6.5.positive"
@@ -159,9 +249,19 @@
       },
       "m7.policy-denial": {
         "attended": true,
+        "ceilings": {
+          "cleanup_ms": 60000,
+          "hold_ms": 120000,
+          "holds": 0,
+          "maintenance": 0,
+          "maintenance_ms": 60000,
+          "run_ms": 600000,
+          "runs": 1
+        },
         "credential": true,
         "driver": "scenario-chat",
         "lane": "m7-operator",
+        "objective": "Required denied call commits its policy result; no effect intent/receipt or workspace change occurs.",
         "status": "ready",
         "steps": [
           "V9.1"
@@ -169,9 +269,19 @@
       },
       "m7.provider-switch": {
         "attended": true,
+        "ceilings": {
+          "cleanup_ms": 60000,
+          "hold_ms": 120000,
+          "holds": 0,
+          "maintenance": 0,
+          "maintenance_ms": 60000,
+          "run_ms": 600000,
+          "runs": 3
+        },
         "credential": true,
         "driver": "scenario-chat",
         "lane": "m7-operator",
+        "objective": "One session's A to B to A facts with a tool round and captured configurations, reopened once between the B and second A runs.",
         "status": "ready",
         "steps": [
           "V7.1",
@@ -181,9 +291,19 @@
       },
       "m7.question-restart": {
         "attended": true,
+        "ceilings": {
+          "cleanup_ms": 60000,
+          "hold_ms": 120000,
+          "holds": 1,
+          "maintenance": 0,
+          "maintenance_ms": 60000,
+          "run_ms": 600000,
+          "runs": 2
+        },
         "credential": true,
         "driver": "demonstration",
         "lane": "m7-operator",
+        "objective": "Same pending identity after prescribed loss; actual answer and selected feature oracle.",
         "status": "ready",
         "steps": [
           "V5.3"
@@ -191,9 +311,19 @@
       },
       "m7.repair": {
         "attended": true,
+        "ceilings": {
+          "cleanup_ms": 60000,
+          "hold_ms": 120000,
+          "holds": 0,
+          "maintenance": 0,
+          "maintenance_ms": 60000,
+          "run_ms": 600000,
+          "runs": 4
+        },
         "credential": true,
         "driver": "fixture-chat",
         "lane": "m7-operator",
+        "objective": "Repair catalog assertions, both pinned test results, allowed diff and reopened diagnosis facts.",
         "status": "ready",
         "steps": [
           "V2.1",
@@ -205,9 +335,19 @@
       },
       "m7.restore": {
         "attended": true,
+        "ceilings": {
+          "cleanup_ms": 60000,
+          "hold_ms": 120000,
+          "holds": 1,
+          "maintenance": 0,
+          "maintenance_ms": 60000,
+          "run_ms": 600000,
+          "runs": 0
+        },
         "credential": false,
         "driver": "demonstration",
         "lane": "m7-operator",
+        "objective": "Attended verification of retained backup manifests, access prevention, restore and manifest inspection joined to m7.rollback's retained execution.",
         "status": "ready",
         "steps": [
           "V13.1",
@@ -218,9 +358,19 @@
       },
       "m7.review": {
         "attended": true,
+        "ceilings": {
+          "cleanup_ms": 60000,
+          "hold_ms": 120000,
+          "holds": 0,
+          "maintenance": 0,
+          "maintenance_ms": 60000,
+          "run_ms": 600000,
+          "runs": 1
+        },
         "credential": true,
         "driver": "fixture-chat",
         "lane": "m7-operator",
+        "objective": "Both committed role calls, exact known finding/call chain, unchanged child workspace and separate/combined usage.",
         "status": "ready",
         "steps": [
           "V8.1",
@@ -241,9 +391,19 @@
       },
       "m7.steer-barrier": {
         "attended": true,
+        "ceilings": {
+          "cleanup_ms": 60000,
+          "hold_ms": 90000,
+          "holds": 1,
+          "maintenance": 0,
+          "maintenance_ms": 60000,
+          "run_ms": 600000,
+          "runs": 2
+        },
         "credential": true,
         "driver": "demonstration",
         "lane": "m7-operator",
+        "objective": "Steer and follow-up are admitted while the held tool call runs, which is released only after both.",
         "status": "ready",
         "steps": [
           "V4.1",
@@ -274,9 +434,19 @@
       },
       "m7.thinking-rounds": {
         "attended": true,
+        "ceilings": {
+          "cleanup_ms": 60000,
+          "hold_ms": 120000,
+          "holds": 0,
+          "maintenance": 6,
+          "maintenance_ms": 60000,
+          "run_ms": 600000,
+          "runs": 7
+        },
         "credential": true,
         "driver": "demonstration",
         "lane": "m7-operator",
+        "objective": "Each of seven thinking cells completes continued tool-result rounds with expanded-block equality, then a settled reopen.",
         "status": "ready",
         "steps": [
           "V7.3.positive"
@@ -284,9 +454,19 @@
       },
       "m7.trace.file": {
         "attended": true,
+        "ceilings": {
+          "cleanup_ms": 60000,
+          "hold_ms": 120000,
+          "holds": 0,
+          "maintenance": 0,
+          "maintenance_ms": 60000,
+          "run_ms": 600000,
+          "runs": 1
+        },
         "credential": true,
         "driver": "scenario-chat",
         "lane": "m7-operator",
+        "objective": "The configuration file enables tracing; status and the settings report name the file origin and cleanup is confirmed.",
         "status": "ready",
         "steps": [
           "V11.1.file",
@@ -297,9 +477,19 @@
       },
       "m7.trace.flag": {
         "attended": true,
+        "ceilings": {
+          "cleanup_ms": 60000,
+          "hold_ms": 120000,
+          "holds": 0,
+          "maintenance": 0,
+          "maintenance_ms": 60000,
+          "run_ms": 600000,
+          "runs": 1
+        },
         "credential": true,
         "driver": "scenario-chat",
         "lane": "m7-operator",
+        "objective": "The --trace flag enables tracing; status and the settings report name the flag origin and cleanup is confirmed.",
         "status": "ready",
         "steps": [
           "V11.1.flag",
@@ -310,9 +500,19 @@
       },
       "m7.trace.json": {
         "attended": true,
+        "ceilings": {
+          "cleanup_ms": 60000,
+          "hold_ms": 120000,
+          "holds": 0,
+          "maintenance": 0,
+          "maintenance_ms": 60000,
+          "run_ms": 600000,
+          "runs": 1
+        },
         "credential": true,
         "driver": "scenario-ask",
         "lane": "m7-operator",
+        "objective": "A traced JSON ask writes exactly one completed result object to standard output.",
         "status": "ready",
         "steps": [
           "V11.5.json"

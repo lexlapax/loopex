@@ -28,17 +28,24 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
   Pipe dispatch writes the fixture's prompts with `/wait` barriers; repair and
   long reopen the recorded session for their final prompt, and long compacts
   explicitly before closing. Terminal dispatch hands the operator's standard
-  input to the conversation. The independent rerun uses a separately rendered
-  runner with the same oracle under an empty environment; feature takes its
-  branch from the dispatch result's committed answer. Workspace inspection
-  uses the catalog inventory or, for the external checkout, Git's changed
-  paths against the pinned base.
+  input to the conversation after printing the case's objective and the exact
+  lines to type; the attempt's state root then names the session it created.
+  Before a lane whose cases all pin ceilings, the runner prints their summed
+  block ceiling, and it prints each case's elapsed time as it starts and ends.
+  The independent rerun uses a separately rendered runner with the same
+  oracle under an empty environment; feature takes its branch from the
+  dispatch result's committed answer. Workspace inspection uses the catalog
+  inventory or, for the external checkout, Git's changed paths against the
+  pinned base.
 
   The mechanical result is the first that applies: missing retained evidence
   (`evidence_incomplete_post_dispatch`, evidence null), then
-  `assertion_failed` for a failed conversation, oracle, pin check or changed
-  path, otherwise `pass`. Provider-failure and required-action classification
-  from committed records are not inferred here; the reviewer assigns causes.
+  `assertion_failed` for a failed conversation, oracle, pin check, changed
+  path or a case that outlasted its pinned ceiling, otherwise `pass`. The
+  retained `assertions.json` names each failed assertion ID, such as
+  `m7.repair.ceiling`, with the elapsed time and ceiling. Provider-failure
+  and required-action classification from committed records are not inferred
+  here; the reviewer assigns causes.
   """
 
   alias LoopexCli.{Chat, M7FixtureChat}
@@ -61,6 +68,7 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
   @held ~w(m7.steer-barrier m7.interrupt m7.daemon-detach)
   @hold_limit_ms 90_000
   @readme "M7 held workspace.\n"
+  @answer_line "/answer ID --choice CHOICE (both IDs from the question line; either choice)"
 
   @switches [
     lane: :string,
@@ -265,13 +273,49 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
              Map.get(context, :matrix)
            ),
          {:ok, plan} <- admit(writer, context, selection, Map.get(context, :mode, :new)) do
-      context = Map.put(context, :credentials, credentials(context.config_argv, manifest))
+      context =
+        Map.merge(context, %{
+          credentials: credentials(context.config_argv, manifest),
+          lane_started: now(context)
+        })
+
+      announce_block(manifest, plan.remaining, context)
       run_pins(writer, plan.remaining, selection, context, [])
     else
       {:skip, :lane_already_ended} -> {:ok, []}
       other -> other
     end
   end
+
+  # Concept: the attended block's finite ceiling is known and printed before
+  # its first case starts; nothing adjusts it during the run.
+  # Technical depth: the sum of the remaining cases' pinned case ceilings,
+  # printed only when every one of them pins a ceiling.
+  defp announce_block(manifest, remaining, context) do
+    ceilings = Enum.map(remaining, &ExecutionManifest.case_ceiling(manifest, &1.pin["case_key"]))
+
+    if remaining != [] and Enum.all?(ceilings, &is_integer/1),
+      do:
+        say(
+          context,
+          "block ceiling #{Enum.sum(ceilings)} ms for #{length(ceilings)} cases, " <>
+            "each with its 60000 ms setup allowance"
+        )
+  end
+
+  # Concept: live progress for the person watching the lane.
+  # Technical depth: lines go to the operator's device, never into a
+  # conversation transcript or another retained record an oracle reads.
+  defp say(context, line),
+    do:
+      IO.puts(
+        Map.get(context, :operator_device, :stdio),
+        "m7-fixture-chat: +#{now(context) - Map.get(context, :lane_started, now(context))} ms " <>
+          line
+      )
+
+  defp now(context),
+    do: Map.get(context, :clock, fn -> System.monotonic_time(:millisecond) end).()
 
   # Concept: each conversation starts as a fresh chat process would, with the
   # configuration's and the pinned providers' named credential variables
@@ -379,6 +423,35 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
   @doc false
   def run_case(writer, pin, selection, context) do
     case_id = pin["case_key"]
+    ceiling = ExecutionManifest.case_ceiling(context.manifest["execution_manifest"], case_id)
+
+    context =
+      Map.merge(context, %{case_id: case_id, case_started: now(context), case_ceiling: ceiling})
+
+    say(context, "#{case_id} started" <> if(ceiling, do: ", ceiling #{ceiling} ms", else: ""))
+
+    if Map.get(context, :dispatch) == :terminal,
+      do:
+        say(
+          context,
+          "#{case_id} objective: " <>
+            to_string(context.manifest["execution_manifest"]["cases"][case_id]["objective"])
+        )
+
+    result = attempt_case(writer, pin, selection, context)
+
+    with {:ok, %{mechanical_result: mechanical}} <- result,
+         do:
+           say(
+             context,
+             "#{case_id} #{mechanical} after #{now(context) - context.case_started} ms"
+           )
+
+    result
+  end
+
+  defp attempt_case(writer, pin, selection, context) do
+    case_id = pin["case_key"]
     # A test may fix the nonce so a fixed fixture reply can name the runner.
     nonce =
       Map.get_lazy(context, :attempt_nonce, fn ->
@@ -480,7 +553,31 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
       {oracle_status, oracle} = independent_oracle(staged, environment, root)
       {changes, inventory} = inspect_changes(staged, root)
       checks = if staged.capture, do: Policy.check(staged.capture), else: :ok
-      retained = [{:ok, record}, oracle, inventory, facts | transcripts]
+      elapsed = now(context) - context.case_started
+      ceiling = context.case_ceiling
+
+      # Concept: each failed assertion has a stable ID; a ceiling breach is
+      # one of them and leaves the result order unchanged.
+      failed =
+        for {id, failed?} <- [
+              {"conversation", outcome.exit != 0},
+              {"oracle", oracle_status != 0},
+              {"changes", changes != :ok},
+              {"pins", checks != :ok},
+              {"joins", not match?({:ok, _}, join)},
+              {"ceiling", is_integer(ceiling) and elapsed > ceiling}
+            ],
+            failed?,
+            do: base["case_key"] <> "." <> id
+
+      assertions =
+        retain(root, "assertions.json", %{
+          "failed" => failed,
+          "elapsed_ms" => elapsed,
+          "ceiling_ms" => ceiling
+        })
+
+      retained = [{:ok, record}, oracle, inventory, facts, assertions | transcripts]
 
       mechanical =
         cond do
@@ -490,8 +587,7 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
           match?({:missing, _}, join) ->
             "required_action_absent"
 
-          outcome.exit != 0 or oracle_status != 0 or changes != :ok or checks != :ok or
-              not match?({:ok, _}, join) ->
+          failed != [] ->
             "assertion_failed"
 
           true ->
@@ -947,8 +1043,22 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
          ]}
 
       _ ->
+        # Under --terminal these steps are the operator's script, not input.
         if Map.get(context, :dispatch) == :terminal,
-          do: {:ok, [%{resume: false, steps: []}]},
+          do:
+            {:ok,
+             [
+               %{
+                 resume: false,
+                 steps: [
+                   {:line, hd(entry["prompts"])},
+                   {:answer, :choose},
+                   {:line, "/wait"},
+                   {:line, "/status"},
+                   {:line, "/quit"}
+                 ]
+               }
+             ]},
           else: {:error, :feature_answer_requires_operator}
     end
   end
@@ -1145,8 +1255,14 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
         # Harness-driven steps need the piped device even under --terminal;
         # the operator still answers through {:answer, :operator}.
         mode = if harness_driven?(conversation.steps), do: :pipe, else: mode
+
+        if mode == :terminal,
+          do: say(context, operator_script(context.case_id, n, conversation))
+
         result = chat(staged, context, conversation.steps, mode, extra, n, known)
-        result = Map.put(result, :session, session_id(result.output))
+
+        result =
+          Map.put(result, :session, session_id(result.output) || operator_session(mode, staged))
 
         # A prescribed terminal cut ends chat with status 1; the joins decide.
         result =
@@ -1162,6 +1278,43 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
            else: outcome(Enum.reverse([result | done]), session)
     end
   end
+
+  # Concept: the operator types each scripted line of a terminal
+  # conversation in order; the runner shows them first, since nothing else
+  # tells the operator what the case prescribes.
+  # Technical depth: plain text on the operator's device; a resumed
+  # conversation is already reopened by the runner, and an answer step names
+  # the choice the operator makes.
+  @doc false
+  def operator_script(case_id, n, conversation) do
+    lines =
+      conversation.steps
+      |> Enum.flat_map(fn
+        {:line, line} -> [line]
+        {:answer, _} -> [@answer_line]
+        _ -> []
+      end)
+      |> Enum.with_index(1)
+      |> Enum.map_join("\n", fn {line, index} -> "  #{index}. #{line}" end)
+
+    reopened = if conversation[:resume], do: " (the runner reopens the session)", else: ""
+    "#{case_id} conversation #{n}#{reopened}: type these lines in order\n" <> lines
+  end
+
+  # Concept: on the operator's own terminal chat's output reaches the operator,
+  # not the runner, so the attempt's fresh state root names its session.
+  # Technical depth: the attempt's root holds exactly the one session its
+  # first conversation created; anything else leaves the session unknown.
+  defp operator_session(:terminal, staged) do
+    state = Path.join(Path.dirname(staged.fixture.workspace), "state")
+
+    case LoopexCli.SessionCatalog.list(state) do
+      {:ok, [%{session_id: session}]} -> session
+      _ -> nil
+    end
+  end
+
+  defp operator_session(_mode, _staged), do: nil
 
   defp outcome(results, session) do
     %{
@@ -1200,11 +1353,15 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
     gate = if :await_gate in steps, do: start_gate(), else: nil
 
     # Concept: the conversation is chat's input device and its owned output
-    # target (ADR 0068); the terminal case acquires the process's own stdio.
+    # target (ADR 0068); the terminal case acquires the process's own stdio
+    # (a test supplies its own input and owned target per conversation).
     {input, output, chat_mode} =
-      if mode == :terminal,
-        do: {:stdio, :stdio, :interactive},
-        else: {device, {:owned, device}, :pipe}
+      if mode == :terminal do
+        {input, output} = Map.get(context, :terminal_io, fn -> {:stdio, :stdio} end).()
+        {input, output, :interactive}
+      else
+        {device, {:owned, device}, :pipe}
+      end
 
     options =
       [

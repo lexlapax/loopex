@@ -177,12 +177,13 @@ outputs; it then
 requires the extraction's source identity to be the staged commit and its
 `VERSION` to be `0.3.0`, and prints both retained files' SHA-256 digests. A `--only long_bound` pass over `loopex`,
 `loopex_executor_local`, `loopex_daemon` and the in-process ReqLLM transport-drain witness runs the real-duration proofs the
-fast check excludes. On Linux the last lane runs the daemon's two
+fast check excludes. On Linux the cross-UID lane runs the daemon's two
 `--only cross_uid` cases and requires exactly two to execute; it needs a second
 unprivileged user named in `LOOPEX_CROSS_UID_USER` that you may run a command
 as with `sudo -n`. Elsewhere that lane prints `cross_uid: not run (Darwin)` and
 the run ends `PASS (closure-incomplete: cross_uid not run)`; closure needs a
-Linux run ending in a plain `PASS`. The pre-1.0 current-contract rule retires
+Linux run ending in a plain `PASS`. The M7 `m7-rollback` lane, then the
+`m7-operator` and `m7-provider` conversation lanes, run after it. The pre-1.0 current-contract rule retires
 the old cross-version `rollback` lane and its historical archive requirements;
 the removed selector refuses before staging. Every current lane prints its executed count and
 elapsed time. Provider keys are not placed in command arguments; exact
@@ -196,7 +197,11 @@ its children. Trusted host code that ran before the script starts remains the
 host's responsibility. Two of the real-provider tests and the `m7-operator`
 block's attended cases are attended: they prompt on the controlling terminal
 for the operator's decisions (`Type yes and press Enter.`), so run the command
-from a terminal.
+from a terminal. Before its first case the `m7-operator` block prints its
+summed finite block ceiling, and before each conversation the operator types
+it prints the case's objective and the exact lines to type; the
+[M7 validation runbook](docs/operator/m7-validation.md#attended-block) has the
+details.
 
 An unchanged-source release reuses this closure evidence. It runs only the
 pre-tag administrative-SHA proofs described by the milestone and verification

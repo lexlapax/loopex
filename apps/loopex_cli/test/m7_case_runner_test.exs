@@ -226,8 +226,12 @@ defmodule LoopexCli.M7CaseRunnerTest do
     references = Enum.map(completed["body"]["evidence"], & &1["reference"])
     names = Enum.map(references, &Path.basename/1)
 
-    for name <- ~w(execution.json oracle.txt changes.json transcript-1.txt transcript-2.txt),
+    for name <-
+          ~w(execution.json oracle.txt changes.json assertions.json transcript-1.txt transcript-2.txt),
         do: assert(name in names)
+
+    assertions = JSON.decode!(File.read!(Path.join(result.root, "records/assertions.json")))
+    assert assertions["failed"] == [] and assertions["ceiling_ms"] == 2_520_000
 
     for reference <- completed["body"]["evidence"] do
       bytes = File.read!(reference["reference"])
@@ -245,6 +249,127 @@ defmodule LoopexCli.M7CaseRunnerTest do
                lane_selection(f),
                :continue
              )
+  end
+
+  # Concept: the attended block's finite ceiling is printed before its first
+  # case, and equals the sum the manifest pins.
+  test "the operator lane prints its pinned block ceiling before the first case", f do
+    File.write!(f.config, :json.encode(Map.delete(profile(f.root), "paths")))
+    {:ok, catalog} = FixtureManifest.load(@fixtures)
+    manifest = catalog.catalog["execution_manifest"]
+    {:ok, operator} = StringIO.open("")
+
+    pinned =
+      Enum.sum(
+        for id <- manifest["lanes"]["m7-operator"] do
+          c = manifest["cases"][id]["ceilings"]
+
+          c["runs"] * c["run_ms"] + c["maintenance"] * c["maintenance_ms"] +
+            c["holds"] * c["hold_ms"] + c["cleanup_ms"] + 60_000
+        end
+      )
+
+    context =
+      Map.merge(f.context, %{
+        manifest: catalog.catalog,
+        operator_device: operator,
+        chat_options: chat_options(f, fn _, _ -> [] end, self())
+      })
+
+    assert {:stopped, _} = CaseRunner.run_lane(f.writer, "m7-operator", context)
+    {_, shown} = StringIO.contents(operator)
+    [first, second | _] = String.split(shown, "\n")
+    assert first =~ ~r/^m7-fixture-chat: \+\d+ ms block ceiling #{pinned} ms for 20 cases/
+    assert second =~ "m7.baseline.ask started, ceiling "
+  end
+
+  # Concept: a case that outlasts its pinned ceiling fails that assertion even
+  # when everything else passes.
+  test "a ceiling breach adds the case's ceiling assertion ID and fails the case", f do
+    scripts = fn capture, call ->
+      if call == 1,
+        do: repair_script(capture.argv, @fixed),
+        else: [%{text: "the empty-ledger boundary", calls: []}]
+    end
+
+    # Each reading of the clock is an hour after the last.
+    {:ok, ticks} = Agent.start_link(fn -> 0 end)
+    clock = fn -> Agent.get_and_update(ticks, &{&1, &1 + 3_600_000}) end
+    {:ok, operator} = StringIO.open("")
+
+    context =
+      Map.merge(f.context, %{
+        clock: clock,
+        operator_device: operator,
+        chat_options: chat_options(f, scripts, self())
+      })
+
+    assert {:stopped, [{:ok, result}]} = CaseRunner.run_lane(f.writer, "m7-operator", context)
+    assert result.mechanical_result == "assertion_failed"
+    assertions = JSON.decode!(File.read!(Path.join(result.root, "records/assertions.json")))
+    assert assertions["failed"] == ["m7.repair.ceiling"]
+    assert assertions["ceiling_ms"] == 2_520_000
+    assert assertions["elapsed_ms"] > assertions["ceiling_ms"]
+    oracle = File.read!(Path.join(result.root, "records/oracle.txt"))
+    assert oracle =~ "status=0"
+    {_, shown} = StringIO.contents(operator)
+    assert shown =~ "m7.repair assertion_failed after "
+  end
+
+  # Concept: under --terminal the operator sees each conversation's exact
+  # lines before typing them; the runner still reopens the recorded session.
+  test "a terminal conversation shows the operator its script and reopens the session", f do
+    scripts = fn capture, call ->
+      if call == 1,
+        do: repair_script(capture.argv, @fixed),
+        else: [%{text: "the empty-ledger boundary", calls: []}]
+    end
+
+    [first, second, third, reopened] =
+      FixtureManifest.entry(f.context.manifest, "repair")["prompts"]
+
+    typed =
+      Enum.map_join(
+        [first, "/wait", second, "/wait", third, "/wait", "/status", "/quit"] ++
+          [reopened, "/wait", "/status", "/quit"],
+        &(&1 <> "\n")
+      )
+
+    {:ok, operator} = StringIO.open(typed)
+
+    context =
+      Map.merge(f.context, %{
+        dispatch: :terminal,
+        operator_device: operator,
+        # Each conversation reads the typed lines and writes to its own target.
+        terminal_io: fn ->
+          {:ok, target} = LoopexCli.Output.Memory.start()
+          {operator, LoopexCli.Output.Memory.target(target)}
+        end,
+        chat_options: chat_options(f, scripts, self())
+      })
+
+    result = passed!(CaseRunner.run_lane(f.writer, "m7-operator", context))
+    {_, shown} = StringIO.contents(operator)
+    assert shown =~ "m7.repair objective: Repair catalog assertions"
+
+    assert shown =~
+             "m7.repair conversation 1: type these lines in order\n  1. #{first}\n  2. /wait\n"
+
+    assert shown =~ "m7.repair conversation 2 (the runner reopens the session)"
+    assert shown =~ "  1. #{reopened}\n  2. /wait\n  3. /status\n  4. /quit"
+    assert facts(result)["session"]
+  end
+
+  test "the attended feature script names the answer the operator chooses", f do
+    entry = FixtureManifest.entry(f.context.manifest, "feature")
+    [prompt] = entry["prompts"]
+    {:ok, [conversation]} = CaseRunner.plan("m7.feature", entry, %{dispatch: :terminal})
+
+    assert CaseRunner.operator_script("m7.feature", 1, conversation) ==
+             "m7.feature conversation 1: type these lines in order\n  1. #{prompt}\n" <>
+               "  2. /answer ID --choice CHOICE (both IDs from the question line; either choice)\n" <>
+               "  3. /wait\n  4. /status\n  5. /quit"
   end
 
   test "a failing oracle completes as assertion_failed and stops the lane", f do

@@ -114,6 +114,45 @@ For closure, run the same options through
 `bash scripts/attended-release.sh --output LOG ...`. It forwards them unchanged
 and retains a transcript with both providers' credential values redacted.
 
+<a id="attended-block"></a>
+## Attended block
+
+The `m7-operator` lane is one contiguous attended block. Each of its manifest
+cases pins an objective and finite ceilings: a count of runs, standalone
+maintenance steps and question, attendance or tool holds, each at its own
+ceiling (at most 600,000 ms per run, 60,000 ms per maintenance step and
+120,000 ms per hold), plus cleanup. A case's ceiling adds a 60,000-ms setup
+allowance; the block ceiling is the sum over its cases. Before the first case
+the wrapper prints, for example:
+
+```text
+m7-fixture-chat: +0 ms block ceiling 25800000 ms for 20 cases, each with its 60000 ms setup allowance
+```
+
+It then prints a `+ELAPSED ms` line as each case starts and ends. No ceiling
+changes during a run. A case that outlasts its ceiling records the assertion
+ID `<case>.ceiling` in its retained `records/assertions.json`, beside any
+other failed assertion IDs, and completes `assertion_failed` unless an
+earlier result applies; review assigns its cause.
+
+Under `--terminal`, before each conversation you type, the wrapper prints the
+case's objective and the exact lines to type in order, for example:
+
+```text
+m7-fixture-chat: +431 ms m7.repair conversation 1: type these lines in order
+  1. Diagnose the boundary bug in Ledger.total/1 without editing. ...
+  2. /wait
+  ...
+  8. /quit
+```
+
+Type each line exactly and wait for `/wait` to return before the next.
+Where a line reads `/answer ID --choice CHOICE`, take the interaction ID and
+one of the offered choice IDs from the question line chat prints; either
+choice is valid, and the case's oracle follows the one you choose. A later conversation marked
+`(the runner reopens the session)` starts already resumed. These lines go to
+your terminal and the attended transcript only; no oracle reads them.
+
 ## External task
 
 The maintainer-selected external task changes `slugify` in
