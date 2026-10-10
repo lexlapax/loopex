@@ -7282,3 +7282,18 @@ candidate `3aa7fedd6703c98fb468e8e7f7a1a0bfeedfa37b` (concept SHA-256
 `199ed09307ad76813cac9e98c1729a5bc81dd26fedd108e5e537fa568fdc97a4`), amending only
 the named clauses of ADRs 0009, 0016, 0019, 0024, 0031, 0032 and 0048.
 
+
+<a id="disposition-m7-credential-plane-and-cold-load-2026-10-09"></a>
+### M7 single-credential plane and provider-worker cold load, 2026-10-09
+
+ADR 0070's "one-route version-2 plane" is implemented as one credential
+reference (`LOOPEX_PROVIDER_API_KEY`) routed to every catalog provider that needs
+a credential, which keeps one key working for whichever provider the model
+names. The maintainer accepted this as the meaning of that clause.
+
+The thinking-rounds case flaked under load because each isolated provider
+worker cold-loads the model catalog on every call (about 1 s), leaving four
+calls and three tool rounds near the 15 s test run deadline. The maintainer
+selected fixing the cold load rather than raising the test deadline: the
+isolated worker must stop paying a full catalog load per call while keeping
+ADR 0039's custody and deadline guarantees. The test deadline stays 15 s.

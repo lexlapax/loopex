@@ -49,17 +49,28 @@ All recorded in the context map with exact identities:
 
 ### Open work at this checkpoint
 
-- ADR 0070 removals, in two agent worktrees: groups 1–3 and group 4 (single
-  offline/daemon catalog).
-- Composition whole-suite failures that pass per file (StartupAcquisition,
-  FacadeClient), restore-IO temp-name collisions, and the thinking-rounds case
-  flaking under load.
-- Then: the full `bash scripts/check.sh` on both pairs, the remaining T16 rows
-  (process-boundary stress thirty times on Linux, independent review), and the
-  T05 migration row and T04 Control-slot row once the full check is green.
-- Then T17: present the paid/attended case list and cost; run the closure matrix
-  through `scripts/attended-release.sh` with the M7 options. T18 and T19 need
-  separate maintainer approval.
+m7 head at this checkpoint contains every agent unit; no agent is running and
+no `worktree-agent-*` branch holds unmerged work.
+
+- ADR 0070 groups 1–4 are merged, but whole-app floor-pair runs for the
+  credential-plane and demo-tool removals and the single-catalog change are
+  still owed. Rerun the whole suites on both pairs, one pair at a time.
+- Composition whole suite: green on current (two seeds) and floor (one seed);
+  one more floor seed is owed.
+- Fix the isolated provider worker's per-call model-catalog cold load (context
+  map, 2026-10-09 credential-plane and cold-load disposition). This is what
+  makes `m7_case_runner_test` "thinking rounds" flake under load.
+- CLI source-scan failure: `apps/loopex_cli/lib/mix/tasks/m7_evidence/execution_manifest.ex`
+  names `Loopex.LLM`; route it through composition as was done for the other
+  m7_evidence files.
+- Then: the full `bash scripts/check.sh` on both pairs; the remaining T16 rows
+  (focused/fast/release lanes, process-boundary stress thirty times on Linux,
+  independent review); the T05 migration row and the T04 Control-slot row once
+  the full check is green; and T08/T06/T07/T12 rows whose remaining proof is the
+  full check or the paid/attended campaign.
+- Then T17: present the paid/attended case list and its cost; run the closure
+  matrix through `scripts/attended-release.sh` with the M7 options. T18 and T19
+  need separate maintainer approval.
 
 Worktree branches named `worktree-agent-*` hold unmerged agent work; merge or
 discard them deliberately. Their committed heads survive a restart; uncommitted
