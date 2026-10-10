@@ -7297,3 +7297,21 @@ calls and three tool rounds near the 15 s test run deadline. The maintainer
 selected fixing the cold load rather than raising the test deadline: the
 isolated worker must stop paying a full catalog load per call while keeping
 ADR 0039's custody and deadline guarantees. The test deadline stays 15 s.
+
+<a id="disposition-m7-pinned-load-scope-2026-10-10"></a>
+### M7 pinned-load scope, proxy frame read and cleanup test window, 2026-10-10
+
+- **Pinned-load scope.** The T16 thirty-run pinned-load row covers the boundary
+  the verification guide names: the executor and provider-child OS processes,
+  plus the other groups already run (store writer lock, attempts writer, ask
+  launcher, credential custody, daemon listeners, composition credential cleanup,
+  output writer). The CLI chat/ask child-VM fixtures are excluded, because their
+  cold child VM cannot start within their waits on four loaded cores. Making
+  those fixtures precompiled and event-driven is later work. This override
+  narrows what the row proves.
+- **Proxy frame read.** The foreground output proxy reads a frame with an exact
+  length buffered copy instead of byte-wise bash `read`, so full 2 MiB frames
+  meet the unchanged 5 s write budget. Frame bounds and custody are unchanged.
+- **Cleanup test window.** The maintainer rejected widening the
+  `ephemeral_cleanup_test` abort window to `{5_000, 6_000}`. Those cases must
+  become deterministic by event ordering under the default 1,000 ms window.
