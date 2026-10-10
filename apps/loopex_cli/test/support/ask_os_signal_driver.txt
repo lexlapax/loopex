@@ -32,8 +32,8 @@ defmodule LoopexCli.AskOSSignalDriver do
       install_interrupt: fn main, reference ->
         case Interrupt.install_ask(main, reference) do
           {:ok, manager} = installed ->
+            watch_phase(socket, main, manager, reference)
             send_control(socket, {:install, :ok})
-            spawn(fn -> watch_phase(socket, manager, reference, 1_000) end)
             installed
 
           other ->
@@ -167,19 +167,25 @@ defmodule LoopexCli.AskOSSignalDriver do
     }
   end
 
-  defp watch_phase(_socket, _manager, _reference, 0), do: :ok
+  # Concept: the phase marker follows the handler's own admission of a signal.
+  # Technical depth: the installed handler sends `{manager, reference,
+  # :interrupt}` to the command's main process only in the callback that moves
+  # its phase from idle to stopping. Tracing the exact signal manager's sends,
+  # armed before the test learns installation finished, attributes that notice
+  # to the manager and orders the marker after it, with no polling budget and
+  # no later phase query that the command's own handler removal could overtake.
+  defp watch_phase(socket, main, manager, reference) do
+    watcher = spawn(fn -> await_interrupt(socket, main, manager, reference) end)
+    1 = :erlang.trace(manager, true, [:send, {:tracer, watcher}])
+  end
 
-  defp watch_phase(socket, manager, reference, remaining) do
-    case Interrupt.ask_phase(manager, reference) do
-      :stopping ->
+  defp await_interrupt(socket, main, manager, reference) do
+    receive do
+      {:trace, ^manager, :send, {^manager, ^reference, :interrupt}, ^main} ->
         send_control(socket, {:phase, :stopping})
 
-      :idle ->
-        Process.sleep(5)
-        watch_phase(socket, manager, reference, remaining - 1)
-
-      _ ->
-        :ok
+      {:trace, ^manager, :send, _message, _to} ->
+        await_interrupt(socket, main, manager, reference)
     end
   end
 
