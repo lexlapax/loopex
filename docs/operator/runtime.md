@@ -250,11 +250,11 @@ plan construction and retained exclusion evidence. The accepted
 and [closed input schemas](../adr/0051-current-format-physical-restore-technical.md#technical-adr-0051-boundary)
 define this administrative operation.
 
-Restore audits retained helper objects: each file under
-`delegation/RUNTIME/OBJECT` must belong to a runtime in the plan and be a
-bounded regular file named by the digest of its bytes. Any other `delegation/`
-entry, including helper locks, writer files or temporary files, refuses the
-restore. Do not omit helper entries to make a backup eligible. Another machine, an older snapshot, an
+This procedure refuses a state root containing any `delegation/` namespace,
+including helper locks or temporary files, because the complete helper-ledger
+audit is not implemented for it. Do not omit those entries to make a backup
+eligible. A root that has run helpers therefore cannot be restored this way
+yet; copying opaque helper state does not prove it recoverable. Another machine, an older snapshot, an
 older format, or a lost or recreated workspace is outside this procedure.
 
 <a id="operator-runtime-backup-capture"></a>
