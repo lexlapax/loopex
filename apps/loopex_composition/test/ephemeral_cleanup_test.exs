@@ -107,7 +107,10 @@ defmodule LoopexComposition.Ephemeral.CleanupTest do
   end
 
   test "runtime stop waits for its worker result, finish, and exact DOWN", %{tmp: tmp} do
-    session = start_session(tmp, successful_drain())
+    # The held worker must still be inside its phase while this case forges and
+    # observes messages; the explicit window keeps the default 1 s slot from
+    # retiring it first on a loaded host. Ordering, not the window, is proved.
+    session = start_session(tmp, successful_drain(), abort_phase_window_ms: {5_000, 6_000})
     {:loopex_ephemeral_session, owner, cell} = session
 
     %{startup: %{owned_root: %{path: root}, registered: %{runtime: %Runtime{} = runtime}}} =
@@ -211,7 +214,9 @@ defmodule LoopexComposition.Ephemeral.CleanupTest do
   end
 
   test "a failed runtime-stop worker cannot certify the session subtree", %{tmp: tmp} do
-    session = start_session(tmp, successful_drain())
+    # This case kills the held worker itself; the explicit window keeps the
+    # default 1 s slot from retiring it first on a loaded host.
+    session = start_session(tmp, successful_drain(), abort_phase_window_ms: {5_000, 6_000})
     {:loopex_ephemeral_session, owner, cell} = session
 
     %{startup: %{owned_root: %{path: root}, registered: %{runtime: %Runtime{} = runtime}}} =
@@ -435,7 +440,7 @@ defmodule LoopexComposition.Ephemeral.CleanupTest do
               group_drain: drain,
               group_attest: fn _executor, _instance, _nonce, _deadline -> :ok end
             },
-            Map.new(Keyword.take(options, [:subtree_stop]))
+            Map.new(Keyword.take(options, [:subtree_stop, :abort_phase_window_ms]))
           )
       }
       |> LoopexComposition.PreparedSessionFixture.capture()

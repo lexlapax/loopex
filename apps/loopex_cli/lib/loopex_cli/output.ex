@@ -683,7 +683,10 @@ defmodule LoopexCli.Output do
   def handle_info({:output_deadline, token}, %{timer: {_timer, token}} = state) do
     state = expire_waiters(%{state | timer: nil})
     state = if overdue?(state), do: fail(state, :output_drain_timeout), else: state
-    progress_close(arm(state))
+
+    if state.closing != nil and now() >= state.closing.cutoff,
+      do: progress_close(state),
+      else: progress_close(arm(state))
   end
 
   def handle_info(:join_poll, state), do: progress_close(state)
@@ -996,6 +999,16 @@ defmodule LoopexCli.Output do
 
   defp progress_close(%{closing: closing} = state) do
     cond do
+      # Concept: the captured cutoff is settled by its own deadline, whatever
+      # message happens to arrive first.
+      # Technical depth: the armed timer covers the closing cutoff and every
+      # write deadline, so it is already due here. Its handler records an
+      # overdue write as output_drain_timeout before the verdict; a command
+      # DOWN or join poll at the same instant waits for it rather than
+      # deciding the close without that failure.
+      now() >= closing.cutoff and state.timer != nil ->
+        {:noreply, state}
+
       now() >= closing.cutoff ->
         reply_close(state, {:error, :cleanup_unproved})
 

@@ -203,6 +203,12 @@ defmodule Loopex.AppServer.OutputWriter do
   end
 
   def handle_info(
+        {:observe_group, reference},
+        %{active: %{reference: reference, phase: :starting}} = state
+      ),
+      do: {:noreply, observe_group(state)}
+
+  def handle_info(
         {:write_cutoff, reference},
         %{active: %{reference: reference, phase: phase}} = state
       )
@@ -274,36 +280,9 @@ defmodule Loopex.AppServer.OutputWriter do
   defp control_record(%{active: %{phase: :starting} = active} = state, record) do
     expected = "READY #{active.nonce} #{active.leader}"
 
-    if record == expected and now_ms() < active.write_cutoff do
-      case group_observation(active.leader, active.write_cutoff) do
-        {:ok, pairs} ->
-          if {active.leader, active.leader} in pairs and now_ms() < active.write_cutoff do
-            active = %{active | group: active.leader, phase: :writing}
-            state = %{state | active: active}
-
-            bytes = [
-              "ALLOW ",
-              active.nonce,
-              "\nFRAME ",
-              active.nonce,
-              " ",
-              Integer.to_string(byte_size(active.frame)),
-              "\n",
-              active.frame
-            ]
-
-            state = %{state | active: %{active | frame: nil}}
-            if command(active.port, bytes), do: state, else: retire(state, :control_lost)
-          else
-            retire(state, :group_unproved)
-          end
-
-        :unproved ->
-          retire(state, :group_unproved)
-      end
-    else
-      retire(state, :invalid_control)
-    end
+    if record == expected and now_ms() < active.write_cutoff,
+      do: observe_group(state),
+      else: retire(state, :invalid_control)
   end
 
   defp control_record(%{active: %{phase: :writing} = active} = state, record) do
@@ -506,6 +485,46 @@ defmodule Loopex.AppServer.OutputWriter do
     }
 
     if state.stopping, do: {:stop, :normal, state}, else: {:noreply, state}
+  end
+
+  # Concept: a ready leader is admitted once its own group is observed, and
+  # that observation may take the write budget it was given.
+  # Technical depth: each `ps` read stays bounded; an unproved read before the
+  # write cutoff is observed again rather than retiring a healthy writer, so a
+  # slow process table under load spends the original budget instead of a
+  # fixed share of it. The write cutoff still retires the writer.
+  defp observe_group(%{active: active} = state) do
+    case group_observation(active.leader, active.write_cutoff) do
+      {:ok, pairs} ->
+        if {active.leader, active.leader} in pairs and now_ms() < active.write_cutoff do
+          active = %{active | group: active.leader, phase: :writing}
+          state = %{state | active: active}
+
+          bytes = [
+            "ALLOW ",
+            active.nonce,
+            "\nFRAME ",
+            active.nonce,
+            " ",
+            Integer.to_string(byte_size(active.frame)),
+            "\n",
+            active.frame
+          ]
+
+          state = %{state | active: %{active | frame: nil}}
+          if command(active.port, bytes), do: state, else: retire(state, :control_lost)
+        else
+          retire(state, :group_unproved)
+        end
+
+      :unproved ->
+        if now_ms() < active.write_cutoff do
+          Process.send_after(self(), {:observe_group, active.reference}, 10)
+          state
+        else
+          retire(state, :group_unproved)
+        end
+    end
   end
 
   defp group_observation(leader, cutoff) when is_integer(leader) and leader > 0 do

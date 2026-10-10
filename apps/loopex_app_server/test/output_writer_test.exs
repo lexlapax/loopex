@@ -442,8 +442,10 @@ defmodule Loopex.AppServer.OutputWriterTest do
   defp with_fixture(mode, body) do
     cutoff = System.monotonic_time(:millisecond) + 30_000
 
-    root =
-      Path.join(System.tmp_dir!(), "loopex-output-writer-#{System.unique_integer([:positive])}")
+    # A random, exclusively created root: VM-local unique integers repeat
+    # across test VMs, so a root left by an interrupted run is never reused.
+    suffix = Base.url_encode64(:crypto.strong_rand_bytes(12), padding: false)
+    root = Path.join(System.tmp_dir!(), "loopex-output-writer-" <> suffix)
 
     File.mkdir!(root)
 

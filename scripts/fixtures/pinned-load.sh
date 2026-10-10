@@ -12,7 +12,8 @@
 #     test/coding_tools_test.exs:4302 test/post_closure_hotfix_test.exs:786
 #
 # ITER (default 30), CPUS (default 0-3) and HOGS (default 8) are environment
-# variables. Prints one line per run and a final count.
+# variables. Prints one line per run and a final count. KEEP=<prefix> also
+# writes each run's complete output to <prefix>.<run>.log for retention.
 set -u
 [ $# -ge 2 ] || { echo "usage: pinned-load.sh <app dir> <test spec>..." >&2; exit 2; }
 command -v taskset >/dev/null || { echo "pinned-load.sh: taskset is required (Linux)" >&2; exit 2; }
@@ -36,6 +37,7 @@ hangs=0
 for i in $(seq 1 "$ITER"); do
   start=$(date +%s)
   out=$(cd "$app" && taskset -c "$CPUS" mix test --no-compile "$@" 2>&1)
+  [ -n "${KEEP:-}" ] && printf '%s\n' "$out" >"$KEEP.$i.log"
   dur=$(( $(date +%s) - start ))
   echo "run $i ${dur}s :: $(echo "$out" | grep -aE '^Result:|tests?, [0-9]+ failure' | tail -n 1)"
   if ! echo "$out" | grep -qaE '^Result: [0-9]+ passed|tests?, 0 failures'; then
