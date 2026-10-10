@@ -10,7 +10,8 @@ defmodule LoopexComposition.Restore do
   candidate publication and terminal claim release. Complete prior lineage is
   validated before appending the next ordinal. Original-transaction resolution
   reuses retained candidates under the host's exclusion and prior-owner evidence.
-  Unsupported helper-ledger grammars remain fenced.
+  A quiescent helper namespace restores only when every member passes the
+  helper decoders and each task receipt matches its run log; anything else refuses.
   """
 
   alias Loopex.Executor.Local.RestoreCodec
