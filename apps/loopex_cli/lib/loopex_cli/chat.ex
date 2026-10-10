@@ -224,12 +224,17 @@ defmodule LoopexCli.Chat do
 
   # Composition's creation defaults use the profile's explicit ceilings, so a
   # coding profile's tool definitions fit its declared system budget.
+  # Literal atoms: a built escript loads modules lazily, so an atom that only a
+  # not-yet-loaded module defines does not exist for `to_existing_atom` yet.
   defp declared_budgets(session),
     do:
       for(
-        key <- ~w(context_token_budget system_class_tokens),
+        {key, option} <- [
+          {"context_token_budget", :context_token_budget},
+          {"system_class_tokens", :system_class_tokens}
+        ],
         is_integer(session[key]),
-        do: {String.to_existing_atom(key), session[key]}
+        do: {option, session[key]}
       )
 
   defp callback(runtime, invocation, consumer, driver, placement, deps, tag) do
