@@ -90,10 +90,15 @@ defmodule LoopexCli.OutputStdioTest do
   defp child(mode, report) do
     elixir = System.find_executable("elixir") || flunk("elixir executable unavailable")
 
+    # Concept: the child loads this build's compiled applications.
+    # Technical depth: select code paths under the active build root, which
+    # MIX_BUILD_ROOT may place anywhere (the floor lane uses a sibling root).
+    build = Mix.Project.build_path()
+
     paths =
       :code.get_path()
       |> Enum.map(&List.to_string/1)
-      |> Enum.filter(&String.contains?(&1, "_build"))
+      |> Enum.filter(&String.starts_with?(&1, build))
       |> Enum.flat_map(&["-pa", &1])
 
     Enum.map_join([elixir | paths] ++ [@driver, mode, report], " ", &sh_quote/1)
