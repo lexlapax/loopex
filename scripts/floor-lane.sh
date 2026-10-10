@@ -181,7 +181,12 @@ run_logged() {
       "$interrupted_status" "$((SECONDS - started))" | tee -a "${logs[@]}"
     return "$interrupted_status"
   fi
-  "$@" >"$stream" 2>&1 &
+  # Concept: the clone and its checks see ordinary source modes.
+  # Technical depth: the runner keeps umask 077 for its retained logs, but Git
+  # applies the umask to checked-out files and the M7 fixture manifest pins
+  # 0644/0755 source modes. Each command runs under the canonical scoped
+  # umask 022 instead of inheriting 077.
+  (umask 022 && "$@") >"$stream" 2>&1 &
   active_pid=$!
   [[ $interrupted_status -eq 0 ]] || terminate_active
   set +e
