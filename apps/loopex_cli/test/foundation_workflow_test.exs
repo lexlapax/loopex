@@ -366,7 +366,7 @@ defmodule LoopexCli.FoundationWorkflowTest do
         nil
       )
 
-    assert {:ok, [%{session_id: session_id}]} = Loopex.list_sessions(workflow.state_root)
+    assert {:ok, [%{session_id: session_id}]} = LoopexCli.SessionCatalog.list(workflow.state_root)
     {session_id, output}
   end
 

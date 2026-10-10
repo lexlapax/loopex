@@ -2,6 +2,7 @@ Code.require_file("../../loopex/test/support/m1_runtime_helper.exs", __DIR__)
 Code.require_file("../../loopex/test/support/agent_loop_helper.exs", __DIR__)
 
 Code.require_file("support/output_capture.exs", __DIR__)
+Code.require_file("support/session_catalog_helper.exs", __DIR__)
 
 defmodule LoopexCli.ContextBudgetCommandsTest do
   @moduledoc false
@@ -316,7 +317,7 @@ defmodule LoopexCli.ContextBudgetCommandsTest do
       assert_receive {^marker, Loopex, :runtime_placement_id, [state_root]}
       assert state_root == fixture.state_root
 
-      assert_receive {^marker, Loopex, :prepare_resume_known_session,
+      assert_receive {^marker, LoopexCli.SessionCatalog, :prepare_resume,
                       [prepared_root, prepared_runtime, prepared_session, command_id]}
 
       assert prepared_root == fixture.state_root
@@ -483,7 +484,13 @@ defmodule LoopexCli.ContextBudgetCommandsTest do
                     {:committed, _tx_id, _receipt}},
                    5_000
 
-    :ok = Loopex.track_session(fixture.state_root, fixture.session_id, fixture.placement)
+    :ok =
+      LoopexCli.Test.SessionCatalog.record(
+        fixture.state_root,
+        fixture.session_id,
+        fixture.placement
+      )
+
     coordinator = coordinator_of(fixture.runtime)
     monitor = Process.monitor(coordinator)
     Process.exit(coordinator, :kill)
@@ -510,7 +517,14 @@ defmodule LoopexCli.ContextBudgetCommandsTest do
              })
 
     drain(fixture.attachment)
-    :ok = Loopex.track_session(fixture.state_root, fixture.session_id, fixture.placement)
+
+    :ok =
+      LoopexCli.Test.SessionCatalog.record(
+        fixture.state_root,
+        fixture.session_id,
+        fixture.placement
+      )
+
     coordinator = coordinator_of(fixture.runtime)
     monitor = Process.monitor(coordinator)
     Process.exit(coordinator, :kill)

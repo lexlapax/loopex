@@ -395,7 +395,7 @@ defmodule LoopexCli.ResourceAdmissionWorkflowTest do
       Loopex, :create_session, [:runtime, %{"surface" => "cli"}, _] ->
         {:ok, "session-1"}
 
-      Loopex, :track_session, [^root, "session-1", "placement-1"] ->
+      LoopexCli.SessionCatalog, :record, [^root, "session-1", "placement-1"] ->
         :ok
 
       Loopex, :attach, [:runtime, "session-1", [after_event_sequence: 0]] ->

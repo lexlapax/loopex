@@ -3,6 +3,8 @@ Code.require_file(
   __DIR__
 )
 
+Code.require_file("support/session_catalog_helper.exs", __DIR__)
+
 defmodule LoopexCli.MultiClientWorkflowTest do
   use ExUnit.Case, async: false
   @moduletag capture_log: true
@@ -12,11 +14,12 @@ defmodule LoopexCli.MultiClientWorkflowTest do
   @credential "multi-client-placeholder"
 
   # Concept: the operator workflow with every step a command an operator
-  # types, each in its own operating-system process: import a released root,
-  # start the daemon, run a task through it, list, refuse to observe a session
-  # this daemon has not activated, resume, and stop.
+  # types, each in its own operating-system process: a session recorded
+  # offline is already in the daemon's one catalogue, so the daemon lists it
+  # with no import step; run a task through the daemon, list, refuse to
+  # observe a session this daemon has not activated, resume, and stop.
   @tag timeout: 300_000
-  test "an operator moves a released root to a daemon and drives it from separate processes" do
+  test "a session recorded offline is listed by a daemon driven from separate processes" do
     root = Path.join(System.tmp_dir!(), "lmw-#{System.unique_integer([:positive])}")
     state_root = Path.join(root, "s")
     workspace = Path.join(root, "w")
@@ -24,11 +27,9 @@ defmodule LoopexCli.MultiClientWorkflowTest do
     File.mkdir_p!(workspace)
     on_exit(fn -> File.rm_rf(root) end)
 
-    # A released root with one recorded session and no daemon index.
+    # An offline command recorded one session under the root's placement.
     {:ok, placement} = Loopex.runtime_placement_id(state_root)
-    :ok = Loopex.track_session(state_root, "s-legacy", placement)
-
-    assert {0, _output} = cli(["daemon", "prepare-index", "--state-root", state_root])
+    :ok = LoopexCli.Test.SessionCatalog.record(state_root, "s-offline", placement)
 
     provider =
       ProviderFixture.new(:reply,
@@ -84,9 +85,9 @@ defmodule LoopexCli.MultiClientWorkflowTest do
       listing |> String.split("\n", trim: true) |> List.last() |> JSON.decode!()
 
     residency = Map.new(sessions, &{&1["session_id"], &1["residency"]})
-    assert residency == %{"s-legacy" => "dormant", session_id => "active"}
+    assert residency == %{"s-offline" => "dormant", session_id => "active"}
 
-    {status, refusal} = cli(["attach", "s-legacy", "--daemon", socket])
+    {status, refusal} = cli(["attach", "s-offline", "--daemon", socket])
     assert status == 1
     assert refusal =~ "dormant"
 

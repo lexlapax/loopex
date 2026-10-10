@@ -12,6 +12,7 @@ Code.require_file("../../loopex/test/support/agent_loop_helper.exs", __DIR__)
 Code.require_file("support/demonstration.ex", __DIR__)
 
 Code.require_file("support/output_capture.exs", __DIR__)
+Code.require_file("support/session_catalog_helper.exs", __DIR__)
 
 defmodule LoopexCliTest do
   @moduledoc false
@@ -1512,7 +1513,7 @@ defmodule LoopexCliTest do
 
     _finished = observe(attachment)
 
-    :ok = Loopex.track_session(state_root, session_id, placement)
+    :ok = LoopexCli.Test.SessionCatalog.record(state_root, session_id, placement)
 
     listed = elem(OutputCapture.dispatch(["sessions", "--state-root", state_root]), 1)
     assert listed =~ session_id
@@ -1665,7 +1666,7 @@ defmodule LoopexCliTest do
 
     assert run_output =~ "yesterday's answer"
 
-    assert {:ok, [%{session_id: session_id}]} = Loopex.list_sessions(state_root)
+    assert {:ok, [%{session_id: session_id}]} = LoopexCli.SessionCatalog.list(state_root)
     first_marker = end_the_process(marker)
 
     resume_output =
@@ -1927,7 +1928,7 @@ defmodule LoopexCliTest do
     Loopex, :runtime_placement_id, [_root] ->
       {:ok, "runtime-probe"}
 
-    Loopex, :prepare_resume_known_session, [_root, _runtime, _session, command_id] ->
+    LoopexCli.SessionCatalog, :prepare_resume, [_root, _runtime, _session, command_id] ->
       IO.puts("COMMAND_ID " <> command_id)
       {:error, :probe_stop}
 
@@ -2236,7 +2237,7 @@ defmodule LoopexCliTest do
     {session_id, _attachment, {:accepted, "prompt-1"}} =
       AgentLoopFixture.run(fixture, "do the thing")
 
-    :ok = Loopex.track_session(state_root, session_id, placement)
+    :ok = LoopexCli.Test.SessionCatalog.record(state_root, session_id, placement)
     assert_receive {:holding, _model}, 2_000
 
     output =
@@ -2859,6 +2860,46 @@ defmodule LoopexCliTest do
     assert silent =~ "no project resources found"
   end
 
+  # Concept: ADR 0070 retires the offline `sessions/` catalog. A root whose
+  # sessions exist only there is refused, never imported, and a resume through
+  # a runtime other than the one that created the session reaches no Store.
+  test "a retired offline catalog is refused and a foreign placement cannot resume" do
+    {retired, _workspace} = roots()
+    File.mkdir_p!(Path.join([retired, "sessions"]))
+
+    assert {:error, :session_catalog_retired} =
+             LoopexCli.dispatch(["sessions", "--state-root", retired])
+
+    {:ok, lock} = Placement.acquire(retired)
+
+    assert {:error, :session_catalog_retired} =
+             LoopexCli.SessionCatalog.record(retired, "s_retired", "runtime-original")
+
+    :ok = Placement.release(lock)
+
+    {state_root, _workspace} = roots()
+    :ok = LoopexCli.Test.SessionCatalog.record(state_root, "s_bound", "runtime-original")
+    fixture = fixture(script: [%{text: "unused"}], runtime_id: "runtime-other")
+
+    assert {:error, {:runtime_placement_mismatch, reason}} =
+             LoopexCli.SessionCatalog.prepare_resume(
+               state_root,
+               fixture.runtime,
+               "s_bound",
+               "resume-foreign"
+             )
+
+    assert reason =~ "runtime-original"
+
+    assert {:error, :session_unknown} =
+             LoopexCli.SessionCatalog.prepare_resume(
+               state_root,
+               fixture.runtime,
+               "s_missing",
+               "resume-missing"
+             )
+  end
+
   test "a session the state root could not record is reported and fails the command instead of passing as recorded" do
     # Concept: a session that was never written down is a session the operator
     # cannot find again, and they have to be told while they can still act.
@@ -2871,15 +2912,19 @@ defmodule LoopexCliTest do
     # refusing to reach it, with nothing left to say which run it had been.
     {state_root, _workspace} = roots()
 
-    # A state root whose sessions directory cannot exist, because a plain file
-    # already occupies the name. Nothing else about the root is disturbed, so
-    # the placement identity still resolves exactly as a live run's would.
-    File.write!(Path.join(state_root, "sessions"), "not a directory")
+    # A state root whose session index directory cannot exist, because a plain
+    # file already occupies the name. Nothing else about the root is disturbed,
+    # so the placement identity still resolves exactly as a live run's would,
+    # and the command holds the placement lock as a live run does.
+    File.write!(Path.join(state_root, "daemon"), "not a directory")
+    {:ok, lock} = Placement.acquire(state_root)
 
     reported =
       OutputCapture.stderr(fn ->
         send(self(), {:recorded, LoopexCli.record_session(state_root, "s_unrecorded")})
       end)
+
+    :ok = Placement.release(lock)
 
     assert_received {:recorded, outcome}
 
@@ -2895,13 +2940,15 @@ defmodule LoopexCliTest do
 
     # The failure was real rather than asserted: the session is genuinely not
     # there to be listed.
-    assert {:error, _unreadable} = Loopex.list_sessions(state_root)
+    assert {:error, _unreadable} = LoopexCli.SessionCatalog.list(state_root)
 
     # And a state root that works still records, so the check is about the
     # failure and not about refusing everything.
     {working, _ignored} = roots()
+    {:ok, lock} = Placement.acquire(working)
     assert :ok = LoopexCli.record_session(working, "s_recorded")
-    assert {:ok, [%{session_id: "s_recorded"}]} = Loopex.list_sessions(working)
+    :ok = Placement.release(lock)
+    assert {:ok, [%{session_id: "s_recorded"}]} = LoopexCli.SessionCatalog.list(working)
   end
 
   test "a terminal interrupt delivered to the shipped launcher cancels the task through the public facade" do

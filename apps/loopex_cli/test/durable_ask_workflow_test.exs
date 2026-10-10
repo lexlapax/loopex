@@ -1225,7 +1225,7 @@ defmodule LoopexCli.DurableAskWorkflowTest do
         consumer = Agent.get(calls, & &1.composition)[:diagnostics_to]
         Keyword.fetch!(overrides, :trace_hook).(consumer, configuration)
 
-      Loopex, :track_session, [@root, "session-1", "placement-1"] ->
+      LoopexCli.SessionCatalog, :record, [@root, "session-1", "placement-1"] ->
         record.(:track)
         Keyword.get(overrides, :track, :ok)
 

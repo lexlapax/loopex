@@ -67,7 +67,7 @@ defmodule LoopexCli.ChatBuiltWorkflowTest do
     refute first.stdout <> File.read!(first.stderr) =~ credential
 
     state = Path.join(root, "state")
-    assert {:ok, [%{session_id: retained_session}]} = Loopex.list_sessions(state)
+    assert {:ok, [%{session_id: retained_session}]} = LoopexCli.SessionCatalog.list(state)
     assert LoopexProtocol.Wire.encode_identity(retained_session) == session_id
     assert {:ok, ^retained_session} = LoopexProtocol.Wire.session_identity(session_id)
     genesis = genesis(state)
@@ -191,7 +191,7 @@ defmodule LoopexCli.ChatBuiltWorkflowTest do
              Enum.filter(controls, &(&1["event"] == "closing"))
 
     assert ProviderFixture.events(provider) == before
-    assert {:ok, [%{session_id: ^retained_session}]} = Loopex.list_sessions(state)
+    assert {:ok, [%{session_id: ^retained_session}]} = LoopexCli.SessionCatalog.list(state)
   end
 
   defp profile do
