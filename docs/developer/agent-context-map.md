@@ -7364,3 +7364,45 @@ ADR 0039's custody and deadline guarantees. The test deadline stays 15 s.
   pre-approved a $150 provider-spend cap for the T17 closure matrix (estimate:
   likely $10–25, worst case about $130). The maintainer attends the
   `m7-operator` block.
+
+<a id="disposition-m7-reference-profile-target-2026-10-10"></a>
+### M7 reference profile system-class target, 2026-10-10
+
+- **Amended text.** This override amends the
+  [M7 technical plan](../plans/M7-technical.md) paragraph requiring each
+  demonstrated reference chat profile to stay below 1,000 estimated
+  system-class tokens. Every profile except the three named below still has to
+  meet that target, measured with a 512-byte workspace path.
+- **Override.** `chat-coding` and `chat-coding-appendix` run under an explicit
+  1,500-token system ceiling. `chat-coding-helpers` (the `m7.review` helper
+  parent) runs under 2,000.
+- **Cause.** Each schema field costs a fixed number of bytes in the canonical
+  encoding, and the environment fact carries the absolute workspace path. At a
+  512-byte path, the full coding set plus the question tool costs 932 tokens
+  even with every description emptied, and 955 with the project appendix. No
+  description that is still useful fits below 1,000. Removing fields was not
+  allowed.
+- **Remedy applied.** All nine reference tool definitions and the reference
+  base instruction were compacted, keeping every schema field. The new texts
+  are new generation bytes under their existing versions, and every pinned
+  digest and vector was repinned.
+- **Measured.** Credential-free on Linux x86_64 with a 512-byte workspace:
+
+  | Profile | Before | After |
+  | --- | --- | --- |
+  | `chat-coding` | 1,318 | 1,128 |
+  | `chat-coding-appendix` (admitted, changed) | 1,341 | 1,151 and 1,161 |
+  | `chat-coding-helpers` | 1,584 | 1,360 |
+  | `chat-read-only` | — | 986 |
+  | `daemon-coding` | — | 963 |
+  | `ask-coding` | — | 963 |
+  | `ask-read-only` | — | 821 |
+  | `ephemeral-question` | — | 918 |
+  | `helper-investigate` | — | 836 |
+  | `helper-review` | — | 831 |
+
+  The maintenance (compaction) instruction class measures 129 tokens and is
+  unchanged.
+- **Where it is enforced.** The manifest's `profiles` set records each
+  ceiling, and `M7ProfilesTest` enforces it. The runner gives each attempt its
+  case's ceilings, so the earlier host widenings to 2,000 and 4,000 are gone.

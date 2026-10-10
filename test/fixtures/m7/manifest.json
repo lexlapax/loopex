@@ -22,6 +22,9 @@
           "V1.1",
           "V1.2",
           "V1.3.ask"
+        ],
+        "profiles": [
+          "ask-read-only"
         ]
       },
       "m7.baseline.durable": {
@@ -44,6 +47,9 @@
           "V1.3.durable",
           "V1.4",
           "V1.5"
+        ],
+        "profiles": [
+          "chat-coding"
         ]
       },
       "m7.cross-provider-maintenance": {
@@ -54,6 +60,9 @@
         "status": "ready",
         "steps": [
           "V6.7"
+        ],
+        "profiles": [
+          "chat-read-only"
         ]
       },
       "m7.daemon-detach": {
@@ -64,6 +73,9 @@
         "status": "ready",
         "steps": [
           "V9.4"
+        ],
+        "profiles": [
+          "daemon-coding"
         ]
       },
       "m7.ephemeral-question": {
@@ -84,6 +96,9 @@
         "status": "ready",
         "steps": [
           "V5.6.positive"
+        ],
+        "profiles": [
+          "ephemeral-question"
         ]
       },
       "m7.external": {
@@ -108,6 +123,9 @@
           "V10.3",
           "V10.4",
           "V10.5"
+        ],
+        "profiles": [
+          "chat-coding"
         ]
       },
       "m7.feature": {
@@ -129,6 +147,9 @@
         "steps": [
           "V5.1",
           "V5.2"
+        ],
+        "profiles": [
+          "chat-coding"
         ]
       },
       "m7.instructions.admitted": {
@@ -150,6 +171,9 @@
         "steps": [
           "V3.1",
           "V3.2"
+        ],
+        "profiles": [
+          "chat-coding-appendix"
         ]
       },
       "m7.instructions.changed": {
@@ -160,6 +184,9 @@
         "status": "ready",
         "steps": [
           "V3.4"
+        ],
+        "profiles": [
+          "chat-coding-appendix"
         ]
       },
       "m7.instructions.declined": {
@@ -170,6 +197,9 @@
         "status": "ready",
         "steps": [
           "V3.3"
+        ],
+        "profiles": [
+          "chat-coding"
         ]
       },
       "m7.interrupt": {
@@ -190,6 +220,9 @@
         "status": "ready",
         "steps": [
           "V9.2"
+        ],
+        "profiles": [
+          "chat-coding"
         ]
       },
       "m7.long": {
@@ -214,6 +247,9 @@
           "V6.3",
           "V6.4",
           "V6.6.positive"
+        ],
+        "profiles": [
+          "chat-coding"
         ]
       },
       "m7.oversized-source": {
@@ -234,6 +270,9 @@
         "status": "ready",
         "steps": [
           "V6.5.positive"
+        ],
+        "profiles": [
+          "chat-coding"
         ]
       },
       "m7.pipe-answer": {
@@ -245,6 +284,9 @@
         "steps": [
           "V2.6.answer",
           "V2.6.decline"
+        ],
+        "profiles": [
+          "chat-coding"
         ]
       },
       "m7.policy-denial": {
@@ -265,6 +307,9 @@
         "status": "ready",
         "steps": [
           "V9.1"
+        ],
+        "profiles": [
+          "chat-coding"
         ]
       },
       "m7.provider-switch": {
@@ -287,6 +332,9 @@
           "V7.1",
           "V7.2",
           "V7.4"
+        ],
+        "profiles": [
+          "chat-coding"
         ]
       },
       "m7.question-restart": {
@@ -307,6 +355,9 @@
         "status": "ready",
         "steps": [
           "V5.3"
+        ],
+        "profiles": [
+          "chat-coding"
         ]
       },
       "m7.repair": {
@@ -331,6 +382,9 @@
           "V2.3",
           "V2.4",
           "V2.5"
+        ],
+        "profiles": [
+          "chat-coding"
         ]
       },
       "m7.restore": {
@@ -354,7 +408,8 @@
           "V13.4",
           "V13.5",
           "V13.6"
-        ]
+        ],
+        "profiles": []
       },
       "m7.review": {
         "attended": true,
@@ -377,6 +432,11 @@
           "V8.2",
           "V8.3",
           "V8.4"
+        ],
+        "profiles": [
+          "chat-coding-helpers",
+          "helper-investigate",
+          "helper-review"
         ]
       },
       "m7.rollback": {
@@ -387,7 +447,8 @@
         "status": "ready",
         "steps": [
           "V13.2"
-        ]
+        ],
+        "profiles": []
       },
       "m7.steer-barrier": {
         "attended": true,
@@ -410,6 +471,9 @@
           "V4.2",
           "V4.3",
           "V4.4"
+        ],
+        "profiles": [
+          "chat-coding"
         ]
       },
       "m7.thinking-bound": {
@@ -420,6 +484,9 @@
         "status": "ready",
         "steps": [
           "V7.7.bound"
+        ],
+        "profiles": [
+          "chat-read-only"
         ]
       },
       "m7.thinking-cancel": {
@@ -430,6 +497,9 @@
         "status": "ready",
         "steps": [
           "V7.7.cancel"
+        ],
+        "profiles": [
+          "chat-read-only"
         ]
       },
       "m7.thinking-rounds": {
@@ -450,6 +520,9 @@
         "status": "ready",
         "steps": [
           "V7.3.positive"
+        ],
+        "profiles": [
+          "chat-read-only"
         ]
       },
       "m7.trace.file": {
@@ -473,6 +546,9 @@
           "V11.2.file",
           "V11.5.file",
           "V12.1"
+        ],
+        "profiles": [
+          "chat-coding"
         ]
       },
       "m7.trace.flag": {
@@ -496,6 +572,9 @@
           "V11.2.flag",
           "V11.5.flag",
           "V12.2"
+        ],
+        "profiles": [
+          "chat-coding"
         ]
       },
       "m7.trace.json": {
@@ -516,6 +595,9 @@
         "status": "ready",
         "steps": [
           "V11.5.json"
+        ],
+        "profiles": [
+          "ask-coding"
         ]
       }
     },
@@ -1043,7 +1125,39 @@
         "owner": "test:apps/loopex_reference_client/test/end_to_end_recovery_test.exs#an effect without a durable receipt becomes outcome_unknown and is not blindly retried"
       }
     },
-    "status": "pinned"
+    "status": "pinned",
+    "profiles": {
+      "chat-coding": {
+        "system_class_tokens": 1500
+      },
+      "chat-coding-appendix": {
+        "system_class_tokens": 1500
+      },
+      "chat-coding-helpers": {
+        "system_class_tokens": 2000
+      },
+      "chat-read-only": {
+        "system_class_tokens": 1000
+      },
+      "daemon-coding": {
+        "system_class_tokens": 1000
+      },
+      "ask-coding": {
+        "system_class_tokens": 1000
+      },
+      "ask-read-only": {
+        "system_class_tokens": 1000
+      },
+      "ephemeral-question": {
+        "system_class_tokens": 1000
+      },
+      "helper-investigate": {
+        "system_class_tokens": 1000
+      },
+      "helper-review": {
+        "system_class_tokens": 1000
+      }
+    }
   },
   "external": {
     "allowed_changed_paths": [

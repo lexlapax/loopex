@@ -94,19 +94,18 @@ defmodule LoopexProtocol.ToolDefinition do
     "tool_version" => "1.0.0",
     "name" => "ask",
     "class" => "interaction",
-    "description" =>
-      "Ask the operator a question. Supply optional unique choices, or request a text answer.",
+    "description" => "Ask the operator a question.",
     "parameter_schema" => %{
       "type" => "object",
       "properties" => %{
         "question" => %{
           "type" => "string",
-          "description" => "Nonempty UTF-8 question, at most 2,048 bytes."
+          "description" => "At most 2048 bytes."
         },
         "choices" => %{
           "type" => "array",
           "items" => %{"type" => "string"},
-          "description" => "One to eight distinct nonempty labels, at most 256 UTF-8 bytes each."
+          "description" => "1-8 distinct labels, 256 bytes each."
         }
       },
       "required" => ["question"]

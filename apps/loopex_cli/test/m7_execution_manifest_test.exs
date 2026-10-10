@@ -184,6 +184,35 @@ defmodule LoopexCli.M7ExecutionManifestTest do
     end
   end
 
+  test "profile keys are declared once and staged exactly by provider-backed cases", f do
+    profiles = ["cases", "m7.repair", "profiles"]
+
+    assert ExecutionManifest.validate(Map.delete(f.manifest, "profiles")) ==
+             {:error, :invalid_execution_manifest}
+
+    assert ExecutionManifest.validate(
+             update_in(f.manifest, ["cases", "m7.repair"], &Map.delete(&1, "profiles"))
+           ) == {:error, :invalid_m7_cases}
+
+    assert ExecutionManifest.validate(
+             put_in(f.manifest, profiles, ["chat-coding", "chat-coding"])
+           ) ==
+             {:error, :invalid_m7_cases}
+
+    for changed <- [
+          put_in(f.manifest, profiles, []),
+          put_in(f.manifest, profiles, ["chat-unknown"]),
+          put_in(f.manifest, ["cases", "m7.restore", "profiles"], ["chat-coding"]),
+          put_in(f.manifest, ["profiles", "chat-unused"], %{"system_class_tokens" => 1_000}),
+          put_in(f.manifest, ["profiles", "chat-coding", "system_class_tokens"], 0),
+          put_in(f.manifest, ["profiles", "chat-coding", "extra"], true),
+          put_in(f.manifest, ["profiles", "Chat Coding"], %{"system_class_tokens" => 1_000}),
+          Map.put(f.manifest, "profiles", %{})
+        ] do
+      assert ExecutionManifest.validate(changed) == {:error, :invalid_m7_profiles}
+    end
+  end
+
   test "test owners must name a literal test in an application test file", f do
     for owner <- [
           "test:apps/loopex/test/configured_session_test.exs#no such test name",

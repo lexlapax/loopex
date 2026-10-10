@@ -165,7 +165,7 @@ defmodule Mix.Tasks.Loopex.M7Evidence do
   end
 
   # Concept: the closure scaffold reserves one row per committed key.
-  # Technical depth: rows start with the backquoted step or case key.
+  # Technical depth: rows start with the backquoted step, case or profile key.
   defp closure_rows(root, execution) do
     with {:ok, text} <-
            read(Path.join(root, "docs/evidence/M7-closure-runs.md"), :m7_closure_rows_missing) do
@@ -173,7 +173,8 @@ defmodule Mix.Tasks.Loopex.M7Evidence do
       starts = MapSet.new(starts)
 
       keys =
-        Map.keys(execution["operator_step_evidence"]) ++ Map.keys(execution["cases"])
+        Map.keys(execution["operator_step_evidence"]) ++
+          Map.keys(execution["cases"]) ++ Map.keys(execution["profiles"])
 
       if Enum.all?(keys, &MapSet.member?(starts, "| `#{&1}`")),
         do: :ok,

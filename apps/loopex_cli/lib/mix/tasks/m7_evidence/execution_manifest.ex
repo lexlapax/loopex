@@ -16,7 +16,10 @@ defmodule Mix.Tasks.Loopex.M7Evidence.ExecutionManifest do
   `genesis_digest` (the SHA-256 of the campaign's canonical genesis record),
   `lanes`, `cases`, `operator_step_evidence` and `providers`: provider A and
   the selected provider B with credential variable names, B's model, its two
-  exact cells and the cases that use it.
+  exact cells and the cases that use it. `profiles` declares each
+  demonstrated reference profile key with its `system_class_tokens` ceiling;
+  every case lists the keys it stages (none without a credential) and every
+  key is staged by some case.
 
   Every numbered step of the accepted scenarios (74 steps) has one or more
   keys `Vn.m` or `Vn.m.<subcase>`; no key names another step. An owner is
@@ -24,7 +27,7 @@ defmodule Mix.Tasks.Loopex.M7Evidence.ExecutionManifest do
   `pending:<reason>` or `retired:<disposition>`. A mandatory attended step has
   at least one attended key, no pending or retired key, and every attended key
   is owned by an `m7-operator` case. Each case lists exactly the keys it owns,
-  its lane, attendance, credential need, driver and status; lane lists hold
+  its profiles, its lane, attendance, credential need, driver and status; lane lists hold
   exactly their cases in execution order. An attended case also carries the
   `objective` shown to its operator and its `ceilings`: per-unit `run_ms`
   (at most 600,000), `maintenance_ms` (at most 60,000), `hold_ms` (at most
@@ -60,9 +63,10 @@ defmodule Mix.Tasks.Loopex.M7Evidence.ExecutionManifest do
                 V6.6 V7.1 V7.2 V7.3 V7.4 V8.1 V8.2 V8.3 V8.4 V9.1 V9.2 V11.5 V10.1 V10.2
                 V10.3 V10.4 V10.5 V13.1 V13.4 V13.5 V13.6)
   @lanes ~w(m7-operator m7-provider m7-rollback)
-  @keys ~w(status coverage campaign_id genesis_digest lanes cases operator_step_evidence providers)
+  @keys ~w(status coverage campaign_id genesis_digest lanes cases operator_step_evidence providers
+             profiles)
   @credential_names ~w(LOOPEX_PROVIDER_API_KEY OPENAI_API_KEY ANTHROPIC_API_KEY OPENROUTER_API_KEY)
-  @case_keys ~w(lane attended credential driver status steps)
+  @case_keys ~w(lane attended credential driver status steps profiles)
   @attended_keys @case_keys ++ ~w(objective ceilings)
   @setup_ms 60_000
   @unit_caps %{"run_ms" => 600_000, "maintenance_ms" => 60_000, "hold_ms" => 120_000}
@@ -82,6 +86,7 @@ defmodule Mix.Tasks.Loopex.M7Evidence.ExecutionManifest do
          true <- manifest["coverage"] == "V1-V13" or {:error, :invalid_execution_manifest},
          :ok <- genesis(manifest["campaign_id"], manifest["genesis_digest"]),
          :ok <- cases(manifest["cases"], manifest["lanes"]),
+         :ok <- profiles(manifest["profiles"], manifest["cases"]),
          :ok <- providers(manifest["providers"], manifest["cases"]),
          :ok <- coverage(manifest["operator_step_evidence"], manifest["cases"]) do
       :ok
@@ -267,7 +272,31 @@ defmodule Mix.Tasks.Loopex.M7Evidence.ExecutionManifest do
       entry["attended"] == (entry["lane"] == "m7-operator") and
       is_boolean(entry["credential"]) and entry["driver"] in @drivers and
       status?(entry["status"]) and is_list(entry["steps"]) and entry["steps"] != [] and
-      entry["steps"] == Enum.uniq(entry["steps"])
+      entry["steps"] == Enum.uniq(entry["steps"]) and is_list(entry["profiles"]) and
+      entry["profiles"] == Enum.uniq(entry["profiles"])
+  end
+
+  # Concept: every demonstrated reference profile is declared once with its
+  # system ceiling, and every provider-backed case names the profiles it stages.
+  # Technical depth: a key is a lowercase slug with a positive ceiling; a
+  # credential case names one or more declared keys, a credential-free case
+  # none, and every declared key has at least one owning case.
+  defp profiles(profiles, cases) do
+    used = for {_id, entry} <- cases, key <- entry["profiles"], uniq: true, do: key
+
+    valid =
+      is_map(profiles) and map_size(profiles) > 0 and
+        Enum.all?(profiles, fn {key, entry} ->
+          Regex.match?(~r/\A[a-z][a-z0-9-]{0,63}\z/, key) and
+            closed?(entry, ~w(system_class_tokens)) and
+            is_integer(entry["system_class_tokens"]) and entry["system_class_tokens"] > 0
+        end) and
+        Enum.all?(cases, fn {_id, entry} ->
+          entry["credential"] == (entry["profiles"] != []) and
+            Enum.all?(entry["profiles"], &Map.has_key?(profiles, &1))
+        end) and Enum.sort(used) == Enum.sort(Map.keys(profiles))
+
+    if valid, do: :ok, else: {:error, :invalid_m7_profiles}
   end
 
   defp objective?(text), do: is_binary(text) and text != "" and byte_size(text) <= 512

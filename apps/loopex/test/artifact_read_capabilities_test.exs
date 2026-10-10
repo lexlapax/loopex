@@ -4,7 +4,7 @@ defmodule Loopex.Runtime.ArtifactReadCapabilitiesTest do
   alias Loopex.Runtime.ArtifactReadCapabilities, as: Capabilities
   alias LoopexProtocol.ToolDefinition
 
-  @range_digest "858956b73d7059ffaf18943d28bb0654ee3ca935f86cec3a136ba8e93b6e3c9e"
+  @range_digest "49a166620b21ea1a517d972afa9605fae0cb768e54427784ae6a9dfaadfea009"
   setup do
     path = Path.expand("../priv/vectors/artifact_read.v1.json", __DIR__)
     manifest = path |> File.read!() |> JSON.decode!()

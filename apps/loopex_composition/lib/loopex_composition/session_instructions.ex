@@ -20,9 +20,8 @@ defmodule LoopexComposition.SessionInstructions do
   alias LoopexComposition.ProjectResources.ResourceReader
   alias LoopexProtocol.Frame
 
-  @base "You are a coding agent working in a real workspace. " <>
-          "Use the tools you are given to inspect and change files, and run commands " <>
-          "when you need to. Continue until the task is done, then stop."
+  @base "You are a coding agent in a real workspace. " <>
+          "Use the tools until the task is done, then stop."
   @options ~w(system_file append_file enabled_roles catalog_digest)
   @facts ~w(workspace platform tool_profile)
   @role ~r/\A[a-z][a-z0-9_-]{0,63}\z/

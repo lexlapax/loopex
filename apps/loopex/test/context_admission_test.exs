@@ -182,22 +182,19 @@ defmodule Loopex.ContextAdmissionTest do
         "wall_time_ms" => 30000
       },
       "description" =>
-        "Read a workspace text file, or an authorized artifact range. Artifact ranges require artifact_use, offset and length (at most 4096 bytes).",
+        "Read a workspace file, or an artifact range (artifact_use, offset, length).",
       "effect_class" => "read_only",
       "idempotency_class" => "safe_retry",
       "name" => "read",
       "parameter_schema" => %{
         "properties" => %{
           "artifact_use" => %{
-            "description" => "Committed use:<sha256> reference.",
+            "description" => "use:<sha256> reference.",
             "type" => "string"
           },
           "length" => %{"description" => "1 to 4096 bytes.", "type" => "integer"},
-          "offset" => %{"description" => "Unsigned byte offset.", "type" => "integer"},
-          "path" => %{
-            "description" => "Path relative to the workspace root.",
-            "type" => "string"
-          }
+          "offset" => %{"description" => "Byte offset.", "type" => "integer"},
+          "path" => %{"description" => "Workspace-relative path.", "type" => "string"}
         },
         "required" => [],
         "type" => "object"
@@ -215,18 +212,14 @@ defmodule Loopex.ContextAdmissionTest do
         "output_bytes" => 4096,
         "wall_time_ms" => 30000
       },
-      "description" =>
-        "Create or replace a file beneath the workspace root with the exact content given.",
+      "description" => "Create or replace a workspace file.",
       "effect_class" => "workspace_write",
       "idempotency_class" => "safe_retry",
       "name" => "write",
       "parameter_schema" => %{
         "properties" => %{
-          "content" => %{"description" => "Exact bytes to write.", "type" => "string"},
-          "path" => %{
-            "description" => "Path relative to the workspace root.",
-            "type" => "string"
-          }
+          "content" => %{"description" => "Exact bytes.", "type" => "string"},
+          "path" => %{"description" => "Workspace-relative path.", "type" => "string"}
         },
         "required" => ["path", "content"],
         "type" => "object"
@@ -241,19 +234,15 @@ defmodule Loopex.ContextAdmissionTest do
         "output_bytes" => 4096,
         "wall_time_ms" => 30000
       },
-      "description" =>
-        "Replace one exact occurrence of a string in a file. Fails and reports what it found if the match is absent or ambiguous.",
+      "description" => "Replace one exact, unique match in a file; reports mismatches.",
       "effect_class" => "workspace_write",
       "idempotency_class" => "never_blind_retry",
       "name" => "edit",
       "parameter_schema" => %{
         "properties" => %{
-          "new" => %{"description" => "Replacement text.", "type" => "string"},
-          "old" => %{"description" => "Exact text to replace.", "type" => "string"},
-          "path" => %{
-            "description" => "Path relative to the workspace root.",
-            "type" => "string"
-          }
+          "new" => %{"description" => "Replacement.", "type" => "string"},
+          "old" => %{"description" => "Exact text.", "type" => "string"},
+          "path" => %{"description" => "Workspace-relative path.", "type" => "string"}
         },
         "required" => ["path", "old", "new"],
         "type" => "object"
@@ -268,20 +257,19 @@ defmodule Loopex.ContextAdmissionTest do
         "output_bytes" => 16384,
         "wall_time_ms" => 120_000
       },
-      "description" =>
-        "Run a command in the workspace. Supply argv for no shell interpretation, or command for an explicit shell.",
+      "description" => "Run argv without a shell, or command in a shell.",
       "effect_class" => "process",
       "idempotency_class" => "never_blind_retry",
       "name" => "bash",
       "parameter_schema" => %{
         "properties" => %{
           "argv" => %{
-            "description" => "Program and arguments, run without a shell.",
+            "description" => "Program and arguments.",
             "items" => %{"type" => "string"},
             "type" => "array"
           },
           "command" => %{
-            "description" => "A raw shell command, interpreted by the shell.",
+            "description" => "Shell command.",
             "type" => "string"
           }
         },
@@ -1117,8 +1105,8 @@ defmodule Loopex.ContextAdmissionTest do
       |> Enum.map(&Bounds.estimate/1)
       |> Enum.sum()
 
-    assert provider_bytes == 2_597
-    assert provider_tokens == 867
+    assert provider_bytes == 2_239
+    assert provider_tokens == 748
 
     retained_components =
       [
@@ -1126,8 +1114,8 @@ defmodule Loopex.ContextAdmissionTest do
         | Enum.map(definitions, &ToolDefinition.canonical_bytes/1)
       ]
 
-    assert Enum.sum(Enum.map(retained_components, &byte_size/1)) == 4_640
-    assert Enum.sum(Enum.map(retained_components, &Bounds.estimate/1)) == 1_549
+    assert Enum.sum(Enum.map(retained_components, &byte_size/1)) == 4_282
+    assert Enum.sum(Enum.map(retained_components, &Bounds.estimate/1)) == 1_429
 
     project_message = %{
       "role" => "user",
@@ -1173,8 +1161,8 @@ defmodule Loopex.ContextAdmissionTest do
     assert fixed_record == committed.payload
 
     canonical_definition_list = Canonical.encode(definitions)
-    assert byte_size(canonical_definition_list) == 3_922
-    assert Bounds.estimate(canonical_definition_list) == 1_308
+    assert byte_size(canonical_definition_list) == 3_564
+    assert Bounds.estimate(canonical_definition_list) == 1_188
 
     assert Enum.map(definitions, &ToolDefinition.generation/1) ==
              Enum.map(request.tools, &ToolDefinition.generation/1)

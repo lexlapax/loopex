@@ -103,9 +103,8 @@ defmodule LoopexComposition.SessionInstructionsTest do
     assert captured["version"] == "loopex.reference.v1"
 
     assert captured["base"] ==
-             "You are a coding agent working in a real workspace. " <>
-               "Use the tools you are given to inspect and change files, and run commands " <>
-               "when you need to. Continue until the task is done, then stop."
+             "You are a coding agent in a real workspace. " <>
+               "Use the tools until the task is done, then stop."
 
     assert captured["appendix"] == ""
     assert map_size(captured) == 5
