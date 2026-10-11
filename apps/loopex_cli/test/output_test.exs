@@ -247,7 +247,7 @@ defmodule LoopexCli.OutputTest do
         Process.sleep(:infinity)
       end)
 
-    assert_receive {:opened, {:loopex_cli_output, owner, _} = output}
+    assert {:opened, {:loopex_cli_output, owner, _} = output} = await_report(command, :opened)
     assert_receive {:held_target_write, :stdout, "blocked"}
     assert Output.write(output, :control, :stdout, "forged") == {:error, :not_output_owner}
     owner_monitor = Process.monitor(owner)
@@ -304,8 +304,8 @@ defmodule LoopexCli.OutputTest do
         send(test, {:opened, Output.open(held.target, acquisition)})
       end)
 
-    assert_receive {:acquisition, acquisition}
-    assert_receive {:held_target_acquire, owner, _id}
+    assert {:acquisition, acquisition} = await_report(command, :acquisition)
+    assert {:held_target_acquire, owner, _id} = await_report(command, :held_target_acquire)
     owner_monitor = Process.monitor(owner)
 
     # Concept: the owner publishes inside the interval; the caller reads it later.
@@ -362,7 +362,7 @@ defmodule LoopexCli.OutputTest do
         send(test, {:result, Output.open(held.target, Output.acquisition())})
       end)
 
-    assert_receive {:held_target_acquire, owner, _id}
+    assert {:held_target_acquire, owner, _id} = await_report(caller, :held_target_acquire)
     owner_monitor = Process.monitor(owner)
     Process.exit(caller, :kill)
     assert_receive {:DOWN, ^owner_monitor, :process, ^owner, _}, 6_000
@@ -439,6 +439,24 @@ defmodule LoopexCli.OutputTest do
     assert_receive {:held_target_write, :stdout, ^expected}
     Held.release(held, :ok)
     assert :ok = Output.finish(output)
+  end
+
+  # Concept: a spawned caller's first report waits on that caller's progress.
+  # Technical depth: the caller must be scheduled, spawn the output owner and
+  # reach the held target first, so a fixed window would measure host load.
+  # The wait ends on the first message with the tag or the caller's DOWN,
+  # under the ExUnit test timeout.
+  defp await_report(caller, tag) do
+    monitor = Process.monitor(caller)
+
+    receive do
+      message when is_tuple(message) and elem(message, 0) == tag ->
+        Process.demonitor(monitor, [:flush])
+        message
+
+      {:DOWN, ^monitor, :process, ^caller, reason} ->
+        flunk("#{inspect(caller)} exited before #{inspect(tag)}: #{inspect(reason)}")
+    end
   end
 
   defp native(sequence),

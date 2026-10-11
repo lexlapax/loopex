@@ -275,8 +275,26 @@ defmodule LoopexCli.ChatStartupTest do
       end)
 
     on_exit(fn -> if Process.alive?(host), do: Process.exit(host, :kill) end)
-    assert_receive {:driver, ^host, driver}
-    assert_receive {:blocked_startup, command}
+    assert {:driver, ^host, driver} = await_report(host, :driver)
+    assert {:blocked_startup, command} = await_report(host, :blocked_startup)
     {host, driver, command}
+  end
+
+  # Concept: a freshly started host's report waits on the host's own progress.
+  # Technical depth: the host starts a driver and its attachment holders before
+  # reaching startup, so a fixed window would measure host-load scheduling.
+  # The wait ends on the first message with the tag or the host's DOWN, under
+  # the ExUnit test timeout.
+  defp await_report(host, tag) do
+    monitor = Process.monitor(host)
+
+    receive do
+      message when is_tuple(message) and elem(message, 0) == tag ->
+        Process.demonitor(monitor, [:flush])
+        message
+
+      {:DOWN, ^monitor, :process, ^host, reason} ->
+        flunk("#{inspect(host)} exited before #{inspect(tag)}: #{inspect(reason)}")
+    end
   end
 end

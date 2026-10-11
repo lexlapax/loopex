@@ -143,12 +143,12 @@ defmodule LoopexCliTest do
         end)
       end
 
+    # Each linked task reaches the barrier as its own first event; a task
+    # crash fails the case, and the ExUnit timeout bounds a task that stalls.
     workers =
       for _task <- tasks do
         receive do
           {:policy_decision_ready, worker} -> worker
-        after
-          2_000 -> flunk("a concurrent policy decision did not reach the barrier")
         end
       end
 

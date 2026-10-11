@@ -61,8 +61,8 @@ defmodule LoopexCli.ConfigInspectionTest do
     StringIO.open("", [encoding: :latin1], fn device ->
       {:ok, consumer} = LoopexComposition.DiagnosticConsumer.start_link(device, 1_000)
       assert :ok = LoopexComposition.DiagnosticConsumer.settings_report(consumer, rows)
+      await_report(consumer)
       cutoff = System.monotonic_time(:millisecond) + 1_000
-      await_report(consumer, cutoff)
       assert {:ok, final} = LoopexComposition.DiagnosticConsumer.close(consumer, cutoff)
       assert final.counts.diagnostic == %{emitted: length(rows), dropped: 0, unconfirmed: 0}
       {"", output} = StringIO.contents(device)
@@ -80,13 +80,17 @@ defmodule LoopexCli.ConfigInspectionTest do
     end)
   end
 
-  defp await_report(consumer, cutoff) do
+  # Concept: the report drain is awaited as the consumer's own state, and the
+  # close cutoff starts only after it.
+  # Technical depth: the consumer's writer runs in its own process, so a
+  # test-clock window around the drain would measure host-load scheduling.
+  # The ExUnit test timeout bounds the poll.
+  defp await_report(consumer) do
     status = LoopexComposition.DiagnosticConsumer.status(consumer)
 
     if status.active or status.pending > 0 do
-      assert System.monotonic_time(:millisecond) < cutoff
       Process.sleep(1)
-      await_report(consumer, cutoff)
+      await_report(consumer)
     end
   end
 

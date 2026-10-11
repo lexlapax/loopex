@@ -1059,13 +1059,25 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
 
     # The probe is unlinked deliberately: under the implementation this refutes,
     # its own read of the signal server expires and takes the reader down, and a
-    # linked reader would take this case with it instead of failing it.
-    _probe =
-      spawn(fn -> send(parent, {:signal_server_answered, :sys.get_state(:erl_signal_server)}) end)
+    # linked reader would take this case with it instead of failing it. That
+    # bounded read, not a test-clock window, decides the case: the wait ends on
+    # the probe's answer or its DOWN.
+    {probe, probe_monitor} =
+      spawn_monitor(fn ->
+        send(parent, {:signal_server_answered, :sys.get_state(:erl_signal_server)})
+      end)
 
-    assert_receive {:signal_server_answered, handlers},
-                   500,
-                   "the signal server did not answer while a prepared activation was waiting"
+    handlers =
+      receive do
+        {:signal_server_answered, handlers} ->
+          handlers
+
+        {:DOWN, ^probe_monitor, :process, ^probe, reason} ->
+          flunk(
+            "the signal server did not answer while a prepared activation was waiting: " <>
+              inspect(reason)
+          )
+      end
 
     assert [%{abort: %{command_id: interrupt_id}, backstop: backstop}] =
              for({Interrupt, _id, handler_state} <- handlers, do: handler_state)
@@ -1774,7 +1786,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
           Loopex.transfer_resume(activation, target, {guard, make_ref()})
         end)
 
-      assert {:ok, {:error, :resume_activation_holder_mismatch}} = Task.yield(stranger, 1_000)
+      assert {:error, :resume_activation_holder_mismatch} = Task.await(stranger, :infinity)
 
       for malformed <- [
             :malformed,

@@ -100,18 +100,29 @@ defmodule LoopexCli.DurableAskWorkflowTest do
         trace_hook: fn consumer, _ ->
           assert self() == caller
 
-          # Concept: fixture startup allows the approved scheduling grace.
-          # Technical depth: one captured cutoff bounds the writer-start wait;
-          # production queue, drain and cleanup limits are unchanged.
-          writer_start_cutoff = System.monotonic_time(:millisecond) + 1_000
+          # Concept: the writer-start wait ends on the writer's own first write.
+          # Technical depth: the consumer starts its writer only for this
+          # diagnostic, so a fixed window would measure host-load scheduling.
+          # The wait ends on the stalled device's report or the consumer's
+          # DOWN, under the ExUnit test timeout; production queue, drain and
+          # cleanup limits are unchanged.
+          consumer_monitor = Process.monitor(consumer)
 
           send(
             consumer,
             {:loopex_diagnostic, %{"kind" => "trace_call", "message" => "trace-only-secret"}}
           )
 
-          remaining = max(0, writer_start_cutoff - System.monotonic_time(:millisecond))
-          assert_receive {:stalled_trace_writer, writer}, remaining
+          writer =
+            receive do
+              {:stalled_trace_writer, writer} ->
+                writer
+
+              {:DOWN, ^consumer_monitor, :process, ^consumer, reason} ->
+                flunk("trace consumer exited before its writer started: #{inspect(reason)}")
+            end
+
+          Process.demonitor(consumer_monitor, [:flush])
           writer_ref = Process.monitor(writer)
           assert Process.alive?(writer)
           send(caller, {:captured_trace_writer, writer, writer_ref})

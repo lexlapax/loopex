@@ -736,7 +736,13 @@ defmodule LoopexCli.ChatResumeConfigurationTest do
              ChatConfiguration.resume(invocation, activation)
 
     send(holder, :abandon)
-    assert_receive {:abandoned, :ok}
+
+    # The holder's own runtime abandonment answers, or its DOWN ends the wait.
+    receive do
+      {:abandoned, result} -> assert result == :ok
+      {:DOWN, ^monitor, :process, ^holder, reason} -> flunk("holder exited: #{inspect(reason)}")
+    end
+
     assert_receive {:DOWN, ^monitor, :process, ^holder, :normal}
   end
 

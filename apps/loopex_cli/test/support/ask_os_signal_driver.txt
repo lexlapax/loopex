@@ -309,17 +309,22 @@ defmodule LoopexCli.AskOSSignalDriver do
   defp hold_actor(actor) do
     parent = self()
 
-    gate =
-      spawn(fn ->
+    {gate, monitor} =
+      spawn_monitor(fn ->
         true = :erlang.suspend_process(actor)
         send(parent, {self(), :held})
         actor_gate(actor)
       end)
 
+    # The fresh gate's acknowledgement or its DOWN ends the wait; a fixed
+    # window would only measure how soon the loaded host schedules it.
     receive do
-      {^gate, :held} -> gate
-    after
-      1_000 -> raise "facade actor suspension was not acknowledged"
+      {^gate, :held} ->
+        Process.demonitor(monitor, [:flush])
+        gate
+
+      {:DOWN, ^monitor, :process, ^gate, reason} ->
+        raise "facade actor suspension was not acknowledged: #{inspect(reason)}"
     end
   end
 

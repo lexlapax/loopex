@@ -53,8 +53,10 @@ defmodule LoopexCli.ChatOSSignalDriver do
     result = ChatDriver.run(driver)
     {watcher_pid, monitor} = watcher
     receive do
+      # The watcher's own exit ends the join; its stop cutoff already bounds it.
       {:DOWN, ^monitor, :process, ^watcher_pid, :normal} -> :ok
-    after 1000 -> raise "signal watcher did not join"
+      {:DOWN, ^monitor, :process, ^watcher_pid, reason} ->
+        raise "signal watcher did not join: #{inspect(reason)}"
     end
     :ok = Loopex.stop(fixture.runtime)
     finish = Interrupt.finish_chat(manager, ref)

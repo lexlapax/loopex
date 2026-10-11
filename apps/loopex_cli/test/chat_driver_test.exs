@@ -680,7 +680,7 @@ defmodule LoopexCli.ChatDriverTest do
     {host, driver} =
       start_host(fixture.runtime, session, input, output, configuration: prepared, facade: facade)
 
-    assert_receive {:blocked_status, worker}
+    assert {:blocked_status, worker} = await_report(host, :blocked_status)
     monitor = Process.monitor(worker)
     assert {:monitored_by, holders} = Process.info(worker, :monitored_by)
     assert self() in holders and driver in holders
@@ -1564,15 +1564,16 @@ defmodule LoopexCli.ChatDriverTest do
         receive do: (:leave -> :ok)
       end)
 
-    assert_receive {:driver, driver}
-    assert_receive {:holder, command}
-    assert_receive {:holder, reader}
-    assert_receive {:input_worker, input_worker}
+    assert {:driver, driver} = await_report(caller, :driver)
+    assert {:holder, command} = await_report(caller, :holder)
+    assert {:holder, reader} = await_report(caller, :holder)
+    assert {:input_worker, input_worker} = await_report(caller, :input_worker)
     monitors = for pid <- [driver, command, reader, input_worker], do: {pid, Process.monitor(pid)}
     send(caller, :leave)
 
+    # The reaping follows the caller's own loss; each DOWN is its own event.
     for {pid, monitor} <- monitors do
-      assert_receive {:DOWN, ^monitor, :process, ^pid, _}
+      receive do: ({:DOWN, ^monitor, :process, ^pid, _} -> :ok)
       refute Process.alive?(pid)
     end
   end
@@ -1740,7 +1741,7 @@ defmodule LoopexCli.ChatDriverTest do
     on_exit(fn -> Process.exit(input, :kill) end)
     {:ok, output} = Memory.start()
     {host, driver} = start_host(fixture.runtime, session, input, output)
-    assert_receive {:blocked_input, reader}
+    assert {:blocked_input, reader} = await_report(host, :blocked_input)
     monitor = Process.monitor(reader)
     ChatDriver.interrupt(driver)
     assert_receive {:provisional, ^host, %{exit_code: 1, cleanup: :confirmed}}, 5_000
@@ -1827,9 +1828,9 @@ defmodule LoopexCli.ChatDriverTest do
     end
 
     {host, _} = start_host(fixture.runtime, session, input, output, facade: facade)
-    assert_receive {:admitted_prompt, command_id}
-    assert_receive {:observed_command, ^command_id}
-    assert_receive {:shutdown_command, shutdown_id}
+    assert {:admitted_prompt, command_id} = await_report(host, :admitted_prompt)
+    assert {:observed_command, ^command_id} = await_report(host, :observed_command)
+    assert {:shutdown_command, shutdown_id} = await_report(host, :shutdown_command)
     assert shutdown_id != command_id
     assert_receive {:provisional, ^host, %{exit_code: 1}}, 5_000
     refute_receive {:admitted_prompt, _}, 0
@@ -1866,7 +1867,7 @@ defmodule LoopexCli.ChatDriverTest do
     end
 
     {host, driver} = start_host(fixture.runtime, session, input, output, facade: facade)
-    assert_receive {:blocked_admission, worker, id}
+    assert {:blocked_admission, worker, id} = await_report(host, :blocked_admission)
     worker_monitor = Process.monitor(worker)
     ChatDriver.interrupt(driver)
     initial = :sys.get_state(driver)
@@ -1939,7 +1940,7 @@ defmodule LoopexCli.ChatDriverTest do
     end
 
     {host, driver} = start_host(fixture.runtime, session, input, output, facade: facade)
-    assert_receive {:pending_admission, worker, id}
+    assert {:pending_admission, worker, id} = await_report(host, :pending_admission)
     joins = monitor_processes(Map.keys(:sys.get_state(driver).workers))
     Process.exit(worker, :kill)
 
@@ -2329,8 +2330,27 @@ defmodule LoopexCli.ChatDriverTest do
       end)
 
     on_exit(fn -> if Process.alive?(host), do: Process.exit(host, :kill) end)
-    assert_receive {:host_driver, ^host, driver}
+    assert {:host_driver, ^host, driver} = await_report(host, :host_driver)
     {host, driver}
+  end
+
+  # Concept: a report from a freshly started chat host or caller waits on that
+  # actor's own progress, never on a test clock.
+  # Technical depth: before these reports the actor starts a driver, its
+  # attachment holders and runtime commands, so a fixed window would measure
+  # host-load scheduling rather than the product. The wait ends on the first
+  # message with the tag or the actor's DOWN, under the ExUnit test timeout.
+  defp await_report(actor, tag) do
+    monitor = Process.monitor(actor)
+
+    receive do
+      message when is_tuple(message) and elem(message, 0) == tag ->
+        Process.demonitor(monitor, [:flush])
+        message
+
+      {:DOWN, ^monitor, :process, ^actor, reason} ->
+        flunk("#{inspect(actor)} exited before #{inspect(tag)}: #{inspect(reason)}")
+    end
   end
 
   # Concept: both blocked-closing fixtures observe finish admission before its state.
