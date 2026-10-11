@@ -1,9 +1,11 @@
+Code.require_file("support/event_wait.exs", __DIR__)
 Code.require_file("support/m1_runtime_helper.exs", __DIR__)
 Code.require_file("support/configured_genesis_helper.exs", __DIR__)
 Code.require_file("support/agent_loop_helper.exs", __DIR__)
 
 defmodule Loopex.ResourceWorkspaceBindingTest do
   use ExUnit.Case, async: true
+  import Loopex.EventWait
 
   alias Loopex.M1RuntimeTestStore
 
@@ -82,13 +84,13 @@ defmodule Loopex.ResourceWorkspaceBindingTest do
     assert {:accepted, _} =
              Loopex.command(attachment, %{type: :prompt, command_id: "prompt", content: "write"})
 
-    assert_receive {:tool_progress_emitted, "c1", worker}, 5000
+    await_receive({:tool_progress_emitted, "c1", worker})
     worker_monitor = Process.monitor(worker)
     assert [job] = Loopex.AgentLoopTestExecutor.jobs(executor)
     assert job.workspace_ref == legacy_ref
     before = M1RuntimeTestStore.inspect_state(store_pid).sessions[session].records
     assert :ok = Loopex.stop(writer)
-    assert_receive {:DOWN, ^worker_monitor, :process, ^worker, _}, 5000
+    await_receive({:DOWN, ^worker_monitor, :process, ^worker, _})
 
     reader_options =
       writer_options
@@ -105,7 +107,7 @@ defmodule Loopex.ResourceWorkspaceBindingTest do
 
     assert {:ok, ^session} = Loopex.activate_resume(activation)
     {:ok, resumed} = Loopex.attach(reader, session, after_event_sequence: 0)
-    assert {:ok, query} = await_reconciliation(resumed, 100)
+    assert {:ok, query} = await_reconciliation(resumed)
     assert query.journaled_canonical_request_digest == job.canonical_request_digest
     assert query.journaled_operation_id == job.operation_id
     assert :ok = Loopex.reconcile(resumed, Map.put(query, :evidence, "outcome_unknown"))
@@ -114,18 +116,21 @@ defmodule Loopex.ResourceWorkspaceBindingTest do
     assert Loopex.AgentLoopTestExecutor.jobs(executor) == [job]
   end
 
-  defp await_reconciliation(attachment, attempts) when attempts > 0 do
+  # Concept: the resumed owner answers once its recovery has settled the
+  # retained effect; the case waits on that answer, not on a test clock.
+  # Technical depth: `:effect_in_flight` is the owner's own not-yet state, so
+  # the poll ends on any other answer and ExUnit's per-test timeout is the
+  # outer bound.
+  defp await_reconciliation(attachment) do
     case Loopex.reconciliation_query(attachment) do
       {:error, :effect_in_flight} ->
         Process.sleep(10)
-        await_reconciliation(attachment, attempts - 1)
+        await_reconciliation(attachment)
 
       result ->
         result
     end
   end
-
-  defp await_reconciliation(_attachment, 0), do: {:error, :reconciliation_not_ready}
 
   defp manifest(ref),
     do: %{version: "loopex.resource_pack/1", workspace_ref: ref, revision: nil, packs: []}
