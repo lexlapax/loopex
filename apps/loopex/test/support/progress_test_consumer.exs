@@ -99,6 +99,12 @@ defmodule Loopex.ProgressTestConsumer do
   defp patterns({:{}, _metadata, [:loopex_progress, item]}),
     do: {quote(do: {_session, unquote(item)}), quote(do: {:loopex_progress, elem(result, 1)})}
 
+  # Concept: an `:infinity` wait ends only on the awaited item itself.
+  # Technical depth: a case uses it for an item that the producing process
+  # offers as its own last act, such as a domain closure, so the case's ExUnit
+  # timeout, not a window started before that process ran, bounds the wait.
+  def matching(predicate, :infinity), do: find(predicate, :infinity)
+
   def matching(predicate, timeout),
     do: find(predicate, System.monotonic_time(:millisecond) + timeout)
 
@@ -110,7 +116,10 @@ defmodule Loopex.ProgressTestConsumer do
            predicate.({session, item})
          end) do
       nil ->
-        remaining = max(cutoff - System.monotonic_time(:millisecond), 0)
+        remaining =
+          if cutoff == :infinity,
+            do: :infinity,
+            else: max(cutoff - System.monotonic_time(:millisecond), 0)
 
         if remaining == 0 do
           :empty
