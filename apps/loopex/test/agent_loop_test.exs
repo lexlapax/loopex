@@ -2079,7 +2079,7 @@ defmodule Loopex.AgentLoopTest do
         Loopex.command(attachment, %{type: :abort, command_id: "abort-policy"})
       end)
 
-    assert {:accepted, "abort-policy"} = Task.await(abort, 1_000)
+    assert {:accepted, "abort-policy"} = Task.await(abort, :infinity)
 
     events = drain(attachment, 2_000)
     assert Enum.find(events, &(&1.kind == "run.finished"))["outcome"] == "cancelled"

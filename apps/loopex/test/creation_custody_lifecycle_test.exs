@@ -1,8 +1,10 @@
+Code.require_file("support/event_wait.exs", __DIR__)
 Code.require_file("support/m1_runtime_helper.exs", __DIR__)
 Code.require_file("support/configured_genesis_helper.exs", __DIR__)
 Code.require_file("support/m5_query_fault_store.exs", __DIR__)
 
 defmodule Loopex.CreationCustodyLifecycleTest do
+  import Loopex.EventWait
   use ExUnit.Case, async: false
 
   alias Loopex.ConfiguredGenesisFixture
@@ -23,9 +25,10 @@ defmodule Loopex.CreationCustodyLifecycleTest do
 
     runtime = runtime(store)
 
-    assert_receive {:record_held_before_linearization, waiter, ^pid,
-                    :runtime_control_claim_creation_domain, claim},
-                   1_000
+    await_receive(
+      {:record_held_before_linearization, waiter, ^pid, :runtime_control_claim_creation_domain,
+       claim}
+    )
 
     on_exit(fn -> Fixture.release(waiter) end)
     {:ok, %{control: control}} = Runtime.children(runtime)
@@ -58,7 +61,7 @@ defmodule Loopex.CreationCustodyLifecycleTest do
       )
 
     runtime = runtime(store)
-    assert_receive {:record_held_before_linearization, waiter, ^pid, _, _}, 1_000
+    await_receive({:record_held_before_linearization, waiter, ^pid, _, _})
     on_exit(fn -> Fixture.release(waiter) end)
     {:ok, %{control: control}} = Runtime.children(runtime)
     before = :sys.get_state(control)
@@ -133,9 +136,10 @@ defmodule Loopex.CreationCustodyLifecycleTest do
 
     caller = request(runtime, "native", %{"original" => "bytes"})
 
-    assert_receive {:record_held_before_linearization, waiter, ^pid,
-                    :runtime_control_reserve_creation, reserve},
-                   1_000
+    await_receive(
+      {:record_held_before_linearization, waiter, ^pid, :runtime_control_reserve_creation,
+       reserve}
+    )
 
     on_exit(fn -> Fixture.release(waiter) end)
     state = :sys.get_state(control)
@@ -154,7 +158,7 @@ defmodule Loopex.CreationCustodyLifecycleTest do
     assert Fixture.inspect_state(pid).creation_calls == calls
     assert :sys.get_state(control).creation.from == state.creation.from
     Fixture.release(waiter)
-    assert_receive {:creation_answer, ^caller, {:ok, "s_test_1"}}, 1_000
+    assert {:ok, "s_test_1"} = answer(caller)
     ready(control)
 
     assert {:ok, {:historical, "s_test_1"}} =
@@ -178,13 +182,12 @@ defmodule Loopex.CreationCustodyLifecycleTest do
     :ok = Fixture.delay_after_commit(pid, :runtime_control_reserve_creation, self())
     caller = request(runtime, "native", %{})
 
-    assert_receive {:transaction_linearized, waiter, ^pid, :runtime_control_reserve_creation, _},
-                   1_000
+    await_receive({:transaction_linearized, waiter, ^pid, :runtime_control_reserve_creation, _})
 
     on_exit(fn -> Fixture.release(waiter) end)
     initial = :sys.get_state(control).creation
     Fixture.release(waiter)
-    assert_receive {:creation_answer, ^caller, {:ok, "s_test_1"}}, 1_000
+    assert {:ok, "s_test_1"} = answer(caller)
     ready(control)
     finals = Enum.filter(Fixture.inspect_state(pid).creation_calls, &(&1.type == :create_session))
     assert [first, second] = finals
@@ -198,8 +201,7 @@ defmodule Loopex.CreationCustodyLifecycleTest do
     :ok = Fixture.delay_after_commit(pid, :runtime_control_reserve_creation, self())
     caller = request(runtime, "native", %{"original" => "bytes"})
 
-    assert_receive {:transaction_linearized, waiter, ^pid, :runtime_control_reserve_creation, _},
-                   1_000
+    await_receive({:transaction_linearized, waiter, ^pid, :runtime_control_reserve_creation, _})
 
     on_exit(fn -> Fixture.release(waiter) end)
     original = :sys.get_state(control).creation
@@ -241,9 +243,10 @@ defmodule Loopex.CreationCustodyLifecycleTest do
     :ok = Fixture.delay_after_commit(pid, :runtime_control_create_session, self())
     caller = request(runtime, "native", %{})
 
-    assert_receive {:transaction_linearized, waiter, ^pid, :runtime_control_create_session,
-                    {:committed, "native", _}},
-                   1_000
+    await_receive(
+      {:transaction_linearized, waiter, ^pid, :runtime_control_create_session,
+       {:committed, "native", _}}
+    )
 
     on_exit(fn -> Fixture.release(waiter) end)
     original = :sys.get_state(control).creation
@@ -270,9 +273,10 @@ defmodule Loopex.CreationCustodyLifecycleTest do
 
     caller = request(runtime, "native", %{})
 
-    assert_receive {:record_held_before_linearization, waiter, ^pid,
-                    :runtime_control_reserve_creation, reserve},
-                   1_000
+    await_receive(
+      {:record_held_before_linearization, waiter, ^pid, :runtime_control_reserve_creation,
+       reserve}
+    )
 
     on_exit(fn -> Fixture.release(waiter) end)
     original = :sys.get_state(control).creation
@@ -313,9 +317,9 @@ defmodule Loopex.CreationCustodyLifecycleTest do
 
     caller = request(runtime, "native", %{})
 
-    assert_receive {:record_held_before_linearization, waiter, ^pid,
-                    :runtime_control_reserve_creation, old},
-                   1_000
+    await_receive(
+      {:record_held_before_linearization, waiter, ^pid, :runtime_control_reserve_creation, old}
+    )
 
     on_exit(fn -> Fixture.release(waiter) end)
     original = :sys.get_state(control).creation
@@ -358,8 +362,7 @@ defmodule Loopex.CreationCustodyLifecycleTest do
     :ok = Fixture.delay_after_commit(pid, :runtime_control_create_session, self())
     caller = request(runtime, "native", %{})
 
-    assert_receive {:transaction_linearized, waiter, ^pid, :runtime_control_create_session, _},
-                   1_000
+    await_receive({:transaction_linearized, waiter, ^pid, :runtime_control_create_session, _})
 
     on_exit(fn -> Fixture.release(waiter) end)
     state = :sys.get_state(control)
@@ -367,7 +370,7 @@ defmodule Loopex.CreationCustodyLifecycleTest do
     old_selection = state.creation_selection
     Process.exit(control, :kill)
     join_actors(monitors)
-    assert_receive {:creation_answer, ^caller, {:error, :runtime_unavailable}}, 1_000
+    assert {:error, :runtime_unavailable} = answer(caller)
 
     successor =
       await_value(fn ->
@@ -390,15 +393,14 @@ defmodule Loopex.CreationCustodyLifecycleTest do
     :ok = Fixture.delay_after_commit(pid, :runtime_control_create_session, self())
     caller = request(runtime, "native", %{})
 
-    assert_receive {:transaction_linearized, waiter, ^pid, :runtime_control_create_session, _},
-                   1_000
+    await_receive({:transaction_linearized, waiter, ^pid, :runtime_control_create_session, _})
 
     on_exit(fn -> Fixture.release(waiter) end)
     original = :sys.get_state(control).creation
     monitors = monitor_actors(original.action)
     Process.exit(original.action.pid, :kill)
     join_actors(monitors)
-    assert_receive {:creation_answer, ^caller, {:ok, "s_test_1"}}, 1_000
+    assert {:ok, "s_test_1"} = answer(caller)
     ready(control)
     assert :sys.get_state(control).sessions == %{}
     assert Fixture.inspect_state(pid).sessions["s_test_1"].owner_epoch == 0
@@ -410,9 +412,9 @@ defmodule Loopex.CreationCustodyLifecycleTest do
     :ok = Fixture.delay_after_commit(pid, :runtime_control_reserve_creation, self())
     caller = request(runtime, "native", %{})
 
-    assert_receive {:transaction_linearized, waiter, ^pid, :runtime_control_reserve_creation,
-                    outcome},
-                   1_000
+    await_receive(
+      {:transaction_linearized, waiter, ^pid, :runtime_control_reserve_creation, outcome}
+    )
 
     on_exit(fn -> Fixture.release(waiter) end)
     state = :sys.get_state(control)
@@ -435,7 +437,7 @@ defmodule Loopex.CreationCustodyLifecycleTest do
     assert :sys.get_state(control).creation == entry
     assert :sys.get_state(control).lane == state.lane
     Fixture.release(waiter)
-    assert_receive {:creation_answer, ^caller, {:ok, "s_test_1"}}, 1_000
+    assert {:ok, "s_test_1"} = answer(caller)
     ready(control)
 
     send(
@@ -458,13 +460,13 @@ defmodule Loopex.CreationCustodyLifecycleTest do
       )
 
     caller = request(runtime, "native", %{})
-    assert_receive {:record_held_before_linearization, waiter, ^pid, _, _}, 1_000
+    await_receive({:record_held_before_linearization, waiter, ^pid, _, _})
     on_exit(fn -> Fixture.release(waiter) end)
     monitors = monitor_actors(:sys.get_state(control).creation.action)
     assert {:ok, %{runtime_id: "runtime"}} = Runtime.configuration(runtime)
     assert :ok = Runtime.stop(runtime)
     join_actors(monitors)
-    assert_receive {:creation_answer, ^caller, {:error, :runtime_unavailable}}, 1_000
+    assert {:error, :runtime_unavailable} = answer(caller)
     refute Runtime.alive?(runtime)
     # Store remains the owner of its deliverable, independent of the runtime join.
     refute :sys.get_state(pid).pending_transactions == %{}
@@ -530,7 +532,7 @@ defmodule Loopex.CreationCustodyLifecycleTest do
       )
 
     runtime = runtime(store)
-    assert_receive {:record_held_before_linearization, waiter, ^pid, _, first}, 1_000
+    await_receive({:record_held_before_linearization, waiter, ^pid, _, first})
     on_exit(fn -> Fixture.release(waiter) end)
     {:ok, rival} = Store.claim_creation_domain("runtime", 0, String.duplicate("b", 64))
     assert {:committed, _, _} = Store.transact(store, rival)
@@ -555,7 +557,7 @@ defmodule Loopex.CreationCustodyLifecycleTest do
     {pid, store} = fixture()
     :ok = Fixture.delay_after_commit(pid, :runtime_control_claim_creation_domain, self())
     runtime = runtime(store)
-    assert_receive {:transaction_linearized, waiter, ^pid, _, _}, 1_000
+    await_receive({:transaction_linearized, waiter, ^pid, _, _})
     on_exit(fn -> Fixture.release(waiter) end)
     {:ok, rival} = Store.claim_creation_domain("runtime", 1, String.duplicate("b", 64))
     assert {:committed, _, _} = Store.transact(store, rival)
@@ -648,7 +650,7 @@ defmodule Loopex.CreationCustodyLifecycleTest do
       )
 
     caller = request(runtime, "other", %{})
-    assert_receive {:record_held_before_linearization, waiter, ^pid, _, _}, 1_000
+    await_receive({:record_held_before_linearization, waiter, ^pid, _, _})
     on_exit(fn -> Fixture.release(waiter) end)
     before_reads = Fixture.inspect_state(pid).record_reads
     spent = :sys.get_state(control).spent_attempts
@@ -671,7 +673,7 @@ defmodule Loopex.CreationCustodyLifecycleTest do
     assert :sys.get_state(control).spent_attempts == spent
     assert Fixture.inspect_state(pid).record_reads == before_reads
     Fixture.release(waiter)
-    assert_receive {:creation_answer, ^caller, {:ok, _}}, 1_000
+    assert {:ok, _} = answer(caller)
     ready(control)
 
     assert {:ok, :dispatched} =
@@ -760,9 +762,8 @@ defmodule Loopex.CreationCustodyLifecycleTest do
     guardian_monitor = Process.monitor(guardian)
     send(guardian, {:creation_guard_owned, self(), incarnation, invocation, permit})
 
-    assert_receive {:creation_carrier_ready, ^incarnation, ^invocation, ^permit, ^guardian, group,
-                    worker},
-                   1_000
+    assert {:creation_carrier_ready, ^incarnation, ^invocation, ^permit, ^guardian, group, worker} =
+             carrier_event(guardian, guardian_monitor)
 
     group_monitor = Process.monitor(group)
     worker_monitor = Process.monitor(worker)
@@ -789,9 +790,8 @@ defmodule Loopex.CreationCustodyLifecycleTest do
     guardian_monitor = Process.monitor(guardian)
     send(guardian, {:creation_guard_owned, self(), incarnation, invocation, permit})
 
-    assert_receive {:creation_carrier_ready, ^incarnation, ^invocation, ^permit, ^guardian, group,
-                    worker},
-                   1_000
+    assert {:creation_carrier_ready, ^incarnation, ^invocation, ^permit, ^guardian, group, worker} =
+             carrier_event(guardian, guardian_monitor)
 
     group_monitor = Process.monitor(group)
     worker_monitor = Process.monitor(worker)
@@ -799,9 +799,8 @@ defmodule Loopex.CreationCustodyLifecycleTest do
     assert Fixture.inspect_state(pid).creation_calls == []
     send(worker, {:creation_permit, self(), incarnation, invocation, permit})
 
-    assert_receive {:creation_carrier_joined, ^incarnation, ^invocation, ^permit, ^guardian,
-                    ^group, ^worker, {:committed, _, _}},
-                   1_000
+    assert {:creation_carrier_joined, ^incarnation, ^invocation, ^permit, ^guardian, ^group,
+            ^worker, {:committed, _, _}} = carrier_event(guardian, guardian_monitor)
 
     join_actors([{guardian, guardian_monitor}, {group, group_monitor}, {worker, worker_monitor}])
     assert Fixture.inspect_state(pid).creation_calls == [claim]
@@ -812,9 +811,9 @@ defmodule Loopex.CreationCustodyLifecycleTest do
     :ok = Fixture.delay_after_commit(pid, :runtime_control_create_session, self())
     caller = request(runtime, "late-read", %{})
 
-    assert_receive {:transaction_linearized, final_waiter, ^pid, :runtime_control_create_session,
-                    _},
-                   1_000
+    await_receive(
+      {:transaction_linearized, final_waiter, ^pid, :runtime_control_create_session, _}
+    )
 
     on_exit(fn -> Fixture.release(final_waiter) end)
     final_action = :sys.get_state(control).creation.action
@@ -823,16 +822,14 @@ defmodule Loopex.CreationCustodyLifecycleTest do
     Process.exit(caller, :kill)
     join_actors(final_monitors)
 
-    assert_receive {:creation_read_held, before_close_waiter, _, %{command_id: "late-read"}},
-                   1_000
+    await_receive({:creation_read_held, before_close_waiter, _, %{command_id: "late-read"}})
 
     on_exit(fn -> Fixture.release(before_close_waiter) end)
     assert :sys.get_state(control).creation.phase == :before_close
     :ok = Fixture.hold_next_creation_recovery(pid, self())
     Fixture.release(before_close_waiter)
 
-    assert_receive {:creation_read_held, terminal_waiter, reader, %{command_id: "late-read"}},
-                   1_000
+    await_receive({:creation_read_held, terminal_waiter, reader, %{command_id: "late-read"}})
 
     on_exit(fn -> Fixture.release(terminal_waiter) end)
     original = :sys.get_state(control)
@@ -860,19 +857,19 @@ defmodule Loopex.CreationCustodyLifecycleTest do
     :ok = Fixture.delay_after_commit(pid, :runtime_control_close_creation_reservation, self())
     caller = request(runtime, "late-close", %{})
 
-    assert_receive {:transaction_linearized, reserve_waiter, ^pid,
-                    :runtime_control_reserve_creation, _},
-                   1_000
+    await_receive(
+      {:transaction_linearized, reserve_waiter, ^pid, :runtime_control_reserve_creation, _}
+    )
 
     on_exit(fn -> Fixture.release(reserve_waiter) end)
     reserve_monitors = monitor_actors(:sys.get_state(control).creation.action)
     Process.exit(caller, :kill)
     join_actors(reserve_monitors)
 
-    assert_receive {:transaction_linearized, close_waiter, ^pid,
-                    :runtime_control_close_creation_reservation,
-                    {:committed, _, %{final_resolution: {:not_committed, :creation_cancelled}}}},
-                   1_000
+    await_receive(
+      {:transaction_linearized, close_waiter, ^pid, :runtime_control_close_creation_reservation,
+       {:committed, _, %{final_resolution: {:not_committed, :creation_cancelled}}}}
+    )
 
     on_exit(fn -> Fixture.release(close_waiter) end)
     original = :sys.get_state(control)
@@ -1087,35 +1084,53 @@ defmodule Loopex.CreationCustodyLifecycleTest do
         do: {pid, Process.monitor(pid)}
       )
 
+  # Concept: every wait on runtime progress ends on that progress itself.
+  # Technical depth: held Store transitions, creation answers, carrier events
+  # and actor joins all follow a freshly scheduled actor, so a fixed window
+  # would measure only scheduling. The runtime is linked to the case, a
+  # monitored actor's DOWN ends its wait, and ExUnit's per-test timeout is the
+  # outer bound. Cleanup cutoffs stay asserted from the values Control records.
   defp join_actors(monitors) do
-    for {pid, monitor} <- monitors,
-        do: assert_receive({:DOWN, ^monitor, :process, ^pid, _}, 1_000)
+    for {pid, monitor} <- monitors do
+      receive do
+        {:DOWN, ^monitor, :process, ^pid, _} -> :ok
+      end
+    end
+  end
+
+  defp answer(caller) do
+    monitor = Process.monitor(caller)
+
+    receive do
+      {:creation_answer, ^caller, result} ->
+        Process.demonitor(monitor, [:flush])
+        result
+
+      {:DOWN, ^monitor, :process, ^caller, reason} ->
+        flunk("creation caller exited: #{inspect(reason)}")
+    end
+  end
+
+  defp carrier_event(guardian, monitor) do
+    receive do
+      {:creation_carrier_ready, _, _, _, ^guardian, _, _} = event ->
+        event
+
+      {:creation_carrier_joined, _, _, _, ^guardian, _, _, _} = event ->
+        event
+
+      {:DOWN, ^monitor, :process, ^guardian, reason} ->
+        flunk("creation guardian exited: #{inspect(reason)}")
+    end
   end
 
   defp await(check), do: await_value(fn -> if check.(), do: true end)
-  defp await_value(check), do: await_value(check, System.monotonic_time(:millisecond) + 1_000)
 
-  defp await_value(check, cutoff) do
+  defp await_value(check) do
     case check.() do
-      nil ->
-        assert System.monotonic_time(:millisecond) < cutoff
-
-        receive do
-        after
-          1 -> :ok
-        end
-
-        await_value(check, cutoff)
-
-      false ->
-        assert System.monotonic_time(:millisecond) < cutoff
-
-        receive do
-        after
-          1 -> :ok
-        end
-
-        await_value(check, cutoff)
+      result when result in [nil, false] ->
+        Process.sleep(1)
+        await_value(check)
 
       value ->
         value

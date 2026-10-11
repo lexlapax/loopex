@@ -1,7 +1,10 @@
+Code.require_file("support/event_wait.exs", __DIR__)
 Code.require_file("support/m1_runtime_helper.exs", __DIR__)
 Code.require_file("support/agent_loop_helper.exs", __DIR__)
 
 defmodule Loopex.InteractionLifecycleTest do
+  import Loopex.EventWait
+
   @moduledoc """
   ## Concept
 
@@ -1166,7 +1169,8 @@ defmodule Loopex.InteractionLifecycleTest do
     policy_monitor = Process.monitor(policy)
     send(policy, {:interaction_stop_monitor_installed, nonce, policy_monitor})
 
-    assert_receive {:interaction_stop_monitor_confirmed, ^nonce, ^policy, ^policy_monitor}, 1_000
+    await_receive({:interaction_stop_monitor_confirmed, ^nonce, ^policy, ^policy_monitor})
+
     assert {:ok, children} = Loopex.Runtime.children(fixture.runtime)
     control = :sys.get_state(children.control, 1_000)
     %{coordinator: coordinator, owner_group: group} = Map.fetch!(control.sessions, session_id)

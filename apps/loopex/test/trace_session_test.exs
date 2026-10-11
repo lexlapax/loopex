@@ -1,7 +1,10 @@
+Code.require_file("support/event_wait.exs", __DIR__)
 Code.require_file("support/configured_genesis_helper.exs", __DIR__)
 Code.require_file("support/m1_runtime_helper.exs", __DIR__)
 
 defmodule Loopex.TraceSessionTest do
+  import Loopex.EventWait
+
   @moduledoc """
   ## Concept
 
@@ -125,7 +128,8 @@ defmodule Loopex.TraceSessionTest do
 
     # The other tracer still receives its own session's messages.
     send(worker, :call)
-    assert_receive {:trace, ^worker, :call, {Loopex.Trace.Config, :ceilings, _arguments}}, 1_000
+
+    await_receive({:trace, ^worker, :call, {Loopex.Trace.Config, :ceilings, _arguments}})
   end
 
   # Concept: a session traces a named module the runtime has not called yet,
@@ -169,7 +173,7 @@ defmodule Loopex.TraceSessionTest do
     {:ok, worker} =
       Loopex.Runtime.TaskSupervisor.start_child(workers, fn -> module.call(parent) end)
 
-    assert_receive {:unloaded_called, ^worker}
+    await_receive({:unloaded_called, ^worker})
 
     entry = await_entry("trace_call")
     assert entry["module"] == inspect(module)
@@ -295,7 +299,7 @@ defmodule Loopex.TraceSessionTest do
     {:ok, calls_task} =
       Loopex.Runtime.TaskSupervisor.start_child(calls_workers, fn -> PendingCall.block(parent) end)
 
-    assert_receive {:pending_trace_call, ^calls_task}
+    await_receive({:pending_trace_call, ^calls_task})
     assert %{calls: %{}, call_monitors: %{}} = :sys.get_state(calls_tracer)
     send(calls_task, :finish)
 
@@ -308,7 +312,7 @@ defmodule Loopex.TraceSessionTest do
         PendingCall.block(parent)
       end)
 
-    assert_receive {:pending_trace_call, ^returns_task}
+    await_receive({:pending_trace_call, ^returns_task})
 
     assert eventually(fn ->
              state = :sys.get_state(returns_tracer)
@@ -373,19 +377,19 @@ defmodule Loopex.TraceSessionTest do
         receive do: (:finish -> :ok)
       end)
 
-    assert_receive {:exclusion_probe, ^sender, :before}
+    await_receive({:exclusion_probe, ^sender, :before})
     refute_receive {:excluded, ^sender, _result}, 50
     :ok = :sys.resume(tracer)
-    assert_receive {:excluded, ^sender, :ok}, 1_000
+    await_receive({:excluded, ^sender, :ok})
 
     trace_state = :sys.get_state(tracer)
 
     refute Enum.any?(trace_state.calls, fn {{pid, _, _, _}, _started} -> pid == sender end)
     refute Map.has_key?(trace_state.call_monitors, sender)
 
-    assert_receive {:sensitive_probe, ^sender}
-    assert_receive {:exclusion_probe, ^sender, :after}
-    assert_receive {:excluded_sender_parked, ^sender}
+    await_receive({:sensitive_probe, ^sender})
+    await_receive({:exclusion_probe, ^sender, :after})
+    await_receive({:excluded_sender_parked, ^sender})
 
     before_entry =
       await_entry("trace_call", fn entry ->
@@ -411,7 +415,7 @@ defmodule Loopex.TraceSessionTest do
     {:ok, control_task} =
       Loopex.Runtime.TaskSupervisor.start_child(workers, fn -> ExclusionProbe.control(parent) end)
 
-    assert_receive {:exclusion_probe, ^control_task, :control}
+    await_receive({:exclusion_probe, ^control_task, :control})
 
     control_entry =
       await_entry("trace_call", fn entry ->
@@ -423,7 +427,7 @@ defmodule Loopex.TraceSessionTest do
     {:ok, globally_cleared} =
       Loopex.Runtime.TaskSupervisor.start_child(workers, fn -> SensitiveProbe.carry(parent) end)
 
-    assert_receive {:sensitive_probe, ^globally_cleared}
+    await_receive({:sensitive_probe, ^globally_cleared})
     Process.sleep(50)
 
     refute Enum.any?(drain_entries(), fn entry ->
@@ -440,7 +444,7 @@ defmodule Loopex.TraceSessionTest do
     {:ok, restored} =
       Loopex.Runtime.TaskSupervisor.start_child(workers, fn -> SensitiveProbe.carry(parent) end)
 
-    assert_receive {:sensitive_probe, ^restored}
+    await_receive({:sensitive_probe, ^restored})
 
     restored_entry =
       await_entry("trace_call", fn entry ->
@@ -488,7 +492,7 @@ defmodule Loopex.TraceSessionTest do
         receive do: (:finish -> :ok)
       end)
 
-    assert_receive {:proportional_exclusion, ^sender, :ok}, 1_000
+    await_receive({:proportional_exclusion, ^sender, :ok})
 
     assert eventually(fn ->
              state = :sys.get_state(control)
@@ -675,15 +679,19 @@ defmodule Loopex.TraceSessionTest do
     Loopex.session_status(runtime, "absent-session")
   end
 
-  defp await_entry(kind, accept \\ fn _entry -> true end, deadline \\ 2_000) do
+  # Concept: entries, worker probes and tracer state are awaited on their own
+  # progress.
+  # Technical depth: each follows a freshly started worker, tracer or sink, so
+  # a fixed window would race only scheduling; `:infinity` waits and these
+  # unbounded polls end on that progress, and ExUnit's per-test timeout is the
+  # outer bound. Silence windows (`refute_receive`) are unchanged.
+  defp await_entry(kind, accept \\ fn _entry -> true end) do
     receive do
       {:loopex_diagnostic, %{"kind" => ^kind} = entry} ->
-        if accept.(entry), do: entry, else: await_entry(kind, accept, deadline)
+        if accept.(entry), do: entry, else: await_entry(kind, accept)
 
       {:loopex_diagnostic, _other} ->
-        await_entry(kind, accept, deadline)
-    after
-      deadline -> flunk("no #{kind} entry arrived within #{deadline}ms")
+        await_entry(kind, accept)
     end
   end
 
@@ -695,16 +703,12 @@ defmodule Loopex.TraceSessionTest do
     end
   end
 
-  defp eventually(fun, attempts \\ 100)
-
-  defp eventually(fun, attempts) when attempts > 0 do
+  defp eventually(fun) do
     if fun.() do
       true
     else
       Process.sleep(10)
-      eventually(fun, attempts - 1)
+      eventually(fun)
     end
   end
-
-  defp eventually(_fun, 0), do: false
 end

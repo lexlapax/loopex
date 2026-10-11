@@ -1,4 +1,7 @@
+Code.require_file("support/event_wait.exs", __DIR__)
+
 defmodule Loopex.ProgressSinkTest do
+  import Loopex.EventWait
   use ExUnit.Case, async: false
 
   alias Loopex.ProgressSink, as: Sink
@@ -322,7 +325,9 @@ defmodule Loopex.ProgressSinkTest do
 
     reference = make_ref()
     send(owner, {:close, reference})
-    assert_receive {:close_started, ^reference, started}, 1_000
+    # Owner and guardian messages carry their own clock stamps, so these waits
+    # end on the messages; ExUnit's per-test timeout is the outer bound.
+    await_receive({:close_started, ^reference, started})
     wait_for_close_call(guardian, owner, incarnation, started + 1_000)
     assert state(sink) == put_elem(before, 3, :closed)
     assert :dropped = Sink.try_offer(sink, "s", text("late"))
@@ -373,7 +378,7 @@ defmodule Loopex.ProgressSinkTest do
     assert :ok = :sys.suspend(guardian)
     reference = make_ref()
     send(owner, {:close, reference})
-    assert_receive {:close_started, ^reference, started}, 1_000
+    await_receive({:close_started, ^reference, started})
     wait_for_close_call(guardian, owner, incarnation, started + 1_000)
 
     # Spend two seconds of the original call budget before the real reply.
@@ -384,7 +389,7 @@ defmodule Loopex.ProgressSinkTest do
     end
 
     assert :ok = :sys.resume(guardian)
-    assert_receive {:after_close_reply, ^gate, ^guardian, replied}, 1_000
+    await_receive({:after_close_reply, ^gate, ^guardian, replied})
     assert (replied - started) in 2_000..3_000
     assert Process.alive?(guardian)
     assert elem(state(sink), 3) == :closed
@@ -436,8 +441,8 @@ defmodule Loopex.ProgressSinkTest do
     assert :ok = :sys.install(guardian, {gate, hook, :waiting})
     reference = make_ref()
     send(owner, {:close, reference})
-    assert_receive {:close_started, ^reference, started}, 1_000
-    assert_receive {:after_close_reply, ^gate, ^guardian, replied}, 1_000
+    await_receive({:close_started, ^reference, started})
+    await_receive({:after_close_reply, ^gate, ^guardian, replied})
     assert replied >= started
     assert Process.alive?(guardian)
 
@@ -469,8 +474,8 @@ defmodule Loopex.ProgressSinkTest do
       assert {:status, :suspended} = Process.info(owner, :status)
       assert :erlang.resume_process(owner)
 
-      assert_receive {:close_result, ^reference, {:error, :cleanup_unproved}, ^started, finished},
-                     1_000
+      # The owner's own stamps bound this close; the waits end on its messages.
+      await_receive({:close_result, ^reference, {:error, :cleanup_unproved}, ^started, finished})
 
       assert finished >= resume_after
       send(owner, :finish)

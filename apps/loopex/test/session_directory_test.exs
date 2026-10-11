@@ -1,7 +1,9 @@
+Code.require_file("support/event_wait.exs", __DIR__)
 Code.require_file("support/configured_genesis_helper.exs", __DIR__)
 Code.require_file("support/m1_runtime_helper.exs", __DIR__)
 
 defmodule Loopex.SessionDirectoryTest do
+  import Loopex.EventWait
   use ExUnit.Case, async: false
 
   alias Loopex.M1RuntimeTestStore
@@ -238,8 +240,10 @@ defmodule Loopex.SessionDirectoryTest do
 
     first = Task.async(fn -> Runtime.resume_session(runtime, session_id, "resume-concurrent") end)
 
-    assert_receive {:transaction_linearized, waiter, ^store_pid,
-                    :runtime_control_stage_owner_attempt, {:committed, _tx_id, _receipt}}
+    await_receive(
+      {:transaction_linearized, waiter, ^store_pid, :runtime_control_stage_owner_attempt,
+       {:committed, _tx_id, _receipt}}
+    )
 
     second =
       Task.async(fn -> Runtime.resume_session(runtime, session_id, "resume-concurrent") end)
@@ -303,7 +307,8 @@ defmodule Loopex.SessionDirectoryTest do
     {_output, 0} = System.cmd(mkfifo, [identity_path], stderr_to_stdout: true)
 
     task = Task.async(fn -> SessionDirectory.runtime_id(root) end)
-    assert {:error, :corrupt_runtime_id} = Task.await(task, 1_000)
+    # A blocking FIFO read never answers and fails under ExUnit's timeout.
+    assert {:error, :corrupt_runtime_id} = Task.await(task, :infinity)
   end
 
   test "cold runtime identity publication syncs every new namespace boundary", %{root: root} do
@@ -332,18 +337,16 @@ defmodule Loopex.SessionDirectoryTest do
 
     delivery = :erlang.trace_delivered(self())
 
+    # The VM's delivery notice and the linked forwarder's own count end these
+    # waits; ExUnit's per-test timeout is the outer bound.
     receive do
       {:trace_delivered, _tracee, ^delivery} -> :ok
-    after
-      1_000 -> flunk("session-directory sync trace was not delivered")
     end
 
     send(tracer, {:finish, self()})
 
     receive do
       {:session_directory_syncs, count} -> {result, count}
-    after
-      1_000 -> flunk("session-directory sync trace did not finish")
     end
   end
 

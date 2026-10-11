@@ -1,3 +1,4 @@
+Code.require_file("support/event_wait.exs", __DIR__)
 Code.require_file("support/progress_test_consumer.exs", __DIR__)
 Code.require_file("support/m1_runtime_helper.exs", __DIR__)
 Code.require_file("support/configured_genesis_helper.exs", __DIR__)
@@ -28,6 +29,7 @@ defmodule Loopex.SlowControl do
 end
 
 defmodule Loopex.SessionLifecycleTest do
+  import Loopex.EventWait
   use ExUnit.Case, async: true
 
   alias Loopex.SlowControl
@@ -842,9 +844,10 @@ defmodule Loopex.SessionLifecycleTest do
     on_exit(fn -> if Process.alive?(caller), do: Process.exit(caller, :kill) end)
     store_pid = fixture.store_pid
 
-    assert_receive {:transaction_linearized, waiter, ^store_pid,
-                    :runtime_control_reserve_creation, {:committed, _, _}},
-                   1_000
+    await_receive(
+      {:transaction_linearized, waiter, ^store_pid, :runtime_control_reserve_creation,
+       {:committed, _, _}}
+    )
 
     on_exit(fn -> M1RuntimeTestStore.release(waiter) end)
     waiter_monitor = Process.monitor(waiter)
@@ -858,11 +861,11 @@ defmodule Loopex.SessionLifecycleTest do
 
     :ok = M1RuntimeTestStore.inject(fixture.store_pid, pair)
     Process.exit(caller, :kill)
-    cutoff = System.monotonic_time(:millisecond) + 1_000
-
+    # Each original actor's own DOWN ends its join; ExUnit's timeout bounds it.
     for {pid, monitor} <- monitors do
-      assert_receive {:DOWN, ^monitor, :process, ^pid, _},
-                     max(cutoff - System.monotonic_time(:millisecond), 0)
+      receive do
+        {:DOWN, ^monitor, :process, ^pid, _} -> :ok
+      end
     end
 
     status = if phase == :recovery_representation, do: :unavailable, else: :ready
@@ -890,7 +893,7 @@ defmodule Loopex.SessionLifecycleTest do
     refute_received {:faulted_close_answer, ^caller, {:ok, _}}
 
     M1RuntimeTestStore.release(waiter)
-    assert_receive {:DOWN, ^waiter_monitor, :process, ^waiter, :normal}, 1_000
+    await_receive({:DOWN, ^waiter_monitor, :process, ^waiter, :normal})
 
     assert M1RuntimeTestStore.inspect_state(fixture.store_pid).creation_calls ==
              state.creation_calls

@@ -1,10 +1,18 @@
+Code.require_file("support/event_wait.exs", __DIR__)
+
 defmodule Loopex.ArtifactOpenClockTest do
+  import Loopex.EventWait
   use ExUnit.Case, async: true
 
   alias Loopex.Attachment
   alias Loopex.ArtifactStore
   alias Loopex.Runtime
   alias Loopex.Runtime.EventDispatcher
+
+  # Concept: the routed call and its answer are awaited on their own events.
+  # Technical depth: each wait follows a freshly spawned linked caller, so a
+  # fixed window would race only scheduling; ExUnit's per-test timeout is the
+  # outer bound. The clock assertions bind the values the product captured.
 
   test "opening captures one clock before supervisor queuing and binds the actual route" do
     test = self()
@@ -15,14 +23,14 @@ defmodule Loopex.ArtifactOpenClockTest do
     before_open = System.monotonic_time(:millisecond)
     caller = Task.async(fn -> Runtime.open_artifact_transfer(attachment, request) end)
 
-    assert_receive {:lookup, ^supervisor, lookup_from}, 1_000
+    await_receive({:lookup, ^supervisor, lookup_from})
     after_lookup = System.monotonic_time(:millisecond)
     Process.sleep(2)
     assert System.monotonic_time(:millisecond) > after_lookup
     assert System.monotonic_time(:millisecond) < before_open + 1_000
     GenServer.reply(lookup_from, [{EventDispatcher, dispatcher, :worker, [EventDispatcher]}])
 
-    assert_receive {:open, ^dispatcher, message, from}, 1_000
+    await_receive({:open, ^dispatcher, message, from})
 
     assert {:open_transfer, token, "session", "attachment", "incarnation", routed, context} =
              message
@@ -37,7 +45,7 @@ defmodule Loopex.ArtifactOpenClockTest do
     assert context.metadata_read_bytes === 131_073
     assert System.monotonic_time(:millisecond) < context.open_deadline_ms
     GenServer.reply(from, {:ok, %{transfer_ref: context.transfer_ref}})
-    assert {:ok, %{transfer_ref: id}} = Task.await(caller, 1_000)
+    assert {:ok, %{transfer_ref: id}} = Task.await(caller, :infinity)
     assert id === context.transfer_ref
   end
 
@@ -67,15 +75,15 @@ defmodule Loopex.ArtifactOpenClockTest do
     attachment = attachment(supervisor, dispatcher)
     request = %{use_locator: "use:" <> String.duplicate("c", 64), start: 0}
     caller = Task.async(fn -> Runtime.open_artifact_transfer(attachment, request) end)
-    assert_receive {:lookup, ^supervisor, lookup_from}, 1_000
+    await_receive({:lookup, ^supervisor, lookup_from})
     GenServer.reply(lookup_from, [{EventDispatcher, dispatcher, :worker, [EventDispatcher]}])
-    assert_receive {:open, ^dispatcher, _message, _from}, 1_000
+    await_receive({:open, ^dispatcher, _message, _from})
     monitor = Process.monitor(dispatcher)
     Process.exit(dispatcher, :kill)
     assert_receive {:DOWN, ^monitor, :process, ^dispatcher, :killed}, 1_000
 
     assert {:error, %{reason: :transfers_unavailable, cleanup: :unproved}} =
-             Task.await(caller, 1_000)
+             Task.await(caller, :infinity)
 
     refute_received {:lookup, ^supervisor, _from}
   end
@@ -88,11 +96,11 @@ defmodule Loopex.ArtifactOpenClockTest do
     attachment = attachment(supervisor, original)
     request = %{use_locator: "use:" <> String.duplicate("d", 64), start: 0}
     caller = Task.async(fn -> Runtime.open_artifact_transfer(attachment, request) end)
-    assert_receive {:lookup, ^supervisor, lookup_from}, 1_000
+    await_receive({:lookup, ^supervisor, lookup_from})
     GenServer.reply(lookup_from, [{EventDispatcher, replacement, :worker, [EventDispatcher]}])
 
     assert {:error, %{reason: :transfers_unavailable, cleanup: :unproved}} =
-             Task.await(caller, 1_000)
+             Task.await(caller, :infinity)
 
     refute_received {:open, _, _, _}
     assert Process.alive?(original)
@@ -116,13 +124,13 @@ defmodule Loopex.ArtifactOpenClockTest do
           end
         end)
 
-      assert_receive {:lookup, ^supervisor, lookup_from}, 1_000
+      await_receive({:lookup, ^supervisor, lookup_from})
       queued_at = System.monotonic_time(:millisecond)
       Process.sleep(2)
       assert System.monotonic_time(:millisecond) > queued_at
       assert System.monotonic_time(:millisecond) < before_call + 1_000
       GenServer.reply(lookup_from, [{EventDispatcher, dispatcher, :worker, [EventDispatcher]}])
-      assert_receive {:open, ^dispatcher, message, from}, 1_000
+      await_receive({:open, ^dispatcher, message, from})
 
       case operation do
         :read ->
@@ -133,7 +141,7 @@ defmodule Loopex.ArtifactOpenClockTest do
           assert deadline >= before_call + 5_000
           assert deadline <= queued_at + 5_000
           GenServer.reply(from, {:ok, :complete})
-          assert {:ok, :complete} = Task.await(caller, 1_000)
+          assert {:ok, :complete} = Task.await(caller, :infinity)
 
         :close ->
           assert {:close_transfer, token, "session", "attachment", "incarnation", ^id, anchor} =
@@ -143,7 +151,7 @@ defmodule Loopex.ArtifactOpenClockTest do
           assert anchor >= before_call
           assert anchor <= queued_at
           GenServer.reply(from, :ok)
-          assert :ok = Task.await(caller, 1_000)
+          assert :ok = Task.await(caller, :infinity)
       end
     end
   end

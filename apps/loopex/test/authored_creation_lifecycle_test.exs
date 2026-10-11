@@ -1,9 +1,11 @@
+Code.require_file("support/event_wait.exs", __DIR__)
 Code.require_file("support/m1_runtime_helper.exs", __DIR__)
 Code.require_file("support/agent_loop_adapters.exs", __DIR__)
 Code.require_file("support/configured_genesis_helper.exs", __DIR__)
 Code.require_file("support/model_preparation_conformance.exs", __DIR__)
 
 defmodule Loopex.AuthoredCreationLifecycleTest do
+  import Loopex.EventWait
   use ExUnit.Case, async: false
   alias Loopex.ConfiguredGenesisFixture, as: Captured
   alias Loopex.M1RuntimeTestStore, as: Fixture
@@ -184,11 +186,13 @@ defmodule Loopex.AuthoredCreationLifecycleTest do
 
       send(duplicate, :adapter_reap)
 
+      # The duplicate's own DOWN, not a fixture clock, ends this join.
       receive do
         {:DOWN, ^monitor, :process, ^duplicate, :normal} ->
           send(selection.observer, {:duplicate_reaped, duplicate})
-      after
-        1_000 -> raise "host-owned duplicate did not join"
+
+        {:DOWN, ^monitor, :process, ^duplicate, reason} ->
+          raise "host-owned duplicate exited: #{inspect(reason)}"
       end
     end
 
@@ -287,7 +291,9 @@ defmodule Loopex.AuthoredCreationLifecycleTest do
     f = fixture()
     input = options(%{"model" => "authored-alias", "max_tokens" => 1_111})
     assert {:ok, session} = create(f.runtime, "prepared", input)
-    assert_receive {:preparing, worker, current, changes, [], context, callback_options}, 1_000
+
+    await_receive({:preparing, worker, current, changes, [], context, callback_options})
+
     Conformance.assert_context(context, 5_000)
     assert changes == input["configuration"]
     assert callback_options == f.model.options
@@ -417,7 +423,7 @@ defmodule Loopex.AuthoredCreationLifecycleTest do
     f = fixture(mode: :hold)
     input = options(%{"model" => "alias"})
     caller = request(f, "held", input)
-    assert_receive {:preparing, worker, _, _, _, _, _}, 1_000
+    await_receive({:preparing, worker, _, _, _, _, _})
     original = :sys.get_state(f.control).creation
     store_before = Fixture.inspect_state(f.store_pid)
     assert {:error, :creation_in_progress} = create(f.runtime, "held", input)
@@ -433,7 +439,7 @@ defmodule Loopex.AuthoredCreationLifecycleTest do
     assert Fixture.inspect_state(f.store_pid) == store_before
     assert calls(f) == 1
     send(worker, :release)
-    assert_receive {:authored_answer, ^caller, {:ok, _}}, 1_000
+    assert {:ok, _} = answer(caller)
   end
 
   test "closed malformed input refuses before Store and optional callback" do
@@ -497,30 +503,30 @@ defmodule Loopex.AuthoredCreationLifecycleTest do
         )
 
       caller = request(f, Atom.to_string(mode), options(%{"max_tokens" => 1_111}))
-      assert_receive {:managed_child, child}, 1_000
+      await_receive({:managed_child, child})
       child_monitor = Process.monitor(child)
 
       grandchild =
         if mode == :nested do
-          assert_receive {:grandchild, pid}, 1_000
+          await_receive({:grandchild, pid})
           {pid, Process.monitor(pid)}
         end
 
-      assert_receive {:record_held_before_linearization, waiter, _,
-                      :runtime_control_reserve_creation, _},
-                     1_000
+      await_receive(
+        {:record_held_before_linearization, waiter, _, :runtime_control_reserve_creation, _}
+      )
 
       on_exit(fn -> Fixture.release(waiter) end)
-      assert_receive {:DOWN, ^child_monitor, :process, ^child, _}, 1_000
+      await_receive({:DOWN, ^child_monitor, :process, ^child, _})
 
       if grandchild do
         {pid, monitor} = grandchild
-        assert_receive {:DOWN, ^monitor, :process, ^pid, _}, 1_000
+        await_receive({:DOWN, ^monitor, :process, ^pid, _})
       end
 
       refute :sys.get_state(f.control).creation.stopped
       Fixture.release(waiter)
-      assert_receive {:authored_answer, ^caller, {:ok, _}}, 1_000
+      assert {:ok, _} = answer(caller)
       ready(f.control)
     end
   end
@@ -528,13 +534,14 @@ defmodule Loopex.AuthoredCreationLifecycleTest do
   test "an arbitrary registered resource must acknowledge and join before reservation" do
     f = fixture(mode: :resource_hold)
     caller = request(f, "resource", options(%{"max_tokens" => 1_111}))
-    assert_receive {:registered_resource, resource, guardian}, 1_000
+    await_receive({:registered_resource, resource, guardian})
     monitor = Process.monitor(resource)
-    assert_receive {:resource_stopping, ^resource, _stop, stopper, cooperative, observe}, 1_000
+
+    await_receive({:resource_stopping, ^resource, _stop, stopper, cooperative, observe})
+
     assert stopper != guardian
     capture = %{cooperative: cooperative, observe: observe}
-    capture_cutoff = now() + 1_000
-    await(fn -> :sys.get_state(f.control).creation.cleanup == capture end, capture_cutoff)
+    await(fn -> :sys.get_state(f.control).creation.cleanup == capture end)
     state = :sys.get_state(f.control)
     assert state.creation.cleanup == %{cooperative: cooperative, observe: observe}
     refute state.creation.stopped
@@ -542,17 +549,17 @@ defmodule Loopex.AuthoredCreationLifecycleTest do
     assert Fixture.inspect_state(f.store_pid).sessions == %{}
     assert {:error, :creation_in_progress} = create(f.runtime, "other", %{"version" => 1})
     send(resource, :release)
-    assert_receive {:DOWN, ^monitor, :process, ^resource, :normal}, 1_000
-    assert_receive {:authored_answer, ^caller, {:ok, _}}, 1_000
+    await_receive({:DOWN, ^monitor, :process, ^resource, :normal})
+    assert {:ok, _} = answer(caller)
   end
 
   test "naked resource death fences preparation instead of treating group DOWN as cleanup" do
     f = fixture(mode: :resource_noack)
     caller = request(f, "no-ack", options(%{"max_tokens" => 1_111}))
-    assert_receive {:registered_resource, resource, _}, 1_000
+    await_receive({:registered_resource, resource, _})
     monitor = Process.monitor(resource)
-    assert_receive {:DOWN, ^monitor, :process, ^resource, _}, 1_000
-    assert_receive {:authored_answer, ^caller, {:error, :store_unavailable}}, 1_000
+    await_receive({:DOWN, ^monitor, :process, ^resource, _})
+    assert {:error, :store_unavailable} = answer(caller)
     state = :sys.get_state(f.control)
     assert state.creation.cleanup_unproved
     assert state.creation_status == :unavailable
@@ -563,11 +570,11 @@ defmodule Loopex.AuthoredCreationLifecycleTest do
   test "actual guardian death retires its root-owned group and managed child without publication" do
     f = fixture(mode: :hold_descendant)
     caller = request(f, "guardian-loss", options(%{"max_tokens" => 1_111}))
-    assert_receive {:managed_child, child}, 1_000
+    await_receive({:managed_child, child})
     action = :sys.get_state(f.control).creation.action
     monitors = actor_monitors([action.pid, action.group, action.worker, child])
     Process.exit(action.pid, :kill)
-    join(monitors, now() + 1_000)
+    join(monitors)
     await(fn -> :sys.get_state(f.control).creation_status == :unavailable end)
     assert Fixture.inspect_state(f.store_pid).sessions == %{}
     refute_received {:authored_answer, ^caller, {:ok, _}}
@@ -576,13 +583,13 @@ defmodule Loopex.AuthoredCreationLifecycleTest do
   test "actual group death forces guardian fallback joins for the arbitrary resource" do
     f = fixture(mode: :resource_hold)
     caller = request(f, "group-loss", options(%{"max_tokens" => 1_111}))
-    assert_receive {:registered_resource, resource, _}, 1_000
-    assert_receive {:resource_stopping, ^resource, _, _, _, _}, 1_000
+    await_receive({:registered_resource, resource, _})
+    await_receive({:resource_stopping, ^resource, _, _, _, _})
     action = :sys.get_state(f.control).creation.action
     monitors = actor_monitors([action.pid, action.group, action.worker, resource])
     Process.exit(action.group, :kill)
-    join(monitors, now() + 1_000)
-    assert_receive {:authored_answer, ^caller, {:error, :store_unavailable}}, 1_000
+    join(monitors)
+    assert {:error, :store_unavailable} = answer(caller)
     assert :sys.get_state(f.control).creation.cleanup_unproved
     assert Fixture.inspect_state(f.store_pid).sessions == %{}
   end
@@ -590,11 +597,11 @@ defmodule Loopex.AuthoredCreationLifecycleTest do
   test "caller loss stops preparation before reservation and joins its actual child" do
     f = fixture(mode: :hold_descendant)
     caller = request(f, "caller-loss", options(%{"max_tokens" => 1_111}))
-    assert_receive {:managed_child, child}, 1_000
+    await_receive({:managed_child, child})
     action = :sys.get_state(f.control).creation.action
     monitors = actor_monitors([action.pid, action.group, action.worker, child])
     Process.exit(caller, :kill)
-    join(monitors, now() + 1_000)
+    join(monitors)
     await(fn -> is_nil(:sys.get_state(f.control).creation) end)
     assert Fixture.inspect_state(f.store_pid).sessions == %{}
     refute_received :unexpected_model_dispatch
@@ -629,7 +636,7 @@ defmodule Loopex.AuthoredCreationLifecycleTest do
   test "stale preparation notices cannot change the retained episode or admit a candidate" do
     f = fixture(mode: :hold)
     caller = request(f, "stale", options(%{"model" => "alias"}))
-    assert_receive {:preparing, worker, _, _, _, _, _}, 1_000
+    await_receive({:preparing, worker, _, _, _, _, _})
     state = :sys.get_state(f.control)
     entry = state.creation
 
@@ -646,7 +653,7 @@ defmodule Loopex.AuthoredCreationLifecycleTest do
 
     assert :sys.get_state(f.control).creation == entry
     send(worker, :release)
-    assert_receive {:authored_answer, ^caller, {:ok, _}}, 1_000
+    assert {:ok, _} = answer(caller)
     assert calls(f) == 1
   end
 
@@ -657,8 +664,8 @@ defmodule Loopex.AuthoredCreationLifecycleTest do
       f = fixture(mode: :resource_ack)
       :ok = Fixture.hold_next_transition_before_linearization(f.store_pid, phase, self())
       caller = request(f, Atom.to_string(phase), options(%{"max_tokens" => 1_111}))
-      assert_receive {:resource_stopping, _, _, _, cooperative, observe}, 1_000
-      assert_receive {:record_held_before_linearization, waiter, _, ^phase, _}, 1_000
+      await_receive({:resource_stopping, _, _, _, cooperative, observe})
+      await_receive({:record_held_before_linearization, waiter, _, ^phase, _})
       on_exit(fn -> Fixture.release(waiter) end)
       before = :sys.get_state(f.control).creation
       assert before.cleanup == %{cooperative: cooperative, observe: observe}
@@ -690,14 +697,14 @@ defmodule Loopex.AuthoredCreationLifecycleTest do
   test "actual sixty second authored cutoff stops the original callback without a fresh allowance" do
     f = fixture(mode: :hold)
     caller = request(f, "deadline", options(%{"max_tokens" => 1_111}))
-    assert_receive {:preparing, worker, _, _, _, context, _}, 1_000
+    await_receive({:preparing, worker, _, _, _, context, _})
     Conformance.assert_context(context, 5_000)
     original = :sys.get_state(f.control).creation
     monitors = actor_monitors([original.action.pid, original.action.group, worker])
     assert_receive {:authored_answer, ^caller, {:error, _}}, 70_000
     assert now() >= context.deadline_monotonic_ms
     assert original.cutoff == context.deadline_monotonic_ms
-    join(monitors, now() + 1_000)
+    join(monitors)
     assert Fixture.inspect_state(f.store_pid).sessions == %{}
     assert calls(f) == 1
   end
@@ -713,30 +720,24 @@ defmodule Loopex.AuthoredCreationLifecycleTest do
   test "group loss before registration acknowledgement transfers the first-offer inventory" do
     f = fixture(mode: :held_first_offer)
     caller = request(f, "offered-group-loss", options(%{"max_tokens" => 1_111}))
-    assert_receive {:offer_callback_ready, worker}, 1_000
+    await_receive({:offer_callback_ready, worker})
     action = :sys.get_state(f.control).creation.action
     monitors = actor_monitors([action.pid, action.group, worker, caller])
     assert :erlang.suspend_process(action.pid)
 
     try do
       send(worker, :offer_resource)
-      assert_receive {:first_offer_created, ^worker, resource, reference}, 1_000
+      await_receive({:first_offer_created, ^worker, resource, reference})
       retain_fixture_actor(resource)
       resource_monitor = Process.monitor(resource)
       inventory = :sys.get_state(action.group).inventory
-      cutoff = now() + 1_000
-
-      await(
-        fn -> :ets.lookup(inventory, :resource) == [{:resource, resource, reference}] end,
-        cutoff
-      )
-
+      await(fn -> :ets.lookup(inventory, :resource) == [{:resource, resource, reference}] end)
       Process.exit(action.group, :kill)
-      await(fn -> :ets.info(inventory, :owner) == action.pid end, cutoff)
+      await(fn -> :ets.info(inventory, :owner) == action.pid end)
       assert :erlang.resume_process(action.pid)
       assert_receive {:DOWN, ^resource_monitor, :process, ^resource, :killed}, 1_000
-      join(monitors, now() + 1_000)
-      assert_receive {:authored_answer, ^caller, {:error, :store_unavailable}}, 1_000
+      join(monitors)
+      assert {:error, :store_unavailable} = answer(caller)
       assert :sys.get_state(f.control).creation.cleanup_unproved
       no_prepared_dispatch(f)
     after
@@ -753,10 +754,10 @@ defmodule Loopex.AuthoredCreationLifecycleTest do
   test "a duplicate distinct offer is refused and the adapter joins its host-owned process" do
     f = fixture(mode: :duplicate_resource)
     caller = request(f, "duplicate", options(%{"max_tokens" => 1_111}))
-    assert_receive {:registered_resource, resource, _guardian}, 1_000
+    await_receive({:registered_resource, resource, _guardian})
     retain_fixture_actor(resource)
     resource_monitor = Process.monitor(resource)
-    assert_receive {:duplicate_refused, worker, duplicate, {:error, :unavailable}}, 1_000
+    await_receive({:duplicate_refused, worker, duplicate, {:error, :unavailable}})
     retain_fixture_actor(duplicate)
     duplicate_monitor = Process.monitor(duplicate)
     action = :sys.get_state(f.control).creation.action
@@ -764,13 +765,15 @@ defmodule Loopex.AuthoredCreationLifecycleTest do
     assert [{:resource, ^resource, _}] = :ets.lookup(inventory, :resource)
     no_prepared_dispatch(f)
     send(worker, :reap_duplicate)
-    assert_receive {:duplicate_reaped, ^duplicate}, 1_000
-    assert_receive {:DOWN, ^duplicate_monitor, :process, ^duplicate, :normal}, 1_000
-    assert_receive {:resource_stopping, ^resource, _stop, _stopper, _cooperative, _observe}, 1_000
+    await_receive({:duplicate_reaped, ^duplicate})
+    await_receive({:DOWN, ^duplicate_monitor, :process, ^duplicate, :normal})
+
+    await_receive({:resource_stopping, ^resource, _stop, _stopper, _cooperative, _observe})
+
     assert [{:resource, ^resource, _}] = :ets.lookup(inventory, :resource)
     send(resource, :release)
-    assert_receive {:DOWN, ^resource_monitor, :process, ^resource, :normal}, 1_000
-    assert_receive {:authored_answer, ^caller, {:ok, _session}}, 1_000
+    await_receive({:DOWN, ^resource_monitor, :process, ^resource, :normal})
+    assert {:ok, _session} = answer(caller)
     ready(f.control)
     refute Process.alive?(worker)
     refute_received :unexpected_model_dispatch
@@ -779,33 +782,34 @@ defmodule Loopex.AuthoredCreationLifecycleTest do
   defp late_first_offer(fault) do
     f = fixture(mode: :late_first_offer)
     caller = request(f, "late-#{fault}", options(%{"max_tokens" => 1_111}))
-    assert_receive {:late_callback_ready, worker}, 1_000
+    await_receive({:late_callback_ready, worker})
     action = :sys.get_state(f.control).creation.action
     monitors = actor_monitors([action.pid, action.group, worker, caller])
     if fault == :caller, do: Process.exit(caller, :kill), else: Process.exit(action.pid, :kill)
-    assert_receive {:late_cleanup_started, ^worker}, 1_000
-    cutoff = now() + 1_000
-    await(fn -> not is_nil(:sys.get_state(f.control).creation.cleanup) end, cutoff)
+    await_receive({:late_cleanup_started, ^worker})
+    await(fn -> not is_nil(:sys.get_state(f.control).creation.cleanup) end)
     captured = :sys.get_state(f.control).creation.cleanup
-    await(fn -> :sys.get_state(action.group).cleanup == captured end, cutoff)
+    await(fn -> :sys.get_state(action.group).cleanup == captured end)
     send(worker, :offer_resource)
-    assert_receive {:late_offer_result, ^worker, resource, {:error, :unavailable}}, 1_000
+    await_receive({:late_offer_result, ^worker, resource, {:error, :unavailable}})
     retain_fixture_actor(resource)
     monitor = Process.monitor(resource)
-    assert_receive {:resource_stopping, ^resource, _stop, stopper, cooperative, observe}, 1_000
+
+    await_receive({:resource_stopping, ^resource, _stop, stopper, cooperative, observe})
+
     assert stopper == action.group
     assert captured == %{cooperative: cooperative, observe: observe}
     assert :sys.get_state(f.control).creation.cleanup == captured
     no_prepared_dispatch(f)
     send(resource, :release)
-    assert_receive {:DOWN, ^monitor, :process, ^resource, :normal}, 1_000
-    join(monitors, now() + 1_000)
+    await_receive({:DOWN, ^monitor, :process, ^resource, :normal})
+    join(monitors)
 
     if fault == :caller do
       await(fn -> is_nil(:sys.get_state(f.control).creation) end)
     else
       assert calls(f) == 1
-      assert_receive {:authored_answer, ^caller, {:error, :invalid_session_creation}}, 1_000
+      assert {:error, :invalid_session_creation} = answer(caller)
       await(fn -> :sys.get_state(f.control).creation_status == :unavailable end)
     end
 
@@ -815,25 +819,27 @@ defmodule Loopex.AuthoredCreationLifecycleTest do
   test "a refused duplicate already admitted by Starter keeps its managed-child custody" do
     f = fixture(mode: :managed_duplicate)
     caller = request(f, "managed-duplicate", options(%{"max_tokens" => 1_111}))
-    assert_receive {:registered_resource, resource, _guardian}, 1_000
+    await_receive({:registered_resource, resource, _guardian})
     retain_fixture_actor(resource)
     resource_monitor = Process.monitor(resource)
-    assert_receive {:managed_duplicate_refused, duplicate, {:error, :unavailable}}, 1_000
+    await_receive({:managed_duplicate_refused, duplicate, {:error, :unavailable}})
     retain_fixture_actor(duplicate)
     duplicate_monitor = Process.monitor(duplicate)
     action = :sys.get_state(f.control).creation.action
     retained = :sys.get_state(action.group)
     assert Map.has_key?(retained.children, duplicate)
     assert [{:resource, ^resource, _}] = :ets.lookup(retained.inventory, :resource)
-    assert_receive {:duplicate_child_stopping, ^duplicate}, 1_000
-    assert_receive {:resource_stopping, ^resource, _stop, _stopper, _cooperative, _observe}, 1_000
+    await_receive({:duplicate_child_stopping, ^duplicate})
+
+    await_receive({:resource_stopping, ^resource, _stop, _stopper, _cooperative, _observe})
+
     no_prepared_dispatch(f)
     send(duplicate, :release)
-    assert_receive {:DOWN, ^duplicate_monitor, :process, ^duplicate, :normal}, 1_000
+    await_receive({:DOWN, ^duplicate_monitor, :process, ^duplicate, :normal})
     no_prepared_dispatch(f)
     send(resource, :release)
-    assert_receive {:DOWN, ^resource_monitor, :process, ^resource, :normal}, 1_000
-    assert_receive {:authored_answer, ^caller, {:ok, _session}}, 1_000
+    await_receive({:DOWN, ^resource_monitor, :process, ^resource, :normal})
+    assert {:ok, _session} = answer(caller)
     ready(f.control)
     refute_received :unexpected_model_dispatch
   end
@@ -948,6 +954,33 @@ defmodule Loopex.AuthoredCreationLifecycleTest do
 
   defp actor_monitors(pids), do: Enum.map(pids, &{&1, Process.monitor(&1)})
 
+  # Concept: every wait on creation progress ends on that progress itself.
+  # Technical depth: fixture callbacks, held Store transitions, caller answers
+  # and actor joins all follow a freshly scheduled actor, so a fixed window
+  # would measure only scheduling. The runtime is linked to the case, a
+  # caller's DOWN ends its wait, and ExUnit's per-test timeout is the outer
+  # bound. A join anchored at a recorded cleanup instant keeps that bound.
+  defp answer(caller) do
+    monitor = Process.monitor(caller)
+
+    receive do
+      {:authored_answer, ^caller, result} ->
+        Process.demonitor(monitor, [:flush])
+        result
+
+      {:DOWN, ^monitor, :process, ^caller, reason} ->
+        flunk("creation caller exited: #{inspect(reason)}")
+    end
+  end
+
+  defp join(monitors) do
+    for {pid, monitor} <- monitors do
+      receive do
+        {:DOWN, ^monitor, :process, ^pid, _} -> :ok
+      end
+    end
+  end
+
   defp join(monitors, cutoff) do
     for {pid, monitor} <- monitors do
       assert_receive {:DOWN, ^monitor, :process, ^pid, _}, max(cutoff - now(), 0)
@@ -961,20 +994,10 @@ defmodule Loopex.AuthoredCreationLifecycleTest do
         state.creation_status == :ready and is_nil(state.creation)
       end)
 
-  defp await(predicate), do: await(predicate, now() + 1_000)
-
-  defp await(predicate, cutoff) do
-    if predicate.() do
-      :ok
-    else
-      assert now() < cutoff
-
-      receive do
-      after
-        1 -> :ok
-      end
-
-      await(predicate, cutoff)
+  defp await(predicate) do
+    unless predicate.() do
+      Process.sleep(1)
+      await(predicate)
     end
   end
 

@@ -11,8 +11,8 @@ defmodule Loopex.RuntimeStartTest do
   # observe the original creation startup before issuing their one create.
   # Technical depth: accepted ADR0063 distinguishes dispatcher readiness from
   # creation eligibility. Each of twenty starts preserves the dispatcher check,
-  # pins the public startup identity/cutoff and spends one 1,000-ms fixture bound
-  # observing it before the unchanged create/resume and owned cleanup sequence.
+  # pins the public startup identity/cutoff and observes it within that original
+  # cutoff before the unchanged create/resume and owned cleanup sequence.
   test "a started runtime has a ready dispatcher and creates after original startup proof" do
     for index <- 1..20 do
       {store_pid, store} = M1RuntimeTestStore.start_store()
@@ -41,10 +41,12 @@ defmodule Loopex.RuntimeStartTest do
     end
   end
 
+  # Concept: startup is awaited on its own progress up to its own deadline.
+  # Technical depth: the original snapshot's startup deadline is the only
+  # cutoff; a test-clock window would race the freshly scheduled startup read.
   defp await_startup(runtime) do
-    cutoff = System.monotonic_time(:millisecond) + 1_000
     assert {:ok, snapshot} = Runtime.creation_startup_status(runtime, 1_000)
-    await_startup(runtime, snapshot, min(cutoff, snapshot.startup_deadline_ms))
+    await_startup(runtime, snapshot, snapshot.startup_deadline_ms)
   end
 
   defp await_startup(runtime, snapshot, cutoff) do

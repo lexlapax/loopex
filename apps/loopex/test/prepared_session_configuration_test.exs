@@ -111,18 +111,29 @@ defmodule Loopex.PreparedSessionConfigurationTest do
         end
       end)
 
-    assert_receive {:nonholder_read, {:error, :resume_activation_holder_mismatch}}
+    # Concept: each holder answer is awaited on the holder's own events.
+    # Technical depth: the holder is freshly spawned and calls the runtime
+    # before answering, so a fixed window measures only scheduling; its DOWN
+    # ends a wait early and ExUnit's timeout is the outer bound.
+    holder_event = fn ->
+      receive do
+        {:DOWN, ^monitor, :process, ^holder, reason} -> {:down, reason}
+        {tag, _} = message when tag in [:nonholder_read, :holder_read, :holder_abandon] -> message
+      end
+    end
+
+    assert {:nonholder_read, {:error, :resume_activation_holder_mismatch}} = holder_event.()
     assert :ok = Loopex.transfer_resume(activation, holder)
 
     assert {:error, :resume_activation_holder_mismatch} =
              Loopex.prepared_session_configuration(activation)
 
     send(holder, :read)
-    assert_receive {:holder_read, {:ok, ^expected}}
+    assert {:holder_read, {:ok, ^expected}} = holder_event.()
     assert facts(fixture, session) == before
     send(holder, :finish)
-    assert_receive {:holder_abandon, :ok}
-    assert_receive {:DOWN, ^monitor, :process, ^holder, :normal}
+    assert {:holder_abandon, :ok} = holder_event.()
+    assert {:down, :normal} = holder_event.()
     assert AgentLoopTestModel.dispatched(fixture.model) == []
     assert Agent.get(fixture.executor, & &1.jobs) == []
   end

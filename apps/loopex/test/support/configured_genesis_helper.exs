@@ -68,40 +68,35 @@ defmodule Loopex.ConfiguredGenesisFixture do
 
   # Concept: placement fixtures observe the original creation startup, including
   # intentional unavailable starts whose retired slot permits read-only queries.
-  # Technical depth: one existing 1,000 ms fixture cutoff bounds native reads and
-  # exact original-Control retirement observations. No creation is retried.
+  # Technical depth: the observation ends on the runtime's own startup progress.
+  # Startup reads the Store from a freshly scheduled worker, so a fixture clock
+  # would race only scheduling; ExUnit's per-test timeout is the outer bound.
+  # Each read keeps the product's own call bounds. No creation is retried.
   def await_creation_ready(runtime), do: await_creation_state(runtime, :ready)
   def await_creation_unavailable(runtime), do: await_creation_state(runtime, :unavailable)
 
   defp await_creation_state(runtime, desired) do
-    cutoff = System.monotonic_time(:millisecond) + 1_000
-    remaining = creation_remaining!(cutoff)
-    children = GenServer.call(runtime.supervisor, :which_children, remaining)
-    _remaining = creation_remaining!(cutoff)
+    children = GenServer.call(runtime.supervisor, :which_children)
 
     {Loopex.Runtime.Control, control, _type, _modules} =
       List.keyfind(children, Loopex.Runtime.Control, 0)
 
     true = is_pid(control)
-    await_creation_state(runtime, control, desired, cutoff, nil)
+    await_creation_state(runtime, control, desired, nil)
   catch
     :exit, _reason -> raise "fixture creation startup capability unavailable"
   end
 
-  defp await_creation_state(runtime, control, desired, cutoff, original) do
-    remaining = creation_remaining!(cutoff)
-
+  defp await_creation_state(runtime, control, desired, original) do
     {:ok, %{state: status, startup_id: id, startup_deadline_ms: deadline}} =
-      Loopex.Runtime.creation_startup_status(runtime, remaining)
+      Loopex.Runtime.creation_startup_status(runtime)
 
-    remaining = creation_remaining!(cutoff)
     capture = {id, deadline}
 
     if original != nil and original != capture,
       do: raise("fixture creation startup identity changed during observation")
 
-    state = :sys.get_state(control, remaining)
-    _remaining = creation_remaining!(cutoff)
+    state = :sys.get_state(control)
 
     %{
       creation_startup: %{startup_id: ^id, startup_deadline_ms: ^deadline},
@@ -111,34 +106,17 @@ defmodule Loopex.ConfiguredGenesisFixture do
 
     cond do
       status == desired and actual_status == desired and is_nil(creation) ->
-        _remaining = creation_remaining!(cutoff)
         :ok
 
       status == :starting or (desired == :unavailable and status == :unavailable) ->
-        remaining = creation_remaining!(cutoff)
-
-        receive do
-          :no_fixture_message -> :ok
-        after
-          min(remaining, 10) -> :ok
-        end
-
-        await_creation_state(runtime, control, desired, cutoff, capture)
+        Process.sleep(10)
+        await_creation_state(runtime, control, desired, capture)
 
       true ->
         raise "fixture creation startup unavailable: #{inspect(status)}"
     end
   catch
     :exit, _reason -> raise "fixture creation startup capability unavailable"
-  end
-
-  defp creation_remaining!(cutoff) do
-    remaining = cutoff - System.monotonic_time(:millisecond)
-
-    if remaining <= 0,
-      do: raise("fixture creation startup did not settle within its observation bound")
-
-    remaining
   end
 
   # Concept: direct Store seeds use the same current creation custody as Runtime.

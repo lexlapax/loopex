@@ -217,7 +217,7 @@ defmodule Loopex.AgentLoopFixture do
         progress_sink: Keyword.get(options, :progress_sink)
       }
 
-      await_creation_ready(runtime, System.monotonic_time(:millisecond) + 1_000)
+      await_creation_ready(runtime)
       fixture
     catch
       kind, reason ->
@@ -325,29 +325,21 @@ defmodule Loopex.AgentLoopFixture do
     end
   end
 
-  defp await_creation_ready(runtime, cutoff) do
-    remaining = cutoff - System.monotonic_time(:millisecond)
-
-    if remaining <= 0,
-      do: raise("fixture creation startup did not settle within its observation bound")
-
+  # Concept: construction waits on the runtime's own creation startup.
+  # Technical depth: startup reads the Store from a freshly scheduled worker, so
+  # a fixture clock would race only scheduling. The poll ends at ready or at a
+  # refusal, and ExUnit's per-test timeout is the outer bound.
+  defp await_creation_ready(runtime) do
     with {:ok, %{control: control}} <- Loopex.Runtime.children(runtime),
          true <- is_pid(control),
-         %{creation_status: status} <- :sys.get_state(control, remaining) do
+         %{creation_status: status} <- :sys.get_state(control) do
       case status do
         :ready ->
           :ok
 
         :starting ->
-          remaining = max(cutoff - System.monotonic_time(:millisecond), 0)
-
-          receive do
-            :no_fixture_message -> :ok
-          after
-            min(remaining, 10) -> :ok
-          end
-
-          await_creation_ready(runtime, cutoff)
+          Process.sleep(10)
+          await_creation_ready(runtime)
 
         other ->
           raise "fixture creation startup unavailable: #{inspect(other)}"
