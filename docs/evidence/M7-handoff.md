@@ -49,9 +49,11 @@ All recorded in the context map with exact identities:
 
 ### Open work at this checkpoint, 2026-10-10
 
-All agent work is merged into `m7` at `3747e9a9`; the closure-candidate
-documentation commits that follow it move M7 to In review and change only
-documentation. No agent is running and no `worktree-agent-*` branch holds
+All agent work is merged into `m7`. After the In review documentation
+commits, the final integration fixes recorded in the task ledger's 2026-10-11
+entry (test-wait sweep, attempts-writer lock release, `m7.long` overflow
+prompts and the committed attempts head) changed source before the closure
+candidate. No agent is running and no `worktree-agent-*` branch holds
 unmerged work. `main` (`e78fa64c`) is an ancestor of the candidate.
 
 - Open defect, recorded under the 2026-10-10 stress-chase cap:

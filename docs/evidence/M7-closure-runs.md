@@ -352,8 +352,10 @@ cross-version steps are not passes; preserve current-format restore coverage.
 Before commitment enumerate every known prior attempt and final case in
 literal rows. The final cases are the 28 rows below. No earlier M7 closure
 candidate was nominated, and no case attempt of campaign `m7-closure-1` is
-known before this candidate: `mix loopex.m7_evidence` reports no committed
-attempts head, and every paid case waited for the T17 approval. Preserve the
+known before this candidate: the only committed attempts head,
+`m7-closure-1 2` in the M7 plan, covers the index's genesis and writer
+designation and no case record, and every paid case waited for the T17
+approval. Preserve the
 plan's distinct `product_failure`, `model_nonconformance`,
 `evidence_unavailable` and `environment_failure` dispositions, separate from
 its mechanical results. A new candidate

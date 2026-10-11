@@ -1,5 +1,20 @@
 # M7 Implementation Tasks
 
+### Final integration before the closure matrix, 2026-10-11
+
+Candidate checks after the nomination below found test-timing races and two
+harness defects; each was fixed at its cause before the closure candidate.
+A repo-wide sweep moved about 490 test waits from test-clock windows to the
+awaited actor's own events (`Loopex.EventWait.await_receive/1`), including the
+`artifact_runtime_test.exs:346` run cutoff, which now proves the deadline in
+whichever order it lands; per-worker fixture marker staging fixed the
+credential-rotation race (`timing-sweep/`). The attempts writer now releases
+its lock before a stopping call or `close/1` answers, and closing a writer that
+already stopped is a no-op. `m7.long` overflows its 4,000-token budget from
+three fixed reference prompts
+([disposition](../developer/agent-context-map.md#disposition-m7-long-overflow-prompts-2026-10-10)),
+and the plan records the campaign's committed attempts head.
+
 ### Closure candidate nominated, 2026-10-10
 
 All agent work is merged at `3747e9a9`, including the compacted tool text and
@@ -16748,11 +16763,13 @@ full restore175, operator attendance, helpers or whole integration.
   (`custody-close/suite-loopex-current-run1-under-pinned-hogs.log`). It
   passed in the next unloaded whole-suite run. Hypothesis: the fixture's
   1,000 ms run deadline is reached under load before tool progress is
-  emitted. Not proved.
+  emitted. Fixed 2026-10-11: the deadline instant is fixed when the first
+  model call commits, so under load it can land before tool progress; the case
+  now proves the deadline outcome in either order (`timing-sweep/proof/`).
   Pending proof (2026-10-10, candidate nomination): the closure scaffold's two
-  Linux pinned-load rows. The retained sets in `pinned-load/` (`CASES.txt`) ran
-  at pre-candidate SHAs; whether they stand for the candidate or the touched
-  cases rerun at its SHA is a maintainer decision.
+  Linux pinned-load rows. The maintainer decided that the retained sets in
+  `pinned-load/` (`CASES.txt`), run at pre-candidate SHAs, stand for the
+  candidate ([closure preparation](../developer/agent-context-map.md#disposition-m7-closure-preparation-2026-10-10)).
 - [ ] Independently review integration changes and fix confirmed defects without weakening checks.
   Pending proof (2026-10-10, candidate nomination): the independent review of the exact candidate (T17).
 
