@@ -232,7 +232,13 @@ defmodule LoopexCli.M7FixtureChatTest do
     assert recipe.bytes =~
              "M7_FINDING='" <> f.root <> "/finding'\\''$(not-a-command)`literal`.tsv'"
 
-    assert recipe.bytes =~ "M7_WORKSPACE='" <> f.root <> "/quote'\\''$(literal)`path`/workspace'"
+    # The workspace renders physically; `pwd -P` names it without the product resolver.
+    {physical, 0} = System.cmd("/bin/pwd", ["-P"], cd: f.root)
+
+    assert recipe.bytes =~
+             "M7_WORKSPACE='" <>
+               String.trim_trailing(physical, "\n") <> "/quote'\\''$(literal)`path`/workspace'"
+
     assert {:ok, prepared} = prepare(f, fixture)
     assert prepared.capture.argv == ["/bin/sh", fixture.runner]
     refute File.exists?(finding)

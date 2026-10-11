@@ -21,11 +21,13 @@ defmodule LoopexCli.Policy.M7Fixture do
   mutation; they have no oracle runner. The existing Policy port owns
   timeout, durable decisions and grants. Captures perform no execution and do
   not authorize a provider attempt or replace the campaign admission procedure.
-  The shared fixed runner recipe uses the hosting Elixir/OTP paths (Python 3 for the
-  external task's oracle) and an empty
-  child environment with only literal catalog inputs. Its bytes are returned
-  without writing or running a command; fixture preparation must compare and
-  pin those bytes before using the existing capture boundary.
+  The shared fixed runner recipe uses the hosting Elixir/OTP paths (Python 3 for
+  the external task's oracle) and an empty child environment with only literal
+  catalog inputs. The workspace and oracle render as their physical paths, so a
+  caller naming a symlinked root (macOS `/tmp` or `/var`) and one naming its
+  target receive the same bytes. Its bytes are returned without writing or
+  running a command; fixture preparation must compare and pin those bytes
+  before using the existing capture boundary.
   """
 
   @behaviour Loopex.Policy
@@ -41,6 +43,8 @@ defmodule LoopexCli.Policy.M7Fixture do
          true <- text?(workspace) and Path.type(workspace) == :absolute,
          true <- text?(oracle) and Path.type(oracle) == :absolute,
          true <- oracle_environment?(case_id, environment),
+         {:ok, workspace} <- WorkspaceIdentity.resolve_path(workspace),
+         {:ok, oracle} <- WorkspaceIdentity.resolve_path(oracle),
          {:ok, interpreter} <- interpreter(case_id) do
       path =
         Path.dirname(interpreter) <>

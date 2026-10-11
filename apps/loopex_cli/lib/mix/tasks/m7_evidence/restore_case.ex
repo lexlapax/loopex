@@ -20,7 +20,7 @@ defmodule Mix.Tasks.Loopex.M7Evidence.RestoreCase do
   step; `records` lists retained evidence. Any refusal leaves the checks false.
   """
 
-  alias LoopexComposition.Restore
+  alias LoopexComposition.{Restore, WorkspaceIdentity}
   alias LoopexComposition.Restore.IO, as: RestoreIO
   alias LoopexProtocol.Canonical
 
@@ -39,7 +39,12 @@ defmodule Mix.Tasks.Loopex.M7Evidence.RestoreCase do
     end
   end
 
+  # Concept: the restore administrator takes physical roots only.
+  # Technical depth: it refuses a symlinked ancestor (macOS `/tmp` and `/var`
+  # are symlinks), so the destination and transaction derive from the
+  # attempt root's physical path.
   defp verify(retained, baseline, root, confirm) do
+    {:ok, root} = WorkspaceIdentity.resolve_path(root)
     backup = retained["backup"]
     original = retained["plan"]
     source = original["source_state_root"]

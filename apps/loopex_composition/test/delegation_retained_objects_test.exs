@@ -320,6 +320,20 @@ defmodule LoopexComposition.DelegationRetainedObjectsTest do
     owner
   end
 
+  test "a host's symlinked state root opens the physical root under its lease", context do
+    link = context.root <> "-host"
+    File.ln_s!(context.root, link)
+    on_exit(fn -> File.rm!(link) end)
+    Placement.release(context.lease)
+    {:ok, lease} = Placement.acquire(link)
+    on_exit(fn -> Placement.release(lease) end)
+
+    assert {:ok, handle} = LoopexComposition.Delegation.host(link, "retained-test", lease, true)
+    assert {:ok, digest} = RetainedObjects.install(handle.objects, "{}")
+    assert File.read!(Path.join(context.directory, digest)) == "{}"
+    LoopexComposition.Delegation.close(handle)
+  end
+
   defp hash(bytes), do: :crypto.hash(:sha256, bytes) |> Base.encode16(case: :lower)
   defp recovered_at(:renamed), do: {:ok, "{}"}
   defp recovered_at(:temporary_synced), do: {:error, :enoent}

@@ -22,7 +22,7 @@ defmodule LoopexComposition.Delegation do
   """
 
   alias LoopexComposition.Delegation.{Catalog, Helper, RetainedObjects, Router, Tool}
-  alias LoopexComposition.{ProviderBindings, SessionInstructions}
+  alias LoopexComposition.{ProviderBindings, SessionInstructions, WorkspaceIdentity}
 
   @mutating ~w(prompt steer follow_up configure compact interaction_answer abort resume)a
   @read_only ~w(attach snapshot history artifact status)a
@@ -72,14 +72,25 @@ defmodule LoopexComposition.Delegation do
   enables no helpers has no helper history to classify, so no owner is opened
   and `nil` is returned; every other case opens the owner. ADR 0046's rule that
   retained helper history is classified even when delegation is disabled
-  therefore holds whenever any history exists.
+  therefore holds whenever any history exists. A configured root may name a
+  symlink (macOS `/tmp` and `/var` are symlinks), and retained objects refuse a
+  symlinked ancestor, so the owner opens the physical root and the placement
+  lease's owner file under it; the lease's own identity checks are unchanged.
   """
   @spec host(Path.t(), binary(), term(), boolean()) :: {:ok, map() | nil} | {:error, term()}
   def host(root, runtime_id, placement, enabled) do
-    if enabled or File.dir?(Path.join(root, "delegation")),
-      do: open(root, runtime_id, placement, enabled: enabled, recover_stale_writer: true),
-      else: {:ok, nil}
+    if enabled or File.dir?(Path.join(root, "delegation")) do
+      with {:ok, root} <- WorkspaceIdentity.resolve_path(root),
+           {:ok, placement} <- physical_owner(placement) do
+        open(root, runtime_id, placement, enabled: enabled, recover_stale_writer: true)
+      end
+    else
+      {:ok, nil}
+    end
   end
+
+  defp physical_owner(owner) when is_binary(owner), do: WorkspaceIdentity.resolve_path(owner)
+  defp physical_owner(owner), do: {:ok, owner}
 
   @doc """
   ## Concept

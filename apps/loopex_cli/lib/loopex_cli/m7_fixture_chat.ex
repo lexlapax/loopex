@@ -59,14 +59,18 @@ defmodule LoopexCli.M7FixtureChat do
            ),
          {:ok, workspace} <- WorkspaceIdentity.resolve_path(fixture.workspace),
          {:ok, runner} <- WorkspaceIdentity.resolve_path(fixture.runner),
-         {:ok, oracle} <- WorkspaceIdentity.resolve_path(fixture.oracle),
          {:ok, catalog} <- FixtureManifest.load(fixture.catalog_root),
          name = String.replace_prefix(fixture.case_id, "m7.", ""),
          entry = FixtureManifest.entry(catalog.catalog, name),
          :ok <- FixtureManifest.verify_workspace(entry, workspace),
          :ok <- FixtureManifest.verify_oracle(entry, fixture.catalog_root),
          {:ok, recipe} <-
-           M7Fixture.oracle_runner(fixture.case_id, workspace, oracle, fixture.environment),
+           M7Fixture.oracle_runner(
+             fixture.case_id,
+             workspace,
+             fixture.oracle,
+             fixture.environment
+           ),
          true <- pins_match?(fixture.pins, fixture, catalog, entry, recipe),
          {:ok, capture} <-
            M7Fixture.prepare(

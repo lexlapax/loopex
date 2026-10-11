@@ -90,6 +90,28 @@ defmodule LoopexCli.M7FixturePolicyTest do
     }
   end
 
+  test "a symlinked root and its target render the same physical runner bytes", f do
+    link = f.root <> "-link"
+    File.ln_s!(f.root, link)
+    on_exit(fn -> File.rm(link) end)
+    {physical, 0} = System.cmd("/bin/pwd", ["-P"], cd: f.root)
+    physical = String.trim_trailing(physical, "\n")
+
+    {:ok, linked} =
+      Policy.oracle_runner(
+        "m7.repair",
+        Path.join(link, "workspace"),
+        Path.join(link, "trusted/oracle.exs"),
+        %{}
+      )
+
+    assert {:ok, linked} ==
+             Policy.oracle_runner("m7.repair", f.workspace, f.oracle, %{})
+
+    assert linked.bytes =~ "M7_WORKSPACE='" <> physical <> "/workspace'"
+    assert linked.bytes =~ "'" <> physical <> "/trusted/oracle.exs'\n"
+  end
+
   test "the feature runner takes only a catalog default as its one approved argument", f do
     {:ok, recipe} = Policy.oracle_runner("m7.feature", f.workspace, f.oracle, %{})
     assert recipe.bytes =~ ~s(case "${1:-}" in empty|literal_null)
