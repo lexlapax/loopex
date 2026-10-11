@@ -146,7 +146,7 @@ defmodule Mix.Tasks.Loopex.M7Evidence.CaseRunner do
       try do
         report(command(writer, opts, context))
       after
-        if Process.alive?(writer), do: AttemptWriter.close(writer)
+        AttemptWriter.close(writer)
       end
     else
       other -> report({:error, other})

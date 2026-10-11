@@ -64,7 +64,7 @@ defmodule Mix.Tasks.Loopex.M7Matrix do
       try do
         session(writer, opts, pins, concept, input, output)
       after
-        if Process.alive?(writer), do: AttemptWriter.close(writer)
+        AttemptWriter.close(writer)
       end
     else
       {:error, reason} -> reply(output, "refused #{inspect(reason)}", 2)

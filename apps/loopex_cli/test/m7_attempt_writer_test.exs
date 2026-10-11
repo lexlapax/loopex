@@ -164,6 +164,7 @@ defmodule LoopexCli.M7AttemptWriterTest do
     q = Path.join(dir, "q")
     relinquish = fn -> Writer.relinquish(writer, "writer-2", "host-2", "h", q) end
     assert {:ok, _} = releases_before_exit(writer, relinquish)
+    assert Writer.close(writer) == :ok
     assert {:ok, writer} = Writer.open(index, host(dir, 1))
     :ok = Writer.close(writer)
   end

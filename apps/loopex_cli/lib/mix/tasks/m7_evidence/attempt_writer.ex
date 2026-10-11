@@ -86,8 +86,14 @@ defmodule Mix.Tasks.Loopex.M7Evidence.AttemptWriter do
   def accept(writer, revocation_path, transfer_path),
     do: GenServer.call(writer, {:accept, revocation_path, transfer_path}, :infinity)
 
+  # Concept: closing a writer that a stopping call already ended is a no-op;
+  # that call released the lock before it answered.
   @doc false
-  def close(writer), do: GenServer.stop(writer)
+  def close(writer) do
+    GenServer.stop(writer)
+  catch
+    :exit, {:noproc, _} -> :ok
+  end
 
   defp start(request) do
     case GenServer.start(__MODULE__, {request, self()}) do
