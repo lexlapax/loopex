@@ -341,9 +341,14 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
 
     guardian =
       receive do
-        {:trace, ^caller, :spawn, pid, {:erlang, :apply, [_closure, []]}} when is_pid(pid) -> pid
-      after
-        1_000 -> flunk("direct provider guardian did not start")
+        {:trace, ^caller, :spawn, pid, {:erlang, :apply, [_closure, []]}} when is_pid(pid) ->
+          pid
+
+        {:completed, ^caller, result} ->
+          flunk("direct provider caller completed before its guardian: #{inspect(result)}")
+
+        {:DOWN, ^caller_monitor, :process, ^caller, reason} = down ->
+          caller_ended_early(down, "direct provider caller exited before its guardian", reason)
       end
 
     %{
@@ -388,7 +393,18 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
     # supervised guardian without adding a production test seam.
     1 = :erlang.trace(caller, true, [:call, :procs, :set_on_spawn, {:tracer, observer}])
     send(caller, :start)
-    assert_receive {:registered, ^caller, guardian, stop_reference}, 1_000
+
+    {guardian, stop_reference} =
+      receive do
+        {:registered, ^caller, guardian, stop_reference} ->
+          {guardian, stop_reference}
+
+        {:completed, ^caller, result} ->
+          flunk("managed provider caller completed before registering: #{inspect(result)}")
+
+        {:DOWN, ^caller_monitor, :process, ^caller, reason} = down ->
+          caller_ended_early(down, "managed provider caller exited before registering", reason)
+      end
 
     %{
       caller: caller,
@@ -399,6 +415,18 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
       deadline: request.deadline,
       lifetime: :managed
     }
+  end
+
+  # Concept: a started caller's first event ends the wait, never a test clock.
+  # Technical depth: the caller is spawned parked and only then started, so a
+  # window opened at `:start` measured how soon a loaded scheduler first ran it
+  # (a candidate run saw an empty mailbox after 1,000 ms). Each path out of the
+  # caller is bounded by its request deadline and reported as its awaited
+  # event, its completion, or its DOWN; the case's ExUnit timeout bounds the
+  # rest. The DOWN is put back for any case that later joins the caller.
+  defp caller_ended_early(down, message, reason) do
+    send(self(), down)
+    flunk("#{message}: #{inspect(reason)}")
   end
 
   # A reply or refusal that has not arrived by the request's deadline still
