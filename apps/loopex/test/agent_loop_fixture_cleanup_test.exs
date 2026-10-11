@@ -8,9 +8,8 @@ defmodule Loopex.AgentLoopFixtureCleanupTest do
 
   test "an alive standalone catcher joins every acquired actor after runtime admission refuses" do
     with_caller([script: [], bounds_max_turns: 0], fn caller, monitor ->
-      assert_receive {:constructor_failed, ^caller, :error, {:badmatch, refused} = reason,
-                      receipt},
-                     1_000
+      assert {:constructor_failed, ^caller, :error, {:badmatch, refused} = reason, receipt} =
+               await_caller(caller, monitor)
 
       assert refused == {:error, :invalid_runtime_options}
       assert elem(receipt.original_failure, 1) == reason
@@ -31,9 +30,8 @@ defmodule Loopex.AgentLoopFixtureCleanupTest do
       :ok = Store.hold_next_creation_recovery(store, self())
 
       with_caller([script: [], store: store], fn caller, caller_monitor ->
-        assert_receive {:creation_read_held, waiter, _original_read_worker, _request}, 1_000
-        cutoff = now_ms() + 1_000
-        originals = await_originals(caller, cutoff)
+        waiter = await_creation_read(caller, caller_monitor)
+        originals = await_originals(caller)
         assert Enum.sort(Enum.map(originals, &elem(&1, 0))) == [:executor, :model, :runtime]
 
         monitors =
@@ -43,8 +41,8 @@ defmodule Loopex.AgentLoopFixtureCleanupTest do
         try do
           Store.release(waiter)
 
-          assert_receive {:constructor_failed, ^caller, :error, %RuntimeError{} = error, receipt},
-                         1_000
+          assert {:constructor_failed, ^caller, :error, %RuntimeError{} = error, receipt} =
+                   await_caller(caller, caller_monitor)
 
           assert error.message =~ "fixture creation startup unavailable"
           assert receipt.status == :joined
@@ -80,26 +78,23 @@ defmodule Loopex.AgentLoopFixtureCleanupTest do
       :ok = Store.fail_reads(store, true)
       :ok = Store.hold_next_creation_recovery(store, self())
 
-      with_caller([script: [], store: store], fn caller, _monitor ->
-        assert_receive {:creation_read_held, waiter, _read_worker, _request}, 1_000
-        originals = await_originals(caller, now_ms() + 1_000)
+      with_caller([script: [], store: store], fn caller, caller_monitor ->
+        waiter = await_creation_read(caller, caller_monitor)
+        originals = await_originals(caller)
         {:model, model, _original_monitor} = List.keyfind(originals, :model, 0)
         true = :erlang.suspend_process(model)
 
         try do
           Store.release(waiter)
-          # One original 1,000-ms cleanup episode really expires. The separate
-          # existing fixture grace observes its receipt without changing it.
-          observation_cutoff = now_ms() + 2_000
-
-          assert_receive {:constructor_failed, ^caller, :error, %RuntimeError{} = original,
-                          receipt},
-                         max(observation_cutoff - now_ms(), 0)
+          # One original 1,000-ms cleanup episode really expires: the fixture
+          # stamps its own observation no earlier than that cutoff.
+          assert {:constructor_failed, ^caller, :error, %RuntimeError{} = original, receipt} =
+                   await_caller(caller, caller_monitor)
 
           assert original.message =~ "fixture creation startup unavailable"
           assert elem(receipt.original_failure, 1) == original
           assert receipt.status == :cleanup_unproved
-          assert now_ms() >= receipt.cutoff
+          assert receipt.observed_at >= receipt.cutoff
           model_row = Enum.find(receipt.actors, &(&1.kind == :model))
           assert model_row.pid == model
           assert model_row.original_down == :unproved
@@ -144,14 +139,14 @@ defmodule Loopex.AgentLoopFixtureCleanupTest do
   end
 
   test "successful non-ExUnit construction keeps its original returned fixture teardown" do
-    with_caller([script: []], fn caller, _monitor ->
-      assert_receive {:constructor_ready, ^caller, fixture}, 1_000
+    with_caller([script: []], fn caller, monitor ->
+      assert {:constructor_ready, ^caller, fixture} = await_caller(caller, monitor)
       assert Process.alive?(fixture.model)
       assert Process.alive?(fixture.executor)
       assert Process.alive?(fixture.runtime.supervisor)
       assert Process.alive?(fixture.store)
       send(caller, :stop_successful_fixture)
-      assert_receive {:successful_fixture_stopped, ^caller}, 1_000
+      assert {:successful_fixture_stopped, ^caller} = await_caller(caller, monitor)
       refute Process.alive?(fixture.runtime.supervisor)
       refute Process.alive?(fixture.store)
       assert Process.alive?(fixture.model)
@@ -160,7 +155,7 @@ defmodule Loopex.AgentLoopFixtureCleanupTest do
       # Those Agents retain the existing successful-caller ownership. This
       # test explicitly reaps them; construction must not retire them early.
       send(caller, :reap_successful_agents)
-      assert_receive {:successful_agents_joined, ^caller}, 1_000
+      assert {:successful_agents_joined, ^caller} = await_caller(caller, monitor)
       refute Process.alive?(fixture.model)
       refute Process.alive?(fixture.executor)
     end)
@@ -216,18 +211,57 @@ defmodule Loopex.AgentLoopFixtureCleanupTest do
         end
       end)
 
+    # Concept: the caller's own bounded construction, not a test clock, decides
+    # when it is joined.
+    # Technical depth: every path out of `Fixture.start/1` is bounded by the
+    # fixture's own readiness and cleanup cutoffs, and the caller then answers
+    # `:finish` at once. A fixed join window started here could expire while a
+    # loaded scheduler still runs that bounded cleanup, killing the caller with
+    # a live runtime and replacing the case's own failure with a join failure.
+    # The join therefore waits for the caller's DOWN under the case's ExUnit
+    # timeout and requires a normal exit.
     try do
       function.(caller, monitor)
     after
       send(caller, :finish)
 
       receive do
-        {:DOWN, ^monitor, :process, ^caller, :normal} -> :ok
-      after
-        1_000 ->
-          Process.exit(caller, :kill)
-          flunk("original constructor caller did not join within fixture grace")
+        {:DOWN, ^monitor, :process, ^caller, reason} -> assert reason == :normal
       end
+    end
+  end
+
+  # Concept: each wait ends on the caller's next event, never on a test clock.
+  # Technical depth: the caller reports every outcome of the constructor and of
+  # each requested teardown step as a tuple naming itself, or exits. Those
+  # paths are bounded by the fixture's own readiness and cleanup cutoffs, so a
+  # fixed window here would only measure the test's own scheduling.
+  defp await_caller(caller, monitor) do
+    receive do
+      message when is_tuple(message) and tuple_size(message) > 1 and elem(message, 1) == caller ->
+        message
+
+      {:DOWN, ^monitor, :process, ^caller, reason} = down ->
+        # Leave the DOWN for the join in `with_caller/2`.
+        send(self(), down)
+        flunk("constructor caller exited: #{inspect(reason)}")
+    end
+  end
+
+  # The held creation read comes from the Store; any caller event first means
+  # the constructor ended without reaching it.
+  defp await_creation_read(caller, monitor) do
+    receive do
+      {:creation_read_held, waiter, _read_worker, _request} ->
+        waiter
+
+      {:DOWN, ^monitor, :process, ^caller, reason} = down ->
+        # Leave the DOWN for the join in `with_caller/2`.
+        send(self(), down)
+        flunk("constructor caller exited: #{inspect(reason)}")
+
+      message when is_tuple(message) and tuple_size(message) > 1 and elem(message, 1) == caller ->
+        flunk("constructor ended before its creation read: #{inspect(message)}")
     end
   end
 
@@ -251,7 +285,13 @@ defmodule Loopex.AgentLoopFixtureCleanupTest do
     end
   end
 
-  defp await_originals(caller, cutoff) do
+  # Concept: the creation read can be held before `Loopex.start_link/1`
+  # returns to the caller, so the runtime is recorded as an original actor
+  # strictly later, in the caller's own constructor record.
+  # Technical depth: that record exists from the first acquisition until the
+  # constructor exits, so polling it ends either at the runtime row or at its
+  # removal; no test clock bounds the caller's progress.
+  defp await_originals(caller) do
     {:dictionary, dictionary} = Process.info(caller, :dictionary)
 
     originals =
@@ -260,14 +300,16 @@ defmodule Loopex.AgentLoopFixtureCleanupTest do
         _ -> nil
       end)
 
-    if originals && List.keymember?(originals, :runtime, 0) do
-      originals
-    else
-      assert now_ms() < cutoff
-      Process.sleep(1)
-      await_originals(caller, cutoff)
+    cond do
+      is_nil(originals) ->
+        flunk("constructor ended before recording its runtime")
+
+      List.keymember?(originals, :runtime, 0) ->
+        originals
+
+      true ->
+        Process.sleep(1)
+        await_originals(caller)
     end
   end
-
-  defp now_ms(), do: System.monotonic_time(:millisecond)
 end
